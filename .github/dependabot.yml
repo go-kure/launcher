@@ -1,0 +1,60 @@
+# Dependabot configuration
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "chore(deps)"
+
+    # Separate groups for different coordination needs
+    groups:
+      # Safe updates — no coordination needed
+      go-safe:
+        patterns:
+          - "github.com/spf13/*"
+          - "github.com/stretchr/*"
+          - "gopkg.in/*"
+          - "github.com/pmezard/*"
+          - "github.com/blang/*"
+        update-types:
+          - "minor"
+          - "patch"
+
+      # Kubernetes ecosystem - only patch updates
+      k8s-ecosystem:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+        update-types:
+          - "patch"
+
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "github_actions"
+      - "type/ci"
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      # Group all GitHub Actions updates
+      actions:
+        patterns:
+          - "*"

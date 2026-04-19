@@ -1,0 +1,50 @@
+[tools]
+# Use exact versions for reproducibility across environments
+go = "1.26.2"
+golangci-lint = "2.10.1"
+git-cliff = "2.7.0"
+goreleaser = "2.14.3"
+# Required for GoReleaser SBOM generation and signing
+syft = "1.21.0"
+cosign = "2.4.3"
+
+[env]
+GOBIN = "{{config_root}}/.bin"
+PATH = "{{config_root}}/.bin:{{env.PATH}}"
+
+[tasks.build]
+description = "Build all executables"
+run = "make build"
+
+[tasks.test]
+description = "Run all tests"
+run = "make test"
+
+[tasks.lint]
+description = "Run linter"
+run = "make lint"
+
+[tasks.tidy]
+description = "Tidy go modules"
+run = "make tidy"
+
+[tasks.check]
+description = "Quick pre-commit check"
+run = "make check"
+
+[tasks.verify]
+description = "Run all checks (tidy, lint, test)"
+depends = ["tidy", "lint", "test"]
+
+[tasks.changelog]
+description = "Generate changelog from git history"
+run = "git cliff -o CHANGELOG.md"
+
+[tasks.changelog-preview]
+description = "Preview changelog changes"
+run = "git cliff --unreleased"
+
+[tasks.release]
+description = "Release workflow (dry-run by default, --do-it to trigger CI)"
+run = "./scripts/release-trigger.sh"
+raw = true

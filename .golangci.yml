@@ -1,0 +1,80 @@
+# golangci-lint configuration for Launcher
+# Aligned with Wharf standard (meta/standards/golangci-lint.md)
+# and Crane's linter set (gitlab.com/autops/wharf/crane)
+
+version: "2"
+
+run:
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    # Default linters (listed explicitly per Wharf standard)
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    # Additional required linters (aligned with Crane)
+    - bodyclose
+    - durationcheck
+    - errorlint
+    - exhaustive
+    - misspell
+    - nilerr
+    - unconvert
+    - whitespace
+    # Optional linters (launcher-specific, not required by Wharf standard)
+    - gosec
+  settings:
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+    exhaustive:
+      default-signifies-exhaustive: true
+    gosec:
+      excludes:
+        # CLI tool reads files from user-provided paths — not a vulnerability
+        - G304
+        # Manifest/config files need 0644 (world-readable), not 0600
+        - G306
+        # Standard 0755 directory permissions
+        - G301
+    staticcheck:
+      checks:
+        - "all"
+        # gosimple (S*) checks are included via "all" — gosimple was merged
+        # into staticcheck in golangci-lint v2
+        - "-QF*"
+        - "-ST*"
+  exclusions:
+    generated: lax
+    rules:
+      # Test files have relaxed rules
+      - linters:
+          - errcheck
+          - gosec
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/go-kure/launcher
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

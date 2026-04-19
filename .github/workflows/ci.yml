@@ -1,0 +1,543 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'release/*']
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 4 * * *'  # 4am UTC daily - catch external changes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  # Go version is read from mise.toml (single source of truth)
+  # GO_VERSION is set dynamically in each job that needs it
+  GOLANGCI_LINT_VERSION: 'v2.10.1'
+
+# Avoid duplicate runs on the same commit
+concurrency:
+  group: ci-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  # =============================================================================
+  # Pre-flight: Rebase Freshness Check
+  # =============================================================================
+
+  rebase-check:
+    name: rebase-check
+    runs-on: autops-kube
+    timeout-minutes: 2
+    if: github.event_name == 'pull_request'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+
+    - name: Check branch is rebased on main
+      run: |
+        git fetch origin main
+        if ! git merge-base --is-ancestor origin/main HEAD; then
+          echo "::error::Branch is not rebased on latest main. Please run: git rebase origin/main"
+          exit 1
+        fi
+        echo "Branch is up to date with main."
+
+  # =============================================================================
+  # Stage 1: Fast Validation
+  # =============================================================================
+
+  validate:
+    name: lint
+    runs-on: autops-kube
+    timeout-minutes: 15
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Install build tools
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make
+
+    - name: Read Go version from mise.toml
+      id: go-version
+      run: |
+        GO_VER=$(grep '^go = ' mise.toml | sed 's/go = "\(.*\)"/\1/')
+        echo "version=$GO_VER" >> $GITHUB_OUTPUT
+        echo "Using Go version: $GO_VER"
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ steps.go-version.outputs.version }}
+        check-latest: true
+        cache: false
+
+    - name: Cache Go modules
+      uses: actions/cache@v5
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-gomod-
+
+    - name: Install dependencies
+      run: make deps
+
+    - name: Check Go version consistency
+      run: make check-go-version
+
+    - name: Install goimports
+      run: go install golang.org/x/tools/cmd/goimports@latest
+
+    - name: Check formatting
+      run: |
+        make fmt
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "::error::Code is not properly formatted. Run 'make fmt' to fix."
+          git diff
+          exit 1
+        fi
+
+    - name: Check go mod tidy
+      run: |
+        make tidy
+        if [ -n "$(git status --porcelain go.mod go.sum)" ]; then
+          echo "::error::go.mod or go.sum is not tidy. Run 'make tidy' to fix."
+          git diff go.mod go.sum
+          exit 1
+        fi
+
+    - name: Run go vet
+      run: make vet
+
+    - name: Fetch base branch for diff-based lint
+      if: github.event_name == 'pull_request'
+      run: git fetch origin ${{ github.base_ref }} --depth=1
+
+    - name: Run linters
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          make lint LINT_FLAGS="--new-from-rev=origin/${{ github.base_ref }}"
+        else
+          make lint
+        fi
+
+  # =============================================================================
+  # Stage 2: Tests and Security (parallel)
+  # =============================================================================
+
+  test:
+    name: test
+    runs-on: autops-kube
+    timeout-minutes: 15
+    needs: validate
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Install build tools
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential
+
+    - name: Read Go version from mise.toml
+      id: go-version
+      run: |
+        GO_VER=$(grep '^go = ' mise.toml | sed 's/go = "\(.*\)"/\1/')
+        echo "version=$GO_VER" >> $GITHUB_OUTPUT
+        echo "Using Go version: $GO_VER"
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ steps.go-version.outputs.version }}
+        check-latest: true
+        cache: false
+
+    - name: Cache Go modules
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Install dependencies
+      run: make deps
+
+    - name: Run unit tests
+      run: |
+        set -euo pipefail
+        go test -v -timeout 30s ./... 2>&1 | tee /tmp/gotest.log
+
+    - name: Upload test log
+      uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: test-log
+        path: /tmp/gotest.log
+        if-no-files-found: error
+
+    - name: Run race tests
+      env:
+        CGO_ENABLED: "1"
+      run: make test-race
+
+    - name: Run tests with coverage
+      run: make test-coverage
+
+    - name: Upload coverage artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: coverage
+        path: coverage/coverage.out
+        retention-days: 7
+
+  security:
+    name: Security
+    runs-on: autops-kube
+    timeout-minutes: 10
+    needs: validate
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Install build tools
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make
+
+    - name: Read Go version from mise.toml
+      id: go-version
+      run: |
+        GO_VER=$(grep '^go = ' mise.toml | sed 's/go = "\(.*\)"/\1/')
+        echo "version=$GO_VER" >> $GITHUB_OUTPUT
+        echo "Using Go version: $GO_VER"
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ steps.go-version.outputs.version }}
+        check-latest: true
+        cache: false
+
+    - name: Install govulncheck
+      run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+    - name: Run govulncheck
+      run: |
+        set +e
+        OUTPUT=$(govulncheck ./... 2>&1)
+        EXIT_CODE=$?
+        echo "$OUTPUT"
+
+        if [ $EXIT_CODE -ne 0 ]; then
+          {
+            echo "## :shield: govulncheck found vulnerabilities"
+            echo ""
+            echo '```'
+            echo "$OUTPUT"
+            echo '```'
+            echo ""
+            echo "**Fix:** Update the Go version or affected dependencies as indicated above."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $EXIT_CODE
+        else
+          echo ":white_check_mark: **govulncheck** — no vulnerabilities found" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Check for outdated dependencies
+      run: make outdated
+
+    - name: Check for sensitive files
+      run: |
+        # Check for common sensitive patterns
+        if grep -r -i "password\|secret\|token\|key" --include="*.go" --include="*.yaml" --include="*.yml" . | grep -v "test" | grep -v "_test.go" | grep -E "(=|:)" | head -10; then
+          echo "::warning::Potential sensitive information found in code. Please review."
+        fi
+
+  # =============================================================================
+  # Stage 3: Coverage Check
+  # =============================================================================
+
+  coverage-check:
+    name: Coverage Check
+    runs-on: autops-kube
+    timeout-minutes: 5
+    needs: test
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Read Go version from mise.toml
+      id: go-version
+      run: |
+        GO_VER=$(grep '^go = ' mise.toml | sed 's/go = "\(.*\)"/\1/')
+        echo "version=$GO_VER" >> $GITHUB_OUTPUT
+        echo "Using Go version: $GO_VER"
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ steps.go-version.outputs.version }}
+        check-latest: true
+        cache: false
+
+    - name: Download coverage artifact
+      uses: actions/download-artifact@v8
+      with:
+        name: coverage
+        path: coverage/
+
+    - name: Check coverage threshold
+      id: coverage
+      run: |
+        COVERAGE=$(go tool cover -func=coverage/coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+        THRESHOLD=85
+        echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+        echo "Current coverage: ${COVERAGE}%"
+        echo "Required threshold: ${THRESHOLD}%"
+
+        if [ "${COVERAGE%.*}" -lt "$THRESHOLD" ]; then
+          echo "::error::Test coverage ${COVERAGE}% is below required threshold of ${THRESHOLD}%"
+          exit 1
+        else
+          echo "::notice::Test coverage ${COVERAGE}% meets required threshold"
+        fi
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v6
+      with:
+        file: ./coverage/coverage.out
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+    - name: Comment coverage on PR
+      if: github.event_name == 'pull_request'
+      uses: marocchino/sticky-pull-request-comment@v3
+      with:
+        header: coverage
+        message: |
+          ## Test Coverage Report
+
+          **Total Coverage:** ${{ steps.coverage.outputs.coverage }}%
+
+          Coverage threshold: 85%
+
+  # =============================================================================
+  # Stage 4: Build (parallel)
+  # =============================================================================
+
+  build-binaries:
+    name: Build kurel
+    runs-on: autops-kube
+    timeout-minutes: 10
+    needs: coverage-check
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Install build tools
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make
+
+    - name: Read Go version from mise.toml
+      id: go-version
+      run: |
+        GO_VER=$(grep '^go = ' mise.toml | sed 's/go = "\(.*\)"/\1/')
+        echo "version=$GO_VER" >> $GITHUB_OUTPUT
+        echo "Using Go version: $GO_VER"
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ steps.go-version.outputs.version }}
+        check-latest: true
+        cache: false
+
+    - name: Cache Go modules
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Install dependencies
+      run: make deps
+
+    - name: Build kurel
+      run: make build-kurel
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: kurel-linux-amd64
+        path: bin/kurel
+        retention-days: 7
+
+  build:
+    name: build
+    runs-on: autops-kube
+    timeout-minutes: 1
+    needs: build-binaries
+    if: always()
+    steps:
+    - name: Check build results
+      run: |
+        if [ "${{ needs.build-binaries.result }}" != "success" ]; then
+          echo "Build failed or was cancelled"
+          exit 1
+        fi
+
+  # =============================================================================
+  # Stage 5: Cross-Platform Build (main/release only)
+  # =============================================================================
+
+  cross-platform:
+    name: Cross-Platform Build
+    runs-on: autops-kube
+    timeout-minutes: 15
+    needs: build-binaries
+    if: |
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, darwin, windows]
+        arch: [amd64, arm64]
+        exclude:
+          - os: windows
+            arch: arm64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Install build tools
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make
+
+    - name: Read Go version from mise.toml
+      id: go-version
+      run: |
+        GO_VER=$(grep '^go = ' mise.toml | sed 's/go = "\(.*\)"/\1/')
+        echo "version=$GO_VER" >> $GITHUB_OUTPUT
+        echo "Using Go version: $GO_VER"
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ steps.go-version.outputs.version }}
+        check-latest: true
+        cache: false
+
+    - name: Cache Go modules
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Install dependencies
+      run: make deps
+
+    - name: Build for ${{ matrix.os }}/${{ matrix.arch }}
+      env:
+        GOOS: ${{ matrix.os }}
+        GOARCH: ${{ matrix.arch }}
+      run: |
+        VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+        GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
+
+        if [ "${{ matrix.os }}" = "windows" ]; then
+          EXT=".exe"
+        else
+          EXT=""
+        fi
+
+        mkdir -p bin
+        go build -ldflags="-s -w -X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.BuildTime=${BUILD_TIME}" \
+          -o bin/kurel-${{ matrix.os }}-${{ matrix.arch }}${EXT} ./cmd/kurel
+
+    - name: Upload cross-platform artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: binaries-${{ matrix.os }}-${{ matrix.arch }}
+        path: bin/*
+        retention-days: 30
+
+  # =============================================================================
+  # PR-only Jobs (parallel, non-blocking)
+  # =============================================================================
+
+  analyze-changes:
+    name: Analyze Changes
+    runs-on: autops-kube
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Get changed files
+      id: changed-files
+      uses: tj-actions/changed-files@v47
+      with:
+        files: |
+          **.go
+          go.mod
+          go.sum
+          Makefile
+          .github/workflows/**.yml
+
+    - name: Analyze Go changes
+      if: steps.changed-files.outputs.any_changed == 'true'
+      run: |
+        echo "Changed Go-related files:"
+        echo "${{ steps.changed-files.outputs.all_changed_files }}"
+
+        # Count lines of code changes
+        ADDED_LINES=$(git diff --numstat origin/main...HEAD | awk '{added+=$1} END {print added+0}')
+        REMOVED_LINES=$(git diff --numstat origin/main...HEAD | awk '{removed+=$2} END {print removed+0}')
+
+        echo "Lines added: $ADDED_LINES"
+        echo "Lines removed: $REMOVED_LINES"
+
+        # Check if this is a major change
+        if [ "$ADDED_LINES" -gt 500 ] || [ "$REMOVED_LINES" -gt 500 ]; then
+          echo "::notice::This is a major change (500+ lines). Consider breaking it into smaller PRs."
+        fi
+
+    - name: Check for breaking changes
+      if: steps.changed-files.outputs.any_changed == 'true'
+      run: |
+        # Look for potential breaking changes in public APIs
+        if echo "${{ steps.changed-files.outputs.all_changed_files }}" | grep -E "pkg/.*\.go$"; then
+          echo "::warning::Changes detected in pkg/ directory. Review for potential breaking changes to public API."
+        fi
