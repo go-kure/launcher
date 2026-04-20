@@ -1,0 +1,3 @@
+# Production configuration with more replicas
+[deployment.simple-app]
+spec.replicas: 5

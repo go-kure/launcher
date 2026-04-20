@@ -1,0 +1,3 @@
+# Debug mode patch
+[deployment.simple-app.spec.template.spec.containers.0]
+env: [{ name: "DEBUG", value: "true" }]
