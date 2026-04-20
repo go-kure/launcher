@@ -38,3 +38,9 @@ release-notes.md
 
 # Temporary test output
 **/temp/
+
+# Hugo site build artifacts
+site/public/
+site/.generated/
+site/versions.toml
+site/.hugo_build.lock

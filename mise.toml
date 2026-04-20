@@ -7,6 +7,7 @@ goreleaser = "2.14.3"
 # Required for GoReleaser SBOM generation and signing
 syft = "1.21.0"
 cosign = "2.4.3"
+hugo = "0.155.3"
 
 [env]
 GOBIN = "{{config_root}}/.bin"
