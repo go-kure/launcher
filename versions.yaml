@@ -1,0 +1,4 @@
+go:
+  current: "1.26.2"
+
+infrastructure: {}

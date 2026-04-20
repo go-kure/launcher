@@ -1,0 +1,47 @@
+baseURL = 'https://www.gokure.dev/launcher/'
+languageCode = 'en-us'
+title = 'Go Kure — Launcher'
+
+[params]
+  disableInlineCopyToClipBoard = true
+  themeVariant = "relearn-dark"
+  # Version is overridden at build time via versions.toml config overlay.
+  # Default to "dev" so local builds and CI validation show the WIP banner.
+  version = "dev"
+
+[module]
+  [[module.imports]]
+    path = 'github.com/McShelby/hugo-theme-relearn'
+
+  # === Generated content (from inject-frontmatter.sh) ===
+
+  # Getting started
+  [[module.mounts]]
+    source = ".generated/getting-started/introduction.md"
+    target = "content/getting-started/introduction.md"
+
+  # Concepts
+  [[module.mounts]]
+    source = ".generated/concepts/design.md"
+    target = "content/concepts/design.md"
+
+  # Contributing
+  [[module.mounts]]
+    source = ".generated/contributing/guide.md"
+    target = "content/contributing/guide.md"
+
+  # Changelog
+  [[module.mounts]]
+    source = ".generated/changelog/releases.md"
+    target = "content/changelog/releases.md"
+
+  # === Hand-authored content ===
+  [[module.mounts]]
+    source = "content"
+    target = "content"
+  [[module.mounts]]
+    source = "static"
+    target = "static"
+  [[module.mounts]]
+    source = "layouts"
+    target = "layouts"
