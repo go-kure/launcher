@@ -1,6 +1,6 @@
 # Patch - Declarative Resource Patching
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/go-kure/kure/pkg/patch.svg)](https://pkg.go.dev/github.com/go-kure/kure/pkg/patch)
+[![Go Reference](https://pkg.go.dev/badge/github.com/go-kure/launcher/pkg/patch.svg)](https://pkg.go.dev/github.com/go-kure/launcher/pkg/patch)
 
 The `patch` package provides a JSONPath-based system for declaratively modifying Kubernetes resources. It supports both TOML and YAML patch file formats with structure-preserving modifications and variable substitution.
 
@@ -41,25 +41,10 @@ patches:
     value: "nginx:latest"
 ```
 
-## CLI Usage
-
-The `kure patch` command provides a CLI for applying patches:
-
-```bash
-# Apply patches and write output
-kure patch base.yaml patches/customize.kpatch -o output.yaml
-
-# Preview changes without writing (diff mode)
-kure patch --diff base.yaml patches/customize.kpatch
-
-# Combine all patched resources into a single output
-kure patch --combined base.yaml patches/
-```
-
 ## Quick Start
 
 ```go
-import "github.com/go-kure/kure/pkg/patch"
+import "github.com/go-kure/launcher/pkg/patch"
 
 // Load patches from file
 file, _ := os.Open("patches/customize.kpatch")
@@ -153,7 +138,7 @@ patchSet.KindLookup = lookup
 resolved, reports, err := patchSet.ResolveWithConflictCheck()
 ```
 
-SMP patches are applied before field-level patches. See [DESIGN.md](https://github.com/go-kure/kure/blob/main/pkg/patch/DESIGN.md) for full specification.
+SMP patches are applied before field-level patches. See [DESIGN.md](https://github.com/go-kure/launcher/blob/main/pkg/patch/DESIGN.md) for full specification.
 
 ## API Reference
 
