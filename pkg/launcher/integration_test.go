@@ -12,8 +12,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/go-kure/launcher/pkg/launcher"
 	"github.com/go-kure/kure/pkg/logger"
+	"github.com/go-kure/launcher/pkg/launcher"
 )
 
 // Integration tests for the complete launcher workflow

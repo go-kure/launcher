@@ -10,8 +10,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/go-kure/launcher/pkg/launcher"
 	"github.com/go-kure/kure/pkg/logger"
+	"github.com/go-kure/launcher/pkg/launcher"
 )
 
 func TestCLI_BuildCommand(t *testing.T) {
