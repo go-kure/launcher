@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/errors"
 	"github.com/go-kure/kure/pkg/logger"
+
 	"github.com/go-kure/launcher/pkg/patch"
 )
 
