@@ -1,6 +1,6 @@
 # Launcher - Kubernetes Resources Launcher
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/go-kure/kure/pkg/launcher.svg)](https://pkg.go.dev/github.com/go-kure/kure/pkg/launcher)
+[![Go Reference](https://pkg.go.dev/badge/github.com/go-kure/launcher/pkg/launcher.svg)](https://pkg.go.dev/github.com/go-kure/launcher/pkg/launcher)
 
 This package provides the core functionality for Kurel, the Kubernetes Resources Launcher CLI tool.
 
@@ -344,13 +344,13 @@ monitoring:
 
 ## 🤝 Contributing
 
-Kurel is part of the [Kure](https://github.com/go-kure/kure) project. See the main repository for contribution guidelines.
+Kurel is part of the [go-kure](https://github.com/go-kure) organization. See [CONTRIBUTING.md](https://github.com/go-kure/launcher/blob/main/CONTRIBUTING.md) for contribution guidelines.
 
 ## 📚 Documentation
 
-- [Design Specification](https://github.com/go-kure/kure/blob/main/pkg/launcher/DESIGN.md) - Technical design and architecture
-- [Detailed Design Document](https://github.com/go-kure/kure/blob/main/pkg/launcher/DESIGN-DETAILS.md) - Complete design discussion and decisions
-- [Kure Documentation](https://github.com/go-kure/kure#readme) - Main project documentation
+- [Design Specification](https://github.com/go-kure/launcher/blob/main/pkg/launcher/DESIGN.md) - Technical design and architecture
+- [Detailed Design Document](https://github.com/go-kure/launcher/blob/main/pkg/launcher/DESIGN-DETAILS.md) - Complete design discussion and decisions
+- [Kure Library](https://github.com/go-kure/kure#readme) - Core Kubernetes resource builders that Launcher depends on
 
 ## 🎯 Philosophy
 
