@@ -102,10 +102,16 @@ jobs:
 
           # --- Fetch PR diff ---
           echo "Fetching PR diff for #${PR_NUMBER}..."
-          DIFF=$(curl -sf \
+          HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/pr_diff_raw.txt \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github.diff" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "ERROR: GitHub API returned HTTP ${HTTP_CODE} fetching PR diff"
+            cat /tmp/pr_diff_raw.txt
+            exit 1
+          fi
+          DIFF=$(cat /tmp/pr_diff_raw.txt)
 
           if [ -z "$DIFF" ]; then
             echo "No diff found, skipping review."
@@ -113,10 +119,16 @@ jobs:
           fi
 
           # --- Fetch PR metadata ---
-          PR_DATA=$(curl -sf \
+          HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/pr_meta_raw.txt \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "ERROR: GitHub API returned HTTP ${HTTP_CODE} fetching PR metadata"
+            cat /tmp/pr_meta_raw.txt
+            exit 1
+          fi
+          PR_DATA=$(cat /tmp/pr_meta_raw.txt)
           PR_TITLE=$(echo "$PR_DATA" | jq -r '.title // "Untitled"')
           PR_DESC=$(echo "$PR_DATA" | jq -r '.body // ""')
 
