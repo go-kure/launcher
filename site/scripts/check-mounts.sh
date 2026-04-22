@@ -13,6 +13,7 @@ LAUNCHER_ROOT="${1:-$(cd "$SITE_DIR/.." && pwd)}"
 MOUNTED_FILES=(
   "README.md"
   "DEVELOPMENT.md"
+  "CHANGELOG.md"
   "docs/design.md"
 )
 
