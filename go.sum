@@ -49,8 +49,8 @@ github.com/fsnotify/fsnotify v1.9.0 h1:2Ml+OJNzbYCTzsxtv8vKSFD9PbJjmhYF14k/jKC7S
 github.com/fsnotify/fsnotify v1.9.0/go.mod h1:8jBTzvmWwFyi3Pb8djgCCO5IBqzKJ/Jwo8TRcHyHii0=
 github.com/fxamacker/cbor/v2 v2.9.0 h1:NpKPmjDBgUfBms6tr6JZkTHtfFGcMKsw3eGcmD/sapM=
 github.com/fxamacker/cbor/v2 v2.9.0/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
-github.com/go-kure/kure v0.1.0-rc.11 h1:z9/qHdhZ7pOYlXo1ifbcl3v6cponz4Hc3abHuI1Dk4k=
-github.com/go-kure/kure v0.1.0-rc.11/go.mod h1:3Mhwe7JgDqkmfeSq5mwVsm+CknWc0ELpBeXOXxy3mmE=
+github.com/go-kure/kure v0.2.0-alpha.0 h1:SN27wW2Dgj7VwM7JBQw7uO1Yx0qrJ/C2iSxI+g5SJZ8=
+github.com/go-kure/kure v0.2.0-alpha.0/go.mod h1:kPXapoPoauVyE15gocz1K6Yc2Pa2cSizU8Bb2g0TDx8=
 github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=
 github.com/go-logr/logr v1.4.3/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
 github.com/go-logr/zapr v1.3.0 h1:XGdV8XW8zdwFiwOA2Dryh1gj2KRQyOOoNmBy4EplIcQ=
