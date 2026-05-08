@@ -17,6 +17,11 @@ env:
   # Go version is read from mise.toml (single source of truth)
   # GO_VERSION is set dynamically in each job that needs it
   GOLANGCI_LINT_VERSION: 'v2.10.1'
+  # Force actions/cache to use the legacy REST API (v1) so it reads ACTIONS_CACHE_URL
+  # from the runner pod env, routing cache traffic through the in-cluster cache server.
+  # Without this, cache@v5 uses the twirp API via ACTIONS_RESULTS_URL which GitHub's
+  # job dispatch overwrites with its own URL, bypassing the local cache server entirely.
+  ACTIONS_CACHE_SERVICE_V2: 'false'
 
 # Avoid duplicate runs on the same commit
 concurrency:
