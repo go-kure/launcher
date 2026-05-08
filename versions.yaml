@@ -1,4 +1,4 @@
 go:
-  current: "1.26.2"
+  current: "1.26.3"
 
 infrastructure: {}
