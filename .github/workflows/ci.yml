@@ -35,7 +35,7 @@ jobs:
 
   rebase-check:
     name: rebase-check
-    runs-on: autops-kube
+    runs-on: autops-kube-kure
     timeout-minutes: 2
     if: github.event_name == 'pull_request'
 
@@ -61,7 +61,7 @@ jobs:
 
   changes:
     name: detect-changes
-    runs-on: autops-kube
+    runs-on: autops-kube-kure
     timeout-minutes: 2
     outputs:
       go: ${{ steps.filter.outputs.go }}
@@ -92,7 +92,7 @@ jobs:
 
   validate:
     name: lint
-    runs-on: autops-kube
+    runs-on: autops-kube-kure
     timeout-minutes: 20
     needs: [changes]
     if: |
@@ -175,7 +175,7 @@ jobs:
 
   test:
     name: test
-    runs-on: autops-kube
+    runs-on: autops-kube-kure
     timeout-minutes: 25
     needs: [changes]
     if: |
@@ -236,7 +236,7 @@ jobs:
 
   security:
     name: Security
-    runs-on: autops-kube
+    runs-on: autops-kube-kure
     timeout-minutes: 10
     needs: [changes]
     if: |
@@ -304,7 +304,7 @@ jobs:
 
   coverage-check:
     name: Coverage Check
-    runs-on: autops-kube
+    runs-on: autops-kube-kure
     timeout-minutes: 5
     needs: test
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
@@ -374,7 +374,7 @@ jobs:
 
   build-binaries:
     name: Build kurel
-    runs-on: autops-kube
+    runs-on: autops-kube-kure
     timeout-minutes: 10
     needs: [changes, test]
     if: |
@@ -424,7 +424,7 @@ jobs:
 
   docs-build:
     name: docs-build
-    runs-on: autops-kube
+    runs-on: autops-kube-kure
     timeout-minutes: 15
     needs: [changes]
     if: |
@@ -516,7 +516,7 @@ jobs:
 
   build:
     name: build
-    runs-on: autops-kube
+    runs-on: autops-kube-kure
     timeout-minutes: 1
     needs: [validate, test, build-binaries, docs-build, coverage-check]
     if: always()
@@ -541,7 +541,7 @@ jobs:
 
   cross-platform:
     name: Cross-Platform Build
-    runs-on: autops-kube
+    runs-on: autops-kube-kure
     timeout-minutes: 15
     needs: build-binaries
     if: |
@@ -620,7 +620,7 @@ jobs:
 
   analyze-changes:
     name: Analyze Changes
-    runs-on: autops-kube
+    runs-on: autops-kube-kure
     timeout-minutes: 5
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
 
