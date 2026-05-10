@@ -79,7 +79,7 @@ jobs:
             - 'go.mod'
             - 'go.sum'
             - 'Makefile'
-            - '.github/workflows/ci.yml'
+            - '.github/workflows/**'
           docs:
             - 'site/**'
             - 'docs/**'
@@ -376,7 +376,7 @@ jobs:
 
           **Total Coverage:** ${{ steps.coverage.outputs.coverage }}%
 
-          Coverage threshold: 85%
+          Coverage threshold: 80%
 
   # =============================================================================
   # Stage 4: Build (parallel with coverage-check)
