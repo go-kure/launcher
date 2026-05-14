@@ -12,6 +12,45 @@ or the pipeline execution loop.
 
 ---
 
+## Framing
+
+### Policy vs ClusterProfile
+
+These are separate concerns with different owners:
+
+- **ClusterProfile** — describes how the platform implements each trait (which ingress
+  controller, which certificate issuer). Written once per cluster by a platform operator.
+  Covered in `design-cluster-profile.md`.
+- **Policy** — describes enforcement constraints and defaults applied to application
+  components (max replicas, allowed registries, memory limits). Written per environment by
+  a platform or security operator. Covered here.
+
+The two inputs are orthogonal. A cluster profile says "ingress means Gateway API here";
+a policy says "no component may request more than 2 replicas in staging". ClusterProfile
+values flow into trait rendering; Policy values flow into component configuration
+enforcement.
+
+### Policy is launcher-native from day one
+
+`kurel build` will accept a `--policy` flag pointing to a policy document. This means the
+`oam.Policy` interface is a first-class launcher abstraction from Phase 1, not solely a
+crane compatibility seam.
+
+When no policy is supplied, launcher passes `NoopPolicy` — a concrete type that satisfies
+`oam.Policy` and permits everything (all limits absent, all defaults absent, all security
+flags false). Handlers always receive a non-nil `Policy` value; nil checks in handler code
+are not needed or intended.
+
+### crane compatibility
+
+crane's `*api.EnvironmentPolicy` is the existing concrete policy type. After migration,
+crane wires it into launcher by satisfying the `oam.Policy` interface. The question is how.
+
+The interface must be rich enough to serve both crane's `EnvironmentPolicy` and future
+launcher-native policy document types that may have different enforcement semantics.
+
+---
+
 ## Background
 
 ### Current state in crane
@@ -58,7 +97,7 @@ the migration (Phase 4 in the roadmap). The question is what shape the interface
 
 ---
 
-## Option B — Typed Accessor Interface
+## Option A — Typed Accessor Interface
 
 ### Interface definition
 
@@ -229,7 +268,7 @@ any omission immediately.
 
 ---
 
-## Option C — Opaque Marker Interface
+## Option B — Opaque Marker Interface
 
 ### Interface definition
 
@@ -301,14 +340,14 @@ func (a *OAMPolicyAdapter) MaxMemory() string            { return a.env.Enforced
 func (a *OAMPolicyAdapter) MaxStorageSize() string       { return a.env.Enforced.MaxStorageSize }
 func (a *OAMPolicyAdapter) AllowedRegistries() []string  { return a.env.Enforced.AllowedRegistries }
 func (a *OAMPolicyAdapter) DefaultReplicas() *int32      { return a.env.Defaults.Replicas }
-// ... (same accessor set as Option B, but on the adapter, not on EnvironmentPolicy)
+// ... (same accessor set as Option A, but on the adapter, not on EnvironmentPolicy)
 ```
 
 ### How handler code changes — two sub-options
 
 crane's handlers receive `oam.Policy` and must extract data. There are two ways to do this:
 
-**Sub-option C1: Assert to the concrete adapter**
+**Sub-option B1: Assert to the concrete adapter**
 
 ```go
 // crane handler — asserts directly to crane's own adapter type
@@ -329,7 +368,7 @@ Consequence: the handler file gains an import of crane's own `cranePolicy` packa
 name the adapter type. The handler is still tightly coupled to crane's concrete types —
 just through an extra indirection layer.
 
-**Sub-option C2: Assert to local sub-interfaces**
+**Sub-option B2: Assert to local sub-interfaces**
 
 Each handler defines a minimal sub-interface for the policy data it needs:
 
@@ -364,10 +403,10 @@ implement `replicaLimiter` — including future launcher-native policies.
 
 ### NoopPolicy problem
 
-With Option C, `NoopPolicy` has no data methods. Both C1 and C2 return early (no
+With Option B, `NoopPolicy` has no data methods. Both B1 and B2 return early (no
 enforcement, no defaults) when the policy is `NoopPolicy`:
-- C1: `p.(*OAMPolicyAdapter)` assertion fails → `return nil`
-- C2: `p.(replicaLimiter)` assertion fails → skip the block
+- B1: `p.(*OAMPolicyAdapter)` assertion fails → `return nil`
+- B2: `p.(replicaLimiter)` assertion fails → skip the block
 
 This means NoopPolicy silently disables all enforcement and default application. This is
 the intended behavior (no policy = no constraints), but it is implicit. Bugs where a nil
@@ -381,7 +420,7 @@ check `p == nil`.
 ### Interface growth
 
 If `EnvironmentPolicy` adds a new field, the adapter grows a new accessor method. The
-`Policy` interface is never updated. Sub-option C2 handler files also grow a new line in
+`Policy` interface is never updated. Sub-option B2 handler files also grow a new line in
 their local sub-interface if they need the new data.
 
 There is no compile-time check that the adapter covers all data a handler might need —
@@ -391,7 +430,7 @@ only runtime behavior verifies coverage.
 
 - 1 interface method (marker only)
 - crane gains one `OAMPolicyAdapter` struct with ~20 accessor methods
-- Handler code: type assertions (C1: to adapter type; C2: to local sub-interfaces)
+- Handler code: type assertions (B1: to adapter type; B2: to local sub-interfaces)
 - No compiler verification — coverage gaps are silent
 - Policy interface never grows; adapters grow instead
 - A future launcher-native Policy (completely different semantics) can satisfy the marker without any constraint on its shape
@@ -400,22 +439,28 @@ only runtime behavior verifies coverage.
 
 ## Summary Comparison
 
-| Aspect | Option B: Typed Accessors | Option C: Opaque Marker |
+| Aspect | Option A: Typed Accessors | Option B: Opaque Marker |
 |---|---|---|
 | Interface methods | ~19 | 1 (marker) |
 | Compiler verifies crane implements Policy | **Yes** — `var _ oam.Policy = ...` | No |
-| Type assertions in handler code | **None** | Required (C1 or C2) |
+| Type assertions in handler code | **None** | Required (B1 or B2) |
 | NoopPolicy works implicitly | **Yes** — zero returns permit everything | Silent skip (assertions fail) |
 | Boilerplate | ~20 methods on `EnvironmentPolicy` | Adapter struct + ~20 methods |
-| Handler imports | `oam` package only | `oam` + adapter type (C1) or just `oam` (C2) |
+| Handler imports | `oam` package only | `oam` + adapter type (B1) or just `oam` (B2) |
 | Interface grows with EnvironmentPolicy | **Yes** — explicit gate | No — adapter grows silently |
 | Future non-crane Policy implementations | Must implement all ~19 methods | Only satisfy the marker |
 | Coverage gap detection | **Compile time** | Runtime (silent) |
 
-### When Option C's flexibility matters
+### When Option B's flexibility matters
 
-Option C's main advantage — that future Policy implementations only need the marker, not
+Option B's main advantage — that future Policy implementations only need the marker, not
 19 methods — is relevant if launcher will define its own native Policy type (separate from
-crane's EnvironmentPolicy) that has fundamentally different enforcement semantics. If the
-only Policy implementation that will ever exist is crane's EnvironmentPolicy wrapped in an
-adapter, Option C adds indirection without benefit.
+crane's EnvironmentPolicy) that has fundamentally different enforcement semantics. Because
+policy is launcher-native from day one (see Framing above), a future launcher policy type
+is a realistic scenario. However, if that future type has the same enforcement surface as
+crane's `EnvironmentPolicy` (replicas, memory, allowed registries, security flags), it
+would implement the same 19 methods anyway.
+
+Option A's explicit interface growth (every new policy field requires a new interface
+method) is an intentional gate, not a burden — it ensures new policy data is consciously
+exposed to the public API surface rather than silently accumulating in an adapter.
