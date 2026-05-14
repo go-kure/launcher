@@ -49,7 +49,7 @@ spec:
 The schema of what keys a given capability accepts (types, required fields, descriptions)
 is launcher built-in knowledge, not cluster operator input. Where this schema lives for
 built-in handlers is described in the launcher handler documentation; the design for
-custom capability schema is tracked separately (Q2 in the design backlog).
+custom capability schema is tracked in issue #60.
 
 ### Strictness
 

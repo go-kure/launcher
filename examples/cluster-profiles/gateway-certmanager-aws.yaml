@@ -17,7 +17,7 @@ spec:
     certificate:
       rendering:
         issuerRef:
-          name: letsencrypt-prod
+          name: internal-ca
           kind: ClusterIssuer
     external-secret:
       rendering:

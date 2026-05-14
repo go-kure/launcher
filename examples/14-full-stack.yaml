@@ -1,4 +1,7 @@
 # Full-stack example — exercises every Phase 1 component type and every Phase 1 trait type.
+# Component types: webservice, worker, cronjob, postgresql, helmrelease, daemonset, statefulset
+# Trait types: expose (public + scoped internal), ingress, httproute, certificate,
+#              external-secret, configmap, scaler
 # Use with cluster-profiles/gateway-certmanager-aws.yaml to exercise scoped capabilities.
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
@@ -157,3 +160,41 @@ spec:
       storage:
         size: "10Gi"
         mountPath: /data
+
+  # --- webservice: ingress (direct — no capability dispatch) ---
+  - name: admin
+    type: webservice
+    properties:
+      image: myregistry/admin:v1.0.0
+      port: 8080
+      replicas: 1
+    traits:
+    - type: ingress
+      properties:
+        ingressClassName: nginx
+        rules:
+        - host: admin.example.com
+          paths:
+          - path: /
+            port: 8080
+
+  # --- webservice: httproute (direct — no capability dispatch) ---
+  - name: metrics
+    type: webservice
+    properties:
+      image: myregistry/metrics:v1.0.0
+      port: 9090
+      replicas: 1
+    traits:
+    - type: httproute
+      properties:
+        parentRefs:
+        - name: prod-gateway
+          namespace: gateway-system
+        rules:
+        - matches:
+          - path:
+              type: PathPrefix
+              value: /metrics
+          backendRefs:
+          - port: 9090
