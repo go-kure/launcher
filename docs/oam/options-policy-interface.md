@@ -1,6 +1,6 @@
 # Options: Policy Interface Design
 
-*Status: Decision required | Blocks: `design-policy-interface.md`, issue #38*
+*Status: **Decided — Option A** | Issue #38*
 
 This document fully designs both options for the `oam.Policy` interface.
 Read both options completely before deciding.

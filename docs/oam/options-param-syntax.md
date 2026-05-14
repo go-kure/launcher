@@ -1,6 +1,6 @@
 # Options: Parameter Syntax for OAM Packages
 
-*Status: Decision required | Blocks: `design-kurel-package.md` §6, issue #36*
+*Status: **Decided — Option A** | Issue #36*
 
 This document compares two options for how application-specific values (image, replicas,
 domain names, etc.) are expressed in a kurel package and supplied at build time.
