@@ -1,21 +1,28 @@
-# Options: Parameter Syntax for OAM Packages
+# Design: Parameter Syntax for Kurel Packages
 
-*Status: **Decided — Option A** | Issue #36*
+*Status: **Final — Option A selected** | Issue #36*
 
-This document compares two options for how application-specific values (image, replicas,
-domain names, etc.) are expressed in a kurel package and supplied at build time.
+| Version | Date | Summary |
+|---|---|---|
+| 1.1 | 2026-05-14 | Record decision (Option A); remove Option B; add resolver behaviour section; correct env list claim |
+| 1.0 | 2026-04-19 | Initial draft — compared Option A (placeholders) and Option B (overlay) |
+
+**Decision:** Application values are expressed as `${var}` placeholders in `app.yaml`,
+with a typed parameter schema declared in `kurel.yaml`. Reason: launcher is a package
+manager; an explicit, machine-readable package API (schema, required fields, types,
+`--set` support) is more important than `app.yaml` being valid at rest.
 
 **Scope:** how values flow from the user into `component.properties` and
 `trait.properties`. Platform profile resolution (ClusterProfile rendering) is already
 decided and is out of scope here.
 
 **Optionality and package composition** (optional traits, optional components,
-multi-instance components) are a separate design axis and are not part of this decision.
+multi-instance components) are deferred to Phase 2 (issue #39).
 See `options-package-composition.md`.
 
 ---
 
-## Option A — `${var}` Placeholders in app.yaml
+## Parameter Syntax — `${var}` Placeholders
 
 ### How it works
 
@@ -189,179 +196,14 @@ replaces the placeholder with the full YAML node from values.yaml:
 
 ---
 
-## Option B — values.yaml Overlay on Static app.yaml
+## Why Not values.yaml Overlay
 
-### How it works
+The rejected alternative had `app.yaml` as a static document with sentinel strings
+(`"REQUIRED"`) for mandatory fields, and a `values.yaml` that deep-merges into the
+component/trait structure at build time. It was rejected because:
 
-`kurel.yaml` is metadata-only — no parameter schema. `app.yaml` is a complete, valid
-Application document with sensible defaults (or sentinel values for required fields).
-A `values.yaml` file (user-supplied) deep-merges into `app.yaml`'s component and trait
-properties at build time. The runtime receives the merged document.
-
-`app.yaml` is always valid and parseable as a launcher Application — before and after
-the overlay.
-
-### kurel.yaml (metadata only)
-
-```yaml
-apiVersion: launcher.gokure.dev/v1alpha1
-kind: Package
-metadata:
-  name: webservice
-  version: "1.0.0"
-  description: "A stateless web service with ingress, TLS, and optional autoscaling."
-spec:
-  # No parameter declarations
-```
-
-### app.yaml with defaults
-
-```yaml
-apiVersion: launcher.gokure.dev/v1alpha1
-kind: Application
-metadata:
-  name: my-app
-spec:
-  components:
-  - name: web
-    type: webservice
-    properties:
-      image: "REQUIRED"     # sentinel — build fails if still present after overlay
-      port: 8080
-      replicas: 1           # default
-      resources:
-        requests:
-          cpu: "100m"
-          memory: "128Mi"
-    traits:
-    - type: expose
-      properties:
-        rules:
-        - host: "REQUIRED"
-          paths:
-          - path: /
-            port: 8080
-        tls:
-        - secretName: "REQUIRED"
-          hosts:
-          - "REQUIRED"
-    - type: certificate
-      properties:
-        secretName: "REQUIRED"
-        dnsNames:
-        - "REQUIRED"
-    - type: scaler
-      properties:
-        minReplicas: 1
-        maxReplicas: 10
-        cpuUtilization: 70
-```
-
-### values.yaml
-
-The overlay mirrors the component/trait structure of `app.yaml`. Merge is by component
-name and trait type (not index):
-
-```yaml
-# values.yaml
-components:
-- name: web
-  properties:
-    image: "myregistry/app:v1.2.3"
-    replicas: 3
-    env:
-    - name: LOG_LEVEL       # full list supplied directly — no type coercion needed
-      value: info
-    - name: DB_HOST
-      value: postgres.svc
-  traits:
-  - type: expose
-    properties:
-      rules:
-      - host: "app.example.com"
-        paths:
-        - path: /
-          port: 8080
-      tls:
-      - secretName: "my-app-tls"
-        hosts:
-        - "app.example.com"
-  - type: certificate
-    properties:
-      secretName: "my-app-tls"
-      dnsNames:
-      - "app.example.com"
-```
-
-### Supplying values at build time
-
-```sh
-# values.yaml is the only input mechanism — no --set flags
-kurel build . --profile cluster.yaml --values values.yaml
-```
-
-### Merge algorithm
-
-1. Components matched by `name`.
-2. Within a component, `properties` deep-merged: user keys override package keys;
-   unmentioned keys preserved.
-3. Traits matched by `type`. If multiple traits of the same type exist, matched by
-   index — this is a known limitation.
-4. Within a trait, `properties` deep-merged the same way.
-5. After merge, any property value equal to the sentinel string `"REQUIRED"` causes a
-   build error listing the component, trait, and property path.
-
-### What cannot be added via values.yaml
-
-- A new component not present in `app.yaml`
-- A new trait not present in `app.yaml`
-- Conditional inclusion/exclusion of components or traits (separate design axis)
-
-### Implications
-
-- `app.yaml` is always a valid launcher Application document. Readable as-is; serves as
-  documentation for the package's defaults and structure.
-- No explicit parameter schema: consumers must read `app.yaml` to discover what can be
-  overridden.
-- Required field enforcement is ad-hoc: sentinel strings work for string fields, but a
-  user who supplies `image: ""` passes the check and produces a broken manifest.
-- Trait index ambiguity: packages with multiple traits of the same type (e.g. two
-  `configmap` traits) require a deterministic resolution rule.
-
-### Pros
-
-- `app.yaml` is always a valid, readable Application document
-- Type-safe: YAML values in `values.yaml` retain types natively
-- No resolver complexity: deep-merge, no type coercion
-- `app.yaml` serves as living documentation with defaults visible
-
-### Cons
-
-- No machine-readable parameter schema — no way to enumerate what a package accepts
-  without reading app.yaml
-- Required enforcement is ad-hoc (sentinel strings)
-- No `--set` flags
-- Values file must mirror app.yaml structure — users need to know component/trait names
-- Trait-by-index matching is fragile
-
----
-
-## Summary Comparison
-
-| Aspect | Option A: Placeholders | Option B: Overlay |
-|---|---|---|
-| Explicit parameter schema | **Yes — in `kurel.yaml`** | No — read `app.yaml` |
-| Required parameters enforced | **Yes — schema validation** | Ad-hoc (sentinel strings) |
-| Parameter discovery | Single list in `kurel.yaml` | Must read `app.yaml` |
-| Type safety | Requires type-aware resolver | **Native YAML** |
-| Lists and maps as parameters | Yes (node substitution) | **Yes (native)** |
-| `--set` flags | **Yes (scalars)** | No |
-| Values file structure | By parameter name (flat/structured) | Mirrors app.yaml internals |
-| Resolver complexity | Higher (type coercion + node subst.) | **Lower (deep-merge)** |
-| `app.yaml` readable at rest | No (contains `${…}`) | **Yes** |
-| Prototype resolver reuse | Partial | No |
-
-Note on `app.yaml` readability: in Option A, `app.yaml` at rest contains placeholder
-syntax and is not a valid Application. In Option B it is valid and readable without
-tooling. This affects developer experience when browsing package source, but is not a
-runtime or correctness concern — both options produce identical resolved output.
+- No machine-readable parameter schema — consumers must read `app.yaml` to discover what can be overridden
+- Required field enforcement is ad-hoc: sentinel strings work for string fields, but `image: ""` passes the check and produces a broken manifest
+- No `--set` flags — scalars cannot be supplied on the command line
+- Values file must mirror `app.yaml` structure — users need to know component and trait names
+- Trait-by-index matching is fragile for packages with multiple traits of the same type

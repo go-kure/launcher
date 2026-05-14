@@ -1,7 +1,11 @@
 # Design: API Group and Document Ownership
 
-*Status: Draft | Prerequisite for: design-cluster-profile.md, design-kurel-package.md,
-design-policy-interface.md*
+*Status: Final | Prerequisite for: design-cluster-profile.md, design-kurel-package.md,
+options-policy-interface.md*
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0 | 2026-05-14 | Initial — records GVK decision, rationale, strictness rule, OAM reuse |
 
 ---
 
@@ -104,7 +108,7 @@ silently ignoring them and producing incorrect output.
 
 Operators migrating crane `ClusterProfile` documents to launcher `cluster.yaml` must
 remove crane-specific fields before use. The fields to remove are documented in
-`design-cluster-profile.md §8`.
+`design-cluster-profile.md §7`.
 
 ---
 

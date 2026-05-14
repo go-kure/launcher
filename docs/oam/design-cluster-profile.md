@@ -1,6 +1,11 @@
 # Design: Platform Profile — ClusterProfile
 
-*Status: Draft | Issue: [#37](https://github.com/go-kure/launcher/issues/37)*
+*Status: Final | Issue: [#37](https://github.com/go-kure/launcher/issues/37)*
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.1 | 2026-05-14 | Remove `parameters` field; update GVK to `launcher.gokure.dev/v1alpha1`; add strictness rule; add migration guide |
+| 1.0 | 2026-04-19 | Initial draft |
 
 ---
 

@@ -1,10 +1,11 @@
 # Design: Kurel Package Spec
 
-*Status: Draft (partial) | Issue: [#36](https://github.com/go-kure/launcher/issues/36)*
+*Status: Draft | Issue: [#36](https://github.com/go-kure/launcher/issues/36)*
 
-> **Note:** The parameter syntax section is deliberately omitted. See
-> `docs/oam/options-param-syntax.md` for the two options under consideration.
-> This document will be completed once that decision is made.
+| Version | Date | Summary |
+|---|---|---|
+| 1.1 | 2026-05-14 | Complete §6 (parameter syntax — Option A); fix GVK references; remove `backup` from Phase 1 trait table; fix §5 diagram label |
+| 1.0 | 2026-04-19 | Initial draft — parameter syntax section omitted pending decision |
 
 ---
 
@@ -52,8 +53,19 @@ metadata:
   description: "A stateless web service with ingress, TLS, and optional autoscaling."
   # Future: home, keywords, maintainers (informational only)
 spec:
-  # Parameter declarations — content TBD (see options-param-syntax.md)
-  parameters: []
+  parameters:
+  - name: image
+    type: string
+    required: true
+    description: "Container image with tag, e.g. registry/app:v1.2.3"
+  - name: domain
+    type: string
+    required: true
+    description: "Primary hostname, e.g. app.example.com"
+  - name: replicas
+    type: integer
+    required: false
+    default: 1
 ```
 
 ---
@@ -61,8 +73,10 @@ spec:
 ## 4. app.yaml — OAM Application
 
 `app.yaml` is a launcher Application document (`launcher.gokure.dev/v1alpha1`, kind
-`Application`). The component and trait types must match the handler registry that the
-runtime is configured with. See `docs/oam/design-gvk.md` for the GVK rationale.
+`Application`). It contains `${var}` parameter placeholders that the resolver substitutes
+using the values supplied at build time. The component and trait types must match the
+handler registry that the runtime is configured with. See `docs/oam/design-gvk.md` for
+the GVK rationale and `docs/oam/options-param-syntax.md` for the parameter syntax spec.
 
 ### 4.1 Basic structure
 
@@ -117,9 +131,8 @@ Migrated from crane. Each type maps to a `TraitHandler` in `pkg/oam/builtin/`:
 | `external-secret` | yes — `secretStoreRef` | ExternalSecrets ExternalSecret |
 | `configmap` | no | ConfigMap with optional volume mount |
 | `scaler` | no | HPA + optional PDB |
-| `backup` | no | crane-specific, stays in crane |
 
-Traits that remain in crane (not migrated to launcher): `fluxcd-postbuild`,
+Traits that remain in crane (not migrated to launcher): `backup`, `fluxcd-postbuild`,
 `fluxcd-patches`, `prune-protection`, `rbac`. These depend on crane's delivery pipeline
 and have no meaning in a static manifest build.
 
@@ -163,22 +176,22 @@ The two sets are merged at different stages:
 - Platform profile rendering is merged into trait properties before handler invocation
   (capability resolution, see ClusterProfile design)
 - Application values are merged into component and trait properties
-  (parameter resolution — syntax TBD)
+  (`${var}` placeholder substitution — see §6)
 
 ### Separation of concerns
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  Application team provides:                                     │
-│  - app.yaml (OAM Application — what to run, what capabilities)  │
+│  - app.yaml (launcher Application — what to run, what capabilities)  │
 │  - values  (image, replicas, domains — per deployment)          │
 └─────────────────────┬───────────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────────┐
 │  kurel build                                                    │
 │  1. Resolve application values into OAM Application             │
-│  2. Load ClusterProfile (platform profile)                      │
-│  3. For each trait: merge capability rendering into properties  │
+│  2. Load ClusterProfile (platform profile)                         │
+│  3. For each trait: merge capability rendering into properties     │
 │  4. Dispatch to component and trait handlers                    │
 │  5. Output: static Kubernetes manifests                         │
 └─────────────────────┬───────────────────────────────────────────┘
@@ -191,11 +204,112 @@ The two sets are merged at different stages:
 
 ---
 
-## 6. Parameter Syntax [TBD]
+## 6. Parameter Syntax
 
-*This section will describe how application values are expressed in `kurel.yaml` and
-`app.yaml`, and how `kurel build` accepts them. See `docs/oam/options-param-syntax.md`
-for the options under consideration.*
+Application values are expressed as `${name}` placeholders in `app.yaml`. The resolver
+substitutes all placeholders using the values supplied at build time before the Application
+is parsed or dispatched to handlers. For the full design rationale see
+`docs/oam/options-param-syntax.md`.
+
+### 6.1 Parameter declarations in kurel.yaml
+
+Each parameter has a name, type, required flag, optional default, and optional description.
+
+```yaml
+spec:
+  parameters:
+  - name: image
+    type: string
+    required: true
+    description: "Container image with tag, e.g. registry/app:v1.2.3"
+  - name: replicas
+    type: integer
+    required: false
+    default: 1
+  - name: domain
+    type: string
+    required: true
+  - name: tlsSecret
+    type: string
+    required: false
+    default: "${name}-tls"   # may reference other parameters
+  - name: env
+    type: array
+    required: false
+    default: []
+    description: "Extra environment variables as [{name, value}] objects"
+```
+
+Supported types: `string`, `integer`, `boolean`, `array`, `object`.
+
+### 6.2 Placeholder syntax in app.yaml
+
+```yaml
+spec:
+  components:
+  - name: web
+    type: webservice
+    properties:
+      image: "${image}"          # scalar substitution — resolves to string
+      replicas: ${replicas}      # scalar substitution — resolves to integer
+      env: ${env}                # node substitution — resolves to YAML list
+    traits:
+    - type: expose
+      properties:
+        rules:
+        - host: "${domain}"
+    - type: certificate
+      properties:
+        secretName: "${tlsSecret}"
+        dnsNames:
+        - "${domain}"
+```
+
+### 6.3 Resolver behaviour
+
+**Scalar substitution** — when `${name}` is the entire value of a YAML field, the resolver
+replaces it with the typed value from the parameter declaration:
+- `image: "${image}"` → `image: "myregistry/app:v1.2.3"` (string)
+- `replicas: ${replicas}` → `replicas: 3` (integer, not string `"3"`)
+
+**Node substitution** — when the parameter type is `array` or `object`, the resolver
+replaces the placeholder with the full YAML node:
+- `env: ${env}` → `env: [{name: LOG_LEVEL, value: info}, ...]`
+
+**Inline string embedding** — when `${name}` is embedded inside a larger string value:
+- `secretName: "${name}-tls"` → `secretName: "webservice-tls"` (always a string)
+
+### 6.4 Supplying values at build time
+
+```sh
+# values.yaml — flat scalars or structured (for array/object parameters)
+kurel build . --profile cluster.yaml --values values.yaml
+
+# --set flags — scalars only
+kurel build . --profile cluster.yaml \
+    --set image=myregistry/app:v1.2.3 \
+    --set replicas=3 \
+    --set domain=app.example.com
+```
+
+```yaml
+# values.yaml — with structured array parameter
+image: myregistry/app:v1.2.3
+replicas: 3
+domain: app.example.com
+env:
+- name: LOG_LEVEL
+  value: info
+- name: DB_HOST
+  value: postgres.svc
+```
+
+### 6.5 Validation
+
+- Missing required parameter → build error naming the parameter before any resolution
+- Optional parameter with no value → default value used
+- `default` may itself contain `${name}` references to other parameters; these are
+  resolved in declaration order
 
 ---
 
