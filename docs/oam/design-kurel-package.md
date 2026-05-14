@@ -1,6 +1,6 @@
 # Design: Kurel Package Spec
 
-*Status: Draft | Issue: [#36](https://github.com/go-kure/launcher/issues/36)*
+*Status: Final | Issue: [#36](https://github.com/go-kure/launcher/issues/36)*
 
 | Version | Date | Summary |
 |---|---|---|
@@ -41,8 +41,7 @@ layout. No coexistence or backward-compatible bridging is required.
 
 ## 3. kurel.yaml
 
-`kurel.yaml` declares the package identity and (when the parameter syntax is decided)
-the parameter schema.
+`kurel.yaml` declares the package identity and the parameter schema.
 
 ```yaml
 apiVersion: launcher.gokure.dev/v1alpha1
