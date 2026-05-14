@@ -1,0 +1,12 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-database
+spec:
+  components:
+  - name: db
+    type: postgresql
+    properties:
+      instances: 1
+      storage:
+        size: "10Gi"

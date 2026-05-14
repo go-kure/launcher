@@ -1,0 +1,51 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+spec:
+  components:
+  - name: web
+    type: webservice
+    properties:
+      image: myregistry/my-app:v1.2.3
+      port: 8080
+      replicas: 3
+      env:
+      - name: LOG_LEVEL
+        value: info
+      - name: DB_HOST
+        value: postgres.svc.cluster.local
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "256Mi"
+        limits:
+          cpu: "1000m"
+          memory: "512Mi"
+    traits:
+    - type: expose
+      properties:
+        rules:
+        - host: my-app.example.com
+          paths:
+          - path: /
+            port: 8080
+        tls:
+        - secretName: my-app-tls
+          hosts:
+          - my-app.example.com
+    - type: certificate
+      properties:
+        secretName: my-app-tls
+        dnsNames:
+        - my-app.example.com
+    - type: external-secret
+      properties:
+        secretName: my-app-db-credentials
+        remoteRef:
+          key: prod/my-app/db
+    - type: scaler
+      properties:
+        minReplicas: 2
+        maxReplicas: 10
+        cpuUtilization: 70

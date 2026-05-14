@@ -1,0 +1,30 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-cronjob
+spec:
+  components:
+  - name: cleanup
+    type: cronjob
+    properties:
+      image: myregistry/my-cronjob:v1.2.3
+      schedule: "0 2 * * *"
+      concurrencyPolicy: Forbid
+      successfulJobsHistoryLimit: 3
+      failedJobsHistoryLimit: 1
+      env:
+      - name: LOG_LEVEL
+        value: info
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "64Mi"
+        limits:
+          cpu: "500m"
+          memory: "128Mi"
+    traits:
+    - type: external-secret
+      properties:
+        secretName: my-cronjob-credentials
+        remoteRef:
+          key: prod/my-cronjob/credentials

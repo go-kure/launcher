@@ -1,0 +1,19 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+spec:
+  components:
+  - name: web
+    type: webservice
+    properties:
+      image: myregistry/my-app:v1.2.3
+      port: 8080
+      replicas: 1
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "256Mi"

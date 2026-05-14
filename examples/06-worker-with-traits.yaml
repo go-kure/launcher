@@ -1,0 +1,27 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-worker
+spec:
+  components:
+  - name: worker
+    type: worker
+    properties:
+      image: myregistry/my-worker:v1.2.3
+      replicas: 2
+      env:
+      - name: QUEUE_URL
+        value: amqp://rabbitmq.svc.cluster.local
+    traits:
+    - type: external-secret
+      properties:
+        secretName: my-worker-credentials
+        remoteRef:
+          key: prod/my-worker/credentials
+    - type: configmap
+      properties:
+        name: my-worker-config
+        data:
+          BATCH_SIZE: "50"
+          TIMEOUT_SECONDS: "30"
+        mountPath: /etc/worker

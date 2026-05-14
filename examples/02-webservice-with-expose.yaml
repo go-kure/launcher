@@ -1,0 +1,20 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+spec:
+  components:
+  - name: web
+    type: webservice
+    properties:
+      image: myregistry/my-app:v1.2.3
+      port: 8080
+      replicas: 2
+    traits:
+    - type: expose
+      properties:
+        rules:
+        - host: my-app.example.com
+          paths:
+          - path: /
+            port: 8080

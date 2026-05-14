@@ -1,0 +1,159 @@
+# Full-stack example — exercises every Phase 1 component type and every Phase 1 trait type.
+# Use with cluster-profiles/gateway-certmanager-aws.yaml to exercise scoped capabilities.
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: full-stack
+spec:
+  components:
+
+  # --- webservice: expose (public) + certificate + scaler + external-secret + configmap ---
+  - name: web
+    type: webservice
+    properties:
+      image: myregistry/web:v1.0.0
+      port: 8080
+      replicas: 3
+      env:
+      - name: LOG_LEVEL
+        value: info
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "512Mi"
+    traits:
+    - type: expose
+      properties:
+        rules:
+        - host: app.example.com
+          paths:
+          - path: /
+            port: 8080
+        tls:
+        - secretName: web-tls
+          hosts:
+          - app.example.com
+    - type: certificate
+      properties:
+        secretName: web-tls
+        dnsNames:
+        - app.example.com
+    - type: external-secret
+      properties:
+        secretName: web-app-secrets
+        remoteRef:
+          key: prod/web/secrets
+    - type: configmap
+      properties:
+        name: web-config
+        data:
+          FEATURE_FLAGS: "new-ui=true"
+        mountPath: /etc/config
+    - type: scaler
+      properties:
+        minReplicas: 2
+        maxReplicas: 10
+        cpuUtilization: 70
+
+  # --- webservice: expose (internal, scoped) ---
+  - name: api
+    type: webservice
+    properties:
+      image: myregistry/api:v1.0.0
+      port: 9090
+      replicas: 2
+    traits:
+    - type: expose
+      properties:
+        scope: internal
+        rules:
+        - host: api.internal.example.com
+          paths:
+          - path: /
+            port: 9090
+
+  # --- worker: external-secret + configmap ---
+  - name: worker
+    type: worker
+    properties:
+      image: myregistry/worker:v1.0.0
+      replicas: 2
+      env:
+      - name: QUEUE_URL
+        value: amqp://rabbitmq.svc.cluster.local
+    traits:
+    - type: external-secret
+      properties:
+        secretName: worker-credentials
+        remoteRef:
+          key: prod/worker/credentials
+    - type: configmap
+      properties:
+        name: worker-config
+        data:
+          BATCH_SIZE: "50"
+        mountPath: /etc/worker
+
+  # --- cronjob ---
+  - name: cleanup
+    type: cronjob
+    properties:
+      image: myregistry/cleanup:v1.0.0
+      schedule: "0 3 * * *"
+      concurrencyPolicy: Forbid
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "64Mi"
+
+  # --- postgresql ---
+  - name: db
+    type: postgresql
+    properties:
+      instances: 3
+      storage:
+        size: "50Gi"
+        storageClass: fast-ssd
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+
+  # --- helmrelease ---
+  - name: redis
+    type: helmrelease
+    properties:
+      chart:
+        name: redis
+        repository: https://charts.bitnami.com/bitnami
+        version: "18.6.1"
+      values:
+        auth:
+          enabled: false
+        master:
+          persistence:
+            size: "8Gi"
+
+  # --- daemonset ---
+  - name: log-collector
+    type: daemonset
+    properties:
+      image: myregistry/log-collector:v1.0.0
+      resources:
+        requests:
+          cpu: "50m"
+          memory: "64Mi"
+
+  # --- statefulset ---
+  - name: session-store
+    type: statefulset
+    properties:
+      image: myregistry/session-store:v1.0.0
+      replicas: 3
+      port: 6379
+      storage:
+        size: "10Gi"
+        mountPath: /data

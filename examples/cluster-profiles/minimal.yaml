@@ -1,0 +1,10 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: staging-minimal
+spec:
+  capabilities:
+    expose:
+      rendering:
+        controllerType: ingress
+        ingressClassName: traefik

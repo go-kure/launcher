@@ -1,0 +1,20 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-stateful-app
+spec:
+  components:
+  - name: app
+    type: statefulset
+    properties:
+      image: myregistry/my-stateful-app:v1.0.0
+      replicas: 3
+      port: 8080
+      storage:
+        size: "20Gi"
+        storageClass: standard
+        mountPath: /data
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "256Mi"

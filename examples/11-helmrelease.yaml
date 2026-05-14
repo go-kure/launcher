@@ -1,0 +1,22 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-third-party
+spec:
+  components:
+  - name: redis
+    type: helmrelease
+    properties:
+      chart:
+        name: redis
+        repository: https://charts.bitnami.com/bitnami
+        version: "18.6.1"
+      values:
+        auth:
+          enabled: false
+        master:
+          persistence:
+            enabled: true
+            size: "8Gi"
+        replica:
+          replicaCount: 1
