@@ -1,0 +1,24 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-database
+spec:
+  components:
+  - name: db
+    type: postgresql
+    properties:
+      instances: 3
+      storage:
+        size: "50Gi"
+        storageClass: fast-ssd
+      postgresql:
+        parameters:
+          max_connections: "200"
+          shared_buffers: "256MB"
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "512Mi"
+        limits:
+          cpu: "2000m"
+          memory: "2Gi"

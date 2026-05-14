@@ -1,0 +1,15 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-worker
+spec:
+  components:
+  - name: worker
+    type: worker
+    properties:
+      image: myregistry/my-worker:v1.2.3
+      replicas: 1
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"

@@ -1,0 +1,27 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: prod-gateway
+spec:
+  capabilities:
+    expose:
+      rendering:
+        controllerType: gateway
+        gatewayName: prod-gateway
+        gatewayNamespace: gateway-system
+    expose.internal:
+      rendering:
+        controllerType: gateway
+        gatewayName: internal-gateway
+        gatewayNamespace: gateway-system
+    certificate:
+      rendering:
+        issuerRef:
+          name: letsencrypt-prod
+          kind: ClusterIssuer
+    external-secret:
+      rendering:
+        secretStoreRef:
+          name: aws-secretsmanager
+          kind: ClusterSecretStore
+        refreshInterval: "1h"
