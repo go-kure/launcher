@@ -267,9 +267,11 @@ The go-kure org governance, design documents, and community files are maintained
 - **Standards**: [docs/standards.md](https://github.com/go-kure/.github/blob/main/docs/standards.md)
 - **Contributing**: [CONTRIBUTING.md](https://github.com/go-kure/.github/blob/main/CONTRIBUTING.md)
 - **Reusable workflows**: release, auto-rebase, pr-review, claude — all hosted in go-kure/.github
+- **Reusable workflow reference**: [go-kure/.github AGENTS.md](https://github.com/go-kure/.github/blob/main/AGENTS.md)
 
 ## Questions?
 
 Refer to:
 1. `DEVELOPMENT.md` - Detailed development workflow
 2. `docs/design.md` - Full design document and vision
+3. `docs/github-workflows.md` - GitHub Actions workflow reference
