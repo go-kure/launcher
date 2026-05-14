@@ -175,23 +175,23 @@ Launcher targets teams committed to a GitOps-first workflow who want OAM semanti
 **Phase 0 (current): Extraction, design, and housekeeping**
 - Move prototype code from kure — *done*
 - Establish module structure and CI — *done*
-- Design the launcher-native application model — *in progress (PR #58)*
-  - GVK: `launcher.gokure.dev/v1alpha1` for Application, Package, ClusterProfile
-  - ClusterProfile format (`design-cluster-profile.md`)
-  - Parameter syntax options (`options-param-syntax.md`)
-  - Package composition options (`options-package-composition.md`)
-  - Policy interface options (`options-policy-interface.md`)
-  - Package spec (`design-kurel-package.md`) — on hold until param syntax decided
+- Design the launcher-native application model — *in progress (PR #58, closes #36 #37 #38)*
+  - GVK: `launcher.gokure.dev/v1alpha1` for Application, Package, ClusterProfile — *decided*
+  - ClusterProfile format (`design-cluster-profile.md`) — *decided*
+  - Parameter syntax: Option A — `${var}` placeholders with typed schema in `kurel.yaml` — *decided*
+  - Policy interface: Option A — typed accessor interface — *decided*
+  - Package composition: no optional sections in Phase 1; deferred to Phase 2 — *decided*
+  - Package spec (`design-kurel-package.md`) — to be completed in this PR
 
 **Phase 1: OAM-native package format**
 - Implement the launcher Application, Package, and ClusterProfile types
-- Implement parameter resolution (`${var}` placeholders or values overlay — decision pending)
+- Implement parameter resolution — `${var}` placeholders; scalar, node, and inline-string substitution
 - Implement ClusterProfile rendering (capability key resolution, merge semantics)
 - Implement policy enforcement (`--policy` flag, `NoopPolicy`, crane compatibility)
 - CLI: `kurel build` with `--profile`, `--values`, `--policy`, `--set` flags
 
 **Phase 2: Conditional composition (issue #39)**
-- Optional component and trait inclusion
+- Optional component and trait inclusion (boolean gates declared in `kurel.yaml`)
 - Policy-based conditionality
 - Multi-instance component patterns
 
@@ -201,44 +201,38 @@ Launcher targets teams committed to a GitOps-first workflow who want OAM semanti
 
 ---
 
-## 9. Pending Decisions (PR #58 — blocks final design)
+## 9. Phase 0 Design Decisions (PR #58 closes #36, #37, #38)
 
-The following decisions must be made and recorded before `design-kurel-package.md` and
-`design-policy-interface.md` can be completed and PR #58 merged. Options documents for
-each are in `docs/oam/`.
+PR #58 is the single PR that completes all Phase 0 design. It is not merged until all
+three issues are fully resolved and every design document is final. No Phase 1
+implementation work begins before this PR merges.
 
-| Decision | Options doc | Blocks |
+**Decision rule:** launcher is a semantically richer Helm alternative. Explicit package
+API contract and compiler-verified correctness take precedence over YAML validity at rest.
+
+| Concern | Decision | Document |
 |---|---|---|
-| Parameter syntax — `${var}` placeholders vs values overlay | `options-param-syntax.md` | `design-kurel-package.md` §6 |
-| Package composition — how optional sections are declared and enabled | `options-package-composition.md` | `design-kurel-package.md` §4–5 |
-| Policy interface — typed accessors vs opaque marker | `options-policy-interface.md` | `design-policy-interface.md` |
+| API group and version | `launcher.gokure.dev/v1alpha1` for all native docs | `design-gvk.md` |
+| Parser strictness | Strict — unknown fields are a build error | `design-gvk.md` |
+| ClusterProfile format | `cluster.yaml` carries `rendering` only; no `parameters` | `design-cluster-profile.md` |
+| Parameter syntax | **Option A** — `${var}` placeholders; typed schema in `kurel.yaml` | `options-param-syntax.md` |
+| Policy interface | **Option A** — typed accessor interface (~19 methods) | `options-policy-interface.md` |
+| Package composition | **Deferred to Phase 2** — no optional sections in Phase 1 | `options-package-composition.md` |
 
-`design-cluster-profile.md` and `design-gvk.md` are complete and have no open decisions.
-Issue #37 (ClusterProfile) can be closed once PR #58 is approved.
+Issues closed by this PR: #36 (package spec), #37 (ClusterProfile), #38 (policy interface).
 
 ---
 
 ## 10. Open Questions
 
-1. **Conditional inclusion syntax** — How the package author marks optional components and
-   traits, and how the user enables/disables them, is a Phase 0 design question. Two
-   options are compared in `docs/oam/options-package-composition.md`. Deeper conditionality
-   (Phase 2) is tracked in issue #39.
+1. **Conditional inclusion syntax** — No optional sections in Phase 1. Package authors
+   publish always-on packages; separate packages cover distinct deployment variants.
+   Boolean on/off gates and multi-instance support are Phase 2 (issue #39).
 
-2. **Parameter syntax** — Two options compared in `docs/oam/options-param-syntax.md`:
-   - Option A: `${var}` placeholders in `app.yaml`, resolved before parse
-   - Option B: `values.yaml` overlay on a static `app.yaml`
-   Decision pending before `design-kurel-package.md` §6 can be completed.
+2. **Generic/raw YAML escape hatch** — A component type that passes through arbitrary
+   YAML would let package authors handle cases outside the built-in handler set. Not
+   in scope for Phase 1; tracked as future work.
 
-3. **Policy interface** — Two options compared in `docs/oam/options-policy-interface.md`:
-   - Option A: typed accessor interface (~19 methods); compiler-verified; no type assertions
-   - Option B: opaque marker interface; flexible; requires type assertions in handlers
-   Decision pending before `design-policy-interface.md` can be written.
-
-4. **Platform profile format** — Resolved. `ClusterProfile` is a `cluster.yaml` file under
-   `launcher.gokure.dev/v1alpha1`; it carries `rendering` values per capability type. See
-   `docs/oam/design-cluster-profile.md`.
-
-5. **Backwards compatibility with prototype** — The existing `pkg/launcher` pipeline
-   (file-based, patch-centric) is superseded by the new OAM-native design. The prototype
-   code remains in the repository as reference but is not the Phase 1 implementation target.
+3. **Package distribution** — How kurel packages are published, versioned, and referenced
+   by consumers. A standard local layout that lets `kurel build` run without extra flags
+   is the Phase 3 starting point.

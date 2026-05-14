@@ -1,6 +1,6 @@
 # Options: Package Composition — Optional Sections, Multi-Instance, Split Files
 
-*Status: Decision required | Blocks: `design-kurel-package.md` §4–5, issue #36*
+*Status: **Decided — deferred to Phase 2 (issue #39)** | Issue #36*
 
 This document compares two candidate mechanisms for package composition: how a package
 author marks components or traits as optional, how the user enables or disables optional
