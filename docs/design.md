@@ -1,14 +1,16 @@
 # Launcher — Design Document
 
-*Date: 2026-04-19 | Status: Early design — work in progress*
+*Date: 2026-04-19 | Updated: 2026-05-14 | Status: Phase 0 design in progress (PR #58)*
 
 ---
 
 ## 1. Vision
 
-**Launcher** is an OAM-native package manager for Kubernetes — a semantically richer alternative to Helm.
+**Launcher** is an OAM-inspired package manager for Kubernetes — a semantically richer alternative to Helm.
 
-Where Helm templates Kubernetes manifests from Go template files and a flat `values.yaml`, launcher models deployments using the [Open Application Model (OAM)](https://oam.dev/) as its package format. The result is a tool where application structure is explicit and typed, platform implementation choices are separated from application choices, and output is always static, GitOps-ready Kubernetes manifests.
+Where Helm templates Kubernetes manifests from Go template files and a flat `values.yaml`, launcher models deployments using OAM concepts (Applications, Components, Traits) as its package format, under launcher's own API group. The result is a tool where application structure is explicit and typed, platform implementation choices are separated from application choices, and output is always static, GitOps-ready Kubernetes manifests.
+
+Launcher defines its own native application model under `launcher.gokure.dev/v1alpha1`. OAM is the conceptual inspiration, not the API contract — launcher does not claim native API compatibility with `core.oam.dev/v1beta1`.
 
 Launcher uses the [kure](https://github.com/go-kure/kure) library for Kubernetes resource generation.
 
@@ -38,11 +40,12 @@ A **kurel package** is a bundle of OAM specs that can be instantiated with param
 ```
 my-webservice/
 ├── kurel.yaml          # Package metadata and parameter schema
-├── app.yaml            # OAM Application template (parameterized)
-└── patches/            # Optional composition patches
+└── app.yaml            # Application template
 ```
 
-`app.yaml` is a standard OAM Application document with parameter placeholders. The package author defines what can be varied; consumers fill in the values.
+`kurel.yaml` is the package's public API — it declares the parameters (name, type, default, required) and the package version. `app.yaml` is a launcher Application document. The package author defines what can be varied; consumers fill in the values.
+
+The Application document uses `apiVersion: launcher.gokure.dev/v1alpha1`, kind `Application`. ClusterProfile documents (`cluster.yaml`) and Package documents (`kurel.yaml`) use the same API group and version. See `docs/oam/design-gvk.md` for the full GVK rationale.
 
 ### 3.2 Two Parameter Sets
 
@@ -169,20 +172,28 @@ Launcher targets teams committed to a GitOps-first workflow who want OAM semanti
 
 ## 8. Current Status and Roadmap
 
-**Phase 0 (current): Extraction and housekeeping**
-- Move prototype code from kure
-- Establish module structure and CI
-- Document what the prototype does and does not do
+**Phase 0 (current): Extraction, design, and housekeeping**
+- Move prototype code from kure — *done*
+- Establish module structure and CI — *done*
+- Design the launcher-native application model — *in progress (PR #58)*
+  - GVK: `launcher.gokure.dev/v1alpha1` for Application, Package, ClusterProfile
+  - ClusterProfile format (`design-cluster-profile.md`)
+  - Parameter syntax options (`options-param-syntax.md`)
+  - Package composition options (`options-package-composition.md`)
+  - Policy interface options (`options-policy-interface.md`)
+  - Package spec (`design-kurel-package.md`) — on hold until param syntax decided
 
 **Phase 1: OAM-native package format**
-- Define kurel package spec (kurel.yaml schema)
-- Define OAM Application template parameterization
-- Define platform profile contract
-- Implement parameter resolution for both sets
+- Implement the launcher Application, Package, and ClusterProfile types
+- Implement parameter resolution (`${var}` placeholders or values overlay — decision pending)
+- Implement ClusterProfile rendering (capability key resolution, merge semantics)
+- Implement policy enforcement (`--policy` flag, `NoopPolicy`, crane compatibility)
+- CLI: `kurel build` with `--profile`, `--values`, `--policy`, `--set` flags
 
-**Phase 2: Conditional composition**
-- OAM policy-based conditional inclusion (include component X only if trait Y is present)
-- Patch composition on top of OAM Application base
+**Phase 2: Conditional composition (issue #39)**
+- Optional component and trait inclusion
+- Policy-based conditionality
+- Multi-instance component patterns
 
 **Phase 3: Package distribution**
 - OCI-based package publishing and pulling (similar to Helm OCI repositories)
@@ -190,12 +201,44 @@ Launcher targets teams committed to a GitOps-first workflow who want OAM semanti
 
 ---
 
-## 9. Open Questions
+## 9. Pending Decisions (PR #58 — blocks final design)
 
-1. **Conditional inclusion syntax** — OAM does not natively support conditional sections. Proposed: use OAM `PolicyDefinition` with kurel-specific policy types to express conditionality. Needs explicit design.
+The following decisions must be made and recorded before `design-kurel-package.md` and
+`design-policy-interface.md` can be completed and PR #58 merged. Options documents for
+each are in `docs/oam/`.
 
-2. **Platform profile format** — How do platform operators express trait implementations? Options: YAML file, OAM WorkloadDefinition overrides, capability map. Needs design.
+| Decision | Options doc | Blocks |
+|---|---|---|
+| Parameter syntax — `${var}` placeholders vs values overlay | `options-param-syntax.md` | `design-kurel-package.md` §6 |
+| Package composition — how optional sections are declared and enabled | `options-package-composition.md` | `design-kurel-package.md` §4–5 |
+| Policy interface — typed accessors vs opaque marker | `options-policy-interface.md` | `design-policy-interface.md` |
 
-3. **Trait resolution contract** — How does the launcher runtime map "this component requests IngressTrait" to the concrete K8s objects to generate, given a platform profile? This is the core runtime design question.
+`design-cluster-profile.md` and `design-gvk.md` are complete and have no open decisions.
+Issue #37 (ClusterProfile) can be closed once PR #58 is approved.
 
-4. **Backwards compatibility with prototype** — The existing `pkg/launcher` pipeline (file-based, patch-centric) is the starting point. How much of the prototype survives into the new design, and how much is replaced?
+---
+
+## 10. Open Questions
+
+1. **Conditional inclusion syntax** — How the package author marks optional components and
+   traits, and how the user enables/disables them, is a Phase 0 design question. Two
+   options are compared in `docs/oam/options-package-composition.md`. Deeper conditionality
+   (Phase 2) is tracked in issue #39.
+
+2. **Parameter syntax** — Two options compared in `docs/oam/options-param-syntax.md`:
+   - Option A: `${var}` placeholders in `app.yaml`, resolved before parse
+   - Option B: `values.yaml` overlay on a static `app.yaml`
+   Decision pending before `design-kurel-package.md` §6 can be completed.
+
+3. **Policy interface** — Two options compared in `docs/oam/options-policy-interface.md`:
+   - Option A: typed accessor interface (~19 methods); compiler-verified; no type assertions
+   - Option B: opaque marker interface; flexible; requires type assertions in handlers
+   Decision pending before `design-policy-interface.md` can be written.
+
+4. **Platform profile format** — Resolved. `ClusterProfile` is a `cluster.yaml` file under
+   `launcher.gokure.dev/v1alpha1`; it carries `rendering` values per capability type. See
+   `docs/oam/design-cluster-profile.md`.
+
+5. **Backwards compatibility with prototype** — The existing `pkg/launcher` pipeline
+   (file-based, patch-centric) is superseded by the new OAM-native design. The prototype
+   code remains in the repository as reference but is not the Phase 1 implementation target.
