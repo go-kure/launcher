@@ -2,6 +2,12 @@
 
 *Date: 2026-04-19 | Updated: 2026-05-14 | Status: Phase 0 design in progress (PR #58)*
 
+| Version | Date | Summary |
+|---|---|---|
+| 1.2 | 2026-05-14 | Record all Phase 0 decisions; add §9 decisions table; update roadmap; trim open questions |
+| 1.1 | 2026-05-14 | Update GVK, roadmap, and open questions for second design iteration |
+| 1.0 | 2026-04-19 | Initial draft |
+
 ---
 
 ## 1. Vision
@@ -191,7 +197,7 @@ Launcher targets teams committed to a GitOps-first workflow who want OAM semanti
 - CLI: `kurel build` with `--profile`, `--values`, `--policy`, `--set` flags
 
 **Phase 2: Conditional composition (issue #39)**
-- Optional component and trait inclusion (boolean gates declared in `kurel.yaml`)
+- Optional component and trait inclusion — mechanism TBD, designed in #39
 - Policy-based conditionality
 - Multi-instance component patterns
 
