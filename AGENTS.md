@@ -32,10 +32,8 @@ launcher/
 ├── pkg/
 │   ├── launcher/     # Package launcher core (to be migrated from kure)
 │   ├── patch/        # JSONPath-based patching (to be migrated from kure)
-│   ├── cmd/
-│   │   └── kurel/    # kurel command implementations
-│   ├── errors/       # Error handling
-│   └── logger/       # Structured logging
+│   └── cmd/
+│       └── kurel/    # kurel command implementations
 ├── docs/             # Documentation
 │   └── design.md     # Full design document and vision
 ├── .github/
