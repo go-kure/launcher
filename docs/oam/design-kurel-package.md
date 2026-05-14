@@ -27,7 +27,7 @@ once and any project instantiates it by supplying their image, domain, and value
 ```
 my-app/
 ├── kurel.yaml        # package identity and parameter schema
-├── app.yaml          # OAM Application (standard core.oam.dev/v1beta1)
+├── app.yaml          # launcher Application (launcher.gokure.dev/v1alpha1)
 └── examples/
     ├── production.yaml   # example values for a production deployment
     └── staging.yaml      # example values for a staging deployment
@@ -44,7 +44,7 @@ layout. No coexistence or backward-compatible bridging is required.
 the parameter schema.
 
 ```yaml
-apiVersion: launcher.wharf.zone/v1alpha1
+apiVersion: launcher.gokure.dev/v1alpha1
 kind: Package
 metadata:
   name: webservice        # package identifier
@@ -60,13 +60,14 @@ spec:
 
 ## 4. app.yaml — OAM Application
 
-`app.yaml` is a standard OAM Application document (`core.oam.dev/v1beta1`). The component
-and trait types must match the handler registry that the runtime is configured with.
+`app.yaml` is a launcher Application document (`launcher.gokure.dev/v1alpha1`, kind
+`Application`). The component and trait types must match the handler registry that the
+runtime is configured with. See `docs/oam/design-gvk.md` for the GVK rationale.
 
 ### 4.1 Basic structure
 
 ```yaml
-apiVersion: core.oam.dev/v1beta1
+apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
   name: my-app
