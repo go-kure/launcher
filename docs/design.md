@@ -1,9 +1,10 @@
 # Launcher — Design Document
 
-*Date: 2026-04-19 | Updated: 2026-05-14 | Status: Phase 0 design in progress (PR #58)*
+*Date: 2026-04-19 | Updated: 2026-05-15 | Status: Phase 0 design complete*
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3 | 2026-05-15 | Replace patch-centric §4 with OAM-native pipeline; add OAM model, Policy interface, launcher layout, and what-launcher-does-not-do sections; update roadmap |
 | 1.2 | 2026-05-14 | Record all Phase 0 decisions; add §9 decisions table; update roadmap; trim open questions |
 | 1.1 | 2026-05-14 | Update GVK, roadmap, and open questions for second design iteration |
 | 1.0 | 2026-04-19 | Initial draft |
@@ -95,33 +96,31 @@ When deploying multiple packages to a cluster, the platform profile is configure
 ## 4. Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│                kurel CLI                    │
-│           (launcher/cmd/kurel)              │
-└──────────────────────┬──────────────────────┘
-                       │
-         ┌─────────────▼──────────────┐
-         │     launcher runtime       │
-         │  (launcher/pkg/launcher)   │
-         │                            │
-         │  load → resolve → patch    │
-         │       → validate → build   │
-         └─────────────┬──────────────┘
-                       │
-         ┌─────────────▼──────────────┐
-         │       patch engine         │
-         │   (launcher/pkg/patch)     │
-         │  TOML/YAML/JSONPath/SMP    │
-         └─────────────┬──────────────┘
-                       │
-         ┌─────────────▼──────────────┐
-         │       kure library         │
-         │  (github.com/go-kure/kure) │
-         │  K8s builders + GitOps     │
-         └────────────────────────────┘
+OAM YAML input (app.yaml + cluster.yaml)
+        │
+        ▼
+┌───────────────────┐
+│   OAM Parser      │  pkg/oam — parse Application, Component, Trait, Policy
+└────────┬──────────┘
+         │
+         ▼
+┌───────────────────┐
+│  Handler Registry  │  ComponentHandler + TraitHandler per OAM type
+│  + Transformer    │  TransformContext carries Policy + ClusterProfile
+└────────┬──────────┘
+         │ ApplicationConfig per component
+         ▼
+┌───────────────────┐
+│   kure library    │  github.com/go-kure/kure
+│  K8s builders +   │  Deployment, Service, HelmRelease, …
+│  GitOps layout    │  pkg/kubernetes + pkg/stack/fluxcd
+└────────┬──────────┘
+         │
+         ▼
+  static K8s manifests (GitOps-ready)
 ```
 
-Launcher generates **static Kubernetes manifests**. It does not deploy them. Consumers feed the output into a GitOps pipeline (FluxCD, ArgoCD) or apply it directly with `kubectl`.
+Launcher generates **static Kubernetes manifests**. It does not deploy them. Consumers commit the output to a Git repository and let a GitOps engine (FluxCD) reconcile it into a cluster.
 
 ---
 
@@ -143,7 +142,7 @@ kure remains a standalone library with no dependency on launcher. Launcher impor
 
 ### What stays in kure
 
-`pkg/stack/generators/kurelpackage/` — a kure *generator* that produces kurel package structure as output from a kure Application. This is a kure concern (generating artifacts from the kure domain model), not a launcher concern.
+`pkg/stack/generators/kurelpackage/` — historically a kure *generator* that produced kurel package structure from a kure Application. This package is now being removed from kure (unused by all known consumers; removal tracked in [kure#539](https://github.com/go-kure/kure/issues/539)). It does not move to launcher.
 
 ---
 
@@ -176,45 +175,25 @@ Launcher targets teams committed to a GitOps-first workflow who want OAM semanti
 
 ---
 
-## 8. Current Status and Roadmap
+## 8. OAM Model
 
-**Phase 0 (current): Extraction, design, and housekeeping**
-- Move prototype code from kure — *done*
-- Establish module structure and CI — *done*
-- Design the launcher-native application model — *in progress (PR #58, closes #36 #37 #38)*
-  - GVK: `launcher.gokure.dev/v1alpha1` for Application, Package, ClusterProfile — *decided*
-  - ClusterProfile format (`design-cluster-profile.md`) — *decided*
-  - Parameter syntax: Option A — `${var}` placeholders with typed schema in `kurel.yaml` — *decided*
-  - Policy interface: Option A — typed accessor interface — *decided*
-  - Package composition: no optional sections in Phase 1; deferred to Phase 2 — *decided*
-  - Package spec (`design-kurel-package.md`) — to be completed in this PR
+Launcher defines its own OAM types under `launcher.gokure.dev/v1alpha1`. These are not CRDs — they are static YAML files consumed by `kurel build`.
 
-**Phase 1: OAM-native package format**
-- Implement the launcher Application, Package, and ClusterProfile types
-- Implement parameter resolution — `${var}` placeholders; scalar, node, and inline-string substitution
-- Implement ClusterProfile rendering (capability key resolution, merge semantics)
-- Implement policy enforcement (`--policy` flag, `NoopPolicy`, crane compatibility)
-- CLI: `kurel build` with `--profile`, `--values`, `--policy`, `--set` flags
+| Type | apiVersion | Purpose |
+|------|-----------|---------|
+| `Application` | `launcher.gokure.dev/v1alpha1` | Bundle of components + traits to deploy |
+| `Package` | `launcher.gokure.dev/v1alpha1` | Kurel package metadata and parameter schema |
+| `ClusterProfile` | `launcher.gokure.dev/v1alpha1` | Platform trait implementation map + capability list |
 
-**Phase 2: Conditional composition (issue #39)**
-- Optional component and trait inclusion — mechanism TBD, designed in #39
-- Policy-based conditionality
-- Multi-instance component patterns
-
-**Phase 3: Package distribution**
-- OCI-based package publishing and pulling (similar to Helm OCI repositories)
-- Package versioning
+Launcher does **not** use `core.oam.dev/v1beta1`. That API group belongs to KubeVela's CRD-based runtime. Launcher is a compile-time tool with its own types.
 
 ---
 
-## 9. Phase 0 Design Decisions (PR #58 closes #36, #37, #38)
+## 9. Phase 0 Design Decisions
 
-PR #58 is the single PR that completes all Phase 0 design. It is not merged until all
-three issues are fully resolved and every design document is final. No Phase 1
-implementation work begins before this PR merges.
+PR #58 closed issues #36 (package spec), #37 (ClusterProfile), #38 (policy interface). These decisions are final.
 
-**Decision rule:** launcher is a semantically richer Helm alternative. Explicit package
-API contract and compiler-verified correctness take precedence over YAML validity at rest.
+**Decision rule:** launcher is a semantically richer Helm alternative. Explicit package API contract and compiler-verified correctness take precedence over YAML validity at rest.
 
 | Concern | Decision | Document |
 |---|---|---|
@@ -225,11 +204,92 @@ API contract and compiler-verified correctness take precedence over YAML validit
 | Policy interface | **Option A** — typed accessor interface (~19 methods) | `options-policy-interface.md` |
 | Package composition | **Deferred to Phase 2** — no optional sections in Phase 1 | `options-package-composition.md` |
 
-Issues closed by this PR: #36 (package spec), #37 (ClusterProfile), #38 (policy interface).
+---
+
+## 10. Policy Interface
+
+The `Policy` interface is launcher's primary extension point for downstream consumers (e.g. crane) to enforce environment-specific constraints without modifying launcher's built-in handlers.
+
+```go
+type Policy interface {
+    ValidateImage(ref string) error
+    ValidateReplicas(n int32) error
+    ValidateResources(req corev1.ResourceRequirements) error
+    ValidateStorage(size resource.Quantity) error
+    ValidatePodSpec(spec *corev1.PodSpec) error
+    ValidateCapability(traitType string) error
+    DefaultReplicas() *int32
+    DefaultResources() *corev1.ResourceRequirements
+}
+```
+
+`NoopPolicy` is the default — all methods pass through. Downstream consumers implement `Policy` to add enforcement. Every built-in handler calls `Policy` automatically via `TransformContext`; no handler wrapping is needed by consumers.
 
 ---
 
-## 10. Open Questions
+## 11. Launcher Layout
+
+Launcher's GitOps output is intentionally simple:
+
+- **One OCI artifact** per bundle (all manifests in one layer)
+- **One `OCIRepository`** source per bundle
+- **One `Kustomization`** per bundle pointing at the OCI artifact
+
+This monolithic layout is owned by launcher and generated as part of `kurel build`. Downstream consumers (e.g. crane) may implement their own multi-layer delivery hierarchy on top of the same kure FluxCD primitives — that hierarchy is their own concern, not launcher's.
+
+---
+
+## 12. What Launcher Does NOT Do
+
+| Concern | Who owns it |
+|---------|------------|
+| Multi-OCI artifact splitting (per-app, per-layer) | crane (4-layer Flux hierarchy) |
+| Platform component catalog (PlatformComponent CRD) | crane + harbor |
+| Environment-specific enforcement (registry allowlist, replica limits) | crane (`EnvironmentPolicy implements Policy`) |
+| Cluster provisioning and lifecycle | barge |
+| GitOps engine (running in cluster) | FluxCD (external) |
+
+---
+
+## 13. Current Status and Roadmap
+
+**Phase 0 (complete): Extraction, design, and housekeeping**
+- Move prototype code from kure — *done*
+- Establish module structure and CI — *done*
+- Design OAM-native application model (GVK, ClusterProfile, Policy, package spec) — *done* (#36, #37, #38)
+- Clean up prototype pipeline and align CLI with OAM design — *done* (#40, #41, #42)
+
+**Phase 0b / Vertical Slice (current): First end-to-end kurel build** (#56)
+- One component + one trait → working manifest output
+- Validates the OAM parser → handler → kure pipeline end-to-end
+
+**Phase 1: OAM Core** (#31)
+- `pkg/oam`: types, parser, validator (#43)
+- `pkg/oam`: handler interfaces (ComponentHandler, TraitHandler, CapabilityAware) (#44)
+- `pkg/oam`: ClusterProfile and CapabilityDefinition types (#45)
+- `pkg/oam`: Policy interface, Enforceable interface, NoopPolicy (#46)
+- `pkg/oam`: OAM runtime skeleton (Transformer, handler registry, TransformContext) (#47)
+- `pkg/oam`: transform pipeline (capability wiring, policy application) (#53)
+- Fixture parity and regression coverage (#54)
+
+**Phase 2: Built-in handlers** (#32)
+- Component handlers: webservice, worker, postgresql, cronjob, helmrelease, daemonset, statefulset (#48)
+- Trait handlers — workload set: expose, certificate, external-secret, pvc, scaler (#49)
+- Trait handlers — network/infra set: ingress, httproute, configmap, networkpolicy, cilium-networkpolicy, volsync (#50)
+
+**Phase 3: CLI integration** (#33)
+- `kurel build` — OAM mode (app.yaml + --profile cluster.yaml → manifests) (#51)
+
+**Phase 4: Crane integration** (#34) — deferred
+- crane becomes a launcher consumer; EnvironmentPolicy, handler migration
+
+**Phase 5: OCI distribution** (#35)
+- OCI-based package publishing and pulling
+- Package catalog as OCI index (#16)
+
+---
+
+## 14. Open Questions
 
 1. **Conditional inclusion syntax** — No optional sections in Phase 1. Package authors
    publish always-on packages; separate packages cover distinct deployment variants.
