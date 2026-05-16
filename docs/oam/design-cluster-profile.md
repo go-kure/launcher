@@ -47,9 +47,15 @@ spec:
 
 `cluster.yaml` does not carry capability schema — it only carries rendering values.
 The schema of what keys a given capability accepts (types, required fields, descriptions)
-is launcher built-in knowledge, not cluster operator input. Where this schema lives for
-built-in handlers is described in the launcher handler documentation; the design for
-custom capability schema is tracked in issue #60.
+is separate from the profile itself.
+
+For **built-in handlers**, the rendering schema lives in typed Go structs in
+`pkg/oam/builtin/`, one struct per capability type. The handler validates and applies
+defaults via a `ValidateAndApplyDefaults` method at ClusterProfile evaluation time.
+
+For **custom capabilities** (handlers registered by downstream consumers via library
+embedding), the rendering schema is optionally declared in a `CapabilityDefinition`
+document (Phase 2/3). See `design-capability-schema.md` for the full design.
 
 ### Strictness
 
