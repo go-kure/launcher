@@ -5,8 +5,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/go-kure/launcher/pkg/errors"
 	"k8s.io/apimachinery/pkg/util/validation"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // SupportedAPIVersion is the only accepted apiVersion for Application documents.
