@@ -8,8 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-kure/launcher/pkg/errors"
 	"gopkg.in/yaml.v3"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // Parse parses an Application YAML document in strict mode.
