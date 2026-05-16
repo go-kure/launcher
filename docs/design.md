@@ -204,6 +204,12 @@ PR #58 closed issues #36 (package spec), #37 (ClusterProfile), #38 (policy inter
 | Policy interface | **Option A** — typed accessor interface (~19 methods) | `options-policy-interface.md` |
 | Package composition | **Deferred to Phase 2** — no optional sections in Phase 1 | `options-package-composition.md` |
 
+### 9.1 Later Design Decisions
+
+| Concern | Decision | Document |
+|---|---|---|
+| Capability rendering schema | Typed Go struct per handler + reflection-derived JSON Schema; `ValidateAndApplyDefaults` interface; custom `CapabilityDefinition` document kind deferred to Phase 2/3 | `design-capability-schema.md` |
+
 ---
 
 ## 10. Policy Interface
@@ -266,7 +272,7 @@ This monolithic layout is owned by launcher and generated as part of `kurel buil
 **Phase 1: OAM Core** (#31)
 - `pkg/oam`: types, parser, validator (#43)
 - `pkg/oam`: handler interfaces (ComponentHandler, TraitHandler, CapabilityAware) (#44)
-- `pkg/oam`: ClusterProfile and CapabilityDefinition types (#45)
+- `pkg/oam`: ClusterProfile and CapabilityBinding types (#45)
 - `pkg/oam`: Policy interface, Enforceable interface, NoopPolicy (#46)
 - `pkg/oam`: OAM runtime skeleton (Transformer, handler registry, TransformContext) (#47)
 - `pkg/oam`: transform pipeline (capability wiring, policy application) (#53)
