@@ -7,10 +7,10 @@
 | 1.1 | 2026-05-14 | Record decision (Option A); add framing section; rename options A/B; remove Option B |
 | 1.0 | 2026-04-19 | Initial draft — compared typed accessor (Option A) and opaque marker (Option B) |
 
-**Decision:** `oam.Policy` is a typed accessor interface with ~19 methods. Reason:
+**Decision:** `oam.Policy` is a typed accessor interface with 18 methods. Reason:
 compile-time verification, no type assertions in handler code, and explicit `NoopPolicy`
-behaviour (zero returns permit everything) are more important than the flexibility of a
-marker interface for future policy types.
+behaviour (no limits, no defaults, security-sensitive bools default-deny) are more important
+than the flexibility of a marker interface for future policy types.
 
 **Scope:** The `Policy` and `Enforceable` interface definitions in `pkg/oam`, how
 `*api.EnvironmentPolicy` in crane satisfies `Policy` after migration, and how handler
@@ -44,9 +44,14 @@ enforcement.
 crane compatibility seam.
 
 When no policy is supplied, launcher passes `NoopPolicy` — a concrete type that satisfies
-`oam.Policy` and permits everything (all limits absent, all defaults absent, all security
-flags false). Handlers always receive a non-nil `Policy` value; nil checks in handler code
-are not needed or intended.
+`oam.Policy` with the following semantics:
+- **No enforced limits** — all limit methods return nil or empty string
+- **No defaults applied** — all default methods return nil or empty string
+- **Security-sensitive features denied by default** — all security flag methods return false
+
+This is intentional default-deny behaviour for security flags, not a "permit everything"
+stance. Handlers always receive a non-nil `Policy` value; nil checks in handler code are
+not needed or intended.
 
 ### crane compatibility
 
@@ -154,7 +159,8 @@ type Enforceable interface {
 
 ```go
 // NoopPolicy is used when no policy is configured.
-// All methods return nil / empty / false (permit everything, apply no defaults).
+// No enforced limits, no defaults applied, security-sensitive features denied by default.
+// Security flags return false — intentional default-deny, not "permit everything".
 type NoopPolicy struct{}
 
 func (*NoopPolicy) MaxReplicas() *int32          { return nil }
