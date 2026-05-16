@@ -18,8 +18,8 @@ type Metadata struct {
 
 // ApplicationSpec defines the components and policies of an OAM application.
 type ApplicationSpec struct {
-	Components []Component `yaml:"components"`
-	Policies   []Policy    `yaml:"policies,omitempty"`
+	Components []Component         `yaml:"components"`
+	Policies   []ApplicationPolicy `yaml:"policies,omitempty"`
 }
 
 // Component represents a single component within an OAM application.
@@ -37,8 +37,8 @@ type Trait struct {
 	Properties map[string]any `yaml:"properties"`
 }
 
-// Policy defines application-level policies passed through to the runtime unchanged.
-type Policy struct {
+// ApplicationPolicy defines an application-level policy entry passed through to the runtime unchanged.
+type ApplicationPolicy struct {
 	Name       string         `yaml:"name"`
 	Type       string         `yaml:"type"`
 	Properties map[string]any `yaml:"properties,omitempty"`
