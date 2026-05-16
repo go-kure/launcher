@@ -218,18 +218,32 @@ The `Policy` interface is launcher's primary extension point for downstream cons
 
 ```go
 type Policy interface {
-    ValidateImage(ref string) error
-    ValidateReplicas(n int32) error
-    ValidateResources(req corev1.ResourceRequirements) error
-    ValidateStorage(size resource.Quantity) error
-    ValidatePodSpec(spec *corev1.PodSpec) error
-    ValidateCapability(traitType string) error
+    // Enforced limits — nil or empty string means no limit.
+    MaxReplicas() *int32
+    MaxCPU() string
+    MaxMemory() string
+    MaxStorageSize() string
+    AllowedRegistries() []string
+    // Defaults — nil or empty string means leave the OAM value as-is.
     DefaultReplicas() *int32
-    DefaultResources() *corev1.ResourceRequirements
+    DefaultCPURequest() string
+    DefaultMemoryRequest() string
+    DefaultCPULimit() string
+    DefaultMemoryLimit() string
+    // Security flags — false is the zero value (default-deny).
+    AllowHostNetwork() bool
+    AllowPrivileged() bool
+    AllowHostPID() bool
+    AllowHostIPC() bool
+    AllowHostPathVolumes() bool
+    // Capability constraints — nil means unconstrained.
+    AllowedCapabilities() []string
+    ForbiddenCapabilities() []string
+    RequiredCapabilities() []string
 }
 ```
 
-`NoopPolicy` is the default — all methods pass through. Downstream consumers implement `Policy` to add enforcement. Every built-in handler calls `Policy` automatically via `TransformContext`; no handler wrapping is needed by consumers.
+`NoopPolicy` is the default when no policy document is supplied: no enforced limits, no defaults applied, security-sensitive booleans default-deny (false). Downstream consumers (e.g. crane's `*api.EnvironmentPolicy`) implement `Policy` to add enforcement. See `docs/oam/options-policy-interface.md` for the full design rationale.
 
 ---
 
