@@ -118,7 +118,7 @@ func TestValidate_PolicyOpenEndedType(t *testing.T) {
 			Components: []Component{
 				{Name: "web", Type: "webservice", Properties: map[string]any{"image": "nginx:1.25"}},
 			},
-			Policies: []Policy{
+			Policies: []ApplicationPolicy{
 				{Name: "resource-limits", Type: "env-policy"},
 				{Name: "my-custom", Type: "my-custom-policy-type"},
 			},
@@ -140,7 +140,7 @@ func TestValidate_PolicyDuplicateName(t *testing.T) {
 			Components: []Component{
 				{Name: "web", Type: "webservice", Properties: map[string]any{"image": "nginx:1.25"}},
 			},
-			Policies: []Policy{
+			Policies: []ApplicationPolicy{
 				{Name: "my-policy", Type: "env-policy"},
 				{Name: "my-policy", Type: "another-type"},
 			},
@@ -165,7 +165,7 @@ func TestValidate_PolicyInvalidDNS1123Name(t *testing.T) {
 			Components: []Component{
 				{Name: "web", Type: "webservice", Properties: map[string]any{"image": "nginx:1.25"}},
 			},
-			Policies: []Policy{
+			Policies: []ApplicationPolicy{
 				{Name: "My Policy!", Type: "env-policy"},
 			},
 		},
@@ -189,7 +189,7 @@ func TestValidate_PolicyMissingType(t *testing.T) {
 			Components: []Component{
 				{Name: "web", Type: "webservice", Properties: map[string]any{"image": "nginx:1.25"}},
 			},
-			Policies: []Policy{
+			Policies: []ApplicationPolicy{
 				{Name: "my-policy", Type: ""},
 			},
 		},

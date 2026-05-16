@@ -83,7 +83,7 @@ func validate(app *Application) error {
 
 	seenPolicyNames := make(map[string]bool)
 	for i, p := range app.Spec.Policies {
-		if err := validatePolicy(&p, i, seenPolicyNames); err != nil {
+		if err := validateApplicationPolicy(&p, i, seenPolicyNames); err != nil {
 			return err
 		}
 	}
@@ -148,10 +148,10 @@ func validateTrait(t *Trait, componentName, componentType string, index int) err
 	return nil
 }
 
-// validatePolicy checks that a policy has a non-empty name and type.
+// validateApplicationPolicy checks that an application policy entry has a non-empty name and type.
 // Policy types are open-ended in Phase 1 — no allowlist, no semantic interpretation
 // of policy properties. See design-kurel-package.md §4.4.
-func validatePolicy(p *Policy, index int, seenNames map[string]bool) error {
+func validateApplicationPolicy(p *ApplicationPolicy, index int, seenNames map[string]bool) error {
 	if p.Name == "" {
 		return oamValidationError("name", fmt.Sprintf("spec.policies[%d].name is required", index))
 	}
