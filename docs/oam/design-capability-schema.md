@@ -194,8 +194,10 @@ all handler input types — not only capability rendering. The same approach gov
 - **Component properties** (Application → handler, application developer concern)
 
 All handler inputs are decoded via `decodeStrict[T]` into their respective typed structs.
-The schema generation path (`RenderingSchema()`) and the validation path
-(`ValidateAndApplyDefaults`) are the same regardless of input type.
+The principle — typed struct as authoritative schema, strict decode, validate-and-default
+in one pass — applies uniformly across all handler input types. The specific interface
+methods for component and trait property validation (as distinct from capability rendering)
+are follow-on design work, not specified here.
 
 ---
 
@@ -323,7 +325,7 @@ this PR.
 
 | Concern | Deferred to |
 |---|---|
-| `CapabilityDefinition` document kind implementation | Phase 2/3 (#60) |
+| `CapabilityDefinition` document kind implementation | Phase 3 follow-up implementation issue ([#66](https://github.com/go-kure/launcher/issues/66)) |
 | `CapabilityBinding` rename in `pkg/oam` | #45 (Phase 1) |
 | App-facing property schema for custom traits | Future (schema-provider interface or separate document kinds) |
 | Plugin-style external handler dispatch | Phase 4+ |

@@ -40,7 +40,7 @@ spec:
 | Field | Type | Description |
 |---|---|---|
 | `metadata.name` | string | Identifies the cluster; referenced in build tooling |
-| `spec.capabilities` | map | Keys are trait types; values are capability definitions |
+| `spec.capabilities` | map | Keys are trait types; values are capability bindings |
 | `capabilities.<type>.rendering` | map | Platform values merged into trait properties before handler invocation |
 
 ### Capability schema
@@ -52,6 +52,8 @@ is separate from the profile itself.
 For **built-in handlers**, the rendering schema lives in typed Go structs in
 `pkg/oam/builtin/`, one struct per capability type. The handler validates and applies
 defaults via a `ValidateAndApplyDefaults` method at ClusterProfile evaluation time.
+Unknown rendering keys for built-in handlers are a build error — consistent with the
+strict-by-default principle in `design-gvk.md`.
 
 For **custom capabilities** (handlers registered by downstream consumers via library
 embedding), the rendering schema is optionally declared in a `CapabilityDefinition`
