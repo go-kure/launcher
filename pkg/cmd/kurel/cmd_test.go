@@ -43,7 +43,7 @@ func TestNewKurelCommand(t *testing.T) {
 func TestKurelCommandSubcommands(t *testing.T) {
 	cmd := NewKurelCommand()
 
-	expectedSubcommands := []string{"config", "completion", "version"}
+	expectedSubcommands := []string{"build", "config", "completion", "version"}
 
 	commandMap := make(map[string]bool)
 	for _, subCmd := range cmd.Commands() {
