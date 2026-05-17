@@ -16,15 +16,19 @@ type stubPolicy struct {
 	maxReplicas       *int32
 	defaultReplicas   *int32
 	allowedRegistries []string
+	maxCPU            string
+	maxMemory         string
+	maxStorageSize    string
+	defaultCPURequest string
 }
 
 func (s *stubPolicy) MaxReplicas() *int32             { return s.maxReplicas }
-func (s *stubPolicy) MaxCPU() string                  { return "" }
-func (s *stubPolicy) MaxMemory() string               { return "" }
-func (s *stubPolicy) MaxStorageSize() string          { return "" }
+func (s *stubPolicy) MaxCPU() string                  { return s.maxCPU }
+func (s *stubPolicy) MaxMemory() string               { return s.maxMemory }
+func (s *stubPolicy) MaxStorageSize() string          { return s.maxStorageSize }
 func (s *stubPolicy) AllowedRegistries() []string     { return s.allowedRegistries }
 func (s *stubPolicy) DefaultReplicas() *int32         { return s.defaultReplicas }
-func (s *stubPolicy) DefaultCPURequest() string       { return "" }
+func (s *stubPolicy) DefaultCPURequest() string       { return s.defaultCPURequest }
 func (s *stubPolicy) DefaultMemoryRequest() string    { return "" }
 func (s *stubPolicy) DefaultCPULimit() string         { return "" }
 func (s *stubPolicy) DefaultMemoryLimit() string      { return "" }
@@ -207,4 +211,326 @@ func TestWebserviceConfig_ApplyPolicy_DefaultReplicas(t *testing.T) {
 		}
 	}
 	t.Error("Deployment not found in output")
+}
+
+func TestWebserviceHandler_WithResources(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"resources": map[string]any{
+				"requests": map[string]any{
+					"cpu":    "100m",
+					"memory": "128Mi",
+				},
+				"limits": map[string]any{
+					"cpu":    "500m",
+					"memory": "512Mi",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceHandler_WithEnv_Simple(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"env": []any{
+				map[string]any{"name": "FOO", "value": "bar"},
+				map[string]any{"name": "BAZ", "value": "qux"},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceHandler_WithEnv_SecretRef(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"env": []any{
+				map[string]any{
+					"name": "SECRET_VAL",
+					"valueFrom": map[string]any{
+						"secretKeyRef": map[string]any{
+							"name": "my-secret",
+							"key":  "password",
+						},
+					},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceHandler_WithEnv_ConfigMapRef(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"env": []any{
+				map[string]any{
+					"name": "CONFIG_VAL",
+					"valueFrom": map[string]any{
+						"configMapKeyRef": map[string]any{
+							"name": "my-config",
+							"key":  "value",
+						},
+					},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceHandler_WithCommandAndArgs(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image":   "ghcr.io/org/app:v1",
+			"command": []any{"/bin/sh"},
+			"args":    []any{"-c", "echo hello"},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceHandler_WithProbes(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"livenessProbe": map[string]any{
+				"httpGet": map[string]any{
+					"path": "/healthz",
+					"port": 8080,
+				},
+				"initialDelaySeconds": 10,
+				"periodSeconds":       5,
+			},
+			"readinessProbe": map[string]any{
+				"httpGet": map[string]any{
+					"path": "/ready",
+					"port": 8080,
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceHandler_WithInitContainers(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"initContainers": []any{
+				map[string]any{
+					"name":    "init",
+					"image":   "ghcr.io/org/init:v1",
+					"command": []any{"/bin/sh", "-c", "echo init"},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceHandler_WithSidecars(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"sidecars": []any{
+				map[string]any{
+					"name":  "sidecar",
+					"image": "ghcr.io/org/sidecar:v1",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceConfig_ApplyPolicy_MaxCPU(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"resources": map[string]any{
+				"limits": map[string]any{
+					"cpu": "2000m",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	p := &stubPolicy{}
+	p.maxCPU = "500m"
+	if err := enforceable.ApplyPolicy(p); err == nil {
+		t.Error("expected error when CPU limit exceeds max")
+	}
+}
+
+func TestWebserviceConfig_ApplyPolicy_DefaultCPURequest(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	p := &stubPolicy{}
+	p.defaultCPURequest = "100m"
+	if err := enforceable.ApplyPolicy(p); err != nil {
+		t.Fatalf("ApplyPolicy: %v", err)
+	}
+}
+
+func TestWebserviceHandler_WithVolumes_EmptyDir(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"volumes": []any{
+				map[string]any{
+					"name":      "tmp",
+					"type":      "emptyDir",
+					"mountPath": "/tmp",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceConfig_ApplyPolicy_MaxStorageSize(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/app:v1",
+			"replicas": 1,
+			"volumes": []any{
+				map[string]any{
+					"name":         "data",
+					"type":         "pvc",
+					"mountPath":    "/data",
+					"size":         "20Gi",
+					"storageClass": "standard",
+					"accessModes":  []any{"ReadWriteOnce"},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	p := &stubPolicy{}
+	p.maxStorageSize = "5Gi"
+	if err := enforceable.ApplyPolicy(p); err == nil {
+		t.Error("expected error when PVC size exceeds max")
+	}
 }
