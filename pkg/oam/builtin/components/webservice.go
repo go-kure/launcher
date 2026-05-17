@@ -1,8 +1,6 @@
 package components
 
 import (
-	"fmt"
-
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
@@ -10,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -32,7 +31,7 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 
 	image, ok := props["image"].(string)
 	if !ok {
-		return nil, fmt.Errorf("required property 'image' missing or not a string")
+		return nil, errors.New("required property 'image' missing or not a string")
 	}
 	if err := ValidateImageRef(image); err != nil {
 		return nil, err
@@ -60,7 +59,7 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 	config.Args = parseArgs(props)
 	probes, err := parseProbes(props)
 	if err != nil {
-		return nil, fmt.Errorf("invalid probe configuration: %w", err)
+		return nil, errors.Wrap(err, "invalid probe configuration")
 	}
 	config.Probes = probes
 
@@ -202,7 +201,7 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	container := kubernetes.CreateContainer(app.Name, c.Image, c.Command, c.Args)
 	rr, err := buildResourceRequirements(c.Resources)
 	if err != nil {
-		return nil, fmt.Errorf("resource requirements: %w", err)
+		return nil, errors.Wrap(err, "resource requirements")
 	}
 	_ = kubernetes.SetContainerResources(container, rr)
 	_ = kubernetes.AddContainerPort(container, corev1.ContainerPort{
@@ -225,7 +224,7 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	_ = kubernetes.SetDeploymentReplicas(dep, c.Replicas)
 	if hasNonRWXPVC(c.PVCs) {
 		if c.Replicas > 1 {
-			return nil, fmt.Errorf("deployment %q: non-RWX PVC requires replicas=1, got %d", app.Name, c.Replicas)
+			return nil, errors.Errorf("deployment %q: non-RWX PVC requires replicas=1, got %d", app.Name, c.Replicas)
 		}
 		_ = kubernetes.SetDeploymentStrategy(dep, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
 	}

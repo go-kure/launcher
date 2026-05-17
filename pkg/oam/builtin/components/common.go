@@ -12,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // ValidateImageRef validates a container image reference.
@@ -20,7 +22,7 @@ import (
 func ValidateImageRef(image string) error {
 	ref, err := name.ParseReference(image)
 	if err != nil {
-		return fmt.Errorf("image %q rejected: %w", image, err)
+		return errors.Errorf("image %q rejected: %w", image, err)
 	}
 
 	switch r := ref.(type) {
@@ -31,9 +33,9 @@ func ValidateImageRef(image string) error {
 			return nil
 		}
 		if hasExplicitLatestTag(image) {
-			return fmt.Errorf("image %q rejected: :latest tag not allowed; use an explicit version tag or digest", image)
+			return errors.Errorf("image %q rejected: :latest tag not allowed; use an explicit version tag or digest", image)
 		}
-		return fmt.Errorf("image %q rejected: no tag or digest specified; use an explicit version tag or digest", image)
+		return errors.Errorf("image %q rejected: no tag or digest specified; use an explicit version tag or digest", image)
 	}
 	return nil
 }
@@ -197,7 +199,7 @@ func parseEnv(props map[string]any) ([]EnvVar, error) {
 				if vf, ok := envMap["valueFrom"].(map[string]any); ok {
 					src, err := parseEnvVarSource(vf)
 					if err != nil {
-						return nil, fmt.Errorf("env %q: %w", envName, err)
+						return nil, errors.Errorf("env %q: %w", envName, err)
 					}
 					ev.ValueFrom = src
 				} else {
@@ -215,7 +217,7 @@ func parseEnvVarSource(vf map[string]any) (*EnvVarSource, error) {
 	_, hasSecret := vf["secretKeyRef"].(map[string]any)
 	_, hasConfigMap := vf["configMapKeyRef"].(map[string]any)
 	if hasSecret && hasConfigMap {
-		return nil, fmt.Errorf("valueFrom: secretKeyRef and configMapKeyRef are mutually exclusive")
+		return nil, errors.Errorf("valueFrom: secretKeyRef and configMapKeyRef are mutually exclusive")
 	}
 	if skr, ok := vf["secretKeyRef"].(map[string]any); ok {
 		src.SecretKeyRef = parseKeySelector(skr)
@@ -224,7 +226,7 @@ func parseEnvVarSource(vf map[string]any) (*EnvVarSource, error) {
 		src.ConfigMapKeyRef = parseKeySelector(cmr)
 	}
 	if src.SecretKeyRef == nil && src.ConfigMapKeyRef == nil {
-		return nil, fmt.Errorf("invalid valueFrom: must contain a valid secretKeyRef or configMapKeyRef with both name and key")
+		return nil, errors.Errorf("invalid valueFrom: must contain a valid secretKeyRef or configMapKeyRef with both name and key")
 	}
 	return src, nil
 }
@@ -321,21 +323,21 @@ func parseProbes(props map[string]any) (ProbeConfig, error) {
 	if r, ok := probes["readiness"].(map[string]any); ok {
 		p, err := parseProbe(r)
 		if err != nil {
-			return config, fmt.Errorf("readiness probe: %w", err)
+			return config, errors.Errorf("readiness probe: %w", err)
 		}
 		config.Readiness = p
 	}
 	if l, ok := probes["liveness"].(map[string]any); ok {
 		p, err := parseProbe(l)
 		if err != nil {
-			return config, fmt.Errorf("liveness probe: %w", err)
+			return config, errors.Errorf("liveness probe: %w", err)
 		}
 		config.Liveness = p
 	}
 	if s, ok := probes["startup"].(map[string]any); ok {
 		p, err := parseProbe(s)
 		if err != nil {
-			return config, fmt.Errorf("startup probe: %w", err)
+			return config, errors.Errorf("startup probe: %w", err)
 		}
 		config.Startup = p
 	}
@@ -354,7 +356,7 @@ func countProbeHandlers(m map[string]any) int {
 
 func parseProbe(m map[string]any) (*corev1.Probe, error) {
 	if countProbeHandlers(m) > 1 {
-		return nil, fmt.Errorf("probe must specify exactly one handler, but multiple were provided")
+		return nil, errors.Errorf("probe must specify exactly one handler, but multiple were provided")
 	}
 
 	probe := &corev1.Probe{}
@@ -363,7 +365,7 @@ func parseProbe(m map[string]any) (*corev1.Probe, error) {
 	if httpGet, ok := m["httpGet"].(map[string]any); ok {
 		port, err := parsePort(httpGet["port"])
 		if err != nil {
-			return nil, fmt.Errorf("httpGet handler: %w", err)
+			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
 		handler := &corev1.HTTPGetAction{}
 		if path, ok := httpGet["path"].(string); ok {
@@ -373,7 +375,7 @@ func parseProbe(m map[string]any) (*corev1.Probe, error) {
 		if scheme, ok := httpGet["scheme"].(string); ok {
 			s := corev1.URIScheme(strings.ToUpper(scheme))
 			if s != corev1.URISchemeHTTP && s != corev1.URISchemeHTTPS {
-				return nil, fmt.Errorf("httpGet handler: unsupported scheme %q, must be HTTP or HTTPS", scheme)
+				return nil, errors.Errorf("httpGet handler: unsupported scheme %q, must be HTTP or HTTPS", scheme)
 			}
 			handler.Scheme = s
 		}
@@ -393,7 +395,7 @@ func parseProbe(m map[string]any) (*corev1.Probe, error) {
 	} else if tcpSocket, ok := m["tcpSocket"].(map[string]any); ok {
 		port, err := parsePort(tcpSocket["port"])
 		if err != nil {
-			return nil, fmt.Errorf("tcpSocket handler: %w", err)
+			return nil, errors.Errorf("tcpSocket handler: %w", err)
 		}
 		probe.TCPSocket = &corev1.TCPSocketAction{Port: port}
 		hasHandler = true
@@ -414,10 +416,10 @@ func parseProbe(m map[string]any) (*corev1.Probe, error) {
 		handler := &corev1.GRPCAction{}
 		port, err := parsePort(grpc["port"])
 		if err != nil {
-			return nil, fmt.Errorf("grpc handler: %w", err)
+			return nil, errors.Errorf("grpc handler: %w", err)
 		}
 		if port.Type == intstr.String {
-			return nil, fmt.Errorf("grpc handler: port must be numeric, got named port %q", port.StrVal)
+			return nil, errors.Errorf("grpc handler: port must be numeric, got named port %q", port.StrVal)
 		}
 		handler.Port = port.IntVal
 		if svc, ok := grpc["service"].(string); ok {
@@ -472,17 +474,17 @@ func parsePort(v any) (intstr.IntOrString, error) {
 		return validateNumericPort(p)
 	case string:
 		if p == "" {
-			return intstr.IntOrString{}, fmt.Errorf("port must not be an empty string")
+			return intstr.IntOrString{}, errors.Errorf("port must not be an empty string")
 		}
 		return intstr.FromString(p), nil
 	default:
-		return intstr.IntOrString{}, fmt.Errorf("unsupported port type: %T", v)
+		return intstr.IntOrString{}, errors.Errorf("unsupported port type: %T", v)
 	}
 }
 
 func validateNumericPort(port int64) (intstr.IntOrString, error) {
 	if port < 1 || port > 65535 {
-		return intstr.IntOrString{}, fmt.Errorf("port %d out of valid range 1-65535", port)
+		return intstr.IntOrString{}, errors.Errorf("port %d out of valid range 1-65535", port)
 	}
 	return intstr.FromInt32(int32(port)), nil
 }
@@ -527,7 +529,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			if sizeLimit, ok := m["sizeLimit"].(string); ok && sizeLimit != "" {
 				qty, err := resource.ParseQuantity(sizeLimit)
 				if err != nil {
-					return result, fmt.Errorf("volume %q: invalid emptyDir sizeLimit %q: %w", volName, sizeLimit, err)
+					return result, errors.Errorf("volume %q: invalid emptyDir sizeLimit %q: %w", volName, sizeLimit, err)
 				}
 				vol.EmptyDir.SizeLimit = &qty
 			}
@@ -538,12 +540,12 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				continue
 			}
 			if _, err := resource.ParseQuantity(size); err != nil {
-				return result, fmt.Errorf("volume %q: invalid PVC size %q: %w", volName, size, err)
+				return result, errors.Errorf("volume %q: invalid PVC size %q: %w", volName, size, err)
 			}
 			storageClass, _ := m["storageClass"].(string)
 			accessModes, err := parseAccessModes(m)
 			if err != nil {
-				return result, fmt.Errorf("volume %q: %w", volName, err)
+				return result, errors.Errorf("volume %q: %w", volName, err)
 			}
 			result.Volumes = append(result.Volumes, corev1.Volume{
 				Name: volName,
@@ -621,7 +623,7 @@ func parseAccessModes(m map[string]any) ([]string, error) {
 		for _, mode := range modes {
 			if s, ok := mode.(string); ok && s != "" {
 				if !validAccessModes[s] {
-					return nil, fmt.Errorf("invalid accessMode %q", s)
+					return nil, errors.Errorf("invalid accessMode %q", s)
 				}
 				result = append(result, s)
 			}
@@ -642,25 +644,25 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 	for i, item := range raw {
 		m, ok := item.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("initContainers[%d]: expected object, got %T", i, item)
+			return nil, errors.Errorf("initContainers[%d]: expected object, got %T", i, item)
 		}
 		ic := InitContainerConfig{}
 		ic.Name, _ = m["name"].(string)
 		if ic.Name == "" {
-			return nil, fmt.Errorf("initContainers[%d]: name is required", i)
+			return nil, errors.Errorf("initContainers[%d]: name is required", i)
 		}
 		ic.Image, _ = m["image"].(string)
 		if ic.Image == "" {
-			return nil, fmt.Errorf("initContainers[%d] %q: image is required", i, ic.Name)
+			return nil, errors.Errorf("initContainers[%d] %q: image is required", i, ic.Name)
 		}
 		if err := ValidateImageRef(ic.Image); err != nil {
-			return nil, fmt.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
+			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
 		}
 		ic.Command = parseCommand(m)
 		ic.Args = parseArgs(m)
 		env, err := parseEnv(m)
 		if err != nil {
-			return nil, fmt.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
+			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
 		}
 		ic.Env = env
 		if resources, ok := m["resources"].(map[string]any); ok {
@@ -685,25 +687,25 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 	for i, item := range raw {
 		m, ok := item.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("sidecars[%d]: expected object, got %T", i, item)
+			return nil, errors.Errorf("sidecars[%d]: expected object, got %T", i, item)
 		}
 		sc := SidecarContainerConfig{}
 		sc.Name, _ = m["name"].(string)
 		if sc.Name == "" {
-			return nil, fmt.Errorf("sidecars[%d]: name is required", i)
+			return nil, errors.Errorf("sidecars[%d]: name is required", i)
 		}
 		sc.Image, _ = m["image"].(string)
 		if sc.Image == "" {
-			return nil, fmt.Errorf("sidecars[%d] %q: image is required", i, sc.Name)
+			return nil, errors.Errorf("sidecars[%d] %q: image is required", i, sc.Name)
 		}
 		if err := ValidateImageRef(sc.Image); err != nil {
-			return nil, fmt.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
+			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
 		}
 		sc.Command = parseCommand(m)
 		sc.Args = parseArgs(m)
 		env, err := parseEnv(m)
 		if err != nil {
-			return nil, fmt.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
+			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
 		}
 		sc.Env = env
 		if resources, ok := m["resources"].(map[string]any); ok {
@@ -718,7 +720,7 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 			for j, rp := range rawPorts {
 				pm, ok := rp.(map[string]any)
 				if !ok {
-					return nil, fmt.Errorf("sidecars[%d] %q: ports[%d]: expected object, got %T", i, sc.Name, j, rp)
+					return nil, errors.Errorf("sidecars[%d] %q: ports[%d]: expected object, got %T", i, sc.Name, j, rp)
 				}
 				pname, _ := pm["name"].(string)
 				var port int32
@@ -726,7 +728,7 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 					port = n
 				}
 				if port == 0 {
-					return nil, fmt.Errorf("sidecars[%d] %q: ports[%d]: containerPort is required", i, sc.Name, j)
+					return nil, errors.Errorf("sidecars[%d] %q: ports[%d]: containerPort is required", i, sc.Name, j)
 				}
 				cp := corev1.ContainerPort{
 					ContainerPort: port,
@@ -755,12 +757,12 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 	for i, v := range raw {
 		mm, ok := v.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("%s: volumeMounts[%d] expected object, got %T", prefix, i, v)
+			return nil, errors.Errorf("%s: volumeMounts[%d] expected object, got %T", prefix, i, v)
 		}
 		n, _ := mm["name"].(string)
 		mountPath, _ := mm["mountPath"].(string)
 		if n == "" || mountPath == "" {
-			return nil, fmt.Errorf("%s: volumeMounts[%d]: name and mountPath are required", prefix, i)
+			return nil, errors.Errorf("%s: volumeMounts[%d]: name and mountPath are required", prefix, i)
 		}
 		vm := corev1.VolumeMount{Name: n, MountPath: mountPath}
 		if ro, ok := mm["readOnly"].(bool); ok {
@@ -795,7 +797,7 @@ func parseAffinity(props map[string]any) (AffinityConfig, error) {
 	switch cfg.PodAntiAffinityType {
 	case "preferred", "required":
 	default:
-		return AffinityConfig{}, fmt.Errorf("invalid podAntiAffinityType %q: must be \"preferred\" or \"required\"", cfg.PodAntiAffinityType)
+		return AffinityConfig{}, errors.Errorf("invalid podAntiAffinityType %q: must be \"preferred\" or \"required\"", cfg.PodAntiAffinityType)
 	}
 	if ns, ok := raw["nodeSelector"].(map[string]any); ok {
 		cfg.NodeSelector = stringMap(ns)
@@ -952,7 +954,7 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 	container := kubernetes.CreateContainer(ic.Name, ic.Image, ic.Command, ic.Args)
 	rr, err := buildResourceRequirements(ic.Resources)
 	if err != nil {
-		return nil, fmt.Errorf("init container %q resources: %w", ic.Name, err)
+		return nil, errors.Errorf("init container %q resources: %w", ic.Name, err)
 	}
 	_ = kubernetes.SetContainerResources(container, rr)
 	for _, env := range buildEnvVars(ic.Env) {
@@ -968,7 +970,7 @@ func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error)
 	container := kubernetes.CreateContainer(sc.Name, sc.Image, sc.Command, sc.Args)
 	rr, err := buildResourceRequirements(sc.Resources)
 	if err != nil {
-		return nil, fmt.Errorf("sidecar container %q resources: %w", sc.Name, err)
+		return nil, errors.Errorf("sidecar container %q resources: %w", sc.Name, err)
 	}
 	_ = kubernetes.SetContainerResources(container, rr)
 	for _, p := range sc.Ports {
@@ -997,7 +999,7 @@ func createServiceAccount(name, namespace string, labels map[string]string) *cor
 func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev1.PersistentVolumeClaim, error) {
 	qty, err := resource.ParseQuantity(pvc.Size)
 	if err != nil {
-		return nil, fmt.Errorf("PVC %q: invalid size %q: %w", pvc.Name, pvc.Size, err)
+		return nil, errors.Errorf("PVC %q: invalid size %q: %w", pvc.Name, pvc.Size, err)
 	}
 
 	claim := kubernetes.CreatePersistentVolumeClaim(pvc.Name, namespace)

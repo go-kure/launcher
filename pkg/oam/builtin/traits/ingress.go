@@ -9,6 +9,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -73,29 +74,29 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 
 	rawRules, ok := props["rules"].([]any)
 	if !ok || len(rawRules) == 0 {
-		return nil, fmt.Errorf("required property 'rules' missing or empty")
+		return nil, errors.Errorf("required property 'rules' missing or empty")
 	}
 	for i, rawRule := range rawRules {
 		ruleMap, ok := rawRule.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("rules[%d]: expected object", i)
+			return nil, errors.Errorf("rules[%d]: expected object", i)
 		}
 
 		host, ok := ruleMap["host"].(string)
 		if !ok || host == "" {
-			return nil, fmt.Errorf("rules[%d]: required field 'host' missing or not a string", i)
+			return nil, errors.Errorf("rules[%d]: required field 'host' missing or not a string", i)
 		}
 
 		rawPaths, ok := ruleMap["paths"].([]any)
 		if !ok || len(rawPaths) == 0 {
-			return nil, fmt.Errorf("rules[%d]: required field 'paths' missing or empty", i)
+			return nil, errors.Errorf("rules[%d]: required field 'paths' missing or empty", i)
 		}
 
 		rule := IngressRule{Host: host}
 		for j, rawPath := range rawPaths {
 			pathMap, ok := rawPath.(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("rules[%d].paths[%d]: expected object", i, j)
+				return nil, errors.Errorf("rules[%d].paths[%d]: expected object", i, j)
 			}
 
 			p := IngressPath{
@@ -110,7 +111,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 
 			if pathType, ok := pathMap["pathType"].(string); ok {
 				if !validPathTypes[pathType] {
-					return nil, fmt.Errorf("rules[%d].paths[%d]: pathType must be 'Prefix', 'Exact', or 'ImplementationSpecific', got %q", i, j, pathType)
+					return nil, errors.Errorf("rules[%d].paths[%d]: pathType must be 'Prefix', 'Exact', or 'ImplementationSpecific', got %q", i, j, pathType)
 				}
 				p.PathType = pathType
 			}
@@ -135,14 +136,14 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 		for i, rawEntry := range rawTLS {
 			entry, ok := rawEntry.(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("tls[%d]: expected object", i)
+				return nil, errors.Errorf("tls[%d]: expected object", i)
 			}
 			tlsEntry := IngressTLS{}
 			if rawHosts, ok := entry["hosts"].([]any); ok {
 				for _, h := range rawHosts {
 					s, ok := h.(string)
 					if !ok {
-						return nil, fmt.Errorf("tls[%d].hosts entries must be strings", i)
+						return nil, errors.Errorf("tls[%d].hosts entries must be strings", i)
 					}
 					tlsEntry.Hosts = append(tlsEntry.Hosts, s)
 				}
