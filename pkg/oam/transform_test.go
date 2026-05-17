@@ -500,6 +500,79 @@ func TestTransform_NilPolicyNormalized(t *testing.T) {
 	}
 }
 
+// constrainedPolicy is a Policy stub with configurable capability constraints.
+type constrainedPolicy struct {
+	NoopPolicy
+	forbidden []string
+	allowed   []string
+	required  []string
+}
+
+func (p *constrainedPolicy) ForbiddenCapabilities() []string { return p.forbidden }
+func (p *constrainedPolicy) AllowedCapabilities() []string   { return p.allowed }
+func (p *constrainedPolicy) RequiredCapabilities() []string  { return p.required }
+
+func TestTransform_CapabilityConstraint_Forbidden(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"expose": &stubTraitHandler{typ: "expose"}},
+	)
+	comp := Component{
+		Name:   "web",
+		Type:   "webservice",
+		Traits: []Trait{{Type: "expose", Properties: map[string]any{}}},
+	}
+	app := makeApp("myapp", comp)
+	policy := &constrainedPolicy{forbidden: []string{"expose"}}
+	_, err := tr.Transform(app, TransformContext{Policy: policy})
+	if err == nil {
+		t.Fatal("expected ViolationError for forbidden capability")
+	}
+	var ve *ViolationError
+	if !errors.As(err, &ve) {
+		t.Errorf("expected ViolationError, got %T: %v", err, err)
+	}
+}
+
+func TestTransform_CapabilityConstraint_NotInAllowedList(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"expose": &stubTraitHandler{typ: "expose"}},
+	)
+	comp := Component{
+		Name:   "web",
+		Type:   "webservice",
+		Traits: []Trait{{Type: "expose", Properties: map[string]any{}}},
+	}
+	app := makeApp("myapp", comp)
+	policy := &constrainedPolicy{allowed: []string{"ingress"}} // "expose" not in list
+	_, err := tr.Transform(app, TransformContext{Policy: policy})
+	if err == nil {
+		t.Fatal("expected ViolationError for capability not in allowed list")
+	}
+	var ve *ViolationError
+	if !errors.As(err, &ve) {
+		t.Errorf("expected ViolationError, got %T: %v", err, err)
+	}
+}
+
+func TestTransform_CapabilityConstraint_RequiredMissing(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		nil,
+	)
+	app := makeApp("myapp", makeComponent("web", "webservice")) // no traits
+	policy := &constrainedPolicy{required: []string{"ingress"}}
+	_, err := tr.Transform(app, TransformContext{Policy: policy})
+	if err == nil {
+		t.Fatal("expected ViolationError for missing required capability")
+	}
+	var ve *ViolationError
+	if !errors.As(err, &ve) {
+		t.Errorf("expected ViolationError, got %T: %v", err, err)
+	}
+}
+
 // --- find* with no match ---
 
 func TestTransformer_FindHandler_NoMatch(t *testing.T) {

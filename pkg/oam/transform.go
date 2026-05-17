@@ -151,6 +151,11 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 
+	// Phase 1.5: validate capability constraints declared by the Policy.
+	if err := enforceCapabilityConstraints(collectTraitTypes(app), ctx.Policy); err != nil {
+		return nil, nil, &ViolationError{Component: app.Metadata.Name, Cause: err}
+	}
+
 	// Phase 2: apply OAM policies (placement overrides, dependency graph).
 	policyResult, err := t.applyPolicies(app, entries)
 	if err != nil {
@@ -647,6 +652,71 @@ func walkLeafBundle(bundle *stack.Bundle, fn func(*stack.Bundle)) {
 	for _, child := range bundle.Children {
 		walkLeafBundle(child, fn)
 	}
+}
+
+// collectTraitTypes returns the unique trait types used across all components.
+func collectTraitTypes(app *Application) []string {
+	seen := make(map[string]bool)
+	var types []string
+	for _, comp := range app.Spec.Components {
+		for _, trait := range comp.Traits {
+			if !seen[trait.Type] {
+				seen[trait.Type] = true
+				types = append(types, trait.Type)
+			}
+		}
+	}
+	return types
+}
+
+// enforceCapabilityConstraints checks that the application's trait types satisfy the
+// capability constraints from the active Policy. Returns nil when all constraint slices
+// are empty (which is always true for NoopPolicy).
+func enforceCapabilityConstraints(traitTypes []string, policy Policy) error {
+	forbidden := policy.ForbiddenCapabilities()
+	allowed := policy.AllowedCapabilities()
+	required := policy.RequiredCapabilities()
+
+	if len(forbidden) == 0 && len(allowed) == 0 && len(required) == 0 {
+		return nil
+	}
+
+	used := make(map[string]bool, len(traitTypes))
+	for _, t := range traitTypes {
+		used[t] = true
+	}
+
+	if len(forbidden) > 0 {
+		forbiddenSet := make(map[string]bool, len(forbidden))
+		for _, f := range forbidden {
+			forbiddenSet[f] = true
+		}
+		for _, t := range traitTypes {
+			if forbiddenSet[t] {
+				return fmt.Errorf("capability %q is forbidden by environment policy", t)
+			}
+		}
+	}
+
+	if len(allowed) > 0 {
+		allowedSet := make(map[string]bool, len(allowed))
+		for _, a := range allowed {
+			allowedSet[a] = true
+		}
+		for _, t := range traitTypes {
+			if !allowedSet[t] {
+				return fmt.Errorf("capability %q is not in the allowed list", t)
+			}
+		}
+	}
+
+	for _, r := range required {
+		if !used[r] {
+			return fmt.Errorf("required capability %q is missing", r)
+		}
+	}
+
+	return nil
 }
 
 // deepCopyMap returns a deep copy of a map[string]any via JSON round-trip.
