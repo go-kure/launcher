@@ -2,9 +2,10 @@ package builtin
 
 import (
 	"bytes"
-	"fmt"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // DecodeStrict decodes src into T using yaml.v3 KnownFields mode.
@@ -13,7 +14,7 @@ import (
 func DecodeStrict[T any](src map[string]any) (*T, error) {
 	data, err := yaml.Marshal(src)
 	if err != nil {
-		return nil, fmt.Errorf("internal: marshal rendering: %w", err)
+		return nil, errors.Wrap(err, "internal: marshal rendering")
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)

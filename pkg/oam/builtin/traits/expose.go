@@ -1,7 +1,6 @@
 package traits
 
 import (
-	"fmt"
 	"maps"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -57,6 +56,6 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 	case "ingress":
 		return (&IngressHandler{}).Apply(modified, app, bundle)
 	default:
-		return fmt.Errorf("expose trait: unsupported controllerType %q", controllerType)
+		return errors.Errorf("expose trait: unsupported controllerType %q", controllerType)
 	}
 }
