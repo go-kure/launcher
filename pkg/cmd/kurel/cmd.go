@@ -35,6 +35,7 @@ static, GitOps-ready Kubernetes manifests.`,
 	shared.InitConfig("kurel", globalOpts)
 
 	cmd.AddCommand(
+		newBuildCommand(),
 		newConfigCommand(globalOpts),
 		shared.NewCompletionCommand(),
 		shared.NewVersionCommand("kurel"),
