@@ -1,5 +1,14 @@
 package oam
 
+import (
+	"encoding/json"
+	"fmt"
+	"maps"
+	"slices"
+
+	"github.com/go-kure/kure/pkg/stack"
+)
+
 // ValidateAndApplyDefaults is implemented by built-in TraitHandlers that accept
 // rendering keys from ClusterProfile. Called at ClusterProfile evaluation time,
 // before any Application is processed. See design-capability-schema.md §2.2.
@@ -102,4 +111,553 @@ func (t *Transformer) findTraitHandler(traitType string) TraitHandler {
 
 func (t *Transformer) findPolicyHandler(policyType string) PolicyHandler {
 	return t.policyHandlers[policyType]
+}
+
+// --- Pipeline entry points ---
+
+// componentEntry holds a component with its corresponding stack application and tier.
+type componentEntry struct {
+	index     int
+	component Component
+	app       *stack.Application
+	tier      Tier
+}
+
+// Transform converts an OAM Application to a kure Cluster.
+func (t *Transformer) Transform(app *Application, ctx TransformContext) (*stack.Cluster, error) {
+	cluster, _, err := t.TransformWithPolicy(app, ctx)
+	return cluster, err
+}
+
+// TransformWithPolicy converts an OAM Application to a kure Cluster and
+// returns the accumulated PolicyResult. ctx.Policy is normalized to NoopPolicy
+// if nil so that all pipeline stages always receive a non-nil Policy value.
+func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext) (*stack.Cluster, *PolicyResult, error) {
+	if ctx.Policy == nil {
+		ctx.Policy = &NoopPolicy{}
+	}
+
+	namespace := ctx.Namespace
+	if namespace == "" {
+		namespace = app.Metadata.Namespace
+	}
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	// Phase 1: create applications, apply Enforceable policy, classify tiers.
+	entries, err := t.createApplications(app, namespace, ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Phase 2: apply OAM policies (placement overrides, dependency graph).
+	policyResult, err := t.applyPolicies(app, entries)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Apply placement tier overrides before grouping.
+	for i, entry := range entries {
+		if tier, ok := policyResult.TierOverrides[entry.component.Name]; ok {
+			entries[i].tier = tier
+		}
+	}
+
+	// Phase 3: group by tier and build cluster.
+	tierGroups := groupByTier(entries)
+
+	var cluster *stack.Cluster
+	if policyResult.HasDependencies() {
+		cluster, err = t.buildDependencyAwareCluster(app, entries, policyResult.Dependencies, ctx)
+	} else if len(tierGroups) <= 1 {
+		cluster, err = t.buildFlatCluster(app, entries, ctx)
+	} else {
+		cluster, err = t.buildHierarchicalCluster(app, entries, tierGroups, ctx)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Phase 4: post-build bundle decorations.
+	componentMap := make(map[string]componentEntry, len(entries))
+	for _, e := range entries {
+		componentMap[e.component.Name] = e
+	}
+	applyAutoHealthChecks(cluster, componentMap, policyResult.HealthCheckOverrides)
+	applyReconciliationSettings(cluster, componentMap, policyResult.ReconciliationSettings)
+
+	return cluster, policyResult, nil
+}
+
+// createApplications converts OAM components to stack applications, applies
+// Enforceable policy, and classifies each component into a deployment tier.
+func (t *Transformer) createApplications(app *Application, namespace string, ctx TransformContext) ([]componentEntry, error) {
+	entries := make([]componentEntry, 0, len(app.Spec.Components))
+	for i, component := range app.Spec.Components {
+		handler := t.findComponentHandler(component.Type)
+		if handler == nil {
+			return nil, &TransformError{Message: fmt.Sprintf("no handler for component type %q", component.Type)}
+		}
+
+		config, err := handler.ToApplicationConfig(&component, namespace)
+		if err != nil {
+			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+		}
+
+		if enforceable, ok := config.(Enforceable); ok {
+			if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
+				return nil, &ViolationError{Component: component.Name, Cause: err}
+			}
+		}
+
+		tier, err := ClassifyComponent(&component)
+		if err != nil {
+			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+		}
+
+		stackApp := stack.NewApplication(component.Name, namespace, config)
+		entries = append(entries, componentEntry{
+			index:     i,
+			component: component,
+			app:       stackApp,
+			tier:      tier,
+		})
+	}
+
+	deduplicateSourceRefs(entries)
+	return entries, nil
+}
+
+// applyPolicies runs all registered policy handlers for the application's OAM policies.
+func (t *Transformer) applyPolicies(app *Application, entries []componentEntry) (*PolicyResult, error) {
+	result := NewPolicyResult()
+	if len(app.Spec.Policies) == 0 {
+		return result, nil
+	}
+
+	componentNames := make([]string, len(entries))
+	for i, e := range entries {
+		componentNames[i] = e.component.Name
+	}
+
+	for _, p := range app.Spec.Policies {
+		handler := t.findPolicyHandler(p.Type)
+		if handler == nil {
+			return nil, &TransformError{Message: fmt.Sprintf("no handler for policy type %q", p.Type)}
+		}
+		if err := handler.Apply(&p, componentNames, result); err != nil {
+			return nil, &TransformError{Message: fmt.Sprintf("policy %q", p.Name), Cause: err}
+		}
+	}
+
+	return result, nil
+}
+
+// buildFlatCluster creates a single-bundle cluster when all components belong to one tier.
+func (t *Transformer) buildFlatCluster(app *Application, entries []componentEntry, ctx TransformContext) (*stack.Cluster, error) {
+	apps := make([]*stack.Application, 0, len(entries))
+	for _, e := range entries {
+		apps = append(apps, e.app)
+	}
+
+	bundle, err := stack.NewBundle(app.Metadata.Name, apps, nil)
+	if err != nil {
+		return nil, &TransformError{Message: "failed to create bundle", Cause: err}
+	}
+
+	if err := t.applyTraits(app, entries, bundle, ctx); err != nil {
+		return nil, err
+	}
+
+	node := &stack.Node{Name: "", Bundle: bundle}
+	return stack.NewCluster(ctx.ClusterID, node), nil
+}
+
+// buildHierarchicalCluster creates an umbrella bundle with one tier-child per populated tier.
+func (t *Transformer) buildHierarchicalCluster(app *Application, entries []componentEntry, tierGroups map[Tier][]componentEntry, ctx TransformContext) (*stack.Cluster, error) {
+	tierBundles := make([]*stack.Bundle, 0, len(tierGroups))
+	for _, tier := range TierOrder {
+		group, ok := tierGroups[tier]
+		if !ok {
+			continue
+		}
+
+		apps := make([]*stack.Application, 0, len(group))
+		for _, e := range group {
+			apps = append(apps, e.app)
+		}
+
+		bundleName := fmt.Sprintf("%s-%s", app.Metadata.Name, tier)
+		bundle, err := stack.NewBundle(bundleName, apps, nil)
+		if err != nil {
+			return nil, &TransformError{Message: fmt.Sprintf("failed to create %s bundle", tier), Cause: err}
+		}
+
+		if err := t.applyTraits(app, group, bundle, ctx); err != nil {
+			return nil, err
+		}
+
+		tierBundles = append(tierBundles, bundle)
+	}
+
+	waitTrue := true
+	umbrella := &stack.Bundle{
+		Name:     app.Metadata.Name,
+		Children: tierBundles,
+		Wait:     &waitTrue,
+	}
+	umbrella.InitializeUmbrella()
+	if err := umbrella.Validate(); err != nil {
+		return nil, &TransformError{Message: "failed to validate umbrella bundle", Cause: err}
+	}
+
+	rootNode := &stack.Node{Name: umbrella.Name, Bundle: umbrella}
+	rootNode.InitializePathMap()
+	return stack.NewCluster(ctx.ClusterID, rootNode), nil
+}
+
+// buildDependencyAwareCluster creates per-component bundles when explicit dependency
+// policies are present. Each component gets its own Node and Bundle, enabling arbitrary
+// DependsOn relationships.
+func (t *Transformer) buildDependencyAwareCluster(app *Application, entries []componentEntry, deps map[string][]string, ctx TransformContext) (*stack.Cluster, error) {
+	rootNode := &stack.Node{
+		Name:     "",
+		Children: make([]*stack.Node, 0, len(entries)),
+	}
+
+	bundleMap := make(map[string]*stack.Bundle, len(entries))
+	tierBundles := make(map[Tier][]*stack.Bundle)
+
+	for _, entry := range entries {
+		bundleName := fmt.Sprintf("%s-%s", app.Metadata.Name, entry.component.Name)
+		bundle, err := stack.NewBundle(bundleName, []*stack.Application{entry.app}, nil)
+		if err != nil {
+			return nil, &TransformError{Message: fmt.Sprintf("failed to create bundle for component %q", entry.component.Name), Cause: err}
+		}
+
+		if err := t.applyTraits(app, []componentEntry{entry}, bundle, ctx); err != nil {
+			return nil, err
+		}
+
+		bundleMap[entry.component.Name] = bundle
+		tierBundles[entry.tier] = append(tierBundles[entry.tier], bundle)
+
+		childNode := &stack.Node{Name: entry.component.Name, Bundle: bundle}
+		childNode.SetParent(rootNode)
+		rootNode.Children = append(rootNode.Children, childNode)
+	}
+
+	// Wire explicit dependencies from policies.
+	for component, depNames := range deps {
+		bundle := bundleMap[component]
+		for _, depName := range depNames {
+			if depBundle := bundleMap[depName]; depBundle != nil {
+				bundle.DependsOn = append(bundle.DependsOn, depBundle)
+			}
+		}
+	}
+
+	// Wire automatic cross-tier dependencies: each bundle depends on all bundles in the
+	// immediately preceding populated tier.
+	var prevTierBundles []*stack.Bundle
+	for _, tier := range TierOrder {
+		current := tierBundles[tier]
+		if len(prevTierBundles) > 0 {
+			for _, b := range current {
+				for _, ptb := range prevTierBundles {
+					if !slices.Contains(b.DependsOn, ptb) {
+						b.DependsOn = append(b.DependsOn, ptb)
+					}
+				}
+			}
+		}
+		if len(current) > 0 {
+			prevTierBundles = current
+		}
+	}
+
+	if err := detectBundleCycles(entries, bundleMap); err != nil {
+		return nil, &TransformError{Message: "dependency cycle after applying cross-tier edges", Cause: err}
+	}
+
+	rootNode.InitializePathMap()
+	return stack.NewCluster(ctx.ClusterID, rootNode), nil
+}
+
+// applyTraits applies all traits for the given component entries to the bundle.
+// Capability rendering values are merged into trait properties before dispatch;
+// OAM inline values take precedence. Policy enforcement is applied to configs
+// added by each trait.
+func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bundle *stack.Bundle, ctx TransformContext) error {
+	for _, entry := range entries {
+		for _, trait := range app.Spec.Components[entry.index].Traits {
+			handler := t.findTraitHandler(trait.Type)
+			if handler == nil {
+				return &TransformError{Message: fmt.Sprintf("no handler for trait type %q", trait.Type)}
+			}
+
+			if aware, ok := handler.(CapabilityAware); ok && aware.CapabilityRequired() {
+				key := buildCapabilityKey(trait)
+				_, foundScoped := ctx.Capabilities[key]
+				_, foundBare := ctx.Capabilities[trait.Type]
+				if !foundScoped && !foundBare {
+					return &TransformError{
+						Message: fmt.Sprintf("component %q trait %q: capability %q not found in ClusterProfile",
+							entry.component.Name, trait.Type, key),
+						Cause: ErrMissingCapability,
+					}
+				}
+			}
+
+			resolved := resolveCapability(trait, ctx.Capabilities)
+			prevLen := len(bundle.Applications)
+			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {
+				return &TransformError{
+					Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
+					Cause:   err,
+				}
+			}
+
+			for _, newApp := range bundle.Applications[prevLen:] {
+				if enforceable, ok := newApp.Config.(Enforceable); ok {
+					if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
+						return &ViolationError{Component: entry.component.Name, Cause: err}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// --- Helpers ---
+
+// deduplicateSourceRefs suppresses duplicate source CRD generation when multiple
+// components share the same source URL.
+func deduplicateSourceRefs(entries []componentEntry) {
+	seen := make(map[string]string) // sourceKey → sourceRefName
+	for _, entry := range entries {
+		dedup, ok := entry.app.Config.(SourceDeduplicatable)
+		if !ok {
+			continue
+		}
+		key := dedup.GetSourceKey()
+		if key == "" {
+			continue
+		}
+		if existingName, found := seen[key]; found {
+			dedup.SuppressSourceGeneration(existingName)
+		} else {
+			seen[key] = dedup.GetSourceRefName()
+		}
+	}
+}
+
+// resolveCapability merges capability rendering values into trait properties.
+// Rendering values act as platform-provided defaults; OAM inline values take precedence.
+// Key resolution: tries the scoped key ("<type>.<scope>"), then falls back to the bare
+// "<type>" key. Returns the original trait unchanged when no matching capability exists.
+func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) Trait {
+	if len(capabilities) == 0 {
+		return trait
+	}
+	key := buildCapabilityKey(trait)
+	cap, ok := capabilities[key]
+	if !ok {
+		cap, ok = capabilities[trait.Type]
+	}
+	if !ok || len(cap.Rendering) == 0 {
+		return trait
+	}
+
+	rendering, err := deepCopyMap(cap.Rendering)
+	if err != nil {
+		rendering = cap.Rendering
+	}
+
+	merged := make(map[string]any, len(rendering)+len(trait.Properties))
+	maps.Copy(merged, rendering)
+	maps.Copy(merged, trait.Properties)
+
+	result := trait
+	result.Properties = merged
+	return result
+}
+
+// buildCapabilityKey returns "<type>.<scope>" when the trait carries a non-empty
+// scope property, or "<type>" otherwise. Resolution falls back to the bare type key.
+func buildCapabilityKey(trait Trait) string {
+	if scope, ok := trait.Properties["scope"].(string); ok && scope != "" {
+		return trait.Type + "." + scope
+	}
+	return trait.Type
+}
+
+// detectBundleCycles builds a name-keyed dependency graph from bundle DependsOn
+// pointers and checks for cycles.
+func detectBundleCycles(entries []componentEntry, bundleMap map[string]*stack.Bundle) error {
+	bundleToName := make(map[*stack.Bundle]string, len(entries))
+	for _, e := range entries {
+		bundleToName[bundleMap[e.component.Name]] = e.component.Name
+	}
+
+	graph := make(map[string][]string)
+	for _, e := range entries {
+		bundle := bundleMap[e.component.Name]
+		for _, dep := range bundle.DependsOn {
+			if depName, ok := bundleToName[dep]; ok {
+				graph[e.component.Name] = append(graph[e.component.Name], depName)
+			}
+		}
+	}
+
+	return detectCycles(graph)
+}
+
+// detectCycles checks for circular dependencies in a string-keyed graph using DFS.
+func detectCycles(deps map[string][]string) error {
+	const (
+		unvisited = 0
+		visiting  = 1
+		visited   = 2
+	)
+
+	state := make(map[string]int)
+
+	var visit func(node string, path []string) error
+	visit = func(node string, path []string) error {
+		if state[node] == visited {
+			return nil
+		}
+		if state[node] == visiting {
+			return fmt.Errorf("circular dependency: %v -> %s", path, node)
+		}
+		state[node] = visiting
+		path = append(path, node)
+		for _, dep := range deps[node] {
+			if err := visit(dep, path); err != nil {
+				return err
+			}
+		}
+		state[node] = visited
+		return nil
+	}
+
+	for node := range deps {
+		if state[node] == unvisited {
+			if err := visit(node, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// componentHealthCheckGVK maps OAM component types to their primary workload GVK.
+// Types not listed (e.g. cronjob) are skipped — their resources are ephemeral.
+var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
+	"webservice":  {"apps/v1", "Deployment"},
+	"worker":      {"apps/v1", "Deployment"},
+	"statefulset": {"apps/v1", "StatefulSet"},
+	"daemonset":   {"apps/v1", "DaemonSet"},
+	"helmrelease": {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
+	"postgresql":  {"postgresql.cnpg.io/v1", "Cluster"},
+}
+
+// applyAutoHealthChecks walks all leaf bundles and appends inferred health check
+// references based on each component's type, followed by any explicit overrides.
+func applyAutoHealthChecks(cluster *stack.Cluster, componentMap map[string]componentEntry, overrides []stack.HealthCheck) {
+	if cluster == nil {
+		return
+	}
+	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
+		for _, app := range bundle.Applications {
+			entry, ok := componentMap[app.Name]
+			if !ok {
+				continue
+			}
+			gvk, ok := componentHealthCheckGVK[entry.component.Type]
+			if !ok {
+				continue
+			}
+			bundle.HealthChecks = append(bundle.HealthChecks, stack.HealthCheck{
+				APIVersion: gvk.APIVersion,
+				Kind:       gvk.Kind,
+				Name:       app.Name,
+				Namespace:  app.Namespace,
+			})
+		}
+		bundle.HealthChecks = append(bundle.HealthChecks, overrides...)
+	})
+}
+
+// applyReconciliationSettings applies Flux reconciliation overrides from a
+// reconciliation policy to all leaf bundles.
+func applyReconciliationSettings(cluster *stack.Cluster, _ map[string]componentEntry, settings *ReconciliationSettings) {
+	if cluster == nil || settings == nil {
+		return
+	}
+	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
+		if settings.Interval != "" {
+			bundle.Interval = settings.Interval
+		}
+		if settings.RetryInterval != "" {
+			bundle.RetryInterval = settings.RetryInterval
+		}
+		if settings.Timeout != "" {
+			bundle.Timeout = settings.Timeout
+		}
+		if settings.Prune != nil {
+			bundle.Prune = settings.Prune
+		}
+		if settings.Wait != nil {
+			bundle.Wait = settings.Wait
+		}
+		if settings.Force != nil {
+			bundle.Force = settings.Force
+		}
+		if settings.Suspend != nil {
+			bundle.Suspend = settings.Suspend
+		}
+	})
+}
+
+// walkLeafBundles calls fn for every leaf bundle reachable from node.
+func walkLeafBundles(node *stack.Node, fn func(*stack.Bundle)) {
+	if node == nil {
+		return
+	}
+	if node.Bundle != nil {
+		walkLeafBundle(node.Bundle, fn)
+	}
+	for _, child := range node.Children {
+		walkLeafBundles(child, fn)
+	}
+}
+
+func walkLeafBundle(bundle *stack.Bundle, fn func(*stack.Bundle)) {
+	if bundle == nil {
+		return
+	}
+	if !bundle.IsUmbrella() {
+		fn(bundle)
+		return
+	}
+	for _, child := range bundle.Children {
+		walkLeafBundle(child, fn)
+	}
+}
+
+// deepCopyMap returns a deep copy of a map[string]any via JSON round-trip.
+func deepCopyMap(src map[string]any) (map[string]any, error) {
+	data, err := json.Marshal(src)
+	if err != nil {
+		return nil, err
+	}
+	var dst map[string]any
+	if err := json.Unmarshal(data, &dst); err != nil {
+		return nil, err
+	}
+	return dst, nil
 }
