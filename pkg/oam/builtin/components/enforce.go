@@ -1,10 +1,11 @@
 package components
 
 import (
-	"fmt"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 func enforceMaxReplicas(current int32, max *int32) error {
@@ -12,7 +13,7 @@ func enforceMaxReplicas(current int32, max *int32) error {
 		return nil
 	}
 	if current > *max {
-		return fmt.Errorf("replicas %d exceeds enforced maximum %d", current, *max)
+		return errors.Errorf("replicas %d exceeds enforced maximum %d", current, *max)
 	}
 	return nil
 }
@@ -23,14 +24,14 @@ func enforceMaxResource(current, max, label string) error {
 	}
 	currentQty, err := resource.ParseQuantity(current)
 	if err != nil {
-		return fmt.Errorf("invalid %s value %q: %w", label, current, err)
+		return errors.Wrapf(err, "invalid %s value %q", label, current)
 	}
 	maxQty, err := resource.ParseQuantity(max)
 	if err != nil {
-		return fmt.Errorf("invalid enforced max %s value %q: %w", label, max, err)
+		return errors.Wrapf(err, "invalid enforced max %s value %q", label, max)
 	}
 	if currentQty.Cmp(maxQty) > 0 {
-		return fmt.Errorf("%s %q exceeds enforced maximum %q", label, current, max)
+		return errors.Errorf("%s %q exceeds enforced maximum %q", label, current, max)
 	}
 	return nil
 }
@@ -45,7 +46,7 @@ func enforceAllowedRegistries(image string, allowed []string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("image %q is not from an allowed registry %v", image, allowed)
+	return errors.Errorf("image %q is not from an allowed registry %v", image, allowed)
 }
 
 func registryHost(image string) string {
