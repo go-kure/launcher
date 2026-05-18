@@ -186,6 +186,22 @@ func TestCronjobHandler_RestartPolicy_Never(t *testing.T) {
 	t.Error("CronJob not found")
 }
 
+func TestCronjobHandler_HistoryLimit_Overflow_Rejected(t *testing.T) {
+	h := &components.CronjobHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":                      "ghcr.io/org/job:v1.0.0",
+			"schedule":                   "0 2 * * *",
+			"successfulJobsHistoryLimit": 3_000_000_000,
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for out-of-int32-range successfulJobsHistoryLimit")
+	}
+}
+
 func TestCronjobHandler_HistoryLimit_Fractional_Rejected(t *testing.T) {
 	h := &components.CronjobHandler{}
 	_, err := h.ToApplicationConfig(&oam.Component{
