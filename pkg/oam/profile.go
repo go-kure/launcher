@@ -51,5 +51,8 @@ func ParseClusterProfile(data []byte) (*ClusterProfile, error) {
 	if err := dec.Decode(&profile); err != nil {
 		return nil, errors.Wrap(err, "parsing ClusterProfile")
 	}
+	if err := validateClusterProfile(&profile); err != nil {
+		return nil, err
+	}
 	return &profile, nil
 }
