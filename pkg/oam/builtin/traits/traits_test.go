@@ -5,6 +5,10 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
@@ -782,3 +786,454 @@ func (p *stubPVCPolicy) AllowHostPathVolumes() bool      { return false }
 func (p *stubPVCPolicy) AllowedCapabilities() []string   { return nil }
 func (p *stubPVCPolicy) ForbiddenCapabilities() []string { return nil }
 func (p *stubPVCPolicy) RequiredCapabilities() []string  { return nil }
+
+// --- ExternalSecretHandler ---
+
+func TestExternalSecretHandler_CanHandle(t *testing.T) {
+	h := &traits.ExternalSecretHandler{}
+	if !h.CanHandle("external-secret") {
+		t.Error("expected CanHandle to return true for 'external-secret'")
+	}
+	if h.CanHandle("configmap") {
+		t.Error("expected CanHandle to return false for 'configmap'")
+	}
+}
+
+func TestExternalSecretHandler_CapabilityRequired(t *testing.T) {
+	h := &traits.ExternalSecretHandler{}
+	if !h.CapabilityRequired() {
+		t.Error("expected CapabilityRequired to return true")
+	}
+}
+
+func TestExternalSecretHandler_ValidateAndApplyDefaults_ValidWithName(t *testing.T) {
+	h := &traits.ExternalSecretHandler{}
+	rendering := map[string]any{
+		"secretStoreRef": map[string]any{
+			"name": "vault-store",
+		},
+	}
+	got, err := h.ValidateAndApplyDefaults(rendering)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ref, _ := got["secretStoreRef"].(map[string]any)
+	if ref["kind"] != "ClusterSecretStore" {
+		t.Errorf("expected default kind ClusterSecretStore, got %v", ref["kind"])
+	}
+}
+
+func TestExternalSecretHandler_ValidateAndApplyDefaults_MissingSecretStoreRef(t *testing.T) {
+	h := &traits.ExternalSecretHandler{}
+	_, err := h.ValidateAndApplyDefaults(map[string]any{})
+	if err == nil {
+		t.Fatal("expected error for missing secretStoreRef")
+	}
+}
+
+func TestExternalSecretHandler_Apply_MissingSecretName(t *testing.T) {
+	h := &traits.ExternalSecretHandler{}
+	trait := &oam.Trait{
+		Type: "external-secret",
+		Properties: map[string]any{
+			"secretStoreRef": map[string]any{
+				"name": "vault-store",
+				"kind": "ClusterSecretStore",
+			},
+		},
+	}
+	err := h.Apply(trait, newApp("api", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error for missing secretName")
+	}
+}
+
+func TestExternalSecretHandler_Apply_AppendsToBundleAndNamedCorrectly(t *testing.T) {
+	h := &traits.ExternalSecretHandler{}
+	trait := &oam.Trait{
+		Type: "external-secret",
+		Properties: map[string]any{
+			"secretName": "my-secret",
+			"secretStoreRef": map[string]any{
+				"name": "vault-store",
+				"kind": "ClusterSecretStore",
+			},
+		},
+	}
+	bundle := newBundle()
+	if err := h.Apply(trait, newApp("api", "default"), bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(bundle.Applications) != 1 {
+		t.Fatalf("expected 1 bundle application, got %d", len(bundle.Applications))
+	}
+	if bundle.Applications[0].Name != "api-external-secret-my-secret" {
+		t.Errorf("expected name 'api-external-secret-my-secret', got %q", bundle.Applications[0].Name)
+	}
+}
+
+// --- ConfigMapHandler ---
+
+func TestConfigMapHandler_CanHandle(t *testing.T) {
+	h := &traits.ConfigMapHandler{}
+	if !h.CanHandle("configmap") {
+		t.Error("expected CanHandle to return true for 'configmap'")
+	}
+	if h.CanHandle("networkpolicy") {
+		t.Error("expected CanHandle to return false for 'networkpolicy'")
+	}
+}
+
+func TestConfigMapHandler_ValidateAndApplyDefaults_RejectsUnknownKey(t *testing.T) {
+	h := &traits.ConfigMapHandler{}
+	_, err := h.ValidateAndApplyDefaults(map[string]any{"unknownKey": "value"})
+	if err == nil {
+		t.Fatal("expected error for unknown rendering key")
+	}
+}
+
+func TestConfigMapHandler_Apply_MissingName(t *testing.T) {
+	h := &traits.ConfigMapHandler{}
+	err := h.Apply(&oam.Trait{Type: "configmap", Properties: map[string]any{}}, newApp("api", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
+}
+
+func TestConfigMapHandler_Apply_NoMountPath_AppendsBundleOnly(t *testing.T) {
+	h := &traits.ConfigMapHandler{}
+	trait := &oam.Trait{
+		Type: "configmap",
+		Properties: map[string]any{
+			"name": "app-config",
+			"data": map[string]any{"KEY": "value"},
+		},
+	}
+	app := newApp("api", "default")
+	originalConfig := app.Config
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(bundle.Applications) != 1 {
+		t.Fatalf("expected 1 bundle application, got %d", len(bundle.Applications))
+	}
+	if app.Config != originalConfig {
+		t.Error("expected app.Config unchanged when no mountPath")
+	}
+}
+
+func TestConfigMapHandler_Apply_WithMountPath_WrapsConfig(t *testing.T) {
+	h := &traits.ConfigMapHandler{}
+	trait := &oam.Trait{
+		Type: "configmap",
+		Properties: map[string]any{
+			"name":      "app-config",
+			"mountPath": "/etc/config",
+		},
+	}
+	app := newApp("api", "default")
+	originalConfig := app.Config
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if app.Config == originalConfig {
+		t.Error("expected app.Config to be wrapped with decorator")
+	}
+	if len(bundle.Applications) != 1 {
+		t.Fatalf("expected 1 bundle application for ConfigMap, got %d", len(bundle.Applications))
+	}
+}
+
+// stubStatefulSetConfig is a stub ApplicationConfig that returns a StatefulSet.
+type stubStatefulSetConfig struct{}
+
+func (s *stubStatefulSetConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
+	ss := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "default"},
+		Spec: appsv1.StatefulSetSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "db", Image: "postgres:15"}},
+				},
+			},
+		},
+	}
+	obj := client.Object(ss)
+	return []*client.Object{&obj}, nil
+}
+
+// stubUnsupportedConfig returns a Service (non-workload type).
+type stubUnsupportedConfig struct{}
+
+func (s *stubUnsupportedConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "svc"}}
+	obj := client.Object(svc)
+	return []*client.Object{&obj}, nil
+}
+
+func TestConfigMapDecorator_StatefulSet_MountsVolume(t *testing.T) {
+	dec := &traits.ConfigMapDecorator{
+		Inner:         &stubStatefulSetConfig{},
+		ConfigMapName: "my-config",
+		MountPath:     "/etc/config",
+	}
+	app := newApp("db", "default")
+	objects, err := dec.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objects))
+	}
+	ss, ok := (*objects[0]).(*appsv1.StatefulSet)
+	if !ok {
+		t.Fatalf("expected *appsv1.StatefulSet, got %T", *objects[0])
+	}
+	if len(ss.Spec.Template.Spec.Volumes) != 1 {
+		t.Errorf("expected 1 volume, got %d", len(ss.Spec.Template.Spec.Volumes))
+	}
+	if len(ss.Spec.Template.Spec.Containers[0].VolumeMounts) != 1 {
+		t.Errorf("expected 1 volumeMount, got %d", len(ss.Spec.Template.Spec.Containers[0].VolumeMounts))
+	}
+	if ss.Spec.Template.Spec.Containers[0].VolumeMounts[0].MountPath != "/etc/config" {
+		t.Errorf("unexpected mountPath: %q", ss.Spec.Template.Spec.Containers[0].VolumeMounts[0].MountPath)
+	}
+}
+
+func TestConfigMapDecorator_UnsupportedComponent_ReturnsError(t *testing.T) {
+	dec := &traits.ConfigMapDecorator{
+		Inner:         &stubUnsupportedConfig{},
+		ConfigMapName: "my-config",
+		MountPath:     "/etc/config",
+	}
+	_, err := dec.Generate(newApp("svc", "default"))
+	if err == nil {
+		t.Fatal("expected error for unsupported workload type")
+	}
+	if !strings.Contains(err.Error(), "no supported workload resource was found") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// --- NetworkPolicyHandler ---
+
+func TestNetworkPolicyHandler_CanHandle(t *testing.T) {
+	h := &traits.NetworkPolicyHandler{}
+	if !h.CanHandle("networkpolicy") {
+		t.Error("expected CanHandle to return true for 'networkpolicy'")
+	}
+	if h.CanHandle("cilium-networkpolicy") {
+		t.Error("expected CanHandle to return false for 'cilium-networkpolicy'")
+	}
+}
+
+func TestNetworkPolicyHandler_ValidateAndApplyDefaults_RejectsUnknownKey(t *testing.T) {
+	h := &traits.NetworkPolicyHandler{}
+	_, err := h.ValidateAndApplyDefaults(map[string]any{"foo": "bar"})
+	if err == nil {
+		t.Fatal("expected error for unknown rendering key")
+	}
+}
+
+func TestNetworkPolicyHandler_Apply_MissingIngressAndEgress(t *testing.T) {
+	h := &traits.NetworkPolicyHandler{}
+	err := h.Apply(&oam.Trait{Type: "networkpolicy", Properties: map[string]any{}}, newApp("api", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error when neither ingress nor egress specified")
+	}
+}
+
+func TestNetworkPolicyHandler_Apply_AppendsToBundleWithIngress(t *testing.T) {
+	h := &traits.NetworkPolicyHandler{}
+	trait := &oam.Trait{
+		Type: "networkpolicy",
+		Properties: map[string]any{
+			"ingress": []any{
+				map[string]any{
+					"from": []any{
+						map[string]any{"podSelector": map[string]any{"matchLabels": map[string]any{"app": "frontend"}}},
+					},
+					"ports": []any{
+						map[string]any{"port": float64(8080), "protocol": "TCP"},
+					},
+				},
+			},
+		},
+	}
+	bundle := newBundle()
+	if err := h.Apply(trait, newApp("api", "default"), bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(bundle.Applications) != 1 {
+		t.Fatalf("expected 1 bundle application, got %d", len(bundle.Applications))
+	}
+	if bundle.Applications[0].Name != "api-networkpolicy" {
+		t.Errorf("expected name 'api-networkpolicy', got %q", bundle.Applications[0].Name)
+	}
+}
+
+// --- CiliumNetworkPolicyHandler ---
+
+func TestCiliumNetworkPolicyHandler_CanHandle(t *testing.T) {
+	h := &traits.CiliumNetworkPolicyHandler{}
+	if !h.CanHandle("cilium-networkpolicy") {
+		t.Error("expected CanHandle to return true for 'cilium-networkpolicy'")
+	}
+	if h.CanHandle("networkpolicy") {
+		t.Error("expected CanHandle to return false for 'networkpolicy'")
+	}
+}
+
+func TestCiliumNetworkPolicyHandler_ValidateAndApplyDefaults_RejectsUnknownKey(t *testing.T) {
+	h := &traits.CiliumNetworkPolicyHandler{}
+	_, err := h.ValidateAndApplyDefaults(map[string]any{"foo": "bar"})
+	if err == nil {
+		t.Fatal("expected error for unknown rendering key")
+	}
+}
+
+func TestCiliumNetworkPolicyHandler_Apply_MissingName(t *testing.T) {
+	h := &traits.CiliumNetworkPolicyHandler{}
+	err := h.Apply(&oam.Trait{
+		Type:       "cilium-networkpolicy",
+		Properties: map[string]any{"ingress": []any{}},
+	}, newApp("api", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
+}
+
+func TestCiliumNetworkPolicyHandler_Apply_MissingIngressAndEgress(t *testing.T) {
+	h := &traits.CiliumNetworkPolicyHandler{}
+	err := h.Apply(&oam.Trait{
+		Type:       "cilium-networkpolicy",
+		Properties: map[string]any{"name": "my-policy"},
+	}, newApp("api", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error when neither ingress nor egress specified")
+	}
+}
+
+func TestCiliumNetworkPolicyHandler_Apply_AppendsToBundle(t *testing.T) {
+	h := &traits.CiliumNetworkPolicyHandler{}
+	trait := &oam.Trait{
+		Type: "cilium-networkpolicy",
+		Properties: map[string]any{
+			"name": "api-allow",
+			"ingress": []any{
+				map[string]any{"fromEndpoints": []any{map[string]any{"matchLabels": map[string]any{"app": "frontend"}}}},
+			},
+		},
+	}
+	bundle := newBundle()
+	if err := h.Apply(trait, newApp("api", "default"), bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(bundle.Applications) != 1 {
+		t.Fatalf("expected 1 bundle application, got %d", len(bundle.Applications))
+	}
+	if bundle.Applications[0].Name != "api-allow" {
+		t.Errorf("expected name 'api-allow', got %q", bundle.Applications[0].Name)
+	}
+}
+
+// --- VolSyncHandler ---
+
+func TestVolSyncHandler_CanHandle(t *testing.T) {
+	h := &traits.VolSyncHandler{}
+	if !h.CanHandle("volsync") {
+		t.Error("expected CanHandle to return true for 'volsync'")
+	}
+	if h.CanHandle("configmap") {
+		t.Error("expected CanHandle to return false for 'configmap'")
+	}
+}
+
+func TestVolSyncHandler_ValidateAndApplyDefaults_RejectsUnknownKey(t *testing.T) {
+	h := &traits.VolSyncHandler{}
+	_, err := h.ValidateAndApplyDefaults(map[string]any{"foo": "bar"})
+	if err == nil {
+		t.Fatal("expected error for unknown rendering key")
+	}
+}
+
+func TestVolSyncHandler_Apply_MissingSourcePVC(t *testing.T) {
+	h := &traits.VolSyncHandler{}
+	err := h.Apply(&oam.Trait{
+		Type:       "volsync",
+		Properties: map[string]any{"schedule": "@daily"},
+	}, newApp("db", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error for missing sourcePVC")
+	}
+}
+
+func TestVolSyncHandler_Apply_MissingSchedule(t *testing.T) {
+	h := &traits.VolSyncHandler{}
+	err := h.Apply(&oam.Trait{
+		Type:       "volsync",
+		Properties: map[string]any{"sourcePVC": "data"},
+	}, newApp("db", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error for missing schedule")
+	}
+}
+
+func TestVolSyncHandler_Apply_AppendsToBundle(t *testing.T) {
+	h := &traits.VolSyncHandler{}
+	trait := &oam.Trait{
+		Type:       "volsync",
+		Properties: map[string]any{"sourcePVC": "data", "schedule": "@daily"},
+	}
+	bundle := newBundle()
+	if err := h.Apply(trait, newApp("db", "default"), bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(bundle.Applications) != 1 {
+		t.Fatalf("expected 1 bundle application, got %d", len(bundle.Applications))
+	}
+	if bundle.Applications[0].Name != "data-backup" {
+		t.Errorf("expected name 'data-backup', got %q", bundle.Applications[0].Name)
+	}
+}
+
+func TestVolSyncHandler_Apply_DefaultRepository(t *testing.T) {
+	h := &traits.VolSyncHandler{}
+	trait := &oam.Trait{
+		Type:       "volsync",
+		Properties: map[string]any{"sourcePVC": "data", "schedule": "@daily"},
+	}
+	bundle := newBundle()
+	app := newApp("mydb", "default")
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	cfg, ok := bundle.Applications[0].Config.(*traits.VolsyncConfig)
+	if !ok {
+		t.Fatalf("expected *traits.VolsyncConfig, got %T", bundle.Applications[0].Config)
+	}
+	if cfg.Repository != "mydb-volsync-secret" {
+		t.Errorf("expected default repository 'mydb-volsync-secret', got %q", cfg.Repository)
+	}
+}
+
+func TestVolSyncHandler_Apply_InvalidCopyMethod(t *testing.T) {
+	h := &traits.VolSyncHandler{}
+	trait := &oam.Trait{
+		Type: "volsync",
+		Properties: map[string]any{
+			"sourcePVC":  "data",
+			"schedule":   "@daily",
+			"copyMethod": "Invalid",
+		},
+	}
+	err := h.Apply(trait, newApp("db", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error for invalid copyMethod")
+	}
+	if !strings.Contains(err.Error(), "unsupported copyMethod") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}

@@ -24,18 +24,19 @@ var validComponentTypes = map[string]bool{
 	"statefulset": true,
 }
 
-// validTraitTypes is the Phase 1 set from design-kurel-package.md §4.3.
-// Deferred until Phase 2 (#49, #50): networkpolicy, cilium-networkpolicy, volsync.
-// Updated when Phase 2 handlers land.
+// validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.
 var validTraitTypes = map[string]bool{
-	"expose":          true,
-	"ingress":         true,
-	"httproute":       true,
-	"certificate":     true,
-	"external-secret": true,
-	"configmap":       true,
-	"scaler":          true,
-	"pvc":             true,
+	"expose":               true,
+	"ingress":              true,
+	"httproute":            true,
+	"certificate":          true,
+	"external-secret":      true,
+	"configmap":            true,
+	"networkpolicy":        true,
+	"cilium-networkpolicy": true,
+	"volsync":              true,
+	"scaler":               true,
+	"pvc":                  true,
 }
 
 // traitComponentRestrictions maps trait types to the component types they support.

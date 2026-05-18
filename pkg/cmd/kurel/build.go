@@ -122,11 +122,16 @@ func newBuiltinTransformer() *oam.Transformer {
 			"statefulset": &components.StatefulsetHandler{},
 		},
 		map[string]oam.TraitHandler{
-			"expose":      &traits.ExposeHandler{},
-			"ingress":     &traits.IngressHandler{}, //nolint:staticcheck
-			"certificate": &traits.CertificateHandler{},
-			"scaler":      &traits.ScalerHandler{},
-			"pvc":         &traits.PVCHandler{},
+			"expose":               &traits.ExposeHandler{},
+			"ingress":              &traits.IngressHandler{}, //nolint:staticcheck
+			"certificate":          &traits.CertificateHandler{},
+			"scaler":               &traits.ScalerHandler{},
+			"pvc":                  &traits.PVCHandler{},
+			"external-secret":      &traits.ExternalSecretHandler{},
+			"configmap":            &traits.ConfigMapHandler{},
+			"networkpolicy":        &traits.NetworkPolicyHandler{},
+			"cilium-networkpolicy": &traits.CiliumNetworkPolicyHandler{},
+			"volsync":              &traits.VolSyncHandler{},
 		},
 	)
 }
