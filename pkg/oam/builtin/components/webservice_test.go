@@ -534,3 +534,81 @@ func TestWebserviceConfig_ApplyPolicy_MaxStorageSize(t *testing.T) {
 		t.Error("expected error when PVC size exceeds max")
 	}
 }
+
+func TestWebserviceHandler_WithProbes_NamedPort(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"livenessProbe": map[string]any{
+				"httpGet": map[string]any{
+					"path": "/healthz",
+					"port": 8080,
+				},
+				"initialDelaySeconds": 10,
+				"periodSeconds":       5,
+			},
+			"readinessProbe": map[string]any{
+				"httpGet": map[string]any{
+					"path": "/ready",
+					"port": "http",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceHandler_WithAffinity(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"affinity": map[string]any{
+				"enablePodAntiAffinity": true,
+				"podAntiAffinityType":   "required",
+				"topologyKey":           "kubernetes.io/hostname",
+				"nodeSelector": map[string]any{
+					"disktype": "ssd",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceHandler_InvalidAffinity(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"affinity": map[string]any{
+				"podAntiAffinityType": "invalid",
+			},
+		},
+	}
+	_, err := h.ToApplicationConfig(component, "default")
+	if err == nil {
+		t.Fatal("expected error for invalid podAntiAffinityType")
+	}
+}

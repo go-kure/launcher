@@ -1,0 +1,11 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-daemon
+  namespace: default
+spec:
+  components:
+    - name: agent
+      type: daemonset
+      properties:
+        image: ghcr.io/example/agent:v1.0.0

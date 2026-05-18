@@ -1,0 +1,12 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: frontend
+      type: webservice
+      properties:
+        image: ghcr.io/example/frontend:v1.0.0
+        port: 8080

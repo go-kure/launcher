@@ -1,0 +1,12 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-cronjob
+  namespace: default
+spec:
+  components:
+    - name: cleanup
+      type: cronjob
+      properties:
+        image: ghcr.io/example/cleanup:v1.0.0
+        schedule: "0 2 * * *"
