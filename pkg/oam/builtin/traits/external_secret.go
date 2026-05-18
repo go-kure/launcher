@@ -239,6 +239,9 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 		if v, ok := rawRef["version"].(string); ok {
 			ref.Version = v
 		}
+		if ds, ok := rawRef["decodingStrategy"].(string); ok {
+			ref.DecodingStrategy = ds
+		}
 		config.Data = append(config.Data, esDataEntry{
 			SecretKey: config.SecretName,
 			RemoteRef: ref,
