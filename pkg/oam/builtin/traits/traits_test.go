@@ -1373,6 +1373,25 @@ func TestExternalSecretHandler_Apply_RemoteRefConflictsWithData(t *testing.T) {
 	}
 }
 
+func TestExternalSecretHandler_Apply_RemoteRefDecodingStrategy(t *testing.T) {
+	h := &traits.ExternalSecretHandler{}
+	bundle := newBundle()
+	if err := h.Apply(&oam.Trait{
+		Type: "external-secret",
+		Properties: map[string]any{
+			"secretName":     "my-creds",
+			"secretStoreRef": map[string]any{"name": "vault", "kind": "ClusterSecretStore"},
+			"remoteRef":      map[string]any{"key": "prod/x", "decodingStrategy": "Base64"},
+		},
+	}, newApp("api", "default"), bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	cfg := bundle.Applications[0].Config.(*traits.ExternalSecretConfig)
+	if cfg.Data[0].RemoteRef.DecodingStrategy != "Base64" {
+		t.Errorf("expected decodingStrategy 'Base64', got %q", cfg.Data[0].RemoteRef.DecodingStrategy)
+	}
+}
+
 func TestExternalSecretHandler_Apply_RemoteRefMissingKey(t *testing.T) {
 	h := &traits.ExternalSecretHandler{}
 	err := h.Apply(&oam.Trait{
