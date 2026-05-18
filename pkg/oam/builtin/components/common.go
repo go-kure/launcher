@@ -872,16 +872,16 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 func parseHistoryLimit(field string, v any) (int32, error) {
 	switch n := v.(type) {
 	case int:
-		if n < 0 {
-			return 0, errors.Errorf("%s: must be non-negative, got %d", field, n)
+		if n < 0 || n > math.MaxInt32 {
+			return 0, errors.Errorf("%s: must be between 0 and %d, got %d", field, math.MaxInt32, n)
 		}
 		return int32(n), nil //nolint:gosec
 	case float64:
 		if n != float64(int64(n)) {
 			return 0, errors.Errorf("%s: must be an integer, got %g", field, n)
 		}
-		if n < 0 {
-			return 0, errors.Errorf("%s: must be non-negative, got %g", field, n)
+		if n < 0 || n > math.MaxInt32 {
+			return 0, errors.Errorf("%s: must be between 0 and %d, got %g", field, math.MaxInt32, n)
 		}
 		return int32(n), nil
 	default:
