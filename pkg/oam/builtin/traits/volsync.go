@@ -1,6 +1,8 @@
 package traits
 
 import (
+	"math"
+
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	kurevol "github.com/go-kure/kure/pkg/kubernetes/volsync"
 	"github.com/go-kure/kure/pkg/stack"
@@ -34,7 +36,7 @@ func (h *VolSyncHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 		return err
 	}
 
-	rsApp := stack.NewApplication(config.SourcePVC+"-backup", app.Namespace, config)
+	rsApp := stack.NewApplication(app.Name+"-"+config.SourcePVC+"-backup", app.Namespace, config)
 	bundle.Applications = append(bundle.Applications, rsApp)
 	return nil
 }
@@ -82,19 +84,33 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 		config.VolumeSnapshotClassName = vsc
 	}
 
-	if pid, ok := yamlToInt(props["pruneIntervalDays"]); ok {
+	if v, ok := props["pruneIntervalDays"]; ok {
+		pid, ok := yamlToInt(v)
+		if !ok {
+			return nil, errors.New("'pruneIntervalDays' must be a positive integer")
+		}
+		if pid <= 0 || pid > math.MaxInt32 {
+			return nil, errors.Errorf("'pruneIntervalDays' must be between 1 and %d", math.MaxInt32)
+		}
 		config.PruneIntervalDays = pid
 	}
 
 	if rawRetain, ok := props["retain"].(map[string]any); ok {
-		if d, ok := yamlToInt(rawRetain["daily"]); ok {
-			config.RetainDaily = d
-		}
-		if w, ok := yamlToInt(rawRetain["weekly"]); ok {
-			config.RetainWeekly = w
-		}
-		if m, ok := yamlToInt(rawRetain["monthly"]); ok {
-			config.RetainMonthly = m
+		for field, dst := range map[string]*int{
+			"daily":   &config.RetainDaily,
+			"weekly":  &config.RetainWeekly,
+			"monthly": &config.RetainMonthly,
+		} {
+			if v, ok := rawRetain[field]; ok {
+				n, ok := yamlToInt(v)
+				if !ok {
+					return nil, errors.Errorf("'retain.%s' must be a non-negative integer", field)
+				}
+				if n < 0 || n > math.MaxInt32 {
+					return nil, errors.Errorf("'retain.%s' must be between 0 and %d", field, math.MaxInt32)
+				}
+				*dst = n
+			}
 		}
 	}
 
@@ -117,11 +133,15 @@ type VolsyncConfig struct {
 }
 
 // yamlToInt converts a numeric value (int, float64) from YAML to int.
+// Non-integer float values (e.g. 1.5) are rejected.
 func yamlToInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int:
 		return n, true
 	case float64:
+		if n != float64(int(n)) {
+			return 0, false
+		}
 		return int(n), true
 	}
 	return 0, false

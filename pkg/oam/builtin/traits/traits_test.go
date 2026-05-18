@@ -973,6 +973,24 @@ func (s *stubUnsupportedConfig) Generate(_ *stack.Application) ([]*client.Object
 	return []*client.Object{&obj}, nil
 }
 
+// stubDaemonSetConfig returns a DaemonSet.
+type stubDaemonSetConfig struct{}
+
+func (s *stubDaemonSetConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"},
+		Spec: appsv1.DaemonSetSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "agent", Image: "agent:1"}},
+				},
+			},
+		},
+	}
+	obj := client.Object(ds)
+	return []*client.Object{&obj}, nil
+}
+
 func TestConfigMapDecorator_StatefulSet_MountsVolume(t *testing.T) {
 	dec := &traits.ConfigMapDecorator{
 		Inner:         &stubStatefulSetConfig{},
@@ -999,6 +1017,25 @@ func TestConfigMapDecorator_StatefulSet_MountsVolume(t *testing.T) {
 	}
 	if ss.Spec.Template.Spec.Containers[0].VolumeMounts[0].MountPath != "/etc/config" {
 		t.Errorf("unexpected mountPath: %q", ss.Spec.Template.Spec.Containers[0].VolumeMounts[0].MountPath)
+	}
+}
+
+func TestConfigMapDecorator_DaemonSet_MountsVolume(t *testing.T) {
+	dec := &traits.ConfigMapDecorator{
+		Inner:         &stubDaemonSetConfig{},
+		ConfigMapName: "agent-config",
+		MountPath:     "/etc/agent",
+	}
+	objects, err := dec.Generate(newApp("agent", "default"))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	ds, ok := (*objects[0]).(*appsv1.DaemonSet)
+	if !ok {
+		t.Fatalf("expected *appsv1.DaemonSet, got %T", *objects[0])
+	}
+	if len(ds.Spec.Template.Spec.Volumes) != 1 {
+		t.Errorf("expected 1 volume, got %d", len(ds.Spec.Template.Spec.Volumes))
 	}
 }
 
@@ -1194,8 +1231,8 @@ func TestVolSyncHandler_Apply_AppendsToBundle(t *testing.T) {
 	if len(bundle.Applications) != 1 {
 		t.Fatalf("expected 1 bundle application, got %d", len(bundle.Applications))
 	}
-	if bundle.Applications[0].Name != "data-backup" {
-		t.Errorf("expected name 'data-backup', got %q", bundle.Applications[0].Name)
+	if bundle.Applications[0].Name != "db-data-backup" {
+		t.Errorf("expected name 'db-data-backup', got %q", bundle.Applications[0].Name)
 	}
 }
 
@@ -1235,5 +1272,343 @@ func TestVolSyncHandler_Apply_InvalidCopyMethod(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported copyMethod") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestVolSyncHandler_Apply_NonIntegerPruneIntervalDays(t *testing.T) {
+	h := &traits.VolSyncHandler{}
+	err := h.Apply(&oam.Trait{
+		Type: "volsync",
+		Properties: map[string]any{
+			"sourcePVC":         "data",
+			"schedule":          "@daily",
+			"pruneIntervalDays": float64(1.5),
+		},
+	}, newApp("db", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error for non-integer pruneIntervalDays")
+	}
+}
+
+func TestVolSyncHandler_Apply_NegativePruneIntervalDays(t *testing.T) {
+	h := &traits.VolSyncHandler{}
+	err := h.Apply(&oam.Trait{
+		Type: "volsync",
+		Properties: map[string]any{
+			"sourcePVC":         "data",
+			"schedule":          "@daily",
+			"pruneIntervalDays": -1,
+		},
+	}, newApp("db", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error for negative pruneIntervalDays")
+	}
+}
+
+func TestVolSyncHandler_Apply_BundleNameIsComponentScoped(t *testing.T) {
+	h := &traits.VolSyncHandler{}
+	bundle := newBundle()
+	if err := h.Apply(&oam.Trait{
+		Type:       "volsync",
+		Properties: map[string]any{"sourcePVC": "data", "schedule": "@daily"},
+	}, newApp("mydb", "default"), bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if bundle.Applications[0].Name != "mydb-data-backup" {
+		t.Errorf("expected 'mydb-data-backup', got %q", bundle.Applications[0].Name)
+	}
+}
+
+// --- ExternalSecretHandler remoteRef shorthand ---
+
+func TestExternalSecretHandler_Apply_RemoteRefShorthand(t *testing.T) {
+	h := &traits.ExternalSecretHandler{}
+	trait := &oam.Trait{
+		Type: "external-secret",
+		Properties: map[string]any{
+			"secretName": "my-creds",
+			"secretStoreRef": map[string]any{
+				"name": "vault",
+				"kind": "ClusterSecretStore",
+			},
+			"remoteRef": map[string]any{
+				"key": "prod/my-app/db",
+			},
+		},
+	}
+	bundle := newBundle()
+	if err := h.Apply(trait, newApp("api", "default"), bundle); err != nil {
+		t.Fatalf("Apply with remoteRef shorthand: %v", err)
+	}
+	cfg := bundle.Applications[0].Config.(*traits.ExternalSecretConfig)
+	if len(cfg.Data) != 1 {
+		t.Fatalf("expected 1 data entry from remoteRef shorthand, got %d", len(cfg.Data))
+	}
+	if cfg.Data[0].SecretKey != "my-creds" {
+		t.Errorf("expected secretKey %q, got %q", "my-creds", cfg.Data[0].SecretKey)
+	}
+	if cfg.Data[0].RemoteRef.Key != "prod/my-app/db" {
+		t.Errorf("expected remoteRef.key %q, got %q", "prod/my-app/db", cfg.Data[0].RemoteRef.Key)
+	}
+}
+
+func TestExternalSecretHandler_Apply_RemoteRefConflictsWithData(t *testing.T) {
+	h := &traits.ExternalSecretHandler{}
+	err := h.Apply(&oam.Trait{
+		Type: "external-secret",
+		Properties: map[string]any{
+			"secretName":     "my-creds",
+			"secretStoreRef": map[string]any{"name": "vault", "kind": "ClusterSecretStore"},
+			"remoteRef":      map[string]any{"key": "prod/x"},
+			"data": []any{
+				map[string]any{
+					"secretKey": "K",
+					"remoteRef": map[string]any{"key": "prod/y"},
+				},
+			},
+		},
+	}, newApp("api", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error when remoteRef combined with data")
+	}
+}
+
+func TestExternalSecretHandler_Apply_RemoteRefMissingKey(t *testing.T) {
+	h := &traits.ExternalSecretHandler{}
+	err := h.Apply(&oam.Trait{
+		Type: "external-secret",
+		Properties: map[string]any{
+			"secretName":     "my-creds",
+			"secretStoreRef": map[string]any{"name": "vault", "kind": "ClusterSecretStore"},
+			"remoteRef":      map[string]any{},
+		},
+	}, newApp("api", "default"), newBundle())
+	if err == nil {
+		t.Fatal("expected error for missing remoteRef.key")
+	}
+}
+
+// --- Generate() tests for coverage ---
+
+func TestCiliumNetworkPolicyConfig_Generate(t *testing.T) {
+	bundle := newBundle()
+	h := &traits.CiliumNetworkPolicyHandler{}
+	err := h.Apply(&oam.Trait{
+		Type: "cilium-networkpolicy",
+		Properties: map[string]any{
+			"name": "test-policy",
+			"ingress": []any{
+				map[string]any{"fromEndpoints": []any{map[string]any{"matchLabels": map[string]any{"app": "frontend"}}}},
+			},
+		},
+	}, newApp("api", "default"), bundle)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	objects, err := bundle.Applications[0].Config.Generate(bundle.Applications[0])
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objects))
+	}
+}
+
+func TestConfigMapConfig_Generate(t *testing.T) {
+	cfg := &traits.ConfigMapConfig{
+		Name:          "my-config",
+		ComponentName: "api",
+		Data:          map[string]string{"KEY": "value"},
+	}
+	app := newApp("my-config", "default")
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objects))
+	}
+}
+
+func TestNetworkPolicyConfig_Generate(t *testing.T) {
+	bundle := newBundle()
+	h := &traits.NetworkPolicyHandler{}
+	err := h.Apply(&oam.Trait{
+		Type: "networkpolicy",
+		Properties: map[string]any{
+			"egress": []any{
+				map[string]any{
+					"to": []any{
+						map[string]any{"podSelector": map[string]any{"matchLabels": map[string]any{"app": "backend"}}},
+					},
+					"ports": []any{
+						map[string]any{"port": float64(5432), "protocol": "TCP"},
+					},
+				},
+			},
+		},
+	}, newApp("api", "default"), bundle)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	objects, err := bundle.Applications[0].Config.Generate(bundle.Applications[0])
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objects))
+	}
+}
+
+func TestNetworkPolicyConfig_Generate_BothIngressAndEgress(t *testing.T) {
+	bundle := newBundle()
+	h := &traits.NetworkPolicyHandler{}
+	err := h.Apply(&oam.Trait{
+		Type: "networkpolicy",
+		Properties: map[string]any{
+			"ingress": []any{
+				map[string]any{
+					"from": []any{
+						map[string]any{
+							"namespaceSelector": map[string]any{"matchLabels": map[string]any{"ns": "prod"}},
+							"podSelector":       map[string]any{"matchLabels": map[string]any{"app": "web"}},
+						},
+					},
+				},
+			},
+			"egress": []any{
+				map[string]any{
+					"to": []any{
+						map[string]any{
+							"ipBlock": map[string]any{
+								"cidr":   "10.0.0.0/8",
+								"except": []any{"10.1.0.0/16"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, newApp("api", "default"), bundle)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	objects, err := bundle.Applications[0].Config.Generate(bundle.Applications[0])
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objects))
+	}
+}
+
+func TestExternalSecretConfig_Generate(t *testing.T) {
+	bundle := newBundle()
+	h := &traits.ExternalSecretHandler{}
+	err := h.Apply(&oam.Trait{
+		Type: "external-secret",
+		Properties: map[string]any{
+			"secretName": "my-secret",
+			"secretStoreRef": map[string]any{
+				"name": "vault",
+				"kind": "ClusterSecretStore",
+			},
+			"data": []any{
+				map[string]any{
+					"secretKey": "DB_PASS",
+					"remoteRef": map[string]any{"key": "prod/db", "property": "password"},
+				},
+			},
+		},
+	}, newApp("api", "default"), bundle)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	objects, err := bundle.Applications[0].Config.Generate(bundle.Applications[0])
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objects))
+	}
+}
+
+func TestExternalSecretConfig_Generate_WithDataFromAndTemplate(t *testing.T) {
+	bundle := newBundle()
+	h := &traits.ExternalSecretHandler{}
+	err := h.Apply(&oam.Trait{
+		Type: "external-secret",
+		Properties: map[string]any{
+			"secretName":       "bulk-secret",
+			"targetSecretName": "my-k8s-secret",
+			"secretStoreRef": map[string]any{
+				"name": "vault",
+				"kind": "ClusterSecretStore",
+			},
+			"target": map[string]any{
+				"creationPolicy": "Merge",
+				"deletionPolicy": "Retain",
+				"template": map[string]any{
+					"type": "kubernetes.io/dockerconfigjson",
+					"data": map[string]any{".dockerconfigjson": "{{ .secret }}"},
+				},
+			},
+			"dataFrom": []any{
+				map[string]any{
+					"extract": map[string]any{
+						"key":                "prod/my-app",
+						"decodingStrategy":   "None",
+						"conversionStrategy": "Default",
+						"metadataPolicy":     "None",
+					},
+				},
+				map[string]any{
+					"find": map[string]any{
+						"name": map[string]any{"regexp": "prod/.*"},
+						"tags": map[string]any{"env": "prod"},
+					},
+				},
+			},
+		},
+	}, newApp("api", "default"), bundle)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	objects, err := bundle.Applications[0].Config.Generate(bundle.Applications[0])
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objects))
+	}
+}
+
+func TestVolsyncConfig_Generate(t *testing.T) {
+	bundle := newBundle()
+	h := &traits.VolSyncHandler{}
+	err := h.Apply(&oam.Trait{
+		Type: "volsync",
+		Properties: map[string]any{
+			"sourcePVC":               "data",
+			"schedule":                "@daily",
+			"storageClassName":        "fast",
+			"volumeSnapshotClassName": "csi-snapclass",
+			"pruneIntervalDays":       float64(7),
+			"retain": map[string]any{
+				"daily":   float64(3),
+				"weekly":  float64(2),
+				"monthly": float64(1),
+			},
+		},
+	}, newApp("db", "default"), bundle)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	objects, err := bundle.Applications[0].Config.Generate(bundle.Applications[0])
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objects))
 	}
 }

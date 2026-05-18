@@ -222,6 +222,29 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 		}
 	}
 
+	// Shorthand: top-level remoteRef maps to a single data entry where secretKey=secretName.
+	// Matches the shape used in launcher examples (e.g. examples/04-webservice-full.yaml).
+	if rawRef, ok := props["remoteRef"].(map[string]any); ok {
+		if len(config.Data) > 0 || len(config.DataFrom) > 0 {
+			return nil, errors.New("external-secret: 'remoteRef' cannot be combined with 'data' or 'dataFrom'")
+		}
+		key, _ := rawRef["key"].(string)
+		if key == "" {
+			return nil, errors.New("external-secret: remoteRef.key is required")
+		}
+		ref := esRemoteRef{Key: key}
+		if p, ok := rawRef["property"].(string); ok {
+			ref.Property = p
+		}
+		if v, ok := rawRef["version"].(string); ok {
+			ref.Version = v
+		}
+		config.Data = append(config.Data, esDataEntry{
+			SecretKey: config.SecretName,
+			RemoteRef: ref,
+		})
+	}
+
 	return config, nil
 }
 
