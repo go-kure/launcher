@@ -8,7 +8,7 @@ require (
 	github.com/cilium/cilium v1.19.3
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260213133823-31b0c7c37342
-	github.com/go-kure/kure v0.2.0-alpha.3
+	github.com/go-kure/kure v0.2.0-alpha.4
 	github.com/google/go-containerregistry v0.21.5
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
