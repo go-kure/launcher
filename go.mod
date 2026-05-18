@@ -5,7 +5,7 @@ go 1.26.3
 require (
 	github.com/backube/volsync v0.15.0
 	github.com/cert-manager/cert-manager v1.20.2
-	github.com/cilium/cilium v1.19.3
+	github.com/cilium/cilium v1.19.4
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260213133823-31b0c7c37342
 	github.com/go-kure/kure v0.2.0-alpha.3
