@@ -207,6 +207,36 @@ func TestBuildCommand_NamespaceOverride(t *testing.T) {
 	}
 }
 
+func TestBuildCommand_StaleProfileField_Rejected(t *testing.T) {
+	const staleCraneProfile = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: stale-cluster
+spec:
+  gitops:
+    url: https://git.example.com
+  capabilities:
+    expose:
+      rendering:
+        controllerType: ingress
+        ingressClassName: nginx
+`
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", testAppYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", staleCraneProfile)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for stale crane field spec.gitops in cluster.yaml")
+	}
+}
+
 func TestBuildCommand_IsRegistered(t *testing.T) {
 	cmd := NewKurelCommand()
 	var found bool
