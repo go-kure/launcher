@@ -115,14 +115,18 @@ func runBuild(cmd *cobra.Command, appPath string, opts *buildOptions) error {
 func newBuiltinTransformer() *oam.Transformer {
 	return oam.NewTransformer(
 		map[string]oam.ComponentHandler{
-			"webservice": &components.WebserviceHandler{},
-			"worker":     &components.WorkerHandler{},
-			"cronjob":    &components.CronjobHandler{},
-			"daemonset":  &components.DaemonsetHandler{},
+			"webservice":  &components.WebserviceHandler{},
+			"worker":      &components.WorkerHandler{},
+			"cronjob":     &components.CronjobHandler{},
+			"daemonset":   &components.DaemonsetHandler{},
+			"statefulset": &components.StatefulsetHandler{},
 		},
 		map[string]oam.TraitHandler{
-			"expose":  &traits.ExposeHandler{},
-			"ingress": &traits.IngressHandler{}, //nolint:staticcheck
+			"expose":      &traits.ExposeHandler{},
+			"ingress":     &traits.IngressHandler{}, //nolint:staticcheck
+			"certificate": &traits.CertificateHandler{},
+			"scaler":      &traits.ScalerHandler{},
+			"pvc":         &traits.PVCHandler{},
 		},
 	)
 }
