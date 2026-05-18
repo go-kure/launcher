@@ -61,7 +61,10 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 	}
 
 	accessModes := []string{"ReadWriteOnce"}
-	if rawModes, ok := props["accessModes"].([]any); ok && len(rawModes) > 0 {
+	if rawModes, ok := props["accessModes"].([]any); ok {
+		if len(rawModes) == 0 {
+			return nil, errors.New("accessModes must not be empty when specified")
+		}
 		accessModes = nil
 		for i, m := range rawModes {
 			s, ok := m.(string)
