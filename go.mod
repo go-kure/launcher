@@ -3,6 +3,7 @@ module github.com/go-kure/launcher
 go 1.26.3
 
 require (
+	github.com/cert-manager/cert-manager v1.20.2
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/go-kure/kure v0.2.0-alpha.3
 	github.com/google/go-containerregistry v0.21.5
@@ -22,7 +23,6 @@ require (
 	github.com/backube/volsync v0.15.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
-	github.com/cert-manager/cert-manager v1.20.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/cilium v1.19.3 // indirect
 	github.com/cilium/ebpf v0.20.1-0.20260218191617-ee67e7f43dd9 // indirect
