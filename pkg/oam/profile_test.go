@@ -90,3 +90,64 @@ func TestParseClusterProfile_InvalidYAML(t *testing.T) {
 		t.Fatal("expected error for invalid YAML")
 	}
 }
+
+func TestParseClusterProfile_WrongAPIVersion(t *testing.T) {
+	data := []byte(`
+apiVersion: core.oam.dev/v1beta1
+kind: ClusterProfile
+metadata:
+  name: test-cluster
+`)
+	_, err := ParseClusterProfile(data)
+	if err == nil {
+		t.Fatal("expected error for wrong apiVersion")
+	}
+	if !strings.Contains(err.Error(), "apiVersion") {
+		t.Errorf("expected error to mention 'apiVersion', got: %v", err)
+	}
+}
+
+func TestParseClusterProfile_WrongKind(t *testing.T) {
+	data := []byte(`
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-cluster
+`)
+	_, err := ParseClusterProfile(data)
+	if err == nil {
+		t.Fatal("expected error for wrong kind")
+	}
+	if !strings.Contains(err.Error(), "kind") {
+		t.Errorf("expected error to mention 'kind', got: %v", err)
+	}
+}
+
+func TestParseClusterProfile_MissingName(t *testing.T) {
+	data := []byte(`
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: ""
+`)
+	_, err := ParseClusterProfile(data)
+	if err == nil {
+		t.Fatal("expected error for missing metadata.name")
+	}
+	if !strings.Contains(err.Error(), "metadata.name") {
+		t.Errorf("expected error to mention 'metadata.name', got: %v", err)
+	}
+}
+
+func TestParseClusterProfile_InvalidName(t *testing.T) {
+	data := []byte(`
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: "Not A Valid DNS Name!"
+`)
+	_, err := ParseClusterProfile(data)
+	if err == nil {
+		t.Fatal("expected error for invalid DNS name")
+	}
+}

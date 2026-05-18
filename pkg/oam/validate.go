@@ -172,11 +172,40 @@ func validateApplicationPolicy(p *ApplicationPolicy, index int, seenNames map[st
 	return nil
 }
 
+// validateClusterProfile checks apiVersion, kind, and metadata.name on a
+// decoded ClusterProfile, mirroring the semantic validation that validate()
+// applies to Application documents.
+func validateClusterProfile(profile *ClusterProfile) error {
+	if profile.APIVersion != SupportedAPIVersion {
+		return profileValidationError("apiVersion", fmt.Sprintf("unsupported apiVersion %q, expected %q",
+			profile.APIVersion, SupportedAPIVersion))
+	}
+	if profile.Kind != "ClusterProfile" {
+		return profileValidationError("kind", fmt.Sprintf("expected kind ClusterProfile, got %q", profile.Kind))
+	}
+	if profile.Metadata.Name == "" {
+		return profileValidationError("metadata.name", "metadata.name is required")
+	}
+	if errs := validation.IsDNS1123Subdomain(profile.Metadata.Name); len(errs) > 0 {
+		return profileValidationError("metadata.name", fmt.Sprintf("metadata.name %q is not a valid DNS-1123 subdomain",
+			profile.Metadata.Name))
+	}
+	return nil
+}
+
 // oamValidationError creates a ValidationError with a custom message.
 func oamValidationError(field, message string) *errors.ValidationError {
 	return &errors.ValidationError{
 		Field:     field,
 		Component: "application",
+		Message:   message,
+	}
+}
+
+func profileValidationError(field, message string) *errors.ValidationError {
+	return &errors.ValidationError{
+		Field:     field,
+		Component: "clusterprofile",
 		Message:   message,
 	}
 }
