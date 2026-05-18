@@ -10,6 +10,13 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
+var validPVCAccessModes = map[string]bool{
+	"ReadWriteOnce":    true,
+	"ReadOnlyMany":     true,
+	"ReadWriteMany":    true,
+	"ReadWriteOncePod": true,
+}
+
 // PVCHandler handles OAM pvc traits, generating a standalone PersistentVolumeClaim.
 type PVCHandler struct{}
 
@@ -54,17 +61,17 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 	}
 
 	accessModes := []string{"ReadWriteOnce"}
-	if rawModes, ok := props["accessModes"].([]any); ok {
+	if rawModes, ok := props["accessModes"].([]any); ok && len(rawModes) > 0 {
 		accessModes = nil
 		for i, m := range rawModes {
 			s, ok := m.(string)
 			if !ok {
 				return nil, errors.Errorf("accessModes[%d]: expected string, got %T", i, m)
 			}
+			if !validPVCAccessModes[s] {
+				return nil, errors.Errorf("invalid accessMode %q: must be one of ReadWriteOnce, ReadOnlyMany, ReadWriteMany, ReadWriteOncePod", s)
+			}
 			accessModes = append(accessModes, s)
-		}
-		if len(accessModes) == 0 {
-			return nil, errors.New("accessModes must contain at least one entry when specified")
 		}
 	}
 

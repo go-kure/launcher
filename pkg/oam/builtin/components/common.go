@@ -1105,13 +1105,11 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		vct.StorageClass, _ = m["storageClass"].(string)
 		vct.Size, _ = m["size"].(string)
 		vct.MountPath, _ = m["mountPath"].(string)
-		if modes, ok := m["accessModes"].([]any); ok {
-			for _, mode := range modes {
-				if s, ok := mode.(string); ok {
-					vct.AccessModes = append(vct.AccessModes, s)
-				}
-			}
+		accessModes, err := parseAccessModes(m)
+		if err != nil {
+			return nil, errors.Wrapf(err, "volumeClaimTemplate %q", vct.Name)
 		}
+		vct.AccessModes = accessModes
 		if vct.Name == "" {
 			return nil, errors.New("volumeClaimTemplate entry missing required field 'name'")
 		}
