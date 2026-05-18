@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: db
+  name: db
+  namespace: default
+spec:
+  podManagementPolicy: OrderedReady
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  serviceName: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+      - image: ghcr.io/example/postgres:v15.0
+        imagePullPolicy: IfNotPresent
+        name: db
+        ports:
+        - containerPort: 5432
+          name: tcp
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: data
+      serviceAccountName: db
+  updateStrategy: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+    status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: db
+  name: db
+  namespace: default
+spec:
+  clusterIP: None
+  ports:
+  - name: tcp
+    port: 5432
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    app: db
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: db
+  name: db
+  namespace: default

@@ -1,0 +1,17 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        port: 8080
+      traits:
+        - type: scaler
+          properties:
+            minReplicas: 2
+            maxReplicas: 10

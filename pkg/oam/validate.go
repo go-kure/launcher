@@ -25,7 +25,7 @@ var validComponentTypes = map[string]bool{
 }
 
 // validTraitTypes is the Phase 1 set from design-kurel-package.md §4.3.
-// Deferred until Phase 2 (#49, #50): pvc, networkpolicy, cilium-networkpolicy, volsync.
+// Deferred until Phase 2 (#49, #50): networkpolicy, cilium-networkpolicy, volsync.
 // Updated when Phase 2 handlers land.
 var validTraitTypes = map[string]bool{
 	"expose":          true,
@@ -35,6 +35,7 @@ var validTraitTypes = map[string]bool{
 	"external-secret": true,
 	"configmap":       true,
 	"scaler":          true,
+	"pvc":             true,
 }
 
 // traitComponentRestrictions maps trait types to the component types they support.

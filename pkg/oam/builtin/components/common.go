@@ -1079,6 +1079,56 @@ func createServiceAccount(name, namespace string, labels map[string]string) *cor
 	return sa
 }
 
+// VolumeClaimTemplate represents a PVC template for a StatefulSet.
+type VolumeClaimTemplate struct {
+	Name         string
+	StorageClass string
+	Size         string
+	AccessModes  []string
+	MountPath    string
+}
+
+// parseVolumeClaimTemplates parses volumeClaimTemplates from OAM properties.
+func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, error) {
+	vctList, ok := props["volumeClaimTemplates"].([]any)
+	if !ok {
+		return nil, nil
+	}
+	var vcts []VolumeClaimTemplate
+	for _, v := range vctList {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return nil, errors.New("volumeClaimTemplates: each entry must be a mapping")
+		}
+		vct := VolumeClaimTemplate{}
+		vct.Name, _ = m["name"].(string)
+		vct.StorageClass, _ = m["storageClass"].(string)
+		vct.Size, _ = m["size"].(string)
+		vct.MountPath, _ = m["mountPath"].(string)
+		if modes, ok := m["accessModes"].([]any); ok {
+			for _, mode := range modes {
+				if s, ok := mode.(string); ok {
+					vct.AccessModes = append(vct.AccessModes, s)
+				}
+			}
+		}
+		if vct.Name == "" {
+			return nil, errors.New("volumeClaimTemplate entry missing required field 'name'")
+		}
+		if vct.Size == "" {
+			return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'size'", vct.Name)
+		}
+		if vct.MountPath == "" {
+			return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'mountPath'", vct.Name)
+		}
+		if _, err := resource.ParseQuantity(vct.Size); err != nil {
+			return nil, errors.Errorf("volumeClaimTemplate %q: invalid size %q: %w", vct.Name, vct.Size, err)
+		}
+		vcts = append(vcts, vct)
+	}
+	return vcts, nil
+}
+
 // BuildPVC creates a PersistentVolumeClaim from a PVCConfig.
 func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev1.PersistentVolumeClaim, error) {
 	qty, err := resource.ParseQuantity(pvc.Size)
