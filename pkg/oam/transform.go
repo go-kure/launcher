@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/go-kure/kure/pkg/stack"
 )
@@ -99,6 +100,46 @@ func (t *Transformer) RegisterPolicy(typeName string, h PolicyHandler) {
 		panic("oam: policy handler does not claim type " + typeName)
 	}
 	t.policyHandlers[typeName] = h
+}
+
+// EvaluateProfile validates and applies defaults to all capability renderings in
+// the ClusterProfile. For each capability key whose trait type matches a registered
+// handler that implements ValidateAndApplyDefaults, the rendering map is passed
+// through that handler's VAD method. Returns a new ClusterProfile with updated
+// renderings, or a TransformError wrapping the first validation failure.
+//
+// Capability keys follow the "<type>" or "<type>.<scope>" convention. EvaluateProfile
+// must be called before Transform so that malformed profile renderings are caught at
+// load time rather than silently propagated into the pipeline.
+func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile, error) {
+	if profile == nil {
+		return nil, nil
+	}
+	if len(profile.Spec.Capabilities) == 0 {
+		return profile, nil
+	}
+	evaluated := make(map[string]CapabilityBinding, len(profile.Spec.Capabilities))
+	for key, binding := range profile.Spec.Capabilities {
+		typeName, _, _ := strings.Cut(key, ".")
+		handler, ok := t.traitHandlers[typeName]
+		if !ok {
+			evaluated[key] = binding
+			continue
+		}
+		vad, ok := handler.(ValidateAndApplyDefaults)
+		if !ok {
+			evaluated[key] = binding
+			continue
+		}
+		validated, err := vad.ValidateAndApplyDefaults(binding.Rendering)
+		if err != nil {
+			return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
+		}
+		evaluated[key] = CapabilityBinding{Rendering: validated}
+	}
+	result := *profile
+	result.Spec = ClusterProfileSpec{Capabilities: evaluated}
+	return &result, nil
 }
 
 func (t *Transformer) findComponentHandler(componentType string) ComponentHandler {

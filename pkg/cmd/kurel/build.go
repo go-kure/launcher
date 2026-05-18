@@ -72,10 +72,15 @@ func runBuild(cmd *cobra.Command, appPath string, opts *buildOptions) error {
 
 	transformer := newBuiltinTransformer()
 
+	evaluatedProfile, err := transformer.EvaluateProfile(&profile)
+	if err != nil {
+		return errors.Wrapf(err, "evaluating profile %q", opts.profilePath)
+	}
+
 	ctx := oam.TransformContext{
 		ClusterID:    opts.clusterID,
 		Namespace:    opts.namespace,
-		Capabilities: profile.Spec.Capabilities,
+		Capabilities: evaluatedProfile.Spec.Capabilities,
 	}
 
 	cluster, err := transformer.Transform(app, ctx)

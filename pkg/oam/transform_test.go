@@ -587,3 +587,145 @@ func TestTransformer_FindHandler_NoMatch(t *testing.T) {
 		t.Errorf("findPolicyHandler(unknown) = %v, want nil", got)
 	}
 }
+
+// --- EvaluateProfile ---
+
+type errVADHandler struct {
+	stubTraitHandler
+	err error
+	out map[string]any
+}
+
+func (h *errVADHandler) CapabilityRequired() bool { return true }
+func (h *errVADHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
+	if h.err != nil {
+		return nil, h.err
+	}
+	if h.out != nil {
+		return h.out, nil
+	}
+	return rendering, nil
+}
+
+func TestEvaluateProfile_NilProfile(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	got, err := tr.EvaluateProfile(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil for nil profile, got %v", got)
+	}
+}
+
+func TestEvaluateProfile_EmptyCapabilities(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	profile := &ClusterProfile{Metadata: ClusterProfileMetadata{Name: "test"}}
+	got, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != profile {
+		t.Error("expected same pointer for profile with no capabilities")
+	}
+}
+
+func TestEvaluateProfile_UnknownCapability_Passthrough(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	profile := &ClusterProfile{
+		Spec: ClusterProfileSpec{
+			Capabilities: map[string]CapabilityBinding{
+				"unknown-trait": {Rendering: map[string]any{"x": "y"}},
+			},
+		},
+	}
+	got, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Spec.Capabilities["unknown-trait"].Rendering["x"] != "y" {
+		t.Error("unknown capability rendering should pass through unchanged")
+	}
+}
+
+func TestEvaluateProfile_NonVADHandler_Passthrough(t *testing.T) {
+	// A plain TraitHandler (no CapabilityAware, no ValidateAndApplyDefaults)
+	// is registered successfully; EvaluateProfile must pass its rendering through.
+	tr := NewTransformer(nil, map[string]TraitHandler{
+		"expose": &stubTraitHandler{typ: "expose"},
+	})
+	profile := &ClusterProfile{
+		Spec: ClusterProfileSpec{
+			Capabilities: map[string]CapabilityBinding{
+				"expose": {Rendering: map[string]any{"controllerType": "ingress"}},
+			},
+		},
+	}
+	got, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Spec.Capabilities["expose"].Rendering["controllerType"] != "ingress" {
+		t.Error("non-VAD handler should pass rendering through unchanged")
+	}
+}
+
+func TestEvaluateProfile_ValidCapability_AppliesDefaults(t *testing.T) {
+	enriched := map[string]any{"controllerType": "ingress", "ingressClassName": "nginx"}
+	handler := &errVADHandler{stubTraitHandler: stubTraitHandler{typ: "expose"}, out: enriched}
+	tr := NewTransformer(nil, map[string]TraitHandler{"expose": handler})
+	profile := &ClusterProfile{
+		Spec: ClusterProfileSpec{
+			Capabilities: map[string]CapabilityBinding{
+				"expose": {Rendering: map[string]any{"controllerType": "ingress"}},
+			},
+		},
+	}
+	got, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Spec.Capabilities["expose"].Rendering["ingressClassName"] != "nginx" {
+		t.Error("expected enriched rendering from VAD handler")
+	}
+}
+
+func TestEvaluateProfile_InvalidCapability_ReturnsError(t *testing.T) {
+	handler := &errVADHandler{stubTraitHandler: stubTraitHandler{typ: "expose"}, err: errors.New("bad rendering")}
+	tr := NewTransformer(nil, map[string]TraitHandler{"expose": handler})
+	profile := &ClusterProfile{
+		Spec: ClusterProfileSpec{
+			Capabilities: map[string]CapabilityBinding{
+				"expose": {Rendering: map[string]any{"controllerType": "unknown"}},
+			},
+		},
+	}
+	_, err := tr.EvaluateProfile(profile)
+	if err == nil {
+		t.Fatal("expected error for invalid capability rendering")
+	}
+	var te *TransformError
+	if !errors.As(err, &te) {
+		t.Errorf("expected TransformError, got %T: %v", err, err)
+	}
+}
+
+func TestEvaluateProfile_ScopedKey(t *testing.T) {
+	enriched := map[string]any{"controllerType": "ingress", "ingressClassName": "traefik"}
+	handler := &errVADHandler{stubTraitHandler: stubTraitHandler{typ: "expose"}, out: enriched}
+	tr := NewTransformer(nil, map[string]TraitHandler{"expose": handler})
+	profile := &ClusterProfile{
+		Spec: ClusterProfileSpec{
+			Capabilities: map[string]CapabilityBinding{
+				"expose.prod": {Rendering: map[string]any{"controllerType": "ingress"}},
+			},
+		},
+	}
+	got, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Spec.Capabilities["expose.prod"].Rendering["ingressClassName"] != "traefik" {
+		t.Error("scoped key should resolve to base type and call VAD handler")
+	}
+}
