@@ -1,0 +1,375 @@
+package traits
+
+import (
+	"fmt"
+	"time"
+
+	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	"github.com/go-kure/kure/pkg/kubernetes/externalsecrets"
+	"github.com/go-kure/kure/pkg/stack"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin"
+)
+
+// ExternalSecretHandler handles OAM external-secret traits.
+type ExternalSecretHandler struct{}
+
+// CanHandle returns true for external-secret trait type.
+func (h *ExternalSecretHandler) CanHandle(traitType string) bool {
+	return traitType == "external-secret"
+}
+
+// CapabilityRequired returns true: the external-secret trait needs secretStoreRef
+// from a ClusterProfile capability.
+func (h *ExternalSecretHandler) CapabilityRequired() bool { return true }
+
+// ValidateAndApplyDefaults validates the external-secret capability rendering.
+func (h *ExternalSecretHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
+	r, err := builtin.DecodeStrict[builtin.ExternalSecretRendering](rendering)
+	if err != nil {
+		return nil, errors.Wrap(err, "external-secret rendering")
+	}
+	rawRef, _ := rendering["secretStoreRef"].(map[string]any)
+	if rawRef == nil || r.SecretStoreRef.Name == "" {
+		return nil, errors.New("external-secret rendering: secretStoreRef.name is required")
+	}
+	if r.SecretStoreRef.Kind == "" {
+		if rawRef == nil {
+			rendering["secretStoreRef"] = map[string]any{"kind": "ClusterSecretStore"}
+		} else {
+			rawRef["kind"] = "ClusterSecretStore"
+		}
+	}
+	return rendering, nil
+}
+
+// Apply creates an ExternalSecret resource appended to the bundle.
+func (h *ExternalSecretHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
+	config, err := h.parseProperties(trait.Properties, app)
+	if err != nil {
+		return err
+	}
+
+	esApp := stack.NewApplication(
+		app.Name+"-external-secret-"+config.SecretName,
+		app.Namespace,
+		config,
+	)
+	bundle.Applications = append(bundle.Applications, esApp)
+	return nil
+}
+
+func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack.Application) (*ExternalSecretConfig, error) {
+	config := &ExternalSecretConfig{
+		ComponentName:   app.Name,
+		RefreshInterval: "1h",
+	}
+
+	secretName, ok := props["secretName"].(string)
+	if !ok || secretName == "" {
+		return nil, errors.New("required property 'secretName' missing or not a string")
+	}
+	config.SecretName = secretName
+
+	rawStoreRef, _ := props["secretStoreRef"].(map[string]any)
+	if rawStoreRef == nil {
+		return nil, errors.New("required capability property 'secretStoreRef' missing; configure external-secret in ClusterProfile")
+	}
+	storeName, _ := rawStoreRef["name"].(string)
+	if storeName == "" {
+		return nil, errors.New("external-secret: secretStoreRef.name is required")
+	}
+	config.StoreRefName = storeName
+	config.StoreRefKind = "ClusterSecretStore"
+	if kind, ok := rawStoreRef["kind"].(string); ok && kind != "" {
+		config.StoreRefKind = kind
+	}
+
+	if ri, ok := props["refreshInterval"].(string); ok && ri != "" {
+		config.RefreshInterval = ri
+	}
+
+	config.TargetSecretName = secretName
+	if tsn, ok := props["targetSecretName"].(string); ok && tsn != "" {
+		config.TargetSecretName = tsn
+	}
+
+	if rawTarget, ok := props["target"].(map[string]any); ok {
+		if cp, ok := rawTarget["creationPolicy"].(string); ok && cp != "" {
+			validCreationPolicies := map[creationPolicy]bool{
+				creationPolicyOwner:  true,
+				creationPolicyOrphan: true,
+				creationPolicyMerge:  true,
+				creationPolicyNone:   true,
+			}
+			if !validCreationPolicies[creationPolicy(cp)] {
+				return nil, errors.Errorf("target.creationPolicy %q is invalid; must be one of Owner, Orphan, Merge, None", cp)
+			}
+			config.CreationPolicy = creationPolicy(cp)
+		}
+		if dp, ok := rawTarget["deletionPolicy"].(string); ok && dp != "" {
+			validDeletionPolicies := map[deletionPolicy]bool{
+				deletionPolicyDelete: true,
+				deletionPolicyMerge:  true,
+				deletionPolicyRetain: true,
+			}
+			if !validDeletionPolicies[deletionPolicy(dp)] {
+				return nil, errors.Errorf("target.deletionPolicy %q is invalid; must be one of Delete, Merge, Retain", dp)
+			}
+			config.DeletionPolicy = deletionPolicy(dp)
+		}
+		if rawTemplate, ok := rawTarget["template"].(map[string]any); ok {
+			tmpl := &esTemplate{}
+			if t, ok := rawTemplate["type"].(string); ok {
+				tmpl.Type = t
+			}
+			if rawData, ok := rawTemplate["data"].(map[string]any); ok {
+				tmpl.Data = make(map[string]string, len(rawData))
+				for k, v := range rawData {
+					tmpl.Data[k] = fmt.Sprintf("%v", v)
+				}
+			}
+			config.Template = tmpl
+		}
+	}
+
+	if rawData, ok := props["data"].([]any); ok {
+		for i, item := range rawData {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				return nil, errors.Errorf("data[%d]: expected object", i)
+			}
+			secretKey, _ := entry["secretKey"].(string)
+			if secretKey == "" {
+				return nil, errors.Errorf("data[%d]: required field 'secretKey' missing or empty", i)
+			}
+			rawRef, ok := entry["remoteRef"].(map[string]any)
+			if !ok {
+				return nil, errors.Errorf("data[%d]: required field 'remoteRef' missing or not an object", i)
+			}
+			key, _ := rawRef["key"].(string)
+			if key == "" {
+				return nil, errors.Errorf("data[%d].remoteRef: required field 'key' missing or empty", i)
+			}
+			ref := esRemoteRef{Key: key}
+			if p, ok := rawRef["property"].(string); ok {
+				ref.Property = p
+			}
+			if v, ok := rawRef["version"].(string); ok {
+				ref.Version = v
+			}
+			if ds, ok := rawRef["decodingStrategy"].(string); ok {
+				ref.DecodingStrategy = ds
+			}
+			config.Data = append(config.Data, esDataEntry{
+				SecretKey: secretKey,
+				RemoteRef: ref,
+			})
+		}
+	}
+
+	if rawDataFrom, ok := props["dataFrom"].([]any); ok {
+		for i, item := range rawDataFrom {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				return nil, errors.Errorf("dataFrom[%d]: expected object", i)
+			}
+			dfEntry := esDataFromEntry{}
+			if rawExtract, ok := entry["extract"].(map[string]any); ok {
+				key, _ := rawExtract["key"].(string)
+				if key == "" {
+					return nil, errors.Errorf("dataFrom[%d].extract: required field 'key' missing or empty", i)
+				}
+				ref := &esExtractRef{Key: key}
+				if ds, ok := rawExtract["decodingStrategy"].(string); ok {
+					ref.DecodingStrategy = ds
+				}
+				if cs, ok := rawExtract["conversionStrategy"].(string); ok {
+					ref.ConversionStrategy = cs
+				}
+				if mp, ok := rawExtract["metadataPolicy"].(string); ok {
+					ref.MetadataPolicy = mp
+				}
+				dfEntry.Extract = ref
+			}
+			if rawFind, ok := entry["find"].(map[string]any); ok {
+				find := &esFind{}
+				if rawName, ok := rawFind["name"].(map[string]any); ok {
+					if re, ok := rawName["regexp"].(string); ok {
+						find.Name = &esFindName{RegExp: re}
+					}
+				}
+				if rawTags, ok := rawFind["tags"].(map[string]any); ok {
+					find.Tags = make(map[string]string, len(rawTags))
+					for k, v := range rawTags {
+						find.Tags[k] = fmt.Sprintf("%v", v)
+					}
+				}
+				dfEntry.Find = find
+				if find.Name == nil && len(find.Tags) == 0 {
+					return nil, errors.Errorf("dataFrom[%d].find: must have at least 'name' or 'tags'", i)
+				}
+			}
+			if dfEntry.Extract == nil && dfEntry.Find == nil {
+				return nil, errors.Errorf("dataFrom[%d]: must have 'extract' or 'find'", i)
+			}
+			config.DataFrom = append(config.DataFrom, dfEntry)
+		}
+	}
+
+	return config, nil
+}
+
+type creationPolicy string
+
+const (
+	creationPolicyOwner  creationPolicy = "Owner"
+	creationPolicyOrphan creationPolicy = "Orphan"
+	creationPolicyMerge  creationPolicy = "Merge"
+	creationPolicyNone   creationPolicy = "None"
+)
+
+type deletionPolicy string
+
+const (
+	deletionPolicyDelete deletionPolicy = "Delete"
+	deletionPolicyMerge  deletionPolicy = "Merge"
+	deletionPolicyRetain deletionPolicy = "Retain"
+)
+
+type esDataEntry struct {
+	SecretKey string
+	RemoteRef esRemoteRef
+}
+
+type esRemoteRef struct {
+	Key              string
+	Property         string
+	Version          string
+	DecodingStrategy string
+}
+
+type esExtractRef struct {
+	Key                string
+	DecodingStrategy   string
+	ConversionStrategy string
+	MetadataPolicy     string
+}
+
+type esDataFromEntry struct {
+	Extract *esExtractRef
+	Find    *esFind
+}
+
+type esFind struct {
+	Name *esFindName
+	Tags map[string]string
+}
+
+type esFindName struct {
+	RegExp string
+}
+
+type esTemplate struct {
+	Type string
+	Data map[string]string
+}
+
+// ExternalSecretConfig implements stack.ApplicationConfig for external-secret traits.
+type ExternalSecretConfig struct {
+	SecretName       string
+	ComponentName    string
+	StoreRefName     string
+	StoreRefKind     string
+	RefreshInterval  string
+	TargetSecretName string
+	CreationPolicy   creationPolicy
+	DeletionPolicy   deletionPolicy
+	Template         *esTemplate
+	Data             []esDataEntry
+	DataFrom         []esDataFromEntry
+}
+
+// Generate creates an ExternalSecret CRD resource.
+func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	dur, err := time.ParseDuration(c.RefreshInterval)
+	if err != nil {
+		return nil, errors.Errorf("invalid refreshInterval %q: %w", c.RefreshInterval, err)
+	}
+
+	es := externalsecrets.ExternalSecret(&externalsecrets.ExternalSecretConfig{
+		Name:      c.SecretName,
+		Namespace: app.Namespace,
+		SecretStoreRef: esv1.SecretStoreRef{
+			Name: c.StoreRefName,
+			Kind: c.StoreRefKind,
+		},
+	})
+	externalsecrets.AddExternalSecretLabel(es, "app", c.ComponentName)
+	externalsecrets.SetRefreshInterval(es, metav1.Duration{Duration: dur})
+
+	target := esv1.ExternalSecretTarget{Name: c.TargetSecretName}
+	if c.CreationPolicy != "" {
+		target.CreationPolicy = esv1.ExternalSecretCreationPolicy(c.CreationPolicy)
+	}
+	if c.DeletionPolicy != "" {
+		target.DeletionPolicy = esv1.ExternalSecretDeletionPolicy(c.DeletionPolicy)
+	}
+	if c.Template != nil {
+		target.Template = &esv1.ExternalSecretTemplate{
+			Type: corev1.SecretType(c.Template.Type),
+			Data: c.Template.Data,
+		}
+	}
+	externalsecrets.SetTarget(es, target)
+
+	for _, d := range c.Data {
+		ref := esv1.ExternalSecretDataRemoteRef{Key: d.RemoteRef.Key}
+		if d.RemoteRef.Property != "" {
+			ref.Property = d.RemoteRef.Property
+		}
+		if d.RemoteRef.Version != "" {
+			ref.Version = d.RemoteRef.Version
+		}
+		if d.RemoteRef.DecodingStrategy != "" {
+			ref.DecodingStrategy = esv1.ExternalSecretDecodingStrategy(d.RemoteRef.DecodingStrategy)
+		}
+		externalsecrets.AddExternalSecretData(es, esv1.ExternalSecretData{
+			SecretKey: d.SecretKey,
+			RemoteRef: ref,
+		})
+	}
+
+	for _, df := range c.DataFrom {
+		entry := esv1.ExternalSecretDataFromRemoteRef{}
+		if df.Extract != nil {
+			extract := &esv1.ExternalSecretDataRemoteRef{Key: df.Extract.Key}
+			if df.Extract.DecodingStrategy != "" {
+				extract.DecodingStrategy = esv1.ExternalSecretDecodingStrategy(df.Extract.DecodingStrategy)
+			}
+			if df.Extract.ConversionStrategy != "" {
+				extract.ConversionStrategy = esv1.ExternalSecretConversionStrategy(df.Extract.ConversionStrategy)
+			}
+			if df.Extract.MetadataPolicy != "" {
+				extract.MetadataPolicy = esv1.ExternalSecretMetadataPolicy(df.Extract.MetadataPolicy)
+			}
+			entry.Extract = extract
+		}
+		if df.Find != nil {
+			find := &esv1.ExternalSecretFind{Tags: df.Find.Tags}
+			if df.Find.Name != nil {
+				find.Name = &esv1.FindName{RegExp: df.Find.Name.RegExp}
+			}
+			entry.Find = find
+		}
+		externalsecrets.AddDataFrom(es, entry)
+	}
+
+	obj := client.Object(es)
+	return []*client.Object{&obj}, nil
+}

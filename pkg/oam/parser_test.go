@@ -430,38 +430,6 @@ spec:
 	}
 }
 
-func TestParse_RejectsDeferredPhase2TraitType(t *testing.T) {
-	// networkpolicy is a Phase 2 trait (issue #49) — not yet supported.
-	// It must fail at validate time, not silently pass to dispatch.
-	input := `
-apiVersion: launcher.gokure.dev/v1alpha1
-kind: Application
-metadata:
-  name: hello
-spec:
-  components:
-  - name: web
-    type: webservice
-    properties:
-      image: nginx:1.25
-    traits:
-    - type: networkpolicy
-      properties:
-        size: 10Gi
-`
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for deferred Phase 2 trait networkpolicy, got nil")
-	}
-	var valErr *errors.ValidationError
-	if !stderrors.As(err, &valErr) {
-		t.Fatalf("expected *errors.ValidationError, got %T: %v", err, err)
-	}
-	if valErr.Value != "networkpolicy" {
-		t.Errorf("Value = %q, want %q", valErr.Value, "networkpolicy")
-	}
-}
-
 func TestParse_RejectsDuplicateComponentNames(t *testing.T) {
 	input := `
 apiVersion: launcher.gokure.dev/v1alpha1

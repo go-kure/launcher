@@ -3,8 +3,11 @@ module github.com/go-kure/launcher
 go 1.26.3
 
 require (
+	github.com/backube/volsync v0.15.0
 	github.com/cert-manager/cert-manager v1.20.2
+	github.com/cilium/cilium v1.19.3
 	github.com/evanphx/json-patch/v5 v5.9.11
+	github.com/external-secrets/external-secrets/apis v0.0.0-20260213133823-31b0c7c37342
 	github.com/go-kure/kure v0.2.0-alpha.3
 	github.com/google/go-containerregistry v0.21.5
 	github.com/spf13/cobra v1.10.2
@@ -20,11 +23,9 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/avast/retry-go/v5 v5.0.0 // indirect
-	github.com/backube/volsync v0.15.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/cilium/cilium v1.19.3 // indirect
 	github.com/cilium/ebpf v0.20.1-0.20260218191617-ee67e7f43dd9 // indirect
 	github.com/cilium/hive v0.0.0-20260108104938-97756f6ff54c // indirect
 	github.com/cilium/proxy v0.0.0-20250623105955-2136f59a4ea1 // indirect
@@ -37,7 +38,6 @@ require (
 	github.com/controlplaneio-fluxcd/flux-operator v0.40.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
-	github.com/external-secrets/external-secrets/apis v0.0.0-20260213133823-31b0c7c37342 // indirect
 	github.com/fluxcd/helm-controller/api v1.5.4 // indirect
 	github.com/fluxcd/image-automation-controller/api v1.1.2 // indirect
 	github.com/fluxcd/kustomize-controller/api v1.8.4 // indirect
