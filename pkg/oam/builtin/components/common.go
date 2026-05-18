@@ -805,6 +805,90 @@ func parseAffinity(props map[string]any) (AffinityConfig, error) {
 	return cfg, nil
 }
 
+func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
+	tolList, ok := props["tolerations"].([]any)
+	if !ok {
+		return nil, nil
+	}
+	tolerations := make([]corev1.Toleration, 0, len(tolList))
+	for i, t := range tolList {
+		m, ok := t.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("toleration[%d]: must be a mapping", i)
+		}
+		tol := corev1.Toleration{}
+
+		if raw, exists := m["key"]; exists {
+			keyStr, ok := raw.(string)
+			if !ok {
+				return nil, errors.Errorf("toleration[%d].key: must be a string, got %T", i, raw)
+			}
+			tol.Key = keyStr
+		}
+
+		if raw, exists := m["operator"]; exists {
+			opStr, ok := raw.(string)
+			if !ok {
+				return nil, errors.Errorf("toleration[%d].operator: must be a string, got %T", i, raw)
+			}
+			switch corev1.TolerationOperator(opStr) {
+			case corev1.TolerationOpExists, corev1.TolerationOpEqual:
+				tol.Operator = corev1.TolerationOperator(opStr)
+			default:
+				return nil, errors.Errorf("toleration[%d].operator: invalid value %q, must be 'Exists' or 'Equal'", i, opStr)
+			}
+		} else if tol.Key == "" {
+			tol.Operator = corev1.TolerationOpExists
+		} else {
+			tol.Operator = corev1.TolerationOpEqual
+		}
+
+		if raw, exists := m["value"]; exists {
+			valStr, ok := raw.(string)
+			if !ok {
+				return nil, errors.Errorf("toleration[%d].value: must be a string, got %T", i, raw)
+			}
+			tol.Value = valStr
+		}
+
+		if raw, exists := m["effect"]; exists {
+			effStr, ok := raw.(string)
+			if !ok {
+				return nil, errors.Errorf("toleration[%d].effect: must be a string, got %T", i, raw)
+			}
+			switch corev1.TaintEffect(effStr) {
+			case corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute, "":
+				tol.Effect = corev1.TaintEffect(effStr)
+			default:
+				return nil, errors.Errorf("toleration[%d].effect: invalid value %q", i, effStr)
+			}
+		}
+
+		tolerations = append(tolerations, tol)
+	}
+	return tolerations, nil
+}
+
+func parseHistoryLimit(field string, v any) (int32, error) {
+	switch n := v.(type) {
+	case int:
+		if n < 0 {
+			return 0, errors.Errorf("%s: must be non-negative, got %d", field, n)
+		}
+		return int32(n), nil //nolint:gosec
+	case float64:
+		if n != float64(int64(n)) {
+			return 0, errors.Errorf("%s: must be an integer, got %g", field, n)
+		}
+		if n < 0 {
+			return 0, errors.Errorf("%s: must be non-negative, got %g", field, n)
+		}
+		return int32(n), nil
+	default:
+		return 0, errors.Errorf("%s: must be an integer, got %T", field, v)
+	}
+}
+
 // --- Builders ---
 
 func buildEnvVars(envs []EnvVar) []corev1.EnvVar {

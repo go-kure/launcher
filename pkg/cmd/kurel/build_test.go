@@ -158,20 +158,20 @@ func TestBuildCommand_InvalidAppYAML(t *testing.T) {
 }
 
 func TestBuildCommand_UnsupportedComponentType(t *testing.T) {
-	const workerApp = `apiVersion: launcher.gokure.dev/v1alpha1
+	const unknownApp = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
-  name: my-worker
+  name: my-app
   namespace: default
 spec:
   components:
     - name: backend
-      type: worker
+      type: statefulset
       properties:
-        image: ghcr.io/example/worker:v1.0.0
+        image: ghcr.io/example/backend:v1.0.0
 `
 	dir := t.TempDir()
-	appPath := writeTempFile(t, dir, "app.yaml", workerApp)
+	appPath := writeTempFile(t, dir, "app.yaml", unknownApp)
 	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
 
 	cmd := NewKurelCommand()
@@ -182,7 +182,7 @@ spec:
 	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for unsupported component type 'worker'")
+		t.Fatal("expected error for unsupported component type 'statefulset'")
 	}
 }
 

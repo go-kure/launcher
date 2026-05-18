@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: backend
+  name: backend
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - image: ghcr.io/example/worker:v1.0.0
+        imagePullPolicy: IfNotPresent
+        name: backend
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: backend
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: backend
+  name: backend
+  namespace: default

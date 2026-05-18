@@ -110,12 +110,15 @@ func runBuild(cmd *cobra.Command, appPath string, opts *buildOptions) error {
 	return writeOutputDir(opts.outputDir, app.Metadata.Name, yamlBytes)
 }
 
-// newBuiltinTransformer creates a Transformer pre-loaded with the supported
-// built-in handlers for this vertical slice (webservice, expose, ingress).
+// newBuiltinTransformer creates a Transformer pre-loaded with all supported
+// built-in component and trait handlers.
 func newBuiltinTransformer() *oam.Transformer {
 	return oam.NewTransformer(
 		map[string]oam.ComponentHandler{
 			"webservice": &components.WebserviceHandler{},
+			"worker":     &components.WorkerHandler{},
+			"cronjob":    &components.CronjobHandler{},
+			"daemonset":  &components.DaemonsetHandler{},
 		},
 		map[string]oam.TraitHandler{
 			"expose":  &traits.ExposeHandler{},
