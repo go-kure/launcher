@@ -1,5 +1,13 @@
 package oam
 
+import (
+	"bytes"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/go-kure/launcher/pkg/errors"
+)
+
 // ClusterProfile encodes per-cluster capability bindings for the launcher runtime.
 // It is a YAML document with apiVersion launcher.gokure.dev/v1alpha1, kind ClusterProfile.
 //
@@ -30,4 +38,18 @@ type ClusterProfileSpec struct {
 // See docs/oam/design-cluster-profile.md §2 and docs/oam/design-capability-schema.md §3.6.
 type CapabilityBinding struct {
 	Rendering map[string]any `yaml:"rendering,omitempty" json:"rendering,omitempty"`
+}
+
+// ParseClusterProfile parses a ClusterProfile YAML document in strict mode.
+// Unknown fields are rejected so that stale crane fields (spec.gitops, etc.),
+// metadata fields outside the launcher schema, and typos in the profile
+// structure all fail the build with a clear error.
+func ParseClusterProfile(data []byte) (*ClusterProfile, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	var profile ClusterProfile
+	if err := dec.Decode(&profile); err != nil {
+		return nil, errors.Wrap(err, "parsing ClusterProfile")
+	}
+	return &profile, nil
 }

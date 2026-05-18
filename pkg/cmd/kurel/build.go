@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kio "github.com/go-kure/kure/pkg/io"
@@ -65,14 +64,14 @@ func runBuild(cmd *cobra.Command, appPath string, opts *buildOptions) error {
 		return errors.Wrapf(err, "reading profile file %q", opts.profilePath)
 	}
 
-	var profile oam.ClusterProfile
-	if err := yaml.Unmarshal(profileData, &profile); err != nil {
+	profile, err := oam.ParseClusterProfile(profileData)
+	if err != nil {
 		return errors.Wrapf(err, "parsing profile file %q", opts.profilePath)
 	}
 
 	transformer := newBuiltinTransformer()
 
-	evaluatedProfile, err := transformer.EvaluateProfile(&profile)
+	evaluatedProfile, err := transformer.EvaluateProfile(profile)
 	if err != nil {
 		return errors.Wrapf(err, "evaluating profile %q", opts.profilePath)
 	}
