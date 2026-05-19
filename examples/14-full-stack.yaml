@@ -116,10 +116,8 @@ spec:
   - name: db
     type: postgresql
     properties:
-      instances: 3
-      storage:
-        size: "50Gi"
-        storageClass: fast-ssd
+      replicas: 3
+      storageSize: "50Gi"
       resources:
         requests:
           cpu: "500m"

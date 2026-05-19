@@ -120,6 +120,7 @@ func newBuiltinTransformer() *oam.Transformer {
 			"cronjob":     &components.CronjobHandler{},
 			"daemonset":   &components.DaemonsetHandler{},
 			"statefulset": &components.StatefulsetHandler{},
+			"postgresql":  &components.PostgresqlHandler{},
 		},
 		map[string]oam.TraitHandler{
 			"expose":               &traits.ExposeHandler{},

@@ -1,11 +1,12 @@
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
-  name: my-database
+  name: test-db
+  namespace: default
 spec:
   components:
-  - name: db
+  - name: postgres
     type: postgresql
     properties:
-      replicas: 1
+      version: "16"
       storageSize: "10Gi"

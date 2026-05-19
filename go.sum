@@ -44,6 +44,8 @@ github.com/cloudnative-pg/cnpg-i v0.5.0 h1:/TOzpNT6cwNgrpftTtrnLKdoHgMwd+88vZgXj
 github.com/cloudnative-pg/cnpg-i v0.5.0/go.mod h1:7Gh4+UzhBpGhr4DreB1GN9wGYfvxwXCXZUyVt3zE/3I=
 github.com/cloudnative-pg/machinery v0.4.0 h1:3sfqrBptH4QQSVB4g10Z+7aiQRnh4g+6AsqsK0ibKaQ=
 github.com/cloudnative-pg/machinery v0.4.0/go.mod h1:OIwaTYAnLv8PmBmBvEf0BvMK2JBX6J+naTMg9UgV1FQ=
+github.com/cloudnative-pg/plugin-barman-cloud v0.12.0 h1:zq1hJYpyfRsVXp1CJ2ncZGQoIDfus614x6VYMtWfwEQ=
+github.com/cloudnative-pg/plugin-barman-cloud v0.12.0/go.mod h1:7pMLhJalzyTO0sx9uelGT7bKA53o+uWbrG4ktVIBWQM=
 github.com/cncf/xds/go v0.0.0-20251210132809-ee656c7534f5 h1:6xNmx7iTtyBRev0+D/Tv1FZd4SCg8axKApyNyRsAt/w=
 github.com/cncf/xds/go v0.0.0-20251210132809-ee656c7534f5/go.mod h1:KdCmV+x/BuvyMxRnYBlmVaq4OLiKW6iRQfvC62cvdkI=
 github.com/controlplaneio-fluxcd/flux-operator v0.40.0 h1:LoUtsOagXI7nVpg6uhKzA/gWgcmvssy/7B2UKRPF5X0=

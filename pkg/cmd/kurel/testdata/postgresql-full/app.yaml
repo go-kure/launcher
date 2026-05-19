@@ -1,0 +1,20 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db-full
+  namespace: production
+spec:
+  components:
+  - name: main-db
+    type: postgresql
+    properties:
+      version: "15"
+      storageSize: "100Gi"
+      replicas: 3
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi

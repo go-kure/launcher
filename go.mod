@@ -6,6 +6,8 @@ require (
 	github.com/backube/volsync v0.15.0
 	github.com/cert-manager/cert-manager v1.20.2
 	github.com/cilium/cilium v1.19.3
+	github.com/cloudnative-pg/cloudnative-pg v1.29.0
+	github.com/cloudnative-pg/plugin-barman-cloud v0.12.0
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260213133823-31b0c7c37342
 	github.com/go-kure/kure v0.2.0-alpha.3
@@ -32,7 +34,6 @@ require (
 	github.com/cilium/statedb v0.5.6 // indirect
 	github.com/cilium/stream v0.0.1 // indirect
 	github.com/cloudnative-pg/barman-cloud v0.5.1 // indirect
-	github.com/cloudnative-pg/cloudnative-pg v1.29.0 // indirect
 	github.com/cloudnative-pg/cnpg-i v0.5.0 // indirect
 	github.com/cloudnative-pg/machinery v0.4.0 // indirect
 	github.com/controlplaneio-fluxcd/flux-operator v0.40.0 // indirect
