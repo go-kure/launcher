@@ -168,6 +168,9 @@ func (c *WebserviceConfig) ApplyPolicy(p oam.Policy) error {
 	return nil
 }
 
+// ServicePort returns the port exposed by the component's Service.
+func (c *WebserviceConfig) ServicePort() int32 { return c.Port }
+
 // Generate creates Kubernetes Deployment, Service, and ServiceAccount resources.
 func (c *WebserviceConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}

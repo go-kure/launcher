@@ -1,7 +1,6 @@
 package traits
 
 import (
-	"log/slog"
 	"time"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
@@ -14,9 +13,6 @@ import (
 )
 
 // HTTPRouteHandler handles OAM httproute traits.
-//
-// Deprecated: the httproute trait is deprecated; migrate to the expose trait.
-// This handler is retained for direct use and emits a deprecation warning on every invocation.
 type HTTPRouteHandler struct{}
 
 // CanHandle returns true for httproute trait type.
@@ -27,14 +23,7 @@ func (h *HTTPRouteHandler) CanHandle(traitType string) bool {
 // Apply creates an HTTPRoute resource for the component's service.
 // If the optional 'name' property is set, that value is used as the sub-application
 // name, enabling multiple httproute traits on the same component without collision.
-//
-// Deprecated: the httproute trait is deprecated; migrate to the expose trait.
-// This handler is retained for backward compatibility and emits a deprecation
-// warning on every invocation.
 func (h *HTTPRouteHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
-	slog.Warn("httproute trait is deprecated; migrate to the expose trait",
-		slog.String("component", app.Name),
-	)
 	config, err := h.parseProperties(trait.Properties, app)
 	if err != nil {
 		return err
@@ -54,6 +43,7 @@ func (h *HTTPRouteHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 }
 
 func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Application) (*HTTPRouteConfig, error) {
+	defaultPort := resolveDefaultPort(app)
 	config := &HTTPRouteConfig{
 		ComponentName: app.Name,
 	}
@@ -173,7 +163,7 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 				}
 				br := BackendRef{
 					Name: app.Name,
-					Port: 80,
+					Port: defaultPort,
 				}
 				if name, ok := backendMap["name"].(string); ok {
 					br.Name = name
@@ -187,7 +177,7 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 			}
 		} else {
 			// Default: single backend pointing to the component's service
-			rule.BackendRefs = []BackendRef{{Name: app.Name, Port: 80}}
+			rule.BackendRefs = []BackendRef{{Name: app.Name, Port: defaultPort}}
 		}
 
 		// Optional: filters
