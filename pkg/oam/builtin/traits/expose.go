@@ -24,8 +24,6 @@ func (h *ExposeHandler) CanHandle(traitType string) bool {
 func (h *ExposeHandler) CapabilityRequired() bool { return true }
 
 // ValidateAndApplyDefaults validates the capability rendering for the expose trait.
-// It accepts only controllerType "ingress" in this release; "gateway" is deferred
-// until the httproute handler lands.
 func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
 	r, err := builtin.DecodeStrict[builtin.ExposeRendering](rendering)
 	if err != nil {
@@ -34,19 +32,31 @@ func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[
 	if r.ControllerType == "" {
 		return nil, errors.New("expose rendering: controllerType is required")
 	}
-	if r.ControllerType != "ingress" {
-		return nil, errors.Errorf("expose rendering: controllerType %q is not yet implemented; only \"ingress\" is supported", r.ControllerType)
-	}
-	if r.IngressClassName == "" {
-		return nil, errors.New("expose rendering: ingressClassName is required when controllerType is \"ingress\"")
-	}
-	if r.GatewayName != "" || r.GatewayNamespace != "" {
-		return nil, errors.New("expose rendering: gatewayName and gatewayNamespace are only valid when controllerType is \"gateway\"")
+	switch r.ControllerType {
+	case "ingress":
+		if r.IngressClassName == "" {
+			return nil, errors.New("expose rendering: ingressClassName is required when controllerType is \"ingress\"")
+		}
+		if r.GatewayName != "" || r.GatewayNamespace != "" {
+			return nil, errors.New("expose rendering: gatewayName and gatewayNamespace are only valid when controllerType is \"gateway\"")
+		}
+	case "gateway":
+		if r.GatewayName == "" {
+			return nil, errors.New("expose rendering: gatewayName is required when controllerType is \"gateway\"")
+		}
+		if r.IngressClassName != "" {
+			return nil, errors.New("expose rendering: ingressClassName is only valid when controllerType is \"ingress\"")
+		}
+		if r.GatewayNamespace == "" {
+			rendering["gatewayNamespace"] = "gateway-system"
+		}
+	default:
+		return nil, errors.Errorf("expose rendering: controllerType %q is not supported (want \"ingress\" or \"gateway\")", r.ControllerType)
 	}
 	return rendering, nil
 }
 
-// Apply dispatches to IngressHandler based on controllerType in the trait properties.
+// Apply dispatches to IngressHandler or HTTPRouteHandler based on controllerType.
 func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
 	controllerType, _ := trait.Properties["controllerType"].(string)
 	props := maps.Clone(trait.Properties)
@@ -55,6 +65,21 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 	switch controllerType {
 	case "ingress":
 		return (&IngressHandler{}).Apply(modified, app, bundle)
+	case "gateway":
+		gatewayName, _ := props["gatewayName"].(string)
+		gatewayNamespace, _ := props["gatewayNamespace"].(string)
+		if gatewayNamespace == "" {
+			gatewayNamespace = "gateway-system"
+		}
+		delete(props, "gatewayName")
+		delete(props, "gatewayNamespace")
+		ref := map[string]any{"name": gatewayName}
+		if gatewayNamespace != "" {
+			ref["namespace"] = gatewayNamespace
+		}
+		props["parentRefs"] = []any{ref}
+		modified = &oam.Trait{Type: "expose", Properties: props}
+		return (&HTTPRouteHandler{}).Apply(modified, app, bundle)
 	default:
 		return errors.Errorf("expose trait: unsupported controllerType %q", controllerType)
 	}

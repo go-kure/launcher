@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: vaultwarden
+  name: vaultwarden
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vaultwarden
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: vaultwarden
+    spec:
+      containers:
+      - image: vaultwarden/server:1.32.0
+        imagePullPolicy: IfNotPresent
+        name: vaultwarden
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: vaultwarden
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: vaultwarden
+  name: vaultwarden
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: vaultwarden
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: vaultwarden
+  name: vaultwarden
+  namespace: default
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  labels:
+    app: vaultwarden
+  name: vaultwarden-httproute
+  namespace: default
+spec:
+  hostnames:
+  - vault.example.com
+  parentRefs:
+  - name: public-gateway
+    namespace: gateway-system
+  rules:
+  - backendRefs:
+    - name: vaultwarden
+      port: 80
+    filters:
+    - responseHeaderModifier:
+        set:
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains; preload
+        - name: X-Frame-Options
+          value: DENY
+        - name: Content-Security-Policy
+          value: default-src 'self'; frame-ancestors 'none'
+      type: ResponseHeaderModifier
+    matches:
+    - path:
+        type: PathPrefix
+        value: /

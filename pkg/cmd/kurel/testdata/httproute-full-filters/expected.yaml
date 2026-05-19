@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: secureapi
+  name: secureapi
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: secureapi
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: secureapi
+    spec:
+      containers:
+      - image: myorg/secureapi:v2.0.0
+        imagePullPolicy: IfNotPresent
+        name: secureapi
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: secureapi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: secureapi
+  name: secureapi
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: secureapi
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: secureapi
+  name: secureapi
+  namespace: default
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  labels:
+    app: secureapi
+  name: secureapi-httproute
+  namespace: default
+spec:
+  hostnames:
+  - api.example.com
+  parentRefs:
+  - name: public-gateway
+    namespace: gateway-system
+  rules:
+  - backendRefs:
+    - name: secureapi
+      port: 80
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          replacePrefixMatch: /v2
+          type: ReplacePrefixMatch
+    - requestHeaderModifier:
+        add:
+        - name: X-Forwarded-Proto
+          value: https
+      type: RequestHeaderModifier
+    - responseHeaderModifier:
+        remove:
+        - X-Powered-By
+        set:
+        - name: Strict-Transport-Security
+          value: max-age=31536000
+      type: ResponseHeaderModifier
+    matches:
+    - path:
+        type: PathPrefix
+        value: /v1
+    timeouts:
+      request: 10s

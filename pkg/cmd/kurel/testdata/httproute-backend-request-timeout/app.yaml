@@ -1,0 +1,26 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: slowapi
+  namespace: default
+spec:
+  components:
+  - name: slowapi
+    type: webservice
+    properties:
+      image: myorg/slowapi:v1.0.0
+    traits:
+    - type: httproute
+      properties:
+        parentRefs:
+          - name: public-gateway
+        hostnames:
+          - slow.example.com
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            timeouts:
+              request: 30s
+              backendRequest: 10s

@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: api
+  name: api
+  namespace: production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+      - image: myregistry/api:v1.0.0
+        imagePullPolicy: IfNotPresent
+        name: api
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: api
+  name: api
+  namespace: production
+spec:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: api
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: api
+  name: api
+  namespace: production
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  labels:
+    app: api
+  name: api-httproute
+  namespace: production
+spec:
+  hostnames:
+  - api.example.com
+  parentRefs:
+  - name: public-gateway
+    namespace: gateway-system
+  rules:
+  - backendRefs:
+    - name: api
+      port: 80
+    filters:
+    - externalAuth:
+        backendRef:
+          name: authz-svc
+          port: 9090
+        http:
+          allowedHeaders:
+          - X-User-Id
+          - X-Tenant-Id
+          path: /check
+        protocol: HTTP
+      type: ExternalAuth
+    matches:
+    - path:
+        type: PathPrefix
+        value: /

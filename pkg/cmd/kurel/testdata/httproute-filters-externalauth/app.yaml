@@ -1,0 +1,37 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: myapp
+  namespace: production
+spec:
+  components:
+  - name: api
+    type: webservice
+    properties:
+      image: myregistry/api:v1.0.0
+      port: 8080
+    traits:
+    - type: httproute
+      properties:
+        parentRefs:
+          - name: public-gateway
+            namespace: gateway-system
+        hostnames:
+          - api.example.com
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            filters:
+              - type: ExternalAuth
+                externalAuth:
+                  protocol: HTTP
+                  backendRef:
+                    name: authz-svc
+                    port: 9090
+                  http:
+                    path: /check
+                    allowedHeaders:
+                      - X-User-Id
+                      - X-Tenant-Id

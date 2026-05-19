@@ -1,0 +1,39 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: myapp
+  namespace: production
+spec:
+  components:
+  - name: api
+    type: webservice
+    properties:
+      image: myregistry/api:v1.0.0
+      port: 8080
+    traits:
+    - type: httproute
+      properties:
+        parentRefs:
+          - name: public-gateway
+            namespace: gateway-system
+        hostnames:
+          - api.example.com
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            filters:
+              - type: CORS
+                cors:
+                  allowOrigins:
+                    - https://example.com
+                    - https://app.example.com
+                  allowMethods:
+                    - GET
+                    - POST
+                  allowHeaders:
+                    - Authorization
+                    - Content-Type
+                  allowCredentials: true
+                  maxAge: 3600

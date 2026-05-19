@@ -1,0 +1,21 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: hello
+  namespace: default
+spec:
+  components:
+  - name: web
+    type: webservice
+    properties:
+      image: nginx:1.25
+    traits:
+    - type: httproute
+      properties:
+        parentRefs:
+          - name: my-gateway
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /

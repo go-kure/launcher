@@ -1,0 +1,35 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: hello
+  namespace: default
+spec:
+  components:
+  - name: web
+    type: webservice
+    properties:
+      image: nginx:1.25
+    traits:
+    - type: httproute
+      properties:
+        parentRefs:
+          - name: my-gateway
+            namespace: gateway-system
+        hostnames:
+          - api.example.com
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /v1
+                headers:
+                  - name: x-api-version
+                    value: v1
+              - path:
+                  type: PathPrefix
+                  value: /v2
+                headers:
+                  - name: x-api-version
+                    value: v2
+            backendRefs:
+              - port: 8080

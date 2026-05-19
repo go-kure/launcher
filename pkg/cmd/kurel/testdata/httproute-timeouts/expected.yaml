@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: slowapi
+  name: slowapi
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: slowapi
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: slowapi
+    spec:
+      containers:
+      - image: myorg/slowapi:v1.0.0
+        imagePullPolicy: IfNotPresent
+        name: slowapi
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: slowapi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: slowapi
+  name: slowapi
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: slowapi
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: slowapi
+  name: slowapi
+  namespace: default
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  labels:
+    app: slowapi
+  name: slowapi-httproute
+  namespace: default
+spec:
+  hostnames:
+  - slow.example.com
+  parentRefs:
+  - name: public-gateway
+  rules:
+  - backendRefs:
+    - name: slowapi
+      port: 80
+    matches:
+    - path:
+        type: PathPrefix
+        value: /
+    timeouts:
+      request: 30s
