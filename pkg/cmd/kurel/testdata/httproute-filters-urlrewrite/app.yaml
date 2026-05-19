@@ -1,0 +1,29 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: api
+  namespace: default
+spec:
+  components:
+  - name: api
+    type: webservice
+    properties:
+      image: myorg/api:v2.1.0
+    traits:
+    - type: httproute
+      properties:
+        parentRefs:
+          - name: public-gateway
+        hostnames:
+          - api.example.com
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /v1
+            filters:
+              - type: URLRewrite
+                urlRewrite:
+                  path:
+                    type: ReplacePrefixMatch
+                    replacePrefixMatch: /v2

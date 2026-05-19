@@ -1,0 +1,44 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: secureapi
+  namespace: default
+spec:
+  components:
+  - name: secureapi
+    type: webservice
+    properties:
+      image: myorg/secureapi:v2.0.0
+    traits:
+    - type: httproute
+      properties:
+        parentRefs:
+          - name: public-gateway
+            namespace: gateway-system
+        hostnames:
+          - api.example.com
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /v1
+            filters:
+              - type: URLRewrite
+                urlRewrite:
+                  path:
+                    type: ReplacePrefixMatch
+                    replacePrefixMatch: /v2
+              - type: RequestHeaderModifier
+                requestHeaderModifier:
+                  add:
+                    - name: X-Forwarded-Proto
+                      value: https
+              - type: ResponseHeaderModifier
+                responseHeaderModifier:
+                  set:
+                    - name: Strict-Transport-Security
+                      value: "max-age=31536000"
+                  remove:
+                    - X-Powered-By
+            timeouts:
+              request: 10s

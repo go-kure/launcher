@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
@@ -50,18 +51,18 @@ func TestExposeHandler_ValidateAndApplyDefaults_MissingControllerType(t *testing
 	}
 }
 
-func TestExposeHandler_ValidateAndApplyDefaults_GatewayRejected(t *testing.T) {
+func TestExposeHandler_ValidateAndApplyDefaults_Gateway_Valid(t *testing.T) {
 	h := &traits.ExposeHandler{}
 	rendering := map[string]any{
 		"controllerType": "gateway",
 		"gatewayName":    "my-gateway",
 	}
-	_, err := h.ValidateAndApplyDefaults(rendering)
-	if err == nil {
-		t.Fatal("expected error for gateway controllerType")
+	got, err := h.ValidateAndApplyDefaults(rendering)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("expected 'not yet implemented' in error, got: %v", err)
+	if got["gatewayNamespace"] != "gateway-system" {
+		t.Errorf("expected gatewayNamespace defaulted to 'gateway-system', got: %v", got["gatewayNamespace"])
 	}
 }
 
@@ -142,7 +143,7 @@ func TestExposeHandler_Apply_UnsupportedControllerType(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "expose",
 		Properties: map[string]any{
-			"controllerType": "gateway",
+			"controllerType": "foo",
 		},
 	}
 	app := newApp("my-app", "default")
@@ -1629,5 +1630,157 @@ func TestVolsyncConfig_Generate(t *testing.T) {
 	}
 	if len(objects) != 1 {
 		t.Fatalf("expected 1 object, got %d", len(objects))
+	}
+}
+
+// --- ExposeHandler gateway validation ---
+
+func TestExposeHandler_ValidateAndApplyDefaults_Gateway_MissingGatewayName(t *testing.T) {
+	h := &traits.ExposeHandler{}
+	rendering := map[string]any{
+		"controllerType": "gateway",
+	}
+	_, err := h.ValidateAndApplyDefaults(rendering)
+	if err == nil {
+		t.Fatal("expected error for missing gatewayName")
+	}
+	if !strings.Contains(err.Error(), "gatewayName") {
+		t.Errorf("expected 'gatewayName' in error, got: %v", err)
+	}
+}
+
+func TestExposeHandler_ValidateAndApplyDefaults_Gateway_DefaultNamespace(t *testing.T) {
+	h := &traits.ExposeHandler{}
+	rendering := map[string]any{
+		"controllerType": "gateway",
+		"gatewayName":    "prod-gateway",
+	}
+	got, err := h.ValidateAndApplyDefaults(rendering)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got["gatewayNamespace"] != "gateway-system" {
+		t.Errorf("expected gatewayNamespace='gateway-system', got: %v", got["gatewayNamespace"])
+	}
+}
+
+func TestExposeHandler_ValidateAndApplyDefaults_Gateway_ExplicitNamespace(t *testing.T) {
+	h := &traits.ExposeHandler{}
+	rendering := map[string]any{
+		"controllerType":   "gateway",
+		"gatewayName":      "prod-gateway",
+		"gatewayNamespace": "infra",
+	}
+	got, err := h.ValidateAndApplyDefaults(rendering)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got["gatewayNamespace"] != "infra" {
+		t.Errorf("expected gatewayNamespace='infra', got: %v", got["gatewayNamespace"])
+	}
+}
+
+func TestExposeHandler_ValidateAndApplyDefaults_Gateway_RejectsIngressClassName(t *testing.T) {
+	h := &traits.ExposeHandler{}
+	rendering := map[string]any{
+		"controllerType":   "gateway",
+		"gatewayName":      "prod-gateway",
+		"ingressClassName": "nginx",
+	}
+	_, err := h.ValidateAndApplyDefaults(rendering)
+	if err == nil {
+		t.Fatal("expected error for ingressClassName in gateway rendering")
+	}
+	if !strings.Contains(err.Error(), "ingressClassName") {
+		t.Errorf("expected 'ingressClassName' in error, got: %v", err)
+	}
+}
+
+func TestExposeHandler_ValidateAndApplyDefaults_UnsupportedControllerType(t *testing.T) {
+	h := &traits.ExposeHandler{}
+	rendering := map[string]any{
+		"controllerType": "foo",
+	}
+	_, err := h.ValidateAndApplyDefaults(rendering)
+	if err == nil {
+		t.Fatal("expected error for unsupported controllerType")
+	}
+	if !strings.Contains(err.Error(), "foo") {
+		t.Errorf("expected 'foo' in error, got: %v", err)
+	}
+}
+
+// --- ExposeHandler.Apply gateway dispatch ---
+
+func TestExposeHandler_Apply_Gateway_DispatchesToHTTPRoute(t *testing.T) {
+	h := &traits.ExposeHandler{}
+	trait := &oam.Trait{
+		Type: "expose",
+		Properties: map[string]any{
+			"controllerType": "gateway",
+			"gatewayName":    "my-gw",
+			"rules":          []any{map[string]any{}},
+		},
+	}
+	app := newApp("web", "default")
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(bundle.Applications) != 1 {
+		t.Fatalf("expected 1 sub-application, got %d", len(bundle.Applications))
+	}
+	subApp := bundle.Applications[0]
+	objs, err := subApp.Config.Generate(subApp)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objs) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objs))
+	}
+	route, ok := (*objs[0]).(*gatewayv1.HTTPRoute)
+	if !ok {
+		t.Fatalf("expected *gatewayv1.HTTPRoute, got %T", *objs[0])
+	}
+	if len(route.Spec.ParentRefs) != 1 {
+		t.Fatalf("expected 1 parentRef, got %d", len(route.Spec.ParentRefs))
+	}
+	pr := route.Spec.ParentRefs[0]
+	if string(pr.Name) != "my-gw" {
+		t.Errorf("parentRef.Name = %q, want \"my-gw\"", pr.Name)
+	}
+	if pr.Namespace == nil || string(*pr.Namespace) != "gateway-system" {
+		t.Errorf("parentRef.Namespace = %v, want \"gateway-system\"", pr.Namespace)
+	}
+}
+
+func TestExposeHandler_Apply_Gateway_ExplicitNamespace(t *testing.T) {
+	h := &traits.ExposeHandler{}
+	trait := &oam.Trait{
+		Type: "expose",
+		Properties: map[string]any{
+			"controllerType":   "gateway",
+			"gatewayName":      "my-gw",
+			"gatewayNamespace": "infra",
+			"rules":            []any{map[string]any{}},
+		},
+	}
+	app := newApp("web", "default")
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	subApp := bundle.Applications[0]
+	objs, err := subApp.Config.Generate(subApp)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	route, ok := (*objs[0]).(*gatewayv1.HTTPRoute)
+	if !ok {
+		t.Fatalf("expected *gatewayv1.HTTPRoute, got %T", *objs[0])
+	}
+	pr := route.Spec.ParentRefs[0]
+	if pr.Namespace == nil || string(*pr.Namespace) != "infra" {
+		t.Errorf("parentRef.Namespace = %v, want \"infra\"", pr.Namespace)
 	}
 }

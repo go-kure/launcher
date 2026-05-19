@@ -1,0 +1,29 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shlink
+  namespace: default
+spec:
+  components:
+  - name: shlink
+    type: webservice
+    properties:
+      image: shlinkio/shlink:4.3
+    traits:
+    - type: httproute
+      properties:
+        parentRefs:
+          - name: public-gateway
+            namespace: gateway-system
+        hostnames:
+          - short.example.com
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            filters:
+              - type: RequestRedirect
+                requestRedirect:
+                  scheme: https
+                  statusCode: 308

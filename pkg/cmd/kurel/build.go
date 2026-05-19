@@ -124,7 +124,8 @@ func newBuiltinTransformer() *oam.Transformer {
 		},
 		map[string]oam.TraitHandler{
 			"expose":               &traits.ExposeHandler{},
-			"ingress":              &traits.IngressHandler{}, //nolint:staticcheck
+			"ingress":              &traits.IngressHandler{},   //nolint:staticcheck
+			"httproute":            &traits.HTTPRouteHandler{}, //nolint:staticcheck
 			"certificate":          &traits.CertificateHandler{},
 			"scaler":               &traits.ScalerHandler{},
 			"pvc":                  &traits.PVCHandler{},
