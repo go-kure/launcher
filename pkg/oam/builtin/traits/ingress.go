@@ -2,7 +2,6 @@ package traits
 
 import (
 	"fmt"
-	"log/slog"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
@@ -13,6 +12,21 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
+// servicePortProvider is implemented by component configs that expose a service port.
+// Trait handlers use it to resolve the default backend port from the component's service.
+type servicePortProvider interface {
+	ServicePort() int32
+}
+
+// resolveDefaultPort returns the component's service port when the config implements
+// servicePortProvider, otherwise returns 80.
+func resolveDefaultPort(app *stack.Application) int32 {
+	if pp, ok := app.Config.(servicePortProvider); ok && pp.ServicePort() > 0 {
+		return pp.ServicePort()
+	}
+	return 80
+}
+
 // validPathTypes is the set of path types accepted by the Kubernetes Ingress API.
 var validPathTypes = map[string]bool{
 	string(networkingv1.PathTypePrefix):                 true,
@@ -21,9 +35,6 @@ var validPathTypes = map[string]bool{
 }
 
 // IngressHandler handles OAM ingress traits.
-//
-// Deprecated: the ingress trait is deprecated; migrate to the expose trait.
-// This handler is retained for direct use and emits a deprecation warning on every invocation.
 type IngressHandler struct{}
 
 // CanHandle returns true for ingress trait type.
@@ -35,9 +46,6 @@ func (h *IngressHandler) CanHandle(traitType string) bool {
 // If the optional 'name' property is set, that value is used as the sub-application
 // name, enabling multiple ingress traits on the same component without collision.
 func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
-	slog.Warn("ingress trait is deprecated; migrate to the expose trait or httproute",
-		slog.String("component", app.Name),
-	)
 	config, err := h.parseProperties(trait.Properties, app)
 	if err != nil {
 		return err
@@ -53,6 +61,7 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 }
 
 func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Application) (*IngressConfig, error) {
+	defaultPort := resolveDefaultPort(app)
 	config := &IngressConfig{
 		ServiceName: app.Name,
 	}
@@ -102,7 +111,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 			p := IngressPath{
 				Path:     "/",
 				PathType: "Prefix",
-				Port:     80,
+				Port:     defaultPort,
 			}
 
 			if path, ok := pathMap["path"].(string); ok {

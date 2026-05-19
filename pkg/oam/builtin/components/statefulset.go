@@ -182,6 +182,9 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 	return nil
 }
 
+// ServicePort returns the port exposed by the component's headless Service, or 0 if no port is configured.
+func (c *StatefulsetConfig) ServicePort() int32 { return c.Port }
+
 // Generate creates Kubernetes StatefulSet, headless Service, ServiceAccount, and any standalone PVCs.
 func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}

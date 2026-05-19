@@ -1,28 +1,14 @@
 package traits
 
 import (
-	"context"
-	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
 )
-
-// captureHandler captures slog records for assertion in tests.
-type captureHandler struct {
-	records *[]slog.Record
-}
-
-func (c *captureHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
-func (c *captureHandler) Handle(_ context.Context, r slog.Record) error {
-	*c.records = append(*c.records, r)
-	return nil
-}
-func (c *captureHandler) WithAttrs(_ []slog.Attr) slog.Handler { return c }
-func (c *captureHandler) WithGroup(_ string) slog.Handler      { return c }
 
 func TestHTTPRouteHandler_CanHandle(t *testing.T) {
 	h := &HTTPRouteHandler{}
@@ -43,42 +29,6 @@ func TestHTTPRouteHandler_CanHandle(t *testing.T) {
 				t.Errorf("CanHandle(%q) = %v, want %v", tc.traitType, got, tc.want)
 			}
 		})
-	}
-}
-
-func TestHTTPRouteHandler_Apply_EmitsDeprecationWarning(t *testing.T) {
-	var records []slog.Record
-	capturingHandler := &captureHandler{records: &records}
-	old := slog.Default()
-	slog.SetDefault(slog.New(capturingHandler))
-	t.Cleanup(func() { slog.SetDefault(old) })
-
-	h := &HTTPRouteHandler{}
-	app := stack.NewApplication("mycomp", "default", nil)
-	trait := &oam.Trait{
-		Type: "httproute",
-		Properties: map[string]any{
-			"parentRefs": []any{
-				map[string]any{"name": "my-gateway"},
-			},
-			"rules": []any{
-				map[string]any{},
-			},
-		},
-	}
-	bundle := &stack.Bundle{}
-	if err := h.Apply(trait, app, bundle); err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if len(records) == 0 {
-		t.Fatal("expected slog.Warn to be called, but no records captured")
-	}
-	r := records[0]
-	if r.Level != slog.LevelWarn {
-		t.Errorf("expected Warn level, got %v", r.Level)
-	}
-	if !strings.Contains(r.Message, "httproute trait is deprecated") {
-		t.Errorf("unexpected deprecation message: %q", r.Message)
 	}
 }
 
@@ -137,11 +87,6 @@ func TestHTTPRouteHandler_Apply_SubAppNaming(t *testing.T) {
 			"rules":      []any{map[string]any{}},
 		},
 	}
-	_ = slog.Default() // suppress deprecation log
-	old := slog.Default()
-	slog.SetDefault(slog.New(&captureHandler{records: new([]slog.Record)}))
-	t.Cleanup(func() { slog.SetDefault(old) })
-
 	if err := h.Apply(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -190,6 +135,33 @@ func TestHTTPRouteConfig_Generate_Basic(t *testing.T) {
 	labels := route.GetLabels()
 	if labels["app"] != "web" {
 		t.Errorf("labels[app] = %q, want \"web\" (component name, not sub-app name)", labels["app"])
+	}
+}
+
+// mockServicePortConfig is a minimal ApplicationConfig that also implements servicePortProvider.
+type mockServicePortConfig struct{ port int32 }
+
+func (m *mockServicePortConfig) ServicePort() int32 { return m.port }
+func (m *mockServicePortConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
+	return nil, nil
+}
+
+func TestHTTPRouteHandler_DefaultPortFromComponent(t *testing.T) {
+	h := &HTTPRouteHandler{}
+	app := stack.NewApplication("api", "default", &mockServicePortConfig{port: 8080})
+
+	cfg, err := h.parseProperties(map[string]any{
+		"parentRefs": []any{map[string]any{"name": "gw"}},
+		"rules":      []any{map[string]any{}},
+	}, app)
+	if err != nil {
+		t.Fatalf("parseProperties: %v", err)
+	}
+	if len(cfg.Rules) != 1 || len(cfg.Rules[0].BackendRefs) != 1 {
+		t.Fatalf("expected 1 rule with 1 backendRef, got %+v", cfg.Rules)
+	}
+	if cfg.Rules[0].BackendRefs[0].Port != 8080 {
+		t.Errorf("default backend port = %d, want 8080 (from component)", cfg.Rules[0].BackendRefs[0].Port)
 	}
 }
 
