@@ -1,0 +1,29 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  affinity: {}
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://my-bucket/backups
+      endpointURL: https://s3.amazonaws.com
+      s3Credentials:
+        accessKeyId:
+          key: ACCESS_KEY_ID
+          name: backup-creds
+        secretAccessKey:
+          key: SECRET_ACCESS_KEY
+          name: backup-creds
+    retentionPolicy: 30d
+  enablePDB: false
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 1
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources: {}
+  storage:
+    size: 10Gi

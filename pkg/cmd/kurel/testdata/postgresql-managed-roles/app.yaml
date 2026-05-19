@@ -1,0 +1,21 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres
+    type: postgresql
+    properties:
+      version: "16"
+      storageSize: "10Gi"
+      managedRoles:
+      - name: app_user
+        login: true
+        passwordSecret: app-db-creds
+        comment: Application user
+      - name: readonly_user
+        login: true
+        inRoles:
+          - pg_read_all_data

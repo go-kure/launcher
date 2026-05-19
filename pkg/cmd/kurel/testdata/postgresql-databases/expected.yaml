@@ -1,0 +1,45 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  affinity: {}
+  enablePDB: false
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 1
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources: {}
+  storage:
+    size: 10Gi
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: postgres-myapp
+  namespace: default
+spec:
+  cluster:
+    name: postgres
+  name: myapp
+  owner: myapp_user
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: postgres-analytics
+  namespace: default
+spec:
+  cluster:
+    name: postgres
+  databaseReclaimPolicy: delete
+  extensions:
+  - ensure: present
+    name: pg_stat_statements
+  - ensure: absent
+    name: pgvector
+  name: analytics
+  owner: analytics_user

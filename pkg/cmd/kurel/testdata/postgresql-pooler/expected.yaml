@@ -1,0 +1,33 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  affinity: {}
+  enablePDB: true
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 3
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources: {}
+  storage:
+    size: 10Gi
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: postgres-pooler
+  namespace: default
+spec:
+  cluster:
+    name: postgres
+  instances: 3
+  pgbouncer:
+    parameters:
+      default_pool_size: "25"
+      max_client_conn: "1000"
+    poolMode: transaction
+  type: rw

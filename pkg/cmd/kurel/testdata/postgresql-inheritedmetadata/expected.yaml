@@ -1,0 +1,23 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  affinity: {}
+  enablePDB: false
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  inheritedMetadata:
+    annotations:
+      backup.velero.io/backup-volumes: data
+    labels:
+      reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+      reflector.v1.k8s.emberstack.com/reflection-auto-namespaces: app-ns
+  instances: 1
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources: {}
+  storage:
+    size: 10Gi

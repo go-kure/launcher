@@ -1,0 +1,28 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  affinity: {}
+  enablePDB: false
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 1
+  managed:
+    roles:
+    - comment: Application user
+      login: true
+      name: app_user
+      passwordSecret:
+        name: app-db-creds
+    - inRoles:
+      - pg_read_all_data
+      login: true
+      name: readonly_user
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources: {}
+  storage:
+    size: 10Gi

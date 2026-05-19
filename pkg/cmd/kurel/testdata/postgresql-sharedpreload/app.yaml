@@ -1,0 +1,15 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres
+    type: postgresql
+    properties:
+      version: "16"
+      storageSize: "10Gi"
+      postgresql:
+        parameters:
+          shared_preload_libraries: vectors.so,pg_stat_statements

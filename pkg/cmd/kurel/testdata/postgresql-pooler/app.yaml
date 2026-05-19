@@ -1,0 +1,21 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres
+    type: postgresql
+    properties:
+      version: "16"
+      storageSize: "10Gi"
+      replicas: 3
+      pooler:
+        enabled: true
+        instances: 3
+        type: "rw"
+        poolMode: "transaction"
+        parameters:
+          max_client_conn: "1000"
+          default_pool_size: "25"

@@ -1,0 +1,39 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: main-db
+  namespace: production
+spec:
+  affinity:
+    enablePodAntiAffinity: true
+    nodeSelector:
+      workload-type: database
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+  enablePDB: true
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 3
+  monitoring:
+    enablePodMonitor: true
+  postgresql:
+    parameters:
+      effective_cache_size: 768MB
+      max_connections: "200"
+      shared_buffers: 256MB
+    syncReplicaElectionConstraint:
+      enabled: false
+    synchronous:
+      dataDurability: required
+      failoverQuorum: false
+      method: any
+      number: 1
+  primaryUpdateStrategy: unsupervised
+  resources:
+    limits:
+      cpu: "4"
+      memory: 8Gi
+    requests:
+      cpu: "1"
+      memory: 2Gi
+  storage:
+    size: 100Gi

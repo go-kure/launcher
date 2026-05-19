@@ -1,0 +1,42 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  affinity: {}
+  enablePDB: false
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 1
+  plugins:
+  - isWALArchiver: true
+    name: barman-cloud.barmancloud.cnpg.io
+    parameters:
+      objectStoreName: postgres
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources: {}
+  storage:
+    size: 10Gi
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  configuration:
+    destinationPath: s3://my-bucket/postgres/
+    endpointURL: https://s3.example.com
+    s3Credentials:
+      accessKeyId:
+        key: ACCESS_KEY_ID
+        name: postgres-backup-creds
+      secretAccessKey:
+        key: SECRET_ACCESS_KEY
+        name: postgres-backup-creds
+  instanceSidecarConfiguration:
+    resources: {}
+  retentionPolicy: 30d

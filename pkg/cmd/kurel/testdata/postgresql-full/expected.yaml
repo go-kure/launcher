@@ -1,0 +1,23 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: main-db
+  namespace: production
+spec:
+  affinity: {}
+  enablePDB: true
+  imageName: ghcr.io/cloudnative-pg/postgresql:15
+  instances: 3
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources:
+    limits:
+      cpu: "4"
+      memory: 8Gi
+    requests:
+      cpu: "1"
+      memory: 2Gi
+  storage:
+    size: 100Gi

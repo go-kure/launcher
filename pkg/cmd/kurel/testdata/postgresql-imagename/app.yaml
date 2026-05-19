@@ -1,11 +1,12 @@
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
-  name: my-database
+  name: test-db
+  namespace: default
 spec:
   components:
-  - name: db
+  - name: postgres
     type: postgresql
     properties:
-      replicas: 1
+      imageName: ghcr.io/tensorchord/pgvecto-rs:pg16-v0.3.0
       storageSize: "10Gi"
