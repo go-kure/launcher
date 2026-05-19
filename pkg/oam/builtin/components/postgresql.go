@@ -83,12 +83,9 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 					continue
 				}
 				name, _ := cqMap["name"].(string)
-				if name == "" {
-					return nil, errors.Errorf("monitoring.customQueries[%d]: 'name' is required", i)
-				}
 				key, _ := cqMap["key"].(string)
-				if key == "" {
-					return nil, errors.Errorf("monitoring.customQueries[%d]: 'key' is required", i)
+				if name == "" || key == "" {
+					return nil, errors.Errorf("monitoring.customQueries[%d]: both 'name' and 'key' are required", i)
 				}
 				config.MonitoringCustomQueries = append(config.MonitoringCustomQueries, CustomQueryRef{Name: name, Key: key})
 			}

@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"strings"
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -104,6 +105,42 @@ func TestPostgresqlHandler_BootstrapRecovery(t *testing.T) {
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
 			"bootstrap": map[string]any{
+				"recovery": map[string]any{"source": "backup-src"},
+			},
+			"externalClusters": []any{
+				map[string]any{
+					"name": "backup-src",
+					"barmanObjectStore": map[string]any{
+						"destinationPath": "s3://backups/",
+					},
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	pc := cfg.(*components.PostgresqlConfig)
+	if pc.BootstrapRecoverySource != "backup-src" {
+		t.Errorf("BootstrapRecoverySource: got %q, want %q", pc.BootstrapRecoverySource, "backup-src")
+	}
+	if len(pc.ExternalClusters) != 1 {
+		t.Fatalf("ExternalClusters: got %d, want 1", len(pc.ExternalClusters))
+	}
+	if pc.ExternalClusters[0].Name != "backup-src" {
+		t.Errorf("ExternalClusters[0].Name: got %q", pc.ExternalClusters[0].Name)
+	}
+	if pc.ExternalClusters[0].BarmanObjectStore == nil {
+		t.Error("ExternalClusters[0].BarmanObjectStore: expected non-nil")
+	}
+}
+
+func TestPostgresqlHandler_BootstrapRecovery_ConnectionParameters(t *testing.T) {
+	h := &components.PostgresqlHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "db", Type: "postgresql",
+		Properties: map[string]any{
+			"bootstrap": map[string]any{
 				"recovery": map[string]any{"source": "backup-cluster"},
 			},
 			"externalClusters": []any{
@@ -121,13 +158,10 @@ func TestPostgresqlHandler_BootstrapRecovery(t *testing.T) {
 	}
 	pc := cfg.(*components.PostgresqlConfig)
 	if pc.BootstrapRecoverySource != "backup-cluster" {
-		t.Errorf("BootstrapRecoverySource: got %q, want %q", pc.BootstrapRecoverySource, "backup-cluster")
+		t.Errorf("BootstrapRecoverySource: got %q", pc.BootstrapRecoverySource)
 	}
-	if len(pc.ExternalClusters) != 1 {
-		t.Fatalf("ExternalClusters: got %d, want 1", len(pc.ExternalClusters))
-	}
-	if pc.ExternalClusters[0].Name != "backup-cluster" {
-		t.Errorf("ExternalClusters[0].Name: got %q", pc.ExternalClusters[0].Name)
+	if len(pc.ExternalClusters) != 1 || pc.ExternalClusters[0].ConnectionParameters["host"] != "db.example.com" {
+		t.Errorf("ExternalClusters[0].ConnectionParameters: got %v", pc.ExternalClusters[0].ConnectionParameters)
 	}
 }
 
@@ -275,8 +309,8 @@ func TestPostgresqlHandler_MonitoringCustomQueries_MissingName(t *testing.T) {
 			},
 		},
 	}, "default")
-	if err == nil {
-		t.Error("expected error for missing monitoring.customQueries[0].name")
+	if err == nil || !strings.Contains(err.Error(), "both 'name' and 'key' are required") {
+		t.Errorf("expected error containing 'both name and key are required', got: %v", err)
 	}
 }
 
@@ -293,8 +327,8 @@ func TestPostgresqlHandler_MonitoringCustomQueries_MissingKey(t *testing.T) {
 			},
 		},
 	}, "default")
-	if err == nil {
-		t.Error("expected error for missing monitoring.customQueries[0].key")
+	if err == nil || !strings.Contains(err.Error(), "both 'name' and 'key' are required") {
+		t.Errorf("expected error containing 'both name and key are required', got: %v", err)
 	}
 }
 
