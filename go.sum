@@ -102,8 +102,8 @@ github.com/fxamacker/cbor/v2 v2.9.0 h1:NpKPmjDBgUfBms6tr6JZkTHtfFGcMKsw3eGcmD/sa
 github.com/fxamacker/cbor/v2 v2.9.0/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
 github.com/go-errors/errors v1.5.1 h1:ZwEMSLRCapFLflTpT7NKaAc7ukJ8ZPEjzlxt8rPN8bk=
 github.com/go-errors/errors v1.5.1/go.mod h1:sIVyrIiJhuEF+Pj9Ebtd6P/rEYROXFi3BopGUQ5a5Og=
-github.com/go-kure/kure v0.2.0-alpha.3 h1:HTXZlLwhipFxo5epvep3HBKPNWKFS2dkQE59Ju14AVk=
-github.com/go-kure/kure v0.2.0-alpha.3/go.mod h1:4DxxbzO4s1xUZy4uacmiSm2ffowhs2EbQK8DL+KC46k=
+github.com/go-kure/kure v0.2.0-alpha.4 h1:Qd5EXA+EGk/NeGnSTHB8NWFdZymWBXy6jKvXb4Kjr4g=
+github.com/go-kure/kure v0.2.0-alpha.4/go.mod h1:CYsMxOgqtXAsEfUTx2AWN3w6IOD4TWlV/XLB+MV9QfQ=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=
 github.com/go-logr/logr v1.4.3/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=

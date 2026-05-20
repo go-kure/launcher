@@ -12,7 +12,7 @@ require (
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260213133823-31b0c7c37342
 	github.com/fluxcd/helm-controller/api v1.5.4
 	github.com/fluxcd/source-controller/api v1.8.3
-	github.com/go-kure/kure v0.2.0-alpha.3
+	github.com/go-kure/kure v0.2.0-alpha.4
 	github.com/google/go-containerregistry v0.21.5
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
