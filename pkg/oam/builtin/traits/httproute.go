@@ -1,6 +1,7 @@
 package traits
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
@@ -161,23 +162,49 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 				if !ok {
 					return nil, errors.Errorf("rules[%d].backendRefs[%d]: expected object", i, j)
 				}
+				nameExplicit := false
 				br := BackendRef{
-					Name: app.Name,
+					Name: resolveServiceName(app),
 					Port: defaultPort,
 				}
 				if name, ok := backendMap["name"].(string); ok {
 					br.Name = name
+					nameExplicit = true
 				}
+				portExplicit := false
 				if port, ok := backendMap["port"].(float64); ok {
 					br.Port = int32(port) //nolint:gosec
+					portExplicit = true
 				} else if port, ok := backendMap["port"].(int); ok {
 					br.Port = int32(port) //nolint:gosec
+					portExplicit = true
+				}
+				if nameExplicit && !portExplicit {
+					br.Port = 0
+				}
+				if !nameExplicit {
+					if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d].backendRefs[%d]", i, j)); err != nil {
+						return nil, err
+					}
+				}
+				if br.Port == 0 {
+					return nil, errors.Errorf(
+						"rules[%d].backendRefs[%d]: cannot determine backend port — specify 'port' in the backendRef",
+						i, j)
 				}
 				rule.BackendRefs = append(rule.BackendRefs, br)
 			}
 		} else {
 			// Default: single backend pointing to the component's service
-			rule.BackendRefs = []BackendRef{{Name: app.Name, Port: defaultPort}}
+			if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d]", i)); err != nil {
+				return nil, err
+			}
+			if defaultPort == 0 {
+				return nil, errors.Errorf(
+					"rules[%d]: cannot determine backend port for component %q — configure the component port or specify backendRefs[].port",
+					i, app.Name)
+			}
+			rule.BackendRefs = []BackendRef{{Name: resolveServiceName(app), Port: defaultPort}}
 		}
 
 		// Optional: filters

@@ -77,7 +77,7 @@ func TestHTTPRouteHandler_ParentRefs_MissingName(t *testing.T) {
 
 func TestHTTPRouteHandler_Apply_SubAppNaming(t *testing.T) {
 	h := &HTTPRouteHandler{}
-	app := stack.NewApplication("web", "default", nil)
+	app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
 	bundle := &stack.Bundle{}
 
 	trait := &oam.Trait{
@@ -178,7 +178,7 @@ func baseRule(filters []any) map[string]any {
 // TestHTTPRouteHandler_ParseFilters covers the discriminated-union filter parser.
 func TestHTTPRouteHandler_ParseFilters(t *testing.T) {
 	h := &HTTPRouteHandler{}
-	app := stack.NewApplication("web", "default", nil)
+	app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
 
 	cases := []struct {
 		name         string
@@ -637,7 +637,7 @@ func TestHTTPRouteHandler_ParseFilters(t *testing.T) {
 // TestHTTPRouteHandler_ParseTimeouts covers the timeout parser.
 func TestHTTPRouteHandler_ParseTimeouts(t *testing.T) {
 	h := &HTTPRouteHandler{}
-	app := stack.NewApplication("web", "default", nil)
+	app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
 
 	baseTimeoutRule := func(timeouts map[string]any) map[string]any {
 		return map[string]any{
@@ -718,7 +718,7 @@ func TestHTTPRouteHandler_ParseTimeouts(t *testing.T) {
 // exercised end-to-end through Generate(). One Apply() call per filter type suffices.
 func TestHTTPRouteConfig_Generate_Filters(t *testing.T) {
 	h := &HTTPRouteHandler{}
-	app := stack.NewApplication("web", "default", nil)
+	app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
 
 	applyAndGenerate := func(t *testing.T, props map[string]any) {
 		t.Helper()
@@ -875,5 +875,122 @@ func TestHTTPRouteConfig_Generate_Filters(t *testing.T) {
 				}},
 			}},
 		})
+	})
+}
+
+// mockNamedServiceConfig implements servicePortProvider and serviceBackendNamer.
+type mockNamedServiceConfig struct {
+	port        int32
+	serviceName string
+}
+
+func (m *mockNamedServiceConfig) ServicePort() int32         { return m.port }
+func (m *mockNamedServiceConfig) BackendServiceName() string { return m.serviceName }
+func (m *mockNamedServiceConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
+	return nil, nil
+}
+
+func TestHTTPRouteHandler_CustomServiceName(t *testing.T) {
+	h := &HTTPRouteHandler{}
+	app := stack.NewApplication("my-statefulset", "default", &mockNamedServiceConfig{
+		port: 5432, serviceName: "postgres-primary",
+	})
+	cfg, err := h.parseProperties(map[string]any{
+		"parentRefs": []any{map[string]any{"name": "gw"}},
+		"rules":      []any{map[string]any{}},
+	}, app)
+	if err != nil {
+		t.Fatalf("parseProperties: %v", err)
+	}
+	br := cfg.Rules[0].BackendRefs[0]
+	if br.Name != "postgres-primary" {
+		t.Errorf("BackendRef.Name = %q, want \"postgres-primary\"", br.Name)
+	}
+	if br.Port != 5432 {
+		t.Errorf("BackendRef.Port = %d, want 5432", br.Port)
+	}
+}
+
+func TestHTTPRouteHandler_ExplicitBackendRef_Success(t *testing.T) {
+	h := &HTTPRouteHandler{}
+	app := stack.NewApplication("wrk", "default", nil)
+	cfg, err := h.parseProperties(map[string]any{
+		"parentRefs": []any{map[string]any{"name": "gw"}},
+		"rules": []any{map[string]any{
+			"backendRefs": []any{map[string]any{"name": "other-svc", "port": 8080}},
+		}},
+	}, app)
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	br := cfg.Rules[0].BackendRefs[0]
+	if br.Name != "other-svc" || br.Port != 8080 {
+		t.Errorf("backendRef = %+v, want {Name: other-svc, Port: 8080}", br)
+	}
+}
+
+func TestHTTPRouteHandler_NoServicePort_Errors(t *testing.T) {
+	h := &HTTPRouteHandler{}
+
+	t.Run("no backendRefs, no Service", func(t *testing.T) {
+		app := stack.NewApplication("wrk", "default", nil)
+		_, err := h.parseProperties(map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules":      []any{map[string]any{}},
+		}, app)
+		if err == nil || !strings.Contains(err.Error(), "no service port") {
+			t.Errorf("expected 'no service port', got: %v", err)
+		}
+	})
+
+	t.Run("explicit backendRef name, no port (port not inherited)", func(t *testing.T) {
+		app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 8080})
+		_, err := h.parseProperties(map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules": []any{map[string]any{
+				"backendRefs": []any{map[string]any{"name": "other-svc"}},
+			}},
+		}, app)
+		if err == nil || !strings.Contains(err.Error(), "cannot determine backend port") {
+			t.Errorf("expected 'cannot determine backend port', got: %v", err)
+		}
+	})
+
+	t.Run("backendRefs present, implicit name, no port, no Service", func(t *testing.T) {
+		app := stack.NewApplication("wrk", "default", nil)
+		_, err := h.parseProperties(map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules": []any{map[string]any{
+				"backendRefs": []any{map[string]any{}},
+			}},
+		}, app)
+		if err == nil || !strings.Contains(err.Error(), "no service port") {
+			t.Errorf("expected 'no service port', got: %v", err)
+		}
+	})
+
+	t.Run("backendRefs present, implicit name, explicit port, no Service", func(t *testing.T) {
+		// port: 8080 is explicit but name is implicit — component still has no Service
+		app := stack.NewApplication("wrk", "default", nil)
+		_, err := h.parseProperties(map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules": []any{map[string]any{
+				"backendRefs": []any{map[string]any{"port": 8080}},
+			}},
+		}, app)
+		if err == nil || !strings.Contains(err.Error(), "no service port") {
+			t.Errorf("expected 'no service port', got: %v", err)
+		}
+	})
+
+	t.Run("no backendRefs, service port 0", func(t *testing.T) {
+		app := stack.NewApplication("wrk", "default", &mockServicePortConfig{port: 0})
+		_, err := h.parseProperties(map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules":      []any{map[string]any{}},
+		}, app)
+		if err == nil || !strings.Contains(err.Error(), "cannot determine backend port") {
+			t.Errorf("expected 'cannot determine backend port', got: %v", err)
+		}
 	})
 }
