@@ -1,0 +1,16 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: default
+spec:
+  components:
+    - name: prometheus
+      type: helmchart
+      properties:
+        chart: kube-prometheus-stack
+        version: "69.3.2"
+        source:
+          kind: HelmRepository
+          name: prometheus-community
+          namespace: flux-system

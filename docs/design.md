@@ -106,7 +106,7 @@ OAM YAML input (app.yaml + cluster.yaml)
          ▼
 ┌───────────────────┐
 │  Handler Registry  │  ComponentHandler + TraitHandler per OAM type
-│  + Transformer    │  TransformContext carries Policy + ClusterProfile
+│  + Transformer    │  TransformContext carries ClusterID, Namespace, Policy, Capabilities
 └────────┬──────────┘
          │ ApplicationConfig per component
          ▼
@@ -293,7 +293,7 @@ This monolithic layout is owned by launcher and generated as part of `kurel buil
 - Fixture parity and regression coverage (#54)
 
 **Phase 2: Built-in handlers** (#32)
-- Component handlers: webservice, worker, postgresql, cronjob, helmrelease, daemonset, statefulset (#48)
+- Component handlers: webservice, worker, postgresql, cronjob, helmchart, daemonset, statefulset (#48)
 - Trait handlers — workload set: expose, certificate, external-secret, pvc, scaler (#49)
 - Trait handlers — network/infra set: ingress, httproute, configmap, networkpolicy, cilium-networkpolicy, volsync (#50)
 

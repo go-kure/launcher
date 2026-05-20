@@ -5,12 +5,12 @@ metadata:
 spec:
   components:
   - name: redis
-    type: helmrelease
+    type: helmchart
     properties:
-      chart:
-        name: redis
-        repository: https://charts.bitnami.com/bitnami
-        version: "18.6.1"
+      chart: redis
+      version: "18.6.1"
+      source:
+        url: https://charts.bitnami.com/bitnami
       values:
         auth:
           enabled: false

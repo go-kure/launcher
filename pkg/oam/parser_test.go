@@ -743,7 +743,7 @@ metadata:
 spec:
   components:
   - name: cert-manager
-    type: helmrelease
+    type: helmchart
     properties:
       chart: cert-manager
     annotations:

@@ -121,6 +121,7 @@ func newBuiltinTransformer() *oam.Transformer {
 			"daemonset":   &components.DaemonsetHandler{},
 			"statefulset": &components.StatefulsetHandler{},
 			"postgresql":  &components.PostgresqlHandler{},
+			"helmchart":   &components.HelmchartHandler{},
 		},
 		map[string]oam.TraitHandler{
 			"expose":               &traits.ExposeHandler{},

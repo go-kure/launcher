@@ -648,6 +648,68 @@ func TestEvaluateProfile_UnknownCapability_Passthrough(t *testing.T) {
 	}
 }
 
+func TestEvaluateProfile_GitopsEnginePreserved(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	// Must include at least one capability so EvaluateProfile reaches the spec-rebuild
+	// path (it returns early when Capabilities is empty, which would not catch the bug).
+	profile := &ClusterProfile{
+		Metadata: ClusterProfileMetadata{Name: "test"},
+		Spec: ClusterProfileSpec{
+			GitopsEngine: "fluxcd",
+			Capabilities: map[string]CapabilityBinding{
+				"unknown-cap": {Rendering: map[string]any{"k": "v"}},
+			},
+		},
+	}
+	got, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Spec.GitopsEngine != "fluxcd" {
+		t.Errorf("GitopsEngine = %q, want %q", got.Spec.GitopsEngine, "fluxcd")
+	}
+}
+
+// dedupTrackingConfig implements ApplicationConfig and SourceDeduplicatable for dedup tests.
+type dedupTrackingConfig struct {
+	name       string
+	sourceKey  string
+	suppressed bool
+	sharedRef  string
+}
+
+func (c *dedupTrackingConfig) GetSourceKey() string     { return c.sourceKey }
+func (c *dedupTrackingConfig) GetSourceRefName() string { return c.name }
+func (c *dedupTrackingConfig) SuppressSourceGeneration(ref string) {
+	c.suppressed = true
+	c.sharedRef = ref
+}
+func (c *dedupTrackingConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
+	return nil, nil
+}
+
+func TestTransform_HelmchartSourceDedup(t *testing.T) {
+	cfgA := &dedupTrackingConfig{name: "comp-a", sourceKey: "helm:https://example.com/charts"}
+	cfgB := &dedupTrackingConfig{name: "comp-b", sourceKey: "helm:https://example.com/charts"}
+
+	entries := []componentEntry{
+		{component: Component{Name: "comp-a"}, app: stack.NewApplication("comp-a", "default", cfgA)},
+		{component: Component{Name: "comp-b"}, app: stack.NewApplication("comp-b", "default", cfgB)},
+	}
+
+	deduplicateSourceRefs(entries)
+
+	if cfgA.suppressed {
+		t.Error("comp-a should not be suppressed (first component with this source key)")
+	}
+	if !cfgB.suppressed {
+		t.Error("comp-b should be suppressed (shares source key with comp-a)")
+	}
+	if cfgB.sharedRef != "comp-a" {
+		t.Errorf("comp-b.sharedRef = %q, want %q", cfgB.sharedRef, "comp-a")
+	}
+}
+
 func TestEvaluateProfile_NonVADHandler_Passthrough(t *testing.T) {
 	// A plain TraitHandler (no CapabilityAware, no ValidateAndApplyDefaults)
 	// is registered successfully; EvaluateProfile must pass its rendering through.

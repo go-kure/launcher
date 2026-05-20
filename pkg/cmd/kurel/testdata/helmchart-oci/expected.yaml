@@ -1,0 +1,21 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: cert-manager
+  namespace: default
+spec:
+  interval: 10m0s
+  ref:
+    tag: v1.17.2
+  url: oci://ghcr.io/cert-manager/charts/cert-manager
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cert-manager
+  namespace: default
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: cert-manager
+  interval: 10m0s
