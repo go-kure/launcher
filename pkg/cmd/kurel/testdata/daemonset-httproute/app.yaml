@@ -1,0 +1,19 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: hello
+  namespace: default
+spec:
+  components:
+    - name: agent
+      type: daemonset
+      properties:
+        image: ghcr.io/example/agent:v1.0
+        port: 9090
+      traits:
+        - type: httproute
+          properties:
+            parentRefs:
+              - name: my-gateway
+            rules:
+              - {}

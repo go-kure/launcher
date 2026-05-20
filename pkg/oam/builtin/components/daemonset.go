@@ -5,6 +5,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -73,6 +74,10 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 	}
 	config.InitContainers = initContainers
 
+	if port, ok := toInt32(props["port"]); ok {
+		config.Port = port
+	}
+
 	return config, nil
 }
 
@@ -81,6 +86,7 @@ type DaemonsetConfig struct {
 	Name              string
 	Namespace         string
 	Image             string
+	Port              int32 // when > 0, generates a ClusterIP Service exposing this port
 	Env               []EnvVar
 	Resources         ResourceRequirements
 	Command           []string
@@ -93,6 +99,10 @@ type DaemonsetConfig struct {
 	PVCs              []PVCConfig
 	explicitResources explicitResourceFlags
 }
+
+// ServicePort implements servicePortProvider, making DaemonsetConfig usable as an
+// implicit backend for ingress, httproute, and expose traits.
+func (c *DaemonsetConfig) ServicePort() int32 { return c.Port }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
 // DaemonSets don't have replicas, so only resource and registry limits apply.
@@ -138,19 +148,28 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 	return nil
 }
 
-// Generate creates a Kubernetes DaemonSet and ServiceAccount.
+// Generate creates a Kubernetes DaemonSet, optional Service, and ServiceAccount.
+// A Service is generated when Port > 0.
 func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}
 	ds, err := c.createDaemonSet(app)
 	if err != nil {
 		return nil, err
 	}
-	sa := createServiceAccount(app.Name, app.Namespace, labels)
 
 	dsObj := client.Object(ds)
-	saObj := client.Object(sa)
+	objects := []*client.Object{&dsObj}
 
-	objects := []*client.Object{&dsObj, &saObj}
+	if c.Port > 0 {
+		svc := c.createService(app)
+		svcObj := client.Object(svc)
+		objects = append(objects, &svcObj)
+	}
+
+	sa := createServiceAccount(app.Name, app.Namespace, labels)
+	saObj := client.Object(sa)
+	objects = append(objects, &saObj)
+
 	for _, pvc := range c.PVCs {
 		p, err := BuildPVC(pvc, app.Namespace, labels)
 		if err != nil {
@@ -160,6 +179,22 @@ func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, er
 		objects = append(objects, &pObj)
 	}
 	return objects, nil
+}
+
+func (c *DaemonsetConfig) createService(app *stack.Application) *corev1.Service {
+	labels := map[string]string{"app": app.Name}
+	svc := kubernetes.CreateService(app.Name, app.Namespace)
+	svc.Labels = labels
+	svc.Annotations = nil
+	_ = kubernetes.SetServiceType(svc, corev1.ServiceTypeClusterIP)
+	_ = kubernetes.SetServiceSelector(svc, map[string]string{"app": app.Name})
+	_ = kubernetes.AddServicePort(svc, corev1.ServicePort{
+		Name:       "tcp",
+		Port:       c.Port,
+		TargetPort: intstr.FromInt32(c.Port),
+		Protocol:   corev1.ProtocolTCP,
+	})
+	return svc
 }
 
 func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.DaemonSet, error) {
@@ -175,6 +210,13 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 		_ = kubernetes.AddContainerEnv(container, env)
 	}
 	applyProbes(container, c.Probes)
+	if c.Port > 0 {
+		_ = kubernetes.AddContainerPort(container, corev1.ContainerPort{
+			Name:          "tcp",
+			ContainerPort: c.Port,
+			Protocol:      corev1.ProtocolTCP,
+		})
+	}
 	for _, m := range c.VolumeMounts {
 		_ = kubernetes.AddContainerVolumeMount(container, m)
 	}
