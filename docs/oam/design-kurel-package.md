@@ -232,14 +232,9 @@ spec:
     type: string
     required: false
     default: "${name}-tls"   # may reference other parameters
-  - name: env
-    type: array
-    required: false
-    default: []
-    description: "Extra environment variables as [{name, value}] objects"
 ```
 
-Supported types: `string`, `integer`, `boolean`, `array`, `object`.
+Supported types: `string`, `integer`, `boolean`.
 
 ### 6.2 Placeholder syntax in app.yaml
 
@@ -251,7 +246,6 @@ spec:
     properties:
       image: "${image}"          # scalar substitution — resolves to string
       replicas: ${replicas}      # scalar substitution — resolves to integer
-      env: ${env}                # node substitution — resolves to YAML list
     traits:
     - type: expose
       properties:
@@ -271,17 +265,12 @@ replaces it with the typed value from the parameter declaration:
 - `image: "${image}"` → `image: "myregistry/app:v1.2.3"` (string)
 - `replicas: ${replicas}` → `replicas: 3` (integer, not string `"3"`)
 
-**Node substitution** — when the parameter type is `array` or `object`, the resolver
-replaces the placeholder with the full YAML node:
-- `env: ${env}` → `env: [{name: LOG_LEVEL, value: info}, ...]`
-
 **Inline string embedding** — when `${name}` is embedded inside a larger string value:
 - `secretName: "${name}-tls"` → `secretName: "webservice-tls"` (always a string)
 
 ### 6.4 Supplying values at build time
 
 ```sh
-# values.yaml — flat scalars or structured (for array/object parameters)
 kurel build . --profile cluster.yaml --values values.yaml
 
 # --set flags — scalars only
@@ -292,15 +281,10 @@ kurel build . --profile cluster.yaml \
 ```
 
 ```yaml
-# values.yaml — with structured array parameter
+# values.yaml
 image: myregistry/app:v1.2.3
 replicas: 3
 domain: app.example.com
-env:
-- name: LOG_LEVEL
-  value: info
-- name: DB_HOST
-  value: postgres.svc
 ```
 
 ### 6.5 Validation
@@ -309,6 +293,9 @@ env:
 - Optional parameter with no value → default value used
 - `default` may itself contain `${name}` references to other parameters; these are
   resolved in declaration order
+- `default` values are type-checked at `ParsePackage` time; a string default that is
+  not parseable as the declared type (e.g. `default: foo` for `type: integer`) is
+  rejected immediately
 
 ---
 
