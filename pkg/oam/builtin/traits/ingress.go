@@ -45,7 +45,8 @@ func resolveServiceName(app *stack.Application) string {
 // checkImplicitBackend validates that the component can serve as an implicit backend
 // (the trait path/backendRef does not name an explicit target service).
 func checkImplicitBackend(app *stack.Application, location string) error {
-	if _, ok := app.Config.(servicePortProvider); !ok {
+	pp, ok := app.Config.(servicePortProvider)
+	if !ok || pp.ServicePort() == 0 {
 		return errors.Errorf(
 			"%s: component %q has no service port; configure a service port or specify an explicit backend name",
 			location, app.Name)
@@ -89,7 +90,8 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Application) (*IngressConfig, error) {
 	defaultPort := resolveDefaultPort(app)
 	config := &IngressConfig{
-		ServiceName: resolveServiceName(app),
+		ComponentName: app.Name,
+		ServiceName:   resolveServiceName(app),
 	}
 
 	if name, ok := props["name"].(string); ok && name != "" {
@@ -151,10 +153,15 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 				p.PathType = pathType
 			}
 
+			// backendExplicit is true only when the backend names a DIFFERENT service than
+			// the component's own. A self-reference (backend == component service name) is
+			// treated as implicit so that the same port-mismatch guard applies.
 			backendExplicit := false
 			if backend, ok := pathMap["backend"].(string); ok && backend != "" {
 				p.ServiceName = backend
-				backendExplicit = true
+				if backend != config.ServiceName {
+					backendExplicit = true
+				}
 			}
 
 			portExplicit := false
@@ -171,13 +178,21 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 				}
 			}
 
+			// Zero the inherited port only for truly external explicit backends.
 			if backendExplicit && !portExplicit {
 				p.Port = 0
 			}
 
-			if p.ServiceName == "" {
+			// Implicit backend: empty name OR explicit name that resolves to the component's
+			// own service — both are subject to the same port constraints.
+			if p.ServiceName == "" || p.ServiceName == config.ServiceName {
 				if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d].paths[%d]", i, j)); err != nil {
 					return nil, err
+				}
+				if portExplicit && p.Port > 0 && p.Port != defaultPort {
+					return nil, errors.Errorf(
+						"rules[%d].paths[%d]: cannot route implicit backend to port %d — component service exposes port %d; specify an explicit backend name or match the component port",
+						i, j, p.Port, defaultPort)
 				}
 			}
 			if p.Port == 0 && p.PortName == "" {
@@ -220,6 +235,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 // IngressConfig implements stack.ApplicationConfig for ingress traits.
 type IngressConfig struct {
 	Name             string
+	ComponentName    string // label value — always the OAM component name, not the K8s Service name
 	Annotations      map[string]string
 	IngressClassName string
 	Rules            []IngressRule
@@ -251,7 +267,7 @@ type IngressTLS struct {
 // Generate creates a Kubernetes Ingress resource.
 func (c *IngressConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{
-		"app": c.ServiceName,
+		"app": c.ComponentName,
 	}
 
 	ingress := kubernetes.CreateIngress(app.Name, app.Namespace, c.IngressClassName)
