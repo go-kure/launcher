@@ -136,6 +136,27 @@ spec:
 	}
 }
 
+func TestParsePackage_RejectsArrayParamType(t *testing.T) {
+	input := `
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Package
+metadata:
+  name: my-app
+spec:
+  parameters:
+  - name: items
+    type: array
+`
+	_, err := oam.ParsePackage([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for unsupported param type 'array', got nil")
+	}
+	var valErr *errors.ValidationError
+	if !stderrors.As(err, &valErr) {
+		t.Errorf("expected *errors.ValidationError, got %T: %v", err, err)
+	}
+}
+
 func TestParsePackage_RejectsDuplicateParamName(t *testing.T) {
 	input := `
 apiVersion: launcher.gokure.dev/v1alpha1
