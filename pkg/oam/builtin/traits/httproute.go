@@ -162,14 +162,20 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 				if !ok {
 					return nil, errors.Errorf("rules[%d].backendRefs[%d]: expected object", i, j)
 				}
+				// nameExplicit is true only when the backendRef names a DIFFERENT service
+				// than the component's own. A self-reference is treated as implicit so
+				// the same port-mismatch guard applies.
+				selfServiceName := resolveServiceName(app)
 				nameExplicit := false
 				br := BackendRef{
-					Name: resolveServiceName(app),
+					Name: selfServiceName,
 					Port: defaultPort,
 				}
 				if name, ok := backendMap["name"].(string); ok {
 					br.Name = name
-					nameExplicit = true
+					if name != selfServiceName {
+						nameExplicit = true
+					}
 				}
 				portExplicit := false
 				if port, ok := backendMap["port"].(float64); ok {
@@ -185,6 +191,11 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 				if !nameExplicit {
 					if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d].backendRefs[%d]", i, j)); err != nil {
 						return nil, err
+					}
+					if portExplicit && br.Port != defaultPort {
+						return nil, errors.Errorf(
+							"rules[%d].backendRefs[%d]: cannot route implicit backend to port %d — component service exposes port %d; specify an explicit backend name or match the component port",
+							i, j, br.Port, defaultPort)
 					}
 				}
 				if br.Port == 0 {

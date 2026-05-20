@@ -74,7 +74,7 @@ spec:
   rules:
   - backendRefs:
     - name: web
-      port: 8080
+      port: 80
     matches:
     - headers:
       - name: x-api-version

@@ -73,14 +73,14 @@ spec:
   rules:
   - backendRefs:
     - name: web
-      port: 8080
+      port: 80
     matches:
     - path:
         type: PathPrefix
         value: /api
   - backendRefs:
     - name: web
-      port: 3000
+      port: 80
     matches:
     - path:
         type: PathPrefix

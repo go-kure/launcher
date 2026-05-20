@@ -32,4 +32,4 @@ spec:
                   - name: x-api-version
                     value: v2
             backendRefs:
-              - port: 8080
+              - port: 80

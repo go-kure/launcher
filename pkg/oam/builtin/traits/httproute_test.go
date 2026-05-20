@@ -984,13 +984,80 @@ func TestHTTPRouteHandler_NoServicePort_Errors(t *testing.T) {
 	})
 
 	t.Run("no backendRefs, service port 0", func(t *testing.T) {
+		// ServicePort() == 0 means no Service is generated — checkImplicitBackend fires
 		app := stack.NewApplication("wrk", "default", &mockServicePortConfig{port: 0})
 		_, err := h.parseProperties(map[string]any{
 			"parentRefs": []any{map[string]any{"name": "gw"}},
 			"rules":      []any{map[string]any{}},
 		}, app)
-		if err == nil || !strings.Contains(err.Error(), "cannot determine backend port") {
-			t.Errorf("expected 'cannot determine backend port', got: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "no service port") {
+			t.Errorf("expected 'no service port', got: %v", err)
+		}
+	})
+}
+
+func TestHTTPRouteHandler_ImplicitBackend_PortMismatch_Error(t *testing.T) {
+	h := &HTTPRouteHandler{}
+
+	t.Run("no name, port differs from component service", func(t *testing.T) {
+		// webservice exposes port 80; trait routes implicit backend to 8080 — must error
+		app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
+		_, err := h.parseProperties(map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules": []any{map[string]any{
+				"backendRefs": []any{map[string]any{"port": 8080}},
+			}},
+		}, app)
+		if err == nil || !strings.Contains(err.Error(), "cannot route implicit backend") {
+			t.Errorf("expected 'cannot route implicit backend', got: %v", err)
+		}
+	})
+
+	t.Run("self-service name, port differs from component service", func(t *testing.T) {
+		// Explicitly naming the component's own service still subject to port mismatch guard
+		app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
+		_, err := h.parseProperties(map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules": []any{map[string]any{
+				"backendRefs": []any{map[string]any{"name": "web", "port": 8080}},
+			}},
+		}, app)
+		if err == nil || !strings.Contains(err.Error(), "cannot route implicit backend") {
+			t.Errorf("expected 'cannot route implicit backend', got: %v", err)
+		}
+	})
+
+	t.Run("no name, port matches component service — success", func(t *testing.T) {
+		// Explicit port that matches component port is a no-op redundancy; must succeed
+		app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
+		cfg, err := h.parseProperties(map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules": []any{map[string]any{
+				"backendRefs": []any{map[string]any{"port": 80}},
+			}},
+		}, app)
+		if err != nil {
+			t.Fatalf("expected success, got: %v", err)
+		}
+		if cfg.Rules[0].BackendRefs[0].Port != 80 {
+			t.Errorf("Port = %d, want 80", cfg.Rules[0].BackendRefs[0].Port)
+		}
+	})
+
+	t.Run("self-service name, port matches component service — success", func(t *testing.T) {
+		// Self-reference with correct port is allowed (redundant but valid)
+		app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
+		cfg, err := h.parseProperties(map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules": []any{map[string]any{
+				"backendRefs": []any{map[string]any{"name": "web", "port": 80}},
+			}},
+		}, app)
+		if err != nil {
+			t.Fatalf("expected success, got: %v", err)
+		}
+		if cfg.Rules[0].BackendRefs[0].Port != 80 {
+			t.Errorf("Port = %d, want 80", cfg.Rules[0].BackendRefs[0].Port)
 		}
 	})
 }

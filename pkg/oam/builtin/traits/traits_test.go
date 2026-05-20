@@ -299,12 +299,12 @@ func TestIngressHandler_Apply_Generate(t *testing.T) {
 						map[string]any{
 							"path":     "/api",
 							"pathType": "Prefix",
-							"port":     8080,
+							"port":     80,
 						},
 						map[string]any{
 							"path":     "/exact",
 							"pathType": "Exact",
-							"port":     8080,
+							"port":     80,
 						},
 						map[string]any{
 							"path":     "/impl",
@@ -1954,4 +1954,100 @@ func TestIngressHandler_Apply_CustomServiceName(t *testing.T) {
 	if gotName != "postgres-primary" {
 		t.Errorf("backend.service.name = %q, want \"postgres-primary\"", gotName)
 	}
+	// Label must use the component name, not the K8s Service name
+	if got := ingress.Labels["app"]; got != "my-statefulset" {
+		t.Errorf("ingress label app = %q, want \"my-statefulset\"", got)
+	}
+}
+
+func TestIngressHandler_Apply_ImplicitBackend_PortMismatch_Error(t *testing.T) {
+	h := &traits.IngressHandler{}
+
+	t.Run("implicit backend, port differs from component service", func(t *testing.T) {
+		// webservice exposes port 80; trait routes implicit backend to 8080 — must error
+		trait := &oam.Trait{
+			Type: "ingress",
+			Properties: map[string]any{
+				"rules": []any{
+					map[string]any{
+						"host": "example.com",
+						"paths": []any{
+							map[string]any{"path": "/", "port": 8080},
+						},
+					},
+				},
+			},
+		}
+		app := newWebApp("web", "default") // port 80
+		err := h.Apply(trait, app, newBundle())
+		if err == nil || !strings.Contains(err.Error(), "cannot route implicit backend") {
+			t.Errorf("expected 'cannot route implicit backend', got: %v", err)
+		}
+	})
+
+	t.Run("self-service backend name, port differs from component service", func(t *testing.T) {
+		// Explicitly naming the component's own service still subject to port mismatch guard
+		trait := &oam.Trait{
+			Type: "ingress",
+			Properties: map[string]any{
+				"rules": []any{
+					map[string]any{
+						"host": "example.com",
+						"paths": []any{
+							map[string]any{"path": "/", "backend": "web", "port": 8080},
+						},
+					},
+				},
+			},
+		}
+		app := newWebApp("web", "default") // port 80, service name "web"
+		err := h.Apply(trait, app, newBundle())
+		if err == nil || !strings.Contains(err.Error(), "cannot route implicit backend") {
+			t.Errorf("expected 'cannot route implicit backend', got: %v", err)
+		}
+	})
+
+	t.Run("implicit backend, port matches component service — success", func(t *testing.T) {
+		// Redundant explicit port that matches is allowed
+		trait := &oam.Trait{
+			Type: "ingress",
+			Properties: map[string]any{
+				"rules": []any{
+					map[string]any{
+						"host": "example.com",
+						"paths": []any{
+							map[string]any{"path": "/", "port": 80},
+						},
+					},
+				},
+			},
+		}
+		app := newWebApp("web", "default") // port 80
+		bundle := newBundle()
+		if err := h.Apply(trait, app, bundle); err != nil {
+			t.Fatalf("expected success, got: %v", err)
+		}
+	})
+
+	t.Run("self-service backend name, port matches component service — success", func(t *testing.T) {
+		// Self-reference with correct port is allowed (redundant but valid)
+		trait := &oam.Trait{
+			Type: "ingress",
+			Properties: map[string]any{
+				"rules": []any{
+					map[string]any{
+						"host": "example.com",
+						"paths": []any{
+							map[string]any{"path": "/", "backend": "web", "port": 80},
+						},
+					},
+				},
+			},
+		}
+		app := newWebApp("web", "default") // port 80, service name "web"
+		bundle := newBundle()
+		if err := h.Apply(trait, app, bundle); err != nil {
+			t.Fatalf("expected success, got: %v", err)
+		}
+	})
 }
