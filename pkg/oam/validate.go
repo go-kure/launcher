@@ -2,7 +2,9 @@ package oam
 
 import (
 	"fmt"
+	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -237,6 +239,60 @@ func validatePackage(pkg *Package) error {
 		if !validParamTypes[p.Type] {
 			return packageValidationError("parameters", fmt.Sprintf(
 				"parameter %q has invalid type %q; supported types: string, integer, boolean", p.Name, p.Type))
+		}
+		if err := validateParamDefault(&p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateParamDefault checks that a ParameterDecl.Default is compatible with
+// the declared Type. Defaults containing ${name} placeholder references are
+// deferred to build time (their referenced values are not yet known at parse
+// time); all other defaults are validated immediately.
+func validateParamDefault(p *ParameterDecl) error {
+	if p.Default == nil {
+		return nil
+	}
+	defStr, isStr := p.Default.(string)
+	if isStr {
+		if placeholderRE.MatchString(defStr) {
+			return nil // validated at build time when referenced params are known
+		}
+		switch p.Type {
+		case "integer":
+			if _, err := strconv.Atoi(defStr); err != nil {
+				return packageValidationError("parameters",
+					fmt.Sprintf("parameter %q has default %q which is not a valid integer", p.Name, defStr))
+			}
+		case "boolean":
+			if _, err := strconv.ParseBool(defStr); err != nil {
+				return packageValidationError("parameters",
+					fmt.Sprintf("parameter %q has default %q which is not a valid boolean (use true or false)", p.Name, defStr))
+			}
+		}
+		return nil
+	}
+	// Non-string default: the Go type decoded by yaml.Unmarshal must match the declared type.
+	switch p.Type {
+	case "integer":
+		switch tv := p.Default.(type) {
+		case int, int64:
+			// OK
+		case float64:
+			if tv != math.Trunc(tv) {
+				return packageValidationError("parameters",
+					fmt.Sprintf("parameter %q has fractional default %g; integer parameters require whole numbers", p.Name, tv))
+			}
+		default:
+			return packageValidationError("parameters",
+				fmt.Sprintf("parameter %q (type integer) has default of type %T; expected a whole number", p.Name, p.Default))
+		}
+	case "boolean":
+		if _, ok := p.Default.(bool); !ok {
+			return packageValidationError("parameters",
+				fmt.Sprintf("parameter %q (type boolean) has default of type %T; expected true or false", p.Name, p.Default))
 		}
 	}
 	return nil

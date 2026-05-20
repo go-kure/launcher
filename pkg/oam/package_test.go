@@ -157,6 +157,94 @@ spec:
 	}
 }
 
+func TestParsePackage_RejectsStringDefaultForIntegerParam(t *testing.T) {
+	input := `
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Package
+metadata:
+  name: my-app
+spec:
+  parameters:
+  - name: replicas
+    type: integer
+    default: foo
+`
+	_, err := oam.ParsePackage([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for string default 'foo' on integer param, got nil")
+	}
+	var valErr *errors.ValidationError
+	if !stderrors.As(err, &valErr) {
+		t.Errorf("expected *errors.ValidationError, got %T: %v", err, err)
+	}
+}
+
+func TestParsePackage_RejectsStringDefaultForBooleanParam(t *testing.T) {
+	input := `
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Package
+metadata:
+  name: my-app
+spec:
+  parameters:
+  - name: enabled
+    type: boolean
+    default: maybe
+`
+	_, err := oam.ParsePackage([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for string default 'maybe' on boolean param, got nil")
+	}
+	var valErr *errors.ValidationError
+	if !stderrors.As(err, &valErr) {
+		t.Errorf("expected *errors.ValidationError, got %T: %v", err, err)
+	}
+}
+
+func TestParsePackage_RejectsFractionalDefaultForIntegerParam(t *testing.T) {
+	input := `
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Package
+metadata:
+  name: my-app
+spec:
+  parameters:
+  - name: replicas
+    type: integer
+    default: 2.5
+`
+	_, err := oam.ParsePackage([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for fractional default 2.5 on integer param, got nil")
+	}
+	var valErr *errors.ValidationError
+	if !stderrors.As(err, &valErr) {
+		t.Errorf("expected *errors.ValidationError, got %T: %v", err, err)
+	}
+}
+
+func TestParsePackage_AcceptsPlaceholderDefaultOnIntegerParam(t *testing.T) {
+	// Placeholder defaults (${…}) are validated at build time, not parse time.
+	input := `
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Package
+metadata:
+  name: my-app
+spec:
+  parameters:
+  - name: base
+    type: integer
+    required: true
+  - name: extra
+    type: integer
+    default: "${base}"
+`
+	_, err := oam.ParsePackage([]byte(input))
+	if err != nil {
+		t.Fatalf("expected no error for placeholder default on integer param, got: %v", err)
+	}
+}
+
 func TestParsePackage_RejectsDuplicateParamName(t *testing.T) {
 	input := `
 apiVersion: launcher.gokure.dev/v1alpha1

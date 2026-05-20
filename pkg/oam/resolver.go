@@ -173,8 +173,12 @@ func buildEffectiveValues(schema []ParameterDecl, coerced map[string]any) (map[s
 		}
 
 		if !placeholderRE.MatchString(defStr) {
-			// Plain string default, no placeholders.
-			effective[p.Name] = defStr
+			// Plain string default, no placeholders — coerce to the declared type.
+			val, err := coerceStringToType(defStr, p.Type, p.Name)
+			if err != nil {
+				return nil, err
+			}
+			effective[p.Name] = val
 			continue
 		}
 
