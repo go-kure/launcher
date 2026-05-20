@@ -114,7 +114,7 @@ Migrated from crane. Each type maps to a `ComponentHandler` implementation in
 | `cronjob` | Scheduled task: CronJob |
 | `postgresql` | PostgreSQL instance (CNPG) |
 | `helmrelease` | FluxCD HelmRelease for third-party charts |
-| `daemonset` | DaemonSet for node-level agents |
+| `daemonset` | DaemonSet for node-level agents. Optional `port: <N>` generates a ClusterIP Service exposing port N; required when the daemonset acts as an implicit backend for ingress, httproute, or expose traits. |
 | `statefulset` | StatefulSet for ordered, persistent workloads |
 
 ### 4.3 Supported trait types (Phase 1)
