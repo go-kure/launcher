@@ -203,6 +203,45 @@ func validateClusterProfile(profile *ClusterProfile) error {
 	return nil
 }
 
+// validParamTypes is the set of accepted ParameterDecl.Type values.
+var validParamTypes = map[string]bool{
+	"string":  true,
+	"integer": true,
+	"boolean": true,
+	"array":   true,
+	"object":  true,
+}
+
+// validatePackage performs semantic validation on a parsed Package.
+func validatePackage(pkg *Package) error {
+	if pkg.APIVersion != SupportedAPIVersion {
+		return packageValidationError("apiVersion", fmt.Sprintf("unsupported apiVersion %q, expected %q",
+			pkg.APIVersion, SupportedAPIVersion))
+	}
+	if pkg.Kind != "Package" {
+		return packageValidationError("kind", fmt.Sprintf("expected kind Package, got %q", pkg.Kind))
+	}
+	if pkg.Metadata.Name == "" {
+		return packageValidationError("metadata.name", "metadata.name is required")
+	}
+
+	seenNames := make(map[string]bool, len(pkg.Spec.Parameters))
+	for i, p := range pkg.Spec.Parameters {
+		if p.Name == "" {
+			return packageValidationError("parameters", fmt.Sprintf("parameters[%d].name is required", i))
+		}
+		if seenNames[p.Name] {
+			return packageValidationError("parameters", fmt.Sprintf("duplicate parameter name %q", p.Name))
+		}
+		seenNames[p.Name] = true
+		if !validParamTypes[p.Type] {
+			return packageValidationError("parameters", fmt.Sprintf(
+				"parameter %q has invalid type %q; must be one of: string, integer, boolean, array, object", p.Name, p.Type))
+		}
+	}
+	return nil
+}
+
 // oamValidationError creates a ValidationError with a custom message.
 func oamValidationError(field, message string) *errors.ValidationError {
 	return &errors.ValidationError{
@@ -216,6 +255,14 @@ func profileValidationError(field, message string) *errors.ValidationError {
 	return &errors.ValidationError{
 		Field:     field,
 		Component: "clusterprofile",
+		Message:   message,
+	}
+}
+
+func packageValidationError(field, message string) *errors.ValidationError {
+	return &errors.ValidationError{
+		Field:     field,
+		Component: "package",
 		Message:   message,
 	}
 }

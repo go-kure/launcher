@@ -1,0 +1,12 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: simple
+spec:
+  components:
+  - name: web
+    type: webservice
+    properties:
+      image: "${image}"
+      port: 8080
+      replicas: ${replicas}

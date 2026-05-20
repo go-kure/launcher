@@ -1,0 +1,5 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: test
+spec: {}

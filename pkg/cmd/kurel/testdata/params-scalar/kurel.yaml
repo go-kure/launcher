@@ -1,0 +1,14 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Package
+metadata:
+  name: simple
+  version: "1.0.0"
+spec:
+  parameters:
+  - name: image
+    type: string
+    required: true
+  - name: replicas
+    type: integer
+    required: false
+    default: 1

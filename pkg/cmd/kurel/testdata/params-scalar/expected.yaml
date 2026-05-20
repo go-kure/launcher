@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: web
+  name: web
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - image: myregistry/app:v1.2.3
+        imagePullPolicy: IfNotPresent
+        name: web
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: web
+      topologySpreadConstraints:
+      - labelSelector:
+          matchLabels:
+            app: web
+        maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: web
+  name: web
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: web
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: web
+  name: web
+  namespace: default
