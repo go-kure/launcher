@@ -8,6 +8,11 @@ import (
 	"testing"
 )
 
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // TestFixtures runs all scenario directories under testdata/.
 // Each scenario directory must contain app.yaml and cluster.yaml.
 // The expected output is compared against expected.yaml.
@@ -35,7 +40,12 @@ func TestFixtures(t *testing.T) {
 			var out bytes.Buffer
 			cmd.SetOut(&out)
 			cmd.SetErr(&out)
-			cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+
+			args := []string{"build", appPath, "--profile", profilePath}
+			if vp := filepath.Join(dir, "values.yaml"); fileExists(vp) {
+				args = append(args, "--values", vp)
+			}
+			cmd.SetArgs(args)
 
 			if err := cmd.Execute(); err != nil {
 				t.Fatalf("build command failed: %v\noutput: %s", err, out.String())

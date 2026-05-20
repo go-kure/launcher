@@ -70,6 +70,37 @@ func MustParse(data []byte) *Application {
 	return app
 }
 
+// ParsePackage parses a kurel.yaml Package document in strict mode.
+// Unknown fields are rejected; the document is semantically validated before returning.
+// YAML decode failures return *errors.ParseError; semantic failures return *errors.ValidationError.
+func ParsePackage(data []byte) (*Package, error) {
+	var pkg Package
+
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+
+	if err := dec.Decode(&pkg); err != nil {
+		return nil, packageParseError(err)
+	}
+
+	if err := validatePackage(&pkg); err != nil {
+		return nil, err
+	}
+
+	return &pkg, nil
+}
+
+// packageParseError converts a yaml decode error into a ParseError for Package documents.
+// Parallel to yamlParseError but uses "Package" as the document kind.
+func packageParseError(err error) *errors.ParseError {
+	var typeErr *yaml.TypeError
+	if stderrors.As(err, &typeErr) && len(typeErr.Errors) > 0 {
+		line := extractYAMLLine(typeErr.Errors[0])
+		return errors.NewParseError("Package", "", line, 0, err)
+	}
+	return errors.NewParseError("Package", "", 0, 0, err)
+}
+
 // yamlParseError converts a yaml decode error into a ParseError,
 // extracting line information from yaml.TypeError when available.
 func yamlParseError(err error) *errors.ParseError {
