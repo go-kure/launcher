@@ -29,6 +29,7 @@ kind: ClusterProfile
 metadata:
   name: <string>       # cluster identifier, e.g. "prod-eu-west"
 spec:
+  gitopsEngine: fluxcd # optional; default "fluxcd". Selects native-delivery CR type for helmchart.
   capabilities:
     <trait-type>:      # e.g. "expose", "certificate", "external-secret"
       rendering:       # values injected into trait properties at build time
@@ -40,6 +41,7 @@ spec:
 | Field | Type | Description |
 |---|---|---|
 | `metadata.name` | string | Identifies the cluster; referenced in build tooling |
+| `spec.gitopsEngine` | string | GitOps engine for helmchart native delivery. Accepted: `"fluxcd"` (default, optional). |
 | `spec.capabilities` | map | Keys are trait types; values are capability bindings |
 | `capabilities.<type>.rendering` | map | Platform values merged into trait properties before handler invocation |
 
@@ -72,6 +74,11 @@ not appear in a launcher `cluster.yaml`:
 - `spec.gitops` — FluxCD/ArgoCD wiring; delivery-layer concern
 - `spec.componentCatalog` / `spec.catalog` — Harbor catalog references
 - `spec.componentVariants` — crane layer-3 variant selection
+
+Note: `spec.gitopsEngine` (a single string field) is launcher-specific and IS present in
+launcher ClusterProfiles. It selects which native GitOps delivery CRs are emitted for
+helmchart components. Do not confuse it with crane's `spec.gitops` (the full delivery
+block, which stays in crane only).
 
 ---
 
@@ -261,6 +268,10 @@ follows:
 | `spec.catalog` | — | Stays in crane |
 | `spec.componentCatalog` | — | Stays in crane |
 | `spec.componentVariants` | — | Stays in crane |
+
+`spec.gitopsEngine` is a launcher-only addition with no direct crane counterpart. It
+replaces the engine-selection concern embedded in crane's `spec.gitops.engine` with a
+top-level string. The full `spec.gitops` delivery wiring stays in crane only.
 
 Operators migrating a crane `ClusterProfile` to a launcher `cluster.yaml` must:
 1. Change `apiVersion` to `launcher.gokure.dev/v1alpha1`

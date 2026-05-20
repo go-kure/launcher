@@ -27,7 +27,8 @@ type CapabilityAware interface {
 // SourceDeduplicatable is an optional interface for ApplicationConfig types
 // that generate source CRDs (e.g. HelmRepository). The runtime uses it to
 // suppress duplicate source generation when multiple components share the
-// same source URL.
+// same source key (URL for HelmRepository, URL+version for OCIRepository);
+// first component wins.
 type SourceDeduplicatable interface {
 	GetSourceKey() string
 	GetSourceRefName() string

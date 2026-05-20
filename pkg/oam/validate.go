@@ -13,13 +13,13 @@ import (
 // SupportedAPIVersion is the only accepted apiVersion for Application documents.
 const SupportedAPIVersion = "launcher.gokure.dev/v1alpha1"
 
-// validComponentTypes is the Phase 1 set. Updated when Phase 2 handlers land.
+// validComponentTypes is the Phase 2 set. Updated when Phase 2 handlers land.
 var validComponentTypes = map[string]bool{
 	"webservice":  true,
 	"worker":      true,
 	"postgresql":  true,
 	"cronjob":     true,
-	"helmrelease": true,
+	"helmchart":   true,
 	"daemonset":   true,
 	"statefulset": true,
 }
@@ -191,6 +191,14 @@ func validateClusterProfile(profile *ClusterProfile) error {
 	if errs := validation.IsDNS1123Subdomain(profile.Metadata.Name); len(errs) > 0 {
 		return profileValidationError("metadata.name", fmt.Sprintf("metadata.name %q is not a valid DNS-1123 subdomain",
 			profile.Metadata.Name))
+	}
+	switch profile.Spec.GitopsEngine {
+	case "", "fluxcd":
+		// normalize the absent-field default
+		profile.Spec.GitopsEngine = "fluxcd"
+	default:
+		return profileValidationError("spec.gitopsEngine",
+			fmt.Sprintf("unsupported gitopsEngine %q; supported values: fluxcd", profile.Spec.GitopsEngine))
 	}
 	return nil
 }

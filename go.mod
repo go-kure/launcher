@@ -10,6 +10,8 @@ require (
 	github.com/cloudnative-pg/plugin-barman-cloud v0.12.0
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260213133823-31b0c7c37342
+	github.com/fluxcd/helm-controller/api v1.5.4
+	github.com/fluxcd/source-controller/api v1.8.3
 	github.com/go-kure/kure v0.2.0-alpha.3
 	github.com/google/go-containerregistry v0.21.5
 	github.com/spf13/cobra v1.10.2
@@ -40,14 +42,12 @@ require (
 	github.com/controlplaneio-fluxcd/flux-operator v0.40.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
-	github.com/fluxcd/helm-controller/api v1.5.4 // indirect
 	github.com/fluxcd/image-automation-controller/api v1.1.2 // indirect
 	github.com/fluxcd/kustomize-controller/api v1.8.4 // indirect
 	github.com/fluxcd/notification-controller/api v1.8.4 // indirect
 	github.com/fluxcd/pkg/apis/acl v0.9.0 // indirect
 	github.com/fluxcd/pkg/apis/kustomize v1.15.1 // indirect
 	github.com/fluxcd/pkg/apis/meta v1.25.1 // indirect
-	github.com/fluxcd/source-controller/api v1.8.3 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect

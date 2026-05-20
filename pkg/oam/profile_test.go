@@ -151,3 +151,44 @@ metadata:
 		t.Fatal("expected error for invalid DNS name")
 	}
 }
+
+func TestParseClusterProfile_GitopsEngine(t *testing.T) {
+	cases := []struct {
+		name      string
+		engine    string
+		wantErr   bool
+		wantValue string
+	}{
+		{"absent defaults to fluxcd", "", false, "fluxcd"},
+		{"explicit fluxcd accepted", "fluxcd", false, "fluxcd"},
+		{"argocd rejected", "argocd", true, ""},
+		{"case-sensitive FLUXCD rejected", "FLUXCD", true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engineField := ""
+			if tc.engine != "" {
+				engineField = "\n  gitopsEngine: " + tc.engine
+			}
+			data := []byte(`apiVersion: launcher.gokure.dev/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: test-cluster
+spec:` + engineField + `
+`)
+			got, err := ParseClusterProfile(data)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for gitopsEngine %q, got nil", tc.engine)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Spec.GitopsEngine != tc.wantValue {
+				t.Errorf("GitopsEngine = %q, want %q", got.Spec.GitopsEngine, tc.wantValue)
+			}
+		})
+	}
+}

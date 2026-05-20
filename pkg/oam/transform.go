@@ -138,7 +138,8 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 		evaluated[key] = CapabilityBinding{Rendering: validated}
 	}
 	result := *profile
-	result.Spec = ClusterProfileSpec{Capabilities: evaluated}
+	result.Spec = profile.Spec           // copy all fields (future-proof: new fields survive automatically)
+	result.Spec.Capabilities = evaluated // overwrite only the evaluated capabilities
 	return &result, nil
 }
 
@@ -480,7 +481,8 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 // --- Helpers ---
 
 // deduplicateSourceRefs suppresses duplicate source CRD generation when multiple
-// components share the same source URL.
+// components share the same source key (URL for HelmRepository, URL+version for
+// OCIRepository); first component wins.
 func deduplicateSourceRefs(entries []componentEntry) {
 	seen := make(map[string]string) // sourceKey → sourceRefName
 	for _, entry := range entries {
@@ -607,7 +609,7 @@ var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"worker":      {"apps/v1", "Deployment"},
 	"statefulset": {"apps/v1", "StatefulSet"},
 	"daemonset":   {"apps/v1", "DaemonSet"},
-	"helmrelease": {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
+	"helmchart":   {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
 	"postgresql":  {"postgresql.cnpg.io/v1", "Cluster"},
 }
 

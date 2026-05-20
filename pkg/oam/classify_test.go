@@ -37,7 +37,7 @@ func TestClassifyComponent_DefaultMap(t *testing.T) {
 		{"webservice", TierApps},
 		{"worker", TierApps},
 		{"cronjob", TierApps},
-		{"helmrelease", TierApps},
+		{"helmchart", TierApps},
 		{"statefulset", TierApps},
 		{"postgresql", TierServices},
 		{"daemonset", TierInfra},

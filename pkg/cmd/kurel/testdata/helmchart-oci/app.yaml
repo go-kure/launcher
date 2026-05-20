@@ -1,0 +1,14 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: default
+spec:
+  components:
+    - name: cert-manager
+      type: helmchart
+      properties:
+        version: v1.17.2
+        source:
+          kind: OCIRepository
+          url: oci://ghcr.io/cert-manager/charts/cert-manager

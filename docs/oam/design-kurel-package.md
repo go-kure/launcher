@@ -113,7 +113,7 @@ Migrated from crane. Each type maps to a `ComponentHandler` implementation in
 | `worker` | Long-running background worker: Deployment (no Service) |
 | `cronjob` | Scheduled task: CronJob |
 | `postgresql` | PostgreSQL instance (CNPG) |
-| `helmrelease` | FluxCD HelmRelease for third-party charts |
+| `helmchart` | FluxCD HelmRelease for third-party charts. Supports inline source creation (`source.url`) and reference to existing source CRs (`source.name`). Multiple components sharing the same source key share a single source CR (first component wins). For HelmRepository the key is the URL; for OCIRepository the key is URL+version, so two OCI components with the same URL but different versions each get their own source CR. |
 | `daemonset` | DaemonSet for node-level agents. Optional `port: <N>` generates a ClusterIP Service exposing port N; required when the daemonset acts as an implicit backend for ingress, httproute, or expose traits. |
 | `statefulset` | StatefulSet for ordered, persistent workloads |
 

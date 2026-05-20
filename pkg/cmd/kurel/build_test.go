@@ -166,7 +166,7 @@ metadata:
 spec:
   components:
     - name: backend
-      type: helmrelease
+      type: unknownxyz
       properties:
         image: ghcr.io/example/backend:v1.0.0
 `
@@ -182,7 +182,7 @@ spec:
 	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for unsupported component type 'helmrelease'")
+		t.Fatal("expected error for unsupported component type 'unknownxyz'")
 	}
 }
 
