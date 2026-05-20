@@ -3,6 +3,7 @@ package oam
 import (
 	"fmt"
 	"maps"
+	"math"
 	"regexp"
 	"strconv"
 
@@ -105,6 +106,9 @@ func coerceValue(v any, decl *ParameterDecl) (any, error) {
 		case int64:
 			return int(tv), nil
 		case float64:
+			if tv != math.Trunc(tv) {
+				return nil, errors.Errorf("parameter %q (type integer): %g is not a valid integer (fractional values are not allowed)", decl.Name, tv)
+			}
 			return int(tv), nil
 		case string:
 			n, err := strconv.Atoi(tv)
@@ -129,7 +133,14 @@ func coerceValue(v any, decl *ParameterDecl) (any, error) {
 			return nil, errors.Errorf("parameter %q (type boolean): cannot coerce %T to boolean", decl.Name, v)
 		}
 	case "string":
-		return fmt.Sprintf("%v", v), nil
+		switch v.(type) {
+		case map[string]any, []any:
+			return nil, errors.Errorf("parameter %q (type string): got %T, expected a string scalar value", decl.Name, v)
+		case nil:
+			return nil, errors.Errorf("parameter %q (type string): null is not a valid string value", decl.Name)
+		default:
+			return fmt.Sprintf("%v", v), nil
+		}
 	case "array", "object":
 		if _, isStr := v.(string); isStr {
 			return nil, errors.Errorf("parameter %q (type %s) cannot be set with --set; use --values to supply a structured value", decl.Name, decl.Type)

@@ -185,6 +185,54 @@ func TestResolveParameters_SetCoercion_BadInteger(t *testing.T) {
 	}
 }
 
+func TestResolveParameters_FloatIntegerRejected(t *testing.T) {
+	// values.yaml float64 like replicas: 2.5 must be rejected, not silently truncated.
+	schema := []oam.ParameterDecl{{Name: "replicas", Type: "integer", Required: true}}
+	_, err := oam.ResolveParameters([]byte("replicas: ${replicas}\n"), schema, map[string]any{"replicas": float64(2.5)})
+	if err == nil {
+		t.Fatal("expected error: 2.5 is not a valid integer (would silently truncate to 2)")
+	}
+	if !strings.Contains(err.Error(), "replicas") {
+		t.Errorf("error should name the parameter, got: %v", err)
+	}
+}
+
+func TestResolveParameters_FloatWholeNumberAccepted(t *testing.T) {
+	// A whole-number float like 2.0 decoded from YAML is acceptable for integer params.
+	schema := []oam.ParameterDecl{{Name: "replicas", Type: "integer", Required: true}}
+	out := resolveOK(t, "replicas: ${replicas}\n", schema, map[string]any{"replicas": float64(2.0)})
+	m := mustUnmarshal(t, out)
+	if m["replicas"] != 2 {
+		t.Errorf("replicas = %v (%T), want 2 (int)", m["replicas"], m["replicas"])
+	}
+}
+
+func TestResolveParameters_StringParamRejectsMap(t *testing.T) {
+	// image: {repo: ghcr.io/app} in values.yaml must be rejected, not stringified.
+	schema := []oam.ParameterDecl{{Name: "image", Type: "string", Required: true}}
+	_, err := oam.ResolveParameters([]byte("image: ${image}\n"), schema, map[string]any{
+		"image": map[string]any{"repo": "ghcr.io/app"},
+	})
+	if err == nil {
+		t.Fatal("expected error: map value is not a valid string parameter")
+	}
+	if !strings.Contains(err.Error(), "image") {
+		t.Errorf("error should name the parameter, got: %v", err)
+	}
+}
+
+func TestResolveParameters_StringParamRejectsNull(t *testing.T) {
+	// image: null in values.yaml must be rejected.
+	schema := []oam.ParameterDecl{{Name: "image", Type: "string", Required: true}}
+	_, err := oam.ResolveParameters([]byte("image: ${image}\n"), schema, map[string]any{"image": nil})
+	if err == nil {
+		t.Fatal("expected error: null is not a valid string parameter")
+	}
+	if !strings.Contains(err.Error(), "image") {
+		t.Errorf("error should name the parameter, got: %v", err)
+	}
+}
+
 func TestResolveParameters_UnknownPlaceholderInAppYAML(t *testing.T) {
 	schema := []oam.ParameterDecl{}
 	_, err := oam.ResolveParameters([]byte("image: ${undefined}\n"), schema, map[string]any{})

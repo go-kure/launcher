@@ -204,12 +204,12 @@ func validateClusterProfile(profile *ClusterProfile) error {
 }
 
 // validParamTypes is the set of accepted ParameterDecl.Type values.
+// array and object are intentionally excluded: node substitution is not yet
+// implemented, so declaring those types would produce an unusable package.
 var validParamTypes = map[string]bool{
 	"string":  true,
 	"integer": true,
 	"boolean": true,
-	"array":   true,
-	"object":  true,
 }
 
 // validatePackage performs semantic validation on a parsed Package.
@@ -236,7 +236,7 @@ func validatePackage(pkg *Package) error {
 		seenNames[p.Name] = true
 		if !validParamTypes[p.Type] {
 			return packageValidationError("parameters", fmt.Sprintf(
-				"parameter %q has invalid type %q; must be one of: string, integer, boolean, array, object", p.Name, p.Type))
+				"parameter %q has invalid type %q; supported types: string, integer, boolean", p.Name, p.Type))
 		}
 	}
 	return nil
