@@ -7,6 +7,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -21,6 +22,30 @@ func newApp(name, namespace string) *stack.Application {
 
 func newBundle() *stack.Bundle {
 	return &stack.Bundle{}
+}
+
+// webConfig satisfies servicePortProvider via duck-typing at runtime.
+type webConfig struct{ port int32 }
+
+func (w *webConfig) ServicePort() int32 { return w.port }
+func (w *webConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
+	return nil, nil
+}
+
+// namedWebConfig additionally satisfies serviceBackendNamer.
+type namedWebConfig struct {
+	port        int32
+	serviceName string
+}
+
+func (w *namedWebConfig) ServicePort() int32         { return w.port }
+func (w *namedWebConfig) BackendServiceName() string { return w.serviceName }
+func (w *namedWebConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
+	return nil, nil
+}
+
+func newWebApp(name, namespace string) *stack.Application {
+	return stack.NewApplication(name, namespace, &webConfig{port: 80})
 }
 
 // --- ExposeHandler.ValidateAndApplyDefaults ---
@@ -128,7 +153,7 @@ func TestExposeHandler_Apply_DispatchesToIngress(t *testing.T) {
 			},
 		},
 	}
-	app := newApp("my-app", "default")
+	app := newWebApp("my-app", "default")
 	bundle := newBundle()
 	if err := h.Apply(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -186,7 +211,7 @@ func TestIngressHandler_Apply_Basic(t *testing.T) {
 			},
 		},
 	}
-	app := newApp("my-app", "default")
+	app := newWebApp("my-app", "default")
 	bundle := newBundle()
 	if err := h.Apply(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -220,7 +245,7 @@ func TestIngressHandler_Apply_TLS(t *testing.T) {
 			},
 		},
 	}
-	app := newApp("my-app", "default")
+	app := newWebApp("my-app", "default")
 	bundle := newBundle()
 	if err := h.Apply(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -297,7 +322,7 @@ func TestIngressHandler_Apply_Generate(t *testing.T) {
 			},
 		},
 	}
-	app := newApp("my-app", "default")
+	app := newWebApp("my-app", "default")
 	bundle := newBundle()
 	if err := h.Apply(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -330,7 +355,7 @@ func TestIngressHandler_Apply_NamedSubApp(t *testing.T) {
 			},
 		},
 	}
-	app := newApp("my-app", "default")
+	app := newWebApp("my-app", "default")
 	bundle := newBundle()
 	if err := h.Apply(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -1722,7 +1747,7 @@ func TestExposeHandler_Apply_Gateway_DispatchesToHTTPRoute(t *testing.T) {
 			"rules":          []any{map[string]any{}},
 		},
 	}
-	app := newApp("web", "default")
+	app := newWebApp("web", "default")
 	bundle := newBundle()
 	if err := h.Apply(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -1765,7 +1790,7 @@ func TestExposeHandler_Apply_Gateway_ExplicitNamespace(t *testing.T) {
 			"rules":            []any{map[string]any{}},
 		},
 	}
-	app := newApp("web", "default")
+	app := newWebApp("web", "default")
 	bundle := newBundle()
 	if err := h.Apply(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -1782,5 +1807,151 @@ func TestExposeHandler_Apply_Gateway_ExplicitNamespace(t *testing.T) {
 	pr := route.Spec.ParentRefs[0]
 	if pr.Namespace == nil || string(*pr.Namespace) != "infra" {
 		t.Errorf("parentRef.Namespace = %v, want \"infra\"", pr.Namespace)
+	}
+}
+
+func TestExposeHandler_Apply_Gateway_NoServicePort_Errors(t *testing.T) {
+	h := &traits.ExposeHandler{}
+	trait := &oam.Trait{
+		Type: "expose",
+		Properties: map[string]any{
+			"controllerType": "gateway",
+			"gatewayName":    "my-gw",
+			"rules":          []any{map[string]any{}},
+		},
+	}
+	app := newApp("wrk", "default")
+	bundle := newBundle()
+	err := h.Apply(trait, app, bundle)
+	if err == nil {
+		t.Fatal("expected error for component with no service port")
+	}
+	if !strings.Contains(err.Error(), "no service port") {
+		t.Errorf("expected 'no service port' in error, got: %v", err)
+	}
+}
+
+func TestIngressHandler_Apply_NoServicePort_Errors(t *testing.T) {
+	h := &traits.IngressHandler{}
+	trait := &oam.Trait{
+		Type: "ingress",
+		Properties: map[string]any{
+			"ingressClassName": "nginx",
+			"rules": []any{
+				map[string]any{
+					"host": "example.com",
+					"paths": []any{
+						map[string]any{"path": "/"},
+					},
+				},
+			},
+		},
+	}
+	app := newApp("wrk", "default")
+	bundle := newBundle()
+	err := h.Apply(trait, app, bundle)
+	if err == nil {
+		t.Fatal("expected error for component with no service port")
+	}
+	if !strings.Contains(err.Error(), "no service port") {
+		t.Errorf("expected 'no service port' in error, got: %v", err)
+	}
+}
+
+func TestIngressHandler_Apply_ExplicitBackend_NoPortErrors(t *testing.T) {
+	h := &traits.IngressHandler{}
+	trait := &oam.Trait{
+		Type: "ingress",
+		Properties: map[string]any{
+			"rules": []any{
+				map[string]any{
+					"host": "example.com",
+					"paths": []any{
+						map[string]any{
+							"path":    "/admin",
+							"backend": "deny-backend",
+							// no "port" — must error even though component has port 80
+						},
+					},
+				},
+			},
+		},
+	}
+	app := newWebApp("web", "default")
+	err := h.Apply(trait, app, newBundle())
+	if err == nil || !strings.Contains(err.Error(), "cannot determine backend port") {
+		t.Errorf("expected 'cannot determine backend port', got: %v", err)
+	}
+}
+
+func TestIngressHandler_Apply_ExplicitBackend(t *testing.T) {
+	h := &traits.IngressHandler{}
+	trait := &oam.Trait{
+		Type: "ingress",
+		Properties: map[string]any{
+			"ingressClassName": "nginx",
+			"rules": []any{
+				map[string]any{
+					"host": "example.com",
+					"paths": []any{
+						map[string]any{
+							"path":    "/",
+							"backend": "deny-backend",
+							"port":    8080,
+						},
+					},
+				},
+			},
+		},
+	}
+	app := newApp("wrk", "default")
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	objs, err := bundle.Applications[0].Config.(*traits.IngressConfig).Generate(
+		stack.NewApplication("wrk-ingress", "default", nil))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	ingress := (*objs[0]).(*networkingv1.Ingress)
+	gotName := ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Name
+	if gotName != "deny-backend" {
+		t.Errorf("backend.service.name = %q, want \"deny-backend\"", gotName)
+	}
+}
+
+func TestIngressHandler_Apply_CustomServiceName(t *testing.T) {
+	h := &traits.IngressHandler{}
+	app := stack.NewApplication("my-statefulset", "default", &namedWebConfig{
+		port: 5432, serviceName: "postgres-primary",
+	})
+	trait := &oam.Trait{
+		Type: "ingress",
+		Properties: map[string]any{
+			"rules": []any{
+				map[string]any{
+					"host":  "db.example.com",
+					"paths": []any{map[string]any{"path": "/"}},
+				},
+			},
+		},
+	}
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	subApp := bundle.Applications[0]
+	objs, err := subApp.Config.Generate(stack.NewApplication("my-statefulset-ingress", "default", nil))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	ingress, ok := (*objs[0]).(*networkingv1.Ingress)
+	if !ok {
+		t.Fatalf("expected *networkingv1.Ingress, got %T", *objs[0])
+	}
+	gotName := ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Name
+	if gotName != "postgres-primary" {
+		t.Errorf("backend.service.name = %q, want \"postgres-primary\"", gotName)
 	}
 }

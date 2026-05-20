@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: frontend
+  name: frontend
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - image: ghcr.io/example/frontend:v1.0.0
+        imagePullPolicy: IfNotPresent
+        name: frontend
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: frontend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: frontend
+  name: frontend
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: frontend
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: frontend
+  name: frontend
+  namespace: default
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  labels:
+    app: frontend
+  name: frontend-ingress
+  namespace: default
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: frontend.example.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: frontend
+            port:
+              number: 8080
+        path: /
+        pathType: Prefix
+      - backend:
+          service:
+            name: deny-backend
+            port:
+              number: 8080
+        path: /admin
+        pathType: Prefix

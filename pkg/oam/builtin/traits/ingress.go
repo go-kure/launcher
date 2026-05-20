@@ -18,13 +18,39 @@ type servicePortProvider interface {
 	ServicePort() int32
 }
 
-// resolveDefaultPort returns the component's service port when the config implements
-// servicePortProvider, otherwise returns 80.
+// serviceBackendNamer is implemented by component configs whose Kubernetes Service
+// name differs from the application name (e.g. StatefulsetConfig.ServiceName).
+type serviceBackendNamer interface {
+	BackendServiceName() string
+}
+
+// resolveDefaultPort returns the component's service port, or 0 if the component
+// does not expose a service port.
 func resolveDefaultPort(app *stack.Application) int32 {
 	if pp, ok := app.Config.(servicePortProvider); ok && pp.ServicePort() > 0 {
 		return pp.ServicePort()
 	}
-	return 80
+	return 0
+}
+
+// resolveServiceName returns the name of the Kubernetes Service the component exposes.
+// Falls back to app.Name when the config does not implement serviceBackendNamer.
+func resolveServiceName(app *stack.Application) string {
+	if sn, ok := app.Config.(serviceBackendNamer); ok {
+		return sn.BackendServiceName()
+	}
+	return app.Name
+}
+
+// checkImplicitBackend validates that the component can serve as an implicit backend
+// (the trait path/backendRef does not name an explicit target service).
+func checkImplicitBackend(app *stack.Application, location string) error {
+	if _, ok := app.Config.(servicePortProvider); !ok {
+		return errors.Errorf(
+			"%s: component %q has no service port; configure a service port or specify an explicit backend name",
+			location, app.Name)
+	}
+	return nil
 }
 
 // validPathTypes is the set of path types accepted by the Kubernetes Ingress API.
@@ -63,7 +89,7 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Application) (*IngressConfig, error) {
 	defaultPort := resolveDefaultPort(app)
 	config := &IngressConfig{
-		ServiceName: app.Name,
+		ServiceName: resolveServiceName(app),
 	}
 
 	if name, ok := props["name"].(string); ok && name != "" {
@@ -125,15 +151,39 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 				p.PathType = pathType
 			}
 
+			backendExplicit := false
+			if backend, ok := pathMap["backend"].(string); ok && backend != "" {
+				p.ServiceName = backend
+				backendExplicit = true
+			}
+
+			portExplicit := false
 			if port, ok := toIngressPort(pathMap["port"]); ok {
 				p.Port = port
+				portExplicit = true
 			}
 
 			if portName, ok := pathMap["portName"].(string); ok && portName != "" {
 				if _, hasPort := pathMap["port"]; !hasPort {
 					p.Port = 0
 					p.PortName = portName
+					portExplicit = true
 				}
+			}
+
+			if backendExplicit && !portExplicit {
+				p.Port = 0
+			}
+
+			if p.ServiceName == "" {
+				if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d].paths[%d]", i, j)); err != nil {
+					return nil, err
+				}
+			}
+			if p.Port == 0 && p.PortName == "" {
+				return nil, errors.Errorf(
+					"rules[%d].paths[%d]: cannot determine backend port — configure the component port or specify 'port'/'portName' in the path",
+					i, j)
 			}
 
 			rule.Paths = append(rule.Paths, p)
@@ -185,10 +235,11 @@ type IngressRule struct {
 
 // IngressPath represents a single path within a rule.
 type IngressPath struct {
-	Path     string
-	PathType string
-	Port     int32
-	PortName string
+	Path        string
+	PathType    string
+	ServiceName string // empty means use IngressConfig.ServiceName (= component service)
+	Port        int32
+	PortName    string
 }
 
 // IngressTLS represents a TLS entry.
@@ -217,17 +268,19 @@ func (c *IngressConfig) Generate(app *stack.Application) ([]*client.Object, erro
 			var servicePort networkingv1.ServiceBackendPort
 			if p.Port > 0 {
 				servicePort = networkingv1.ServiceBackendPort{Number: p.Port}
-			} else if p.PortName != "" {
-				servicePort = networkingv1.ServiceBackendPort{Name: p.PortName}
 			} else {
-				servicePort = networkingv1.ServiceBackendPort{Number: 80}
+				servicePort = networkingv1.ServiceBackendPort{Name: p.PortName}
+			}
+			serviceName := p.ServiceName
+			if serviceName == "" {
+				serviceName = c.ServiceName
 			}
 			kubernetes.AddIngressRulePath(ingressRule, networkingv1.HTTPIngressPath{
 				Path:     p.Path,
 				PathType: &pathType,
 				Backend: networkingv1.IngressBackend{
 					Service: &networkingv1.IngressServiceBackend{
-						Name: c.ServiceName,
+						Name: serviceName,
 						Port: servicePort,
 					},
 				},

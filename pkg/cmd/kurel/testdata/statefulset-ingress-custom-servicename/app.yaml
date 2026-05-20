@@ -1,0 +1,21 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-db
+  namespace: default
+spec:
+  components:
+    - name: db
+      type: statefulset
+      properties:
+        image: ghcr.io/example/postgres:v15.0
+        port: 5432
+        serviceName: postgres-primary
+      traits:
+        - type: ingress
+          properties:
+            ingressClassName: nginx
+            rules:
+              - host: db.example.com
+                paths:
+                  - path: /

@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: db
+  name: db
+  namespace: default
+spec:
+  podManagementPolicy: OrderedReady
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  serviceName: postgres-primary
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+      - image: ghcr.io/example/postgres:v15.0
+        imagePullPolicy: IfNotPresent
+        name: db
+        ports:
+        - containerPort: 5432
+          name: tcp
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: db
+  updateStrategy: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: db
+  name: postgres-primary
+  namespace: default
+spec:
+  clusterIP: None
+  ports:
+  - name: tcp
+    port: 5432
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    app: db
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: db
+  name: db
+  namespace: default
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  labels:
+    app: postgres-primary
+  name: db-ingress
+  namespace: default
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: db.example.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: postgres-primary
+            port:
+              number: 5432
+        path: /
+        pathType: Prefix
