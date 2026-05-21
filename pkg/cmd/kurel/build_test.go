@@ -1,7 +1,12 @@
 package kurel
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -458,5 +463,101 @@ func TestBuildCommand_DirectoryArg(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, "myregistry/app:v1.2.3") {
 		t.Errorf("expected image in output, got:\n%s", got)
+	}
+}
+
+// buildMinimalChartTar builds a gzipped tar chart archive. extraFiles are merged on top of the
+// auto-generated Chart.yaml, keyed by their path inside the archive (e.g. "chartname/templates/x.yaml").
+func buildMinimalChartTar(t *testing.T, name, version string, extraFiles map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	files := map[string]string{
+		name + "/Chart.yaml": fmt.Sprintf("apiVersion: v2\nname: %s\nversion: %s\n", name, version),
+	}
+	for k, v := range extraFiles {
+		files[k] = v
+	}
+	for path, content := range files {
+		hdr := &tar.Header{Name: path, Mode: 0o600, Size: int64(len(content))}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("tar header: %v", err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatalf("tar write: %v", err)
+		}
+	}
+	tw.Close()
+	gz.Close()
+	return buf.Bytes()
+}
+
+func helmIndexYAML(name, version, url string) string {
+	return fmt.Sprintf(
+		"apiVersion: v1\nentries:\n  %s:\n  - name: %s\n    version: %s\n    urls:\n      - %s\ngenerated: \"2024-01-01T00:00:00Z\"\n",
+		name, name, version, url,
+	)
+}
+
+func TestBuildCommand_HelmchartTemplateDelivery(t *testing.T) {
+	// NOTES.txt content renders as a YAML mapping — without kure alpha.8's NOTES.txt filter,
+	// decodeKubeManifests would return "missing apiVersion or kind" on this chart.
+	chartFiles := map[string]string{
+		"testchart/templates/cm.yaml":   "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test-cm\ndata:\n  key: value\n",
+		"testchart/templates/NOTES.txt": "chart: testchart\nversion: 0.1.0\n",
+	}
+	chartBuf := buildMinimalChartTar(t, "testchart", "0.1.0", chartFiles)
+
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.yaml":
+			fmt.Fprint(w, helmIndexYAML("testchart", "0.1.0", srvURL+"/testchart-0.1.0.tgz"))
+		case "/testchart-0.1.0.tgz":
+			w.Write(chartBuf)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	appYAML := fmt.Sprintf(`apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: testapp
+      type: helmchart
+      properties:
+        chart: testchart
+        version: "0.1.0"
+        delivery: template
+        source:
+          url: %s
+`, srvURL)
+
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", appYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("build failed: %v\noutput: %s", err, out.String())
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "kind: ConfigMap") {
+		t.Errorf("expected ConfigMap in output, got:\n%s", got)
+	}
+	if strings.Contains(got, "chart: testchart") {
+		t.Errorf("NOTES.txt content must not appear in output, got:\n%s", got)
 	}
 }
