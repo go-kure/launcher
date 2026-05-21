@@ -323,7 +323,43 @@ func TestHelmchartHandler_SourceDedup(t *testing.T) {
 	}
 }
 
-func TestHelmchartHandler_DeliveryTemplate_Rejected(t *testing.T) {
+func TestHelmchartHandler_DeliveryTemplate_FormBRejected(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":    "kube-prometheus-stack",
+			"delivery": "template",
+			"source": map[string]any{
+				"name": "existing-repo",
+				"kind": "HelmRepository",
+			},
+		},
+	}, "monitoring")
+	if err == nil {
+		t.Fatal("expected error: template delivery does not support source.name (Form B)")
+	}
+}
+
+func TestHelmchartHandler_DeliveryTemplate_OCIWithoutVersionRejected(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "my-chart",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"delivery": "template",
+			"source": map[string]any{
+				"url": "oci://ghcr.io/example/charts/myapp",
+			},
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error: template delivery with OCIRepository requires version")
+	}
+}
+
+func TestHelmchartHandler_DeliveryTemplate_ValuesFromRejected(t *testing.T) {
 	h := &components.HelmchartHandler{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "metrics",
@@ -334,10 +370,134 @@ func TestHelmchartHandler_DeliveryTemplate_Rejected(t *testing.T) {
 			"source": map[string]any{
 				"url": "https://prometheus-community.github.io/helm-charts",
 			},
+			"valuesFrom": []any{
+				map[string]any{"kind": "ConfigMap", "name": "my-values"},
+			},
 		},
 	}, "monitoring")
 	if err == nil {
-		t.Fatal("expected error for delivery: template")
+		t.Fatal("expected error: template delivery does not support valuesFrom")
+	}
+}
+
+func TestHelmchartHandler_DeliveryTemplate_ReleaseNameRejected(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":       "kube-prometheus-stack",
+			"delivery":    "template",
+			"releaseName": "my-release",
+			"source": map[string]any{
+				"url": "https://prometheus-community.github.io/helm-charts",
+			},
+		},
+	}, "monitoring")
+	if err == nil {
+		t.Fatal("expected error: template delivery does not support releaseName")
+	}
+}
+
+func TestHelmchartHandler_DeliveryTemplate_TargetNamespaceRejected(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":           "kube-prometheus-stack",
+			"delivery":        "template",
+			"targetNamespace": "other-ns",
+			"source": map[string]any{
+				"url": "https://prometheus-community.github.io/helm-charts",
+			},
+		},
+	}, "monitoring")
+	if err == nil {
+		t.Fatal("expected error: template delivery does not support targetNamespace")
+	}
+}
+
+func TestHelmchartHandler_DeliveryTemplate_IntervalRejected(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":    "kube-prometheus-stack",
+			"delivery": "template",
+			"interval": "5m",
+			"source": map[string]any{
+				"url": "https://prometheus-community.github.io/helm-charts",
+			},
+		},
+	}, "monitoring")
+	if err == nil {
+		t.Fatal("expected error: template delivery does not support interval")
+	}
+}
+
+func TestHelmchartHandler_DeliveryTemplate_DriftDetectionRejected(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":    "kube-prometheus-stack",
+			"delivery": "template",
+			"source": map[string]any{
+				"url": "https://prometheus-community.github.io/helm-charts",
+			},
+			"driftDetection": map[string]any{"mode": "enabled"},
+		},
+	}, "monitoring")
+	if err == nil {
+		t.Fatal("expected error: template delivery does not support driftDetection")
+	}
+}
+
+func TestHelmchartHandler_DeliveryTemplate_InstallCRDsRejected(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":    "kube-prometheus-stack",
+			"delivery": "template",
+			"source": map[string]any{
+				"url": "https://prometheus-community.github.io/helm-charts",
+			},
+			"install": map[string]any{"crds": "Create"},
+		},
+	}, "monitoring")
+	if err == nil {
+		t.Fatal("expected error: template delivery does not support install.crds")
+	}
+}
+
+func TestHelmchartGetSourceKey_TemplateReturnsEmpty(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":    "kube-prometheus-stack",
+			"delivery": "template",
+			"source": map[string]any{
+				"url": "https://prometheus-community.github.io/helm-charts",
+			},
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	type sourcer interface{ GetSourceKey() string }
+	s, ok := cfg.(sourcer)
+	if !ok {
+		t.Skip("config does not implement GetSourceKey")
+	}
+	if key := s.GetSourceKey(); key != "" {
+		t.Errorf("GetSourceKey() = %q, want empty string for template delivery", key)
 	}
 }
 

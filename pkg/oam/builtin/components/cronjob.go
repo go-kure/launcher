@@ -181,9 +181,9 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	if err != nil {
 		return nil, errors.Wrap(err, "resource requirements")
 	}
-	_ = kubernetes.SetContainerResources(container, rr)
+	kubernetes.SetContainerResources(container, rr)
 	for _, env := range buildEnvVars(c.Env) {
-		_ = kubernetes.AddContainerEnv(container, env)
+		kubernetes.AddContainerEnv(container, env)
 	}
 
 	cj := kubernetes.CreateCronJob(app.Name, app.Namespace, c.Schedule)
@@ -192,9 +192,9 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	cj.Spec.JobTemplate.Labels = labels
 	cj.Spec.JobTemplate.Spec.Template.Labels = labels
 	cj.Spec.JobTemplate.Spec.Template.Spec.RestartPolicy = c.RestartPolicy
-	_ = kubernetes.SetCronJobSuccessfulJobsHistoryLimit(cj, c.SuccessfulJobsHistoryLimit)
-	_ = kubernetes.SetCronJobFailedJobsHistoryLimit(cj, c.FailedJobsHistoryLimit)
-	_ = kubernetes.SetCronJobServiceAccountName(cj, app.Name)
+	kubernetes.SetCronJobSuccessfulJobsHistoryLimit(cj, c.SuccessfulJobsHistoryLimit)
+	kubernetes.SetCronJobFailedJobsHistoryLimit(cj, c.FailedJobsHistoryLimit)
+	kubernetes.SetCronJobServiceAccountName(cj, app.Name)
 	// Init containers added before the main container so declaration order is
 	// preserved in spec.template.spec.initContainers.
 	for _, ic := range c.InitContainers {
@@ -202,9 +202,13 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 		if err != nil {
 			return nil, err
 		}
-		_ = kubernetes.AddCronJobInitContainer(cj, initContainer)
+		if err := kubernetes.AddCronJobInitContainer(cj, initContainer); err != nil {
+			return nil, errors.Wrapf(err, "add init container %q", ic.Name)
+		}
 	}
-	_ = kubernetes.AddCronJobContainer(cj, container)
+	if err := kubernetes.AddCronJobContainer(cj, container); err != nil {
+		return nil, errors.Wrapf(err, "add container %q", c.Name)
+	}
 
 	return cj, nil
 }

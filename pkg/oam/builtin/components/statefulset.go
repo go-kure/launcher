@@ -223,25 +223,25 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	if err != nil {
 		return nil, errors.Wrap(err, "resource requirements")
 	}
-	_ = kubernetes.SetContainerResources(container, rr)
+	kubernetes.SetContainerResources(container, rr)
 	if c.Port > 0 {
-		_ = kubernetes.AddContainerPort(container, corev1.ContainerPort{
+		kubernetes.AddContainerPort(container, corev1.ContainerPort{
 			Name:          "tcp",
 			ContainerPort: c.Port,
 			Protocol:      corev1.ProtocolTCP,
 		})
 	}
 	for _, env := range buildEnvVars(c.Env) {
-		_ = kubernetes.AddContainerEnv(container, env)
+		kubernetes.AddContainerEnv(container, env)
 	}
 	for _, vct := range c.VolumeClaimTemplates {
-		_ = kubernetes.AddContainerVolumeMount(container, corev1.VolumeMount{
+		kubernetes.AddContainerVolumeMount(container, corev1.VolumeMount{
 			Name:      vct.Name,
 			MountPath: vct.MountPath,
 		})
 	}
 	for _, m := range c.VolumeMounts {
-		_ = kubernetes.AddContainerVolumeMount(container, m)
+		kubernetes.AddContainerVolumeMount(container, m)
 	}
 	applyProbes(container, c.Probes)
 
@@ -249,28 +249,34 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	sts.Labels = labels
 	sts.Annotations = nil
 	sts.Spec.Template.Labels = labels
-	_ = kubernetes.SetStatefulSetReplicas(sts, c.Replicas)
-	_ = kubernetes.SetStatefulSetServiceName(sts, c.ServiceName)
-	_ = kubernetes.SetStatefulSetServiceAccountName(sts, app.Name)
+	kubernetes.SetStatefulSetReplicas(sts, c.Replicas)
+	kubernetes.SetStatefulSetServiceName(sts, c.ServiceName)
+	kubernetes.SetStatefulSetServiceAccountName(sts, app.Name)
 
 	for _, ic := range c.InitContainers {
 		initContainer, err := buildInitContainer(ic)
 		if err != nil {
 			return nil, err
 		}
-		_ = kubernetes.AddStatefulSetInitContainer(sts, initContainer)
+		if err := kubernetes.AddStatefulSetInitContainer(sts, initContainer); err != nil {
+			return nil, errors.Wrapf(err, "add init container %q", ic.Name)
+		}
 	}
-	_ = kubernetes.AddStatefulSetContainer(sts, container)
+	if err := kubernetes.AddStatefulSetContainer(sts, container); err != nil {
+		return nil, errors.Wrapf(err, "add container %q", c.Name)
+	}
 	for _, sc := range c.Sidecars {
 		sidecarContainer, err := buildSidecarContainer(sc)
 		if err != nil {
 			return nil, err
 		}
-		_ = kubernetes.AddStatefulSetContainer(sts, sidecarContainer)
+		if err := kubernetes.AddStatefulSetContainer(sts, sidecarContainer); err != nil {
+			return nil, errors.Wrapf(err, "add sidecar container %q", sc.Name)
+		}
 	}
 
 	if aff := buildAffinity(c.Affinity, map[string]string{"app": app.Name}); aff != nil {
-		_ = kubernetes.SetStatefulSetAffinity(sts, aff)
+		kubernetes.SetStatefulSetAffinity(sts, aff)
 	}
 
 	for _, vct := range c.VolumeClaimTemplates {
@@ -286,10 +292,12 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 			AccessModes:      accessModes,
 			StorageRequest:   resource.MustParse(vct.Size),
 		})
-		_ = kubernetes.AddStatefulSetVolumeClaimTemplate(sts, pvc)
+		kubernetes.AddStatefulSetVolumeClaimTemplate(sts, pvc)
 	}
 	for i := range c.Volumes {
-		_ = kubernetes.AddStatefulSetVolume(sts, &c.Volumes[i])
+		if err := kubernetes.AddStatefulSetVolume(sts, &c.Volumes[i]); err != nil {
+			return nil, errors.Wrapf(err, "add volume %q", c.Volumes[i].Name)
+		}
 	}
 
 	return sts, nil
@@ -301,10 +309,10 @@ func (c *StatefulsetConfig) createHeadlessService(app *stack.Application) *corev
 	svc := kubernetes.CreateService(c.ServiceName, app.Namespace)
 	svc.Labels = labels
 	svc.Annotations = nil
-	_ = kubernetes.SetServiceClusterIP(svc, "None")
-	_ = kubernetes.SetServiceSelector(svc, map[string]string{"app": app.Name})
+	kubernetes.SetServiceClusterIP(svc, "None")
+	kubernetes.SetServiceSelector(svc, map[string]string{"app": app.Name})
 	if c.Port > 0 {
-		_ = kubernetes.AddServicePort(svc, corev1.ServicePort{
+		kubernetes.AddServicePort(svc, corev1.ServicePort{
 			Name:       "tcp",
 			Port:       c.Port,
 			TargetPort: intstr.FromInt32(c.Port),

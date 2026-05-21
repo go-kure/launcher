@@ -289,16 +289,12 @@ func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object
 	np := kubernetes.CreateNetworkPolicy(c.ComponentName+"-allow", app.Namespace)
 	np.Labels = map[string]string{"app": c.ComponentName}
 	np.Annotations = nil
-	if err := kubernetes.SetNetworkPolicyPodSelector(np, metav1.LabelSelector{
+	kubernetes.SetNetworkPolicyPodSelector(np, metav1.LabelSelector{
 		MatchLabels: map[string]string{"app": c.ComponentName},
-	}); err != nil {
-		return nil, errors.Wrap(err, "set pod selector")
-	}
+	})
 
 	if len(c.Ingress) > 0 {
-		if err := kubernetes.AddNetworkPolicyPolicyType(np, networkingv1.PolicyTypeIngress); err != nil {
-			return nil, errors.Wrap(err, "add ingress policy type")
-		}
+		kubernetes.AddNetworkPolicyPolicyType(np, networkingv1.PolicyTypeIngress)
 		for _, rule := range c.Ingress {
 			ingressRule := networkingv1.NetworkPolicyIngressRule{}
 			for _, peer := range rule.From {
@@ -322,16 +318,12 @@ func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object
 					Port:     &portVal,
 				})
 			}
-			if err := kubernetes.AddNetworkPolicyIngressRule(np, ingressRule); err != nil {
-				return nil, errors.Wrap(err, "add ingress rule")
-			}
+			kubernetes.AddNetworkPolicyIngressRule(np, ingressRule)
 		}
 	}
 
 	if len(c.Egress) > 0 {
-		if err := kubernetes.AddNetworkPolicyPolicyType(np, networkingv1.PolicyTypeEgress); err != nil {
-			return nil, errors.Wrap(err, "add egress policy type")
-		}
+		kubernetes.AddNetworkPolicyPolicyType(np, networkingv1.PolicyTypeEgress)
 		for _, rule := range c.Egress {
 			egressRule := networkingv1.NetworkPolicyEgressRule{}
 			for _, peer := range rule.To {
@@ -355,9 +347,7 @@ func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object
 					Port:     &portVal,
 				})
 			}
-			if err := kubernetes.AddNetworkPolicyEgressRule(np, egressRule); err != nil {
-				return nil, errors.Wrap(err, "add egress rule")
-			}
+			kubernetes.AddNetworkPolicyEgressRule(np, egressRule)
 		}
 	}
 

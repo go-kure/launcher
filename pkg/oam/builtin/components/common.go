@@ -1040,12 +1040,12 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 	if err != nil {
 		return nil, errors.Errorf("init container %q resources: %w", ic.Name, err)
 	}
-	_ = kubernetes.SetContainerResources(container, rr)
+	kubernetes.SetContainerResources(container, rr)
 	for _, env := range buildEnvVars(ic.Env) {
-		_ = kubernetes.AddContainerEnv(container, env)
+		kubernetes.AddContainerEnv(container, env)
 	}
 	for _, m := range ic.VolumeMounts {
-		_ = kubernetes.AddContainerVolumeMount(container, m)
+		kubernetes.AddContainerVolumeMount(container, m)
 	}
 	return container, nil
 }
@@ -1056,15 +1056,15 @@ func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error)
 	if err != nil {
 		return nil, errors.Errorf("sidecar container %q resources: %w", sc.Name, err)
 	}
-	_ = kubernetes.SetContainerResources(container, rr)
+	kubernetes.SetContainerResources(container, rr)
 	for _, p := range sc.Ports {
-		_ = kubernetes.AddContainerPort(container, p)
+		kubernetes.AddContainerPort(container, p)
 	}
 	for _, env := range buildEnvVars(sc.Env) {
-		_ = kubernetes.AddContainerEnv(container, env)
+		kubernetes.AddContainerEnv(container, env)
 	}
 	for _, m := range sc.VolumeMounts {
-		_ = kubernetes.AddContainerVolumeMount(container, m)
+		kubernetes.AddContainerVolumeMount(container, m)
 	}
 	return container, nil
 }
@@ -1075,7 +1075,7 @@ func createServiceAccount(name, namespace string, labels map[string]string) *cor
 	sa := kubernetes.CreateServiceAccount(name, namespace)
 	sa.Labels = labels
 	sa.Annotations = nil
-	_ = kubernetes.SetServiceAccountAutomountToken(sa, false)
+	kubernetes.SetServiceAccountAutomountToken(sa, false)
 	return sa
 }
 

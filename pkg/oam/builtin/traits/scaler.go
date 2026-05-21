@@ -164,13 +164,13 @@ func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string
 	hpa := kubernetes.CreateHorizontalPodAutoscaler(c.ComponentName+"-hpa", app.Namespace)
 	hpa.Labels = labels
 	hpa.Annotations = nil
-	_ = kubernetes.SetHPAScaleTargetRef(hpa, "apps/v1", "Deployment", c.ComponentName)
-	_ = kubernetes.SetHPAMinMaxReplicas(hpa, c.MinReplicas, c.MaxReplicas)
+	kubernetes.SetHPAScaleTargetRef(hpa, "apps/v1", "Deployment", c.ComponentName)
+	kubernetes.SetHPAMinMaxReplicas(hpa, c.MinReplicas, c.MaxReplicas)
 	if c.CPUUtilization != nil {
-		_ = kubernetes.AddHPACPUMetric(hpa, *c.CPUUtilization)
+		kubernetes.AddHPACPUMetric(hpa, *c.CPUUtilization)
 	}
 	if c.MemoryUtilization != nil {
-		_ = kubernetes.AddHPAMemoryMetric(hpa, *c.MemoryUtilization)
+		kubernetes.AddHPAMemoryMetric(hpa, *c.MemoryUtilization)
 	}
 	return hpa
 }
@@ -179,8 +179,8 @@ func (c *ScalerConfig) buildPDB(app *stack.Application, labels map[string]string
 	pdb := kubernetes.CreatePodDisruptionBudget(c.ComponentName+"-pdb", app.Namespace)
 	pdb.Labels = labels
 	pdb.Annotations = nil
-	_ = kubernetes.SetPDBMinAvailable(pdb, intstr.FromString("50%"))
-	_ = kubernetes.SetPDBSelector(pdb, &metav1.LabelSelector{
+	kubernetes.SetPDBMinAvailable(pdb, intstr.FromString("50%"))
+	kubernetes.SetPDBSelector(pdb, &metav1.LabelSelector{
 		MatchLabels: map[string]string{"app": c.ComponentName},
 	})
 	return pdb

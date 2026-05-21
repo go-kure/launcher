@@ -302,11 +302,11 @@ func (c *IngressConfig) Generate(app *stack.Application) ([]*client.Object, erro
 				},
 			})
 		}
-		_ = kubernetes.AddIngressRule(ingress, ingressRule)
+		kubernetes.AddIngressRule(ingress, ingressRule)
 	}
 
 	for _, tls := range c.TLS {
-		_ = kubernetes.AddIngressTLS(ingress, networkingv1.IngressTLS{
+		kubernetes.AddIngressTLS(ingress, networkingv1.IngressTLS{
 			Hosts:      tls.Hosts,
 			SecretName: tls.SecretName,
 		})
