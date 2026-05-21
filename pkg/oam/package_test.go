@@ -201,6 +201,51 @@ spec:
 	}
 }
 
+func TestParsePackage_RejectsMapDefaultForStringParam(t *testing.T) {
+	input := `
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Package
+metadata:
+  name: my-app
+spec:
+  parameters:
+  - name: image
+    type: string
+    default:
+      repo: ghcr.io/app
+`
+	_, err := oam.ParsePackage([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for map default on string param, got nil")
+	}
+	var valErr *errors.ValidationError
+	if !stderrors.As(err, &valErr) {
+		t.Errorf("expected *errors.ValidationError, got %T: %v", err, err)
+	}
+}
+
+func TestParsePackage_RejectsSliceDefaultForStringParam(t *testing.T) {
+	input := `
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Package
+metadata:
+  name: my-app
+spec:
+  parameters:
+  - name: tags
+    type: string
+    default: [a, b]
+`
+	_, err := oam.ParsePackage([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for list default on string param, got nil")
+	}
+	var valErr *errors.ValidationError
+	if !stderrors.As(err, &valErr) {
+		t.Errorf("expected *errors.ValidationError, got %T: %v", err, err)
+	}
+}
+
 func TestParsePackage_RejectsFractionalDefaultForIntegerParam(t *testing.T) {
 	input := `
 apiVersion: launcher.gokure.dev/v1alpha1
