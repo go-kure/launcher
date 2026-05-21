@@ -294,6 +294,12 @@ func validateParamDefault(p *ParameterDecl) error {
 			return packageValidationError("parameters",
 				fmt.Sprintf("parameter %q (type boolean) has default of type %T; expected true or false", p.Name, p.Default))
 		}
+	case "string":
+		switch p.Default.(type) {
+		case map[string]any, []any:
+			return packageValidationError("parameters",
+				fmt.Sprintf("parameter %q (type string) has default of type %T; expected a scalar string value", p.Name, p.Default))
+		}
 	}
 	return nil
 }
