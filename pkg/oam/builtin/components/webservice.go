@@ -206,35 +206,37 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	if err != nil {
 		return nil, errors.Wrap(err, "resource requirements")
 	}
-	_ = kubernetes.SetContainerResources(container, rr)
-	_ = kubernetes.AddContainerPort(container, corev1.ContainerPort{
+	kubernetes.SetContainerResources(container, rr)
+	kubernetes.AddContainerPort(container, corev1.ContainerPort{
 		Name:          "http",
 		ContainerPort: c.Port,
 		Protocol:      corev1.ProtocolTCP,
 	})
 	for _, env := range buildEnvVars(c.Env) {
-		_ = kubernetes.AddContainerEnv(container, env)
+		kubernetes.AddContainerEnv(container, env)
 	}
 	applyProbes(container, c.Probes)
 	for _, m := range c.VolumeMounts {
-		_ = kubernetes.AddContainerVolumeMount(container, m)
+		kubernetes.AddContainerVolumeMount(container, m)
 	}
 
 	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
 	dep.Labels = labels
 	dep.Annotations = nil
 	dep.Spec.Template.Labels = labels
-	_ = kubernetes.SetDeploymentReplicas(dep, c.Replicas)
+	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
 	if hasNonRWXPVC(c.PVCs) {
 		if c.Replicas > 1 {
 			return nil, errors.Errorf("deployment %q: non-RWX PVC requires replicas=1, got %d", app.Name, c.Replicas)
 		}
-		_ = kubernetes.SetDeploymentStrategy(dep, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
+		kubernetes.SetDeploymentStrategy(dep, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
 	}
-	_ = kubernetes.SetDeploymentServiceAccountName(dep, app.Name)
+	kubernetes.SetDeploymentServiceAccountName(dep, app.Name)
 	if !c.TopologySpreadDisabled {
 		for _, tsc := range buildTopologySpreadConstraints(c.Replicas, map[string]string{"app": app.Name}) {
-			_ = kubernetes.AddDeploymentTopologySpreadConstraints(dep, &tsc)
+			if err := kubernetes.AddDeploymentTopologySpreadConstraints(dep, &tsc); err != nil {
+				return nil, errors.Wrapf(err, "add topology spread constraint")
+			}
 		}
 	}
 	// Init containers must be added before the main container so they
@@ -245,21 +247,29 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 		if err != nil {
 			return nil, err
 		}
-		_ = kubernetes.AddDeploymentInitContainer(dep, initContainer)
+		if err := kubernetes.AddDeploymentInitContainer(dep, initContainer); err != nil {
+			return nil, errors.Wrapf(err, "add init container %q", ic.Name)
+		}
 	}
-	_ = kubernetes.AddDeploymentContainer(dep, container)
+	if err := kubernetes.AddDeploymentContainer(dep, container); err != nil {
+		return nil, errors.Wrapf(err, "add container %q", c.Name)
+	}
 	for _, sc := range c.Sidecars {
 		sidecarContainer, err := buildSidecarContainer(sc)
 		if err != nil {
 			return nil, err
 		}
-		_ = kubernetes.AddDeploymentContainer(dep, sidecarContainer)
+		if err := kubernetes.AddDeploymentContainer(dep, sidecarContainer); err != nil {
+			return nil, errors.Wrapf(err, "add sidecar container %q", sc.Name)
+		}
 	}
 	for i := range c.Volumes {
-		_ = kubernetes.AddDeploymentVolume(dep, &c.Volumes[i])
+		if err := kubernetes.AddDeploymentVolume(dep, &c.Volumes[i]); err != nil {
+			return nil, errors.Wrapf(err, "add volume %q", c.Volumes[i].Name)
+		}
 	}
 	if aff := buildAffinity(c.Affinity, map[string]string{"app": app.Name}); aff != nil {
-		_ = kubernetes.SetDeploymentAffinity(dep, aff)
+		kubernetes.SetDeploymentAffinity(dep, aff)
 	}
 
 	return dep, nil
@@ -271,9 +281,9 @@ func (c *WebserviceConfig) createService(app *stack.Application) *corev1.Service
 	svc := kubernetes.CreateService(app.Name, app.Namespace)
 	svc.Labels = labels
 	svc.Annotations = nil
-	_ = kubernetes.SetServiceType(svc, corev1.ServiceTypeClusterIP)
-	_ = kubernetes.SetServiceSelector(svc, map[string]string{"app": app.Name})
-	_ = kubernetes.AddServicePort(svc, corev1.ServicePort{
+	kubernetes.SetServiceType(svc, corev1.ServiceTypeClusterIP)
+	kubernetes.SetServiceSelector(svc, map[string]string{"app": app.Name})
+	kubernetes.AddServicePort(svc, corev1.ServicePort{
 		Name:       "http",
 		Port:       c.Port,
 		TargetPort: intstr.FromInt32(c.Port),

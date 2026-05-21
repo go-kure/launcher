@@ -186,9 +186,9 @@ func (c *DaemonsetConfig) createService(app *stack.Application) *corev1.Service 
 	svc := kubernetes.CreateService(app.Name, app.Namespace)
 	svc.Labels = labels
 	svc.Annotations = nil
-	_ = kubernetes.SetServiceType(svc, corev1.ServiceTypeClusterIP)
-	_ = kubernetes.SetServiceSelector(svc, map[string]string{"app": app.Name})
-	_ = kubernetes.AddServicePort(svc, corev1.ServicePort{
+	kubernetes.SetServiceType(svc, corev1.ServiceTypeClusterIP)
+	kubernetes.SetServiceSelector(svc, map[string]string{"app": app.Name})
+	kubernetes.AddServicePort(svc, corev1.ServicePort{
 		Name:       "tcp",
 		Port:       c.Port,
 		TargetPort: intstr.FromInt32(c.Port),
@@ -205,27 +205,27 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 	if err != nil {
 		return nil, errors.Wrap(err, "resource requirements")
 	}
-	_ = kubernetes.SetContainerResources(container, rr)
+	kubernetes.SetContainerResources(container, rr)
 	for _, env := range buildEnvVars(c.Env) {
-		_ = kubernetes.AddContainerEnv(container, env)
+		kubernetes.AddContainerEnv(container, env)
 	}
 	applyProbes(container, c.Probes)
 	if c.Port > 0 {
-		_ = kubernetes.AddContainerPort(container, corev1.ContainerPort{
+		kubernetes.AddContainerPort(container, corev1.ContainerPort{
 			Name:          "tcp",
 			ContainerPort: c.Port,
 			Protocol:      corev1.ProtocolTCP,
 		})
 	}
 	for _, m := range c.VolumeMounts {
-		_ = kubernetes.AddContainerVolumeMount(container, m)
+		kubernetes.AddContainerVolumeMount(container, m)
 	}
 
 	ds := kubernetes.CreateDaemonSet(app.Name, app.Namespace)
 	ds.Labels = labels
 	ds.Annotations = nil
 	ds.Spec.Template.Labels = labels
-	_ = kubernetes.SetDaemonSetServiceAccountName(ds, app.Name)
+	kubernetes.SetDaemonSetServiceAccountName(ds, app.Name)
 	// Init containers added before the main container so declaration order is
 	// preserved in spec.template.spec.initContainers.
 	for _, ic := range c.InitContainers {
@@ -233,14 +233,22 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 		if err != nil {
 			return nil, err
 		}
-		_ = kubernetes.AddDaemonSetInitContainer(ds, initContainer)
+		if err := kubernetes.AddDaemonSetInitContainer(ds, initContainer); err != nil {
+			return nil, errors.Wrapf(err, "add init container %q", ic.Name)
+		}
 	}
-	_ = kubernetes.AddDaemonSetContainer(ds, container)
+	if err := kubernetes.AddDaemonSetContainer(ds, container); err != nil {
+		return nil, errors.Wrapf(err, "add container %q", c.Name)
+	}
 	for i := range c.Tolerations {
-		_ = kubernetes.AddDaemonSetToleration(ds, &c.Tolerations[i])
+		if err := kubernetes.AddDaemonSetToleration(ds, &c.Tolerations[i]); err != nil {
+			return nil, errors.Wrapf(err, "add toleration %d", i)
+		}
 	}
 	for i := range c.Volumes {
-		_ = kubernetes.AddDaemonSetVolume(ds, &c.Volumes[i])
+		if err := kubernetes.AddDaemonSetVolume(ds, &c.Volumes[i]); err != nil {
+			return nil, errors.Wrapf(err, "add volume %q", c.Volumes[i].Name)
+		}
 	}
 
 	return ds, nil

@@ -710,6 +710,27 @@ func TestTransform_HelmchartSourceDedup(t *testing.T) {
 	}
 }
 
+func TestTransform_HelmchartMixedDelivery_SameSourceURL(t *testing.T) {
+	// template delivery returns "" from GetSourceKey — it must not claim the source key
+	// and must not cause the subsequent native component to be suppressed.
+	cfgTemplate := &dedupTrackingConfig{name: "app-template", sourceKey: ""}
+	cfgNative := &dedupTrackingConfig{name: "app-native", sourceKey: "helm:https://example.com/charts"}
+
+	entries := []componentEntry{
+		{component: Component{Name: "app-template"}, app: stack.NewApplication("app-template", "default", cfgTemplate)},
+		{component: Component{Name: "app-native"}, app: stack.NewApplication("app-native", "default", cfgNative)},
+	}
+
+	deduplicateSourceRefs(entries)
+
+	if cfgTemplate.suppressed {
+		t.Error("template component should not be suppressed (empty source key skips dedup)")
+	}
+	if cfgNative.suppressed {
+		t.Error("native component should not be suppressed (first native component with this source key)")
+	}
+}
+
 func TestEvaluateProfile_NonVADHandler_Passthrough(t *testing.T) {
 	// A plain TraitHandler (no CapabilityAware, no ValidateAndApplyDefaults)
 	// is registered successfully; EvaluateProfile must pass its rendering through.

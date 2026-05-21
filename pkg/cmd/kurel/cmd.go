@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/go-kure/kure/pkg/cmd/shared"
-	"github.com/go-kure/kure/pkg/cmd/shared/options"
-	"github.com/go-kure/kure/pkg/errors"
+	"github.com/go-kure/launcher/pkg/cmd/shared"
+	"github.com/go-kure/launcher/pkg/cmd/shared/options"
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // NewKurelCommand creates the root command for kurel CLI

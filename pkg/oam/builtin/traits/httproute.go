@@ -951,11 +951,11 @@ func (c *HTTPRouteConfig) Generate(app *stack.Application) ([]*client.Object, er
 			ns := gatewayv1.Namespace(ref.Namespace)
 			pr.Namespace = &ns
 		}
-		_ = kubernetes.AddHTTPRouteParentRef(route, pr)
+		kubernetes.AddHTTPRouteParentRef(route, pr)
 	}
 
 	for _, h := range c.Hostnames {
-		_ = kubernetes.AddHTTPRouteHostname(route, gatewayv1.Hostname(h))
+		kubernetes.AddHTTPRouteHostname(route, gatewayv1.Hostname(h))
 	}
 
 	for _, rule := range c.Rules {
@@ -1005,7 +1005,7 @@ func (c *HTTPRouteConfig) Generate(app *stack.Application) ([]*client.Object, er
 			httpRule.Timeouts = buildGatewayTimeouts(rule.Timeouts)
 		}
 
-		_ = kubernetes.AddHTTPRouteRule(route, httpRule)
+		kubernetes.AddHTTPRouteRule(route, httpRule)
 	}
 
 	obj := client.Object(route)

@@ -1,11 +1,19 @@
 package components
 
 import (
+	"bytes"
+	"io"
 	"strings"
+	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
+	"github.com/go-kure/kure/pkg/stack/helm"
+	"gopkg.in/yaml.v3"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -23,8 +31,9 @@ func (h *HelmchartHandler) CanHandle(componentType string) bool {
 // ToApplicationConfig converts an OAM helmchart component to a HelmchartConfig.
 func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	cfg := &HelmchartConfig{
-		Name:      component.Name,
-		Namespace: namespace,
+		Name:        component.Name,
+		Namespace:   namespace,
+		renderChart: helm.RenderChart,
 	}
 
 	props := component.Properties
@@ -78,7 +87,7 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 			if !ok {
 				return nil, errors.Errorf("valuesFrom[%d]: expected object, got %T", i, vf)
 			}
-			vfc := fluxcd.ValuesFromConfig{}
+			vfc := helmv2.ValuesReference{}
 			vfc.Kind, _ = m["kind"].(string)
 			switch vfc.Kind {
 			case "ConfigMap", "Secret":
@@ -101,9 +110,9 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 	case "", "native":
 		// ok
 	case "template":
-		return nil, errors.New("helmchart: delivery: template is not yet implemented; see issue #83")
+		// ok — template-specific validation follows after source block parsing
 	default:
-		return nil, errors.Errorf("helmchart: unsupported delivery %q; supported values: native", cfg.Delivery)
+		return nil, errors.Errorf("helmchart: unsupported delivery %q; supported values: native, template", cfg.Delivery)
 	}
 
 	// Parse source block
@@ -174,6 +183,34 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 		cfg.SourceRefNamespace = srcNamespace
 	}
 
+	// Template-specific validation (requires source block to be parsed above)
+	if cfg.Delivery == "template" {
+		if cfg.SourceRefName != "" {
+			return nil, errors.New("helmchart: delivery: template requires an inline source URL; source.name is not supported")
+		}
+		if cfg.SourceKind == "OCIRepository" && cfg.Version == "" {
+			return nil, errors.New("helmchart: delivery: template with OCIRepository requires version to be set")
+		}
+		if len(cfg.ValuesFrom) > 0 {
+			return nil, errors.New("helmchart: delivery: template does not support valuesFrom (cluster-side values are not resolvable at build time)")
+		}
+		if cfg.ReleaseName != "" {
+			return nil, errors.New("helmchart: delivery: template does not support releaseName")
+		}
+		if cfg.TargetNamespace != "" {
+			return nil, errors.New("helmchart: delivery: template does not support targetNamespace")
+		}
+		if cfg.Interval != "" {
+			return nil, errors.New("helmchart: delivery: template does not support interval")
+		}
+		if cfg.DriftMode != "" {
+			return nil, errors.New("helmchart: delivery: template does not support driftDetection")
+		}
+		if cfg.InstallCRDs != "" || cfg.UpgradeCRDs != "" {
+			return nil, errors.New("helmchart: delivery: template does not support install.crds / upgrade.crds")
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -202,11 +239,15 @@ type HelmchartConfig struct {
 	InstallCRDs     string
 	UpgradeCRDs     string
 	Values          map[string]any
-	ValuesFrom      []fluxcd.ValuesFromConfig
+	ValuesFrom      []helmv2.ValuesReference
 
 	// dedup state (Form A only)
 	suppressSource bool
 	sharedSrcName  string
+
+	// renderChart is the function used to render Helm charts in template delivery mode.
+	// Defaults to helm.RenderChart; injectable for testing.
+	renderChart func(chartURL, version string, values map[string]any) ([]byte, error)
 }
 
 // ApplyPolicy is a no-op for helmchart (Helm releases have no resource-limit policy).
@@ -214,10 +255,11 @@ func (c *HelmchartConfig) ApplyPolicy(_ oam.Policy) error { return nil }
 
 // GetSourceKey returns the dedup key for Form A sources.
 // For HelmRepository: "helm:<url>". For OCIRepository: "oci:<url>:<version>".
-// Returns "" for Form B (reference) so the dedup loop skips this config.
+// Returns "" for Form B (reference) and for template delivery (no source CR emitted)
+// so the dedup loop skips this config.
 // First component wins when multiple components share the same source key.
 func (c *HelmchartConfig) GetSourceKey() string {
-	if c.SourceURL == "" {
+	if c.SourceURL == "" || c.Delivery == "template" {
 		return ""
 	}
 	if c.SourceKind == "OCIRepository" {
@@ -237,9 +279,15 @@ func (c *HelmchartConfig) SuppressSourceGeneration(refName string) {
 }
 
 // Generate produces the Kubernetes objects for this helmchart component.
-// Output order: source CR (Form A only, unless suppressed by dedup) then HelmRelease.
+// For delivery: template, renders the chart client-side and returns raw manifests.
+// For delivery: native (default), emits a source CR (Form A only) and a HelmRelease.
 func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	if c.Delivery == "template" {
+		return c.generateTemplate()
+	}
+
 	var objects []*client.Object
+	interval := parseDuration(effectiveInterval(c.Interval))
 
 	if c.SourceURL != "" {
 		// Form A: inline source
@@ -251,65 +299,67 @@ func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, er
 		if !c.suppressSource {
 			switch c.SourceKind {
 			case "HelmRepository":
-				repo := fluxcd.HelmRepository(&fluxcd.HelmRepositoryConfig{
-					Name:      c.Name,
-					Namespace: c.Namespace,
-					URL:       c.SourceURL,
-					Interval:  effectiveInterval(c.Interval),
-				})
+				repo := fluxcd.CreateHelmRepository(c.Name, c.Namespace)
+				fluxcd.SetHelmRepositoryURL(repo, c.SourceURL)
+				fluxcd.SetHelmRepositoryInterval(repo, interval)
 				obj := client.Object(repo)
 				objects = append(objects, &obj)
 			case "OCIRepository":
-				repo := fluxcd.OCIRepository(&fluxcd.OCIRepositoryConfig{
-					Name:      c.Name,
-					Namespace: c.Namespace,
-					URL:       c.SourceURL,
-					Ref:       c.Version,
-					Interval:  effectiveInterval(c.Interval),
-				})
+				repo := fluxcd.CreateOCIRepository(c.Name, c.Namespace)
+				fluxcd.SetOCIRepositoryURL(repo, c.SourceURL)
+				fluxcd.SetOCIRepositoryInterval(repo, interval)
+				if c.Version != "" {
+					fluxcd.SetOCIRepositoryReference(repo, &sourcev1.OCIRepositoryRef{Tag: c.Version})
+				}
 				obj := client.Object(repo)
 				objects = append(objects, &obj)
 			}
 		}
 
-		relCfg := c.baseReleaseConfig()
+		hr := c.buildHelmRelease()
 		switch c.SourceKind {
 		case "HelmRepository":
-			relCfg.Chart = c.Chart
-			relCfg.Version = c.Version
-			relCfg.SourceRef = helmv2.CrossNamespaceObjectReference{
-				Kind: "HelmRepository",
-				Name: srcName,
-			}
+			fluxcd.SetHelmReleaseChart(hr, &helmv2.HelmChartTemplate{
+				Spec: helmv2.HelmChartTemplateSpec{
+					Chart:   c.Chart,
+					Version: c.Version,
+					SourceRef: helmv2.CrossNamespaceObjectReference{
+						Kind: "HelmRepository",
+						Name: srcName,
+					},
+				},
+			})
 		case "OCIRepository":
-			relCfg.ChartRef = &fluxcd.ChartRefConfig{
+			fluxcd.SetHelmReleaseChartRef(hr, &helmv2.CrossNamespaceSourceReference{
 				Kind: "OCIRepository",
 				Name: srcName,
-			}
+			})
 		}
-		hr := fluxcd.HelmRelease(relCfg)
 		obj := client.Object(hr)
 		objects = append(objects, &obj)
 	} else {
 		// Form B: reference existing source CR
-		relCfg := c.baseReleaseConfig()
+		hr := c.buildHelmRelease()
 		switch c.SourceRefKind {
 		case "HelmRepository":
-			relCfg.Chart = c.Chart
-			relCfg.Version = c.Version
-			relCfg.SourceRef = helmv2.CrossNamespaceObjectReference{
-				Kind:      "HelmRepository",
-				Name:      c.SourceRefName,
-				Namespace: c.SourceRefNamespace,
-			}
+			fluxcd.SetHelmReleaseChart(hr, &helmv2.HelmChartTemplate{
+				Spec: helmv2.HelmChartTemplateSpec{
+					Chart:   c.Chart,
+					Version: c.Version,
+					SourceRef: helmv2.CrossNamespaceObjectReference{
+						Kind:      "HelmRepository",
+						Name:      c.SourceRefName,
+						Namespace: c.SourceRefNamespace,
+					},
+				},
+			})
 		default: // "OCIRepository" or "HelmChart"
-			relCfg.ChartRef = &fluxcd.ChartRefConfig{
+			fluxcd.SetHelmReleaseChartRef(hr, &helmv2.CrossNamespaceSourceReference{
 				Kind:      c.SourceRefKind,
 				Name:      c.SourceRefName,
 				Namespace: c.SourceRefNamespace,
-			}
+			})
 		}
-		hr := fluxcd.HelmRelease(relCfg)
 		obj := client.Object(hr)
 		objects = append(objects, &obj)
 	}
@@ -317,19 +367,88 @@ func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, er
 	return objects, nil
 }
 
-func (c *HelmchartConfig) baseReleaseConfig() *fluxcd.HelmReleaseConfig {
-	return &fluxcd.HelmReleaseConfig{
-		Name:               c.Name,
-		Namespace:          c.Namespace,
-		Interval:           effectiveInterval(c.Interval),
-		ReleaseName:        c.ReleaseName,
-		TargetNamespace:    c.TargetNamespace,
-		DriftDetectionMode: c.DriftMode,
-		InstallCRDs:        c.InstallCRDs,
-		UpgradeCRDs:        c.UpgradeCRDs,
-		Values:             c.Values,
-		ValuesFrom:         c.ValuesFrom,
+// generateTemplate renders the chart client-side via helm.RenderChart and returns the
+// resulting Kubernetes manifests as individual objects.
+//
+// Known limitation: kure's renderer hardcodes .Release.Name = "release" and
+// .Release.Namespace = "default" (kure/pkg/stack/helm/render.go). Charts that use
+// .Release.Name or .Release.Namespace in templates will render with those fixed values
+// regardless of component name or namespace. A follow-up kure PR is needed to expose
+// configurable release options.
+func (c *HelmchartConfig) generateTemplate() ([]*client.Object, error) {
+	renderFn := c.renderChart
+	if renderFn == nil {
+		renderFn = helm.RenderChart
 	}
+	chartURL := strings.TrimRight(c.SourceURL, "/") + "/" + c.Chart
+	if c.SourceKind == "OCIRepository" {
+		chartURL = c.SourceURL // OCI URL already embeds the chart path
+	}
+	raw, err := renderFn(chartURL, c.Version, c.Values)
+	if err != nil {
+		return nil, errors.Wrapf(err, "helmchart %q: rendering chart", c.Name)
+	}
+	return decodeKubeManifests(raw)
+}
+
+// decodeKubeManifests decodes multi-doc YAML from RenderChart into Kubernetes objects.
+// Real YAML parse errors are returned immediately.
+// Non-map and empty documents are skipped defensively (kure filters NOTES.txt upstream).
+// Mapping documents without apiVersion/kind are an error (broken chart manifest).
+func decodeKubeManifests(raw []byte) ([]*client.Object, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	var objects []*client.Object
+	for {
+		var rawDoc any
+		if err := dec.Decode(&rawDoc); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, errors.Wrapf(err, "decoding rendered manifest")
+		}
+		doc, ok := rawDoc.(map[string]any)
+		if !ok || len(doc) == 0 {
+			continue // defensive: skip non-map or empty documents
+		}
+		if doc["apiVersion"] == nil || doc["kind"] == nil {
+			return nil, errors.Errorf("rendered document is missing apiVersion or kind: %v", doc)
+		}
+		u := &unstructured.Unstructured{Object: doc}
+		obj := client.Object(u)
+		objects = append(objects, &obj)
+	}
+	return objects, nil
+}
+
+// buildHelmRelease creates a HelmRelease with the shared options applied.
+func (c *HelmchartConfig) buildHelmRelease() *helmv2.HelmRelease {
+	interval := parseDuration(effectiveInterval(c.Interval))
+	hr := fluxcd.CreateHelmRelease(c.Name, c.Namespace)
+	fluxcd.SetHelmReleaseInterval(hr, interval)
+
+	if c.ReleaseName != "" {
+		fluxcd.SetHelmReleaseReleaseName(hr, c.ReleaseName)
+	}
+	if c.TargetNamespace != "" {
+		fluxcd.SetHelmReleaseTargetNamespace(hr, c.TargetNamespace)
+	}
+	if c.DriftMode != "" {
+		fluxcd.SetHelmReleaseDriftDetection(hr, fluxcd.CreateDriftDetection(helmv2.DriftDetectionMode(c.DriftMode)))
+	}
+	if c.InstallCRDs != "" {
+		fluxcd.SetHelmReleaseInstallCRDs(hr, helmv2.CRDsPolicy(c.InstallCRDs))
+	}
+	if c.UpgradeCRDs != "" {
+		fluxcd.SetHelmReleaseUpgradeCRDs(hr, helmv2.CRDsPolicy(c.UpgradeCRDs))
+	}
+	if len(c.Values) > 0 {
+		// error ignored: only fails on JSON marshal failure, which can't happen with map[string]any
+		_ = fluxcd.SetHelmReleaseValuesFromMap(hr, c.Values)
+	}
+	for _, vf := range c.ValuesFrom {
+		fluxcd.AddHelmReleaseValuesFrom(hr, vf)
+	}
+	return hr
 }
 
 func effectiveInterval(interval string) string {
@@ -337,4 +456,9 @@ func effectiveInterval(interval string) string {
 		return "10m"
 	}
 	return interval
+}
+
+func parseDuration(s string) metav1.Duration {
+	d, _ := time.ParseDuration(s)
+	return metav1.Duration{Duration: d}
 }
