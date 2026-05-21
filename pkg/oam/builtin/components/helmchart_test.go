@@ -11,6 +11,22 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
+func TestHelmchartHandler_IntervalInvalid_Rejected(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":    "kube-prometheus-stack",
+			"interval": "5minutes",
+			"source":   map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+		},
+	}, "monitoring")
+	if err == nil {
+		t.Fatal("expected error for invalid interval format")
+	}
+}
+
 func TestHelmchartHandler_CanHandle(t *testing.T) {
 	h := &components.HelmchartHandler{}
 	if !h.CanHandle("helmchart") {
