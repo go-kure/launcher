@@ -42,6 +42,11 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 	cfg.Version, _ = props["version"].(string)
 	cfg.Delivery, _ = props["delivery"].(string)
 	cfg.Interval, _ = props["interval"].(string)
+	if cfg.Interval != "" {
+		if _, err := time.ParseDuration(cfg.Interval); err != nil {
+			return nil, errors.Errorf("helmchart: interval %q is invalid: must be a valid Go duration (e.g. 10m, 1h30m)", cfg.Interval)
+		}
+	}
 	cfg.ReleaseName, _ = props["releaseName"].(string)
 	cfg.TargetNamespace, _ = props["targetNamespace"].(string)
 
