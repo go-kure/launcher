@@ -48,7 +48,8 @@ func checkImplicitBackend(app *stack.Application, location string) error {
 	pp, ok := app.Config.(servicePortProvider)
 	if !ok || pp.ServicePort() == 0 {
 		return errors.Errorf(
-			"%s: component %q has no service port; configure a service port or specify an explicit backend name",
+			"%s: component %q has no service port; configure a service port or specify an explicit backend name"+
+				" (for helmchart components, set servicePort and optionally serviceName on the trait)",
 			location, app.Name)
 	}
 	return nil
@@ -92,6 +93,31 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	config := &IngressConfig{
 		ComponentName: app.Name,
 		ServiceName:   resolveServiceName(app),
+	}
+
+	// Trait-level explicit backend — allows routing traits on component types that do not
+	// implement servicePortProvider (e.g. helmchart). servicePort is parsed first so that
+	// an invalid value is rejected before serviceName can be honoured.
+	traitPortProvided := false
+	if _, hasServicePort := props["servicePort"]; hasServicePort {
+		sp, ok := toIngressPort(props["servicePort"])
+		if !ok {
+			return nil, errors.Errorf("servicePort must be a valid port number (1–65535)")
+		}
+		if existingPort := resolveDefaultPort(app); existingPort > 0 {
+			return nil, errors.Errorf(
+				"servicePort may not be set on a component that already exposes service port %d; "+
+					"use path-level 'port' or 'backend' overrides instead",
+				existingPort)
+		}
+		defaultPort = sp
+		traitPortProvided = true
+	}
+	if sn, ok := props["serviceName"].(string); ok && sn != "" {
+		if !traitPortProvided {
+			return nil, errors.Errorf("serviceName requires a valid servicePort to also be set on the trait")
+		}
+		config.ServiceName = sn
 	}
 
 	if name, ok := props["name"].(string); ok && name != "" {
@@ -186,8 +212,10 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 			// Implicit backend: empty name OR explicit name that resolves to the component's
 			// own service — both are subject to the same port constraints.
 			if p.ServiceName == "" || p.ServiceName == config.ServiceName {
-				if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d].paths[%d]", i, j)); err != nil {
-					return nil, err
+				if !traitPortProvided {
+					if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d].paths[%d]", i, j)); err != nil {
+						return nil, err
+					}
 				}
 				if portExplicit && p.Port > 0 && p.Port != defaultPort {
 					return nil, errors.Errorf(

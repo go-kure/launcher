@@ -49,6 +49,31 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 		ComponentName: app.Name,
 	}
 
+	// Trait-level explicit backend — same semantics as ingress: servicePort first,
+	// then serviceName; both guarded against components with a known service port.
+	traitPortProvided := false
+	defaultServiceName := resolveServiceName(app)
+	if _, hasServicePort := props["servicePort"]; hasServicePort {
+		sp, ok := toIngressPort(props["servicePort"])
+		if !ok {
+			return nil, errors.Errorf("servicePort must be a valid port number (1–65535)")
+		}
+		if existingPort := resolveDefaultPort(app); existingPort > 0 {
+			return nil, errors.Errorf(
+				"servicePort may not be set on a component that already exposes service port %d; "+
+					"use backendRef-level 'port' or an explicit 'name' instead",
+				existingPort)
+		}
+		defaultPort = sp
+		traitPortProvided = true
+	}
+	if sn, ok := props["serviceName"].(string); ok && sn != "" {
+		if !traitPortProvided {
+			return nil, errors.Errorf("serviceName requires a valid servicePort to also be set on the trait")
+		}
+		defaultServiceName = sn
+	}
+
 	// Optional: name (for multiple httproute traits on the same component)
 	if name, ok := props["name"].(string); ok && name != "" {
 		config.Name = name
@@ -165,7 +190,7 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 				// nameExplicit is true only when the backendRef names a DIFFERENT service
 				// than the component's own. A self-reference is treated as implicit so
 				// the same port-mismatch guard applies.
-				selfServiceName := resolveServiceName(app)
+				selfServiceName := defaultServiceName
 				nameExplicit := false
 				br := BackendRef{
 					Name: selfServiceName,
@@ -189,8 +214,10 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 					br.Port = 0
 				}
 				if !nameExplicit {
-					if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d].backendRefs[%d]", i, j)); err != nil {
-						return nil, err
+					if !traitPortProvided {
+						if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d].backendRefs[%d]", i, j)); err != nil {
+							return nil, err
+						}
 					}
 					if portExplicit && br.Port != defaultPort {
 						return nil, errors.Errorf(
@@ -207,15 +234,17 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 			}
 		} else {
 			// Default: single backend pointing to the component's service
-			if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d]", i)); err != nil {
-				return nil, err
+			if !traitPortProvided {
+				if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d]", i)); err != nil {
+					return nil, err
+				}
 			}
 			if defaultPort == 0 {
 				return nil, errors.Errorf(
 					"rules[%d]: cannot determine backend port for component %q — configure the component port or specify backendRefs[].port",
 					i, app.Name)
 			}
-			rule.BackendRefs = []BackendRef{{Name: resolveServiceName(app), Port: defaultPort}}
+			rule.BackendRefs = []BackendRef{{Name: defaultServiceName, Port: defaultPort}}
 		}
 
 		// Optional: filters

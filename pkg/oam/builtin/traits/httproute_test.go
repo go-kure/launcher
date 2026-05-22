@@ -1061,3 +1061,95 @@ func TestHTTPRouteHandler_ImplicitBackend_PortMismatch_Error(t *testing.T) {
 		}
 	})
 }
+
+// --- HTTPRouteHandler trait-level servicePort/serviceName (helmchart support) ---
+
+func TestHTTPRouteHandler_TraitLevel_ServicePort_Success(t *testing.T) {
+	h := &HTTPRouteHandler{}
+	// nil config = no servicePortProvider (simulates helmchart)
+	app := stack.NewApplication("myapp", "default", nil)
+	cfg, err := h.parseProperties(map[string]any{
+		"servicePort": float64(8080),
+		"parentRefs":  []any{map[string]any{"name": "gw"}},
+		"rules":       []any{map[string]any{}},
+	}, app)
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	if cfg.Rules[0].BackendRefs[0].Port != 8080 {
+		t.Errorf("Port = %d, want 8080", cfg.Rules[0].BackendRefs[0].Port)
+	}
+	if cfg.Rules[0].BackendRefs[0].Name != "myapp" {
+		t.Errorf("Name = %q, want %q", cfg.Rules[0].BackendRefs[0].Name, "myapp")
+	}
+}
+
+func TestHTTPRouteHandler_TraitLevel_ServiceNameAndPort_Success(t *testing.T) {
+	h := &HTTPRouteHandler{}
+	app := stack.NewApplication("myapp", "default", nil)
+	cfg, err := h.parseProperties(map[string]any{
+		"serviceName": "my-chart-svc",
+		"servicePort": float64(8080),
+		"parentRefs":  []any{map[string]any{"name": "gw"}},
+		"rules":       []any{map[string]any{}},
+	}, app)
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	if cfg.Rules[0].BackendRefs[0].Name != "my-chart-svc" {
+		t.Errorf("Name = %q, want %q", cfg.Rules[0].BackendRefs[0].Name, "my-chart-svc")
+	}
+	if cfg.Rules[0].BackendRefs[0].Port != 8080 {
+		t.Errorf("Port = %d, want 8080", cfg.Rules[0].BackendRefs[0].Port)
+	}
+}
+
+func TestHTTPRouteHandler_TraitLevel_ServiceNameWithoutPort_Errors(t *testing.T) {
+	h := &HTTPRouteHandler{}
+	app := stack.NewApplication("myapp", "default", nil)
+	_, err := h.parseProperties(map[string]any{
+		"serviceName": "my-svc",
+		"parentRefs":  []any{map[string]any{"name": "gw"}},
+		"rules":       []any{map[string]any{}},
+	}, app)
+	if err == nil {
+		t.Fatal("expected error when serviceName set without servicePort")
+	}
+	if !strings.Contains(err.Error(), "serviceName requires a valid servicePort") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestHTTPRouteHandler_TraitLevel_InvalidServicePort_Errors(t *testing.T) {
+	h := &HTTPRouteHandler{}
+	app := stack.NewApplication("myapp", "default", nil)
+	for _, badPort := range []any{"oops", float64(70000), float64(0)} {
+		_, err := h.parseProperties(map[string]any{
+			"servicePort": badPort,
+			"parentRefs":  []any{map[string]any{"name": "gw"}},
+			"rules":       []any{map[string]any{}},
+		}, app)
+		if err == nil {
+			t.Fatalf("expected error for invalid servicePort %v", badPort)
+		}
+		if !strings.Contains(err.Error(), "valid port number") {
+			t.Errorf("unexpected error for port %v: %v", badPort, err)
+		}
+	}
+}
+
+func TestHTTPRouteHandler_TraitLevel_ServicePort_RejectedOnKnownPortComponent(t *testing.T) {
+	h := &HTTPRouteHandler{}
+	app := stack.NewApplication("myapp", "default", &mockServicePortConfig{port: 80})
+	_, err := h.parseProperties(map[string]any{
+		"servicePort": float64(8080),
+		"parentRefs":  []any{map[string]any{"name": "gw"}},
+		"rules":       []any{map[string]any{}},
+	}, app)
+	if err == nil {
+		t.Fatal("expected error when servicePort set on component with known service port")
+	}
+	if !strings.Contains(err.Error(), "may not be set") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
