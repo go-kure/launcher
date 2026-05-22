@@ -49,15 +49,27 @@ func (h *FluxCDPatchesHandler) Apply(trait *oam.Trait, _ *stack.Application, bun
 			if !ok {
 				return errors.Errorf("fluxcd-patches: patch[%d].target must be an object", i)
 			}
-			p.Target = &stack.PatchSelector{
-				Group:              stringProp(t, "group"),
-				Version:            stringProp(t, "version"),
-				Kind:               stringProp(t, "kind"),
-				Name:               stringProp(t, "name"),
-				Namespace:          stringProp(t, "namespace"),
-				LabelSelector:      stringProp(t, "labelSelector"),
-				AnnotationSelector: stringProp(t, "annotationSelector"),
+			sel := &stack.PatchSelector{}
+			fields := []struct {
+				key string
+				dst *string
+			}{
+				{"group", &sel.Group},
+				{"version", &sel.Version},
+				{"kind", &sel.Kind},
+				{"name", &sel.Name},
+				{"namespace", &sel.Namespace},
+				{"labelSelector", &sel.LabelSelector},
+				{"annotationSelector", &sel.AnnotationSelector},
 			}
+			for _, f := range fields {
+				v, err := strictTargetString(t, f.key, i)
+				if err != nil {
+					return err
+				}
+				*f.dst = v
+			}
+			p.Target = sel
 		}
 
 		bundle.Patches = append(bundle.Patches, p)
@@ -66,8 +78,16 @@ func (h *FluxCDPatchesHandler) Apply(trait *oam.Trait, _ *stack.Application, bun
 	return nil
 }
 
-// stringProp returns the string value of key from m, or "" if absent or not a string.
-func stringProp(m map[string]any, key string) string {
-	v, _ := m[key].(string)
-	return v
+// strictTargetString returns the string value of key from t.
+// Returns an error if the value is present but not a string.
+func strictTargetString(t map[string]any, key string, idx int) (string, error) {
+	v, ok := t[key]
+	if !ok {
+		return "", nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", errors.Errorf("fluxcd-patches: patch[%d].target.%s: expected string, got %T", idx, key, v)
+	}
+	return s, nil
 }
