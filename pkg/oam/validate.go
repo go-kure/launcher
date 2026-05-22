@@ -39,6 +39,10 @@ var validTraitTypes = map[string]bool{
 	"volsync":              true,
 	"scaler":               true,
 	"pvc":                  true,
+	"rbac":                 true,
+	"fluxcd-patches":       true,
+	"fluxcd-postbuild":     true,
+	"prune-protection":     true,
 }
 
 // traitComponentRestrictions maps trait types to the component types they support.

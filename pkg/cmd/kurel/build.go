@@ -240,6 +240,10 @@ func newBuiltinTransformer() *oam.Transformer {
 	t.RegisterBuiltinTrait("networkpolicy", &traits.NetworkPolicyHandler{})
 	t.RegisterBuiltinTrait("cilium-networkpolicy", &traits.CiliumNetworkPolicyHandler{})
 	t.RegisterBuiltinTrait("volsync", &traits.VolSyncHandler{})
+	t.RegisterBuiltinTrait("rbac", &traits.RBACHandler{})
+	t.RegisterBuiltinTrait("fluxcd-patches", &traits.FluxCDPatchesHandler{})
+	t.RegisterBuiltinTrait("fluxcd-postbuild", &traits.PostBuildHandler{})
+	t.RegisterBuiltinTrait("prune-protection", &traits.PruneProtectionHandler{})
 	return t
 }
 
