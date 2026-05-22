@@ -43,3 +43,34 @@ type ApplicationPolicy struct {
 	Type       string         `yaml:"type"`
 	Properties map[string]any `yaml:"properties,omitempty"`
 }
+
+// CapabilityDefinition declares the rendering schema for a custom capability trait type.
+// metadata.name is the trait type. Scope: platform-facing rendering schema only
+// (what keys a ClusterProfile capability binding may contain).
+// See docs/oam/design-capability-schema.md §3.2.
+type CapabilityDefinition struct {
+	APIVersion string            `yaml:"apiVersion"`
+	Kind       string            `yaml:"kind"`
+	Metadata   Metadata          `yaml:"metadata"` // metadata.name = trait type
+	Spec       CapabilityDefSpec `yaml:"spec"`
+}
+
+// CapabilityDefSpec holds the rendering schema declaration.
+type CapabilityDefSpec struct {
+	Description string                    `yaml:"description,omitempty"`
+	Rendering   CapabilityRenderingSchema `yaml:"rendering,omitempty"`
+}
+
+// CapabilityRenderingSchema lists the accepted rendering properties.
+type CapabilityRenderingSchema struct {
+	Properties map[string]CapabilityPropertySchema `yaml:"properties,omitempty"`
+}
+
+// CapabilityPropertySchema describes one rendering property.
+// Accepted types: "string", "integer", "boolean" (same vocabulary as kurel.yaml parameters).
+type CapabilityPropertySchema struct {
+	Type        string `yaml:"type,omitempty"`
+	Required    bool   `yaml:"required,omitempty"`
+	Default     any    `yaml:"default,omitempty"`
+	Description string `yaml:"description,omitempty"`
+}

@@ -812,3 +812,196 @@ func TestEvaluateProfile_ScopedKey(t *testing.T) {
 		t.Error("scoped key should resolve to base type and call VAD handler")
 	}
 }
+
+// --- CapabilityDefinition tests ---
+
+// customVADHandler is a trait handler for test custom types that accepts any rendering.
+type customVADHandler struct{ stubTraitHandler }
+
+func (h *customVADHandler) CapabilityRequired() bool { return false }
+func (h *customVADHandler) ValidateAndApplyDefaults(r map[string]any) (map[string]any, error) {
+	return r, nil
+}
+
+// capDefFixture returns a CapabilityDefinition with one required integer property.
+func capDefFixture(traitType string) *CapabilityDefinition {
+	return &CapabilityDefinition{
+		APIVersion: "launcher.gokure.dev/v1alpha1",
+		Kind:       "CapabilityDefinition",
+		Metadata:   Metadata{Name: traitType},
+		Spec: CapabilityDefSpec{
+			Rendering: CapabilityRenderingSchema{
+				Properties: map[string]CapabilityPropertySchema{
+					"timeout": {Type: "integer", Required: true},
+					"mode":    {Type: "string", Default: "auto"},
+				},
+			},
+		},
+	}
+}
+
+func TestEvaluateProfile_CapabilityDefinition_AppliesSchemaBeforeVAD(t *testing.T) {
+	// Custom trait registered via RegisterTrait; definition loaded; valid rendering.
+	// The definition applies a default for "mode", so VAD should receive it.
+	tr := NewTransformer(nil, nil)
+	tr.RegisterTrait("custom", &customVADHandler{stubTraitHandler: stubTraitHandler{typ: "custom"}})
+	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"custom": capDefFixture("custom")})
+
+	profile := &ClusterProfile{
+		Spec: ClusterProfileSpec{
+			Capabilities: map[string]CapabilityBinding{
+				"custom": {Rendering: map[string]any{"timeout": float64(30)}},
+			},
+		},
+	}
+	got, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// "mode" default should have been applied.
+	if got.Spec.Capabilities["custom"].Rendering["mode"] != "auto" {
+		t.Errorf("mode = %v, want %q", got.Spec.Capabilities["custom"].Rendering["mode"], "auto")
+	}
+}
+
+func TestEvaluateProfile_CapabilityDefinition_SchemaViolationReturnsError(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterTrait("custom", &customVADHandler{stubTraitHandler: stubTraitHandler{typ: "custom"}})
+	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"custom": capDefFixture("custom")})
+
+	profile := &ClusterProfile{
+		Spec: ClusterProfileSpec{
+			Capabilities: map[string]CapabilityBinding{
+				// timeout is required but missing → definition schema rejects this.
+				"custom": {Rendering: map[string]any{"mode": "fast"}},
+			},
+		},
+	}
+	_, err := tr.EvaluateProfile(profile)
+	if err == nil {
+		t.Fatal("expected error for missing required property in definition schema")
+	}
+}
+
+func TestEvaluateProfile_CapabilityDefinition_BuiltinIgnoresDefinition(t *testing.T) {
+	// Definition for a built-in type declares timeout as required; even though the
+	// rendering omits it, no error fires because built-ins skip definition schema.
+	tr := NewTransformer(nil, nil)
+	tr.RegisterBuiltinTrait("expose", &customVADHandler{stubTraitHandler: stubTraitHandler{typ: "expose"}})
+	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"expose": capDefFixture("expose")})
+
+	profile := &ClusterProfile{
+		Spec: ClusterProfileSpec{
+			Capabilities: map[string]CapabilityBinding{
+				"expose": {Rendering: map[string]any{"controllerType": "ingress"}},
+			},
+		},
+	}
+	_, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("built-in type should ignore definition schema; got error: %v", err)
+	}
+}
+
+// minimalApp returns an OAM Application with one component and one trait for pipeline tests.
+func minimalApp(componentType, traitType string) *Application {
+	return &Application{
+		APIVersion: "core.oam.dev/v1beta1",
+		Kind:       "Application",
+		Metadata:   Metadata{Name: "test-app"},
+		Spec: ApplicationSpec{
+			Components: []Component{
+				{
+					Name:       "comp",
+					Type:       componentType,
+					Properties: map[string]any{},
+					Traits: []Trait{
+						{Type: traitType, Properties: map[string]any{}},
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestTransform_CustomTrait_CapabilityResolved_NoDefinition_Warns(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"comp": &pipelineComponentHandler{typ: "comp"}},
+		map[string]TraitHandler{"custom": &stubTraitHandler{typ: "custom"}},
+	)
+	var warned string
+	tr.SetWarningHandler(func(msg string) { warned = msg })
+
+	ctx := TransformContext{
+		ClusterID:    "test",
+		Capabilities: map[string]CapabilityBinding{"custom": {Rendering: map[string]any{"x": "y"}}},
+	}
+	_, err := tr.Transform(minimalApp("comp", "custom"), ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warned == "" {
+		t.Error("expected warning for custom trait with resolved capability but no definition")
+	}
+}
+
+func TestTransform_CustomTrait_CapabilityResolved_NoDefinition_StrictErrors(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"comp": &pipelineComponentHandler{typ: "comp"}},
+		map[string]TraitHandler{"custom": &stubTraitHandler{typ: "custom"}},
+	)
+	tr.SetStrictCapabilities(true)
+
+	ctx := TransformContext{
+		ClusterID:    "test",
+		Capabilities: map[string]CapabilityBinding{"custom": {Rendering: map[string]any{"x": "y"}}},
+	}
+	_, err := tr.Transform(minimalApp("comp", "custom"), ctx)
+	if err == nil {
+		t.Fatal("expected error with strict-capabilities and no definition")
+	}
+}
+
+func TestTransform_CustomTrait_NoCapabilityResolved_NoWarn(t *testing.T) {
+	// No capability in profile → check never fires even for custom types.
+	var warned string
+	tr := NewTransformer(
+		map[string]ComponentHandler{"comp": &pipelineComponentHandler{typ: "comp"}},
+		map[string]TraitHandler{"custom": &stubTraitHandler{typ: "custom"}},
+	)
+	tr.SetStrictCapabilities(true)
+	tr.SetWarningHandler(func(msg string) { warned = msg })
+
+	ctx := TransformContext{ClusterID: "test", Capabilities: map[string]CapabilityBinding{}}
+	_, err := tr.Transform(minimalApp("comp", "custom"), ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warned != "" {
+		t.Errorf("unexpected warning: %q", warned)
+	}
+}
+
+func TestTransform_BuiltinTrait_CapabilityResolved_NoDefinition_NoWarn(t *testing.T) {
+	// Built-in trait with resolved capability and no definition: no warning, no error.
+	var warned string
+	tr := NewTransformer(
+		map[string]ComponentHandler{"comp": &pipelineComponentHandler{typ: "comp"}},
+		nil,
+	)
+	tr.RegisterBuiltinTrait("expose", &stubTraitHandler{typ: "expose"})
+	tr.SetStrictCapabilities(true)
+	tr.SetWarningHandler(func(msg string) { warned = msg })
+
+	ctx := TransformContext{
+		ClusterID:    "test",
+		Capabilities: map[string]CapabilityBinding{"expose": {Rendering: map[string]any{"type": "ingress"}}},
+	}
+	_, err := tr.Transform(minimalApp("comp", "expose"), ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warned != "" {
+		t.Errorf("unexpected warning for built-in trait: %q", warned)
+	}
+}

@@ -1,0 +1,17 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: staging-with-redis-sidecar
+spec:
+  capabilities:
+    expose:
+      rendering:
+        controllerType: ingress
+        ingressClassName: nginx
+    # Rendering values for the custom redis-sidecar trait.
+    # The definitions/redis-sidecar.yaml CapabilityDefinition validates
+    # these keys and applies defaults for absent optional properties.
+    redis-sidecar:
+      rendering:
+        image: redis:7-alpine
+        maxMemory: "512Mi"
