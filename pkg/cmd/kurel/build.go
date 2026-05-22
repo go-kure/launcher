@@ -20,12 +20,14 @@ import (
 )
 
 type buildOptions struct {
-	profilePath string
-	outputDir   string
-	namespace   string
-	clusterID   string
-	valuesPath  string
-	setValues   []string // "key=value" strings from --set
+	profilePath        string
+	outputDir          string
+	namespace          string
+	clusterID          string
+	valuesPath         string
+	setValues          []string // "key=value" strings from --set
+	capabilityDefPaths []string
+	strictCapabilities bool
 }
 
 func newBuildCommand() *cobra.Command {
@@ -50,6 +52,8 @@ kurel.yaml for parameterized packages). Output is written to stdout (default) or
 	cmd.Flags().StringVar(&opts.clusterID, "cluster-id", "local", "cluster identifier")
 	cmd.Flags().StringVar(&opts.valuesPath, "values", "", "path to values YAML file")
 	cmd.Flags().StringArrayVar(&opts.setValues, "set", nil, "set a parameter value (key=value, repeatable)")
+	cmd.Flags().StringArrayVar(&opts.capabilityDefPaths, "capability-def", nil, "CapabilityDefinition file (repeatable)")
+	cmd.Flags().BoolVar(&opts.strictCapabilities, "strict-capabilities", false, "error instead of warn on unvalidated custom capabilities")
 
 	_ = cmd.MarkFlagRequired("profile")
 
@@ -123,6 +127,16 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	}
 
 	transformer := newBuiltinTransformer()
+
+	capDefs, err := oam.LoadCapabilityDefinitions(opts.capabilityDefPaths, filepath.Join(appDir, "definitions"))
+	if err != nil {
+		return errors.Wrap(err, "loading capability definitions")
+	}
+	transformer.SetCapabilityDefs(capDefs)
+	transformer.SetStrictCapabilities(opts.strictCapabilities)
+	transformer.SetWarningHandler(func(msg string) {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warning:", msg)
+	})
 
 	evaluatedProfile, err := transformer.EvaluateProfile(profile)
 	if err != nil {
@@ -203,7 +217,7 @@ func loadSuppliedValues(opts *buildOptions) (map[string]any, error) {
 // newBuiltinTransformer creates a Transformer pre-loaded with all supported
 // built-in component and trait handlers.
 func newBuiltinTransformer() *oam.Transformer {
-	return oam.NewTransformer(
+	t := oam.NewTransformer(
 		map[string]oam.ComponentHandler{
 			"webservice":  &components.WebserviceHandler{},
 			"worker":      &components.WorkerHandler{},
@@ -213,20 +227,20 @@ func newBuiltinTransformer() *oam.Transformer {
 			"postgresql":  &components.PostgresqlHandler{},
 			"helmchart":   &components.HelmchartHandler{},
 		},
-		map[string]oam.TraitHandler{
-			"expose":               &traits.ExposeHandler{},
-			"ingress":              &traits.IngressHandler{},
-			"httproute":            &traits.HTTPRouteHandler{},
-			"certificate":          &traits.CertificateHandler{},
-			"scaler":               &traits.ScalerHandler{},
-			"pvc":                  &traits.PVCHandler{},
-			"external-secret":      &traits.ExternalSecretHandler{},
-			"configmap":            &traits.ConfigMapHandler{},
-			"networkpolicy":        &traits.NetworkPolicyHandler{},
-			"cilium-networkpolicy": &traits.CiliumNetworkPolicyHandler{},
-			"volsync":              &traits.VolSyncHandler{},
-		},
+		nil,
 	)
+	t.RegisterBuiltinTrait("expose", &traits.ExposeHandler{})
+	t.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+	t.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
+	t.RegisterBuiltinTrait("certificate", &traits.CertificateHandler{})
+	t.RegisterBuiltinTrait("scaler", &traits.ScalerHandler{})
+	t.RegisterBuiltinTrait("pvc", &traits.PVCHandler{})
+	t.RegisterBuiltinTrait("external-secret", &traits.ExternalSecretHandler{})
+	t.RegisterBuiltinTrait("configmap", &traits.ConfigMapHandler{})
+	t.RegisterBuiltinTrait("networkpolicy", &traits.NetworkPolicyHandler{})
+	t.RegisterBuiltinTrait("cilium-networkpolicy", &traits.CiliumNetworkPolicyHandler{})
+	t.RegisterBuiltinTrait("volsync", &traits.VolSyncHandler{})
+	return t
 }
 
 // collectFromNode walks the node tree and collects all generated client.Objects

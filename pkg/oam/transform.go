@@ -32,10 +32,18 @@ type TransformContext struct {
 // Transformer is the core OAM runtime. Handlers are registered at startup;
 // Transform/TransformWithPolicy (added in #53) execute the pipeline.
 // Internal storage uses maps keyed by typeName for O(1) dispatch.
+//
+// Handlers registered via RegisterTrait are treated as custom for
+// CapabilityDefinition purposes. Use RegisterBuiltinTrait for launcher's own
+// built-in handlers; built-in types are never checked against CapabilityDefinition files.
 type Transformer struct {
-	componentHandlers map[string]ComponentHandler
-	traitHandlers     map[string]TraitHandler
-	policyHandlers    map[string]PolicyHandler
+	componentHandlers  map[string]ComponentHandler
+	traitHandlers      map[string]TraitHandler
+	policyHandlers     map[string]PolicyHandler
+	builtinTraitTypes  map[string]bool
+	capabilityDefs     map[string]*CapabilityDefinition
+	strictCapabilities bool
+	warnHandler        func(string)
 }
 
 // NewTransformer creates a Transformer pre-loaded with component and trait handlers.
@@ -44,11 +52,14 @@ type Transformer struct {
 // (design-capability-schema.md §2.5) applies to pre-loaded handlers too.
 // Panics if any trait handler implements CapabilityAware but not ValidateAndApplyDefaults.
 // Nil maps are treated as empty.
+// Handlers registered through this constructor are treated as custom for
+// CapabilityDefinition purposes; use RegisterBuiltinTrait for launcher built-ins.
 func NewTransformer(componentHandlers map[string]ComponentHandler, traitHandlers map[string]TraitHandler) *Transformer {
 	t := &Transformer{
 		componentHandlers: make(map[string]ComponentHandler),
 		traitHandlers:     make(map[string]TraitHandler),
 		policyHandlers:    make(map[string]PolicyHandler),
+		builtinTraitTypes: make(map[string]bool),
 	}
 	for typeName, h := range componentHandlers {
 		t.RegisterComponent(typeName, h)
@@ -102,6 +113,31 @@ func (t *Transformer) RegisterPolicy(typeName string, h PolicyHandler) {
 	t.policyHandlers[typeName] = h
 }
 
+// RegisterBuiltinTrait is like RegisterTrait but marks the type as built-in.
+// Built-in types are never checked against CapabilityDefinition files.
+func (t *Transformer) RegisterBuiltinTrait(typeName string, h TraitHandler) {
+	t.RegisterTrait(typeName, h)
+	t.builtinTraitTypes[typeName] = true
+}
+
+// SetCapabilityDefs replaces the set of loaded CapabilityDefinition schemas.
+// Typically populated from LoadCapabilityDefinitions before calling EvaluateProfile.
+func (t *Transformer) SetCapabilityDefs(defs map[string]*CapabilityDefinition) {
+	t.capabilityDefs = defs
+}
+
+// SetStrictCapabilities controls whether a missing CapabilityDefinition for a custom
+// trait is a hard error (true) or a warning (false, default).
+func (t *Transformer) SetStrictCapabilities(strict bool) {
+	t.strictCapabilities = strict
+}
+
+// SetWarningHandler sets the callback invoked when a non-fatal capability warning is emitted.
+// If nil, warnings are silently dropped.
+func (t *Transformer) SetWarningHandler(h func(string)) {
+	t.warnHandler = h
+}
+
 // EvaluateProfile validates and applies defaults to all capability renderings in
 // the ClusterProfile. For each capability key whose trait type matches a registered
 // handler that implements ValidateAndApplyDefaults, the rendering map is passed
@@ -126,12 +162,30 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 			evaluated[key] = binding
 			continue
 		}
+
+		currentRendering := binding.Rendering
+
+		// For custom (non-built-in) trait types, apply CapabilityDefinition schema
+		// defaults before handler VAD so that VAD sees schema-defaulted values.
+		if !t.builtinTraitTypes[typeName] {
+			if def, hasDef := t.capabilityDefs[typeName]; hasDef {
+				withDefaults, err := applyDefinitionSchema(currentRendering, def)
+				if err != nil {
+					return nil, &TransformError{
+						Message: fmt.Sprintf("capability %q definition schema", key),
+						Cause:   err,
+					}
+				}
+				currentRendering = withDefaults
+			}
+		}
+
 		vad, ok := handler.(ValidateAndApplyDefaults)
 		if !ok {
-			evaluated[key] = binding
+			evaluated[key] = CapabilityBinding{Rendering: currentRendering}
 			continue
 		}
-		validated, err := vad.ValidateAndApplyDefaults(binding.Rendering)
+		validated, err := vad.ValidateAndApplyDefaults(currentRendering)
 		if err != nil {
 			return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
 		}
@@ -453,6 +507,25 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 						Message: fmt.Sprintf("component %q trait %q: capability %q not found in ClusterProfile",
 							entry.component.Name, trait.Type, key),
 						Cause: ErrMissingCapability,
+					}
+				}
+			}
+
+			// For custom (non-built-in) traits whose capability rendering resolved in the
+			// profile, warn or error when no CapabilityDefinition was loaded for the type.
+			if !t.builtinTraitTypes[trait.Type] {
+				key := buildCapabilityKey(trait)
+				_, foundScoped := ctx.Capabilities[key]
+				_, foundBare := ctx.Capabilities[trait.Type]
+				if foundScoped || foundBare {
+					if _, hasDef := t.capabilityDefs[trait.Type]; !hasDef {
+						msg := fmt.Sprintf("no CapabilityDefinition found for custom trait %q", trait.Type)
+						if t.strictCapabilities {
+							return &TransformError{Message: msg}
+						}
+						if t.warnHandler != nil {
+							t.warnHandler(msg)
+						}
 					}
 				}
 			}

@@ -1,0 +1,23 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: CapabilityDefinition
+metadata:
+  # metadata.name IS the trait type — matches the trait type used in app.yaml.
+  name: redis-sidecar
+spec:
+  description: "Injects a Redis sidecar container alongside the main workload."
+  rendering:
+    properties:
+      image:
+        type: string
+        required: true
+        description: "Redis image reference, e.g. redis:7"
+      maxMemory:
+        type: string
+        required: false
+        default: "256Mi"
+        description: "Memory limit for the Redis sidecar container"
+      port:
+        type: integer
+        required: false
+        default: 6379
+        description: "Port the Redis sidecar listens on"
