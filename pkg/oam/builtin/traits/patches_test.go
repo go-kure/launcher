@@ -135,3 +135,39 @@ func TestFluxCDPatchesHandler_Apply_MissingPatches_Errors(t *testing.T) {
 		t.Fatal("expected error for missing patches property")
 	}
 }
+
+func TestFluxCDPatchesHandler_Apply_Target_NonStringKind_Errors(t *testing.T) {
+	h := &traits.FluxCDPatchesHandler{}
+	trait := &oam.Trait{
+		Type: "fluxcd-patches",
+		Properties: map[string]any{
+			"patches": []any{
+				map[string]any{
+					"patch":  "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: svc\n",
+					"target": map[string]any{"kind": 42},
+				},
+			},
+		},
+	}
+	if err := h.Apply(trait, newApp("svc", "ns"), newBundle()); err == nil {
+		t.Fatal("expected error for non-string target.kind")
+	}
+}
+
+func TestFluxCDPatchesHandler_Apply_Target_NonStringName_Errors(t *testing.T) {
+	h := &traits.FluxCDPatchesHandler{}
+	trait := &oam.Trait{
+		Type: "fluxcd-patches",
+		Properties: map[string]any{
+			"patches": []any{
+				map[string]any{
+					"patch":  "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: svc\n",
+					"target": map[string]any{"kind": "Deployment", "name": true},
+				},
+			},
+		},
+	}
+	if err := h.Apply(trait, newApp("svc", "ns"), newBundle()); err == nil {
+		t.Fatal("expected error for non-string target.name")
+	}
+}

@@ -92,6 +92,56 @@ func TestPruneProtectionHandler_Apply_OnlyTargetApp(t *testing.T) {
 	}
 }
 
+// TestPruneProtectionHandler_Apply_DoesNotProtectSiblingApps documents that
+// prune-protection only annotates resources produced by the component's own
+// app.Config. Resources appended to bundle.Applications by other trait handlers
+// (e.g. rbac) are NOT annotated — narrow scope is intentional.
+func TestPruneProtectionHandler_Apply_DoesNotProtectSiblingApps(t *testing.T) {
+	rbacH := &traits.RBACHandler{}
+	prune := &traits.PruneProtectionHandler{}
+
+	app := stack.NewApplication("api", "default", &cmStub{name: "api", namespace: "default"})
+	bundle := newBundle()
+	bundle.Applications = append(bundle.Applications, app)
+
+	rbacTrait := &oam.Trait{Type: "rbac", Properties: map[string]any{
+		"rules": []any{map[string]any{
+			"apiGroups": []any{""},
+			"resources": []any{"pods"},
+			"verbs":     []any{"get"},
+		}},
+	}}
+	if err := rbacH.Apply(rbacTrait, app, bundle); err != nil {
+		t.Fatalf("rbac.Apply: %v", err)
+	}
+	if err := prune.Apply(&oam.Trait{Type: "prune-protection"}, app, bundle); err != nil {
+		t.Fatalf("prune.Apply: %v", err)
+	}
+
+	// Main app resources ARE annotated.
+	mainResources, err := app.Generate()
+	if err != nil {
+		t.Fatalf("app.Generate: %v", err)
+	}
+	for _, r := range mainResources {
+		if (*r).GetAnnotations()[stack.AnnotationFluxPruneKey] != stack.AnnotationFluxPruneDisabled {
+			t.Errorf("main app resource %q: expected prune annotation", (*r).GetName())
+		}
+	}
+
+	// Sibling (rbac) resources are NOT annotated — narrow scope is intentional.
+	rbacApp := bundle.Applications[1]
+	rbacResources, err := rbacApp.Config.Generate(rbacApp)
+	if err != nil {
+		t.Fatalf("rbacApp.Generate: %v", err)
+	}
+	for _, r := range rbacResources {
+		if _, ok := (*r).GetAnnotations()[stack.AnnotationFluxPruneKey]; ok {
+			t.Errorf("rbac sibling resource %q: should NOT have prune annotation (narrow scope)", (*r).GetName())
+		}
+	}
+}
+
 // cmStub is a minimal ApplicationConfig that emits a single ConfigMap.
 type cmStub struct {
 	name      string
