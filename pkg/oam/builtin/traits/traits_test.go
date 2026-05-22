@@ -2051,3 +2051,138 @@ func TestIngressHandler_Apply_ImplicitBackend_PortMismatch_Error(t *testing.T) {
 		}
 	})
 }
+
+// --- IngressHandler trait-level servicePort/serviceName (helmchart support) ---
+
+func TestIngressHandler_TraitLevel_ServicePort_Success(t *testing.T) {
+	h := &traits.IngressHandler{}
+	trait := &oam.Trait{
+		Type: "ingress",
+		Properties: map[string]any{
+			"servicePort": float64(8080),
+			"rules": []any{
+				map[string]any{
+					"host":  "app.example.com",
+					"paths": []any{map[string]any{"path": "/"}},
+				},
+			},
+		},
+	}
+	// newApp creates a component with no servicePortProvider (simulates helmchart)
+	app := newApp("myapp", "default")
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("expected success with trait-level servicePort, got: %v", err)
+	}
+	ic, ok := bundle.Applications[0].Config.(*traits.IngressConfig)
+	if !ok {
+		t.Fatal("expected IngressConfig")
+	}
+	if ic.Rules[0].Paths[0].Port != 8080 {
+		t.Errorf("expected port 8080, got %d", ic.Rules[0].Paths[0].Port)
+	}
+}
+
+func TestIngressHandler_TraitLevel_ServiceNameAndPort_Success(t *testing.T) {
+	h := &traits.IngressHandler{}
+	trait := &oam.Trait{
+		Type: "ingress",
+		Properties: map[string]any{
+			"serviceName": "my-chart-svc",
+			"servicePort": float64(8080),
+			"rules": []any{
+				map[string]any{
+					"host":  "app.example.com",
+					"paths": []any{map[string]any{"path": "/"}},
+				},
+			},
+		},
+	}
+	app := newApp("myapp", "default")
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	ic, ok := bundle.Applications[0].Config.(*traits.IngressConfig)
+	if !ok {
+		t.Fatal("expected IngressConfig")
+	}
+	if ic.ServiceName != "my-chart-svc" {
+		t.Errorf("expected ServiceName 'my-chart-svc', got %q", ic.ServiceName)
+	}
+}
+
+func TestIngressHandler_TraitLevel_ServiceNameWithoutPort_Errors(t *testing.T) {
+	h := &traits.IngressHandler{}
+	trait := &oam.Trait{
+		Type: "ingress",
+		Properties: map[string]any{
+			"serviceName": "my-svc",
+			"rules": []any{
+				map[string]any{
+					"host":  "app.example.com",
+					"paths": []any{map[string]any{"path": "/"}},
+				},
+			},
+		},
+	}
+	app := newApp("myapp", "default")
+	err := h.Apply(trait, app, newBundle())
+	if err == nil {
+		t.Fatal("expected error when serviceName set without servicePort")
+	}
+	if !strings.Contains(err.Error(), "serviceName requires a valid servicePort") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestIngressHandler_TraitLevel_InvalidServicePort_Errors(t *testing.T) {
+	h := &traits.IngressHandler{}
+	for _, badPort := range []any{"oops", float64(70000), float64(0)} {
+		trait := &oam.Trait{
+			Type: "ingress",
+			Properties: map[string]any{
+				"servicePort": badPort,
+				"rules": []any{
+					map[string]any{
+						"host":  "app.example.com",
+						"paths": []any{map[string]any{"path": "/"}},
+					},
+				},
+			},
+		}
+		app := newApp("myapp", "default")
+		err := h.Apply(trait, app, newBundle())
+		if err == nil {
+			t.Fatalf("expected error for invalid servicePort %v", badPort)
+		}
+		if !strings.Contains(err.Error(), "valid port number") {
+			t.Errorf("unexpected error for port %v: %v", badPort, err)
+		}
+	}
+}
+
+func TestIngressHandler_TraitLevel_ServicePort_RejectedOnKnownPortComponent(t *testing.T) {
+	h := &traits.IngressHandler{}
+	trait := &oam.Trait{
+		Type: "ingress",
+		Properties: map[string]any{
+			"servicePort": float64(8080),
+			"rules": []any{
+				map[string]any{
+					"host":  "app.example.com",
+					"paths": []any{map[string]any{"path": "/"}},
+				},
+			},
+		},
+	}
+	// newWebApp creates a component with servicePortProvider (port 80)
+	app := newWebApp("myapp", "default")
+	err := h.Apply(trait, app, newBundle())
+	if err == nil {
+		t.Fatal("expected error when servicePort set on component with known service port")
+	}
+	if !strings.Contains(err.Error(), "may not be set") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
