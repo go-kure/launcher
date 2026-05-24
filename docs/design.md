@@ -144,6 +144,29 @@ kure remains a standalone library with no dependency on launcher. Launcher impor
 
 `pkg/stack/generators/kurelpackage/` — historically a kure *generator* that produced kurel package structure from a kure Application. This package is now being removed from kure (unused by all known consumers; removal tracked in [kure#539](https://github.com/go-kure/kure/issues/539)). It does not move to launcher.
 
+### What launcher does not use from kure (intentional)
+
+Launcher does **not** use the following kure packages. This is by design, not an oversight.
+
+| Package | Why not used |
+|---|---|
+| `pkg/stack/generators/` (AppWorkload, FluxHelm, KurelPackage) | kure's pre-built generator types; consumed only by kure's own tests, not by crane or launcher |
+| `pkg/stack/application_wrapper.go` (ApplicationWrapper) | kure's GVK YAML dispatch mechanism; launcher defines its own OAM parser under `launcher.gokure.dev/v1alpha1` |
+| `pkg/gvk` | kure's generic GVK registry; not relevant to launcher's static-file OAM model |
+| `generators.gokure.dev/*`, `stack.gokure.dev/*` API groups | kure's versioning space; launcher's documents use `launcher.gokure.dev` exclusively |
+
+### What launcher does use from kure (intentional)
+
+| Package | Purpose |
+|---|---|
+| `pkg/stack.ApplicationConfig` | Handler output interface — `ComponentHandler.ToApplicationConfig()` in `pkg/oam/handler.go` returns `stack.ApplicationConfig`, which is the bridge to kure's resource builders |
+| `pkg/kubernetes` | Kubernetes resource construction (Deployment, Service, etc.) |
+| `pkg/stack/fluxcd` | GitOps delivery object generation (OCIRepository, Kustomization) |
+| `pkg/errors` | Error types |
+| `pkg/io` | YAML parsing utilities |
+| `pkg/logger` | Logging interface |
+| `pkg/cmd/shared` | CLI infrastructure |
+
 ---
 
 ## 6. Comparison with Helm
