@@ -458,7 +458,7 @@ func (c *HelmchartConfig) buildHelmRelease() *helmv2.HelmRelease {
 
 func effectiveInterval(interval string) string {
 	if interval == "" {
-		return "10m"
+		return "60m"
 	}
 	return interval
 }
