@@ -1,4 +1,4 @@
-apiVersion: core.oam.dev/v1beta1
+apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
   name: my-app
@@ -7,12 +7,16 @@ spec:
   - name: api
     type: webservice
     properties:
-      image: myorg/api:latest
+      image: myorg/api:v1.0.0
       port: 8080
     traits:
     - type: expose
       properties:
-        port: 8080
+        rules:
+        - host: my-app.example.com
+          paths:
+          - path: /
+            port: 8080
     # redis-sidecar is a custom trait implemented by the downstream consumer's
     # handler. The rendering values (image, maxMemory, port) come from the
     # ClusterProfile capability binding; the definitions/redis-sidecar.yaml

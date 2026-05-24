@@ -60,6 +60,30 @@ func ParseMulti(data []byte) ([]*Application, error) {
 	return apps, nil
 }
 
+// ParseWithExtraTraitTypes is like Parse but also accepts custom trait type names
+// from CapabilityDefinition files so they pass validation.
+func ParseWithExtraTraitTypes(data []byte, extraTraitTypes []string) (*Application, error) {
+	var app Application
+
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+
+	if err := dec.Decode(&app); err != nil {
+		return nil, yamlParseError(err)
+	}
+
+	custom := make(map[string]bool, len(extraTraitTypes))
+	for _, t := range extraTraitTypes {
+		custom[t] = true
+	}
+
+	if err := validateWithCustomTraits(&app, custom); err != nil {
+		return nil, err
+	}
+
+	return &app, nil
+}
+
 // MustParse parses an Application YAML document and panics on error.
 // Use only in tests or initialization code where errors are truly unexpected.
 func MustParse(data []byte) *Application {
