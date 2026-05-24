@@ -543,8 +543,8 @@ func TestHelmchartHandler_DefaultInterval(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected HelmRelease at objects[1], got %T", *objects[1])
 	}
-	if hr.Spec.Interval.Duration.String() != "10m0s" {
-		t.Errorf("interval = %q, want 10m0s (default)", hr.Spec.Interval.Duration.String())
+	if hr.Spec.Interval.Duration.String() != "1h0m0s" {
+		t.Errorf("interval = %q, want 1h0m0s (default)", hr.Spec.Interval.Duration.String())
 	}
 }
 
