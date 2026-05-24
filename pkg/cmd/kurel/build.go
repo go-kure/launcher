@@ -111,7 +111,19 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		}
 	}
 
-	app, err := oam.Parse(appData)
+	// Load capability definitions before parsing the app so that custom trait
+	// types from --capability-def pass the trait type validation in oam.Parse.
+	capDefs, err := oam.LoadCapabilityDefinitions(opts.capabilityDefPaths, filepath.Join(appDir, "definitions"))
+	if err != nil {
+		return errors.Wrap(err, "loading capability definitions")
+	}
+
+	customTraitTypes := make([]string, 0, len(capDefs))
+	for name := range capDefs {
+		customTraitTypes = append(customTraitTypes, name)
+	}
+
+	app, err := oam.ParseWithExtraTraitTypes(appData, customTraitTypes)
 	if err != nil {
 		return errors.Wrapf(err, "parsing application file %q", appPath)
 	}
@@ -128,10 +140,6 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 
 	transformer := newBuiltinTransformer()
 
-	capDefs, err := oam.LoadCapabilityDefinitions(opts.capabilityDefPaths, filepath.Join(appDir, "definitions"))
-	if err != nil {
-		return errors.Wrap(err, "loading capability definitions")
-	}
 	transformer.SetCapabilityDefs(capDefs)
 	transformer.SetStrictCapabilities(opts.strictCapabilities)
 	transformer.SetWarningHandler(func(msg string) {

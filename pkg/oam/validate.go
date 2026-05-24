@@ -53,6 +53,12 @@ var traitComponentRestrictions = map[string]map[string]bool{
 
 // validate performs semantic validation on a parsed Application.
 func validate(app *Application) error {
+	return validateWithCustomTraits(app, nil)
+}
+
+// validateWithCustomTraits is like validate but also accepts custom trait type names
+// derived from CapabilityDefinition files supplied via --capability-def.
+func validateWithCustomTraits(app *Application, customTraitTypes map[string]bool) error {
 	if app.APIVersion != SupportedAPIVersion {
 		return oamValidationError("apiVersion", fmt.Sprintf("unsupported apiVersion %q, expected %q",
 			app.APIVersion, SupportedAPIVersion))
@@ -84,7 +90,7 @@ func validate(app *Application) error {
 
 	seenNames := make(map[string]bool)
 	for i, c := range app.Spec.Components {
-		if err := validateComponent(&c, i, seenNames); err != nil {
+		if err := validateComponent(&c, i, seenNames, customTraitTypes); err != nil {
 			return err
 		}
 	}
@@ -99,7 +105,7 @@ func validate(app *Application) error {
 	return nil
 }
 
-func validateComponent(c *Component, index int, seenNames map[string]bool) error {
+func validateComponent(c *Component, index int, seenNames map[string]bool, customTraitTypes map[string]bool) error {
 	if c.Name == "" {
 		return oamValidationError("name", fmt.Sprintf("spec.components[%d].name is required", index))
 	}
@@ -122,7 +128,7 @@ func validateComponent(c *Component, index int, seenNames map[string]bool) error
 	}
 
 	for j, t := range c.Traits {
-		if err := validateTrait(&t, c.Name, c.Type, j); err != nil {
+		if err := validateTrait(&t, c.Name, c.Type, j, customTraitTypes); err != nil {
 			return err
 		}
 	}
@@ -130,13 +136,13 @@ func validateComponent(c *Component, index int, seenNames map[string]bool) error
 	return nil
 }
 
-func validateTrait(t *Trait, componentName, componentType string, index int) error {
+func validateTrait(t *Trait, componentName, componentType string, index int, customTraitTypes map[string]bool) error {
 	if t.Type == "" {
 		return oamValidationError("type", fmt.Sprintf("component %q trait[%d] missing type",
 			componentName, index))
 	}
 
-	if !validTraitTypes[t.Type] {
+	if !validTraitTypes[t.Type] && !customTraitTypes[t.Type] {
 		return errors.NewValidationError("type", t.Type, componentName, supportedTraitTypes())
 	}
 

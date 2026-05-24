@@ -10,9 +10,8 @@ spec:
         ingressClassName: nginx
     certificate:
       rendering:
-        issuerRef:
-          name: letsencrypt-prod
-          kind: ClusterIssuer
+        issuerRefName: letsencrypt-prod
+        issuerRefKind: ClusterIssuer
     external-secret:
       rendering:
         secretStoreRef:
