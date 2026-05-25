@@ -11,7 +11,7 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260213133823-31b0c7c37342
 	github.com/fluxcd/helm-controller/api v1.5.4
-	github.com/fluxcd/source-controller/api v1.8.4
+	github.com/fluxcd/source-controller/api v1.8.5
 	github.com/go-kure/kure v0.2.0-alpha.8
 	github.com/google/go-containerregistry v0.21.5
 	github.com/spf13/cobra v1.10.2
