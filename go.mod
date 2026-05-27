@@ -10,10 +10,10 @@ require (
 	github.com/cloudnative-pg/plugin-barman-cloud v0.12.0
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260213133823-31b0c7c37342
-	github.com/fluxcd/helm-controller/api v1.5.4
-	github.com/fluxcd/source-controller/api v1.8.4
-	github.com/go-kure/kure v0.2.0-alpha.8
-	github.com/google/go-containerregistry v0.21.5
+	github.com/fluxcd/helm-controller/api v1.5.5
+	github.com/fluxcd/source-controller/api v1.8.5
+	github.com/go-kure/kure v0.2.0-beta.0
+	github.com/google/go-containerregistry v0.21.6
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
@@ -53,7 +53,7 @@ require (
 	github.com/dylibso/observe-sdk/go v0.0.0-20240819160327-2d926c5d788a // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/extism/go-sdk v1.7.1 // indirect
-	github.com/fluxcd/image-automation-controller/api v1.1.3 // indirect
+	github.com/fluxcd/image-automation-controller/api v1.1.4 // indirect
 	github.com/fluxcd/kustomize-controller/api v1.8.5 // indirect
 	github.com/fluxcd/notification-controller/api v1.8.4 // indirect
 	github.com/fluxcd/pkg/apis/acl v0.9.0 // indirect
@@ -149,19 +149,19 @@ require (
 	go.uber.org/dig v1.17.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
-	go.universe.tf/metallb v0.15.3 // indirect
+	go.universe.tf/metallb v0.16.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	golang.org/x/crypto v0.50.0 // indirect
-	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/net v0.54.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/term v0.42.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/term v0.43.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.44.0 // indirect
+	golang.org/x/tools v0.45.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/grpc v1.81.0 // indirect
