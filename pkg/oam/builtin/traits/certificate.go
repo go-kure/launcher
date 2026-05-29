@@ -32,12 +32,15 @@ func (h *CertificateHandler) ValidateAndApplyDefaults(rendering map[string]any) 
 	if err != nil {
 		return nil, errors.Wrap(err, "certificate rendering")
 	}
-	if r.IssuerRefName == "" {
-		return nil, errors.New("certificate rendering: issuerRefName is required")
+	if r.IssuerRef.Name == "" {
+		return nil, errors.New("certificate rendering: issuerRef.name is required")
 	}
-	if r.IssuerRefKind == "" {
-		rendering["issuerRefKind"] = "ClusterIssuer"
+	kind := r.IssuerRef.Kind
+	if kind == "" {
+		kind = "ClusterIssuer"
 	}
+	// Normalise to the nested shape with the kind defaulted in place.
+	rendering["issuerRef"] = map[string]any{"name": r.IssuerRef.Name, "kind": kind}
 	return rendering, nil
 }
 
@@ -70,14 +73,18 @@ func (h *CertificateHandler) parseProperties(props map[string]any, app *stack.Ap
 	}
 	config.SecretName = secretName
 
-	issuerName, ok := props["issuerRefName"].(string)
+	issuerRef, ok := props["issuerRef"].(map[string]any)
+	if !ok {
+		return nil, errors.New("required property 'issuerRef' missing or not a map")
+	}
+	issuerName, ok := issuerRef["name"].(string)
 	if !ok || issuerName == "" {
-		return nil, errors.New("required property 'issuerRefName' missing or not a string")
+		return nil, errors.New("required property 'issuerRef.name' missing or not a string")
 	}
 	config.IssuerName = issuerName
 
 	config.IssuerKind = "ClusterIssuer"
-	if kind, ok := props["issuerRefKind"].(string); ok && kind != "" {
+	if kind, ok := issuerRef["kind"].(string); ok && kind != "" {
 		config.IssuerKind = kind
 	}
 
