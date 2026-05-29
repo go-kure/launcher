@@ -1,8 +1,6 @@
 package components
 
 import (
-	"maps"
-
 	"github.com/go-kure/kure/pkg/stack"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -95,15 +93,17 @@ type PassthroughConfig struct {
 	Object        map[string]any
 }
 
-// Generate emits the declared object as an unstructured resource. It clones the
-// object and metadata maps before the metadata fixup so the source properties are
-// never mutated; other nested values are not mutated and may be aliased.
+// Generate emits the declared object as an unstructured resource. It deep-copies
+// the object first so the metadata fixup — and any later in-place mutation of
+// labels/annotations by the delivery layer (kure stack.Bundle.Generate) — never
+// touches the source component properties.
 func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
-	obj := maps.Clone(c.Object)
+	obj := deepCopyMap(c.Object)
 
-	meta := map[string]any{}
-	if existing, ok := obj["metadata"].(map[string]any); ok {
-		meta = maps.Clone(existing)
+	meta, _ := obj["metadata"].(map[string]any)
+	if meta == nil {
+		meta = map[string]any{}
+		obj["metadata"] = meta
 	}
 	if name, ok := meta["name"].(string); !ok || name == "" {
 		meta["name"] = c.ComponentName
@@ -113,9 +113,35 @@ func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, er
 			meta["namespace"] = c.Namespace
 		}
 	}
-	obj["metadata"] = meta
 
 	u := &unstructured.Unstructured{Object: obj}
 	out := client.Object(u)
 	return []*client.Object{&out}, nil
+}
+
+// deepCopyMap returns a deep copy of a decoded YAML/JSON map: nested maps and
+// slices are cloned, scalars (immutable) are copied by value. Unlike
+// runtime.DeepCopyJSON it does not assume JSON-typed scalars, so it is safe for
+// whatever scalar types the OAM decoder produces.
+func deepCopyMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = deepCopyValue(v)
+	}
+	return out
+}
+
+func deepCopyValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		return deepCopyMap(t)
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = deepCopyValue(e)
+		}
+		return out
+	default:
+		return v
+	}
 }
