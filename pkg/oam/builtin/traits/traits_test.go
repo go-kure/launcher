@@ -365,6 +365,55 @@ func TestIngressHandler_Apply_NamedSubApp(t *testing.T) {
 	}
 }
 
+func TestIngressHandler_Apply_Scope(t *testing.T) {
+	h := &traits.IngressHandler{}
+	trait := &oam.Trait{
+		Type: "ingress",
+		Properties: map[string]any{
+			"scope": "external",
+			"rules": []any{
+				map[string]any{
+					"host":  "example.com",
+					"paths": []any{map[string]any{"path": "/"}},
+				},
+			},
+		},
+	}
+	app := newWebApp("my-app", "default")
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if bundle.Applications[0].Name != "my-app-ingress-external" {
+		t.Errorf("expected name 'my-app-ingress-external', got %q", bundle.Applications[0].Name)
+	}
+}
+
+func TestIngressHandler_Apply_NameWinsOverScope(t *testing.T) {
+	h := &traits.IngressHandler{}
+	trait := &oam.Trait{
+		Type: "ingress",
+		Properties: map[string]any{
+			"name":  "custom-ingress",
+			"scope": "external",
+			"rules": []any{
+				map[string]any{
+					"host":  "example.com",
+					"paths": []any{map[string]any{"path": "/"}},
+				},
+			},
+		},
+	}
+	app := newWebApp("my-app", "default")
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if bundle.Applications[0].Name != "custom-ingress" {
+		t.Errorf("expected name to win over scope: 'custom-ingress', got %q", bundle.Applications[0].Name)
+	}
+}
+
 // --- CertificateHandler ---
 
 func TestCertificateHandler_CanHandle(t *testing.T) {
