@@ -319,6 +319,7 @@ This monolithic layout is owned by launcher and generated as part of `kurel buil
 - Component handlers: webservice, worker, postgresql, cronjob, helmchart, daemonset, statefulset (#48)
 - Trait handlers — workload set: expose, certificate, external-secret, pvc, scaler (#49)
 - Trait handlers — network/infra set: ingress, httproute, configmap, networkpolicy, cilium-networkpolicy, volsync (#50)
+- Generic `passthrough` component — emits arbitrary CRDs / non-standard objects with no per-type Go handler (#105)
 
 **Phase 3: CLI integration** (#33)
 - `kurel build` — OAM mode (app.yaml + --profile cluster.yaml → manifests) (#51)
@@ -338,9 +339,11 @@ This monolithic layout is owned by launcher and generated as part of `kurel buil
    publish always-on packages; separate packages cover distinct deployment variants.
    Boolean on/off gates and multi-instance support are Phase 2 (issue #39).
 
-2. **Generic/raw YAML escape hatch** — A component type that passes through arbitrary
-   YAML would let package authors handle cases outside the built-in handler set. Not
-   in scope for Phase 1; tracked as future work.
+2. **Generic/raw YAML escape hatch** — Implemented as the `passthrough` component
+   (#105): it emits an arbitrary Kubernetes object declared inline under `object:`,
+   with a `clusterScoped` flag for cluster-scoped resources, covering cases outside the
+   built-in handler set. Config-driven custom *traits* and template/plugin rendering
+   remain future work (#102).
 
 3. **Package distribution** — How kurel packages are published, versioned, and referenced
    by consumers. A standard local layout that lets `kurel build` run without extra flags

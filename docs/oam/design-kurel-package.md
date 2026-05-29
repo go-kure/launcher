@@ -116,6 +116,7 @@ Migrated from crane. Each type maps to a `ComponentHandler` implementation in
 | `helmchart` | FluxCD HelmRelease for third-party charts. Supports inline source creation (`source.url`) and reference to existing source CRs (`source.name`). Multiple components sharing the same source key share a single source CR (first component wins). For HelmRepository the key is the URL; for OCIRepository the key is URL+version, so two OCI components with the same URL but different versions each get their own source CR. |
 | `daemonset` | DaemonSet for node-level agents. Optional `port: <N>` generates a ClusterIP Service exposing port N; required when the daemonset acts as an implicit backend for ingress, httproute, or expose traits. |
 | `statefulset` | StatefulSet for ordered, persistent workloads |
+| `passthrough` | Generic escape hatch (launcher-native, not migrated from crane): emits an arbitrary Kubernetes object — CRD or non-standard type — declared inline under `object:`. Set `clusterScoped: true` for cluster-scoped resources (no namespace injected). `object.metadata.name` defaults to the component name. No standard trait/port integration or auto health check. |
 
 ### 4.3 Supported trait types (Phase 1)
 
