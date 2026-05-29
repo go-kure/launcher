@@ -24,6 +24,7 @@ var validComponentTypes = map[string]bool{
 	"helmchart":   true,
 	"daemonset":   true,
 	"statefulset": true,
+	"passthrough": true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.

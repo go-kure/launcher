@@ -3,6 +3,7 @@ package components_test
 import (
 	"testing"
 
+	"github.com/go-kure/kure/pkg/stack"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -160,6 +161,76 @@ func TestPassthroughHandler_Errors(t *testing.T) {
 				t.Errorf("expected error for %q", name)
 			}
 		})
+	}
+}
+
+func TestPassthrough_TransformWithPolicy(t *testing.T) {
+	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
+		"passthrough": &components.PassthroughHandler{},
+	}, nil)
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "app", Namespace: "ns1"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{{
+				Name: "my-cr",
+				Type: "passthrough",
+				Properties: map[string]any{
+					"object": map[string]any{
+						"apiVersion": "example.com/v1",
+						"kind":       "Widget",
+						"spec":       map[string]any{"size": int64(3)},
+					},
+				},
+			}},
+		},
+	}
+
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "ns1"})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+
+	found := false
+	walkBundles(cluster.Node, func(b *stack.Bundle) {
+		for _, a := range b.Applications {
+			objs, err := a.Generate()
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			for _, o := range objs {
+				u, ok := (*o).(*unstructured.Unstructured)
+				if !ok || u.GetKind() != "Widget" {
+					continue
+				}
+				found = true
+				if u.GetName() != "my-cr" || u.GetNamespace() != "ns1" {
+					t.Errorf("Widget metadata: name=%q ns=%q", u.GetName(), u.GetNamespace())
+				}
+			}
+		}
+	})
+	if !found {
+		t.Error("passthrough Widget was not emitted by the transform")
+	}
+}
+
+func walkBundles(n *stack.Node, fn func(*stack.Bundle)) {
+	if n == nil {
+		return
+	}
+	var visit func(b *stack.Bundle)
+	visit = func(b *stack.Bundle) {
+		if b == nil {
+			return
+		}
+		fn(b)
+		for _, ch := range b.Children {
+			visit(ch)
+		}
+	}
+	visit(n.Bundle)
+	for _, ch := range n.Children {
+		walkBundles(ch, fn)
 	}
 }
 
