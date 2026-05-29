@@ -1,6 +1,39 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.1] - 2026-05-29
+
+### Added
+
+- Certificate trait uses nested issuerRef {name,kind}
+- Support scope property for ingress/httproute sub-app naming
+- Synthesize per-component allow-ingress NetworkPolicy at cluster post-build
+- Parse networkPolicy.trafficSources on ingress/httproute traits
+- Add passthrough component for arbitrary objects
+- Register passthrough component type
+
+### CI
+
+- Redesign release workflows — Create/Promote/Bump/Publish
+
+### Dependencies
+
+- Bump kure to v0.2.0-beta.0 and align flux/containerregistry deps
+- Bump kure to v0.2.0-beta.3 and align k8s deps
+
+### Documentation
+
+- Add README with index, profile guide, and custom-capability explanation
+- Document launcher's intentional kure package boundary
+- Document and example the passthrough component
+
+### Fixed
+
+- Correct cluster profile issuerRef fields and custom-capability app; support custom traits in parser
+- Change default HelmRelease interval from 10m to 60m
+- Deep-copy passthrough object so source properties are never mutated
+- Upgrade golang.org/x/net to v0.55.0 to address GO-2026-5026
+
 ## [0.1.0-alpha.0] - 2026-05-22
 
 ### Added
@@ -108,5 +141,9 @@ All notable changes to this project will be documented in this file.
 
 - Expand builtin handler coverage to meet 80% threshold
 - Document prune-protection narrow scope; strict target validation in fluxcd-patches
+
+### Release
+
+- V0.1.0-alpha.0
 
 
