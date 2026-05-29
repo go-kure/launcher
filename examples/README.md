@@ -30,11 +30,12 @@ bin/kurel build examples/01-webservice-minimal.yaml \
 | 12 | [12-daemonset.yaml](12-daemonset.yaml) | daemonset | — | minimal |
 | 13 | [13-statefulset.yaml](13-statefulset.yaml) | statefulset | — | minimal |
 | 14 | [14-full-stack.yaml](14-full-stack.yaml) | webservice×3, worker, cronjob, postgresql, helmchart, daemonset, statefulset | expose, expose.internal, certificate, external-secret, configmap, scaler | gateway-certmanager-aws |
+| 15 | [15-passthrough-minimal.yaml](15-passthrough-minimal.yaml) | passthrough (SparkApplication CRD + cluster-scoped ClusterRole) | — | minimal |
 
 **Profile compatibility notes:**
 - Examples 03–04, 06, 08 also work with `gateway-certmanager-aws.yaml`
 - Example 14 also works with `nginx-certmanager-vault.yaml`
-- Examples 01, 05, 07, 09–13 work with any profile
+- Examples 01, 05, 07, 09–13, 15 work with any profile
 
 ## Cluster profiles
 
@@ -111,6 +112,7 @@ transformer.SetCapabilityDefs(capDefs)
 
 ### Future work
 
-Config-driven extensibility (custom traits and components without Go code, CRD passthrough,
-standard Kubernetes API coverage) is tracked in
+The `passthrough` component type (see example 15) already emits arbitrary CRDs and
+non-standard objects with no Go handler. Broader config-driven extensibility — custom
+*traits* and template/plugin-rendered components without Go code — is tracked in
 [issue #102](https://github.com/go-kure/launcher/issues/102).
