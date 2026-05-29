@@ -287,6 +287,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	}
 	applyAutoHealthChecks(cluster, componentMap, policyResult.HealthCheckOverrides)
 	applyReconciliationSettings(cluster, componentMap, policyResult.ReconciliationSettings)
+	synthesizeNetworkPolicies(cluster)
 
 	return cluster, policyResult, nil
 }
