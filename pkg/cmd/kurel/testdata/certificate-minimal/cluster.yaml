@@ -6,5 +6,6 @@ spec:
   capabilities:
     certificate:
       rendering:
-        issuerRefName: letsencrypt-prod
-        issuerRefKind: ClusterIssuer
+        issuerRef:
+          name: letsencrypt-prod
+          kind: ClusterIssuer

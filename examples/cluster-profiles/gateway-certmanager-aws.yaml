@@ -16,8 +16,9 @@ spec:
         gatewayNamespace: gateway-system
     certificate:
       rendering:
-        issuerRefName: internal-ca
-        issuerRefKind: ClusterIssuer
+        issuerRef:
+          name: internal-ca
+          kind: ClusterIssuer
     external-secret:
       rendering:
         secretStoreRef:

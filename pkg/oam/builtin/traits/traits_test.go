@@ -387,14 +387,18 @@ func TestCertificateHandler_CapabilityRequired(t *testing.T) {
 func TestCertificateHandler_ValidateAndApplyDefaults_OK(t *testing.T) {
 	h := &traits.CertificateHandler{}
 	rendering := map[string]any{
-		"issuerRefName": "letsencrypt-prod",
+		"issuerRef": map[string]any{"name": "letsencrypt-prod"},
 	}
 	out, err := h.ValidateAndApplyDefaults(rendering)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["issuerRefKind"] != "ClusterIssuer" {
-		t.Errorf("expected default issuerRefKind 'ClusterIssuer', got %q", out["issuerRefKind"])
+	ref, ok := out["issuerRef"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected issuerRef map, got %T", out["issuerRef"])
+	}
+	if ref["kind"] != "ClusterIssuer" {
+		t.Errorf("expected default issuerRef.kind 'ClusterIssuer', got %q", ref["kind"])
 	}
 }
 
@@ -409,8 +413,8 @@ func TestCertificateHandler_ValidateAndApplyDefaults_MissingIssuerRefName(t *tes
 func TestCertificateHandler_ValidateAndApplyDefaults_UnknownField(t *testing.T) {
 	h := &traits.CertificateHandler{}
 	rendering := map[string]any{
-		"issuerRefName": "letsencrypt-prod",
-		"unknownField":  "value",
+		"issuerRef":    map[string]any{"name": "letsencrypt-prod"},
+		"unknownField": "value",
 	}
 	_, err := h.ValidateAndApplyDefaults(rendering)
 	if err == nil {
@@ -423,10 +427,9 @@ func TestCertificateHandler_Apply_OK(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "certificate",
 		Properties: map[string]any{
-			"secretName":    "my-tls",
-			"issuerRefName": "letsencrypt-prod",
-			"issuerRefKind": "ClusterIssuer",
-			"dnsNames":      []any{"example.com"},
+			"secretName": "my-tls",
+			"issuerRef":  map[string]any{"name": "letsencrypt-prod", "kind": "ClusterIssuer"},
+			"dnsNames":   []any{"example.com"},
 		},
 	}
 	app := newApp("frontend", "default")
@@ -444,8 +447,8 @@ func TestCertificateHandler_Apply_MissingSecretName(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "certificate",
 		Properties: map[string]any{
-			"issuerRefName": "letsencrypt-prod",
-			"dnsNames":      []any{"example.com"},
+			"issuerRef": map[string]any{"name": "letsencrypt-prod"},
+			"dnsNames":  []any{"example.com"},
 		},
 	}
 	app := newApp("frontend", "default")
@@ -460,8 +463,8 @@ func TestCertificateHandler_Apply_MissingDNSNames(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "certificate",
 		Properties: map[string]any{
-			"secretName":    "my-tls",
-			"issuerRefName": "letsencrypt-prod",
+			"secretName": "my-tls",
+			"issuerRef":  map[string]any{"name": "letsencrypt-prod"},
 		},
 	}
 	app := newApp("frontend", "default")
@@ -476,12 +479,11 @@ func TestCertificateConfig_Generate_OK(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "certificate",
 		Properties: map[string]any{
-			"secretName":    "my-tls",
-			"issuerRefName": "letsencrypt-prod",
-			"issuerRefKind": "ClusterIssuer",
-			"dnsNames":      []any{"example.com"},
-			"duration":      "2160h",
-			"renewBefore":   "360h",
+			"secretName":  "my-tls",
+			"issuerRef":   map[string]any{"name": "letsencrypt-prod", "kind": "ClusterIssuer"},
+			"dnsNames":    []any{"example.com"},
+			"duration":    "2160h",
+			"renewBefore": "360h",
 		},
 	}
 	app := newApp("frontend", "default")
