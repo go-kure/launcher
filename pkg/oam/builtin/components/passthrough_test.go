@@ -1,0 +1,184 @@
+package components_test
+
+import (
+	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/components"
+)
+
+func passthroughComponent(props map[string]any) *oam.Component {
+	return &oam.Component{Name: "my-res", Type: "passthrough", Properties: props}
+}
+
+// generate runs ToApplicationConfig + Generate and returns the single emitted object.
+func generatePassthrough(t *testing.T, props map[string]any, namespace string) *unstructured.Unstructured {
+	t.Helper()
+	h := &components.PassthroughHandler{}
+	cfg, err := h.ToApplicationConfig(passthroughComponent(props), namespace)
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	objs, err := cfg.Generate(nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objs) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objs))
+	}
+	u, ok := (*objs[0]).(*unstructured.Unstructured)
+	if !ok {
+		t.Fatalf("expected *unstructured.Unstructured, got %T", *objs[0])
+	}
+	return u
+}
+
+func TestPassthroughHandler_CanHandle(t *testing.T) {
+	h := &components.PassthroughHandler{}
+	if !h.CanHandle("passthrough") {
+		t.Error("expected true for passthrough")
+	}
+	if h.CanHandle("webservice") {
+		t.Error("expected false for webservice")
+	}
+}
+
+func TestPassthroughHandler_NamespacedSpecObject(t *testing.T) {
+	u := generatePassthrough(t, map[string]any{
+		"object": map[string]any{
+			"apiVersion": "sparkoperator.k8s.io/v1beta2",
+			"kind":       "SparkApplication",
+			"spec":       map[string]any{"mode": "cluster"},
+		},
+	}, "data")
+
+	if u.GetAPIVersion() != "sparkoperator.k8s.io/v1beta2" {
+		t.Errorf("apiVersion = %q", u.GetAPIVersion())
+	}
+	if u.GetKind() != "SparkApplication" {
+		t.Errorf("kind = %q", u.GetKind())
+	}
+	if u.GetName() != "my-res" {
+		t.Errorf("name = %q, want defaulted to component name", u.GetName())
+	}
+	if u.GetNamespace() != "data" {
+		t.Errorf("namespace = %q, want build namespace", u.GetNamespace())
+	}
+	spec, _ := u.Object["spec"].(map[string]any)
+	if spec["mode"] != "cluster" {
+		t.Errorf("spec passthrough lost: %#v", u.Object["spec"])
+	}
+}
+
+func TestPassthroughHandler_PreservesUserMetadata(t *testing.T) {
+	u := generatePassthrough(t, map[string]any{
+		"object": map[string]any{
+			"apiVersion": "example.com/v1",
+			"kind":       "Widget",
+			"metadata": map[string]any{
+				"name":   "explicit-name",
+				"labels": map[string]any{"team": "data"},
+			},
+			"spec": map[string]any{},
+		},
+	}, "ns1")
+
+	if u.GetName() != "explicit-name" {
+		t.Errorf("name = %q, want user-set name preserved", u.GetName())
+	}
+	if u.GetLabels()["team"] != "data" {
+		t.Errorf("labels lost: %#v", u.GetLabels())
+	}
+	if u.GetNamespace() != "ns1" {
+		t.Errorf("namespace = %q, want build namespace", u.GetNamespace())
+	}
+}
+
+func TestPassthroughHandler_NonSpecObject(t *testing.T) {
+	u := generatePassthrough(t, map[string]any{
+		"object": map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"data":       map[string]any{"key": "value"},
+		},
+	}, "ns1")
+
+	data, _ := u.Object["data"].(map[string]any)
+	if data["key"] != "value" {
+		t.Errorf("data passthrough lost: %#v", u.Object["data"])
+	}
+	if u.GetName() != "my-res" || u.GetNamespace() != "ns1" {
+		t.Errorf("metadata fixup wrong: name=%q ns=%q", u.GetName(), u.GetNamespace())
+	}
+}
+
+func TestPassthroughHandler_ClusterScoped(t *testing.T) {
+	u := generatePassthrough(t, map[string]any{
+		"clusterScoped": true,
+		"object": map[string]any{
+			"apiVersion": "rbac.authorization.k8s.io/v1",
+			"kind":       "ClusterRole",
+			"rules":      []any{map[string]any{"verbs": []any{"get"}}},
+		},
+	}, "data")
+
+	if u.GetNamespace() != "" {
+		t.Errorf("cluster-scoped object must not get a namespace, got %q", u.GetNamespace())
+	}
+	if u.GetName() != "my-res" {
+		t.Errorf("name = %q", u.GetName())
+	}
+	if _, ok := u.Object["rules"].([]any); !ok {
+		t.Errorf("rules passthrough lost: %#v", u.Object["rules"])
+	}
+}
+
+func TestPassthroughHandler_Errors(t *testing.T) {
+	h := &components.PassthroughHandler{}
+	cases := map[string]map[string]any{
+		"missing object":       {},
+		"object not a map":     {"object": "nope"},
+		"missing apiVersion":   {"object": map[string]any{"kind": "Widget"}},
+		"missing kind":         {"object": map[string]any{"apiVersion": "example.com/v1"}},
+		"empty apiVersion":     {"object": map[string]any{"apiVersion": "", "kind": "Widget"}},
+		"unknown top key":      {"object": map[string]any{"apiVersion": "v1", "kind": "ConfigMap"}, "extra": 1},
+		"clusterScoped string": {"clusterScoped": "yes", "object": map[string]any{"apiVersion": "v1", "kind": "ConfigMap"}},
+		"metadata not a map":   {"object": map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": "nope"}},
+		"clusterScoped with namespace": {
+			"clusterScoped": true,
+			"object": map[string]any{
+				"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole",
+				"metadata": map[string]any{"namespace": "x"},
+			},
+		},
+	}
+	for name, props := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := h.ToApplicationConfig(passthroughComponent(props), "ns1"); err == nil {
+				t.Errorf("expected error for %q", name)
+			}
+		})
+	}
+}
+
+func TestPassthroughHandler_DoesNotMutateSource(t *testing.T) {
+	objMeta := map[string]any{"name": ""}
+	object := map[string]any{
+		"apiVersion": "example.com/v1",
+		"kind":       "Widget",
+		"metadata":   objMeta,
+	}
+	props := map[string]any{"object": object}
+
+	_ = generatePassthrough(t, props, "ns1")
+
+	// Source metadata must be untouched (no injected name/namespace).
+	if _, ok := objMeta["namespace"]; ok {
+		t.Errorf("source metadata mutated: namespace injected into %#v", objMeta)
+	}
+	if objMeta["name"] != "" {
+		t.Errorf("source metadata mutated: name set to %q", objMeta["name"])
+	}
+}
