@@ -234,6 +234,45 @@ func walkBundles(n *stack.Node, fn func(*stack.Bundle)) {
 	}
 }
 
+func TestPassthroughHandler_RespectsInlineNamespace(t *testing.T) {
+	// clusterScoped:false respects a user-supplied namespace (intentional
+	// cross-namespace escape hatch); the build namespace is only a fallback.
+	u := generatePassthrough(t, map[string]any{
+		"object": map[string]any{
+			"apiVersion": "example.com/v1",
+			"kind":       "Widget",
+			"metadata":   map[string]any{"namespace": "other"},
+		},
+	}, "ns1")
+	if u.GetNamespace() != "other" {
+		t.Errorf("inline namespace not respected: got %q, want \"other\"", u.GetNamespace())
+	}
+}
+
+func TestPassthroughHandler_DeepCopyIsolatesSource(t *testing.T) {
+	srcSpec := map[string]any{"replicas": int64(1)}
+	srcLabels := map[string]any{"team": "data"}
+	object := map[string]any{
+		"apiVersion": "example.com/v1",
+		"kind":       "Widget",
+		"metadata":   map[string]any{"labels": srcLabels},
+		"spec":       srcSpec,
+	}
+
+	u := generatePassthrough(t, map[string]any{"object": object}, "ns1")
+
+	// Simulate downstream in-place edits to nested maps of the emitted object.
+	u.Object["spec"].(map[string]any)["replicas"] = int64(99)
+	u.Object["metadata"].(map[string]any)["labels"].(map[string]any)["team"] = "ops"
+
+	if srcSpec["replicas"] != int64(1) {
+		t.Errorf("source spec mutated through emitted object: %#v", srcSpec)
+	}
+	if srcLabels["team"] != "data" {
+		t.Errorf("source labels mutated through emitted object: %#v", srcLabels)
+	}
+}
+
 func TestPassthroughHandler_DoesNotMutateSource(t *testing.T) {
 	objMeta := map[string]any{"name": ""}
 	object := map[string]any{
