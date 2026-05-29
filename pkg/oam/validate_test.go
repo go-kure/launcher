@@ -5,6 +5,31 @@ import (
 	"testing"
 )
 
+func TestValidate_PassthroughComponent(t *testing.T) {
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   Metadata{Name: "test-app"},
+		Spec: ApplicationSpec{
+			Components: []Component{
+				{
+					Name: "my-cr",
+					Type: "passthrough",
+					Properties: map[string]any{
+						"object": map[string]any{
+							"apiVersion": "example.com/v1",
+							"kind":       "Widget",
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := validate(app); err != nil {
+		t.Errorf("unexpected error for passthrough component: %v", err)
+	}
+}
+
 func TestValidate_ScalerTraitOnCronjob(t *testing.T) {
 	app := &Application{
 		APIVersion: SupportedAPIVersion,

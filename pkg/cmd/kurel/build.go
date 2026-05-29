@@ -234,6 +234,7 @@ func newBuiltinTransformer() *oam.Transformer {
 			"statefulset": &components.StatefulsetHandler{},
 			"postgresql":  &components.PostgresqlHandler{},
 			"helmchart":   &components.HelmchartHandler{},
+			"passthrough": &components.PassthroughHandler{},
 		},
 		nil,
 	)
