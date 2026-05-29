@@ -6,10 +6,12 @@ import (
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // servicePortProvider is implemented by component configs that expose a service port.
@@ -263,6 +265,14 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 		}
 	}
 
+	// Platform-reserved auto-NetworkPolicy inputs (populated by capability rendering).
+	sources, err := parseTrafficSources(props, app.Name, "ingress")
+	if err != nil {
+		return nil, err
+	}
+	config.sources = sources
+	config.ports = collectIngressPorts(config)
+
 	return config, nil
 }
 
@@ -276,7 +286,22 @@ type IngressConfig struct {
 	Rules            []IngressRule
 	TLS              []IngressTLS
 	ServiceName      string
+
+	// sources/ports are populated in parseProperties from the platform-reserved
+	// networkPolicy.trafficSources rendering; they drive auto-NetworkPolicy synthesis.
+	sources []netpol.TrafficSource
+	ports   []intstr.IntOrString
 }
+
+// TrafficSources implements the cluster-level trafficSourceCollector contract.
+func (c *IngressConfig) TrafficSources() []netpol.TrafficSource { return c.sources }
+
+// TargetComponentName returns the OAM component label (not the K8s Service name),
+// so the synthesized NetworkPolicy selects the component's pods via {app: <name>}.
+func (c *IngressConfig) TargetComponentName() string { return c.ComponentName }
+
+// BackendPorts implements the cluster-level trafficSourceCollector contract.
+func (c *IngressConfig) BackendPorts() []intstr.IntOrString { return c.ports }
 
 // IngressRule represents a single host rule with its paths.
 type IngressRule struct {

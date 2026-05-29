@@ -6,11 +6,13 @@ import (
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // HTTPRouteHandler handles OAM httproute traits.
@@ -271,6 +273,14 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 
 		config.Rules = append(config.Rules, rule)
 	}
+
+	// Platform-reserved auto-NetworkPolicy inputs (populated by capability rendering).
+	sources, err := parseTrafficSources(props, app.Name, "httproute")
+	if err != nil {
+		return nil, err
+	}
+	config.sources = sources
+	config.ports = collectHTTPRoutePorts(config, defaultServiceName)
 
 	return config, nil
 }
@@ -823,7 +833,22 @@ type HTTPRouteConfig struct {
 	ParentRefs    []ParentRef
 	Hostnames     []string
 	Rules         []HTTPRouteRule
+
+	// sources/ports are populated in parseProperties from the platform-reserved
+	// networkPolicy.trafficSources rendering; they drive auto-NetworkPolicy synthesis.
+	sources []netpol.TrafficSource
+	ports   []intstr.IntOrString
 }
+
+// TrafficSources implements the cluster-level trafficSourceCollector contract.
+func (c *HTTPRouteConfig) TrafficSources() []netpol.TrafficSource { return c.sources }
+
+// TargetComponentName returns the OAM component label (not the K8s Service name),
+// so the synthesized NetworkPolicy selects the component's pods via {app: <name>}.
+func (c *HTTPRouteConfig) TargetComponentName() string { return c.ComponentName }
+
+// BackendPorts implements the cluster-level trafficSourceCollector contract.
+func (c *HTTPRouteConfig) BackendPorts() []intstr.IntOrString { return c.ports }
 
 // ParentRef represents a gateway parent reference.
 type ParentRef struct {
