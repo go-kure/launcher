@@ -115,6 +115,45 @@ func TestHTTPRouteHandler_Apply_SubAppNaming(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteHandler_Apply_Scope(t *testing.T) {
+	h := &HTTPRouteHandler{}
+	app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
+
+	bundle := &stack.Bundle{}
+	trait := &oam.Trait{
+		Type: "httproute",
+		Properties: map[string]any{
+			"scope":      "external",
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules":      []any{map[string]any{}},
+		},
+	}
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if bundle.Applications[0].Name != "web-httproute-external" {
+		t.Errorf("sub-app name = %q, want \"web-httproute-external\"", bundle.Applications[0].Name)
+	}
+
+	// name wins over scope
+	bundle2 := &stack.Bundle{}
+	trait2 := &oam.Trait{
+		Type: "httproute",
+		Properties: map[string]any{
+			"name":       "explicit",
+			"scope":      "external",
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules":      []any{map[string]any{}},
+		},
+	}
+	if err := h.Apply(trait2, app, bundle2); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if bundle2.Applications[0].Name != "explicit" {
+		t.Errorf("sub-app name = %q, want \"explicit\"", bundle2.Applications[0].Name)
+	}
+}
+
 func TestHTTPRouteConfig_Generate_Basic(t *testing.T) {
 	cfg := &HTTPRouteConfig{
 		ComponentName: "web",

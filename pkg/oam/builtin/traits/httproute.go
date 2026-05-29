@@ -33,6 +33,8 @@ func (h *HTTPRouteHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 	subAppName := app.Name + "-httproute"
 	if config.Name != "" {
 		subAppName = config.Name
+	} else if config.Scope != "" {
+		subAppName = app.Name + "-httproute-" + config.Scope
 	}
 	routeApp := stack.NewApplication(
 		subAppName,
@@ -77,6 +79,12 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	// Optional: name (for multiple httproute traits on the same component)
 	if name, ok := props["name"].(string); ok && name != "" {
 		config.Name = name
+	}
+
+	// Optional: scope — sub-app name becomes {component}-httproute-{scope} when
+	// set and name is empty, enabling multiple httproute traits per component.
+	if scope, ok := props["scope"].(string); ok && scope != "" {
+		config.Scope = scope
 	}
 
 	// Required: parentRefs
@@ -810,6 +818,7 @@ func isAllowedRedirectStatus(code int) bool {
 // HTTPRouteConfig implements stack.ApplicationConfig for httproute traits.
 type HTTPRouteConfig struct {
 	Name          string // optional, overrides sub-app name for multi-httproute components
+	Scope         string // optional; sub-app name becomes {component}-httproute-{scope} when set and Name is empty
 	ComponentName string
 	ParentRefs    []ParentRef
 	Hostnames     []string

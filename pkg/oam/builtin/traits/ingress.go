@@ -82,6 +82,8 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 	subAppName := app.Name + "-ingress"
 	if config.Name != "" {
 		subAppName = config.Name
+	} else if config.Scope != "" {
+		subAppName = app.Name + "-ingress-" + config.Scope
 	}
 	ingressApp := stack.NewApplication(subAppName, app.Namespace, config)
 	bundle.Applications = append(bundle.Applications, ingressApp)
@@ -122,6 +124,10 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 
 	if name, ok := props["name"].(string); ok && name != "" {
 		config.Name = name
+	}
+
+	if scope, ok := props["scope"].(string); ok && scope != "" {
+		config.Scope = scope
 	}
 
 	if rawAnnotations, ok := props["annotations"].(map[string]any); ok {
@@ -263,6 +269,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 // IngressConfig implements stack.ApplicationConfig for ingress traits.
 type IngressConfig struct {
 	Name             string
+	Scope            string // optional; sub-app name becomes {component}-ingress-{scope} when set and Name is empty
 	ComponentName    string // label value — always the OAM component name, not the K8s Service name
 	Annotations      map[string]string
 	IngressClassName string
