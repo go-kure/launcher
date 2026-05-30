@@ -1,6 +1,16 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.2] - 2026-05-30
+
+### Added
+
+- Restore app parameter on cilium-networkpolicy parseProperties
+- Rename daemonset Service port name from tcp to http
+- Revert volsync sub-app name to {sourcePVC}-backup
+- Accept inline secretStoreRef/provider in external-secret trait
+- Add FluxNamespace forwarding for configmap+helmchart combos
+
 ## [0.1.0-alpha.1] - 2026-05-29
 
 ### Added
@@ -33,6 +43,10 @@ All notable changes to this project will be documented in this file.
 - Change default HelmRelease interval from 10m to 60m
 - Deep-copy passthrough object so source properties are never mutated
 - Upgrade golang.org/x/net to v0.55.0 to address GO-2026-5026
+
+### Release
+
+- V0.1.0-alpha.1
 
 ## [0.1.0-alpha.0] - 2026-05-22
 
