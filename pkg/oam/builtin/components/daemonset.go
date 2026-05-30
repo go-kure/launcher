@@ -189,7 +189,7 @@ func (c *DaemonsetConfig) createService(app *stack.Application) *corev1.Service 
 	kubernetes.SetServiceType(svc, corev1.ServiceTypeClusterIP)
 	kubernetes.SetServiceSelector(svc, map[string]string{"app": app.Name})
 	kubernetes.AddServicePort(svc, corev1.ServicePort{
-		Name:       "tcp",
+		Name:       "http",
 		Port:       c.Port,
 		TargetPort: intstr.FromInt32(c.Port),
 		Protocol:   corev1.ProtocolTCP,
@@ -212,7 +212,7 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 	applyProbes(container, c.Probes)
 	if c.Port > 0 {
 		kubernetes.AddContainerPort(container, corev1.ContainerPort{
-			Name:          "tcp",
+			Name:          "http",
 			ContainerPort: c.Port,
 			Protocol:      corev1.ProtocolTCP,
 		})
