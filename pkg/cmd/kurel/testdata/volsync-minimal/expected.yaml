@@ -76,7 +76,7 @@ metadata:
 apiVersion: volsync.backube/v1alpha1
 kind: ReplicationSource
 metadata:
-  name: db-data-backup
+  name: data-backup
   namespace: default
 spec:
   restic:
