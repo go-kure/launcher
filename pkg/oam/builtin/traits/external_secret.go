@@ -24,9 +24,11 @@ func (h *ExternalSecretHandler) CanHandle(traitType string) bool {
 	return traitType == "external-secret"
 }
 
-// CapabilityRequired returns true: the external-secret trait needs secretStoreRef
-// from a ClusterProfile capability.
-func (h *ExternalSecretHandler) CapabilityRequired() bool { return true }
+// CapabilityRequired returns false: secretStoreRef can be provided inline
+// (via trait properties or crane's provider: shorthand) without a ClusterProfile
+// capability. When both inline and capability are absent, parseProperties returns
+// a clear error.
+func (h *ExternalSecretHandler) CapabilityRequired() bool { return false }
 
 // ValidateAndApplyDefaults validates the external-secret capability rendering.
 func (h *ExternalSecretHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
@@ -39,11 +41,7 @@ func (h *ExternalSecretHandler) ValidateAndApplyDefaults(rendering map[string]an
 		return nil, errors.New("external-secret rendering: secretStoreRef.name is required")
 	}
 	if r.SecretStoreRef.Kind == "" {
-		if rawRef == nil {
-			rendering["secretStoreRef"] = map[string]any{"kind": "ClusterSecretStore"}
-		} else {
-			rawRef["kind"] = "ClusterSecretStore"
-		}
+		rawRef["kind"] = "ClusterSecretStore"
 	}
 	return rendering, nil
 }
@@ -78,16 +76,23 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 
 	rawStoreRef, _ := props["secretStoreRef"].(map[string]any)
 	if rawStoreRef == nil {
-		return nil, errors.New("required capability property 'secretStoreRef' missing; configure external-secret in ClusterProfile")
-	}
-	storeName, _ := rawStoreRef["name"].(string)
-	if storeName == "" {
-		return nil, errors.New("external-secret: secretStoreRef.name is required")
-	}
-	config.StoreRefName = storeName
-	config.StoreRefKind = "ClusterSecretStore"
-	if kind, ok := rawStoreRef["kind"].(string); ok && kind != "" {
-		config.StoreRefKind = kind
+		// Accept crane's bare provider: string shorthand.
+		if provider, ok := props["provider"].(string); ok && provider != "" {
+			config.StoreRefName = provider
+			config.StoreRefKind = "ClusterSecretStore"
+		} else {
+			return nil, errors.New("external-secret: secretStoreRef (or provider) is required; set inline or via ClusterProfile capability")
+		}
+	} else {
+		storeName, _ := rawStoreRef["name"].(string)
+		if storeName == "" {
+			return nil, errors.New("external-secret: secretStoreRef.name is required")
+		}
+		config.StoreRefName = storeName
+		config.StoreRefKind = "ClusterSecretStore"
+		if kind, ok := rawStoreRef["kind"].(string); ok && kind != "" {
+			config.StoreRefKind = kind
+		}
 	}
 
 	if ri, ok := props["refreshInterval"].(string); ok && ri != "" {

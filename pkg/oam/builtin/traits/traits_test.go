@@ -878,8 +878,8 @@ func TestExternalSecretHandler_CanHandle(t *testing.T) {
 
 func TestExternalSecretHandler_CapabilityRequired(t *testing.T) {
 	h := &traits.ExternalSecretHandler{}
-	if !h.CapabilityRequired() {
-		t.Error("expected CapabilityRequired to return true")
+	if h.CapabilityRequired() {
+		t.Error("expected CapabilityRequired to return false: inline provider/secretStoreRef is supported")
 	}
 }
 
