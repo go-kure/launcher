@@ -266,7 +266,7 @@ func TestDaemonsetConfig_WithPort(t *testing.T) {
 			}
 			ports := o.Spec.Template.Spec.Containers[0].Ports
 			if len(ports) == 0 || ports[0].ContainerPort != 9090 {
-				t.Errorf("container port = %v, want [{tcp 9090}]", ports)
+				t.Errorf("container port = %v, want [{http 9090}]", ports)
 			}
 		case *corev1.Service:
 			foundSvc = true
@@ -333,5 +333,43 @@ func TestDaemonsetConfig_WithoutPort(t *testing.T) {
 	}
 	if len(objects) != 2 {
 		t.Errorf("expected 2 objects (DaemonSet + ServiceAccount), got %d", len(objects))
+	}
+}
+
+func TestDaemonsetHandler_ServicePortName_IsHttp(t *testing.T) {
+	h := &components.DaemonsetHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "node-exporter",
+		Type: "daemonset",
+		Properties: map[string]any{
+			"image": "prom/node-exporter:v1.0.0",
+			"port":  float64(9100),
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("node-exporter", "monitoring", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, objPtr := range objects {
+		switch obj := (*objPtr).(type) {
+		case *corev1.Service:
+			for _, p := range obj.Spec.Ports {
+				if p.Name != "http" {
+					t.Errorf("Service port name = %q, want %q", p.Name, "http")
+				}
+			}
+		case *appsv1.DaemonSet:
+			for _, c := range obj.Spec.Template.Spec.Containers {
+				for _, p := range c.Ports {
+					if p.Name != "http" {
+						t.Errorf("DaemonSet container port name = %q, want %q", p.Name, "http")
+					}
+				}
+			}
+		}
 	}
 }

@@ -20,7 +20,7 @@ spec:
         name: agent
         ports:
         - containerPort: 9090
-          name: tcp
+          name: http
           protocol: TCP
         resources:
           limits:
@@ -40,7 +40,7 @@ metadata:
   namespace: default
 spec:
   ports:
-  - name: tcp
+  - name: http
     port: 9090
     protocol: TCP
     targetPort: 9090
