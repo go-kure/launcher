@@ -1308,8 +1308,8 @@ func TestVolSyncHandler_Apply_AppendsToBundle(t *testing.T) {
 	if len(bundle.Applications) != 1 {
 		t.Fatalf("expected 1 bundle application, got %d", len(bundle.Applications))
 	}
-	if bundle.Applications[0].Name != "db-data-backup" {
-		t.Errorf("expected name 'db-data-backup', got %q", bundle.Applications[0].Name)
+	if bundle.Applications[0].Name != "data-backup" {
+		t.Errorf("expected name 'data-backup', got %q", bundle.Applications[0].Name)
 	}
 }
 
@@ -1382,7 +1382,7 @@ func TestVolSyncHandler_Apply_NegativePruneIntervalDays(t *testing.T) {
 	}
 }
 
-func TestVolSyncHandler_Apply_BundleNameIsComponentScoped(t *testing.T) {
+func TestVolSyncHandler_Apply_BundleNameIsPVCScoped(t *testing.T) {
 	h := &traits.VolSyncHandler{}
 	bundle := newBundle()
 	if err := h.Apply(&oam.Trait{
@@ -1391,8 +1391,8 @@ func TestVolSyncHandler_Apply_BundleNameIsComponentScoped(t *testing.T) {
 	}, newApp("mydb", "default"), bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if bundle.Applications[0].Name != "mydb-data-backup" {
-		t.Errorf("expected 'mydb-data-backup', got %q", bundle.Applications[0].Name)
+	if bundle.Applications[0].Name != "data-backup" {
+		t.Errorf("expected 'data-backup', got %q", bundle.Applications[0].Name)
 	}
 }
 
