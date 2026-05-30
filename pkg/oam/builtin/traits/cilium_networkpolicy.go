@@ -32,7 +32,7 @@ func (h *CiliumNetworkPolicyHandler) ValidateAndApplyDefaults(rendering map[stri
 
 // Apply creates a CiliumNetworkPolicy resource appended to the bundle.
 func (h *CiliumNetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
-	config, err := h.parseProperties(trait.Properties)
+	config, err := h.parseProperties(trait.Properties, app)
 	if err != nil {
 		return err
 	}
@@ -46,7 +46,9 @@ func (h *CiliumNetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Applicat
 	return nil
 }
 
-func (h *CiliumNetworkPolicyHandler) parseProperties(props map[string]any) (*CiliumNetworkPolicyConfig, error) {
+// app is reserved for future component-aware policy synthesis (defaulting
+// endpointSelector from component labels, scoping rules to service ports).
+func (h *CiliumNetworkPolicyHandler) parseProperties(props map[string]any, _ *stack.Application) (*CiliumNetworkPolicyConfig, error) {
 	name, ok := props["name"].(string)
 	if !ok || name == "" {
 		return nil, errors.New("required property 'name' missing or not a string")
