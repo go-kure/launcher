@@ -142,6 +142,23 @@ func TestPruneProtectionHandler_Apply_DoesNotProtectSiblingApps(t *testing.T) {
 	}
 }
 
+func TestPruneProtectionHandler_Apply_ForwardsSetFluxNamespace(t *testing.T) {
+	// fluxNSCapture is defined in configmap_test.go in the same package traits_test.
+	inner := &fluxNSCapture{}
+	app := stack.NewApplication("myapp", "default", inner)
+	if err := (&traits.PruneProtectionHandler{}).Apply(&oam.Trait{Type: "prune-protection"}, app, &stack.Bundle{}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	setter, ok := app.Config.(interface{ SetFluxNamespace(string) })
+	if !ok {
+		t.Fatal("pruneProtectedConfig does not implement SetFluxNamespace")
+	}
+	setter.SetFluxNamespace("custom-flux")
+	if inner.lastNS != "custom-flux" {
+		t.Errorf("inner.lastNS = %q, want %q", inner.lastNS, "custom-flux")
+	}
+}
+
 // cmStub is a minimal ApplicationConfig that emits a single ConfigMap.
 type cmStub struct {
 	name      string

@@ -645,6 +645,45 @@ func TestHelmchartHandler_InvalidHelmRepositoryURL_Rejected(t *testing.T) {
 	}
 }
 
+func TestHelmchartConfig_SetFluxNamespace_AffectsFluxCRNamespace(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart": "kube-prometheus-stack",
+			"source": map[string]any{
+				"url": "https://prometheus-community.github.io/helm-charts",
+			},
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+
+	setter, ok := cfg.(interface{ SetFluxNamespace(string) })
+	if !ok {
+		t.Fatal("HelmchartConfig does not implement SetFluxNamespace")
+	}
+	setter.SetFluxNamespace("custom-flux")
+
+	app := stack.NewApplication("metrics", "monitoring", cfg)
+	objs, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	for _, objPtr := range objs {
+		obj := *objPtr
+		switch obj.(type) {
+		case *helmv2.HelmRelease, *sourcev1.HelmRepository:
+			if ns := obj.GetNamespace(); ns != "custom-flux" {
+				t.Errorf("%T.Namespace = %q, want %q", obj, ns, "custom-flux")
+			}
+		}
+	}
+}
+
 func TestHelmchartHandler_ValuesFrom_Validated(t *testing.T) {
 	h := &components.HelmchartHandler{}
 	cases := []struct {

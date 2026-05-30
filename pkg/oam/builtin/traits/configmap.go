@@ -15,6 +15,12 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin"
 )
 
+// fluxNamespaceSettable mirrors oam.fluxNamespaceSettable locally because
+// oam.fluxNamespaceSettable is unexported and cannot be referenced cross-package.
+type fluxNamespaceSettable interface {
+	SetFluxNamespace(string)
+}
+
 // ConfigMapHandler handles OAM configmap traits.
 type ConfigMapHandler struct{}
 
@@ -160,4 +166,14 @@ func (d *ConfigMapDecorator) Generate(app *stack.Application) ([]*client.Object,
 	}
 
 	return objects, nil
+}
+
+// SetFluxNamespace forwards the per-request Flux namespace to the inner config
+// when it satisfies fluxNamespaceSettable (e.g. HelmchartConfig). Without this,
+// a helmchart component with configmap.mountPath emits Flux CRs in the wrong
+// namespace when TransformContext.FluxNamespace is set.
+func (d *ConfigMapDecorator) SetFluxNamespace(ns string) {
+	if setter, ok := d.Inner.(fluxNamespaceSettable); ok {
+		setter.SetFluxNamespace(ns)
+	}
 }

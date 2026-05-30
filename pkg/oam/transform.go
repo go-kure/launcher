@@ -19,14 +19,23 @@ type ValidateAndApplyDefaults interface {
 
 // TransformContext carries per-transform state passed to the pipeline.
 type TransformContext struct {
-	ClusterID    string
-	TenantID     string
-	Environment  string
-	AppVersion   string
-	TeamID       string
-	Namespace    string // overrides OAM metadata.namespace when set
-	Policy       Policy
-	Capabilities map[string]CapabilityBinding
+	ClusterID     string
+	TenantID      string
+	Environment   string
+	AppVersion    string
+	TeamID        string
+	Namespace     string // overrides OAM metadata.namespace when set
+	FluxNamespace string // Flux control-plane namespace; "" means use component namespace
+	Policy        Policy
+	Capabilities  map[string]CapabilityBinding
+}
+
+// fluxNamespaceSettable is implemented by ApplicationConfig types that emit
+// Flux CRDs (HelmRelease, HelmRepository, OCIRepository) and support per-request
+// namespace re-stamping. Decorators that wrap such configs must also implement
+// this interface and forward the call.
+type fluxNamespaceSettable interface {
+	SetFluxNamespace(string)
 }
 
 // Transformer is the core OAM runtime. Handlers are registered at startup;
@@ -288,6 +297,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	applyAutoHealthChecks(cluster, componentMap, policyResult.HealthCheckOverrides)
 	applyReconciliationSettings(cluster, componentMap, policyResult.ReconciliationSettings)
 	synthesizeNetworkPolicies(cluster)
+	postProcessFluxNamespace(cluster, ctx.FluxNamespace)
 
 	return cluster, policyResult, nil
 }
@@ -685,6 +695,21 @@ var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"daemonset":   {"apps/v1", "DaemonSet"},
 	"helmchart":   {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
 	"postgresql":  {"postgresql.cnpg.io/v1", "Cluster"},
+}
+
+// postProcessFluxNamespace walks all leaf bundle applications and calls
+// SetFluxNamespace on any config that satisfies fluxNamespaceSettable.
+func postProcessFluxNamespace(cluster *stack.Cluster, ns string) {
+	if cluster == nil || ns == "" {
+		return
+	}
+	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
+		for _, app := range bundle.Applications {
+			if setter, ok := app.Config.(fluxNamespaceSettable); ok {
+				setter.SetFluxNamespace(ns)
+			}
+		}
+	})
 }
 
 // applyAutoHealthChecks walks all leaf bundles and appends inferred health check
