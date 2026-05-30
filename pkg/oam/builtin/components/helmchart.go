@@ -253,6 +253,11 @@ type HelmchartConfig struct {
 	// renderChart is the function used to render Helm charts in template delivery mode.
 	// Defaults to helm.RenderChart; injectable for testing.
 	renderChart func(chartURL, version string, values map[string]any) ([]byte, error)
+
+	// fluxNS overrides the namespace for emitted Flux control-plane CRs
+	// (HelmRelease, HelmRepository, OCIRepository). Set by postProcessFluxNamespace
+	// via TransformContext.FluxNamespace. Empty means use c.Namespace.
+	fluxNS string
 }
 
 // ApplyPolicy is a no-op for helmchart (Helm releases have no resource-limit policy).
@@ -283,6 +288,20 @@ func (c *HelmchartConfig) SuppressSourceGeneration(refName string) {
 	c.sharedSrcName = refName
 }
 
+// fluxNamespace returns the namespace for Flux control-plane CRs.
+func (c *HelmchartConfig) fluxNamespace() string {
+	if c.fluxNS != "" {
+		return c.fluxNS
+	}
+	return c.Namespace
+}
+
+// SetFluxNamespace re-stamps the Flux control-plane namespace for HelmRelease,
+// HelmRepository, and OCIRepository. Satisfies pkg/oam.fluxNamespaceSettable.
+func (c *HelmchartConfig) SetFluxNamespace(ns string) {
+	c.fluxNS = ns
+}
+
 // Generate produces the Kubernetes objects for this helmchart component.
 // For delivery: template, renders the chart client-side and returns raw manifests.
 // For delivery: native (default), emits a source CR (Form A only) and a HelmRelease.
@@ -304,13 +323,13 @@ func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, er
 		if !c.suppressSource {
 			switch c.SourceKind {
 			case "HelmRepository":
-				repo := fluxcd.CreateHelmRepository(c.Name, c.Namespace)
+				repo := fluxcd.CreateHelmRepository(c.Name, c.fluxNamespace())
 				fluxcd.SetHelmRepositoryURL(repo, c.SourceURL)
 				fluxcd.SetHelmRepositoryInterval(repo, interval)
 				obj := client.Object(repo)
 				objects = append(objects, &obj)
 			case "OCIRepository":
-				repo := fluxcd.CreateOCIRepository(c.Name, c.Namespace)
+				repo := fluxcd.CreateOCIRepository(c.Name, c.fluxNamespace())
 				fluxcd.SetOCIRepositoryURL(repo, c.SourceURL)
 				fluxcd.SetOCIRepositoryInterval(repo, interval)
 				if c.Version != "" {
@@ -428,7 +447,7 @@ func decodeKubeManifests(raw []byte) ([]*client.Object, error) {
 // buildHelmRelease creates a HelmRelease with the shared options applied.
 func (c *HelmchartConfig) buildHelmRelease() *helmv2.HelmRelease {
 	interval := parseDuration(effectiveInterval(c.Interval))
-	hr := fluxcd.CreateHelmRelease(c.Name, c.Namespace)
+	hr := fluxcd.CreateHelmRelease(c.Name, c.fluxNamespace())
 	fluxcd.SetHelmReleaseInterval(hr, interval)
 
 	if c.ReleaseName != "" {

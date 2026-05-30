@@ -61,3 +61,11 @@ func (p *pruneProtectedConfig) Validate() error {
 	}
 	return nil
 }
+
+// SetFluxNamespace forwards the per-request Flux namespace to the wrapped
+// config when it satisfies fluxNamespaceSettable (e.g. HelmchartConfig).
+func (p *pruneProtectedConfig) SetFluxNamespace(ns string) {
+	if setter, ok := p.wrapped.(fluxNamespaceSettable); ok {
+		setter.SetFluxNamespace(ns)
+	}
+}
