@@ -723,3 +723,38 @@ func TestHelmchartHandler_ValuesFrom_Validated(t *testing.T) {
 		})
 	}
 }
+
+func TestHelmchartConfig_EmitsAutoHealthCheck(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	mk := func(props map[string]any) stack.ApplicationConfig {
+		cfg, err := h.ToApplicationConfig(&oam.Component{Name: "c", Type: "helmchart", Properties: props}, "demo")
+		if err != nil {
+			t.Fatalf("ToApplicationConfig: %v", err)
+		}
+		return cfg
+	}
+	emitter := func(cfg stack.ApplicationConfig) bool {
+		e, ok := cfg.(interface{ EmitsAutoHealthCheck() bool })
+		if !ok {
+			t.Fatal("HelmchartConfig does not implement EmitsAutoHealthCheck")
+		}
+		return e.EmitsAutoHealthCheck()
+	}
+
+	native := mk(map[string]any{
+		"chart":  "redis",
+		"source": map[string]any{"url": "https://charts.example.com"},
+	})
+	if !emitter(native) {
+		t.Error("native delivery must emit a HelmRelease auto health check")
+	}
+
+	template := mk(map[string]any{
+		"chart":    "redis",
+		"delivery": "template",
+		"source":   map[string]any{"url": "https://charts.example.com"},
+	})
+	if emitter(template) {
+		t.Error("template delivery emits no HelmRelease, so must veto the auto health check")
+	}
+}

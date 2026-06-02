@@ -302,6 +302,14 @@ func (c *HelmchartConfig) SetFluxNamespace(ns string) {
 	c.fluxNS = ns
 }
 
+// EmitsAutoHealthCheck reports whether this component emits a HelmRelease that
+// the auto health-check can reference. Template delivery renders manifests
+// client-side and emits no HelmRelease, so no HelmRelease health check should
+// be synthesized. Satisfies pkg/oam.autoHealthCheckEmitter.
+func (c *HelmchartConfig) EmitsAutoHealthCheck() bool {
+	return c.Delivery != "template"
+}
+
 // Generate produces the Kubernetes objects for this helmchart component.
 // For delivery: template, renders the chart client-side and returns raw manifests.
 // For delivery: native (default), emits a source CR (Form A only) and a HelmRelease.
