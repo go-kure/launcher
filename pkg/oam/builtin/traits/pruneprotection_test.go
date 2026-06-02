@@ -159,6 +159,22 @@ func TestPruneProtectionHandler_Apply_ForwardsSetFluxNamespace(t *testing.T) {
 	}
 }
 
+func TestPruneProtectionHandler_Apply_ForwardsEmitsAutoHealthCheck(t *testing.T) {
+	// hcVetoConfig (configmap_test.go) vetoes its auto health check, like a
+	// helmchart with delivery=template.
+	app := stack.NewApplication("rendered", "default", &hcVetoConfig{})
+	if err := (&traits.PruneProtectionHandler{}).Apply(&oam.Trait{Type: "prune-protection"}, app, &stack.Bundle{}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	e, ok := app.Config.(interface{ EmitsAutoHealthCheck() bool })
+	if !ok {
+		t.Fatal("pruneProtectedConfig does not implement EmitsAutoHealthCheck")
+	}
+	if e.EmitsAutoHealthCheck() {
+		t.Error("expected veto (false) forwarded through prune-protection wrapper")
+	}
+}
+
 // cmStub is a minimal ApplicationConfig that emits a single ConfigMap.
 type cmStub struct {
 	name      string

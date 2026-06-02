@@ -38,6 +38,17 @@ type fluxNamespaceSettable interface {
 	SetFluxNamespace(string)
 }
 
+// autoHealthCheckEmitter is implemented by ApplicationConfig types whose
+// auto health-check (from componentHealthCheckGVK) is only valid when the
+// config actually emits the referenced object. Helmchart returns false for
+// delivery=template (it renders manifests and emits no HelmRelease), so no
+// HelmRelease health check should be synthesized. Decorators that wrap such
+// configs must forward this call (mirroring fluxNamespaceSettable). Configs
+// that do not implement it are assumed to emit their object.
+type autoHealthCheckEmitter interface {
+	EmitsAutoHealthCheck() bool
+}
+
 // Transformer is the core OAM runtime. Handlers are registered at startup;
 // Transform/TransformWithPolicy (added in #53) execute the pipeline.
 // Internal storage uses maps keyed by typeName for O(1) dispatch.
@@ -294,7 +305,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	for _, e := range entries {
 		componentMap[e.component.Name] = e
 	}
-	applyAutoHealthChecks(cluster, componentMap, policyResult.HealthCheckOverrides)
+	applyAutoHealthChecks(cluster, componentMap, policyResult.HealthCheckOverrides, ctx.FluxNamespace)
 	applyReconciliationSettings(cluster, componentMap, policyResult.ReconciliationSettings)
 	synthesizeNetworkPolicies(cluster)
 	postProcessFluxNamespace(cluster, ctx.FluxNamespace)
@@ -712,9 +723,29 @@ func postProcessFluxNamespace(cluster *stack.Cluster, ns string) {
 	})
 }
 
+// isFluxControlPlaneGVK reports whether an auto health-check GVK targets a Flux
+// control-plane CR (a *.toolkit.fluxcd.io kind, e.g. HelmRelease) that
+// postProcessFluxNamespace relocates to the flux namespace. Workload kinds
+// (Deployment/StatefulSet/…) and app-namespace CRs (CNPG Cluster) stay in the
+// app namespace even when their config is wrapped by a fluxNamespaceSettable
+// decorator, so the namespace switch must be gated on this.
+func isFluxControlPlaneGVK(apiVersion string) bool {
+	group, _, _ := strings.Cut(apiVersion, "/")
+	return strings.HasSuffix(group, ".toolkit.fluxcd.io")
+}
+
 // applyAutoHealthChecks walks all leaf bundles and appends inferred health check
 // references based on each component's type, followed by any explicit overrides.
-func applyAutoHealthChecks(cluster *stack.Cluster, componentMap map[string]componentEntry, overrides []stack.HealthCheck) {
+//
+// The synthesized check's namespace must point at the namespace where the
+// referenced object actually lands. For Flux-CR configs (helmchart →
+// HelmRelease) the object is relocated to the flux namespace by
+// postProcessFluxNamespace, so the check must carry the same flux namespace —
+// this mirrors that function's predicate exactly (fluxNamespaceSettable +
+// non-empty fluxNamespace) so the check always follows its object. Configs that
+// will not emit the referenced object (helmchart delivery=template) are skipped
+// via autoHealthCheckEmitter.
+func applyAutoHealthChecks(cluster *stack.Cluster, componentMap map[string]componentEntry, overrides []stack.HealthCheck, fluxNamespace string) {
 	if cluster == nil {
 		return
 	}
@@ -728,11 +759,29 @@ func applyAutoHealthChecks(cluster *stack.Cluster, componentMap map[string]compo
 			if !ok {
 				continue
 			}
+			// Skip when the config will not emit the referenced object
+			// (e.g. helmchart delivery=template emits manifests, no HelmRelease).
+			if e, ok := app.Config.(autoHealthCheckEmitter); ok && !e.EmitsAutoHealthCheck() {
+				continue
+			}
+			// Mirror postProcessFluxNamespace: a config that re-stamps the flux
+			// namespace on its object emits that object in the flux namespace, so
+			// its health check must reference the flux namespace too. Gate on the
+			// target being a Flux control-plane CR (e.g. HelmRelease): wrappers
+			// (configmap/prune-protection) implement fluxNamespaceSettable even
+			// when wrapping a workload whose Deployment stays in the app namespace,
+			// so the settable check alone is too broad.
+			ns := app.Namespace
+			if fluxNamespace != "" && isFluxControlPlaneGVK(gvk.APIVersion) {
+				if _, settable := app.Config.(fluxNamespaceSettable); settable {
+					ns = fluxNamespace
+				}
+			}
 			bundle.HealthChecks = append(bundle.HealthChecks, stack.HealthCheck{
 				APIVersion: gvk.APIVersion,
 				Kind:       gvk.Kind,
 				Name:       app.Name,
-				Namespace:  app.Namespace,
+				Namespace:  ns,
 			})
 		}
 		bundle.HealthChecks = append(bundle.HealthChecks, overrides...)

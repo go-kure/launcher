@@ -21,6 +21,13 @@ type fluxNamespaceSettable interface {
 	SetFluxNamespace(string)
 }
 
+// autoHealthCheckEmitter mirrors oam.autoHealthCheckEmitter locally (unexported
+// cross-package). Decorators forward it so a wrapped helmchart's template-delivery
+// veto still reaches the auto health-check synthesis.
+type autoHealthCheckEmitter interface {
+	EmitsAutoHealthCheck() bool
+}
+
 // ConfigMapHandler handles OAM configmap traits.
 type ConfigMapHandler struct{}
 
@@ -176,4 +183,14 @@ func (d *ConfigMapDecorator) SetFluxNamespace(ns string) {
 	if setter, ok := d.Inner.(fluxNamespaceSettable); ok {
 		setter.SetFluxNamespace(ns)
 	}
+}
+
+// EmitsAutoHealthCheck forwards the inner config's auto-health-check veto (e.g. a
+// wrapped helmchart with delivery=template emits no HelmRelease). Defaults to
+// true when the inner config does not implement the interface.
+func (d *ConfigMapDecorator) EmitsAutoHealthCheck() bool {
+	if e, ok := d.Inner.(autoHealthCheckEmitter); ok {
+		return e.EmitsAutoHealthCheck()
+	}
+	return true
 }

@@ -169,3 +169,28 @@ func TestTransform_FluxNamespace_ReachesHelmRelease(t *testing.T) {
 		t.Error("no HelmRelease or HelmRepository found in cluster")
 	}
 }
+
+// hcVetoConfig implements ApplicationConfig + autoHealthCheckEmitter and vetoes
+// its auto health check (like a helmchart with delivery=template).
+type hcVetoConfig struct{ fluxNSCapture }
+
+func (c *hcVetoConfig) EmitsAutoHealthCheck() bool { return false }
+
+func TestConfigMapDecorator_EmitsAutoHealthCheck_Forwards(t *testing.T) {
+	dec := &traits.ConfigMapDecorator{Inner: &hcVetoConfig{}, ConfigMapName: "c", MountPath: "/etc/c"}
+	e, ok := any(dec).(interface{ EmitsAutoHealthCheck() bool })
+	if !ok {
+		t.Fatal("ConfigMapDecorator does not implement EmitsAutoHealthCheck")
+	}
+	if e.EmitsAutoHealthCheck() {
+		t.Error("expected veto (false) forwarded from inner template-delivery config")
+	}
+}
+
+func TestConfigMapDecorator_EmitsAutoHealthCheck_DefaultsTrue(t *testing.T) {
+	dec := &traits.ConfigMapDecorator{Inner: &cmStub{name: "app", namespace: "default"}, ConfigMapName: "c", MountPath: "/etc/c"}
+	e := any(dec).(interface{ EmitsAutoHealthCheck() bool })
+	if !e.EmitsAutoHealthCheck() {
+		t.Error("expected default true when inner does not implement autoHealthCheckEmitter")
+	}
+}

@@ -69,3 +69,13 @@ func (p *pruneProtectedConfig) SetFluxNamespace(ns string) {
 		setter.SetFluxNamespace(ns)
 	}
 }
+
+// EmitsAutoHealthCheck forwards the wrapped config's auto-health-check veto so a
+// prune-protected helmchart with delivery=template still suppresses the bogus
+// HelmRelease health check. Defaults to true when the inner config lacks it.
+func (p *pruneProtectedConfig) EmitsAutoHealthCheck() bool {
+	if e, ok := p.wrapped.(autoHealthCheckEmitter); ok {
+		return e.EmitsAutoHealthCheck()
+	}
+	return true
+}

@@ -1005,3 +1005,105 @@ func TestTransform_BuiltinTrait_CapabilityResolved_NoDefinition_NoWarn(t *testin
 		t.Errorf("unexpected warning for built-in trait: %q", warned)
 	}
 }
+
+// --- applyAutoHealthChecks namespace + delivery=template veto (#234) ---
+
+// fluxHCConfig implements ApplicationConfig + fluxNamespaceSettable (like a
+// native helmchart whose HelmRelease is relocated to the flux namespace).
+type fluxHCConfig struct{ ns string }
+
+func (c *fluxHCConfig) Generate(_ *stack.Application) ([]*client.Object, error) { return nil, nil }
+func (c *fluxHCConfig) SetFluxNamespace(ns string)                              { c.ns = ns }
+
+// templateHCConfig is a fluxHCConfig that vetoes its auto health check (like a
+// helmchart with delivery=template: no HelmRelease object emitted).
+type templateHCConfig struct{ fluxHCConfig }
+
+func (c *templateHCConfig) EmitsAutoHealthCheck() bool { return false }
+
+// plainHCConfig implements only ApplicationConfig (a workload component whose
+// object stays in the app namespace; not flux-relocated).
+type plainHCConfig struct{}
+
+func (c *plainHCConfig) Generate(_ *stack.Application) ([]*client.Object, error) { return nil, nil }
+
+func leafClusterWith(app *stack.Application) *stack.Cluster {
+	return &stack.Cluster{Node: &stack.Node{Bundle: &stack.Bundle{Applications: []*stack.Application{app}}}}
+}
+
+func helmchartEntryMap(app *stack.Application, typ string) map[string]componentEntry {
+	return map[string]componentEntry{app.Name: {component: Component{Name: app.Name, Type: typ}, app: app}}
+}
+
+func TestApplyAutoHealthChecks_FluxConfigUsesFluxNamespace(t *testing.T) {
+	app := stack.NewApplication("redis", "demo", &fluxHCConfig{})
+	cluster := leafClusterWith(app)
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "helmchart"), nil, "flux-system")
+
+	hc := cluster.Node.Bundle.HealthChecks
+	if len(hc) != 1 {
+		t.Fatalf("expected 1 health check, got %d", len(hc))
+	}
+	if hc[0].Kind != "HelmRelease" || hc[0].Namespace != "flux-system" {
+		t.Errorf("got %s/%s in %q, want HelmRelease in flux-system", hc[0].Kind, hc[0].Name, hc[0].Namespace)
+	}
+}
+
+func TestApplyAutoHealthChecks_EmptyFluxNamespaceUsesAppNamespace(t *testing.T) {
+	app := stack.NewApplication("redis", "demo", &fluxHCConfig{})
+	cluster := leafClusterWith(app)
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "helmchart"), nil, "")
+
+	hc := cluster.Node.Bundle.HealthChecks
+	if len(hc) != 1 || hc[0].Namespace != "demo" {
+		t.Fatalf("expected HelmRelease check in app namespace 'demo', got %+v", hc)
+	}
+}
+
+func TestApplyAutoHealthChecks_WorkloadKeepsAppNamespace(t *testing.T) {
+	app := stack.NewApplication("web", "demo", &plainHCConfig{})
+	cluster := leafClusterWith(app)
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "webservice"), nil, "flux-system")
+
+	hc := cluster.Node.Bundle.HealthChecks
+	if len(hc) != 1 || hc[0].Kind != "Deployment" || hc[0].Namespace != "demo" {
+		t.Fatalf("expected Deployment check in app namespace 'demo', got %+v", hc)
+	}
+}
+
+func TestApplyAutoHealthChecks_SettableWorkloadKeepsAppNamespace(t *testing.T) {
+	// A workload (webservice → Deployment) whose config is fluxNamespaceSettable
+	// — e.g. wrapped by configmap/prune-protection, whose wrapper implements
+	// SetFluxNamespace even though the Deployment stays in the app namespace.
+	// The check must NOT move to the flux namespace (target is not a Flux CR).
+	app := stack.NewApplication("web", "demo", &fluxHCConfig{})
+	cluster := leafClusterWith(app)
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "webservice"), nil, "flux-system")
+
+	hc := cluster.Node.Bundle.HealthChecks
+	if len(hc) != 1 || hc[0].Kind != "Deployment" || hc[0].Namespace != "demo" {
+		t.Fatalf("settable workload check must stay in app namespace 'demo', got %+v", hc)
+	}
+}
+
+func TestApplyAutoHealthChecks_TemplateDeliverySkipped(t *testing.T) {
+	app := stack.NewApplication("rendered", "demo", &templateHCConfig{})
+	cluster := leafClusterWith(app)
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "helmchart"), nil, "flux-system")
+
+	if hc := cluster.Node.Bundle.HealthChecks; len(hc) != 0 {
+		t.Fatalf("expected no auto health check for template delivery, got %+v", hc)
+	}
+}
+
+func TestApplyAutoHealthChecks_OverridesAppendedVerbatim(t *testing.T) {
+	app := stack.NewApplication("rendered", "demo", &templateHCConfig{})
+	cluster := leafClusterWith(app)
+	override := stack.HealthCheck{APIVersion: "helm.toolkit.fluxcd.io/v2", Kind: "HelmRelease", Name: "external", Namespace: "other-ns"}
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "helmchart"), []stack.HealthCheck{override}, "flux-system")
+
+	hc := cluster.Node.Bundle.HealthChecks
+	if len(hc) != 1 || hc[0] != override {
+		t.Fatalf("expected the user override appended verbatim (namespace untouched), got %+v", hc)
+	}
+}
