@@ -37,7 +37,7 @@ launcher/
 ├── docs/             # Documentation
 │   └── design.md     # Full design document and vision
 ├── .github/
-│   ├── workflows/    # CI, release, auto-rebase
+│   ├── workflows/    # CI, release, pr-review
 │   └── dependabot.yml
 ├── .claude/          # Claude Code configuration
 ├── mise.toml         # Tool versions and tasks
@@ -131,8 +131,8 @@ make precommit
   git checkout -b <type>/<description> main
   ```
 - **Branch prefixes**: `feat/`, `fix/`, `docs/`, `chore/`
-- **Required CI checks** that must pass: `lint`, `test`, `build`, `rebase-check`
-- **Auto-rebase**: open PRs are automatically rebased when main is updated
+- **Required CI checks** that must pass: `lint`, `test`, `build`
+- **Merge queue**: merging goes through a GitHub merge queue (rebase method) that rebases and tests the merged result before landing — no manual rebasing needed
 - **Linear history** enforced — rebase only, no merge commits
 - **All conversations** must be resolved before merge
 - Use `gh pr create` to open pull requests
@@ -266,7 +266,7 @@ The go-kure org governance, design documents, and community files are maintained
   - [OCI Artifact Layout](https://github.com/go-kure/.github/blob/main/docs/design/oci-layout.md) — layout tree conventions
 - **Standards**: [docs/standards.md](https://github.com/go-kure/.github/blob/main/docs/standards.md)
 - **Contributing**: [CONTRIBUTING.md](https://github.com/go-kure/.github/blob/main/CONTRIBUTING.md)
-- **Reusable workflows**: release, auto-rebase, pr-review, claude — all hosted in go-kure/.github
+- **Reusable workflows**: release, pr-review, claude — all hosted in go-kure/.github
 - **Reusable workflow reference**: [go-kure/.github AGENTS.md](https://github.com/go-kure/.github/blob/main/AGENTS.md)
 
 ## Questions?
