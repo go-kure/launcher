@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.3] - 2026-06-02
+
+### Fixed
+
+- Emit the flux namespace for helmchart auto health checks (#234)
+
 ## [0.1.0-alpha.2] - 2026-05-30
 
 ### Added
@@ -10,6 +16,10 @@ All notable changes to this project will be documented in this file.
 - Revert volsync sub-app name to {sourcePVC}-backup
 - Accept inline secretStoreRef/provider in external-secret trait
 - Add FluxNamespace forwarding for configmap+helmchart combos
+
+### Release
+
+- V0.1.0-alpha.2
 
 ## [0.1.0-alpha.1] - 2026-05-29
 
