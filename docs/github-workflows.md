@@ -2,7 +2,7 @@
 
 This document provides an overview of all GitHub Actions workflows used in the launcher project.
 
-**Last Updated:** 2026-05-14
+**Last Updated:** 2026-06-02
 
 ---
 
@@ -10,9 +10,8 @@ This document provides an overview of all GitHub Actions workflows used in the l
 
 | Workflow | File | Triggers | Purpose |
 |----------|------|----------|---------|
-| [CI](#ci-workflow) | `ci.yml` | push, PR, schedule, manual | Testing, linting, building, cross-platform binaries |
+| [CI](#ci-workflow) | `ci.yml` | push, PR, merge_group, schedule, manual | Testing, linting, building, cross-platform binaries |
 | [Deploy Docs](#deploy-docs-workflow) | `deploy-docs.yml` | push to main (docs paths), `workflow_dispatch` | Multi-version docs deployment |
-| [Auto-Rebase](#auto-rebase-workflow) | `auto-rebase.yml` | push to main | Rebase all open PRs when main is updated |
 | [Release](#release-workflow) | `release.yml` | version tags | Release with GoReleaser, SBOM, docs deploy |
 | [Create Release](#create-release-workflow) | `release-create.yml` | `workflow_dispatch` | Pre-release test gate + tag creation |
 | [PR Review](#pr-review-workflow) | `pr-review.yml` | pull_request | Two-pass AI code review via ccproxy |
@@ -34,6 +33,7 @@ for their full documentation.
 
 - Push to: `main`, `develop`, `release/*`
 - Pull requests to: `main`, `develop`
+- Merge group (merge queue's temporary branch — required checks must report here)
 - Schedule: 4am UTC daily (catch external changes)
 - Manual dispatch
 
@@ -77,16 +77,18 @@ concurrency:
            └─────────────────┘
 
 PR-only jobs (parallel, non-blocking):
-┌──────────────┐  ┌─────────────────┐  ┌────────────┐
-│ rebase-check │  │ analyze-changes │  │ docs-build │
-└──────────────┘  └─────────────────┘  └────────────┘
+┌─────────────────┐  ┌────────────┐
+│ analyze-changes │  │ docs-build │
+└─────────────────┘  └────────────┘
 ```
+
+On `merge_group` events (merge queue), `lint`/`test`/`build` run against the queue's
+temporary branch — the merged result — before the PR is allowed to land.
 
 ### Jobs Detail
 
 | Job | Check Name | Timeout | Dependencies | Purpose |
 |-----|------------|---------|--------------|---------|
-| `rebase-check` | `rebase-check` | 2 min | — | Verify PR branch is rebased on main (PR only) |
 | `changes` | `detect-changes` | 2 min | — | Path filter: `go:` and `docs:` outputs control downstream jobs |
 | `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint; diff-based lint on PRs |
 | `test` | `test` | 25 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
@@ -171,30 +173,35 @@ Requires `DEPLOY_TOKEN` secret — a PAT with write access to `go-kure/go-kure.g
 
 ---
 
-## Auto-Rebase Workflow
+## Merge Queue
 
-**File:** `.github/workflows/auto-rebase.yml`
-**Reusable source:** `go-kure/.github/.github/workflows/auto-rebase.yml@main`
+launcher merges through GitHub's native **merge queue** (configured in the `main-protection`
+ruleset, not a workflow file). This replaced the former `rebase-check` job and `auto-rebase.yml`
+workflow — it is the native equivalent of GitLab's merged-results pipelines.
 
-### Triggers
+### How It Works
 
-- Push to `main` (runs after every merge)
+1. A reviewed PR is added to the queue ("Merge when ready").
+2. The queue creates a temporary branch combining `main` + the PR and fires a `merge_group`
+   event; `lint`/`test`/`build` run against that **merged result**.
+3. If green, the PR lands on `main` with the **rebase** merge method (linear history preserved).
+   If the merged result fails, the PR is dropped from the queue and `main` stays green.
 
-### Purpose
+### Why
 
-Automatically rebases all open PRs targeting main when main is updated. This ensures PRs stay
-fresh for the required-status-checks strict mode in the branch ruleset.
+- Tests the actual merged result, which `rebase-check` (ancestry-only) could not.
+- No force-pushing contributor branches and no per-merge auto-rebase storm — the queue rebases
+  once, at merge time.
 
-### Configuration
+### Configuration (ruleset `merge_queue` rule)
 
-- Excludes PRs labeled `dependencies` (Dependabot manages its own rebase)
-- Excludes draft PRs
-- Concurrency group cancels in-progress rebases when a newer main push arrives
+- **Merge method:** `REBASE` (linear history)
+- **Grouping:** `ALLGREEN` (a failing entry is dropped from the group)
+- **Batch size:** 1 (conservative; tune after observing runner load)
+- **Required checks on the queue:** `lint`, `test`, `build` (must also trigger on `merge_group`)
 
-### Authentication
-
-Requires `AUTO_REBASE_PAT` secret — a PAT with `Contents: Read+Write` and `Pull requests: Read`
-on the launcher repo. A PAT (not `GITHUB_TOKEN`) is required so that the force-push triggers CI.
+Auto-merge is **not** enabled — every PR is reviewed and queued manually. The merge queue rule is
+managed centrally in `go-kure/.github` (`governance/repository-settings-policy.yaml`).
 
 ---
 

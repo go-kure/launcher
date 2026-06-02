@@ -47,16 +47,16 @@ The `main` branch is protected — all changes must go through pull requests.
    gh pr create
    ```
 
-4. **Pass required CI checks**: `lint`, `test`, `build`, `rebase-check`
+4. **Pass required CI checks**: `lint`, `test`, `build`
 
-5. **Merge** (linear history required — rebase, no merge commits)
+5. **Merge** via the merge queue (linear history required — rebase, no merge commits)
 
 ### Branch Protection Rules
 
 Enforced via the `main-protection` repository ruleset:
 
-- **Required status checks** (strict): `lint`, `test`, `build`, `rebase-check`
-- **Auto-rebase**: open PRs are automatically rebased when main is updated (via `auto-rebase.yml`)
+- **Required status checks**: `lint`, `test`, `build`
+- **Merge queue**: merging goes through a GitHub merge queue (rebase method) that rebases and tests the merged result before landing — no manual rebasing, no auto-rebase force-pushes
 - **Pull requests required**: all changes must go through a PR
 - **Conversation resolution**: all review threads must be resolved
 - **Linear history**: enforced (rebase only, no merge commits)
@@ -160,15 +160,9 @@ The project uses GitHub Actions workflows:
 
 ### Main CI Pipeline (`.github/workflows/ci.yml`)
 
-- **Triggers**: Push to main/develop, PRs
-- **Jobs**: rebase-check, validate (lint), test, security, coverage-check, build, cross-platform, analyze-changes
+- **Triggers**: Push to main/develop, PRs, merge_group (merge queue)
+- **Jobs**: validate (lint), test, security, coverage-check, build, cross-platform, analyze-changes
 - **Runner**: `autops-kube` (self-hosted)
-
-### Auto-Rebase (`.github/workflows/auto-rebase.yml`)
-
-- **Triggers**: Push to main
-- **Purpose**: Automatically rebases all open PRs targeting main
-- **Auth**: Requires `AUTO_REBASE_PAT` secret
 
 ### Release Pipeline (`.github/workflows/release.yml`)
 
