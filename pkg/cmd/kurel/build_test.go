@@ -83,6 +83,81 @@ func TestBuildCommand_StdoutOutput(t *testing.T) {
 	}
 }
 
+// testCRDManifestsAppYAML exercises the launcher-native crd and manifests
+// component handlers (#237): an inline CRD plus an inline namespaced manifest
+// that omits metadata.namespace and must be stamped with the app namespace.
+const testCRDManifestsAppYAML = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: appns
+spec:
+  components:
+    - name: widget-crds
+      type: crd
+      properties:
+        inline: |
+          apiVersion: apiextensions.k8s.io/v1
+          kind: CustomResourceDefinition
+          metadata:
+            name: widgets.example.com
+          spec:
+            group: example.com
+            names:
+              kind: Widget
+              plural: widgets
+            scope: Namespaced
+            versions:
+              - name: v1
+                served: true
+                storage: true
+                schema:
+                  openAPIV3Schema:
+                    type: object
+    - name: extra
+      type: manifests
+      properties:
+        inline: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: cm
+          data:
+            k: v
+`
+
+func TestBuildCommand_CRDAndManifestsComponents(t *testing.T) {
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", testCRDManifestsAppYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("build with crd/manifests components failed: %v\noutput: %s", err, out.String())
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "kind: CustomResourceDefinition") {
+		t.Errorf("expected emitted CustomResourceDefinition, got:\n%s", got)
+	}
+	if !strings.Contains(got, "widgets.example.com") {
+		t.Errorf("expected CRD name in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "kind: ConfigMap") {
+		t.Errorf("expected manifests ConfigMap in output, got:\n%s", got)
+	}
+	// The ConfigMap omitted metadata.namespace; the manifests handler must stamp
+	// it with the app namespace.
+	if !strings.Contains(got, "namespace: appns") {
+		t.Errorf("expected namespaced manifest stamped with app namespace 'appns', got:\n%s", got)
+	}
+}
+
 func TestBuildCommand_OutputDir(t *testing.T) {
 	dir := t.TempDir()
 	appPath := writeTempFile(t, dir, "app.yaml", testAppYAML)

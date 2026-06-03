@@ -320,6 +320,7 @@ This monolithic layout is owned by launcher and generated as part of `kurel buil
 - Trait handlers — workload set: expose, certificate, external-secret, pvc, scaler (#49)
 - Trait handlers — network/infra set: ingress, httproute, configmap, networkpolicy, cilium-networkpolicy, volsync (#50)
 - Generic `passthrough` component — emits arbitrary CRDs / non-standard objects with no per-type Go handler (#105)
+- Manifest-source components: `crd`, `manifests` — emit CRDs / arbitrary manifests from inline or http(s) URL sources, with scope-aware namespace stamping (classifier in kure `pkg/manifest`); migrated from crane (#237)
 
 **Phase 3: CLI integration** (#33)
 - `kurel build` — OAM mode (app.yaml + --profile cluster.yaml → manifests) (#51)

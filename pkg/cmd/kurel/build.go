@@ -235,6 +235,8 @@ func newBuiltinTransformer() *oam.Transformer {
 			"postgresql":  &components.PostgresqlHandler{},
 			"helmchart":   &components.HelmchartHandler{},
 			"passthrough": &components.PassthroughHandler{},
+			"crd":         &components.CRDHandler{},
+			"manifests":   &components.ManifestsHandler{},
 		},
 		nil,
 	)

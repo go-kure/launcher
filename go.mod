@@ -12,7 +12,7 @@ require (
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260213133823-31b0c7c37342
 	github.com/fluxcd/helm-controller/api v1.5.5
 	github.com/fluxcd/source-controller/api v1.8.5
-	github.com/go-kure/kure v0.2.0-beta.4
+	github.com/go-kure/kure v0.2.0-beta.5
 	github.com/google/go-containerregistry v0.21.6
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
@@ -47,7 +47,7 @@ require (
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/cloudnative-pg/barman-cloud v0.5.1 // indirect
 	github.com/cloudnative-pg/cnpg-i v0.5.0 // indirect
-	github.com/cloudnative-pg/machinery v0.4.0 // indirect
+	github.com/cloudnative-pg/machinery v0.5.0 // indirect
 	github.com/controlplaneio-fluxcd/flux-operator v0.48.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dylibso/observe-sdk/go v0.0.0-20240819160327-2d926c5d788a // indirect

@@ -41,6 +41,8 @@ func TestClassifyComponent_DefaultMap(t *testing.T) {
 		{"statefulset", TierApps},
 		{"postgresql", TierServices},
 		{"daemonset", TierInfra},
+		{"crd", TierApps},
+		{"manifests", TierApps},
 	}
 	for _, tc := range cases {
 		t.Run(tc.typ, func(t *testing.T) {
