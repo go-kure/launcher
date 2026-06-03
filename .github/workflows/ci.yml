@@ -540,11 +540,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [linux, darwin, windows]
+        os: [linux]
         arch: [amd64, arm64]
-        exclude:
-          - os: windows
-            arch: arm64
 
     steps:
     - name: Checkout code

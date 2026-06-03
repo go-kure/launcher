@@ -18,16 +18,13 @@ builds:
       - -X github.com/go-kure/launcher/pkg/cmd/shared.BuildDate={{.Date}}
     env:
       - CGO_ENABLED=0
-    goos: [linux, darwin, windows]
+    goos: [linux]
     goarch: [amd64, arm64]
 
 archives:
   - id: kurel-archive
     ids: [kurel]
     formats: [tar.gz]
-    format_overrides:
-      - goos: windows
-        formats: [zip]
     name_template: "kurel_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
