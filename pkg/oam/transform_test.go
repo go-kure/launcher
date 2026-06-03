@@ -1107,3 +1107,36 @@ func TestApplyAutoHealthChecks_OverridesAppendedVerbatim(t *testing.T) {
 		t.Fatalf("expected the user override appended verbatim (namespace untouched), got %+v", hc)
 	}
 }
+
+func TestApplyAutoHealthChecks_OCIUsesFluxNamespace(t *testing.T) {
+	// An oci component emits a Flux Kustomization (a kustomize.toolkit.fluxcd.io
+	// control-plane CR relocated to the flux namespace), so its inferred health
+	// check must reference the Kustomization GVK in the flux namespace.
+	app := stack.NewApplication("checkout", "demo", &fluxHCConfig{})
+	cluster := leafClusterWith(app)
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "oci"), nil, "flux-system")
+
+	hc := cluster.Node.Bundle.HealthChecks
+	if len(hc) != 1 {
+		t.Fatalf("expected 1 health check, got %d", len(hc))
+	}
+	if hc[0].APIVersion != "kustomize.toolkit.fluxcd.io/v1" || hc[0].Kind != "Kustomization" {
+		t.Errorf("got %s/%s, want Kustomization (kustomize.toolkit.fluxcd.io/v1)", hc[0].APIVersion, hc[0].Kind)
+	}
+	if hc[0].Name != "checkout" || hc[0].Namespace != "flux-system" {
+		t.Errorf("got %q in %q, want checkout in flux-system", hc[0].Name, hc[0].Namespace)
+	}
+}
+
+func TestApplyAutoHealthChecks_OCIEmptyFluxNamespaceUsesAppNamespace(t *testing.T) {
+	// With no flux namespace configured, the Kustomization stays in the app
+	// namespace, so the health check must follow it there.
+	app := stack.NewApplication("checkout", "demo", &fluxHCConfig{})
+	cluster := leafClusterWith(app)
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "oci"), nil, "")
+
+	hc := cluster.Node.Bundle.HealthChecks
+	if len(hc) != 1 || hc[0].Kind != "Kustomization" || hc[0].Namespace != "demo" {
+		t.Fatalf("expected Kustomization check in app namespace 'demo', got %+v", hc)
+	}
+}
