@@ -321,6 +321,7 @@ This monolithic layout is owned by launcher and generated as part of `kurel buil
 - Trait handlers — network/infra set: ingress, httproute, configmap, networkpolicy, cilium-networkpolicy, volsync (#50)
 - Generic `passthrough` component — emits arbitrary CRDs / non-standard objects with no per-type Go handler (#105)
 - Manifest-source components: `crd`, `manifests` — emit CRDs / arbitrary manifests from inline or http(s) URL sources, with scope-aware namespace stamping (classifier in kure `pkg/manifest`); migrated from crane (#237)
+- `oci` source component — emits an `OCIRepository` source CR (URL+version dedup, flux-namespace placement) plus a per-component Flux `Kustomization`; the OAM counterpart to crane's platform OCI translator (crane#246 / #241)
 
 **Phase 3: CLI integration** (#33)
 - `kurel build` — OAM mode (app.yaml + --profile cluster.yaml → manifests) (#51)

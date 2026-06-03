@@ -27,6 +27,7 @@ var validComponentTypes = map[string]bool{
 	"passthrough": true,
 	"crd":         true,
 	"manifests":   true,
+	"oci":         true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.

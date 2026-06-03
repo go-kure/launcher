@@ -237,6 +237,7 @@ func newBuiltinTransformer() *oam.Transformer {
 			"passthrough": &components.PassthroughHandler{},
 			"crd":         &components.CRDHandler{},
 			"manifests":   &components.ManifestsHandler{},
+			"oci":         &components.OCIHandler{},
 		},
 		nil,
 	)
