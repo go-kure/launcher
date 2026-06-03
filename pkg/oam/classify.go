@@ -16,6 +16,7 @@ var defaultTierMap = map[string]Tier{
 	"statefulset": TierApps,
 	"crd":         TierApps,
 	"manifests":   TierApps,
+	"oci":         TierApps,
 }
 
 // validTiers is the set of valid tier values for annotation validation.

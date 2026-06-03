@@ -706,6 +706,7 @@ var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"daemonset":   {"apps/v1", "DaemonSet"},
 	"helmchart":   {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
 	"postgresql":  {"postgresql.cnpg.io/v1", "Cluster"},
+	"oci":         {"kustomize.toolkit.fluxcd.io/v1", "Kustomization"},
 }
 
 // postProcessFluxNamespace walks all leaf bundle applications and calls
