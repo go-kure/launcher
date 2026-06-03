@@ -58,8 +58,8 @@ github.com/cloudnative-pg/cloudnative-pg v1.29.1 h1:ZNEt1TMlnQKXI1kho2UqQuqdfvIv
 github.com/cloudnative-pg/cloudnative-pg v1.29.1/go.mod h1:Sbgx9jVmkle4/gR2U5JHrzDd74sRPOBHDtPkvncg5v8=
 github.com/cloudnative-pg/cnpg-i v0.5.0 h1:/TOzpNT6cwNgrpftTtrnLKdoHgMwd+88vZgXjlVgXeE=
 github.com/cloudnative-pg/cnpg-i v0.5.0/go.mod h1:7Gh4+UzhBpGhr4DreB1GN9wGYfvxwXCXZUyVt3zE/3I=
-github.com/cloudnative-pg/machinery v0.4.0 h1:3sfqrBptH4QQSVB4g10Z+7aiQRnh4g+6AsqsK0ibKaQ=
-github.com/cloudnative-pg/machinery v0.4.0/go.mod h1:OIwaTYAnLv8PmBmBvEf0BvMK2JBX6J+naTMg9UgV1FQ=
+github.com/cloudnative-pg/machinery v0.5.0 h1:hhTnkzn+AiN3NmbjCQ6RXj5rfqV3K6arzq6kdXAzcnQ=
+github.com/cloudnative-pg/machinery v0.5.0/go.mod h1:uuFjqBUjWn0a9uvAk1ixTSzPM0PrjaS+QiKLOIBqLm4=
 github.com/cloudnative-pg/plugin-barman-cloud v0.12.0 h1:zq1hJYpyfRsVXp1CJ2ncZGQoIDfus614x6VYMtWfwEQ=
 github.com/cloudnative-pg/plugin-barman-cloud v0.12.0/go.mod h1:7pMLhJalzyTO0sx9uelGT7bKA53o+uWbrG4ktVIBWQM=
 github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 h1:aBangftG7EVZoUb69Os8IaYg++6uMOdKK83QtkkvJik=
@@ -144,8 +144,8 @@ github.com/fxamacker/cbor/v2 v2.9.1 h1:2rWm8B193Ll4VdjsJY28jxs70IdDsHRWgQYAI80+r
 github.com/fxamacker/cbor/v2 v2.9.1/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
 github.com/go-errors/errors v1.5.1 h1:ZwEMSLRCapFLflTpT7NKaAc7ukJ8ZPEjzlxt8rPN8bk=
 github.com/go-errors/errors v1.5.1/go.mod h1:sIVyrIiJhuEF+Pj9Ebtd6P/rEYROXFi3BopGUQ5a5Og=
-github.com/go-kure/kure v0.2.0-beta.4 h1:csc1ww63kRuLtkq1rsU+4ja7e03yhTvb6OUbAXCkSG8=
-github.com/go-kure/kure v0.2.0-beta.4/go.mod h1:PS/QxwQziZ4/tQkwk0O355TJpEtgReI6sQ/134RM9rw=
+github.com/go-kure/kure v0.2.0-beta.5 h1:HksOGEPQYIhqELonpUTv0s6RpAJVKqnWGmDR9k9aXoE=
+github.com/go-kure/kure v0.2.0-beta.5/go.mod h1:SOb3kRr2P8QG4MiOKVsMmtL1CVQEp2sikGSnZpyILGA=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=
 github.com/go-logr/logr v1.4.3/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
@@ -294,10 +294,10 @@ github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8m
 github.com/oklog/ulid/v2 v2.1.1 h1:suPZ4ARWLOJLegGFiZZ1dFAkqzhMjL3J1TzI+5wHz8s=
 github.com/oklog/ulid/v2 v2.1.1/go.mod h1:rcEKHmBBKfef9DhnvX7y1HZBYxjXb0cP5ExxNsTT1QQ=
 github.com/onsi/ginkgo v1.16.5 h1:8xi0RTUf59SOSfEtZMvwTvXYMzG4gV23XVHOZiXNtnE=
-github.com/onsi/ginkgo/v2 v2.28.3 h1:4JvMdwtFU0imd8fHx25OJXoDMRexnf8v5NHKYSTTji4=
-github.com/onsi/ginkgo/v2 v2.28.3/go.mod h1:+aXOY+vzZ5mu2iI2HpTZUPmM//oQfsNFX6gU9kNcA44=
-github.com/onsi/gomega v1.40.0 h1:Vtol0e1MghCD2ZVIilPDIg44XSL9l2QAn8ZNaljWcJc=
-github.com/onsi/gomega v1.40.0/go.mod h1:M/Uqpu/8qTjtzCLUA2zJHX9Iilrau25x1PdoSRbWh5A=
+github.com/onsi/ginkgo/v2 v2.29.0 h1:rfh+ZFjgJhYWRoIqVf3Uwx/W20yLrcrE2h2GmYVRaag=
+github.com/onsi/ginkgo/v2 v2.29.0/go.mod h1:+aXOY+vzZ5mu2iI2HpTZUPmM//oQfsNFX6gU9kNcA44=
+github.com/onsi/gomega v1.41.0 h1:OwKp4pXNgVxf6sCplzYo794OFNuoL2q2SBMU5NSWOjA=
+github.com/onsi/gomega v1.41.0/go.mod h1:M/Uqpu/8qTjtzCLUA2zJHX9Iilrau25x1PdoSRbWh5A=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
 github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3IKzErnv2BNG4W4MAM=
 github.com/opencontainers/image-spec v1.1.1 h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=

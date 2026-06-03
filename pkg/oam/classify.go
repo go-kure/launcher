@@ -14,6 +14,8 @@ var defaultTierMap = map[string]Tier{
 	"helmchart":   TierApps,
 	"daemonset":   TierInfra,
 	"statefulset": TierApps,
+	"crd":         TierApps,
+	"manifests":   TierApps,
 }
 
 // validTiers is the set of valid tier values for annotation validation.

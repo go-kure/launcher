@@ -117,6 +117,8 @@ Migrated from crane. Each type maps to a `ComponentHandler` implementation in
 | `daemonset` | DaemonSet for node-level agents. Optional `port: <N>` generates a ClusterIP Service exposing port N; required when the daemonset acts as an implicit backend for ingress, httproute, or expose traits. |
 | `statefulset` | StatefulSet for ordered, persistent workloads |
 | `passthrough` | Generic escape hatch (launcher-native, not migrated from crane): emits an arbitrary Kubernetes object — CRD or non-standard type — declared inline under `object:`. Set `clusterScoped: true` for cluster-scoped resources (no namespace injected). `object.metadata.name` defaults to the component name. For namespaced objects `object.metadata.namespace` defaults to the build namespace when unset, but an inline value is respected (intentional cross-namespace). No standard trait/port integration or auto health check. |
+| `crd` | Emits `CustomResourceDefinition` manifests from a multi-doc YAML source — `inline:` (offline) or `url:` (http/https only; `oci://` not yet supported). Rejects any non-CRD document. Emitted CRDs are auto-staged early by stack-compile's CRD inference. URL hosts are constrained by the policy registry allowlist (`AllowedRegistries`), re-checked on every redirect. |
+| `manifests` | Emits arbitrary Kubernetes manifests from the same sources as `crd` (`inline` / `url`). Each object's scope is resolved (built-in kinds plus any CRD in the same source); namespaced objects that omit `metadata.namespace` are stamped with the build namespace, cluster-scoped objects are left untouched, and an unknown-scope object with no namespace fails closed. Same URL allowlist as `crd`. |
 
 ### 4.3 Supported trait types (Phase 1)
 
