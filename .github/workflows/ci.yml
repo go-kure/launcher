@@ -225,6 +225,11 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'pull_request' || needs.changes.outputs.go == 'true')
 
+    # GOMEMLIMIT keeps Go's GC under the runner pod memory limit so govulncheck doesn't get
+    # OOMKilled on the in-cluster ARC runner. Pairs with the 6Gi ARC runner limit.
+    env:
+      GOMEMLIMIT: 5GiB
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
@@ -251,7 +256,7 @@ jobs:
     - name: Run govulncheck
       run: |
         set +e
-        OUTPUT=$(govulncheck ./... 2>&1)
+        OUTPUT=$(govulncheck -scan package ./... 2>&1)
         EXIT_CODE=$?
         echo "$OUTPUT"
 
