@@ -1,6 +1,6 @@
 module github.com/go-kure/launcher
 
-go 1.26.3
+go 1.26.4
 
 require (
 	github.com/backube/volsync v0.15.0
