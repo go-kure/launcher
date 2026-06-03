@@ -73,7 +73,7 @@ concurrency:
                     │
                     ▼ (main / release/* only)
            ┌─────────────────┐
-           │ cross-platform  │  ← 5-platform matrix build
+           │ cross-platform  │  ← linux amd64/arm64 matrix build
            └─────────────────┘
 
 PR-only jobs (parallel, non-blocking):
@@ -97,7 +97,7 @@ temporary branch — the merged result — before the PR is allowed to land.
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches |
 | `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check | Aggregation gate |
-| `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux/darwin/windows × amd64/arm64 (main + release/* only) |
+| `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
 | `analyze-changes` | `Analyze Changes` | 5 min | — | Changed files summary, breaking change warning for pkg/ (PR only) |
 
 ### Cross-Platform Matrix
@@ -107,8 +107,6 @@ Runs on main and `release/*` branches only (not PRs):
 | OS | amd64 | arm64 |
 |----|-------|-------|
 | linux | ✅ | ✅ |
-| darwin | ✅ | ✅ |
-| windows | ✅ | — |
 
 ### Configuration
 

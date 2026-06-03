@@ -168,7 +168,7 @@ The project uses GitHub Actions workflows:
 
 - **Triggers**: Version tags (`v*.*.*`)
 - **Jobs**: test, validate (tag + changelog), goreleaser, post-release (proxy refresh)
-- **Produces**: kurel binaries for linux/darwin/windows × amd64/arm64 + checksums + SBOM + cosign signature
+- **Produces**: kurel binaries for linux × amd64/arm64 + checksums + SBOM + cosign signature
 
 ### Creating a Release
 
