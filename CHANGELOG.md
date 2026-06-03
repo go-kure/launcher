@@ -1,11 +1,40 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.4] - 2026-06-03
+
+### Added
+
+- Add crd and manifests component handlers
+
+### Build
+
+- Tidy go.mod (promote apiextensions-apiserver to direct)
+- Bump Go to 1.26.4 (fixes 3 stdlib vulns) and fold in govulncheck tweaks
+
+### CI
+
+- Add merge_group trigger and harden change detection for merge queue
+- Cap govulncheck memory (GOMEMLIMIT + -scan package) to avoid runner OOM
+
+### Dependencies
+
+- Bump the k8s-ecosystem group across 1 directory with 2 updates
+- Bump github.com/go-kure/kure
+
+### Fixed
+
+- Build linux-only release artifacts
+
 ## [0.1.0-alpha.3] - 2026-06-02
 
 ### Fixed
 
 - Emit the flux namespace for helmchart auto health checks (#234)
+
+### Release
+
+- V0.1.0-alpha.3
 
 ## [0.1.0-alpha.2] - 2026-05-30
 
