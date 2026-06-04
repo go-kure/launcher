@@ -48,6 +48,12 @@ return errors.New("description of error")
 return errors.Errorf("invalid value: %s", val)
 ```
 
+### Documentation Sync
+
+- Code and documentation changes must be in the same PR (mandatory; org standard in `go-kure/.github` → `docs/standards.md`, CI-enforced)
+- When you change a package, update its `README.md` and any affected `site/` docs in the same PR; repoint every reference when removing/renaming
+- Map-based enforcement (`docs-map.yaml` + `check-doc-sync.sh`/link-check/doc-gate, as in `go-kure/kure`) is being rolled out here — follow the rule manually until then
+
 ### Commits
 
 Follow conventional commits:
