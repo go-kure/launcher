@@ -214,6 +214,19 @@ func TestResolve(t *testing.T) {
 - Use GoDoc conventions for function comments
 - Include examples in function documentation
 
+### Documentation sync (mandatory)
+
+**Code and documentation changes must be in the same PR.** When you change a
+package, update its `README.md` and any affected guides/site docs in the same PR;
+removing or renaming a package or symbol must repoint every reference. This is the
+go-kure organization documentation-sync standard (`go-kure/.github` →
+`docs/standards.md`), which is CI-enforced.
+
+Map-based enforcement (`docs-map.yaml` as the single source of code→docs mapping,
+with `check-doc-sync.sh` / link checks / a docs-with-code gate, as already in
+`go-kure/kure`) is being rolled out to this repo; until then, follow the rule
+manually and keep package READMEs and `site/` in sync with code.
+
 ## Security Considerations
 
 ### Secret Management
