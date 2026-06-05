@@ -236,6 +236,12 @@ This table is generated from `site/docs-map.yaml`. Do not edit it by hand — ed
 map and run `bash site/scripts/gen-docs-tables.sh`.
 
 <!-- BEGIN GENERATED: reverse-mapping (source: site/docs-map.yaml) -->
+| Package Changed | Auto-Synced (README) | Guides to Review |
+|-----------------|---------------------|------------------|
+| `pkg/cmd/kurel/` | `api-reference/kurel-cli` | — |
+| `pkg/errors/` | `api-reference/errors` | — |
+| `pkg/patch/` | `api-reference/patch` | — |
+| `.github/workflows/` | — | `contributing/github-workflows` |
 <!-- END GENERATED: reverse-mapping -->
 
 ## Security Considerations

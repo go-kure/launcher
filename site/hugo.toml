@@ -13,27 +13,12 @@ title = 'Go Kure — Launcher'
   [[module.imports]]
     path = 'github.com/McShelby/hugo-theme-relearn'
 
-  # === Generated content (from inject-frontmatter.sh) ===
-
-  # Getting started
+  # === Generated content (from inject-frontmatter.sh, driven by docs-map.yaml) ===
+  # Mounted wholesale: every file inject-frontmatter.sh writes into .generated/ is
+  # published. The set is controlled entirely by docs-map.yaml — no per-file list.
   [[module.mounts]]
-    source = ".generated/getting-started/introduction.md"
-    target = "content/getting-started/introduction.md"
-
-  # Concepts
-  [[module.mounts]]
-    source = ".generated/concepts/design.md"
-    target = "content/concepts/design.md"
-
-  # Contributing
-  [[module.mounts]]
-    source = ".generated/contributing/guide.md"
-    target = "content/contributing/guide.md"
-
-  # Changelog
-  [[module.mounts]]
-    source = ".generated/changelog/releases.md"
-    target = "content/changelog/releases.md"
+    source = ".generated"
+    target = "content"
 
   # === Hand-authored content ===
   [[module.mounts]]

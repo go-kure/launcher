@@ -170,5 +170,5 @@ SMP patches are applied before field-level patches. See [DESIGN.md](https://gith
 
 ## Related Packages
 
-- [launcher](../launcher/) - Uses patches in kurel package system
-- [io](../io/) - YAML parsing for patch targets
+- [pkg/oam](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) - Uses patches in the kurel package/build pipeline
+- [kure pkg/io](https://pkg.go.dev/github.com/go-kure/kure/pkg/io) - YAML parsing for patch targets

@@ -42,5 +42,6 @@ release-notes.md
 # Hugo site build artifacts
 site/public/
 site/.generated/
+site/.linkcheck/
 site/versions.toml
 site/.hugo_build.lock

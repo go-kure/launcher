@@ -1,0 +1,82 @@
+# docs-map.yaml — Normative source for launcher's code↔docs mapping.
+#
+# Single source of truth (see go-kure/.github docs/standards.md "Documentation
+# Sync"). Derived and never hand-edited: site mounts (via inject-frontmatter.sh),
+# the AGENTS.md "Reverse Mapping" table, and the api-reference nav (via
+# gen-docs-tables.sh). Validate with check-doc-sync.sh.
+#
+# To publish a package: add a `mount:` block. To leave it unpublished: set
+# `mounted: false` with a `reason:` (a README is still required for every entry).
+
+repo_type: go-library
+
+code_roots:
+  - pkg
+  - cmd
+
+packages:
+  # ─── Published (CLI) ───
+  - path: pkg/cmd/kurel
+    readme: pkg/cmd/kurel/README.md
+    mount: {target: api-reference/kurel-cli.md, title: kurel CLI, weight: 10, group: CLI, desc: "kurel command tree, flags, and usage"}
+
+  # ─── Published (Libraries) ───
+  - path: pkg/errors
+    readme: pkg/errors/README.md
+    mount: {target: api-reference/errors.md, title: Errors, weight: 30, group: Libraries, desc: "Structured error types and wrapping helpers"}
+  - path: pkg/patch
+    readme: pkg/patch/README.md
+    mount: {target: api-reference/patch.md, title: Patch Engine, weight: 40, group: Libraries, desc: "Declarative JSONPath patching (TOML/YAML, strategic merge)"}
+
+  # ─── Unmounted: internal builder surface; full reference deferred (PR-B / #145) ───
+  - path: pkg/oam
+    readme: pkg/oam/README.md
+    mounted: false
+    reason: "Large internal builder surface (OAM model/parser/transformer); full per-package reference deferred to the content PR."
+  - path: pkg/oam/builtin
+    readme: pkg/oam/builtin/README.md
+    mounted: false
+    reason: "Internal capability rendering schemas; not a user-facing API."
+  - path: pkg/oam/builtin/components
+    readme: pkg/oam/builtin/components/README.md
+    mounted: false
+    reason: "Internal component handlers; full reference deferred to the content PR."
+  - path: pkg/oam/builtin/traits
+    readme: pkg/oam/builtin/traits/README.md
+    mounted: false
+    reason: "Internal trait handlers; full reference deferred to the content PR."
+  - path: pkg/oam/netpol
+    readme: pkg/oam/netpol/README.md
+    mounted: false
+    reason: "Internal NetworkPolicy-synthesis support type."
+  - path: pkg/cmd/shared
+    readme: pkg/cmd/shared/README.md
+    mounted: false
+    reason: "Internal CLI builders; usage documented in the kurel CLI reference."
+  - path: pkg/cmd/shared/options
+    readme: pkg/cmd/shared/options/README.md
+    mounted: false
+    reason: "Internal CLI global options; flags documented in the kurel CLI reference."
+  - path: cmd/kurel
+    readme: cmd/kurel/README.md
+    mounted: false
+    reason: "Binary entrypoint (package main); no API surface."
+
+# Non-package docs mounted into the site. Not gated by code changes.
+# (README.md, examples/README.md, and design-capability-schema.md are deferred to
+# the content PR, where their repo-relative links are reworked for the site.)
+extra_mounts:
+  - {source: docs/design.md, target: concepts/design.md, title: Design, weight: 10}
+  - {source: docs/oam/design-gvk.md, target: concepts/oam-gvk.md, title: API Group & GVK, weight: 20}
+  - {source: docs/oam/design-kurel-package.md, target: concepts/oam-package.md, title: Kurel Packages, weight: 30}
+  - {source: docs/oam/design-cluster-profile.md, target: concepts/oam-cluster-profile.md, title: Cluster Profiles, weight: 40}
+  - {source: docs/oam/options-param-syntax.md, target: concepts/oam-param-syntax.md, title: Parameter Syntax, weight: 50}
+  - {source: docs/oam/options-policy-interface.md, target: concepts/oam-policy-interface.md, title: Policy Interface, weight: 60}
+  - {source: docs/oam/options-package-composition.md, target: concepts/oam-package-composition.md, title: Package Composition, weight: 70}
+  - {source: DEVELOPMENT.md, target: contributing/guide.md, title: Development Guide, weight: 10}
+  - {source: docs/github-workflows.md, target: contributing/github-workflows.md, title: GitHub Workflows, weight: 20}
+  - {source: CHANGELOG.md, target: changelog/releases.md, title: Releases, weight: 10}
+
+# Extra reverse-map rows for non-package paths (no README mount, review-only).
+review_mappings:
+  - {change: "`.github/workflows/`", reference: "—", guides: "`contributing/github-workflows`"}
