@@ -14,7 +14,7 @@ This document provides an overview of all GitHub Actions workflows used in the l
 | [Deploy Docs](#deploy-docs-workflow) | `deploy-docs.yml` | push to main (docs paths), `workflow_dispatch` | Multi-version docs deployment |
 | [Release](#release-workflow) | `release.yml` | version tags | Release with GoReleaser, SBOM, docs deploy |
 | [Create Release](#create-release-workflow) | `release-create.yml` | `workflow_dispatch` | Pre-release test gate + tag creation |
-| [PR Review](#pr-review-workflow) | `pr-review.yml` | pull_request | Two-pass AI code review via ccproxy |
+| [PR Review](#pr-review-workflow) | `pr-review.yml` | pull_request | Two-pass AI code review via claude-max-proxy |
 | [Claude](#claude-workflow) | `claude.yml` | PR/issue/comment events | @claude AI assistant |
 
 The last five workflows are thin callers that delegate to reusable workflows in
@@ -278,7 +278,7 @@ subsequent workflows — `GITHUB_TOKEN` pushes do not trigger workflows).
 
 ### How It Works
 
-Two-pass AI review via a cluster-local ccproxy sidecar:
+Two-pass AI review via the cluster-local claude-max-proxy sidecar:
 
 1. **Pass 1 — Review**: Sends PR diff + `AGENTS.md` + `.claude/CLAUDE.md` to the review model.
    Posts up to 3 findings in a structured table as a PR comment.
