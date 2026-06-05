@@ -67,5 +67,5 @@ Custom traits implement `oam.TraitHandler` (`CanHandle` + `Apply`), optionally
 `CapabilityAware` + `ValidateAndApplyDefaults` for capability validation.
 
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
-for the full config-field reference, the [OAM model](oam) for the interfaces, and
-`examples/` for runnable applications.
+for the full config-field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
+for the interfaces, and `examples/` for runnable applications.

@@ -45,8 +45,8 @@ parse → resolve parameters → transform (component + trait handlers) → mani
 
 | Interface | Role |
 |-----------|------|
-| `ComponentHandler` | `CanHandle(type)` + `ToApplicationConfig(...)` — see [components](oam-components). |
-| `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](oam-traits). |
+| `ComponentHandler` | `CanHandle(type)` + `ToApplicationConfig(...)` — see [components](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components). |
+| `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits). |
 | `PolicyHandler` | Enforce/validate policies (`Enforceable`, `PolicyResult`). |
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
