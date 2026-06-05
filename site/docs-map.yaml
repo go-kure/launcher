@@ -72,6 +72,7 @@ extra_mounts:
   - {source: docs/oam/options-param-syntax.md, target: concepts/oam-param-syntax.md, title: Parameter Syntax, weight: 50}
   - {source: docs/oam/options-policy-interface.md, target: concepts/oam-policy-interface.md, title: Policy Interface, weight: 60}
   - {source: docs/oam/options-package-composition.md, target: concepts/oam-package-composition.md, title: Package Composition, weight: 70}
+  - {source: docs/oam/design-capability-schema.md, target: concepts/oam-capability-schema.md, title: Capability Schema, weight: 55}
   - {source: DEVELOPMENT.md, target: contributing/guide.md, title: Development Guide, weight: 10}
   - {source: docs/github-workflows.md, target: contributing/github-workflows.md, title: GitHub Workflows, weight: 20}
   - {source: CHANGELOG.md, target: changelog/releases.md, title: Releases, weight: 10}
