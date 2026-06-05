@@ -242,6 +242,9 @@ map and run `bash site/scripts/gen-docs-tables.sh`.
 | `pkg/cmd/kurel/` | `api-reference/kurel-cli` | — |
 | `pkg/errors/` | `api-reference/errors` | — |
 | `pkg/patch/` | `api-reference/patch` | — |
+| `pkg/oam/` | `api-reference/oam` | — |
+| `pkg/oam/builtin/components/` | `api-reference/oam-components` | — |
+| `pkg/oam/builtin/traits/` | `api-reference/oam-traits` | — |
 | `.github/workflows/` | — | `contributing/github-workflows` |
 <!-- END GENERATED: reverse-mapping -->
 

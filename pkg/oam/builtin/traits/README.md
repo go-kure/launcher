@@ -2,16 +2,70 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/go-kure/launcher/pkg/oam/builtin/traits.svg)](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
 
-Package `traits` implements `oam.TraitHandler` for the built-in OAM trait types,
-covering networking (`ingress`, `httproute`, `expose`, network policy / Cilium),
-security (`rbac`, `certificate`, `externalsecret`), storage (`pvc`, `volsync`),
-config (`configmap`), scaling (`scaler`), and operational concerns (FluxCD patches,
-prune protection, post-build). Each handler parses its typed config (e.g.
-`IngressConfig`, `HTTPRouteConfig`, `CertificateConfig`, `ScalerConfig`) and decorates
-or emits Kubernetes resources accordingly.
+Package `traits` implements `oam.TraitHandler` for the built-in trait types. A trait
+decorates or augments a component — adding networking, security, storage, scaling,
+or operational behavior. Handlers are registered with the transformer in
+`pkg/cmd/kurel` via `RegisterBuiltinTrait(type, handler)`; each implements
+`CanHandle` + `Apply`. Some traits are **capability-aware** (`CapabilityRequired`)
+and draw platform choices (issuer, gateway, secret store) from the `ClusterProfile`.
 
-This is an **internal builder surface** for the `kurel` CLI and the extension point
-for custom traits (implement `oam.TraitHandler`). A full per-symbol reference is
-deferred; see
-[pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
-and `examples/` for usage. (#145 PR-B will publish the full reference.)
+## Trait catalog
+
+### Networking
+| `type` | Produces | Key properties |
+|--------|----------|----------------|
+| `ingress` | Ingress | `rules[]` (`host`, `paths[]`), `ingressClassName`, `tls[]`, `annotations` |
+| `httproute` | Gateway API HTTPRoute | `parentRefs[]`, `rules[]` (`matches`/`backendRefs`/`filters`/`timeouts`), `hostnames[]` |
+| `expose` | Ingress **or** HTTPRoute | `rules[]`, `hostnames[]` — controller chosen by ClusterProfile (`controllerType`) |
+| `networkpolicy` | NetworkPolicy | `ingress[]`/`egress[]` (`from`/`to`, `ports`) |
+| `cilium-networkpolicy` | CiliumNetworkPolicy | `name`, `endpointSelector`, `ingress`/`egress` (raw Cilium rules) |
+
+### Security
+| `type` | Produces | Key properties |
+|--------|----------|----------------|
+| `certificate` | cert-manager Certificate | `secretName`, `dnsNames[]`, `duration`, `renewBefore` (issuer from ClusterProfile) |
+| `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide` |
+| `external-secret` | ESO ExternalSecret | `secretName`, `data[]`/`dataFrom[]`, `refreshInterval` (store from ClusterProfile or `provider`) |
+
+### Storage
+| `type` | Produces | Key properties |
+|--------|----------|----------------|
+| `pvc` | PersistentVolumeClaim | `name`, `size`, `storageClassName`, `accessModes[]` (policy: `maxStorageSize`) |
+| `volsync` | VolSync ReplicationSource | `sourcePVC`, `schedule`, `copyMethod`, `retain.{daily,weekly,monthly}` |
+
+### Configuration & scaling
+| `type` | Produces | Key properties |
+|--------|----------|----------------|
+| `configmap` | ConfigMap (+ optional volume mount) | `name`, `data`, `mountPath` |
+| `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas`, `cpuUtilization`, `memoryUtilization`, `enablePDB` |
+
+### Operational (FluxCD)
+| `type` | Effect | Key properties |
+|--------|--------|----------------|
+| `fluxcd-patches` | Appends `Kustomization.spec.patches` | `patches[]` (`patch`, `target`) |
+| `fluxcd-postbuild` | Sets `Kustomization.spec.postBuild` | `substitute`, `substituteFrom[]` |
+| `prune-protection` | Adds `kustomize.toolkit.fluxcd.io/prune: disabled` | (no properties) |
+
+## Capability-aware traits
+
+These require (or optionally use) a `ClusterProfile` capability, so the platform —
+not the app — chooses the implementation:
+
+- **expose** → `controllerType` (ingress vs gateway) + gateway/ingress details.
+- **certificate** → `issuerRef` (cert-manager issuer/cluster-issuer).
+- **external-secret** → `secretStoreRef` (or the inline `provider` shorthand).
+
+## Auto-synthesized NetworkPolicy
+
+Routing traits (`ingress`/`httproute`/`expose`) can surface platform-reserved
+`networkPolicy.trafficSources`, which the OAM layer collects to synthesize a
+matching `NetworkPolicy` (see [`pkg/oam/netpol`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/netpol)).
+
+## Extending
+
+Custom traits implement `oam.TraitHandler` (`CanHandle` + `Apply`), optionally
+`CapabilityAware` + `ValidateAndApplyDefaults` for capability validation.
+
+See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
+for the full config-field reference, the [OAM model](oam) for the interfaces, and
+`examples/` for runnable applications.
