@@ -52,7 +52,8 @@ return errors.Errorf("invalid value: %s", val)
 
 - Code and documentation changes must be in the same PR (mandatory; org standard in `go-kure/.github` → `docs/standards.md`, CI-enforced)
 - When you change a package, update its `README.md` and any affected `site/` docs in the same PR; repoint every reference when removing/renaming
-- Map-based enforcement (`docs-map.yaml` + `check-doc-sync.sh`/link-check/doc-gate, as in `go-kure/kure`) is being rolled out here — follow the rule manually until then
+- `site/docs-map.yaml` is the single source of the code→docs mapping; the AGENTS reverse-map table + api-reference nav are generated from it (`bash site/scripts/gen-docs-tables.sh`) — never hand-edit them
+- Enforced in CI: `check-doc-sync.sh` (structure), `check-links.sh` (rendered links), and the `doc-gate` job (mapped-package source change must touch its docs; bypass only via the maintainer `docs-skip` label)
 
 ### Commits
 
