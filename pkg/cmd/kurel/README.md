@@ -9,7 +9,7 @@ Kubernetes manifests.
 
 This package defines the `kurel` command tree (`NewKurelCommand`) and entry point
 (`Execute`). The completion and version subcommands are provided by
-[`pkg/cmd/shared`](../shared).
+[`pkg/cmd/shared`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/cmd/shared).
 
 ## Command tree
 
@@ -42,7 +42,7 @@ Output goes to stdout by default, or to a directory with `--output`.
 
 ## Global flags
 
-Available on all commands (defined in [`pkg/cmd/shared/options`](../shared/options)):
+Available on all commands (defined in [`pkg/cmd/shared/options`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/cmd/shared/options)):
 
 | Flag | Description |
 |------|-------------|
