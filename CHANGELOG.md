@@ -1,6 +1,33 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.5] - 2026-06-05
+
+### Added
+
+- Add oci component handler
+- ScopeOverrides for cluster-scoped CRs without in-source CRD
+- Single-source docs map + enforcement tooling; mount existing docs
+
+### CI
+
+- Enforce docs sync (check-doc-sync, link-check, doc-gate)
+
+### Documentation
+
+- State mandatory documentation-sync rule (Part C cascade)
+- Correct backend to claude-max-proxy:3456
+- Add per-package READMEs (errors, kurel CLI ref, oam overviews)
+- Add section intros, api-reference index, and generator markers
+- Refresh AGENTS structure + mark doc-sync enforced
+- Publish OAM model + component/trait handler references
+- Getting-started narrative + mount capability schema
+- Use absolute pkg.go.dev links for cross-package refs
+
+### Testing
+
+- Cover oci auto health-check GVK + flux namespace
+
 ## [0.1.0-alpha.4] - 2026-06-03
 
 ### Added
@@ -25,6 +52,10 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Build linux-only release artifacts
+
+### Release
+
+- V0.1.0-alpha.4
 
 ## [0.1.0-alpha.3] - 2026-06-02
 
