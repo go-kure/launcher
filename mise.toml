@@ -8,6 +8,9 @@ goreleaser = "2.14.3"
 syft = "1.21.0"
 cosign = "2.4.3"
 hugo = "0.155.3"
+# Docs tooling: docs-map driver (yq) and rendered-site link checker (lychee)
+yq = "4.44.6"
+lychee = "0.24.2"
 
 [env]
 GOBIN = "{{config_root}}/.bin"

@@ -62,7 +62,9 @@ jobs:
           docs:
             - 'site/**'
             - 'docs/**'
-            - '*.md'
+            - '**.md'
+            - 'pkg/**'
+            - 'cmd/**'
             - 'scripts/**'
             - '.github/workflows/ci.yml'
 
@@ -473,13 +475,31 @@ jobs:
         go-version: ${{ steps.go-version.outputs.version }}
         cache: false
 
-    - name: Check mounted files exist
-      run: bash site/scripts/check-mounts.sh
+    - name: Cache yq
+      id: yq-cache
+      uses: actions/cache@v5
+      with:
+        path: ~/bin/yq
+        key: yq-4.44.6-linux-amd64
+
+    - name: Install yq
+      if: steps.yq-cache.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p ~/bin
+        curl -fsSL -o ~/bin/yq \
+          https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_amd64
+        chmod +x ~/bin/yq
+        echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Add yq to PATH
+      if: steps.yq-cache.outputs.cache-hit == 'true'
+      run: echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Validate docs map (code↔docs sync)
+      run: bash site/scripts/check-doc-sync.sh
 
     - name: Inject front matter
       run: bash site/scripts/inject-frontmatter.sh
-
-    # TODO: add CLI reference generation once kurel cobra commands are extracted
 
     - name: Generate versions config overlay
       run: bash scripts/gen-versions-toml.sh --version dev
@@ -508,11 +528,72 @@ jobs:
         path: site/public/
         retention-days: 7
 
+    - name: Cache lychee
+      id: lychee-cache
+      uses: actions/cache@v5
+      with:
+        path: ~/bin/lychee
+        key: lychee-0.24.2-linux-amd64
+
+    - name: Install lychee
+      if: steps.lychee-cache.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p ~/bin
+        curl -fsSL -o /tmp/lychee.tar.gz \
+          https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz
+        tar xzf /tmp/lychee.tar.gz -C /tmp
+        install -m755 /tmp/lychee-x86_64-unknown-linux-gnu/lychee ~/bin/lychee
+        echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Add lychee to PATH
+      if: steps.lychee-cache.outputs.cache-hit == 'true'
+      run: echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Check internal links (rendered site)
+      run: bash site/scripts/check-links.sh
+
+  doc-gate:
+    name: doc-gate
+    runs-on: autops-kube-kure
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Cache yq
+      id: yq-cache
+      uses: actions/cache@v5
+      with:
+        path: ~/bin/yq
+        key: yq-4.44.6-linux-amd64
+
+    - name: Install yq
+      if: steps.yq-cache.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p ~/bin
+        curl -fsSL -o ~/bin/yq \
+          https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_amd64
+        chmod +x ~/bin/yq
+        echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Add yq to PATH
+      if: steps.yq-cache.outputs.cache-hit == 'true'
+      run: echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Enforce docs-with-code (Layer 3)
+      run: |
+        bash site/scripts/check-doc-gate.sh "origin/${{ github.base_ref }}" . \
+          "--skip=${{ contains(github.event.pull_request.labels.*.name, 'docs-skip') }}"
+
   build:
     name: build
     runs-on: autops-kube-kure
     timeout-minutes: 1
-    needs: [validate, test, build-binaries, docs-build, coverage-check]
+    needs: [validate, test, build-binaries, docs-build, coverage-check, doc-gate]
     if: always()
     steps:
     - name: Check build results
@@ -522,7 +603,8 @@ jobs:
         bb="${{ needs.build-binaries.result }}"
         db="${{ needs.docs-build.result }}"
         cc="${{ needs.coverage-check.result }}"
-        for result in "$vl" "$tt" "$bb" "$db" "$cc"; do
+        dg="${{ needs.doc-gate.result }}"
+        for result in "$vl" "$tt" "$bb" "$db" "$cc" "$dg"; do
           if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
             echo "Required job failed or was cancelled (result: $result)"
             exit 1
