@@ -28,23 +28,22 @@ packages:
     readme: pkg/patch/README.md
     mount: {target: api-reference/patch.md, title: Patch Engine, weight: 40, group: Libraries, desc: "Declarative JSONPath patching (TOML/YAML, strategic merge)"}
 
-  # ─── Unmounted: internal builder surface; full reference deferred (PR-B / #145) ───
+  # ─── Published (OAM model + handler catalogs) ───
   - path: pkg/oam
     readme: pkg/oam/README.md
-    mounted: false
-    reason: "Large internal builder surface (OAM model/parser/transformer); full per-package reference deferred to the content PR."
+    mount: {target: api-reference/oam.md, title: OAM Model, weight: 20, group: OAM, desc: "OAM data model, parser, and transform pipeline"}
+  - path: pkg/oam/builtin/components
+    readme: pkg/oam/builtin/components/README.md
+    mount: {target: api-reference/oam-components.md, title: Component Handlers, weight: 22, group: OAM, desc: "Built-in component types (webservice, worker, cronjob, helmchart, …)"}
+  - path: pkg/oam/builtin/traits
+    readme: pkg/oam/builtin/traits/README.md
+    mount: {target: api-reference/oam-traits.md, title: Trait Handlers, weight: 24, group: OAM, desc: "Built-in traits (ingress, certificate, scaler, externalsecret, …)"}
+
+  # ─── Unmounted: internal support; not a user-facing API ───
   - path: pkg/oam/builtin
     readme: pkg/oam/builtin/README.md
     mounted: false
-    reason: "Internal capability rendering schemas; not a user-facing API."
-  - path: pkg/oam/builtin/components
-    readme: pkg/oam/builtin/components/README.md
-    mounted: false
-    reason: "Internal component handlers; full reference deferred to the content PR."
-  - path: pkg/oam/builtin/traits
-    readme: pkg/oam/builtin/traits/README.md
-    mounted: false
-    reason: "Internal trait handlers; full reference deferred to the content PR."
+    reason: "Internal capability rendering schemas used by the component/trait handlers."
   - path: pkg/oam/netpol
     readme: pkg/oam/netpol/README.md
     mounted: false

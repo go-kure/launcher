@@ -18,6 +18,14 @@ For the full Go API, see
 |---------|-------------|-----------|
 | [kurel CLI](kurel-cli) | kurel command tree, flags, and usage | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/cmd/kurel) |
 
+## OAM
+
+| Package | Description | Reference |
+|---------|-------------|-----------|
+| [OAM Model](oam) | OAM data model, parser, and transform pipeline | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) |
+| [Component Handlers](oam-components) | Built-in component types (webservice, worker, cronjob, helmchart, …) | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components) |
+| [Trait Handlers](oam-traits) | Built-in traits (ingress, certificate, scaler, externalsecret, …) | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits) |
+
 ## Libraries
 
 | Package | Description | Reference |
