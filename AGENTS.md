@@ -222,10 +222,21 @@ removing or renaming a package or symbol must repoint every reference. This is t
 go-kure organization documentation-sync standard (`go-kure/.github` →
 `docs/standards.md`), which is CI-enforced.
 
-Map-based enforcement (`docs-map.yaml` as the single source of code→docs mapping,
-with `check-doc-sync.sh` / link checks / a docs-with-code gate, as already in
-`go-kure/kure`) is being rolled out to this repo; until then, follow the rule
-manually and keep package READMEs and `site/` in sync with code.
+`site/docs-map.yaml` is the single source of the code→docs mapping. The site mounts,
+the reverse-mapping table below, and the api-reference nav are generated from or
+validated against it — never hand-edit them. To change what's published, edit
+`docs-map.yaml` and run `bash site/scripts/gen-docs-tables.sh`. Enforcement:
+`check-doc-sync.sh` (structure, blocking), `check-links.sh` (rendered internal
+links, blocking), and the `doc-gate` job (a mapped package's source change must
+touch its docs; bypass only via the maintainer-restricted `docs-skip` label).
+
+### Reverse Mapping: Code to Docs
+
+This table is generated from `site/docs-map.yaml`. Do not edit it by hand — edit the
+map and run `bash site/scripts/gen-docs-tables.sh`.
+
+<!-- BEGIN GENERATED: reverse-mapping (source: site/docs-map.yaml) -->
+<!-- END GENERATED: reverse-mapping -->
 
 ## Security Considerations
 
