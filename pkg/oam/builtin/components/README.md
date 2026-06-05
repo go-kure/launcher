@@ -61,5 +61,5 @@ Custom component types implement `oam.ComponentHandler` (`CanHandle` +
 `ValidateImageRef` (image policy) and `BuildPVC` (PVC from a `PVCConfig`).
 
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
-for the full type/field reference, the [OAM model](oam) for the handler interfaces,
-and `examples/` for runnable applications.
+for the full type/field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
+for the handler interfaces, and `examples/` for runnable applications.
