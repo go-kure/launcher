@@ -28,16 +28,19 @@ See `docs/design.md` for the full vision and architecture.
 ```
 launcher/
 ├── cmd/
-│   └── kurel/        # kurel CLI entrypoint
+│   └── kurel/        # kurel CLI binary entrypoint (package main)
 ├── pkg/
-│   ├── launcher/     # Package launcher core (to be migrated from kure)
-│   ├── patch/        # JSONPath-based patching (to be migrated from kure)
-│   └── cmd/
-│       └── kurel/    # kurel command implementations
-├── docs/             # Documentation
-│   └── design.md     # Full design document and vision
+│   ├── cmd/
+│   │   ├── kurel/    # kurel command tree (build, config, completion, version)
+│   │   └── shared/   # shared CLI builders + global options
+│   ├── errors/       # structured error types + wrapping helpers
+│   ├── oam/          # OAM model, parser, transformer (+ builtin/ handlers, netpol/)
+│   └── patch/        # JSONPath-based patching (TOML/YAML, strategic merge)
+├── docs/             # Documentation (design.md, oam/ specs, github-workflows)
+├── examples/         # Runnable example applications and cluster profiles
+├── site/             # Hugo docs site (docs-map.yaml, scripts/, content/)
 ├── .github/
-│   ├── workflows/    # CI, release, pr-review
+│   ├── workflows/    # CI, deploy-docs, release, pr-review
 │   └── dependabot.yml
 ├── .claude/          # Claude Code configuration
 ├── mise.toml         # Tool versions and tasks
@@ -45,8 +48,6 @@ launcher/
 ├── AGENTS.md         # This file
 └── DEVELOPMENT.md    # Development workflow guide
 ```
-
-> **Note**: The `pkg/launcher/`, `pkg/patch/`, `cmd/kurel/`, and `pkg/cmd/kurel/` packages will be migrated from `go-kure/kure` in a future PR (tracked in go-kure/launcher#1 and go-kure/kure#442).
 
 ## Development Workflow
 
