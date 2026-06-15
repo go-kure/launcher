@@ -3,7 +3,7 @@ module github.com/go-kure/launcher
 go 1.26.4
 
 require (
-	github.com/backube/volsync v0.15.0
+	github.com/backube/volsync v0.16.0
 	github.com/cert-manager/cert-manager v1.20.2
 	github.com/cilium/cilium v1.19.4
 	github.com/cloudnative-pg/cloudnative-pg v1.29.1
