@@ -29,6 +29,11 @@ Builds static manifests from an Application (a path to `app.yaml`, or a director
 containing `app.yaml` and optionally `kurel.yaml`) plus a platform `ClusterProfile`.
 Output goes to stdout by default, or to a directory with `--output`.
 
+All built-in component and trait handlers are registered automatically. See
+[Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
+and [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
+for the full catalogue; the `security-context` trait was added in this release.
+
 | Flag | Description |
 |------|-------------|
 | `--profile` (required) | Path to the `ClusterProfile` YAML. |
