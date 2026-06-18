@@ -26,6 +26,7 @@ and draw platform choices (issuer, gateway, secret store) from the `ClusterProfi
 | `certificate` | cert-manager Certificate | `secretName`, `dnsNames[]`, `duration`, `renewBefore` (issuer from ClusterProfile) |
 | `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide` |
 | `external-secret` | ESO ExternalSecret | `secretName`, `data[]`/`dataFrom[]`, `refreshInterval` (store from ClusterProfile or `provider`) |
+| `security-context` | (modifies PodSpec) | `psaLevel` (`restricted`\|`baseline`\|`privileged`), optional: `runAsNonRoot`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`, `runAsGroup`, `fsGroup` |
 
 ### Storage
 | `type` | Produces | Key properties |
