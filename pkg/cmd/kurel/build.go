@@ -256,6 +256,7 @@ func newBuiltinTransformer() *oam.Transformer {
 	t.RegisterBuiltinTrait("fluxcd-patches", &traits.FluxCDPatchesHandler{})
 	t.RegisterBuiltinTrait("fluxcd-postbuild", &traits.PostBuildHandler{})
 	t.RegisterBuiltinTrait("prune-protection", &traits.PruneProtectionHandler{})
+	t.RegisterBuiltinTrait("security-context", &traits.SecurityContextHandler{})
 	return t
 }
 
