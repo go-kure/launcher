@@ -281,3 +281,19 @@ func TestSecurityContextHandler_NonPodSpecResourcesPassThrough(t *testing.T) {
 		t.Errorf("expected *corev1.ConfigMap, got %T", *resources[0])
 	}
 }
+
+func TestSecurityContextHandler_Error_NonIntegralFloat(t *testing.T) {
+	h := &traits.SecurityContextHandler{}
+	app := stack.NewApplication("svc", "ns", &deployStub{name: "svc", namespace: "ns"})
+	trait := &oam.Trait{
+		Type: "security-context",
+		Properties: map[string]any{
+			"psaLevel":  "baseline",
+			"runAsUser": float64(1000.5),
+		},
+	}
+	err := h.Apply(trait, app, newBundle())
+	if err == nil {
+		t.Fatal("expected error for non-integral float runAsUser, got nil")
+	}
+}

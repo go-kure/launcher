@@ -1,6 +1,8 @@
 package traits
 
 import (
+	"math"
+
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -296,6 +298,9 @@ func toInt64(v any) (int64, error) {
 	case int64:
 		return n, nil
 	case float64:
+		if n != math.Trunc(n) {
+			return 0, errors.Errorf("expected integer, got non-integral float %v", n)
+		}
 		return int64(n), nil
 	default:
 		return 0, errors.Errorf("expected integer, got %T", v)
