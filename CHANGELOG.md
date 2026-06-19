@@ -1,6 +1,31 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.7] - 2026-06-19
+
+### Dependencies
+
+- Bump the k8s-ecosystem group across 1 directory with 3 updates
+
+## [0.1.0-alpha.6] - 2026-06-19
+
+### Added
+
+- Add security-context OAM trait handler
+
+### Dependencies
+
+- Bump github.com/cloudnative-pg/plugin-barman-cloud
+- Bump github.com/backube/volsync from 0.15.0 to 0.16.0
+
+### Documentation
+
+- Reference security-context trait in build command README
+
+### Fixed
+
+- Reject non-integral float values in toInt64
+
 ## [0.1.0-alpha.5] - 2026-06-05
 
 ### Added
@@ -27,6 +52,10 @@ All notable changes to this project will be documented in this file.
 ### Testing
 
 - Cover oci auto health-check GVK + flux namespace
+
+### Release
+
+- V0.1.0-alpha.5
 
 ## [0.1.0-alpha.4] - 2026-06-03
 
