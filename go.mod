@@ -10,7 +10,7 @@ require (
 	github.com/cloudnative-pg/plugin-barman-cloud v0.13.0
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260213133823-31b0c7c37342
-	github.com/fluxcd/helm-controller/api v1.5.5
+	github.com/fluxcd/helm-controller/api v1.6.0
 	github.com/fluxcd/kustomize-controller/api v1.8.5
 	github.com/fluxcd/source-controller/api v1.8.5
 	github.com/go-kure/kure v0.2.0-beta.5
@@ -58,8 +58,8 @@ require (
 	github.com/fluxcd/image-automation-controller/api v1.1.4 // indirect
 	github.com/fluxcd/notification-controller/api v1.8.4 // indirect
 	github.com/fluxcd/pkg/apis/acl v0.9.0 // indirect
-	github.com/fluxcd/pkg/apis/kustomize v1.16.0 // indirect
-	github.com/fluxcd/pkg/apis/meta v1.26.0 // indirect
+	github.com/fluxcd/pkg/apis/kustomize v1.19.0 // indirect
+	github.com/fluxcd/pkg/apis/meta v1.30.0 // indirect
 	github.com/fluxcd/source-watcher/api/v2 v2.1.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
