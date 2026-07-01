@@ -47,7 +47,7 @@ jobs:
       docs: ${{ github.event_name == 'merge_group' && 'true' || steps.filter.outputs.docs }}
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
     - uses: dorny/paths-filter@v4
       if: github.event_name != 'merge_group'
       id: filter
@@ -83,7 +83,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Install build tools
       run: command -v make &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends make)
@@ -102,7 +102,7 @@ jobs:
         cache: false
 
     - name: Cache Go modules
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
@@ -166,7 +166,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Install build tools
       run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends build-essential
@@ -185,7 +185,7 @@ jobs:
         cache: false
 
     - name: Cache Go modules
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
@@ -234,7 +234,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Install build tools
       run: command -v make &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends make)
@@ -348,7 +348,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Read Go version from mise.toml
       id: go-version
@@ -427,7 +427,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Install build tools
       run: command -v make &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends make)
@@ -446,7 +446,7 @@ jobs:
         cache: false
 
     - name: Cache Go modules
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
@@ -477,7 +477,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Read Hugo version from mise.toml
       id: hugo-version
@@ -491,7 +491,7 @@ jobs:
 
     - name: Restore Hugo from cache
       id: hugo-cache
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ${{ runner.temp }}/hugo-bin
         key: hugo-${{ steps.hugo-version.outputs.version }}-linux-amd64
@@ -525,7 +525,7 @@ jobs:
 
     - name: Cache yq
       id: yq-cache
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/bin/yq
         key: yq-4.44.6-linux-amd64
@@ -553,7 +553,7 @@ jobs:
       run: bash scripts/gen-versions-toml.sh --version dev
 
     - name: Cache Hugo modules
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: |
           ${{ runner.temp }}/hugo_cache
@@ -578,7 +578,7 @@ jobs:
 
     - name: Cache lychee
       id: lychee-cache
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/bin/lychee
         key: lychee-0.24.2-linux-amd64
@@ -608,13 +608,13 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
     - name: Cache yq
       id: yq-cache
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/bin/yq
         key: yq-4.44.6-linux-amd64
@@ -680,7 +680,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Install build tools
       run: command -v make &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends make)
@@ -699,7 +699,7 @@ jobs:
         cache: false
 
     - name: Cache Go modules
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
@@ -747,7 +747,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
