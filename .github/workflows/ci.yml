@@ -252,30 +252,78 @@ jobs:
         go-version: ${{ steps.go-version.outputs.version }}
         cache: false
 
-    - name: Install govulncheck
-      run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+    - name: Install scan tools
+      run: |
+        go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+        command -v jq &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends jq)
 
     - name: Run govulncheck
+      env:
+        # Accepted-risk advisories: reachable under symbol scan but not exploitable in Launcher's use.
+        # Every entry MUST carry a justification.
+        # GO-2026-5377: privilege escalation in the external-secrets *controller* reconciler.
+        #   Launcher only imports the apis module to generate CRD manifests; reachable traces run
+        #   through generated deepcopy boilerplate and package registration/init paths, never a
+        #   reconciler. No upstream fix in the Go vuln DB (Fixed in: N/A), and the apis module is
+        #   untagged so no bump can clear it — see docs/github-workflows.md.
+        VULN_ALLOWLIST: "GO-2026-5377"
       run: |
         set +e
-        OUTPUT=$(govulncheck -scan package ./... 2>&1)
-        EXIT_CODE=$?
-        echo "$OUTPUT"
 
-        if [ $EXIT_CODE -ne 0 ]; then
-          {
-            echo "## :shield: govulncheck found vulnerabilities"
-            echo ""
-            echo '```'
-            echo "$OUTPUT"
-            echo '```'
-            echo ""
-            echo "**Fix:** Update the Go version or affected dependencies as indicated above."
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit $EXIT_CODE
-        else
-          echo ":white_check_mark: **govulncheck** — no vulnerabilities found" >> "$GITHUB_STEP_SUMMARY"
+        # Human-readable report for the log. This never gates the step (|| true): with a known
+        # allowlisted finding govulncheck exits non-zero, and the JSON gate below is the sole
+        # enforcement point.
+        govulncheck -scan symbol ./... || true
+
+        # Machine-readable scan for gating. In JSON mode govulncheck can exit 0 even with reachable
+        # findings, so its exit code is deliberately ignored.
+        govulncheck -scan symbol -format json ./... > govulncheck.json 2>govulncheck.err
+        if [ ! -s govulncheck.json ]; then
+          echo "::error::govulncheck produced no JSON output"
+          cat govulncheck.err
+          exit 1
         fi
+
+        # OSV IDs with at least one reachable symbol trace (i.e. actually affecting our code).
+        # Findings without a function-bearing frame are informational (required but not called).
+        printf '%s\n' "$VULN_ALLOWLIST" | tr ' ' '\n' | sed '/^$/d' | sort -u > allowed.txt
+        jq -r 'select(.finding? and any(.finding.trace[]?; .function != null)) | .finding.osv' \
+          govulncheck.json | sort -u > reachable.txt
+
+        # Split reachable advisories into accepted-risk vs must-fix buckets. grep exits 1 on
+        # "no match"; guarded with || true so an empty bucket is not treated as an error.
+        allowed_hit=$(grep -Fxf allowed.txt reachable.txt || true)
+        unallowed=$(grep -Fxvf allowed.txt reachable.txt || true)
+
+        {
+          echo "## :shield: govulncheck (symbol scan)"
+          echo ""
+          if [ -n "$allowed_hit" ]; then
+            echo "**Allowed reachable advisories (accepted risk):**"
+            echo '```'
+            echo "$allowed_hit"
+            echo '```'
+            echo ""
+          fi
+          if [ -n "$unallowed" ]; then
+            echo "**Unallowed reachable advisories:**"
+            echo '```'
+            echo "$unallowed"
+            echo '```'
+            echo ""
+            echo "**Fix:** update the Go version or affected dependencies, or add a justified entry to VULN_ALLOWLIST."
+          fi
+          if [ -z "$allowed_hit" ] && [ -z "$unallowed" ]; then
+            echo ":white_check_mark: no reachable vulnerabilities"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ -n "$unallowed" ]; then
+          echo "Unallowed reachable vulnerabilities found:"
+          echo "$unallowed"
+          exit 1
+        fi
+        echo "No unallowed reachable vulnerabilities (allowed: ${allowed_hit:-none})."
 
     - name: Check for outdated dependencies
       run: make outdated
@@ -347,7 +395,7 @@ jobs:
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v7
       with:
-        file: ./coverage/coverage.out
+        files: ./coverage/coverage.out
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: false
