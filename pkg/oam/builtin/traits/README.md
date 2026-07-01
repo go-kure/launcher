@@ -70,3 +70,9 @@ Custom traits implement `oam.TraitHandler` (`CanHandle` + `Apply`), optionally
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
 for the full config-field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
 for the interfaces, and `examples/` for runnable applications.
+
+## Conventions
+
+Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access
+modes, restart policies, etc.) rather than string literals — never re-define values
+that already exist upstream.
