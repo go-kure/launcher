@@ -121,6 +121,36 @@ func (t *Transformer) RegisterTrait(typeName string, h TraitHandler) {
 	t.traitHandlers[typeName] = h
 }
 
+// HandlerSchemaSet is the set of property schemas declared by registered handlers,
+// keyed by handler type name. Component and trait schemas are kept separate so a
+// component and a trait that share a type name do not collide, and so consumers
+// (crane's validator) know which registry a schema came from.
+type HandlerSchemaSet struct {
+	Components map[string]map[string]PropertySchema
+	Traits     map[string]map[string]PropertySchema
+}
+
+// HandlerSchemas returns the property schemas of every registered component and
+// trait handler that implements PropertySchemaProvider. Handlers that do not
+// implement it are omitted. The maps are always non-nil.
+func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
+	set := HandlerSchemaSet{
+		Components: make(map[string]map[string]PropertySchema),
+		Traits:     make(map[string]map[string]PropertySchema),
+	}
+	for name, h := range t.componentHandlers {
+		if p, ok := h.(PropertySchemaProvider); ok {
+			set.Components[name] = p.PropertySchema()
+		}
+	}
+	for name, h := range t.traitHandlers {
+		if p, ok := h.(PropertySchemaProvider); ok {
+			set.Traits[name] = p.PropertySchema()
+		}
+	}
+	return set
+}
+
 // RegisterPolicy registers a policy handler under the given type name.
 // Panics if typeName is already registered or if h.CanHandle(typeName) returns false.
 func (t *Transformer) RegisterPolicy(typeName string, h PolicyHandler) {

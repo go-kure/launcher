@@ -36,6 +36,16 @@ func (h *ConfigMapHandler) CanHandle(traitType string) bool {
 	return traitType == "configmap"
 }
 
+// PropertySchema declares the configmap trait's user-facing properties so crane
+// can validate them before invocation. `data` is an open map (escape hatch).
+func (h *ConfigMapHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"name":      {Type: oam.PropertyTypeString, Required: true},
+		"mountPath": {Type: oam.PropertyTypeString},
+		"data":      {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+	}
+}
+
 // ValidateAndApplyDefaults rejects any rendering key for this no-rendering trait.
 func (h *ConfigMapHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
 	if _, err := builtin.DecodeStrict[builtin.ConfigmapRendering](rendering); err != nil {

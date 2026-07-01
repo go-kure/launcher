@@ -7,7 +7,9 @@ types. Each handler parses a typed config from a component's `properties` and
 produces the corresponding Kubernetes resources via kure's builders. Handlers are
 registered with the transformer in `pkg/cmd/kurel` (`newBuiltinTransformer`), each
 mapping a component `type` string to a handler implementing `CanHandle` +
-`ToApplicationConfig`.
+`ToApplicationConfig`. Handlers may also implement `oam.PropertySchemaProvider`
+(`PropertySchema()`) to declare a constrained schema for their properties so crane can
+validate them before invocation — the `passthrough` handler is a worked example.
 
 ## Component types
 

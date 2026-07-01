@@ -28,6 +28,15 @@ func (h *PassthroughHandler) CanHandle(componentType string) bool {
 	return componentType == "passthrough"
 }
 
+// PropertySchema declares the passthrough component's properties. `object` is the
+// escape-hatch body emitted verbatim, so it is an open object (additionalProperties).
+func (h *PassthroughHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"object":        {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true},
+		"clusterScoped": {Type: oam.PropertyTypeBoolean, Default: false},
+	}
+}
+
 // ToApplicationConfig validates the passthrough properties and returns a PassthroughConfig.
 func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	props := component.Properties
