@@ -92,7 +92,7 @@ temporary branch — the merged result — before the PR is allowed to land.
 | `changes` | `detect-changes` | 2 min | — | Path filter: `go:` and `docs:` outputs control downstream jobs |
 | `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint; diff-based lint on PRs |
 | `test` | `test` | 25 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
-| `security` | `Security` | 10 min | changes | govulncheck, outdated deps check, sensitive file scan |
+| `security` | `Security` | 10 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches |
@@ -124,6 +124,15 @@ Runs on main and `release/*` branches only (not PRs):
 - **Cross-platform artifacts** — 5 binaries uploaded per main push (30-day retention)
 - **Skip draft PRs** — `if: github.event.pull_request.draft == false`
 - **make install guard** — every job that calls `make` installs it first (runner image lacks it)
+- **govulncheck allowlist** — the `Security` job runs `govulncheck -scan symbol -format json` and gates
+  on OSV IDs with a reachable symbol trace. A `jq` filter is the sole enforcement point (JSON mode can
+  exit 0 despite reachable findings), and accepted-risk advisories are listed in the step's
+  `VULN_ALLOWLIST` env with a justification per entry. The step summary reports allowed vs unallowed
+  reachable advisories separately, so accepted risk stays visible rather than looking clean.
+  - Currently allowlisted: `GO-2026-5377` (external-secrets controller privilege escalation). Launcher
+    only imports `external-secrets/apis` to generate CRD manifests; reachable traces are generated
+    deepcopy boilerplate and package init, never a reconciler. The apis module is untagged and the Go
+    vuln DB records no fixed version (`Fixed in: N/A`), so no dependency bump can clear it.
 
 ---
 
