@@ -7,6 +7,9 @@ handlers (e.g. `CertificateRendering`, `ExposeRendering`, `ExternalSecretRenderi
 `NetworkPolicyRendering`, `ConfigmapRendering`, `VolSyncRendering`) and the
 `DecodeStrict[T]` helper used by handlers to decode capability properties.
 
+`ExposeRendering` additionally carries `certManagerClusterIssuer` (platform-managed TLS on
+the ingress path) and `allowedHostnameWildcard` (hostname constraint for both paths).
+
 These are internal schema types used by [`builtin/components`](components) and
 [`builtin/traits`](traits); they are not a user-facing API. See
 [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin) for the

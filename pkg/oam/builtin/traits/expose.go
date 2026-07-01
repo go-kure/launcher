@@ -47,6 +47,9 @@ func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[
 		if r.IngressClassName != "" {
 			return nil, errors.New("expose rendering: ingressClassName is only valid when controllerType is \"ingress\"")
 		}
+		if r.CertManagerClusterIssuer != "" {
+			return nil, errors.New("expose rendering: certManagerClusterIssuer is only valid when controllerType is \"ingress\"")
+		}
 		if r.GatewayNamespace == "" {
 			rendering["gatewayNamespace"] = "gateway-system"
 		}
@@ -57,15 +60,41 @@ func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[
 }
 
 // Apply dispatches to IngressHandler or HTTPRouteHandler based on controllerType.
+// It also implements platform-managed TLS (ingress path) and hostname validation
+// (both paths), consuming the certManagerClusterIssuer/allowedHostnameWildcard
+// capability keys so they never leak into the low-level handlers.
 func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
 	controllerType, _ := trait.Properties["controllerType"].(string)
 	props := maps.Clone(trait.Properties)
 	delete(props, "controllerType")
-	modified := &oam.Trait{Type: "expose", Properties: props}
+
+	// Consume the platform capability keys; they are handled here, not downstream.
+	issuer, _ := props["certManagerClusterIssuer"].(string)
+	wildcard, _ := props["allowedHostnameWildcard"].(string)
+	delete(props, "certManagerClusterIssuer")
+	delete(props, "allowedHostnameWildcard")
+
 	switch controllerType {
 	case "ingress":
-		return (&IngressHandler{}).Apply(modified, app, bundle)
+		hosts := uniqueStrings(ruleHosts(props))
+		if err := validateHostnames(hosts, wildcard, app.Name); err != nil {
+			return err
+		}
+		// expose is platform-managed: the user does not author TLS.
+		delete(props, "tls")
+		if issuer != "" {
+			if err := setClusterIssuerAnnotation(props, issuer, app.Name); err != nil {
+				return err
+			}
+			if len(hosts) > 0 {
+				props["tls"] = synthesizedIngressTLS(hosts, app.Name)
+			}
+		}
+		return (&IngressHandler{}).Apply(&oam.Trait{Type: "expose", Properties: props}, app, bundle)
 	case "gateway":
+		if err := validateHostnames(hostnameList(props), wildcard, app.Name); err != nil {
+			return err
+		}
 		gatewayName, _ := props["gatewayName"].(string)
 		gatewayNamespace, _ := props["gatewayNamespace"].(string)
 		if gatewayNamespace == "" {
@@ -78,9 +107,71 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 			ref["namespace"] = gatewayNamespace
 		}
 		props["parentRefs"] = []any{ref}
-		modified = &oam.Trait{Type: "expose", Properties: props}
-		return (&HTTPRouteHandler{}).Apply(modified, app, bundle)
+		return (&HTTPRouteHandler{}).Apply(&oam.Trait{Type: "expose", Properties: props}, app, bundle)
 	default:
 		return errors.Errorf("expose trait: unsupported controllerType %q", controllerType)
 	}
+}
+
+// ruleHosts extracts the host of every entry in the ingress-style rules[] property.
+func ruleHosts(props map[string]any) []string {
+	var hosts []string
+	if rawRules, ok := props["rules"].([]any); ok {
+		for _, r := range rawRules {
+			if rm, ok := r.(map[string]any); ok {
+				if host, ok := rm["host"].(string); ok && host != "" {
+					hosts = append(hosts, host)
+				}
+			}
+		}
+	}
+	return hosts
+}
+
+// hostnameList extracts the gateway-style hostnames[] property.
+func hostnameList(props map[string]any) []string {
+	var hosts []string
+	if raw, ok := props["hostnames"].([]any); ok {
+		for _, h := range raw {
+			if s, ok := h.(string); ok && s != "" {
+				hosts = append(hosts, s)
+			}
+		}
+	}
+	return hosts
+}
+
+// setClusterIssuerAnnotation adds the platform cert-manager cluster-issuer
+// annotation. The platform value is authoritative: a conflicting user-supplied
+// value is rejected as a ValidationError.
+func setClusterIssuerAnnotation(props map[string]any, issuer, component string) error {
+	anns, _ := props["annotations"].(map[string]any)
+	if anns == nil {
+		anns = map[string]any{}
+	}
+	if existing, ok := anns[clusterIssuerAnnotation].(string); ok && existing != issuer {
+		return &errors.ValidationError{
+			Field:     "annotations." + clusterIssuerAnnotation,
+			Value:     existing,
+			Component: component,
+			Message: "annotation " + clusterIssuerAnnotation +
+				" is platform-managed by the expose trait and cannot be overridden",
+		}
+	}
+	anns[clusterIssuerAnnotation] = issuer
+	props["annotations"] = anns
+	return nil
+}
+
+// synthesizedIngressTLS builds the single managed TLS entry: all hosts under one
+// deterministic secretName (<component>-tls), for cert-manager's ingress-shim.
+func synthesizedIngressTLS(hosts []string, component string) []any {
+	anyHosts := make([]any, len(hosts))
+	for i, h := range hosts {
+		anyHosts[i] = h
+	}
+	return []any{map[string]any{
+		"hosts":      anyHosts,
+		"secretName": component + "-tls",
+	}}
 }
