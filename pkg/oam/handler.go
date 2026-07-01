@@ -24,6 +24,15 @@ type CapabilityAware interface {
 	CapabilityRequired() bool
 }
 
+// PropertySchemaProvider is an optional interface implemented by component and
+// trait handlers that declare a schema for their user-facing properties. crane's
+// validator consumes these schemas (via Transformer.HandlerSchemas) to validate a
+// component/trait's properties before the handler is invoked. Handlers that accept
+// arbitrary keys declare an open field with PropertySchema.AdditionalProperties.
+type PropertySchemaProvider interface {
+	PropertySchema() map[string]PropertySchema
+}
+
 // SourceDeduplicatable is an optional interface for ApplicationConfig types
 // that generate source CRDs (e.g. HelmRepository). The runtime uses it to
 // suppress duplicate source generation when multiple components share the

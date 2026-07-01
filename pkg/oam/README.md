@@ -49,7 +49,19 @@ parse → resolve parameters → transform (component + trait handlers) → mani
 | `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits). |
 | `PolicyHandler` | Enforce/validate policies (`Enforceable`, `PolicyResult`). |
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
+| `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
+
+## Property schemas
+
+Handlers may implement `PropertySchemaProvider` (`PropertySchema() map[string]PropertySchema`)
+to declare a constrained schema for their user-facing properties. `PropertySchema` is the
+richer sibling of `CapabilityPropertySchema`: `Type` (string/integer/boolean/number/array/object),
+`Required`, `Default`, `Enum`, nested `Properties`, `Items`, and `AdditionalProperties` (default
+false; escape-hatch fields set it true). `Transformer.HandlerSchemas()` returns a
+`HandlerSchemaSet{ Components, Traits }` of every registered handler that declares one, so crane's
+validator can check a component/trait's properties before the handler is invoked. Built-in
+examples: the `configmap` trait and the `passthrough` component.
 
 ## Capability system
 
