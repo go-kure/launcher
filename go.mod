@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/backube/volsync v0.16.0
-	github.com/cert-manager/cert-manager v1.20.2
+	github.com/cert-manager/cert-manager v1.20.3
 	github.com/cilium/cilium v1.19.5
 	github.com/cloudnative-pg/cloudnative-pg v1.29.1
 	github.com/cloudnative-pg/plugin-barman-cloud v0.13.0
