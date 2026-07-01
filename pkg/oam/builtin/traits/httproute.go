@@ -47,6 +47,16 @@ func (h *HTTPRouteHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 	return nil
 }
 
+// synthesizeParentRef builds a Gateway API parentRef map from a gateway name and
+// (optional) namespace, applying the "gateway-system" default. Shared by the
+// httproute trait's capability synthesis and the expose trait's gateway path.
+func synthesizeParentRef(name, namespace string) map[string]any {
+	if namespace == "" {
+		namespace = "gateway-system"
+	}
+	return map[string]any{"name": name, "namespace": namespace}
+}
+
 func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Application) (*HTTPRouteConfig, error) {
 	defaultPort := resolveDefaultPort(app)
 	config := &HTTPRouteConfig{
@@ -89,10 +99,18 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 		config.Scope = scope
 	}
 
-	// Required: parentRefs
+	// parentRefs: user-authored take precedence; otherwise synthesize a single ref
+	// from the gatewayName/gatewayNamespace capability fields (crane#235 D4). This
+	// is optional-capability: a plain httproute with an explicit parentRefs still
+	// works with no capability.
 	rawParentRefs, ok := props["parentRefs"].([]any)
 	if !ok || len(rawParentRefs) == 0 {
-		return nil, errors.New("required property 'parentRefs' missing or empty")
+		gatewayName, _ := props["gatewayName"].(string)
+		if gatewayName == "" {
+			return nil, errors.New("required property 'parentRefs' missing or empty (and no gatewayName capability to synthesize from)")
+		}
+		gatewayNamespace, _ := props["gatewayNamespace"].(string)
+		rawParentRefs = []any{synthesizeParentRef(gatewayName, gatewayNamespace)}
 	}
 	for i, rawRef := range rawParentRefs {
 		refMap, ok := rawRef.(map[string]any)

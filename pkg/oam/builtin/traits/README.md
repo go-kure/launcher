@@ -18,7 +18,7 @@ constrained schema for their properties so crane can validate them before invoca
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `ingress` | Ingress | `rules[]` (`host`, `paths[]`), `ingressClassName`, `tls[]`, `annotations` |
-| `httproute` | Gateway API HTTPRoute | `parentRefs[]`, `rules[]` (`matches`/`backendRefs`/`filters`/`timeouts`), `hostnames[]` |
+| `httproute` | Gateway API HTTPRoute | `rules[]` (`matches`/`backendRefs`/`filters`/`timeouts`), `hostnames[]`; `parentRefs[]` optional — synthesized from the `gatewayName`/`gatewayNamespace` capability when omitted |
 | `expose` | Ingress **or** HTTPRoute | `rules[]`, `hostnames[]` — controller chosen by ClusterProfile (`controllerType`) |
 | `networkpolicy` | NetworkPolicy | `ingress[]`/`egress[]` (`from`/`to`, `ports`) |
 | `cilium-networkpolicy` | CiliumNetworkPolicy | `name`, `endpointSelector`, `ingress`/`egress` (raw Cilium rules) |

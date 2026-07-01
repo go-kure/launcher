@@ -97,16 +97,9 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 		}
 		gatewayName, _ := props["gatewayName"].(string)
 		gatewayNamespace, _ := props["gatewayNamespace"].(string)
-		if gatewayNamespace == "" {
-			gatewayNamespace = "gateway-system"
-		}
 		delete(props, "gatewayName")
 		delete(props, "gatewayNamespace")
-		ref := map[string]any{"name": gatewayName}
-		if gatewayNamespace != "" {
-			ref["namespace"] = gatewayNamespace
-		}
-		props["parentRefs"] = []any{ref}
+		props["parentRefs"] = []any{synthesizeParentRef(gatewayName, gatewayNamespace)}
 		return (&HTTPRouteHandler{}).Apply(&oam.Trait{Type: "expose", Properties: props}, app, bundle)
 	default:
 		return errors.Errorf("expose trait: unsupported controllerType %q", controllerType)
