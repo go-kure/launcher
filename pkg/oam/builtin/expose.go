@@ -19,4 +19,15 @@ type ExposeRendering struct {
 	// GatewayNamespace is the namespace of the Gateway resource.
 	// Optional when ControllerType is "gateway"; defaults to "gateway-system".
 	GatewayNamespace string `yaml:"gatewayNamespace,omitempty" json:"gatewayNamespace,omitempty"`
+
+	// CertManagerClusterIssuer, when set, enables platform-managed TLS on the
+	// ingress path: expose emits the cert-manager.io/cluster-issuer annotation and
+	// a synthesized spec.tls[] entry derived from the rule hosts. Empty disables
+	// managed TLS (plain HTTP). Ingress-only.
+	CertManagerClusterIssuer string `yaml:"certManagerClusterIssuer,omitempty" json:"certManagerClusterIssuer,omitempty"`
+
+	// AllowedHostnameWildcard, when set (e.g. "*.apps.example.com"), constrains the
+	// user-supplied hostnames on both the ingress and gateway paths. Empty skips
+	// hostname validation.
+	AllowedHostnameWildcard string `yaml:"allowedHostnameWildcard,omitempty" json:"allowedHostnameWildcard,omitempty"`
 }

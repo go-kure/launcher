@@ -242,6 +242,18 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 		config.Rules = append(config.Rules, rule)
 	}
 
+	// Optional platform constraint (from capability rendering when used directly;
+	// the expose trait validates and strips this before delegating here).
+	if wildcard, ok := props["allowedHostnameWildcard"].(string); ok && wildcard != "" {
+		hosts := make([]string, 0, len(config.Rules))
+		for _, r := range config.Rules {
+			hosts = append(hosts, r.Host)
+		}
+		if err := validateHostnames(hosts, wildcard, app.Name); err != nil {
+			return nil, err
+		}
+	}
+
 	if rawTLS, ok := props["tls"].([]any); ok {
 		for i, rawEntry := range rawTLS {
 			entry, ok := rawEntry.(map[string]any)

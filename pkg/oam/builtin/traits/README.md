@@ -53,6 +53,13 @@ These require (or optionally use) a `ClusterProfile` capability, so the platform
 not the app — chooses the implementation:
 
 - **expose** → `controllerType` (ingress vs gateway) + gateway/ingress details.
+  On the **ingress** path, expose is platform-managed for TLS: it derives `spec.tls[]`
+  from the rule hosts under a deterministic `<component>-tls` secret and emits the
+  `cert-manager.io/cluster-issuer` annotation from the `certManagerClusterIssuer`
+  capability field (empty ⇒ managed TLS disabled). Users do **not** author TLS on the
+  expose trait (use the low-level `ingress` trait for full TLS control). Both paths
+  validate user hostnames against the `allowedHostnameWildcard` capability field (empty ⇒
+  no validation); a violation is a `ValidationError`.
 - **certificate** → `issuerRef` (cert-manager issuer/cluster-issuer).
 - **external-secret** → `secretStoreRef` (or the inline `provider` shorthand).
 
