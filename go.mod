@@ -10,9 +10,9 @@ require (
 	github.com/cloudnative-pg/plugin-barman-cloud v0.13.0
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260630123415-dfb816dacc15
-	github.com/fluxcd/helm-controller/api v1.5.5
-	github.com/fluxcd/kustomize-controller/api v1.8.5
-	github.com/fluxcd/source-controller/api v1.8.5
+	github.com/fluxcd/helm-controller/api v1.6.1
+	github.com/fluxcd/kustomize-controller/api v1.9.1
+	github.com/fluxcd/source-controller/api v1.9.1
 	github.com/go-kure/kure v0.2.0-beta.5
 	github.com/google/go-containerregistry v0.21.6
 	github.com/spf13/cobra v1.10.2
@@ -57,12 +57,12 @@ require (
 	github.com/extism/go-sdk v1.7.1 // indirect
 	github.com/fluxcd/image-automation-controller/api v1.1.4 // indirect
 	github.com/fluxcd/notification-controller/api v1.8.4 // indirect
-	github.com/fluxcd/pkg/apis/acl v0.9.0 // indirect
-	github.com/fluxcd/pkg/apis/kustomize v1.16.0 // indirect
-	github.com/fluxcd/pkg/apis/meta v1.26.0 // indirect
+	github.com/fluxcd/pkg/apis/acl v0.10.0 // indirect
+	github.com/fluxcd/pkg/apis/kustomize v1.19.1 // indirect
+	github.com/fluxcd/pkg/apis/meta v1.30.1 // indirect
 	github.com/fluxcd/source-watcher/api/v2 v2.1.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -173,7 +173,7 @@ require (
 	k8s.io/cli-runtime v0.36.0 // indirect
 	k8s.io/client-go v0.36.2 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
-	k8s.io/kube-openapi v0.0.0-20260502001324-b7f5293f4787 // indirect
+	k8s.io/kube-openapi v0.0.0-20260603220949-865597e52e25 // indirect
 	k8s.io/streaming v0.36.2 // indirect
 	k8s.io/utils v0.0.0-20260507154919-ff6756f316d2 // indirect
 	oras.land/oras-go/v2 v2.6.0 // indirect
