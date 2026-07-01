@@ -2,6 +2,7 @@ package traits
 
 import (
 	"github.com/go-kure/kure/pkg/stack"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -11,10 +12,10 @@ import (
 )
 
 var validPVCAccessModes = map[string]bool{
-	"ReadWriteOnce":    true,
-	"ReadOnlyMany":     true,
-	"ReadWriteMany":    true,
-	"ReadWriteOncePod": true,
+	string(corev1.ReadWriteOnce):    true,
+	string(corev1.ReadOnlyMany):     true,
+	string(corev1.ReadWriteMany):    true,
+	string(corev1.ReadWriteOncePod): true,
 }
 
 // PVCHandler handles OAM pvc traits, generating a standalone PersistentVolumeClaim.
@@ -60,7 +61,7 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 		storageClass = s
 	}
 
-	accessModes := []string{"ReadWriteOnce"}
+	accessModes := []string{string(corev1.ReadWriteOnce)}
 	if rawModes, ok := props["accessModes"].([]any); ok {
 		if len(rawModes) == 0 {
 			return nil, errors.New("accessModes must not be empty when specified")

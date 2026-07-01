@@ -54,9 +54,9 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	config.RestartPolicy = corev1.RestartPolicyOnFailure
 	if rp, ok := props["restartPolicy"].(string); ok {
 		switch rp {
-		case "Never":
+		case string(corev1.RestartPolicyNever):
 			config.RestartPolicy = corev1.RestartPolicyNever
-		case "OnFailure":
+		case string(corev1.RestartPolicyOnFailure):
 			config.RestartPolicy = corev1.RestartPolicyOnFailure
 		default:
 			return nil, errors.Errorf("invalid restartPolicy %q, must be 'Never' or 'OnFailure'", rp)

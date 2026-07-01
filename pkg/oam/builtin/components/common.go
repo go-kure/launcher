@@ -632,7 +632,7 @@ func parseAccessModes(m map[string]any) ([]string, error) {
 			return result, nil
 		}
 	}
-	return []string{"ReadWriteOnce"}, nil
+	return []string{string(corev1.ReadWriteOnce)}, nil
 }
 
 func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
