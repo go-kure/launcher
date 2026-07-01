@@ -65,3 +65,9 @@ Custom component types implement `oam.ComponentHandler` (`CanHandle` +
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
 for the full type/field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
 for the handler interfaces, and `examples/` for runnable applications.
+
+## Conventions
+
+Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access
+modes, restart policies, etc.) rather than string literals — never re-define values
+that already exist upstream.
