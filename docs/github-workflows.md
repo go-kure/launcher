@@ -252,7 +252,7 @@ Secrets: `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY` (kure-release-bot GitHub Ap
 
 ### Triggers
 
-- Manual dispatch with inputs: `type` (alpha/beta/rc/stable/bump), `scope` (minor/major),
+- Manual dispatch with inputs: `type` (alpha/beta/rc/stable/bump), `scope` (minor/major/prerelease),
   `dry_run` (default: false)
 
 ### Purpose
