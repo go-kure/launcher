@@ -2,7 +2,7 @@
 
 This document provides an overview of all GitHub Actions workflows used in the launcher project.
 
-**Last Updated:** 2026-06-02
+**Last Updated:** 2026-07-02
 
 ---
 
