@@ -109,6 +109,24 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-gomod-
 
+    # Source-aware Go build cache (distinct job prefix so lint and test don't overwrite
+    # each other's entry). See the test job for the design rationale.
+    - name: Restore Go build cache
+      id: gocache
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-validate-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-${{ hashFiles('**/*.go', 'go.mod', 'go.sum', 'Makefile', '**/testdata/**') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-validate-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-validate-
+
+    - name: Log Go build cache restore
+      run: |
+        echo "cache-hit=${{ steps.gocache.outputs.cache-hit }}"
+        echo "primary-key=${{ steps.gocache.outputs.cache-primary-key }}"
+        echo "matched-key=${{ steps.gocache.outputs.cache-matched-key }}"
+
     - name: Install dependencies
       run: make deps
 
@@ -151,6 +169,13 @@ jobs:
           make lint
         fi
 
+    - name: Save Go build cache
+      if: success() && steps.gocache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ steps.gocache.outputs.cache-primary-key }}
+
   # =============================================================================
   # Stage 2: Tests and Security (parallel with lint)
   # =============================================================================
@@ -192,6 +217,25 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-gomod-
 
+    # Source-aware Go build cache. Warmed on push-to-main (main-scoped, restorable by both
+    # PR and merge_group runs); restore-keys fall back deps-first then job-prefix. Split
+    # restore/save so we can log exact vs fallback via cache-matched-key.
+    - name: Restore Go build cache
+      id: gocache
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-test-race-cover-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-${{ hashFiles('**/*.go', 'go.mod', 'go.sum', 'Makefile', '**/testdata/**') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-test-race-cover-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-test-race-cover-
+
+    - name: Log Go build cache restore
+      run: |
+        echo "cache-hit=${{ steps.gocache.outputs.cache-hit }}"
+        echo "primary-key=${{ steps.gocache.outputs.cache-primary-key }}"
+        echo "matched-key=${{ steps.gocache.outputs.cache-matched-key }}"
+
     - name: Install dependencies
       run: make deps
 
@@ -200,6 +244,15 @@ jobs:
         set -euo pipefail
         mkdir -p coverage
         go test -v -race -coverprofile=coverage/coverage.out -covermode=atomic -timeout 5m ./... 2>&1 | tee /tmp/gotest.log
+
+    # Save only on non-exact restore (fallback/miss) and only if the run succeeded, so a
+    # broken build never publishes a cache. Refreshes the per-tree entry for main-warming.
+    - name: Save Go build cache
+      if: success() && steps.gocache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ steps.gocache.outputs.cache-primary-key }}
 
     - name: Upload test log
       uses: actions/upload-artifact@v7
@@ -251,6 +304,32 @@ jobs:
       with:
         go-version: ${{ steps.go-version.outputs.version }}
         cache: false
+
+    - name: Cache Go modules
+      uses: actions/cache@v6
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-gomod-
+
+    # Source-aware Go build cache. govulncheck's symbol scan compiles the whole program,
+    # so a warm build cache cuts this job materially (it had no caching before).
+    - name: Restore Go build cache
+      id: gocache
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-security-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-${{ hashFiles('**/*.go', 'go.mod', 'go.sum', 'Makefile', '**/testdata/**') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-security-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-security-
+
+    - name: Log Go build cache restore
+      run: |
+        echo "cache-hit=${{ steps.gocache.outputs.cache-hit }}"
+        echo "primary-key=${{ steps.gocache.outputs.cache-primary-key }}"
+        echo "matched-key=${{ steps.gocache.outputs.cache-matched-key }}"
 
     - name: Install scan tools
       run: |
@@ -324,6 +403,13 @@ jobs:
           exit 1
         fi
         echo "No unallowed reachable vulnerabilities (allowed: ${allowed_hit:-none})."
+
+    - name: Save Go build cache
+      if: success() && steps.gocache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ steps.gocache.outputs.cache-primary-key }}
 
     - name: Check for outdated dependencies
       run: make outdated
@@ -453,11 +539,35 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-gomod-
 
+    # Source-aware Go build cache (build prefix, shared with cross-platform per-arch).
+    - name: Restore Go build cache
+      id: gocache
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-${{ hashFiles('**/*.go', 'go.mod', 'go.sum', 'Makefile', '**/testdata/**') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-
+
+    - name: Log Go build cache restore
+      run: |
+        echo "cache-hit=${{ steps.gocache.outputs.cache-hit }}"
+        echo "primary-key=${{ steps.gocache.outputs.cache-primary-key }}"
+        echo "matched-key=${{ steps.gocache.outputs.cache-matched-key }}"
+
     - name: Install dependencies
       run: make deps
 
     - name: Build kurel
       run: make build-kurel
+
+    - name: Save Go build cache
+      if: success() && steps.gocache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ steps.gocache.outputs.cache-primary-key }}
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v7
@@ -706,6 +816,25 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-gomod-
 
+    # Source-aware Go build cache, scoped per target arch (cross-compiled arm64 artifacts
+    # differ from amd64, so matrix.arch is part of the key — runner.arch is the host arch
+    # and is identical across legs).
+    - name: Restore Go build cache
+      id: gocache
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-${{ matrix.os }}-${{ matrix.arch }}-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-${{ hashFiles('**/*.go', 'go.mod', 'go.sum', 'Makefile', '**/testdata/**') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-${{ matrix.os }}-${{ matrix.arch }}-deps-${{ hashFiles('go.mod', 'go.sum') }}-src-
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-build-${{ matrix.os }}-${{ matrix.arch }}-
+
+    - name: Log Go build cache restore
+      run: |
+        echo "cache-hit=${{ steps.gocache.outputs.cache-hit }}"
+        echo "primary-key=${{ steps.gocache.outputs.cache-primary-key }}"
+        echo "matched-key=${{ steps.gocache.outputs.cache-matched-key }}"
+
     - name: Install dependencies
       run: make deps
 
@@ -727,6 +856,13 @@ jobs:
         mkdir -p bin
         go build -ldflags="-s -w -X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.BuildTime=${BUILD_TIME}" \
           -o bin/kurel-${{ matrix.os }}-${{ matrix.arch }}${EXT} ./cmd/kurel
+
+    - name: Save Go build cache
+      if: success() && steps.gocache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ steps.gocache.outputs.cache-primary-key }}
 
     - name: Upload cross-platform artifacts
       uses: actions/upload-artifact@v7

@@ -345,17 +345,60 @@ GO_VER=$(grep '^go = ' mise.toml | sed 's/go = "\(.*\)"/\1/')
 
 ### Caching
 
-Module and build caches use explicit `actions/cache@v5` steps with `cache: false` on `setup-go`:
+`setup-go` runs with `cache: false`; caching is done with explicit `actions/cache` steps.
+The runners are ephemeral ARC pods, so nothing on disk survives between jobs — everything
+useful must round-trip through the cache server.
+
+**Module cache** (dependency-only, one combined step per Go job):
 
 ```yaml
 - name: Cache Go modules
-  uses: actions/cache@v5
+  uses: actions/cache@v6
   with:
     path: ~/go/pkg/mod
     key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
     restore-keys: |
       ${{ runner.os }}-gomod-
 ```
+
+**Go build cache** (`~/.cache/go-build`) uses split `actions/cache/restore` + `actions/cache/save`
+so the log can show exact vs fallback restore (`cache-matched-key`). The key is **source-aware**
+and **split by job purpose** so `validate` (non-race) and `test` (race+coverage) never overwrite
+each other's entry:
+
+```yaml
+- name: Restore Go build cache
+  id: gocache
+  uses: actions/cache/restore@v6
+  with:
+    path: ~/.cache/go-build
+    key: ${{ runner.os }}-${{ runner.arch }}-go-<GOVER>-gocache-<purpose>-deps-<go.sum hash>-src-<source hash>
+    restore-keys: |
+      ${{ runner.os }}-${{ runner.arch }}-go-<GOVER>-gocache-<purpose>-deps-<go.sum hash>-src-
+      ${{ runner.os }}-${{ runner.arch }}-go-<GOVER>-gocache-<purpose>-
+# ... compile / test ...
+- name: Save Go build cache
+  if: success() && steps.gocache.outputs.cache-hit != 'true'
+  uses: actions/cache/save@v6
+  with:
+    path: ~/.cache/go-build
+    key: ${{ steps.gocache.outputs.cache-primary-key }}
+```
+
+Purpose prefixes: `gocache-validate-`, `gocache-test-race-cover-`, `gocache-security-`,
+`gocache-build-` (the `cross-platform` job adds `<os>-<arch>` because cross-compiled artifacts
+differ per target). The source hash covers `**/*.go`, `go.mod`, `go.sum`, `Makefile`, and
+`**/testdata/**`. The save runs only on a non-exact (fallback/miss) restore and only when the
+run succeeded, so a broken build never publishes a cache.
+
+**Cross-ref scoping caveat.** GitHub caches are ref-scoped: a `pull_request` cache lives on
+`refs/pull/N/merge` and is **not** visible to the `merge_group` (merge-queue) run — verified
+empirically. The only scope both PR and queue runs can read is the default branch (`main`).
+So these caches are warmed by push-to-main runs; a code-changing PR and its queue run restore
+main's cache via **restore-key fallback** (not an exact hit) and Go reuses unchanged package
+entries internally. This lowers the absolute cost of both runs but does **not** deduplicate the
+PR↔queue build — that duplication is inherent to the merge queue and cannot be removed with
+GitHub-scoped caches.
 
 Cache and artifact traffic routes through an in-cluster cache server. Setting
 `ACTIONS_RESULTS_URL` in the workflow `env:` block ensures upload/download-artifact and
