@@ -69,6 +69,54 @@ jobs:
             - '.github/workflows/ci.yml'
 
   # =============================================================================
+  # TEMPORARY — cache-scope probe (Step 0A). REVERT after reading results.
+  # Question: can a merge_group (queue) run restore a cache saved by the
+  # pull_request run? Uses a fixed key so every event references the same string.
+  # Expected: PR run saves (scoped to refs/pull/N/merge); merge_group MISSES
+  # (queue ref can only read its own ref + base + default branch main, never the
+  # PR ref). Not a required check; not in the build gate — does not block merges.
+  # =============================================================================
+
+  cache-scope-probe:
+    name: cache-scope-probe
+    runs-on: autops-kube-kure
+    timeout-minutes: 3
+    steps:
+    - name: Prepare probe payload dir
+      run: mkdir -p /tmp/cache-probe
+
+    - name: Restore probe cache
+      id: probe
+      uses: actions/cache/restore@v6
+      with:
+        path: /tmp/cache-probe
+        key: cache-scope-probe-v1
+
+    - name: Report probe result
+      run: |
+        echo "event=${{ github.event_name }}"
+        echo "ref=${{ github.ref }}"
+        echo "cache-hit=${{ steps.probe.outputs.cache-hit }}"
+        echo "matched-key=${{ steps.probe.outputs.cache-matched-key }}"
+        if [ -f /tmp/cache-probe/saved-by.txt ]; then
+          echo "RESTORED payload — originally saved by:"
+          cat /tmp/cache-probe/saved-by.txt
+        else
+          echo "NO payload restored (cache miss)"
+        fi
+
+    - name: Write payload (only on miss)
+      if: steps.probe.outputs.cache-hit != 'true'
+      run: echo "event=${{ github.event_name }} ref=${{ github.ref }} sha=${{ github.sha }} run=${{ github.run_id }}" > /tmp/cache-probe/saved-by.txt
+
+    - name: Save probe cache (only on miss)
+      if: success() && steps.probe.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: /tmp/cache-probe
+        key: cache-scope-probe-v1
+
+  # =============================================================================
   # Stage 1: Fast Validation
   # =============================================================================
 
