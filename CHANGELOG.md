@@ -1,6 +1,37 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.8] - 2026-07-02
+
+### Added
+
+- Property-schema vocabulary + handler-schema interface
+- Platform-managed TLS + hostname validation
+- Synthesise parentRefs from capability
+- Add prerelease bump scope
+
+### Dependencies
+
+- Bump external-secrets/apis to latest pseudo-version
+- Bump github.com/cilium/cilium from 1.19.4 to 1.19.5
+- Bump github.com/google/go-containerregistry
+- Bump github.com/cert-manager/cert-manager
+- Bump sigs.k8s.io/gateway-api from 1.5.1 to 1.6.0
+- Bump github.com/cloudnative-pg/cloudnative-pg
+- Adopt Flux 2.9 API set + kure v0.2.0-beta.6
+
+### Documentation
+
+- Note k8s.io/api constant convention
+
+### Fixed
+
+- Use k8s.io/api constants for well-known K8s values
+
+### Performance
+
+- Source-aware Go build cache, split by job purpose
+
 ## [0.1.0-alpha.7] - 2026-06-19
 
 ### Dependencies
