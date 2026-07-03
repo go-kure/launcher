@@ -1,6 +1,21 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.9] - 2026-07-03
+
+### Added
+
+- Add PropertySchema() to rc.1 public built-in handlers
+
+### Changed
+
+- Give resources requests/limits independent sub-maps
+
+### Documentation
+
+- Refresh github-workflows.md Last Updated date
+- Note shared handler registration and property schemas
+
 ## [0.1.0-alpha.8] - 2026-07-02
 
 ### Added
@@ -31,6 +46,10 @@ All notable changes to this project will be documented in this file.
 ### Performance
 
 - Source-aware Go build cache, split by job purpose
+
+### Release
+
+- V0.1.0-alpha.8
 
 ## [0.1.0-alpha.7] - 2026-06-19
 
