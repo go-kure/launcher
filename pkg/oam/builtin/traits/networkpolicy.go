@@ -33,6 +33,54 @@ func (h *NetworkPolicyHandler) ValidateAndApplyDefaults(rendering map[string]any
 	return rendering, nil
 }
 
+// PropertySchema declares the networkpolicy trait's user-facing properties.
+func (h *NetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
+	labelSelector := oam.PropertySchema{
+		Type: oam.PropertyTypeObject,
+		Properties: map[string]oam.PropertySchema{
+			"matchLabels": {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+		},
+	}
+	peer := oam.PropertySchema{
+		Type: oam.PropertyTypeObject,
+		Properties: map[string]oam.PropertySchema{
+			"podSelector":       labelSelector,
+			"namespaceSelector": labelSelector,
+			"ipBlock": {
+				Type: oam.PropertyTypeObject,
+				Properties: map[string]oam.PropertySchema{
+					"cidr":   {Type: oam.PropertyTypeString, Required: true},
+					"except": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
+				},
+			},
+		},
+	}
+	// port is an int-or-string union, so the port item is kept open beyond `protocol`.
+	port := oam.PropertySchema{
+		Type:                 oam.PropertyTypeObject,
+		AdditionalProperties: true,
+		Properties: map[string]oam.PropertySchema{
+			"protocol": {Type: oam.PropertyTypeString, Default: "TCP", Enum: []any{"TCP", "UDP", "SCTP"}},
+		},
+	}
+	peerList := func(dir string) oam.PropertySchema {
+		return oam.PropertySchema{
+			Type: oam.PropertyTypeArray,
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject,
+				Properties: map[string]oam.PropertySchema{
+					dir:     {Type: oam.PropertyTypeArray, Items: &peer},
+					"ports": {Type: oam.PropertyTypeArray, Items: &port},
+				},
+			},
+		}
+	}
+	return map[string]oam.PropertySchema{
+		"ingress": peerList("from"),
+		"egress":  peerList("to"),
+	}
+}
+
 // Apply creates a NetworkPolicy resource appended to the bundle.
 func (h *NetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
 	config, err := h.parseProperties(trait.Properties, app)

@@ -16,6 +16,16 @@ type CRDHandler struct{}
 
 func (h *CRDHandler) CanHandle(componentType string) bool { return componentType == "crd" }
 
+// PropertySchema declares the crd component's properties. Exactly one of
+// `inline` (raw CRD YAML) / `url` is required — the one-of rule is enforced in
+// parseManifestSource and is not expressible in the schema vocabulary.
+func (h *CRDHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"inline": {Type: oam.PropertyTypeString},
+		"url":    {Type: oam.PropertyTypeString},
+	}
+}
+
 func (h *CRDHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	src, err := parseManifestSource(component.Properties)
 	if err != nil {

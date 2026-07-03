@@ -29,6 +29,27 @@ func (h *VolSyncHandler) ValidateAndApplyDefaults(rendering map[string]any) (map
 	return rendering, nil
 }
 
+// PropertySchema declares the volsync trait's user-facing properties.
+func (h *VolSyncHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"sourcePVC":               {Type: oam.PropertyTypeString, Required: true},
+		"schedule":                {Type: oam.PropertyTypeString, Required: true},
+		"repository":              {Type: oam.PropertyTypeString},
+		"copyMethod":              {Type: oam.PropertyTypeString, Default: "Snapshot", Enum: []any{"Snapshot", "Direct", "Clone"}},
+		"storageClassName":        {Type: oam.PropertyTypeString},
+		"volumeSnapshotClassName": {Type: oam.PropertyTypeString},
+		"pruneIntervalDays":       {Type: oam.PropertyTypeInteger, Default: 14},
+		"retain": {
+			Type: oam.PropertyTypeObject,
+			Properties: map[string]oam.PropertySchema{
+				"daily":   {Type: oam.PropertyTypeInteger, Default: 7},
+				"weekly":  {Type: oam.PropertyTypeInteger, Default: 4},
+				"monthly": {Type: oam.PropertyTypeInteger, Default: 3},
+			},
+		},
+	}
+}
+
 // Apply creates a VolSync ReplicationSource resource appended to the bundle.
 func (h *VolSyncHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
 	config, err := h.parseProperties(trait.Properties, app)

@@ -18,6 +18,27 @@ type ManifestsHandler struct{}
 
 func (h *ManifestsHandler) CanHandle(componentType string) bool { return componentType == "manifests" }
 
+// PropertySchema declares the manifests component's properties. Exactly one of
+// `inline` (raw multi-doc YAML) / `url` is required (enforced in
+// parseManifestSource); `scopeOverrides` supplies scope for unknown kinds.
+func (h *ManifestsHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"inline": {Type: oam.PropertyTypeString},
+		"url":    {Type: oam.PropertyTypeString},
+		"scopeOverrides": {
+			Type: oam.PropertyTypeArray,
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject,
+				Properties: map[string]oam.PropertySchema{
+					"apiVersion": {Type: oam.PropertyTypeString, Required: true},
+					"kind":       {Type: oam.PropertyTypeString, Required: true},
+					"scope":      {Type: oam.PropertyTypeString, Required: true, Enum: []any{"Cluster", "Namespaced"}},
+				},
+			},
+		},
+	}
+}
+
 func (h *ManifestsHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	overrides, srcProps, err := parseScopeOverrides(component.Properties)
 	if err != nil {

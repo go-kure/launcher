@@ -20,6 +20,25 @@ func (h *WebserviceHandler) CanHandle(componentType string) bool {
 	return componentType == "webservice"
 }
 
+// PropertySchema declares the webservice component's user-facing properties.
+func (h *WebserviceHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"image":          {Type: oam.PropertyTypeString, Required: true},
+		"port":           {Type: oam.PropertyTypeInteger, Default: 80},
+		"replicas":       {Type: oam.PropertyTypeInteger, Default: 1},
+		"topologySpread": {Type: oam.PropertyTypeBoolean, Default: true},
+		"env":            schemaEnv(),
+		"resources":      schemaResources(),
+		"command":        schemaStringArray(),
+		"args":           schemaStringArray(),
+		"probes":         schemaProbes(),
+		"volumes":        schemaVolumes(),
+		"initContainers": schemaContainers(),
+		"sidecars":       schemaContainers(),
+		"affinity":       schemaAffinity(),
+	}
+}
+
 // ToApplicationConfig converts an OAM webservice component to a WebserviceConfig.
 func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &WebserviceConfig{

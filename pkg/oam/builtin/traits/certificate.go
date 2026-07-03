@@ -44,6 +44,24 @@ func (h *CertificateHandler) ValidateAndApplyDefaults(rendering map[string]any) 
 	return rendering, nil
 }
 
+// PropertySchema declares the certificate trait's user-facing properties.
+func (h *CertificateHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"secretName": {Type: oam.PropertyTypeString, Required: true},
+		"issuerRef": {
+			Type:     oam.PropertyTypeObject,
+			Required: true,
+			Properties: map[string]oam.PropertySchema{
+				"name": {Type: oam.PropertyTypeString, Required: true},
+				"kind": {Type: oam.PropertyTypeString, Default: "ClusterIssuer"},
+			},
+		},
+		"dnsNames":    {Type: oam.PropertyTypeArray, Required: true, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
+		"duration":    {Type: oam.PropertyTypeString, Default: "2160h"},
+		"renewBefore": {Type: oam.PropertyTypeString, Default: "360h"},
+	}
+}
+
 // Apply creates a cert-manager Certificate resource appended to the bundle.
 func (h *CertificateHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
 	config, err := h.parseProperties(trait.Properties, app)

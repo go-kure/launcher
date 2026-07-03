@@ -19,6 +19,25 @@ func (h *PostBuildHandler) CanHandle(traitType string) bool {
 	return traitType == "fluxcd-postbuild"
 }
 
+// PropertySchema declares the fluxcd-postbuild trait's user-facing properties.
+// `substitute` is an open map of string→string.
+func (h *PostBuildHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"substitute": {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+		"substituteFrom": {
+			Type: oam.PropertyTypeArray,
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject,
+				Properties: map[string]oam.PropertySchema{
+					"kind":     {Type: oam.PropertyTypeString, Required: true, Enum: []any{"ConfigMap", "Secret"}},
+					"name":     {Type: oam.PropertyTypeString, Required: true},
+					"optional": {Type: oam.PropertyTypeBoolean},
+				},
+			},
+		},
+	}
+}
+
 // Apply decodes the postBuild properties and sets bundle.PostBuild.
 func (h *PostBuildHandler) Apply(trait *oam.Trait, _ *stack.Application, bundle *stack.Bundle) error {
 	pb := &stack.PostBuild{}

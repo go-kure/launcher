@@ -28,6 +28,27 @@ func (h *HelmchartHandler) CanHandle(componentType string) bool {
 	return componentType == "helmchart"
 }
 
+// PropertySchema declares the helmchart component's user-facing properties. The
+// Helm `values` tree and the Flux-shaped source/driftDetection/install/upgrade
+// blocks are kept open (AdditionalProperties) rather than modeled field-by-field.
+func (h *HelmchartHandler) PropertySchema() map[string]oam.PropertySchema {
+	openObject := oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}
+	return map[string]oam.PropertySchema{
+		"chart":           {Type: oam.PropertyTypeString},
+		"version":         {Type: oam.PropertyTypeString},
+		"delivery":        {Type: oam.PropertyTypeString, Default: "native", Enum: []any{"native", "template"}},
+		"interval":        {Type: oam.PropertyTypeString},
+		"releaseName":     {Type: oam.PropertyTypeString},
+		"targetNamespace": {Type: oam.PropertyTypeString},
+		"source":          {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true},
+		"values":          openObject,
+		"driftDetection":  openObject,
+		"install":         openObject,
+		"upgrade":         openObject,
+		"valuesFrom":      {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}},
+	}
+}
+
 // ToApplicationConfig converts an OAM helmchart component to a HelmchartConfig.
 func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	cfg := &HelmchartConfig{

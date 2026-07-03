@@ -19,6 +19,25 @@ func (h *WorkerHandler) CanHandle(componentType string) bool {
 	return componentType == "worker"
 }
 
+// PropertySchema declares the worker component's user-facing properties. Like
+// webservice minus `port` (worker emits no Service).
+func (h *WorkerHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"image":          {Type: oam.PropertyTypeString, Required: true},
+		"replicas":       {Type: oam.PropertyTypeInteger, Default: 1},
+		"topologySpread": {Type: oam.PropertyTypeBoolean, Default: true},
+		"env":            schemaEnv(),
+		"resources":      schemaResources(),
+		"command":        schemaStringArray(),
+		"args":           schemaStringArray(),
+		"probes":         schemaProbes(),
+		"volumes":        schemaVolumes(),
+		"initContainers": schemaContainers(),
+		"sidecars":       schemaContainers(),
+		"affinity":       schemaAffinity(),
+	}
+}
+
 // ToApplicationConfig converts an OAM worker component to a WorkerConfig.
 func (h *WorkerHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &WorkerConfig{

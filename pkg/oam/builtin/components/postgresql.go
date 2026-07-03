@@ -19,6 +19,35 @@ func (h *PostgresqlHandler) CanHandle(componentType string) bool {
 	return componentType == "postgresql"
 }
 
+// PropertySchema declares the postgresql component's top-level user-facing
+// properties. The CNPG-shaped sub-objects (backup, pooler, bootstrap, databases,
+// …) are deep and K8s-adjacent, so they are kept open (AdditionalProperties)
+// rather than modeled field-by-field.
+func (h *PostgresqlHandler) PropertySchema() map[string]oam.PropertySchema {
+	openObject := oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}
+	openArray := oam.PropertySchema{Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}}
+	return map[string]oam.PropertySchema{
+		"provider":          {Type: oam.PropertyTypeString, Default: "cnpg", Enum: []any{"cnpg"}},
+		"version":           {Type: oam.PropertyTypeString, Default: "16"},
+		"storageSize":       {Type: oam.PropertyTypeString, Default: "1Gi"},
+		"replicas":          {Type: oam.PropertyTypeInteger, Default: 1},
+		"imageName":         {Type: oam.PropertyTypeString},
+		"resources":         schemaResources(),
+		"backup":            openObject,
+		"monitoring":        openObject,
+		"pooler":            openObject,
+		"bootstrap":         openObject,
+		"replication":       openObject,
+		"postgresql":        openObject,
+		"inheritedMetadata": openObject,
+		"objectStore":       openObject,
+		"affinity":          openObject,
+		"externalClusters":  openArray,
+		"managedRoles":      openArray,
+		"databases":         openArray,
+	}
+}
+
 // ToApplicationConfig converts an OAM postgresql component to a PostgresqlConfig.
 func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &PostgresqlConfig{

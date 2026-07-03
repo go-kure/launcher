@@ -21,6 +21,26 @@ func (h *StatefulsetHandler) CanHandle(componentType string) bool {
 	return componentType == "statefulset"
 }
 
+// PropertySchema declares the statefulset component's user-facing properties.
+func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"image":                {Type: oam.PropertyTypeString, Required: true},
+		"replicas":             {Type: oam.PropertyTypeInteger, Default: 1},
+		"port":                 {Type: oam.PropertyTypeInteger},
+		"serviceName":          {Type: oam.PropertyTypeString},
+		"env":                  schemaEnv(),
+		"resources":            schemaResources(),
+		"command":              schemaStringArray(),
+		"args":                 schemaStringArray(),
+		"probes":               schemaProbes(),
+		"volumeClaimTemplates": schemaVolumeClaimTemplates(),
+		"volumes":              schemaVolumes(),
+		"initContainers":       schemaContainers(),
+		"sidecars":             schemaContainers(),
+		"affinity":             schemaAffinity(),
+	}
+}
+
 // ToApplicationConfig converts an OAM statefulset component to a StatefulsetConfig.
 func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &StatefulsetConfig{

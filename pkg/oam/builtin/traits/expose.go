@@ -59,6 +59,30 @@ func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[
 	return rendering, nil
 }
 
+// PropertySchema declares the expose trait's user-facing properties. expose is a
+// dispatcher, so its surface is the effective union it passes through to the
+// ingress (rules) or gateway (hostnames) handler, minus `tls` (platform-managed).
+// controllerType and the ingressClassName/gateway*/certManager* keys are supplied
+// by capability rendering.
+func (h *ExposeHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"controllerType":           {Type: oam.PropertyTypeString, Required: true, Enum: []any{"ingress", "gateway"}},
+		"certManagerClusterIssuer": {Type: oam.PropertyTypeString},
+		"allowedHostnameWildcard":  {Type: oam.PropertyTypeString},
+		"gatewayName":              {Type: oam.PropertyTypeString},
+		"gatewayNamespace":         {Type: oam.PropertyTypeString, Default: "gateway-system"},
+		"annotations":              {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+		"rules":                    {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}},
+		"hostnames":                {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
+		"ingressClassName":         {Type: oam.PropertyTypeString},
+		"servicePort":              {Type: oam.PropertyTypeInteger},
+		"serviceName":              {Type: oam.PropertyTypeString},
+		"name":                     {Type: oam.PropertyTypeString},
+		"scope":                    {Type: oam.PropertyTypeString},
+		"networkPolicy":            schemaNetworkPolicy(),
+	}
+}
+
 // Apply dispatches to IngressHandler or HTTPRouteHandler based on controllerType.
 // It also implements platform-managed TLS (ingress path) and hostname validation
 // (both paths), consuming the certManagerClusterIssuer/allowedHostnameWildcard

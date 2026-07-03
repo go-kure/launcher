@@ -23,6 +23,17 @@ func (h *ScalerHandler) CanHandle(traitType string) bool {
 	return traitType == "scaler"
 }
 
+// PropertySchema declares the scaler trait's user-facing properties.
+func (h *ScalerHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"minReplicas":       {Type: oam.PropertyTypeInteger, Required: true},
+		"maxReplicas":       {Type: oam.PropertyTypeInteger, Required: true},
+		"cpuUtilization":    {Type: oam.PropertyTypeInteger, Default: 80},
+		"memoryUtilization": {Type: oam.PropertyTypeInteger},
+		"enablePDB":         {Type: oam.PropertyTypeBoolean, Default: false},
+	}
+}
+
 // Apply creates HPA and optionally PDB resources for the component.
 func (h *ScalerHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
 	config, err := h.parseProperties(trait.Properties, app)
