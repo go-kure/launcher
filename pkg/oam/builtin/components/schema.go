@@ -33,15 +33,19 @@ func schemaEnv() oam.PropertySchema {
 
 // schemaResources describes the shared `resources` property (see parseResources).
 func schemaResources() oam.PropertySchema {
-	quantity := map[string]oam.PropertySchema{
-		"cpu":    {Type: oam.PropertyTypeString},
-		"memory": {Type: oam.PropertyTypeString},
+	// requests and limits each get their own map so the returned schema shares no
+	// sub-map state (honoring the file-level freshness contract above).
+	quantity := func() map[string]oam.PropertySchema {
+		return map[string]oam.PropertySchema{
+			"cpu":    {Type: oam.PropertyTypeString},
+			"memory": {Type: oam.PropertyTypeString},
+		}
 	}
 	return oam.PropertySchema{
 		Type: oam.PropertyTypeObject,
 		Properties: map[string]oam.PropertySchema{
-			"requests": {Type: oam.PropertyTypeObject, Properties: quantity},
-			"limits":   {Type: oam.PropertyTypeObject, Properties: quantity},
+			"requests": {Type: oam.PropertyTypeObject, Properties: quantity()},
+			"limits":   {Type: oam.PropertyTypeObject, Properties: quantity()},
 		},
 	}
 }
