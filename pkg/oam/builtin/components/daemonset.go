@@ -20,6 +20,22 @@ func (h *DaemonsetHandler) CanHandle(componentType string) bool {
 	return componentType == "daemonset"
 }
 
+// PropertySchema declares the daemonset component's user-facing properties.
+func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"image":          {Type: oam.PropertyTypeString, Required: true},
+		"port":           {Type: oam.PropertyTypeInteger},
+		"env":            schemaEnv(),
+		"resources":      schemaResources(),
+		"command":        schemaStringArray(),
+		"args":           schemaStringArray(),
+		"probes":         schemaProbes(),
+		"tolerations":    schemaTolerations(),
+		"volumes":        schemaVolumes(),
+		"initContainers": schemaContainers(),
+	}
+}
+
 // ToApplicationConfig converts an OAM daemonset component to a DaemonsetConfig.
 func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &DaemonsetConfig{

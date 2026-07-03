@@ -24,6 +24,22 @@ func (h *CronjobHandler) CanHandle(componentType string) bool {
 	return componentType == "cronjob"
 }
 
+// PropertySchema declares the cronjob component's user-facing properties.
+func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"image":                      {Type: oam.PropertyTypeString, Required: true},
+		"schedule":                   {Type: oam.PropertyTypeString, Required: true},
+		"restartPolicy":              {Type: oam.PropertyTypeString, Default: "OnFailure", Enum: []any{"Never", "OnFailure"}},
+		"successfulJobsHistoryLimit": {Type: oam.PropertyTypeInteger, Default: 3},
+		"failedJobsHistoryLimit":     {Type: oam.PropertyTypeInteger, Default: 1},
+		"env":                        schemaEnv(),
+		"resources":                  schemaResources(),
+		"command":                    schemaStringArray(),
+		"args":                       schemaStringArray(),
+		"initContainers":             schemaContainers(),
+	}
+}
+
 // ToApplicationConfig converts an OAM cronjob component to a CronjobConfig.
 func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &CronjobConfig{

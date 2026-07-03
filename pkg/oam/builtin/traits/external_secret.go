@@ -62,6 +62,63 @@ func (h *ExternalSecretHandler) Apply(trait *oam.Trait, app *stack.Application, 
 	return nil
 }
 
+// PropertySchema declares the external-secret trait's user-facing properties.
+func (h *ExternalSecretHandler) PropertySchema() map[string]oam.PropertySchema {
+	remoteRef := oam.PropertySchema{
+		Type: oam.PropertyTypeObject,
+		Properties: map[string]oam.PropertySchema{
+			"key":              {Type: oam.PropertyTypeString, Required: true},
+			"property":         {Type: oam.PropertyTypeString},
+			"version":          {Type: oam.PropertyTypeString},
+			"decodingStrategy": {Type: oam.PropertyTypeString},
+		},
+	}
+	requiredRemoteRef := remoteRef
+	requiredRemoteRef.Required = true
+	return map[string]oam.PropertySchema{
+		"secretName": {Type: oam.PropertyTypeString, Required: true},
+		"secretStoreRef": {
+			Type: oam.PropertyTypeObject,
+			Properties: map[string]oam.PropertySchema{
+				"name": {Type: oam.PropertyTypeString, Required: true},
+				"kind": {Type: oam.PropertyTypeString, Default: "ClusterSecretStore"},
+			},
+		},
+		"provider":         {Type: oam.PropertyTypeString},
+		"refreshInterval":  {Type: oam.PropertyTypeString, Default: "1h"},
+		"targetSecretName": {Type: oam.PropertyTypeString},
+		"target": {
+			Type: oam.PropertyTypeObject,
+			Properties: map[string]oam.PropertySchema{
+				"creationPolicy": {Type: oam.PropertyTypeString, Enum: []any{"Owner", "Orphan", "Merge", "None"}},
+				"deletionPolicy": {Type: oam.PropertyTypeString, Enum: []any{"Delete", "Merge", "Retain"}},
+				"template": {
+					Type: oam.PropertyTypeObject,
+					Properties: map[string]oam.PropertySchema{
+						"type": {Type: oam.PropertyTypeString},
+						"data": {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+					},
+				},
+			},
+		},
+		"data": {
+			Type: oam.PropertyTypeArray,
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject,
+				Properties: map[string]oam.PropertySchema{
+					"secretKey": {Type: oam.PropertyTypeString, Required: true},
+					"remoteRef": requiredRemoteRef,
+				},
+			},
+		},
+		"dataFrom": {
+			Type:  oam.PropertyTypeArray,
+			Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true},
+		},
+		"remoteRef": remoteRef,
+	}
+}
+
 func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack.Application) (*ExternalSecretConfig, error) {
 	config := &ExternalSecretConfig{
 		ComponentName:   app.Name,

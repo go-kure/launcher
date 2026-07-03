@@ -26,6 +26,20 @@ func (h *PVCHandler) CanHandle(traitType string) bool {
 	return traitType == "pvc"
 }
 
+// PropertySchema declares the pvc trait's user-facing properties.
+func (h *PVCHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"name":             {Type: oam.PropertyTypeString, Required: true},
+		"size":             {Type: oam.PropertyTypeString, Required: true},
+		"storageClassName": {Type: oam.PropertyTypeString},
+		"accessModes": {
+			Type:    oam.PropertyTypeArray,
+			Default: []any{"ReadWriteOnce"},
+			Items:   &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: []any{"ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"}},
+		},
+	}
+}
+
 // Apply parses the trait properties and appends a standalone PVC to the bundle.
 func (h *PVCHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
 	config, err := h.parseProperties(trait.Properties, app)

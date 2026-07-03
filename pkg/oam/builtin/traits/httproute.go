@@ -57,6 +57,48 @@ func synthesizeParentRef(name, namespace string) map[string]any {
 	return map[string]any{"name": name, "namespace": namespace}
 }
 
+// PropertySchema declares the httproute trait's user-facing properties. The Gateway
+// API rule tree (matches/filters/backendRefs/timeouts) is deep, so rule items are
+// kept open beyond the enumerated backendRefs/matches/filters keys. `gatewayName`/
+// `gatewayNamespace`/`networkPolicy` are platform-reserved capability keys.
+func (h *HTTPRouteHandler) PropertySchema() map[string]oam.PropertySchema {
+	openArray := oam.PropertySchema{Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}}
+	return map[string]oam.PropertySchema{
+		"parentRefs": {
+			Type: oam.PropertyTypeArray,
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject,
+				Properties: map[string]oam.PropertySchema{
+					"name":      {Type: oam.PropertyTypeString, Required: true},
+					"namespace": {Type: oam.PropertyTypeString},
+				},
+			},
+		},
+		"hostnames": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
+		"rules": {
+			Type:     oam.PropertyTypeArray,
+			Required: true,
+			Items: &oam.PropertySchema{
+				Type:                 oam.PropertyTypeObject,
+				AdditionalProperties: true,
+				Properties: map[string]oam.PropertySchema{
+					"matches":     openArray,
+					"backendRefs": openArray,
+					"filters":     openArray,
+					"timeouts":    {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+				},
+			},
+		},
+		"gatewayName":      {Type: oam.PropertyTypeString},
+		"gatewayNamespace": {Type: oam.PropertyTypeString, Default: "gateway-system"},
+		"servicePort":      {Type: oam.PropertyTypeInteger},
+		"serviceName":      {Type: oam.PropertyTypeString},
+		"name":             {Type: oam.PropertyTypeString},
+		"scope":            {Type: oam.PropertyTypeString},
+		"networkPolicy":    schemaNetworkPolicy(),
+	}
+}
+
 func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Application) (*HTTPRouteConfig, error) {
 	defaultPort := resolveDefaultPort(app)
 	config := &HTTPRouteConfig{

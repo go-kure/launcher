@@ -72,6 +72,56 @@ func (h *IngressHandler) CanHandle(traitType string) bool {
 	return traitType == "ingress"
 }
 
+// PropertySchema declares the ingress trait's user-facing properties.
+// `allowedHostnameWildcard` and `networkPolicy` are platform-reserved keys
+// populated by capability rendering.
+func (h *IngressHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"rules": {
+			Type:     oam.PropertyTypeArray,
+			Required: true,
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject,
+				Properties: map[string]oam.PropertySchema{
+					"host": {Type: oam.PropertyTypeString, Required: true},
+					"paths": {
+						Type:     oam.PropertyTypeArray,
+						Required: true,
+						Items: &oam.PropertySchema{
+							Type: oam.PropertyTypeObject,
+							Properties: map[string]oam.PropertySchema{
+								"path":     {Type: oam.PropertyTypeString, Default: "/"},
+								"pathType": {Type: oam.PropertyTypeString, Default: "Prefix", Enum: []any{"Prefix", "Exact", "ImplementationSpecific"}},
+								"backend":  {Type: oam.PropertyTypeString},
+								"port":     {Type: oam.PropertyTypeInteger},
+								"portName": {Type: oam.PropertyTypeString},
+							},
+						},
+					},
+				},
+			},
+		},
+		"tls": {
+			Type: oam.PropertyTypeArray,
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject,
+				Properties: map[string]oam.PropertySchema{
+					"hosts":      {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
+					"secretName": {Type: oam.PropertyTypeString},
+				},
+			},
+		},
+		"annotations":             {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+		"ingressClassName":        {Type: oam.PropertyTypeString},
+		"servicePort":             {Type: oam.PropertyTypeInteger},
+		"serviceName":             {Type: oam.PropertyTypeString},
+		"name":                    {Type: oam.PropertyTypeString},
+		"scope":                   {Type: oam.PropertyTypeString},
+		"allowedHostnameWildcard": {Type: oam.PropertyTypeString},
+		"networkPolicy":           schemaNetworkPolicy(),
+	}
+}
+
 // Apply creates an Ingress resource for the component's service.
 // If the optional 'name' property is set, that value is used as the sub-application
 // name, enabling multiple ingress traits on the same component without collision.

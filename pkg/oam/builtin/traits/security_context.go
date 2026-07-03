@@ -33,6 +33,19 @@ func (h *SecurityContextHandler) CanHandle(traitType string) bool {
 	return traitType == "security-context"
 }
 
+// PropertySchema declares the security-context trait's user-facing properties.
+func (h *SecurityContextHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"psaLevel":                 {Type: oam.PropertyTypeString, Required: true, Enum: []any{"restricted", "baseline", "privileged"}},
+		"runAsNonRoot":             {Type: oam.PropertyTypeBoolean},
+		"allowPrivilegeEscalation": {Type: oam.PropertyTypeBoolean},
+		"readOnlyRootFilesystem":   {Type: oam.PropertyTypeBoolean},
+		"runAsUser":                {Type: oam.PropertyTypeInteger},
+		"runAsGroup":               {Type: oam.PropertyTypeInteger},
+		"fsGroup":                  {Type: oam.PropertyTypeInteger},
+	}
+}
+
 // Apply wraps app.Config so that Generate() produces securityContext values
 // matching the declared psaLevel rather than the crane-default restricted.
 // It does NOT create additional Kubernetes objects.

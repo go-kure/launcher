@@ -8,9 +8,13 @@ or operational behavior. Handlers are registered with the transformer in
 `pkg/cmd/kurel` via `RegisterBuiltinTrait(type, handler)`; each implements
 `CanHandle` + `Apply`. Some traits are **capability-aware** (`CapabilityRequired`)
 and draw platform choices (issuer, gateway, secret store) from the `ClusterProfile`.
-Handlers may also implement `oam.PropertySchemaProvider` (`PropertySchema()`) to declare a
-constrained schema for their properties so crane can validate them before invocation — the
-`configmap` handler is a worked example.
+Every built-in trait handler also implements `oam.PropertySchemaProvider`
+(`PropertySchema()`), declaring a constrained schema for its user-facing properties so
+crane can validate them before invocation. This includes the platform-reserved keys a
+handler reads from merged properties (e.g. `networkPolicy`, `allowedHostnameWildcard`,
+`controllerType`). Deeply nested or K8s-adjacent shapes are kept shallow/open
+(`additionalProperties`) rather than modeled field-by-field; `prune-protection` accepts no
+properties and so declares an empty schema.
 
 ## Trait catalog
 

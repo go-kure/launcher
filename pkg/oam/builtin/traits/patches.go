@@ -19,6 +19,26 @@ func (h *FluxCDPatchesHandler) CanHandle(traitType string) bool {
 	return traitType == "fluxcd-patches"
 }
 
+// PropertySchema declares the fluxcd-patches trait's user-facing properties. Each
+// patch carries a strategic-merge/JSON6902 body plus a kustomize target selector,
+// kept open beyond the enumerated fields.
+func (h *FluxCDPatchesHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"patches": {
+			Type:     oam.PropertyTypeArray,
+			Required: true,
+			Items: &oam.PropertySchema{
+				Type:                 oam.PropertyTypeObject,
+				AdditionalProperties: true,
+				Properties: map[string]oam.PropertySchema{
+					"patch":  {Type: oam.PropertyTypeString, Required: true},
+					"target": {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+				},
+			},
+		},
+	}
+}
+
 // Apply decodes the patches property and appends each patch to bundle.Patches.
 func (h *FluxCDPatchesHandler) Apply(trait *oam.Trait, _ *stack.Application, bundle *stack.Bundle) error {
 	raw, ok := trait.Properties["patches"]

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 const testAppYAML = `apiVersion: launcher.gokure.dev/v1alpha1
@@ -335,6 +337,37 @@ func TestNewBuiltinTransformer_Registered(t *testing.T) {
 	transformer := newBuiltinTransformer()
 	if transformer == nil {
 		t.Fatal("expected non-nil transformer")
+	}
+}
+
+// TestNewBuiltinTransformer_HandlerSchemaParity asserts that every registered
+// built-in component and trait handler exposes a PropertySchema (via the optional
+// oam.PropertySchemaProvider interface). It iterates the registration maps
+// directly — the same source newBuiltinTransformer registers from — so a handler
+// added without a schema is caught by the type assertion below rather than being
+// silently dropped by HandlerSchemas(). This is the launcher-side guard for the
+// crane parity gate.
+func TestNewBuiltinTransformer_HandlerSchemaParity(t *testing.T) {
+	for name, h := range builtinComponentHandlers() {
+		assertExposesSchema(t, "component", name, h)
+	}
+	for name, h := range builtinTraitHandlers() {
+		assertExposesSchema(t, "trait", name, h)
+	}
+}
+
+// assertExposesSchema fails if h does not implement oam.PropertySchemaProvider or
+// returns a nil schema map. An empty (non-nil) map is allowed — e.g.
+// prune-protection accepts no user-facing properties.
+func assertExposesSchema(t *testing.T, kind, name string, h any) {
+	t.Helper()
+	p, ok := h.(oam.PropertySchemaProvider)
+	if !ok {
+		t.Errorf("%s handler %q does not implement oam.PropertySchemaProvider", kind, name)
+		return
+	}
+	if p.PropertySchema() == nil {
+		t.Errorf("%s handler %q returns a nil PropertySchema map", kind, name)
 	}
 }
 

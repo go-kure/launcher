@@ -26,6 +26,24 @@ type OCIHandler struct{}
 // CanHandle returns true for the oci component type.
 func (h *OCIHandler) CanHandle(componentType string) bool { return componentType == "oci" }
 
+// PropertySchema declares the oci component's user-facing properties.
+func (h *OCIHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"source": {
+			Type:     oam.PropertyTypeObject,
+			Required: true,
+			Properties: map[string]oam.PropertySchema{
+				"url": {Type: oam.PropertyTypeString, Required: true},
+			},
+		},
+		"version":         {Type: oam.PropertyTypeString, Required: true},
+		"path":            {Type: oam.PropertyTypeString, Default: "./"},
+		"prune":           {Type: oam.PropertyTypeBoolean, Default: true},
+		"interval":        {Type: oam.PropertyTypeString},
+		"targetNamespace": {Type: oam.PropertyTypeString},
+	}
+}
+
 // ToApplicationConfig converts an OAM oci component to an OCIConfig.
 //
 // Properties:

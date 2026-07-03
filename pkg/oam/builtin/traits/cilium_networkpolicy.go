@@ -30,6 +30,18 @@ func (h *CiliumNetworkPolicyHandler) ValidateAndApplyDefaults(rendering map[stri
 	return rendering, nil
 }
 
+// PropertySchema declares the cilium-networkpolicy trait's user-facing properties.
+// endpointSelector/egress/ingress carry opaque Cilium api.Rule shapes, so they are
+// kept open (AdditionalProperties on the objects / array items).
+func (h *CiliumNetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"name":             {Type: oam.PropertyTypeString, Required: true},
+		"endpointSelector": {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+		"egress":           {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}},
+		"ingress":          {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}},
+	}
+}
+
 // Apply creates a CiliumNetworkPolicy resource appended to the bundle.
 func (h *CiliumNetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
 	config, err := h.parseProperties(trait.Properties, app)

@@ -20,6 +20,27 @@ func (h *RBACHandler) CanHandle(traitType string) bool {
 	return traitType == "rbac"
 }
 
+// PropertySchema declares the rbac trait's user-facing properties. Each rule is a
+// K8s PolicyRule-shaped object, kept open beyond the enumerated fields.
+func (h *RBACHandler) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"rules": {
+			Type:     oam.PropertyTypeArray,
+			Required: true,
+			Items: &oam.PropertySchema{
+				Type:                 oam.PropertyTypeObject,
+				AdditionalProperties: true,
+				Properties: map[string]oam.PropertySchema{
+					"apiGroups": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
+					"resources": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
+					"verbs":     {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
+				},
+			},
+		},
+		"clusterWide": {Type: oam.PropertyTypeBoolean},
+	}
+}
+
 // Apply parses the trait properties and appends a new stack.Application carrying
 // an rbacTraitConfig to the bundle.
 func (h *RBACHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {

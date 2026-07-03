@@ -222,41 +222,56 @@ func loadSuppliedValues(opts *buildOptions) (map[string]any, error) {
 	return supplied, nil
 }
 
+// builtinComponentHandlers returns the built-in component handlers keyed by type.
+// It is the single source of truth for component registration, shared by
+// newBuiltinTransformer and the handler-schema parity test.
+func builtinComponentHandlers() map[string]oam.ComponentHandler {
+	return map[string]oam.ComponentHandler{
+		"webservice":  &components.WebserviceHandler{},
+		"worker":      &components.WorkerHandler{},
+		"cronjob":     &components.CronjobHandler{},
+		"daemonset":   &components.DaemonsetHandler{},
+		"statefulset": &components.StatefulsetHandler{},
+		"postgresql":  &components.PostgresqlHandler{},
+		"helmchart":   &components.HelmchartHandler{},
+		"passthrough": &components.PassthroughHandler{},
+		"crd":         &components.CRDHandler{},
+		"manifests":   &components.ManifestsHandler{},
+		"oci":         &components.OCIHandler{},
+	}
+}
+
+// builtinTraitHandlers returns the built-in trait handlers keyed by type. It is
+// the single source of truth for trait registration, shared by
+// newBuiltinTransformer and the handler-schema parity test.
+func builtinTraitHandlers() map[string]oam.TraitHandler {
+	return map[string]oam.TraitHandler{
+		"expose":               &traits.ExposeHandler{},
+		"ingress":              &traits.IngressHandler{},
+		"httproute":            &traits.HTTPRouteHandler{},
+		"certificate":          &traits.CertificateHandler{},
+		"scaler":               &traits.ScalerHandler{},
+		"pvc":                  &traits.PVCHandler{},
+		"external-secret":      &traits.ExternalSecretHandler{},
+		"configmap":            &traits.ConfigMapHandler{},
+		"networkpolicy":        &traits.NetworkPolicyHandler{},
+		"cilium-networkpolicy": &traits.CiliumNetworkPolicyHandler{},
+		"volsync":              &traits.VolSyncHandler{},
+		"rbac":                 &traits.RBACHandler{},
+		"fluxcd-patches":       &traits.FluxCDPatchesHandler{},
+		"fluxcd-postbuild":     &traits.PostBuildHandler{},
+		"prune-protection":     &traits.PruneProtectionHandler{},
+		"security-context":     &traits.SecurityContextHandler{},
+	}
+}
+
 // newBuiltinTransformer creates a Transformer pre-loaded with all supported
 // built-in component and trait handlers.
 func newBuiltinTransformer() *oam.Transformer {
-	t := oam.NewTransformer(
-		map[string]oam.ComponentHandler{
-			"webservice":  &components.WebserviceHandler{},
-			"worker":      &components.WorkerHandler{},
-			"cronjob":     &components.CronjobHandler{},
-			"daemonset":   &components.DaemonsetHandler{},
-			"statefulset": &components.StatefulsetHandler{},
-			"postgresql":  &components.PostgresqlHandler{},
-			"helmchart":   &components.HelmchartHandler{},
-			"passthrough": &components.PassthroughHandler{},
-			"crd":         &components.CRDHandler{},
-			"manifests":   &components.ManifestsHandler{},
-			"oci":         &components.OCIHandler{},
-		},
-		nil,
-	)
-	t.RegisterBuiltinTrait("expose", &traits.ExposeHandler{})
-	t.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
-	t.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
-	t.RegisterBuiltinTrait("certificate", &traits.CertificateHandler{})
-	t.RegisterBuiltinTrait("scaler", &traits.ScalerHandler{})
-	t.RegisterBuiltinTrait("pvc", &traits.PVCHandler{})
-	t.RegisterBuiltinTrait("external-secret", &traits.ExternalSecretHandler{})
-	t.RegisterBuiltinTrait("configmap", &traits.ConfigMapHandler{})
-	t.RegisterBuiltinTrait("networkpolicy", &traits.NetworkPolicyHandler{})
-	t.RegisterBuiltinTrait("cilium-networkpolicy", &traits.CiliumNetworkPolicyHandler{})
-	t.RegisterBuiltinTrait("volsync", &traits.VolSyncHandler{})
-	t.RegisterBuiltinTrait("rbac", &traits.RBACHandler{})
-	t.RegisterBuiltinTrait("fluxcd-patches", &traits.FluxCDPatchesHandler{})
-	t.RegisterBuiltinTrait("fluxcd-postbuild", &traits.PostBuildHandler{})
-	t.RegisterBuiltinTrait("prune-protection", &traits.PruneProtectionHandler{})
-	t.RegisterBuiltinTrait("security-context", &traits.SecurityContextHandler{})
+	t := oam.NewTransformer(builtinComponentHandlers(), nil)
+	for name, h := range builtinTraitHandlers() {
+		t.RegisterBuiltinTrait(name, h)
+	}
 	return t
 }
 
