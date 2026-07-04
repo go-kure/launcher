@@ -16,6 +16,13 @@ handler reads from merged properties (e.g. `networkPolicy`, `allowedHostnameWild
 (`additionalProperties`) rather than modeled field-by-field; `prune-protection` accepts no
 properties and so declares an empty schema.
 
+Capability-injected fields are **not** marked `Required` in a handler's schema, because
+they are supplied by capability rendering (validated in `ValidateAndApplyDefaults`), not by
+the OAM author — e.g. `expose.controllerType` and the parent `certificate.issuerRef` are
+optional in the user-facing schema (though `issuerRef.name` stays required when `issuerRef`
+is present). Marking a capability-injected field user-required would make a consumer's schema
+preflight reject every valid use of the trait.
+
 ## Trait catalog
 
 ### Networking
