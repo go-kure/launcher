@@ -66,7 +66,10 @@ func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[
 // by capability rendering.
 func (h *ExposeHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"controllerType":           {Type: oam.PropertyTypeString, Required: true, Enum: []any{"ingress", "gateway"}},
+		// controllerType is capability-injected, not user-set (see doc above), so it is
+		// NOT user-required here; it is validated in ValidateAndApplyDefaults. Kept in the
+		// schema as an optional enum so a value, if present, is type/enum-checked.
+		"controllerType":           {Type: oam.PropertyTypeString, Enum: []any{"ingress", "gateway"}},
 		"certManagerClusterIssuer": {Type: oam.PropertyTypeString},
 		"allowedHostnameWildcard":  {Type: oam.PropertyTypeString},
 		"gatewayName":              {Type: oam.PropertyTypeString},

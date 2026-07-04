@@ -48,9 +48,12 @@ func (h *CertificateHandler) ValidateAndApplyDefaults(rendering map[string]any) 
 func (h *CertificateHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"secretName": {Type: oam.PropertyTypeString, Required: true},
+		// issuerRef is capability-injected (CapabilityRequired; validated in
+		// ValidateAndApplyDefaults), so the parent is NOT user-required. If a user does
+		// supply issuerRef, its name is still required so `issuerRef: {}` fails in schema
+		// preflight rather than later in parseProperties.
 		"issuerRef": {
-			Type:     oam.PropertyTypeObject,
-			Required: true,
+			Type: oam.PropertyTypeObject,
 			Properties: map[string]oam.PropertySchema{
 				"name": {Type: oam.PropertyTypeString, Required: true},
 				"kind": {Type: oam.PropertyTypeString, Default: "ClusterIssuer"},
