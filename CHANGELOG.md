@@ -1,6 +1,16 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.10] - 2026-07-04
+
+### Documentation
+
+- Note capability-injected fields are not user-required in trait schemas
+
+### Fixed
+
+- Don't mark capability-injected fields as user-required in schemas
+
 ## [0.1.0-alpha.9] - 2026-07-03
 
 ### Added
@@ -15,6 +25,10 @@ All notable changes to this project will be documented in this file.
 
 - Refresh github-workflows.md Last Updated date
 - Note shared handler registration and property schemas
+
+### Release
+
+- V0.1.0-alpha.9
 
 ## [0.1.0-alpha.8] - 2026-07-02
 
