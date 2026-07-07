@@ -13,33 +13,37 @@ import (
 
 // stubPolicy implements oam.Policy for testing.
 type stubPolicy struct {
-	maxReplicas       *int32
-	defaultReplicas   *int32
-	allowedRegistries []string
-	maxCPU            string
-	maxMemory         string
-	maxStorageSize    string
-	defaultCPURequest string
+	maxReplicas        *int32
+	defaultReplicas    *int32
+	allowedRegistries  []string
+	maxCPU             string
+	maxMemory          string
+	maxStorageSize     string
+	defaultCPURequest  string
+	defaultStorageSize string
 }
 
-func (s *stubPolicy) MaxReplicas() *int32             { return s.maxReplicas }
-func (s *stubPolicy) MaxCPU() string                  { return s.maxCPU }
-func (s *stubPolicy) MaxMemory() string               { return s.maxMemory }
-func (s *stubPolicy) MaxStorageSize() string          { return s.maxStorageSize }
-func (s *stubPolicy) AllowedRegistries() []string     { return s.allowedRegistries }
-func (s *stubPolicy) DefaultReplicas() *int32         { return s.defaultReplicas }
-func (s *stubPolicy) DefaultCPURequest() string       { return s.defaultCPURequest }
-func (s *stubPolicy) DefaultMemoryRequest() string    { return "" }
-func (s *stubPolicy) DefaultCPULimit() string         { return "" }
-func (s *stubPolicy) DefaultMemoryLimit() string      { return "" }
-func (s *stubPolicy) AllowHostNetwork() bool          { return false }
-func (s *stubPolicy) AllowPrivileged() bool           { return false }
-func (s *stubPolicy) AllowHostPID() bool              { return false }
-func (s *stubPolicy) AllowHostIPC() bool              { return false }
-func (s *stubPolicy) AllowHostPathVolumes() bool      { return false }
-func (s *stubPolicy) AllowedCapabilities() []string   { return nil }
-func (s *stubPolicy) ForbiddenCapabilities() []string { return nil }
-func (s *stubPolicy) RequiredCapabilities() []string  { return nil }
+func (s *stubPolicy) MaxReplicas() *int32              { return s.maxReplicas }
+func (s *stubPolicy) MaxCPU() string                   { return s.maxCPU }
+func (s *stubPolicy) MaxMemory() string                { return s.maxMemory }
+func (s *stubPolicy) MaxStorageSize() string           { return s.maxStorageSize }
+func (s *stubPolicy) AllowedRegistries() []string      { return s.allowedRegistries }
+func (s *stubPolicy) DefaultReplicas() *int32          { return s.defaultReplicas }
+func (s *stubPolicy) DefaultCPURequest() string        { return s.defaultCPURequest }
+func (s *stubPolicy) DefaultMemoryRequest() string     { return "" }
+func (s *stubPolicy) DefaultCPULimit() string          { return "" }
+func (s *stubPolicy) DefaultMemoryLimit() string       { return "" }
+func (s *stubPolicy) DefaultStorageSize() string       { return s.defaultStorageSize }
+func (s *stubPolicy) DefaultScalerMinReplicas() *int32 { return nil }
+func (s *stubPolicy) DefaultScalerMaxReplicas() *int32 { return nil }
+func (s *stubPolicy) AllowHostNetwork() bool           { return false }
+func (s *stubPolicy) AllowPrivileged() bool            { return false }
+func (s *stubPolicy) AllowHostPID() bool               { return false }
+func (s *stubPolicy) AllowHostIPC() bool               { return false }
+func (s *stubPolicy) AllowHostPathVolumes() bool       { return false }
+func (s *stubPolicy) AllowedCapabilities() []string    { return nil }
+func (s *stubPolicy) ForbiddenCapabilities() []string  { return nil }
+func (s *stubPolicy) RequiredCapabilities() []string   { return nil }
 
 var _ oam.Policy = (*stubPolicy)(nil)
 

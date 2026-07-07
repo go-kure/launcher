@@ -29,8 +29,11 @@ func (h *PVCHandler) CanHandle(traitType string) bool {
 // PropertySchema declares the pvc trait's user-facing properties.
 func (h *PVCHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"name":             {Type: oam.PropertyTypeString, Required: true},
-		"size":             {Type: oam.PropertyTypeString, Required: true},
+		"name": {Type: oam.PropertyTypeString, Required: true},
+		// size is not schema-required: an EnvironmentPolicy may supply it via
+		// DefaultStorageSize. When neither the trait nor a policy default provides a
+		// value, ApplyPolicy errors (pvc has no last-resort handler default).
+		"size":             {Type: oam.PropertyTypeString},
 		"storageClassName": {Type: oam.PropertyTypeString},
 		"accessModes": {
 			Type:    oam.PropertyTypeArray,
@@ -62,12 +65,14 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 		return nil, errors.New("required property 'name' missing or not a string")
 	}
 
+	// size is optional at parse time: a policy default may supply it. When present
+	// it must be a valid quantity; the "must be set" check runs in validateEffective
+	// after ApplyPolicy has had a chance to apply the policy default.
 	size, _ := props["size"].(string)
-	if size == "" {
-		return nil, errors.New("required property 'size' missing or not a string")
-	}
-	if _, err := resource.ParseQuantity(size); err != nil {
-		return nil, errors.Errorf("invalid PVC size %q: %w", size, err)
+	if size != "" {
+		if _, err := resource.ParseQuantity(size); err != nil {
+			return nil, errors.Errorf("invalid PVC size %q: %w", size, err)
+		}
 	}
 
 	var storageClass string
@@ -111,27 +116,45 @@ type PVCTraitConfig struct {
 	AccessModes   []string
 }
 
-// ApplyPolicy enforces the policy storage-size limit against the requested PVC size.
+// ApplyPolicy defaults the PVC size from the policy when the trait omitted it,
+// validates the effective size, and enforces the policy storage-size limit.
+// Precedence: authored > policy default > (error, no handler default). A nil
+// policy means no default and no cap.
 func (c *PVCTraitConfig) ApplyPolicy(p oam.Policy) error {
-	if p == nil || p.MaxStorageSize() == "" {
-		return nil
+	if p != nil {
+		c.Size = applyDefaultResource(c.Size, p.DefaultStorageSize())
 	}
-	current, err := resource.ParseQuantity(c.Size)
-	if err != nil {
+	if err := c.validateEffective(); err != nil {
+		return err
+	}
+	if p != nil {
+		if err := enforceMaxStorageSize(c.Size, p.MaxStorageSize()); err != nil {
+			return errors.Errorf("PVC %q %w", c.Name, err)
+		}
+	}
+	return nil
+}
+
+// validateEffective owns the effective-size validation for the PVC: it runs
+// after the policy default is applied (from ApplyPolicy) and defensively from
+// Generate so a config built without ApplyPolicy cannot emit an empty size.
+func (c *PVCTraitConfig) validateEffective() error {
+	if c.Size == "" {
+		return errors.Errorf("PVC %q size is required (set it on the trait or via an EnvironmentPolicy storage default)", c.Name)
+	}
+	if _, err := resource.ParseQuantity(c.Size); err != nil {
 		return errors.Errorf("invalid PVC size %q: %w", c.Size, err)
-	}
-	max, err := resource.ParseQuantity(p.MaxStorageSize())
-	if err != nil {
-		return errors.Errorf("invalid maxStorageSize %q in policy: %w", p.MaxStorageSize(), err)
-	}
-	if current.Cmp(max) > 0 {
-		return errors.Errorf("PVC %q size %q exceeds maximum storage size %q", c.Name, c.Size, p.MaxStorageSize())
 	}
 	return nil
 }
 
 // Generate delegates to components.BuildPVC so the trait shares the same PVC construction path.
 func (c *PVCTraitConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	// Defensive: reject an unset/invalid size even if ApplyPolicy was bypassed.
+	if err := c.validateEffective(); err != nil {
+		return nil, err
+	}
+
 	labels := map[string]string{"app": c.ComponentName}
 	pvc, err := components.BuildPVC(components.PVCConfig{
 		Name:         c.Name,

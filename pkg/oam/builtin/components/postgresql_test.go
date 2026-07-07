@@ -779,6 +779,36 @@ func TestPostgresqlConfig_ApplyPolicy_DefaultsReplicas(t *testing.T) {
 	}
 }
 
+func TestPostgresqlConfig_ApplyPolicy_DefaultsStorageSize(t *testing.T) {
+	// Omitted storageSize takes the policy default over the "1Gi" handler default.
+	pc := newPostgresqlApp(t, map[string]any{})
+	enforceable := stack.ApplicationConfig(pc).(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{defaultStorageSize: "20Gi"}); err != nil {
+		t.Fatalf("ApplyPolicy: %v", err)
+	}
+	if pc.StorageSize != "20Gi" {
+		t.Errorf("StorageSize after defaulting: got %q, want 20Gi", pc.StorageSize)
+	}
+
+	// Authored storageSize wins over the policy default.
+	authored := newPostgresqlApp(t, map[string]any{"storageSize": "50Gi"})
+	if err := stack.ApplicationConfig(authored).(oam.Enforceable).ApplyPolicy(&stubPolicy{defaultStorageSize: "20Gi"}); err != nil {
+		t.Fatalf("ApplyPolicy: %v", err)
+	}
+	if authored.StorageSize != "50Gi" {
+		t.Errorf("authored StorageSize: got %q, want 50Gi", authored.StorageSize)
+	}
+
+	// NoopPolicy (no default) falls back to the "1Gi" handler default.
+	fallback := newPostgresqlApp(t, map[string]any{})
+	if err := stack.ApplicationConfig(fallback).(oam.Enforceable).ApplyPolicy(&oam.NoopPolicy{}); err != nil {
+		t.Fatalf("ApplyPolicy: %v", err)
+	}
+	if fallback.StorageSize != "1Gi" {
+		t.Errorf("fallback StorageSize: got %q, want 1Gi", fallback.StorageSize)
+	}
+}
+
 func TestPostgresqlConfig_ApplyPolicy_NilPolicy(t *testing.T) {
 	pc := newPostgresqlApp(t, map[string]any{})
 	enforceable := stack.ApplicationConfig(pc).(oam.Enforceable)
