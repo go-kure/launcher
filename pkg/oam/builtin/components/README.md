@@ -52,9 +52,9 @@ share these fields: `image` (validated — no untagged/`latest`), `env` (with
   `install.crds`/`upgrade.crds`.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`.
-- **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`,
-  `replicas`, `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`,
-  `databases`.
+- **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
+  (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
+  `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.
 - **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
   (`apiVersion`/`kind`/`scope`) for unknown kinds.

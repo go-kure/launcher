@@ -545,6 +545,12 @@ func (c *PostgresqlConfig) ApplyPolicy(p oam.Policy) error {
 	if !c.explicitResources.memoryLimit {
 		c.Resources.MemoryLimit = applyDefaultResource(c.Resources.MemoryLimit, p.DefaultMemoryLimit())
 	}
+	// StorageSize precedence: authored > policy default > "1Gi" handler default.
+	// The parse-time fallback is already "1Gi", so let a policy default override it
+	// only when the user did not author a value.
+	if !c.explicitStorageSize && p.DefaultStorageSize() != "" {
+		c.StorageSize = p.DefaultStorageSize()
+	}
 
 	if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
 		return err

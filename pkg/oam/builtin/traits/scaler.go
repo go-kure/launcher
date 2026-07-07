@@ -26,8 +26,11 @@ func (h *ScalerHandler) CanHandle(traitType string) bool {
 // PropertySchema declares the scaler trait's user-facing properties.
 func (h *ScalerHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"minReplicas":       {Type: oam.PropertyTypeInteger, Required: true},
-		"maxReplicas":       {Type: oam.PropertyTypeInteger, Required: true},
+		// minReplicas/maxReplicas are not schema-required: an EnvironmentPolicy may
+		// supply them via DefaultScalerMinReplicas/DefaultScalerMaxReplicas. When
+		// neither the trait nor a policy default provides a value, ApplyPolicy errors.
+		"minReplicas":       {Type: oam.PropertyTypeInteger},
+		"maxReplicas":       {Type: oam.PropertyTypeInteger},
 		"cpuUtilization":    {Type: oam.PropertyTypeInteger, Default: 80},
 		"memoryUtilization": {Type: oam.PropertyTypeInteger},
 		"enablePDB":         {Type: oam.PropertyTypeBoolean, Default: false},
@@ -55,23 +58,25 @@ func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Applica
 		ComponentName: app.Name,
 	}
 
-	minReplicas, ok := toInt32ForScaler(props["minReplicas"])
-	if !ok {
-		return nil, errors.New("required property 'minReplicas' missing or not a number")
+	// minReplicas/maxReplicas are optional at parse time: a policy default may
+	// supply them. When present they must be whole numbers; the effective-value
+	// checks (>=1, max>=min, PDB) run in validateEffective after ApplyPolicy.
+	if _, exists := props["minReplicas"]; exists {
+		minReplicas, ok := toInt32ForScaler(props["minReplicas"])
+		if !ok {
+			return nil, errors.New("minReplicas must be a whole number")
+		}
+		config.MinReplicas = minReplicas
+		config.explicitMinReplicas = true
 	}
-	config.MinReplicas = minReplicas
 
-	maxReplicas, ok := toInt32ForScaler(props["maxReplicas"])
-	if !ok {
-		return nil, errors.New("required property 'maxReplicas' missing or not a number")
-	}
-	config.MaxReplicas = maxReplicas
-
-	if config.MinReplicas < 1 {
-		return nil, errors.Errorf("minReplicas must be >= 1, got %d", config.MinReplicas)
-	}
-	if config.MaxReplicas < config.MinReplicas {
-		return nil, errors.Errorf("maxReplicas (%d) must be >= minReplicas (%d)", config.MaxReplicas, config.MinReplicas)
+	if _, exists := props["maxReplicas"]; exists {
+		maxReplicas, ok := toInt32ForScaler(props["maxReplicas"])
+		if !ok {
+			return nil, errors.New("maxReplicas must be a whole number")
+		}
+		config.MaxReplicas = maxReplicas
+		config.explicitMaxReplicas = true
 	}
 
 	if _, exists := props["cpuUtilization"]; exists {
@@ -104,9 +109,8 @@ func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Applica
 	if pdb, ok := props["enablePDB"].(bool); ok {
 		config.EnablePDB = pdb
 	}
-	if config.EnablePDB && config.MinReplicas < 2 {
-		return nil, errors.Errorf("enablePDB requires minReplicas >= 2 (got %d); with 1 replica PDB blocks all voluntary disruptions", config.MinReplicas)
-	}
+	// The enablePDB/minReplicas cross-check runs in validateEffective, since
+	// minReplicas may still be filled by a policy default.
 
 	return config, nil
 }
@@ -147,13 +151,54 @@ type ScalerConfig struct {
 	CPUUtilization    *int32
 	MemoryUtilization *int32
 	EnablePDB         bool
+
+	explicitMinReplicas bool
+	explicitMaxReplicas bool
 }
 
-// ApplyPolicy is a no-op: the scaler trait has no enforceable policy fields.
-func (c *ScalerConfig) ApplyPolicy(_ oam.Policy) error { return nil }
+// ApplyPolicy fills minReplicas/maxReplicas from the policy defaults when the
+// trait omitted them, validates the effective values, and enforces the policy
+// replica ceiling. Precedence: authored > policy default > (error, no handler
+// default for scaler bounds). A nil policy means no defaults and no caps.
+func (c *ScalerConfig) ApplyPolicy(p oam.Policy) error {
+	if p != nil {
+		c.MinReplicas = applyDefaultReplicas(c.MinReplicas, c.explicitMinReplicas, p.DefaultScalerMinReplicas())
+		c.MaxReplicas = applyDefaultReplicas(c.MaxReplicas, c.explicitMaxReplicas, p.DefaultScalerMaxReplicas())
+	}
+	if err := c.validateEffective(); err != nil {
+		return err
+	}
+	if p != nil {
+		if err := enforceMaxReplicas(c.MaxReplicas, p.MaxReplicas()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateEffective owns all effective-value validation for the scaler: it runs
+// after defaults are applied (from ApplyPolicy) and defensively from Generate so
+// a config built without ApplyPolicy cannot emit invalid HPA bounds.
+func (c *ScalerConfig) validateEffective() error {
+	if c.MinReplicas < 1 {
+		return errors.Errorf("minReplicas must be >= 1, got %d (set it on the trait or via an EnvironmentPolicy scaler default)", c.MinReplicas)
+	}
+	if c.MaxReplicas < c.MinReplicas {
+		return errors.Errorf("maxReplicas (%d) must be >= minReplicas (%d)", c.MaxReplicas, c.MinReplicas)
+	}
+	if c.EnablePDB && c.MinReplicas < 2 {
+		return errors.Errorf("enablePDB requires minReplicas >= 2 (got %d); with 1 replica PDB blocks all voluntary disruptions", c.MinReplicas)
+	}
+	return nil
+}
 
 // Generate creates HPA and optionally PDB Kubernetes resources.
 func (c *ScalerConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	// Defensive: reject invalid effective bounds even if ApplyPolicy was bypassed.
+	if err := c.validateEffective(); err != nil {
+		return nil, err
+	}
+
 	labels := map[string]string{"app": c.ComponentName}
 
 	var resources []*client.Object

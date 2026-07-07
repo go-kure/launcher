@@ -38,6 +38,15 @@ func TestNoopPolicy_ZeroValues(t *testing.T) {
 	if got := p.DefaultMemoryLimit(); got != "" {
 		t.Errorf("DefaultMemoryLimit() = %q, want empty", got)
 	}
+	if got := p.DefaultStorageSize(); got != "" {
+		t.Errorf("DefaultStorageSize() = %q, want empty", got)
+	}
+	if got := p.DefaultScalerMinReplicas(); got != nil {
+		t.Errorf("DefaultScalerMinReplicas() = %v, want nil", got)
+	}
+	if got := p.DefaultScalerMaxReplicas(); got != nil {
+		t.Errorf("DefaultScalerMaxReplicas() = %v, want nil", got)
+	}
 	if got := p.AllowHostNetwork(); got {
 		t.Error("AllowHostNetwork() = true, want false (default-deny)")
 	}

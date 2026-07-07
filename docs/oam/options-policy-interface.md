@@ -7,7 +7,7 @@
 | 1.1 | 2026-05-14 | Record decision (Option A); add framing section; rename options A/B; remove Option B |
 | 1.0 | 2026-04-19 | Initial draft — compared typed accessor (Option A) and opaque marker (Option B) |
 
-**Decision:** `oam.Policy` is a typed accessor interface with 18 methods. Reason:
+**Decision:** `oam.Policy` is a typed accessor interface with 21 methods. Reason:
 compile-time verification, no type assertions in handler code, and explicit `NoopPolicy`
 behaviour (no limits, no defaults, security-sensitive bools default-deny) are more important
 than the flexibility of a marker interface for future policy types.
@@ -82,7 +82,7 @@ policy from the request.
 // crane/pkg/api/types.go (abbreviated)
 type EnvironmentPolicy struct {
     Enforced     EnforcedLimits         // MaxReplicas, MaxCPU, MaxMemory, MaxStorageSize, AllowedRegistries
-    Defaults     DefaultValues          // Replicas, CPURequest, MemoryRequest, CPULimit, MemoryLimit
+    Defaults     DefaultValues          // Replicas, CPURequest, MemoryRequest, CPULimit, MemoryLimit, StorageSize, ScalerMinReplicas, ScalerMaxReplicas
     Security     SecurityPolicy         // AllowHostNetwork, AllowPrivileged, AllowHostPID, AllowHostIPC, AllowHostPathVolumes
     Placement    *PlacementRules        // optional
     Capabilities *CapabilityConstraints // Allowed, Forbidden, Required
@@ -135,6 +135,9 @@ type Policy interface {
     DefaultMemoryRequest() string
     DefaultCPULimit() string
     DefaultMemoryLimit() string
+    DefaultStorageSize() string
+    DefaultScalerMinReplicas() *int32
+    DefaultScalerMaxReplicas() *int32
 
     // Security flags — false is the zero value (default-deny)
     AllowHostNetwork() bool
@@ -173,6 +176,9 @@ func (*NoopPolicy) DefaultCPURequest() string    { return "" }
 func (*NoopPolicy) DefaultMemoryRequest() string { return "" }
 func (*NoopPolicy) DefaultCPULimit() string      { return "" }
 func (*NoopPolicy) DefaultMemoryLimit() string   { return "" }
+func (*NoopPolicy) DefaultStorageSize() string       { return "" }
+func (*NoopPolicy) DefaultScalerMinReplicas() *int32 { return nil }
+func (*NoopPolicy) DefaultScalerMaxReplicas() *int32 { return nil }
 func (*NoopPolicy) AllowHostNetwork() bool       { return false }
 func (*NoopPolicy) AllowPrivileged() bool        { return false }
 func (*NoopPolicy) AllowHostPID() bool           { return false }
@@ -207,6 +213,9 @@ func (p *EnvironmentPolicy) DefaultCPURequest() string    { return p.Defaults.CP
 func (p *EnvironmentPolicy) DefaultMemoryRequest() string { return p.Defaults.MemoryRequest }
 func (p *EnvironmentPolicy) DefaultCPULimit() string      { return p.Defaults.CPULimit }
 func (p *EnvironmentPolicy) DefaultMemoryLimit() string   { return p.Defaults.MemoryLimit }
+func (p *EnvironmentPolicy) DefaultStorageSize() string        { return p.Defaults.StorageSize }
+func (p *EnvironmentPolicy) DefaultScalerMinReplicas() *int32  { return p.Defaults.ScalerMinReplicas }
+func (p *EnvironmentPolicy) DefaultScalerMaxReplicas() *int32  { return p.Defaults.ScalerMaxReplicas }
 func (p *EnvironmentPolicy) AllowHostNetwork() bool       { return p.Security.AllowHostNetwork }
 func (p *EnvironmentPolicy) AllowPrivileged() bool        { return p.Security.AllowPrivileged }
 func (p *EnvironmentPolicy) AllowHostPID() bool           { return p.Security.AllowHostPID }

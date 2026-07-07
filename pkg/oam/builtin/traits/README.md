@@ -45,14 +45,14 @@ preflight reject every valid use of the trait.
 ### Storage
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
-| `pvc` | PersistentVolumeClaim | `name`, `size`, `storageClassName`, `accessModes[]` (policy: `maxStorageSize`) |
+| `pvc` | PersistentVolumeClaim | `name`, `size` (optional; policy default `storageSize`), `storageClassName`, `accessModes[]` (policy: `maxStorageSize`) |
 | `volsync` | VolSync ReplicationSource | `sourcePVC`, `schedule`, `copyMethod`, `retain.{daily,weekly,monthly}` |
 
 ### Configuration & scaling
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `configmap` | ConfigMap (+ optional volume mount) | `name`, `data`, `mountPath` |
-| `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas`, `cpuUtilization`, `memoryUtilization`, `enablePDB` |
+| `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB` |
 
 ### Operational (FluxCD)
 | `type` | Effect | Key properties |

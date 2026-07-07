@@ -580,44 +580,73 @@ func TestScalerHandler_Apply_OK(t *testing.T) {
 	}
 }
 
-func TestScalerHandler_Apply_MissingMinReplicas(t *testing.T) {
+// applyScalerPolicy applies the trait then runs ApplyPolicy, returning the
+// ApplyPolicy error. minReplicas/maxReplicas are optional at parse time (a policy
+// default may supply them), so effective-value violations surface here, not in Apply.
+func applyScalerPolicy(t *testing.T, trait *oam.Trait, p oam.Policy) error {
+	t.Helper()
 	h := &traits.ScalerHandler{}
-	trait := &oam.Trait{
-		Type: "scaler",
-		Properties: map[string]any{
-			"maxReplicas": 10,
-		},
+	bundle := newBundle()
+	if err := h.Apply(trait, newApp("api", "default"), bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
 	}
-	if err := h.Apply(trait, newApp("api", "default"), newBundle()); err == nil {
-		t.Fatal("expected error for missing minReplicas")
+	return bundle.Applications[0].Config.(oam.Enforceable).ApplyPolicy(p)
+}
+
+func TestScalerConfig_ApplyPolicy_MissingMinReplicas(t *testing.T) {
+	trait := &oam.Trait{
+		Type:       "scaler",
+		Properties: map[string]any{"maxReplicas": 10},
+	}
+	// Omitted min with no policy default is rejected by ApplyPolicy...
+	if err := applyScalerPolicy(t, trait, &oam.NoopPolicy{}); err == nil {
+		t.Fatal("expected error for missing minReplicas with no policy default")
+	}
+	// ...but a policy default fills it.
+	p := &stubScalerPolicy{defaultScalerMin: int32ptr32(2)}
+	if err := applyScalerPolicy(t, trait, p); err != nil {
+		t.Fatalf("expected policy default to fill minReplicas, got: %v", err)
 	}
 }
 
-func TestScalerHandler_Apply_MinReplicasLessThanOne(t *testing.T) {
-	h := &traits.ScalerHandler{}
+func TestScalerConfig_ApplyPolicy_MinReplicasLessThanOne(t *testing.T) {
 	trait := &oam.Trait{
-		Type: "scaler",
-		Properties: map[string]any{
-			"minReplicas": 0,
-			"maxReplicas": 10,
-		},
+		Type:       "scaler",
+		Properties: map[string]any{"minReplicas": 0, "maxReplicas": 10},
 	}
-	if err := h.Apply(trait, newApp("api", "default"), newBundle()); err == nil {
+	if err := applyScalerPolicy(t, trait, &oam.NoopPolicy{}); err == nil {
 		t.Fatal("expected error for minReplicas < 1")
 	}
 }
 
-func TestScalerHandler_Apply_MaxLessThanMin(t *testing.T) {
-	h := &traits.ScalerHandler{}
+func TestScalerConfig_ApplyPolicy_MaxLessThanMin(t *testing.T) {
 	trait := &oam.Trait{
-		Type: "scaler",
-		Properties: map[string]any{
-			"minReplicas": 5,
-			"maxReplicas": 3,
-		},
+		Type:       "scaler",
+		Properties: map[string]any{"minReplicas": 5, "maxReplicas": 3},
 	}
-	if err := h.Apply(trait, newApp("api", "default"), newBundle()); err == nil {
+	if err := applyScalerPolicy(t, trait, &oam.NoopPolicy{}); err == nil {
 		t.Fatal("expected error for maxReplicas < minReplicas")
+	}
+}
+
+func TestScalerConfig_ApplyPolicy_DefaultsAndCeiling(t *testing.T) {
+	// Authored value wins over the policy default.
+	authored := &oam.Trait{
+		Type:       "scaler",
+		Properties: map[string]any{"minReplicas": 3, "maxReplicas": 9},
+	}
+	p := &stubScalerPolicy{defaultScalerMin: int32ptr32(1), defaultScalerMax: int32ptr32(4)}
+	if err := applyScalerPolicy(t, authored, p); err != nil {
+		t.Fatalf("authored values with policy defaults: %v", err)
+	}
+	// Effective maxReplicas above the policy ceiling is rejected.
+	omitted := &oam.Trait{
+		Type:       "scaler",
+		Properties: map[string]any{"minReplicas": 2},
+	}
+	ceiling := &stubScalerPolicy{maxReplicas: int32ptr32(5), defaultScalerMax: int32ptr32(10)}
+	if err := applyScalerPolicy(t, omitted, ceiling); err == nil {
+		t.Fatal("expected error when effective maxReplicas exceeds MaxReplicas ceiling")
 	}
 }
 
@@ -645,8 +674,7 @@ func TestScalerHandler_Apply_WithPDB(t *testing.T) {
 	}
 }
 
-func TestScalerHandler_Apply_PDB_RequiresMinReplicas2(t *testing.T) {
-	h := &traits.ScalerHandler{}
+func TestScalerConfig_ApplyPolicy_PDB_RequiresMinReplicas2(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "scaler",
 		Properties: map[string]any{
@@ -655,7 +683,7 @@ func TestScalerHandler_Apply_PDB_RequiresMinReplicas2(t *testing.T) {
 			"enablePDB":   true,
 		},
 	}
-	if err := h.Apply(trait, newApp("api", "default"), newBundle()); err == nil {
+	if err := applyScalerPolicy(t, trait, &oam.NoopPolicy{}); err == nil {
 		t.Fatal("expected error: enablePDB requires minReplicas >= 2")
 	}
 }
@@ -672,6 +700,42 @@ func TestScalerHandler_Apply_CPUUtilizationOutOfRange(t *testing.T) {
 	}
 	if err := h.Apply(trait, newApp("api", "default"), newBundle()); err == nil {
 		t.Fatal("expected error for cpuUtilization > 100")
+	}
+}
+
+func TestScalerConfig_ApplyPolicy_NilPolicy(t *testing.T) {
+	// Authored values + nil policy: valid, no defaults/caps applied.
+	authored := &oam.Trait{
+		Type:       "scaler",
+		Properties: map[string]any{"minReplicas": 2, "maxReplicas": 6},
+	}
+	if err := applyScalerPolicy(t, authored, nil); err != nil {
+		t.Errorf("authored values with nil policy should be valid, got: %v", err)
+	}
+	// Omitted min + nil policy: no default to fill it → validateEffective errors.
+	omitted := &oam.Trait{
+		Type:       "scaler",
+		Properties: map[string]any{"maxReplicas": 6},
+	}
+	if err := applyScalerPolicy(t, omitted, nil); err == nil {
+		t.Fatal("expected error for omitted minReplicas with nil policy")
+	}
+}
+
+func TestScalerConfig_Generate_RejectsInvalidBounds(t *testing.T) {
+	// Bypass safety: a config built without ApplyPolicy must not emit invalid HPA
+	// bounds. Apply leaves minReplicas at 0 when omitted; Generate must reject it.
+	h := &traits.ScalerHandler{}
+	trait := &oam.Trait{
+		Type:       "scaler",
+		Properties: map[string]any{"maxReplicas": 5},
+	}
+	bundle := newBundle()
+	if err := h.Apply(trait, newApp("api", "default"), bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := bundle.Applications[0].Generate(); err == nil {
+		t.Fatal("expected Generate to reject minReplicas < 1 when ApplyPolicy was bypassed")
 	}
 }
 
@@ -743,7 +807,7 @@ func TestPVCHandler_Apply_MissingName(t *testing.T) {
 	}
 }
 
-func TestPVCHandler_Apply_MissingSize(t *testing.T) {
+func TestPVCConfig_ApplyPolicy_MissingSize(t *testing.T) {
 	h := &traits.PVCHandler{}
 	trait := &oam.Trait{
 		Type: "pvc",
@@ -751,8 +815,19 @@ func TestPVCHandler_Apply_MissingSize(t *testing.T) {
 			"name": "data",
 		},
 	}
-	if err := h.Apply(trait, newApp("api", "default"), newBundle()); err == nil {
-		t.Fatal("expected error for missing size")
+	// size is optional at parse time; the "required" check moves to ApplyPolicy.
+	bundle := newBundle()
+	if err := h.Apply(trait, newApp("api", "default"), bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	enforceable := bundle.Applications[0].Config.(oam.Enforceable)
+	// No policy default → error.
+	if err := enforceable.ApplyPolicy(&oam.NoopPolicy{}); err == nil {
+		t.Fatal("expected error for missing size with no policy default")
+	}
+	// Policy default fills it.
+	if err := enforceable.ApplyPolicy(&stubPVCPolicy{defaultStorageSize: "3Gi"}); err != nil {
+		t.Fatalf("expected policy default to fill size, got: %v", err)
 	}
 }
 
@@ -840,29 +915,116 @@ func TestPVCTraitConfig_ApplyPolicy_WithinMax(t *testing.T) {
 	}
 }
 
-// stubPVCPolicy implements oam.Policy for PVC trait tests.
-type stubPVCPolicy struct {
-	maxStorageSize string
+// pvcSizeAfterPolicy applies the pvc trait, runs ApplyPolicy, and returns the
+// effective size rendered onto the generated PersistentVolumeClaim.
+func pvcSizeAfterPolicy(t *testing.T, props map[string]any, p oam.Policy) string {
+	t.Helper()
+	h := &traits.PVCHandler{}
+	trait := &oam.Trait{Type: "pvc", Properties: props}
+	app := newApp("api", "default")
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if err := bundle.Applications[0].Config.(oam.Enforceable).ApplyPolicy(p); err != nil {
+		t.Fatalf("ApplyPolicy: %v", err)
+	}
+	objs, err := bundle.Applications[0].Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	pvc := (*objs[0]).(*corev1.PersistentVolumeClaim)
+	return pvc.Spec.Resources.Requests.Storage().String()
 }
 
-func (p *stubPVCPolicy) MaxReplicas() *int32             { return nil }
-func (p *stubPVCPolicy) MaxCPU() string                  { return "" }
-func (p *stubPVCPolicy) MaxMemory() string               { return "" }
-func (p *stubPVCPolicy) MaxStorageSize() string          { return p.maxStorageSize }
-func (p *stubPVCPolicy) AllowedRegistries() []string     { return nil }
-func (p *stubPVCPolicy) DefaultReplicas() *int32         { return nil }
-func (p *stubPVCPolicy) DefaultCPURequest() string       { return "" }
-func (p *stubPVCPolicy) DefaultMemoryRequest() string    { return "" }
-func (p *stubPVCPolicy) DefaultCPULimit() string         { return "" }
-func (p *stubPVCPolicy) DefaultMemoryLimit() string      { return "" }
-func (p *stubPVCPolicy) AllowHostNetwork() bool          { return false }
-func (p *stubPVCPolicy) AllowPrivileged() bool           { return false }
-func (p *stubPVCPolicy) AllowHostPID() bool              { return false }
-func (p *stubPVCPolicy) AllowHostIPC() bool              { return false }
-func (p *stubPVCPolicy) AllowHostPathVolumes() bool      { return false }
-func (p *stubPVCPolicy) AllowedCapabilities() []string   { return nil }
-func (p *stubPVCPolicy) ForbiddenCapabilities() []string { return nil }
-func (p *stubPVCPolicy) RequiredCapabilities() []string  { return nil }
+func TestPVCTraitConfig_ApplyPolicy_NilPolicy(t *testing.T) {
+	h := &traits.PVCHandler{}
+	// Authored size + nil policy: valid.
+	authored := &oam.Trait{Type: "pvc", Properties: map[string]any{"name": "data", "size": "5Gi"}}
+	bundle := newBundle()
+	if err := h.Apply(authored, newApp("api", "default"), bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if err := bundle.Applications[0].Config.(oam.Enforceable).ApplyPolicy(nil); err != nil {
+		t.Errorf("authored size with nil policy should be valid, got: %v", err)
+	}
+	// Omitted size + nil policy: no default → error.
+	omitted := &oam.Trait{Type: "pvc", Properties: map[string]any{"name": "data"}}
+	bundle2 := newBundle()
+	if err := h.Apply(omitted, newApp("api", "default"), bundle2); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if err := bundle2.Applications[0].Config.(oam.Enforceable).ApplyPolicy(nil); err == nil {
+		t.Fatal("expected error for omitted size with nil policy")
+	}
+}
+
+func TestPVCTraitConfig_Generate_RejectsEmptySize(t *testing.T) {
+	// Bypass safety: Generate must reject an unset size even without ApplyPolicy.
+	h := &traits.PVCHandler{}
+	trait := &oam.Trait{Type: "pvc", Properties: map[string]any{"name": "data"}}
+	bundle := newBundle()
+	if err := h.Apply(trait, newApp("api", "default"), bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := bundle.Applications[0].Generate(); err == nil {
+		t.Fatal("expected Generate to reject empty size when ApplyPolicy was bypassed")
+	}
+}
+
+func TestPVCTraitConfig_ApplyPolicy_DefaultStorageSize(t *testing.T) {
+	// Omitted size takes the policy default.
+	if got := pvcSizeAfterPolicy(t, map[string]any{"name": "data"}, &stubPVCPolicy{defaultStorageSize: "7Gi"}); got != "7Gi" {
+		t.Errorf("defaulted size = %q, want 7Gi", got)
+	}
+	// Authored size wins over the policy default.
+	if got := pvcSizeAfterPolicy(t, map[string]any{"name": "data", "size": "5Gi"}, &stubPVCPolicy{defaultStorageSize: "7Gi"}); got != "5Gi" {
+		t.Errorf("authored size = %q, want 5Gi", got)
+	}
+}
+
+// stubPVCPolicy implements oam.Policy for PVC trait tests.
+type stubPVCPolicy struct {
+	maxStorageSize     string
+	defaultStorageSize string
+}
+
+func (p *stubPVCPolicy) MaxReplicas() *int32              { return nil }
+func (p *stubPVCPolicy) MaxCPU() string                   { return "" }
+func (p *stubPVCPolicy) MaxMemory() string                { return "" }
+func (p *stubPVCPolicy) MaxStorageSize() string           { return p.maxStorageSize }
+func (p *stubPVCPolicy) AllowedRegistries() []string      { return nil }
+func (p *stubPVCPolicy) DefaultReplicas() *int32          { return nil }
+func (p *stubPVCPolicy) DefaultCPURequest() string        { return "" }
+func (p *stubPVCPolicy) DefaultMemoryRequest() string     { return "" }
+func (p *stubPVCPolicy) DefaultCPULimit() string          { return "" }
+func (p *stubPVCPolicy) DefaultMemoryLimit() string       { return "" }
+func (p *stubPVCPolicy) DefaultStorageSize() string       { return p.defaultStorageSize }
+func (p *stubPVCPolicy) DefaultScalerMinReplicas() *int32 { return nil }
+func (p *stubPVCPolicy) DefaultScalerMaxReplicas() *int32 { return nil }
+func (p *stubPVCPolicy) AllowHostNetwork() bool           { return false }
+func (p *stubPVCPolicy) AllowPrivileged() bool            { return false }
+func (p *stubPVCPolicy) AllowHostPID() bool               { return false }
+func (p *stubPVCPolicy) AllowHostIPC() bool               { return false }
+func (p *stubPVCPolicy) AllowHostPathVolumes() bool       { return false }
+func (p *stubPVCPolicy) AllowedCapabilities() []string    { return nil }
+func (p *stubPVCPolicy) ForbiddenCapabilities() []string  { return nil }
+func (p *stubPVCPolicy) RequiredCapabilities() []string   { return nil }
+
+// stubScalerPolicy implements oam.Policy for scaler trait tests, embedding
+// NoopPolicy so only the scaler-relevant accessors need overriding.
+type stubScalerPolicy struct {
+	oam.NoopPolicy
+	maxReplicas      *int32
+	defaultScalerMin *int32
+	defaultScalerMax *int32
+}
+
+func (p *stubScalerPolicy) MaxReplicas() *int32              { return p.maxReplicas }
+func (p *stubScalerPolicy) DefaultScalerMinReplicas() *int32 { return p.defaultScalerMin }
+func (p *stubScalerPolicy) DefaultScalerMaxReplicas() *int32 { return p.defaultScalerMax }
+
+func int32ptr32(v int32) *int32 { return &v }
 
 // --- ExternalSecretHandler ---
 
