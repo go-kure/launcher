@@ -3,6 +3,7 @@ package traits
 import (
 	"time"
 
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/certmanager"
 	"github.com/go-kure/kure/pkg/stack"
@@ -62,6 +63,18 @@ func (h *CertificateHandler) PropertySchema() map[string]oam.PropertySchema {
 		"dnsNames":    {Type: oam.PropertyTypeArray, Required: true, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
 		"duration":    {Type: oam.PropertyTypeString, Default: "2160h"},
 		"renewBefore": {Type: oam.PropertyTypeString, Default: "360h"},
+		// privateKey is user-authored (not capability-injected) and optional; when
+		// omitted cert-manager applies its own defaults (RSA 2048). algorithm-specific
+		// size validation is enforced in parseProperties, not the schema.
+		"privateKey": {
+			Type: oam.PropertyTypeObject,
+			Properties: map[string]oam.PropertySchema{
+				"algorithm":      {Type: oam.PropertyTypeString, Enum: []any{"RSA", "ECDSA", "Ed25519"}},
+				"size":           {Type: oam.PropertyTypeInteger},
+				"encoding":       {Type: oam.PropertyTypeString, Enum: []any{"PKCS1", "PKCS8"}},
+				"rotationPolicy": {Type: oam.PropertyTypeString, Enum: []any{"Never", "Always"}},
+			},
+		},
 	}
 }
 
@@ -130,7 +143,82 @@ func (h *CertificateHandler) parseProperties(props map[string]any, app *stack.Ap
 		config.RenewBefore = renew
 	}
 
+	if err := parsePrivateKey(props, config); err != nil {
+		return nil, err
+	}
+
 	return config, nil
+}
+
+// parsePrivateKey reads the optional privateKey block into config, validating
+// algorithm-specific size constraints so launcher rejects shapes cert-manager
+// would later reject. The block and every field are optional; omitted fields
+// leave cert-manager's own defaults in place.
+func parsePrivateKey(props map[string]any, config *CertificateConfig) error {
+	pk, ok := props["privateKey"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	if alg, ok := pk["algorithm"].(string); ok && alg != "" {
+		if alg != "RSA" && alg != "ECDSA" && alg != "Ed25519" {
+			return errors.Errorf("privateKey.algorithm %q is invalid (allowed: RSA, ECDSA, Ed25519)", alg)
+		}
+		config.PKAlgorithm = alg
+	}
+	if enc, ok := pk["encoding"].(string); ok && enc != "" {
+		if enc != "PKCS1" && enc != "PKCS8" {
+			return errors.Errorf("privateKey.encoding %q is invalid (allowed: PKCS1, PKCS8)", enc)
+		}
+		config.PKEncoding = enc
+	}
+	if rot, ok := pk["rotationPolicy"].(string); ok && rot != "" {
+		if rot != "Never" && rot != "Always" {
+			return errors.Errorf("privateKey.rotationPolicy %q is invalid (allowed: Never, Always)", rot)
+		}
+		config.PKRotationPolicy = rot
+	}
+
+	if raw, exists := pk["size"]; exists {
+		size, ok := toInt32ForScaler(raw)
+		if !ok {
+			return errors.New("privateKey.size must be a whole number")
+		}
+		if size <= 0 {
+			return errors.Errorf("privateKey.size must be positive, got %d", size)
+		}
+		config.PKSize = int(size)
+	}
+
+	if config.PKSize != 0 {
+		// A bare size (no algorithm) is ambiguous: cert-manager would default to
+		// RSA, where ECDSA sizes are invalid. Require an explicit algorithm.
+		if config.PKAlgorithm == "" {
+			return errors.New("privateKey.size requires privateKey.algorithm to be set")
+		}
+		if err := validatePrivateKeySize(config.PKAlgorithm, config.PKSize); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validatePrivateKeySize enforces cert-manager's per-algorithm key sizes.
+func validatePrivateKeySize(algorithm string, size int) error {
+	switch algorithm {
+	case "RSA":
+		if size != 2048 && size != 4096 && size != 8192 {
+			return errors.Errorf("privateKey.size %d is invalid for RSA (allowed: 2048, 4096, 8192)", size)
+		}
+	case "ECDSA":
+		if size != 256 && size != 384 && size != 521 {
+			return errors.Errorf("privateKey.size %d is invalid for ECDSA (allowed: 256, 384, 521)", size)
+		}
+	case "Ed25519":
+		return errors.New("privateKey.size must not be set for Ed25519 (key size is fixed)")
+	}
+	return nil
 }
 
 // CertificateConfig implements stack.ApplicationConfig for certificate traits.
@@ -142,6 +230,12 @@ type CertificateConfig struct {
 	DNSNames      []string
 	Duration      string
 	RenewBefore   string
+
+	// PrivateKey options; zero values leave cert-manager's defaults in place.
+	PKAlgorithm      string
+	PKSize           int
+	PKEncoding       string
+	PKRotationPolicy string
 }
 
 // ApplyPolicy is a no-op: certificates have no enforceable policy fields.
@@ -170,6 +264,17 @@ func (c *CertificateConfig) Generate(app *stack.Application) ([]*client.Object, 
 		Duration:    &metav1.Duration{Duration: dur},
 		RenewBefore: &metav1.Duration{Duration: renewBefore},
 	})
+
+	// The kure helper cannot carry privateKey; set it directly. Only populate the
+	// sub-fields the user authored so cert-manager defaults the rest.
+	if c.PKAlgorithm != "" || c.PKSize != 0 || c.PKEncoding != "" || c.PKRotationPolicy != "" {
+		cert.Spec.PrivateKey = &certv1.CertificatePrivateKey{
+			Algorithm:      certv1.PrivateKeyAlgorithm(c.PKAlgorithm),
+			Size:           c.PKSize,
+			Encoding:       certv1.PrivateKeyEncoding(c.PKEncoding),
+			RotationPolicy: certv1.PrivateKeyRotationPolicy(c.PKRotationPolicy),
+		}
+	}
 
 	obj := client.Object(cert)
 	return []*client.Object{&obj}, nil
