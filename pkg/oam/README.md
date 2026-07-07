@@ -63,6 +63,23 @@ false; escape-hatch fields set it true). `Transformer.HandlerSchemas()` returns 
 validator can check a component/trait's properties before the handler is invoked. Built-in
 examples: the `configmap` trait and the `passthrough` component.
 
+## Policy defaults & enforcement
+
+`Policy` is a typed accessor interface (no type assertions in handlers) that carries
+per-environment **enforced limits** (`MaxReplicas`, `MaxCPU`, `MaxMemory`, `MaxStorageSize`,
+`AllowedRegistries`), **defaults** (`DefaultReplicas`, the CPU/memory request/limit defaults,
+and the workload-shape defaults `DefaultStorageSize`, `DefaultScalerMinReplicas`,
+`DefaultScalerMaxReplicas`), security flags, and capability constraints. Handlers that
+implement `Enforceable` receive it via `ApplyPolicy`; `NoopPolicy` supplies zero values when
+no policy is set (so `ApplyPolicy` is always called with a non-nil value at runtime).
+
+Handlers apply values with the precedence **authored > policy default > handler default**,
+then enforce the limits on the resulting effective value. For example the `scaler` trait fills
+`minReplicas`/`maxReplicas` from the scaler defaults when omitted (erroring if neither the trait
+nor a policy default supplies them), and the `pvc`/`postgresql` handlers default the storage
+size from `DefaultStorageSize`. See the Policy Interface design note under the Concepts
+section for the full accessor list and rationale.
+
 ## Capability system
 
 Capability-aware traits (e.g. `expose`, `certificate`, `external-secret`) declare
