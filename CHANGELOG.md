@@ -1,6 +1,17 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.11] - 2026-07-07
+
+### Added
+
+- Support privateKey (algorithm/size/rotationPolicy/encoding) in certificate trait
+- Consume EnvironmentPolicy storage/scaler defaults in scaler/pvc/postgresql
+
+### Documentation
+
+- Document Policy defaults & enforcement in pkg/oam README
+
 ## [0.1.0-alpha.10] - 2026-07-04
 
 ### Documentation
@@ -10,6 +21,10 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Don't mark capability-injected fields as user-required in schemas
+
+### Release
+
+- V0.1.0-alpha.10
 
 ## [0.1.0-alpha.9] - 2026-07-03
 
