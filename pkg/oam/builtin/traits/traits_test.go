@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -546,6 +547,102 @@ func TestCertificateConfig_Generate_OK(t *testing.T) {
 	}
 	if len(objects) != 1 {
 		t.Errorf("expected 1 Certificate object, got %d", len(objects))
+	}
+}
+
+func TestCertificateConfig_Generate_PrivateKey(t *testing.T) {
+	h := &traits.CertificateHandler{}
+	trait := &oam.Trait{
+		Type: "certificate",
+		Properties: map[string]any{
+			"secretName": "my-tls",
+			"issuerRef":  map[string]any{"name": "letsencrypt-prod", "kind": "ClusterIssuer"},
+			"dnsNames":   []any{"example.com"},
+			"privateKey": map[string]any{
+				"algorithm":      "ECDSA",
+				"size":           256,
+				"rotationPolicy": "Always",
+			},
+		},
+	}
+	app := newApp("frontend", "default")
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	objects, err := bundle.Applications[0].Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	cert, ok := (*objects[0]).(*certv1.Certificate)
+	if !ok {
+		t.Fatalf("expected *certv1.Certificate, got %T", *objects[0])
+	}
+	if cert.Spec.PrivateKey == nil {
+		t.Fatal("expected spec.privateKey to be set, got nil")
+	}
+	if cert.Spec.PrivateKey.Algorithm != certv1.ECDSAKeyAlgorithm {
+		t.Errorf("algorithm = %q, want ECDSA", cert.Spec.PrivateKey.Algorithm)
+	}
+	if cert.Spec.PrivateKey.Size != 256 {
+		t.Errorf("size = %d, want 256", cert.Spec.PrivateKey.Size)
+	}
+	if cert.Spec.PrivateKey.RotationPolicy != certv1.RotationPolicyAlways {
+		t.Errorf("rotationPolicy = %q, want Always", cert.Spec.PrivateKey.RotationPolicy)
+	}
+}
+
+func TestCertificateConfig_Generate_NoPrivateKey(t *testing.T) {
+	h := &traits.CertificateHandler{}
+	trait := &oam.Trait{
+		Type: "certificate",
+		Properties: map[string]any{
+			"secretName": "my-tls",
+			"issuerRef":  map[string]any{"name": "letsencrypt-prod"},
+			"dnsNames":   []any{"example.com"},
+		},
+	}
+	app := newApp("frontend", "default")
+	bundle := newBundle()
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	objects, err := bundle.Applications[0].Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	cert := (*objects[0]).(*certv1.Certificate)
+	if cert.Spec.PrivateKey != nil {
+		t.Errorf("expected spec.privateKey to be nil when unset, got %+v", cert.Spec.PrivateKey)
+	}
+}
+
+func TestCertificateHandler_Apply_PrivateKeyInvalid(t *testing.T) {
+	cases := map[string]map[string]any{
+		"unknown algorithm":      {"algorithm": "DSA"},
+		"unknown encoding":       {"algorithm": "RSA", "size": 2048, "encoding": "DER"},
+		"size without algorithm": {"size": 2048},
+		"non-positive size":      {"algorithm": "RSA", "size": 0},
+		"RSA size mismatch":      {"algorithm": "RSA", "size": 256},
+		"ECDSA size mismatch":    {"algorithm": "ECDSA", "size": 2048},
+		"Ed25519 with size":      {"algorithm": "Ed25519", "size": 256},
+	}
+	for name, pk := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := &traits.CertificateHandler{}
+			trait := &oam.Trait{
+				Type: "certificate",
+				Properties: map[string]any{
+					"secretName": "my-tls",
+					"issuerRef":  map[string]any{"name": "letsencrypt-prod"},
+					"dnsNames":   []any{"example.com"},
+					"privateKey": pk,
+				},
+			}
+			if err := h.Apply(trait, newApp("frontend", "default"), newBundle()); err == nil {
+				t.Fatalf("expected error for %s", name)
+			}
+		})
 	}
 }
 
