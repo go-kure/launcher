@@ -40,4 +40,16 @@ type ExposeRendering struct {
 	// nginx.ingress.kubernetes.io/force-ssl-redirect annotation. Ingress-only. A
 	// component may override it via the inline forceSslRedirect property.
 	ForceSSLRedirect *bool `yaml:"forceSslRedirect,omitempty" json:"forceSslRedirect,omitempty"`
+
+	// AuthURL is the nginx external-auth endpoint base (the oauth2-proxy /oauth2/auth
+	// URL). Ingress-only. When set, an expose trait enables ext-auth by authoring
+	// allowedGroups; must be a bare base URL (no query string).
+	AuthURL string `yaml:"authURL,omitempty" json:"authURL,omitempty"`
+
+	// AuthSigninURL is the platform default for the nginx auth-signin annotation.
+	// Ingress-only; a component may override it inline via the authSigninURL property.
+	AuthSigninURL string `yaml:"authSigninURL,omitempty" json:"authSigninURL,omitempty"`
+
+	// AuthResponseHeaders is the nginx auth-response-headers value. Ingress-only.
+	AuthResponseHeaders string `yaml:"authResponseHeaders,omitempty" json:"authResponseHeaders,omitempty"`
 }

@@ -19,6 +19,14 @@ const (
 	forceSSLRedirectAnnotation = "nginx.ingress.kubernetes.io/force-ssl-redirect"
 )
 
+// nginx external-auth (oauth2-proxy) annotations the expose trait writes from its
+// allowedGroups / authSigninURL properties plus the capability auth-url / auth-response-headers.
+const (
+	authURLAnnotation             = "nginx.ingress.kubernetes.io/auth-url"
+	authSigninAnnotation          = "nginx.ingress.kubernetes.io/auth-signin"
+	authResponseHeadersAnnotation = "nginx.ingress.kubernetes.io/auth-response-headers"
+)
+
 // matchHostnameWildcard reports whether host is permitted by pattern. An empty
 // pattern permits everything. A pattern without a leading "*." must match host
 // exactly. A "*.suffix" pattern matches exactly one DNS label in place of the

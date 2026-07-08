@@ -82,6 +82,11 @@ not the app — chooses the implementation:
   hosts are still wildcard-validated). Platform-default `ssl-redirect` / `force-ssl-redirect`
   come from the `sslRedirect` / `forceSslRedirect` capability fields (author-overridable via
   the same inline properties; the typed value wins over a raw same-key annotation).
+  External-auth (oauth2-proxy): authoring `allowedGroups: [...]` on an ingress expose emits the
+  nginx `auth-url` / `auth-signin` / `auth-response-headers` annotations from the capability's
+  `authURL` / `authSigninURL` / `authResponseHeaders` (`authSigninURL` is override-able inline;
+  `authURL` must be a bare base URL). `allowedGroups` must be non-empty, and the capability must
+  supply `authURL` or the trait is rejected.
 - **certificate** → `issuerRef` (cert-manager issuer/cluster-issuer).
 - **external-secret** → `secretStoreRef` (or the inline `provider` shorthand).
 

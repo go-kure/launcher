@@ -3,6 +3,7 @@ package traits
 import (
 	"maps"
 	"strconv"
+	"strings"
 
 	"github.com/go-kure/kure/pkg/stack"
 
@@ -41,6 +42,12 @@ func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[
 		if r.GatewayName != "" || r.GatewayNamespace != "" {
 			return nil, errors.New("expose rendering: gatewayName and gatewayNamespace are only valid when controllerType is \"gateway\"")
 		}
+		if strings.Contains(r.AuthURL, "?") {
+			return nil, errors.New("expose rendering: authURL must be a base URL without a query string")
+		}
+		if (r.AuthSigninURL != "" || r.AuthResponseHeaders != "") && r.AuthURL == "" {
+			return nil, errors.New("expose rendering: authSigninURL and authResponseHeaders require authURL")
+		}
 	case "gateway":
 		if r.GatewayName == "" {
 			return nil, errors.New("expose rendering: gatewayName is required when controllerType is \"gateway\"")
@@ -53,6 +60,9 @@ func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[
 		}
 		if r.SSLRedirect != nil || r.ForceSSLRedirect != nil {
 			return nil, errors.New("expose rendering: sslRedirect and forceSslRedirect are only valid when controllerType is \"ingress\"")
+		}
+		if r.AuthURL != "" || r.AuthSigninURL != "" || r.AuthResponseHeaders != "" {
+			return nil, errors.New("expose rendering: authURL, authSigninURL and authResponseHeaders are only valid when controllerType is \"ingress\"")
 		}
 		if r.GatewayNamespace == "" {
 			rendering["gatewayNamespace"] = "gateway-system"
@@ -84,6 +94,10 @@ func (h *ExposeHandler) PropertySchema() map[string]oam.PropertySchema {
 		"ingressClassName":         {Type: oam.PropertyTypeString, Description: "IngressClass to use (ingress controllerType only)."},
 		"sslRedirect":              {Type: oam.PropertyTypeBoolean, Description: "nginx ssl-redirect annotation (ingress controllerType only); platform default via capability rendering, override-able inline."},
 		"forceSslRedirect":         {Type: oam.PropertyTypeBoolean, Description: "nginx force-ssl-redirect annotation (ingress controllerType only); platform default via capability rendering, override-able inline."},
+		"allowedGroups":            {Type: oam.PropertyTypeArray, Description: "oauth2-proxy allowed groups; enables external-auth on the route (ingress controllerType only). Order is preserved.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "An allowed oauth2-proxy group."}},
+		"authURL":                  {Type: oam.PropertyTypeString, Description: "Capability-injected nginx external-auth endpoint base (ingress controllerType only)."},
+		"authSigninURL":            {Type: oam.PropertyTypeString, Description: "nginx auth-signin URL (ingress controllerType only); platform default via capability rendering, override-able inline."},
+		"authResponseHeaders":      {Type: oam.PropertyTypeString, Description: "Capability-injected nginx auth-response-headers value (ingress controllerType only)."},
 		"servicePort":              {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one."},
 		"serviceName":              {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
 		"name":                     {Type: oam.PropertyTypeString, Description: "Overrides the sub-application name, allowing multiple expose traits per component."},
@@ -140,11 +154,16 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 		// ssl-redirect / force-ssl-redirect: typed property (capability default or
 		// inline override) wins over a same-key raw annotation.
 		setSSLRedirectAnnotations(props)
+		// external-auth: when the trait authors allowedGroups, inject the nginx
+		// auth-* annotations from the capability rendering.
+		if err := setAuthAnnotations(props, app.Name); err != nil {
+			return err
+		}
 		return (&IngressHandler{}).Apply(&oam.Trait{Type: "expose", Properties: props}, app, bundle)
 	case "gateway":
-		// ssl-redirect is nginx-ingress-specific; reject the inline properties on the
+		// These properties are nginx-ingress-specific; reject them inline on the
 		// gateway path (the rendering guard only covers the capability-supplied form).
-		for _, k := range []string{"sslRedirect", "forceSslRedirect"} {
+		for _, k := range []string{"sslRedirect", "forceSslRedirect", "allowedGroups", "authSigninURL"} {
 			if _, ok := props[k]; ok {
 				return &errors.ValidationError{
 					Field:     k,
@@ -266,6 +285,72 @@ func setSSLRedirectAnnotations(props map[string]any) {
 func boolProp(props map[string]any, key string) (val, ok bool) {
 	val, ok = props[key].(bool)
 	return val, ok
+}
+
+// setAuthAnnotations writes the nginx external-auth annotations (auth-url, auth-signin,
+// auth-response-headers) when the expose trait authors allowedGroups. The auth-url base,
+// signin default, and response-headers come from the capability rendering (authURL and
+// authResponseHeaders are platform-reserved; authSigninURL is override-able inline);
+// allowedGroups is authored, order preserved. The typed values win over same-key raw
+// annotations. All auth-* keys are consumed here so they never reach IngressHandler.
+func setAuthAnnotations(props map[string]any, component string) error {
+	rawGroups, hasGroups := props["allowedGroups"]
+	authURL, _ := props["authURL"].(string)
+	signin, _ := props["authSigninURL"].(string)
+	respHeaders, _ := props["authResponseHeaders"].(string)
+	delete(props, "allowedGroups")
+	delete(props, "authURL")
+	delete(props, "authSigninURL")
+	delete(props, "authResponseHeaders")
+
+	if !hasGroups {
+		return nil // no ext-auth requested; discard any capability-injected auth-* keys
+	}
+	groups := stringList(rawGroups)
+	if len(groups) == 0 {
+		return &errors.ValidationError{
+			Field:     "allowedGroups",
+			Component: component,
+			Message:   "allowedGroups must not be empty (ext-auth requires at least one group)",
+		}
+	}
+	if authURL == "" {
+		return &errors.ValidationError{
+			Field:     "allowedGroups",
+			Component: component,
+			Message:   "ext-auth is not offered on this platform (the expose capability has no authURL)",
+		}
+	}
+
+	anns, _ := props["annotations"].(map[string]any)
+	if anns == nil {
+		anns = map[string]any{}
+	}
+	anns[authURLAnnotation] = authURL + "?allowed_groups=" + strings.Join(groups, ",")
+	if signin != "" {
+		anns[authSigninAnnotation] = signin
+	}
+	if respHeaders != "" {
+		anns[authResponseHeadersAnnotation] = respHeaders
+	}
+	props["annotations"] = anns
+	return nil
+}
+
+// stringList converts an OAM array value ([]any of strings) to []string, preserving
+// order and dropping empty entries.
+func stringList(v any) []string {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, e := range raw {
+		if s, ok := e.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // synthesizedIngressTLS builds the single managed TLS entry: all hosts under one
