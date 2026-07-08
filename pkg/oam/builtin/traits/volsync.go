@@ -32,19 +32,20 @@ func (h *VolSyncHandler) ValidateAndApplyDefaults(rendering map[string]any) (map
 // PropertySchema declares the volsync trait's user-facing properties.
 func (h *VolSyncHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"sourcePVC":               {Type: oam.PropertyTypeString, Required: true},
-		"schedule":                {Type: oam.PropertyTypeString, Required: true},
-		"repository":              {Type: oam.PropertyTypeString},
-		"copyMethod":              {Type: oam.PropertyTypeString, Default: "Snapshot", Enum: []any{"Snapshot", "Direct", "Clone"}},
-		"storageClassName":        {Type: oam.PropertyTypeString},
-		"volumeSnapshotClassName": {Type: oam.PropertyTypeString},
-		"pruneIntervalDays":       {Type: oam.PropertyTypeInteger, Default: 14},
+		"sourcePVC":               {Type: oam.PropertyTypeString, Required: true, Description: "Name of the PersistentVolumeClaim to back up."},
+		"schedule":                {Type: oam.PropertyTypeString, Required: true, Description: "Cron schedule controlling when backups run."},
+		"repository":              {Type: oam.PropertyTypeString, Description: "Name of the Secret holding restic repository credentials (defaults to <component>-volsync-secret)."},
+		"copyMethod":              {Type: oam.PropertyTypeString, Default: "Snapshot", Enum: []any{"Snapshot", "Direct", "Clone"}, Description: "How the source volume is captured for backup (Snapshot, Direct, or Clone)."},
+		"storageClassName":        {Type: oam.PropertyTypeString, Description: "StorageClass used for the point-in-time copy of the source volume."},
+		"volumeSnapshotClassName": {Type: oam.PropertyTypeString, Description: "VolumeSnapshotClass used when copyMethod is Snapshot."},
+		"pruneIntervalDays":       {Type: oam.PropertyTypeInteger, Default: 14, Description: "How often, in days, restic prunes the backup repository."},
 		"retain": {
-			Type: oam.PropertyTypeObject,
+			Type:        oam.PropertyTypeObject,
+			Description: "Restic retention policy for backup snapshots.",
 			Properties: map[string]oam.PropertySchema{
-				"daily":   {Type: oam.PropertyTypeInteger, Default: 7},
-				"weekly":  {Type: oam.PropertyTypeInteger, Default: 4},
-				"monthly": {Type: oam.PropertyTypeInteger, Default: 3},
+				"daily":   {Type: oam.PropertyTypeInteger, Default: 7, Description: "Number of daily backups to retain."},
+				"weekly":  {Type: oam.PropertyTypeInteger, Default: 4, Description: "Number of weekly backups to retain."},
+				"monthly": {Type: oam.PropertyTypeInteger, Default: 3, Description: "Number of monthly backups to retain."},
 			},
 		},
 	}

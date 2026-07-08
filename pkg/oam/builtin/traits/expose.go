@@ -69,19 +69,19 @@ func (h *ExposeHandler) PropertySchema() map[string]oam.PropertySchema {
 		// controllerType is capability-injected, not user-set (see doc above), so it is
 		// NOT user-required here; it is validated in ValidateAndApplyDefaults. Kept in the
 		// schema as an optional enum so a value, if present, is type/enum-checked.
-		"controllerType":           {Type: oam.PropertyTypeString, Enum: []any{"ingress", "gateway"}},
-		"certManagerClusterIssuer": {Type: oam.PropertyTypeString},
-		"allowedHostnameWildcard":  {Type: oam.PropertyTypeString},
-		"gatewayName":              {Type: oam.PropertyTypeString},
-		"gatewayNamespace":         {Type: oam.PropertyTypeString, Default: "gateway-system"},
-		"annotations":              {Type: oam.PropertyTypeObject, AdditionalProperties: true},
-		"rules":                    {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}},
-		"hostnames":                {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
-		"ingressClassName":         {Type: oam.PropertyTypeString},
-		"servicePort":              {Type: oam.PropertyTypeInteger},
-		"serviceName":              {Type: oam.PropertyTypeString},
-		"name":                     {Type: oam.PropertyTypeString},
-		"scope":                    {Type: oam.PropertyTypeString},
+		"controllerType":           {Type: oam.PropertyTypeString, Enum: []any{"ingress", "gateway"}, Description: "Capability-injected controller kind (ingress or gateway) this expose dispatches to."},
+		"certManagerClusterIssuer": {Type: oam.PropertyTypeString, Description: "cert-manager ClusterIssuer used to synthesize TLS (ingress controllerType only)."},
+		"allowedHostnameWildcard":  {Type: oam.PropertyTypeString, Description: "Platform-reserved wildcard the hostnames must fall under."},
+		"gatewayName":              {Type: oam.PropertyTypeString, Description: "Gateway name used to synthesize parentRefs (gateway controllerType only)."},
+		"gatewayNamespace":         {Type: oam.PropertyTypeString, Default: "gateway-system", Description: "Namespace of the Gateway (gateway controllerType only)."},
+		"annotations":              {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Additional annotations to set on the generated resource."},
+		"rules":                    {Type: oam.PropertyTypeArray, Description: "Ingress-style host rules passed through to the ingress handler.", Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "A single ingress-style host rule."}},
+		"hostnames":                {Type: oam.PropertyTypeArray, Description: "Gateway-style hostnames passed through to the httproute handler.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A hostname for the gateway route."}},
+		"ingressClassName":         {Type: oam.PropertyTypeString, Description: "IngressClass to use (ingress controllerType only)."},
+		"servicePort":              {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one."},
+		"serviceName":              {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
+		"name":                     {Type: oam.PropertyTypeString, Description: "Overrides the sub-application name, allowing multiple expose traits per component."},
+		"scope":                    {Type: oam.PropertyTypeString, Description: "Suffix appended to the sub-application name to disambiguate multiple expose traits."},
 		"networkPolicy":            schemaNetworkPolicy(),
 	}
 }

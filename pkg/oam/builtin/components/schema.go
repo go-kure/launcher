@@ -19,13 +19,15 @@ func accessModesEnum() []any {
 // kept open — it carries secretKeyRef/configMapKeyRef sub-objects.
 func schemaEnv() oam.PropertySchema {
 	return oam.PropertySchema{
-		Type: oam.PropertyTypeArray,
+		Type:        oam.PropertyTypeArray,
+		Description: "Environment variables to set on the container.",
 		Items: &oam.PropertySchema{
-			Type: oam.PropertyTypeObject,
+			Type:        oam.PropertyTypeObject,
+			Description: "A single environment variable.",
 			Properties: map[string]oam.PropertySchema{
-				"name":      {Type: oam.PropertyTypeString, Required: true},
-				"value":     {Type: oam.PropertyTypeString},
-				"valueFrom": {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+				"name":      {Type: oam.PropertyTypeString, Required: true, Description: "Environment variable name."},
+				"value":     {Type: oam.PropertyTypeString, Description: "Literal value for the variable."},
+				"valueFrom": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Source the value from another object (e.g. secretKeyRef or configMapKeyRef)."},
 			},
 		},
 	}
@@ -37,15 +39,16 @@ func schemaResources() oam.PropertySchema {
 	// sub-map state (honoring the file-level freshness contract above).
 	quantity := func() map[string]oam.PropertySchema {
 		return map[string]oam.PropertySchema{
-			"cpu":    {Type: oam.PropertyTypeString},
-			"memory": {Type: oam.PropertyTypeString},
+			"cpu":    {Type: oam.PropertyTypeString, Description: `CPU quantity (e.g. "500m" or "1").`},
+			"memory": {Type: oam.PropertyTypeString, Description: `Memory quantity (e.g. "512Mi" or "1Gi").`},
 		}
 	}
 	return oam.PropertySchema{
-		Type: oam.PropertyTypeObject,
+		Type:        oam.PropertyTypeObject,
+		Description: "Compute resource requests and limits for the container.",
 		Properties: map[string]oam.PropertySchema{
-			"requests": {Type: oam.PropertyTypeObject, Properties: quantity()},
-			"limits":   {Type: oam.PropertyTypeObject, Properties: quantity()},
+			"requests": {Type: oam.PropertyTypeObject, Description: "Minimum resources guaranteed to the container.", Properties: quantity()},
+			"limits":   {Type: oam.PropertyTypeObject, Description: "Maximum resources the container may use.", Properties: quantity()},
 		},
 	}
 }
@@ -53,8 +56,9 @@ func schemaResources() oam.PropertySchema {
 // schemaStringArray describes an array-of-strings property (command/args).
 func schemaStringArray() oam.PropertySchema {
 	return oam.PropertySchema{
-		Type:  oam.PropertyTypeArray,
-		Items: &oam.PropertySchema{Type: oam.PropertyTypeString},
+		Type:        oam.PropertyTypeArray,
+		Description: "A list of string values (e.g. command or args).",
+		Items:       &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single string value."},
 	}
 }
 
@@ -62,13 +66,16 @@ func schemaStringArray() oam.PropertySchema {
 // probe carries an int-or-string port and many optional K8s fields, so the
 // individual probe objects are kept open.
 func schemaProbes() oam.PropertySchema {
-	probe := oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}
+	probe := func(desc string) oam.PropertySchema {
+		return oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: desc}
+	}
 	return oam.PropertySchema{
-		Type: oam.PropertyTypeObject,
+		Type:        oam.PropertyTypeObject,
+		Description: "Health probes for the container.",
 		Properties: map[string]oam.PropertySchema{
-			"readiness": probe,
-			"liveness":  probe,
-			"startup":   probe,
+			"readiness": probe("Readiness probe determining when the container can receive traffic."),
+			"liveness":  probe("Liveness probe determining when the container should be restarted."),
+			"startup":   probe("Startup probe determining when the container has finished starting."),
 		},
 	}
 }
@@ -78,15 +85,17 @@ func schemaProbes() oam.PropertySchema {
 // open beyond the common fields.
 func schemaVolumes() oam.PropertySchema {
 	return oam.PropertySchema{
-		Type: oam.PropertyTypeArray,
+		Type:        oam.PropertyTypeArray,
+		Description: "Volumes to attach and mount into the container.",
 		Items: &oam.PropertySchema{
 			Type:                 oam.PropertyTypeObject,
 			AdditionalProperties: true,
+			Description:          "A single volume and its mount.",
 			Properties: map[string]oam.PropertySchema{
-				"name":      {Type: oam.PropertyTypeString, Required: true},
-				"type":      {Type: oam.PropertyTypeString, Enum: []any{"hostPath", "emptyDir", "pvc", "configMap", "secret"}},
-				"mountPath": {Type: oam.PropertyTypeString, Required: true},
-				"readOnly":  {Type: oam.PropertyTypeBoolean},
+				"name":      {Type: oam.PropertyTypeString, Required: true, Description: "Volume name."},
+				"type":      {Type: oam.PropertyTypeString, Enum: []any{"hostPath", "emptyDir", "pvc", "configMap", "secret"}, Description: "Volume source type."},
+				"mountPath": {Type: oam.PropertyTypeString, Required: true, Description: "Path where the volume is mounted in the container."},
+				"readOnly":  {Type: oam.PropertyTypeBoolean, Description: "Mount the volume read-only."},
 			},
 		},
 	}
@@ -97,13 +106,15 @@ func schemaVolumes() oam.PropertySchema {
 // volumeMounts/ports shapes are kept open on the item object.
 func schemaContainers() oam.PropertySchema {
 	return oam.PropertySchema{
-		Type: oam.PropertyTypeArray,
+		Type:        oam.PropertyTypeArray,
+		Description: "Additional containers to run in the pod (init containers or sidecars).",
 		Items: &oam.PropertySchema{
 			Type:                 oam.PropertyTypeObject,
 			AdditionalProperties: true,
+			Description:          "A single container definition.",
 			Properties: map[string]oam.PropertySchema{
-				"name":  {Type: oam.PropertyTypeString, Required: true},
-				"image": {Type: oam.PropertyTypeString, Required: true},
+				"name":  {Type: oam.PropertyTypeString, Required: true, Description: "Container name."},
+				"image": {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference."},
 			},
 		},
 	}
@@ -112,12 +123,13 @@ func schemaContainers() oam.PropertySchema {
 // schemaAffinity describes the shared `affinity` property (see parseAffinity).
 func schemaAffinity() oam.PropertySchema {
 	return oam.PropertySchema{
-		Type: oam.PropertyTypeObject,
+		Type:        oam.PropertyTypeObject,
+		Description: "Pod affinity and anti-affinity scheduling rules.",
 		Properties: map[string]oam.PropertySchema{
-			"enablePodAntiAffinity": {Type: oam.PropertyTypeBoolean},
-			"topologyKey":           {Type: oam.PropertyTypeString, Default: "kubernetes.io/hostname"},
-			"podAntiAffinityType":   {Type: oam.PropertyTypeString, Default: "preferred", Enum: []any{"preferred", "required"}},
-			"nodeSelector":          {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+			"enablePodAntiAffinity": {Type: oam.PropertyTypeBoolean, Description: "Spread pods across nodes using pod anti-affinity."},
+			"topologyKey":           {Type: oam.PropertyTypeString, Default: "kubernetes.io/hostname", Description: "Node topology key the anti-affinity rule is evaluated against."},
+			"podAntiAffinityType":   {Type: oam.PropertyTypeString, Default: "preferred", Enum: []any{"preferred", "required"}, Description: "Whether anti-affinity is a soft preference or a hard requirement."},
+			"nodeSelector":          {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Node labels the pod must match to be scheduled."},
 		},
 	}
 }
@@ -125,14 +137,16 @@ func schemaAffinity() oam.PropertySchema {
 // schemaTolerations describes the shared `tolerations` property (see parseTolerations).
 func schemaTolerations() oam.PropertySchema {
 	return oam.PropertySchema{
-		Type: oam.PropertyTypeArray,
+		Type:        oam.PropertyTypeArray,
+		Description: "Node taint tolerations allowing the pod to schedule onto tainted nodes.",
 		Items: &oam.PropertySchema{
-			Type: oam.PropertyTypeObject,
+			Type:        oam.PropertyTypeObject,
+			Description: "A single taint toleration.",
 			Properties: map[string]oam.PropertySchema{
-				"key":      {Type: oam.PropertyTypeString},
-				"operator": {Type: oam.PropertyTypeString, Enum: []any{"Exists", "Equal"}},
-				"value":    {Type: oam.PropertyTypeString},
-				"effect":   {Type: oam.PropertyTypeString, Enum: []any{"NoSchedule", "PreferNoSchedule", "NoExecute", ""}},
+				"key":      {Type: oam.PropertyTypeString, Description: "Taint key to tolerate."},
+				"operator": {Type: oam.PropertyTypeString, Enum: []any{"Exists", "Equal"}, Description: "How the taint key/value are matched."},
+				"value":    {Type: oam.PropertyTypeString, Description: "Taint value to match when operator is Equal."},
+				"effect":   {Type: oam.PropertyTypeString, Enum: []any{"NoSchedule", "PreferNoSchedule", "NoExecute", ""}, Description: "Taint effect to tolerate (empty matches all effects)."},
 			},
 		},
 	}
@@ -142,15 +156,17 @@ func schemaTolerations() oam.PropertySchema {
 // (see parseVolumeClaimTemplates).
 func schemaVolumeClaimTemplates() oam.PropertySchema {
 	return oam.PropertySchema{
-		Type: oam.PropertyTypeArray,
+		Type:        oam.PropertyTypeArray,
+		Description: "PersistentVolumeClaim templates provisioned per replica.",
 		Items: &oam.PropertySchema{
-			Type: oam.PropertyTypeObject,
+			Type:        oam.PropertyTypeObject,
+			Description: "A single volume claim template.",
 			Properties: map[string]oam.PropertySchema{
-				"name":         {Type: oam.PropertyTypeString, Required: true},
-				"size":         {Type: oam.PropertyTypeString, Required: true},
-				"mountPath":    {Type: oam.PropertyTypeString, Required: true},
-				"storageClass": {Type: oam.PropertyTypeString},
-				"accessModes":  {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: accessModesEnum()}},
+				"name":         {Type: oam.PropertyTypeString, Required: true, Description: "Claim name (also used as the mount name)."},
+				"size":         {Type: oam.PropertyTypeString, Required: true, Description: `Requested storage size (e.g. "10Gi").`},
+				"mountPath":    {Type: oam.PropertyTypeString, Required: true, Description: "Path where the claim is mounted in the container."},
+				"storageClass": {Type: oam.PropertyTypeString, Description: "StorageClass used to provision the volume."},
+				"accessModes":  {Type: oam.PropertyTypeArray, Description: "Requested access modes for the volume.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: accessModesEnum(), Description: "A single access mode."}},
 			},
 		},
 	}

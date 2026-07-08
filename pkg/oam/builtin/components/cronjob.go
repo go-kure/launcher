@@ -27,11 +27,11 @@ func (h *CronjobHandler) CanHandle(componentType string) bool {
 // PropertySchema declares the cronjob component's user-facing properties.
 func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"image":                      {Type: oam.PropertyTypeString, Required: true},
-		"schedule":                   {Type: oam.PropertyTypeString, Required: true},
-		"restartPolicy":              {Type: oam.PropertyTypeString, Default: "OnFailure", Enum: []any{"Never", "OnFailure"}},
-		"successfulJobsHistoryLimit": {Type: oam.PropertyTypeInteger, Default: 3},
-		"failedJobsHistoryLimit":     {Type: oam.PropertyTypeInteger, Default: 1},
+		"image":                      {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the job container."},
+		"schedule":                   {Type: oam.PropertyTypeString, Required: true, Description: "Cron schedule in standard 5-field format (e.g. \"0 2 * * *\")."},
+		"restartPolicy":              {Type: oam.PropertyTypeString, Default: "OnFailure", Enum: []any{"Never", "OnFailure"}, Description: "Pod restart policy for the job's containers."},
+		"successfulJobsHistoryLimit": {Type: oam.PropertyTypeInteger, Default: 3, Description: "Number of successful finished jobs to retain."},
+		"failedJobsHistoryLimit":     {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of failed finished jobs to retain."},
 		"env":                        schemaEnv(),
 		"resources":                  schemaResources(),
 		"command":                    schemaStringArray(),

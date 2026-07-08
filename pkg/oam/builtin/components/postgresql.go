@@ -24,27 +24,37 @@ func (h *PostgresqlHandler) CanHandle(componentType string) bool {
 // …) are deep and K8s-adjacent, so they are kept open (AdditionalProperties)
 // rather than modeled field-by-field.
 func (h *PostgresqlHandler) PropertySchema() map[string]oam.PropertySchema {
-	openObject := oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}
-	openArray := oam.PropertySchema{Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}}
+	// The CNPG-shaped sub-objects are kept open; each reuses the same open shape
+	// but carries its own description, so a per-key helper supplies the prose.
+	openObj := func(desc string) oam.PropertySchema {
+		return oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: desc}
+	}
+	openArr := func(desc, itemDesc string) oam.PropertySchema {
+		return oam.PropertySchema{
+			Type:        oam.PropertyTypeArray,
+			Description: desc,
+			Items:       &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: itemDesc},
+		}
+	}
 	return map[string]oam.PropertySchema{
-		"provider":          {Type: oam.PropertyTypeString, Default: "cnpg", Enum: []any{"cnpg"}},
-		"version":           {Type: oam.PropertyTypeString, Default: "16"},
-		"storageSize":       {Type: oam.PropertyTypeString, Default: "1Gi"},
-		"replicas":          {Type: oam.PropertyTypeInteger, Default: 1},
-		"imageName":         {Type: oam.PropertyTypeString},
+		"provider":          {Type: oam.PropertyTypeString, Default: "cnpg", Enum: []any{"cnpg"}, Description: "Database provider (only cnpg is supported)."},
+		"version":           {Type: oam.PropertyTypeString, Default: "16", Description: "PostgreSQL major version for the cluster image."},
+		"storageSize":       {Type: oam.PropertyTypeString, Default: "1Gi", Description: "Persistent storage size requested for each instance."},
+		"replicas":          {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of PostgreSQL instances in the cluster."},
+		"imageName":         {Type: oam.PropertyTypeString, Description: "Override for the container image (defaults to the CloudNativePG image for the version)."},
 		"resources":         schemaResources(),
-		"backup":            openObject,
-		"monitoring":        openObject,
-		"pooler":            openObject,
-		"bootstrap":         openObject,
-		"replication":       openObject,
-		"postgresql":        openObject,
-		"inheritedMetadata": openObject,
-		"objectStore":       openObject,
-		"affinity":          openObject,
-		"externalClusters":  openArray,
-		"managedRoles":      openArray,
-		"databases":         openArray,
+		"backup":            openObj("Barman object-store backup settings (retentionPolicy, destinationPath, endpointURL, secretName)."),
+		"monitoring":        openObj("Monitoring settings, including the PodMonitor toggle and custom queries."),
+		"pooler":            openObj("PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters)."),
+		"bootstrap":         openObj("Cluster bootstrap source (recovery or pg_basebackup)."),
+		"replication":       openObj("Synchronous replication settings (method, number, dataDurability)."),
+		"postgresql":        openObj("PostgreSQL server settings, including the parameters map."),
+		"inheritedMetadata": openObj("Labels and annotations propagated to the generated resources."),
+		"objectStore":       openObj("Barman Cloud ObjectStore settings for backups (destinationPath, endpointURL, secretName, retentionPolicy, serverName)."),
+		"affinity":          openObj("Pod affinity and anti-affinity scheduling settings."),
+		"externalClusters":  openArr("External clusters referenced for bootstrap or replica sources.", "A single external cluster definition."),
+		"managedRoles":      openArr("Database roles created and reconciled by the operator.", "A single managed role definition."),
+		"databases":         openArr("Databases created and reconciled within the cluster.", "A single database definition."),
 	}
 }
 

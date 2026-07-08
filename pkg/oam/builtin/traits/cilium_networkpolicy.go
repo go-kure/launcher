@@ -35,10 +35,10 @@ func (h *CiliumNetworkPolicyHandler) ValidateAndApplyDefaults(rendering map[stri
 // kept open (AdditionalProperties on the objects / array items).
 func (h *CiliumNetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"name":             {Type: oam.PropertyTypeString, Required: true},
-		"endpointSelector": {Type: oam.PropertyTypeObject, AdditionalProperties: true},
-		"egress":           {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}},
-		"ingress":          {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}},
+		"name":             {Type: oam.PropertyTypeString, Required: true, Description: "Name of the generated CiliumNetworkPolicy resource."},
+		"endpointSelector": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Cilium endpoint selector matching the pods this policy applies to."},
+		"egress":           {Type: oam.PropertyTypeArray, Description: "Cilium egress rules controlling outbound traffic.", Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "A single Cilium egress rule (opaque api.Rule shape)."}},
+		"ingress":          {Type: oam.PropertyTypeArray, Description: "Cilium ingress rules controlling inbound traffic.", Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "A single Cilium ingress rule (opaque api.Rule shape)."}},
 	}
 }
 

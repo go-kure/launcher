@@ -30,17 +30,18 @@ func (h *OCIHandler) CanHandle(componentType string) bool { return componentType
 func (h *OCIHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"source": {
-			Type:     oam.PropertyTypeObject,
-			Required: true,
+			Type:        oam.PropertyTypeObject,
+			Required:    true,
+			Description: "OCIRepository source of the artifact to reconcile.",
 			Properties: map[string]oam.PropertySchema{
-				"url": {Type: oam.PropertyTypeString, Required: true},
+				"url": {Type: oam.PropertyTypeString, Required: true, Description: "OCI artifact URL (must use the oci:// scheme)."},
 			},
 		},
-		"version":         {Type: oam.PropertyTypeString, Required: true},
-		"path":            {Type: oam.PropertyTypeString, Default: "./"},
-		"prune":           {Type: oam.PropertyTypeBoolean, Default: true},
-		"interval":        {Type: oam.PropertyTypeString},
-		"targetNamespace": {Type: oam.PropertyTypeString},
+		"version":         {Type: oam.PropertyTypeString, Required: true, Description: "Artifact version to reconcile: a tag or sha256:<digest>."},
+		"path":            {Type: oam.PropertyTypeString, Default: "./", Description: "Path within the artifact that the Kustomization reconciles."},
+		"prune":           {Type: oam.PropertyTypeBoolean, Default: true, Description: "Whether the Kustomization prunes resources removed from the source."},
+		"interval":        {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Go duration (default 60m)."},
+		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Namespace into which the Kustomization applies resources."},
 	}
 }
 

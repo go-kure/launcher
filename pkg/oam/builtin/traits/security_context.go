@@ -36,13 +36,13 @@ func (h *SecurityContextHandler) CanHandle(traitType string) bool {
 // PropertySchema declares the security-context trait's user-facing properties.
 func (h *SecurityContextHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"psaLevel":                 {Type: oam.PropertyTypeString, Required: true, Enum: []any{"restricted", "baseline", "privileged"}},
-		"runAsNonRoot":             {Type: oam.PropertyTypeBoolean},
-		"allowPrivilegeEscalation": {Type: oam.PropertyTypeBoolean},
-		"readOnlyRootFilesystem":   {Type: oam.PropertyTypeBoolean},
-		"runAsUser":                {Type: oam.PropertyTypeInteger},
-		"runAsGroup":               {Type: oam.PropertyTypeInteger},
-		"fsGroup":                  {Type: oam.PropertyTypeInteger},
+		"psaLevel":                 {Type: oam.PropertyTypeString, Required: true, Enum: []any{"restricted", "baseline", "privileged"}, Description: "Pod Security Admission level the workload requires (restricted, baseline, or privileged)."},
+		"runAsNonRoot":             {Type: oam.PropertyTypeBoolean, Description: "Whether containers must run as a non-root user."},
+		"allowPrivilegeEscalation": {Type: oam.PropertyTypeBoolean, Description: "Whether a container process may gain more privileges than its parent."},
+		"readOnlyRootFilesystem":   {Type: oam.PropertyTypeBoolean, Description: "Whether the container root filesystem is mounted read-only."},
+		"runAsUser":                {Type: oam.PropertyTypeInteger, Description: "UID to run the container process as."},
+		"runAsGroup":               {Type: oam.PropertyTypeInteger, Description: "GID to run the container process as."},
+		"fsGroup":                  {Type: oam.PropertyTypeInteger, Description: "Supplemental group applied to ownership of mounted volumes."},
 	}
 }
 

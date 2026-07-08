@@ -23,10 +23,10 @@ func (h *WebserviceHandler) CanHandle(componentType string) bool {
 // PropertySchema declares the webservice component's user-facing properties.
 func (h *WebserviceHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"image":          {Type: oam.PropertyTypeString, Required: true},
-		"port":           {Type: oam.PropertyTypeInteger, Default: 80},
-		"replicas":       {Type: oam.PropertyTypeInteger, Default: 1},
-		"topologySpread": {Type: oam.PropertyTypeBoolean, Default: true},
+		"image":          {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
+		"port":           {Type: oam.PropertyTypeInteger, Default: 80, Description: "Container port exposed by the Deployment and its ClusterIP Service."},
+		"replicas":       {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of Deployment pod replicas."},
+		"topologySpread": {Type: oam.PropertyTypeBoolean, Default: true, Description: "Whether default topology spread constraints are applied across nodes."},
 		"env":            schemaEnv(),
 		"resources":      schemaResources(),
 		"command":        schemaStringArray(),

@@ -32,20 +32,22 @@ func (h *HelmchartHandler) CanHandle(componentType string) bool {
 // Helm `values` tree and the Flux-shaped source/driftDetection/install/upgrade
 // blocks are kept open (AdditionalProperties) rather than modeled field-by-field.
 func (h *HelmchartHandler) PropertySchema() map[string]oam.PropertySchema {
-	openObject := oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}
+	openObject := func(desc string) oam.PropertySchema {
+		return oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: desc}
+	}
 	return map[string]oam.PropertySchema{
-		"chart":           {Type: oam.PropertyTypeString},
-		"version":         {Type: oam.PropertyTypeString},
-		"delivery":        {Type: oam.PropertyTypeString, Default: "native", Enum: []any{"native", "template"}},
-		"interval":        {Type: oam.PropertyTypeString},
-		"releaseName":     {Type: oam.PropertyTypeString},
-		"targetNamespace": {Type: oam.PropertyTypeString},
-		"source":          {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true},
-		"values":          openObject,
-		"driftDetection":  openObject,
-		"install":         openObject,
-		"upgrade":         openObject,
-		"valuesFrom":      {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}},
+		"chart":           {Type: oam.PropertyTypeString, Description: "Chart name within a HelmRepository source."},
+		"version":         {Type: oam.PropertyTypeString, Description: "Chart version to install."},
+		"delivery":        {Type: oam.PropertyTypeString, Default: "native", Enum: []any{"native", "template"}, Description: "Delivery mode: native emits a HelmRelease, template renders the chart client-side."},
+		"interval":        {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Go duration (default 60m)."},
+		"releaseName":     {Type: oam.PropertyTypeString, Description: "Helm release name (defaults to the component name)."},
+		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Namespace into which the HelmRelease installs resources."},
+		"source":          {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true, Description: "Chart source: an inline url, or a reference (name/kind) to an existing source CR."},
+		"values":          openObject("Helm values tree passed to the release."),
+		"driftDetection":  openObject("Flux drift detection settings (mode: enabled, warn, or disabled)."),
+		"install":         openObject("Helm install options (e.g. crds: Skip, Create, or CreateReplace)."),
+		"upgrade":         openObject("Helm upgrade options (e.g. crds: Skip, Create, or CreateReplace)."),
+		"valuesFrom":      {Type: oam.PropertyTypeArray, Description: "References to ConfigMaps or Secrets supplying additional Helm values.", Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "A single ConfigMap or Secret values reference (kind, name, valuesKey, targetPath)."}},
 	}
 }
 

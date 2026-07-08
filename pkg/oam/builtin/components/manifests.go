@@ -23,16 +23,18 @@ func (h *ManifestsHandler) CanHandle(componentType string) bool { return compone
 // parseManifestSource); `scopeOverrides` supplies scope for unknown kinds.
 func (h *ManifestsHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"inline": {Type: oam.PropertyTypeString},
-		"url":    {Type: oam.PropertyTypeString},
+		"inline": {Type: oam.PropertyTypeString, Description: "Raw multi-document manifest YAML emitted inline (mutually exclusive with url)."},
+		"url":    {Type: oam.PropertyTypeString, Description: "URL of the manifest YAML source (mutually exclusive with inline)."},
 		"scopeOverrides": {
-			Type: oam.PropertyTypeArray,
+			Type:        oam.PropertyTypeArray,
+			Description: "Explicit scope entries for kinds whose scope is otherwise unknown.",
 			Items: &oam.PropertySchema{
-				Type: oam.PropertyTypeObject,
+				Type:        oam.PropertyTypeObject,
+				Description: "A single scope override for one apiVersion/kind.",
 				Properties: map[string]oam.PropertySchema{
-					"apiVersion": {Type: oam.PropertyTypeString, Required: true},
-					"kind":       {Type: oam.PropertyTypeString, Required: true},
-					"scope":      {Type: oam.PropertyTypeString, Required: true, Enum: []any{"Cluster", "Namespaced"}},
+					"apiVersion": {Type: oam.PropertyTypeString, Required: true, Description: "API version of the kind whose scope is being overridden."},
+					"kind":       {Type: oam.PropertyTypeString, Required: true, Description: "Kind whose scope is being overridden."},
+					"scope":      {Type: oam.PropertyTypeString, Required: true, Enum: []any{"Cluster", "Namespaced"}, Description: "Whether the kind is cluster-scoped or namespaced."},
 				},
 			},
 		},

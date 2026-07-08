@@ -26,6 +26,9 @@ const (
 type PropertySchema struct {
 	// Type is the value type. Required.
 	Type PropertyType `json:"type"`
+	// Description is human-facing prose for the property, surfaced in generated
+	// API references (e.g. crane's Handler API Reference). Optional.
+	Description string `json:"description,omitempty"`
 	// Required marks the property as mandatory.
 	Required bool `json:"required,omitempty"`
 	// Default is the value applied when the property is absent.

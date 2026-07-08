@@ -62,39 +62,51 @@ func synthesizeParentRef(name, namespace string) map[string]any {
 // kept open beyond the enumerated backendRefs/matches/filters keys. `gatewayName`/
 // `gatewayNamespace`/`networkPolicy` are platform-reserved capability keys.
 func (h *HTTPRouteHandler) PropertySchema() map[string]oam.PropertySchema {
-	openArray := oam.PropertySchema{Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true}}
+	// openArray builds an array of opaque objects; matches/backendRefs/filters share
+	// the shape but have different meanings, so an accurate description is passed in.
+	openArray := func(arrayDesc, itemDesc string) oam.PropertySchema {
+		return oam.PropertySchema{
+			Type:        oam.PropertyTypeArray,
+			Description: arrayDesc,
+			Items:       &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: itemDesc},
+		}
+	}
 	return map[string]oam.PropertySchema{
 		"parentRefs": {
-			Type: oam.PropertyTypeArray,
+			Type:        oam.PropertyTypeArray,
+			Description: "Gateway parent references this route attaches to.",
 			Items: &oam.PropertySchema{
-				Type: oam.PropertyTypeObject,
+				Type:        oam.PropertyTypeObject,
+				Description: "A single Gateway parent reference.",
 				Properties: map[string]oam.PropertySchema{
-					"name":      {Type: oam.PropertyTypeString, Required: true},
-					"namespace": {Type: oam.PropertyTypeString},
+					"name":      {Type: oam.PropertyTypeString, Required: true, Description: "Name of the parent Gateway."},
+					"namespace": {Type: oam.PropertyTypeString, Description: "Namespace of the parent Gateway (defaults to gateway-system)."},
 				},
 			},
 		},
-		"hostnames": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
+		"hostnames": {Type: oam.PropertyTypeArray, Description: "Hostnames this route matches.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A hostname the route matches."}},
 		"rules": {
-			Type:     oam.PropertyTypeArray,
-			Required: true,
+			Type:        oam.PropertyTypeArray,
+			Required:    true,
+			Description: "Routing rules for the HTTPRoute.",
 			Items: &oam.PropertySchema{
 				Type:                 oam.PropertyTypeObject,
 				AdditionalProperties: true,
+				Description:          "A single routing rule (matches, backends, filters, timeouts).",
 				Properties: map[string]oam.PropertySchema{
-					"matches":     openArray,
-					"backendRefs": openArray,
-					"filters":     openArray,
-					"timeouts":    {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+					"matches":     openArray("Gateway API match conditions selecting requests for this rule.", "A single Gateway API match condition."),
+					"backendRefs": openArray("Backend services requests matching this rule are forwarded to.", "A single backend reference (name/port)."),
+					"filters":     openArray("Gateway API filters applied to matching requests.", "A single Gateway API filter (e.g. RequestRedirect, URLRewrite)."),
+					"timeouts":    {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Per-rule request and backendRequest timeouts."},
 				},
 			},
 		},
-		"gatewayName":      {Type: oam.PropertyTypeString},
-		"gatewayNamespace": {Type: oam.PropertyTypeString, Default: "gateway-system"},
-		"servicePort":      {Type: oam.PropertyTypeInteger},
-		"serviceName":      {Type: oam.PropertyTypeString},
-		"name":             {Type: oam.PropertyTypeString},
-		"scope":            {Type: oam.PropertyTypeString},
+		"gatewayName":      {Type: oam.PropertyTypeString, Description: "Capability-supplied Gateway name used to synthesize parentRefs."},
+		"gatewayNamespace": {Type: oam.PropertyTypeString, Default: "gateway-system", Description: "Namespace of the capability-supplied Gateway."},
+		"servicePort":      {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one."},
+		"serviceName":      {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
+		"name":             {Type: oam.PropertyTypeString, Description: "Overrides the sub-application name, allowing multiple httproute traits per component."},
+		"scope":            {Type: oam.PropertyTypeString, Description: "Suffix appended to the sub-application name to disambiguate multiple httproute traits."},
 		"networkPolicy":    schemaNetworkPolicy(),
 	}
 }

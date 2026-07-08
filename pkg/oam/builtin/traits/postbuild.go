@@ -23,15 +23,17 @@ func (h *PostBuildHandler) CanHandle(traitType string) bool {
 // `substitute` is an open map of string→string.
 func (h *PostBuildHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"substitute": {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+		"substitute": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Literal key/value variables substituted into the Kustomization at post-build."},
 		"substituteFrom": {
-			Type: oam.PropertyTypeArray,
+			Type:        oam.PropertyTypeArray,
+			Description: "References to ConfigMaps or Secrets whose keys supply post-build substitution variables.",
 			Items: &oam.PropertySchema{
-				Type: oam.PropertyTypeObject,
+				Type:        oam.PropertyTypeObject,
+				Description: "A ConfigMap or Secret providing post-build substitution variables.",
 				Properties: map[string]oam.PropertySchema{
-					"kind":     {Type: oam.PropertyTypeString, Required: true, Enum: []any{"ConfigMap", "Secret"}},
-					"name":     {Type: oam.PropertyTypeString, Required: true},
-					"optional": {Type: oam.PropertyTypeBoolean},
+					"kind":     {Type: oam.PropertyTypeString, Required: true, Enum: []any{"ConfigMap", "Secret"}, Description: "Source kind (ConfigMap or Secret)."},
+					"name":     {Type: oam.PropertyTypeString, Required: true, Description: "Name of the ConfigMap or Secret to read variables from."},
+					"optional": {Type: oam.PropertyTypeBoolean, Description: "Whether a missing source is tolerated instead of failing the build."},
 				},
 			},
 		},

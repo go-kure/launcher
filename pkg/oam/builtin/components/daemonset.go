@@ -23,8 +23,8 @@ func (h *DaemonsetHandler) CanHandle(componentType string) bool {
 // PropertySchema declares the daemonset component's user-facing properties.
 func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"image":          {Type: oam.PropertyTypeString, Required: true},
-		"port":           {Type: oam.PropertyTypeInteger},
+		"image":          {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
+		"port":           {Type: oam.PropertyTypeInteger, Description: "Container port to expose; when set, a ClusterIP Service is generated."},
 		"env":            schemaEnv(),
 		"resources":      schemaResources(),
 		"command":        schemaStringArray(),
