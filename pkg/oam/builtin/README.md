@@ -8,7 +8,9 @@ handlers (e.g. `CertificateRendering`, `ExposeRendering`, `ExternalSecretRenderi
 `DecodeStrict[T]` helper used by handlers to decode capability properties.
 
 `ExposeRendering` additionally carries `certManagerClusterIssuer` (platform-managed TLS on
-the ingress path) and `allowedHostnameWildcard` (hostname constraint for both paths).
+the ingress path), `allowedHostnameWildcard` (hostname constraint for both paths), and the
+ingress-only `sslRedirect` / `forceSslRedirect` platform defaults (author-overridable via the
+matching inline expose properties).
 
 These are internal schema types used by [`builtin/components`](components) and
 [`builtin/traits`](traits); they are not a user-facing API. See

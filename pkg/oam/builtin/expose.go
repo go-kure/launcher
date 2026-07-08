@@ -30,4 +30,14 @@ type ExposeRendering struct {
 	// user-supplied hostnames on both the ingress and gateway paths. Empty skips
 	// hostname validation.
 	AllowedHostnameWildcard string `yaml:"allowedHostnameWildcard,omitempty" json:"allowedHostnameWildcard,omitempty"`
+
+	// SSLRedirect is the platform default for the nginx-ingress
+	// nginx.ingress.kubernetes.io/ssl-redirect annotation. Ingress-only. A
+	// component may override it via the inline sslRedirect property.
+	SSLRedirect *bool `yaml:"sslRedirect,omitempty" json:"sslRedirect,omitempty"`
+
+	// ForceSSLRedirect is the platform default for the nginx-ingress
+	// nginx.ingress.kubernetes.io/force-ssl-redirect annotation. Ingress-only. A
+	// component may override it via the inline forceSslRedirect property.
+	ForceSSLRedirect *bool `yaml:"forceSslRedirect,omitempty" json:"forceSslRedirect,omitempty"`
 }

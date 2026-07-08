@@ -11,6 +11,14 @@ import (
 // the ClusterIssuer used to provision the ingress TLS certificate.
 const clusterIssuerAnnotation = "cert-manager.io/cluster-issuer"
 
+// sslRedirectAnnotation / forceSSLRedirectAnnotation are the nginx-ingress
+// annotations the expose trait writes from its sslRedirect / forceSslRedirect
+// properties (platform default via capability rendering, override-able inline).
+const (
+	sslRedirectAnnotation      = "nginx.ingress.kubernetes.io/ssl-redirect"
+	forceSSLRedirectAnnotation = "nginx.ingress.kubernetes.io/force-ssl-redirect"
+)
+
 // matchHostnameWildcard reports whether host is permitted by pattern. An empty
 // pattern permits everything. A pattern without a leading "*." must match host
 // exactly. A "*.suffix" pattern matches exactly one DNS label in place of the
