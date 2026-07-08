@@ -14,7 +14,9 @@ crane can validate them before invocation. This includes the platform-reserved k
 handler reads from merged properties (e.g. `networkPolicy`, `allowedHostnameWildcard`,
 `controllerType`). Deeply nested or K8s-adjacent shapes are kept shallow/open
 (`additionalProperties`) rather than modeled field-by-field; `prune-protection` accepts no
-properties and so declares an empty schema.
+properties and so declares an empty schema. Every property (including nested object fields and
+array item schemas at every depth) carries a `Description`, surfaced in crane's generated Handler
+API Reference.
 
 Capability-injected fields are **not** marked `Required` in a handler's schema, because
 they are supplied by capability rendering (validated in `ValidateAndApplyDefaults`), not by

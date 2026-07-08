@@ -21,8 +21,8 @@ func (h *CRDHandler) CanHandle(componentType string) bool { return componentType
 // parseManifestSource and is not expressible in the schema vocabulary.
 func (h *CRDHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"inline": {Type: oam.PropertyTypeString},
-		"url":    {Type: oam.PropertyTypeString},
+		"inline": {Type: oam.PropertyTypeString, Description: "Raw CRD YAML emitted inline (mutually exclusive with url)."},
+		"url":    {Type: oam.PropertyTypeString, Description: "URL of the CRD YAML source (mutually exclusive with inline)."},
 	}
 }
 

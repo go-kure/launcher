@@ -25,14 +25,16 @@ func (h *FluxCDPatchesHandler) CanHandle(traitType string) bool {
 func (h *FluxCDPatchesHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"patches": {
-			Type:     oam.PropertyTypeArray,
-			Required: true,
+			Type:        oam.PropertyTypeArray,
+			Required:    true,
+			Description: "Strategic-merge or JSON6902 patches applied to the generated Kustomization.",
 			Items: &oam.PropertySchema{
 				Type:                 oam.PropertyTypeObject,
 				AdditionalProperties: true,
+				Description:          "A single patch with its body and optional target selector.",
 				Properties: map[string]oam.PropertySchema{
-					"patch":  {Type: oam.PropertyTypeString, Required: true},
-					"target": {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+					"patch":  {Type: oam.PropertyTypeString, Required: true, Description: "Patch body as a strategic-merge YAML or JSON6902 document."},
+					"target": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Kustomize target selector (group/version/kind/name/namespace/labelSelector/annotationSelector) restricting which resources the patch applies to."},
 				},
 			},
 		},

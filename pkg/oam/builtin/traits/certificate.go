@@ -48,31 +48,33 @@ func (h *CertificateHandler) ValidateAndApplyDefaults(rendering map[string]any) 
 // PropertySchema declares the certificate trait's user-facing properties.
 func (h *CertificateHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"secretName": {Type: oam.PropertyTypeString, Required: true},
+		"secretName": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the Secret that stores the issued certificate and its private key."},
 		// issuerRef is capability-injected (CapabilityRequired; validated in
 		// ValidateAndApplyDefaults), so the parent is NOT user-required. If a user does
 		// supply issuerRef, its name is still required so `issuerRef: {}` fails in schema
 		// preflight rather than later in parseProperties.
 		"issuerRef": {
-			Type: oam.PropertyTypeObject,
+			Type:        oam.PropertyTypeObject,
+			Description: "Reference to the cert-manager issuer that signs the certificate (normally capability-injected).",
 			Properties: map[string]oam.PropertySchema{
-				"name": {Type: oam.PropertyTypeString, Required: true},
-				"kind": {Type: oam.PropertyTypeString, Default: "ClusterIssuer"},
+				"name": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the issuer to sign the certificate."},
+				"kind": {Type: oam.PropertyTypeString, Default: "ClusterIssuer", Description: "Issuer kind (Issuer or ClusterIssuer)."},
 			},
 		},
-		"dnsNames":    {Type: oam.PropertyTypeArray, Required: true, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
-		"duration":    {Type: oam.PropertyTypeString, Default: "2160h"},
-		"renewBefore": {Type: oam.PropertyTypeString, Default: "360h"},
+		"dnsNames":    {Type: oam.PropertyTypeArray, Required: true, Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A DNS name (SAN) to include in the certificate."}, Description: "DNS names the certificate is issued for."},
+		"duration":    {Type: oam.PropertyTypeString, Default: "2160h", Description: "Total validity duration of the certificate as a Go duration (e.g. 2160h)."},
+		"renewBefore": {Type: oam.PropertyTypeString, Default: "360h", Description: "How long before expiry cert-manager renews the certificate, as a Go duration."},
 		// privateKey is user-authored (not capability-injected) and optional; when
 		// omitted cert-manager applies its own defaults (RSA 2048). algorithm-specific
 		// size validation is enforced in parseProperties, not the schema.
 		"privateKey": {
-			Type: oam.PropertyTypeObject,
+			Type:        oam.PropertyTypeObject,
+			Description: "Private key options; when omitted cert-manager applies its own defaults (RSA 2048).",
 			Properties: map[string]oam.PropertySchema{
-				"algorithm":      {Type: oam.PropertyTypeString, Enum: []any{"RSA", "ECDSA", "Ed25519"}},
-				"size":           {Type: oam.PropertyTypeInteger},
-				"encoding":       {Type: oam.PropertyTypeString, Enum: []any{"PKCS1", "PKCS8"}},
-				"rotationPolicy": {Type: oam.PropertyTypeString, Enum: []any{"Never", "Always"}},
+				"algorithm":      {Type: oam.PropertyTypeString, Enum: []any{"RSA", "ECDSA", "Ed25519"}, Description: "Private key algorithm (RSA, ECDSA, or Ed25519)."},
+				"size":           {Type: oam.PropertyTypeInteger, Description: "Private key size in bits; valid values depend on the algorithm."},
+				"encoding":       {Type: oam.PropertyTypeString, Enum: []any{"PKCS1", "PKCS8"}, Description: "Private key encoding (PKCS1 or PKCS8)."},
+				"rotationPolicy": {Type: oam.PropertyTypeString, Enum: []any{"Never", "Always"}, Description: "Whether cert-manager regenerates the private key on renewal (Never or Always)."},
 			},
 		},
 	}

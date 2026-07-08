@@ -29,16 +29,17 @@ func (h *PVCHandler) CanHandle(traitType string) bool {
 // PropertySchema declares the pvc trait's user-facing properties.
 func (h *PVCHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"name": {Type: oam.PropertyTypeString, Required: true},
+		"name": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the PersistentVolumeClaim to create."},
 		// size is not schema-required: an EnvironmentPolicy may supply it via
 		// DefaultStorageSize. When neither the trait nor a policy default provides a
 		// value, ApplyPolicy errors (pvc has no last-resort handler default).
-		"size":             {Type: oam.PropertyTypeString},
-		"storageClassName": {Type: oam.PropertyTypeString},
+		"size":             {Type: oam.PropertyTypeString, Description: "Requested storage size as a Kubernetes quantity (e.g. 10Gi); may instead come from an EnvironmentPolicy storage default."},
+		"storageClassName": {Type: oam.PropertyTypeString, Description: "StorageClass backing the volume."},
 		"accessModes": {
-			Type:    oam.PropertyTypeArray,
-			Default: []any{"ReadWriteOnce"},
-			Items:   &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: []any{"ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"}},
+			Type:        oam.PropertyTypeArray,
+			Default:     []any{"ReadWriteOnce"},
+			Description: "Access modes requested for the volume.",
+			Items:       &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: []any{"ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"}, Description: "A volume access mode (ReadWriteOnce, ReadOnlyMany, ReadWriteMany, or ReadWriteOncePod)."},
 		},
 	}
 }

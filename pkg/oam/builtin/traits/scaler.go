@@ -29,11 +29,11 @@ func (h *ScalerHandler) PropertySchema() map[string]oam.PropertySchema {
 		// minReplicas/maxReplicas are not schema-required: an EnvironmentPolicy may
 		// supply them via DefaultScalerMinReplicas/DefaultScalerMaxReplicas. When
 		// neither the trait nor a policy default provides a value, ApplyPolicy errors.
-		"minReplicas":       {Type: oam.PropertyTypeInteger},
-		"maxReplicas":       {Type: oam.PropertyTypeInteger},
-		"cpuUtilization":    {Type: oam.PropertyTypeInteger, Default: 80},
-		"memoryUtilization": {Type: oam.PropertyTypeInteger},
-		"enablePDB":         {Type: oam.PropertyTypeBoolean, Default: false},
+		"minReplicas":       {Type: oam.PropertyTypeInteger, Description: "Minimum replica count for the HorizontalPodAutoscaler; may instead come from an EnvironmentPolicy scaler default."},
+		"maxReplicas":       {Type: oam.PropertyTypeInteger, Description: "Maximum replica count for the HorizontalPodAutoscaler; may instead come from an EnvironmentPolicy scaler default."},
+		"cpuUtilization":    {Type: oam.PropertyTypeInteger, Default: 80, Description: "Target average CPU utilization percentage (1-100) that triggers scaling."},
+		"memoryUtilization": {Type: oam.PropertyTypeInteger, Description: "Target average memory utilization percentage (1-100) that triggers scaling."},
+		"enablePDB":         {Type: oam.PropertyTypeBoolean, Default: false, Description: "When true, also generate a PodDisruptionBudget (requires minReplicas >= 2)."},
 	}
 }
 

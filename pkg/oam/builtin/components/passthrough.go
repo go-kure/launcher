@@ -32,8 +32,8 @@ func (h *PassthroughHandler) CanHandle(componentType string) bool {
 // escape-hatch body emitted verbatim, so it is an open object (additionalProperties).
 func (h *PassthroughHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"object":        {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true},
-		"clusterScoped": {Type: oam.PropertyTypeBoolean, Default: false},
+		"object":        {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true, Description: "The Kubernetes object emitted verbatim (apiVersion, kind, metadata, and any body fields)."},
+		"clusterScoped": {Type: oam.PropertyTypeBoolean, Default: false, Description: "Whether the emitted object is cluster-scoped, suppressing namespace stamping."},
 	}
 }
 

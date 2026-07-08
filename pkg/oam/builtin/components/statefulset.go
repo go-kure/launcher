@@ -24,10 +24,10 @@ func (h *StatefulsetHandler) CanHandle(componentType string) bool {
 // PropertySchema declares the statefulset component's user-facing properties.
 func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"image":                {Type: oam.PropertyTypeString, Required: true},
-		"replicas":             {Type: oam.PropertyTypeInteger, Default: 1},
-		"port":                 {Type: oam.PropertyTypeInteger},
-		"serviceName":          {Type: oam.PropertyTypeString},
+		"image":                {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
+		"replicas":             {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of StatefulSet pod replicas."},
+		"port":                 {Type: oam.PropertyTypeInteger, Description: "Container port to expose via the headless Service."},
+		"serviceName":          {Type: oam.PropertyTypeString, Description: "Name of the headless Service (defaults to the component name)."},
 		"env":                  schemaEnv(),
 		"resources":            schemaResources(),
 		"command":              schemaStringArray(),

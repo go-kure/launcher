@@ -40,9 +40,9 @@ func (h *ConfigMapHandler) CanHandle(traitType string) bool {
 // can validate them before invocation. `data` is an open map (escape hatch).
 func (h *ConfigMapHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"name":      {Type: oam.PropertyTypeString, Required: true},
-		"mountPath": {Type: oam.PropertyTypeString},
-		"data":      {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+		"name":      {Type: oam.PropertyTypeString, Required: true, Description: "Name of the ConfigMap resource to create."},
+		"mountPath": {Type: oam.PropertyTypeString, Description: "Path at which the ConfigMap is mounted as a volume into the component's workload; when set, the component is decorated with the volume mount."},
+		"data":      {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Key/value pairs stored in the ConfigMap data (values are stringified)."},
 	}
 }
 

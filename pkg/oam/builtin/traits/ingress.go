@@ -78,23 +78,27 @@ func (h *IngressHandler) CanHandle(traitType string) bool {
 func (h *IngressHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"rules": {
-			Type:     oam.PropertyTypeArray,
-			Required: true,
+			Type:        oam.PropertyTypeArray,
+			Required:    true,
+			Description: "Host-based routing rules for the Ingress.",
 			Items: &oam.PropertySchema{
-				Type: oam.PropertyTypeObject,
+				Type:        oam.PropertyTypeObject,
+				Description: "A single host rule with its paths.",
 				Properties: map[string]oam.PropertySchema{
-					"host": {Type: oam.PropertyTypeString, Required: true},
+					"host": {Type: oam.PropertyTypeString, Required: true, Description: "Hostname this rule matches."},
 					"paths": {
-						Type:     oam.PropertyTypeArray,
-						Required: true,
+						Type:        oam.PropertyTypeArray,
+						Required:    true,
+						Description: "Paths under the host and the service backend each routes to.",
 						Items: &oam.PropertySchema{
-							Type: oam.PropertyTypeObject,
+							Type:        oam.PropertyTypeObject,
+							Description: "A single path mapping to a service backend.",
 							Properties: map[string]oam.PropertySchema{
-								"path":     {Type: oam.PropertyTypeString, Default: "/"},
-								"pathType": {Type: oam.PropertyTypeString, Default: "Prefix", Enum: []any{"Prefix", "Exact", "ImplementationSpecific"}},
-								"backend":  {Type: oam.PropertyTypeString},
-								"port":     {Type: oam.PropertyTypeInteger},
-								"portName": {Type: oam.PropertyTypeString},
+								"path":     {Type: oam.PropertyTypeString, Default: "/", Description: "URL path to match."},
+								"pathType": {Type: oam.PropertyTypeString, Default: "Prefix", Enum: []any{"Prefix", "Exact", "ImplementationSpecific"}, Description: "How the path is matched (Prefix, Exact, or ImplementationSpecific)."},
+								"backend":  {Type: oam.PropertyTypeString, Description: "Service name to route to (defaults to the component's service)."},
+								"port":     {Type: oam.PropertyTypeInteger, Description: "Service port number to route to."},
+								"portName": {Type: oam.PropertyTypeString, Description: "Named service port to route to (alternative to port)."},
 							},
 						},
 					},
@@ -102,22 +106,24 @@ func (h *IngressHandler) PropertySchema() map[string]oam.PropertySchema {
 			},
 		},
 		"tls": {
-			Type: oam.PropertyTypeArray,
+			Type:        oam.PropertyTypeArray,
+			Description: "TLS configuration for the Ingress hosts.",
 			Items: &oam.PropertySchema{
-				Type: oam.PropertyTypeObject,
+				Type:        oam.PropertyTypeObject,
+				Description: "A single TLS entry pairing hosts with a secret.",
 				Properties: map[string]oam.PropertySchema{
-					"hosts":      {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
-					"secretName": {Type: oam.PropertyTypeString},
+					"hosts":      {Type: oam.PropertyTypeArray, Description: "Hostnames covered by this TLS certificate.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A hostname covered by the certificate."}},
+					"secretName": {Type: oam.PropertyTypeString, Description: "Name of the Secret holding the TLS certificate."},
 				},
 			},
 		},
-		"annotations":             {Type: oam.PropertyTypeObject, AdditionalProperties: true},
-		"ingressClassName":        {Type: oam.PropertyTypeString},
-		"servicePort":             {Type: oam.PropertyTypeInteger},
-		"serviceName":             {Type: oam.PropertyTypeString},
-		"name":                    {Type: oam.PropertyTypeString},
-		"scope":                   {Type: oam.PropertyTypeString},
-		"allowedHostnameWildcard": {Type: oam.PropertyTypeString},
+		"annotations":             {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Additional annotations to set on the Ingress resource."},
+		"ingressClassName":        {Type: oam.PropertyTypeString, Description: "IngressClass that should handle this Ingress."},
+		"servicePort":             {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one (e.g. helmchart)."},
+		"serviceName":             {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
+		"name":                    {Type: oam.PropertyTypeString, Description: "Overrides the sub-application name, allowing multiple ingress traits per component."},
+		"scope":                   {Type: oam.PropertyTypeString, Description: "Suffix appended to the sub-application name to disambiguate multiple ingress traits."},
+		"allowedHostnameWildcard": {Type: oam.PropertyTypeString, Description: "Platform-reserved wildcard the rule hostnames must fall under."},
 		"networkPolicy":           schemaNetworkPolicy(),
 	}
 }

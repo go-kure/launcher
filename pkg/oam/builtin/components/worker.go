@@ -23,9 +23,9 @@ func (h *WorkerHandler) CanHandle(componentType string) bool {
 // webservice minus `port` (worker emits no Service).
 func (h *WorkerHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"image":          {Type: oam.PropertyTypeString, Required: true},
-		"replicas":       {Type: oam.PropertyTypeInteger, Default: 1},
-		"topologySpread": {Type: oam.PropertyTypeBoolean, Default: true},
+		"image":          {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
+		"replicas":       {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of Deployment pod replicas."},
+		"topologySpread": {Type: oam.PropertyTypeBoolean, Default: true, Description: "Whether default topology spread constraints are applied across nodes."},
 		"env":            schemaEnv(),
 		"resources":      schemaResources(),
 		"command":        schemaStringArray(),

@@ -25,19 +25,21 @@ func (h *RBACHandler) CanHandle(traitType string) bool {
 func (h *RBACHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"rules": {
-			Type:     oam.PropertyTypeArray,
-			Required: true,
+			Type:        oam.PropertyTypeArray,
+			Required:    true,
+			Description: "Policy rules granted to the component's ServiceAccount.",
 			Items: &oam.PropertySchema{
 				Type:                 oam.PropertyTypeObject,
 				AdditionalProperties: true,
+				Description:          "A single RBAC policy rule.",
 				Properties: map[string]oam.PropertySchema{
-					"apiGroups": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
-					"resources": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
-					"verbs":     {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
+					"apiGroups": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "An API group the rule applies to."}, Description: "API groups the rule applies to."},
+					"resources": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A resource type the rule applies to."}, Description: "Resource types the rule applies to."},
+					"verbs":     {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A verb the rule permits."}, Description: "Verbs the rule permits on the listed resources."},
 				},
 			},
 		},
-		"clusterWide": {Type: oam.PropertyTypeBoolean},
+		"clusterWide": {Type: oam.PropertyTypeBoolean, Description: "When true, also generate a ClusterRole and ClusterRoleBinding for cluster-wide permissions."},
 	}
 }
 

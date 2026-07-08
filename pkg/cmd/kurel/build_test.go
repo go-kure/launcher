@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -369,6 +370,62 @@ func assertExposesSchema(t *testing.T, kind, name string, h any) {
 	if p.PropertySchema() == nil {
 		t.Errorf("%s handler %q returns a nil PropertySchema map", kind, name)
 	}
+}
+
+// TestBuiltinHandlerSchemaDescriptions asserts that every built-in handler's
+// PropertySchema carries a non-empty Description on every node at every depth —
+// each top-level property, each nested Properties field, and each array Items
+// schema, recursively. Crane renders these in its Handler API Reference; a blank
+// description shows as an empty table row, including on the deepest nested
+// tables. It iterates the same registration maps as the parity test above so it
+// covers exactly the set crane renders.
+func TestBuiltinHandlerSchemaDescriptions(t *testing.T) {
+	for name, h := range builtinComponentHandlers() {
+		assertSchemaDescribed(t, "component", name, h)
+	}
+	for name, h := range builtinTraitHandlers() {
+		assertSchemaDescribed(t, "trait", name, h)
+	}
+}
+
+// assertSchemaDescribed walks a handler's top-level PropertySchema entries. A
+// handler that exposes no properties (e.g. prune-protection's empty map) has
+// nothing to walk and passes.
+func assertSchemaDescribed(t *testing.T, kind, name string, h any) {
+	t.Helper()
+	p, ok := h.(oam.PropertySchemaProvider)
+	if !ok {
+		return // TestNewBuiltinTransformer_HandlerSchemaParity already flags this.
+	}
+	schema := p.PropertySchema()
+	for _, k := range sortedSchemaKeys(schema) {
+		assertDescribed(t, fmt.Sprintf("%s %s.%s", kind, name, k), schema[k])
+	}
+}
+
+// assertDescribed fails if node — or any nested Properties value or Items schema,
+// recursively — has a blank (or whitespace-only) Description. Keys are sorted so
+// failure output is deterministic.
+func assertDescribed(t *testing.T, path string, node oam.PropertySchema) {
+	t.Helper()
+	if strings.TrimSpace(node.Description) == "" {
+		t.Errorf("%s: PropertySchema node has empty Description", path)
+	}
+	for _, k := range sortedSchemaKeys(node.Properties) {
+		assertDescribed(t, path+"."+k, node.Properties[k])
+	}
+	if node.Items != nil {
+		assertDescribed(t, path+"[]", *node.Items)
+	}
+}
+
+func sortedSchemaKeys(m map[string]oam.PropertySchema) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // --- Parameter substitution tests ---

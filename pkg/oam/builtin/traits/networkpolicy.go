@@ -36,21 +36,24 @@ func (h *NetworkPolicyHandler) ValidateAndApplyDefaults(rendering map[string]any
 // PropertySchema declares the networkpolicy trait's user-facing properties.
 func (h *NetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 	labelSelector := oam.PropertySchema{
-		Type: oam.PropertyTypeObject,
+		Type:        oam.PropertyTypeObject,
+		Description: "Label selector matching the pods or namespaces this peer applies to.",
 		Properties: map[string]oam.PropertySchema{
-			"matchLabels": {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+			"matchLabels": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Label key/value pairs a pod or namespace must carry to match."},
 		},
 	}
 	peer := oam.PropertySchema{
-		Type: oam.PropertyTypeObject,
+		Type:        oam.PropertyTypeObject,
+		Description: "A network peer selected by pod/namespace label selectors or an IP block.",
 		Properties: map[string]oam.PropertySchema{
 			"podSelector":       labelSelector,
 			"namespaceSelector": labelSelector,
 			"ipBlock": {
-				Type: oam.PropertyTypeObject,
+				Type:        oam.PropertyTypeObject,
+				Description: "An IP block (CIDR with optional exceptions) this rule applies to.",
 				Properties: map[string]oam.PropertySchema{
-					"cidr":   {Type: oam.PropertyTypeString, Required: true},
-					"except": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString}},
+					"cidr":   {Type: oam.PropertyTypeString, Required: true, Description: "CIDR range the rule applies to."},
+					"except": {Type: oam.PropertyTypeArray, Description: "CIDR ranges to exclude from the block.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A CIDR range excluded from the block."}},
 				},
 			},
 		},
@@ -59,25 +62,38 @@ func (h *NetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 	port := oam.PropertySchema{
 		Type:                 oam.PropertyTypeObject,
 		AdditionalProperties: true,
+		Description:          "A port (number or named port) with its protocol.",
 		Properties: map[string]oam.PropertySchema{
-			"protocol": {Type: oam.PropertyTypeString, Default: "TCP", Enum: []any{"TCP", "UDP", "SCTP"}},
+			"protocol": {Type: oam.PropertyTypeString, Default: "TCP", Enum: []any{"TCP", "UDP", "SCTP"}, Description: "IP protocol for the port (TCP, UDP, or SCTP)."},
 		},
 	}
-	peerList := func(dir string) oam.PropertySchema {
+	// peerList is a helper: the direction key and the surrounding descriptions differ
+	// between ingress and egress, so each accurate description is passed in.
+	peerList := func(dir, listDesc, ruleDesc, peersDesc, portsDesc string) oam.PropertySchema {
 		return oam.PropertySchema{
-			Type: oam.PropertyTypeArray,
+			Type:        oam.PropertyTypeArray,
+			Description: listDesc,
 			Items: &oam.PropertySchema{
-				Type: oam.PropertyTypeObject,
+				Type:        oam.PropertyTypeObject,
+				Description: ruleDesc,
 				Properties: map[string]oam.PropertySchema{
-					dir:     {Type: oam.PropertyTypeArray, Items: &peer},
-					"ports": {Type: oam.PropertyTypeArray, Items: &port},
+					dir:     {Type: oam.PropertyTypeArray, Description: peersDesc, Items: &peer},
+					"ports": {Type: oam.PropertyTypeArray, Description: portsDesc, Items: &port},
 				},
 			},
 		}
 	}
 	return map[string]oam.PropertySchema{
-		"ingress": peerList("from"),
-		"egress":  peerList("to"),
+		"ingress": peerList("from",
+			"Ingress rules allowing inbound traffic to the workload.",
+			"A single ingress rule pairing allowed peers with ports.",
+			"Peers allowed to connect to the workload.",
+			"Ports on the workload the peers may connect to."),
+		"egress": peerList("to",
+			"Egress rules allowing outbound traffic from the workload.",
+			"A single egress rule pairing allowed peers with ports.",
+			"Peers the workload is allowed to connect to.",
+			"Destination ports the workload may connect to."),
 	}
 }
 

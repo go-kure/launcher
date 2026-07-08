@@ -65,55 +65,62 @@ func (h *ExternalSecretHandler) Apply(trait *oam.Trait, app *stack.Application, 
 // PropertySchema declares the external-secret trait's user-facing properties.
 func (h *ExternalSecretHandler) PropertySchema() map[string]oam.PropertySchema {
 	remoteRef := oam.PropertySchema{
-		Type: oam.PropertyTypeObject,
+		Type:        oam.PropertyTypeObject,
+		Description: "Reference to a key in the external secret store.",
 		Properties: map[string]oam.PropertySchema{
-			"key":              {Type: oam.PropertyTypeString, Required: true},
-			"property":         {Type: oam.PropertyTypeString},
-			"version":          {Type: oam.PropertyTypeString},
-			"decodingStrategy": {Type: oam.PropertyTypeString},
+			"key":              {Type: oam.PropertyTypeString, Required: true, Description: "Key or path of the secret in the remote store."},
+			"property":         {Type: oam.PropertyTypeString, Description: "Specific property within the remote secret to extract."},
+			"version":          {Type: oam.PropertyTypeString, Description: "Version of the remote secret to fetch."},
+			"decodingStrategy": {Type: oam.PropertyTypeString, Description: "How the fetched value is decoded (e.g. Base64, None)."},
 		},
 	}
 	requiredRemoteRef := remoteRef
 	requiredRemoteRef.Required = true
 	return map[string]oam.PropertySchema{
-		"secretName": {Type: oam.PropertyTypeString, Required: true},
+		"secretName": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the generated ExternalSecret and the default target Secret."},
 		"secretStoreRef": {
-			Type: oam.PropertyTypeObject,
+			Type:        oam.PropertyTypeObject,
+			Description: "Reference to the SecretStore or ClusterSecretStore backing this secret.",
 			Properties: map[string]oam.PropertySchema{
-				"name": {Type: oam.PropertyTypeString, Required: true},
-				"kind": {Type: oam.PropertyTypeString, Default: "ClusterSecretStore"},
+				"name": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the referenced secret store."},
+				"kind": {Type: oam.PropertyTypeString, Default: "ClusterSecretStore", Description: "Kind of the referenced store (SecretStore or ClusterSecretStore)."},
 			},
 		},
-		"provider":         {Type: oam.PropertyTypeString},
-		"refreshInterval":  {Type: oam.PropertyTypeString, Default: "1h"},
-		"targetSecretName": {Type: oam.PropertyTypeString},
+		"provider":         {Type: oam.PropertyTypeString, Description: "Shorthand naming a ClusterSecretStore, used when secretStoreRef is not set."},
+		"refreshInterval":  {Type: oam.PropertyTypeString, Default: "1h", Description: "How often the secret is re-fetched from the store (e.g. 1h)."},
+		"targetSecretName": {Type: oam.PropertyTypeString, Description: "Overrides the name of the produced Kubernetes Secret (defaults to secretName)."},
 		"target": {
-			Type: oam.PropertyTypeObject,
+			Type:        oam.PropertyTypeObject,
+			Description: "Configuration for the Kubernetes Secret this ExternalSecret produces.",
 			Properties: map[string]oam.PropertySchema{
-				"creationPolicy": {Type: oam.PropertyTypeString, Enum: []any{"Owner", "Orphan", "Merge", "None"}},
-				"deletionPolicy": {Type: oam.PropertyTypeString, Enum: []any{"Delete", "Merge", "Retain"}},
+				"creationPolicy": {Type: oam.PropertyTypeString, Enum: []any{"Owner", "Orphan", "Merge", "None"}, Description: "Controls how the target Secret is created and owned."},
+				"deletionPolicy": {Type: oam.PropertyTypeString, Enum: []any{"Delete", "Merge", "Retain"}, Description: "Controls what happens to the target Secret when source data is removed."},
 				"template": {
-					Type: oam.PropertyTypeObject,
+					Type:        oam.PropertyTypeObject,
+					Description: "Template shaping the generated Secret's type and data.",
 					Properties: map[string]oam.PropertySchema{
-						"type": {Type: oam.PropertyTypeString},
-						"data": {Type: oam.PropertyTypeObject, AdditionalProperties: true},
+						"type": {Type: oam.PropertyTypeString, Description: "Type of the generated Kubernetes Secret (e.g. Opaque)."},
+						"data": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Templated key/value entries rendered into the Secret."},
 					},
 				},
 			},
 		},
 		"data": {
-			Type: oam.PropertyTypeArray,
+			Type:        oam.PropertyTypeArray,
+			Description: "Explicit mappings from remote store keys to entries in the target Secret.",
 			Items: &oam.PropertySchema{
-				Type: oam.PropertyTypeObject,
+				Type:        oam.PropertyTypeObject,
+				Description: "A single mapping of a remote reference to a target Secret key.",
 				Properties: map[string]oam.PropertySchema{
-					"secretKey": {Type: oam.PropertyTypeString, Required: true},
+					"secretKey": {Type: oam.PropertyTypeString, Required: true, Description: "Key in the target Secret to populate."},
 					"remoteRef": requiredRemoteRef,
 				},
 			},
 		},
 		"dataFrom": {
-			Type:  oam.PropertyTypeArray,
-			Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true},
+			Type:        oam.PropertyTypeArray,
+			Description: "Bulk imports of secret data via extract or find queries.",
+			Items:       &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "A single extract or find query pulling multiple keys."},
 		},
 		"remoteRef": remoteRef,
 	}
