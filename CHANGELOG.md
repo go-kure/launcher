@@ -1,6 +1,13 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.12] - 2026-07-08
+
+### Added
+
+- Add Description to PropertySchema + populate builtin handler descriptions
+- Hostnames shorthand + platform-default ssl-redirect
+
 ## [0.1.0-alpha.11] - 2026-07-07
 
 ### Added
@@ -11,6 +18,10 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - Document Policy defaults & enforcement in pkg/oam README
+
+### Release
+
+- V0.1.0-alpha.11
 
 ## [0.1.0-alpha.10] - 2026-07-04
 
