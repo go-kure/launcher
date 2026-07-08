@@ -76,6 +76,12 @@ not the app — chooses the implementation:
   expose trait (use the low-level `ingress` trait for full TLS control). Both paths
   validate user hostnames against the `allowedHostnameWildcard` capability field (empty ⇒
   no validation); a violation is a `ValidationError`.
+  On the ingress path a bare `hostnames: [...]` shorthand is accepted: when `rules` is
+  absent it expands to one rule per host with `path: /` + the component service port
+  (supply `rules` for finer control; both together keep `rules` for routing while all
+  hosts are still wildcard-validated). Platform-default `ssl-redirect` / `force-ssl-redirect`
+  come from the `sslRedirect` / `forceSslRedirect` capability fields (author-overridable via
+  the same inline properties; the typed value wins over a raw same-key annotation).
 - **certificate** → `issuerRef` (cert-manager issuer/cluster-issuer).
 - **external-secret** → `secretStoreRef` (or the inline `provider` shorthand).
 

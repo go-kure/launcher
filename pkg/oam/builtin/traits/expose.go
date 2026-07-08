@@ -2,6 +2,7 @@ package traits
 
 import (
 	"maps"
+	"strconv"
 
 	"github.com/go-kure/kure/pkg/stack"
 
@@ -50,6 +51,9 @@ func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[
 		if r.CertManagerClusterIssuer != "" {
 			return nil, errors.New("expose rendering: certManagerClusterIssuer is only valid when controllerType is \"ingress\"")
 		}
+		if r.SSLRedirect != nil || r.ForceSSLRedirect != nil {
+			return nil, errors.New("expose rendering: sslRedirect and forceSslRedirect are only valid when controllerType is \"ingress\"")
+		}
 		if r.GatewayNamespace == "" {
 			rendering["gatewayNamespace"] = "gateway-system"
 		}
@@ -76,8 +80,10 @@ func (h *ExposeHandler) PropertySchema() map[string]oam.PropertySchema {
 		"gatewayNamespace":         {Type: oam.PropertyTypeString, Default: "gateway-system", Description: "Namespace of the Gateway (gateway controllerType only)."},
 		"annotations":              {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Additional annotations to set on the generated resource."},
 		"rules":                    {Type: oam.PropertyTypeArray, Description: "Ingress-style host rules passed through to the ingress handler.", Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "A single ingress-style host rule."}},
-		"hostnames":                {Type: oam.PropertyTypeArray, Description: "Gateway-style hostnames passed through to the httproute handler.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A hostname for the gateway route."}},
+		"hostnames":                {Type: oam.PropertyTypeArray, Description: "Hostnames: gateway routes, or an ingress shorthand that expands to one rule per host when rules is absent.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A hostname to route."}},
 		"ingressClassName":         {Type: oam.PropertyTypeString, Description: "IngressClass to use (ingress controllerType only)."},
+		"sslRedirect":              {Type: oam.PropertyTypeBoolean, Description: "nginx ssl-redirect annotation (ingress controllerType only); platform default via capability rendering, override-able inline."},
+		"forceSslRedirect":         {Type: oam.PropertyTypeBoolean, Description: "nginx force-ssl-redirect annotation (ingress controllerType only); platform default via capability rendering, override-able inline."},
 		"servicePort":              {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one."},
 		"serviceName":              {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
 		"name":                     {Type: oam.PropertyTypeString, Description: "Overrides the sub-application name, allowing multiple expose traits per component."},
@@ -103,8 +109,19 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 
 	switch controllerType {
 	case "ingress":
-		hosts := uniqueStrings(ruleHosts(props))
-		if err := validateHostnames(hosts, wildcard, app.Name); err != nil {
+		// hostnames shorthand: when hostnames is set and rules is not, synthesize
+		// one rule per host (path "/" + the component service port are defaulted by
+		// IngressHandler). hostnames is never an IngressHandler input on this path.
+		shorthand := hostnameList(props)
+		if len(shorthand) > 0 {
+			if _, hasRules := props["rules"]; !hasRules {
+				props["rules"] = expandHostnamesToIngressRules(shorthand)
+			}
+		}
+		delete(props, "hostnames")
+		// Validate every host that appears — the rules' hosts and any shorthand
+		// hostnames — against the platform wildcard, even when both are present.
+		if err := validateHostnames(uniqueStrings(append(ruleHosts(props), shorthand...)), wildcard, app.Name); err != nil {
 			return err
 		}
 		// expose is platform-managed: the user does not author TLS.
@@ -113,12 +130,29 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 			if err := setClusterIssuerAnnotation(props, issuer, app.Name); err != nil {
 				return err
 			}
-			if len(hosts) > 0 {
-				props["tls"] = synthesizedIngressTLS(hosts, app.Name)
+			// TLS covers the effective routing hosts only. When both `rules` and
+			// `hostnames` are supplied, `rules` drives routing, so a hostnames entry
+			// that is not routed must not get a synthesized certificate.
+			if routingHosts := uniqueStrings(ruleHosts(props)); len(routingHosts) > 0 {
+				props["tls"] = synthesizedIngressTLS(routingHosts, app.Name)
 			}
 		}
+		// ssl-redirect / force-ssl-redirect: typed property (capability default or
+		// inline override) wins over a same-key raw annotation.
+		setSSLRedirectAnnotations(props)
 		return (&IngressHandler{}).Apply(&oam.Trait{Type: "expose", Properties: props}, app, bundle)
 	case "gateway":
+		// ssl-redirect is nginx-ingress-specific; reject the inline properties on the
+		// gateway path (the rendering guard only covers the capability-supplied form).
+		for _, k := range []string{"sslRedirect", "forceSslRedirect"} {
+			if _, ok := props[k]; ok {
+				return &errors.ValidationError{
+					Field:     k,
+					Component: app.Name,
+					Message:   k + " is only valid when controllerType is \"ingress\"",
+				}
+			}
+		}
 		if err := validateHostnames(hostnameList(props), wildcard, app.Name); err != nil {
 			return err
 		}
@@ -181,6 +215,57 @@ func setClusterIssuerAnnotation(props map[string]any, issuer, component string) 
 	anns[clusterIssuerAnnotation] = issuer
 	props["annotations"] = anns
 	return nil
+}
+
+// expandHostnamesToIngressRules turns the hostnames shorthand into ingress rules,
+// one host per rule with a single empty path object. IngressHandler defaults the
+// path to "/" and the backend port to the component service port.
+func expandHostnamesToIngressRules(hostnames []string) []any {
+	rules := make([]any, len(hostnames))
+	for i, h := range hostnames {
+		rules[i] = map[string]any{
+			"host":  h,
+			"paths": []any{map[string]any{}},
+		}
+	}
+	return rules
+}
+
+// setSSLRedirectAnnotations writes the nginx ssl-redirect / force-ssl-redirect
+// annotations from the typed sslRedirect / forceSslRedirect properties, which carry
+// the capability-rendered platform default (override-able inline). The typed value
+// is authoritative: it is written last and wins over a same-key raw annotation. When
+// the property is absent, an existing raw annotation is left untouched. The property
+// keys are consumed here so they never reach IngressHandler.
+func setSSLRedirectAnnotations(props map[string]any) {
+	var anns map[string]any
+	set := func(key string, val bool) {
+		if anns == nil {
+			if existing, ok := props["annotations"].(map[string]any); ok {
+				anns = existing
+			} else {
+				anns = map[string]any{}
+			}
+		}
+		anns[key] = strconv.FormatBool(val)
+	}
+	if v, ok := boolProp(props, "sslRedirect"); ok {
+		set(sslRedirectAnnotation, v)
+	}
+	if v, ok := boolProp(props, "forceSslRedirect"); ok {
+		set(forceSSLRedirectAnnotation, v)
+	}
+	if anns != nil {
+		props["annotations"] = anns
+	}
+	delete(props, "sslRedirect")
+	delete(props, "forceSslRedirect")
+}
+
+// boolProp reads a boolean property; ok is false when absent or not a bool.
+func boolProp(props map[string]any, key string) (val, ok bool) {
+	val, ok = props[key].(bool)
+	return val, ok
 }
 
 // synthesizedIngressTLS builds the single managed TLS entry: all hosts under one
