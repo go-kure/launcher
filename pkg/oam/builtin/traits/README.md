@@ -72,8 +72,13 @@ not the app — chooses the implementation:
   On the **ingress** path, expose is platform-managed for TLS: it derives `spec.tls[]`
   from the rule hosts under a deterministic `<component>-tls` secret and emits the
   `cert-manager.io/cluster-issuer` annotation from the `certManagerClusterIssuer`
-  capability field (empty ⇒ managed TLS disabled). Users do **not** author TLS on the
-  expose trait (use the low-level `ingress` trait for full TLS control). Both paths
+  capability field (empty ⇒ managed TLS disabled). Users do **not** author the TLS
+  block on the expose trait (use the low-level `ingress` trait for full TLS control),
+  but may author `secretName` to override just the managed secret's name (still
+  ingress-only, hosts stay rule-derived, and it requires the cluster-issuer capability;
+  a `secretName` on the gateway path or without managed TLS is a `ValidationError`).
+  This lets a component carry several expose ingress traits (distinct `name`/`scope`)
+  each naming its own cert secret. Both paths
   validate user hostnames against the `allowedHostnameWildcard` capability field (empty ⇒
   no validation); a violation is a `ValidationError`.
   On the ingress path a bare `hostnames: [...]` shorthand is accepted: when `rules` is
