@@ -90,6 +90,13 @@ not the app — chooses the implementation:
 - **certificate** → `issuerRef` (cert-manager issuer/cluster-issuer).
 - **external-secret** → `secretStoreRef` (or the inline `provider` shorthand).
 
+  `data[]` entries derive by absence: a bare `- secretKey: FOO` defaults
+  `remoteRef.key` to `"<namespace>/<secretName>"` and `remoteRef.property` to
+  `secretKey`; author any `remoteRef` field to override. Because absence is meaningful,
+  unknown keys in an entry or its `remoteRef` are rejected (naming the supported
+  fields) rather than silently ignored. See
+  [design-external-secret-data-shorthand](../../../../docs/oam/design-external-secret-data-shorthand.md).
+
 ## Auto-synthesized NetworkPolicy
 
 Routing traits (`ingress`/`httproute`/`expose`) can surface platform-reserved
