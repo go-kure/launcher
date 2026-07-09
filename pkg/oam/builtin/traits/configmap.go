@@ -78,7 +78,7 @@ func (h *ConfigMapHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 
 	cmConfig := &ConfigMapConfig{
 		Name:          name,
-		ComponentName: app.Name,
+		componentName: app.Name,
 		Data:          data,
 	}
 	cmApp := stack.NewApplication(name, app.Namespace, cmConfig)
@@ -98,14 +98,18 @@ func (h *ConfigMapHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 // ConfigMapConfig implements stack.ApplicationConfig for configmap traits.
 type ConfigMapConfig struct {
 	Name          string
-	ComponentName string
+	componentName string
 	Data          map[string]string
 }
+
+// ComponentName returns the OAM component this sub-app belongs to, for resource
+// provenance attribution.
+func (c *ConfigMapConfig) ComponentName() string { return c.componentName }
 
 // Generate creates a Kubernetes ConfigMap resource.
 func (c *ConfigMapConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	cm := kubernetes.CreateConfigMap(app.Name, app.Namespace)
-	kubernetes.SetConfigMapLabels(cm, map[string]string{"app": c.ComponentName})
+	kubernetes.SetConfigMapLabels(cm, map[string]string{"app": c.componentName})
 	cm.Annotations = nil
 	if len(c.Data) > 0 {
 		kubernetes.AddConfigMapDataMap(cm, c.Data)

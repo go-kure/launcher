@@ -128,7 +128,7 @@ func (h *ExternalSecretHandler) PropertySchema() map[string]oam.PropertySchema {
 
 func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack.Application) (*ExternalSecretConfig, error) {
 	config := &ExternalSecretConfig{
-		ComponentName:   app.Name,
+		componentName:   app.Name,
 		RefreshInterval: "1h",
 	}
 
@@ -378,7 +378,7 @@ type esTemplate struct {
 // ExternalSecretConfig implements stack.ApplicationConfig for external-secret traits.
 type ExternalSecretConfig struct {
 	SecretName       string
-	ComponentName    string
+	componentName    string
 	StoreRefName     string
 	StoreRefKind     string
 	RefreshInterval  string
@@ -389,6 +389,10 @@ type ExternalSecretConfig struct {
 	Data             []esDataEntry
 	DataFrom         []esDataFromEntry
 }
+
+// ComponentName returns the OAM component this sub-app belongs to, for resource
+// provenance attribution.
+func (c *ExternalSecretConfig) ComponentName() string { return c.componentName }
 
 // Generate creates an ExternalSecret CRD resource.
 func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Object, error) {
@@ -405,7 +409,7 @@ func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Objec
 			Kind: c.StoreRefKind,
 		},
 	})
-	externalsecrets.AddExternalSecretLabel(es, "app", c.ComponentName)
+	externalsecrets.AddExternalSecretLabel(es, "app", c.componentName)
 	externalsecrets.SetRefreshInterval(es, metav1.Duration{Duration: dur})
 
 	target := esv1.ExternalSecretTarget{Name: c.TargetSecretName}

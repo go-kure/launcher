@@ -58,6 +58,8 @@ share these fields: `image` (validated — no untagged/`latest`), `env` (with
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.
 - **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
+  Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
+  consumers can attribute the emitted resource to its owning OAM component.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
   (`apiVersion`/`kind`/`scope`) for unknown kinds.
 

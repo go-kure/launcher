@@ -43,3 +43,11 @@ type SourceDeduplicatable interface {
 	GetSourceRefName() string
 	SuppressSourceGeneration(refName string)
 }
+
+// ComponentNamed is an optional interface for trait/component sub-app
+// ApplicationConfig types that expose the OAM component they were emitted for.
+// Consumers use it to attribute each emitted resource to its owning component
+// (e.g. a provenance label) without re-deriving the component from sub-app names.
+type ComponentNamed interface {
+	ComponentName() string
+}

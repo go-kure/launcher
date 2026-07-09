@@ -1770,13 +1770,19 @@ func TestCiliumNetworkPolicyConfig_Generate(t *testing.T) {
 }
 
 func TestConfigMapConfig_Generate(t *testing.T) {
-	cfg := &traits.ConfigMapConfig{
-		Name:          "my-config",
-		ComponentName: "api",
-		Data:          map[string]string{"KEY": "value"},
+	bundle := newBundle()
+	h := &traits.ConfigMapHandler{}
+	err := h.Apply(&oam.Trait{
+		Type: "configmap",
+		Properties: map[string]any{
+			"name": "my-config",
+			"data": map[string]any{"KEY": "value"},
+		},
+	}, newApp("api", "default"), bundle)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
 	}
-	app := newApp("my-config", "default")
-	objects, err := cfg.Generate(app)
+	objects, err := bundle.Applications[0].Config.Generate(bundle.Applications[0])
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}

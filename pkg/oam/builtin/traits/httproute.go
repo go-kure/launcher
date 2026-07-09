@@ -114,7 +114,7 @@ func (h *HTTPRouteHandler) PropertySchema() map[string]oam.PropertySchema {
 func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Application) (*HTTPRouteConfig, error) {
 	defaultPort := resolveDefaultPort(app)
 	config := &HTTPRouteConfig{
-		ComponentName: app.Name,
+		componentName: app.Name,
 	}
 
 	// Trait-level explicit backend — same semantics as ingress: servicePort first,
@@ -901,7 +901,7 @@ func isAllowedRedirectStatus(code int) bool {
 type HTTPRouteConfig struct {
 	Name          string // optional, overrides sub-app name for multi-httproute components
 	Scope         string // optional; sub-app name becomes {component}-httproute-{scope} when set and Name is empty
-	ComponentName string
+	componentName string
 	ParentRefs    []ParentRef
 	Hostnames     []string
 	Rules         []HTTPRouteRule
@@ -915,9 +915,13 @@ type HTTPRouteConfig struct {
 // TrafficSources implements the cluster-level trafficSourceCollector contract.
 func (c *HTTPRouteConfig) TrafficSources() []netpol.TrafficSource { return c.sources }
 
+// ComponentName returns the OAM component this sub-app belongs to — always the OAM
+// component name, not the K8s Service name — for resource provenance attribution.
+func (c *HTTPRouteConfig) ComponentName() string { return c.componentName }
+
 // TargetComponentName returns the OAM component label (not the K8s Service name),
 // so the synthesized NetworkPolicy selects the component's pods via {app: <name>}.
-func (c *HTTPRouteConfig) TargetComponentName() string { return c.ComponentName }
+func (c *HTTPRouteConfig) TargetComponentName() string { return c.ComponentName() }
 
 // BackendPorts implements the cluster-level trafficSourceCollector contract.
 func (c *HTTPRouteConfig) BackendPorts() []intstr.IntOrString { return c.ports }
@@ -1075,7 +1079,7 @@ type BackendRef struct {
 // Generate creates a Gateway API HTTPRoute resource.
 func (c *HTTPRouteConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	route := kubernetes.CreateHTTPRoute(app.Name, app.Namespace)
-	route.Labels = map[string]string{"app": c.ComponentName}
+	route.Labels = map[string]string{"app": c.componentName}
 	route.Annotations = nil
 
 	for _, ref := range c.ParentRefs {

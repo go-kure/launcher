@@ -78,7 +78,7 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 	}
 
 	config := &VolsyncConfig{
-		ComponentName:     app.Name,
+		componentName:     app.Name,
 		SourcePVC:         sourcePVC,
 		Schedule:          schedule,
 		CopyMethod:        "Snapshot",
@@ -144,7 +144,7 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 
 // VolsyncConfig implements stack.ApplicationConfig for volsync traits.
 type VolsyncConfig struct {
-	ComponentName           string
+	componentName           string
 	SourcePVC               string
 	Schedule                string
 	Repository              string
@@ -156,6 +156,10 @@ type VolsyncConfig struct {
 	RetainWeekly            int
 	RetainMonthly           int
 }
+
+// ComponentName returns the OAM component this sub-app belongs to, for resource
+// provenance attribution.
+func (c *VolsyncConfig) ComponentName() string { return c.componentName }
 
 // yamlToInt converts a numeric value (int, float64) from YAML to int.
 // Non-integer float values (e.g. 1.5) are rejected.

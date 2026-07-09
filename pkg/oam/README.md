@@ -51,6 +51,7 @@ parse → resolve parameters → transform (component + trait handlers) → mani
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
+| `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. |
 
 ## Property schemas
 

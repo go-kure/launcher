@@ -58,9 +58,10 @@ func (h *CiliumNetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Applicat
 	return nil
 }
 
-// app is reserved for future component-aware policy synthesis (defaulting
-// endpointSelector from component labels, scoping rules to service ports).
-func (h *CiliumNetworkPolicyHandler) parseProperties(props map[string]any, _ *stack.Application) (*CiliumNetworkPolicyConfig, error) {
+// app supplies the owning component name (componentName); deeper component-aware
+// policy synthesis (defaulting endpointSelector from component labels, scoping rules
+// to service ports) remains future work.
+func (h *CiliumNetworkPolicyHandler) parseProperties(props map[string]any, app *stack.Application) (*CiliumNetworkPolicyConfig, error) {
 	name, ok := props["name"].(string)
 	if !ok || name == "" {
 		return nil, errors.New("required property 'name' missing or not a string")
@@ -74,6 +75,7 @@ func (h *CiliumNetworkPolicyHandler) parseProperties(props map[string]any, _ *st
 
 	return &CiliumNetworkPolicyConfig{
 		Name:             name,
+		componentName:    app.Name,
 		EndpointSelector: props["endpointSelector"],
 		Egress:           props["egress"],
 		Ingress:          props["ingress"],
@@ -83,10 +85,15 @@ func (h *CiliumNetworkPolicyHandler) parseProperties(props map[string]any, _ *st
 // CiliumNetworkPolicyConfig implements stack.ApplicationConfig for cilium-networkpolicy traits.
 type CiliumNetworkPolicyConfig struct {
 	Name             string
+	componentName    string
 	EndpointSelector any
 	Egress           any
 	Ingress          any
 }
+
+// ComponentName returns the OAM component this sub-app belongs to, for resource
+// provenance attribution.
+func (c *CiliumNetworkPolicyConfig) ComponentName() string { return c.componentName }
 
 // Generate creates a cilium.io/v2 CiliumNetworkPolicy via JSON round-trip.
 func (c *CiliumNetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {

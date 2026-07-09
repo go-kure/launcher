@@ -98,7 +98,7 @@ func (h *CertificateHandler) Apply(trait *oam.Trait, app *stack.Application, bun
 
 func (h *CertificateHandler) parseProperties(props map[string]any, app *stack.Application) (*CertificateConfig, error) {
 	config := &CertificateConfig{
-		ComponentName: app.Name,
+		componentName: app.Name,
 		Duration:      "2160h",
 		RenewBefore:   "360h",
 	}
@@ -226,7 +226,7 @@ func validatePrivateKeySize(algorithm string, size int) error {
 // CertificateConfig implements stack.ApplicationConfig for certificate traits.
 type CertificateConfig struct {
 	SecretName    string
-	ComponentName string
+	componentName string
 	IssuerName    string
 	IssuerKind    string
 	DNSNames      []string
@@ -239,6 +239,10 @@ type CertificateConfig struct {
 	PKEncoding       string
 	PKRotationPolicy string
 }
+
+// ComponentName returns the OAM component this sub-app belongs to, for resource
+// provenance attribution.
+func (c *CertificateConfig) ComponentName() string { return c.componentName }
 
 // ApplyPolicy is a no-op: certificates have no enforceable policy fields.
 func (c *CertificateConfig) ApplyPolicy(_ oam.Policy) error { return nil }

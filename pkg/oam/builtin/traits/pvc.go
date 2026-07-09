@@ -101,7 +101,7 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 
 	return &PVCTraitConfig{
 		Name:          name,
-		ComponentName: app.Name,
+		componentName: app.Name,
 		Size:          size,
 		StorageClass:  storageClass,
 		AccessModes:   accessModes,
@@ -111,11 +111,15 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 // PVCTraitConfig implements stack.ApplicationConfig for standalone PVC traits.
 type PVCTraitConfig struct {
 	Name          string
-	ComponentName string
+	componentName string
 	Size          string
 	StorageClass  string
 	AccessModes   []string
 }
+
+// ComponentName returns the OAM component this sub-app belongs to, for resource
+// provenance attribution.
+func (c *PVCTraitConfig) ComponentName() string { return c.componentName }
 
 // ApplyPolicy defaults the PVC size from the policy when the trait omitted it,
 // validates the effective size, and enforces the policy storage-size limit.
@@ -156,7 +160,7 @@ func (c *PVCTraitConfig) Generate(app *stack.Application) ([]*client.Object, err
 		return nil, err
 	}
 
-	labels := map[string]string{"app": c.ComponentName}
+	labels := map[string]string{"app": c.componentName}
 	pvc, err := components.BuildPVC(components.PVCConfig{
 		Name:         c.Name,
 		Size:         c.Size,

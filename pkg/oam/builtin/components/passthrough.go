@@ -85,7 +85,7 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 	}
 
 	return &PassthroughConfig{
-		ComponentName: component.Name,
+		componentName: component.Name,
 		Namespace:     namespace,
 		ClusterScoped: clusterScoped,
 		Object:        object,
@@ -96,11 +96,15 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 // It emits the declared object verbatim, defaulting metadata.name to the component
 // name and (for namespaced objects) metadata.namespace to the build namespace.
 type PassthroughConfig struct {
-	ComponentName string
+	componentName string
 	Namespace     string
 	ClusterScoped bool
 	Object        map[string]any
 }
+
+// ComponentName returns the OAM component this sub-app belongs to, for resource
+// provenance attribution.
+func (c *PassthroughConfig) ComponentName() string { return c.componentName }
 
 // Generate emits the declared object as an unstructured resource. It deep-copies
 // the object first so the metadata fixup — and any later in-place mutation of
@@ -115,7 +119,7 @@ func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, er
 		obj["metadata"] = meta
 	}
 	if name, ok := meta["name"].(string); !ok || name == "" {
-		meta["name"] = c.ComponentName
+		meta["name"] = c.componentName
 	}
 	if !c.ClusterScoped {
 		if ns, ok := meta["namespace"].(string); !ok || ns == "" {

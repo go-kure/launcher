@@ -105,6 +105,16 @@ See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/
 for the full config-field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
 for the interfaces, and `examples/` for runnable applications.
 
+## Component attribution
+
+Every trait sub-app config exposes the OAM component it was emitted for via
+`ComponentName() string` (the `oam.ComponentNamed` interface) — always the component
+name, never the sub-app or K8s Service name. Consumers use it to stamp per-resource
+provenance (e.g. a `wharf.zone/component` label) without re-deriving the component
+from sub-app names, which several handlers author from properties rather than
+`<component>-<suffix>`. The routing traits' existing `TargetComponentName()` (used by
+auto-NetworkPolicy synthesis) delegates to the same accessor.
+
 ## Conventions
 
 Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access
