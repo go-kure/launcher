@@ -85,6 +85,7 @@ func (h *ExposeHandler) PropertySchema() map[string]oam.PropertySchema {
 		// schema as an optional enum so a value, if present, is type/enum-checked.
 		"controllerType":           {Type: oam.PropertyTypeString, Enum: []any{"ingress", "gateway"}, Description: "Capability-injected controller kind (ingress or gateway) this expose dispatches to."},
 		"certManagerClusterIssuer": {Type: oam.PropertyTypeString, Description: "cert-manager ClusterIssuer used to synthesize TLS (ingress controllerType only)."},
+		"secretName":               {Type: oam.PropertyTypeString, Description: "Overrides the synthesized <component>-tls secret name for platform-managed TLS (ingress controllerType only; requires a cert-manager cluster-issuer capability)."},
 		"allowedHostnameWildcard":  {Type: oam.PropertyTypeString, Description: "Platform-reserved wildcard the hostnames must fall under."},
 		"gatewayName":              {Type: oam.PropertyTypeString, Description: "Gateway name used to synthesize parentRefs (gateway controllerType only)."},
 		"gatewayNamespace":         {Type: oam.PropertyTypeString, Default: "gateway-system", Description: "Namespace of the Gateway (gateway controllerType only)."},
@@ -138,7 +139,22 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 		if err := validateHostnames(uniqueStrings(append(ruleHosts(props), shorthand...)), wildcard, app.Name); err != nil {
 			return err
 		}
-		// expose is platform-managed: the user does not author TLS.
+		// expose is platform-managed: the user does not author the TLS block, only
+		// (optionally) the managed secret's name. Present-but-wrong-typed/empty is an
+		// error, not a silent fallback to <component>-tls (which would name-collide).
+		var secretName string
+		if raw, present := props["secretName"]; present {
+			s, ok := raw.(string)
+			if !ok || s == "" {
+				return &errors.ValidationError{
+					Field:     "secretName",
+					Component: app.Name,
+					Message:   "secretName must be a non-empty string",
+				}
+			}
+			secretName = s
+		}
+		delete(props, "secretName")
 		delete(props, "tls")
 		if issuer != "" {
 			if err := setClusterIssuerAnnotation(props, issuer, app.Name); err != nil {
@@ -148,7 +164,15 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 			// `hostnames` are supplied, `rules` drives routing, so a hostnames entry
 			// that is not routed must not get a synthesized certificate.
 			if routingHosts := uniqueStrings(ruleHosts(props)); len(routingHosts) > 0 {
-				props["tls"] = synthesizedIngressTLS(routingHosts, app.Name)
+				props["tls"] = synthesizedIngressTLS(routingHosts, app.Name, secretName)
+			}
+		} else if secretName != "" {
+			// No cluster-issuer capability → no synthesized TLS, so an authored
+			// secretName would be silently dropped. Reject instead.
+			return &errors.ValidationError{
+				Field:     "secretName",
+				Component: app.Name,
+				Message:   "secretName requires platform-managed TLS (no cert-manager cluster-issuer capability)",
 			}
 		}
 		// ssl-redirect / force-ssl-redirect: typed property (capability default or
@@ -163,7 +187,7 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 	case "gateway":
 		// These properties are nginx-ingress-specific; reject them inline on the
 		// gateway path (the rendering guard only covers the capability-supplied form).
-		for _, k := range []string{"sslRedirect", "forceSslRedirect", "allowedGroups", "authSigninURL"} {
+		for _, k := range []string{"sslRedirect", "forceSslRedirect", "allowedGroups", "authSigninURL", "secretName"} {
 			if _, ok := props[k]; ok {
 				return &errors.ValidationError{
 					Field:     k,
@@ -354,14 +378,18 @@ func stringList(v any) []string {
 }
 
 // synthesizedIngressTLS builds the single managed TLS entry: all hosts under one
-// deterministic secretName (<component>-tls), for cert-manager's ingress-shim.
-func synthesizedIngressTLS(hosts []string, component string) []any {
+// secret, for cert-manager's ingress-shim. secretName defaults to the deterministic
+// <component>-tls when the trait does not author an override.
+func synthesizedIngressTLS(hosts []string, component, secretName string) []any {
+	if secretName == "" {
+		secretName = component + "-tls"
+	}
 	anyHosts := make([]any, len(hosts))
 	for i, h := range hosts {
 		anyHosts[i] = h
 	}
 	return []any{map[string]any{
 		"hosts":      anyHosts,
-		"secretName": component + "-tls",
+		"secretName": secretName,
 	}}
 }
