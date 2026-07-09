@@ -2,6 +2,7 @@ package traits
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
@@ -74,8 +75,18 @@ func (h *ExternalSecretHandler) PropertySchema() map[string]oam.PropertySchema {
 			"decodingStrategy": {Type: oam.PropertyTypeString, Description: "How the fetched value is decoded (e.g. Base64, None)."},
 		},
 	}
-	requiredRemoteRef := remoteRef
-	requiredRemoteRef.Required = true
+	// dataRemoteRef is the per-entry remoteRef: optional, and its key/property are
+	// derivable (key ← "<namespace>/<secretName>", property ← secretKey) when absent.
+	dataRemoteRef := oam.PropertySchema{
+		Type:        oam.PropertyTypeObject,
+		Description: "Reference to a key in the external secret store. Optional: when omitted, key defaults to \"<namespace>/<secretName>\" and property to secretKey.",
+		Properties: map[string]oam.PropertySchema{
+			"key":              {Type: oam.PropertyTypeString, Description: "Key or path of the secret in the remote store. Defaults to \"<namespace>/<secretName>\" when omitted."},
+			"property":         {Type: oam.PropertyTypeString, Description: "Specific property within the remote secret to extract. Defaults to secretKey when omitted."},
+			"version":          {Type: oam.PropertyTypeString, Description: "Version of the remote secret to fetch."},
+			"decodingStrategy": {Type: oam.PropertyTypeString, Description: "How the fetched value is decoded (e.g. Base64, None)."},
+		},
+	}
 	return map[string]oam.PropertySchema{
 		"secretName": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the generated ExternalSecret and the default target Secret."},
 		"secretStoreRef": {
@@ -107,13 +118,13 @@ func (h *ExternalSecretHandler) PropertySchema() map[string]oam.PropertySchema {
 		},
 		"data": {
 			Type:        oam.PropertyTypeArray,
-			Description: "Explicit mappings from remote store keys to entries in the target Secret.",
+			Description: "Mappings from remote store keys to entries in the target Secret. A fully-derivable entry is just {secretKey}: remoteRef.key defaults to \"<namespace>/<secretName>\" and remoteRef.property to secretKey; author remoteRef fields to override.",
 			Items: &oam.PropertySchema{
 				Type:        oam.PropertyTypeObject,
 				Description: "A single mapping of a remote reference to a target Secret key.",
 				Properties: map[string]oam.PropertySchema{
 					"secretKey": {Type: oam.PropertyTypeString, Required: true, Description: "Key in the target Secret to populate."},
-					"remoteRef": requiredRemoteRef,
+					"remoteRef": dataRemoteRef,
 				},
 			},
 		},
@@ -213,27 +224,54 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 			if !ok {
 				return nil, errors.Errorf("data[%d]: expected object", i)
 			}
+			if bad := unsupportedKeys(entry, "secretKey", "remoteRef"); len(bad) > 0 {
+				return nil, errors.Errorf("data[%d]: unsupported field %q (supported: secretKey, remoteRef)", i, bad[0])
+			}
 			secretKey, _ := entry["secretKey"].(string)
 			if secretKey == "" {
 				return nil, errors.Errorf("data[%d]: required field 'secretKey' missing or empty", i)
 			}
-			rawRef, ok := entry["remoteRef"].(map[string]any)
-			if !ok {
-				return nil, errors.Errorf("data[%d]: required field 'remoteRef' missing or not an object", i)
+			// remoteRef is optional. When a field is absent the value is derived:
+			// key ← "<namespace>/<secretName>", property ← secretKey. Absence is
+			// meaningful, so unknown keys are rejected rather than silently ignored
+			// (a typo would otherwise derive a wrong remote path).
+			var ref esRemoteRef
+			if raw, present := entry["remoteRef"]; present {
+				rawRef, ok := raw.(map[string]any)
+				if !ok {
+					return nil, errors.Errorf("data[%d].remoteRef: must be an object", i)
+				}
+				if bad := unsupportedKeys(rawRef, "key", "property", "version", "decodingStrategy"); len(bad) > 0 {
+					return nil, errors.Errorf("data[%d].remoteRef: unsupported field %q (supported: key, property, version, decodingStrategy)", i, bad[0])
+				}
+				// A present-but-wrong-typed field must error, not fall through to
+				// derivation — else an authored `key: 12345` (YAML int) is silently
+				// discarded and the entry derives the wrong remote path.
+				for _, f := range []struct {
+					name string
+					dst  *string
+				}{
+					{"key", &ref.Key},
+					{"property", &ref.Property},
+					{"version", &ref.Version},
+					{"decodingStrategy", &ref.DecodingStrategy},
+				} {
+					raw, present := rawRef[f.name]
+					if !present {
+						continue
+					}
+					s, ok := raw.(string)
+					if !ok {
+						return nil, errors.Errorf("data[%d].remoteRef.%s: must be a string", i, f.name)
+					}
+					*f.dst = s
+				}
 			}
-			key, _ := rawRef["key"].(string)
-			if key == "" {
-				return nil, errors.Errorf("data[%d].remoteRef: required field 'key' missing or empty", i)
+			if ref.Key == "" {
+				ref.Key = app.Namespace + "/" + config.SecretName
 			}
-			ref := esRemoteRef{Key: key}
-			if p, ok := rawRef["property"].(string); ok {
-				ref.Property = p
-			}
-			if v, ok := rawRef["version"].(string); ok {
-				ref.Version = v
-			}
-			if ds, ok := rawRef["decodingStrategy"].(string); ok {
-				ref.DecodingStrategy = ds
+			if ref.Property == "" {
+				ref.Property = secretKey
 			}
 			config.Data = append(config.Data, esDataEntry{
 				SecretKey: secretKey,
@@ -336,6 +374,23 @@ const (
 	deletionPolicyMerge  deletionPolicy = "Merge"
 	deletionPolicyRetain deletionPolicy = "Retain"
 )
+
+// unsupportedKeys returns the keys of m not in allowed, sorted for a deterministic
+// error message.
+func unsupportedKeys(m map[string]any, allowed ...string) []string {
+	ok := make(map[string]struct{}, len(allowed))
+	for _, a := range allowed {
+		ok[a] = struct{}{}
+	}
+	var bad []string
+	for k := range m {
+		if _, found := ok[k]; !found {
+			bad = append(bad, k)
+		}
+	}
+	slices.Sort(bad)
+	return bad
+}
 
 type esDataEntry struct {
 	SecretKey string
