@@ -1,12 +1,32 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.13] - 2026-07-09
+
+### Added
+
+- External-auth (oauth2-proxy) ingress annotations
+- Expose ComponentName() accessor on sub-app configs
+- External-secret data[] shorthand (derive remoteRef.key + property)
+
+### Documentation
+
+- External-secret data[] shorthand design spike
+
+### Fixed
+
+- Accept security-context in validTraitTypes
+
 ## [0.1.0-alpha.12] - 2026-07-08
 
 ### Added
 
 - Add Description to PropertySchema + populate builtin handler descriptions
 - Hostnames shorthand + platform-default ssl-redirect
+
+### Release
+
+- V0.1.0-alpha.12
 
 ## [0.1.0-alpha.11] - 2026-07-07
 
