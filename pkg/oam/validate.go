@@ -44,6 +44,7 @@ var validTraitTypes = map[string]bool{
 	"scaler":               true,
 	"pvc":                  true,
 	"rbac":                 true,
+	"security-context":     true,
 	"fluxcd-patches":       true,
 	"fluxcd-postbuild":     true,
 	"prune-protection":     true,

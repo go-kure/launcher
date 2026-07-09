@@ -285,3 +285,29 @@ func TestValidate_NamespaceEmpty(t *testing.T) {
 		t.Errorf("unexpected error for empty namespace: %v", err)
 	}
 }
+
+// TestValidate_SecurityContextTrait guards that standalone validation accepts the
+// security-context trait, which SecurityContextHandler ships (regression for the
+// validTraitTypes allowlist omitting a shipped handler).
+func TestValidate_SecurityContextTrait(t *testing.T) {
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   Metadata{Name: "test-app"},
+		Spec: ApplicationSpec{
+			Components: []Component{
+				{
+					Name:       "web",
+					Type:       "webservice",
+					Properties: map[string]any{"image": "nginx:1.25"},
+					Traits: []Trait{
+						{Type: "security-context", Properties: map[string]any{"runAsNonRoot": true}},
+					},
+				},
+			},
+		},
+	}
+	if err := validate(app); err != nil {
+		t.Errorf("unexpected error for security-context trait: %v", err)
+	}
+}
