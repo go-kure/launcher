@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.14] - 2026-07-09
+
+### Added
+
+- Authored secretName override on ingress TLS
+
 ## [0.1.0-alpha.13] - 2026-07-09
 
 ### Added
@@ -16,6 +22,10 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Accept security-context in validTraitTypes
+
+### Release
+
+- V0.1.0-alpha.13
 
 ## [0.1.0-alpha.12] - 2026-07-08
 
