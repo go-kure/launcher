@@ -38,6 +38,10 @@ parse → resolve parameters → transform (component + trait handlers) → mani
 | `LoadCapabilityDefinitions` | Load `CapabilityDefinition`s for capability validation. |
 | `ParseWithExtraTraitTypes` | Parse allowing additional (custom) trait types. |
 
+Standalone parsing validates each trait's `type` against the built-in handler set
+(the `security-context` trait is included, matching `SecurityContextHandler`);
+`ParseWithExtraTraitTypes` widens that allowlist with caller-supplied custom types.
+
 ## Transform & extension
 
 `NewTransformer(...)` builds a transformer from maps of component/trait handlers;
