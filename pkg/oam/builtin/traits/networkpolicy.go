@@ -115,7 +115,7 @@ func (h *NetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Application, b
 
 func (h *NetworkPolicyHandler) parseProperties(props map[string]any, app *stack.Application) (*NetworkPolicyConfig, error) {
 	config := &NetworkPolicyConfig{
-		ComponentName: app.Name,
+		componentName: app.Name,
 	}
 
 	rawIngress, hasIngress := props["ingress"]
@@ -322,10 +322,14 @@ func parseNPPort(raw any, path string) (npPort, error) {
 
 // NetworkPolicyConfig implements stack.ApplicationConfig for networkpolicy traits.
 type NetworkPolicyConfig struct {
-	ComponentName string
+	componentName string
 	Ingress       []npIngressRule
 	Egress        []npEgressRule
 }
+
+// ComponentName returns the OAM component this sub-app belongs to, for resource
+// provenance attribution.
+func (c *NetworkPolicyConfig) ComponentName() string { return c.componentName }
 
 type npIngressRule struct {
 	From  []npPeer
@@ -350,11 +354,11 @@ type npPort struct {
 
 // Generate creates a Kubernetes NetworkPolicy resource.
 func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	np := kubernetes.CreateNetworkPolicy(c.ComponentName+"-allow", app.Namespace)
-	np.Labels = map[string]string{"app": c.ComponentName}
+	np := kubernetes.CreateNetworkPolicy(c.componentName+"-allow", app.Namespace)
+	np.Labels = map[string]string{"app": c.componentName}
 	np.Annotations = nil
 	kubernetes.SetNetworkPolicyPodSelector(np, metav1.LabelSelector{
-		MatchLabels: map[string]string{"app": c.ComponentName},
+		MatchLabels: map[string]string{"app": c.componentName},
 	})
 
 	if len(c.Ingress) > 0 {

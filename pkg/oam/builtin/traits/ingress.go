@@ -151,7 +151,7 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Application) (*IngressConfig, error) {
 	defaultPort := resolveDefaultPort(app)
 	config := &IngressConfig{
-		ComponentName: app.Name,
+		componentName: app.Name,
 		ServiceName:   resolveServiceName(app),
 	}
 
@@ -348,7 +348,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 type IngressConfig struct {
 	Name             string
 	Scope            string // optional; sub-app name becomes {component}-ingress-{scope} when set and Name is empty
-	ComponentName    string // label value — always the OAM component name, not the K8s Service name
+	componentName    string
 	Annotations      map[string]string
 	IngressClassName string
 	Rules            []IngressRule
@@ -364,9 +364,13 @@ type IngressConfig struct {
 // TrafficSources implements the cluster-level trafficSourceCollector contract.
 func (c *IngressConfig) TrafficSources() []netpol.TrafficSource { return c.sources }
 
+// ComponentName returns the OAM component this sub-app belongs to — always the OAM
+// component name, not the K8s Service name — for resource provenance attribution.
+func (c *IngressConfig) ComponentName() string { return c.componentName }
+
 // TargetComponentName returns the OAM component label (not the K8s Service name),
 // so the synthesized NetworkPolicy selects the component's pods via {app: <name>}.
-func (c *IngressConfig) TargetComponentName() string { return c.ComponentName }
+func (c *IngressConfig) TargetComponentName() string { return c.ComponentName() }
 
 // BackendPorts implements the cluster-level trafficSourceCollector contract.
 func (c *IngressConfig) BackendPorts() []intstr.IntOrString { return c.ports }
@@ -395,7 +399,7 @@ type IngressTLS struct {
 // Generate creates a Kubernetes Ingress resource.
 func (c *IngressConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{
-		"app": c.ComponentName,
+		"app": c.componentName,
 	}
 
 	ingress := kubernetes.CreateIngress(app.Name, app.Namespace, c.IngressClassName)

@@ -80,7 +80,7 @@ func (h *RBACHandler) parseProperties(props map[string]any, app *stack.Applicati
 	}
 
 	return &rbacTraitConfig{
-		ComponentName: app.Name,
+		componentName: app.Name,
 		Namespace:     app.Namespace,
 		Rules:         rules,
 		ClusterWide:   clusterWide,
@@ -136,16 +136,20 @@ type rbacRule struct {
 }
 
 type rbacTraitConfig struct {
-	ComponentName string
+	componentName string
 	Namespace     string
 	Rules         []rbacRule
 	ClusterWide   bool
 }
 
-func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	labels := map[string]string{"app": c.ComponentName}
+// ComponentName returns the OAM component this sub-app belongs to, for resource
+// provenance attribution.
+func (c *rbacTraitConfig) ComponentName() string { return c.componentName }
 
-	role := kubernetes.CreateRole(c.ComponentName, c.Namespace)
+func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	labels := map[string]string{"app": c.componentName}
+
+	role := kubernetes.CreateRole(c.componentName, c.Namespace)
 	role.Labels = labels
 	role.Annotations = nil
 	for _, r := range c.Rules {
@@ -156,17 +160,17 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 		})
 	}
 
-	rb := kubernetes.CreateRoleBinding(c.ComponentName, c.Namespace)
+	rb := kubernetes.CreateRoleBinding(c.componentName, c.Namespace)
 	rb.Labels = labels
 	rb.Annotations = nil
 	kubernetes.SetRoleBindingRoleRef(rb, rbacv1.RoleRef{
 		APIGroup: rbacv1.GroupName,
 		Kind:     "Role",
-		Name:     c.ComponentName,
+		Name:     c.componentName,
 	})
 	kubernetes.AddRoleBindingSubject(rb, rbacv1.Subject{
 		Kind:      rbacv1.ServiceAccountKind,
-		Name:      c.ComponentName,
+		Name:      c.componentName,
 		Namespace: c.Namespace,
 	})
 
@@ -178,7 +182,7 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 		return objects, nil
 	}
 
-	cr := kubernetes.CreateClusterRole(c.ComponentName)
+	cr := kubernetes.CreateClusterRole(c.componentName)
 	cr.Labels = labels
 	cr.Annotations = nil
 	for _, r := range c.Rules {
@@ -189,17 +193,17 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 		})
 	}
 
-	crb := kubernetes.CreateClusterRoleBinding(c.ComponentName)
+	crb := kubernetes.CreateClusterRoleBinding(c.componentName)
 	crb.Labels = labels
 	crb.Annotations = nil
 	kubernetes.SetClusterRoleBindingRoleRef(crb, rbacv1.RoleRef{
 		APIGroup: rbacv1.GroupName,
 		Kind:     "ClusterRole",
-		Name:     c.ComponentName,
+		Name:     c.componentName,
 	})
 	kubernetes.AddClusterRoleBindingSubject(crb, rbacv1.Subject{
 		Kind:      rbacv1.ServiceAccountKind,
-		Name:      c.ComponentName,
+		Name:      c.componentName,
 		Namespace: c.Namespace,
 	})
 

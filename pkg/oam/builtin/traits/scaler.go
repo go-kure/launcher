@@ -55,7 +55,7 @@ func (h *ScalerHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 
 func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Application) (*ScalerConfig, error) {
 	config := &ScalerConfig{
-		ComponentName: app.Name,
+		componentName: app.Name,
 	}
 
 	// minReplicas/maxReplicas are optional at parse time: a policy default may
@@ -145,7 +145,7 @@ func toInt32ForScaler(v any) (int32, bool) {
 
 // ScalerConfig implements stack.ApplicationConfig for scaler traits.
 type ScalerConfig struct {
-	ComponentName     string
+	componentName     string
 	MinReplicas       int32
 	MaxReplicas       int32
 	CPUUtilization    *int32
@@ -155,6 +155,10 @@ type ScalerConfig struct {
 	explicitMinReplicas bool
 	explicitMaxReplicas bool
 }
+
+// ComponentName returns the OAM component this sub-app belongs to, for resource
+// provenance attribution.
+func (c *ScalerConfig) ComponentName() string { return c.componentName }
 
 // ApplyPolicy fills minReplicas/maxReplicas from the policy defaults when the
 // trait omitted them, validates the effective values, and enforces the policy
@@ -199,7 +203,7 @@ func (c *ScalerConfig) Generate(app *stack.Application) ([]*client.Object, error
 		return nil, err
 	}
 
-	labels := map[string]string{"app": c.ComponentName}
+	labels := map[string]string{"app": c.componentName}
 
 	var resources []*client.Object
 
@@ -217,10 +221,10 @@ func (c *ScalerConfig) Generate(app *stack.Application) ([]*client.Object, error
 }
 
 func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string) *autoscalingv2.HorizontalPodAutoscaler {
-	hpa := kubernetes.CreateHorizontalPodAutoscaler(c.ComponentName+"-hpa", app.Namespace)
+	hpa := kubernetes.CreateHorizontalPodAutoscaler(c.componentName+"-hpa", app.Namespace)
 	hpa.Labels = labels
 	hpa.Annotations = nil
-	kubernetes.SetHPAScaleTargetRef(hpa, "apps/v1", "Deployment", c.ComponentName)
+	kubernetes.SetHPAScaleTargetRef(hpa, "apps/v1", "Deployment", c.componentName)
 	kubernetes.SetHPAMinMaxReplicas(hpa, c.MinReplicas, c.MaxReplicas)
 	if c.CPUUtilization != nil {
 		kubernetes.AddHPACPUMetric(hpa, *c.CPUUtilization)
@@ -232,12 +236,12 @@ func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string
 }
 
 func (c *ScalerConfig) buildPDB(app *stack.Application, labels map[string]string) *policyv1.PodDisruptionBudget {
-	pdb := kubernetes.CreatePodDisruptionBudget(c.ComponentName+"-pdb", app.Namespace)
+	pdb := kubernetes.CreatePodDisruptionBudget(c.componentName+"-pdb", app.Namespace)
 	pdb.Labels = labels
 	pdb.Annotations = nil
 	kubernetes.SetPDBMinAvailable(pdb, intstr.FromString("50%"))
 	kubernetes.SetPDBSelector(pdb, &metav1.LabelSelector{
-		MatchLabels: map[string]string{"app": c.ComponentName},
+		MatchLabels: map[string]string{"app": c.componentName},
 	})
 	return pdb
 }

@@ -156,7 +156,7 @@ func TestHTTPRouteHandler_Apply_Scope(t *testing.T) {
 
 func TestHTTPRouteConfig_Generate_Basic(t *testing.T) {
 	cfg := &HTTPRouteConfig{
-		ComponentName: "web",
+		componentName: "web",
 		ParentRefs:    []ParentRef{{Name: "my-gateway"}},
 		Rules: []HTTPRouteRule{
 			{BackendRefs: []BackendRef{{Name: "web", Port: 80}}},
