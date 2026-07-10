@@ -97,6 +97,35 @@ spec:
 	}
 }
 
+func TestParsePackage_ResolvesParamAlias(t *testing.T) {
+	// An aliased parameter item (`- *base`) must resolve to its mapping and decode
+	// like plain yaml.v3 — reaching semantic validation (here: duplicate name),
+	// not being rejected as a parse error for "not a mapping".
+	input := `
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Package
+metadata:
+  name: my-app
+spec:
+  parameters:
+  - &base
+    name: a
+    type: string
+  - *base
+`
+	_, err := ParsePackage([]byte(input))
+	if err == nil {
+		t.Fatal("expected duplicate-name error for aliased param, got nil")
+	}
+	var valErr *errors.ValidationError
+	if !stderrors.As(err, &valErr) {
+		t.Fatalf("expected *errors.ValidationError (proving the alias decoded), got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("expected duplicate-name error, got: %v", err)
+	}
+}
+
 // --- capability rendering: rich fields rejected at both levels ---
 
 // loadCapDef writes a CapabilityDefinition YAML to a temp file and loads it.
@@ -197,6 +226,25 @@ func TestLoadCapabilityDefinitions_ResolvesPropertyAlias(t *testing.T) {
 	props := defs["my-trait"].Spec.Rendering.Properties
 	if props["base"].Type != PropertyTypeString || props["copy"].Type != PropertyTypeString {
 		t.Errorf("alias not resolved: %+v", props)
+	}
+}
+
+func TestLoadCapabilityDefinitions_RejectsMergeKey(t *testing.T) {
+	// Intentional tightening: a YAML merge key (`<<`) is not expanded — it is a key
+	// outside the flat allow-set, so it is rejected. (Plain yaml.v3 would merge it.)
+	_, err := loadCapDef(t, `  rendering:
+    properties:
+      base: &b
+        type: string
+      merged:
+        <<: *b
+        required: true
+`)
+	if err == nil {
+		t.Fatal("expected load error for merge key, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported field") {
+		t.Errorf("expected unsupported-field error for merge key, got: %v", err)
 	}
 }
 
