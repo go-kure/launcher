@@ -1,7 +1,9 @@
 package oam
 
 import (
+	"slices"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -28,6 +30,18 @@ var (
 		"properties": {},
 	}
 )
+
+// allowedFields renders an allow-set as a sorted, comma-joined list for error
+// messages, so each call site names its own accepted keys (e.g. "properties" at
+// the rendering level vs. the flat vocabulary at the property level).
+func allowedFields(allowed map[string]struct{}) string {
+	keys := make([]string, 0, len(allowed))
+	for k := range allowed {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return strings.Join(keys, ", ")
+}
 
 // isYAMLNull reports whether node is a YAML null scalar (e.g. `foo:` with no
 // value, or an explicit `null`). There is no yaml.NullNode; a null resolves to a
@@ -69,8 +83,7 @@ func rejectUnsupportedSchemaKeys(node *yaml.Node, allowed map[string]struct{}, c
 			return errors.Errorf("%s: keys must be scalars", ctx)
 		}
 		if _, ok := allowed[keyNode.Value]; !ok {
-			return errors.Errorf("%s: unsupported field %q (kurel parameters and capability "+
-				"rendering properties accept only type, required, default, description)", ctx, keyNode.Value)
+			return errors.Errorf("%s: unsupported field %q (allowed: %s)", ctx, keyNode.Value, allowedFields(allowed))
 		}
 	}
 	return nil

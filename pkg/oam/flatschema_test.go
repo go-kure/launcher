@@ -180,6 +180,23 @@ func TestLoadCapabilityDefinitions_RejectsUnknownRenderingField(t *testing.T) {
 	}
 }
 
+func TestLoadCapabilityDefinitions_RenderingLevelErrorNamesCorrectKeys(t *testing.T) {
+	// A flat-vocabulary field placed at the rendering level (not inside a property)
+	// must report the rendering allow-set ("properties"), not the property-level
+	// vocabulary — otherwise the message self-contradicts ("unsupported field
+	// \"type\" … accept only type, …").
+	_, err := loadCapDef(t, "  rendering:\n    type: string\n")
+	if err == nil {
+		t.Fatal("expected load error for flat field at rendering level, got nil")
+	}
+	if !strings.Contains(err.Error(), "allowed: properties") {
+		t.Errorf("rendering-level error should name 'properties' as allowed, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "required, default") {
+		t.Errorf("rendering-level error must not claim the property vocabulary, got: %v", err)
+	}
+}
+
 func TestLoadCapabilityDefinitions_RejectsUnknownPropertyField(t *testing.T) {
 	_, err := loadCapDef(t, `  rendering:
     properties:
