@@ -81,11 +81,13 @@ func rejectUnsupportedSchemaKeys(node *yaml.Node, allowed map[string]struct{}, c
 // passes through to a zero value and is caught by validatePackage ("name is
 // required"), preserving prior behavior.
 func (p *ParameterDecl) UnmarshalYAML(node *yaml.Node) error {
+	node = resolveAlias(node)
 	if err := rejectUnsupportedSchemaKeys(node, kurelParamKeys, "kurel parameter"); err != nil {
 		return err
 	}
 	// Named local (not a `type raw ParameterDecl` alias) to keep the inline embed
-	// unambiguous and avoid recursing back into this method.
+	// unambiguous and avoid recursing back into this method. Decode the resolved
+	// node so an aliased parameter item (`- *anchor`) decodes like plain yaml.v3.
 	var y struct {
 		Name           string `yaml:"name"`
 		PropertySchema `yaml:",inline"`
