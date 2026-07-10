@@ -61,16 +61,11 @@ type CapabilityDefSpec struct {
 	Rendering   CapabilityRenderingSchema `yaml:"rendering,omitempty"`
 }
 
-// CapabilityRenderingSchema lists the accepted rendering properties.
+// CapabilityRenderingSchema lists the accepted rendering properties. Each
+// property is a PropertySchema restricted to the flat vocabulary
+// (type/required/default/description) — the rich fields are rejected at decode
+// time by UnmarshalYAML (flatschema.go). Accepted types: "string", "integer",
+// "boolean" (enforced by LoadCapabilityDefinitions).
 type CapabilityRenderingSchema struct {
-	Properties map[string]CapabilityPropertySchema `yaml:"properties,omitempty"`
-}
-
-// CapabilityPropertySchema describes one rendering property.
-// Accepted types: "string", "integer", "boolean" (same vocabulary as kurel.yaml parameters).
-type CapabilityPropertySchema struct {
-	Type        string `yaml:"type,omitempty"`
-	Required    bool   `yaml:"required,omitempty"`
-	Default     any    `yaml:"default,omitempty"`
-	Description string `yaml:"description,omitempty"`
+	Properties map[string]PropertySchema `yaml:"properties,omitempty"`
 }

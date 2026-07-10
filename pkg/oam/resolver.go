@@ -98,7 +98,7 @@ func coerceSuppliedValues(supplied map[string]any, schema map[string]*ParameterD
 }
 
 func coerceValue(v any, decl *ParameterDecl) (any, error) {
-	switch decl.Type {
+	switch string(decl.Type) {
 	case "integer":
 		switch tv := v.(type) {
 		case int:
@@ -174,7 +174,7 @@ func buildEffectiveValues(schema []ParameterDecl, coerced map[string]any) (map[s
 
 		if !placeholderRE.MatchString(defStr) {
 			// Plain string default, no placeholders — coerce to the declared type.
-			val, err := coerceStringToType(defStr, p.Type, p.Name)
+			val, err := coerceStringToType(defStr, string(p.Type), p.Name)
 			if err != nil {
 				return nil, err
 			}
@@ -207,7 +207,7 @@ func buildEffectiveValues(schema []ParameterDecl, coerced map[string]any) (map[s
 				"default for parameter %q contains unresolved placeholder after substitution: %q", p.Name, resolved)
 		}
 
-		val, err := coerceStringToType(resolved, p.Type, p.Name)
+		val, err := coerceStringToType(resolved, string(p.Type), p.Name)
 		if err != nil {
 			return nil, err
 		}
