@@ -1,11 +1,30 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.15] - 2026-07-10
+
+### Changed
+
+- Unify schema vocabulary on PropertySchema
+- Preserve YAML aliases and validate schema keys
+
+### Fixed
+
+- Make unsupported-field error name the correct allow-set
+
+### Testing
+
+- Cover param aliases and document merge-key rejection
+
 ## [0.1.0-alpha.14] - 2026-07-09
 
 ### Added
 
 - Authored secretName override on ingress TLS
+
+### Release
+
+- V0.1.0-alpha.14
 
 ## [0.1.0-alpha.13] - 2026-07-09
 
