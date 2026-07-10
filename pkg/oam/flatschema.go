@@ -37,13 +37,26 @@ func isYAMLNull(node *yaml.Node) bool {
 	return node.Kind == yaml.ScalarNode && node.Tag == "!!null"
 }
 
+// resolveAlias follows a YAML alias (`*anchor`) to the node it references, so alias
+// nodes are handled like the value they point at. Plain yaml.v3 struct/map decoding
+// resolves aliases transparently; the custom unmarshalers must do the same before
+// inspecting node kind so `*anchor` inputs are not rejected as "not a mapping".
+func resolveAlias(node *yaml.Node) *yaml.Node {
+	for node != nil && node.Kind == yaml.AliasNode {
+		node = node.Alias
+	}
+	return node
+}
+
 // rejectUnsupportedSchemaKeys enforces allowed as the exact accepted key-set on a
 // schema mapping node. Node-shape handling preserves prior decoding behavior:
+//   - alias node → resolved to its target first
 //   - null node → nil (pass through to a zero value; tolerated / caught later)
 //   - mapping node → error on any key outside allowed
 //   - any other node (non-null scalar, sequence) → error (this already failed
 //     before as a yaml TypeError when decoded into a struct; only the message changes)
 func rejectUnsupportedSchemaKeys(node *yaml.Node, allowed map[string]struct{}, ctx string) error {
+	node = resolveAlias(node)
 	if isYAMLNull(node) {
 		return nil
 	}
@@ -51,10 +64,13 @@ func rejectUnsupportedSchemaKeys(node *yaml.Node, allowed map[string]struct{}, c
 		return errors.Errorf("%s must be a mapping", ctx)
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := node.Content[i].Value
-		if _, ok := allowed[key]; !ok {
+		keyNode := node.Content[i]
+		if keyNode.Kind != yaml.ScalarNode {
+			return errors.Errorf("%s: keys must be scalars", ctx)
+		}
+		if _, ok := allowed[keyNode.Value]; !ok {
 			return errors.Errorf("%s: unsupported field %q (kurel parameters and capability "+
-				"rendering properties accept only type, required, default, description)", ctx, key)
+				"rendering properties accept only type, required, default, description)", ctx, keyNode.Value)
 		}
 	}
 	return nil
@@ -88,6 +104,8 @@ func (p *ParameterDecl) UnmarshalYAML(node *yaml.Node) error {
 // empty schema; a null property value (`foo: null`) is retained as an empty
 // PropertySchema so the property stays known to applyDefinitionSchema.
 func (r *CapabilityRenderingSchema) UnmarshalYAML(node *yaml.Node) error {
+	r.Properties = nil // reset so decoding into a reused value is correct
+	node = resolveAlias(node)
 	if isYAMLNull(node) {
 		return nil
 	}
@@ -102,6 +120,7 @@ func (r *CapabilityRenderingSchema) UnmarshalYAML(node *yaml.Node) error {
 			break
 		}
 	}
+	propsNode = resolveAlias(propsNode)
 	if propsNode == nil || isYAMLNull(propsNode) {
 		return nil
 	}
@@ -111,8 +130,12 @@ func (r *CapabilityRenderingSchema) UnmarshalYAML(node *yaml.Node) error {
 
 	props := make(map[string]PropertySchema, len(propsNode.Content)/2)
 	for i := 0; i+1 < len(propsNode.Content); i += 2 {
-		name := propsNode.Content[i].Value
-		valNode := propsNode.Content[i+1]
+		keyNode := propsNode.Content[i]
+		if keyNode.Kind != yaml.ScalarNode {
+			return errors.Errorf("rendering.properties keys must be scalars")
+		}
+		name := keyNode.Value
+		valNode := resolveAlias(propsNode.Content[i+1])
 		ctx := "rendering property " + strconv.Quote(name)
 		if err := rejectUnsupportedSchemaKeys(valNode, capabilityPropKeys, ctx); err != nil {
 			return err
