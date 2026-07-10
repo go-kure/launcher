@@ -224,7 +224,7 @@ func TestApplyDefinitionSchema_AppliesDefault(t *testing.T) {
 	def := &CapabilityDefinition{
 		Spec: CapabilityDefSpec{
 			Rendering: CapabilityRenderingSchema{
-				Properties: map[string]CapabilityPropertySchema{
+				Properties: map[string]PropertySchema{
 					"mode": {Type: "string", Default: "auto"},
 				},
 			},
@@ -243,7 +243,7 @@ func TestApplyDefinitionSchema_RequiredMissing(t *testing.T) {
 	def := &CapabilityDefinition{
 		Spec: CapabilityDefSpec{
 			Rendering: CapabilityRenderingSchema{
-				Properties: map[string]CapabilityPropertySchema{
+				Properties: map[string]PropertySchema{
 					"timeout": {Type: "integer", Required: true},
 				},
 			},
@@ -259,7 +259,7 @@ func TestApplyDefinitionSchema_TypeMismatch(t *testing.T) {
 	def := &CapabilityDefinition{
 		Spec: CapabilityDefSpec{
 			Rendering: CapabilityRenderingSchema{
-				Properties: map[string]CapabilityPropertySchema{
+				Properties: map[string]PropertySchema{
 					"enabled": {Type: "boolean"},
 				},
 			},
@@ -275,7 +275,7 @@ func TestApplyDefinitionSchema_UnknownKey(t *testing.T) {
 	def := &CapabilityDefinition{
 		Spec: CapabilityDefSpec{
 			Rendering: CapabilityRenderingSchema{
-				Properties: map[string]CapabilityPropertySchema{
+				Properties: map[string]PropertySchema{
 					"mode": {Type: "string"},
 				},
 			},
@@ -291,7 +291,7 @@ func TestApplyDefinitionSchema_ValidRendering(t *testing.T) {
 	def := &CapabilityDefinition{
 		Spec: CapabilityDefSpec{
 			Rendering: CapabilityRenderingSchema{
-				Properties: map[string]CapabilityPropertySchema{
+				Properties: map[string]PropertySchema{
 					"mode":     {Type: "string"},
 					"timeout":  {Type: "integer"},
 					"enabled":  {Type: "boolean"},

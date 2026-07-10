@@ -22,11 +22,14 @@ type PackageSpec struct {
 	Parameters []ParameterDecl `yaml:"parameters,omitempty"`
 }
 
-// ParameterDecl declares a single package parameter with its type, default, and constraints.
+// ParameterDecl declares a single package parameter: an ordered, named entry over
+// the shared PropertySchema vocabulary. The ordered list (PackageSpec.Parameters)
+// drives default resolution — a default may reference only earlier parameters — so
+// this stays a list, not a map. The embedded PropertySchema is restricted to the
+// flat vocabulary (type/required/default/description); the rich fields are rejected
+// at decode time by UnmarshalYAML (flatschema.go). Accepted types are gated to
+// string/integer/boolean by validatePackage (array/object are not yet substitutable).
 type ParameterDecl struct {
-	Name        string `yaml:"name"`
-	Type        string `yaml:"type"` // string, integer, boolean, array, object
-	Required    bool   `yaml:"required,omitempty"`
-	Default     any    `yaml:"default,omitempty"`
-	Description string `yaml:"description,omitempty"`
+	Name           string `yaml:"name"`
+	PropertySchema `yaml:",inline"`
 }

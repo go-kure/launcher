@@ -251,7 +251,7 @@ func validatePackage(pkg *Package) error {
 			return packageValidationError("parameters", fmt.Sprintf("duplicate parameter name %q", p.Name))
 		}
 		seenNames[p.Name] = true
-		if !validParamTypes[p.Type] {
+		if !validParamTypes[string(p.Type)] {
 			return packageValidationError("parameters", fmt.Sprintf(
 				"parameter %q has invalid type %q; supported types: string, integer, boolean", p.Name, p.Type))
 		}
@@ -275,7 +275,7 @@ func validateParamDefault(p *ParameterDecl) error {
 		if placeholderRE.MatchString(defStr) {
 			return nil // validated at build time when referenced params are known
 		}
-		switch p.Type {
+		switch string(p.Type) {
 		case "integer":
 			if _, err := strconv.Atoi(defStr); err != nil {
 				return packageValidationError("parameters",
@@ -290,7 +290,7 @@ func validateParamDefault(p *ParameterDecl) error {
 		return nil
 	}
 	// Non-string default: the Go type decoded by yaml.Unmarshal must match the declared type.
-	switch p.Type {
+	switch string(p.Type) {
 	case "integer":
 		switch tv := p.Default.(type) {
 		case int, int64:

@@ -60,13 +60,17 @@ Standalone parsing validates each trait's `type` against the built-in handler se
 ## Property schemas
 
 Handlers may implement `PropertySchemaProvider` (`PropertySchema() map[string]PropertySchema`)
-to declare a constrained schema for their user-facing properties. `PropertySchema` is the
-richer sibling of `CapabilityPropertySchema`: `Type` (string/integer/boolean/number/array/object),
+to declare a constrained schema for their user-facing properties. `PropertySchema` is launcher's
+single schema vocabulary — the same type also backs `kurel.yaml` parameters (`ParameterDecl`) and
+`CapabilityDefinition` rendering properties. It has `Type` (string/integer/boolean/number/array/object),
 `Description`, `Required`, `Default`, `Enum`, nested `Properties`, `Items`, and `AdditionalProperties`
-(default false; escape-hatch fields set it true). `Transformer.HandlerSchemas()` returns a
-`HandlerSchemaSet{ Components, Traits }` of every registered handler that declares one, so crane's
-validator can check a component/trait's properties before the handler is invoked. Built-in
-examples: the `configmap` trait and the `passthrough` component.
+(default false; escape-hatch fields set it true). The rich fields (`Enum`, `Properties`, `Items`,
+`AdditionalProperties`) are meaningful only for handler properties: the two flat call sites (kurel
+parameters, capability rendering) reject them at decode time, so unifying the type does not widen
+their accepted behavior. `Transformer.HandlerSchemas()` returns a `HandlerSchemaSet{ Components, Traits }`
+of every registered handler that declares one, so crane's validator can check a component/trait's
+properties before the handler is invoked. Built-in examples: the `configmap` trait and the
+`passthrough` component.
 
 `Description` is optional (`json:"description,omitempty"`) but every built-in property populates it —
 including nested object fields and array item schemas at every depth — so crane can surface prose in

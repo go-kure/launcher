@@ -95,13 +95,13 @@ func LoadCapabilityDefinitions(paths []string, definitionsDir string) (map[strin
 		}
 
 		for propName, propSchema := range def.Spec.Rendering.Properties {
-			if propSchema.Type != "" && !acceptedPropertyTypes[propSchema.Type] {
+			if propSchema.Type != "" && !acceptedPropertyTypes[string(propSchema.Type)] {
 				return nil, errors.Errorf(
 					"capability definition file %q: property %q has unsupported type %q (accepted: string, integer, boolean)",
 					filePath, propName, propSchema.Type)
 			}
 			if propSchema.Default != nil {
-				if err := checkCapabilityValueType(propSchema.Default, propSchema.Type); err != nil {
+				if err := checkCapabilityValueType(propSchema.Default, string(propSchema.Type)); err != nil {
 					return nil, errors.Errorf(
 						"capability definition file %q: property %q default value: %s",
 						filePath, propName, err)
@@ -154,7 +154,7 @@ func applyDefinitionSchema(rendering map[string]any, def *CapabilityDefinition) 
 			continue
 		}
 		if propSchema.Type != "" {
-			if err := checkCapabilityValueType(v, propSchema.Type); err != nil {
+			if err := checkCapabilityValueType(v, string(propSchema.Type)); err != nil {
 				return nil, errors.Errorf("rendering property %q: %s", propName, err)
 			}
 		}

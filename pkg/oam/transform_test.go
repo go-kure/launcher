@@ -831,7 +831,7 @@ func capDefFixture(traitType string) *CapabilityDefinition {
 		Metadata:   Metadata{Name: traitType},
 		Spec: CapabilityDefSpec{
 			Rendering: CapabilityRenderingSchema{
-				Properties: map[string]CapabilityPropertySchema{
+				Properties: map[string]PropertySchema{
 					"timeout": {Type: "integer", Required: true},
 					"mode":    {Type: "string", Default: "auto"},
 				},
