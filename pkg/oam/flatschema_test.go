@@ -182,6 +182,37 @@ func TestLoadCapabilityDefinitions_RejectsMalformedProperties(t *testing.T) {
 	}
 }
 
+func TestLoadCapabilityDefinitions_ResolvesPropertyAlias(t *testing.T) {
+	// A YAML alias (`*scalar`) must resolve like plain yaml.v3 decode would, not be
+	// rejected as "not a mapping".
+	defs, err := loadCapDef(t, `  rendering:
+    properties:
+      base: &scalar
+        type: string
+      copy: *scalar
+`)
+	if err != nil {
+		t.Fatalf("unexpected error resolving alias: %v", err)
+	}
+	props := defs["my-trait"].Spec.Rendering.Properties
+	if props["base"].Type != PropertyTypeString || props["copy"].Type != PropertyTypeString {
+		t.Errorf("alias not resolved: %+v", props)
+	}
+}
+
+func TestLoadCapabilityDefinitions_RejectsComplexPropertyKey(t *testing.T) {
+	// A non-scalar property key would silently read as "" via Content[i].Value;
+	// map[string]... decode would have errored, so reject it.
+	_, err := loadCapDef(t, `  rendering:
+    properties:
+      ? [a, b]
+      : {type: string}
+`)
+	if err == nil {
+		t.Fatal("expected load error for non-scalar property key, got nil")
+	}
+}
+
 // --- capability rendering: null/empty tolerance preserved ---
 
 func TestLoadCapabilityDefinitions_NullEmptyRenderingTolerated(t *testing.T) {
