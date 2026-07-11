@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/go-kure/kure/pkg/stack"
+
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // ValidateAndApplyDefaults is implemented by built-in TraitHandlers that accept
@@ -28,6 +30,11 @@ type TransformContext struct {
 	FluxNamespace string // Flux control-plane namespace; "" means use component namespace
 	Policy        Policy
 	Capabilities  map[string]CapabilityBinding
+	// EgressPeers carries crane-supplied, graph-derived egress destinations keyed
+	// by OAM component name. Non-authorable: never sourced from OAM YAML or
+	// capability rendering, and never merged into trait properties. nil on the
+	// kurel path, where egress synthesis is a no-op.
+	EgressPeers map[string][]netpol.EgressPeer
 }
 
 // fluxNamespaceSettable is implemented by ApplicationConfig types that emit
@@ -338,6 +345,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	applyAutoHealthChecks(cluster, componentMap, policyResult.HealthCheckOverrides, ctx.FluxNamespace)
 	applyReconciliationSettings(cluster, componentMap, policyResult.ReconciliationSettings)
 	synthesizeNetworkPolicies(cluster)
+	synthesizeEgressNetworkPolicies(cluster, componentMap, ctx.EgressPeers)
 	postProcessFluxNamespace(cluster, ctx.FluxNamespace)
 
 	return cluster, policyResult, nil
