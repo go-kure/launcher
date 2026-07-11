@@ -1,6 +1,13 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.16] - 2026-07-11
+
+### Added
+
+- Accept storageClassName + volumeSnapshotClassName via capability rendering
+- Synthesize per-component egress NetworkPolicy from a non-authorable input
+
 ## [0.1.0-alpha.15] - 2026-07-10
 
 ### Changed
@@ -15,6 +22,10 @@ All notable changes to this project will be documented in this file.
 ### Testing
 
 - Cover param aliases and document merge-key rejection
+
+### Release
+
+- V0.1.0-alpha.15
 
 ## [0.1.0-alpha.14] - 2026-07-09
 
