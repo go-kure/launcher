@@ -48,7 +48,7 @@ preflight reject every valid use of the trait.
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `pvc` | PersistentVolumeClaim | `name`, `size` (optional; policy default `storageSize`), `storageClassName`, `accessModes[]` (policy: `maxStorageSize`) |
-| `volsync` | VolSync ReplicationSource | `sourcePVC`, `schedule`, `copyMethod`, `retain.{daily,weekly,monthly}` |
+| `volsync` | VolSync ReplicationSource | `sourcePVC`, `schedule`, `copyMethod`, `storageClassName`, `volumeSnapshotClassName`, `retain.{daily,weekly,monthly}` (class fields also supplied via capability rendering; injection is `copyMethod`-aware) |
 
 ### Configuration & scaling
 | `type` | Produces | Key properties |
