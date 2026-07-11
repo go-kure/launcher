@@ -4,8 +4,13 @@
 
 Package `builtin` holds the rendering-schema types shared by the built-in capability
 handlers (e.g. `CertificateRendering`, `ExposeRendering`, `ExternalSecretRendering`,
-`NetworkPolicyRendering`, `ConfigmapRendering`, `VolSyncRendering`) and the
+`NetworkPolicyRendering`, `ConfigmapRendering`, `VolSyncRendering`, `PVCRendering`) and the
 `DecodeStrict[T]` helper used by handlers to decode capability properties.
+
+`VolSyncRendering` and `PVCRendering` carry platform-supplied storage-class defaults
+(`storageClassName`, plus `volumeSnapshotClassName` for volsync) that a ClusterProfile capability
+can inject; both are overridable by the matching inline trait property and strict-decoded, so an
+operator typo in the rendering fails at profile-load.
 
 `ExposeRendering` additionally carries `certManagerClusterIssuer` (platform-managed TLS on
 the ingress path), `allowedHostnameWildcard` (hostname constraint for both paths), the

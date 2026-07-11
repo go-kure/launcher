@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
@@ -24,6 +25,17 @@ type PVCHandler struct{}
 // CanHandle returns true for the pvc trait type.
 func (h *PVCHandler) CanHandle(traitType string) bool {
 	return traitType == "pvc"
+}
+
+// ValidateAndApplyDefaults accepts the pvc storageClassName rendering key and rejects
+// any other key, turning an operator typo into a profile-load error instead of a
+// silent pass-through. The class stays optional/overridable, so pvc is not
+// CapabilityRequired.
+func (h *PVCHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
+	if _, err := builtin.DecodeStrict[builtin.PVCRendering](rendering); err != nil {
+		return nil, errors.Wrap(err, "pvc rendering")
+	}
+	return rendering, nil
 }
 
 // PropertySchema declares the pvc trait's user-facing properties.

@@ -1,5 +1,10 @@
 package builtin
 
-// VolSyncRendering holds no rendering keys; ValidateAndApplyDefaults rejects
-// any key the operator accidentally provides (design-capability-schema.md §2.4).
-type VolSyncRendering struct{}
+// VolSyncRendering carries platform-supplied class defaults for volsync backups.
+// Both are overridable by inline OAM trait properties; injection is copyMethod-aware
+// (see traits/volsync.go Generate). ValidateAndApplyDefaults strict-decodes into this
+// struct, so any other rendering key the operator accidentally provides is rejected.
+type VolSyncRendering struct {
+	StorageClassName        string `yaml:"storageClassName,omitempty" json:"storageClassName,omitempty"`
+	VolumeSnapshotClassName string `yaml:"volumeSnapshotClassName,omitempty" json:"volumeSnapshotClassName,omitempty"`
+}

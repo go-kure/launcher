@@ -21,7 +21,8 @@ func (h *VolSyncHandler) CanHandle(traitType string) bool {
 	return traitType == "volsync"
 }
 
-// ValidateAndApplyDefaults rejects any rendering key for this no-rendering trait.
+// ValidateAndApplyDefaults accepts the volsync class-default rendering keys
+// (storageClassName, volumeSnapshotClassName) and rejects any other key.
 func (h *VolSyncHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
 	if _, err := builtin.DecodeStrict[builtin.VolSyncRendering](rendering); err != nil {
 		return nil, errors.Wrap(err, "volsync rendering")
@@ -195,11 +196,16 @@ func (c *VolsyncConfig) Generate(app *stack.Application) ([]*client.Object, erro
 			Monthly: &monthly,
 		},
 	}
-	if c.StorageClassName != "" {
+	// StorageClassName applies to the copy volume (Snapshot + Clone); Direct writes
+	// the source PVC and has no copy volume. VolumeSnapshotClassName only means
+	// anything for Snapshot; Clone/Direct never snapshot. The guard is source-blind:
+	// on Direct the class is dropped whether it was rendered or authored inline,
+	// because the capability merge precedes this handler and cannot tell them apart.
+	if c.CopyMethod != "Direct" && c.StorageClassName != "" {
 		sc := c.StorageClassName
 		mover.StorageClassName = &sc
 	}
-	if c.VolumeSnapshotClassName != "" {
+	if c.CopyMethod == "Snapshot" && c.VolumeSnapshotClassName != "" {
 		vsc := c.VolumeSnapshotClassName
 		mover.VolumeSnapshotClassName = &vsc
 	}
