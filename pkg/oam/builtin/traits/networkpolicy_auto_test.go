@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 func ingressTrafficSourcesTrait(extra map[string]any) *oam.Trait {
@@ -218,4 +220,41 @@ func clusterAppNames(c *stack.Cluster) []string {
 
 func clusterHasApp(c *stack.Cluster, name string) bool {
 	return slices.Contains(clusterAppNames(c), name)
+}
+
+// End-to-end: a webservice with crane-supplied (non-authorable) egress peers on the
+// transform context yields a synthesized {component}-allow-egress-traffic policy, and
+// no inbound policy is synthesized absent trafficSources (additive, distinct paths).
+func TestTransform_EgressPeers_SynthesizesEgressNetworkPolicy(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{{
+				Name:       "web",
+				Type:       "webservice",
+				Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+			}},
+		},
+	}
+
+	ctx := oam.TransformContext{
+		Namespace: "default",
+		EgressPeers: map[string][]netpol.EgressPeer{
+			"web": {{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
+		},
+	}
+	cluster, _, err := tr.TransformWithPolicy(app, ctx)
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+
+	if !clusterHasApp(cluster, "web-allow-egress-traffic") {
+		t.Errorf("expected synthesized \"web-allow-egress-traffic\"; cluster apps: %v", clusterAppNames(cluster))
+	}
+	if clusterHasApp(cluster, "web-allow-ingress-traffic") {
+		t.Errorf("did not expect inbound synthesis without trafficSources; cluster apps: %v", clusterAppNames(cluster))
+	}
 }

@@ -28,6 +28,17 @@ parse → resolve parameters → transform (component + trait handlers) → mani
    `ComponentHandler` and each trait to its `TraitHandler`, merging the
    `ClusterProfile`'s capability choices.
 
+A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources
+in two directions, each a **separate** additive resource (the authored
+`networkpolicy` / `cilium-networkpolicy` traits are unaffected):
+
+- **Inbound** (`{comp}-allow-ingress-traffic`) — routing-derived, from routing traits'
+  platform-reserved `networkPolicy.trafficSources` capability rendering.
+- **Egress** (`{comp}-allow-egress-traffic`) — from `TransformContext.EgressPeers`, a
+  crane-supplied, non-authorable synthesis input (graph-derived dependency peers; never
+  set from OAM YAML or capability rendering). K8s `NetworkPolicy` only. Empty when a
+  caller supplies no peers (e.g. the kurel CLI), so synthesis is then a no-op.
+
 ## Parsing
 
 | Function | Purpose |

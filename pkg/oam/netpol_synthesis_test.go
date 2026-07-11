@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -185,5 +187,35 @@ func TestComponentAllowPolicyConfig_Generate(t *testing.T) {
 	}
 	if len(objs) != 1 {
 		t.Fatalf("expected 1 object, got %d", len(objs))
+	}
+
+	np, ok := (*objs[0]).(*networkingv1.NetworkPolicy)
+	if !ok {
+		t.Fatalf("expected *NetworkPolicy, got %T", *objs[0])
+	}
+	if np.Name != "web-allow-ingress-traffic" {
+		t.Errorf("name = %q, want web-allow-ingress-traffic", np.Name)
+	}
+	if np.Labels != nil || np.Annotations != nil {
+		t.Errorf("expected nil Labels/Annotations, got labels=%v annotations=%v", np.Labels, np.Annotations)
+	}
+	if got := np.Spec.PodSelector.MatchLabels["app"]; got != "web" {
+		t.Errorf("podSelector app = %q, want web", got)
+	}
+	if len(np.Spec.PolicyTypes) != 1 || np.Spec.PolicyTypes[0] != networkingv1.PolicyTypeIngress {
+		t.Errorf("policyTypes = %v, want [Ingress]", np.Spec.PolicyTypes)
+	}
+	if len(np.Spec.Egress) != 0 {
+		t.Errorf("expected no egress rules, got %d", len(np.Spec.Egress))
+	}
+	if len(np.Spec.Ingress) != 1 {
+		t.Fatalf("expected 1 ingress rule, got %d", len(np.Spec.Ingress))
+	}
+	r := np.Spec.Ingress[0]
+	if len(r.From) != 1 || r.From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "ingress-nginx" {
+		t.Errorf("ingress peer = %v, want namespace ingress-nginx", r.From)
+	}
+	if len(r.Ports) != 1 || r.Ports[0].Port.IntVal != 80 || *r.Ports[0].Protocol != corev1.ProtocolTCP {
+		t.Errorf("ingress ports = %v, want [80/TCP]", r.Ports)
 	}
 }
