@@ -73,6 +73,7 @@ extra_mounts:
   - {source: docs/oam/options-policy-interface.md, target: concepts/oam-policy-interface.md, title: Policy Interface, weight: 60}
   - {source: docs/oam/options-package-composition.md, target: concepts/oam-package-composition.md, title: Package Composition, weight: 70}
   - {source: docs/oam/design-capability-schema.md, target: concepts/oam-capability-schema.md, title: Capability Schema, weight: 55}
+  - {source: docs/oam/design-external-secret-data-shorthand.md, target: concepts/oam-external-secret-shorthand.md, title: External Secret Shorthand, weight: 80}
   - {source: DEVELOPMENT.md, target: contributing/guide.md, title: Development Guide, weight: 10}
   - {source: docs/github-workflows.md, target: contributing/github-workflows.md, title: GitHub Workflows, weight: 20}
   - {source: CHANGELOG.md, target: changelog/releases.md, title: Releases, weight: 10}

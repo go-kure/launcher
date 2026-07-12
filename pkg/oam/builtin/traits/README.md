@@ -100,7 +100,7 @@ not the app — chooses the implementation:
   `secretKey`; author any `remoteRef` field to override. Because absence is meaningful,
   unknown keys in an entry or its `remoteRef` are rejected (naming the supported
   fields) rather than silently ignored. See
-  [design-external-secret-data-shorthand](../../../../docs/oam/design-external-secret-data-shorthand.md).
+  [External Secret Shorthand](/concepts/oam-external-secret-shorthand/).
 
 ## Auto-synthesized NetworkPolicy
 
