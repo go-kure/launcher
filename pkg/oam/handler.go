@@ -1,6 +1,10 @@
 package oam
 
-import "github.com/go-kure/kure/pkg/stack"
+import (
+	"github.com/go-kure/kure/pkg/stack"
+
+	"github.com/go-kure/launcher/pkg/oam/netpol"
+)
 
 // ComponentHandler handles transformation of a specific OAM component type
 // into a kure ApplicationConfig.
@@ -50,4 +54,14 @@ type SourceDeduplicatable interface {
 // (e.g. a provenance label) without re-deriving the component from sub-app names.
 type ComponentNamed interface {
 	ComponentName() string
+}
+
+// EndpointProvider is an optional ComponentHandler interface: it declares the component's
+// in-cluster data-plane endpoints (selector + ports) that launcher knows deterministically
+// (e.g. an operator-managed database's instance pods). A downstream platform consumer calls
+// Transformer.ComponentEndpoints to learn these — to build its dependency graph and the
+// target-side allows it feeds back via TransformContext.IngressPeers — without hardcoding the
+// operator selector. It is not read by synthesis (synthesis emits from IngressPeers).
+type EndpointProvider interface {
+	Endpoints(component *Component) ([]netpol.Endpoint, error)
 }

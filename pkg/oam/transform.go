@@ -50,6 +50,11 @@ type TransformContext struct {
 	// input; a downstream platform embedding launcher sets its own domain. Validated as a
 	// DNS-1123 subdomain — an invalid value fails the transform.
 	Domain string
+	// IngressPeers carries platform-supplied, graph-derived target-side allows keyed by OAM
+	// component name (the endpoint owner). Each IngressPeer names an endpoint (selector +
+	// ports) and the sources allowed to reach it. Non-authorable, like EgressPeers. nil on the
+	// kurel path, where endpoint-ingress synthesis is a no-op.
+	IngressPeers map[string][]netpol.IngressPeer
 }
 
 // fluxNamespaceSettable is implemented by ApplicationConfig types that emit
@@ -269,6 +274,31 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 	return &result, nil
 }
 
+// ComponentEndpoints returns the endpoints declared by the handler for comp.Type, or
+// (nil, nil) if comp is nil, no handler is registered, or the handler is not an
+// EndpointProvider. It returns an error if a registered provider yields a malformed endpoint
+// (fail-fast: a broken handler surfaces early, not as a silent connectivity outage). Consumed
+// by a downstream platform to learn endpoint selectors when building its dependency graph.
+func (t *Transformer) ComponentEndpoints(comp *Component) ([]netpol.Endpoint, error) {
+	if comp == nil {
+		return nil, nil
+	}
+	ep, ok := t.findComponentHandler(comp.Type).(EndpointProvider)
+	if !ok {
+		return nil, nil
+	}
+	eps, err := ep.Endpoints(comp)
+	if err != nil {
+		return nil, err
+	}
+	for i, e := range eps {
+		if err := validateEndpoint(e); err != nil {
+			return nil, errors.Wrapf(err, "component %q endpoint[%d]", comp.Name, i)
+		}
+	}
+	return eps, nil
+}
+
 func (t *Transformer) findComponentHandler(componentType string) ComponentHandler {
 	return t.componentHandlers[componentType]
 }
@@ -379,6 +409,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	}
 	synthesizeNetworkPolicies(cluster, labelKey)
 	synthesizeEgressNetworkPolicies(cluster, componentMap, ctx.EgressPeers, labelKey)
+	synthesizeEndpointIngressNetworkPolicies(cluster, componentMap, ctx.IngressPeers)
 	postProcessFluxNamespace(cluster, ctx.FluxNamespace)
 
 	return cluster, policyResult, nil

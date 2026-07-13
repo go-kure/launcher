@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
@@ -378,4 +379,250 @@ func sortIntOrStringPorts(ports []intstr.IntOrString) {
 		}
 		return a.StrVal < b.StrVal
 	})
+}
+
+// --- Endpoint-ingress synthesis (platform-supplied, non-authorable target-side allows) ---
+
+// validateEndpoint fails closed on a malformed endpoint: the pod selector is required and
+// matchLabels-only, and at least one port is required. Used to reject bad EndpointProvider
+// output (a launcher-internal bug) and to guard directly-built endpoint-ingress configs.
+func validateEndpoint(e netpol.Endpoint) error {
+	if e.PodSelector == nil || len(e.PodSelector.MatchLabels) == 0 {
+		return errors.New("endpoint pod selector must have non-empty matchLabels")
+	}
+	if len(e.PodSelector.MatchExpressions) > 0 {
+		return errors.New("endpoint pod selector must be matchLabels-only (no matchExpressions)")
+	}
+	if len(e.Ports) == 0 {
+		return errors.New("endpoint must declare at least one port")
+	}
+	return nil
+}
+
+// endpointValid reports whether e passes validateEndpoint — a boolean form for fail-closed
+// drop/skip paths (Generate, grouping) that must not surface a nil error.
+func endpointValid(e netpol.Endpoint) bool { return validateEndpoint(e) == nil }
+
+// validSources keeps only fail-closed traffic sources: each must carry a namespace and a
+// non-empty matchLabels pod selector (matchLabels-only). Namespace-wide sources are dropped —
+// unlike the inbound family, endpoint-ingress never allows "all pods in a namespace". The
+// survivors are sorted by canonical key so the emitted rule's From order (and the dedup key)
+// is byte-stable regardless of the caller's source order.
+func validSources(sources []netpol.TrafficSource) []netpol.TrafficSource {
+	out := make([]netpol.TrafficSource, 0, len(sources))
+	for _, s := range sources {
+		if s.Namespace == "" || s.PodSelector == nil || len(s.PodSelector.MatchLabels) == 0 {
+			continue
+		}
+		if len(s.PodSelector.MatchExpressions) > 0 {
+			continue
+		}
+		out = append(out, s)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return trafficSourceKey(out[i]) < trafficSourceKey(out[j]) })
+	return out
+}
+
+// trafficSourceKey returns a canonical key for one (validated) traffic source: namespace plus
+// sorted key=value matchLabels.
+func trafficSourceKey(s netpol.TrafficSource) string {
+	labelParts := make([]string, 0, len(s.PodSelector.MatchLabels))
+	for lk, lv := range s.PodSelector.MatchLabels {
+		labelParts = append(labelParts, lk+"="+lv)
+	}
+	sort.Strings(labelParts)
+	return s.Namespace + "/" + strings.Join(labelParts, ",")
+}
+
+type endpointIngressRule struct {
+	Sources []netpol.TrafficSource // fail-closed: each carries a namespace + matchLabels pod selector
+}
+
+// componentEndpointIngressPolicyConfig is the ApplicationConfig for an auto-generated
+// NetworkPolicy that allows ingress to one of a component's declared endpoints (e.g. an
+// operator-managed database's instance pods) from platform-supplied sources. The resource
+// name is {component}-allow-endpoint-ingress, distinct from the other synthesized families and
+// the explicit networkpolicy trait, so it is purely additive. The podSelector is the endpoint's
+// own selector — deliberately not the component-label key — because it protects operator pods
+// that carry no component-provenance label.
+type componentEndpointIngressPolicyConfig struct {
+	ComponentName string
+	Endpoint      netpol.Endpoint       // this policy's single endpoint (podSelector + ports)
+	Rules         []endpointIngressRule // one per distinct source set, deduplicated
+}
+
+// ApplyPolicy is a no-op: a synthesized NetworkPolicy has no enforceable policy fields
+// (matching the other synthesized families).
+func (c *componentEndpointIngressPolicyConfig) ApplyPolicy(_ Policy) error { return nil }
+
+func (c *componentEndpointIngressPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	// Fail closed: never emit a deny-all (no rules) or allow-from-all (bad selectors) policy,
+	// even for a directly-built config. Filter sources with the same strict rule as synthesis.
+	if !endpointValid(c.Endpoint) {
+		return nil, nil // invalid endpoint: emit nothing (not an error at the Generate boundary)
+	}
+	var rules []endpointIngressRule
+	for _, r := range c.Rules {
+		if srcs := validSources(r.Sources); len(srcs) > 0 {
+			rules = append(rules, endpointIngressRule{Sources: srcs})
+		}
+	}
+	if len(rules) == 0 {
+		return nil, nil // no valid sources; an Ingress NP with zero rules would deny all ingress
+	}
+
+	np := kubernetes.CreateNetworkPolicy(c.ComponentName+"-allow-endpoint-ingress", app.Namespace)
+	np.Labels = nil
+	np.Annotations = nil
+	kubernetes.SetNetworkPolicyPodSelector(np, *c.Endpoint.PodSelector)
+	kubernetes.SetNetworkPolicyPolicyTypes(np, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress})
+
+	proto := corev1.ProtocolTCP
+	for _, r := range rules {
+		rule := networkingv1.NetworkPolicyIngressRule{}
+		for _, src := range r.Sources {
+			peer := networkingv1.NetworkPolicyPeer{
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": src.Namespace},
+				},
+				PodSelector: src.PodSelector,
+			}
+			kubernetes.AddNetworkPolicyIngressPeer(&rule, peer)
+		}
+		for _, p := range c.Endpoint.Ports {
+			port := p
+			kubernetes.AddNetworkPolicyIngressPort(&rule, networkingv1.NetworkPolicyPort{
+				Port:     &port,
+				Protocol: &proto,
+			})
+		}
+		kubernetes.AddNetworkPolicyIngressRule(np, rule)
+	}
+
+	obj := client.Object(np)
+	return []*client.Object{&obj}, nil
+}
+
+// synthesizeEndpointIngressNetworkPolicies traverses all leaf bundles and, for each primary
+// component application with platform-supplied ingress peers, appends
+// componentEndpointIngressPolicyConfig applications emitting per-endpoint ingress
+// NetworkPolicies. The signal is non-authorable (TransformContext.IngressPeers), so this is a
+// no-op on the kurel path where no peers are supplied.
+//
+// Runs as a cluster post-build stage (Phase 4), after trait application — so the synthesized
+// policies are not subject to Enforceable.ApplyPolicy (intentional).
+func synthesizeEndpointIngressNetworkPolicies(cluster *stack.Cluster, componentMap map[string]componentEntry, ingressPeers map[string][]netpol.IngressPeer) {
+	if cluster == nil || len(ingressPeers) == 0 {
+		return
+	}
+	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
+		var autoApps []*stack.Application
+		for _, app := range bundle.Applications {
+			// Match the primary component app by identity, not just by name (same guard as
+			// the egress path): a trait sub-app whose name collides with a component name
+			// could otherwise attach the policy beside the wrong app in the wrong bundle.
+			entry, ok := componentMap[app.Name]
+			if !ok || app != entry.app {
+				continue
+			}
+			groups := groupIngressPeers(ingressPeers[app.Name])
+			// Multi-endpoint rule (v1): the NP name has no per-endpoint discriminator, so a
+			// component with >1 distinct endpoint would collide. Only postgresql produces
+			// endpoints today (exactly one), so this is unreachable; skip rather than emit a
+			// colliding or partial policy.
+			// TODO(pooler): suffix per-endpoint NP names when a second endpoint is added.
+			if len(groups) != 1 {
+				continue
+			}
+			autoApps = append(autoApps, stack.NewApplication(
+				app.Name+"-allow-endpoint-ingress",
+				app.Namespace,
+				&componentEndpointIngressPolicyConfig{
+					ComponentName: app.Name,
+					Endpoint:      groups[0].Endpoint,
+					Rules:         groups[0].Rules,
+				},
+			))
+		}
+		bundle.Applications = append(bundle.Applications, autoApps...)
+	})
+}
+
+type endpointIngressGroup struct {
+	Endpoint netpol.Endpoint
+	Rules    []endpointIngressRule
+}
+
+// groupIngressPeers normalizes platform-supplied ingress peers into per-endpoint groups for
+// deterministic, fail-closed output: it drops peers whose endpoint is malformed or whose sources
+// are all namespace-wide, groups the survivors by endpoint (selector + ports), deduplicates
+// identical source sets within a group, and sorts groups + rules by canonical key.
+func groupIngressPeers(peers []netpol.IngressPeer) []endpointIngressGroup {
+	byEndpoint := map[string]*endpointIngressGroup{}
+	var order []string
+	for _, p := range peers {
+		if !endpointValid(p.Endpoint) {
+			continue
+		}
+		srcs := validSources(p.Sources)
+		if len(srcs) == 0 {
+			continue
+		}
+		ports := make([]intstr.IntOrString, len(p.Endpoint.Ports))
+		copy(ports, p.Endpoint.Ports)
+		sortIntOrStringPorts(ports)
+		ep := netpol.Endpoint{PodSelector: p.Endpoint.PodSelector, Ports: ports}
+		ek := endpointKey(ep)
+		g, ok := byEndpoint[ek]
+		if !ok {
+			g = &endpointIngressGroup{Endpoint: ep}
+			byEndpoint[ek] = g
+			order = append(order, ek)
+		}
+		sk := sourcesKey(srcs)
+		dup := false
+		for _, r := range g.Rules {
+			if sourcesKey(r.Sources) == sk {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			g.Rules = append(g.Rules, endpointIngressRule{Sources: srcs})
+		}
+	}
+	out := make([]endpointIngressGroup, 0, len(order))
+	for _, ek := range order {
+		g := byEndpoint[ek]
+		sort.SliceStable(g.Rules, func(i, j int) bool { return sourcesKey(g.Rules[i].Sources) < sourcesKey(g.Rules[j].Sources) })
+		out = append(out, *g)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return endpointKey(out[i].Endpoint) < endpointKey(out[j].Endpoint) })
+	return out
+}
+
+// endpointKey returns a canonical dedup/ordering key for an endpoint (matchLabels + Type-tagged
+// ports, mirroring egressPeerKey).
+func endpointKey(e netpol.Endpoint) string {
+	labelParts := make([]string, 0, len(e.PodSelector.MatchLabels))
+	for lk, lv := range e.PodSelector.MatchLabels {
+		labelParts = append(labelParts, lk+"="+lv)
+	}
+	sort.Strings(labelParts)
+	portKeys := make([]string, 0, len(e.Ports))
+	for _, pt := range e.Ports {
+		portKeys = append(portKeys, fmt.Sprintf("%d:%s", pt.Type, pt.String()))
+	}
+	return fmt.Sprintf("sel:%s;ports:%s", strings.Join(labelParts, ","), strings.Join(portKeys, "|"))
+}
+
+// sourcesKey returns a canonical dedup/ordering key for a source set — per-source keys sorted
+// so order does not affect the key. (validSources already sorts, but sort defensively.)
+func sourcesKey(sources []netpol.TrafficSource) string {
+	srcKeys := make([]string, 0, len(sources))
+	for _, s := range sources {
+		srcKeys = append(srcKeys, trafficSourceKey(s))
+	}
+	sort.Strings(srcKeys)
+	return strings.Join(srcKeys, "|")
 }
