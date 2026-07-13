@@ -921,7 +921,7 @@ func (c *HTTPRouteConfig) ComponentName() string { return c.componentName }
 
 // TargetComponentName returns the OAM component label (not the K8s Service name), so the
 // synthesized NetworkPolicy selects the component's pods via the configured component
-// label key (default {wharf.zone/component: <name>}).  allow-term:wharf tracked by #215
+// label key (default {<domain>/component: <name>}, domain from TransformContext.Domain).
 func (c *HTTPRouteConfig) TargetComponentName() string { return c.ComponentName() }
 
 // BackendPorts implements the cluster-level trafficSourceCollector contract.

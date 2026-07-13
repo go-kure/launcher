@@ -38,15 +38,17 @@ type componentAllowPolicyConfig struct {
 	ComponentName string
 	Rules         []trafficRule // one per collector with non-empty ports; deduplicated
 	// PodSelectorKey is the label key selecting the component's own pods (the ingress
-	// recipients). Empty => ComponentLabel ("wharf.zone/component").  allow-term:wharf tracked by #215
+	// recipients). Empty => the library default key (ComponentLabelKeyForDomain(DefaultDomain)).
+	// The transform path always passes the resolved, domain-aware key; the default here only
+	// applies to directly-constructed configs (tests), which cannot know the transform domain.
 	PodSelectorKey string
 }
 
-// podSelectorKey returns the configured selector key, defaulting to ComponentLabel so a
+// podSelectorKey returns the configured selector key, defaulting to the library default so a
 // directly-built config never emits an empty-key selector.
 func (c *componentAllowPolicyConfig) podSelectorKey() string {
 	if c.PodSelectorKey == "" {
-		return ComponentLabel
+		return ComponentLabelKeyForDomain(DefaultDomain)
 	}
 	return c.PodSelectorKey
 }
@@ -215,15 +217,17 @@ type componentEgressPolicyConfig struct {
 	ComponentName string
 	Peers         []netpol.EgressPeer
 	// PodSelectorKey is the label key selecting the component's own pods (the egress
-	// source pods this policy allows out). Empty => ComponentLabel ("wharf.zone/component").  allow-term:wharf tracked by #215
+	// source pods this policy allows out). Empty => the library default key
+	// (ComponentLabelKeyForDomain(DefaultDomain)); the transform path always passes the
+	// resolved, domain-aware key, so this default only applies to directly-built configs.
 	PodSelectorKey string
 }
 
-// podSelectorKey returns the configured selector key, defaulting to ComponentLabel so a
+// podSelectorKey returns the configured selector key, defaulting to the library default so a
 // directly-built config never emits an empty-key selector.
 func (c *componentEgressPolicyConfig) podSelectorKey() string {
 	if c.PodSelectorKey == "" {
-		return ComponentLabel
+		return ComponentLabelKeyForDomain(DefaultDomain)
 	}
 	return c.PodSelectorKey
 }

@@ -747,7 +747,7 @@ spec:
     properties:
       chart: cert-manager
     annotations:
-      wharf.zone/tier: infra # allow-term:wharf tracked by #215
+      gokure.dev/tier: infra
 `
 	app, err := Parse([]byte(input))
 	if err != nil {
@@ -758,7 +758,7 @@ spec:
 	if comp.Annotations == nil {
 		t.Fatal("expected non-nil Annotations")
 	}
-	if got := comp.Annotations["wharf.zone/tier"]; got != "infra" { // allow-term:wharf tracked by #215
-		t.Errorf("annotations[wharf.zone/tier] = %q, want %q", got, "infra")
+	if got := comp.Annotations["gokure.dev/tier"]; got != "infra" {
+		t.Errorf("annotations[gokure.dev/tier] = %q, want %q", got, "infra")
 	}
 }

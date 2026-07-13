@@ -37,6 +37,16 @@ properties, so a component/trait's properties can be validated before dispatch. 
 and [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
 for the full catalogue; the `security-context` trait was added in this release.
 
+### Platform key domain
+
+kurel derives its platform label/annotation keys under the **`launcher.gokure.dev`**
+domain: the tier-override annotation is `launcher.gokure.dev/tier`, and synthesized
+NetworkPolicies select pods via `launcher.gokure.dev/component`. This is kurel's fixed
+choice over the launcher library default (`gokure.dev`); other embedders set their own
+domain through `TransformContext.Domain`. See the
+[OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the derivation
+and precedence rules.
+
 | Flag | Description |
 |------|-------------|
 | `--profile` (required) | Path to the `ClusterProfile` YAML. |
