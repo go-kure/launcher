@@ -10,9 +10,9 @@ require (
 	github.com/cloudnative-pg/plugin-barman-cloud v0.13.0
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260630123415-dfb816dacc15
-	github.com/fluxcd/helm-controller/api v1.6.1
-	github.com/fluxcd/kustomize-controller/api v1.9.1
-	github.com/fluxcd/source-controller/api v1.9.1
+	github.com/fluxcd/helm-controller/api v1.6.2
+	github.com/fluxcd/kustomize-controller/api v1.9.3
+	github.com/fluxcd/source-controller/api v1.9.3
 	github.com/go-kure/kure v0.2.0-beta.6
 	github.com/google/go-containerregistry v0.21.7
 	github.com/spf13/cobra v1.10.2
