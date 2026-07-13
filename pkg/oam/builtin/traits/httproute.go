@@ -919,8 +919,9 @@ func (c *HTTPRouteConfig) TrafficSources() []netpol.TrafficSource { return c.sou
 // component name, not the K8s Service name — for resource provenance attribution.
 func (c *HTTPRouteConfig) ComponentName() string { return c.componentName }
 
-// TargetComponentName returns the OAM component label (not the K8s Service name),
-// so the synthesized NetworkPolicy selects the component's pods via {app: <name>}.
+// TargetComponentName returns the OAM component label (not the K8s Service name), so the
+// synthesized NetworkPolicy selects the component's pods via the configured component
+// label key (default {wharf.zone/component: <name>}).
 func (c *HTTPRouteConfig) TargetComponentName() string { return c.ComponentName() }
 
 // BackendPorts implements the cluster-level trafficSourceCollector contract.

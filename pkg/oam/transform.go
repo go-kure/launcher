@@ -35,6 +35,13 @@ type TransformContext struct {
 	// capability rendering, and never merged into trait properties. nil on the
 	// kurel path, where egress synthesis is a no-op.
 	EgressPeers map[string][]netpol.EgressPeer
+	// ComponentLabelKey overrides the pod-label key that synthesized NetworkPolicies
+	// target (the component's own pods: ingress recipients / egress sources). Empty
+	// => ComponentLabel ("wharf.zone/component"). Non-authorable platform input, like
+	// EgressPeers: a caller that injects trafficSources/EgressPeers must ensure its
+	// pods carry this label (crane stamps wharf.zone/component) or set this to a key
+	// its pods do carry (e.g. "app").
+	ComponentLabelKey string
 }
 
 // fluxNamespaceSettable is implemented by ApplicationConfig types that emit
@@ -344,8 +351,12 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	}
 	applyAutoHealthChecks(cluster, componentMap, policyResult.HealthCheckOverrides, ctx.FluxNamespace)
 	applyReconciliationSettings(cluster, componentMap, policyResult.ReconciliationSettings)
-	synthesizeNetworkPolicies(cluster)
-	synthesizeEgressNetworkPolicies(cluster, componentMap, ctx.EgressPeers)
+	labelKey := ctx.ComponentLabelKey
+	if labelKey == "" {
+		labelKey = ComponentLabel
+	}
+	synthesizeNetworkPolicies(cluster, labelKey)
+	synthesizeEgressNetworkPolicies(cluster, componentMap, ctx.EgressPeers, labelKey)
 	postProcessFluxNamespace(cluster, ctx.FluxNamespace)
 
 	return cluster, policyResult, nil

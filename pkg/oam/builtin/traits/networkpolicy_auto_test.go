@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -97,7 +98,8 @@ func TestIngressHandler_TrafficSources_MalformedErrors(t *testing.T) {
 
 // TargetComponentName must be the OAM component label, never the (possibly
 // overridden) K8s Service name, so the synthesized NetworkPolicy selects the
-// component's pods via {app: <component>}.
+// component's pods via the configured component label key (default
+// {wharf.zone/component: <component>}).
 func TestIngressConfig_TargetComponentName_IsComponentNotService(t *testing.T) {
 	app := stack.NewApplication("web", "default", &namedWebConfig{port: 80, serviceName: "web-headless"})
 	trait := ingressTrafficSourcesTrait(map[string]any{
@@ -186,6 +188,10 @@ func TestTransform_IngressTrafficSources_SynthesizesNetworkPolicy(t *testing.T) 
 	if !clusterHasApp(cluster, "web-allow-ingress-traffic") {
 		t.Errorf("expected synthesized app \"web-allow-ingress-traffic\"; cluster apps: %v", clusterAppNames(cluster))
 	}
+	// Default target selector is wharf.zone/component (crane stamps it on every pod).
+	if sel := synthesizedPodSelector(t, cluster, "web-allow-ingress-traffic"); sel["wharf.zone/component"] != "web" {
+		t.Errorf("default ingress podSelector = %v, want wharf.zone/component=web", sel)
+	}
 }
 
 func clusterAppNames(c *stack.Cluster) []string {
@@ -222,6 +228,57 @@ func clusterHasApp(c *stack.Cluster, name string) bool {
 	return slices.Contains(clusterAppNames(c), name)
 }
 
+// synthesizedPodSelector finds the named synthesized app, runs its config's Generate,
+// and returns the emitted NetworkPolicy's top-level podSelector matchLabels — proving
+// the configured ComponentLabelKey is threaded all the way through Phase 4.
+func synthesizedPodSelector(t *testing.T, c *stack.Cluster, name string) map[string]string {
+	t.Helper()
+	var found *stack.Application
+	var visitBundle func(b *stack.Bundle)
+	visitBundle = func(b *stack.Bundle) {
+		if b == nil || found != nil {
+			return
+		}
+		for _, a := range b.Applications {
+			if a.Name == name {
+				found = a
+				return
+			}
+		}
+		for _, ch := range b.Children {
+			visitBundle(ch)
+		}
+	}
+	var visitNode func(n *stack.Node)
+	visitNode = func(n *stack.Node) {
+		if n == nil || found != nil {
+			return
+		}
+		visitBundle(n.Bundle)
+		for _, ch := range n.Children {
+			visitNode(ch)
+		}
+	}
+	if c != nil {
+		visitNode(c.Node)
+	}
+	if found == nil {
+		t.Fatalf("synthesized app %q not found; cluster apps: %v", name, clusterAppNames(c))
+	}
+	objs, err := found.Config.Generate(found)
+	if err != nil {
+		t.Fatalf("Generate %q: %v", name, err)
+	}
+	if len(objs) != 1 {
+		t.Fatalf("expected 1 object from %q, got %d", name, len(objs))
+	}
+	np, ok := (*objs[0]).(*networkingv1.NetworkPolicy)
+	if !ok {
+		t.Fatalf("expected *NetworkPolicy from %q, got %T", name, *objs[0])
+	}
+	return np.Spec.PodSelector.MatchLabels
+}
+
 // End-to-end: a webservice with crane-supplied (non-authorable) egress peers on the
 // transform context yields a synthesized {component}-allow-egress-traffic policy, and
 // no inbound policy is synthesized absent trafficSources (additive, distinct paths).
@@ -256,5 +313,76 @@ func TestTransform_EgressPeers_SynthesizesEgressNetworkPolicy(t *testing.T) {
 	}
 	if clusterHasApp(cluster, "web-allow-ingress-traffic") {
 		t.Errorf("did not expect inbound synthesis without trafficSources; cluster apps: %v", clusterAppNames(cluster))
+	}
+	// Default egress source-pod selector is wharf.zone/component.
+	if sel := synthesizedPodSelector(t, cluster, "web-allow-egress-traffic"); sel["wharf.zone/component"] != "web" {
+		t.Errorf("default egress podSelector = %v, want wharf.zone/component=web", sel)
+	}
+}
+
+// End-to-end: TransformContext.ComponentLabelKey overrides the synthesized podSelector
+// key for BOTH inbound and egress families. The "app" case is the escape hatch that
+// restores pre-change behavior for non-crane/kurel callers; a custom key proves the
+// value is passed through verbatim.
+func TestTransform_ComponentLabelKey_Override(t *testing.T) {
+	cases := []struct {
+		name    string
+		key     string
+		wantKey string
+	}{
+		{"escape_hatch_app", "app", "app"},
+		{"custom_key", "example.com/name", "example.com/name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := oam.NewTransformer(nil, nil)
+			tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+			tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+
+			app := &oam.Application{
+				Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+				Spec: oam.ApplicationSpec{
+					Components: []oam.Component{{
+						Name:       "web",
+						Type:       "webservice",
+						Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+						Traits: []oam.Trait{{
+							Type: "ingress",
+							Properties: map[string]any{
+								"rules": []any{map[string]any{
+									"host":  "example.com",
+									"paths": []any{map[string]any{"path": "/"}},
+								}},
+								"networkPolicy": map[string]any{
+									"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}},
+								},
+							},
+						}},
+					}},
+				},
+			}
+
+			ctx := oam.TransformContext{
+				Namespace:         "default",
+				ComponentLabelKey: tc.key,
+				EgressPeers: map[string][]netpol.EgressPeer{
+					"web": {{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
+				},
+			}
+			cluster, _, err := tr.TransformWithPolicy(app, ctx)
+			if err != nil {
+				t.Fatalf("TransformWithPolicy: %v", err)
+			}
+
+			for _, npName := range []string{"web-allow-ingress-traffic", "web-allow-egress-traffic"} {
+				sel := synthesizedPodSelector(t, cluster, npName)
+				if sel[tc.wantKey] != "web" {
+					t.Errorf("%s podSelector = %v, want %s=web", npName, sel, tc.wantKey)
+				}
+				if _, hasDefault := sel["wharf.zone/component"]; hasDefault && tc.wantKey != "wharf.zone/component" {
+					t.Errorf("%s podSelector should not carry default key when overridden: %v", npName, sel)
+				}
+			}
+		})
 	}
 }

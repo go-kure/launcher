@@ -39,6 +39,16 @@ in two directions, each a **separate** additive resource (the authored
   set from OAM YAML or capability rendering). K8s `NetworkPolicy` only. Empty when a
   caller supplies no peers (e.g. the kurel CLI), so synthesis is then a no-op.
 
+Both families select the component's own pods (the ingress recipients / the egress
+source pods) via the **`wharf.zone/component`** label by default, overridable per
+transform through `TransformContext.ComponentLabelKey`. This is a **platform contract**:
+`trafficSources` (inbound) and `EgressPeers` (egress) are platform inputs, so a caller
+that injects them must ensure its pods carry that label — crane stamps
+`wharf.zone/component` on every crane-rendered workload and helm-rendered pod — or set
+`ComponentLabelKey` to a label its pods do carry (e.g. `"app"`). A non-crane caller that
+injects `trafficSources`/`EgressPeers` without either will synthesize a policy that
+selects nothing.
+
 ## Parsing
 
 | Function | Purpose |
