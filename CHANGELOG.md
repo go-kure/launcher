@@ -1,12 +1,48 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.17] - 2026-07-13
+
+### Added
+
+- Target wharf.zone/component in synthesized NetworkPolicies
+- Parametrize the platform label/annotation domain (default gokure.dev)
+- Guard against launcher leading kure on shared direct deps
+- Add EndpointProvider and endpoint-ingress NetworkPolicy synthesis
+
+### CI
+
+- Enforce no-downstream-references guard and document the rule
+
+### Changed
+
+- Genericize downstream references in comments, READMEs, fixtures
+
+### Dependencies
+
+- Bump go-kure/kure to v0.2.0-beta.7 and align shared deps
+
+### Documentation
+
+- Genericize downstream references in design docs
+
+### Fixed
+
+- Run tag-collision checks in preview + guard next dev version
+- Publish external-secret shorthand design doc and fix traits link
+- Harden kure-dep-sync guard per PR review
+- Always refresh remote-tracking base ref in kure-dep-sync guard
+
 ## [0.1.0-alpha.16] - 2026-07-11
 
 ### Added
 
 - Accept storageClassName + volumeSnapshotClassName via capability rendering
 - Synthesize per-component egress NetworkPolicy from a non-authorable input
+
+### Release
+
+- V0.1.0-alpha.16
 
 ## [0.1.0-alpha.15] - 2026-07-10
 
@@ -322,7 +358,7 @@ All notable changes to this project will be documented in this file.
 - Implement helmchart delivery: template (#83)
 - Allow routing traits on helmchart components via explicit servicePort (#89)
 - Add CapabilityDefinition schema for custom trait rendering (#66)
-- Port rbac, fluxcd-patches, fluxcd-postbuild, prune-protection traits from the downstream runtime (#97 #98 #99 #100)
+- Port rbac, fluxcd-patches, fluxcd-postbuild, prune-protection traits from crane (#97 #98 #99 #100)
 
 ### Build
 
@@ -390,7 +426,7 @@ All notable changes to this project will be documented in this file.
 - Reject explicitly empty accessModes list in pvc trait
 - Address external-secret shorthand, volsync naming, and coverage
 - Preserve decodingStrategy in external-secret remoteRef shorthand
-- Align postgresql customQueries validation and bootstrap recovery tests with the downstream runtime
+- Align postgresql customQueries validation and bootstrap recovery tests with crane
 - Remove wrong deprecation from ingress/httproute; fix default backend port
 - Validate implicit backends; extend ingress with per-path backend override
 - Tighten implicit-backend port guards for ingress and httproute
