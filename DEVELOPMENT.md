@@ -235,7 +235,7 @@ Use `@dependabot` commands in PR comments:
 
 ## Active Linters
 
-The `.golangci.yml` enables these linters, aligned with the Wharf standard (`meta/standards/golangci-lint.md`):
+The `.golangci.yml` enables these linters (the full go-kure linter set):
 
 | Linter | Category | Purpose |
 |--------|----------|---------|

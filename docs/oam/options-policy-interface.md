@@ -12,8 +12,8 @@ compile-time verification, no type assertions in handler code, and explicit `Noo
 behaviour (no limits, no defaults, security-sensitive bools default-deny) are more important
 than the flexibility of a marker interface for future policy types.
 
-**Scope:** The `Policy` and `Enforceable` interface definitions in `pkg/oam`, how
-`*api.EnvironmentPolicy` in crane satisfies `Policy` after migration, and how handler
+**Scope:** The `Policy` and `Enforceable` interface definitions in `pkg/oam`, how a
+downstream runtime's `EnvironmentPolicy` type satisfies `Policy`, and how handler
 code uses the interface. This does not cover `TransformContext`, handler registration,
 or the pipeline execution loop.
 
@@ -41,7 +41,7 @@ enforcement.
 
 `kurel build` will accept a `--policy` flag pointing to a policy document. This means the
 `oam.Policy` interface is a first-class launcher abstraction from Phase 1, not solely a
-crane compatibility seam.
+downstream compatibility seam.
 
 When no policy is supplied, launcher passes `NoopPolicy` — a concrete type that satisfies
 `oam.Policy` with the following semantics:
@@ -53,22 +53,22 @@ This is intentional default-deny behaviour for security flags, not a "permit eve
 stance. Handlers always receive a non-nil `Policy` value; nil checks in handler code are
 not needed or intended.
 
-### crane compatibility
+### Downstream compatibility
 
-crane's `*api.EnvironmentPolicy` is the existing concrete policy type. After migration,
-crane wires it into launcher by satisfying the `oam.Policy` interface. The question is how.
+A downstream runtime's `EnvironmentPolicy` is an existing concrete policy type. Such a
+runtime wires it into launcher by satisfying the `oam.Policy` interface. The question is how.
 
-The interface must be rich enough to serve both crane's `EnvironmentPolicy` and future
+The interface must be rich enough to serve both a downstream `EnvironmentPolicy` and future
 launcher-native policy document types that may have different enforcement semantics.
 
 ---
 
 ## Background
 
-### Current state in crane
+### Current state in the downstream runtime
 
 ```go
-// crane/internal/policy/policy.go
+// downstream policy package (illustrative)
 type Enforceable interface {
     ApplyPolicy(policy *api.EnvironmentPolicy) error
 }
@@ -79,7 +79,7 @@ The transformer calls `ApplyPolicy` after parsing each component, passing the en
 policy from the request.
 
 ```go
-// crane/pkg/api/types.go (abbreviated)
+// downstream api types (abbreviated)
 type EnvironmentPolicy struct {
     Enforced     EnforcedLimits         // MaxReplicas, MaxCPU, MaxMemory, MaxStorageSize, AllowedRegistries
     Defaults     DefaultValues          // Replicas, CPURequest, MemoryRequest, CPULimit, MemoryLimit, StorageSize, ScalerMinReplicas, ScalerMaxReplicas
@@ -98,7 +98,7 @@ type Enforceable interface {
 }
 ```
 
-Where crane's `*api.EnvironmentPolicy` satisfies `Policy` — so that migrated handlers
+Where a downstream `*api.EnvironmentPolicy` satisfies `Policy` — so that migrated handlers
 compile without the import path change breaking anything beyond the type signature.
 
 ### Compatibility scope
@@ -189,13 +189,13 @@ func (*NoopPolicy) ForbiddenCapabilities() []string { return nil }
 func (*NoopPolicy) RequiredCapabilities() []string  { return nil }
 ```
 
-### How crane satisfies Policy
+### How a downstream runtime satisfies Policy
 
-crane adds accessor methods to `*api.EnvironmentPolicy`. No adapter or wrapper struct is
-needed — the existing type grows a method set:
+The downstream runtime adds accessor methods to `*api.EnvironmentPolicy`. No adapter or
+wrapper struct is needed — the existing type grows a method set:
 
 ```go
-// crane/pkg/api/policy_impl.go (new file)
+// downstream policy_impl.go (new file, illustrative)
 package api
 
 import "github.com/go-kure/launcher/pkg/oam"
@@ -242,7 +242,7 @@ The change is mechanical: the parameter type changes from `*api.EnvironmentPolic
 `oam.Policy`, and field accesses become method calls:
 
 ```go
-// Before (crane):
+// Before (downstream):
 func (c *WebserviceConfig) ApplyPolicy(p *api.EnvironmentPolicy) error {
     if p == nil { return nil }
     c.Replicas = policy.ApplyDefaultReplicas(c.Replicas, c.explicitReplicas, p.Defaults.Replicas)
@@ -269,7 +269,7 @@ func (c *WebserviceConfig) ApplyPolicy(p oam.Policy) error {
 }
 ```
 
-No type assertions. No imports of crane's `api` package in handler code.
+No type assertions. No imports of the downstream `api` package in handler code.
 
 ### Interface growth
 
@@ -277,15 +277,15 @@ If `EnvironmentPolicy` gains a new field (e.g. `MaxPodCount`), `Policy` must be 
 extended with a new method, and `NoopPolicy` must implement it. This is an intentional
 gate — it ensures new policy fields are consciously exposed to the public interface.
 
-The `var _ oam.Policy = (*EnvironmentPolicy)(nil)` compile check in crane's file catches
-any omission immediately.
+The `var _ oam.Policy = (*EnvironmentPolicy)(nil)` compile check in the downstream file
+catches any omission immediately.
 
 ### Summary
 
 - 19 methods (as defined above)
-- crane gains ~20 accessor methods on `EnvironmentPolicy` (pure boilerplate, no logic)
+- the downstream type gains ~20 accessor methods on `EnvironmentPolicy` (pure boilerplate, no logic)
 - Handler code: method calls, no type assertions, no adapter imports
-- Compiler verifies the contract at crane build time
+- Compiler verifies the contract at the downstream build time
 - Interface must grow manually as `EnvironmentPolicy` grows
 
 ---

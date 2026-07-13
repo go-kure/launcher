@@ -150,7 +150,7 @@ Launcher does **not** use the following kure packages. This is by design, not an
 
 | Package | Why not used |
 |---|---|
-| `pkg/stack/generators/` (AppWorkload, FluxHelm, KurelPackage) | kure's pre-built generator types; consumed only by kure's own tests, not by crane or launcher |
+| `pkg/stack/generators/` (AppWorkload, FluxHelm, KurelPackage) | kure's pre-built generator types; consumed only by kure's own tests, not by launcher or its downstream consumers |
 | `pkg/stack/application_wrapper.go` (ApplicationWrapper) | kure's GVK YAML dispatch mechanism; launcher defines its own OAM parser under `launcher.gokure.dev/v1alpha1` |
 | `pkg/gvk` | kure's generic GVK registry; not relevant to launcher's static-file OAM model |
 | `generators.gokure.dev/*`, `stack.gokure.dev/*` API groups | kure's versioning space; launcher's documents use `launcher.gokure.dev` exclusively |
@@ -237,7 +237,7 @@ PR #58 closed issues #36 (package spec), #37 (ClusterProfile), #38 (policy inter
 
 ## 10. Policy Interface
 
-The `Policy` interface is launcher's primary extension point for downstream consumers (e.g. crane) to enforce environment-specific constraints without modifying launcher's built-in handlers.
+The `Policy` interface is launcher's primary extension point for downstream consumers to enforce environment-specific constraints without modifying launcher's built-in handlers.
 
 ```go
 type Policy interface {
@@ -266,7 +266,7 @@ type Policy interface {
 }
 ```
 
-`NoopPolicy` is the default when no policy document is supplied: no enforced limits, no defaults applied, security-sensitive booleans default-deny (false). Downstream consumers (e.g. crane's `*api.EnvironmentPolicy`) implement `Policy` to add enforcement. See `docs/oam/options-policy-interface.md` for the full design rationale.
+`NoopPolicy` is the default when no policy document is supplied: no enforced limits, no defaults applied, security-sensitive booleans default-deny (false). Downstream consumers implement `Policy` (typically via their own `EnvironmentPolicy` type) to add enforcement. See `docs/oam/options-policy-interface.md` for the full design rationale.
 
 ---
 
@@ -278,7 +278,7 @@ Launcher's GitOps output is intentionally simple:
 - **One `OCIRepository`** source per bundle
 - **One `Kustomization`** per bundle pointing at the OCI artifact
 
-This monolithic layout is owned by launcher and generated as part of `kurel build`. Downstream consumers (e.g. crane) may implement their own multi-layer delivery hierarchy on top of the same kure FluxCD primitives — that hierarchy is their own concern, not launcher's.
+This monolithic layout is owned by launcher and generated as part of `kurel build`. Downstream consumers may implement their own multi-layer delivery hierarchy on top of the same kure FluxCD primitives — that hierarchy is their own concern, not launcher's.
 
 ---
 
@@ -286,10 +286,10 @@ This monolithic layout is owned by launcher and generated as part of `kurel buil
 
 | Concern | Who owns it |
 |---------|------------|
-| Multi-OCI artifact splitting (per-app, per-layer) | crane (4-layer Flux hierarchy) |
-| Platform component catalog (PlatformComponent CRD) | crane + harbor |
-| Environment-specific enforcement (registry allowlist, replica limits) | crane (`EnvironmentPolicy implements Policy`) |
-| Cluster provisioning and lifecycle | barge |
+| Multi-OCI artifact splitting (per-app, per-layer) | a downstream delivery runtime (multi-layer Flux hierarchy) |
+| Platform component catalog | a downstream platform runtime + component registry |
+| Environment-specific enforcement (registry allowlist, replica limits) | a downstream policy consumer (`EnvironmentPolicy implements Policy`) |
+| Cluster provisioning and lifecycle | a downstream cluster-lifecycle tool |
 | GitOps engine (running in cluster) | FluxCD (external) |
 
 ---
@@ -320,14 +320,14 @@ This monolithic layout is owned by launcher and generated as part of `kurel buil
 - Trait handlers — workload set: expose, certificate, external-secret, pvc, scaler (#49)
 - Trait handlers — network/infra set: ingress, httproute, configmap, networkpolicy, cilium-networkpolicy, volsync (#50)
 - Generic `passthrough` component — emits arbitrary CRDs / non-standard objects with no per-type Go handler (#105)
-- Manifest-source components: `crd`, `manifests` — emit CRDs / arbitrary manifests from inline or http(s) URL sources, with scope-aware namespace stamping (classifier in kure `pkg/manifest`); migrated from crane (#237)
-- `oci` source component — emits an `OCIRepository` source CR (URL+version dedup, flux-namespace placement) plus a per-component Flux `Kustomization`; the OAM counterpart to crane's platform OCI translator (crane#246 / #241)
+- Manifest-source components: `crd`, `manifests` — emit CRDs / arbitrary manifests from inline or http(s) URL sources, with scope-aware namespace stamping (classifier in kure `pkg/manifest`); ported from the downstream runtime (#237)
+- `oci` source component — emits an `OCIRepository` source CR (URL+version dedup, flux-namespace placement) plus a per-component Flux `Kustomization`; the OAM counterpart of a downstream platform OCI translator (#241)
 
 **Phase 3: CLI integration** (#33)
 - `kurel build` — OAM mode (app.yaml + --profile cluster.yaml → manifests) (#51)
 
-**Phase 4: Crane integration** (#34) — deferred
-- crane becomes a launcher consumer; EnvironmentPolicy, handler migration
+**Phase 4: Downstream integration** (#34) — deferred
+- a downstream runtime becomes a launcher consumer; EnvironmentPolicy, handler migration
 
 **Phase 5: OCI distribution** (#35)
 - OCI-based package publishing and pulling

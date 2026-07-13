@@ -76,22 +76,19 @@ Launcher's component and trait types (`webservice`, `expose`, `certificate`) are
 launcher-specific. No other OAM runtime understands them. The shared shape
 (components/traits/properties) is a design choice, not an API contract.
 
-**Not `wharf.zone`**
+**Not a platform-specific zone**
 
-`wharf.zone` is the Wharf platform zone. Launcher is a go-kure project — an
-open-source product that is not Wharf-internal. Using `wharf.zone` would make the
-application model look platform-specific when it is intended to be launcher-native and
-publicly usable beyond Wharf deployments.
-
-**Not `launcher.wharf.zone`**
-
-Same reasoning as `wharf.zone`. Embedding the Wharf zone in the group name ties the API
-to the Wharf platform identity rather than to launcher as a standalone product.
+Launcher is a go-kure project — an open-source product that is not tied to any single
+downstream platform. Borrowing a specific platform's DNS zone or label namespace for the
+API group would make the application model look platform-specific when it is intended to be
+launcher-native and publicly usable by any consumer. Embedding a downstream platform's
+identity in the group name would tie the API to that platform rather than to launcher as a
+standalone product.
 
 **`launcher.gokure.dev`**
 
-Reflects the actual ownership (go-kure project), keeps launcher's API separate from both
-the Wharf platform APIs and the upstream OAM namespace, and is honest about what these
+Reflects the actual ownership (go-kure project), keeps launcher's API separate from both any
+downstream platform's APIs and the upstream OAM namespace, and is honest about what these
 documents are: launcher's native input format.
 
 ---
@@ -102,13 +99,12 @@ Launcher rejects unknown fields in all launcher-native documents. An `app.yaml`,
 `kurel.yaml`, or `cluster.yaml` with unrecognised keys is a build error.
 
 Rationale: unknown fields are most often typos or stale config carried over from a
-different tool (e.g. a `cluster.yaml` migrated from crane that still contains `gitops:` or
-`componentCatalog:`). Strict parsing surfaces these problems at build time rather than
-silently ignoring them and producing incorrect output.
+different tool (e.g. a `cluster.yaml` derived from a downstream runtime's profile that still
+contains delivery-wiring or catalog fields). Strict parsing surfaces these problems at build
+time rather than silently ignoring them and producing incorrect output.
 
-Operators migrating crane `ClusterProfile` documents to launcher `cluster.yaml` must
-remove crane-specific fields before use. The fields to remove are documented in
-`design-cluster-profile.md §7`.
+Operators deriving a launcher `cluster.yaml` from a downstream runtime's `ClusterProfile`
+must remove the downstream-specific fields before use. See `design-cluster-profile.md §7`.
 
 ---
 
