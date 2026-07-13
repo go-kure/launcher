@@ -26,7 +26,7 @@ func ociComponent(props map[string]any) *oam.Component {
 
 func validOCIProps() map[string]any {
 	return map[string]any{
-		"source":  map[string]any{"url": "oci://registry.wharf.zone/wharf/charts/checkout"},
+		"source":  map[string]any{"url": "oci://registry.example.com/charts/checkout"},
 		"version": "0.3.0",
 	}
 }
@@ -60,9 +60,9 @@ func TestOCIHandler_Validation(t *testing.T) {
 		{"no source", map[string]any{"version": "0.3.0"}},
 		{"source without url", map[string]any{"source": map[string]any{}, "version": "0.3.0"}},
 		{"non-oci url", map[string]any{"source": map[string]any{"url": "https://example.com/x"}, "version": "0.3.0"}},
-		{"no version", map[string]any{"source": map[string]any{"url": "oci://registry.wharf.zone/x"}}},
+		{"no version", map[string]any{"source": map[string]any{"url": "oci://registry.example.com/x"}}},
 		{"invalid interval", map[string]any{
-			"source": map[string]any{"url": "oci://registry.wharf.zone/x"}, "version": "0.3.0", "interval": "5minutes",
+			"source": map[string]any{"url": "oci://registry.example.com/x"}, "version": "0.3.0", "interval": "5minutes",
 		}},
 	}
 	for _, tc := range cases {
@@ -88,7 +88,7 @@ func TestOCIHandler_Generate_Tag(t *testing.T) {
 	if !ok {
 		t.Fatalf("objects[0]: expected *sourcev1.OCIRepository, got %T", *objs[0])
 	}
-	if repo.Spec.URL != "oci://registry.wharf.zone/wharf/charts/checkout" {
+	if repo.Spec.URL != "oci://registry.example.com/charts/checkout" {
 		t.Errorf("OCIRepository.Spec.URL = %q", repo.Spec.URL)
 	}
 	if repo.Spec.Reference == nil || repo.Spec.Reference.Tag != "0.3.0" {
@@ -168,7 +168,7 @@ func TestOCIHandler_GetSourceKey(t *testing.T) {
 	if !ok {
 		t.Fatal("OCIConfig does not implement GetSourceKey")
 	}
-	want := "oci:oci://registry.wharf.zone/wharf/charts/checkout:0.3.0"
+	want := "oci:oci://registry.example.com/charts/checkout:0.3.0"
 	if got := s.GetSourceKey(); got != want {
 		t.Errorf("GetSourceKey() = %q, want %q", got, want)
 	}
@@ -224,11 +224,11 @@ func TestOCIConfig_SetFluxNamespace(t *testing.T) {
 func TestOCIConfig_ApplyPolicy_RegistryAllowlist(t *testing.T) {
 	deny := mustOCIConfig(t, validOCIProps()).(oam.Enforceable)
 	if err := deny.ApplyPolicy(fakeOCIPolicy{allowed: []string{"trusted.example.com"}}); err == nil {
-		t.Error("want host denial: registry.wharf.zone not in allowlist")
+		t.Error("want host denial: registry.example.com not in allowlist")
 	}
 
 	ok := mustOCIConfig(t, validOCIProps()).(oam.Enforceable)
-	if err := ok.ApplyPolicy(fakeOCIPolicy{allowed: []string{"registry.wharf.zone"}}); err != nil {
+	if err := ok.ApplyPolicy(fakeOCIPolicy{allowed: []string{"registry.example.com"}}); err != nil {
 		t.Errorf("allowed registry rejected: %v", err)
 	}
 

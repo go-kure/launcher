@@ -154,7 +154,7 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	}
 
 	// parentRefs: user-authored take precedence; otherwise synthesize a single ref
-	// from the gatewayName/gatewayNamespace capability fields (crane#235 D4). This
+	// from the gatewayName/gatewayNamespace capability fields. This
 	// is optional-capability: a plain httproute with an explicit parentRefs still
 	// works with no capability.
 	rawParentRefs, ok := props["parentRefs"].([]any)
@@ -921,7 +921,7 @@ func (c *HTTPRouteConfig) ComponentName() string { return c.componentName }
 
 // TargetComponentName returns the OAM component label (not the K8s Service name), so the
 // synthesized NetworkPolicy selects the component's pods via the configured component
-// label key (default {wharf.zone/component: <name>}).
+// label key (default {wharf.zone/component: <name>}).  allow-term:wharf tracked by #215
 func (c *HTTPRouteConfig) TargetComponentName() string { return c.ComponentName() }
 
 // BackendPorts implements the cluster-level trafficSourceCollector contract.

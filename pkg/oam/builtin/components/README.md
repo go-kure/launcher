@@ -9,11 +9,11 @@ registered with the transformer in `pkg/cmd/kurel` (`newBuiltinTransformer`), ea
 mapping a component `type` string to a handler implementing `CanHandle` +
 `ToApplicationConfig`. Every built-in component handler also implements
 `oam.PropertySchemaProvider` (`PropertySchema()`), declaring a constrained schema for its
-user-facing properties so crane can validate them before invocation. Deeply nested or
+user-facing properties so the downstream runtime can validate them before invocation. Deeply nested or
 K8s-adjacent shapes are kept shallow/open (`additionalProperties`) rather than modeled
 field-by-field; escape-hatch fields (e.g. `passthrough.object`, `manifests`/`crd` inline
 content) stay open by design. Every property (including nested object fields and array item
-schemas at every depth) carries a `Description`, surfaced in crane's generated Handler API
+schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler API
 Reference.
 
 ## Component types

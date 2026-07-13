@@ -9,7 +9,7 @@ Package `netpol` contains shared types for automatic `NetworkPolicy` synthesis:
   both the synthesis stage (`pkg/oam`) and the routing trait configs that expose the
   collected sources (`pkg/oam/builtin/traits`) can import it without an import cycle.
 - `EgressPeer` — one allowed **egress** destination (namespace selector + optional pod
-  selector + ports). Unlike `TrafficSource`, it is a crane-supplied, non-authorable
+  selector + ports). Unlike `TrafficSource`, it is a downstream-supplied, non-authorable
   synthesis input carried on `TransformContext.EgressPeers` (never set from OAM YAML or
   capability rendering); it has no trait-side producer.
 

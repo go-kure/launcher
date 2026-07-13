@@ -18,8 +18,8 @@ type TrafficSource struct {
 }
 
 // EgressPeer represents one allowed egress destination for an auto-generated
-// per-component egress NetworkPolicy. It is a crane-supplied, non-authorable
-// synthesis input surfaced from crane's dependency graph — OAM authors cannot
+// per-component egress NetworkPolicy. It is a downstream-supplied, non-authorable
+// synthesis input surfaced from the downstream runtime's dependency graph — OAM authors cannot
 // set it. Namespace is required; PodSelector narrows to specific pods within
 // that namespace (matchLabels only; nil = all pods); Ports are the destination
 // ports (TCP). A peer with no Ports is skipped by synthesis.

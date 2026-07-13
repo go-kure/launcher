@@ -30,16 +30,16 @@ type TransformContext struct {
 	FluxNamespace string // Flux control-plane namespace; "" means use component namespace
 	Policy        Policy
 	Capabilities  map[string]CapabilityBinding
-	// EgressPeers carries crane-supplied, graph-derived egress destinations keyed
+	// EgressPeers carries downstream-supplied, graph-derived egress destinations keyed
 	// by OAM component name. Non-authorable: never sourced from OAM YAML or
 	// capability rendering, and never merged into trait properties. nil on the
 	// kurel path, where egress synthesis is a no-op.
 	EgressPeers map[string][]netpol.EgressPeer
 	// ComponentLabelKey overrides the pod-label key that synthesized NetworkPolicies
 	// target (the component's own pods: ingress recipients / egress sources). Empty
-	// => ComponentLabel ("wharf.zone/component"). Non-authorable platform input, like
+	// => ComponentLabel ("wharf.zone/component"). Non-authorable platform input, like  allow-term:wharf tracked by #215
 	// EgressPeers: a caller that injects trafficSources/EgressPeers must ensure its
-	// pods carry this label (crane stamps wharf.zone/component) or set this to a key
+	// pods carry this label (the downstream runtime stamps wharf.zone/component) or set this to a key  allow-term:wharf tracked by #215
 	// its pods do carry (e.g. "app").
 	ComponentLabelKey string
 }
@@ -138,7 +138,7 @@ func (t *Transformer) RegisterTrait(typeName string, h TraitHandler) {
 // HandlerSchemaSet is the set of property schemas declared by registered handlers,
 // keyed by handler type name. Component and trait schemas are kept separate so a
 // component and a trait that share a type name do not collide, and so consumers
-// (crane's validator) know which registry a schema came from.
+// (the downstream runtime's validator) know which registry a schema came from.
 type HandlerSchemaSet struct {
 	Components map[string]map[string]PropertySchema
 	Traits     map[string]map[string]PropertySchema

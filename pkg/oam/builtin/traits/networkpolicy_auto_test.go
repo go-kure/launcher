@@ -99,7 +99,7 @@ func TestIngressHandler_TrafficSources_MalformedErrors(t *testing.T) {
 // TargetComponentName must be the OAM component label, never the (possibly
 // overridden) K8s Service name, so the synthesized NetworkPolicy selects the
 // component's pods via the configured component label key (default
-// {wharf.zone/component: <component>}).
+// {wharf.zone/component: <component>}).  allow-term:wharf tracked by #215
 func TestIngressConfig_TargetComponentName_IsComponentNotService(t *testing.T) {
 	app := stack.NewApplication("web", "default", &namedWebConfig{port: 80, serviceName: "web-headless"})
 	trait := ingressTrafficSourcesTrait(map[string]any{
@@ -188,9 +188,9 @@ func TestTransform_IngressTrafficSources_SynthesizesNetworkPolicy(t *testing.T) 
 	if !clusterHasApp(cluster, "web-allow-ingress-traffic") {
 		t.Errorf("expected synthesized app \"web-allow-ingress-traffic\"; cluster apps: %v", clusterAppNames(cluster))
 	}
-	// Default target selector is wharf.zone/component (crane stamps it on every pod).
-	if sel := synthesizedPodSelector(t, cluster, "web-allow-ingress-traffic"); sel["wharf.zone/component"] != "web" {
-		t.Errorf("default ingress podSelector = %v, want wharf.zone/component=web", sel)
+	// Default target selector is wharf.zone/component (the downstream runtime stamps it on every pod).  allow-term:wharf tracked by #215
+	if sel := synthesizedPodSelector(t, cluster, "web-allow-ingress-traffic"); sel["wharf.zone/component"] != "web" { // allow-term:wharf tracked by #215
+		t.Errorf("default ingress podSelector = %v, want wharf.zone/component=web", sel) // allow-term:wharf tracked by #215
 	}
 }
 
@@ -279,7 +279,7 @@ func synthesizedPodSelector(t *testing.T, c *stack.Cluster, name string) map[str
 	return np.Spec.PodSelector.MatchLabels
 }
 
-// End-to-end: a webservice with crane-supplied (non-authorable) egress peers on the
+// End-to-end: a webservice with downstream-supplied (non-authorable) egress peers on the
 // transform context yields a synthesized {component}-allow-egress-traffic policy, and
 // no inbound policy is synthesized absent trafficSources (additive, distinct paths).
 func TestTransform_EgressPeers_SynthesizesEgressNetworkPolicy(t *testing.T) {
@@ -314,15 +314,15 @@ func TestTransform_EgressPeers_SynthesizesEgressNetworkPolicy(t *testing.T) {
 	if clusterHasApp(cluster, "web-allow-ingress-traffic") {
 		t.Errorf("did not expect inbound synthesis without trafficSources; cluster apps: %v", clusterAppNames(cluster))
 	}
-	// Default egress source-pod selector is wharf.zone/component.
-	if sel := synthesizedPodSelector(t, cluster, "web-allow-egress-traffic"); sel["wharf.zone/component"] != "web" {
-		t.Errorf("default egress podSelector = %v, want wharf.zone/component=web", sel)
+	// Default egress source-pod selector is wharf.zone/component.  allow-term:wharf tracked by #215
+	if sel := synthesizedPodSelector(t, cluster, "web-allow-egress-traffic"); sel["wharf.zone/component"] != "web" { // allow-term:wharf tracked by #215
+		t.Errorf("default egress podSelector = %v, want wharf.zone/component=web", sel) // allow-term:wharf tracked by #215
 	}
 }
 
 // End-to-end: TransformContext.ComponentLabelKey overrides the synthesized podSelector
 // key for BOTH inbound and egress families. The "app" case is the escape hatch that
-// restores pre-change behavior for non-crane/kurel callers; a custom key proves the
+// restores pre-change behavior for non-downstream/kurel callers; a custom key proves the
 // value is passed through verbatim.
 func TestTransform_ComponentLabelKey_Override(t *testing.T) {
 	cases := []struct {
@@ -379,7 +379,7 @@ func TestTransform_ComponentLabelKey_Override(t *testing.T) {
 				if sel[tc.wantKey] != "web" {
 					t.Errorf("%s podSelector = %v, want %s=web", npName, sel, tc.wantKey)
 				}
-				if _, hasDefault := sel["wharf.zone/component"]; hasDefault && tc.wantKey != "wharf.zone/component" {
+				if _, hasDefault := sel["wharf.zone/component"]; hasDefault && tc.wantKey != "wharf.zone/component" { // allow-term:wharf tracked by #215
 					t.Errorf("%s podSelector should not carry default key when overridden: %v", npName, sel)
 				}
 			}

@@ -55,7 +55,7 @@ func TestExternalSecretHandler_InlineSecretStoreRef(t *testing.T) {
 	}
 }
 
-// provider: string shorthand maps to ClusterSecretStore (crane backward-compat).
+// provider: string shorthand maps to ClusterSecretStore (downstream backward-compat).
 func TestExternalSecretHandler_ProviderShorthand(t *testing.T) {
 	h := &traits.ExternalSecretHandler{}
 	app := stack.NewApplication("myapp", "default", nil)

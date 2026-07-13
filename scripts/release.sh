@@ -19,7 +19,7 @@
 #   - VERSION file at repository root
 #   - cliff.toml configuration
 #
-# See: https://gitlab.com/autops/wharf/meta/-/blob/main/standards/release-process.md
+# See: https://github.com/go-kure/.github/blob/main/standards/release-process.md
 
 set -eu
 
@@ -207,8 +207,8 @@ check_tag_exists() {
 
 setup_ci() {
     log_info "CI mode: configuring git identity"
-    git config user.name "wharf-release-bot"
-    git config user.email "wharf-release-bot@noreply"
+    git config user.name "kure-release-bot"
+    git config user.email "kure-release-bot@noreply"
 
     log_info "Validating HEAD matches origin/main..."
     git fetch origin main

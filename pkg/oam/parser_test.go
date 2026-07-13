@@ -256,7 +256,7 @@ func TestExtractYAMLLine(t *testing.T) {
 }
 
 func TestParse_RejectsCoreOAMAPIVersion(t *testing.T) {
-	// core.oam.dev/v1beta1 is crane's API group — not accepted by launcher.
+	// core.oam.dev/v1beta1 is the upstream OAM API group — not accepted by launcher.
 	input := `
 apiVersion: core.oam.dev/v1beta1
 kind: Application
@@ -747,7 +747,7 @@ spec:
     properties:
       chart: cert-manager
     annotations:
-      wharf.zone/tier: infra
+      wharf.zone/tier: infra # allow-term:wharf tracked by #215
 `
 	app, err := Parse([]byte(input))
 	if err != nil {
@@ -758,7 +758,7 @@ spec:
 	if comp.Annotations == nil {
 		t.Fatal("expected non-nil Annotations")
 	}
-	if got := comp.Annotations["wharf.zone/tier"]; got != "infra" {
+	if got := comp.Annotations["wharf.zone/tier"]; got != "infra" { // allow-term:wharf tracked by #215
 		t.Errorf("annotations[wharf.zone/tier] = %q, want %q", got, "infra")
 	}
 }
