@@ -42,6 +42,15 @@ updates:
       # Flux controllers move together per flux2 release — never bump piecemeal.
       # Grouped so a flux2 upgrade lands as one coordinated PR (also requires a matching
       # kure release first). See the flux2 upgrade tracking issue.
+      #
+      # Ceiling rule for ANY dependency shared with kure (cert-manager, fluxcd/*,
+      # cloudnative-pg, external-secrets/apis, gateway-api, ...): launcher must not lead
+      # the kure release it imports on a shared DIRECT dependency. MVS pulls launcher up to
+      # kure's version automatically, so only the "ahead" direction needs coordination.
+      # Correct sequence: land the matching kure bump → cut a kure release → bump launcher's
+      # go-kure/kure require to it and take the shared-dep bump together. CI enforces this
+      # (diff-scoped, grandfathering existing drift) via site/scripts/check-kure-dep-sync.sh;
+      # see AGENTS.md § "Shared dependencies with kure".
       flux:
         patterns:
           - "github.com/fluxcd/*"
