@@ -5,10 +5,20 @@ import (
 
 	kurecnpg "github.com/go-kure/kure/pkg/kubernetes/cnpg"
 	"github.com/go-kure/kure/pkg/stack"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
+)
+
+// cnpgClusterLabel is the label the CloudNativePG operator stamps on every instance pod of a
+// Cluster (value = the Cluster name). postgresqlPort is the default PostgreSQL service port.
+const (
+	cnpgClusterLabel = "cnpg.io/cluster"
+	postgresqlPort   = 5432
 )
 
 // PostgresqlHandler handles OAM postgresql components.
@@ -17,6 +27,17 @@ type PostgresqlHandler struct{}
 // CanHandle returns true for postgresql component type.
 func (h *PostgresqlHandler) CanHandle(componentType string) bool {
 	return componentType == "postgresql"
+}
+
+// Endpoints implements oam.EndpointProvider: a postgresql component's data-plane endpoint is
+// the CNPG cluster's instance pods (labelled cnpg.io/cluster=<cluster name>, which equals the
+// OAM component name) on the PostgreSQL port. A downstream platform uses this to synthesize the
+// target-side ingress allow without hardcoding the operator selector.
+func (h *PostgresqlHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	return []netpol.Endpoint{{
+		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: component.Name}},
+		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
+	}}, nil
 }
 
 // PropertySchema declares the postgresql component's top-level user-facing

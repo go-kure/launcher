@@ -28,3 +28,25 @@ type EgressPeer struct {
 	PodSelector *metav1.LabelSelector // nil = all pods; matchLabels only
 	Ports       []intstr.IntOrString
 }
+
+// Endpoint is a component's declared in-cluster data-plane endpoint (e.g. an operator-managed
+// database's instance pods). Namespace is deliberately absent — the platform caller knows the
+// target's namespace, and the synthesized NetworkPolicy is emitted in the component's namespace.
+// PodSelector is required (matchLabels only); Ports is required and non-empty (TCP).
+type Endpoint struct {
+	PodSelector *metav1.LabelSelector // required; matchLabels only
+	Ports       []intstr.IntOrString  // required, non-empty; TCP
+}
+
+// IngressPeer is a target-side allow: who may reach one of a component's endpoints. It is a
+// platform-supplied, non-authorable synthesis input (never from OAM YAML or capability
+// rendering); launcher only emits. All selectors are platform-supplied.
+//
+// Unlike TrafficSource (where a nil PodSelector means "all pods"), endpoint-ingress synthesis
+// is fail-closed: each Source MUST carry a namespace and a non-empty matchLabels pod selector
+// (matchLabels only) — a namespace-wide source is dropped, since it would let every pod in that
+// namespace reach the endpoint on the endpoint ports.
+type IngressPeer struct {
+	Endpoint Endpoint        // NetworkPolicy podSelector + ports
+	Sources  []TrafficSource // required matchLabels pod selector + namespace per source
+}

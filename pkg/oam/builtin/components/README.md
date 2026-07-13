@@ -57,6 +57,10 @@ share these fields: `image` (validated — no untagged/`latest`), `env` (with
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.
+  Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
+  data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
+  platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
+  without hardcoding the operator selector.
 - **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
   Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
   consumers can attribute the emitted resource to its owning OAM component.

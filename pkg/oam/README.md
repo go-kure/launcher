@@ -28,9 +28,9 @@ parse → resolve parameters → transform (component + trait handlers) → mani
    `ComponentHandler` and each trait to its `TraitHandler`, merging the
    `ClusterProfile`'s capability choices.
 
-A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources
-in two directions, each a **separate** additive resource (the authored
-`networkpolicy` / `cilium-networkpolicy` traits are unaffected):
+A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
+each a **separate** additive resource (the authored `networkpolicy` /
+`cilium-networkpolicy` traits are unaffected):
 
 - **Inbound** (`{comp}-allow-ingress-traffic`) — routing-derived, from routing traits'
   platform-reserved `networkPolicy.trafficSources` capability rendering.
@@ -38,8 +38,20 @@ in two directions, each a **separate** additive resource (the authored
   downstream-supplied, non-authorable synthesis input (graph-derived dependency peers; never
   set from OAM YAML or capability rendering). K8s `NetworkPolicy` only. Empty when a
   caller supplies no peers (e.g. the kurel CLI), so synthesis is then a no-op.
+- **Endpoint ingress** (`{comp}-allow-endpoint-ingress`) — the **target side** of a
+  connection, from `TransformContext.IngressPeers` (a platform-supplied, non-authorable
+  graph-derived input). Each `netpol.IngressPeer` names an `Endpoint` (pod selector + ports)
+  and the sources allowed to reach it; launcher emits an Ingress `NetworkPolicy` selecting the
+  **endpoint's own selector** — deliberately **not** the component-label key — so it protects
+  operator-created pods (e.g. a CloudNativePG cluster's `cnpg.io/cluster` instance pods) that
+  carry no component-provenance label. Fail-closed: each source must carry a namespace + a
+  non-empty matchLabels pod selector (namespace-wide sources are dropped), and a policy with no
+  valid rule is not emitted. A component's endpoints are declared by its handler via the
+  optional `EndpointProvider` interface and read through `Transformer.ComponentEndpoints` — the
+  producer half a downstream platform uses to learn the real selector (no hardcoding) and build
+  its dependency graph.
 
-Both families select the component's own pods (the ingress recipients / the egress
+The inbound/egress families select the component's own pods (the ingress recipients / the egress
 source pods) via a **derived `<domain>/component`** label by default — the domain comes
 from `TransformContext.Domain` (empty ⇒ the library default `gokure.dev`; the kurel CLI
 uses `launcher.gokure.dev`). The full key is overridable per transform through

@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/stack"
 	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -384,5 +385,46 @@ func TestTransform_ComponentLabelKey_Override(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// End-to-end: a postgresql component + platform-supplied IngressPeers yields a synthesized
+// {comp}-allow-endpoint-ingress policy whose podSelector is the endpoint's own operator label
+// (cnpg.io/cluster), not the component-label key.
+func TestTransform_IngressPeers_SynthesizesEndpointIngressNetworkPolicy(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("postgresql", &components.PostgresqlHandler{})
+
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{{Name: "orders-db", Type: "postgresql"}},
+		},
+	}
+	ctx := oam.TransformContext{
+		Namespace: "default",
+		IngressPeers: map[string][]netpol.IngressPeer{
+			"orders-db": {{
+				Endpoint: netpol.Endpoint{
+					PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"cnpg.io/cluster": "orders-db"}},
+					Ports:       []intstr.IntOrString{intstr.FromInt32(5432)},
+				},
+				Sources: []netpol.TrafficSource{{
+					Namespace:   "app",
+					PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}},
+				}},
+			}},
+		},
+	}
+	cluster, _, err := tr.TransformWithPolicy(app, ctx)
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	if !clusterHasApp(cluster, "orders-db-allow-endpoint-ingress") {
+		t.Fatalf("expected orders-db-allow-endpoint-ingress; apps: %v", clusterAppNames(cluster))
+	}
+	sel := synthesizedPodSelector(t, cluster, "orders-db-allow-endpoint-ingress")
+	if sel["cnpg.io/cluster"] != "orders-db" || len(sel) != 1 {
+		t.Errorf("podSelector = %v, want single cnpg.io/cluster=orders-db", sel)
 	}
 }
