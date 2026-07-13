@@ -110,8 +110,8 @@ func TestComponentEgressPolicyConfig_Generate_Shape(t *testing.T) {
 	if np.Labels != nil || np.Annotations != nil {
 		t.Errorf("expected nil Labels/Annotations, got labels=%v annotations=%v", np.Labels, np.Annotations)
 	}
-	if got := np.Spec.PodSelector.MatchLabels["wharf.zone/component"]; got != "web" {
-		t.Errorf("podSelector wharf.zone/component = %q, want web", got)
+	if got := np.Spec.PodSelector.MatchLabels["wharf.zone/component"]; got != "web" { // allow-term:wharf tracked by #215
+		t.Errorf("podSelector wharf.zone/component = %q, want web", got) // allow-term:wharf tracked by #215
 	}
 	if _, hasApp := np.Spec.PodSelector.MatchLabels["app"]; hasApp {
 		t.Errorf("podSelector should not carry legacy app key: %v", np.Spec.PodSelector.MatchLabels)
@@ -157,15 +157,15 @@ func TestComponentEgressPolicyConfig_Generate_Shape(t *testing.T) {
 }
 
 // TestComponentEgressPolicyConfig_PodSelectorKey verifies the top-level podSelector key
-// (the egress source pods): empty defaults to wharf.zone/component, and a non-empty
-// PodSelectorKey wins (e.g. a non-crane caller opting back to "app").
+// (the egress source pods): empty defaults to wharf.zone/component, and a non-empty  allow-term:wharf tracked by #215
+// PodSelectorKey wins (e.g. a non-downstream caller opting back to "app").
 func TestComponentEgressPolicyConfig_PodSelectorKey(t *testing.T) {
 	cases := []struct {
 		name    string
 		key     string
 		wantKey string
 	}{
-		{"default", "", "wharf.zone/component"},
+		{"default", "", "wharf.zone/component"}, // allow-term:wharf tracked by #215
 		{"override_app", "app", "app"},
 		{"override_custom", "example.com/name", "example.com/name"},
 	}

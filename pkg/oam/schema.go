@@ -1,8 +1,8 @@
 package oam
 
 // PropertyType is the constrained set of value types a handler property may
-// declare. It mirrors the JSON-schema scalar/compound vocabulary that crane's
-// validator understands.
+// declare. It mirrors the JSON-schema scalar/compound vocabulary that the
+// downstream runtime's validator understands.
 type PropertyType string
 
 const (
@@ -19,7 +19,7 @@ const (
 // PropertySchemaProvider interface, handler.go), kurel package parameters
 // (ParameterDecl, package.go), and capability rendering properties
 // (CapabilityRenderingSchema, types.go). Launcher-origin handlers expose it so
-// crane can validate a component/trait's user-facing properties before invoking
+// the downstream runtime can validate a component/trait's user-facing properties before invoking
 // the handler.
 //
 // The rich fields (Enum, Properties, Items, AdditionalProperties) express nested
@@ -34,7 +34,7 @@ type PropertySchema struct {
 	// Type is the value type. Required.
 	Type PropertyType `json:"type" yaml:"type"`
 	// Description is human-facing prose for the property, surfaced in generated
-	// API references (e.g. crane's Handler API Reference). Optional.
+	// API references (e.g. the downstream runtime's Handler API Reference). Optional.
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 	// Required marks the property as mandatory.
 	Required bool `json:"required,omitempty" yaml:"required,omitempty"`

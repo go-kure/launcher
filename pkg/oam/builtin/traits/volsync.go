@@ -60,7 +60,7 @@ func (h *VolSyncHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 	}
 
 	// Sub-app name uses sourcePVC as identifier (not component name) to match
-	// crane's stable naming. Two components with the same PVC name in the same
+	// the downstream runtime's stable naming. Two components with the same PVC name in the same
 	// bundle would collide; OAM authors are expected to use unique PVC names.
 	rsApp := stack.NewApplication(config.SourcePVC+"-backup", app.Namespace, config)
 	bundle.Applications = append(bundle.Applications, rsApp)

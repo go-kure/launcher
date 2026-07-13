@@ -316,7 +316,7 @@ spec:
 	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for stale crane field spec.gitops in cluster.yaml")
+		t.Fatal("expected error for stale downstream field spec.gitops in cluster.yaml")
 	}
 }
 
@@ -347,7 +347,7 @@ func TestNewBuiltinTransformer_Registered(t *testing.T) {
 // directly — the same source newBuiltinTransformer registers from — so a handler
 // added without a schema is caught by the type assertion below rather than being
 // silently dropped by HandlerSchemas(). This is the launcher-side guard for the
-// crane parity gate.
+// downstream parity gate.
 func TestNewBuiltinTransformer_HandlerSchemaParity(t *testing.T) {
 	for name, h := range builtinComponentHandlers() {
 		assertExposesSchema(t, "component", name, h)
@@ -375,10 +375,10 @@ func assertExposesSchema(t *testing.T, kind, name string, h any) {
 // TestBuiltinHandlerSchemaDescriptions asserts that every built-in handler's
 // PropertySchema carries a non-empty Description on every node at every depth —
 // each top-level property, each nested Properties field, and each array Items
-// schema, recursively. Crane renders these in its Handler API Reference; a blank
-// description shows as an empty table row, including on the deepest nested
-// tables. It iterates the same registration maps as the parity test above so it
-// covers exactly the set crane renders.
+// schema, recursively. The downstream runtime renders these in its Handler API
+// Reference; a blank description shows as an empty table row, including on the
+// deepest nested tables. It iterates the same registration maps as the parity test
+// above so it covers exactly the set the downstream runtime renders.
 func TestBuiltinHandlerSchemaDescriptions(t *testing.T) {
 	for name, h := range builtinComponentHandlers() {
 		assertSchemaDescribed(t, "component", name, h)

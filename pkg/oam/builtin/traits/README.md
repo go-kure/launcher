@@ -10,12 +10,12 @@ or operational behavior. Handlers are registered with the transformer in
 and draw platform choices (issuer, gateway, secret store) from the `ClusterProfile`.
 Every built-in trait handler also implements `oam.PropertySchemaProvider`
 (`PropertySchema()`), declaring a constrained schema for its user-facing properties so
-crane can validate them before invocation. This includes the platform-reserved keys a
+the downstream runtime can validate them before invocation. This includes the platform-reserved keys a
 handler reads from merged properties (e.g. `networkPolicy`, `allowedHostnameWildcard`,
 `controllerType`). Deeply nested or K8s-adjacent shapes are kept shallow/open
 (`additionalProperties`) rather than modeled field-by-field; `prune-protection` accepts no
 properties and so declares an empty schema. Every property (including nested object fields and
-array item schemas at every depth) carries a `Description`, surfaced in crane's generated Handler
+array item schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler
 API Reference.
 
 Capability-injected fields are **not** marked `Required` in a handler's schema, because
@@ -122,11 +122,11 @@ for the interfaces, and `examples/` for runnable applications.
 Every trait sub-app config exposes the OAM component it was emitted for via
 `ComponentName() string` (the `oam.ComponentNamed` interface) — always the component
 name, never the sub-app or K8s Service name. Consumers use it to stamp per-resource
-provenance (the `wharf.zone/component` label) without re-deriving the component
+provenance (the `wharf.zone/component` label) without re-deriving the component <!-- allow-term:wharf tracked by #215 -->
 from sub-app names, which several handlers author from properties rather than
 `<component>-<suffix>`. The routing traits' existing `TargetComponentName()` (used by
 auto-NetworkPolicy synthesis) delegates to the same accessor; auto-synthesized
-NetworkPolicies target that `wharf.zone/component` label by default
+NetworkPolicies target that `wharf.zone/component` label by default <!-- allow-term:wharf tracked by #215 -->
 (`TransformContext.ComponentLabelKey`-overridable).
 
 ## Conventions

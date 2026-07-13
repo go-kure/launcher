@@ -178,7 +178,7 @@ func transformVolsyncWithRendering(t *testing.T, copyMethod string) *volsyncv1al
 		}}},
 	}
 	// storageClassName + volumeSnapshotClassName arrive only via capability rendering,
-	// never authored inline: this exercises the rendered (crane-supplied) source.
+	// never authored inline: this exercises the rendered (downstream-supplied) source.
 	ctx := oam.TransformContext{Capabilities: map[string]oam.CapabilityBinding{
 		"volsync": {Rendering: map[string]any{
 			"storageClassName":        "fast",

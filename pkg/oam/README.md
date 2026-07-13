@@ -35,17 +35,17 @@ in two directions, each a **separate** additive resource (the authored
 - **Inbound** (`{comp}-allow-ingress-traffic`) — routing-derived, from routing traits'
   platform-reserved `networkPolicy.trafficSources` capability rendering.
 - **Egress** (`{comp}-allow-egress-traffic`) — from `TransformContext.EgressPeers`, a
-  crane-supplied, non-authorable synthesis input (graph-derived dependency peers; never
+  downstream-supplied, non-authorable synthesis input (graph-derived dependency peers; never
   set from OAM YAML or capability rendering). K8s `NetworkPolicy` only. Empty when a
   caller supplies no peers (e.g. the kurel CLI), so synthesis is then a no-op.
 
 Both families select the component's own pods (the ingress recipients / the egress
-source pods) via the **`wharf.zone/component`** label by default, overridable per
+source pods) via the **`wharf.zone/component`** label by default, overridable per <!-- allow-term:wharf tracked by #215 -->
 transform through `TransformContext.ComponentLabelKey`. This is a **platform contract**:
 `trafficSources` (inbound) and `EgressPeers` (egress) are platform inputs, so a caller
-that injects them must ensure its pods carry that label — crane stamps
-`wharf.zone/component` on every crane-rendered workload and helm-rendered pod — or set
-`ComponentLabelKey` to a label its pods do carry (e.g. `"app"`). A non-crane caller that
+that injects them must ensure its pods carry that label — the downstream runtime stamps
+`wharf.zone/component` on every downstream-rendered workload and helm-rendered pod — or set <!-- allow-term:wharf tracked by #215 -->
+`ComponentLabelKey` to a label its pods do carry (e.g. `"app"`). A non-downstream caller that
 injects `trafficSources`/`EgressPeers` without either will synthesize a policy that
 selects nothing.
 
@@ -89,12 +89,12 @@ single schema vocabulary — the same type also backs `kurel.yaml` parameters (`
 `AdditionalProperties`) are meaningful only for handler properties: the two flat call sites (kurel
 parameters, capability rendering) reject them at decode time, so unifying the type does not widen
 their accepted behavior. `Transformer.HandlerSchemas()` returns a `HandlerSchemaSet{ Components, Traits }`
-of every registered handler that declares one, so crane's validator can check a component/trait's
+of every registered handler that declares one, so the downstream runtime's validator can check a component/trait's
 properties before the handler is invoked. Built-in examples: the `configmap` trait and the
 `passthrough` component.
 
 `Description` is optional (`json:"description,omitempty"`) but every built-in property populates it —
-including nested object fields and array item schemas at every depth — so crane can surface prose in
+including nested object fields and array item schemas at every depth — so the downstream runtime can surface prose in
 its generated Handler API Reference. A completeness test (`pkg/cmd/kurel`) enforces that no built-in
 schema node is left without a description.
 

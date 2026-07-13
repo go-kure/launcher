@@ -26,7 +26,7 @@ func (h *ExternalSecretHandler) CanHandle(traitType string) bool {
 }
 
 // CapabilityRequired returns false: secretStoreRef can be provided inline
-// (via trait properties or crane's provider: shorthand) without a ClusterProfile
+// (via trait properties or the downstream runtime's provider: shorthand) without a ClusterProfile
 // capability. When both inline and capability are absent, parseProperties returns
 // a clear error.
 func (h *ExternalSecretHandler) CapabilityRequired() bool { return false }
@@ -151,7 +151,7 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 
 	rawStoreRef, _ := props["secretStoreRef"].(map[string]any)
 	if rawStoreRef == nil {
-		// Accept crane's bare provider: string shorthand.
+		// Accept the downstream runtime's bare provider: string shorthand.
 		if provider, ok := props["provider"].(string); ok && provider != "" {
 			config.StoreRefName = provider
 			config.StoreRefKind = "ClusterSecretStore"

@@ -47,7 +47,7 @@ func hasExplicitLatestTag(image string) bool {
 	return strings.HasSuffix(image, ":latest")
 }
 
-// --- Property type helpers (inlined from crane's proputil) ---
+// --- Property type helpers (inlined from the downstream runtime's proputil) ---
 
 func toInt32(v any) (int32, bool) {
 	switch n := v.(type) {

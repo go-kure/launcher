@@ -4,7 +4,7 @@ package oam
 // and trait handlers. Handlers call its methods; they must not type-assert.
 //
 // The 21 typed accessor methods correspond to every piece of data that handlers
-// currently access via crane's *api.EnvironmentPolicy. See the finalized design
+// currently access via the downstream runtime's *api.EnvironmentPolicy. See the finalized design
 // in docs/oam/options-policy-interface.md (Option A).
 //
 // When no policy is supplied the runtime passes NoopPolicy, so handlers always

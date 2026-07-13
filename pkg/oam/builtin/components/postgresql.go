@@ -536,7 +536,7 @@ type PostgresqlConfig struct {
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
-// Faithful port of crane's PostgresqlConfig.ApplyPolicy: enforces replicas, resources, storageSize only.
+// Faithful port of the downstream runtime's PostgresqlConfig.ApplyPolicy: enforces replicas, resources, storageSize only.
 func (c *PostgresqlConfig) ApplyPolicy(p oam.Policy) error {
 	if p == nil {
 		return nil

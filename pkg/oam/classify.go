@@ -3,12 +3,14 @@ package oam
 import "fmt"
 
 // TierAnnotation is the OAM component annotation key for overriding the default tier.
+// allow-term:wharf tracked by #215 (domain becomes a parameter; this literal is interim).
 const TierAnnotation = "wharf.zone/tier"
 
-// ComponentLabel is the pod label key crane stamps on every crane-rendered workload
-// pod and helm-rendered pod under crane (webservice via its mutator, helm-rendered
-// pods via a mandatory post-renderer). Synthesized NetworkPolicies target it by default
-// so a single deterministic selector covers both builtin and helm-backed component pods.
+// ComponentLabel is the pod label key the downstream runtime stamps on every rendered
+// workload pod and helm-rendered pod (webservice via its mutator, helm-rendered pods via a
+// mandatory post-renderer). Synthesized NetworkPolicies target it by default so a single
+// deterministic selector covers both builtin and helm-backed component pods.
+// allow-term:wharf tracked by #215 (domain becomes a parameter; this literal is interim).
 const ComponentLabel = "wharf.zone/component"
 
 // defaultTierMap maps OAM component types to their deployment tier.

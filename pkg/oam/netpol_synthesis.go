@@ -38,7 +38,7 @@ type componentAllowPolicyConfig struct {
 	ComponentName string
 	Rules         []trafficRule // one per collector with non-empty ports; deduplicated
 	// PodSelectorKey is the label key selecting the component's own pods (the ingress
-	// recipients). Empty => ComponentLabel ("wharf.zone/component").
+	// recipients). Empty => ComponentLabel ("wharf.zone/component").  allow-term:wharf tracked by #215
 	PodSelectorKey string
 }
 
@@ -53,7 +53,7 @@ func (c *componentAllowPolicyConfig) podSelectorKey() string {
 
 // ApplyPolicy is a no-op: a synthesized NetworkPolicy has no enforceable policy
 // fields. Synthesis runs after the trait Enforceable.ApplyPolicy pass, so these
-// configs are intentionally never policy-checked (matching crane).
+// configs are intentionally never policy-checked (matching the downstream runtime).
 func (c *componentAllowPolicyConfig) ApplyPolicy(_ Policy) error { return nil }
 
 func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
@@ -204,10 +204,10 @@ func trafficRuleKey(sources []netpol.TrafficSource, ports []intstr.IntOrString) 
 	return fmt.Sprintf("src:%s;ports:%s", strings.Join(srcKeys, "|"), strings.Join(portKeys, "|"))
 }
 
-// --- Egress synthesis (crane-supplied, non-authorable peers) ---
+// --- Egress synthesis (downstream-supplied, non-authorable peers) ---
 
 // componentEgressPolicyConfig is the ApplicationConfig for an auto-generated
-// NetworkPolicy that allows egress from a component's pods to crane-supplied
+// NetworkPolicy that allows egress from a component's pods to downstream-supplied
 // dependency-graph peers. The resource name is {component}-allow-egress-traffic,
 // distinct from the inbound synthesis and the explicit networkpolicy trait, so it
 // is purely additive.
@@ -215,7 +215,7 @@ type componentEgressPolicyConfig struct {
 	ComponentName string
 	Peers         []netpol.EgressPeer
 	// PodSelectorKey is the label key selecting the component's own pods (the egress
-	// source pods this policy allows out). Empty => ComponentLabel ("wharf.zone/component").
+	// source pods this policy allows out). Empty => ComponentLabel ("wharf.zone/component").  allow-term:wharf tracked by #215
 	PodSelectorKey string
 }
 
@@ -243,7 +243,7 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 	kubernetes.SetNetworkPolicyPolicyTypes(np, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress})
 
 	// Protocol is a deliberate TCP constant: the per-peer signal carries no
-	// protocol, and UDP/DNS egress is owned by crane's namespace-level
+	// protocol, and UDP/DNS egress is owned by the downstream runtime's namespace-level
 	// allow-dns-egress baseline, not component-scoped synthesis.
 	proto := corev1.ProtocolTCP
 	// Normalize here too (not just on the synthesis path) so a config built
@@ -279,7 +279,7 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 }
 
 // synthesizeEgressNetworkPolicies traverses all leaf bundles and, for each primary
-// component application with crane-supplied egress peers, appends a
+// component application with downstream-supplied egress peers, appends a
 // componentEgressPolicyConfig application emitting a per-component egress
 // NetworkPolicy. The signal is non-authorable (TransformContext.EgressPeers), so
 // this is a no-op on the kurel path where no peers are supplied.
@@ -315,7 +315,7 @@ func synthesizeEgressNetworkPolicies(cluster *stack.Cluster, componentMap map[st
 	})
 }
 
-// buildEgressPeers normalizes crane-supplied egress peers for deterministic output:
+// buildEgressPeers normalizes downstream-supplied egress peers for deterministic output:
 // it drops peers with no ports (an all-ports egress rule would over-permit; an
 // underivable-port peer stays authored via the escape hatch), copies and sorts each
 // surviving peer's ports, then deduplicates and sorts peers by a canonical key so

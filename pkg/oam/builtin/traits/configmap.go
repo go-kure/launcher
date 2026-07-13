@@ -36,8 +36,8 @@ func (h *ConfigMapHandler) CanHandle(traitType string) bool {
 	return traitType == "configmap"
 }
 
-// PropertySchema declares the configmap trait's user-facing properties so crane
-// can validate them before invocation. `data` is an open map (escape hatch).
+// PropertySchema declares the configmap trait's user-facing properties so the
+// downstream runtime can validate them before invocation. `data` is an open map (escape hatch).
 func (h *ConfigMapHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"name":      {Type: oam.PropertyTypeString, Required: true, Description: "Name of the ConfigMap resource to create."},
