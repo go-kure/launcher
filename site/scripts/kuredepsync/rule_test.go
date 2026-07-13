@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -108,12 +109,41 @@ func TestKureModuleExcluded(t *testing.T) {
 }
 
 func TestMessageIncludesReasonAndFix(t *testing.T) {
-	v := violation{module: "example.com/dep", reason: "launcher-raised", launcherHead: "v1.21.0", kureHead: "v1.20.3"}
+	v := violation{module: "example.com/dep", reason: "launcher-raised", launcherHead: "v1.21.0", kureHead: "v1.20.3", kureTag: "v0.2.0-beta.6"}
 	msg := v.message()
-	for _, want := range []string{"launcher-raised", "v1.21.0", "v1.20.3", "check-kure-dep-sync.sh"} {
+	for _, want := range []string{"launcher-raised", "v1.21.0", "v1.20.3", "v0.2.0-beta.6", "check-kure-dep-sync.sh"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message missing %q: %s", want, msg)
 		}
+	}
+	// Empty tag must still produce a sensible message (no dangling "kure ").
+	bare := violation{module: "d", reason: "launcher-raised", launcherHead: "v2", kureHead: "v1"}.message()
+	if strings.Contains(bare, "imported kure  pins") {
+		t.Errorf("empty tag left a double space: %s", bare)
+	}
+}
+
+func TestKureVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/go.mod"
+	const src = `module example.com/x
+
+go 1.26.5
+
+require (
+	github.com/go-kure/kure v0.2.0-beta.6
+	example.com/other v1.2.3 // indirect
+)
+`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := kureVersion(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "v0.2.0-beta.6" {
+		t.Fatalf("kureVersion = %q, want v0.2.0-beta.6", got)
 	}
 }
 

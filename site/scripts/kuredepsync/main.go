@@ -47,11 +47,13 @@ func main() {
 }
 
 type opts struct {
-	launcherHead string
-	kureHead     string
-	launcherBase string
-	kureBase     string
-	report       bool
+	launcherHead    string
+	kureHead        string
+	kureHeadVersion string // imported kure release tag at head, for the message
+	launcherBase    string
+	kureBase        string
+	report          bool
+	printKureVer    string // if set, just print that go.mod's kure require version and exit
 }
 
 // run parses args, applies the guard, and returns a process exit code
@@ -71,16 +73,35 @@ func run(args []string, out io.Writer) (int, error) {
 			o.launcherHead = next()
 		case "--kure-head":
 			o.kureHead = next()
+		case "--kure-head-version":
+			o.kureHeadVersion = next()
 		case "--launcher-base":
 			o.launcherBase = next()
 		case "--kure-base":
 			o.kureBase = next()
 		case "--report":
 			o.report = true
+		case "--print-kure-version":
+			o.printKureVer = next()
 		default:
 			return 2, fmt.Errorf("unknown argument: %s", args[i])
 		}
 	}
+
+	// Version-extraction mode: robustly read the kure require version from a go.mod
+	// (via modfile, not line-scraping) so the wrapper can download it and label output.
+	if o.printKureVer != "" {
+		ver, err := kureVersion(o.printKureVer)
+		if err != nil {
+			return 2, err
+		}
+		if ver == "" {
+			return 2, fmt.Errorf("%s not found in %s", kureModule, o.printKureVer)
+		}
+		fmt.Fprintln(out, ver)
+		return 0, nil
+	}
+
 	if o.launcherHead == "" || o.kureHead == "" {
 		return 2, fmt.Errorf("--launcher-head and --kure-head are required")
 	}
@@ -110,6 +131,9 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 
 	violations := evaluate(launcherHead, kureHead, launcherBase, kureBase)
+	for i := range violations {
+		violations[i].kureTag = o.kureHeadVersion
+	}
 	if len(violations) == 0 {
 		fmt.Fprintln(out, "OK: launcher does not newly lead imported kure on any shared direct dependency.")
 		return 0, nil
@@ -125,14 +149,19 @@ type violation struct {
 	reason       string // launcher-raised | kure-regressed | newly-shared/ahead
 	launcherHead string
 	kureHead     string
+	kureTag      string // imported kure release version, e.g. v0.2.0-beta.6 (may be empty)
 }
 
 func (v violation) message() string {
+	kure := "imported kure"
+	if v.kureTag != "" {
+		kure = "imported kure " + v.kureTag
+	}
 	return fmt.Sprintf(
-		"%s [%s]: launcher pins %s but imported kure pins %s — launcher would lead kure. "+
+		"%s [%s]: launcher pins %s but %s pins %s — launcher would lead kure. "+
 			"Land the matching kure release and bump the %s require first, then take this dep. "+
 			"(guard: check-kure-dep-sync.sh)",
-		v.module, v.reason, v.launcherHead, v.kureHead, kureModule)
+		v.module, v.reason, v.launcherHead, kure, v.kureHead, kureModule)
 }
 
 // evaluate applies the guard rule and returns the violating modules, sorted by name.
@@ -230,4 +259,23 @@ func directRequires(path string) (map[string]string, error) {
 		m[r.Mod.Path] = r.Mod.Version
 	}
 	return m, nil
+}
+
+// kureVersion parses a go.mod and returns the version of its go-kure/kure require
+// (empty string if absent). Robust against comment/replace noise — unlike scraping.
+func kureVersion(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	f, err := modfile.Parse(path, data, nil)
+	if err != nil {
+		return "", fmt.Errorf("parse %s: %w", path, err)
+	}
+	for _, r := range f.Require {
+		if r.Mod.Path == kureModule {
+			return r.Mod.Version, nil
+		}
+	}
+	return "", nil
 }
