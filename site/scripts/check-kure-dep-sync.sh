@@ -47,12 +47,19 @@ done
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# kure_version_of <go.mod path> — extract the imported kure module version. Matches
-# both block (`\t<mod> <ver>`) and single-line (`require <mod> <ver>`) require forms.
+# Build the helper once up front (separate nested module, so `go run <dir>` from the
+# main module can't resolve it; building also avoids `go run`'s "exit status 1" stderr
+# noise while propagating the real exit code). File args passed to it are absolute.
+HELPER_BIN="$TMPDIR/kuredepsync"
+( cd "$HELPER_DIR" && GOWORK=off go build -o "$HELPER_BIN" . )
+run_helper() { "$HELPER_BIN" "$@"; }
+
+# kure_version_of <go.mod path> — the imported kure require version, parsed by the
+# helper via modfile (robust against comment/replace noise, no line-scraping).
 kure_version_of() {
-  local gomod="$1" ver
-  ver="$(awk -v m="$KURE_MODULE" '{for(i=1;i<=NF;i++) if($i==m){print $(i+1); exit}}' "$gomod")"
-  [[ -n "$ver" ]] || { echo "ERROR: $KURE_MODULE not found in $gomod" >&2; exit 2; }
+  local ver
+  ver="$("$HELPER_BIN" --print-kure-version "$1")" \
+    || { echo "ERROR: could not read $KURE_MODULE version from $1" >&2; exit 2; }
   printf '%s' "$ver"
 }
 
@@ -67,17 +74,12 @@ kure_gomod_for() {
 }
 
 LAUNCHER_HEAD="$REPO_ROOT/go.mod"
-KURE_HEAD="$(kure_gomod_for "$(kure_version_of "$LAUNCHER_HEAD")")"
-
-# Build the helper once (it is a separate nested module, so `go run <dir>` from the
-# main module can't resolve it, and building avoids `go run`'s "exit status 1" stderr
-# noise while propagating the real exit code). File args passed to it are absolute.
-HELPER_BIN="$TMPDIR/kuredepsync"
-( cd "$HELPER_DIR" && GOWORK=off go build -o "$HELPER_BIN" . )
-run_helper() { "$HELPER_BIN" "$@"; }
+KURE_HEAD_VER="$(kure_version_of "$LAUNCHER_HEAD")"
+KURE_HEAD="$(kure_gomod_for "$KURE_HEAD_VER")"
 
 if [[ "$MODE" == "report" ]]; then
-  run_helper --launcher-head "$LAUNCHER_HEAD" --kure-head "$KURE_HEAD" --report
+  run_helper --launcher-head "$LAUNCHER_HEAD" \
+    --kure-head "$KURE_HEAD" --kure-head-version "$KURE_HEAD_VER" --report
   exit 0
 fi
 
@@ -94,8 +96,15 @@ resolve_base() {
 }
 
 if ! resolve_base "$BASE"; then
+  # In CI a required check must never silently pass: an unresolved base means the guard
+  # cannot enforce, so fail hard. Locally (offline precommit), degrade to report-only.
+  if [[ "${CI:-}" == "true" ]]; then
+    echo "ERROR: could not resolve base ref '$BASE' in CI; refusing to skip enforcement." >&2
+    exit 2
+  fi
   echo "WARN: could not resolve base ref '$BASE' (offline?); reporting only, not enforcing." >&2
-  run_helper --launcher-head "$LAUNCHER_HEAD" --kure-head "$KURE_HEAD" --report
+  run_helper --launcher-head "$LAUNCHER_HEAD" \
+    --kure-head "$KURE_HEAD" --kure-head-version "$KURE_HEAD_VER" --report
   exit 0
 fi
 
@@ -104,5 +113,5 @@ git -C "$REPO_ROOT" show "$BASE:go.mod" > "$LAUNCHER_BASE"
 KURE_BASE="$(kure_gomod_for "$(kure_version_of "$LAUNCHER_BASE")")"
 
 run_helper \
-  --launcher-head "$LAUNCHER_HEAD" --kure-head "$KURE_HEAD" \
+  --launcher-head "$LAUNCHER_HEAD" --kure-head "$KURE_HEAD" --kure-head-version "$KURE_HEAD_VER" \
   --launcher-base "$LAUNCHER_BASE" --kure-base "$KURE_BASE"
