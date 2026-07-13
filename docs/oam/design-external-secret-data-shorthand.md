@@ -1,13 +1,13 @@
 # Design spike: external-secret `data[]` shorthand
 
-Status: accepted (launcher#199). Companion downstream: crane external-secret
-migration (crane#235 §7).
+Status: accepted (launcher#199). Companion downstream: a downstream runtime's
+external-secret migration.
 
 ## Problem
 
 External-secret `data[]` entries are the single largest authored-OAM boilerplate in
-the opsmaster scenario — ~390 removable lines, 58% of the external-secret volume
-(measured in the crane#235 review, crane@42e3ed4e). Each entry authors 4 lines
+the reference scenario — ~390 removable lines, 58% of the external-secret volume
+(measured in the downstream migration review). Each entry authors 4 lines
 (`secretKey` + `remoteRef.{key,property}`), but the values are near-perfectly
 derivable. Across all 130 `data` entries in opsmaster's 37 external-secret blocks:
 
@@ -54,7 +54,7 @@ parsing would silently *rewrite meaning*: a typo'd `remteRef:` would be ignored,
 parser would see `remoteRef` absent, derive `<namespace>/<secretName>`, and the app
 would fetch the **wrong secret path** — discovered at runtime, in-cluster, on auth
 material. Strict rejection is the only safe complement to defaulting-by-absence, and
-it matches the crane strict-mode charter and the #323 reject-over-ignore pins. There
+it matches the downstream strict-mode charter and the #323 reject-over-ignore pins. There
 are no existing users to grandfather; the opsmaster fixtures conform.
 
 The error names the *supported* fields rather than calling the key a "typo", because
@@ -76,11 +76,11 @@ cases in `external_secret_test.go`.
   reduction. A string list buys marginal terseness at the cost of a string-or-object
   union that exists nowhere else in the trait vocabulary.
 - **`OneOf`/union in `PropertySchema`** to model that union. A cross-repo vocabulary
-  extension (schema + crane validator + docgen rendering) for a single foreseeable
+  extension (schema + downstream validator + docgen rendering) for a single foreseeable
   user does not pay for itself; if a second union case appears, `OneOf` is an additive
   extension to add then.
 - **Parser-only string form** (accept string, don't model it in the schema). The
-  schema is the SSOT crane's validator consumes; letting it under-describe accepted
+  schema is the SSOT the downstream validator consumes; letting it under-describe accepted
   input reverses the #235 schema-SSOT direction and makes the generated handler
   reference narrower than reality.
 
@@ -89,4 +89,4 @@ cases in `external_secret_test.go`.
 `data.Items.remoteRef` becomes **optional** with `key`/`property` optional (a
 `dataRemoteRef` variant); `secretKey` stays required. The top-level `remoteRef`
 shorthand keeps its key-required schema. No `PropertySchema` vocabulary change, so
-crane's validator and docgen are untouched.
+the downstream validator and docgen are untouched.

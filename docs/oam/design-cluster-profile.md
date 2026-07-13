@@ -68,17 +68,17 @@ keys is a build error. See `design-gvk.md` for the parser strictness rationale.
 
 ### What is NOT in a launcher ClusterProfile
 
-The following fields exist in crane's `ClusterProfile` but are crane-specific and must
-not appear in a launcher `cluster.yaml`:
+A downstream platform runtime may layer additional fields onto its own cluster profile.
+Those fields are downstream-specific and must not appear in a launcher `cluster.yaml`:
 
-- `spec.gitops` — FluxCD/ArgoCD wiring; delivery-layer concern
-- `spec.componentCatalog` / `spec.catalog` — Harbor catalog references
-- `spec.componentVariants` — crane layer-3 variant selection
+- delivery-layer wiring (FluxCD/ArgoCD engine configuration blocks)
+- component-catalog / artifact-registry references
+- downstream component-variant selection
 
 Note: `spec.gitopsEngine` (a single string field) is launcher-specific and IS present in
 launcher ClusterProfiles. It selects which native GitOps delivery CRs are emitted for
-helmchart components. Do not confuse it with crane's `spec.gitops` (the full delivery
-block, which stays in crane only).
+helmchart components. It is not the same as a downstream runtime's full delivery-wiring
+block, which stays in that runtime only.
 
 ---
 
@@ -254,26 +254,16 @@ Handlers that do not implement `CapabilityAware`, or whose `CapabilityRequired()
 
 ---
 
-## 7. Relationship to crane's ClusterProfile
+## 7. Migrating from a downstream cluster profile
 
-Crane's `ClusterProfile` type (`pkg/api.ClusterProfileSpec`) maps to this design as
-follows:
+A downstream platform runtime may define its own richer `ClusterProfile` that a launcher
+`cluster.yaml` is derived from. Launcher consumes only the capability model above:
+`spec.capabilities` and its per-capability `rendering` values map across unchanged.
 
-| crane field | launcher | Notes |
-|---|---|---|
-| `spec.capabilities` | `spec.capabilities` | Same structure, same semantics |
-| `spec.capabilities[*].rendering` | `spec.capabilities[*].rendering` | Same field, same semantics |
-| `spec.capabilities[*].parameters` | — | Removed; capability schema is not cluster operator input |
-| `spec.gitops` | — | Stays in crane |
-| `spec.catalog` | — | Stays in crane |
-| `spec.componentCatalog` | — | Stays in crane |
-| `spec.componentVariants` | — | Stays in crane |
+Everything else — delivery-layer wiring, catalog/registry references, component-variant
+selection, and any per-capability `parameters` schema — is out of scope for a launcher
+`cluster.yaml` and stays in the downstream runtime. `spec.gitopsEngine` is a launcher-only
+addition with no upstream equivalent.
 
-`spec.gitopsEngine` is a launcher-only addition with no direct crane counterpart. It
-replaces the engine-selection concern embedded in crane's `spec.gitops.engine` with a
-top-level string. The full `spec.gitops` delivery wiring stays in crane only.
-
-Operators migrating a crane `ClusterProfile` to a launcher `cluster.yaml` must:
-1. Change `apiVersion` to `launcher.gokure.dev/v1alpha1`
-2. Remove `spec.gitops`, `spec.catalog`, `spec.componentCatalog`, `spec.componentVariants`
-3. Remove any `parameters:` blocks from capability entries
+The concrete field-by-field mapping and migration steps for a specific downstream runtime
+live in that runtime's own documentation, not here.

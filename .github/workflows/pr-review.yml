@@ -12,5 +12,5 @@ jobs:
   pr-review:
     uses: go-kure/.github/.github/workflows/pr-review.yml@main
     with:
-      pr_review_context: "OAM-native package manager for Kubernetes, shipped as the kurel CLI. Implements a two-config-set model: package config (app requirements) + site config (cluster capabilities), resolved at install time to produce Kubernetes manifests. Part of the Wharf platform."
+      pr_review_context: "OAM-native package manager for Kubernetes, shipped as the kurel CLI. Implements a two-config-set model: package config (app requirements) + site config (cluster capabilities), resolved at install time to produce Kubernetes manifests. An open-source go-kure project."
     secrets: inherit

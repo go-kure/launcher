@@ -105,7 +105,7 @@ spec:
 
 ### 4.2 Supported component types (Phase 1)
 
-Migrated from crane. Each type maps to a `ComponentHandler` implementation in
+Ported from the downstream runtime. Each type maps to a `ComponentHandler` implementation in
 `pkg/oam/builtin/`:
 
 | type | description |
@@ -117,14 +117,14 @@ Migrated from crane. Each type maps to a `ComponentHandler` implementation in
 | `helmchart` | FluxCD HelmRelease for third-party charts. Supports inline source creation (`source.url`) and reference to existing source CRs (`source.name`). Multiple components sharing the same source key share a single source CR (first component wins). For HelmRepository the key is the URL; for OCIRepository the key is URL+version, so two OCI components with the same URL but different versions each get their own source CR. |
 | `daemonset` | DaemonSet for node-level agents. Optional `port: <N>` generates a ClusterIP Service exposing port N; required when the daemonset acts as an implicit backend for ingress, httproute, or expose traits. |
 | `statefulset` | StatefulSet for ordered, persistent workloads |
-| `passthrough` | Generic escape hatch (launcher-native, not migrated from crane): emits an arbitrary Kubernetes object — CRD or non-standard type — declared inline under `object:`. Set `clusterScoped: true` for cluster-scoped resources (no namespace injected). `object.metadata.name` defaults to the component name. For namespaced objects `object.metadata.namespace` defaults to the build namespace when unset, but an inline value is respected (intentional cross-namespace). No standard trait/port integration or auto health check. |
+| `passthrough` | Generic escape hatch (launcher-native, not ported from the downstream runtime): emits an arbitrary Kubernetes object — CRD or non-standard type — declared inline under `object:`. Set `clusterScoped: true` for cluster-scoped resources (no namespace injected). `object.metadata.name` defaults to the component name. For namespaced objects `object.metadata.namespace` defaults to the build namespace when unset, but an inline value is respected (intentional cross-namespace). No standard trait/port integration or auto health check. |
 | `crd` | Emits `CustomResourceDefinition` manifests from a multi-doc YAML source — `inline:` (offline) or `url:` (http/https only; `oci://` not yet supported). Rejects any non-CRD document. Emitted CRDs are auto-staged early by stack-compile's CRD inference. URL hosts are constrained by the policy registry allowlist (`AllowedRegistries`), re-checked on every redirect. |
 | `manifests` | Emits arbitrary Kubernetes manifests from the same sources as `crd` (`inline` / `url`). Each object's scope is resolved (built-in kinds plus any CRD in the same source); namespaced objects that omit `metadata.namespace` are stamped with the build namespace, cluster-scoped objects are left untouched, and an unknown-scope object with no namespace fails closed. Optional `scopeOverrides: [{apiVersion, kind, scope: Cluster\|Namespaced}]` supplies an explicit scope for a kind whose scope is otherwise unknown — e.g. a cluster-scoped custom resource (a namespace-less `ClusterIssuer`) whose CRD is installed out of band; overrides apply only to unknown-scope objects, so they cannot contradict a known scope, and the fail-closed default is kept for unknown kinds with no override. Same URL allowlist as `crd`. |
 | `oci` | Reconciles an OCI artifact: emits an `OCIRepository` source CR plus a per-component Flux `Kustomization`. Properties: `source.url` (required, `oci://`), `version` (required; a tag, or `sha256:<digest>`), `path` (default `./`), `prune` (default `true`), `interval` (default `60m`), `targetNamespace` (optional). The OCIRepository participates in source dedup keyed on URL+version (shared with `helmchart` OCI sources, first component wins); the Kustomization is always emitted, one per component. Both land in the Flux namespace. OCI registry host is constrained by the policy registry allowlist (`AllowedRegistries`). |
 
 ### 4.3 Supported trait types (Phase 1)
 
-Migrated from crane. Each type maps to a `TraitHandler` in `pkg/oam/builtin/`:
+Ported from the downstream runtime. Each type maps to a `TraitHandler` in `pkg/oam/builtin/`:
 
 | type | requires capability | description |
 |---|---|---|
@@ -136,8 +136,8 @@ Migrated from crane. Each type maps to a `TraitHandler` in `pkg/oam/builtin/`:
 | `configmap` | no | ConfigMap with optional volume mount |
 | `scaler` | no | HPA + optional PDB |
 
-Traits that remain in crane (not migrated to launcher): `backup`, `fluxcd-postbuild`,
-`fluxcd-patches`, `prune-protection`, `rbac`. These depend on crane's delivery pipeline
+Traits that stay in the downstream runtime (not ported to launcher): `backup`, `fluxcd-postbuild`,
+`fluxcd-patches`, `prune-protection`, `rbac`. These depend on the downstream delivery pipeline
 and have no meaning in a static manifest build.
 
 ### 4.4 OAM policies
@@ -154,7 +154,7 @@ spec:
   - name: resource-limits
     type: env-policy
     properties:
-      # crane-style EnvironmentPolicy fields
+      # downstream-style EnvironmentPolicy fields
       enforced:
         maxReplicas: 5
 ```
