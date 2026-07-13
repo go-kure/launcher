@@ -40,14 +40,16 @@ in two directions, each a **separate** additive resource (the authored
   caller supplies no peers (e.g. the kurel CLI), so synthesis is then a no-op.
 
 Both families select the component's own pods (the ingress recipients / the egress
-source pods) via the **`wharf.zone/component`** label by default, overridable per <!-- allow-term:wharf tracked by #215 -->
-transform through `TransformContext.ComponentLabelKey`. This is a **platform contract**:
-`trafficSources` (inbound) and `EgressPeers` (egress) are platform inputs, so a caller
-that injects them must ensure its pods carry that label — the downstream runtime stamps
-`wharf.zone/component` on every downstream-rendered workload and helm-rendered pod — or set <!-- allow-term:wharf tracked by #215 -->
-`ComponentLabelKey` to a label its pods do carry (e.g. `"app"`). A non-downstream caller that
-injects `trafficSources`/`EgressPeers` without either will synthesize a policy that
-selects nothing.
+source pods) via a **derived `<domain>/component`** label by default — the domain comes
+from `TransformContext.Domain` (empty ⇒ the library default `gokure.dev`; the kurel CLI
+uses `launcher.gokure.dev`). The full key is overridable per transform through
+`TransformContext.ComponentLabelKey` (precedence: `ComponentLabelKey` > `<Domain>/component`
+> `gokure.dev/component`). This is a **platform contract**: `trafficSources` (inbound) and
+`EgressPeers` (egress) are platform inputs, so a caller that injects them must ensure its
+pods carry the derived label — a downstream platform sets its own `Domain` and stamps the
+matching `<domain>/component` on every rendered workload and helm-rendered pod — or set
+`ComponentLabelKey` to a label its pods do carry (e.g. `"app"`). A caller that injects
+`trafficSources`/`EgressPeers` without either will synthesize a policy that selects nothing.
 
 ## Parsing
 

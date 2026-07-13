@@ -19,6 +19,11 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
+// kurelDomain is the label/annotation domain the kurel CLI stamps into every transform.
+// The library default is oam.DefaultDomain ("gokure.dev"); kurel uses its own subdomain so
+// kurel-rendered manifests are self-describing. Embedders override via TransformContext.Domain.
+const kurelDomain = "launcher.gokure.dev"
+
 type buildOptions struct {
 	profilePath        string
 	outputDir          string
@@ -155,6 +160,7 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		ClusterID:    opts.clusterID,
 		Namespace:    opts.namespace,
 		Capabilities: evaluatedProfile.Spec.Capabilities,
+		Domain:       kurelDomain,
 	}
 
 	cluster, err := transformer.Transform(app, ctx)

@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	"github.com/go-kure/kure/pkg/stack"
+	"k8s.io/apimachinery/pkg/util/validation"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
@@ -37,11 +39,17 @@ type TransformContext struct {
 	EgressPeers map[string][]netpol.EgressPeer
 	// ComponentLabelKey overrides the pod-label key that synthesized NetworkPolicies
 	// target (the component's own pods: ingress recipients / egress sources). Empty
-	// => ComponentLabel ("wharf.zone/component"). Non-authorable platform input, like  allow-term:wharf tracked by #215
-	// EgressPeers: a caller that injects trafficSources/EgressPeers must ensure its
-	// pods carry this label (the downstream runtime stamps wharf.zone/component) or set this to a key  allow-term:wharf tracked by #215
-	// its pods do carry (e.g. "app").
+	// => the domain-derived key ComponentLabelKeyForDomain(Domain). Takes precedence over
+	// Domain. Validated as a Kubernetes qualified label key. Non-authorable platform input,
+	// like EgressPeers: a caller that injects trafficSources/EgressPeers must ensure its
+	// pods carry this label (the platform stamps the derived component label) or set this
+	// to a key its pods do carry (e.g. "app").
 	ComponentLabelKey string
+	// Domain is the label/annotation domain for derived platform keys (<domain>/tier,
+	// <domain>/component). Empty => DefaultDomain ("gokure.dev"). Non-authorable platform
+	// input; a downstream platform embedding launcher sets its own domain. Validated as a
+	// DNS-1123 subdomain — an invalid value fails the transform.
+	Domain string
 }
 
 // fluxNamespaceSettable is implemented by ApplicationConfig types that emit
@@ -297,6 +305,20 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		ctx.Policy = &NoopPolicy{}
 	}
 
+	// Validate + normalize the platform domain (and the optional full-key override) once,
+	// fail-fast before building anything. ComponentLabelKey takes precedence over Domain,
+	// so it is validated here too — a behavioral tightening (previously any string was
+	// accepted). ctx is a value copy, so normalizing ctx.Domain here is local to this call.
+	ctx.Domain = domainOrDefault(ctx.Domain)
+	if errs := validation.IsDNS1123Subdomain(ctx.Domain); len(errs) > 0 {
+		return nil, nil, errors.Errorf("invalid TransformContext.Domain %q: %s", ctx.Domain, strings.Join(errs, "; "))
+	}
+	if ctx.ComponentLabelKey != "" {
+		if errs := validation.IsQualifiedName(ctx.ComponentLabelKey); len(errs) > 0 {
+			return nil, nil, errors.Errorf("invalid TransformContext.ComponentLabelKey %q: %s", ctx.ComponentLabelKey, strings.Join(errs, "; "))
+		}
+	}
+
 	namespace := ctx.Namespace
 	if namespace == "" {
 		namespace = app.Metadata.Namespace
@@ -353,7 +375,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	applyReconciliationSettings(cluster, componentMap, policyResult.ReconciliationSettings)
 	labelKey := ctx.ComponentLabelKey
 	if labelKey == "" {
-		labelKey = ComponentLabel
+		labelKey = ComponentLabelKeyForDomain(ctx.Domain)
 	}
 	synthesizeNetworkPolicies(cluster, labelKey)
 	synthesizeEgressNetworkPolicies(cluster, componentMap, ctx.EgressPeers, labelKey)
@@ -383,7 +405,9 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			}
 		}
 
-		tier, err := ClassifyComponent(&component)
+		// ctx.Domain was validated + normalized at the top of TransformWithPolicy; the
+		// per-component re-validation inside ClassifyComponentWithDomain is idempotent.
+		tier, err := ClassifyComponentWithDomain(&component, ctx.Domain)
 		if err != nil {
 			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 		}

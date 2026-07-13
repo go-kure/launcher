@@ -290,6 +290,44 @@ func TestBuildCommand_NamespaceOverride(t *testing.T) {
 	}
 }
 
+// kurel resolves the tier annotation under the launcher.gokure.dev domain (not the library
+// default gokure.dev). A component annotated launcher.gokure.dev/tier with an invalid value
+// must therefore fail the build — proving Domain is wired to kurelDomain. With the default
+// domain, that annotation would be ignored and the build would succeed.
+func TestBuildCommand_KurelDomain_TierAnnotationHonored(t *testing.T) {
+	const appYAML = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: frontend
+      type: webservice
+      annotations:
+        launcher.gokure.dev/tier: not-a-valid-tier
+      properties:
+        image: ghcr.io/example/frontend:v1.0.0
+        port: 8080
+`
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", appYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected invalid-tier error (proving kurel reads launcher.gokure.dev/tier), got nil\noutput: %s", out.String())
+	}
+	if !strings.Contains(err.Error(), "tier") {
+		t.Errorf("expected a tier-related error, got: %v", err)
+	}
+}
+
 func TestBuildCommand_StaleProfileField_Rejected(t *testing.T) {
 	const staleCraneProfile = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: ClusterProfile
