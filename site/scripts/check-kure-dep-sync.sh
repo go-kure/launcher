@@ -86,11 +86,13 @@ fi
 # --base mode: resolve the base go.mod, fetching the ref ourselves.
 resolve_base() {
   local ref="$1"
-  # Try as-is; if the object is missing, fetch it.
-  if ! git -C "$REPO_ROOT" rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
-    local remote="origin" branch="$ref"
-    [[ "$ref" == origin/* ]] && branch="${ref#origin/}"
-    git -C "$REPO_ROOT" fetch --no-tags --depth=1 "$remote" "$branch" >/dev/null 2>&1 || true
+  if [[ "$ref" == origin/* ]]; then
+    # Always refresh a remote-tracking base so a stale local origin/main can't cause
+    # false positives/negatives; best-effort so offline runs fall back to the cached ref.
+    git -C "$REPO_ROOT" fetch --no-tags --depth=1 origin "${ref#origin/}" >/dev/null 2>&1 || true
+  elif ! git -C "$REPO_ROOT" rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
+    # Non-tracking ref (e.g. a merge-base SHA): only fetch if the object is missing.
+    git -C "$REPO_ROOT" fetch --no-tags --depth=1 origin "$ref" >/dev/null 2>&1 || true
   fi
   git -C "$REPO_ROOT" rev-parse --verify --quiet "$ref^{commit}" >/dev/null
 }
