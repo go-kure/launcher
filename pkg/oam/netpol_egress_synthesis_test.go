@@ -110,8 +110,11 @@ func TestComponentEgressPolicyConfig_Generate_Shape(t *testing.T) {
 	if np.Labels != nil || np.Annotations != nil {
 		t.Errorf("expected nil Labels/Annotations, got labels=%v annotations=%v", np.Labels, np.Annotations)
 	}
-	if got := np.Spec.PodSelector.MatchLabels["app"]; got != "web" {
-		t.Errorf("podSelector app = %q, want web", got)
+	if got := np.Spec.PodSelector.MatchLabels["wharf.zone/component"]; got != "web" {
+		t.Errorf("podSelector wharf.zone/component = %q, want web", got)
+	}
+	if _, hasApp := np.Spec.PodSelector.MatchLabels["app"]; hasApp {
+		t.Errorf("podSelector should not carry legacy app key: %v", np.Spec.PodSelector.MatchLabels)
 	}
 	if len(np.Spec.PolicyTypes) != 1 || np.Spec.PolicyTypes[0] != networkingv1.PolicyTypeEgress {
 		t.Errorf("policyTypes = %v, want [Egress]", np.Spec.PolicyTypes)
@@ -150,6 +153,39 @@ func TestComponentEgressPolicyConfig_Generate_Shape(t *testing.T) {
 	}
 	if len(r1.Ports) != 1 || r1.Ports[0].Port.IntVal != 5432 || *r1.Ports[0].Protocol != corev1.ProtocolTCP {
 		t.Errorf("rule 1 ports = %v, want [5432/TCP]", r1.Ports)
+	}
+}
+
+// TestComponentEgressPolicyConfig_PodSelectorKey verifies the top-level podSelector key
+// (the egress source pods): empty defaults to wharf.zone/component, and a non-empty
+// PodSelectorKey wins (e.g. a non-crane caller opting back to "app").
+func TestComponentEgressPolicyConfig_PodSelectorKey(t *testing.T) {
+	cases := []struct {
+		name    string
+		key     string
+		wantKey string
+	}{
+		{"default", "", "wharf.zone/component"},
+		{"override_app", "app", "app"},
+		{"override_custom", "example.com/name", "example.com/name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &componentEgressPolicyConfig{
+				ComponentName:  "web",
+				PodSelectorKey: tc.key,
+				Peers: []netpol.EgressPeer{
+					{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}},
+				},
+			}
+			np := egressPolicyFromGenerate(t, cfg)
+			if got := np.Spec.PodSelector.MatchLabels[tc.wantKey]; got != "web" {
+				t.Errorf("podSelector[%q] = %q, want web (labels=%v)", tc.wantKey, got, np.Spec.PodSelector.MatchLabels)
+			}
+			if len(np.Spec.PodSelector.MatchLabels) != 1 {
+				t.Errorf("podSelector should have exactly one label, got %v", np.Spec.PodSelector.MatchLabels)
+			}
+		})
 	}
 }
 
@@ -203,7 +239,7 @@ func TestSynthesizeEgress_AppendsPolicy(t *testing.T) {
 		"web": {{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
 	}
 
-	synthesizeEgressNetworkPolicies(cluster, componentMap, peers)
+	synthesizeEgressNetworkPolicies(cluster, componentMap, peers, ComponentLabel)
 
 	leaf := cluster.Node.Bundle
 	if len(leaf.Applications) != 2 {
@@ -223,7 +259,7 @@ func TestSynthesizeEgress_AppendsPolicy(t *testing.T) {
 
 func TestSynthesizeEgress_NoOpWhenNoPeers(t *testing.T) {
 	cluster, componentMap, _ := egressFixture("web", "default")
-	synthesizeEgressNetworkPolicies(cluster, componentMap, nil)
+	synthesizeEgressNetworkPolicies(cluster, componentMap, nil, ComponentLabel)
 	if n := len(cluster.Node.Bundle.Applications); n != 1 {
 		t.Errorf("expected no synthesis for nil peers, got %d apps", n)
 	}
@@ -235,7 +271,7 @@ func TestSynthesizeEgress_NoOpWhenNoComponentMatch(t *testing.T) {
 	peers := map[string][]netpol.EgressPeer{
 		"other": {{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
 	}
-	synthesizeEgressNetworkPolicies(cluster, componentMap, peers)
+	synthesizeEgressNetworkPolicies(cluster, componentMap, peers, ComponentLabel)
 	if n := len(cluster.Node.Bundle.Applications); n != 1 {
 		t.Errorf("expected no synthesis for unmatched component, got %d apps", n)
 	}
@@ -257,7 +293,7 @@ func TestSynthesizeEgress_IdentityGuard(t *testing.T) {
 		"web": {{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
 	}
 
-	synthesizeEgressNetworkPolicies(cluster, componentMap, peers)
+	synthesizeEgressNetworkPolicies(cluster, componentMap, peers, ComponentLabel)
 
 	var policies []*stack.Application
 	for _, a := range bundle.Applications {

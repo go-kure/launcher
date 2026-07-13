@@ -37,6 +37,18 @@ type trafficRule struct {
 type componentAllowPolicyConfig struct {
 	ComponentName string
 	Rules         []trafficRule // one per collector with non-empty ports; deduplicated
+	// PodSelectorKey is the label key selecting the component's own pods (the ingress
+	// recipients). Empty => ComponentLabel ("wharf.zone/component").
+	PodSelectorKey string
+}
+
+// podSelectorKey returns the configured selector key, defaulting to ComponentLabel so a
+// directly-built config never emits an empty-key selector.
+func (c *componentAllowPolicyConfig) podSelectorKey() string {
+	if c.PodSelectorKey == "" {
+		return ComponentLabel
+	}
+	return c.PodSelectorKey
 }
 
 // ApplyPolicy is a no-op: a synthesized NetworkPolicy has no enforceable policy
@@ -49,7 +61,7 @@ func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client
 	np.Labels = nil
 	np.Annotations = nil
 	kubernetes.SetNetworkPolicyPodSelector(np, metav1.LabelSelector{
-		MatchLabels: map[string]string{"app": c.ComponentName},
+		MatchLabels: map[string]string{c.podSelectorKey(): c.ComponentName},
 	})
 	kubernetes.SetNetworkPolicyPolicyTypes(np, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress})
 
@@ -90,14 +102,16 @@ func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client
 //
 // Runs as a cluster post-build stage (Phase 4), after trait application — so the
 // synthesized policies are not subject to Enforceable.ApplyPolicy (intentional).
-func synthesizeNetworkPolicies(cluster *stack.Cluster) {
+func synthesizeNetworkPolicies(cluster *stack.Cluster, labelKey string) {
 	if cluster == nil {
 		return
 	}
-	walkLeafBundles(cluster.Node, synthesizeForBundle)
+	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
+		synthesizeForBundle(bundle, labelKey)
+	})
 }
 
-func synthesizeForBundle(bundle *stack.Bundle) {
+func synthesizeForBundle(bundle *stack.Bundle, labelKey string) {
 	if bundle == nil {
 		return
 	}
@@ -133,7 +147,7 @@ func synthesizeForBundle(bundle *stack.Bundle) {
 		autoApp := stack.NewApplication(
 			compName+"-allow-ingress-traffic",
 			entry.namespace,
-			&componentAllowPolicyConfig{ComponentName: compName, Rules: rules},
+			&componentAllowPolicyConfig{ComponentName: compName, Rules: rules, PodSelectorKey: labelKey},
 		)
 		bundle.Applications = append(bundle.Applications, autoApp)
 	}
@@ -200,6 +214,18 @@ func trafficRuleKey(sources []netpol.TrafficSource, ports []intstr.IntOrString) 
 type componentEgressPolicyConfig struct {
 	ComponentName string
 	Peers         []netpol.EgressPeer
+	// PodSelectorKey is the label key selecting the component's own pods (the egress
+	// source pods this policy allows out). Empty => ComponentLabel ("wharf.zone/component").
+	PodSelectorKey string
+}
+
+// podSelectorKey returns the configured selector key, defaulting to ComponentLabel so a
+// directly-built config never emits an empty-key selector.
+func (c *componentEgressPolicyConfig) podSelectorKey() string {
+	if c.PodSelectorKey == "" {
+		return ComponentLabel
+	}
+	return c.PodSelectorKey
 }
 
 // ApplyPolicy is a no-op: a synthesized NetworkPolicy has no enforceable policy
@@ -212,7 +238,7 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 	np.Labels = nil
 	np.Annotations = nil
 	kubernetes.SetNetworkPolicyPodSelector(np, metav1.LabelSelector{
-		MatchLabels: map[string]string{"app": c.ComponentName},
+		MatchLabels: map[string]string{c.podSelectorKey(): c.ComponentName},
 	})
 	kubernetes.SetNetworkPolicyPolicyTypes(np, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress})
 
@@ -260,7 +286,7 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 //
 // Runs as a cluster post-build stage (Phase 4), after trait application — so the
 // synthesized policies are not subject to Enforceable.ApplyPolicy (intentional).
-func synthesizeEgressNetworkPolicies(cluster *stack.Cluster, componentMap map[string]componentEntry, egressPeers map[string][]netpol.EgressPeer) {
+func synthesizeEgressNetworkPolicies(cluster *stack.Cluster, componentMap map[string]componentEntry, egressPeers map[string][]netpol.EgressPeer, labelKey string) {
 	if cluster == nil || len(egressPeers) == 0 {
 		return
 	}
@@ -282,7 +308,7 @@ func synthesizeEgressNetworkPolicies(cluster *stack.Cluster, componentMap map[st
 			autoApps = append(autoApps, stack.NewApplication(
 				app.Name+"-allow-egress-traffic",
 				app.Namespace,
-				&componentEgressPolicyConfig{ComponentName: app.Name, Peers: peers},
+				&componentEgressPolicyConfig{ComponentName: app.Name, Peers: peers, PodSelectorKey: labelKey},
 			))
 		}
 		bundle.Applications = append(bundle.Applications, autoApps...)

@@ -122,10 +122,12 @@ for the interfaces, and `examples/` for runnable applications.
 Every trait sub-app config exposes the OAM component it was emitted for via
 `ComponentName() string` (the `oam.ComponentNamed` interface) — always the component
 name, never the sub-app or K8s Service name. Consumers use it to stamp per-resource
-provenance (e.g. a `wharf.zone/component` label) without re-deriving the component
+provenance (the `wharf.zone/component` label) without re-deriving the component
 from sub-app names, which several handlers author from properties rather than
 `<component>-<suffix>`. The routing traits' existing `TargetComponentName()` (used by
-auto-NetworkPolicy synthesis) delegates to the same accessor.
+auto-NetworkPolicy synthesis) delegates to the same accessor; auto-synthesized
+NetworkPolicies target that `wharf.zone/component` label by default
+(`TransformContext.ComponentLabelKey`-overridable).
 
 ## Conventions
 

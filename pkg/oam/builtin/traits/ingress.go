@@ -368,8 +368,9 @@ func (c *IngressConfig) TrafficSources() []netpol.TrafficSource { return c.sourc
 // component name, not the K8s Service name — for resource provenance attribution.
 func (c *IngressConfig) ComponentName() string { return c.componentName }
 
-// TargetComponentName returns the OAM component label (not the K8s Service name),
-// so the synthesized NetworkPolicy selects the component's pods via {app: <name>}.
+// TargetComponentName returns the OAM component label (not the K8s Service name), so the
+// synthesized NetworkPolicy selects the component's pods via the configured component
+// label key (default {wharf.zone/component: <name>}).
 func (c *IngressConfig) TargetComponentName() string { return c.ComponentName() }
 
 // BackendPorts implements the cluster-level trafficSourceCollector contract.

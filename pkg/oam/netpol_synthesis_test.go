@@ -108,7 +108,7 @@ func TestSynthesizeForBundle_AddsNetworkPolicyApp(t *testing.T) {
 	app := stack.NewApplication("web-ingress", "default", col)
 	bundle := &stack.Bundle{Applications: []*stack.Application{app}}
 
-	synthesizeForBundle(bundle)
+	synthesizeForBundle(bundle, ComponentLabel)
 
 	if len(bundle.Applications) != 2 {
 		t.Fatalf("expected 2 applications after synthesis, got %d", len(bundle.Applications))
@@ -128,7 +128,7 @@ func TestSynthesizeForBundle_NoSynthesisWithoutSources(t *testing.T) {
 	app := stack.NewApplication("web-ingress", "default", col)
 	bundle := &stack.Bundle{Applications: []*stack.Application{app}}
 
-	synthesizeForBundle(bundle)
+	synthesizeForBundle(bundle, ComponentLabel)
 
 	if len(bundle.Applications) != 1 {
 		t.Errorf("expected no synthesis (no sources), got %d apps", len(bundle.Applications))
@@ -150,7 +150,7 @@ func TestSynthesizeForBundle_TwoCollectorsSameComponent(t *testing.T) {
 	app2 := stack.NewApplication("web-httproute", "default", col2)
 	bundle := &stack.Bundle{Applications: []*stack.Application{app1, app2}}
 
-	synthesizeForBundle(bundle)
+	synthesizeForBundle(bundle, ComponentLabel)
 
 	// One synthesized policy per component (not per collector).
 	count := 0
@@ -199,8 +199,11 @@ func TestComponentAllowPolicyConfig_Generate(t *testing.T) {
 	if np.Labels != nil || np.Annotations != nil {
 		t.Errorf("expected nil Labels/Annotations, got labels=%v annotations=%v", np.Labels, np.Annotations)
 	}
-	if got := np.Spec.PodSelector.MatchLabels["app"]; got != "web" {
-		t.Errorf("podSelector app = %q, want web", got)
+	if got := np.Spec.PodSelector.MatchLabels["wharf.zone/component"]; got != "web" {
+		t.Errorf("podSelector wharf.zone/component = %q, want web", got)
+	}
+	if _, hasApp := np.Spec.PodSelector.MatchLabels["app"]; hasApp {
+		t.Errorf("podSelector should not carry legacy app key: %v", np.Spec.PodSelector.MatchLabels)
 	}
 	if len(np.Spec.PolicyTypes) != 1 || np.Spec.PolicyTypes[0] != networkingv1.PolicyTypeIngress {
 		t.Errorf("policyTypes = %v, want [Ingress]", np.Spec.PolicyTypes)
@@ -218,4 +221,59 @@ func TestComponentAllowPolicyConfig_Generate(t *testing.T) {
 	if len(r.Ports) != 1 || r.Ports[0].Port.IntVal != 80 || *r.Ports[0].Protocol != corev1.ProtocolTCP {
 		t.Errorf("ingress ports = %v, want [80/TCP]", r.Ports)
 	}
+}
+
+// TestComponentAllowPolicyConfig_PodSelectorKey verifies the top-level podSelector key:
+// empty defaults to wharf.zone/component, and a non-empty PodSelectorKey wins (e.g. a
+// non-crane caller opting back to "app").
+func TestComponentAllowPolicyConfig_PodSelectorKey(t *testing.T) {
+	cases := []struct {
+		name    string
+		key     string
+		wantKey string
+	}{
+		{"default", "", "wharf.zone/component"},
+		{"override_app", "app", "app"},
+		{"override_custom", "example.com/name", "example.com/name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &componentAllowPolicyConfig{
+				ComponentName:  "web",
+				PodSelectorKey: tc.key,
+				Rules: []trafficRule{{
+					Sources: []netpol.TrafficSource{{Namespace: "ingress-nginx"}},
+					Ports:   []intstr.IntOrString{intstr.FromInt32(80)},
+				}},
+			}
+			np := generatedNetworkPolicy(t, cfg)
+			if got := np.Spec.PodSelector.MatchLabels[tc.wantKey]; got != "web" {
+				t.Errorf("podSelector[%q] = %q, want web (labels=%v)", tc.wantKey, got, np.Spec.PodSelector.MatchLabels)
+			}
+			if len(np.Spec.PodSelector.MatchLabels) != 1 {
+				t.Errorf("podSelector should have exactly one label, got %v", np.Spec.PodSelector.MatchLabels)
+			}
+		})
+	}
+}
+
+// generatedNetworkPolicy runs an ApplicationConfig's Generate and returns the single
+// emitted *NetworkPolicy, failing the test on any deviation.
+func generatedNetworkPolicy(t *testing.T, cfg interface {
+	Generate(*stack.Application) ([]*client.Object, error)
+}) *networkingv1.NetworkPolicy {
+	t.Helper()
+	app := stack.NewApplication("np", "default", cfg)
+	objs, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objs) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objs))
+	}
+	np, ok := (*objs[0]).(*networkingv1.NetworkPolicy)
+	if !ok {
+		t.Fatalf("expected *NetworkPolicy, got %T", *objs[0])
+	}
+	return np
 }
