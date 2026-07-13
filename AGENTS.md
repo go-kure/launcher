@@ -231,6 +231,17 @@ validated against it — never hand-edit them. To change what's published, edit
 links, blocking), and the `doc-gate` job (a mapped package's source change must
 touch its docs; bypass only via the maintainer-restricted `docs-skip` label).
 
+### No downstream references (mandatory)
+
+Launcher is an open-source go-kure project and must not name downstream, closed-source
+platform consumers in tracked source, docs, comments, tests, or identifiers. Reword any
+such reference to a generic role (e.g. "a downstream consumer" / "the downstream runtime");
+never introduce a new one. This is the go-kure organization "No Downstream References"
+standard (`go-kure/.github` → `docs/standards.md`), CI-enforced here by
+`site/scripts/check-forbidden-terms.sh` (diff-scoped on PRs, full-tree otherwise). A
+legitimately unavoidable term takes an adjacent `allow-term:<word>` pragma. The remediation
+runbook is `go-kure/.github` → `docs/no-downstream-references.md`.
+
 ### Reverse Mapping: Code to Docs
 
 This table is generated from `site/docs-map.yaml`. Do not edit it by hand — edit the

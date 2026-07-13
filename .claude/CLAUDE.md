@@ -55,6 +55,12 @@ return errors.Errorf("invalid value: %s", val)
 - `site/docs-map.yaml` is the single source of the code→docs mapping; the AGENTS reverse-map table + api-reference nav are generated from it (`bash site/scripts/gen-docs-tables.sh`) — never hand-edit them
 - Enforced in CI: `check-doc-sync.sh` (structure), `check-links.sh` (rendered links), and the `doc-gate` job (mapped-package source change must touch its docs; bypass only via the maintainer `docs-skip` label)
 
+### No Downstream References
+
+- This open-source repo must not name downstream, closed-source platform consumers in source, docs, comments, tests, or identifiers — reword to a generic role (e.g. "a downstream consumer")
+- Org standard: `go-kure/.github` → `docs/standards.md` ("No Downstream References"); remediation runbook: `docs/no-downstream-references.md`
+- CI-enforced by `site/scripts/check-forbidden-terms.sh` (diff-scoped on PRs, full-tree otherwise); a legitimately unavoidable term needs an adjacent `allow-term:<word>` pragma
+
 ### Commits
 
 Follow conventional commits:
