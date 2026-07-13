@@ -59,6 +59,8 @@ jobs:
             - 'go.sum'
             - 'Makefile'
             - '.github/workflows/**'
+            - 'site/scripts/check-kure-dep-sync.sh'
+            - 'site/scripts/kuredepsync/**'
           docs:
             - 'site/**'
             - 'docs/**'
@@ -156,6 +158,31 @@ jobs:
 
     - name: Run go vet
       run: make vet
+
+    - name: Check kuredepsync helper module
+      run: |
+        cd site/scripts/kuredepsync
+        GOWORK=off go mod tidy
+        if [ -n "$(git status --porcelain go.mod go.sum)" ]; then
+          echo "::error::kuredepsync go.mod/go.sum not tidy. Run 'go mod tidy' in site/scripts/kuredepsync."
+          git diff go.mod go.sum
+          exit 1
+        fi
+        GOWORK=off go vet ./...
+        GOWORK=off go test ./...
+
+    # Blocking on PR / merge-queue: fail only when the change newly leads imported kure
+    # on a shared direct dep. The script fetches its own base ref.
+    - name: Check launcher not newly ahead of imported kure
+      if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+      env:
+        BASE_REF: ${{ github.base_ref || 'main' }}
+      run: bash site/scripts/check-kure-dep-sync.sh --base "origin/${BASE_REF}"
+
+    # Visibility only on push / schedule (base merge-base can equal HEAD → no-op diff).
+    - name: Report launcher-kure shared-dep lead
+      if: github.event_name == 'push' || github.event_name == 'schedule'
+      run: bash site/scripts/check-kure-dep-sync.sh --report
 
     - name: Fetch base branch for diff-based lint
       if: github.event_name == 'pull_request'

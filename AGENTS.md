@@ -242,6 +242,31 @@ standard (`go-kure/.github` → `docs/standards.md`), CI-enforced here by
 legitimately unavoidable term takes an adjacent `allow-term:<word>` pragma. The remediation
 runbook is `go-kure/.github` → `docs/no-downstream-references.md`.
 
+### Shared dependencies with kure (mandatory)
+
+Launcher imports `github.com/go-kure/kure` and shares several third-party dependencies with
+it (cert-manager, fluxcd controller APIs, cloudnative-pg, external-secrets/apis, gateway-api,
+…) that launcher's own code also imports directly.
+
+**Why it matters.** Go's Minimum Version Selection makes launcher's effective version of a
+shared dep `max(launcher require, kure require)`. Launcher can therefore never fall *below*
+the kure it imports (MVS pulls it up), so the only manageable direction is launcher racing
+*ahead* — compiling kure's own code against a dependency version kure never released against.
+
+**The rule.** Launcher must not *newly* lead the kure release it imports on a shared **direct**
+dependency. Only deps that are direct requires of **both** go.mods are in scope; deps unique
+to either repo, and indirect deps (MVS-governed — they float to the max across launcher's whole
+graph), are unconstrained. Existing drift is grandfathered.
+
+**How it's enforced.** `site/scripts/check-kure-dep-sync.sh` (Go helper in
+`site/scripts/kuredepsync/`) runs in CI's `validate` job: diff-scoped and blocking on PRs /
+merge-queue (fails only when a change introduces or increases the lead), `--report`-only on
+push/schedule. Also wired into `make check` / `make precommit`.
+
+**Exception path.** Never lead unilaterally. To adopt a newer shared dep: land the matching
+kure bump → cut a kure release → bump launcher's `go-kure/kure` require to it and take the
+shared-dep bump together (yields no lead → guard passes).
+
 ### Reverse Mapping: Code to Docs
 
 This table is generated from `site/docs-map.yaml`. Do not edit it by hand — edit the

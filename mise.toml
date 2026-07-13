@@ -36,9 +36,13 @@ run = "make tidy"
 description = "Quick pre-commit check"
 run = "make check"
 
+[tasks.check-kure-dep-sync]
+description = "Guard: launcher must not newly lead imported kure on shared direct deps"
+run = "make check-kure-dep-sync"
+
 [tasks.verify]
-description = "Run all checks (tidy, lint, test)"
-depends = ["tidy", "lint", "test"]
+description = "Run all checks (tidy, lint, test, kure dep sync)"
+depends = ["tidy", "lint", "test", "check-kure-dep-sync"]
 
 [tasks.changelog]
 description = "Generate changelog from git history"

@@ -329,14 +329,19 @@ dev: tools ## Set up development environment (mise, deps, git hooks)
 # CI/CD
 # =============================================================================
 
+.PHONY: check-kure-dep-sync
+check-kure-dep-sync: ## Guard: launcher must not newly lead imported kure on shared direct deps
+	cd site/scripts/kuredepsync && GOWORK=off go mod tidy && git diff --exit-code go.mod go.sum && GOWORK=off go vet ./... && GOWORK=off go test ./...
+	bash site/scripts/check-kure-dep-sync.sh --base origin/main
+
 .PHONY: check
-check: lint vet test-short ## Quick code quality check (lint, vet, short tests)
+check: lint vet test-short check-kure-dep-sync ## Quick code quality check (lint, vet, short tests, kure dep sync)
 
 .PHONY: precommit
-precommit: fmt tidy lint test ## Run fast pre-commit checks (fmt, tidy, lint, test)
+precommit: fmt tidy lint test check-kure-dep-sync ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync)
 
 .PHONY: ci
-ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln ## Run comprehensive CI pipeline
+ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln check-kure-dep-sync ## Run comprehensive CI pipeline
 
 # =============================================================================
 # Cleanup
