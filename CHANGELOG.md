@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Target wharf.zone/component in synthesized NetworkPolicies
+- Target the platform component label in synthesized NetworkPolicies
 - Parametrize the platform label/annotation domain (default gokure.dev)
 - Guard against launcher leading kure on shared direct deps
 - Add EndpointProvider and endpoint-ingress NetworkPolicy synthesis
@@ -358,7 +358,7 @@ All notable changes to this project will be documented in this file.
 - Implement helmchart delivery: template (#83)
 - Allow routing traits on helmchart components via explicit servicePort (#89)
 - Add CapabilityDefinition schema for custom trait rendering (#66)
-- Port rbac, fluxcd-patches, fluxcd-postbuild, prune-protection traits from crane (#97 #98 #99 #100)
+- Port rbac, fluxcd-patches, fluxcd-postbuild, prune-protection traits from the downstream operator (#97 #98 #99 #100)
 
 ### Build
 
@@ -426,7 +426,7 @@ All notable changes to this project will be documented in this file.
 - Reject explicitly empty accessModes list in pvc trait
 - Address external-secret shorthand, volsync naming, and coverage
 - Preserve decodingStrategy in external-secret remoteRef shorthand
-- Align postgresql customQueries validation and bootstrap recovery tests with crane
+- Align postgresql customQueries validation and bootstrap recovery tests with the downstream operator
 - Remove wrong deprecation from ingress/httproute; fix default backend port
 - Validate implicit backends; extend ingress with per-path backend override
 - Tighten implicit-backend port guards for ingress and httproute
