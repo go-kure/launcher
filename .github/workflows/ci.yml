@@ -617,16 +617,11 @@ jobs:
       uses: actions/checkout@v7
 
     - name: Check for downstream references
-      env:
-        EVENT_NAME: ${{ github.event_name }}
-        BASE_REF: ${{ github.base_ref }}
-      run: |
-        if [ "$EVENT_NAME" = "pull_request" ]; then
-          git fetch --depth=1 origin "$BASE_REF:refs/remotes/origin/$BASE_REF"
-          bash site/scripts/check-forbidden-terms.sh --diff "origin/$BASE_REF"
-        else
-          bash site/scripts/check-forbidden-terms.sh --full-tree
-        fi
+      # Scan the whole tree on every event (pull_request and merge_group alike) so a PR
+      # can never be green while the merge queue would reject it. A diff-scoped PR check
+      # let pre-existing violations (e.g. release-generated CHANGELOG lines) pass the PR
+      # yet block admission at the queue.
+      run: bash site/scripts/check-forbidden-terms.sh --full-tree
 
     - name: Read Hugo version from mise.toml
       id: hugo-version
