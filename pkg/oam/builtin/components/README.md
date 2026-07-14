@@ -43,6 +43,11 @@ share these fields: `image` (validated — no untagged/`latest`), `env` (with
 ## Per-type highlights
 
 - **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice).
+  The `webservice` handler implements the optional `oam.EndpointProvider`: it declares its own
+  pods (`app: <component-name>`) on the declared `port` (its single `port` property drives both
+  the container port and the Service port), letting a downstream platform synthesize generic
+  app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
+  Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
 - **statefulset** — `volumeClaimTemplates` (`name`, `size`, `storageClass`,
   `accessModes`, `mountPath`), `serviceName` (headless).
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`); `port`
