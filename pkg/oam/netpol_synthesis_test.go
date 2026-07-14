@@ -6,11 +6,47 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
+
+// extBackendStub is a router collector (traffic sources + external backend targets, no self ports)
+// used to exercise external-backend synthesis across multiple leaf bundles.
+type extBackendStub struct {
+	component string
+	sources   []netpol.TrafficSource
+	targets   []netpol.BackendTarget
+}
+
+func (s *extBackendStub) Generate(_ *stack.Application) ([]*client.Object, error) { return nil, nil }
+func (s *extBackendStub) TrafficSources() []netpol.TrafficSource                  { return s.sources }
+func (s *extBackendStub) TargetComponentName() string                             { return s.component }
+func (s *extBackendStub) BackendPorts() []intstr.IntOrString                      { return nil }
+func (s *extBackendStub) BackendTargets() []netpol.BackendTarget                  { return s.targets }
+
+// twoLeafBundleCluster builds a cluster whose root node has two child leaf bundles, each holding one
+// application — the minimal multi-bundle shape a dependency-aware/hierarchical transform produces.
+func twoLeafBundleCluster(a, b *stack.Application) *stack.Cluster {
+	return &stack.Cluster{Node: &stack.Node{Children: []*stack.Node{
+		{Bundle: &stack.Bundle{Applications: []*stack.Application{a}}},
+		{Bundle: &stack.Bundle{Applications: []*stack.Application{b}}},
+	}}}
+}
+
+func countClusterApps(c *stack.Cluster, name string) int {
+	n := 0
+	walkLeafBundles(c.Node, func(bundle *stack.Bundle) {
+		for _, a := range bundle.Applications {
+			if a.Name == name {
+				n++
+			}
+		}
+	})
+	return n
+}
 
 // stubCollector implements trafficSourceCollector and stack.ApplicationConfig for synthesis tests.
 type stubCollector struct {
@@ -108,7 +144,11 @@ func TestSynthesizeForBundle_AddsNetworkPolicyApp(t *testing.T) {
 	app := stack.NewApplication("web-ingress", "default", col)
 	bundle := &stack.Bundle{Applications: []*stack.Application{app}}
 
-	synthesizeForBundle(bundle, nil, ComponentLabel)
+	reg := newNPSynthesisRegistry()
+	if err := synthesizeForBundle(bundle, nil, ComponentLabel, reg); err != nil {
+		t.Fatalf("synthesizeForBundle: %v", err)
+	}
+	reg.flush()
 
 	if len(bundle.Applications) != 2 {
 		t.Fatalf("expected 2 applications after synthesis, got %d", len(bundle.Applications))
@@ -128,7 +168,11 @@ func TestSynthesizeForBundle_NoSynthesisWithoutSources(t *testing.T) {
 	app := stack.NewApplication("web-ingress", "default", col)
 	bundle := &stack.Bundle{Applications: []*stack.Application{app}}
 
-	synthesizeForBundle(bundle, nil, ComponentLabel)
+	reg := newNPSynthesisRegistry()
+	if err := synthesizeForBundle(bundle, nil, ComponentLabel, reg); err != nil {
+		t.Fatalf("synthesizeForBundle: %v", err)
+	}
+	reg.flush()
 
 	if len(bundle.Applications) != 1 {
 		t.Errorf("expected no synthesis (no sources), got %d apps", len(bundle.Applications))
@@ -150,7 +194,11 @@ func TestSynthesizeForBundle_TwoCollectorsSameComponent(t *testing.T) {
 	app2 := stack.NewApplication("web-httproute", "default", col2)
 	bundle := &stack.Bundle{Applications: []*stack.Application{app1, app2}}
 
-	synthesizeForBundle(bundle, nil, ComponentLabel)
+	reg := newNPSynthesisRegistry()
+	if err := synthesizeForBundle(bundle, nil, ComponentLabel, reg); err != nil {
+		t.Fatalf("synthesizeForBundle: %v", err)
+	}
+	reg.flush()
 
 	// One synthesized policy per component (not per collector).
 	count := 0
@@ -276,4 +324,85 @@ func generatedNetworkPolicy(t *testing.T, cfg interface {
 		t.Fatalf("expected *NetworkPolicy, got %T", *objs[0])
 	}
 	return np
+}
+
+// --- #239: external-backend synthesis is cluster-wide, not per-bundle ---
+
+// Two routers in DIFFERENT leaf bundles naming the same external Service (same namespace + selector)
+// must emit exactly ONE policy — a per-bundle accumulator would emit a duplicate resource id.
+func TestSynthesizeNetworkPolicies_ExternalBackend_MultiBundle_SameSelector_SinglePolicy(t *testing.T) {
+	mk := func(comp string) *stack.Application {
+		return stack.NewApplication(comp+"-ingress", "default", &extBackendStub{
+			component: comp,
+			sources:   []netpol.TrafficSource{{Namespace: "ingress-nginx"}},
+			targets: []netpol.BackendTarget{{
+				ServiceName: "external-svc",
+				Ports:       []intstr.IntOrString{intstr.FromInt32(8081)},
+				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "external"}},
+			}},
+		})
+	}
+	cluster := twoLeafBundleCluster(mk("router-a"), mk("router-b"))
+	if err := synthesizeNetworkPolicies(cluster, nil, ComponentLabel); err != nil {
+		t.Fatalf("synthesizeNetworkPolicies: %v", err)
+	}
+	if got := countClusterApps(cluster, "external-svc-allow-ingress-traffic"); got != 1 {
+		t.Errorf("expected exactly one external-svc-allow-ingress-traffic across bundles, got %d", got)
+	}
+}
+
+// The same two routers with DIFFERENT selectors for one external Service must fail the transform —
+// a per-bundle check would miss the cross-bundle conflict and emit two colliding allows.
+func TestSynthesizeNetworkPolicies_ExternalBackend_MultiBundle_ConflictingSelectors_Errors(t *testing.T) {
+	mk := func(comp, label string) *stack.Application {
+		return stack.NewApplication(comp+"-ingress", "default", &extBackendStub{
+			component: comp,
+			sources:   []netpol.TrafficSource{{Namespace: "ingress-nginx"}},
+			targets: []netpol.BackendTarget{{
+				ServiceName: "external-svc",
+				Ports:       []intstr.IntOrString{intstr.FromInt32(8081)},
+				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": label}},
+			}},
+		})
+	}
+	cluster := twoLeafBundleCluster(mk("router-a", "external"), mk("router-b", "other"))
+	if err := synthesizeNetworkPolicies(cluster, nil, ComponentLabel); err == nil {
+		t.Fatal("expected an error for one external Service given different selectors across bundles")
+	}
+}
+
+// On any synthesis error, every append is deferred past the failure point, so the cluster is left
+// completely unmutated — an earlier bundle's component policy must not survive a later conflict.
+func TestSynthesizeNetworkPolicies_ExternalConflict_LeavesClusterUnmutated(t *testing.T) {
+	web := stack.NewApplication("web-ingress", "default", &stubCollector{
+		component: "web",
+		sources:   []netpol.TrafficSource{{Namespace: "ingress-nginx"}},
+		ports:     []intstr.IntOrString{intstr.FromInt32(80)},
+	})
+	mkRouter := func(comp, label string) *stack.Application {
+		return stack.NewApplication(comp+"-ingress", "default", &extBackendStub{
+			component: comp,
+			sources:   []netpol.TrafficSource{{Namespace: "ingress-nginx"}},
+			targets: []netpol.BackendTarget{{
+				ServiceName: "external-svc",
+				Ports:       []intstr.IntOrString{intstr.FromInt32(8081)},
+				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": label}},
+			}},
+		})
+	}
+	// Bundle A also carries a component (web) that would emit an inbound policy; bundle B triggers a
+	// cross-bundle external-selector conflict.
+	cluster := &stack.Cluster{Node: &stack.Node{Children: []*stack.Node{
+		{Bundle: &stack.Bundle{Applications: []*stack.Application{web, mkRouter("router-a", "external")}}},
+		{Bundle: &stack.Bundle{Applications: []*stack.Application{mkRouter("router-b", "other")}}},
+	}}}
+	if err := synthesizeNetworkPolicies(cluster, nil, ComponentLabel); err == nil {
+		t.Fatal("expected a cross-bundle selector conflict error")
+	}
+	if got := countClusterApps(cluster, "web-allow-ingress-traffic"); got != 0 {
+		t.Errorf("expected cluster unmutated after error, found %d web-allow-ingress-traffic", got)
+	}
+	if got := countClusterApps(cluster, "external-svc-allow-ingress-traffic"); got != 0 {
+		t.Errorf("expected no external policy after error, found %d", got)
+	}
 }

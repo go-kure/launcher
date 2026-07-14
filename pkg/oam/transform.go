@@ -407,7 +407,9 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	if labelKey == "" {
 		labelKey = ComponentLabelKeyForDomain(ctx.Domain)
 	}
-	synthesizeNetworkPolicies(cluster, componentMap, labelKey)
+	if err := synthesizeNetworkPolicies(cluster, componentMap, labelKey); err != nil {
+		return nil, nil, err
+	}
 	// Egress synthesis fails fast on a malformed non-authorable peer (ported but selector-less):
 	// a producer bug should fail the build, not silently emit a namespace-wide egress allow.
 	if err := synthesizeEgressNetworkPolicies(cluster, componentMap, ctx.EgressPeers, labelKey); err != nil {

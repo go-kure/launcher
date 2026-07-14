@@ -37,7 +37,16 @@ each a **separate** additive resource (the authored `networkpolicy` /
   `backendRef` names a **separate** in-bundle backend Service (not the exposing component's own),
   the allow is **retargeted onto that backend component's pods** + the backendRef port — resolved
   by matching the backend Service name to a sibling OAM component in the same bundle. A backendRef
-  that resolves to no in-bundle component is left authored (documented fallback).
+  that resolves to no in-bundle component (a **bare external Service**) is left authored **unless**
+  it carries an explicit authored `backendSelector` (matchLabels only, on the routing trait's
+  `paths[].backend` / `backendRefs[]` — the selector is not inferable from a Service name): that
+  emits a separate `{service}-allow-ingress-traffic` policy in the router's namespace selecting the
+  backend's pods on the backendRef ports. **Same-namespace only** (the backend is referenced by bare
+  name; cross-namespace `ReferenceGrant` is out of scope). External backends are deduplicated
+  **cluster-wide** (routers in different leaf bundles naming the same Service emit one merged
+  policy). Two routers giving one external Service different selectors, or an external policy name
+  colliding with a component's emitted inbound policy, **fails the transform** rather than emitting
+  conflicting or duplicate allows.
 - **Egress** (`{comp}-allow-egress-traffic`) — from `TransformContext.EgressPeers`, a
   downstream-supplied, non-authorable synthesis input (graph-derived dependency peers; never
   set from OAM YAML or capability rendering). K8s `NetworkPolicy` only. Empty when a

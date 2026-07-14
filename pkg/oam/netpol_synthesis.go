@@ -77,8 +77,19 @@ func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client
 	})
 	kubernetes.SetNetworkPolicyPolicyTypes(np, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress})
 
+	appendIngressTrafficRules(np, c.Rules)
+
+	obj := client.Object(np)
+	return []*client.Object{&obj}, nil
+}
+
+// appendIngressTrafficRules emits one NetworkPolicy ingress rule per trafficRule: a namespace peer
+// (optionally narrowed by the source's matchLabels pod selector, else namespace-wide) for each
+// source, and the rule's ports (TCP). Shared by the inbound component family and the external
+// backend family so their From/Ports emission cannot drift.
+func appendIngressTrafficRules(np *networkingv1.NetworkPolicy, rules []trafficRule) {
 	proto := corev1.ProtocolTCP
-	for _, tr := range c.Rules {
+	for _, tr := range rules {
 		rule := networkingv1.NetworkPolicyIngressRule{}
 		for _, src := range tr.Sources {
 			peer := networkingv1.NetworkPolicyPeer{
@@ -102,6 +113,37 @@ func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client
 		}
 		kubernetes.AddNetworkPolicyIngressRule(np, rule)
 	}
+}
+
+// backendIngressAllowPolicyConfig is the ApplicationConfig for an auto-generated NetworkPolicy that
+// allows ingress to an EXTERNAL routing backend — a bare Service with no owning OAM component (#239).
+// Unlike componentAllowPolicyConfig it selects an explicit, authored pod selector (the backend's
+// pods) rather than a component-label key, and takes an explicit resource name. Like the inbound
+// family (and unlike endpoint-ingress), it permits namespace-wide sources, since routing
+// trafficSources are typically namespace-scoped.
+type backendIngressAllowPolicyConfig struct {
+	PolicyName  string
+	PodSelector *metav1.LabelSelector // authored backend selector (matchLabels-only)
+	Rules       []trafficRule
+}
+
+// ApplyPolicy is a no-op: a synthesized NetworkPolicy has no enforceable policy fields.
+func (c *backendIngressAllowPolicyConfig) ApplyPolicy(_ Policy) error { return nil }
+
+func (c *backendIngressAllowPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	// Residual fail-closed: never emit a policy that selects every pod in the namespace, even for a
+	// directly-built config (the synthesis path already validates the selector before constructing).
+	// A directly-built invalid config emits nothing, not an error.
+	if !matchLabelsSelectorValid(c.PodSelector) {
+		return nil, nil
+	}
+	np := kubernetes.CreateNetworkPolicy(c.PolicyName, app.Namespace)
+	np.Labels = nil
+	np.Annotations = nil
+	kubernetes.SetNetworkPolicyPodSelector(np, *c.PodSelector)
+	kubernetes.SetNetworkPolicyPolicyTypes(np, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress})
+
+	appendIngressTrafficRules(np, c.Rules)
 
 	obj := client.Object(np)
 	return []*client.Object{&obj}, nil
@@ -114,13 +156,114 @@ func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client
 //
 // Runs as a cluster post-build stage (Phase 4), after trait application — so the
 // synthesized policies are not subject to Enforceable.ApplyPolicy (intentional).
-func synthesizeNetworkPolicies(cluster *stack.Cluster, componentMap map[string]componentEntry, labelKey string) {
+func synthesizeNetworkPolicies(cluster *stack.Cluster, componentMap map[string]componentEntry, labelKey string) error {
 	if cluster == nil {
-		return
+		return nil
 	}
+	// External-backend accumulation and name-collision detection are CLUSTER-wide, not per-bundle:
+	// two routers in different leaf bundles can name the same external Service in the same namespace,
+	// which would otherwise emit duplicate NetworkPolicy resource ids (or miss a cross-bundle
+	// selector conflict). Component policies stay per-bundle (a component lives in exactly one
+	// bundle, so its name is already cluster-unique).
+	reg := newNPSynthesisRegistry()
+	// walkLeafBundles cannot abort traversal, so capture the first error and guard the callback.
+	var firstErr error
 	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
-		synthesizeForBundle(bundle, componentMap, labelKey)
+		if firstErr != nil {
+			return
+		}
+		if err := synthesizeForBundle(bundle, componentMap, labelKey, reg); err != nil {
+			firstErr = err
+		}
 	})
+	if firstErr != nil {
+		return firstErr
+	}
+	if err := reg.emitExternalBackends(); err != nil {
+		return err
+	}
+	// Every append is deferred to here, so an error at any point above leaves the cluster
+	// completely unmutated (no partially-decorated bundle observable by a direct caller).
+	reg.flush()
+	return nil
+}
+
+// externalBackendEntry accumulates one external routing backend (a bare Service with no owning
+// component) cluster-wide, keyed namespace-qualified. rules merge across every router that names it;
+// bundle is the leaf bundle its synthesized policy attaches to (the first router's, by walk order).
+type externalBackendEntry struct {
+	selector  *metav1.LabelSelector
+	namespace string
+	service   string
+	bundle    *stack.Bundle
+	rules     []trafficRule
+}
+
+// pendingSynthApp is a synthesized application queued for append to its bundle. All appends are
+// deferred until every bundle has been validated, so a later error leaves no partial mutation.
+type pendingSynthApp struct {
+	bundle *stack.Bundle
+	app    *stack.Application
+}
+
+// npSynthesisRegistry holds cluster-wide synthesis state: every emitted policy's namespace/name (to
+// detect external-vs-component collisions), the external-backend accumulator, and the deferred
+// append queue.
+type npSynthesisRegistry struct {
+	emitted          map[string]struct{}              // namespace/name of every synthesized policy
+	externalBackends map[string]*externalBackendEntry // key: namespace\x00service
+	externalOrder    []string
+	pending          []pendingSynthApp
+}
+
+func newNPSynthesisRegistry() *npSynthesisRegistry {
+	return &npSynthesisRegistry{
+		emitted:          map[string]struct{}{},
+		externalBackends: map[string]*externalBackendEntry{},
+	}
+}
+
+// queue records a synthesized app for deferred append to its bundle.
+func (r *npSynthesisRegistry) queue(bundle *stack.Bundle, app *stack.Application) {
+	r.pending = append(r.pending, pendingSynthApp{bundle: bundle, app: app})
+}
+
+// flush appends every queued app to its bundle. Called once, after all validation succeeds — the
+// only step that mutates a bundle.
+func (r *npSynthesisRegistry) flush() {
+	for _, p := range r.pending {
+		p.bundle.Applications = append(p.bundle.Applications, p.app)
+	}
+}
+
+// emitExternalBackends queues one {service}-allow-ingress-traffic policy per accumulated external
+// backend, after every bundle has contributed. It fails the transform when an external policy name
+// collides with a policy already emitted this pass (a component whose Service name differs, leaving
+// a bare external Service that shares the component's name). Runs after the walk so the collision
+// check sees every component policy cluster-wide; the queued apps are appended only by flush().
+func (r *npSynthesisRegistry) emitExternalBackends() error {
+	sort.Strings(r.externalOrder)
+	for _, key := range r.externalOrder {
+		eb := r.externalBackends[key]
+		rules := appendDedupTrafficRules(nil, eb.rules)
+		if len(rules) == 0 {
+			continue
+		}
+		policyName := eb.service + "-allow-ingress-traffic"
+		nsName := eb.namespace + "/" + policyName
+		if _, dup := r.emitted[nsName]; dup {
+			return errors.Errorf(
+				"external backend Service %q in namespace %q collides with a synthesized policy named %q",
+				eb.service, eb.namespace, policyName)
+		}
+		r.emitted[nsName] = struct{}{}
+		r.queue(eb.bundle, stack.NewApplication(
+			policyName,
+			eb.namespace,
+			&backendIngressAllowPolicyConfig{PolicyName: policyName, PodSelector: eb.selector, Rules: rules},
+		))
+	}
+	return nil
 }
 
 // backendRefTargetCollector is optionally implemented by routing trait configs (IngressConfig,
@@ -131,9 +274,9 @@ type backendRefTargetCollector interface {
 	BackendTargets() []netpol.BackendTarget
 }
 
-func synthesizeForBundle(bundle *stack.Bundle, componentMap map[string]componentEntry, labelKey string) {
+func synthesizeForBundle(bundle *stack.Bundle, componentMap map[string]componentEntry, labelKey string, reg *npSynthesisRegistry) error {
 	if bundle == nil {
-		return
+		return nil
 	}
 
 	// Group collectors by component name, preserving insertion order for determinism. injected
@@ -199,19 +342,53 @@ func synthesizeForBundle(bundle *stack.Bundle, componentMap map[string]component
 		}
 		for _, target := range bt.BackendTargets() {
 			backendComp, resolved := serviceToComponent[target.ServiceName]
-			if !resolved || backendComp == name {
-				continue // unresolvable (authored fallback) or self (already handled above)
+			if resolved {
+				if backendComp == name {
+					continue // self (already handled above)
+				}
+				// #227: retarget onto the in-bundle backend component's pods. An authored
+				// backendSelector on a resolvable ref is ignored — component-label targeting wins.
+				bg := ensureGroup(backendComp)
+				// The backend group's namespace must come from the backend's own app, not the
+				// router-bearing collector's; source it from componentMap.
+				if entry, ok := componentMap[backendComp]; ok {
+					bg.namespace = entry.app.Namespace
+				}
+				bg.injected = append(bg.injected, trafficRule{Sources: sources, Ports: target.Ports})
+				continue
 			}
-			bg := ensureGroup(backendComp)
-			// The backend group's namespace must come from the backend's own app, not the
-			// router-bearing collector's; source it from componentMap.
-			if entry, ok := componentMap[backendComp]; ok {
-				bg.namespace = entry.app.Namespace
+			// #239: external bare Service. Synthesize only with an explicit, valid authored
+			// selector; otherwise leave authored (current behavior — no name-based inference).
+			// Accumulate cluster-wide (in reg) so a Service named across bundles is deduped/merged
+			// and a cross-bundle selector conflict is still caught.
+			if target.PodSelector == nil || !matchLabelsSelectorValid(target.PodSelector) {
+				continue
 			}
-			bg.injected = append(bg.injected, trafficRule{Sources: sources, Ports: target.Ports})
+			ebKey := appPtr.Namespace + "\x00" + target.ServiceName
+			eb, ok := reg.externalBackends[ebKey]
+			if !ok {
+				eb = &externalBackendEntry{
+					selector:  target.PodSelector,
+					namespace: appPtr.Namespace,
+					service:   target.ServiceName,
+					bundle:    bundle,
+				}
+				reg.externalBackends[ebKey] = eb
+				reg.externalOrder = append(reg.externalOrder, ebKey)
+			} else if !matchLabelsSelectorEqual(eb.selector, target.PodSelector) {
+				return errors.Errorf(
+					"external backend Service %q in namespace %q given conflicting backendSelector values",
+					target.ServiceName, appPtr.Namespace)
+			}
+			eb.rules = append(eb.rules, trafficRule{Sources: sources, Ports: target.Ports})
 		}
 	}
 
+	// Queue the per-component inbound policies for this bundle, recording their names in the
+	// cluster-wide registry so external-backend collisions can be detected against the full set.
+	// Nothing is appended here — every synthesized app (component + external) is flushed only after
+	// the whole cluster is walked and validated (synthesizeNetworkPolicies), so any error leaves the
+	// cluster unmutated.
 	for _, compName := range componentOrder {
 		entry := byComponent[compName]
 		rules := buildTrafficRules(entry.collectors)
@@ -219,13 +396,38 @@ func synthesizeForBundle(bundle *stack.Bundle, componentMap map[string]component
 		if len(rules) == 0 {
 			continue
 		}
-		autoApp := stack.NewApplication(
-			compName+"-allow-ingress-traffic",
+		policyName := compName + "-allow-ingress-traffic"
+		reg.emitted[entry.namespace+"/"+policyName] = struct{}{}
+		reg.queue(bundle, stack.NewApplication(
+			policyName,
 			entry.namespace,
 			&componentAllowPolicyConfig{ComponentName: compName, Rules: rules, PodSelectorKey: labelKey},
-		)
-		bundle.Applications = append(bundle.Applications, autoApp)
+		))
 	}
+	return nil
+}
+
+// matchLabelsSelectorValid is the bool form of validateMatchLabelsSelector, for fail-closed
+// drop paths that must not surface a nil error (avoids a nilerr lint on Generate).
+func matchLabelsSelectorValid(sel *metav1.LabelSelector) bool {
+	return validateMatchLabelsSelector(sel) == nil
+}
+
+// matchLabelsSelectorEqual reports whether two matchLabels-only selectors are equal (both nil counts
+// as equal). Used to detect an external Service given two different backendSelector values.
+func matchLabelsSelectorEqual(a, b *metav1.LabelSelector) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	if len(a.MatchLabels) != len(b.MatchLabels) {
+		return false
+	}
+	for k, v := range a.MatchLabels {
+		if b.MatchLabels[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // appendDedupTrafficRules appends extra rules to base, skipping any whose (sources, ports) key

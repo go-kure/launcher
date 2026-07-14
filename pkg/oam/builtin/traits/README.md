@@ -121,6 +121,28 @@ resolves to no in-bundle component is **left authored**. Resolution assumes the 
 port equals its container port, which holds for all builtin components (e.g. webservice sets
 `TargetPort == Port`).
 
+A backend that names a **bare external Service** (no owning OAM component in the bundle) cannot be
+resolved to a selector by name. To synthesize an allow for it, add an explicit authorable
+`backendSelector` (matchLabels only) beside the backend reference —
+`rules[].paths[].backendSelector` (ingress/expose) or `rules[].backendRefs[].backendSelector`
+(httproute):
+
+```yaml
+paths:
+  - path: /
+    backend: external-svc      # a Service with no OAM component
+    port: 8081
+    backendSelector:
+      matchLabels:
+        app.kubernetes.io/name: external
+```
+
+This emits a `{service}-allow-ingress-traffic` policy in the router's namespace selecting the
+backend's pods on the backend ports. Without a `backendSelector`, an external backend stays authored
+(no selector is ever inferred from the Service name). A `backendSelector` on a self/implicit backend
+is rejected (it could never take effect), and a `backendSelector` on a ref that resolves to a
+sibling component is ignored (component-label retargeting wins). Same-namespace only.
+
 ## Extending
 
 Custom traits implement `oam.TraitHandler` (`CanHandle` + `Apply`), optionally
