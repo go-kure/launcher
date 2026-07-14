@@ -585,6 +585,20 @@ type componentEndpointIngressPolicyConfig struct {
 	ComponentName string
 	Endpoint      netpol.Endpoint       // this policy's single endpoint (podSelector + ports)
 	Rules         []endpointIngressRule // one per distinct source set, deduplicated
+	// PolicyName is the resource name for the emitted NetworkPolicy. Empty => the bare
+	// {ComponentName}-allow-endpoint-ingress default (directly-built/test configs); the synthesis
+	// path always sets the per-endpoint suffixed name so multi-endpoint resource names don't collide.
+	PolicyName string
+}
+
+// policyName returns the configured resource name, defaulting to the bare
+// {ComponentName}-allow-endpoint-ingress so a directly-built config still emits a valid single-
+// endpoint name. Mirrors the podSelectorKey() default-fallback pattern of the other families.
+func (c *componentEndpointIngressPolicyConfig) policyName() string {
+	if c.PolicyName == "" {
+		return c.ComponentName + "-allow-endpoint-ingress"
+	}
+	return c.PolicyName
 }
 
 // ApplyPolicy is a no-op: a synthesized NetworkPolicy has no enforceable policy fields
@@ -607,7 +621,7 @@ func (c *componentEndpointIngressPolicyConfig) Generate(app *stack.Application) 
 		return nil, nil // no valid sources; an Ingress NP with zero rules would deny all ingress
 	}
 
-	np := kubernetes.CreateNetworkPolicy(c.ComponentName+"-allow-endpoint-ingress", app.Namespace)
+	np := kubernetes.CreateNetworkPolicy(c.policyName(), app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
 	kubernetes.SetNetworkPolicyPodSelector(np, *c.Endpoint.PodSelector)
@@ -670,13 +684,18 @@ func synthesizeEndpointIngressNetworkPolicies(cluster *stack.Cluster, componentM
 			// downstream prune+create).
 			multi := len(groups) > 1
 			for _, g := range groups {
+				// Compute the per-endpoint name once and bind it to both the layout Application and
+				// the emitted resource, so a multi-endpoint component's NetworkPolicy resource names
+				// are distinct (not just its layout names).
+				name := endpointIngressPolicyName(app.Name, g.Endpoint, multi)
 				autoApps = append(autoApps, stack.NewApplication(
-					endpointIngressPolicyName(app.Name, g.Endpoint, multi),
+					name,
 					app.Namespace,
 					&componentEndpointIngressPolicyConfig{
 						ComponentName: app.Name,
 						Endpoint:      g.Endpoint,
 						Rules:         g.Rules,
+						PolicyName:    name,
 					},
 				))
 			}

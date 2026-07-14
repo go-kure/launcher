@@ -60,7 +60,9 @@ each a **separate** additive resource (the authored `networkpolicy` /
   its dependency graph. One policy is emitted **per distinct endpoint**: a single-endpoint
   component keeps the bare `{comp}-allow-endpoint-ingress` name, while a multi-endpoint component
   (e.g. a CloudNativePG cluster plus its pooler) suffixes each policy with a short content hash of
-  the endpoint, so the names are distinct and stay stable across unrelated endpoint additions.
+  the endpoint, so the names are distinct and stay stable across unrelated endpoint additions. The
+  suffix names the emitted **NetworkPolicy resource** itself (not just the internal layout entry),
+  so a multi-endpoint component's resource ids are unique and `kustomize build` accepts them.
 
 The inbound/egress families select the component's own pods (the ingress recipients / the egress
 source pods) via a **derived `<domain>/component`** label by default — the domain comes
