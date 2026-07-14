@@ -254,6 +254,12 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 	// Normalize here too (not just on the synthesis path) so a config built
 	// directly can never emit an all-ports rule from an empty-port peer.
 	for _, peer := range buildEgressPeers(c.Peers) {
+		// Residual defense behind the synthesizeEgressNetworkPolicies boundary check: reject a
+		// ported peer with an invalid selector here too, so a directly-built config can never
+		// emit a namespace-wide egress allow if the loud layer is ever bypassed.
+		if err := validateMatchLabelsSelector(peer.PodSelector); err != nil {
+			return nil, errors.Wrapf(err, "component %q egress peer", c.ComponentName)
+		}
 		// One egress rule per peer: a NetworkPolicyEgressRule is (any To) AND (any
 		// Ports), so grouping peers with differing ports would cross-product them
 		// (one peer reachable on another's ports).
@@ -291,9 +297,33 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 //
 // Runs as a cluster post-build stage (Phase 4), after trait application — so the
 // synthesized policies are not subject to Enforceable.ApplyPolicy (intentional).
-func synthesizeEgressNetworkPolicies(cluster *stack.Cluster, componentMap map[string]componentEntry, egressPeers map[string][]netpol.EgressPeer, labelKey string) {
+//
+// Loud layer (fail-fast): it returns an error for any peer that carries ports but a nil, empty,
+// or expression-bearing pod selector — which would otherwise emit a namespace-wide egress allow
+// (to.PodSelector nil/empty = all pods in the namespace). EgressPeers is non-authorable
+// (platform-supplied), so a malformed peer is a producer bug; erroring surfaces it at build time
+// rather than silently widening egress — or, under default-deny, silently emitting a too-narrow
+// rule. The len(Ports)==0 skip stays a documented escape hatch, not an invariant violation.
+func synthesizeEgressNetworkPolicies(cluster *stack.Cluster, componentMap map[string]componentEntry, egressPeers map[string][]netpol.EgressPeer, labelKey string) error {
 	if cluster == nil || len(egressPeers) == 0 {
-		return
+		return nil
+	}
+	// Validate the whole non-authorable input up front (sorted keys → deterministic first error),
+	// independent of which components happen to appear in a bundle.
+	comps := make([]string, 0, len(egressPeers))
+	for name := range egressPeers {
+		comps = append(comps, name)
+	}
+	sort.Strings(comps)
+	for _, name := range comps {
+		for i, p := range egressPeers[name] {
+			if len(p.Ports) == 0 {
+				continue // documented escape hatch: underivable ports → peer stays authored
+			}
+			if err := validateMatchLabelsSelector(p.PodSelector); err != nil {
+				return errors.Wrapf(err, "component %q egress peer[%d]", name, i)
+			}
+		}
 	}
 	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
 		var autoApps []*stack.Application
@@ -318,6 +348,7 @@ func synthesizeEgressNetworkPolicies(cluster *stack.Cluster, componentMap map[st
 		}
 		bundle.Applications = append(bundle.Applications, autoApps...)
 	})
+	return nil
 }
 
 // buildEgressPeers normalizes downstream-supplied egress peers for deterministic output:
@@ -383,15 +414,26 @@ func sortIntOrStringPorts(ports []intstr.IntOrString) {
 
 // --- Endpoint-ingress synthesis (platform-supplied, non-authorable target-side allows) ---
 
+// validateMatchLabelsSelector is the single shared selector validator for the synthesis paths:
+// a pod selector must be non-nil, carry non-empty matchLabels, and use matchLabels only (no
+// matchExpressions). Both the egress fail-fast path and endpoint validation route through it so
+// the "matchLabels-only, non-empty" rule cannot drift between the two synthesis families.
+func validateMatchLabelsSelector(sel *metav1.LabelSelector) error {
+	if sel == nil || len(sel.MatchLabels) == 0 {
+		return errors.New("pod selector must have non-empty matchLabels")
+	}
+	if len(sel.MatchExpressions) > 0 {
+		return errors.New("pod selector must be matchLabels-only (no matchExpressions)")
+	}
+	return nil
+}
+
 // validateEndpoint fails closed on a malformed endpoint: the pod selector is required and
 // matchLabels-only, and at least one port is required. Used to reject bad EndpointProvider
 // output (a launcher-internal bug) and to guard directly-built endpoint-ingress configs.
 func validateEndpoint(e netpol.Endpoint) error {
-	if e.PodSelector == nil || len(e.PodSelector.MatchLabels) == 0 {
-		return errors.New("endpoint pod selector must have non-empty matchLabels")
-	}
-	if len(e.PodSelector.MatchExpressions) > 0 {
-		return errors.New("endpoint pod selector must be matchLabels-only (no matchExpressions)")
+	if err := validateMatchLabelsSelector(e.PodSelector); err != nil {
+		return errors.Wrap(err, "endpoint")
 	}
 	if len(e.Ports) == 0 {
 		return errors.New("endpoint must declare at least one port")

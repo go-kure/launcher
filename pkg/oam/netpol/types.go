@@ -21,11 +21,17 @@ type TrafficSource struct {
 // per-component egress NetworkPolicy. It is a downstream-supplied, non-authorable
 // synthesis input surfaced from the downstream runtime's dependency graph — OAM authors cannot
 // set it. Namespace is required; PodSelector narrows to specific pods within
-// that namespace (matchLabels only; nil = all pods); Ports are the destination
-// ports (TCP). A peer with no Ports is skipped by synthesis.
+// that namespace (matchLabels only); Ports are the destination ports (TCP).
+//
+// Fail-fast (aligned with the endpoint-ingress family): a peer that carries Ports but a nil,
+// empty-matchLabels, or expression-bearing PodSelector is a producer bug and is rejected with a
+// build error — it would otherwise emit a namespace-wide egress allow (to.PodSelector nil/empty =
+// all pods). A peer with no Ports is the documented escape hatch: it is silently skipped by
+// synthesis (the destination stays authored), so a ported-but-selector-less peer never slips
+// through as "all pods".
 type EgressPeer struct {
 	Namespace   string
-	PodSelector *metav1.LabelSelector // nil = all pods; matchLabels only
+	PodSelector *metav1.LabelSelector // required matchLabels when Ports set (else the peer is skipped)
 	Ports       []intstr.IntOrString
 }
 

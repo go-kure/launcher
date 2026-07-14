@@ -97,8 +97,9 @@ func TestComponentEgressPolicyConfig_Generate_Shape(t *testing.T) {
 				Ports:       []intstr.IntOrString{intstr.FromInt32(5432)},
 			},
 			{
-				Namespace: "cache",
-				Ports:     []intstr.IntOrString{intstr.FromInt32(6379)},
+				Namespace:   "cache",
+				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "redis"}},
+				Ports:       []intstr.IntOrString{intstr.FromInt32(6379)},
 			},
 		},
 	}
@@ -128,7 +129,7 @@ func TestComponentEgressPolicyConfig_Generate_Shape(t *testing.T) {
 		t.Fatalf("expected 2 egress rules (one per peer), got %d", len(np.Spec.Egress))
 	}
 
-	// First peer: cache with no pod selector, port 6379/TCP.
+	// First peer: cache with pod selector app=redis, port 6379/TCP.
 	r0 := np.Spec.Egress[0]
 	if len(r0.To) != 1 {
 		t.Fatalf("rule 0: expected 1 peer, got %d", len(r0.To))
@@ -136,8 +137,8 @@ func TestComponentEgressPolicyConfig_Generate_Shape(t *testing.T) {
 	if got := r0.To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; got != "cache" {
 		t.Errorf("rule 0 namespace selector = %q, want cache", got)
 	}
-	if r0.To[0].PodSelector != nil {
-		t.Errorf("rule 0: expected nil pod selector, got %v", r0.To[0].PodSelector)
+	if r0.To[0].PodSelector == nil || r0.To[0].PodSelector.MatchLabels["app"] != "redis" {
+		t.Errorf("rule 0 pod selector = %v, want app=redis", r0.To[0].PodSelector)
 	}
 	if len(r0.Ports) != 1 || r0.Ports[0].Port.IntVal != 6379 || *r0.Ports[0].Protocol != corev1.ProtocolTCP {
 		t.Errorf("rule 0 ports = %v, want [6379/TCP]", r0.Ports)
@@ -175,7 +176,7 @@ func TestComponentEgressPolicyConfig_PodSelectorKey(t *testing.T) {
 				ComponentName:  "web",
 				PodSelectorKey: tc.key,
 				Peers: []netpol.EgressPeer{
-					{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}},
+					{Namespace: "db", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgres"}}, Ports: []intstr.IntOrString{intstr.FromInt32(5432)}},
 				},
 			}
 			np := egressPolicyFromGenerate(t, cfg)
@@ -197,7 +198,7 @@ func TestComponentEgressPolicyConfig_Generate_SkipsEmptyPortPeer(t *testing.T) {
 		ComponentName: "web",
 		Peers: []netpol.EgressPeer{
 			{Namespace: "db", Ports: nil}, // no derivable ports → must be dropped
-			{Namespace: "cache", Ports: []intstr.IntOrString{intstr.FromInt32(6379)}},
+			{Namespace: "cache", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "redis"}}, Ports: []intstr.IntOrString{intstr.FromInt32(6379)}},
 		},
 	}
 	np := egressPolicyFromGenerate(t, cfg)
@@ -206,6 +207,67 @@ func TestComponentEgressPolicyConfig_Generate_SkipsEmptyPortPeer(t *testing.T) {
 	}
 	if got := np.Spec.Egress[0].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; got != "cache" {
 		t.Errorf("surviving rule namespace = %q, want cache", got)
+	}
+}
+
+// --- fail-fast on invalid egress peers (#224) ---
+
+// TestSynthesizeEgress_ErrorsOnInvalidSelector is the loud layer: a ported peer with a nil,
+// empty-matchLabels, or expression-bearing selector fails the build rather than emitting a
+// namespace-wide egress allow. The len(Ports)==0 escape hatch stays a silent skip.
+func TestSynthesizeEgress_ErrorsOnInvalidSelector(t *testing.T) {
+	cases := []struct {
+		name    string
+		peer    netpol.EgressPeer
+		wantErr bool
+	}{
+		{"nil selector with ports", netpol.EgressPeer{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}, true},
+		{"empty matchLabels with ports", netpol.EgressPeer{Namespace: "db", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{}}, Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}, true},
+		{"matchExpressions with ports", netpol.EgressPeer{Namespace: "db", PodSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "app", Operator: metav1.LabelSelectorOpExists}}}, Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}, true},
+		{"nil selector no ports (escape hatch)", netpol.EgressPeer{Namespace: "db"}, false},
+		{"valid selector with ports", netpol.EgressPeer{Namespace: "db", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgres"}}, Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster, componentMap, _ := egressFixture("web", "default")
+			peers := map[string][]netpol.EgressPeer{"web": {tc.peer}}
+			err := synthesizeEgressNetworkPolicies(cluster, componentMap, peers, ComponentLabel)
+			if tc.wantErr && err == nil {
+				t.Errorf("expected error for %s, got nil", tc.name)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error for %s: %v", tc.name, err)
+			}
+		})
+	}
+}
+
+// TestSynthesizeEgress_ErrorsOnUnmatchedComponent verifies the loud layer validates the whole
+// non-authorable input up front — a malformed peer keyed by a component absent from the bundle
+// still fails the build (a producer bug should not depend on which components render).
+func TestSynthesizeEgress_ErrorsOnUnmatchedComponent(t *testing.T) {
+	cluster, componentMap, _ := egressFixture("web", "default")
+	peers := map[string][]netpol.EgressPeer{
+		"other": {{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}}, // ported, selector-less
+	}
+	if err := synthesizeEgressNetworkPolicies(cluster, componentMap, peers, ComponentLabel); err == nil {
+		t.Error("expected error for malformed peer on unmatched component, got nil")
+	}
+}
+
+// TestComponentEgressPolicyConfig_Generate_RejectsInvalidSelector is the residual layer: even a
+// directly-built config (bypassing the synthesis boundary) must not emit a ported peer with an
+// invalid selector.
+func TestComponentEgressPolicyConfig_Generate_RejectsInvalidSelector(t *testing.T) {
+	cfg := &componentEgressPolicyConfig{
+		ComponentName: "web",
+		Peers: []netpol.EgressPeer{
+			{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}, // ported, selector-less
+		},
+	}
+	app := stack.NewApplication("web-allow-egress-traffic", "default", cfg)
+	if _, err := cfg.Generate(app); err == nil {
+		t.Error("expected Generate to reject a ported selector-less peer, got nil")
 	}
 }
 
@@ -236,10 +298,12 @@ func egressAppNames(cluster *stack.Cluster) []string {
 func TestSynthesizeEgress_AppendsPolicy(t *testing.T) {
 	cluster, componentMap, primary := egressFixture("web", "default")
 	peers := map[string][]netpol.EgressPeer{
-		"web": {{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
+		"web": {{Namespace: "db", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgres"}}, Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
 	}
 
-	synthesizeEgressNetworkPolicies(cluster, componentMap, peers, ComponentLabel)
+	if err := synthesizeEgressNetworkPolicies(cluster, componentMap, peers, ComponentLabel); err != nil {
+		t.Fatalf("synthesizeEgressNetworkPolicies: %v", err)
+	}
 
 	leaf := cluster.Node.Bundle
 	if len(leaf.Applications) != 2 {
@@ -259,7 +323,9 @@ func TestSynthesizeEgress_AppendsPolicy(t *testing.T) {
 
 func TestSynthesizeEgress_NoOpWhenNoPeers(t *testing.T) {
 	cluster, componentMap, _ := egressFixture("web", "default")
-	synthesizeEgressNetworkPolicies(cluster, componentMap, nil, ComponentLabel)
+	if err := synthesizeEgressNetworkPolicies(cluster, componentMap, nil, ComponentLabel); err != nil {
+		t.Fatalf("synthesizeEgressNetworkPolicies: %v", err)
+	}
 	if n := len(cluster.Node.Bundle.Applications); n != 1 {
 		t.Errorf("expected no synthesis for nil peers, got %d apps", n)
 	}
@@ -269,9 +335,11 @@ func TestSynthesizeEgress_NoOpWhenNoComponentMatch(t *testing.T) {
 	cluster, componentMap, _ := egressFixture("web", "default")
 	// Peers keyed by a component that is not present in the bundle/componentMap.
 	peers := map[string][]netpol.EgressPeer{
-		"other": {{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
+		"other": {{Namespace: "db", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgres"}}, Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
 	}
-	synthesizeEgressNetworkPolicies(cluster, componentMap, peers, ComponentLabel)
+	if err := synthesizeEgressNetworkPolicies(cluster, componentMap, peers, ComponentLabel); err != nil {
+		t.Fatalf("synthesizeEgressNetworkPolicies: %v", err)
+	}
 	if n := len(cluster.Node.Bundle.Applications); n != 1 {
 		t.Errorf("expected no synthesis for unmatched component, got %d apps", n)
 	}
@@ -290,10 +358,12 @@ func TestSynthesizeEgress_IdentityGuard(t *testing.T) {
 		"web": {component: Component{Name: "web"}, app: primary},
 	}
 	peers := map[string][]netpol.EgressPeer{
-		"web": {{Namespace: "db", Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
+		"web": {{Namespace: "db", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgres"}}, Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
 	}
 
-	synthesizeEgressNetworkPolicies(cluster, componentMap, peers, ComponentLabel)
+	if err := synthesizeEgressNetworkPolicies(cluster, componentMap, peers, ComponentLabel); err != nil {
+		t.Fatalf("synthesizeEgressNetworkPolicies: %v", err)
+	}
 
 	var policies []*stack.Application
 	for _, a := range bundle.Applications {
