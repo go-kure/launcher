@@ -21,7 +21,8 @@ func (h *RBACHandler) CanHandle(traitType string) bool {
 }
 
 // PropertySchema declares the rbac trait's user-facing properties. Each rule is a
-// K8s PolicyRule-shaped object, kept open beyond the enumerated fields.
+// closed K8s-PolicyRule-shaped object: only the enumerated fields are accepted and
+// unknown keys are rejected. `resources` and `verbs` are required.
 func (h *RBACHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"rules": {
@@ -30,12 +31,12 @@ func (h *RBACHandler) PropertySchema() map[string]oam.PropertySchema {
 			Description: "Policy rules granted to the component's ServiceAccount.",
 			Items: &oam.PropertySchema{
 				Type:                 oam.PropertyTypeObject,
-				AdditionalProperties: true,
+				AdditionalProperties: false,
 				Description:          "A single RBAC policy rule.",
 				Properties: map[string]oam.PropertySchema{
 					"apiGroups": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "An API group the rule applies to."}, Description: "API groups the rule applies to."},
-					"resources": {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A resource type the rule applies to."}, Description: "Resource types the rule applies to."},
-					"verbs":     {Type: oam.PropertyTypeArray, Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A verb the rule permits."}, Description: "Verbs the rule permits on the listed resources."},
+					"resources": {Type: oam.PropertyTypeArray, Required: true, Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A resource type the rule applies to."}, Description: "Resource types the rule applies to."},
+					"verbs":     {Type: oam.PropertyTypeArray, Required: true, Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A verb the rule permits."}, Description: "Verbs the rule permits on the listed resources."},
 				},
 			},
 		},

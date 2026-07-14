@@ -24,6 +24,42 @@ func TestFluxCDPatchesHandler_CanHandle(t *testing.T) {
 	}
 }
 
+// TestFluxCDPatchesHandler_Schema_Strict guards the strict shape: the patch item and
+// its target selector are closed objects (unknown keys rejected), and
+// the target enumerates the seven kustomize selector fields as strings so valid
+// selectors still pass. Downstream consumers preflight against this schema.
+func TestFluxCDPatchesHandler_Schema_Strict(t *testing.T) {
+	schema := (&traits.FluxCDPatchesHandler{}).PropertySchema()
+	patches, ok := schema["patches"]
+	if !ok {
+		t.Fatal("schema missing 'patches' property")
+	}
+	if patches.Items == nil {
+		t.Fatal("patches.Items is nil")
+	}
+	if patches.Items.AdditionalProperties {
+		t.Error("patch item must be a closed object (AdditionalProperties=false) so unknown keys are rejected")
+	}
+
+	target, ok := patches.Items.Properties["target"]
+	if !ok {
+		t.Fatal("patch item missing 'target' property")
+	}
+	if target.AdditionalProperties {
+		t.Error("patch target must be a closed object (AdditionalProperties=false) so unknown keys in target are rejected")
+	}
+	for _, field := range []string{"group", "version", "kind", "name", "namespace", "labelSelector", "annotationSelector"} {
+		p, ok := target.Properties[field]
+		if !ok {
+			t.Errorf("target missing enumerated selector field %q", field)
+			continue
+		}
+		if p.Type != oam.PropertyTypeString {
+			t.Errorf("target.%s type = %q, want %q", field, p.Type, oam.PropertyTypeString)
+		}
+	}
+}
+
 func TestFluxCDPatchesHandler_Apply_AppendsToBundlePatches(t *testing.T) {
 	h := &traits.FluxCDPatchesHandler{}
 	trait := &oam.Trait{

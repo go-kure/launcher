@@ -12,8 +12,11 @@ Every built-in trait handler also implements `oam.PropertySchemaProvider`
 (`PropertySchema()`), declaring a constrained schema for its user-facing properties so
 the downstream runtime can validate them before invocation. This includes the platform-reserved keys a
 handler reads from merged properties (e.g. `networkPolicy`, `allowedHostnameWildcard`,
-`controllerType`). Deeply nested or K8s-adjacent shapes are kept shallow/open
-(`additionalProperties`) rather than modeled field-by-field; `prune-protection` accepts no
+`controllerType`). Some deeply nested or K8s-adjacent shapes are kept shallow/open
+(`additionalProperties`) rather than modeled field-by-field, but strictness-sensitive traits are
+**closed**: the `rbac` rule object and the `fluxcd-patches` patch item and its `target` selector
+enumerate their fields and set `additionalProperties: false` (unknown keys rejected), matching the
+downstream single-owner adoption of these builtins. `prune-protection` accepts no
 properties and so declares an empty schema. Every property (including nested object fields and
 array item schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler
 API Reference.
