@@ -1,6 +1,26 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.18] - 2026-07-14
+
+### Added
+
+- Implement EndpointProvider on webservice
+- Postgresql pooler EndpointProvider + per-endpoint NP naming
+- Derive ingress-synthesis target from expose backendRefs
+
+### Changed
+
+- Tighten builtin rbac and flux patch schemas
+- Adopt shared check-forbidden-terms action for scan parity
+
+### Fixed
+
+- Scrub downstream references from generated notes
+- Scan full tree for downstream refs on PRs (PR/merge-queue parity)
+- Fail fast on invalid egress peers
+- Preflight downstream-reference guard before every CI push
+
 ## [0.1.0-alpha.17] - 2026-07-13
 
 ### Added
@@ -32,6 +52,10 @@ All notable changes to this project will be documented in this file.
 - Publish external-secret shorthand design doc and fix traits link
 - Harden kure-dep-sync guard per PR review
 - Always refresh remote-tracking base ref in kure-dep-sync guard
+
+### Release
+
+- V0.1.0-alpha.17
 
 ## [0.1.0-alpha.16] - 2026-07-11
 
