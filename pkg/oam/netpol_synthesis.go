@@ -1,6 +1,8 @@
 package oam
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -568,23 +570,24 @@ func synthesizeEndpointIngressNetworkPolicies(cluster *stack.Cluster, componentM
 				continue
 			}
 			groups := groupIngressPeers(ingressPeers[app.Name])
-			// Multi-endpoint rule (v1): the NP name has no per-endpoint discriminator, so a
-			// component with >1 distinct endpoint would collide. Only postgresql produces
-			// endpoints today (exactly one), so this is unreachable; skip rather than emit a
-			// colliding or partial policy.
-			// TODO(pooler): suffix per-endpoint NP names when a second endpoint is added.
-			if len(groups) != 1 {
-				continue
+			// One NP per distinct endpoint. A single-endpoint component keeps the bare name
+			// (back-compat); a multi-endpoint component (e.g. a postgresql cluster + its pooler)
+			// gets a per-endpoint suffix so the names don't collide. The suffix is a content
+			// hash of the endpoint, not a positional index, so each endpoint's NP name is stable
+			// across unrelated endpoint additions (an index would renumber, causing spurious
+			// downstream prune+create).
+			multi := len(groups) > 1
+			for _, g := range groups {
+				autoApps = append(autoApps, stack.NewApplication(
+					endpointIngressPolicyName(app.Name, g.Endpoint, multi),
+					app.Namespace,
+					&componentEndpointIngressPolicyConfig{
+						ComponentName: app.Name,
+						Endpoint:      g.Endpoint,
+						Rules:         g.Rules,
+					},
+				))
 			}
-			autoApps = append(autoApps, stack.NewApplication(
-				app.Name+"-allow-endpoint-ingress",
-				app.Namespace,
-				&componentEndpointIngressPolicyConfig{
-					ComponentName: app.Name,
-					Endpoint:      groups[0].Endpoint,
-					Rules:         groups[0].Rules,
-				},
-			))
 		}
 		bundle.Applications = append(bundle.Applications, autoApps...)
 	})
@@ -656,6 +659,21 @@ func endpointKey(e netpol.Endpoint) string {
 		portKeys = append(portKeys, fmt.Sprintf("%d:%s", pt.Type, pt.String()))
 	}
 	return fmt.Sprintf("sel:%s;ports:%s", strings.Join(labelParts, ","), strings.Join(portKeys, "|"))
+}
+
+// endpointIngressPolicyName returns the NetworkPolicy name for a component's endpoint-ingress
+// policy. A single-endpoint component keeps the bare "{comp}-allow-endpoint-ingress" name
+// (back-compat with #213). When a component exposes more than one distinct endpoint (multi=true,
+// e.g. a postgresql cluster plus its pooler), every policy is suffixed with a short content hash
+// of the endpoint so the names are distinct and — because the hash is derived from the endpoint's
+// own selector+ports, not its position — stable across unrelated endpoint additions.
+func endpointIngressPolicyName(comp string, e netpol.Endpoint, multi bool) string {
+	base := comp + "-allow-endpoint-ingress"
+	if !multi {
+		return base
+	}
+	sum := sha256.Sum256([]byte(endpointKey(e)))
+	return base + "-" + hex.EncodeToString(sum[:])[:8]
 }
 
 // sourcesKey returns a canonical dedup/ordering key for a source set — per-source keys sorted
