@@ -26,6 +26,38 @@ func TestRBACHandler_CanHandle(t *testing.T) {
 	}
 }
 
+// TestRBACHandler_Schema_Strict guards the strict shape of the rbac schema: a rule
+// is a closed object (unknown keys rejected) and resources/verbs are required.
+// Downstream consumers preflight against this schema, so a regression here would
+// silently relax their strict validation.
+func TestRBACHandler_Schema_Strict(t *testing.T) {
+	schema := (&traits.RBACHandler{}).PropertySchema()
+	rules, ok := schema["rules"]
+	if !ok {
+		t.Fatal("schema missing 'rules' property")
+	}
+	if rules.Items == nil {
+		t.Fatal("rules.Items is nil")
+	}
+	if rules.Items.AdditionalProperties {
+		t.Error("rules item must be a closed object (AdditionalProperties=false) so unknown keys in a rule are rejected")
+	}
+	for _, field := range []string{"resources", "verbs"} {
+		p, ok := rules.Items.Properties[field]
+		if !ok {
+			t.Fatalf("rules item missing %q property", field)
+		}
+		if !p.Required {
+			t.Errorf("rules item %q must be Required", field)
+		}
+	}
+	if p, ok := rules.Items.Properties["apiGroups"]; !ok {
+		t.Fatal("rules item missing \"apiGroups\" property")
+	} else if p.Required {
+		t.Error("rules item \"apiGroups\" must stay optional (not Required)")
+	}
+}
+
 func TestRBACHandler_Apply_NamespaceOnly(t *testing.T) {
 	h := &traits.RBACHandler{}
 	trait := &oam.Trait{
