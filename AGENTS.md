@@ -237,8 +237,10 @@ Launcher is an open-source go-kure project and must not name downstream, closed-
 platform consumers in tracked source, docs, comments, tests, or identifiers. Reword any
 such reference to a generic role (e.g. "a downstream consumer" / "the downstream runtime");
 never introduce a new one. This is the go-kure organization "No Downstream References"
-standard (`go-kure/.github` → `docs/standards.md`), CI-enforced here by
-`site/scripts/check-forbidden-terms.sh` (diff-scoped on PRs, full-tree otherwise). A
+standard (`go-kure/.github` → `docs/standards.md`), CI-enforced here via the shared
+`go-kure/.github` `check-forbidden-terms` action, which scans `--full-tree` on **every** event
+(pull request and merge queue alike) so the two never diverge; `scripts/release.sh` runs a
+byte-identical vendored copy (`site/scripts/check-forbidden-terms.sh`) as a release preflight. A
 legitimately unavoidable term takes an adjacent `allow-term:<word>` pragma. The remediation
 runbook is `go-kure/.github` → `docs/no-downstream-references.md`.
 
