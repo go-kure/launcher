@@ -37,7 +37,11 @@ each a **separate** additive resource (the authored `networkpolicy` /
 - **Egress** (`{comp}-allow-egress-traffic`) — from `TransformContext.EgressPeers`, a
   downstream-supplied, non-authorable synthesis input (graph-derived dependency peers; never
   set from OAM YAML or capability rendering). K8s `NetworkPolicy` only. Empty when a
-  caller supplies no peers (e.g. the kurel CLI), so synthesis is then a no-op.
+  caller supplies no peers (e.g. the kurel CLI), so synthesis is then a no-op. **Fail-fast**
+  (aligned with the endpoint-ingress family): a peer that carries ports but a nil, empty, or
+  expression-bearing pod selector is a producer bug and fails the transform with an error — it
+  would otherwise emit a namespace-wide egress allow. A peer with **no ports** is the documented
+  escape hatch and is silently skipped (the destination stays authored).
 - **Endpoint ingress** (`{comp}-allow-endpoint-ingress`) — the **target side** of a
   connection, from `TransformContext.IngressPeers` (a platform-supplied, non-authorable
   graph-derived input). Each `netpol.IngressPeer` names an `Endpoint` (pod selector + ports)

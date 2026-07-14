@@ -8,10 +8,14 @@ Package `netpol` contains shared types for automatic `NetworkPolicy` synthesis:
   platform-reserved `networkPolicy.trafficSources`. It lives outside `pkg/oam` so that
   both the synthesis stage (`pkg/oam`) and the routing trait configs that expose the
   collected sources (`pkg/oam/builtin/traits`) can import it without an import cycle.
-- `EgressPeer` — one allowed **egress** destination (namespace selector + optional pod
-  selector + ports). Unlike `TrafficSource`, it is a downstream-supplied, non-authorable
-  synthesis input carried on `TransformContext.EgressPeers` (never set from OAM YAML or
-  capability rendering); it has no trait-side producer.
+- `EgressPeer` — one allowed **egress** destination (namespace selector + pod selector +
+  ports). Unlike `TrafficSource`, it is a downstream-supplied, non-authorable synthesis input
+  carried on `TransformContext.EgressPeers` (never set from OAM YAML or capability rendering);
+  it has no trait-side producer. **Fail-fast contract** (aligned with the endpoint-ingress
+  family): a peer with ports but a nil, empty-matchLabels, or expression-bearing pod selector is
+  a producer bug and is rejected with a build error — it would otherwise emit a namespace-wide
+  egress allow (`to.PodSelector` nil = all pods). A peer with **no ports** is the documented
+  escape hatch and is silently skipped (destination stays authored).
 - `Endpoint` — a component's declared in-cluster data-plane endpoint: a pod selector
   (matchLabels only) + ports. Namespace is deliberately absent (the caller knows the target's
   namespace). Declared by a component handler via the optional `oam.EndpointProvider`.
