@@ -260,6 +260,15 @@ git_tag() {
     fi
 }
 
+# Abort the release before any push if the tree carries a downstream reference
+# (e.g. a term that leaked into the git-cliff-generated CHANGELOG). A release pushes
+# directly to main, bypassing the merge queue's guard, so this is the last gate.
+check_forbidden_terms() {
+    log_info "Checking tree for downstream references..."
+    bash site/scripts/check-forbidden-terms.sh --full-tree \
+        || die "release aborted: tree contains downstream references (see output above); fix cliff.toml postprocessors or the offending source before releasing"
+}
+
 git_push() {
     tag="$1"
     if [ "$DRY_RUN" = "1" ]; then
@@ -267,6 +276,7 @@ git_push() {
         return
     fi
     if [ "${CI:-}" = "true" ]; then
+        check_forbidden_terms
         log_info "Pushing release..."
         git push --atomic origin HEAD:main "$tag"
         log_success "Pushed main + $tag"
@@ -459,6 +469,7 @@ release_bump() {
 
     # Bump doesn't create a tag — just push the version commit
     if [ "$DRY_RUN" != "1" ] && [ "${CI:-}" = "true" ]; then
+        check_forbidden_terms
         log_info "Pushing version bump..."
         git push origin HEAD:main
         log_success "Pushed main"
