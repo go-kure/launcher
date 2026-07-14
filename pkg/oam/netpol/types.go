@@ -37,12 +37,18 @@ type EgressPeer struct {
 
 // BackendTarget is one expose/routing backendRef that routes to a **separate** in-cluster
 // backend Service — not the exposing component's own. Ingress synthesis uses it to retarget the
-// synthesized allow onto the pods that actually receive the traffic (resolved from the backend
-// Service name to a sibling component). ServiceName is the referenced Kubernetes Service; Ports
-// are the referenced backend ports.
+// synthesized allow onto the pods that actually receive the traffic. ServiceName is the referenced
+// Kubernetes Service; Ports are the referenced backend ports.
+//
+// PodSelector is the authored backend pod selector (matchLabels only), used only when the backend
+// Service does NOT resolve to a sibling in-bundle component: the selector is not inferable from the
+// Service name, so an external bare Service carrying an explicit selector is synthesized onto those
+// pods, while a nil selector leaves the backend authored. When the Service resolves to a sibling
+// component (#227), the component-label targeting takes precedence and PodSelector is ignored.
 type BackendTarget struct {
 	ServiceName string
 	Ports       []intstr.IntOrString
+	PodSelector *metav1.LabelSelector // authored backendSelector (matchLabels only); nil = leave authored
 }
 
 // Endpoint is a component's declared in-cluster data-plane endpoint (e.g. an operator-managed

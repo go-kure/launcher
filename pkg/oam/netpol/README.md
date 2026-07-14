@@ -17,9 +17,13 @@ Package `netpol` contains shared types for automatic `NetworkPolicy` synthesis:
   egress allow (`to.PodSelector` nil = all pods). A peer with **no ports** is the documented
   escape hatch and is silently skipped (destination stays authored).
 - `BackendTarget` — one routing `backendRef` that targets a **separate** in-cluster backend
-  Service (not the exposing component's own): a Service name + ports. Ingress synthesis retargets
-  the `{comp}-allow-ingress-traffic` allow onto the backend's pods (resolved from the Service name
-  to a sibling component); an unresolvable target is left authored.
+  Service (not the exposing component's own): a Service name + ports + an optional `PodSelector`.
+  When the Service name resolves to a sibling in-bundle component, ingress synthesis retargets the
+  `{comp}-allow-ingress-traffic` allow onto that component's pods (#227) and the `PodSelector` is
+  ignored. When it does **not** resolve (a bare external Service), the selector is not inferable
+  from the name: an explicit matchLabels `PodSelector` (the authored `backendSelector`) synthesizes
+  a `{service}-allow-ingress-traffic` allow onto those pods, while a nil selector leaves the backend
+  authored.
 - `Endpoint` — a component's declared in-cluster data-plane endpoint: a pod selector
   (matchLabels only) + ports. Namespace is deliberately absent (the caller knows the target's
   namespace). Declared by a component handler via the optional `oam.EndpointProvider`.

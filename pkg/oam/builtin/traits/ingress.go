@@ -6,6 +6,7 @@ import (
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -94,11 +95,12 @@ func (h *IngressHandler) PropertySchema() map[string]oam.PropertySchema {
 							Type:        oam.PropertyTypeObject,
 							Description: "A single path mapping to a service backend.",
 							Properties: map[string]oam.PropertySchema{
-								"path":     {Type: oam.PropertyTypeString, Default: "/", Description: "URL path to match."},
-								"pathType": {Type: oam.PropertyTypeString, Default: "Prefix", Enum: []any{"Prefix", "Exact", "ImplementationSpecific"}, Description: "How the path is matched (Prefix, Exact, or ImplementationSpecific)."},
-								"backend":  {Type: oam.PropertyTypeString, Description: "Service name to route to (defaults to the component's service)."},
-								"port":     {Type: oam.PropertyTypeInteger, Description: "Service port number to route to."},
-								"portName": {Type: oam.PropertyTypeString, Description: "Named service port to route to (alternative to port)."},
+								"path":            {Type: oam.PropertyTypeString, Default: "/", Description: "URL path to match."},
+								"pathType":        {Type: oam.PropertyTypeString, Default: "Prefix", Enum: []any{"Prefix", "Exact", "ImplementationSpecific"}, Description: "How the path is matched (Prefix, Exact, or ImplementationSpecific)."},
+								"backend":         {Type: oam.PropertyTypeString, Description: "Service name to route to (defaults to the component's service)."},
+								"port":            {Type: oam.PropertyTypeInteger, Description: "Service port number to route to."},
+								"portName":        {Type: oam.PropertyTypeString, Description: "Named service port to route to (alternative to port)."},
+								"backendSelector": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Explicit pod selector (matchLabels only) for an external backend Service; enables ingress NetworkPolicy synthesis onto the backend's pods."},
 							},
 						},
 					},
@@ -254,6 +256,27 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 				}
 			}
 
+			// backendSelector is honored only for an explicit external backend: a self/implicit
+			// backend is retargeted onto the component's own pods, so a selector there can never
+			// take effect — reject it loudly rather than silently ignore.
+			if rawSel, ok := pathMap["backendSelector"]; ok {
+				selMap, ok := rawSel.(map[string]any)
+				if !ok {
+					return nil, errors.Errorf("rules[%d].paths[%d].backendSelector: expected object, got %T", i, j, rawSel)
+				}
+				if !backendExplicit {
+					return nil, errors.Errorf("rules[%d].paths[%d]: backendSelector is only valid with an explicit external 'backend'", i, j)
+				}
+				sel, err := parseMatchLabelsSelector(selMap, fmt.Sprintf("rules[%d].paths[%d].backendSelector", i, j))
+				if err != nil {
+					return nil, err
+				}
+				if len(sel.MatchLabels) == 0 {
+					return nil, errors.Errorf("rules[%d].paths[%d].backendSelector.matchLabels: must be non-empty", i, j)
+				}
+				p.BackendSelector = sel
+			}
+
 			portExplicit := false
 			if port, ok := toIngressPort(pathMap["port"]); ok {
 				p.Port = port
@@ -340,7 +363,11 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	}
 	config.sources = sources
 	config.ports = collectIngressPorts(config)
-	config.backendTargets = collectIngressBackendTargets(config)
+	backendTargets, err := collectIngressBackendTargets(config)
+	if err != nil {
+		return nil, err
+	}
+	config.backendTargets = backendTargets
 
 	return config, nil
 }
@@ -397,6 +424,10 @@ type IngressPath struct {
 	ServiceName string // empty means use IngressConfig.ServiceName (= component service)
 	Port        int32
 	PortName    string
+	// BackendSelector is the authored pod selector (matchLabels only) for an external backend
+	// Service — only valid when ServiceName names a service other than the component's own. It
+	// drives ingress-synthesis onto the backend's pods when the Service has no owning component.
+	BackendSelector *metav1.LabelSelector
 }
 
 // IngressTLS represents a TLS entry.

@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -295,6 +296,25 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 				if nameExplicit && !portExplicit {
 					br.Port = 0
 				}
+
+				// backendSelector is honored only for an explicit external backend (see ingress).
+				if rawSel, ok := backendMap["backendSelector"]; ok {
+					selMap, ok := rawSel.(map[string]any)
+					if !ok {
+						return nil, errors.Errorf("rules[%d].backendRefs[%d].backendSelector: expected object, got %T", i, j, rawSel)
+					}
+					if !nameExplicit {
+						return nil, errors.Errorf("rules[%d].backendRefs[%d]: backendSelector is only valid with an explicit external backend 'name'", i, j)
+					}
+					sel, err := parseMatchLabelsSelector(selMap, fmt.Sprintf("rules[%d].backendRefs[%d].backendSelector", i, j))
+					if err != nil {
+						return nil, err
+					}
+					if len(sel.MatchLabels) == 0 {
+						return nil, errors.Errorf("rules[%d].backendRefs[%d].backendSelector.matchLabels: must be non-empty", i, j)
+					}
+					br.BackendSelector = sel
+				}
 				if !nameExplicit {
 					if !traitPortProvided {
 						if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d].backendRefs[%d]", i, j)); err != nil {
@@ -353,7 +373,11 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	}
 	config.sources = sources
 	config.ports = collectHTTPRoutePorts(config, defaultServiceName)
-	config.backendTargets = collectHTTPRouteBackendTargets(config, defaultServiceName)
+	backendTargets, err := collectHTTPRouteBackendTargets(config, defaultServiceName)
+	if err != nil {
+		return nil, err
+	}
+	config.backendTargets = backendTargets
 
 	return config, nil
 }
@@ -1083,6 +1107,10 @@ type HeaderMatch struct {
 type BackendRef struct {
 	Name string
 	Port int32
+	// BackendSelector is the authored pod selector (matchLabels only) for an external backend
+	// Service — only valid when Name references a service other than the component's own. It drives
+	// ingress-synthesis onto the backend's pods when the Service has no owning component.
+	BackendSelector *metav1.LabelSelector
 }
 
 // Generate creates a Gateway API HTTPRoute resource.

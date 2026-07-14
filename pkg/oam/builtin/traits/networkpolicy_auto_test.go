@@ -761,3 +761,455 @@ func TestTransform_IngressPeers_SynthesizesEndpointIngressNetworkPolicy(t *testi
 		t.Errorf("podSelector = %v, want single cnpg.io/cluster=orders-db", sel)
 	}
 }
+
+// --- #239: external (non-component) routing backends with an explicit backendSelector ---
+
+// ingressExternalBackendApp builds a single-webservice app whose ingress trait routes to one
+// external backend path. selector nil omits backendSelector.
+func ingressExternalBackendApp(backend string, port int, selector map[string]any) *oam.Application {
+	pathMap := map[string]any{"path": "/", "backend": backend, "port": port}
+	if selector != nil {
+		pathMap["backendSelector"] = map[string]any{"matchLabels": selector}
+	}
+	return &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{{
+				Name:       "router",
+				Type:       "webservice",
+				Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+				Traits: []oam.Trait{{
+					Type: "ingress",
+					Properties: map[string]any{
+						"rules":         []any{map[string]any{"host": "example.com", "paths": []any{pathMap}}},
+						"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}}},
+					},
+				}},
+			}},
+		},
+	}
+}
+
+// An ingress path routing to an external bare Service with an explicit backendSelector synthesizes
+// an ingress allow onto the selector's pods (not the router), on the backend port, with the
+// namespace-wide routing traffic source preserved.
+func TestTransform_ExternalBackend_Ingress_WithSelector_SynthesizesNP(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+
+	app := ingressExternalBackendApp("external-svc", 8081, map[string]any{"app.kubernetes.io/name": "external"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	np := synthesizedNetworkPolicy(t, cluster, "external-svc-allow-ingress-traffic")
+	if np.Namespace != "default" {
+		t.Errorf("namespace = %q, want default", np.Namespace)
+	}
+	if got := np.Spec.PodSelector.MatchLabels; got["app.kubernetes.io/name"] != "external" || len(got) != 1 {
+		t.Errorf("podSelector = %v, want single app.kubernetes.io/name=external", got)
+	}
+	if len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 1 || np.Spec.Ingress[0].Ports[0].Port.IntVal != 8081 {
+		t.Errorf("expected single ingress port 8081, got %+v", np.Spec.Ingress)
+	}
+	from := np.Spec.Ingress[0].From
+	if len(from) != 1 || from[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "ingress-nginx" || from[0].PodSelector != nil {
+		t.Errorf("expected namespace-wide From ingress-nginx, got %+v", from)
+	}
+	if clusterHasApp(cluster, "router-allow-ingress-traffic") {
+		t.Errorf("did not expect a self policy for the pure-exposer router; apps: %v", clusterAppNames(cluster))
+	}
+}
+
+// The HTTPRoute shape: a backendRef to an external bare Service + backendSelector synthesizes the
+// same kind of policy.
+func TestTransform_ExternalBackend_HTTPRoute_WithSelector_SynthesizesNP(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
+
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{{
+				Name:       "router",
+				Type:       "webservice",
+				Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+				Traits: []oam.Trait{{
+					Type: "httproute",
+					Properties: map[string]any{
+						"parentRefs": []any{map[string]any{"name": "gw"}},
+						"rules": []any{map[string]any{
+							"backendRefs": []any{map[string]any{
+								"name":            "external-svc",
+								"port":            8081,
+								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}},
+							}},
+						}},
+						"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "gateway-system"}}},
+					},
+				}},
+			}},
+		},
+	}
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	np := synthesizedNetworkPolicy(t, cluster, "external-svc-allow-ingress-traffic")
+	if got := np.Spec.PodSelector.MatchLabels; got["app.kubernetes.io/name"] != "external" || len(got) != 1 {
+		t.Errorf("podSelector = %v, want single app.kubernetes.io/name=external", got)
+	}
+	if len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 1 || np.Spec.Ingress[0].Ports[0].Port.IntVal != 8081 {
+		t.Errorf("expected single ingress port 8081, got %+v", np.Spec.Ingress)
+	}
+}
+
+// Without a backendSelector, an unresolvable external backend stays authored — no synthesized
+// policy (the pre-#239 behavior).
+func TestTransform_ExternalBackend_WithoutSelector_LeavesAuthored(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+
+	app := ingressExternalBackendApp("external-svc", 8081, nil)
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	if clusterHasApp(cluster, "external-svc-allow-ingress-traffic") {
+		t.Errorf("expected no synthesized policy without a selector; apps: %v", clusterAppNames(cluster))
+	}
+}
+
+// Mixed presence for one external Service: a selector-bearing occurrence is synthesized on its own
+// port; a selectorless occurrence stays authored and must not widen the synthesized policy's ports.
+func TestTransform_ExternalBackend_MixedSelectorPresence_DoesNotWiden(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{{
+				Name:       "router",
+				Type:       "webservice",
+				Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+				Traits: []oam.Trait{{
+					Type: "ingress",
+					Properties: map[string]any{
+						"rules": []any{map[string]any{"host": "example.com", "paths": []any{
+							map[string]any{"path": "/a", "backend": "external-svc", "port": 8081,
+								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}}},
+							map[string]any{"path": "/b", "backend": "external-svc", "port": 9091},
+						}}},
+						"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}}},
+					},
+				}},
+			}},
+		},
+	}
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	np := synthesizedNetworkPolicy(t, cluster, "external-svc-allow-ingress-traffic")
+	if len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 1 || np.Spec.Ingress[0].Ports[0].Port.IntVal != 8081 {
+		t.Errorf("expected only the selected port 8081 (9091 stays authored), got %+v", np.Spec.Ingress)
+	}
+}
+
+// Two paths giving the SAME external Service two different selectors is an authoring conflict — a
+// Service has one selector — rejected at parse.
+func TestTransform_ExternalBackend_ConflictingSelectorsInTrait_Rejected(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{{
+				Name:       "router",
+				Type:       "webservice",
+				Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+				Traits: []oam.Trait{{
+					Type: "ingress",
+					Properties: map[string]any{
+						"rules": []any{map[string]any{"host": "example.com", "paths": []any{
+							map[string]any{"path": "/a", "backend": "external-svc", "port": 8081,
+								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}}},
+							map[string]any{"path": "/b", "backend": "external-svc", "port": 8082,
+								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "other"}}},
+						}}},
+						"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}}},
+					},
+				}},
+			}},
+		},
+	}
+	if _, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"}); err == nil {
+		t.Fatal("expected an error for conflicting backendSelector values on one Service")
+	}
+}
+
+// Two routers naming the same external Service in the same namespace with different selectors is a
+// conflict resolved only at synthesis — it must fail the transform, not emit two colliding allows.
+func TestTransform_ExternalBackend_ConflictingSelectorsAcrossRouters_FailsTransform(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+
+	mkRouter := func(name, label string) oam.Component {
+		return oam.Component{
+			Name:       name,
+			Type:       "webservice",
+			Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+			Traits: []oam.Trait{{
+				Type: "ingress",
+				Properties: map[string]any{
+					"rules": []any{map[string]any{"host": name + ".example.com", "paths": []any{
+						map[string]any{"path": "/", "backend": "external-svc", "port": 8081,
+							"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": label}}},
+					}}},
+					"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}}},
+				},
+			}},
+		}
+	}
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec:     oam.ApplicationSpec{Components: []oam.Component{mkRouter("router-a", "external"), mkRouter("router-b", "other")}},
+	}
+	if _, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"}); err == nil {
+		t.Fatal("expected an error for an external Service given two different selectors across routers")
+	}
+}
+
+// An external policy name that collides with an ACTUALLY-EMITTED component inbound policy fails the
+// transform. Component db (statefulset, Service db-headless) emits db-allow-ingress-traffic; a
+// router routing to a bare external Service named db would collide.
+func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransform(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterComponent("statefulset", &components.StatefulsetHandler{})
+	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
+
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{
+				{
+					Name:       "db",
+					Type:       "statefulset",
+					Properties: map[string]any{"image": "postgres:16", "port": 5432, "serviceName": "db-headless"},
+					// db's own routing trait → emits db-allow-ingress-traffic.
+					Traits: []oam.Trait{{
+						Type: "httproute",
+						Properties: map[string]any{
+							"parentRefs":    []any{map[string]any{"name": "gw"}},
+							"rules":         []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db-headless", "port": 5432}}}},
+							"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "gateway-system"}}},
+						},
+					}},
+				},
+				{
+					Name:       "router",
+					Type:       "webservice",
+					Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+					Traits: []oam.Trait{{
+						Type: "httproute",
+						Properties: map[string]any{
+							"parentRefs": []any{map[string]any{"name": "gw"}},
+							// Bare external Service "db" (not db-headless) → unresolved → db-allow-ingress-traffic.
+							"rules": []any{map[string]any{"backendRefs": []any{map[string]any{
+								"name": "db", "port": 8080,
+								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}},
+							}}}},
+							"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "gateway-system"}}},
+						},
+					}},
+				},
+			},
+		},
+	}
+	if _, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"}); err == nil {
+		t.Fatal("expected an error for an external backend policy name colliding with an emitted component policy")
+	}
+}
+
+// The collision check keys on emitted policy names, not on component existence: a same-named
+// component that emits NO inbound policy is not a conflict, so the external policy is still emitted.
+func TestTransform_ExternalBackend_NameNoCollisionWhenComponentHasNoPolicy(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterComponent("statefulset", &components.StatefulsetHandler{})
+	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
+
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{
+				// db has a differing Service name and no routing trait → emits no db-allow-ingress-traffic.
+				{
+					Name:       "db",
+					Type:       "statefulset",
+					Properties: map[string]any{"image": "postgres:16", "port": 5432, "serviceName": "db-headless"},
+				},
+				{
+					Name:       "router",
+					Type:       "webservice",
+					Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+					Traits: []oam.Trait{{
+						Type: "httproute",
+						Properties: map[string]any{
+							"parentRefs": []any{map[string]any{"name": "gw"}},
+							"rules": []any{map[string]any{"backendRefs": []any{map[string]any{
+								"name": "db", "port": 8080,
+								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}},
+							}}}},
+							"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "gateway-system"}}},
+						},
+					}},
+				},
+			},
+		},
+	}
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	np := synthesizedNetworkPolicy(t, cluster, "db-allow-ingress-traffic")
+	if got := np.Spec.PodSelector.MatchLabels; got["app.kubernetes.io/name"] != "external" || len(got) != 1 {
+		t.Errorf("podSelector = %v, want the external backend selector app.kubernetes.io/name=external", got)
+	}
+}
+
+// A backendSelector on a ref that resolves to a sibling in-bundle component is ignored — #227
+// component-label targeting takes precedence and no error is raised.
+func TestTransform_ExternalBackend_SelectorOnSiblingComponent_Ignored(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
+
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{
+				{
+					Name:       "router",
+					Type:       "webservice",
+					Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+					Traits: []oam.Trait{{
+						Type: "httproute",
+						Properties: map[string]any{
+							"parentRefs": []any{map[string]any{"name": "gw"}},
+							"rules": []any{map[string]any{"backendRefs": []any{map[string]any{
+								"name": "backend", "port": 9000,
+								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}},
+							}}}},
+							"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "gateway-system"}}},
+						},
+					}},
+				},
+				{Name: "backend", Type: "webservice", Properties: map[string]any{"image": "api:1.0", "port": 9000}},
+			},
+		},
+	}
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	np := synthesizedNetworkPolicy(t, cluster, "backend-allow-ingress-traffic")
+	if got := np.Spec.PodSelector.MatchLabels["gokure.dev/component"]; got != "backend" {
+		t.Errorf("selector = %v, want #227 component-label gokure.dev/component=backend (authored selector ignored)", np.Spec.PodSelector.MatchLabels)
+	}
+	if clusterHasApp(cluster, "external-svc-allow-ingress-traffic") || clusterHasApp(cluster, "backend-allow-backend-ingress") {
+		t.Errorf("did not expect an external-backend policy for a resolvable ref; apps: %v", clusterAppNames(cluster))
+	}
+}
+
+// A backendSelector on a self/implicit backend can never take effect (the allow is retargeted onto
+// the component's own pods) → rejected at parse.
+func TestTransform_ExternalBackend_SelectorOnSelfBackend_Rejected(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{{
+				Name:       "router",
+				Type:       "webservice",
+				Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+				Traits: []oam.Trait{{
+					Type: "ingress",
+					Properties: map[string]any{
+						"rules": []any{map[string]any{"host": "example.com", "paths": []any{
+							map[string]any{"path": "/", "port": 8080,
+								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}}},
+						}}},
+					},
+				}},
+			}},
+		},
+	}
+	if _, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"}); err == nil {
+		t.Fatal("expected an error for backendSelector on a self/implicit backend")
+	}
+}
+
+// An empty matchLabels backendSelector is rejected — it would otherwise select every pod.
+func TestTransform_ExternalBackend_EmptyMatchLabels_Rejected(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+
+	app := ingressExternalBackendApp("external-svc", 8081, map[string]any{})
+	if _, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"}); err == nil {
+		t.Fatal("expected an error for an empty matchLabels backendSelector")
+	}
+}
+
+// Two distinct external Services each with a selector yield two distinct, deterministically named
+// policies.
+func TestTransform_ExternalBackend_MultipleServices_DistinctNames(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{{
+				Name:       "router",
+				Type:       "webservice",
+				Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+				Traits: []oam.Trait{{
+					Type: "ingress",
+					Properties: map[string]any{
+						"rules": []any{map[string]any{"host": "example.com", "paths": []any{
+							map[string]any{"path": "/a", "backend": "external-a", "port": 8081,
+								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "a"}}},
+							map[string]any{"path": "/b", "backend": "external-b", "port": 8082,
+								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "b"}}},
+						}}},
+						"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}}},
+					},
+				}},
+			}},
+		},
+	}
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	for _, name := range []string{"external-a-allow-ingress-traffic", "external-b-allow-ingress-traffic"} {
+		if !clusterHasApp(cluster, name) {
+			t.Errorf("expected synthesized %q; apps: %v", name, clusterAppNames(cluster))
+		}
+	}
+}
