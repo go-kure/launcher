@@ -95,7 +95,7 @@ temporary branch — the merged result — before the PR is allowed to land.
 | `security` | `Security` | 10 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
-| `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches |
+| `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check |
 | `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
 | `analyze-changes` | `Analyze Changes` | 5 min | — | Changed files summary, breaking change warning for pkg/ (PR only) |
@@ -117,6 +117,10 @@ Runs on main and `release/*` branches only (not PRs):
 
 ### Features
 
+- **No-Downstream-References guard** — `docs-build` runs the shared `go-kure/.github`
+  `check-forbidden-terms` action, which scans `--full-tree` on **every** event so a PR and the merge
+  queue produce identical results (scan parity). A drift-check step keeps the vendored copy that
+  `scripts/release.sh` uses (`site/scripts/check-forbidden-terms.sh`) byte-identical to canonical
 - **Path filtering** — `dorny/paths-filter` skips jobs when unrelated files change
 - **Diff-based lint** — on PRs, lint only checks new/changed lines (`--new-from-rev`)
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages

@@ -616,12 +616,21 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v7
 
+    # Shared org action; always scans --full-tree so a PR and the merge queue see
+    # identical results (go-kure/.github → docs/standards.md, scan-parity MUST rule).
     - name: Check for downstream references
-      # Scan the whole tree on every event (pull_request and merge_group alike) so a PR
-      # can never be green while the merge queue would reject it. A diff-scoped PR check
-      # let pre-existing violations (e.g. release-generated CHANGELOG lines) pass the PR
-      # yet block admission at the queue.
-      run: bash site/scripts/check-forbidden-terms.sh --full-tree
+      uses: go-kure/.github/.github/actions/check-forbidden-terms@main
+
+    # The release script (scripts/release.sh) still calls the vendored copy of the
+    # guard; keep it byte-identical to the canonical so the release preflight can't rot.
+    - name: Verify vendored guard matches canonical
+      uses: actions/checkout@v7
+      with:
+        repository: go-kure/.github
+        ref: main
+        path: .tmp/go-kure-dot-github
+    - name: Diff vendored guard vs canonical
+      run: diff -u .tmp/go-kure-dot-github/scripts/check-forbidden-terms.sh site/scripts/check-forbidden-terms.sh
 
     - name: Read Hugo version from mise.toml
       id: hugo-version
