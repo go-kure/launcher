@@ -158,6 +158,77 @@ func collectHTTPRoutePorts(config *HTTPRouteConfig, selfServiceName string) []in
 	return sortedIntOrStringPorts(seen)
 }
 
+// collectIngressBackendTargets returns the external backend targets of an ingress trait: paths
+// naming a Service other than the component's own, grouped by service name with their ports. These
+// drive ingress-synthesis retargeting (#227) — landing the allow on the backend's pods rather than
+// the exposing component's own.
+func collectIngressBackendTargets(config *IngressConfig) []netpol.BackendTarget {
+	byName := map[string]map[string]intstr.IntOrString{}
+	var order []string
+	for _, rule := range config.Rules {
+		for _, path := range rule.Paths {
+			if path.ServiceName == "" || path.ServiceName == config.ServiceName {
+				continue // self backend; covered by BackendPorts
+			}
+			ports := ensureBackendTarget(byName, &order, path.ServiceName)
+			if path.Port > 0 {
+				ports[fmt.Sprintf("n:%d", path.Port)] = intstr.FromInt32(path.Port)
+			} else if path.PortName != "" {
+				ports["s:"+path.PortName] = intstr.FromString(path.PortName)
+			}
+		}
+	}
+	return buildBackendTargets(order, byName)
+}
+
+// collectHTTPRouteBackendTargets returns the external backend targets of an httproute trait:
+// backendRefs naming a Service other than the component's own, grouped by service name with their
+// ports. See collectIngressBackendTargets.
+func collectHTTPRouteBackendTargets(config *HTTPRouteConfig, selfServiceName string) []netpol.BackendTarget {
+	byName := map[string]map[string]intstr.IntOrString{}
+	var order []string
+	for _, rule := range config.Rules {
+		for _, ref := range rule.BackendRefs {
+			if ref.Name == "" || ref.Name == selfServiceName {
+				continue // self backend; covered by BackendPorts
+			}
+			ports := ensureBackendTarget(byName, &order, ref.Name)
+			if ref.Port > 0 {
+				ports[fmt.Sprintf("n:%d", ref.Port)] = intstr.FromInt32(ref.Port)
+			}
+		}
+	}
+	return buildBackendTargets(order, byName)
+}
+
+// ensureBackendTarget returns the port-dedup map for a service name, registering it (and its
+// insertion order) on first use.
+func ensureBackendTarget(byName map[string]map[string]intstr.IntOrString, order *[]string, name string) map[string]intstr.IntOrString {
+	ports, ok := byName[name]
+	if !ok {
+		ports = map[string]intstr.IntOrString{}
+		byName[name] = ports
+		*order = append(*order, name)
+	}
+	return ports
+}
+
+// buildBackendTargets converts the per-service port maps into a deterministically ordered slice:
+// service names sorted lexically, ports via sortedIntOrStringPorts. Targets with no ports are
+// dropped (nothing to synthesize).
+func buildBackendTargets(order []string, byName map[string]map[string]intstr.IntOrString) []netpol.BackendTarget {
+	sort.Strings(order)
+	var out []netpol.BackendTarget
+	for _, name := range order {
+		ports := sortedIntOrStringPorts(byName[name])
+		if len(ports) == 0 {
+			continue
+		}
+		out = append(out, netpol.BackendTarget{ServiceName: name, Ports: ports})
+	}
+	return out
+}
+
 // sortedIntOrStringPorts converts the dedup map to a deterministically ordered
 // slice: numeric ports ascending, then named ports lexically.
 func sortedIntOrStringPorts(seen map[string]intstr.IntOrString) []intstr.IntOrString {

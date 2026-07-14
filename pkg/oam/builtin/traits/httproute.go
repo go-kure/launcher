@@ -353,6 +353,7 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	}
 	config.sources = sources
 	config.ports = collectHTTPRoutePorts(config, defaultServiceName)
+	config.backendTargets = collectHTTPRouteBackendTargets(config, defaultServiceName)
 
 	return config, nil
 }
@@ -910,10 +911,17 @@ type HTTPRouteConfig struct {
 	// networkPolicy.trafficSources rendering; they drive auto-NetworkPolicy synthesis.
 	sources []netpol.TrafficSource
 	ports   []intstr.IntOrString
+	// backendTargets are external backendRef targets (refs naming a separate Service); they
+	// drive ingress-synthesis retargeting onto the backend's pods (#227).
+	backendTargets []netpol.BackendTarget
 }
 
 // TrafficSources implements the cluster-level trafficSourceCollector contract.
 func (c *HTTPRouteConfig) TrafficSources() []netpol.TrafficSource { return c.sources }
+
+// BackendTargets implements the cluster-level backendRefTargetCollector contract: external
+// backendRef targets whose ingress allow should land on the backend's pods, not this component's.
+func (c *HTTPRouteConfig) BackendTargets() []netpol.BackendTarget { return c.backendTargets }
 
 // ComponentName returns the OAM component this sub-app belongs to — always the OAM
 // component name, not the K8s Service name — for resource provenance attribution.

@@ -340,6 +340,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	}
 	config.sources = sources
 	config.ports = collectIngressPorts(config)
+	config.backendTargets = collectIngressBackendTargets(config)
 
 	return config, nil
 }
@@ -359,10 +360,17 @@ type IngressConfig struct {
 	// networkPolicy.trafficSources rendering; they drive auto-NetworkPolicy synthesis.
 	sources []netpol.TrafficSource
 	ports   []intstr.IntOrString
+	// backendTargets are external backendRef targets (paths naming a separate Service); they
+	// drive ingress-synthesis retargeting onto the backend's pods (#227).
+	backendTargets []netpol.BackendTarget
 }
 
 // TrafficSources implements the cluster-level trafficSourceCollector contract.
 func (c *IngressConfig) TrafficSources() []netpol.TrafficSource { return c.sources }
+
+// BackendTargets implements the cluster-level backendRefTargetCollector contract: external
+// backendRef targets whose ingress allow should land on the backend's pods, not this component's.
+func (c *IngressConfig) BackendTargets() []netpol.BackendTarget { return c.backendTargets }
 
 // ComponentName returns the OAM component this sub-app belongs to — always the OAM
 // component name, not the K8s Service name — for resource provenance attribution.

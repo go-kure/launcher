@@ -33,7 +33,11 @@ each a **separate** additive resource (the authored `networkpolicy` /
 `cilium-networkpolicy` traits are unaffected):
 
 - **Inbound** (`{comp}-allow-ingress-traffic`) — routing-derived, from routing traits'
-  platform-reserved `networkPolicy.trafficSources` capability rendering.
+  platform-reserved `networkPolicy.trafficSources` capability rendering. When a routing trait's
+  `backendRef` names a **separate** in-bundle backend Service (not the exposing component's own),
+  the allow is **retargeted onto that backend component's pods** + the backendRef port — resolved
+  by matching the backend Service name to a sibling OAM component in the same bundle. A backendRef
+  that resolves to no in-bundle component is left authored (documented fallback).
 - **Egress** (`{comp}-allow-egress-traffic`) — from `TransformContext.EgressPeers`, a
   downstream-supplied, non-authorable synthesis input (graph-derived dependency peers; never
   set from OAM YAML or capability rendering). K8s `NetworkPolicy` only. Empty when a
