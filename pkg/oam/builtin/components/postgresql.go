@@ -15,10 +15,12 @@ import (
 )
 
 // cnpgClusterLabel is the label the CloudNativePG operator stamps on every instance pod of a
-// Cluster (value = the Cluster name). postgresqlPort is the default PostgreSQL service port.
+// Cluster (value = the Cluster name). cnpgPoolerNameLabel is the label it stamps on every pooler
+// (PgBouncer) pod (value = the Pooler name). postgresqlPort is the PostgreSQL/PgBouncer port.
 const (
-	cnpgClusterLabel = "cnpg.io/cluster"
-	postgresqlPort   = 5432
+	cnpgClusterLabel    = "cnpg.io/cluster"
+	cnpgPoolerNameLabel = "cnpg.io/poolerName"
+	postgresqlPort      = 5432
 )
 
 // PostgresqlHandler handles OAM postgresql components.
@@ -29,15 +31,39 @@ func (h *PostgresqlHandler) CanHandle(componentType string) bool {
 	return componentType == "postgresql"
 }
 
-// Endpoints implements oam.EndpointProvider: a postgresql component's data-plane endpoint is
+// Endpoints implements oam.EndpointProvider: a postgresql component's data-plane endpoints are
 // the CNPG cluster's instance pods (labelled cnpg.io/cluster=<cluster name>, which equals the
-// OAM component name) on the PostgreSQL port. A downstream platform uses this to synthesize the
-// target-side ingress allow without hardcoding the operator selector.
+// OAM component name) on the PostgreSQL port and, when the component declares a pooler, the
+// pooler (PgBouncer) pods (labelled cnpg.io/poolerName=<cluster name>-pooler) on the same port.
+// A downstream platform uses these to synthesize the target-side ingress allow(s) without
+// hardcoding the operator selectors; a consumer that dials the pooler needs the second endpoint
+// because pooler pods carry a different label set and are not matched by the direct-cluster
+// selector.
 func (h *PostgresqlHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
-	return []netpol.Endpoint{{
+	eps := []netpol.Endpoint{{
 		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: component.Name}},
 		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
-	}}, nil
+	}}
+	// The pooler resource name mirrors createPooler: <component name>-pooler.
+	if poolerEnabled(component) {
+		eps = append(eps, netpol.Endpoint{
+			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: component.Name + "-pooler"}},
+			Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
+		})
+	}
+	return eps, nil
+}
+
+// poolerEnabled reports whether the component declares an enabled pooler. It reads the raw
+// property (mirroring ToApplicationConfig's pooler parse) so Endpoints stays a lightweight,
+// side-effect-free view that does not require a full config build.
+func poolerEnabled(component *oam.Component) bool {
+	pooler, ok := component.Properties["pooler"].(map[string]any)
+	if !ok {
+		return false
+	}
+	enabled, _ := pooler["enabled"].(bool)
+	return enabled
 }
 
 // PropertySchema declares the postgresql component's top-level user-facing

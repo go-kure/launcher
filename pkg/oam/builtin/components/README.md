@@ -60,7 +60,10 @@ share these fields: `image` (validated — no untagged/`latest`), `env` (with
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
   data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
   platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
-  without hardcoding the operator selector.
+  without hardcoding the operator selector. When `pooler.enabled` is set it declares a **second**
+  endpoint for the pooler (PgBouncer) pods (`cnpg.io/poolerName: <component-name>-pooler` on port
+  `5432`), so a consumer that dials the pooler — whose pods carry a different label set and are not
+  matched by the direct-cluster selector — also gets its connection synthesized.
 - **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
   Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
   consumers can attribute the emitted resource to its owning OAM component.

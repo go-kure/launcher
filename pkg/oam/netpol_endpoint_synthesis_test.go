@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -166,6 +167,28 @@ func TestGroupIngressPeers_DropsMalformedAndDedups(t *testing.T) {
 	}
 }
 
+func TestEndpointIngressPolicyName(t *testing.T) {
+	ep := validEndpoint()
+	// Single-endpoint component keeps the bare, back-compatible name.
+	if got := endpointIngressPolicyName("pg", ep, false); got != "pg-allow-endpoint-ingress" {
+		t.Errorf("single-endpoint name = %q, want pg-allow-endpoint-ingress", got)
+	}
+	// Multi-endpoint: suffixed, deterministic, and content-stable (same endpoint → same name).
+	m1 := endpointIngressPolicyName("pg", ep, true)
+	m2 := endpointIngressPolicyName("pg", ep, true)
+	if m1 != m2 {
+		t.Errorf("multi-endpoint name not deterministic: %q vs %q", m1, m2)
+	}
+	if !strings.HasPrefix(m1, "pg-allow-endpoint-ingress-") || len(m1) != len("pg-allow-endpoint-ingress-")+8 {
+		t.Errorf("multi-endpoint name = %q, want bare+'-'+8 hex chars", m1)
+	}
+	// A different endpoint yields a different suffix.
+	pooler := netpol.Endpoint{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"cnpg.io/poolerName": "pg-pooler"}}, Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}
+	if other := endpointIngressPolicyName("pg", pooler, true); other == m1 {
+		t.Errorf("distinct endpoints produced the same name %q", other)
+	}
+}
+
 func TestGroupIngressPeers_TwoDistinctEndpoints(t *testing.T) {
 	ep2 := netpol.Endpoint{
 		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"cnpg.io/cluster": "pg", "role": "pooler"}},
@@ -213,19 +236,68 @@ func TestSynthesizeEndpointIngress_NoOpAndGuards(t *testing.T) {
 	if got := len(egressAppNames(cluster2)); got != 1 {
 		t.Errorf("expected no synthesis for unmatched component, got %d apps", got)
 	}
-	// multi-endpoint → skip (no app emitted)
-	cluster3, componentMap3, _ := egressFixture("pg", "default")
-	ep2 := netpol.Endpoint{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}}, Ports: []intstr.IntOrString{intstr.FromInt32(6432)}}
-	synthesizeEndpointIngressNetworkPolicies(cluster3, componentMap3, map[string][]netpol.IngressPeer{
+}
+
+// TestSynthesizeEndpointIngress_MultiEndpoint verifies a component with two distinct endpoints
+// (e.g. a postgresql cluster + its pooler) emits one policy per endpoint, each with a distinct,
+// content-derived suffixed name — and that neither uses the bare single-endpoint name.
+func TestSynthesizeEndpointIngress_MultiEndpoint(t *testing.T) {
+	cluster, componentMap, _ := egressFixture("pg", "default")
+	ep2 := netpol.Endpoint{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"cnpg.io/poolerName": "pg-pooler"}}, Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}
+	synthesizeEndpointIngressNetworkPolicies(cluster, componentMap, map[string][]netpol.IngressPeer{
 		"pg": {
 			{Endpoint: validEndpoint(), Sources: []netpol.TrafficSource{src("app", "app", "web")}},
 			{Endpoint: ep2, Sources: []netpol.TrafficSource{src("app", "app", "web")}},
 		},
 	})
-	for _, n := range egressAppNames(cluster3) {
-		if n == "pg-allow-endpoint-ingress" {
-			t.Errorf("expected multi-endpoint skip, but a policy was emitted")
+	// Collect the two synthesized policies and render each NP, keyed by its distinguishing
+	// selector label, so we can assert both the naming and the rendered target.
+	var epApps []*stack.Application
+	for _, app := range cluster.Node.Bundle.Applications {
+		if strings.HasPrefix(app.Name, "pg-allow-endpoint-ingress") {
+			epApps = append(epApps, app)
 		}
+		if app.Name == "pg-allow-endpoint-ingress" {
+			t.Errorf("multi-endpoint component must not use the bare policy name")
+		}
+	}
+	if len(epApps) != 2 {
+		t.Fatalf("expected 2 endpoint-ingress policies, got %d", len(epApps))
+	}
+	if epApps[0].Name == epApps[1].Name {
+		t.Errorf("expected two distinct policy names, both are %q", epApps[0].Name)
+	}
+
+	// One NP must select the direct cluster pods, the other the pooler pods; both on port 5432.
+	sawCluster, sawPooler := false, false
+	for _, app := range epApps {
+		objs, err := app.Config.Generate(app)
+		if err != nil {
+			t.Fatalf("Generate %q: %v", app.Name, err)
+		}
+		np, ok := (*objs[0]).(*networkingv1.NetworkPolicy)
+		if !ok {
+			t.Fatalf("expected *NetworkPolicy from %q, got %T", app.Name, *objs[0])
+		}
+		ml := np.Spec.PodSelector.MatchLabels
+		port := np.Spec.Ingress[0].Ports[0].Port.IntVal
+		switch {
+		case ml["cnpg.io/cluster"] == "pg":
+			sawCluster = true
+			if len(ml) != 1 || port != 5432 {
+				t.Errorf("cluster NP %q: selector=%v port=%d, want cnpg.io/cluster=pg port=5432", app.Name, ml, port)
+			}
+		case ml["cnpg.io/poolerName"] == "pg-pooler":
+			sawPooler = true
+			if len(ml) != 1 || port != 5432 {
+				t.Errorf("pooler NP %q: selector=%v port=%d, want cnpg.io/poolerName=pg-pooler port=5432", app.Name, ml, port)
+			}
+		default:
+			t.Errorf("unexpected NP %q selector: %v", app.Name, ml)
+		}
+	}
+	if !sawCluster || !sawPooler {
+		t.Errorf("expected both cluster and pooler NPs (cluster=%v pooler=%v)", sawCluster, sawPooler)
 	}
 }
 
