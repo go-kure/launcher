@@ -5,11 +5,13 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // WebserviceHandler handles OAM webservice components.
@@ -18,6 +20,22 @@ type WebserviceHandler struct{}
 // CanHandle returns true for webservice component type.
 func (h *WebserviceHandler) CanHandle(componentType string) bool {
 	return componentType == "webservice"
+}
+
+// Endpoints implements oam.EndpointProvider: a webservice's in-cluster endpoint is its own pods
+// (labelled app=<component name>) on the declared container/service port. This lets a downstream
+// platform consumer synthesize generic app→app connections whose target is a webservice, the same
+// way it does for a postgresql target. The webservice's single `port` property drives both the
+// container port and the Service port (TargetPort == Port), so there is one endpoint per component.
+func (h *WebserviceHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	port := int32(80)
+	if p, ok := toInt32(component.Properties["port"]); ok {
+		port = p
+	}
+	return []netpol.Endpoint{{
+		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": component.Name}},
+		Ports:       []intstr.IntOrString{intstr.FromInt32(port)},
+	}}, nil
 }
 
 // PropertySchema declares the webservice component's user-facing properties.
