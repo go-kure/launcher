@@ -111,6 +111,16 @@ Routing traits (`ingress`/`httproute`/`expose`) can surface platform-reserved
 `networkPolicy.trafficSources`, which the OAM layer collects to synthesize a
 matching `NetworkPolicy` (see [`pkg/oam/netpol`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/netpol)).
 
+When a routing trait's `backendRefs` (httproute) or path `backend` (ingress) names a **separate**
+in-bundle backend Service rather than the exposing component's own, the synthesized
+`{comp}-allow-ingress-traffic` allow is **retargeted onto the backend component's pods** + the
+backendRef port — so router→backend traffic is allowed under a namespace default-deny. The backend
+Service name is resolved to a sibling OAM component in the same bundle (a component's Service name
+is its `BackendServiceName()` when it declares one, else its component name); a backendRef that
+resolves to no in-bundle component is **left authored**. Resolution assumes the sibling's Service
+port equals its container port, which holds for all builtin components (e.g. webservice sets
+`TargetPort == Port`).
+
 ## Extending
 
 Custom traits implement `oam.TraitHandler` (`CanHandle` + `Apply`), optionally

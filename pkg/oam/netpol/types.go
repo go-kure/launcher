@@ -35,6 +35,16 @@ type EgressPeer struct {
 	Ports       []intstr.IntOrString
 }
 
+// BackendTarget is one expose/routing backendRef that routes to a **separate** in-cluster
+// backend Service — not the exposing component's own. Ingress synthesis uses it to retarget the
+// synthesized allow onto the pods that actually receive the traffic (resolved from the backend
+// Service name to a sibling component). ServiceName is the referenced Kubernetes Service; Ports
+// are the referenced backend ports.
+type BackendTarget struct {
+	ServiceName string
+	Ports       []intstr.IntOrString
+}
+
 // Endpoint is a component's declared in-cluster data-plane endpoint (e.g. an operator-managed
 // database's instance pods). Namespace is deliberately absent — the platform caller knows the
 // target's namespace, and the synthesized NetworkPolicy is emitted in the component's namespace.

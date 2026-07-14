@@ -33,6 +33,13 @@ type trafficRule struct {
 	Ports   []intstr.IntOrString
 }
 
+// serviceBackendNamer is optionally implemented by a component config whose Kubernetes Service
+// name differs from its component name (e.g. a statefulset's headless service). Used to resolve
+// an expose backendRef (a Service name) back to the sibling component that owns it (#227).
+type serviceBackendNamer interface {
+	BackendServiceName() string
+}
+
 // componentAllowPolicyConfig is the ApplicationConfig for an auto-generated
 // NetworkPolicy that allows ingress from routing controller traffic sources to
 // the component's pods. The resource name is {component}-allow-ingress-traffic,
@@ -107,27 +114,67 @@ func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client
 //
 // Runs as a cluster post-build stage (Phase 4), after trait application — so the
 // synthesized policies are not subject to Enforceable.ApplyPolicy (intentional).
-func synthesizeNetworkPolicies(cluster *stack.Cluster, labelKey string) {
+func synthesizeNetworkPolicies(cluster *stack.Cluster, componentMap map[string]componentEntry, labelKey string) {
 	if cluster == nil {
 		return
 	}
 	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
-		synthesizeForBundle(bundle, labelKey)
+		synthesizeForBundle(bundle, componentMap, labelKey)
 	})
 }
 
-func synthesizeForBundle(bundle *stack.Bundle, labelKey string) {
+// backendRefTargetCollector is optionally implemented by routing trait configs (IngressConfig,
+// HTTPRouteConfig) that can route to a separate backend Service via expose backendRefs. It
+// surfaces those external targets so ingress synthesis can land the allow on the backend's own
+// pods instead of the exposing component's (#227).
+type backendRefTargetCollector interface {
+	BackendTargets() []netpol.BackendTarget
+}
+
+func synthesizeForBundle(bundle *stack.Bundle, componentMap map[string]componentEntry, labelKey string) {
 	if bundle == nil {
 		return
 	}
 
-	// Group collectors by component name, preserving insertion order for determinism.
+	// Group collectors by component name, preserving insertion order for determinism. injected
+	// carries retargeted rules for a backend component that a routing trait points at via an
+	// external backendRef (#227) — kept separate from the component's own collectors because its
+	// ports come from the backendRef, not the collector's own BackendPorts.
 	type groupEntry struct {
 		collectors []trafficSourceCollector
+		injected   []trafficRule
 		namespace  string
 	}
 	byComponent := map[string]*groupEntry{}
 	var componentOrder []string
+	ensureGroup := func(name string) *groupEntry {
+		g, exists := byComponent[name]
+		if !exists {
+			g = &groupEntry{}
+			byComponent[name] = g
+			componentOrder = append(componentOrder, name)
+		}
+		return g
+	}
+
+	// Map each in-bundle component's Service name to its component name, for backendRef
+	// resolution. A component's Service name is its BackendServiceName() when it declares one
+	// (e.g. statefulset's headless service), else its component name (webservice's convention).
+	inBundle := map[*stack.Application]bool{}
+	for _, a := range bundle.Applications {
+		inBundle[a] = true
+	}
+	serviceToComponent := map[string]string{}
+	for name, entry := range componentMap {
+		if !inBundle[entry.app] {
+			continue
+		}
+		svc := name
+		if sn, ok := entry.app.Config.(serviceBackendNamer); ok && sn.BackendServiceName() != "" {
+			svc = sn.BackendServiceName()
+		}
+		serviceToComponent[svc] = name
+	}
 
 	for _, appPtr := range bundle.Applications {
 		col, ok := appPtr.Config.(trafficSourceCollector)
@@ -135,17 +182,40 @@ func synthesizeForBundle(bundle *stack.Bundle, labelKey string) {
 			continue
 		}
 		name := col.TargetComponentName()
-		if _, exists := byComponent[name]; !exists {
-			byComponent[name] = &groupEntry{}
-			componentOrder = append(componentOrder, name)
+		g := ensureGroup(name)
+		g.collectors = append(g.collectors, col)
+		g.namespace = appPtr.Namespace
+
+		// #227: an external backendRef routes to a separate backend. Retarget its allow onto the
+		// backend component's pods (resolved from the backend Service name to a sibling
+		// component). Unresolvable refs (no owning component in the bundle) stay authored.
+		bt, ok := appPtr.Config.(backendRefTargetCollector)
+		if !ok {
+			continue
 		}
-		byComponent[name].collectors = append(byComponent[name].collectors, col)
-		byComponent[name].namespace = appPtr.Namespace
+		sources := col.TrafficSources()
+		if len(sources) == 0 {
+			continue // no traffic sources → nothing to allow
+		}
+		for _, target := range bt.BackendTargets() {
+			backendComp, resolved := serviceToComponent[target.ServiceName]
+			if !resolved || backendComp == name {
+				continue // unresolvable (authored fallback) or self (already handled above)
+			}
+			bg := ensureGroup(backendComp)
+			// The backend group's namespace must come from the backend's own app, not the
+			// router-bearing collector's; source it from componentMap.
+			if entry, ok := componentMap[backendComp]; ok {
+				bg.namespace = entry.app.Namespace
+			}
+			bg.injected = append(bg.injected, trafficRule{Sources: sources, Ports: target.Ports})
+		}
 	}
 
 	for _, compName := range componentOrder {
 		entry := byComponent[compName]
 		rules := buildTrafficRules(entry.collectors)
+		rules = appendDedupTrafficRules(rules, entry.injected)
 		if len(rules) == 0 {
 			continue
 		}
@@ -156,6 +226,28 @@ func synthesizeForBundle(bundle *stack.Bundle, labelKey string) {
 		)
 		bundle.Applications = append(bundle.Applications, autoApp)
 	}
+}
+
+// appendDedupTrafficRules appends extra rules to base, skipping any whose (sources, ports) key
+// already appears — so a backendRef-retargeted rule can't duplicate a rule the backend already
+// has from its own routing traits.
+func appendDedupTrafficRules(base, extra []trafficRule) []trafficRule {
+	seen := map[string]struct{}{}
+	for _, r := range base {
+		seen[trafficRuleKey(r.Sources, r.Ports)] = struct{}{}
+	}
+	for _, r := range extra {
+		if len(r.Ports) == 0 || len(r.Sources) == 0 {
+			continue
+		}
+		key := trafficRuleKey(r.Sources, r.Ports)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		base = append(base, r)
+	}
+	return base
 }
 
 // buildTrafficRules returns one trafficRule per collector with non-empty ports

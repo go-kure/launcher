@@ -108,7 +108,7 @@ func TestSynthesizeForBundle_AddsNetworkPolicyApp(t *testing.T) {
 	app := stack.NewApplication("web-ingress", "default", col)
 	bundle := &stack.Bundle{Applications: []*stack.Application{app}}
 
-	synthesizeForBundle(bundle, ComponentLabel)
+	synthesizeForBundle(bundle, nil, ComponentLabel)
 
 	if len(bundle.Applications) != 2 {
 		t.Fatalf("expected 2 applications after synthesis, got %d", len(bundle.Applications))
@@ -128,7 +128,7 @@ func TestSynthesizeForBundle_NoSynthesisWithoutSources(t *testing.T) {
 	app := stack.NewApplication("web-ingress", "default", col)
 	bundle := &stack.Bundle{Applications: []*stack.Application{app}}
 
-	synthesizeForBundle(bundle, ComponentLabel)
+	synthesizeForBundle(bundle, nil, ComponentLabel)
 
 	if len(bundle.Applications) != 1 {
 		t.Errorf("expected no synthesis (no sources), got %d apps", len(bundle.Applications))
@@ -150,7 +150,7 @@ func TestSynthesizeForBundle_TwoCollectorsSameComponent(t *testing.T) {
 	app2 := stack.NewApplication("web-httproute", "default", col2)
 	bundle := &stack.Bundle{Applications: []*stack.Application{app1, app2}}
 
-	synthesizeForBundle(bundle, ComponentLabel)
+	synthesizeForBundle(bundle, nil, ComponentLabel)
 
 	// One synthesized policy per component (not per collector).
 	count := 0
