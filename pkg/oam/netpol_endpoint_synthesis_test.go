@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -269,16 +270,35 @@ func TestSynthesizeEndpointIngress_MultiEndpoint(t *testing.T) {
 	}
 
 	// One NP must select the direct cluster pods, the other the pooler pods; both on port 5432.
+	// #238: the rendered NetworkPolicy *resource* names must also be distinct and sha-suffixed —
+	// the earlier test asserted only the distinct Application (layout) names, so the resource-name
+	// collision that broke `kustomize build` slipped through. Collect np.Name here to assert both.
+	prefix := "pg-allow-endpoint-ingress-"
+	hexSuffix := regexp.MustCompile(`^[0-9a-f]{8}$`)
+	var resourceNames []string
 	sawCluster, sawPooler := false, false
 	for _, app := range epApps {
 		objs, err := app.Config.Generate(app)
 		if err != nil {
 			t.Fatalf("Generate %q: %v", app.Name, err)
 		}
+		if len(objs) != 1 {
+			t.Fatalf("Generate %q: expected 1 object, got %d", app.Name, len(objs))
+		}
 		np, ok := (*objs[0]).(*networkingv1.NetworkPolicy)
 		if !ok {
 			t.Fatalf("expected *NetworkPolicy from %q, got %T", app.Name, *objs[0])
 		}
+		// The resource name must equal the (suffixed) layout name and carry a hex suffix, not the
+		// bare single-endpoint name that would collide across endpoints.
+		if np.Name != app.Name {
+			t.Errorf("resource name %q != layout name %q", np.Name, app.Name)
+		}
+		suffix := strings.TrimPrefix(np.Name, prefix)
+		if suffix == np.Name || !hexSuffix.MatchString(suffix) {
+			t.Errorf("resource name %q lacks %q + 8-hex suffix", np.Name, prefix)
+		}
+		resourceNames = append(resourceNames, np.Name)
 		ml := np.Spec.PodSelector.MatchLabels
 		port := np.Spec.Ingress[0].Ports[0].Port.IntVal
 		switch {
@@ -298,6 +318,9 @@ func TestSynthesizeEndpointIngress_MultiEndpoint(t *testing.T) {
 	}
 	if !sawCluster || !sawPooler {
 		t.Errorf("expected both cluster and pooler NPs (cluster=%v pooler=%v)", sawCluster, sawPooler)
+	}
+	if len(resourceNames) == 2 && resourceNames[0] == resourceNames[1] {
+		t.Errorf("expected two distinct NetworkPolicy resource names, both are %q", resourceNames[0])
 	}
 }
 
