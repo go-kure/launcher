@@ -160,24 +160,32 @@ func synthesizeNetworkPolicies(cluster *stack.Cluster, componentMap map[string]c
 	if cluster == nil {
 		return nil
 	}
-	// External-backend accumulation and name-collision detection are CLUSTER-wide, not per-bundle:
-	// two routers in different leaf bundles can name the same external Service in the same namespace,
-	// which would otherwise emit duplicate NetworkPolicy resource ids (or miss a cross-bundle
-	// selector conflict). Component policies stay per-bundle (a component lives in exactly one
-	// bundle, so its name is already cluster-unique).
+	// Synthesis is entirely CLUSTER-wide (not per-bundle): components of one Application share a
+	// namespace but are split across leaf bundles (dependency-aware: one per component; hierarchical:
+	// one per tier). Resolving a backendRef to its sibling component, and merging a router's injected
+	// allow onto that component's own bundle, therefore requires cluster-wide lookups (#242) — the
+	// same model #239 uses for external backends.
 	reg := newNPSynthesisRegistry()
+	if err := reg.buildLookups(cluster, componentMap); err != nil {
+		return err
+	}
 	// walkLeafBundles cannot abort traversal, so capture the first error and guard the callback.
 	var firstErr error
 	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
 		if firstErr != nil {
 			return
 		}
-		if err := synthesizeForBundle(bundle, componentMap, labelKey, reg); err != nil {
+		if err := synthesizeForBundle(bundle, reg); err != nil {
 			firstErr = err
 		}
 	})
 	if firstErr != nil {
 		return firstErr
+	}
+	// Emit component policies first so the external-vs-component collision check (emitExternalBackends)
+	// sees every component name; both only queue apps.
+	if err := reg.emitComponents(labelKey); err != nil {
+		return err
 	}
 	if err := reg.emitExternalBackends(); err != nil {
 		return err
@@ -185,6 +193,70 @@ func synthesizeNetworkPolicies(cluster *stack.Cluster, componentMap map[string]c
 	// Every append is deferred to here, so an error at any point above leaves the cluster
 	// completely unmutated (no partially-decorated bundle observable by a direct caller).
 	reg.flush()
+	return nil
+}
+
+// buildLookups populates the registry's cluster-wide read-only maps: appToBundle (via a leaf-bundle
+// walk), componentPlacement (each component's own bundle + namespace), and serviceToComponent (each
+// component's Service name → its name). It fails fast (R3) when two components resolve to the same
+// Service name — an ambiguous #227/#242 routing target must error, not silently misroute.
+func (r *npSynthesisRegistry) buildLookups(cluster *stack.Cluster, componentMap map[string]componentEntry) error {
+	appToBundle := map[*stack.Application]*stack.Bundle{}
+	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
+		for _, a := range bundle.Applications {
+			appToBundle[a] = bundle
+		}
+	})
+	// Sort component names so the R3 error (and any map build) is deterministic.
+	names := make([]string, 0, len(componentMap))
+	for name := range componentMap {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	svcOwner := map[string]string{} // svc name → first component that claimed it
+	for _, name := range names {
+		entry := componentMap[name]
+		r.componentPlacement[name] = componentPlacement{bundle: appToBundle[entry.app], namespace: entry.app.Namespace}
+		svc := name
+		if sn, ok := entry.app.Config.(serviceBackendNamer); ok && sn.BackendServiceName() != "" {
+			svc = sn.BackendServiceName()
+		}
+		if prev, dup := svcOwner[svc]; dup {
+			a, b := prev, name
+			if a > b {
+				a, b = b, a
+			}
+			return errors.Errorf(
+				"components %q and %q resolve to the same Service name %q — ambiguous backendRef target",
+				a, b, svc)
+		}
+		svcOwner[svc] = name
+		r.serviceToComponent[svc] = name
+	}
+	return nil
+}
+
+// emitComponents queues one {comp}-allow-ingress-traffic policy per accumulated component, in its own
+// bundle, merging the component's own routing collectors with any injected backendRef rules. Runs
+// after the walk; queued apps are appended only by flush().
+func (r *npSynthesisRegistry) emitComponents(labelKey string) error {
+	for _, compName := range r.componentOrder {
+		ce := r.components[compName]
+		rules := buildTrafficRules(ce.collectors)
+		rules = appendDedupTrafficRules(rules, ce.injected)
+		if len(rules) == 0 {
+			continue
+		}
+		policyName := compName + "-allow-ingress-traffic"
+		// Key by namespace/name (not bare name) to preserve the #239 external-vs-component collision
+		// check and avoid future cross-namespace false positives.
+		r.emitted[ce.namespace+"/"+policyName] = struct{}{}
+		r.queue(ce.bundle, stack.NewApplication(
+			policyName,
+			ce.namespace,
+			&componentAllowPolicyConfig{ComponentName: compName, Rules: rules, PodSelectorKey: labelKey},
+		))
+	}
 	return nil
 }
 
@@ -206,21 +278,67 @@ type pendingSynthApp struct {
 	app    *stack.Application
 }
 
-// npSynthesisRegistry holds cluster-wide synthesis state: every emitted policy's namespace/name (to
-// detect external-vs-component collisions), the external-backend accumulator, and the deferred
-// append queue.
+// componentPlacement records where a component's synthesized inbound policy must land: its own leaf
+// bundle and namespace. Built cluster-wide so a router in one bundle can inject an allow onto a
+// backend component in another bundle (#242).
+type componentPlacement struct {
+	bundle    *stack.Bundle
+	namespace string
+}
+
+// componentInboundEntry accumulates one component's inbound-policy inputs CLUSTER-wide: its own
+// routing collectors plus rules injected by backendRefs from routers in any bundle (#227/#242).
+// bundle/namespace are the component's own (set once), so the merged {comp}-allow-ingress-traffic
+// policy is emitted exactly once in the component's bundle regardless of walk order.
+type componentInboundEntry struct {
+	collectors []trafficSourceCollector
+	injected   []trafficRule
+	namespace  string
+	bundle     *stack.Bundle
+}
+
+// npSynthesisRegistry holds cluster-wide synthesis state: read-only lookups (Service name →
+// component, component → placement), the per-component and external-backend accumulators, every
+// emitted policy's namespace/name (to detect collisions), and the deferred append queue.
 type npSynthesisRegistry struct {
-	emitted          map[string]struct{}              // namespace/name of every synthesized policy
-	externalBackends map[string]*externalBackendEntry // key: namespace\x00service
-	externalOrder    []string
-	pending          []pendingSynthApp
+	serviceToComponent map[string]string             // svc name → component name (cluster-wide, ambiguity-checked)
+	componentPlacement map[string]componentPlacement // component name → its own bundle + namespace
+	components         map[string]*componentInboundEntry
+	componentOrder     []string
+	emitted            map[string]struct{}              // namespace/name of every synthesized policy
+	externalBackends   map[string]*externalBackendEntry // key: namespace\x00service
+	externalOrder      []string
+	pending            []pendingSynthApp
 }
 
 func newNPSynthesisRegistry() *npSynthesisRegistry {
 	return &npSynthesisRegistry{
-		emitted:          map[string]struct{}{},
-		externalBackends: map[string]*externalBackendEntry{},
+		serviceToComponent: map[string]string{},
+		componentPlacement: map[string]componentPlacement{},
+		components:         map[string]*componentInboundEntry{},
+		emitted:            map[string]struct{}{},
+		externalBackends:   map[string]*externalBackendEntry{},
 	}
+}
+
+// ensureComponent returns the accumulator for a component, creating it (and recording insertion
+// order) on first use. bundle/namespace are set only on creation. A later call that disagrees on
+// bundle/namespace is a producer bug (a real component has one placement) — error rather than
+// silently queue the policy into the wrong bundle.
+func (r *npSynthesisRegistry) ensureComponent(name string, bundle *stack.Bundle, namespace string) (*componentInboundEntry, error) {
+	ce, ok := r.components[name]
+	if !ok {
+		ce = &componentInboundEntry{namespace: namespace, bundle: bundle}
+		r.components[name] = ce
+		r.componentOrder = append(r.componentOrder, name)
+		return ce, nil
+	}
+	if ce.bundle != bundle || ce.namespace != namespace {
+		return nil, errors.Errorf(
+			"component %q resolved to inconsistent placement (namespace %q vs %q)",
+			name, ce.namespace, namespace)
+	}
+	return ce, nil
 }
 
 // queue records a synthesized app for deferred append to its bundle.
@@ -274,49 +392,14 @@ type backendRefTargetCollector interface {
 	BackendTargets() []netpol.BackendTarget
 }
 
-func synthesizeForBundle(bundle *stack.Bundle, componentMap map[string]componentEntry, labelKey string, reg *npSynthesisRegistry) error {
+// synthesizeForBundle accumulates one leaf bundle's routing collectors into the cluster-wide
+// registry (reg): each component's own collectors, plus rules injected onto a backend component
+// (resolved cluster-wide, landing on the backend's OWN bundle — #242) or onto an external bare
+// Service (#239). It never emits — emitComponents/emitExternalBackends do that after the whole
+// cluster is walked, so nothing is appended to any bundle until every bundle validates.
+func synthesizeForBundle(bundle *stack.Bundle, reg *npSynthesisRegistry) error {
 	if bundle == nil {
 		return nil
-	}
-
-	// Group collectors by component name, preserving insertion order for determinism. injected
-	// carries retargeted rules for a backend component that a routing trait points at via an
-	// external backendRef (#227) — kept separate from the component's own collectors because its
-	// ports come from the backendRef, not the collector's own BackendPorts.
-	type groupEntry struct {
-		collectors []trafficSourceCollector
-		injected   []trafficRule
-		namespace  string
-	}
-	byComponent := map[string]*groupEntry{}
-	var componentOrder []string
-	ensureGroup := func(name string) *groupEntry {
-		g, exists := byComponent[name]
-		if !exists {
-			g = &groupEntry{}
-			byComponent[name] = g
-			componentOrder = append(componentOrder, name)
-		}
-		return g
-	}
-
-	// Map each in-bundle component's Service name to its component name, for backendRef
-	// resolution. A component's Service name is its BackendServiceName() when it declares one
-	// (e.g. statefulset's headless service), else its component name (webservice's convention).
-	inBundle := map[*stack.Application]bool{}
-	for _, a := range bundle.Applications {
-		inBundle[a] = true
-	}
-	serviceToComponent := map[string]string{}
-	for name, entry := range componentMap {
-		if !inBundle[entry.app] {
-			continue
-		}
-		svc := name
-		if sn, ok := entry.app.Config.(serviceBackendNamer); ok && sn.BackendServiceName() != "" {
-			svc = sn.BackendServiceName()
-		}
-		serviceToComponent[svc] = name
 	}
 
 	for _, appPtr := range bundle.Applications {
@@ -324,14 +407,15 @@ func synthesizeForBundle(bundle *stack.Bundle, componentMap map[string]component
 		if !ok {
 			continue
 		}
-		name := col.TargetComponentName()
-		g := ensureGroup(name)
-		g.collectors = append(g.collectors, col)
-		g.namespace = appPtr.Namespace
+		routerComp := col.TargetComponentName()
+		// The router's own collectors accumulate under its component, in this (the router's) bundle.
+		if _, err := reg.ensureComponent(routerComp, bundle, appPtr.Namespace); err != nil {
+			return err
+		}
+		reg.components[routerComp].collectors = append(reg.components[routerComp].collectors, col)
 
-		// #227: an external backendRef routes to a separate backend. Retarget its allow onto the
-		// backend component's pods (resolved from the backend Service name to a sibling
-		// component). Unresolvable refs (no owning component in the bundle) stay authored.
+		// #227/#242: an external backendRef routes to a separate backend. Retarget its allow onto the
+		// backend component's pods, resolved cluster-wide so the backend may live in another bundle.
 		bt, ok := appPtr.Config.(backendRefTargetCollector)
 		if !ok {
 			continue
@@ -341,26 +425,27 @@ func synthesizeForBundle(bundle *stack.Bundle, componentMap map[string]component
 			continue // no traffic sources → nothing to allow
 		}
 		for _, target := range bt.BackendTargets() {
-			backendComp, resolved := serviceToComponent[target.ServiceName]
+			backendComp, resolved := reg.serviceToComponent[target.ServiceName]
 			if resolved {
-				if backendComp == name {
+				if backendComp == routerComp {
 					continue // self (already handled above)
 				}
-				// #227: retarget onto the in-bundle backend component's pods. An authored
+				// Retarget onto the backend component's pods, in the backend's OWN bundle. An authored
 				// backendSelector on a resolvable ref is ignored — component-label targeting wins.
-				bg := ensureGroup(backendComp)
-				// The backend group's namespace must come from the backend's own app, not the
-				// router-bearing collector's; source it from componentMap.
-				if entry, ok := componentMap[backendComp]; ok {
-					bg.namespace = entry.app.Namespace
+				pl, ok := reg.componentPlacement[backendComp]
+				if !ok {
+					continue // backend has no known placement (defensive) → leave authored
 				}
-				bg.injected = append(bg.injected, trafficRule{Sources: sources, Ports: target.Ports})
+				bce, err := reg.ensureComponent(backendComp, pl.bundle, pl.namespace)
+				if err != nil {
+					return err
+				}
+				bce.injected = append(bce.injected, trafficRule{Sources: sources, Ports: target.Ports})
 				continue
 			}
-			// #239: external bare Service. Synthesize only with an explicit, valid authored
-			// selector; otherwise leave authored (current behavior — no name-based inference).
-			// Accumulate cluster-wide (in reg) so a Service named across bundles is deduped/merged
-			// and a cross-bundle selector conflict is still caught.
+			// #239: external bare Service. Synthesize only with an explicit, valid authored selector;
+			// otherwise leave authored (no name-based inference). Accumulate cluster-wide so a Service
+			// named across bundles is deduped/merged and a cross-bundle selector conflict is caught.
 			if target.PodSelector == nil || !matchLabelsSelectorValid(target.PodSelector) {
 				continue
 			}
@@ -382,27 +467,6 @@ func synthesizeForBundle(bundle *stack.Bundle, componentMap map[string]component
 			}
 			eb.rules = append(eb.rules, trafficRule{Sources: sources, Ports: target.Ports})
 		}
-	}
-
-	// Queue the per-component inbound policies for this bundle, recording their names in the
-	// cluster-wide registry so external-backend collisions can be detected against the full set.
-	// Nothing is appended here — every synthesized app (component + external) is flushed only after
-	// the whole cluster is walked and validated (synthesizeNetworkPolicies), so any error leaves the
-	// cluster unmutated.
-	for _, compName := range componentOrder {
-		entry := byComponent[compName]
-		rules := buildTrafficRules(entry.collectors)
-		rules = appendDedupTrafficRules(rules, entry.injected)
-		if len(rules) == 0 {
-			continue
-		}
-		policyName := compName + "-allow-ingress-traffic"
-		reg.emitted[entry.namespace+"/"+policyName] = struct{}{}
-		reg.queue(bundle, stack.NewApplication(
-			policyName,
-			entry.namespace,
-			&componentAllowPolicyConfig{ComponentName: compName, Rules: rules, PodSelectorKey: labelKey},
-		))
 	}
 	return nil
 }
