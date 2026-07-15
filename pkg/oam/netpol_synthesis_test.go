@@ -145,8 +145,11 @@ func TestSynthesizeForBundle_AddsNetworkPolicyApp(t *testing.T) {
 	bundle := &stack.Bundle{Applications: []*stack.Application{app}}
 
 	reg := newNPSynthesisRegistry()
-	if err := synthesizeForBundle(bundle, nil, ComponentLabel, reg); err != nil {
+	if err := synthesizeForBundle(bundle, reg); err != nil {
 		t.Fatalf("synthesizeForBundle: %v", err)
+	}
+	if err := reg.emitComponents(ComponentLabel); err != nil {
+		t.Fatalf("emitComponents: %v", err)
 	}
 	reg.flush()
 
@@ -169,8 +172,11 @@ func TestSynthesizeForBundle_NoSynthesisWithoutSources(t *testing.T) {
 	bundle := &stack.Bundle{Applications: []*stack.Application{app}}
 
 	reg := newNPSynthesisRegistry()
-	if err := synthesizeForBundle(bundle, nil, ComponentLabel, reg); err != nil {
+	if err := synthesizeForBundle(bundle, reg); err != nil {
 		t.Fatalf("synthesizeForBundle: %v", err)
+	}
+	if err := reg.emitComponents(ComponentLabel); err != nil {
+		t.Fatalf("emitComponents: %v", err)
 	}
 	reg.flush()
 
@@ -195,8 +201,11 @@ func TestSynthesizeForBundle_TwoCollectorsSameComponent(t *testing.T) {
 	bundle := &stack.Bundle{Applications: []*stack.Application{app1, app2}}
 
 	reg := newNPSynthesisRegistry()
-	if err := synthesizeForBundle(bundle, nil, ComponentLabel, reg); err != nil {
+	if err := synthesizeForBundle(bundle, reg); err != nil {
 		t.Fatalf("synthesizeForBundle: %v", err)
+	}
+	if err := reg.emitComponents(ComponentLabel); err != nil {
+		t.Fatalf("emitComponents: %v", err)
 	}
 	reg.flush()
 
@@ -404,5 +413,202 @@ func TestSynthesizeNetworkPolicies_ExternalConflict_LeavesClusterUnmutated(t *te
 	}
 	if got := countClusterApps(cluster, "external-svc-allow-ingress-traffic"); got != 0 {
 		t.Errorf("expected no external policy after error, found %d", got)
+	}
+}
+
+// --- #242: backendRef retargeting resolves and emits across leaf bundles ---
+
+// noopConfig is a minimal ApplicationConfig for a component that is neither a router nor emits a
+// policy of its own — it just occupies a bundle so it can be a cross-bundle backend target.
+type noopConfig struct{}
+
+func (noopConfig) Generate(_ *stack.Application) ([]*client.Object, error) { return nil, nil }
+
+// svcNamerConfig implements serviceBackendNamer to exercise Service-name resolution/collision.
+type svcNamerConfig struct{ svc string }
+
+func (svcNamerConfig) Generate(_ *stack.Application) ([]*client.Object, error) { return nil, nil }
+func (c svcNamerConfig) BackendServiceName() string                            { return c.svc }
+
+func bundleAppNames(b *stack.Bundle) []string {
+	out := make([]string, 0, len(b.Applications))
+	for _, a := range b.Applications {
+		out = append(out, a.Name)
+	}
+	return out
+}
+
+func bundleHasApp(b *stack.Bundle, name string) bool {
+	for _, a := range b.Applications {
+		if a.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func synthesizedNPInBundle(t *testing.T, b *stack.Bundle, name string) *networkingv1.NetworkPolicy {
+	t.Helper()
+	for _, a := range b.Applications {
+		if a.Name != name {
+			continue
+		}
+		objs, err := a.Config.Generate(a)
+		if err != nil {
+			t.Fatalf("Generate %q: %v", name, err)
+		}
+		if len(objs) != 1 {
+			t.Fatalf("expected 1 object from %q, got %d", name, len(objs))
+		}
+		np, ok := (*objs[0]).(*networkingv1.NetworkPolicy)
+		if !ok {
+			t.Fatalf("expected *NetworkPolicy from %q, got %T", name, *objs[0])
+		}
+		return np
+	}
+	t.Fatalf("app %q not found in bundle; apps: %v", name, bundleAppNames(b))
+	return nil
+}
+
+// crossBundleCluster wires router (bundle A) and backend (bundle B) into a two-leaf-bundle cluster
+// with a matching componentMap — the shape a dependency-aware/hierarchical transform produces.
+func crossBundleCluster(router, backend *stack.Application) (*stack.Cluster, *stack.Bundle, *stack.Bundle, map[string]componentEntry) {
+	bundleA := &stack.Bundle{Applications: []*stack.Application{router}}
+	bundleB := &stack.Bundle{Applications: []*stack.Application{backend}}
+	cluster := &stack.Cluster{Node: &stack.Node{Children: []*stack.Node{{Bundle: bundleA}, {Bundle: bundleB}}}}
+	componentMap := map[string]componentEntry{"router": {app: router}, "backend": {app: backend}}
+	return cluster, bundleA, bundleB, componentMap
+}
+
+// A backendRef to a component in a DIFFERENT leaf bundle now retargets — the allow lands on the
+// backend's pods in the BACKEND's bundle (pre-fix: nothing was synthesized).
+func TestSynthesizeNetworkPolicies_CrossBundleRetarget_LandsInBackendBundle(t *testing.T) {
+	backend := stack.NewApplication("backend", "default", noopConfig{})
+	router := stack.NewApplication("router-ingress", "default", &extBackendStub{
+		component: "router",
+		sources:   []netpol.TrafficSource{{Namespace: "gateway-system"}},
+		targets:   []netpol.BackendTarget{{ServiceName: "backend", Ports: []intstr.IntOrString{intstr.FromInt32(9000)}}},
+	})
+	cluster, bundleA, bundleB, componentMap := crossBundleCluster(router, backend)
+	if err := synthesizeNetworkPolicies(cluster, componentMap, ComponentLabel); err != nil {
+		t.Fatalf("synthesizeNetworkPolicies: %v", err)
+	}
+	if !bundleHasApp(bundleB, "backend-allow-ingress-traffic") {
+		t.Fatalf("expected backend-allow-ingress-traffic in the backend bundle; got %v", bundleAppNames(bundleB))
+	}
+	if bundleHasApp(bundleA, "backend-allow-ingress-traffic") {
+		t.Errorf("backend policy must not land in the router's bundle; got %v", bundleAppNames(bundleA))
+	}
+	if countClusterApps(cluster, "router-allow-ingress-traffic") != 0 {
+		t.Errorf("router (pure exposer, no self ports) must get no self policy")
+	}
+	np := synthesizedNPInBundle(t, bundleB, "backend-allow-ingress-traffic")
+	if np.Spec.PodSelector.MatchLabels[ComponentLabel] != "backend" {
+		t.Errorf("podSelector = %v, want %s=backend", np.Spec.PodSelector.MatchLabels, ComponentLabel)
+	}
+	if len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 1 || np.Spec.Ingress[0].Ports[0].Port.IntVal != 9000 {
+		t.Errorf("expected ingress on port 9000, got %+v", np.Spec.Ingress)
+	}
+}
+
+// When the backend also has its own inbound rule (its bundle) AND receives a cross-bundle injection,
+// exactly ONE merged policy is emitted in the backend's bundle carrying both sources (anti-duplicate).
+func TestSynthesizeNetworkPolicies_CrossBundle_MergesWithBackendOwnRules(t *testing.T) {
+	backend := stack.NewApplication("backend-ingress", "default", &stubCollector{
+		component: "backend",
+		sources:   []netpol.TrafficSource{{Namespace: "mesh"}},
+		ports:     []intstr.IntOrString{intstr.FromInt32(9000)},
+	})
+	router := stack.NewApplication("router-ingress", "default", &extBackendStub{
+		component: "router",
+		sources:   []netpol.TrafficSource{{Namespace: "gateway-system"}},
+		targets:   []netpol.BackendTarget{{ServiceName: "backend", Ports: []intstr.IntOrString{intstr.FromInt32(9000)}}},
+	})
+	cluster, _, bundleB, componentMap := crossBundleCluster(router, backend)
+	if err := synthesizeNetworkPolicies(cluster, componentMap, ComponentLabel); err != nil {
+		t.Fatalf("synthesizeNetworkPolicies: %v", err)
+	}
+	if got := countClusterApps(cluster, "backend-allow-ingress-traffic"); got != 1 {
+		t.Fatalf("expected exactly one merged backend policy, got %d", got)
+	}
+	np := synthesizedNPInBundle(t, bundleB, "backend-allow-ingress-traffic")
+	if len(np.Spec.Ingress) != 2 {
+		t.Fatalf("expected 2 merged ingress rules (own + injected), got %d", len(np.Spec.Ingress))
+	}
+	seen := map[string]bool{}
+	for _, r := range np.Spec.Ingress {
+		if len(r.From) == 1 {
+			seen[r.From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]] = true
+		}
+	}
+	if !seen["mesh"] || !seen["gateway-system"] {
+		t.Errorf("expected both mesh (own) and gateway-system (injected) sources, got %v", seen)
+	}
+}
+
+// A cross-bundle backendRef to a Service with no owning component and no selector stays authored.
+func TestSynthesizeNetworkPolicies_CrossBundle_UnresolvedNoSelector_LeavesAuthored(t *testing.T) {
+	backend := stack.NewApplication("backend", "default", noopConfig{})
+	router := stack.NewApplication("router-ingress", "default", &extBackendStub{
+		component: "router",
+		sources:   []netpol.TrafficSource{{Namespace: "gateway-system"}},
+		targets:   []netpol.BackendTarget{{ServiceName: "nonexistent", Ports: []intstr.IntOrString{intstr.FromInt32(9000)}}},
+	})
+	cluster, _, _, componentMap := crossBundleCluster(router, backend)
+	if err := synthesizeNetworkPolicies(cluster, componentMap, ComponentLabel); err != nil {
+		t.Fatalf("synthesizeNetworkPolicies: %v", err)
+	}
+	if countClusterApps(cluster, "nonexistent-allow-ingress-traffic") != 0 {
+		t.Errorf("unresolved backendRef with no selector must stay authored")
+	}
+}
+
+// A cross-bundle backendRef carrying an authored backendSelector now resolves to the component and
+// ignores the selector — component-label targeting wins (intended #239→#242 precedence).
+func TestSynthesizeNetworkPolicies_CrossBundleBackendSelector_Ignored(t *testing.T) {
+	backend := stack.NewApplication("backend", "default", noopConfig{})
+	router := stack.NewApplication("router-ingress", "default", &extBackendStub{
+		component: "router",
+		sources:   []netpol.TrafficSource{{Namespace: "gateway-system"}},
+		targets: []netpol.BackendTarget{{
+			ServiceName: "backend",
+			Ports:       []intstr.IntOrString{intstr.FromInt32(9000)},
+			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "external"}},
+		}},
+	})
+	cluster, bundleA, bundleB, componentMap := crossBundleCluster(router, backend)
+	if err := synthesizeNetworkPolicies(cluster, componentMap, ComponentLabel); err != nil {
+		t.Fatalf("synthesizeNetworkPolicies: %v", err)
+	}
+	np := synthesizedNPInBundle(t, bundleB, "backend-allow-ingress-traffic")
+	if np.Spec.PodSelector.MatchLabels[ComponentLabel] != "backend" || len(np.Spec.PodSelector.MatchLabels) != 1 {
+		t.Errorf("resolvable cross-bundle ref must use component-label, got %v", np.Spec.PodSelector.MatchLabels)
+	}
+	if bundleHasApp(bundleA, "backend-allow-ingress-traffic") || countClusterApps(cluster, "backend-allow-ingress-traffic") != 1 {
+		t.Errorf("expected exactly one backend policy, in the backend bundle")
+	}
+}
+
+// R3: two components whose BackendServiceName() collide → ambiguous backendRef target → error.
+func TestSynthesizeNetworkPolicies_AmbiguousServiceName_SameBackendServiceName_Errors(t *testing.T) {
+	appA := stack.NewApplication("comp-a", "default", svcNamerConfig{svc: "shared"})
+	appB := stack.NewApplication("comp-b", "default", svcNamerConfig{svc: "shared"})
+	bundle := &stack.Bundle{Applications: []*stack.Application{appA, appB}}
+	cluster := &stack.Cluster{Node: &stack.Node{Bundle: bundle}}
+	componentMap := map[string]componentEntry{"comp-a": {app: appA}, "comp-b": {app: appB}}
+	if err := synthesizeNetworkPolicies(cluster, componentMap, ComponentLabel); err == nil {
+		t.Fatal("expected an error for two components sharing a Service name")
+	}
+}
+
+// R3: a component's name equals another component's BackendServiceName() → same ambiguity → error.
+func TestSynthesizeNetworkPolicies_AmbiguousServiceName_NameEqualsOtherBackendServiceName_Errors(t *testing.T) {
+	appA := stack.NewApplication("shared", "default", noopConfig{})                  // Service name = its own name
+	appB := stack.NewApplication("comp-b", "default", svcNamerConfig{svc: "shared"}) // BackendServiceName = "shared"
+	bundle := &stack.Bundle{Applications: []*stack.Application{appA, appB}}
+	cluster := &stack.Cluster{Node: &stack.Node{Bundle: bundle}}
+	componentMap := map[string]componentEntry{"shared": {app: appA}, "comp-b": {app: appB}}
+	if err := synthesizeNetworkPolicies(cluster, componentMap, ComponentLabel); err == nil {
+		t.Fatal("expected an error: component name collides with another's BackendServiceName")
 	}
 }

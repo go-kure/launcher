@@ -1213,3 +1213,63 @@ func TestTransform_ExternalBackend_MultipleServices_DistinctNames(t *testing.T) 
 		}
 	}
 }
+
+// #242: a backendRef whose backend component lands in a DIFFERENT tier bundle (hierarchical cluster)
+// still retargets — the allow is synthesized on the backend's pods in the backend's tier bundle.
+func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	tr.RegisterComponent("statefulset", &components.StatefulsetHandler{})
+	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
+
+	app := &oam.Application{
+		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{
+				{
+					Name:       "router",
+					Type:       "webservice",
+					Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+					Traits: []oam.Trait{{
+						Type: "httproute",
+						Properties: map[string]any{
+							"parentRefs": []any{map[string]any{"name": "gw"}},
+							"rules": []any{map[string]any{
+								"backendRefs": []any{map[string]any{"name": "db-headless", "port": 5432}},
+							}},
+							"networkPolicy": map[string]any{
+								"trafficSources": []any{map[string]any{"namespace": "gateway-system"}},
+							},
+						},
+					}},
+				},
+				{
+					// Annotated into the services tier so router (apps) and db (services) land in
+					// separate leaf bundles → forces the cross-bundle resolution path.
+					Name:        "db",
+					Type:        "statefulset",
+					Annotations: map[string]string{"gokure.dev/tier": "services"},
+					Properties:  map[string]any{"image": "postgres:16", "port": 5432, "serviceName": "db-headless"},
+				},
+			},
+		},
+	}
+
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	if !clusterHasApp(cluster, "db-allow-ingress-traffic") {
+		t.Fatalf("expected db-allow-ingress-traffic across tier bundles; apps: %v", clusterAppNames(cluster))
+	}
+	np := synthesizedNetworkPolicy(t, cluster, "db-allow-ingress-traffic")
+	if got := np.Spec.PodSelector.MatchLabels["gokure.dev/component"]; got != "db" {
+		t.Errorf("target selector = %v, want gokure.dev/component=db", np.Spec.PodSelector.MatchLabels)
+	}
+	if len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 1 || np.Spec.Ingress[0].Ports[0].Port.IntVal != 5432 {
+		t.Errorf("expected a single ingress rule on port 5432, got %+v", np.Spec.Ingress)
+	}
+	if clusterHasApp(cluster, "router-allow-ingress-traffic") {
+		t.Errorf("router-only exposer should get no self policy; apps: %v", clusterAppNames(cluster))
+	}
+}

@@ -34,10 +34,15 @@ each a **separate** additive resource (the authored `networkpolicy` /
 
 - **Inbound** (`{comp}-allow-ingress-traffic`) — routing-derived, from routing traits'
   platform-reserved `networkPolicy.trafficSources` capability rendering. When a routing trait's
-  `backendRef` names a **separate** in-bundle backend Service (not the exposing component's own),
+  `backendRef` names a **separate** backend Service (not the exposing component's own),
   the allow is **retargeted onto that backend component's pods** + the backendRef port — resolved
-  by matching the backend Service name to a sibling OAM component in the same bundle. A backendRef
-  that resolves to no in-bundle component (a **bare external Service**) is left authored **unless**
+  by matching the backend Service name to a sibling OAM component **cluster-wide**, and the
+  retargeted policy is emitted in the **backend component's own leaf bundle**. Resolution spans
+  bundles: components of one Application share a namespace but are split across leaf bundles
+  (dependency-aware = one per component, hierarchical = one per tier), so a router in one bundle
+  correctly retargets onto a backend in another. Two components resolving to the **same** Service
+  name is ambiguous and **fails the transform**. A backendRef
+  that resolves to no component (a **bare external Service**) is left authored **unless**
   it carries an explicit authored `backendSelector` (matchLabels only, on the routing trait's
   `paths[].backend` / `backendRefs[]` — the selector is not inferable from a Service name): that
   emits a separate `{service}-allow-ingress-traffic` policy in the router's namespace selecting the
