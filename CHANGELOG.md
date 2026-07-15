@@ -1,6 +1,18 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.19] - 2026-07-15
+
+### Added
+
+- Synthesize ingress allows for external routing backends via explicit selector
+
+### Fixed
+
+- Distinct resource names for multi-endpoint endpoint-ingress policies
+- Resolve #227 backendRef retargeting across dependency/tier bundles
+- Only register components that own a Service as backendRef targets
+
 ## [0.1.0-alpha.18] - 2026-07-14
 
 ### Added
@@ -20,6 +32,10 @@ All notable changes to this project will be documented in this file.
 - Scan full tree for downstream refs on PRs (PR/merge-queue parity)
 - Fail fast on invalid egress peers
 - Preflight downstream-reference guard before every CI push
+
+### Release
+
+- V0.1.0-alpha.18
 
 ## [0.1.0-alpha.17] - 2026-07-13
 
