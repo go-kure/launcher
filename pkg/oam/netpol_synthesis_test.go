@@ -49,16 +49,20 @@ func countClusterApps(c *stack.Cluster, name string) int {
 }
 
 // stubCollector implements trafficSourceCollector and stack.ApplicationConfig for synthesis tests.
+// servicePort > 0 makes it also own a Service (a valid backendRef target); 0 (the default) leaves it
+// Service-less.
 type stubCollector struct {
-	component string
-	sources   []netpol.TrafficSource
-	ports     []intstr.IntOrString
+	component   string
+	sources     []netpol.TrafficSource
+	ports       []intstr.IntOrString
+	servicePort int32
 }
 
 func (s *stubCollector) Generate(_ *stack.Application) ([]*client.Object, error) { return nil, nil }
 func (s *stubCollector) TrafficSources() []netpol.TrafficSource                  { return s.sources }
 func (s *stubCollector) TargetComponentName() string                             { return s.component }
 func (s *stubCollector) BackendPorts() []intstr.IntOrString                      { return s.ports }
+func (s *stubCollector) ServicePort() int32                                      { return s.servicePort }
 
 // --- buildTrafficRules ---
 
@@ -430,6 +434,13 @@ type svcNamerConfig struct{ svc string }
 func (svcNamerConfig) Generate(_ *stack.Application) ([]*client.Object, error) { return nil, nil }
 func (c svcNamerConfig) BackendServiceName() string                            { return c.svc }
 
+// svcPortConfig implements servicePortProvider: a component that owns a Service named after itself
+// (webservice convention) when port > 0, and owns none when port == 0 (e.g. a port-less daemonset).
+type svcPortConfig struct{ port int32 }
+
+func (svcPortConfig) Generate(_ *stack.Application) ([]*client.Object, error) { return nil, nil }
+func (c svcPortConfig) ServicePort() int32                                    { return c.port }
+
 func bundleAppNames(b *stack.Bundle) []string {
 	out := make([]string, 0, len(b.Applications))
 	for _, a := range b.Applications {
@@ -483,7 +494,7 @@ func crossBundleCluster(router, backend *stack.Application) (*stack.Cluster, *st
 // A backendRef to a component in a DIFFERENT leaf bundle now retargets — the allow lands on the
 // backend's pods in the BACKEND's bundle (pre-fix: nothing was synthesized).
 func TestSynthesizeNetworkPolicies_CrossBundleRetarget_LandsInBackendBundle(t *testing.T) {
-	backend := stack.NewApplication("backend", "default", noopConfig{})
+	backend := stack.NewApplication("backend", "default", svcPortConfig{port: 9000}) // owns Service "backend"
 	router := stack.NewApplication("router-ingress", "default", &extBackendStub{
 		component: "router",
 		sources:   []netpol.TrafficSource{{Namespace: "gateway-system"}},
@@ -514,10 +525,11 @@ func TestSynthesizeNetworkPolicies_CrossBundleRetarget_LandsInBackendBundle(t *t
 // When the backend also has its own inbound rule (its bundle) AND receives a cross-bundle injection,
 // exactly ONE merged policy is emitted in the backend's bundle carrying both sources (anti-duplicate).
 func TestSynthesizeNetworkPolicies_CrossBundle_MergesWithBackendOwnRules(t *testing.T) {
-	backend := stack.NewApplication("backend-ingress", "default", &stubCollector{
-		component: "backend",
-		sources:   []netpol.TrafficSource{{Namespace: "mesh"}},
-		ports:     []intstr.IntOrString{intstr.FromInt32(9000)},
+	backend := stack.NewApplication("backend", "default", &stubCollector{
+		component:   "backend",
+		sources:     []netpol.TrafficSource{{Namespace: "mesh"}},
+		ports:       []intstr.IntOrString{intstr.FromInt32(9000)},
+		servicePort: 9000, // also owns Service "backend" so the router's ref resolves
 	})
 	router := stack.NewApplication("router-ingress", "default", &extBackendStub{
 		component: "router",
@@ -566,7 +578,7 @@ func TestSynthesizeNetworkPolicies_CrossBundle_UnresolvedNoSelector_LeavesAuthor
 // A cross-bundle backendRef carrying an authored backendSelector now resolves to the component and
 // ignores the selector — component-label targeting wins (intended #239→#242 precedence).
 func TestSynthesizeNetworkPolicies_CrossBundleBackendSelector_Ignored(t *testing.T) {
-	backend := stack.NewApplication("backend", "default", noopConfig{})
+	backend := stack.NewApplication("backend", "default", svcPortConfig{port: 9000}) // owns Service "backend"
 	router := stack.NewApplication("router-ingress", "default", &extBackendStub{
 		component: "router",
 		sources:   []netpol.TrafficSource{{Namespace: "gateway-system"}},
@@ -601,14 +613,76 @@ func TestSynthesizeNetworkPolicies_AmbiguousServiceName_SameBackendServiceName_E
 	}
 }
 
-// R3: a component's name equals another component's BackendServiceName() → same ambiguity → error.
+// R3: a Service-owning component's name equals another component's BackendServiceName() → same
+// ambiguity → error.
 func TestSynthesizeNetworkPolicies_AmbiguousServiceName_NameEqualsOtherBackendServiceName_Errors(t *testing.T) {
-	appA := stack.NewApplication("shared", "default", noopConfig{})                  // Service name = its own name
+	appA := stack.NewApplication("shared", "default", svcPortConfig{port: 8080})     // owns Service "shared"
 	appB := stack.NewApplication("comp-b", "default", svcNamerConfig{svc: "shared"}) // BackendServiceName = "shared"
 	bundle := &stack.Bundle{Applications: []*stack.Application{appA, appB}}
 	cluster := &stack.Cluster{Node: &stack.Node{Bundle: bundle}}
 	componentMap := map[string]componentEntry{"shared": {app: appA}, "comp-b": {app: appB}}
 	if err := synthesizeNetworkPolicies(cluster, componentMap, ComponentLabel); err == nil {
 		t.Fatal("expected an error: component name collides with another's BackendServiceName")
+	}
+}
+
+// A Service-LESS component (e.g. a worker) named the same as a bare external Service must NOT shadow
+// it: the router's backendRef stays external and is synthesized from its authored backendSelector,
+// not resolved to the worker's component-label pods.
+func TestSynthesizeNetworkPolicies_ServicelessComponent_DoesNotShadowExternalBackend(t *testing.T) {
+	worker := stack.NewApplication("worker", "default", noopConfig{}) // Service-less
+	router := stack.NewApplication("router-ingress", "default", &extBackendStub{
+		component: "router",
+		sources:   []netpol.TrafficSource{{Namespace: "gateway-system"}},
+		targets: []netpol.BackendTarget{{
+			ServiceName: "worker",
+			Ports:       []intstr.IntOrString{intstr.FromInt32(9000)},
+			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "external"}},
+		}},
+	})
+	cluster, bundleA, _, componentMap := crossBundleCluster(router, worker) // maps "backend"→worker; add "worker" too
+	componentMap["worker"] = componentEntry{app: worker}
+	delete(componentMap, "backend")
+	if err := synthesizeNetworkPolicies(cluster, componentMap, ComponentLabel); err != nil {
+		t.Fatalf("synthesizeNetworkPolicies: %v", err)
+	}
+	np := synthesizedNPInBundle(t, bundleA, "worker-allow-ingress-traffic") // external → router's bundle
+	if np.Spec.PodSelector.MatchLabels["app.kubernetes.io/name"] != "external" || len(np.Spec.PodSelector.MatchLabels) != 1 {
+		t.Errorf("expected the authored external selector, got %v (Service-less component wrongly shadowed the external backend)", np.Spec.PodSelector.MatchLabels)
+	}
+}
+
+// A Service-LESS component name must NOT fabricate an R3 ambiguity with another component's real
+// BackendServiceName().
+func TestSynthesizeNetworkPolicies_ServicelessComponent_NoFalseAmbiguity(t *testing.T) {
+	// "db-headless" is a Service-less component; "db" is a statefulset whose Service is "db-headless".
+	appA := stack.NewApplication("db-headless", "default", noopConfig{})
+	appB := stack.NewApplication("db", "default", svcNamerConfig{svc: "db-headless"})
+	bundle := &stack.Bundle{Applications: []*stack.Application{appA, appB}}
+	cluster := &stack.Cluster{Node: &stack.Node{Bundle: bundle}}
+	componentMap := map[string]componentEntry{"db-headless": {app: appA}, "db": {app: appB}}
+	if err := synthesizeNetworkPolicies(cluster, componentMap, ComponentLabel); err != nil {
+		t.Fatalf("a Service-less component name must not collide with a real Service name: %v", err)
+	}
+}
+
+// A component with an optional Service but no port (ServicePort() == 0, e.g. a port-less daemonset)
+// owns no Service and must not be a backendRef target.
+func TestSynthesizeNetworkPolicies_ZeroPortComponent_NotAServiceOwner(t *testing.T) {
+	backend := stack.NewApplication("zero", "default", svcPortConfig{port: 0}) // no Service
+	router := stack.NewApplication("router-ingress", "default", &extBackendStub{
+		component: "router",
+		sources:   []netpol.TrafficSource{{Namespace: "gateway-system"}},
+		targets:   []netpol.BackendTarget{{ServiceName: "zero", Ports: []intstr.IntOrString{intstr.FromInt32(9000)}}}, // no selector
+	})
+	cluster, _, _, componentMap := crossBundleCluster(router, backend)
+	componentMap["zero"] = componentEntry{app: backend}
+	delete(componentMap, "backend")
+	if err := synthesizeNetworkPolicies(cluster, componentMap, ComponentLabel); err != nil {
+		t.Fatalf("synthesizeNetworkPolicies: %v", err)
+	}
+	// Not registered as a Service owner → backendRef unresolved → no selector → nothing synthesized.
+	if countClusterApps(cluster, "zero-allow-ingress-traffic") != 0 {
+		t.Errorf("a port-less component must not be a backendRef target")
 	}
 }

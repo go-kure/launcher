@@ -40,6 +40,29 @@ type serviceBackendNamer interface {
 	BackendServiceName() string
 }
 
+// servicePortProvider is optionally implemented by a component config that exposes a Service port
+// (the webservice/statefulset convention: Service name == component name). Used to decide whether a
+// component actually owns a routable Service.
+type servicePortProvider interface {
+	ServicePort() int32
+}
+
+// componentServiceName returns the Kubernetes Service name a component owns and whether it owns one.
+// A component is a valid backendRef target only if it declares an explicit BackendServiceName or a
+// positive ServicePort; a Service-less component (e.g. a worker, or a daemonset with no port) owns
+// no Service, so its name must NOT enter serviceToComponent — otherwise it would shadow a bare
+// external Service of the same name (misrouting a #239 backendSelector target) or fabricate a false
+// R3 ambiguity against another component's real Service name.
+func componentServiceName(app *stack.Application) (string, bool) {
+	if sn, ok := app.Config.(serviceBackendNamer); ok && sn.BackendServiceName() != "" {
+		return sn.BackendServiceName(), true
+	}
+	if pp, ok := app.Config.(servicePortProvider); ok && pp.ServicePort() > 0 {
+		return app.Name, true
+	}
+	return "", false
+}
+
 // componentAllowPolicyConfig is the ApplicationConfig for an auto-generated
 // NetworkPolicy that allows ingress from routing controller traffic sources to
 // the component's pods. The resource name is {component}-allow-ingress-traffic,
@@ -217,9 +240,9 @@ func (r *npSynthesisRegistry) buildLookups(cluster *stack.Cluster, componentMap 
 	for _, name := range names {
 		entry := componentMap[name]
 		r.componentPlacement[name] = componentPlacement{bundle: appToBundle[entry.app], namespace: entry.app.Namespace}
-		svc := name
-		if sn, ok := entry.app.Config.(serviceBackendNamer); ok && sn.BackendServiceName() != "" {
-			svc = sn.BackendServiceName()
+		svc, owns := componentServiceName(entry.app)
+		if !owns {
+			continue // Service-less component: not a backendRef target, must not claim a Service name
 		}
 		if prev, dup := svcOwner[svc]; dup {
 			a, b := prev, name
