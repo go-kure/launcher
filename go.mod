@@ -7,7 +7,7 @@ require (
 	github.com/cert-manager/cert-manager v1.21.0
 	github.com/cilium/cilium v1.19.6
 	github.com/cloudnative-pg/cloudnative-pg v1.30.0
-	github.com/cloudnative-pg/plugin-barman-cloud v0.13.0
+	github.com/cloudnative-pg/plugin-barman-cloud v0.14.0
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260630123415-dfb816dacc15
 	github.com/fluxcd/helm-controller/api v1.6.3
@@ -47,8 +47,8 @@ require (
 	github.com/cilium/statedb v0.5.9 // indirect
 	github.com/cilium/stream v0.0.1 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
-	github.com/cloudnative-pg/barman-cloud v0.5.2-0.20260609065833-bd68198c31dc // indirect
-	github.com/cloudnative-pg/cnpg-i v0.5.0 // indirect
+	github.com/cloudnative-pg/barman-cloud v0.5.2-0.20260720143032-950b0f57e122 // indirect
+	github.com/cloudnative-pg/cnpg-i v0.6.0 // indirect
 	github.com/cloudnative-pg/machinery v0.5.0 // indirect
 	github.com/controlplaneio-fluxcd/flux-operator v0.53.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
