@@ -37,7 +37,7 @@ preflight reject every valid use of the trait.
 | `httproute` | Gateway API HTTPRoute | `rules[]` (`matches`/`backendRefs`/`filters`/`timeouts`), `hostnames[]`; `parentRefs[]` optional — synthesized from the `gatewayName`/`gatewayNamespace` capability when omitted |
 | `expose` | Ingress **or** HTTPRoute | `rules[]`, `hostnames[]` — controller chosen by ClusterProfile (`controllerType`) |
 | `networkpolicy` | NetworkPolicy | `ingress[]`/`egress[]` (`from`/`to`, `ports`) |
-| `cilium-networkpolicy` | CiliumNetworkPolicy | `name`, `endpointSelector`, `ingress`/`egress` (raw Cilium rules) |
+| `cilium-networkpolicy` | CiliumNetworkPolicy | `name`, `endpointSelector`, `ingress`/`egress` (raw Cilium rules — decoded strictly, see below) |
 
 ### Security
 | `type` | Produces | Key properties |
@@ -164,6 +164,27 @@ auto-NetworkPolicy synthesis) delegates to the same accessor; auto-synthesized
 NetworkPolicies target that `<domain>/component` label by default (domain from
 `TransformContext.Domain`, library default `gokure.dev`;
 `TransformContext.ComponentLabelKey`-overridable).
+
+## Raw Cilium rules are decoded strictly
+
+`cilium-networkpolicy` passes `endpointSelector`, `ingress` and `egress` through to
+Cilium's `api.Rule` as opaque shapes, so the trait schema cannot validate them. They are
+decoded with `DisallowUnknownFields`: a property the linked Cilium API version does not
+recognise makes the build fail, naming the rejected field.
+
+This is deliberate. Lenient decoding silently **widened** policies whenever Cilium removed
+an API field — v1.20 dropped `kafka`, `l7proto` and `l7` from `api.L7Rules`, so a rule
+carrying them would have rendered as L4-only with no error, producing a policy more
+permissive than authored. Failing the build is the safe direction for a policy generator.
+
+Practical consequence: a package pinned to rule shapes from an older Cilium release will
+fail to build after a Cilium major bump rather than quietly losing its L7 constraints.
+Rewrite the affected rules to the shapes the new API supports.
+
+**Known gap.** `encoding/json` does not propagate `DisallowUnknownFields` into types that
+define their own `UnmarshalJSON`. In this API those are `EndpointSelector` and `ICMPField`,
+so unknown keys nested inside `endpointSelector` or `icmps` are still dropped silently. The
+`toPorts.rules.*` shapes that motivated the guard are covered.
 
 ## Conventions
 
