@@ -1,6 +1,18 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.20] - 2026-08-03
+
+### Dependencies
+
+- Bump oras.land/oras-go/v2 from 2.6.1 to 2.6.2
+- Bump kure to v0.2.0-beta.8 with shared dependency updates
+
+### Fixed
+
+- Bump grpc to v1.82.1 for GO-2026-6061
+- Decode raw Cilium rules strictly; bump kure to v0.2.0-beta.9
+
 ## [0.1.0-alpha.19] - 2026-07-15
 
 ### Added
@@ -12,6 +24,10 @@ All notable changes to this project will be documented in this file.
 - Distinct resource names for multi-endpoint endpoint-ingress policies
 - Resolve #227 backendRef retargeting across dependency/tier bundles
 - Only register components that own a Service as backendRef targets
+
+### Release
+
+- V0.1.0-alpha.19
 
 ## [0.1.0-alpha.18] - 2026-07-14
 
