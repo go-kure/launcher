@@ -1,6 +1,7 @@
 package traits
 
 import (
+	"bytes"
 	"encoding/json"
 
 	ciliumapi "github.com/cilium/cilium/pkg/policy/api"
@@ -129,9 +130,20 @@ func (c *CiliumNetworkPolicyConfig) toAPIRule() (*ciliumapi.Rule, error) {
 		return nil, errors.Wrap(err, "marshal spec")
 	}
 
+	// Decode strictly: a property the linked Cilium API cannot represent must fail
+	// loudly rather than be dropped. Lenient decoding silently widened policies when
+	// Cilium removed api.L7Rules fields — 1.20 dropped kafka, l7proto and l7, which
+	// would have turned an L7-restricted policy into an L4-only one with no error.
+	//
+	// Limitation: encoding/json does not propagate DisallowUnknownFields into types
+	// with a custom UnmarshalJSON. In this API that is EndpointSelector and ICMPField,
+	// so unknown keys nested inside endpointSelector or icmps are still dropped
+	// silently. The toPorts.rules.* shapes that motivated this are covered.
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
 	var rule ciliumapi.Rule
-	if err := json.Unmarshal(data, &rule); err != nil {
-		return nil, errors.Wrap(err, "unmarshal into api.Rule")
+	if err := dec.Decode(&rule); err != nil {
+		return nil, errors.Wrap(err, "unmarshal into api.Rule (a rejected field is not supported by the linked Cilium API version)")
 	}
 
 	return &rule, nil
