@@ -226,10 +226,11 @@ go-kure organization documentation-sync standard (`go-kure/.github` →
 `site/docs-map.yaml` is the single source of the code→docs mapping. The site mounts,
 the reverse-mapping table below, and the api-reference nav are generated from or
 validated against it — never hand-edit them. To change what's published, edit
-`docs-map.yaml` and run `bash site/scripts/gen-docs-tables.sh`. Enforcement:
-`check-doc-sync.sh` (structure, blocking), `check-links.sh` (rendered internal
-links, blocking), and the `doc-gate` job (a mapped package's source change must
-touch its docs; bypass only via the maintainer-restricted `docs-skip` label).
+`docs-map.yaml` and run `bash site/scripts/gen-docs-tables.sh`. Enforcement runs the
+canonical scripts from `go-kure/.github` via composite actions (launcher no longer
+vendors copies): `check-doc-sync` (structure, blocking), `check-links` (rendered
+internal links, blocking), and the `doc-gate` job (a mapped package's source change
+must touch its docs; bypass only via the maintainer-restricted `docs-skip` label).
 
 ### No downstream references (mandatory)
 

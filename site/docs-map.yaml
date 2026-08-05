@@ -3,7 +3,8 @@
 # Single source of truth (see go-kure/.github docs/standards.md "Documentation
 # Sync"). Derived and never hand-edited: site mounts (via inject-frontmatter.sh),
 # the AGENTS.md "Reverse Mapping" table, and the api-reference nav (via
-# gen-docs-tables.sh). Validate with check-doc-sync.sh.
+# gen-docs-tables.sh). Validate with check-doc-sync.sh (canonical, go-kure/.github,
+# consumed here via .github/actions/check-doc-sync).
 #
 # To publish a package: add a `mount:` block. To leave it unpublished: set
 # `mounted: false` with a `reason:` (a README is still required for every entry).
