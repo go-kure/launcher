@@ -95,7 +95,7 @@ temporary branch — the merged result — before the PR is allowed to land.
 | `security` | `Security` | 10 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
-| `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check |
+| `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) |
 | `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
 | `analyze-changes` | `Analyze Changes` | 5 min | — | Changed files summary, breaking change warning for pkg/ (PR only) |
@@ -121,6 +121,9 @@ Runs on main and `release/*` branches only (not PRs):
   `check-forbidden-terms` action, which scans `--full-tree` on **every** event so a PR and the merge
   queue produce identical results (scan parity). A drift-check step keeps the vendored copy that
   `scripts/release.sh` uses (`site/scripts/check-forbidden-terms.sh`) byte-identical to canonical
+- **Doc-sync checks** — `docs-build` (Layers 1/2) and `doc-gate` (Layer 3) run the canonical
+  `check-doc-sync`, `check-links` and `check-doc-gate` actions from `go-kure/.github`; launcher no
+  longer vendors its own copies under `site/scripts/`
 - **Path filtering** — `dorny/paths-filter` skips jobs when unrelated files change
 - **Diff-based lint** — on PRs, lint only checks new/changed lines (`--new-from-rev`)
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages
