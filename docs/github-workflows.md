@@ -93,10 +93,11 @@ temporary branch — the merged result — before the PR is allowed to land.
 | `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint; diff-based lint on PRs |
 | `test` | `test` | 25 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
 | `security` | `Security` | 10 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
+| `action-pins` | `action-pins` | 2 min | — | Fails if any third-party `uses:` ref is not pinned to a 40-char commit SHA (`go-kure/.github` composite action) |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) |
-| `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check | Aggregation gate |
+| `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
 | `analyze-changes` | `Analyze Changes` | 5 min | — | Changed files summary, breaking change warning for pkg/ (PR only) |
 
