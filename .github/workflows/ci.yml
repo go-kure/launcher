@@ -211,7 +211,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
     - name: Check action pins
-      uses: go-kure/.github/.github/actions/check-action-pins@16cb56abeb01d7995a15ab8873814ba96c494d7e # main
+      uses: go-kure/.github/.github/actions/check-action-pins@1793023365e5af6923e9bb6b424fcea1dca1279e # main
 
   # =============================================================================
   # Stage 2: Tests and Security (parallel with lint)
@@ -374,7 +374,39 @@ jobs:
         command -v jq &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends jq)
 
     - name: Run govulncheck
-      env:
+      run: |
+        # A separate human-readable `-scan symbol ./...` run used to precede this
+        # one, purely for the log. Dropped: it re-ran the exact same, potentially
+        # slow scan a second time for no signal the gate step below doesn't already
+        # print (every reachable and allowed OSV ID, plus a fix hint).
+        #
+        # In JSON mode a completed scan exits 0 whether or not it found anything
+        # reachable — reachable findings alone do not produce a nonzero exit here.
+        # So a nonzero exit means govulncheck itself failed (package load error,
+        # vuln-db fetch failure, a Go/govulncheck version mismatch, …), and the
+        # report file can still be non-empty, parseable JSON with zero findings in
+        # that case — a silently "clean" result from a scan that never completed.
+        # That is caught here explicitly: the gate can only tell "empty/unparseable"
+        # from "well-formed", not "well-formed but cut short".
+        set +e
+        govulncheck -scan symbol -format json ./... > govulncheck.json 2> govulncheck.err
+        scan_rc=$?
+        set -e
+        if [ "$scan_rc" -ne 0 ]; then
+          echo "::error::govulncheck exited $scan_rc — scan did not complete"
+          cat govulncheck.err
+          exit 1
+        fi
+        if [ ! -s govulncheck.json ]; then
+          echo "::error::govulncheck produced no JSON output"
+          cat govulncheck.err
+          exit 1
+        fi
+
+    - name: Gate on reachable vulnerabilities
+      uses: go-kure/.github/.github/actions/govulncheck-gate@1793023365e5af6923e9bb6b424fcea1dca1279e # main
+      with:
+        report: govulncheck.json
         # Accepted-risk advisories: reachable under symbol scan but not exploitable in Launcher's use.
         # Every entry MUST carry a justification.
         # GO-2026-5377: privilege escalation in the external-secrets *controller* reconciler.
@@ -382,64 +414,7 @@ jobs:
         #   through generated deepcopy boilerplate and package registration/init paths, never a
         #   reconciler. No upstream fix in the Go vuln DB (Fixed in: N/A), and the apis module is
         #   untagged so no bump can clear it — see docs/github-workflows.md.
-        VULN_ALLOWLIST: "GO-2026-5377"
-      run: |
-        set +e
-
-        # Human-readable report for the log. This never gates the step (|| true): with a known
-        # allowlisted finding govulncheck exits non-zero, and the JSON gate below is the sole
-        # enforcement point.
-        govulncheck -scan symbol ./... || true
-
-        # Machine-readable scan for gating. In JSON mode govulncheck can exit 0 even with reachable
-        # findings, so its exit code is deliberately ignored.
-        govulncheck -scan symbol -format json ./... > govulncheck.json 2>govulncheck.err
-        if [ ! -s govulncheck.json ]; then
-          echo "::error::govulncheck produced no JSON output"
-          cat govulncheck.err
-          exit 1
-        fi
-
-        # OSV IDs with at least one reachable symbol trace (i.e. actually affecting our code).
-        # Findings without a function-bearing frame are informational (required but not called).
-        printf '%s\n' "$VULN_ALLOWLIST" | tr ' ' '\n' | sed '/^$/d' | sort -u > allowed.txt
-        jq -r 'select(.finding? and any(.finding.trace[]?; .function != null)) | .finding.osv' \
-          govulncheck.json | sort -u > reachable.txt
-
-        # Split reachable advisories into accepted-risk vs must-fix buckets. grep exits 1 on
-        # "no match"; guarded with || true so an empty bucket is not treated as an error.
-        allowed_hit=$(grep -Fxf allowed.txt reachable.txt || true)
-        unallowed=$(grep -Fxvf allowed.txt reachable.txt || true)
-
-        {
-          echo "## :shield: govulncheck (symbol scan)"
-          echo ""
-          if [ -n "$allowed_hit" ]; then
-            echo "**Allowed reachable advisories (accepted risk):**"
-            echo '```'
-            echo "$allowed_hit"
-            echo '```'
-            echo ""
-          fi
-          if [ -n "$unallowed" ]; then
-            echo "**Unallowed reachable advisories:**"
-            echo '```'
-            echo "$unallowed"
-            echo '```'
-            echo ""
-            echo "**Fix:** update the Go version or affected dependencies, or add a justified entry to VULN_ALLOWLIST."
-          fi
-          if [ -z "$allowed_hit" ] && [ -z "$unallowed" ]; then
-            echo ":white_check_mark: no reachable vulnerabilities"
-          fi
-        } >> "$GITHUB_STEP_SUMMARY"
-
-        if [ -n "$unallowed" ]; then
-          echo "Unallowed reachable vulnerabilities found:"
-          echo "$unallowed"
-          exit 1
-        fi
-        echo "No unallowed reachable vulnerabilities (allowed: ${allowed_hit:-none})."
+        allowlist: 'GO-2026-5377'
 
     - name: Save Go build cache
       if: success() && steps.gocache.outputs.cache-hit != 'true'

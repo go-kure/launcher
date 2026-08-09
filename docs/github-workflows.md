@@ -92,7 +92,7 @@ temporary branch — the merged result — before the PR is allowed to land.
 | `changes` | `detect-changes` | 2 min | — | Path filter: `go:` and `docs:` outputs control downstream jobs |
 | `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint; diff-based lint on PRs |
 | `test` | `test` | 25 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
-| `security` | `Security` | 10 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
+| `security` | `Security` | 15 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `action-pins` | `action-pins` | 2 min | — | Fails if any third-party `uses:` ref is not pinned to a 40-char commit SHA (`go-kure/.github` composite action) |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
@@ -132,11 +132,12 @@ Runs on main and `release/*` branches only (not PRs):
 - **Cross-platform artifacts** — 5 binaries uploaded per main push (30-day retention)
 - **Skip draft PRs** — `if: github.event.pull_request.draft == false`
 - **make install guard** — every job that calls `make` installs it first (runner image lacks it)
-- **govulncheck allowlist** — the `Security` job runs `govulncheck -scan symbol -format json` and gates
-  on OSV IDs with a reachable symbol trace. A `jq` filter is the sole enforcement point (JSON mode can
-  exit 0 despite reachable findings), and accepted-risk advisories are listed in the step's
-  `VULN_ALLOWLIST` env with a justification per entry. The step summary reports allowed vs unallowed
-  reachable advisories separately, so accepted risk stays visible rather than looking clean.
+- **govulncheck allowlist** — the `Security` job runs `govulncheck -scan symbol -format json`, then
+  gates the report through the shared `go-kure/.github` `govulncheck-gate` composite action (same
+  fail-closed script kure uses), which blocks on any OSV ID with a reachable symbol trace that isn't
+  in the action's `allowlist` input. The action fails closed: a missing, empty, or unparseable report
+  is a gate error (exit 2), never a silent clean result, and reachable-vs-allowed advisories are
+  printed to the job log so accepted risk stays visible rather than looking clean.
   - Currently allowlisted: `GO-2026-5377` (external-secrets controller privilege escalation). Launcher
     only imports `external-secrets/apis` to generate CRD manifests; reachable traces are generated
     deepcopy boilerplate and package init, never a reconciler. The apis module is untagged and the Go
