@@ -211,7 +211,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
     - name: Check action pins
-      uses: go-kure/.github/.github/actions/check-action-pins@main
+      uses: go-kure/.github/.github/actions/check-action-pins@16cb56abeb01d7995a15ab8873814ba96c494d7e # main
 
   # =============================================================================
   # Stage 2: Tests and Security (parallel with lint)
@@ -629,7 +629,7 @@ jobs:
     # Shared org action; always scans --full-tree so a PR and the merge queue see
     # identical results (go-kure/.github → docs/standards.md, scan-parity MUST rule).
     - name: Check for downstream references
-      uses: go-kure/.github/.github/actions/check-forbidden-terms@main
+      uses: go-kure/.github/.github/actions/check-forbidden-terms@16cb56abeb01d7995a15ab8873814ba96c494d7e # main
 
     # The release script (scripts/release.sh) still calls the vendored copy of the
     # guard; keep it byte-identical to the canonical so the release preflight can't rot.
@@ -707,7 +707,7 @@ jobs:
       run: echo "$HOME/bin" >> $GITHUB_PATH
 
     - name: Validate docs map (code↔docs sync)
-      uses: go-kure/.github/.github/actions/check-doc-sync@main
+      uses: go-kure/.github/.github/actions/check-doc-sync@16cb56abeb01d7995a15ab8873814ba96c494d7e # main
 
     - name: Inject front matter
       run: bash site/scripts/inject-frontmatter.sh
@@ -767,7 +767,7 @@ jobs:
       run: hugo --baseURL "/" --destination .linkcheck --quiet
 
     - name: Check internal links (rendered site)
-      uses: go-kure/.github/.github/actions/check-links@main
+      uses: go-kure/.github/.github/actions/check-links@16cb56abeb01d7995a15ab8873814ba96c494d7e # main
       with:
         built-dir: site/.linkcheck
 
@@ -804,7 +804,7 @@ jobs:
       run: echo "$HOME/bin" >> $GITHUB_PATH
 
     - name: Enforce docs-with-code (Layer 3)
-      uses: go-kure/.github/.github/actions/check-doc-gate@main
+      uses: go-kure/.github/.github/actions/check-doc-gate@16cb56abeb01d7995a15ab8873814ba96c494d7e # main
       with:
         base-ref: origin/${{ github.base_ref }}
         skip: ${{ contains(github.event.pull_request.labels.*.name, 'docs-skip') }}
