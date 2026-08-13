@@ -2,6 +2,7 @@ package traits
 
 import (
 	"maps"
+	"strconv"
 	"strings"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -12,23 +13,23 @@ import (
 // ExposeRule lowers an "expose" trait (D5, D1 trait position) into a resolved,
 // terminal "ingress" or "httproute" trait, dispatching on the controllerType
 // capability value. It is the C6 port of the former ExposeHandler.Apply
-// (expose.go): the engine merges capability rendering into the trait before
-// calling LowerTrait (lowering.go), so this rule reads trait.Properties exactly as
-// ExposeHandler.Apply once read them post-merge — only the two direct handler
-// calls at the end of each branch changed, from invoking
+// (deleted, expose.go): the engine merges capability rendering into the trait
+// before calling LowerTrait (lowering.go), so this rule reads trait.Properties
+// exactly as ExposeHandler.Apply once read them post-merge — only the two direct
+// handler calls at the end of each branch changed, from invoking
 // IngressHandler/HTTPRouteHandler.Apply directly to emitting a Trait for the
 // engine's fixpoint to dispatch on the next round.
 //
-// This type deliberately does NOT redeclare the helper functions ExposeHandler's
-// Apply already uses (ruleHosts, hostnameList, setClusterIssuerAnnotation,
-// expandHostnamesToIngressRules, setSSLRedirectAnnotations, boolProp,
-// setAuthAnnotations, stringList, synthesizedIngressTLS — all package-level in
-// expose.go): ExposeHandler stays registered as a dispatchable TraitHandler for
-// the four pre-existing direct-construction test files
-// (expose_ext_auth_test.go, expose_managed_tls_test.go,
-// expose_secretname_override_test.go, expose_shorthand_sslredirect_test.go), so
-// those helpers already exist in this package and ExposeRule.LowerTrait calls them
-// directly rather than duplicating them.
+// The package-level helpers ExposeHandler.Apply used (ruleHosts, hostnameList,
+// setClusterIssuerAnnotation, expandHostnamesToIngressRules,
+// setSSLRedirectAnnotations, boolProp, setAuthAnnotations, stringList,
+// synthesizedIngressTLS, below) moved here from expose.go when ExposeHandler was
+// deleted — this file is now their only caller. The five pre-existing
+// direct-construction test files (expose_ext_auth_test.go,
+// expose_managed_tls_test.go, expose_secretname_override_test.go,
+// expose_shorthand_sslredirect_test.go, traits_test.go) are re-pointed through the
+// applyExpose test helper (traits_test.go), which calls ExposeRule.LowerTrait and
+// feeds the emitted trait to the real IngressHandler/HTTPRouteHandler.Apply.
 type ExposeRule struct{}
 
 // TraitType claims the "expose" trait type at the trait lowering position
@@ -95,29 +96,27 @@ func (ExposeRule) ValidateAndApplyDefaults(rendering map[string]any) (map[string
 }
 
 // PropertySchema declares the expose trait's user-facing properties. Identical to
-// ExposeHandler.PropertySchema (expose.go) — deliberately NOT tightened with the
-// extra PlatformReserved tags the spike's version carries on controllerType,
-// certManagerClusterIssuer, allowedHostnameWildcard, authURL and
-// authResponseHeaders. testdata/webservice-expose-ingress/app.yaml (this branch's
-// existing golden fixture, unlike the spike's rewritten one) authors
-// `controllerType: ingress` inline; marking it PlatformReserved makes
-// enforcePlatformReserved (lowering.go's trait-position check, wired before this
-// task, and now also createApplications/applyTraits) reject that fixture outright,
-// breaking the byte-identity acceptance bar. The D3 gap this task closes is the
-// enforcement call sites (lowering.go already had it; createApplications and
-// applyTraits did not, until this change) actually running for every schema that
-// DOES mark a field reserved — e.g. the shared networkPolicy fragment below,
-// already reserved via schemaNetworkPolicy(true) — not adding new reservations to
-// this particular schema.
+// the former ExposeHandler.PropertySchema, plus PlatformReserved: true on
+// controllerType, certManagerClusterIssuer, allowedHostnameWildcard, authURL and
+// authResponseHeaders (matching the spike) — these five are capability-injected
+// only and must never be authored inline (D3). This closes the enforcement gap the
+// D3 call sites exist to catch: createApplications and applyTraits
+// (transform.go) now run enforcePlatformReserved exactly like lowering.go's
+// trait-position check already did, so a schema that marks a field reserved is
+// actually enforced everywhere capability rendering merges in, not just here.
+// testdata/webservice-expose-ingress/app.yaml previously authored
+// `controllerType: ingress` inline; that line moved out to the fixture's
+// cluster.yaml capability rendering (which already supplied it) so the fixture
+// itself proves the enforcement is live without changing expected.yaml.
 func (ExposeRule) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		// controllerType is capability-injected, not user-set (see doc above), so it is
 		// NOT user-required here; it is validated in ValidateAndApplyDefaults. Kept in the
 		// schema as an optional enum so a value, if present, is type/enum-checked.
-		"controllerType":           {Type: oam.PropertyTypeString, Enum: []any{"ingress", "gateway"}, Description: "Capability-injected controller kind (ingress or gateway) this expose dispatches to."},
-		"certManagerClusterIssuer": {Type: oam.PropertyTypeString, Description: "cert-manager ClusterIssuer used to synthesize TLS (ingress controllerType only)."},
+		"controllerType":           {Type: oam.PropertyTypeString, Enum: []any{"ingress", "gateway"}, PlatformReserved: true, Description: "Capability-injected controller kind (ingress or gateway) this expose dispatches to."},
+		"certManagerClusterIssuer": {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "cert-manager ClusterIssuer used to synthesize TLS (ingress controllerType only)."},
 		"secretName":               {Type: oam.PropertyTypeString, Description: "Overrides the synthesized <component>-tls secret name for platform-managed TLS (ingress controllerType only; requires a cert-manager cluster-issuer capability)."},
-		"allowedHostnameWildcard":  {Type: oam.PropertyTypeString, Description: "Platform-reserved wildcard the hostnames must fall under."},
+		"allowedHostnameWildcard":  {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "Platform-reserved wildcard the hostnames must fall under."},
 		"gatewayName":              {Type: oam.PropertyTypeString, Description: "Gateway name used to synthesize parentRefs (gateway controllerType only)."},
 		"gatewayNamespace":         {Type: oam.PropertyTypeString, Default: "gateway-system", Description: "Namespace of the Gateway (gateway controllerType only)."},
 		"annotations":              {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Additional annotations to set on the generated resource."},
@@ -127,9 +126,9 @@ func (ExposeRule) PropertySchema() map[string]oam.PropertySchema {
 		"sslRedirect":              {Type: oam.PropertyTypeBoolean, Description: "nginx ssl-redirect annotation (ingress controllerType only); platform default via capability rendering, override-able inline."},
 		"forceSslRedirect":         {Type: oam.PropertyTypeBoolean, Description: "nginx force-ssl-redirect annotation (ingress controllerType only); platform default via capability rendering, override-able inline."},
 		"allowedGroups":            {Type: oam.PropertyTypeArray, Description: "oauth2-proxy allowed groups; enables external-auth on the route (ingress controllerType only). Order is preserved.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "An allowed oauth2-proxy group."}},
-		"authURL":                  {Type: oam.PropertyTypeString, Description: "Capability-injected nginx external-auth endpoint base (ingress controllerType only)."},
+		"authURL":                  {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "Capability-injected nginx external-auth endpoint base (ingress controllerType only)."},
 		"authSigninURL":            {Type: oam.PropertyTypeString, Description: "nginx auth-signin URL (ingress controllerType only); platform default via capability rendering, override-able inline."},
-		"authResponseHeaders":      {Type: oam.PropertyTypeString, Description: "Capability-injected nginx auth-response-headers value (ingress controllerType only)."},
+		"authResponseHeaders":      {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "Capability-injected nginx auth-response-headers value (ingress controllerType only)."},
 		"servicePort":              {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one."},
 		"serviceName":              {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
 		"name":                     {Type: oam.PropertyTypeString, Description: "Overrides the sub-application name, allowing multiple expose traits per component."},
@@ -246,4 +245,188 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 	default:
 		return oam.LoweringResult{}, errors.Errorf("expose trait: unsupported controllerType %q", controllerType)
 	}
+}
+
+// ruleHosts extracts the host of every entry in the ingress-style rules[] property.
+func ruleHosts(props map[string]any) []string {
+	var hosts []string
+	if rawRules, ok := props["rules"].([]any); ok {
+		for _, r := range rawRules {
+			if rm, ok := r.(map[string]any); ok {
+				if host, ok := rm["host"].(string); ok && host != "" {
+					hosts = append(hosts, host)
+				}
+			}
+		}
+	}
+	return hosts
+}
+
+// hostnameList extracts the gateway-style hostnames[] property.
+func hostnameList(props map[string]any) []string {
+	var hosts []string
+	if raw, ok := props["hostnames"].([]any); ok {
+		for _, h := range raw {
+			if s, ok := h.(string); ok && s != "" {
+				hosts = append(hosts, s)
+			}
+		}
+	}
+	return hosts
+}
+
+// setClusterIssuerAnnotation adds the platform cert-manager cluster-issuer
+// annotation. The platform value is authoritative: a conflicting user-supplied
+// value is rejected as a ValidationError.
+func setClusterIssuerAnnotation(props map[string]any, issuer, component string) error {
+	anns, _ := props["annotations"].(map[string]any)
+	if anns == nil {
+		anns = map[string]any{}
+	}
+	if existing, ok := anns[clusterIssuerAnnotation].(string); ok && existing != issuer {
+		return &errors.ValidationError{
+			Field:     "annotations." + clusterIssuerAnnotation,
+			Value:     existing,
+			Component: component,
+			Message: "annotation " + clusterIssuerAnnotation +
+				" is platform-managed by the expose trait and cannot be overridden",
+		}
+	}
+	anns[clusterIssuerAnnotation] = issuer
+	props["annotations"] = anns
+	return nil
+}
+
+// expandHostnamesToIngressRules turns the hostnames shorthand into ingress rules,
+// one host per rule with a single empty path object. IngressHandler defaults the
+// path to "/" and the backend port to the component service port.
+func expandHostnamesToIngressRules(hostnames []string) []any {
+	rules := make([]any, len(hostnames))
+	for i, h := range hostnames {
+		rules[i] = map[string]any{
+			"host":  h,
+			"paths": []any{map[string]any{}},
+		}
+	}
+	return rules
+}
+
+// setSSLRedirectAnnotations writes the nginx ssl-redirect / force-ssl-redirect
+// annotations from the typed sslRedirect / forceSslRedirect properties, which carry
+// the capability-rendered platform default (override-able inline). The typed value
+// is authoritative: it is written last and wins over a same-key raw annotation. When
+// the property is absent, an existing raw annotation is left untouched. The property
+// keys are consumed here so they never reach IngressHandler.
+func setSSLRedirectAnnotations(props map[string]any) {
+	var anns map[string]any
+	set := func(key string, val bool) {
+		if anns == nil {
+			if existing, ok := props["annotations"].(map[string]any); ok {
+				anns = existing
+			} else {
+				anns = map[string]any{}
+			}
+		}
+		anns[key] = strconv.FormatBool(val)
+	}
+	if v, ok := boolProp(props, "sslRedirect"); ok {
+		set(sslRedirectAnnotation, v)
+	}
+	if v, ok := boolProp(props, "forceSslRedirect"); ok {
+		set(forceSSLRedirectAnnotation, v)
+	}
+	if anns != nil {
+		props["annotations"] = anns
+	}
+	delete(props, "sslRedirect")
+	delete(props, "forceSslRedirect")
+}
+
+// boolProp reads a boolean property; ok is false when absent or not a bool.
+func boolProp(props map[string]any, key string) (val, ok bool) {
+	val, ok = props[key].(bool)
+	return val, ok
+}
+
+// setAuthAnnotations writes the nginx external-auth annotations (auth-url, auth-signin,
+// auth-response-headers) when the expose trait authors allowedGroups. The auth-url base,
+// signin default, and response-headers come from the capability rendering (authURL and
+// authResponseHeaders are platform-reserved; authSigninURL is override-able inline);
+// allowedGroups is authored, order preserved. The typed values win over same-key raw
+// annotations. All auth-* keys are consumed here so they never reach IngressHandler.
+func setAuthAnnotations(props map[string]any, component string) error {
+	rawGroups, hasGroups := props["allowedGroups"]
+	authURL, _ := props["authURL"].(string)
+	signin, _ := props["authSigninURL"].(string)
+	respHeaders, _ := props["authResponseHeaders"].(string)
+	delete(props, "allowedGroups")
+	delete(props, "authURL")
+	delete(props, "authSigninURL")
+	delete(props, "authResponseHeaders")
+
+	if !hasGroups {
+		return nil // no ext-auth requested; discard any capability-injected auth-* keys
+	}
+	groups := stringList(rawGroups)
+	if len(groups) == 0 {
+		return &errors.ValidationError{
+			Field:     "allowedGroups",
+			Component: component,
+			Message:   "allowedGroups must not be empty (ext-auth requires at least one group)",
+		}
+	}
+	if authURL == "" {
+		return &errors.ValidationError{
+			Field:     "allowedGroups",
+			Component: component,
+			Message:   "ext-auth is not offered on this platform (the expose capability has no authURL)",
+		}
+	}
+
+	anns, _ := props["annotations"].(map[string]any)
+	if anns == nil {
+		anns = map[string]any{}
+	}
+	anns[authURLAnnotation] = authURL + "?allowed_groups=" + strings.Join(groups, ",")
+	if signin != "" {
+		anns[authSigninAnnotation] = signin
+	}
+	if respHeaders != "" {
+		anns[authResponseHeadersAnnotation] = respHeaders
+	}
+	props["annotations"] = anns
+	return nil
+}
+
+// stringList converts an OAM array value ([]any of strings) to []string, preserving
+// order and dropping empty entries.
+func stringList(v any) []string {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, e := range raw {
+		if s, ok := e.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// synthesizedIngressTLS builds the single managed TLS entry: all hosts under one
+// secret, for cert-manager's ingress-shim. secretName defaults to the deterministic
+// <component>-tls when the trait does not author an override.
+func synthesizedIngressTLS(hosts []string, component, secretName string) []any {
+	if secretName == "" {
+		secretName = component + "-tls"
+	}
+	anyHosts := make([]any, len(hosts))
+	for i, h := range hosts {
+		anyHosts[i] = h
+	}
+	return []any{map[string]any{
+		"hosts":      anyHosts,
+		"secretName": secretName,
+	}}
 }

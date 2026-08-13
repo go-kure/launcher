@@ -26,12 +26,11 @@ func withCapAuth(props map[string]any) map[string]any {
 	return props
 }
 
-func TestExposeHandler_Ingress_ExtAuth_Default(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Ingress_ExtAuth_Default(t *testing.T) {
 	app := newWebApp("web", "default")
 	bundle := &stack.Bundle{}
 	trait := exposeIngress(withCapAuth(map[string]any{"allowedGroups": []any{"ginsys-admins"}}))
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	ing := ingressFromBundle(t, bundle)
@@ -46,11 +45,10 @@ func TestExposeHandler_Ingress_ExtAuth_Default(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_Ingress_ExtAuth_CSVOrderPreserved(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Ingress_ExtAuth_CSVOrderPreserved(t *testing.T) {
 	bundle := &stack.Bundle{}
 	trait := exposeIngress(withCapAuth(map[string]any{"allowedGroups": []any{"home-users", "home-admins"}}))
-	if err := h.Apply(trait, newWebApp("web", "default"), bundle); err != nil {
+	if err := applyExpose(trait, newWebApp("web", "default"), bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	ing := ingressFromBundle(t, bundle)
@@ -59,14 +57,13 @@ func TestExposeHandler_Ingress_ExtAuth_CSVOrderPreserved(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_Ingress_ExtAuth_SigninOverride(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Ingress_ExtAuth_SigninOverride(t *testing.T) {
 	bundle := &stack.Bundle{}
 	props := withCapAuth(map[string]any{"allowedGroups": []any{"home-users"}})
 	// inline override wins over the capability default (resolveCapability merges
 	// rendering first, then trait props) — set it after the capability default.
 	props["authSigninURL"] = "https://video.home.example.be/oauth2/start?rd=$scheme://$host$escaped_request_uri"
-	if err := h.Apply(exposeIngress(props), newWebApp("web", "default"), bundle); err != nil {
+	if err := applyExpose(exposeIngress(props), newWebApp("web", "default"), bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	ing := ingressFromBundle(t, bundle)
@@ -75,14 +72,13 @@ func TestExposeHandler_Ingress_ExtAuth_SigninOverride(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_Ingress_ExtAuth_TypedBeatsAnnotation(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Ingress_ExtAuth_TypedBeatsAnnotation(t *testing.T) {
 	bundle := &stack.Bundle{}
 	props := withCapAuth(map[string]any{
 		"allowedGroups": []any{"ginsys-admins"},
 		"annotations":   map[string]any{kAuthURL: "http://evil.example/auth?allowed_groups=everyone"},
 	})
-	if err := h.Apply(exposeIngress(props), newWebApp("web", "default"), bundle); err != nil {
+	if err := applyExpose(exposeIngress(props), newWebApp("web", "default"), bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	ing := ingressFromBundle(t, bundle)
@@ -91,35 +87,33 @@ func TestExposeHandler_Ingress_ExtAuth_TypedBeatsAnnotation(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_Ingress_ExtAuth_MissingURL_Rejected(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Ingress_ExtAuth_MissingURL_Rejected(t *testing.T) {
 	bundle := &stack.Bundle{}
 	// allowedGroups but no capability authURL.
 	trait := exposeIngress(map[string]any{
 		"allowedGroups": []any{"ginsys-admins"},
 		"hostnames":     []any{"a.apps.example.com"},
 	})
-	err := h.Apply(trait, newWebApp("web", "default"), bundle)
+	err := applyExpose(trait, newWebApp("web", "default"), bundle)
 	var ve *pkgerrors.ValidationError
 	if !stderrors.As(err, &ve) {
 		t.Fatalf("want *ValidationError (ext-auth not offered), got %v", err)
 	}
 }
 
-func TestExposeHandler_Ingress_ExtAuth_EmptyGroups_Rejected(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Ingress_ExtAuth_EmptyGroups_Rejected(t *testing.T) {
 	bundle := &stack.Bundle{}
 	trait := exposeIngress(withCapAuth(map[string]any{"allowedGroups": []any{}}))
-	err := h.Apply(trait, newWebApp("web", "default"), bundle)
+	err := applyExpose(trait, newWebApp("web", "default"), bundle)
 	var ve *pkgerrors.ValidationError
 	if !stderrors.As(err, &ve) {
 		t.Fatalf("want *ValidationError for empty allowedGroups, got %v", err)
 	}
 }
 
-func TestExposeHandler_ExtAuth_AuthURLWithQuery_Rejected(t *testing.T) {
-	h := &traits.ExposeHandler{}
-	_, err := h.ValidateAndApplyDefaults(map[string]any{
+func TestExposeRule_ExtAuth_AuthURLWithQuery_Rejected(t *testing.T) {
+	r := traits.ExposeRule{}
+	_, err := r.ValidateAndApplyDefaults(map[string]any{
 		"controllerType":   "ingress",
 		"ingressClassName": "nginx",
 		"authURL":          "http://oauth2-proxy/oauth2/auth?already=here",
@@ -129,9 +123,9 @@ func TestExposeHandler_ExtAuth_AuthURLWithQuery_Rejected(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_ExtAuth_GatewayRendering_Rejected(t *testing.T) {
-	h := &traits.ExposeHandler{}
-	_, err := h.ValidateAndApplyDefaults(map[string]any{
+func TestExposeRule_ExtAuth_GatewayRendering_Rejected(t *testing.T) {
+	r := traits.ExposeRule{}
+	_, err := r.ValidateAndApplyDefaults(map[string]any{
 		"controllerType": "gateway",
 		"gatewayName":    "public-gateway",
 		"authURL":        "http://oauth2-proxy/oauth2/auth",
@@ -141,15 +135,14 @@ func TestExposeHandler_ExtAuth_GatewayRendering_Rejected(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_Gateway_InlineAllowedGroups_Rejected(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Gateway_InlineAllowedGroups_Rejected(t *testing.T) {
 	bundle := &stack.Bundle{}
 	trait := &oam.Trait{Type: "expose", Properties: map[string]any{
 		"controllerType": "gateway",
 		"gatewayName":    "public-gateway",
 		"allowedGroups":  []any{"ginsys-admins"},
 	}}
-	err := h.Apply(trait, newWebApp("web", "default"), bundle)
+	err := applyExpose(trait, newWebApp("web", "default"), bundle)
 	var ve *pkgerrors.ValidationError
 	if !stderrors.As(err, &ve) {
 		t.Fatalf("want *ValidationError for inline allowedGroups on gateway, got %v", err)

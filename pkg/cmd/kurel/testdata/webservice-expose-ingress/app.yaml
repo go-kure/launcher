@@ -13,7 +13,6 @@ spec:
       traits:
         - type: expose
           properties:
-            controllerType: ingress
             rules:
               - host: frontend.example.com
                 paths:

@@ -38,7 +38,7 @@ func TestNetworkPolicy_ReservedAtEveryDeclaration(t *testing.T) {
 	declarations := map[string]oam.PropertySchemaProvider{
 		"ingress":   &IngressHandler{},
 		"httproute": &HTTPRouteHandler{},
-		"expose":    &ExposeHandler{},
+		"expose":    &ExposeRule{},
 	}
 
 	for name, provider := range declarations {

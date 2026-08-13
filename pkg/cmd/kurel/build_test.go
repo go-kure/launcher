@@ -31,7 +31,6 @@ spec:
       traits:
         - type: expose
           properties:
-            controllerType: ingress
             rules:
               - host: frontend.example.com
                 paths:
@@ -385,13 +384,19 @@ func TestNewBuiltinTransformer_Registered(t *testing.T) {
 // directly — the same source newBuiltinTransformer registers from — so a handler
 // added without a schema is caught by the type assertion below rather than being
 // silently dropped by HandlerSchemas(). This is the launcher-side guard for the
-// downstream parity gate.
+// downstream parity gate. Also covers builtinTraitLoweringRules() (e.g. "expose"),
+// which is a trait-position lowering rule rather than a dispatchable TraitHandler —
+// HandlerSchemas() folds both sources into the same Traits map (transform.go), so
+// this test does too, or a rule-only trait's schema regression would go undetected.
 func TestNewBuiltinTransformer_HandlerSchemaParity(t *testing.T) {
 	for name, h := range builtinComponentHandlers() {
 		assertExposesSchema(t, "component", name, h)
 	}
 	for name, h := range builtinTraitHandlers() {
 		assertExposesSchema(t, "trait", name, h)
+	}
+	for name, r := range builtinTraitLoweringRules() {
+		assertExposesSchema(t, "trait", name, r)
 	}
 }
 
@@ -423,6 +428,9 @@ func TestBuiltinHandlerSchemaDescriptions(t *testing.T) {
 	}
 	for name, h := range builtinTraitHandlers() {
 		assertSchemaDescribed(t, "trait", name, h)
+	}
+	for name, r := range builtinTraitLoweringRules() {
+		assertSchemaDescribed(t, "trait", name, r)
 	}
 }
 

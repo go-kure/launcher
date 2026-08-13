@@ -643,10 +643,10 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				}
 			}
 			// D3: reject an authored value for a platform-reserved property before
-			// capability rendering is merged in. applyTraits must perform the same
-			// check for a dispatchable handler — that call site does not exist yet
-			// on this branch (tracked as follow-up work, alongside honoring
-			// Trait.sealed there).
+			// capability rendering is merged in. applyTraits (transform.go, for a
+			// dispatchable handler) and createApplications (transform.go, for a
+			// component handler) perform the same check at their own merge points,
+			// alongside honoring Trait.sealed in applyTraits.
 			if p, ok := rule.(PropertySchemaProvider); ok {
 				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
