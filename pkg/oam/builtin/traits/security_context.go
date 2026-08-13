@@ -54,7 +54,7 @@ func (h *SecurityContextHandler) Apply(trait *oam.Trait, app *stack.Application,
 	if err != nil {
 		return err
 	}
-	app.Config = &securityContextConfig{inner: app.Config, spec: spec}
+	app.Config = &securityContextConfig{decoratorBase: decoratorBase{Inner: app.Config}, spec: spec}
 	return nil
 }
 
@@ -157,14 +157,14 @@ func validateSecurityContextSpec(spec securityContextSpec) error {
 // securityContextConfig wraps an ApplicationConfig and sets PSA-appropriate
 // SecurityContext fields on all PodSpec-bearing resources at Generate time.
 type securityContextConfig struct {
-	inner stack.ApplicationConfig
-	spec  securityContextSpec
+	decoratorBase
+	spec securityContextSpec
 }
 
 // Generate delegates to the inner config and then applies the security context
 // overrides to all PodSpec-bearing resources.
 func (c *securityContextConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	objects, err := c.inner.Generate(app)
+	objects, err := c.Inner.Generate(app)
 	if err != nil {
 		return nil, err
 	}
@@ -174,30 +174,6 @@ func (c *securityContextConfig) Generate(app *stack.Application) ([]*client.Obje
 		}
 	}
 	return objects, nil
-}
-
-// Validate delegates to the wrapped config's Validate if it implements
-// stack.Validator.
-func (c *securityContextConfig) Validate() error {
-	if v, ok := c.inner.(stack.Validator); ok {
-		return v.Validate()
-	}
-	return nil
-}
-
-// SetFluxNamespace forwards to the inner config when it is fluxNamespaceSettable.
-func (c *securityContextConfig) SetFluxNamespace(ns string) {
-	if setter, ok := c.inner.(fluxNamespaceSettable); ok {
-		setter.SetFluxNamespace(ns)
-	}
-}
-
-// EmitsAutoHealthCheck forwards the inner config's veto; defaults to true.
-func (c *securityContextConfig) EmitsAutoHealthCheck() bool {
-	if e, ok := c.inner.(autoHealthCheckEmitter); ok {
-		return e.EmitsAutoHealthCheck()
-	}
-	return true
 }
 
 // applyToPodSpec sets SecurityContext fields on the pod and all containers
