@@ -143,6 +143,9 @@ func (t *Transformer) RegisterComponent(typeName string, h ComponentHandler) {
 	if _, exists := t.componentHandlers[typeName]; exists {
 		panic("oam: component handler already registered for type " + typeName)
 	}
+	if _, exists := t.componentLoweringRules[typeName]; exists {
+		panic("oam: type " + typeName + " is already registered via RegisterComponentLowering; a lowerable type must not also be a dispatchable component handler")
+	}
 	if !h.CanHandle(typeName) {
 		panic("oam: component handler does not claim type " + typeName)
 	}
@@ -156,6 +159,9 @@ func (t *Transformer) RegisterComponent(typeName string, h ComponentHandler) {
 func (t *Transformer) RegisterTrait(typeName string, h TraitHandler) {
 	if _, exists := t.traitHandlers[typeName]; exists {
 		panic("oam: trait handler already registered for type " + typeName)
+	}
+	if _, exists := t.traitLoweringRules[typeName]; exists {
+		panic("oam: type " + typeName + " is already registered via RegisterTraitLowering; a lowerable type must not also be a dispatchable trait handler")
 	}
 	if !h.CanHandle(typeName) {
 		panic("oam: trait handler does not claim type " + typeName)
@@ -213,6 +219,9 @@ func (t *Transformer) RegisterPolicy(typeName string, h PolicyHandler) {
 	if _, exists := t.policyHandlers[typeName]; exists {
 		panic("oam: policy handler already registered for type " + typeName)
 	}
+	if _, exists := t.policyLoweringRules[typeName]; exists {
+		panic("oam: type " + typeName + " is already registered via RegisterPolicyLowering; a lowerable type must not also be a dispatchable policy handler")
+	}
 	if !h.CanHandle(typeName) {
 		panic("oam: policy handler does not claim type " + typeName)
 	}
@@ -267,12 +276,27 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 		if !ok {
 			// The type may be a trait-position lowering rule instead of a dispatchable
 			// handler (e.g. "expose") — a rule never reaches applyTraits, so this is
-			// the only place its ValidateAndApplyDefaults ever runs. Rule-registry
-			// types have no CapabilityDefinition-schema-defaults step:
-			// RegisterTraitLowering draws no custom/built-in distinction today.
+			// the only place its ValidateAndApplyDefaults ever runs. RegisterTraitLowering
+			// draws no custom/built-in distinction today (there is no t.builtinTraitTypes
+			// gate to replicate for this branch), but a lowering-rule type CAN still have
+			// a loaded CapabilityDefinition, and must get the identical schema-defaults
+			// step the handler branch below applies before its own VAD runs — otherwise a
+			// TraitLoweringRule's VAD sees undefaulted, unchecked-against-declared-schema
+			// values purely because its type lowers instead of dispatching.
 			if rule, ok := t.traitLoweringRules[typeName]; ok {
 				if vad, ok := rule.(ValidateAndApplyDefaults); ok {
-					validated, err := vad.ValidateAndApplyDefaults(binding.Rendering)
+					currentRendering := binding.Rendering
+					if def, hasDef := t.capabilityDefs[typeName]; hasDef {
+						withDefaults, err := applyDefinitionSchema(currentRendering, def)
+						if err != nil {
+							return nil, &TransformError{
+								Message: fmt.Sprintf("capability %q definition schema", key),
+								Cause:   err,
+							}
+						}
+						currentRendering = withDefaults
+					}
+					validated, err := vad.ValidateAndApplyDefaults(currentRendering)
 					if err != nil {
 						return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
 					}

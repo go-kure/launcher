@@ -270,6 +270,62 @@ func TestTransformer_RegisterPolicy_PanicsOnCanHandleMismatch(t *testing.T) {
 	})
 }
 
+// --- F1: reciprocal collision checks (RegisterComponent/RegisterTrait/RegisterPolicy
+// vs their *Lowering counterparts) --------------------------------------------------
+//
+// RegisterComponentLowering/RegisterTraitLowering/RegisterPolicyLowering already
+// panicked when a handler-registered-FIRST type was claimed by a lowering rule
+// (TestRegisterComponentLowering_KindClaimedByHandler and friends, lowering_test.go /
+// lowering_negative_test.go). What was missing is the REVERSE order: a lowering rule
+// registered first, then a dispatchable handler claiming the same type — which
+// silently succeeded before this fix, letting the lowering path win the dispatch with
+// no registration-time signal. These fixtures exist solely to exercise that direction.
+
+type stubComponentLoweringRule struct{ typ string }
+
+func (r stubComponentLoweringRule) ComponentType() string { return r.typ }
+func (r stubComponentLoweringRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: comp.Name, Type: "webservice", Properties: map[string]any{}}}}, nil
+}
+
+type stubTraitLoweringRule struct{ typ string }
+
+func (r stubTraitLoweringRule) TraitType() string { return r.typ }
+func (r stubTraitLoweringRule) LowerTrait(trait *Trait, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Traits: []Trait{{Type: "ingress", Properties: map[string]any{}}}}, nil
+}
+
+type stubPolicyLoweringRule struct{ typ string }
+
+func (r stubPolicyLoweringRule) PolicyType() string { return r.typ }
+func (r stubPolicyLoweringRule) LowerPolicy(pol *ApplicationPolicy, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Policies: []ApplicationPolicy{{Name: pol.Name, Type: "dependency", Properties: map[string]any{}}}}, nil
+}
+
+func TestTransformer_RegisterComponent_PanicsIfClaimedByComponentLowering(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(stubComponentLoweringRule{typ: "widget"})
+	mustPanicContaining(t, "RegisterComponentLowering", func() {
+		tr.RegisterComponent("widget", &stubComponentHandler{typ: "widget"})
+	})
+}
+
+func TestTransformer_RegisterTrait_PanicsIfClaimedByTraitLowering(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterTraitLowering(stubTraitLoweringRule{typ: "widget-trait"})
+	mustPanicContaining(t, "RegisterTraitLowering", func() {
+		tr.RegisterTrait("widget-trait", &stubTraitHandler{typ: "widget-trait"})
+	})
+}
+
+func TestTransformer_RegisterPolicy_PanicsIfClaimedByPolicyLowering(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterPolicyLowering(stubPolicyLoweringRule{typ: "widget-policy"})
+	mustPanicContaining(t, "RegisterPolicyLowering", func() {
+		tr.RegisterPolicy("widget-policy", &stubPolicyHandler{typ: "widget-policy"})
+	})
+}
+
 // --- Pipeline: resolveCapability / buildCapabilityKey ---
 
 func TestResolveCapability_NoCapabilities(t *testing.T) {
