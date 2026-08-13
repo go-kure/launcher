@@ -141,20 +141,51 @@ type LoweringContext struct {
 // lowering run (D2). A name already claimed by a different origin is a hard error
 // naming both origins — a collision fails the build, never silently overwrites.
 type NameAllocator struct {
-	taken map[string]Origin
+	taken map[string]nameClaim
+	// round is the fixpoint round currently being processed, set by runLowering
+	// before it dispatches any rule in that round. A given origin's rule fires at
+	// most once per round (lowerDocumentBody/lowerDocumentOnce each call a rule's
+	// LowerXxx exactly once per element per round), so round is what lets Reserve
+	// tell apart two DIFFERENT failure/no-op cases that otherwise look identical
+	// (same name, same origin): a second claim in the SAME round can only come from
+	// that one invocation trying to name two different emitted siblings (a real
+	// collision — see Reserve); a claim repeated in a LATER round is the same
+	// conceptual element re-affirming a name it already owns (e.g. a sealed trait
+	// picked up again by a second, chained TraitLoweringRule — legitimate, a no-op).
+	round int
+}
+
+// nameClaim records which origin claimed a generated name, and in which round, so
+// Reserve can distinguish the two cases above.
+type nameClaim struct {
+	origin Origin
+	round  int
 }
 
 func newNameAllocator() *NameAllocator {
-	return &NameAllocator{taken: make(map[string]Origin)}
+	return &NameAllocator{taken: make(map[string]nameClaim)}
 }
 
-// Reserve claims name for origin. Reserving the same name twice for the same origin
-// is a no-op; reserving it for a different origin is an error.
+// Reserve claims name for origin.
+//
+// Reserving the same name again for the SAME origin in a LATER round is a no-op — the
+// same conceptual element re-affirming a name it already owns. Reserving it again for
+// the same origin in THE SAME round is an error: since one origin's rule invocation
+// runs at most once per round, a second claim within that round means the rule itself
+// generated the identical name for two different emitted siblings (they share one
+// Origin — LoweringResult carries no per-sibling discriminator — so this is the only
+// signal available to catch it). Reserving it for a different origin, in any round, is
+// always an error naming both origins.
 func (n *NameAllocator) Reserve(name string, origin Origin) error {
-	if prior, ok := n.taken[name]; ok && prior != origin {
-		return errors.Errorf("lowering: generated name %q collides — already used by %s, also wanted by %s", name, prior, origin)
+	if prior, ok := n.taken[name]; ok {
+		if prior.origin != origin {
+			return errors.Errorf("lowering: generated name %q collides — already used by %s, also wanted by %s", name, prior.origin, origin)
+		}
+		if prior.round == n.round {
+			return errors.Errorf("lowering: generated name %q collides — %s already used it for a different emitted element in the same lowering round", name, origin)
+		}
 	}
-	n.taken[name] = origin
+	n.taken[name] = nameClaim{origin: origin, round: n.round}
 	return nil
 }
 
@@ -446,6 +477,9 @@ func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext) ([]l
 		if round >= MaxLoweringDepth {
 			return nil, &LoweringError{Origin: culprit, Chain: chain, Cause: ErrLoweringDepthExceeded}
 		}
+		// Every rule dispatched below this point belongs to this round — see the
+		// NameAllocator.round doc comment for why Reserve needs to know it.
+		namer.round = round
 		next := make([]loweringDoc, 0, len(cur))
 		changed := false
 		for _, d := range cur {

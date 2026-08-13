@@ -51,6 +51,57 @@ func TestLower_NameCollision_NamesBothOrigins(t *testing.T) {
 	}
 }
 
+// duplicateSiblingNameRule emits TWO components from one LowerComponent call, and
+// (buggily) calls lctx.Namer.Name with the identical base/suffix for both — the
+// within-one-invocation sibling collision F4 covers, distinct from colliderRule's
+// cross-origin collision above.
+type duplicateSiblingNameRule struct{}
+
+func (duplicateSiblingNameRule) ComponentType() string { return "duplicator" }
+
+func (duplicateSiblingNameRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	name1, err := lctx.Namer.Name("dup", "child", lctx.Origin)
+	if err != nil {
+		return LoweringResult{}, err
+	}
+	name2, err := lctx.Namer.Name("dup", "child", lctx.Origin)
+	if err != nil {
+		return LoweringResult{}, err
+	}
+	return LoweringResult{Components: []Component{
+		{Name: name1, Type: "webservice", Properties: map[string]any{"image": "nginx"}},
+		{Name: name2, Type: "webservice", Properties: map[string]any{"image": "nginx"}},
+	}}, nil
+}
+
+// TestLower_DuplicateSiblingName_Rejected is the regression test for the Codex review
+// finding F4: before the fix, NameAllocator.Reserve treated two Reserve calls sharing
+// one Origin as an idempotent no-op regardless of when they happened, so a rule that
+// (by bug) generated the identical name for two DIFFERENT emitted siblings — sharing
+// one Origin, since LoweringResult carries no per-sibling discriminator — silently
+// succeeded instead of failing as a real collision.
+func TestLower_DuplicateSiblingName_Rejected(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(duplicateSiblingNameRule{})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{
+			Components: []Component{{Name: "dup-me", Type: "duplicator", Properties: map[string]any{}}},
+		},
+	}
+
+	_, err := tr.lower(app, TransformContext{})
+	if err == nil {
+		t.Fatal("expected a same-round sibling name collision error")
+	}
+	if !strings.Contains(err.Error(), "same lowering round") {
+		t.Fatalf("expected a same-round collision message, got: %v", err)
+	}
+}
+
 // loopyRule always re-emits a "loopy" component, so it never reaches a fixpoint —
 // proving the MaxLoweringDepth guard actually fires rather than looping forever.
 type loopyRule struct{}
