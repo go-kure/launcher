@@ -305,10 +305,13 @@ func (t *Transformer) hasLoweringRules() bool {
 }
 
 // RegisterDocumentLowering registers an in-transform document rule. Panics if kind is
-// the terminal kind, is already registered here, or is already claimed by
+// empty, is the terminal kind, is already registered here, or is already claimed by
 // RegisterRawDocumentLowering.
 func (t *Transformer) RegisterDocumentLowering(r DocumentLoweringRule) {
 	kind := r.Kind()
+	if kind == "" {
+		panic("oam: document lowering rule may not claim an empty kind")
+	}
 	if kind == terminalDocumentKind {
 		panic("oam: document lowering rule may not claim the terminal kind " + terminalDocumentKind)
 	}
@@ -321,10 +324,13 @@ func (t *Transformer) RegisterDocumentLowering(r DocumentLoweringRule) {
 	t.docLoweringRules[kind] = r
 }
 
-// RegisterRawDocumentLowering registers a raw-entry document rule. Same three guards,
+// RegisterRawDocumentLowering registers a raw-entry document rule. Same four guards,
 // in the other direction.
 func (t *Transformer) RegisterRawDocumentLowering(r RawDocumentLoweringRule) {
 	kind := r.Kind()
+	if kind == "" {
+		panic("oam: raw document lowering rule may not claim an empty kind")
+	}
 	if kind == terminalDocumentKind {
 		panic("oam: raw document lowering rule may not claim the terminal kind " + terminalDocumentKind)
 	}

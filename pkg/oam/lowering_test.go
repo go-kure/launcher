@@ -414,6 +414,27 @@ func TestRegisterRawDocumentLowering_KindClaimedByDocRegistrar(t *testing.T) {
 	})
 }
 
+// TestRegisterDocumentLowering_RejectsEmptyKind and
+// TestRegisterRawDocumentLowering_RejectsEmptyKind are the regression tests for the
+// Codex review finding F7: a DocumentLoweringRule/RawDocumentLoweringRule
+// implementation with a bug returning "" from Kind() was accepted at registration,
+// which then let ParseWithExtraTypes accept a document with an entirely missing
+// `kind` field and dispatch it to that rule — replacing the caller's canonical
+// "malformed document" error with whatever the buggy rule does instead.
+func TestRegisterDocumentLowering_RejectsEmptyKind(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	mustPanicContaining(t, "empty kind", func() {
+		tr.RegisterDocumentLowering(testDocRule{kind: ""})
+	})
+}
+
+func TestRegisterRawDocumentLowering_RejectsEmptyKind(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	mustPanicContaining(t, "empty kind", func() {
+		tr.RegisterRawDocumentLowering(testRawRule{kind: ""})
+	})
+}
+
 func TestRegisterDocumentLowering_RejectsTerminalKind(t *testing.T) {
 	tr := NewTransformer(nil, nil)
 	mustPanicContaining(t, "terminal kind", func() {
