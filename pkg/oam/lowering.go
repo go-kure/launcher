@@ -500,8 +500,17 @@ func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext) ([]l
 // legitimate terminal type. Custom trait types from --capability-def stay accepted:
 // they are terminal handler types, not lowering claims.
 func (t *Transformer) validateSettled(doc *Application) error {
-	customTraitTypes := make(map[string]bool, len(t.capabilityDefs))
+	customTraitTypes := make(map[string]bool, len(t.capabilityDefs)+len(t.traitHandlers))
 	for name := range t.capabilityDefs {
+		customTraitTypes[name] = true
+	}
+	// A registered TraitHandler (transform.go) is a terminal type whether or not a
+	// CapabilityDefinition was loaded for it — e.g. one accepted via
+	// ParseWithExtraTypes/ParseWithExtraTraitTypes with no matching definition file.
+	// Building this allowlist from t.capabilityDefs alone would reject such a trait
+	// purely because some OTHER lowering rule is registered on the same Transformer
+	// (that is what routes execution through validateSettled at all — hasLoweringRules).
+	for name := range t.traitHandlers {
 		customTraitTypes[name] = true
 	}
 	return validateWithExtraTypes(doc, customTraitTypes, LowerableTypes{})

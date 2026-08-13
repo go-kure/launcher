@@ -345,6 +345,52 @@ func TestLower_ComponentOriginSurvivesSecondRoundLowering(t *testing.T) {
 	}
 }
 
+// --- F3: validateSettled must not drop a registered custom trait handler ---
+
+// TestLower_ValidateSettled_AcceptsHandlerRegisteredCustomTraitWithNoCapabilityDef is
+// the regression test for the Codex review finding F3: validateSettled built its
+// settled-validation allowlist solely from t.capabilityDefs, so a custom trait type
+// accepted via a registered TraitHandler (RegisterTrait) but with NO
+// CapabilityDefinition loaded for it was rejected purely because some OTHER lowering
+// rule happened to be registered on the same Transformer — hasLoweringRules() is what
+// routes execution through validateSettled at all.
+func TestLower_ValidateSettled_AcceptsHandlerRegisteredCustomTraitWithNoCapabilityDef(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"custom-trait": &stubTraitHandler{typ: "custom-trait"}},
+	)
+	// No SetCapabilityDefs call: "custom-trait" has a registered handler but no loaded
+	// CapabilityDefinition.
+	//
+	// Register an unrelated lowering rule purely so hasLoweringRules() is true and
+	// lower() actually exercises the fixpoint (and therefore validateSettled) —
+	// without any rule registered anywhere, lower() short-circuits to the bit-identity
+	// no-op path and validateSettled never runs at all.
+	tr.RegisterComponentLowering(stubComponentLoweringRule{typ: "widget"})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{
+			Components: []Component{{
+				Name:       "web",
+				Type:       "webservice",
+				Properties: map[string]any{"image": "nginx"},
+				Traits:     []Trait{{Type: "custom-trait", Properties: map[string]any{}}},
+			}},
+		},
+	}
+
+	docs, err := tr.lower(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("expected the custom trait %q to survive validateSettled, got: %v", "custom-trait", err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("expected exactly 1 settled document, got %d", len(docs))
+	}
+}
+
 // --- C2b: two registrars, one kind each ------------------------------------
 
 // The same-value case — one concrete type satisfying both DocumentLoweringRule and
