@@ -280,6 +280,71 @@ func TestLower_ComponentOriginSurvivesDocumentLowering(t *testing.T) {
 	}
 }
 
+// --- F2: origin survives a SECOND round of component-position lowering -----
+//
+// stage1Rule and stage2CaptureRule chain two component-lowering rounds: stage1Rule
+// (round 1) emits a "stage2"-typed component, which stage2CaptureRule (round 2) then
+// claims. Before F2, compOrigin at the round-2 site was always rebuilt from the
+// component's CURRENT (already-renamed) Name/Type, discarding the round-1-stamped
+// authored origin that comp.Origin() carries.
+
+type stage1Rule struct{}
+
+func (stage1Rule) ComponentType() string { return "stage1" }
+
+func (stage1Rule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: comp.Name + "-s2", Type: "stage2", Properties: map[string]any{}}}}, nil
+}
+
+// stage2CaptureRule records the Origin it was handed at the component position, so a
+// test can assert whether it is the round-1-stamped authored origin or a re-derived
+// one built from the round-2 synthesized name/type.
+type stage2CaptureRule struct {
+	seen *Origin
+}
+
+func (stage2CaptureRule) ComponentType() string { return "stage2" }
+
+func (r stage2CaptureRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	*r.seen = lctx.Origin
+	return LoweringResult{Components: []Component{{Name: comp.Name + "-web", Type: "webservice", Properties: map[string]any{"image": "nginx"}}}}, nil
+}
+
+// TestLower_ComponentOriginSurvivesSecondRoundLowering is the regression test for the
+// Codex review finding F2.
+func TestLower_ComponentOriginSurvivesSecondRoundLowering(t *testing.T) {
+	var seen Origin
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(stage1Rule{})
+	tr.RegisterComponentLowering(stage2CaptureRule{seen: &seen})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{
+			Components: []Component{{Name: "shop", Type: "stage1", Properties: map[string]any{}}},
+		},
+	}
+
+	docs, err := tr.lower(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if len(docs) != 1 || len(docs[0].Spec.Components) != 1 {
+		t.Fatalf("expected exactly 1 document with 1 settled component, got %+v", docs)
+	}
+	if got := docs[0].Spec.Components[0].Name; got != "shop-s2-web" {
+		t.Fatalf("expected the settled component name %q, got %q", "shop-s2-web", got)
+	}
+	if seen.Component != "shop" {
+		t.Errorf("round-2 Origin.Component = %q, want the ROUND-1-stamped authored name %q, not one re-derived from the round-2 (already-renamed) component", seen.Component, "shop")
+	}
+	if seen.ComponentType != "stage1" {
+		t.Errorf("round-2 Origin.ComponentType = %q, want the ROUND-1-stamped authored type %q, not the round-2 type %q", seen.ComponentType, "stage1", "stage2")
+	}
+}
+
 // --- C2b: two registrars, one kind each ------------------------------------
 
 // The same-value case — one concrete type satisfying both DocumentLoweringRule and

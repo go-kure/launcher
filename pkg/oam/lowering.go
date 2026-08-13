@@ -604,7 +604,17 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 
 	for i := range doc.Spec.Components {
 		comp := doc.Spec.Components[i]
-		compOrigin := Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Component: comp.Name, ComponentType: comp.Type, Index: i}
+		// A component that was itself emitted by a round-N component/trait-position
+		// rule already carries its own stamped authored origin (set at the emission
+		// site below, and at the trait-position emission site further down) — consult
+		// it first, exactly like the docOrigin fallback above, rather than re-deriving
+		// one from the component's current (possibly already-renamed) name/type. Only
+		// a component the fixpoint has never stamped falls back to the synthesized
+		// form.
+		compOrigin, ok := comp.Origin()
+		if !ok {
+			compOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Component: comp.Name, ComponentType: comp.Type, Index: i}
+		}
 
 		if rule, ok := t.componentLoweringRules[comp.Type]; ok {
 			lctx := LoweringContext{Document: doc, Component: &comp, Capabilities: ctx.Capabilities, Origin: compOrigin, Namer: namer}
@@ -639,7 +649,13 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 		newTraits := make([]Trait, 0, len(comp.Traits))
 		for k := range comp.Traits {
 			trait := comp.Traits[k]
-			traitOrigin := Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Component: comp.Name, ComponentType: comp.Type, TraitType: trait.Type, Index: k}
+			// Same fallback as compOrigin above: a trait already stamped by an earlier
+			// round (e.g. a sealed trait re-claimed by a second TraitLoweringRule) keeps
+			// its own authored origin instead of one re-derived from its current type.
+			traitOrigin, traitOK := trait.Origin()
+			if !traitOK {
+				traitOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Component: comp.Name, ComponentType: comp.Type, TraitType: trait.Type, Index: k}
+			}
 
 			rule, ok := t.traitLoweringRules[trait.Type]
 			if !ok {
@@ -716,7 +732,13 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 	newPolicies := make([]ApplicationPolicy, 0, len(doc.Spec.Policies))
 	for i := range doc.Spec.Policies {
 		pol := doc.Spec.Policies[i]
-		polOrigin := Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, PolicyName: pol.Name, Index: i}
+		// Same fallback as compOrigin/traitOrigin above: a policy already stamped by an
+		// earlier round (emitted from a component/trait-position rule, then re-claimed
+		// by a policy-position rule) keeps its own authored origin.
+		polOrigin, polOK := pol.Origin()
+		if !polOK {
+			polOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, PolicyName: pol.Name, Index: i}
+		}
 
 		rule, ok := t.policyLoweringRules[pol.Type]
 		if !ok {
