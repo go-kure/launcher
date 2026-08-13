@@ -16,6 +16,27 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
+// capabilityNetworkPolicy supplies networkPolicy via a trait's capability rendering —
+// the only way to set it now that it is platform-reserved (D3) — instead of authoring
+// it inline in the trait's own Properties.
+func capabilityNetworkPolicy(traitType string, networkPolicy map[string]any) map[string]oam.CapabilityBinding {
+	return map[string]oam.CapabilityBinding{
+		traitType: {Rendering: map[string]any{"networkPolicy": networkPolicy}},
+	}
+}
+
+func ingressNetworkPolicyCapabilities(namespace string) map[string]oam.CapabilityBinding {
+	return capabilityNetworkPolicy("ingress", map[string]any{
+		"trafficSources": []any{map[string]any{"namespace": namespace}},
+	})
+}
+
+func httprouteNetworkPolicyCapabilities(namespace string) map[string]oam.CapabilityBinding {
+	return capabilityNetworkPolicy("httproute", map[string]any{
+		"trafficSources": []any{map[string]any{"namespace": namespace}},
+	})
+}
+
 func ingressTrafficSourcesTrait(extra map[string]any) *oam.Trait {
 	props := map[string]any{
 		"rules": []any{
@@ -172,16 +193,13 @@ func TestTransform_IngressTrafficSources_SynthesizesNetworkPolicy(t *testing.T) 
 							"host":  "example.com",
 							"paths": []any{map[string]any{"path": "/"}},
 						}},
-						"networkPolicy": map[string]any{
-							"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}},
-						},
 					},
 				}},
 			}},
 		},
 	}
 
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: ingressNetworkPolicyCapabilities("ingress-nginx")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -349,9 +367,6 @@ func TestTransform_BackendRef_RetargetsToBackendComponent(t *testing.T) {
 							"rules": []any{map[string]any{
 								"backendRefs": []any{map[string]any{"name": "backend", "port": 9000}},
 							}},
-							"networkPolicy": map[string]any{
-								"trafficSources": []any{map[string]any{"namespace": "gateway-system"}},
-							},
 						},
 					}},
 				},
@@ -364,7 +379,7 @@ func TestTransform_BackendRef_RetargetsToBackendComponent(t *testing.T) {
 		},
 	}
 
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -411,16 +426,13 @@ func TestTransform_BackendRef_Unresolvable_LeavesAuthored(t *testing.T) {
 						"rules": []any{map[string]any{
 							"backendRefs": []any{map[string]any{"name": "external-svc", "port": 9000}},
 						}},
-						"networkPolicy": map[string]any{
-							"trafficSources": []any{map[string]any{"namespace": "gateway-system"}},
-						},
 					},
 				}},
 			}},
 		},
 	}
 
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -457,9 +469,6 @@ func TestTransform_IngressBackendPath_RetargetsToBackend(t *testing.T) {
 									"portName": "http",
 								}},
 							}},
-							"networkPolicy": map[string]any{
-								"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}},
-							},
 						},
 					}},
 				},
@@ -472,7 +481,7 @@ func TestTransform_IngressBackendPath_RetargetsToBackend(t *testing.T) {
 		},
 	}
 
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: ingressNetworkPolicyCapabilities("ingress-nginx")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -518,9 +527,6 @@ func TestTransform_BackendRef_ResolvesViaServiceName(t *testing.T) {
 								// Names the statefulset's headless Service, not its component name.
 								"backendRefs": []any{map[string]any{"name": "db-headless", "port": 5432}},
 							}},
-							"networkPolicy": map[string]any{
-								"trafficSources": []any{map[string]any{"namespace": "gateway-system"}},
-							},
 						},
 					}},
 				},
@@ -533,7 +539,7 @@ func TestTransform_BackendRef_ResolvesViaServiceName(t *testing.T) {
 		},
 	}
 
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -568,16 +574,13 @@ func TestTransform_BackendRef_SelfTarget_Unchanged(t *testing.T) {
 						"rules": []any{map[string]any{
 							"backendRefs": []any{map[string]any{"name": "web", "port": 8080}},
 						}},
-						"networkPolicy": map[string]any{
-							"trafficSources": []any{map[string]any{"namespace": "gateway-system"}},
-						},
 					},
 				}},
 			}},
 		},
 	}
 
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -687,9 +690,6 @@ func TestTransform_ComponentLabelKey_Override(t *testing.T) {
 									"host":  "example.com",
 									"paths": []any{map[string]any{"path": "/"}},
 								}},
-								"networkPolicy": map[string]any{
-									"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}},
-								},
 							},
 						}},
 					}},
@@ -699,6 +699,7 @@ func TestTransform_ComponentLabelKey_Override(t *testing.T) {
 			ctx := oam.TransformContext{
 				Namespace:         "default",
 				ComponentLabelKey: tc.key,
+				Capabilities:      ingressNetworkPolicyCapabilities("ingress-nginx"),
 				EgressPeers: map[string][]netpol.EgressPeer{
 					"web": {{Namespace: "db", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgres"}}, Ports: []intstr.IntOrString{intstr.FromInt32(5432)}}},
 				},
@@ -781,8 +782,7 @@ func ingressExternalBackendApp(backend string, port int, selector map[string]any
 				Traits: []oam.Trait{{
 					Type: "ingress",
 					Properties: map[string]any{
-						"rules":         []any{map[string]any{"host": "example.com", "paths": []any{pathMap}}},
-						"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}}},
+						"rules": []any{map[string]any{"host": "example.com", "paths": []any{pathMap}}},
 					},
 				}},
 			}},
@@ -799,7 +799,7 @@ func TestTransform_ExternalBackend_Ingress_WithSelector_SynthesizesNP(t *testing
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 	app := ingressExternalBackendApp("external-svc", 8081, map[string]any{"app.kubernetes.io/name": "external"})
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: ingressNetworkPolicyCapabilities("ingress-nginx")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -847,13 +847,12 @@ func TestTransform_ExternalBackend_HTTPRoute_WithSelector_SynthesizesNP(t *testi
 								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}},
 							}},
 						}},
-						"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "gateway-system"}}},
 					},
 				}},
 			}},
 		},
 	}
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -905,13 +904,12 @@ func TestTransform_ExternalBackend_MixedSelectorPresence_DoesNotWiden(t *testing
 								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}}},
 							map[string]any{"path": "/b", "backend": "external-svc", "port": 9091},
 						}}},
-						"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}}},
 					},
 				}},
 			}},
 		},
 	}
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: ingressNetworkPolicyCapabilities("ingress-nginx")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -1070,14 +1068,13 @@ func TestTransform_ExternalBackend_NameNoCollisionWhenComponentHasNoPolicy(t *te
 								"name": "db", "port": 8080,
 								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}},
 							}}}},
-							"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "gateway-system"}}},
 						},
 					}},
 				},
 			},
 		},
 	}
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -1110,7 +1107,6 @@ func TestTransform_ExternalBackend_SelectorOnSiblingComponent_Ignored(t *testing
 								"name": "backend", "port": 9000,
 								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}},
 							}}}},
-							"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "gateway-system"}}},
 						},
 					}},
 				},
@@ -1118,7 +1114,7 @@ func TestTransform_ExternalBackend_SelectorOnSiblingComponent_Ignored(t *testing
 			},
 		},
 	}
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -1197,13 +1193,12 @@ func TestTransform_ExternalBackend_MultipleServices_DistinctNames(t *testing.T) 
 							map[string]any{"path": "/b", "backend": "external-b", "port": 8082,
 								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "b"}}},
 						}}},
-						"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}}},
 					},
 				}},
 			}},
 		},
 	}
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: ingressNetworkPolicyCapabilities("ingress-nginx")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -1237,9 +1232,6 @@ func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
 							"rules": []any{map[string]any{
 								"backendRefs": []any{map[string]any{"name": "db-headless", "port": 5432}},
 							}},
-							"networkPolicy": map[string]any{
-								"trafficSources": []any{map[string]any{"namespace": "gateway-system"}},
-							},
 						},
 					}},
 				},
@@ -1255,7 +1247,7 @@ func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
 		},
 	}
 
-	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"})
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
