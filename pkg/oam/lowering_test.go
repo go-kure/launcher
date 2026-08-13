@@ -333,6 +333,52 @@ func TestRegisterRawDocumentLowering_RejectsDuplicateKind(t *testing.T) {
 	})
 }
 
+// --- RegisterTraitLowering: CapabilityAware⇒ValidateAndApplyDefaults guard --------
+//
+// RegisterTrait (transform.go) panics at registration time if a dispatchable
+// TraitHandler implements CapabilityAware without also implementing
+// ValidateAndApplyDefaults, because EvaluateProfile's dispatch needs
+// ValidateAndApplyDefaults to validate/default a capability-rendered binding before
+// use. RegisterTraitLowering must enforce the identical guard for a TraitLoweringRule,
+// since EvaluateProfile's trait-lowering-rule fallback (transform.go) has the same
+// need and the same silent-unvalidated-acceptance failure mode otherwise.
+
+// capAwareTraitLoweringRule implements TraitLoweringRule + CapabilityAware, but NOT
+// ValidateAndApplyDefaults — the shape RegisterTraitLowering must now reject.
+type capAwareTraitLoweringRule struct{ typ string }
+
+func (r capAwareTraitLoweringRule) TraitType() string { return r.typ }
+func (r capAwareTraitLoweringRule) LowerTrait(trait *Trait, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Traits: []Trait{{Type: "ingress", Properties: map[string]any{}}}}, nil
+}
+func (r capAwareTraitLoweringRule) CapabilityRequired() bool { return true }
+
+// capAwareTraitLoweringRuleWithVAD adds ValidateAndApplyDefaults to the above — the
+// shape RegisterTraitLowering must continue to accept, exactly as ExposeRule does today.
+type capAwareTraitLoweringRuleWithVAD struct {
+	capAwareTraitLoweringRule
+}
+
+func (r capAwareTraitLoweringRuleWithVAD) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
+	return rendering, nil
+}
+
+func TestRegisterTraitLowering_PanicsIfCapabilityAwareWithoutVAD(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	mustPanicContaining(t, "implements CapabilityAware but not ValidateAndApplyDefaults", func() {
+		tr.RegisterTraitLowering(capAwareTraitLoweringRule{typ: "reserving-trait"})
+	})
+}
+
+func TestRegisterTraitLowering_CapabilityAwareWithVAD_OK(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	r := capAwareTraitLoweringRuleWithVAD{capAwareTraitLoweringRule{typ: "reserving-trait"}}
+	tr.RegisterTraitLowering(r)
+	if _, ok := tr.traitLoweringRules["reserving-trait"]; !ok {
+		t.Fatal("expected the rule to be registered")
+	}
+}
+
 // TestLowerableTypes_ExcludesRawRegisteredKinds proves the other half of the mutual
 // exclusion: a raw-registered kind has no LowerableTypes entry, so ParseWithExtraTypes
 // can never be pointed at it and the in-transform parse gate cannot admit it.
