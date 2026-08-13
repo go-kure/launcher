@@ -224,13 +224,16 @@ validated and needs no new machinery.
 For a document whose authored YAML already unmarshals into the base
 `Application`/`ApplicationSpec` shape, the engine runs where the spike put it: inside
 the transform pipeline, downstream of `Parse`, reached through `Transform`/
-`TransformWithPolicy` (`pkg/oam/transform.go:333`) and `TransformAll`
-(`transform.go:389`) for the document-splitting case. This is the mechanism D1–D7
-exercised — `DocumentLoweringRule`/`ComponentLoweringRule`/`TraitLoweringRule`/
-`PolicyLoweringRule` operating on a decoded `Application`, with `LoweringContext`,
-`Origin` provenance, `NameAllocator`, and the `MaxLoweringDepth` fixpoint bound all
-already proven against it. No change to this entry point is implied by the finding
-above — it remains correct and sufficient for every document that reaches it.
+`TransformWithPolicy` (`pkg/oam/transform.go:333`, present on this branch today). The
+document-splitting case (`TransformAll`) is spike-only, like the rest of the D1–D7
+mechanics below — it exists at `transform.go:389` on `spike/oam-lowering-engine`, not
+on this branch, and its production shape is undecided along with the rest of that
+code. This is the mechanism D1–D7 exercised — `DocumentLoweringRule`/
+`ComponentLoweringRule`/`TraitLoweringRule`/`PolicyLoweringRule` operating on a decoded
+`Application`, with `LoweringContext`, `Origin` provenance, `NameAllocator`, and the
+`MaxLoweringDepth` fixpoint bound all already proven against it, on the spike branch.
+No change to this entry point's *design* is implied by the finding above — once
+implemented, it remains correct and sufficient for every document that reaches it.
 
 ### Entry point 2 — raw-document (new, required by the finding)
 
