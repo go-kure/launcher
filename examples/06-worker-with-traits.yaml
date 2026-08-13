@@ -16,8 +16,16 @@ spec:
     - type: external-secret
       properties:
         secretName: my-worker-credentials
-        remoteRef:
-          key: prod/my-worker/credentials
+        envFrom: true
+        data:
+        - secretKey: DB_PASSWORD
+          remoteRef:
+            key: prod/my-worker/credentials
+            property: db_password
+        - secretKey: API_TOKEN
+          remoteRef:
+            key: prod/my-worker/credentials
+            property: api_token
     - type: configmap
       properties:
         name: my-worker-config

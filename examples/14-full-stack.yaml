@@ -47,8 +47,16 @@ spec:
     - type: external-secret
       properties:
         secretName: web-app-secrets
-        remoteRef:
-          key: prod/web/secrets
+        envFrom: true
+        data:
+        - secretKey: SESSION_SECRET
+          remoteRef:
+            key: prod/web/secrets
+            property: session_secret
+        - secretKey: STRIPE_KEY
+          remoteRef:
+            key: prod/web/secrets
+            property: stripe_key
     - type: configmap
       properties:
         name: web-config
@@ -91,8 +99,12 @@ spec:
     - type: external-secret
       properties:
         secretName: worker-credentials
-        remoteRef:
-          key: prod/worker/credentials
+        mountPath: /etc/credentials
+        data:
+        - secretKey: token
+          remoteRef:
+            key: prod/worker/credentials
+            property: token
     - type: configmap
       properties:
         name: worker-config

@@ -44,7 +44,7 @@ preflight reject every valid use of the trait.
 |--------|----------|----------------|
 | `certificate` | cert-manager Certificate | `secretName`, `dnsNames[]`, `duration`, `renewBefore`, `privateKey` (`algorithm`/`size`/`encoding`/`rotationPolicy`) (issuer from ClusterProfile) |
 | `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide` |
-| `external-secret` | ESO ExternalSecret | `secretName`, `data[]`/`dataFrom[]`, `refreshInterval` (store from ClusterProfile or `provider`) |
+| `external-secret` | ESO ExternalSecret (+ optional envFrom / volume mount) | `secretName`, `data[]`/`dataFrom[]`, `refreshInterval`, `envFrom`, `mountPath` (store from ClusterProfile or `provider`) |
 | `security-context` | (modifies PodSpec) | `psaLevel` (`restricted`\|`baseline`\|`privileged`), optional: `runAsNonRoot`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`, `runAsGroup`, `fsGroup` |
 
 ### Storage
@@ -104,6 +104,22 @@ not the app — chooses the implementation:
   unknown keys in an entry or its `remoteRef` are rejected (naming the supported
   fields) rather than silently ignored. See
   [External Secret Shorthand](/concepts/oam-external-secret-shorthand/).
+
+  The produced Secret is otherwise emit-only — nothing references it unless the trait is told
+  to. Set `envFrom: true` and/or `mountPath: <path>` to inject it into the component's workload
+  (Deployment, StatefulSet, DaemonSet, or CronJob): `envFrom` wholesale-injects the Secret into
+  the first container via `envFrom[].secretRef`, and `mountPath` mounts it as a volume on the
+  first container at that path. Both may be set together. `envFrom` cannot be combined with the
+  top-level `remoteRef` shorthand: the shorthand derives its single `data[]` entry's `secretKey`
+  from `secretName`, which is a Secret *name*, not a valid environment variable name — author
+  explicit `data[]` entries with their own `secretKey` values instead. When `envFrom` is set,
+  every authored `data[].secretKey` (and any `target.template.data` key) must satisfy
+  Kubernetes' `IsEnvVarName`, since it becomes an env var name in the container; `dataFrom[]`
+  keys are exempt from this check because they are extract/find queries resolved by ESO at
+  runtime, so the keys they ultimately produce aren't known at render time. When `mountPath` is
+  set, the produced Secret's name (`secretName`, or `targetSecretName` if overridden) must be a
+  valid DNS-1123 label, because it becomes the injected volume's name; a dotted or otherwise
+  non-label-safe name is rejected at render time rather than producing an invalid Volume.
 
 ## Auto-synthesized NetworkPolicy
 
