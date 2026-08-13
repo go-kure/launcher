@@ -494,6 +494,14 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 					return false, steps, errors.Wrapf(ErrMissingCapability, "%s: capability %q not found in ClusterProfile", traitOrigin, key)
 				}
 			}
+			// D3: reject an authored value for a platform-reserved property before
+			// capability rendering is merged in, exactly as applyTraits does for a
+			// dispatchable handler.
+			if p, ok := rule.(PropertySchemaProvider); ok {
+				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+				}
+			}
 			// Capability rendering is merged in before the rule runs (D5 input 3), the
 			// same merge applyTraits performs for a dispatchable handler — so a
 			// TraitLoweringRule sees the identical "rendering as defaults, inline wins"

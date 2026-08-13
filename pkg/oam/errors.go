@@ -9,6 +9,11 @@ import (
 // without a matching entry in TransformContext.Capabilities.
 var ErrMissingCapability = errors.New("oam: capability key not found in ClusterProfile")
 
+// ErrPlatformReserved is returned when an authored component/trait property sets a
+// key a handler's schema marks PropertySchema.PlatformReserved (D3) — such a value
+// may only arrive via ClusterProfile capability rendering.
+var ErrPlatformReserved = errors.New("oam: property is platform-reserved")
+
 // TransformError represents a failure in the OAM-to-kure transformation pipeline.
 type TransformError struct {
 	Message string

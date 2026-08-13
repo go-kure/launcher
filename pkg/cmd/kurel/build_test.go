@@ -31,7 +31,6 @@ spec:
       traits:
         - type: expose
           properties:
-            controllerType: ingress
             rules:
               - host: frontend.example.com
                 paths:
@@ -355,6 +354,50 @@ spec:
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for stale downstream field spec.gitops in cluster.yaml")
+	}
+}
+
+// TestBuildCommand_PlatformReservedControllerType_Rejected is the C6/D3 negative
+// proof: controllerType is platform-reserved on ExposeRule's schema, so authoring
+// it inline (rather than letting it arrive via the expose capability's rendering,
+// as testClusterYAML does) must fail before the trait ever lowers.
+func TestBuildCommand_PlatformReservedControllerType_Rejected(t *testing.T) {
+	const appWithAuthoredControllerType = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: frontend
+      type: webservice
+      properties:
+        image: ghcr.io/example/frontend:v1.0.0
+        port: 8080
+      traits:
+        - type: expose
+          properties:
+            controllerType: ingress
+            rules:
+              - host: frontend.example.com
+                paths:
+                  - path: /
+`
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", appWithAuthoredControllerType)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error: controllerType is platform-reserved and must not be authored inline")
+	}
+	if !strings.Contains(err.Error(), "platform-reserved") {
+		t.Errorf("error = %q, want mention of platform-reserved", err.Error())
 	}
 }
 

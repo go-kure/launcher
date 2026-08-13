@@ -80,6 +80,25 @@ checks) still runs — otherwise those checks would silently stop firing with no
 failing test to catch it (see `TestExposeRule_EvaluateProfile_GatewayValidation`
 and `TestExposeRule_SealedGuard_ExtraIngressCapabilityIgnored`).
 
+`PropertySchema.PlatformReserved` (D3) marks a property as platform-supplied only:
+`enforcePlatformReserved` rejects an authored value for such a key **before**
+capability rendering is merged in, at every position that performs that merge
+(the trait-lowering branch above, `applyTraits`) plus symmetrically before a
+component handler's `ToApplicationConfig` (which performs no such merge today,
+but the guard is position-agnostic). `ExposeRule.PropertySchema()` marks
+`controllerType`, `certManagerClusterIssuer`, `allowedHostnameWildcard`, `authURL`,
+and `authResponseHeaders` reserved — each is capability-injected-only in
+`ExposeRule.LowerTrait` and never reaches the emitted `ingress`/`httproute` trait.
+`networkPolicy` is reserved on `ExposeRule`'s own schema copy only, **not** on the
+`schemaNetworkPolicy()` fragment `IngressHandler`/`HTTPRouteHandler` also share —
+those two traits' own test suites author `networkPolicy` directly (bypassing any
+`ClusterProfile`) to exercise netpol synthesis without a capability round-trip, a
+pre-existing, intentional pattern D3 does not reach. `sslRedirect`,
+`forceSslRedirect`, `authSigninURL`, and `ingressClassName` stay **not** reserved:
+each is documented as capability-default-with-inline-override, or (for
+`ingressClassName` on the plain `ingress` trait) authored directly by existing
+fixtures.
+
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /
 `cilium-networkpolicy` traits are unaffected):

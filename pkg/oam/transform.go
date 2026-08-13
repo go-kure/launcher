@@ -516,6 +516,15 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			return nil, &TransformError{Message: fmt.Sprintf("no handler for component type %q", component.Type)}
 		}
 
+		// D3: an authored value for a platform-reserved property is rejected before
+		// the handler ever sees it, symmetric with the trait-position enforcement in
+		// applyTraits/lowerDocumentBody.
+		if p, ok := handler.(PropertySchemaProvider); ok {
+			if err := enforcePlatformReserved(p.PropertySchema(), component.Properties, "properties"); err != nil {
+				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+			}
+		}
+
 		config, err := handler.ToApplicationConfig(&component, namespace)
 		if err != nil {
 			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
@@ -750,6 +759,17 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 							if t.warnHandler != nil {
 								t.warnHandler(msg)
 							}
+						}
+					}
+				}
+
+				// D3: an authored value for a platform-reserved property is rejected
+				// before capability rendering is merged in.
+				if p, ok := handler.(PropertySchemaProvider); ok {
+					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
+						return &TransformError{
+							Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
+							Cause:   err,
 						}
 					}
 				}

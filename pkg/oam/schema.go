@@ -49,4 +49,13 @@ type PropertySchema struct {
 	// AdditionalProperties allows keys beyond those in Properties (object types).
 	// Defaults to false.
 	AdditionalProperties bool `json:"additionalProperties,omitempty" yaml:"additionalProperties,omitempty"`
+	// PlatformReserved marks a property as platform-supplied only (D3): the value
+	// may arrive solely via ClusterProfile capability rendering, never authored
+	// inline. enforcePlatformReserved (property_validate.go) rejects an authored
+	// value before capability rendering is merged in. Meaningful only for handler
+	// properties, like Enum/Properties/Items/AdditionalProperties above — the two
+	// flat call sites (kurel parameters, capability rendering) reject it at decode
+	// time (flatschema.go), since a rendering schema describing what the platform
+	// may set cannot itself be platform-reserved.
+	PlatformReserved bool `json:"platformReserved,omitempty" yaml:"platformReserved,omitempty"`
 }

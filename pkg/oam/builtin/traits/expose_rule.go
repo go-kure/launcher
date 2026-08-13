@@ -85,14 +85,22 @@ func (ExposeRule) ValidateAndApplyDefaults(rendering map[string]any) (map[string
 // authored-element validation pass (D4 currently validates only emitted elements
 // and the settled whole document, not authored input — see pkg/oam/README.md).
 func (ExposeRule) PropertySchema() map[string]oam.PropertySchema {
+	// networkPolicy is shared with IngressHandler/HTTPRouteHandler's own schemas
+	// (schemaNetworkPolicy, schema.go) via the same helper, but PlatformReserved is
+	// set here only: expose is the position a user could author it inline before
+	// any capability rendering ever runs (D3's proof fixture), whereas
+	// ingress/httproute's own test suites author it directly to exercise netpol
+	// synthesis without going through a ClusterProfile at all.
+	exposeNetworkPolicy := schemaNetworkPolicy()
+	exposeNetworkPolicy.PlatformReserved = true
 	return map[string]oam.PropertySchema{
 		// controllerType is capability-injected, not user-set (see doc above), so it is
 		// NOT user-required here; it is validated in ValidateAndApplyDefaults. Kept in the
 		// schema as an optional enum so a value, if present, is type/enum-checked.
-		"controllerType":           {Type: oam.PropertyTypeString, Enum: []any{"ingress", "gateway"}, Description: "Capability-injected controller kind (ingress or gateway) this expose dispatches to."},
-		"certManagerClusterIssuer": {Type: oam.PropertyTypeString, Description: "cert-manager ClusterIssuer used to synthesize TLS (ingress controllerType only)."},
+		"controllerType":           {Type: oam.PropertyTypeString, Enum: []any{"ingress", "gateway"}, PlatformReserved: true, Description: "Capability-injected controller kind (ingress or gateway) this expose dispatches to."},
+		"certManagerClusterIssuer": {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "cert-manager ClusterIssuer used to synthesize TLS (ingress controllerType only)."},
 		"secretName":               {Type: oam.PropertyTypeString, Description: "Overrides the synthesized <component>-tls secret name for platform-managed TLS (ingress controllerType only; requires a cert-manager cluster-issuer capability)."},
-		"allowedHostnameWildcard":  {Type: oam.PropertyTypeString, Description: "Platform-reserved wildcard the hostnames must fall under."},
+		"allowedHostnameWildcard":  {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "Platform-reserved wildcard the hostnames must fall under."},
 		"gatewayName":              {Type: oam.PropertyTypeString, Description: "Gateway name used to synthesize parentRefs (gateway controllerType only)."},
 		"gatewayNamespace":         {Type: oam.PropertyTypeString, Default: "gateway-system", Description: "Namespace of the Gateway (gateway controllerType only)."},
 		"annotations":              {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Additional annotations to set on the generated resource."},
@@ -102,14 +110,14 @@ func (ExposeRule) PropertySchema() map[string]oam.PropertySchema {
 		"sslRedirect":              {Type: oam.PropertyTypeBoolean, Description: "nginx ssl-redirect annotation (ingress controllerType only); platform default via capability rendering, override-able inline."},
 		"forceSslRedirect":         {Type: oam.PropertyTypeBoolean, Description: "nginx force-ssl-redirect annotation (ingress controllerType only); platform default via capability rendering, override-able inline."},
 		"allowedGroups":            {Type: oam.PropertyTypeArray, Description: "oauth2-proxy allowed groups; enables external-auth on the route (ingress controllerType only). Order is preserved.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "An allowed oauth2-proxy group."}},
-		"authURL":                  {Type: oam.PropertyTypeString, Description: "Capability-injected nginx external-auth endpoint base (ingress controllerType only)."},
+		"authURL":                  {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "Capability-injected nginx external-auth endpoint base (ingress controllerType only)."},
 		"authSigninURL":            {Type: oam.PropertyTypeString, Description: "nginx auth-signin URL (ingress controllerType only); platform default via capability rendering, override-able inline."},
-		"authResponseHeaders":      {Type: oam.PropertyTypeString, Description: "Capability-injected nginx auth-response-headers value (ingress controllerType only)."},
+		"authResponseHeaders":      {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "Capability-injected nginx auth-response-headers value (ingress controllerType only)."},
 		"servicePort":              {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one."},
 		"serviceName":              {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
 		"name":                     {Type: oam.PropertyTypeString, Description: "Overrides the sub-application name, allowing multiple expose traits per component."},
 		"scope":                    {Type: oam.PropertyTypeString, Description: "Suffix appended to the sub-application name to disambiguate multiple expose traits."},
-		"networkPolicy":            schemaNetworkPolicy(),
+		"networkPolicy":            exposeNetworkPolicy,
 	}
 }
 

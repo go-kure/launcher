@@ -102,6 +102,23 @@ func validatePropertyValue(schema PropertySchema, value any, path string) error 
 	return nil
 }
 
+// enforcePlatformReserved rejects an authored property whose schema field is
+// PropertySchema.PlatformReserved (D3). It runs on props before capability
+// rendering is merged in (resolveCapability / TraitLoweringRule.LowerTrait), so it
+// sees only what was actually authored — a value the platform itself supplies
+// through capability rendering is never authored and so never present here.
+func enforcePlatformReserved(schema map[string]PropertySchema, props map[string]any, path string) error {
+	for key, field := range schema {
+		if !field.PlatformReserved {
+			continue
+		}
+		if _, present := props[key]; present {
+			return errors.Wrapf(ErrPlatformReserved, "%s: %q is platform-reserved and may only be set via ClusterProfile capability rendering", path, key)
+		}
+	}
+	return nil
+}
+
 // isIntegerValue accepts any Go integer kind, plus a float64/float32 with no
 // fractional part — YAML numeric literals decode to float64 when the surrounding
 // value came through interface{}, and a lowering rule may construct either.
