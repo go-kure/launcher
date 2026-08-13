@@ -126,6 +126,63 @@ carrying its own authored fields still belongs to the raw lowering entry point.
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. |
 
+## Lowering
+
+Some documents, components, traits, and policies are authored in a higher-level
+vocabulary that has no direct dispatchable handler — a type a platform wants expanded
+into one or more terminal types before the transform's own component/trait dispatch
+runs. The lowering engine (`lowering.go`, `lowering_raw.go`) is the shared fixpoint
+that performs that expansion, reachable from two entry points:
+
+| Entry point | Reachable rules | Use when |
+|---|---|---|
+| `(*Transformer).lower`, invoked from `Transform`/`TransformWithPolicy` | `DocumentLoweringRule`, `ComponentLoweringRule`, `TraitLoweringRule`, `PolicyLoweringRule` | The authored document's field set already fits `ApplicationSpec` (`Components`/`Policies`, nothing else), so `ParseWithExtraTypes` can decode it before the transform lowers it away. |
+| `(*Transformer).LowerRaws` — standalone, called by the caller BEFORE its own parse fan-out | `RawDocumentLoweringRule` | The authored document is a whole higher-level kind carrying its OWN fields that don't fit `ApplicationSpec`, so it can never survive a strict `ParseWithExtraTypes` decode. `LowerRaws` takes `[]json.RawMessage`, lowers only the inputs whose `kind` a registered rule claims (everything else passes through byte-identical), decoding each claimed input via that rule's own `DecodeDocument`. |
+
+Four registration interfaces, one per position in the document tree, each with its own
+registrar on `*Transformer` and a duplicate/dispatchable-collision guard (a type
+claimed by a lowering rule must not also be a dispatchable handler type, and a
+document kind must not be claimed by both document registrars):
+
+| Interface | Registrar | Position | May emit |
+|---|---|---|---|
+| `DocumentLoweringRule` | `RegisterDocumentLowering` | whole document (`ApplicationSpec`-shaped only) | `Documents` |
+| `RawDocumentLoweringRule` | `RegisterRawDocumentLowering` | whole document (any shape; own `DecodeDocument`) | `Documents` |
+| `ComponentLoweringRule` | `RegisterComponentLowering` | `spec.components[]` | `Components`, `Policies` |
+| `TraitLoweringRule` | `RegisterTraitLowering` | `spec.components[].traits[]` | `Traits`, `Components`, `Policies` |
+| `PolicyLoweringRule` | `RegisterPolicyLowering` | `spec.policies[]` | `Policies` |
+
+Every rule returns a `LoweringResult`; an entirely empty result is rejected — a
+registered rule that emits nothing is indistinguishable from deleting the authored
+element, which is not permitted. `Transformer.LowerableTypes()` reports every
+kind/component-type/trait-type/policy-type claimed by rules registered on a
+transformer (excluding raw-only rules, which are reachable only via `LowerRaws`), for
+a caller to pass into `ParseWithExtraTypes` ahead of a transform that will lower them
+(see Parsing above).
+
+Expansion runs to a **fixpoint**: every round, every current document's non-terminal
+kind, components, traits, and policies are lowered once via their registered rule (if
+any); the loop repeats until a round changes nothing, bounded by `MaxLoweringDepth`
+(8) — a rule that keeps re-emitting its own (or another registered) type fails the
+build with the full expansion chain rather than looping forever. A transformer with no
+lowering rules registered anywhere returns the input `*Application` unchanged (the
+same pointer — no copy, no allocation); registering rules only on the raw entry point
+leaves that guarantee intact for the in-transform path.
+
+Every emitted element carries an `Origin` — the AUTHORED location it descends from,
+stamped once and copied verbatim onto every element expanded from it at any depth —
+so a `LoweringError` always leads with the YAML the user actually wrote, then the
+synthesized cause, then the expansion chain (`LoweringStep`s) that produced it.
+
+A trait-position rule that implements `CapabilityAware` is enforced by the engine
+exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the
+required `ClusterProfile` capability fails with `ErrMissingCapability`. A rule that
+also implements `PropertySchemaProvider` has an authored value for one of its
+platform-reserved properties rejected before capability rendering is merged into the
+trait it receives, and its emitted component/trait/policy properties validated
+against the TARGET handler's declared schema before the emitted element is accepted
+into the next round (see Property schemas below).
+
 ## Property schemas
 
 Handlers may implement `PropertySchemaProvider` (`PropertySchema() map[string]PropertySchema`)
@@ -145,6 +202,25 @@ properties before the handler is invoked. Built-in examples: the `configmap` tra
 including nested object fields and array item schemas at every depth — so the downstream runtime can surface prose in
 its generated Handler API Reference. A completeness test (`pkg/cmd/kurel`) enforces that no built-in
 schema node is left without a description.
+
+A schema field may also be marked `PlatformReserved`: its value may arrive only via
+`ClusterProfile` capability rendering, never authored inline. `enforcePlatformReserved`
+(`property_validate.go`) rejects an authored value for such a field — including an
+explicit `null` — before capability rendering is merged in, wrapping
+`ErrPlatformReserved`; it walks declared nested object fields too, so a reservation on
+an inner field is enforced wherever it is declared, not only at the top level.
+`createApplications` and `applyTraits` (`transform.go`) run this check on the authored
+path, and the lowering engine runs it on a `TraitLoweringRule`'s input trait before
+capability rendering is resolved into it (see Lowering above).
+
+Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
+component/trait/policy's properties against its TARGET handler's declared schema —
+enforcing `Required`, `Type`, `Enum`, and nested `Properties`/`Items`/
+`AdditionalProperties` — immediately after a lowering rule returns it, so a rule
+cannot silently produce properties its own target handler would reject. This is
+in-process enforcement of what `HandlerSchemas()` only publishes for authored
+documents; an authored document's own property shape is still validated only by
+`ValidateAndApplyDefaults`/handler-specific logic, not by this path.
 
 ## Policy defaults & enforcement
 

@@ -2,12 +2,19 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/go-kure/launcher/pkg/oam/builtin/traits.svg)](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
 
-Package `traits` implements `oam.TraitHandler` for the built-in trait types. A trait
-decorates or augments a component — adding networking, security, storage, scaling,
-or operational behavior. Handlers are registered with the transformer in
-`pkg/cmd/kurel` via `RegisterBuiltinTrait(type, handler)`; each implements
-`CanHandle` + `Apply`. Some traits are **capability-aware** (`CapabilityRequired`)
-and draw platform choices (issuer, gateway, secret store) from the `ClusterProfile`.
+Package `traits` implements `oam.TraitHandler` for most built-in trait types, plus one
+`oam.TraitLoweringRule` (`expose`, see below). A trait decorates or augments a
+component — adding networking, security, storage, scaling, or operational behavior.
+Handlers are registered with the transformer in `pkg/cmd/kurel` via
+`RegisterBuiltinTrait(type, handler)`; each implements `CanHandle` + `Apply`. `expose`
+is registered separately, via `RegisterTraitLowering` (`builtinTraitLoweringRules()`
+in `pkg/cmd/kurel`) — it lowers into a terminal `ingress` or `httproute` trait rather
+than building a resource itself, so it is never also present in the dispatchable
+trait-handler map (a lowerable type and a dispatchable handler type are mutually
+exclusive by construction; see the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s
+Lowering section for the general mechanism). Some traits are **capability-aware**
+(`CapabilityRequired`) and draw platform choices (issuer, gateway, secret store) from
+the `ClusterProfile` — this applies to both dispatchable handlers and lowering rules.
 Every built-in trait handler also implements `oam.PropertySchemaProvider`
 (`PropertySchema()`), declaring a constrained schema for its user-facing properties so
 the downstream runtime can validate them before invocation. This includes the platform-reserved keys a
@@ -71,7 +78,8 @@ preflight reject every valid use of the trait.
 These require (or optionally use) a `ClusterProfile` capability, so the platform —
 not the app — chooses the implementation:
 
-- **expose** → `controllerType` (ingress vs gateway) + gateway/ingress details.
+- **expose** (a `TraitLoweringRule`, not a dispatchable handler — see above) →
+  `controllerType` (ingress vs gateway) + gateway/ingress details.
   On the **ingress** path, expose is platform-managed for TLS: it derives `spec.tls[]`
   from the rule hosts under a deterministic `<component>-tls` secret and emits the
   `cert-manager.io/cluster-issuer` annotation from the `certManagerClusterIssuer`
@@ -165,7 +173,14 @@ sibling component is ignored (component-label retargeting wins). Same-namespace 
 ## Extending
 
 Custom traits implement `oam.TraitHandler` (`CanHandle` + `Apply`), optionally
-`CapabilityAware` + `ValidateAndApplyDefaults` for capability validation.
+`CapabilityAware` + `ValidateAndApplyDefaults` for capability validation. A trait that
+needs to expand into one or more OTHER traits (or components/policies) before any
+handler runs — rather than building a resource itself — implements
+`oam.TraitLoweringRule` (`TraitType` + `LowerTrait`) instead, registered via
+`RegisterTraitLowering`; `expose` (`expose_rule.go`, above) is the built-in example.
+See the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s Lowering
+section for the full mechanism (registration, the fixpoint, and
+`PropertySchemaProvider`/`CapabilityAware` enforcement).
 
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
 for the full config-field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
