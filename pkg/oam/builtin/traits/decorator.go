@@ -30,7 +30,7 @@ type autoHealthCheckEmitter interface {
 // AFTER traits run: stack.Validator (kure pkg/stack/application.go:51),
 // fluxNamespaceSettable (oam/transform.go:830,887), autoHealthCheckEmitter
 // (oam/transform.go:875), servicePortProvider and serviceBackendNamer
-// (traits/ingress.go:33,42,51 and oam/netpol_synthesis.go:57,60). Enforceable and
+// (traits/ingress.go:33,45,55 and oam/netpol_synthesis.go:57,60). Enforceable and
 // SourceDeduplicatable are deliberately absent: the former is asserted only on
 // trait sub-apps (transform.go:675), the latter runs in phase 1 (transform.go:461),
 // so neither can see a decorator. A sixth, kure's layout.LayoutAugmenter, is
