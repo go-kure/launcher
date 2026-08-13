@@ -52,6 +52,16 @@ an empty `LowerableTypes` — any kind/component/trait type still present at tha
 is, by construction, not claimed by any registered rule, so it is a non-terminating
 rule's leftover rather than a legitimate terminal type.
 
+`pkg/oam/builtin/lowering` (toy rules, never registered by the CLI) and
+`pkg/oam/builtin/policies` (a terminal "dependency" `PolicyHandler` — the first
+policy handler in the repo) exercise all four positions end to end: a
+`WebApplicationRule` document rule (1→2 documents), a `WebAndCacheRule` component
+rule (1→2 components + 1 emitted policy), and an `OrderedRule` policy rule (1→N
+terminal "dependency" policies). `pkg/cmd/kurel/toy_webapplication_test.go` drives
+the full chain through the real pipeline (`testdata/toy-webapplication/`, marked
+`SPIKE_ONLY` so the generic `TestFixtures` loop skips it) and asserts the resulting
+`stack.Bundle.DependsOn` edge, not just the golden manifests.
+
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /
 `cilium-networkpolicy` traits are unaffected):

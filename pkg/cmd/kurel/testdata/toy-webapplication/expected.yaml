@@ -1,0 +1,179 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: frontend
+  name: frontend
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - image: ghcr.io/example/frontend:v1.0.0
+        imagePullPolicy: IfNotPresent
+        name: frontend
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: frontend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: frontend
+  name: frontend
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: frontend
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: frontend
+  name: frontend
+  namespace: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: shop-web
+  name: shop-web
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shop-web
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: shop-web
+    spec:
+      containers:
+      - image: ghcr.io/example/shop:v1.0.0
+        imagePullPolicy: IfNotPresent
+        name: shop-web
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: shop-web
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: shop-web
+  name: shop-web
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: shop-web
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: shop-web
+  name: shop-web
+  namespace: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: shop-cache
+  name: shop-cache
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shop-cache
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: shop-cache
+    spec:
+      containers:
+      - image: redis:7
+        imagePullPolicy: IfNotPresent
+        name: shop-cache
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: shop-cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: shop-cache
+  name: shop-cache
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: shop-cache
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: shop-cache
+  name: shop-cache
+  namespace: default

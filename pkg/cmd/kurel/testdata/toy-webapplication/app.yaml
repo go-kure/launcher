@@ -1,0 +1,15 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: WebApplication
+metadata:
+  name: toywebapp
+  namespace: default
+spec:
+  components:
+    - name: frontend
+      type: webservice
+      properties:
+        image: ghcr.io/example/frontend:v1.0.0
+    - name: shop
+      type: web-and-cache
+      properties:
+        image: ghcr.io/example/shop:v1.0.0

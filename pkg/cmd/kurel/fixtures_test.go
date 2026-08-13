@@ -32,6 +32,14 @@ func TestFixtures(t *testing.T) {
 		dir := filepath.Dir(appPath)
 		name := filepath.Base(dir)
 
+		// A directory carrying SPIKE_ONLY needs lowering rules the production CLI's
+		// newBuiltinTransformer never registers (by design — see pkg/oam/README.md
+		// "Lowering engine"), so it cannot go through this generic path. Its own
+		// test drives it directly with a Transformer that adds those rules.
+		if fileExists(filepath.Join(dir, "SPIKE_ONLY")) {
+			continue
+		}
+
 		t.Run(name, func(t *testing.T) {
 			profilePath := filepath.Join(dir, "cluster.yaml")
 			expectedPath := filepath.Join(dir, "expected.yaml")
