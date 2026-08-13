@@ -631,7 +631,9 @@ func TestExternalSecret_TargetSecretNameOverride_UsedInEnvFrom(t *testing.T) {
 		"targetSecretName": "worker-creds-target",
 		"provider":         "vault-backend",
 		"envFrom":          true,
-		"remoteRef":        map[string]any{"key": "secret/creds"},
+		"data": []any{
+			map[string]any{"secretKey": "DB_PASSWORD"},
+		},
 	}}
 	if err := (&traits.ExternalSecretHandler{}).Apply(tr, app, &stack.Bundle{}); err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -681,6 +683,86 @@ func TestExternalSecret_UnsupportedComponent_ReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Deployment, StatefulSet, DaemonSet, or CronJob") {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// envFrom + the top-level remoteRef shorthand must be rejected: the shorthand
+// derives its secretKey from secretName, which is a Secret name, not an
+// environment variable name.
+func TestExternalSecret_EnvFromWithShorthand_Rejected(t *testing.T) {
+	app := stack.NewApplication("worker", "default", newWorkerStubConfig(t))
+	tr := &oam.Trait{Type: "external-secret", Properties: map[string]any{
+		"secretName": "my-worker-credentials",
+		"provider":   "vault-backend",
+		"envFrom":    true,
+		"remoteRef":  map[string]any{"key": "prod/my-worker/credentials"},
+	}}
+	err := (&traits.ExternalSecretHandler{}).Apply(tr, app, &stack.Bundle{})
+	if err == nil {
+		t.Fatal("expected an error for envFrom + remoteRef shorthand")
+	}
+	if !strings.Contains(err.Error(), "remoteRef") || !strings.Contains(err.Error(), "envFrom") {
+		t.Errorf("error %q should name both envFrom and remoteRef", err)
+	}
+}
+
+func TestExternalSecret_EnvFromValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		props   map[string]any
+		wantErr string // substring; empty means no error
+	}{
+		{
+			name: "valid authored keys",
+			props: map[string]any{"secretName": "creds", "provider": "vault-backend", "envFrom": true,
+				"data": []any{map[string]any{"secretKey": "DB_PASSWORD"}}},
+		},
+		{
+			name: "dataFrom only is allowed",
+			props: map[string]any{"secretName": "creds", "provider": "vault-backend", "envFrom": true,
+				"dataFrom": []any{map[string]any{"extract": map[string]any{"key": "prod/creds"}}}},
+		},
+		{
+			name: "invalid secretKey rejected",
+			props: map[string]any{"secretName": "creds", "provider": "vault-backend", "envFrom": true,
+				"data": []any{map[string]any{"secretKey": "1BAD"}}},
+			wantErr: "data[0].secretKey",
+		},
+		{
+			name: "envFrom false skips validation",
+			props: map[string]any{"secretName": "creds", "provider": "vault-backend",
+				"data": []any{map[string]any{"secretKey": "1BAD"}}},
+		},
+		{
+			name: "invalid template data key rejected",
+			props: map[string]any{"secretName": "creds", "provider": "vault-backend", "envFrom": true,
+				"target": map[string]any{"template": map[string]any{
+					"data": map[string]any{"1BAD": "value"},
+				}}},
+			wantErr: "target.template.data",
+		},
+		{
+			name: "mountPath with dotted target rejected",
+			props: map[string]any{"secretName": "creds", "provider": "vault-backend",
+				"targetSecretName": "creds.prod", "mountPath": "/etc/creds"},
+			wantErr: "targetSecretName",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := stack.NewApplication("worker", "default", newWorkerStubConfig(t))
+			err := (&traits.ExternalSecretHandler{}).Apply(
+				&oam.Trait{Type: "external-secret", Properties: tt.props}, app, &stack.Bundle{})
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want one containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
