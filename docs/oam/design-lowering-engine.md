@@ -24,9 +24,8 @@ rule — that was not spelled out in the original decisions doc. Everything else
 the design as written. `pkg/oam`'s scope genuinely widened beyond its doc-comment's
 stated "model + parser + validator" (`pkg/oam/doc.go:1-3`) — the lowering engine is now
 part of the package's production surface, not a spike-only detour that reverts before
-merge. (Whether `doc.go`'s scope statement itself should be reworded is a separate,
-already-tracked item — see "What NOT to do" in this branch's review notes — and is
-deliberately left alone here.)
+merge. (Whether `doc.go`'s scope statement itself should be reworded is left for a
+follow-up, out of scope for this document.)
 
 ## D1 — one engine for all four positions
 
