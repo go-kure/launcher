@@ -322,7 +322,18 @@ func (t *Transformer) RegisterComponentLowering(r ComponentLoweringRule) {
 }
 
 // RegisterTraitLowering registers a trait-position lowering rule. Same duplicate/
-// dispatchable-collision guard as RegisterComponentLowering.
+// dispatchable-collision guard as RegisterComponentLowering, plus the same
+// CapabilityAware⇒ValidateAndApplyDefaults guard RegisterTrait enforces for a
+// dispatchable TraitHandler: EvaluateProfile's trait-lowering-rule fallback
+// (transform.go) needs ValidateAndApplyDefaults to validate/default a
+// capability-rendered binding before use, and silently accepts it unvalidated and
+// undefaulted otherwise (transform.go's rule-registry fallback, "evaluated[key] =
+// binding" with no defaulting/validation). Without this check here, a future
+// TraitLoweringRule could implement CapabilityAware without ValidateAndApplyDefaults
+// and skip validation with no registration-time signal — exactly the class of bug
+// design-lowering-engine.md's "friction #2" records as fixed for "expose"
+// specifically (ExposeRule implements both today), but not closed structurally on
+// this general registration path until now.
 func (t *Transformer) RegisterTraitLowering(r TraitLoweringRule) {
 	typeName := r.TraitType()
 	if _, exists := t.traitLoweringRules[typeName]; exists {
@@ -330,6 +341,11 @@ func (t *Transformer) RegisterTraitLowering(r TraitLoweringRule) {
 	}
 	if _, exists := t.traitHandlers[typeName]; exists {
 		panic("oam: type " + typeName + " is already a dispatchable trait handler; a lowerable type must not also be terminal")
+	}
+	if _, ok := r.(CapabilityAware); ok {
+		if _, ok := r.(ValidateAndApplyDefaults); !ok {
+			panic("oam: trait lowering rule for type " + typeName + " implements CapabilityAware but not ValidateAndApplyDefaults")
+		}
 	}
 	t.traitLoweringRules[typeName] = r
 }

@@ -128,7 +128,7 @@ func (h *IngressHandler) PropertySchema() map[string]oam.PropertySchema {
 		"serviceName":             {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
 		"name":                    {Type: oam.PropertyTypeString, Description: "Overrides the sub-application name, allowing multiple ingress traits per component."},
 		"scope":                   {Type: oam.PropertyTypeString, Description: "Suffix appended to the sub-application name to disambiguate multiple ingress traits."},
-		"allowedHostnameWildcard": {Type: oam.PropertyTypeString, Description: "Platform-reserved wildcard the rule hostnames must fall under."},
+		"allowedHostnameWildcard": {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "Platform-reserved wildcard the rule hostnames must fall under."},
 		"networkPolicy":           schemaNetworkPolicy(true),
 	}
 }
