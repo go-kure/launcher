@@ -84,6 +84,34 @@ func ParseWithExtraTraitTypes(data []byte, extraTraitTypes []string) (*Applicati
 	return &app, nil
 }
 
+// ParseWithExtraTypes is like ParseWithExtraTraitTypes but also accepts a
+// LowerableTypes set (lowering.go): a document kind, component type, or trait type
+// claimed by a registered lowering rule passes validation even though it is not a
+// dispatchable type, because the lowering fixpoint removes it before dispatch ever
+// sees it. Pass Transformer.LowerableTypes() from the transformer that will lower the
+// parsed document.
+func ParseWithExtraTypes(data []byte, extraTraitTypes []string, lowerable LowerableTypes) (*Application, error) {
+	var app Application
+
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+
+	if err := dec.Decode(&app); err != nil {
+		return nil, yamlParseError(err)
+	}
+
+	custom := make(map[string]bool, len(extraTraitTypes))
+	for _, t := range extraTraitTypes {
+		custom[t] = true
+	}
+
+	if err := validateWithExtraTypes(&app, custom, lowerable); err != nil {
+		return nil, err
+	}
+
+	return &app, nil
+}
+
 // MustParse parses an Application YAML document and panics on error.
 // Use only in tests or initialization code where errors are truly unexpected.
 func MustParse(data []byte) *Application {

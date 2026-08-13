@@ -113,10 +113,14 @@ matching `<domain>/component` on every rendered workload and helm-rendered pod â
 | `ParseClusterProfile` | Parse a `ClusterProfile`. |
 | `LoadCapabilityDefinitions` | Load `CapabilityDefinition`s for capability validation. |
 | `ParseWithExtraTraitTypes` | Parse allowing additional (custom) trait types. |
+| `ParseWithExtraTypes` (spike) | Parse allowing custom trait types **and** a `LowerableTypes` set â€” kinds/component types/trait types claimed by a registered lowering rule (see "Lowering engine" above). |
 
 Standalone parsing validates each trait's `type` against the built-in handler set
 (the `security-context` trait is included, matching `SecurityContextHandler`);
 `ParseWithExtraTraitTypes` widens that allowlist with caller-supplied custom types.
+`ParseWithExtraTypes` widens it further with `Transformer.LowerableTypes()`, so a
+document a lowering rule will later expand parses today instead of failing validation
+before the fixpoint ever runs.
 
 ## Transform & extension
 

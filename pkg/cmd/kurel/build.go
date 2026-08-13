@@ -128,7 +128,15 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		customTraitTypes = append(customTraitTypes, name)
 	}
 
-	app, err := oam.ParseWithExtraTraitTypes(appData, customTraitTypes)
+	// newBuiltinTransformer() precedes the parse (moved up from below) so its
+	// LowerableTypes() is available to ParseWithExtraTypes: builtinTraitHandlers/
+	// builtinComponentHandlers register only dispatchable handlers, never lowering
+	// rules, so LowerableTypes() is empty and this is a pure reordering today —
+	// ParseWithExtraTypes behaves identically to the ParseWithExtraTraitTypes it
+	// replaces.
+	transformer := newBuiltinTransformer()
+
+	app, err := oam.ParseWithExtraTypes(appData, customTraitTypes, transformer.LowerableTypes())
 	if err != nil {
 		return errors.Wrapf(err, "parsing application file %q", appPath)
 	}
@@ -142,8 +150,6 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	if err != nil {
 		return errors.Wrapf(err, "parsing profile file %q", opts.profilePath)
 	}
-
-	transformer := newBuiltinTransformer()
 
 	transformer.SetCapabilityDefs(capDefs)
 	transformer.SetStrictCapabilities(opts.strictCapabilities)

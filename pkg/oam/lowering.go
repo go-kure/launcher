@@ -283,6 +283,42 @@ func (t *Transformer) RegisterPolicyLowering(r PolicyLoweringRule) {
 	t.policyLoweringRules[typeName] = r
 }
 
+// LowerableTypes is the set of type names accepted during parsing/validation purely
+// because a registered lowering rule claims them (validateWithExtraTypes). Every name
+// in it MUST disappear before the fixpoint settles: the post-fixpoint whole-document
+// validation pass (D4) checks the result against an EMPTY LowerableTypes, so a type
+// still present at that point is by definition a non-terminating rule.
+type LowerableTypes struct {
+	Kinds          []string
+	ComponentTypes []string
+	TraitTypes     []string
+	PolicyTypes    []string
+}
+
+// LowerableTypes reports the type names claimed by rules registered on t, for callers
+// that parse with ParseWithExtraTypes ahead of a transform that will use t to lower.
+func (t *Transformer) LowerableTypes() LowerableTypes {
+	lt := LowerableTypes{
+		Kinds:          make([]string, 0, len(t.docLoweringRules)),
+		ComponentTypes: make([]string, 0, len(t.componentLoweringRules)),
+		TraitTypes:     make([]string, 0, len(t.traitLoweringRules)),
+		PolicyTypes:    make([]string, 0, len(t.policyLoweringRules)),
+	}
+	for k := range t.docLoweringRules {
+		lt.Kinds = append(lt.Kinds, k)
+	}
+	for k := range t.componentLoweringRules {
+		lt.ComponentTypes = append(lt.ComponentTypes, k)
+	}
+	for k := range t.traitLoweringRules {
+		lt.TraitTypes = append(lt.TraitTypes, k)
+	}
+	for k := range t.policyLoweringRules {
+		lt.PolicyTypes = append(lt.PolicyTypes, k)
+	}
+	return lt
+}
+
 // lower runs the recursive fixpoint expansion over app (D1/D2): every round, every
 // current document's non-terminal kind, components, traits, and policies are lowered
 // once via their registered rule (if any); the loop repeats until a round changes
