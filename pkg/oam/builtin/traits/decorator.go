@@ -2,6 +2,9 @@ package traits
 
 import (
 	"github.com/go-kure/kure/pkg/stack"
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // fluxNamespaceSettable mirrors oam.fluxNamespaceSettable locally because
@@ -85,4 +88,24 @@ func (d decoratorBase) BackendServiceName() string {
 		return n.BackendServiceName()
 	}
 	return ""
+}
+
+// checkVolumeCollision returns an error if podSpec already has a Volume named
+// name. Both ExternalSecretDecorator and ConfigMapDecorator add a Volume named
+// after their target resource (the Secret or ConfigMap), and decorators can
+// wrap in either order depending on trait declaration order — so each must
+// check for an existing same-named Volume before appending its own, not just
+// one of them, or a component naming both the same collides silently into an
+// invalid duplicate-volume PodSpec instead of a clear error. hint names the
+// property the caller can change to resolve the collision (e.g. "rename the
+// secret via targetSecretName").
+func checkVolumeCollision(podSpec *corev1.PodSpec, name, source, hint string) error {
+	for _, v := range podSpec.Volumes {
+		if v.Name == name {
+			return errors.Errorf(
+				"%s: volume %q already exists on the workload; %s",
+				source, name, hint)
+		}
+	}
+	return nil
 }
