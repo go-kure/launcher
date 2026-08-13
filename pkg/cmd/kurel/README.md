@@ -31,11 +31,22 @@ Output goes to stdout by default, or to a directory with `--output`.
 
 All built-in component and trait handlers are registered automatically (via
 `builtinComponentHandlers()` / `builtinTraitHandlers()`, the shared registration
-source). Every registered handler declares a `PropertySchema` for its user-facing
-properties, so a component/trait's properties can be validated before dispatch. See
+source), alongside the built-in trait-position lowering rules
+(`builtinTraitLoweringRules()` — currently just `expose`, registered via
+`RegisterTraitLowering` rather than `RegisterBuiltinTrait`). Every registered handler
+declares a `PropertySchema` for its user-facing properties, so a component/trait's
+properties can be validated before dispatch. See
 [Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
 and [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
 for the full catalogue; the `security-context` trait was added in this release.
+
+Because a lowering rule may claim types the parser would otherwise reject, `build`
+constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`
+runs first, and its `LowerableTypes()` (the kinds/component-types/trait-types claimed
+by its registered lowering rules — just `expose` today) is passed into
+`oam.ParseWithExtraTypes` alongside the `--capability-def`-supplied custom trait
+types. See the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s
+Parsing and Lowering sections for the general mechanism.
 
 ### Platform key domain
 
