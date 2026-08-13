@@ -133,10 +133,14 @@ func validatePropertyValue(schema PropertySchema, value any, path string) error 
 		if !ok {
 			return errors.Errorf("%s: expected object, got %T", path, value)
 		}
-		if schema.Properties != nil {
-			if err := validateObjectProperties(schema.Properties, schema.AdditionalProperties, obj, path); err != nil {
-				return err
-			}
+		// Run unconditionally, even when schema.Properties is nil: a nil map has no
+		// declared keys, so every key in obj is "not declared" by definition, and
+		// validateObjectProperties/AdditionalProperties (defaulting to false, i.e.
+		// closed) is exactly what decides whether that is accepted. Skipping the call
+		// here previously let AdditionalProperties:false silently accept anything when
+		// a handler declared an object-typed field with no sub-schema at all.
+		if err := validateObjectProperties(schema.Properties, schema.AdditionalProperties, obj, path); err != nil {
+			return err
 		}
 	default:
 		// A schema, not a document, is wrong here: some handler declared a type

@@ -222,6 +222,36 @@ func TestValidatePropertyValue_UnsupportedSchemaType(t *testing.T) {
 	}
 }
 
+// TestValidatePropertyValue_EmptyObjectSchema is the regression test for the Codex
+// review finding F6: when a PropertyTypeObject field declares no sub-schema
+// (schema.Properties == nil), validation was skipped entirely, so every key was
+// silently accepted regardless of AdditionalProperties — including its documented
+// default of false (closed). A nil Properties map has no declared keys, so every key
+// in the value is "not declared" by definition; AdditionalProperties alone must decide
+// whether that is accepted, exactly as it already does for a non-nil-but-empty
+// Properties map.
+func TestValidatePropertyValue_EmptyObjectSchema(t *testing.T) {
+	value := map[string]any{"extra": "x"}
+
+	t.Run("AdditionalProperties false (the default) rejects an undeclared key", func(t *testing.T) {
+		schema := PropertySchema{Type: PropertyTypeObject}
+		err := validatePropertyValue(schema, value, "properties.field")
+		if err == nil {
+			t.Fatal("expected an undeclared-key error, got nil")
+		}
+		if !strings.Contains(err.Error(), `unsupported field "extra"`) {
+			t.Fatalf("expected an unsupported-field error naming %q, got: %v", "extra", err)
+		}
+	})
+
+	t.Run("AdditionalProperties true still accepts an undeclared key", func(t *testing.T) {
+		schema := PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true}
+		if err := validatePropertyValue(schema, value, "properties.field"); err != nil {
+			t.Fatalf("expected acceptance with AdditionalProperties:true, got: %v", err)
+		}
+	})
+}
+
 // TestValidateProperties_UntypedSchemaChecksEnumOnly covers a schema built by a call
 // site that leaves Type empty (the flat capability vocabulary permits that).
 func TestValidateProperties_UntypedSchemaChecksEnumOnly(t *testing.T) {
