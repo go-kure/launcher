@@ -89,11 +89,15 @@ but the guard is position-agnostic). `ExposeRule.PropertySchema()` marks
 `controllerType`, `certManagerClusterIssuer`, `allowedHostnameWildcard`, `authURL`,
 and `authResponseHeaders` reserved — each is capability-injected-only in
 `ExposeRule.LowerTrait` and never reaches the emitted `ingress`/`httproute` trait.
-`networkPolicy` is reserved on `ExposeRule`'s own schema copy only, **not** on the
-`schemaNetworkPolicy()` fragment `IngressHandler`/`HTTPRouteHandler` also share —
-those two traits' own test suites author `networkPolicy` directly (bypassing any
-`ClusterProfile`) to exercise netpol synthesis without a capability round-trip, a
-pre-existing, intentional pattern D3 does not reach. `sslRedirect`,
+`networkPolicy` is reserved **uniformly** across `ExposeRule`, `IngressHandler`, and
+`HTTPRouteHandler`: the shared `schemaNetworkPolicy(reserved bool)` helper
+(`schema.go`) takes the reservation choice as an explicit parameter — every current
+caller passes `true` — rather than letting one call site silently diverge from the
+others via a clone-and-override. Tests that need `networkPolicy` synthesized through
+the full `TransformWithPolicy` pipeline now supply it via `ctx.Capabilities`
+(`CapabilityBinding{Rendering: ...}`) instead of authoring it inline on the trait;
+tests that call `IngressHandler.Apply`/`HTTPRouteHandler.Apply` directly still author
+it inline, since those bypass `enforcePlatformReserved` entirely. `sslRedirect`,
 `forceSslRedirect`, `authSigninURL`, and `ingressClassName` stay **not** reserved:
 each is documented as capability-default-with-inline-override, or (for
 `ingressClassName` on the plain `ingress` trait) authored directly by existing

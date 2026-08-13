@@ -108,7 +108,7 @@ func (h *HTTPRouteHandler) PropertySchema() map[string]oam.PropertySchema {
 		"serviceName":      {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
 		"name":             {Type: oam.PropertyTypeString, Description: "Overrides the sub-application name, allowing multiple httproute traits per component."},
 		"scope":            {Type: oam.PropertyTypeString, Description: "Suffix appended to the sub-application name to disambiguate multiple httproute traits."},
-		"networkPolicy":    schemaNetworkPolicy(),
+		"networkPolicy":    schemaNetworkPolicy(true),
 	}
 }
 

@@ -9,8 +9,11 @@ against each decision; it is mirrored as a comment on adr#34.
 
 All seven decisions survived contact with running code, with two concrete corrections:
 D3's proof surfaced that "platform-reserved" was previously **documentation, not
-enforcement** for a shared schema fragment (`networkPolicy`), and its scope had to be
-narrowed per-trait rather than per-shared-schema. D5's four-input closure forced an
+enforcement** for a shared schema fragment (`networkPolicy`); the initial fix scoped
+`PlatformReserved` per-schema-copy to unblock the spike, but the follow-up ADR decision
+was to enforce it **uniformly** across all three sharing traits instead, via an explicit
+`schemaNetworkPolicy(reserved bool)` parameter rather than an implicit shared default —
+see the D3 section below. D5's four-input closure forced an
 engine-level design choice — capability rendering is merged in by the engine, not the
 rule — that was not spelled out in the original decisions doc. Everything else matched
 the design as written. No production API resulted; `pkg/oam` scope widened beyond its
@@ -53,13 +56,31 @@ Holds, but the spike's proof attempt found a real gap: the pre-existing doc comm
 traits, bypassing any `ClusterProfile`, to exercise netpol synthesis without a
 capability round-trip. Marking the shared `schemaNetworkPolicy()` fragment
 (`pkg/oam/builtin/traits/schema.go`) reserved broke all of them — a pre-existing,
-intentional test pattern outside this spike's scope. **Correction: `PlatformReserved`
-had to be scoped per-schema-copy, not per-shared-helper** — `ExposeRule.PropertySchema()`
-clones the fragment and sets `PlatformReserved` on its own copy only
-(`expose_rule.go`), leaving `IngressHandler`/`HTTPRouteHandler`'s copies untouched. This
-is itself a finding: **the design's "mark it declaratively" assumption is right, but the
-schema vocabulary needs per-declaration granularity even when the underlying property is
-shared** — a real design constraint for the eventual ADR, not a spike-only workaround.
+intentional test pattern outside this spike's scope. The spike's first fix scoped
+`PlatformReserved` per-schema-copy (`ExposeRule.PropertySchema()` cloning the fragment
+and overriding the flag on its own copy only), which unblocked the spike but left
+`IngressHandler`/`HTTPRouteHandler`'s copies unreserved — three schema declarations of
+the same property that could silently drift out of sync, with nothing forcing a future
+change to touch all three.
+
+**ADR decision: enforce `PlatformReserved` uniformly, via an explicit parameter, not an
+implicit shared default.** `schemaNetworkPolicy()` became `schemaNetworkPolicy(reserved
+bool)` (`schema.go`) — every call site (`ExposeRule`, `IngressHandler`,
+`HTTPRouteHandler`) now states its choice at the call, and today all three pass `true`.
+This closes the divergence risk without adding a generic reservation-scoping mechanism
+that only one property currently needs — the explicit argument is the whole mechanism.
+The ~18 affected tests in `networkpolicy_auto_test.go` (plus 3 in
+`domain_resolution_test.go`) were migrated: tests that drive the full
+`TransformWithPolicy` pipeline now supply `networkPolicy` via
+`ctx.Capabilities["ingress"|"httproute"].Rendering`, mirroring how a real
+`ClusterProfile` would render it, instead of authoring it inline on the trait (which
+`enforcePlatformReserved` now rejects). Tests that call
+`IngressHandler.Apply`/`HTTPRouteHandler.Apply` directly are unaffected — they bypass
+`applyTraits`/`enforcePlatformReserved` entirely — and were left authoring it inline.
+This is itself a finding: **the design's "mark it declaratively" assumption is right,
+and a shared schema fragment does not need a bespoke per-caller-scoping mechanism to
+stay uniform — an explicit boolean parameter is enough**, so long as every caller is
+required to pass one rather than relying on a default.
 
 `enforcePlatformReserved` (`property_validate.go`) runs at every point that merges
 capability rendering in: the trait-lowering branch (`lowering.go`, before

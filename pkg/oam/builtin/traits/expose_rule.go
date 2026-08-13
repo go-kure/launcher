@@ -85,14 +85,6 @@ func (ExposeRule) ValidateAndApplyDefaults(rendering map[string]any) (map[string
 // authored-element validation pass (D4 currently validates only emitted elements
 // and the settled whole document, not authored input — see pkg/oam/README.md).
 func (ExposeRule) PropertySchema() map[string]oam.PropertySchema {
-	// networkPolicy is shared with IngressHandler/HTTPRouteHandler's own schemas
-	// (schemaNetworkPolicy, schema.go) via the same helper, but PlatformReserved is
-	// set here only: expose is the position a user could author it inline before
-	// any capability rendering ever runs (D3's proof fixture), whereas
-	// ingress/httproute's own test suites author it directly to exercise netpol
-	// synthesis without going through a ClusterProfile at all.
-	exposeNetworkPolicy := schemaNetworkPolicy()
-	exposeNetworkPolicy.PlatformReserved = true
 	return map[string]oam.PropertySchema{
 		// controllerType is capability-injected, not user-set (see doc above), so it is
 		// NOT user-required here; it is validated in ValidateAndApplyDefaults. Kept in the
@@ -117,7 +109,7 @@ func (ExposeRule) PropertySchema() map[string]oam.PropertySchema {
 		"serviceName":              {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
 		"name":                     {Type: oam.PropertyTypeString, Description: "Overrides the sub-application name, allowing multiple expose traits per component."},
 		"scope":                    {Type: oam.PropertyTypeString, Description: "Suffix appended to the sub-application name to disambiguate multiple expose traits."},
-		"networkPolicy":            exposeNetworkPolicy,
+		"networkPolicy":            schemaNetworkPolicy(true),
 	}
 }
 
