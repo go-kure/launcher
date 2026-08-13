@@ -32,7 +32,9 @@ func (h *PruneProtectionHandler) PropertySchema() map[string]oam.PropertySchema 
 // annotated. Resources appended to bundle.Applications by other trait handlers
 // (e.g. rbac, certificate, ingress) are not affected.
 func (h *PruneProtectionHandler) Apply(_ *oam.Trait, app *stack.Application, _ *stack.Bundle) error {
-	app.Config = &pruneProtectedConfig{decoratorBase: decoratorBase{Inner: app.Config}}
+	app.Config = wrapIfAugmenter(
+		&pruneProtectedConfig{decoratorBase: decoratorBase{Inner: app.Config}},
+		app.Config)
 	return nil
 }
 

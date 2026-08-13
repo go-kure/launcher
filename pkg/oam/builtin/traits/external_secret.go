@@ -613,13 +613,14 @@ type ExternalSecretDecorator struct {
 }
 
 // NewExternalSecretDecorator wraps inner so the named Secret reaches the workload.
-func NewExternalSecretDecorator(inner stack.ApplicationConfig, secretName, mountPath string, envFrom bool) *ExternalSecretDecorator {
-	return &ExternalSecretDecorator{
+func NewExternalSecretDecorator(inner stack.ApplicationConfig, secretName, mountPath string, envFrom bool) stack.ApplicationConfig {
+	dec := &ExternalSecretDecorator{
 		decoratorBase: decoratorBase{Inner: inner},
 		SecretName:    secretName,
 		MountPath:     mountPath,
 		EnvFrom:       envFrom,
 	}
+	return wrapIfAugmenter(dec, inner)
 }
 
 // Generate calls the inner config's Generate and injects the Secret into any
@@ -671,6 +672,10 @@ func (d *ExternalSecretDecorator) injectInto(podSpec *corev1.PodSpec) error {
 	}
 	if err := checkVolumeCollision(podSpec, d.SecretName,
 		"external-secret mountPath", "rename the secret via targetSecretName"); err != nil {
+		return err
+	}
+	if err := checkMountPathCollision(podSpec, d.MountPath,
+		"external-secret mountPath", "change the mountPath or the colliding volume's mount"); err != nil {
 		return err
 	}
 	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{

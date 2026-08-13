@@ -54,7 +54,9 @@ func (h *SecurityContextHandler) Apply(trait *oam.Trait, app *stack.Application,
 	if err != nil {
 		return err
 	}
-	app.Config = &securityContextConfig{decoratorBase: decoratorBase{Inner: app.Config}, spec: spec}
+	app.Config = wrapIfAugmenter(
+		&securityContextConfig{decoratorBase: decoratorBase{Inner: app.Config}, spec: spec},
+		app.Config)
 	return nil
 }
 

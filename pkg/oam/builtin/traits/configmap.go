@@ -111,12 +111,13 @@ type ConfigMapDecorator struct {
 }
 
 // NewConfigMapDecorator wraps inner so the named ConfigMap is mounted at mountPath.
-func NewConfigMapDecorator(inner stack.ApplicationConfig, configMapName, mountPath string) *ConfigMapDecorator {
-	return &ConfigMapDecorator{
+func NewConfigMapDecorator(inner stack.ApplicationConfig, configMapName, mountPath string) stack.ApplicationConfig {
+	dec := &ConfigMapDecorator{
 		decoratorBase: decoratorBase{Inner: inner},
 		ConfigMapName: configMapName,
 		MountPath:     mountPath,
 	}
+	return wrapIfAugmenter(dec, inner)
 }
 
 // Generate calls the inner config's Generate and mounts the ConfigMap into any
@@ -144,6 +145,10 @@ func (d *ConfigMapDecorator) Generate(app *stack.Application) ([]*client.Object,
 		}
 		if err := checkVolumeCollision(podSpec, d.ConfigMapName,
 			"configmap mountPath", "rename the configmap via the 'name' property"); err != nil {
+			return nil, err
+		}
+		if err := checkMountPathCollision(podSpec, d.MountPath,
+			"configmap mountPath", "change the mountPath or the colliding volume's mount"); err != nil {
 			return nil, err
 		}
 		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
