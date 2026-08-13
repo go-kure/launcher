@@ -3,6 +3,7 @@ package traits
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
@@ -12,6 +13,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -371,6 +373,37 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 		})
 	}
 
+	if config.envFrom {
+		if _, hasShorthand := props["remoteRef"]; hasShorthand {
+			return nil, errors.New(
+				"external-secret: 'envFrom' cannot be combined with the 'remoteRef' shorthand; " +
+					"the shorthand derives its secretKey from secretName, which is a Secret name and " +
+					"not an environment variable name — author 'data' entries with explicit secretKey values instead")
+		}
+		for i, entry := range config.Data {
+			if msgs := validation.IsEnvVarName(entry.SecretKey); len(msgs) > 0 {
+				return nil, errors.Errorf("data[%d].secretKey %q is not a valid environment variable name (required by envFrom): %s",
+					i, entry.SecretKey, strings.Join(msgs, "; "))
+			}
+		}
+		if config.Template != nil {
+			for _, k := range sortedKeys(config.Template.Data) {
+				if msgs := validation.IsEnvVarName(k); len(msgs) > 0 {
+					return nil, errors.Errorf("target.template.data key %q is not a valid environment variable name (required by envFrom): %s",
+						k, strings.Join(msgs, "; "))
+				}
+			}
+		}
+	}
+
+	if config.mountPath != "" {
+		if msgs := validation.IsDNS1123Label(config.TargetSecretName); len(msgs) > 0 {
+			return nil, errors.Errorf(
+				"external-secret mountPath: the produced Secret name %q cannot be used as a volume name (%s); set targetSecretName to a DNS-1123 label",
+				config.TargetSecretName, strings.Join(msgs, "; "))
+		}
+	}
+
 	return config, nil
 }
 
@@ -406,6 +439,17 @@ func unsupportedKeys(m map[string]any, allowed ...string) []string {
 	}
 	slices.Sort(bad)
 	return bad
+}
+
+// sortedKeys returns m's keys sorted, for deterministic iteration order in
+// error messages.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 type esDataEntry struct {
