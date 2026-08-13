@@ -929,3 +929,43 @@ func TestExternalSecret_NestedWithConfigMap_SameName_CollidesBothOrders(t *testi
 		})
 	}
 }
+
+// TestExternalSecret_NestedWithConfigMap_SameMountPath_DifferentNames_CollidesBothOrders
+// covers the gap checkVolumeCollision cannot see: two DIFFERENTLY named volumes
+// mounted at the SAME path pass the volume-name check but still produce a PodSpec
+// Kubernetes rejects (VolumeMount.MountPath must be unique per container).
+func TestExternalSecret_NestedWithConfigMap_SameMountPath_DifferentNames_CollidesBothOrders(t *testing.T) {
+	newBase := func() *stubWorkerWithService {
+		return &stubWorkerWithService{port: 8080, serviceName: "custom-svc"}
+	}
+
+	cases := []struct {
+		name string
+		dec  stack.ApplicationConfig
+	}{
+		{
+			name: "external-secret-then-configmap",
+			dec: traits.NewConfigMapDecorator(
+				traits.NewExternalSecretDecorator(newBase(), "creds", "/etc/shared", false),
+				"cfg", "/etc/shared"),
+		},
+		{
+			name: "configmap-then-external-secret",
+			dec: traits.NewExternalSecretDecorator(
+				traits.NewConfigMapDecorator(newBase(), "cfg", "/etc/shared"),
+				"creds", "/etc/shared", false),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.dec.Generate(newApp("app", "default"))
+			if err == nil {
+				t.Fatal("expected mount path collision error")
+			}
+			if !strings.Contains(err.Error(), "already used") || !strings.Contains(err.Error(), "/etc/shared") {
+				t.Errorf("unexpected error message: %v", err)
+			}
+		})
+	}
+}
