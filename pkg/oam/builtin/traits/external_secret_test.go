@@ -766,6 +766,63 @@ func TestExternalSecret_EnvFromValidation(t *testing.T) {
 	}
 }
 
+// A present-but-wrong-typed envFrom/mountPath must error, not silently fall
+// through to the zero value — e.g. YAML `envFrom: yes` decodes to the string
+// "yes" (not a bool), and a dropped envFrom/mountPath means the ExternalSecret
+// is emitted but never wired into the workload, with no error to say why.
+func TestExternalSecret_EnvFromMountPath_TypeValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		props   map[string]any
+		wantErr string // substring; empty means no error
+	}{
+		{
+			name: "envFrom non-bool string rejected",
+			props: map[string]any{"secretName": "creds", "provider": "vault-backend",
+				"envFrom": "yes", "remoteRef": map[string]any{"key": "prod/creds"}},
+			wantErr: "envFrom",
+		},
+		{
+			name: "mountPath non-string int rejected",
+			props: map[string]any{"secretName": "creds", "provider": "vault-backend",
+				"mountPath": 123, "remoteRef": map[string]any{"key": "prod/creds"}},
+			wantErr: "mountPath",
+		},
+		{
+			name: "mountPath non-string bool rejected",
+			props: map[string]any{"secretName": "creds", "provider": "vault-backend",
+				"mountPath": true, "remoteRef": map[string]any{"key": "prod/creds"}},
+			wantErr: "mountPath",
+		},
+		{
+			name: "envFrom true happy path unchanged",
+			props: map[string]any{"secretName": "creds", "provider": "vault-backend",
+				"envFrom": true, "data": []any{map[string]any{"secretKey": "DB_PASSWORD"}}},
+		},
+		{
+			name: "mountPath string happy path unchanged",
+			props: map[string]any{"secretName": "creds", "provider": "vault-backend",
+				"mountPath": "/etc/x", "remoteRef": map[string]any{"key": "prod/creds"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := stack.NewApplication("worker", "default", newWorkerStubConfig(t))
+			err := (&traits.ExternalSecretHandler{}).Apply(
+				&oam.Trait{Type: "external-secret", Properties: tt.props}, app, &stack.Bundle{})
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want one containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // nesting: external-secret then configmap, and configmap then external-secret —
 // both orders produce both injections and keep ServicePort/BackendServiceName
 // forwarding through the decorator chain.
@@ -825,6 +882,49 @@ func TestExternalSecret_NestedWithConfigMap_BothOrders(t *testing.T) {
 			bn, ok := tc.dec.(interface{ BackendServiceName() string })
 			if !ok || bn.BackendServiceName() != "custom-svc" {
 				t.Errorf("BackendServiceName not forwarded through decorator chain")
+			}
+		})
+	}
+}
+
+// Same-named volume, both decorator orders: the collision must be caught
+// regardless of which trait wraps outermost. Before this fix, only the order
+// where ExternalSecretDecorator's own append ran after ConfigMapDecorator's
+// (i.e. "configmap-then-external-secret", since decorators wrap in declaration
+// order and the append runs after Inner.Generate returns) produced an error;
+// the other order let ConfigMapDecorator blindly append a second volume with
+// the same name, producing an invalid duplicate-volume PodSpec.
+func TestExternalSecret_NestedWithConfigMap_SameName_CollidesBothOrders(t *testing.T) {
+	newBase := func() *stubWorkerWithService {
+		return &stubWorkerWithService{port: 8080, serviceName: "custom-svc"}
+	}
+
+	cases := []struct {
+		name string
+		dec  stack.ApplicationConfig
+	}{
+		{
+			name: "external-secret-then-configmap",
+			dec: traits.NewConfigMapDecorator(
+				traits.NewExternalSecretDecorator(newBase(), "shared-name", "/etc/creds", false),
+				"shared-name", "/etc/config"),
+		},
+		{
+			name: "configmap-then-external-secret",
+			dec: traits.NewExternalSecretDecorator(
+				traits.NewConfigMapDecorator(newBase(), "shared-name", "/etc/config"),
+				"shared-name", "/etc/creds", false),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.dec.Generate(newApp("app", "default"))
+			if err == nil {
+				t.Fatal("expected volume name collision error")
+			}
+			if !strings.Contains(err.Error(), "already exists") || !strings.Contains(err.Error(), "shared-name") {
+				t.Errorf("unexpected error message: %v", err)
 			}
 		})
 	}

@@ -127,51 +127,38 @@ func (d *ConfigMapDecorator) Generate(app *stack.Application) ([]*client.Object,
 		return nil, err
 	}
 
-	volume := corev1.Volume{
-		Name: d.ConfigMapName,
-		VolumeSource: corev1.VolumeSource{
-			ConfigMap: &corev1.ConfigMapVolumeSource{
-				LocalObjectReference: corev1.LocalObjectReference{Name: d.ConfigMapName},
-			},
-		},
-	}
-	mount := corev1.VolumeMount{
-		Name:      d.ConfigMapName,
-		MountPath: d.MountPath,
-	}
-
 	mounted := false
 	for _, objPtr := range objects {
+		var podSpec *corev1.PodSpec
 		switch w := (*objPtr).(type) {
 		case *appsv1.Deployment:
-			w.Spec.Template.Spec.Volumes = append(w.Spec.Template.Spec.Volumes, volume)
-			if len(w.Spec.Template.Spec.Containers) > 0 {
-				w.Spec.Template.Spec.Containers[0].VolumeMounts = append(
-					w.Spec.Template.Spec.Containers[0].VolumeMounts, mount)
-			}
-			mounted = true
+			podSpec = &w.Spec.Template.Spec
 		case *appsv1.StatefulSet:
-			w.Spec.Template.Spec.Volumes = append(w.Spec.Template.Spec.Volumes, volume)
-			if len(w.Spec.Template.Spec.Containers) > 0 {
-				w.Spec.Template.Spec.Containers[0].VolumeMounts = append(
-					w.Spec.Template.Spec.Containers[0].VolumeMounts, mount)
-			}
-			mounted = true
+			podSpec = &w.Spec.Template.Spec
 		case *appsv1.DaemonSet:
-			w.Spec.Template.Spec.Volumes = append(w.Spec.Template.Spec.Volumes, volume)
-			if len(w.Spec.Template.Spec.Containers) > 0 {
-				w.Spec.Template.Spec.Containers[0].VolumeMounts = append(
-					w.Spec.Template.Spec.Containers[0].VolumeMounts, mount)
-			}
-			mounted = true
+			podSpec = &w.Spec.Template.Spec
 		case *batchv1.CronJob:
-			podSpec := &w.Spec.JobTemplate.Spec.Template.Spec
-			podSpec.Volumes = append(podSpec.Volumes, volume)
-			if len(podSpec.Containers) > 0 {
-				podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, mount)
-			}
-			mounted = true
+			podSpec = &w.Spec.JobTemplate.Spec.Template.Spec
+		default:
+			continue
 		}
+		if err := checkVolumeCollision(podSpec, d.ConfigMapName,
+			"configmap mountPath", "rename the configmap via the 'name' property"); err != nil {
+			return nil, err
+		}
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: d.ConfigMapName,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: d.ConfigMapName},
+				},
+			},
+		})
+		if len(podSpec.Containers) > 0 {
+			podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts,
+				corev1.VolumeMount{Name: d.ConfigMapName, MountPath: d.MountPath})
+		}
+		mounted = true
 	}
 
 	if !mounted {

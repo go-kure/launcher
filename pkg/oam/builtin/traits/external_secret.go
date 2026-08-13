@@ -190,10 +190,22 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 		config.TargetSecretName = tsn
 	}
 
-	if ef, ok := props["envFrom"].(bool); ok {
+	// A present-but-wrong-typed field must error, not fall through silently —
+	// else an authored `envFrom: yes` (which go-yaml v3 parses as the string
+	// "yes", not a bool) is silently dropped and the ExternalSecret is emitted
+	// but never wired into the workload.
+	if raw, present := props["envFrom"]; present {
+		ef, ok := raw.(bool)
+		if !ok {
+			return nil, errors.Errorf("external-secret: 'envFrom' must be a boolean, got %T", raw)
+		}
 		config.envFrom = ef
 	}
-	if mp, ok := props["mountPath"].(string); ok {
+	if raw, present := props["mountPath"]; present {
+		mp, ok := raw.(string)
+		if !ok {
+			return nil, errors.Errorf("external-secret: 'mountPath' must be a string, got %T", raw)
+		}
 		config.mountPath = mp
 	}
 
@@ -657,12 +669,9 @@ func (d *ExternalSecretDecorator) injectInto(podSpec *corev1.PodSpec) error {
 	if d.MountPath == "" {
 		return nil
 	}
-	for _, v := range podSpec.Volumes {
-		if v.Name == d.SecretName {
-			return errors.Errorf(
-				"external-secret mountPath: volume %q already exists on the workload; rename the secret via targetSecretName",
-				d.SecretName)
-		}
+	if err := checkVolumeCollision(podSpec, d.SecretName,
+		"external-secret mountPath", "rename the secret via targetSecretName"); err != nil {
+		return err
 	}
 	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 		Name: d.SecretName,
