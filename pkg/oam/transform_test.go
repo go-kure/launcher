@@ -939,6 +939,49 @@ func TestEvaluateProfile_CapabilityDefinition_SchemaViolationReturnsError(t *tes
 	}
 }
 
+// customVADLoweringRule is a TraitLoweringRule + ValidateAndApplyDefaults fixture for
+// the F5 regression test below — the trait-lowering-rule counterpart of
+// customVADHandler, reached through t.traitLoweringRules instead of t.traitHandlers.
+type customVADLoweringRule struct{ typ string }
+
+func (r customVADLoweringRule) TraitType() string { return r.typ }
+func (r customVADLoweringRule) LowerTrait(trait *Trait, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Traits: []Trait{{Type: "ingress", Properties: map[string]any{}}}}, nil
+}
+func (r customVADLoweringRule) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
+	return rendering, nil
+}
+
+// TestEvaluateProfile_TraitLoweringRule_AppliesCapabilityDefinitionSchemaBeforeVAD is
+// the regression test for the Codex review finding F5: EvaluateProfile's
+// traitLoweringRules fallback called ValidateAndApplyDefaults directly on the raw
+// rendering, skipping the applyDefinitionSchema step the traitHandlers branch applies
+// first. This is the trait-lowering-rule mirror of
+// TestEvaluateProfile_CapabilityDefinition_AppliesSchemaBeforeVAD above: same
+// capDefFixture (declares a default for "mode"), same missing-field rendering, but
+// dispatched through a TraitLoweringRule instead of a TraitHandler.
+func TestEvaluateProfile_TraitLoweringRule_AppliesCapabilityDefinitionSchemaBeforeVAD(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterTraitLowering(customVADLoweringRule{typ: "custom-lowering"})
+	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"custom-lowering": capDefFixture("custom-lowering")})
+
+	profile := &ClusterProfile{
+		Spec: ClusterProfileSpec{
+			Capabilities: map[string]CapabilityBinding{
+				"custom-lowering": {Rendering: map[string]any{"timeout": float64(30)}},
+			},
+		},
+	}
+	got, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// "mode" default should have been applied by applyDefinitionSchema before VAD ran.
+	if got.Spec.Capabilities["custom-lowering"].Rendering["mode"] != "auto" {
+		t.Errorf("mode = %v, want %q", got.Spec.Capabilities["custom-lowering"].Rendering["mode"], "auto")
+	}
+}
+
 func TestEvaluateProfile_CapabilityDefinition_BuiltinIgnoresDefinition(t *testing.T) {
 	// Definition for a built-in type declares timeout as required; even though the
 	// rendering omits it, no error fires because built-ins skip definition schema.
