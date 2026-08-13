@@ -42,6 +42,16 @@ does). This validates a design recorded in `autops/wharf/adr` research
 (`research/abstraction-model/oam-levels-design-decisions.md`, "OAM levels", adr#34) —
 the branch is never merged; only what survives design review lands as a real API later.
 
+D4 ("always re-validate emitted elements against their target schema, as if
+user-authored") is enforced at two points: `validateProperties` checks each emitted
+component/trait/policy's `Properties` against its target handler's `PropertySchema()`
+the moment a lowering rule emits it (an unknown key, a missing required field, a
+type/enum mismatch all fail immediately, citing the **authored** origin first); once
+the fixpoint stops changing anything, every resulting document is re-validated with
+an empty `LowerableTypes` — any kind/component/trait type still present at that point
+is, by construction, not claimed by any registered rule, so it is a non-terminating
+rule's leftover rather than a legitimate terminal type.
+
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /
 `cilium-networkpolicy` traits are unaffected):

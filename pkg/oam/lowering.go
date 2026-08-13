@@ -355,9 +355,33 @@ func (t *Transformer) lower(app *Application, ctx TransformContext) ([]*Applicat
 		}
 		docs = nextDocs
 		if !changed {
+			if err := t.validateSettledDocuments(docs); err != nil {
+				return nil, &LoweringError{Origin: rootOrigin, Chain: chain, Cause: err}
+			}
 			return docs, nil
 		}
 	}
+}
+
+// validateSettledDocuments is D4's whole-document validation pass: once the
+// fixpoint stops changing anything, every resulting document is checked against the
+// strict allowlists with an EMPTY LowerableTypes — a document kind, component type,
+// or trait type present at this point is, by construction, not claimed by any
+// registered rule (the fixpoint would have expanded it otherwise), so it is by
+// definition a non-terminating rule's leftover, not a legitimate terminal type.
+// Custom trait types from --capability-def remain accepted: they are terminal
+// handler types, not lowering-rule claims.
+func (t *Transformer) validateSettledDocuments(docs []*Application) error {
+	customTraitTypes := make(map[string]bool, len(t.capabilityDefs))
+	for name := range t.capabilityDefs {
+		customTraitTypes[name] = true
+	}
+	for _, doc := range docs {
+		if err := validateWithExtraTypes(doc, customTraitTypes, LowerableTypes{}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // lowerDocumentOnce performs ONE round's worth of lowering for a single document: if
@@ -431,10 +455,16 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			for j := range result.Components {
 				result.Components[j].origin = &compOrigin
 				names[j] = result.Components[j].Name
+				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", compOrigin)
+				}
 			}
 			newComponents = append(newComponents, result.Components...)
 			for j := range result.Policies {
 				result.Policies[j].origin = &compOrigin
+				if err := t.validateEmittedPolicy(&result.Policies[j]); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", compOrigin)
+				}
 				pendingPolicies = append(pendingPolicies, result.Policies[j])
 			}
 			steps = append(steps, LoweringStep{Rule: "component/" + comp.Type, Position: PositionComponent, Round: round, From: comp.Name, To: names})
@@ -465,14 +495,23 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				result.Traits[j].origin = &traitOrigin
 				result.Traits[j].sealed = true
 				names[j] = result.Traits[j].Type
+				if err := t.validateEmittedTrait(&result.Traits[j]); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+				}
 			}
 			newTraits = append(newTraits, result.Traits...)
 			for j := range result.Components {
 				result.Components[j].origin = &traitOrigin
+				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+				}
 				newComponents = append(newComponents, result.Components[j])
 			}
 			for j := range result.Policies {
 				result.Policies[j].origin = &traitOrigin
+				if err := t.validateEmittedPolicy(&result.Policies[j]); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+				}
 				pendingPolicies = append(pendingPolicies, result.Policies[j])
 			}
 			steps = append(steps, LoweringStep{Rule: "trait/" + trait.Type, Position: PositionTrait, Round: round, From: trait.Type, To: names})
@@ -505,6 +544,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 		for j := range result.Policies {
 			result.Policies[j].origin = &polOrigin
 			names[j] = result.Policies[j].Name
+			if err := t.validateEmittedPolicy(&result.Policies[j]); err != nil {
+				return false, steps, errors.Wrapf(err, "%s", polOrigin)
+			}
 		}
 		newPolicies = append(newPolicies, result.Policies...)
 		steps = append(steps, LoweringStep{Rule: "policy/" + pol.Type, Position: PositionPolicy, Round: round, From: pol.Name, To: names})
