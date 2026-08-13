@@ -28,6 +28,20 @@ parse → resolve parameters → transform (component + trait handlers) → mani
    `ComponentHandler` and each trait to its `TraitHandler`, merging the
    `ClusterProfile`'s capability choices.
 
+## Lowering engine (spike, `spike/oam-lowering-engine`, branch-only)
+
+`lowering.go` adds an optional, opt-in recursive expansion pass ahead of dispatch:
+`RegisterDocumentLowering`/`RegisterComponentLowering`/`RegisterTraitLowering`/
+`RegisterPolicyLowering` let a higher-level document kind, component type, trait
+type, or policy type lower into one or more lower-level elements, to a fixpoint
+(`MaxLoweringDepth`), before the ordinary handler dispatch above ever runs. With no
+lowering rules registered — true for every production `Transformer` today — `Transform`/
+`TransformWithPolicy`/`TransformAll` behave exactly as before; `TransformAll` is new
+because a document can now expand 1→N (`Transform`/`TransformWithPolicy` error if it
+does). This validates a design recorded in `autops/wharf/adr` research
+(`research/abstraction-model/oam-levels-design-decisions.md`, "OAM levels", adr#34) —
+the branch is never merged; only what survives design review lands as a real API later.
+
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /
 `cilium-networkpolicy` traits are unaffected):

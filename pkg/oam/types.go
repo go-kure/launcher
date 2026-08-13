@@ -6,6 +6,21 @@ type Application struct {
 	Kind       string          `yaml:"kind"`
 	Metadata   Metadata        `yaml:"metadata"`
 	Spec       ApplicationSpec `yaml:"spec"`
+
+	// origin is the authored top-level document this element traces back to, set by
+	// the lowering engine (lowering.go) on every document it emits. Never encoded to
+	// or decoded from YAML (unexported; yaml.v3 ignores it in both directions), and
+	// nil for a document that was never touched by the fixpoint. See Origin.
+	origin *Origin
+}
+
+// Origin returns the element's authored provenance and whether the lowering engine
+// ever stamped one. A document parsed and never lowered returns (Origin{}, false).
+func (a Application) Origin() (Origin, bool) {
+	if a.origin == nil {
+		return Origin{}, false
+	}
+	return *a.origin, true
 }
 
 // Metadata contains standard Kubernetes-style metadata fields.
@@ -29,12 +44,40 @@ type Component struct {
 	Properties  map[string]any    `yaml:"properties"`
 	Traits      []Trait           `yaml:"traits,omitempty"`
 	Annotations map[string]string `yaml:"annotations,omitempty"`
+
+	origin *Origin
+}
+
+// Origin returns the component's authored provenance and whether the lowering engine
+// ever stamped one.
+func (c Component) Origin() (Origin, bool) {
+	if c.origin == nil {
+		return Origin{}, false
+	}
+	return *c.origin, true
 }
 
 // Trait represents an operational behavior attached to a component.
 type Trait struct {
 	Type       string         `yaml:"type"`
 	Properties map[string]any `yaml:"properties"`
+
+	origin *Origin
+	// sealed marks a trait emitted by a lowering rule (D5): its properties are the
+	// rule's own deterministic output, so applyTraits must not merge a second
+	// ClusterProfile capability rendering into it — that would make the trait's
+	// output depend on a fifth input the information-closure rule does not allow.
+	// An authored trait is never sealed.
+	sealed bool
+}
+
+// Origin returns the trait's authored provenance and whether the lowering engine ever
+// stamped one.
+func (t Trait) Origin() (Origin, bool) {
+	if t.origin == nil {
+		return Origin{}, false
+	}
+	return *t.origin, true
 }
 
 // ApplicationPolicy defines an application-level policy entry passed through to the runtime unchanged.
@@ -42,6 +85,17 @@ type ApplicationPolicy struct {
 	Name       string         `yaml:"name"`
 	Type       string         `yaml:"type"`
 	Properties map[string]any `yaml:"properties,omitempty"`
+
+	origin *Origin
+}
+
+// Origin returns the policy's authored provenance and whether the lowering engine
+// ever stamped one.
+func (p ApplicationPolicy) Origin() (Origin, bool) {
+	if p.origin == nil {
+		return Origin{}, false
+	}
+	return *p.origin, true
 }
 
 // CapabilityDefinition declares the rendering schema for a custom capability trait type.

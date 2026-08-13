@@ -91,6 +91,15 @@ type Transformer struct {
 	capabilityDefs     map[string]*CapabilityDefinition
 	strictCapabilities bool
 	warnHandler        func(string)
+
+	// Lowering rule registries (lowering.go). Kept separate from the dispatchable
+	// handler maps above: a lowerable type must never also be dispatchable (see
+	// RegisterComponentLowering et al.), so the two must not collide silently by
+	// sharing one map.
+	docLoweringRules       map[string]DocumentLoweringRule
+	componentLoweringRules map[string]ComponentLoweringRule
+	traitLoweringRules     map[string]TraitLoweringRule
+	policyLoweringRules    map[string]PolicyLoweringRule
 }
 
 // NewTransformer creates a Transformer pre-loaded with component and trait handlers.
@@ -103,10 +112,14 @@ type Transformer struct {
 // CapabilityDefinition purposes; use RegisterBuiltinTrait for launcher built-ins.
 func NewTransformer(componentHandlers map[string]ComponentHandler, traitHandlers map[string]TraitHandler) *Transformer {
 	t := &Transformer{
-		componentHandlers: make(map[string]ComponentHandler),
-		traitHandlers:     make(map[string]TraitHandler),
-		policyHandlers:    make(map[string]PolicyHandler),
-		builtinTraitTypes: make(map[string]bool),
+		componentHandlers:      make(map[string]ComponentHandler),
+		traitHandlers:          make(map[string]TraitHandler),
+		policyHandlers:         make(map[string]PolicyHandler),
+		builtinTraitTypes:      make(map[string]bool),
+		docLoweringRules:       make(map[string]DocumentLoweringRule),
+		componentLoweringRules: make(map[string]ComponentLoweringRule),
+		traitLoweringRules:     make(map[string]TraitLoweringRule),
+		policyLoweringRules:    make(map[string]PolicyLoweringRule),
 	}
 	for typeName, h := range componentHandlers {
 		t.RegisterComponent(typeName, h)
@@ -330,25 +343,80 @@ func (t *Transformer) Transform(app *Application, ctx TransformContext) (*stack.
 // TransformWithPolicy converts an OAM Application to a kure Cluster and
 // returns the accumulated PolicyResult. ctx.Policy is normalized to NoopPolicy
 // if nil so that all pipeline stages always receive a non-nil Policy value.
+//
+// If lowering rules are registered and app's kind or contents expand into more than
+// one document, this returns an error naming TransformAll — TransformWithPolicy's
+// single-cluster signature cannot express a 1→N document result.
 func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext) (*stack.Cluster, *PolicyResult, error) {
+	ctx, err := t.prepareTransformContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	authoredTraitTypes := collectTraitTypes(app) // F7: capture BEFORE lowering may rename traits
+	docs, err := t.lower(app, ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(docs) != 1 {
+		return nil, nil, errors.Errorf(
+			"lowering expanded application %q into %d documents; call TransformAll instead of Transform/TransformWithPolicy",
+			app.Metadata.Name, len(docs))
+	}
+	return t.transformLowered(docs[0], ctx, authoredTraitTypes)
+}
+
+// TransformAll is Transform for applications whose top-level kind or contents lower
+// (D1/D2) into more than one document. It runs the lowering fixpoint once and the
+// rest of the pipeline once per resulting document, in emission order. With no
+// lowering rules registered it returns exactly one cluster, identical to Transform's.
+func (t *Transformer) TransformAll(app *Application, ctx TransformContext) ([]*stack.Cluster, error) {
+	ctx, err := t.prepareTransformContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	authoredTraitTypes := collectTraitTypes(app)
+	docs, err := t.lower(app, ctx)
+	if err != nil {
+		return nil, err
+	}
+	clusters := make([]*stack.Cluster, 0, len(docs))
+	for _, doc := range docs {
+		cluster, _, err := t.transformLowered(doc, ctx, authoredTraitTypes)
+		if err != nil {
+			return nil, err
+		}
+		clusters = append(clusters, cluster)
+	}
+	return clusters, nil
+}
+
+// prepareTransformContext normalizes ctx.Policy and validates the platform domain
+// (and the optional full-key override) once, fail-fast before building anything or
+// running lowering. Shared by TransformWithPolicy and TransformAll so both apply the
+// exact same fail-fast ordering. ctx is a value copy, so this is local to the caller.
+func (t *Transformer) prepareTransformContext(ctx TransformContext) (TransformContext, error) {
 	if ctx.Policy == nil {
 		ctx.Policy = &NoopPolicy{}
 	}
-
-	// Validate + normalize the platform domain (and the optional full-key override) once,
-	// fail-fast before building anything. ComponentLabelKey takes precedence over Domain,
-	// so it is validated here too — a behavioral tightening (previously any string was
-	// accepted). ctx is a value copy, so normalizing ctx.Domain here is local to this call.
 	ctx.Domain = domainOrDefault(ctx.Domain)
 	if errs := validation.IsDNS1123Subdomain(ctx.Domain); len(errs) > 0 {
-		return nil, nil, errors.Errorf("invalid TransformContext.Domain %q: %s", ctx.Domain, strings.Join(errs, "; "))
+		return ctx, errors.Errorf("invalid TransformContext.Domain %q: %s", ctx.Domain, strings.Join(errs, "; "))
 	}
 	if ctx.ComponentLabelKey != "" {
 		if errs := validation.IsQualifiedName(ctx.ComponentLabelKey); len(errs) > 0 {
-			return nil, nil, errors.Errorf("invalid TransformContext.ComponentLabelKey %q: %s", ctx.ComponentLabelKey, strings.Join(errs, "; "))
+			return ctx, errors.Errorf("invalid TransformContext.ComponentLabelKey %q: %s", ctx.ComponentLabelKey, strings.Join(errs, "; "))
 		}
 	}
+	return ctx, nil
+}
 
+// transformLowered is TransformWithPolicy's body, run once per document AFTER
+// lowering has settled: app here is a single, terminal-kind (Application) document.
+// authoredTraitTypes is the trait-type set collected from the ORIGINAL authored
+// document before lowering ran (F7) — a Policy that constrains trait types (e.g.
+// "expose must not be used") must see what the human wrote, not what a lowering rule
+// renamed it to.
+func (t *Transformer) transformLowered(app *Application, ctx TransformContext, authoredTraitTypes []string) (*stack.Cluster, *PolicyResult, error) {
 	namespace := ctx.Namespace
 	if namespace == "" {
 		namespace = app.Metadata.Namespace
@@ -364,7 +432,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	}
 
 	// Phase 1.5: validate capability constraints declared by the Policy.
-	if err := enforceCapabilityConstraints(collectTraitTypes(app), ctx.Policy); err != nil {
+	if err := enforceCapabilityConstraints(authoredTraitTypes, ctx.Policy); err != nil {
 		return nil, nil, &ViolationError{Component: app.Metadata.Name, Cause: err}
 	}
 

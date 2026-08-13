@@ -163,14 +163,21 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		Domain:       kurelDomain,
 	}
 
-	cluster, err := transformer.Transform(app, ctx)
+	// TransformAll, not Transform: with no lowering rules registered (builtinTraitHandlers/
+	// builtinComponentHandlers register only dispatchable handlers, never lowering rules)
+	// this always returns exactly one cluster, so concatenating below is a no-op today.
+	clusters, err := transformer.TransformAll(app, ctx)
 	if err != nil {
 		return errors.Wrap(err, "transforming application")
 	}
 
-	objects, err := collectFromNode(cluster.Node)
-	if err != nil {
-		return errors.Wrap(err, "generating manifests")
+	var objects []*client.Object
+	for _, cluster := range clusters {
+		clusterObjects, err := collectFromNode(cluster.Node)
+		if err != nil {
+			return errors.Wrap(err, "generating manifests")
+		}
+		objects = append(objects, clusterObjects...)
 	}
 
 	if len(objects) == 0 {
