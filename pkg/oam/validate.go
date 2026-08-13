@@ -58,18 +58,38 @@ var traitComponentRestrictions = map[string]map[string]bool{
 
 // validate performs semantic validation on a parsed Application.
 func validate(app *Application) error {
-	return validateWithCustomTraits(app, nil)
+	return validateWithExtraTypes(app, nil, LowerableTypes{})
 }
 
 // validateWithCustomTraits is like validate but also accepts custom trait type names
 // derived from CapabilityDefinition files supplied via --capability-def.
 func validateWithCustomTraits(app *Application, customTraitTypes map[string]bool) error {
+	return validateWithExtraTypes(app, customTraitTypes, LowerableTypes{})
+}
+
+// validateWithExtraTypes is validateWithCustomTraits widened with a LowerableTypes
+// set (lowering.go): a kind, component type, or trait type claimed by a registered
+// lowering rule passes validation even though it is absent from the strict allowlists
+// above, because the lowering fixpoint removes it before any handler ever sees it. An
+// empty LowerableTypes is exactly today's strict behavior — the two wrappers above are
+// unchanged in observable effect.
+//
+// The widening is per position and nothing else: a name in lowerable.ComponentTypes
+// admits that component type only, never the same string used as a kind or a trait
+// type. Every other rule (name syntax, duplicates, trait/component restrictions, the
+// at-least-one-component requirement) still applies to a document whose kind or types
+// are admitted this way.
+//
+// lowerable.PolicyTypes is deliberately not consulted here: policy types carry no
+// allowlist at all (see validateApplicationPolicy), so there is nothing to widen.
+// It exists on LowerableTypes for callers that inspect a Transformer's claims.
+func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, lowerable LowerableTypes) error {
 	if app.APIVersion != SupportedAPIVersion {
 		return oamValidationError("apiVersion", fmt.Sprintf("unsupported apiVersion %q, expected %q",
 			app.APIVersion, SupportedAPIVersion))
 	}
 
-	if app.Kind != "Application" {
+	if app.Kind != "Application" && !slices.Contains(lowerable.Kinds, app.Kind) {
 		return oamValidationError("kind", fmt.Sprintf("expected kind Application, got %q", app.Kind))
 	}
 
@@ -93,9 +113,12 @@ func validateWithCustomTraits(app *Application, customTraitTypes map[string]bool
 		return oamValidationError("spec.components", "spec.components must contain at least one component")
 	}
 
+	lowerableComponentTypes := toTypeSet(lowerable.ComponentTypes)
+	allTraitTypes := mergeTypeSets(customTraitTypes, lowerable.TraitTypes)
+
 	seenNames := make(map[string]bool)
 	for i, c := range app.Spec.Components {
-		if err := validateComponent(&c, i, seenNames, customTraitTypes); err != nil {
+		if err := validateComponent(&c, i, seenNames, allTraitTypes, lowerableComponentTypes); err != nil {
 			return err
 		}
 	}
@@ -110,7 +133,38 @@ func validateWithCustomTraits(app *Application, customTraitTypes map[string]bool
 	return nil
 }
 
-func validateComponent(c *Component, index int, seenNames map[string]bool, customTraitTypes map[string]bool) error {
+// toTypeSet builds a membership set from a type-name slice. Returns nil for an empty
+// slice so a nil-vs-empty-map check is not needed at call sites (a nil map still
+// answers `false` to every lookup).
+func toTypeSet(types []string) map[string]bool {
+	if len(types) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(types))
+	for _, t := range types {
+		set[t] = true
+	}
+	return set
+}
+
+// mergeTypeSets returns a set containing every key of base plus every element of
+// extra. base is never mutated: it is the caller's CapabilityDefinition-derived map,
+// which must not silently gain lowering claims that outlive this one validation.
+func mergeTypeSets(base map[string]bool, extra []string) map[string]bool {
+	if len(extra) == 0 {
+		return base
+	}
+	merged := make(map[string]bool, len(base)+len(extra))
+	for k := range base {
+		merged[k] = true
+	}
+	for _, t := range extra {
+		merged[t] = true
+	}
+	return merged
+}
+
+func validateComponent(c *Component, index int, seenNames map[string]bool, customTraitTypes map[string]bool, lowerableComponentTypes map[string]bool) error {
 	if c.Name == "" {
 		return oamValidationError("name", fmt.Sprintf("spec.components[%d].name is required", index))
 	}
@@ -128,7 +182,7 @@ func validateComponent(c *Component, index int, seenNames map[string]bool, custo
 		return oamValidationError("type", fmt.Sprintf("component %q missing type", c.Name))
 	}
 
-	if !validComponentTypes[c.Type] {
+	if !validComponentTypes[c.Type] && !lowerableComponentTypes[c.Type] {
 		return errors.NewValidationError("type", c.Type, c.Name, supportedComponentTypes())
 	}
 

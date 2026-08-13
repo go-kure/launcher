@@ -99,10 +99,17 @@ matching `<domain>/component` on every rendered workload and helm-rendered pod â
 | `ParseClusterProfile` | Parse a `ClusterProfile`. |
 | `LoadCapabilityDefinitions` | Load `CapabilityDefinition`s for capability validation. |
 | `ParseWithExtraTraitTypes` | Parse allowing additional (custom) trait types. |
+| `ParseWithExtraTypes` | Parse allowing custom trait types **and** a `LowerableTypes` set â€” the document kinds, component types and trait types claimed by a transformer's registered lowering rules. |
 
 Standalone parsing validates each trait's `type` against the built-in handler set
 (the `security-context` trait is included, matching `SecurityContextHandler`);
 `ParseWithExtraTraitTypes` widens that allowlist with caller-supplied custom types.
+`ParseWithExtraTypes` widens it further with `Transformer.LowerableTypes()`, so a
+document authored in types that only a lowering rule understands parses ahead of the
+transform that will lower them away. The widening is additive and per position: an
+empty `LowerableTypes` is exactly the strict behaviour, a name claimed for one position
+never admits it at another, and decoding stays strict (`KnownFields(true)`), so a kind
+carrying its own authored fields still belongs to the raw lowering entry point.
 
 ## Transform & extension
 
