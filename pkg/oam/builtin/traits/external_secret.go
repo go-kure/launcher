@@ -8,6 +8,8 @@ import (
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/externalsecrets"
 	"github.com/go-kure/kure/pkg/stack"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,6 +62,11 @@ func (h *ExternalSecretHandler) Apply(trait *oam.Trait, app *stack.Application, 
 		config,
 	)
 	bundle.Applications = append(bundle.Applications, esApp)
+
+	if config.envFrom || config.mountPath != "" {
+		app.Config = NewExternalSecretDecorator(
+			app.Config, config.TargetSecretName, config.mountPath, config.envFrom)
+	}
 	return nil
 }
 
@@ -100,6 +107,8 @@ func (h *ExternalSecretHandler) PropertySchema() map[string]oam.PropertySchema {
 		"provider":         {Type: oam.PropertyTypeString, Description: "Shorthand naming a ClusterSecretStore, used when secretStoreRef is not set."},
 		"refreshInterval":  {Type: oam.PropertyTypeString, Default: "1h", Description: "How often the secret is re-fetched from the store (e.g. 1h)."},
 		"targetSecretName": {Type: oam.PropertyTypeString, Description: "Overrides the name of the produced Kubernetes Secret (defaults to secretName)."},
+		"envFrom":          {Type: oam.PropertyTypeBoolean, Description: "When true, the produced Secret is injected wholesale into the component's first container via envFrom.secretRef."},
+		"mountPath":        {Type: oam.PropertyTypeString, Description: "Path at which the produced Secret is mounted as a volume into the component's workload; when set, the component is decorated with the volume mount."},
 		"target": {
 			Type:        oam.PropertyTypeObject,
 			Description: "Configuration for the Kubernetes Secret this ExternalSecret produces.",
@@ -177,6 +186,13 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 	config.TargetSecretName = secretName
 	if tsn, ok := props["targetSecretName"].(string); ok && tsn != "" {
 		config.TargetSecretName = tsn
+	}
+
+	if ef, ok := props["envFrom"].(bool); ok {
+		config.envFrom = ef
+	}
+	if mp, ok := props["mountPath"].(string); ok {
+		config.mountPath = mp
 	}
 
 	if rawTarget, ok := props["target"].(map[string]any); ok {
@@ -443,6 +459,8 @@ type ExternalSecretConfig struct {
 	Template         *esTemplate
 	Data             []esDataEntry
 	DataFrom         []esDataFromEntry
+	envFrom          bool
+	mountPath        string
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource
@@ -526,4 +544,91 @@ func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Objec
 
 	obj := client.Object(es)
 	return []*client.Object{&obj}, nil
+}
+
+// ExternalSecretDecorator wraps an ApplicationConfig to inject the Secret produced
+// by the External Secrets Operator into any supported workload — as envFrom and/or
+// as a mounted volume.
+type ExternalSecretDecorator struct {
+	decoratorBase
+	SecretName string
+	MountPath  string
+	EnvFrom    bool
+}
+
+// NewExternalSecretDecorator wraps inner so the named Secret reaches the workload.
+func NewExternalSecretDecorator(inner stack.ApplicationConfig, secretName, mountPath string, envFrom bool) *ExternalSecretDecorator {
+	return &ExternalSecretDecorator{
+		decoratorBase: decoratorBase{Inner: inner},
+		SecretName:    secretName,
+		MountPath:     mountPath,
+		EnvFrom:       envFrom,
+	}
+}
+
+// Generate calls the inner config's Generate and injects the Secret into any
+// Deployment, StatefulSet, DaemonSet, or CronJob resource found.
+func (d *ExternalSecretDecorator) Generate(app *stack.Application) ([]*client.Object, error) {
+	objects, err := d.Inner.Generate(app)
+	if err != nil {
+		return nil, err
+	}
+
+	injected := false
+	for _, objPtr := range objects {
+		var podSpec *corev1.PodSpec
+		switch w := (*objPtr).(type) {
+		case *appsv1.Deployment:
+			podSpec = &w.Spec.Template.Spec
+		case *appsv1.StatefulSet:
+			podSpec = &w.Spec.Template.Spec
+		case *appsv1.DaemonSet:
+			podSpec = &w.Spec.Template.Spec
+		case *batchv1.CronJob:
+			podSpec = &w.Spec.JobTemplate.Spec.Template.Spec
+		default:
+			continue
+		}
+		if err := d.injectInto(podSpec); err != nil {
+			return nil, err
+		}
+		injected = true
+	}
+
+	if !injected {
+		return nil, errors.New("external-secret envFrom/mountPath requires a Deployment, StatefulSet, DaemonSet, or CronJob component; no supported workload resource was found")
+	}
+	return objects, nil
+}
+
+// injectInto applies the configured envFrom and/or volume mount to one PodSpec.
+func (d *ExternalSecretDecorator) injectInto(podSpec *corev1.PodSpec) error {
+	if d.EnvFrom && len(podSpec.Containers) > 0 {
+		podSpec.Containers[0].EnvFrom = append(podSpec.Containers[0].EnvFrom, corev1.EnvFromSource{
+			SecretRef: &corev1.SecretEnvSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: d.SecretName},
+			},
+		})
+	}
+	if d.MountPath == "" {
+		return nil
+	}
+	for _, v := range podSpec.Volumes {
+		if v.Name == d.SecretName {
+			return errors.Errorf(
+				"external-secret mountPath: volume %q already exists on the workload; rename the secret via targetSecretName",
+				d.SecretName)
+		}
+	}
+	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+		Name: d.SecretName,
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{SecretName: d.SecretName},
+		},
+	})
+	if len(podSpec.Containers) > 0 {
+		podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts,
+			corev1.VolumeMount{Name: d.SecretName, MountPath: d.MountPath})
+	}
+	return nil
 }
