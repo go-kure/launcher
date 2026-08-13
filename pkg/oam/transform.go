@@ -195,6 +195,15 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 			set.Traits[name] = p.PropertySchema()
 		}
 	}
+	// A trait type reachable only through a TraitLoweringRule (e.g. "expose", which
+	// RegisterTraitLowering claims instead of RegisterBuiltinTrait) must still publish
+	// its schema here — HandlerSchemas is the one place a caller discovers property
+	// schemas, regardless of which position registry actually claims the type.
+	for name, r := range t.traitLoweringRules {
+		if p, ok := r.(PropertySchemaProvider); ok {
+			set.Traits[name] = p.PropertySchema()
+		}
+	}
 	return set
 }
 
@@ -384,6 +393,15 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		}
 	}
 
+	// authoredTraitTypes is captured BEFORE t.lower() runs (F7): a Policy that
+	// constrains trait types (e.g. "expose must not be used") must see what the
+	// human wrote, not what a lowering rule renamed it to. ExposeRule lowers an
+	// authored "expose" trait into a terminal "ingress"/"httproute" trait, so
+	// collecting trait types AFTER lowering would silently evaluate the Policy
+	// against the wrong input — a policy control deciding on synthesized detail
+	// instead of the authored line it is meant to police.
+	authoredTraitTypes := collectTraitTypes(app)
+
 	// Run the lowering fixpoint (D1/D2, lowering.go) before anything else: a
 	// registered TraitLoweringRule (e.g. "expose", pkg/oam/builtin/traits) must
 	// settle into its terminal trait type before createApplications/applyTraits
@@ -422,8 +440,10 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 
-	// Phase 1.5: validate capability constraints declared by the Policy.
-	if err := enforceCapabilityConstraints(collectTraitTypes(app), ctx.Policy); err != nil {
+	// Phase 1.5: validate capability constraints declared by the Policy. Uses
+	// authoredTraitTypes (captured before t.lower() ran), not a fresh
+	// collectTraitTypes(app) call here — see the comment at that capture site.
+	if err := enforceCapabilityConstraints(authoredTraitTypes, ctx.Policy); err != nil {
 		return nil, nil, &ViolationError{Component: app.Metadata.Name, Cause: err}
 	}
 

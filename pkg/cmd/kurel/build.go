@@ -270,6 +270,18 @@ func builtinTraitHandlers() map[string]oam.TraitHandler {
 	}
 }
 
+// builtinTraitLoweringRules returns the built-in trait-position lowering rules
+// (oam.TraitLoweringRule, D5) keyed by the trait type they claim. It is the single
+// source of truth for trait-lowering registration, shared by newBuiltinTransformer
+// and the handler-schema parity/description tests — mirroring
+// builtinComponentHandlers/builtinTraitHandlers above so a rule added here is
+// covered by those tests exactly like a dispatchable handler is.
+func builtinTraitLoweringRules() map[string]oam.TraitLoweringRule {
+	return map[string]oam.TraitLoweringRule{
+		"expose": traits.ExposeRule{},
+	}
+}
+
 // newBuiltinTransformer creates a Transformer pre-loaded with all supported
 // built-in component and trait handlers.
 func newBuiltinTransformer() *oam.Transformer {
@@ -282,7 +294,9 @@ func newBuiltinTransformer() *oam.Transformer {
 	// HTTPRouteHandler (registered above) to dispatch on the next fixpoint round.
 	// It must not also appear in builtinTraitHandlers — RegisterTraitLowering
 	// panics on that collision, which is the guard doing its job.
-	t.RegisterTraitLowering(traits.ExposeRule{})
+	for _, r := range builtinTraitLoweringRules() {
+		t.RegisterTraitLowering(r)
+	}
 	return t
 }
 

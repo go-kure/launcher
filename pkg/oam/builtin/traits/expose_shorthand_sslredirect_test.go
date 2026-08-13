@@ -20,12 +20,11 @@ func exposeIngress(props map[string]any) *oam.Trait {
 }
 
 // (a) hostnames shorthand → one rule per host, path "/" + component service port (80).
-func TestExposeHandler_Ingress_HostnamesShorthand(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Ingress_HostnamesShorthand(t *testing.T) {
 	app := newWebApp("web", "default")
 	bundle := &stack.Bundle{}
 	trait := exposeIngress(map[string]any{"hostnames": []any{"a.apps.example.com"}})
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	ing := ingressFromBundle(t, bundle)
@@ -45,8 +44,7 @@ func TestExposeHandler_Ingress_HostnamesShorthand(t *testing.T) {
 }
 
 // hostnames + rules together: rules drive routing (existing behavior preserved).
-func TestExposeHandler_Ingress_HostnamesAndRules(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Ingress_HostnamesAndRules(t *testing.T) {
 	app := newWebApp("web", "default")
 	bundle := &stack.Bundle{}
 	trait := exposeIngress(map[string]any{
@@ -57,7 +55,7 @@ func TestExposeHandler_Ingress_HostnamesAndRules(t *testing.T) {
 			"paths": []any{map[string]any{"path": "/"}},
 		}},
 	})
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	ing := ingressFromBundle(t, bundle)
@@ -68,8 +66,7 @@ func TestExposeHandler_Ingress_HostnamesAndRules(t *testing.T) {
 
 // Reviewer pin: a shorthand hostname outside the wildcard is rejected even when the
 // rules carry an allowed host.
-func TestExposeHandler_Ingress_HostnameOutsideWildcard_RejectedWithAllowedRule(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Ingress_HostnameOutsideWildcard_RejectedWithAllowedRule(t *testing.T) {
 	app := newWebApp("web", "default")
 	bundle := &stack.Bundle{}
 	trait := exposeIngress(map[string]any{
@@ -80,7 +77,7 @@ func TestExposeHandler_Ingress_HostnameOutsideWildcard_RejectedWithAllowedRule(t
 			"paths": []any{map[string]any{"path": "/"}},
 		}},
 	})
-	err := h.Apply(trait, app, bundle)
+	err := applyExpose(trait, app, bundle)
 	var ve *pkgerrors.ValidationError
 	if !stderrors.As(err, &ve) {
 		t.Fatalf("want *ValidationError for bad.other.com, got %v", err)
@@ -88,7 +85,7 @@ func TestExposeHandler_Ingress_HostnameOutsideWildcard_RejectedWithAllowedRule(t
 }
 
 // (b) ssl-redirect: typed property (capability default or inline) → nginx annotation.
-func TestExposeHandler_Ingress_SSLRedirect(t *testing.T) {
+func TestExposeRule_Ingress_SSLRedirect(t *testing.T) {
 	cases := []struct {
 		name      string
 		props     map[string]any
@@ -109,14 +106,13 @@ func TestExposeHandler_Ingress_SSLRedirect(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &traits.ExposeHandler{}
 			app := newWebApp("web", "default")
 			bundle := &stack.Bundle{}
 			props := map[string]any{"hostnames": []any{"a.apps.example.com"}}
 			for k, v := range tc.props {
 				props[k] = v
 			}
-			if err := h.Apply(exposeIngress(props), app, bundle); err != nil {
+			if err := applyExpose(exposeIngress(props), app, bundle); err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
 			ing := ingressFromBundle(t, bundle)
@@ -131,12 +127,11 @@ func TestExposeHandler_Ingress_SSLRedirect(t *testing.T) {
 }
 
 // (c) coverage: capability-rendered ingressClassName lands on spec.ingressClassName.
-func TestExposeHandler_Ingress_IngressClassName(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Ingress_IngressClassName(t *testing.T) {
 	app := newWebApp("web", "default")
 	bundle := &stack.Bundle{}
 	trait := exposeIngress(map[string]any{"hostnames": []any{"a.apps.example.com"}})
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	ing := ingressFromBundle(t, bundle)
@@ -146,9 +141,9 @@ func TestExposeHandler_Ingress_IngressClassName(t *testing.T) {
 }
 
 // ssl-redirect fields are ingress-only: rejected on the gateway rendering.
-func TestExposeHandler_Gateway_SSLRedirect_Rejected(t *testing.T) {
-	h := &traits.ExposeHandler{}
-	_, err := h.ValidateAndApplyDefaults(map[string]any{
+func TestExposeRule_Gateway_SSLRedirect_Rejected(t *testing.T) {
+	r := traits.ExposeRule{}
+	_, err := r.ValidateAndApplyDefaults(map[string]any{
 		"controllerType": "gateway",
 		"gatewayName":    "public-gateway",
 		"sslRedirect":    true,
@@ -160,8 +155,7 @@ func TestExposeHandler_Gateway_SSLRedirect_Rejected(t *testing.T) {
 
 // Inline ssl-redirect on a gateway expose trait is rejected at Apply time (the
 // rendering guard only covers the capability-supplied form).
-func TestExposeHandler_Gateway_InlineSSLRedirect_Rejected(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Gateway_InlineSSLRedirect_Rejected(t *testing.T) {
 	app := newWebApp("web", "default")
 	bundle := &stack.Bundle{}
 	trait := &oam.Trait{Type: "expose", Properties: map[string]any{
@@ -169,7 +163,7 @@ func TestExposeHandler_Gateway_InlineSSLRedirect_Rejected(t *testing.T) {
 		"gatewayName":    "public-gateway",
 		"sslRedirect":    true,
 	}}
-	err := h.Apply(trait, app, bundle)
+	err := applyExpose(trait, app, bundle)
 	var ve *pkgerrors.ValidationError
 	if !stderrors.As(err, &ve) {
 		t.Fatalf("want *ValidationError for inline sslRedirect on gateway, got %v", err)
@@ -178,8 +172,7 @@ func TestExposeHandler_Gateway_InlineSSLRedirect_Rejected(t *testing.T) {
 
 // Managed TLS covers the effective routing hosts only: with both rules and hostnames,
 // a hostnames entry that is not routed by rules must not get a synthesized cert.
-func TestExposeHandler_Ingress_ManagedTLS_RoutingHostsOnly(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Ingress_ManagedTLS_RoutingHostsOnly(t *testing.T) {
 	app := newWebApp("web", "default")
 	bundle := &stack.Bundle{}
 	trait := exposeIngress(map[string]any{
@@ -191,7 +184,7 @@ func TestExposeHandler_Ingress_ManagedTLS_RoutingHostsOnly(t *testing.T) {
 			"paths": []any{map[string]any{"path": "/"}},
 		}},
 	})
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	ing := ingressFromBundle(t, bundle)

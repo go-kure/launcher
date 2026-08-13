@@ -9,7 +9,7 @@ import "testing"
 // trait (regression guard for the expose.controllerType / certificate.issuerRef
 // bug shipped in v0.1.0-alpha.9).
 func TestCapabilityInjectedFieldsNotUserRequired(t *testing.T) {
-	exposeSchema := (&ExposeHandler{}).PropertySchema()
+	exposeSchema := (&ExposeRule{}).PropertySchema()
 	if exposeSchema["controllerType"].Required {
 		t.Error("expose: controllerType is capability-injected and must not be user-required")
 	}
