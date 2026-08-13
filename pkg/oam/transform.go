@@ -91,6 +91,21 @@ type Transformer struct {
 	capabilityDefs     map[string]*CapabilityDefinition
 	strictCapabilities bool
 	warnHandler        func(string)
+
+	// Lowering rule registries (lowering.go). Kept separate from the dispatchable
+	// handler maps above: a lowerable type must never also be dispatchable (see
+	// RegisterComponentLowering et al.), so the two must not collide silently by
+	// sharing one map.
+	docLoweringRules       map[string]DocumentLoweringRule
+	componentLoweringRules map[string]ComponentLoweringRule
+	traitLoweringRules     map[string]TraitLoweringRule
+	policyLoweringRules    map[string]PolicyLoweringRule
+	// rawDocLoweringRules is the raw-document entry point's own registry
+	// (lowering_raw.go). Deliberately a second map rather than an entry in
+	// docLoweringRules: the two rule flavours have different LowerDocument
+	// signatures, are reachable from different entry points, and a kind may be
+	// claimed by at most one of them.
+	rawDocLoweringRules map[string]RawDocumentLoweringRule
 }
 
 // NewTransformer creates a Transformer pre-loaded with component and trait handlers.
@@ -103,10 +118,15 @@ type Transformer struct {
 // CapabilityDefinition purposes; use RegisterBuiltinTrait for launcher built-ins.
 func NewTransformer(componentHandlers map[string]ComponentHandler, traitHandlers map[string]TraitHandler) *Transformer {
 	t := &Transformer{
-		componentHandlers: make(map[string]ComponentHandler),
-		traitHandlers:     make(map[string]TraitHandler),
-		policyHandlers:    make(map[string]PolicyHandler),
-		builtinTraitTypes: make(map[string]bool),
+		componentHandlers:      make(map[string]ComponentHandler),
+		traitHandlers:          make(map[string]TraitHandler),
+		policyHandlers:         make(map[string]PolicyHandler),
+		builtinTraitTypes:      make(map[string]bool),
+		docLoweringRules:       make(map[string]DocumentLoweringRule),
+		componentLoweringRules: make(map[string]ComponentLoweringRule),
+		traitLoweringRules:     make(map[string]TraitLoweringRule),
+		policyLoweringRules:    make(map[string]PolicyLoweringRule),
+		rawDocLoweringRules:    make(map[string]RawDocumentLoweringRule),
 	}
 	for typeName, h := range componentHandlers {
 		t.RegisterComponent(typeName, h)
