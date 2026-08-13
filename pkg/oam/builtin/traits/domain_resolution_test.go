@@ -9,8 +9,10 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
-// ingressTrafficSourcesApp builds a webservice + ingress trait carrying trafficSources,
-// which yields a synthesized {comp}-allow-ingress-traffic policy after transform.
+// ingressTrafficSourcesApp builds a webservice + plain ingress trait (no
+// networkPolicy authored inline — it is platform-reserved, D3), which yields a
+// synthesized {comp}-allow-ingress-traffic policy after transform once
+// ingressTrafficSourcesCapabilities supplies it via capability rendering.
 func ingressTrafficSourcesApp() *oam.Application {
 	return &oam.Application{
 		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
@@ -26,13 +28,22 @@ func ingressTrafficSourcesApp() *oam.Application {
 							"host":  "example.com",
 							"paths": []any{map[string]any{"path": "/"}},
 						}},
-						"networkPolicy": map[string]any{
-							"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}},
-						},
 					},
 				}},
 			}},
 		},
+	}
+}
+
+// ingressTrafficSourcesCapabilities supplies networkPolicy via the "ingress"
+// capability's rendering — the only way to set it now that it is platform-reserved.
+func ingressTrafficSourcesCapabilities() map[string]oam.CapabilityBinding {
+	return map[string]oam.CapabilityBinding{
+		"ingress": {Rendering: map[string]any{
+			"networkPolicy": map[string]any{
+				"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}},
+			},
+		}},
 	}
 }
 
@@ -47,7 +58,7 @@ func domainTestTransformer() *oam.Transformer {
 func TestTransform_Domain_DrivesIngressSelector(t *testing.T) {
 	tr := domainTestTransformer()
 	cluster, _, err := tr.TransformWithPolicy(ingressTrafficSourcesApp(),
-		oam.TransformContext{Namespace: "default", Domain: "example.com"})
+		oam.TransformContext{Namespace: "default", Domain: "example.com", Capabilities: ingressTrafficSourcesCapabilities()})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -64,7 +75,7 @@ func TestTransform_Domain_DrivesIngressSelector(t *testing.T) {
 func TestTransform_DefaultDomain_IngressSelector(t *testing.T) {
 	tr := domainTestTransformer()
 	cluster, _, err := tr.TransformWithPolicy(ingressTrafficSourcesApp(),
-		oam.TransformContext{Namespace: "default"})
+		oam.TransformContext{Namespace: "default", Capabilities: ingressTrafficSourcesCapabilities()})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
@@ -78,7 +89,7 @@ func TestTransform_DefaultDomain_IngressSelector(t *testing.T) {
 func TestTransform_ComponentLabelKey_WinsOverDomain(t *testing.T) {
 	tr := domainTestTransformer()
 	cluster, _, err := tr.TransformWithPolicy(ingressTrafficSourcesApp(),
-		oam.TransformContext{Namespace: "default", Domain: "example.com", ComponentLabelKey: "app"})
+		oam.TransformContext{Namespace: "default", Domain: "example.com", ComponentLabelKey: "app", Capabilities: ingressTrafficSourcesCapabilities()})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}

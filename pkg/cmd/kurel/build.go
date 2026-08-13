@@ -128,7 +128,9 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		customTraitTypes = append(customTraitTypes, name)
 	}
 
-	app, err := oam.ParseWithExtraTraitTypes(appData, customTraitTypes)
+	transformer := newBuiltinTransformer()
+
+	app, err := oam.ParseWithExtraTypes(appData, customTraitTypes, transformer.LowerableTypes())
 	if err != nil {
 		return errors.Wrapf(err, "parsing application file %q", appPath)
 	}
@@ -142,8 +144,6 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	if err != nil {
 		return errors.Wrapf(err, "parsing profile file %q", opts.profilePath)
 	}
-
-	transformer := newBuiltinTransformer()
 
 	transformer.SetCapabilityDefs(capDefs)
 	transformer.SetStrictCapabilities(opts.strictCapabilities)
@@ -252,7 +252,6 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 // newBuiltinTransformer and the handler-schema parity test.
 func builtinTraitHandlers() map[string]oam.TraitHandler {
 	return map[string]oam.TraitHandler{
-		"expose":               &traits.ExposeHandler{},
 		"ingress":              &traits.IngressHandler{},
 		"httproute":            &traits.HTTPRouteHandler{},
 		"certificate":          &traits.CertificateHandler{},
@@ -278,6 +277,12 @@ func newBuiltinTransformer() *oam.Transformer {
 	for name, h := range builtinTraitHandlers() {
 		t.RegisterBuiltinTrait(name, h)
 	}
+	// "expose" is a trait-position lowering rule (D5), not a dispatchable handler:
+	// it lowers into a terminal "ingress" or "httproute" trait for IngressHandler/
+	// HTTPRouteHandler (registered above) to dispatch on the next fixpoint round.
+	// It must not also appear in builtinTraitHandlers — RegisterTraitLowering
+	// panics on that collision, which is the guard doing its job.
+	t.RegisterTraitLowering(traits.ExposeRule{})
 	return t
 }
 
