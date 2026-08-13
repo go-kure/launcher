@@ -119,7 +119,10 @@ not the app — chooses the implementation:
   runtime, so the keys they ultimately produce aren't known at render time. When `mountPath` is
   set, the produced Secret's name (`secretName`, or `targetSecretName` if overridden) must be a
   valid DNS-1123 label, because it becomes the injected volume's name; a dotted or otherwise
-  non-label-safe name is rejected at render time rather than producing an invalid Volume.
+  non-label-safe name is rejected at render time rather than producing an invalid Volume. A
+  `mountPath` already used by another decorator's volume (e.g. `configmap`) is also rejected at
+  render time — even when the two volumes have different names, Kubernetes requires every
+  `VolumeMount.mountPath` in a container to be unique.
 
 ## Auto-synthesized NetworkPolicy
 
