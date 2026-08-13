@@ -72,6 +72,7 @@ extra_mounts:
   - {source: docs/oam/design-cluster-profile.md, target: concepts/oam-cluster-profile.md, title: Cluster Profiles, weight: 40}
   - {source: docs/oam/options-param-syntax.md, target: concepts/oam-param-syntax.md, title: Parameter Syntax, weight: 50}
   - {source: docs/oam/options-policy-interface.md, target: concepts/oam-policy-interface.md, title: Policy Interface, weight: 60}
+  - {source: docs/oam/design-lowering-engine.md, target: concepts/oam-lowering-engine.md, title: "Lowering Engine", weight: 65}
   - {source: docs/oam/options-package-composition.md, target: concepts/oam-package-composition.md, title: Package Composition, weight: 70}
   - {source: docs/oam/design-capability-schema.md, target: concepts/oam-capability-schema.md, title: Capability Schema, weight: 55}
   - {source: docs/oam/design-external-secret-data-shorthand.md, target: concepts/oam-external-secret-shorthand.md, title: External Secret Shorthand, weight: 80}
