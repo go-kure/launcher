@@ -37,9 +37,12 @@ func resolveDefaultPort(app *stack.Application) int32 {
 }
 
 // resolveServiceName returns the name of the Kubernetes Service the component exposes.
-// Falls back to app.Name when the config does not implement serviceBackendNamer.
+// Falls back to app.Name when the config does not implement serviceBackendNamer OR
+// returns an empty name — decorators (decoratorBase) always implement the interface
+// and return "" for an inner config that does not override the Service name, so the
+// presence check alone is not sufficient.
 func resolveServiceName(app *stack.Application) string {
-	if sn, ok := app.Config.(serviceBackendNamer); ok {
+	if sn, ok := app.Config.(serviceBackendNamer); ok && sn.BackendServiceName() != "" {
 		return sn.BackendServiceName()
 	}
 	return app.Name

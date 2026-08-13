@@ -1328,11 +1328,7 @@ func (s *stubDaemonSetConfig) Generate(_ *stack.Application) ([]*client.Object, 
 }
 
 func TestConfigMapDecorator_StatefulSet_MountsVolume(t *testing.T) {
-	dec := &traits.ConfigMapDecorator{
-		Inner:         &stubStatefulSetConfig{},
-		ConfigMapName: "my-config",
-		MountPath:     "/etc/config",
-	}
+	dec := traits.NewConfigMapDecorator(&stubStatefulSetConfig{}, "my-config", "/etc/config")
 	app := newApp("db", "default")
 	objects, err := dec.Generate(app)
 	if err != nil {
@@ -1357,11 +1353,7 @@ func TestConfigMapDecorator_StatefulSet_MountsVolume(t *testing.T) {
 }
 
 func TestConfigMapDecorator_DaemonSet_MountsVolume(t *testing.T) {
-	dec := &traits.ConfigMapDecorator{
-		Inner:         &stubDaemonSetConfig{},
-		ConfigMapName: "agent-config",
-		MountPath:     "/etc/agent",
-	}
+	dec := traits.NewConfigMapDecorator(&stubDaemonSetConfig{}, "agent-config", "/etc/agent")
 	objects, err := dec.Generate(newApp("agent", "default"))
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -1376,11 +1368,7 @@ func TestConfigMapDecorator_DaemonSet_MountsVolume(t *testing.T) {
 }
 
 func TestConfigMapDecorator_UnsupportedComponent_ReturnsError(t *testing.T) {
-	dec := &traits.ConfigMapDecorator{
-		Inner:         &stubUnsupportedConfig{},
-		ConfigMapName: "my-config",
-		MountPath:     "/etc/config",
-	}
+	dec := traits.NewConfigMapDecorator(&stubUnsupportedConfig{}, "my-config", "/etc/config")
 	_, err := dec.Generate(newApp("svc", "default"))
 	if err == nil {
 		t.Fatal("expected error for unsupported workload type")

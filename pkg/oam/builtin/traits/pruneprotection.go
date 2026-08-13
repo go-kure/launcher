@@ -32,7 +32,7 @@ func (h *PruneProtectionHandler) PropertySchema() map[string]oam.PropertySchema 
 // annotated. Resources appended to bundle.Applications by other trait handlers
 // (e.g. rbac, certificate, ingress) are not affected.
 func (h *PruneProtectionHandler) Apply(_ *oam.Trait, app *stack.Application, _ *stack.Bundle) error {
-	app.Config = &pruneProtectedConfig{wrapped: app.Config}
+	app.Config = &pruneProtectedConfig{decoratorBase: decoratorBase{Inner: app.Config}}
 	return nil
 }
 
@@ -40,11 +40,11 @@ func (h *PruneProtectionHandler) Apply(_ *oam.Trait, app *stack.Application, _ *
 // stack.AnnotationFluxPruneKey = stack.AnnotationFluxPruneDisabled into every
 // resource returned by the wrapped config's Generate method.
 type pruneProtectedConfig struct {
-	wrapped stack.ApplicationConfig
+	decoratorBase
 }
 
 func (p *pruneProtectedConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	resources, err := p.wrapped.Generate(app)
+	resources, err := p.Inner.Generate(app)
 	if err != nil {
 		return nil, err
 	}
@@ -57,31 +57,4 @@ func (p *pruneProtectedConfig) Generate(app *stack.Application) ([]*client.Objec
 		(*r).SetAnnotations(ann)
 	}
 	return resources, nil
-}
-
-// Validate delegates to the wrapped config's Validate if it implements
-// stack.Validator, preserving any pre-generation validation defined there.
-func (p *pruneProtectedConfig) Validate() error {
-	if v, ok := p.wrapped.(stack.Validator); ok {
-		return v.Validate()
-	}
-	return nil
-}
-
-// SetFluxNamespace forwards the per-request Flux namespace to the wrapped
-// config when it satisfies fluxNamespaceSettable (e.g. HelmchartConfig).
-func (p *pruneProtectedConfig) SetFluxNamespace(ns string) {
-	if setter, ok := p.wrapped.(fluxNamespaceSettable); ok {
-		setter.SetFluxNamespace(ns)
-	}
-}
-
-// EmitsAutoHealthCheck forwards the wrapped config's auto-health-check veto so a
-// prune-protected helmchart with delivery=template still suppresses the bogus
-// HelmRelease health check. Defaults to true when the inner config lacks it.
-func (p *pruneProtectedConfig) EmitsAutoHealthCheck() bool {
-	if e, ok := p.wrapped.(autoHealthCheckEmitter); ok {
-		return e.EmitsAutoHealthCheck()
-	}
-	return true
 }

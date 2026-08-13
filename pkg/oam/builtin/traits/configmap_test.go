@@ -25,11 +25,7 @@ func (f *fluxNSCapture) Generate(_ *stack.Application) ([]*client.Object, error)
 
 func TestConfigMapDecorator_SetFluxNamespace_Forwards(t *testing.T) {
 	inner := &fluxNSCapture{}
-	dec := &traits.ConfigMapDecorator{
-		Inner:         inner,
-		ConfigMapName: "my-config",
-		MountPath:     "/etc/config",
-	}
+	dec := traits.NewConfigMapDecorator(inner, "my-config", "/etc/config")
 
 	setter, ok := any(dec).(interface{ SetFluxNamespace(string) })
 	if !ok {
@@ -45,11 +41,7 @@ func TestConfigMapDecorator_SetFluxNamespace_Forwards(t *testing.T) {
 
 func TestConfigMapDecorator_SetFluxNamespace_NoopWhenInnerLacksInterface(t *testing.T) {
 	inner := &cmStub{name: "app", namespace: "default"} // defined in pruneprotection_test.go
-	dec := &traits.ConfigMapDecorator{
-		Inner:         inner,
-		ConfigMapName: "my-config",
-		MountPath:     "/etc/config",
-	}
+	dec := traits.NewConfigMapDecorator(inner, "my-config", "/etc/config")
 
 	setter, ok := any(dec).(interface{ SetFluxNamespace(string) })
 	if !ok {
@@ -177,7 +169,7 @@ type hcVetoConfig struct{ fluxNSCapture }
 func (c *hcVetoConfig) EmitsAutoHealthCheck() bool { return false }
 
 func TestConfigMapDecorator_EmitsAutoHealthCheck_Forwards(t *testing.T) {
-	dec := &traits.ConfigMapDecorator{Inner: &hcVetoConfig{}, ConfigMapName: "c", MountPath: "/etc/c"}
+	dec := traits.NewConfigMapDecorator(&hcVetoConfig{}, "c", "/etc/c")
 	e, ok := any(dec).(interface{ EmitsAutoHealthCheck() bool })
 	if !ok {
 		t.Fatal("ConfigMapDecorator does not implement EmitsAutoHealthCheck")
@@ -188,7 +180,7 @@ func TestConfigMapDecorator_EmitsAutoHealthCheck_Forwards(t *testing.T) {
 }
 
 func TestConfigMapDecorator_EmitsAutoHealthCheck_DefaultsTrue(t *testing.T) {
-	dec := &traits.ConfigMapDecorator{Inner: &cmStub{name: "app", namespace: "default"}, ConfigMapName: "c", MountPath: "/etc/c"}
+	dec := traits.NewConfigMapDecorator(&cmStub{name: "app", namespace: "default"}, "c", "/etc/c")
 	e := any(dec).(interface{ EmitsAutoHealthCheck() bool })
 	if !e.EmitsAutoHealthCheck() {
 		t.Error("expected default true when inner does not implement autoHealthCheckEmitter")
