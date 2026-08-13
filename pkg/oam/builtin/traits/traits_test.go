@@ -1,6 +1,7 @@
 package traits_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -49,10 +50,35 @@ func newWebApp(name, namespace string) *stack.Application {
 	return stack.NewApplication(name, namespace, &webConfig{port: 80})
 }
 
-// --- ExposeHandler.ValidateAndApplyDefaults ---
+// applyExpose is the C5 port of a direct ExposeHandler.Apply(trait, app, bundle)
+// call: it lowers trait via ExposeRule.LowerTrait — trait.Properties must already
+// carry any capability-rendered values inline, exactly as a pre-lowering-merge
+// caller would have supplied them to the old handler directly — then feeds the one
+// emitted trait to the real handler (IngressHandler or HTTPRouteHandler) it names,
+// reproducing what the engine's fixpoint plus applyTraits would do end to end.
+func applyExpose(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
+	lctx := oam.LoweringContext{Component: &oam.Component{Name: app.Name}}
+	result, err := (traits.ExposeRule{}).LowerTrait(trait, lctx)
+	if err != nil {
+		return err
+	}
+	emitted := result.Traits[0]
+	var handler oam.TraitHandler
+	switch emitted.Type {
+	case "ingress":
+		handler = &traits.IngressHandler{}
+	case "httproute":
+		handler = &traits.HTTPRouteHandler{}
+	default:
+		return fmt.Errorf("applyExpose: unexpected emitted trait type %q", emitted.Type)
+	}
+	return handler.Apply(&emitted, app, bundle)
+}
 
-func TestExposeHandler_ValidateAndApplyDefaults_ValidIngress(t *testing.T) {
-	h := &traits.ExposeHandler{}
+// --- ExposeRule.ValidateAndApplyDefaults ---
+
+func TestExposeRule_ValidateAndApplyDefaults_ValidIngress(t *testing.T) {
+	h := &traits.ExposeRule{}
 	rendering := map[string]any{
 		"controllerType":   "ingress",
 		"ingressClassName": "nginx",
@@ -66,8 +92,8 @@ func TestExposeHandler_ValidateAndApplyDefaults_ValidIngress(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_ValidateAndApplyDefaults_MissingControllerType(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_ValidateAndApplyDefaults_MissingControllerType(t *testing.T) {
+	h := &traits.ExposeRule{}
 	rendering := map[string]any{
 		"ingressClassName": "nginx",
 	}
@@ -77,8 +103,8 @@ func TestExposeHandler_ValidateAndApplyDefaults_MissingControllerType(t *testing
 	}
 }
 
-func TestExposeHandler_ValidateAndApplyDefaults_Gateway_Valid(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_ValidateAndApplyDefaults_Gateway_Valid(t *testing.T) {
+	h := &traits.ExposeRule{}
 	rendering := map[string]any{
 		"controllerType": "gateway",
 		"gatewayName":    "my-gateway",
@@ -92,8 +118,8 @@ func TestExposeHandler_ValidateAndApplyDefaults_Gateway_Valid(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_ValidateAndApplyDefaults_MissingIngressClassName(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_ValidateAndApplyDefaults_MissingIngressClassName(t *testing.T) {
+	h := &traits.ExposeRule{}
 	rendering := map[string]any{
 		"controllerType": "ingress",
 	}
@@ -106,8 +132,8 @@ func TestExposeHandler_ValidateAndApplyDefaults_MissingIngressClassName(t *testi
 	}
 }
 
-func TestExposeHandler_ValidateAndApplyDefaults_IngressWithGatewayFields(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_ValidateAndApplyDefaults_IngressWithGatewayFields(t *testing.T) {
+	h := &traits.ExposeRule{}
 	rendering := map[string]any{
 		"controllerType":   "ingress",
 		"ingressClassName": "nginx",
@@ -122,8 +148,8 @@ func TestExposeHandler_ValidateAndApplyDefaults_IngressWithGatewayFields(t *test
 	}
 }
 
-func TestExposeHandler_ValidateAndApplyDefaults_UnknownField(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_ValidateAndApplyDefaults_UnknownField(t *testing.T) {
+	h := &traits.ExposeRule{}
 	rendering := map[string]any{
 		"controllerType":   "ingress",
 		"ingressClassName": "nginx",
@@ -135,10 +161,9 @@ func TestExposeHandler_ValidateAndApplyDefaults_UnknownField(t *testing.T) {
 	}
 }
 
-// --- ExposeHandler.Apply ---
+// --- ExposeRule.LowerTrait + real handler.Apply ---
 
-func TestExposeHandler_Apply_DispatchesToIngress(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_DispatchesToIngress(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "expose",
 		Properties: map[string]any{
@@ -156,7 +181,7 @@ func TestExposeHandler_Apply_DispatchesToIngress(t *testing.T) {
 	}
 	app := newWebApp("my-app", "default")
 	bundle := newBundle()
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	if len(bundle.Applications) != 1 {
@@ -164,8 +189,7 @@ func TestExposeHandler_Apply_DispatchesToIngress(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_Apply_UnsupportedControllerType(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_UnsupportedControllerType(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "expose",
 		Properties: map[string]any{
@@ -174,7 +198,7 @@ func TestExposeHandler_Apply_UnsupportedControllerType(t *testing.T) {
 	}
 	app := newApp("my-app", "default")
 	bundle := newBundle()
-	err := h.Apply(trait, app, bundle)
+	err := applyExpose(trait, app, bundle)
 	if err == nil {
 		t.Fatal("expected error for unsupported controllerType")
 	}
@@ -256,20 +280,17 @@ func TestIngressHandler_Apply_TLS(t *testing.T) {
 	}
 }
 
-// --- CanHandle and CapabilityRequired ---
+// --- TraitType and CapabilityRequired ---
 
-func TestExposeHandler_CanHandle(t *testing.T) {
-	h := &traits.ExposeHandler{}
-	if !h.CanHandle("expose") {
-		t.Error("expected true for expose")
-	}
-	if h.CanHandle("ingress") {
-		t.Error("expected false for ingress")
+func TestExposeRule_TraitType(t *testing.T) {
+	r := traits.ExposeRule{}
+	if got := r.TraitType(); got != "expose" {
+		t.Errorf("TraitType() = %q, want \"expose\"", got)
 	}
 }
 
-func TestExposeHandler_CapabilityRequired(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_CapabilityRequired(t *testing.T) {
+	h := &traits.ExposeRule{}
 	if !h.CapabilityRequired() {
 		t.Error("expected true")
 	}
@@ -1974,10 +1995,10 @@ func TestVolsyncConfig_Generate(t *testing.T) {
 	}
 }
 
-// --- ExposeHandler gateway validation ---
+// --- ExposeRule gateway validation ---
 
-func TestExposeHandler_ValidateAndApplyDefaults_Gateway_MissingGatewayName(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_ValidateAndApplyDefaults_Gateway_MissingGatewayName(t *testing.T) {
+	h := &traits.ExposeRule{}
 	rendering := map[string]any{
 		"controllerType": "gateway",
 	}
@@ -1990,8 +2011,8 @@ func TestExposeHandler_ValidateAndApplyDefaults_Gateway_MissingGatewayName(t *te
 	}
 }
 
-func TestExposeHandler_ValidateAndApplyDefaults_Gateway_DefaultNamespace(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_ValidateAndApplyDefaults_Gateway_DefaultNamespace(t *testing.T) {
+	h := &traits.ExposeRule{}
 	rendering := map[string]any{
 		"controllerType": "gateway",
 		"gatewayName":    "prod-gateway",
@@ -2005,8 +2026,8 @@ func TestExposeHandler_ValidateAndApplyDefaults_Gateway_DefaultNamespace(t *test
 	}
 }
 
-func TestExposeHandler_ValidateAndApplyDefaults_Gateway_ExplicitNamespace(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_ValidateAndApplyDefaults_Gateway_ExplicitNamespace(t *testing.T) {
+	h := &traits.ExposeRule{}
 	rendering := map[string]any{
 		"controllerType":   "gateway",
 		"gatewayName":      "prod-gateway",
@@ -2021,8 +2042,8 @@ func TestExposeHandler_ValidateAndApplyDefaults_Gateway_ExplicitNamespace(t *tes
 	}
 }
 
-func TestExposeHandler_ValidateAndApplyDefaults_Gateway_RejectsIngressClassName(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_ValidateAndApplyDefaults_Gateway_RejectsIngressClassName(t *testing.T) {
+	h := &traits.ExposeRule{}
 	rendering := map[string]any{
 		"controllerType":   "gateway",
 		"gatewayName":      "prod-gateway",
@@ -2037,8 +2058,8 @@ func TestExposeHandler_ValidateAndApplyDefaults_Gateway_RejectsIngressClassName(
 	}
 }
 
-func TestExposeHandler_ValidateAndApplyDefaults_UnsupportedControllerType(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_ValidateAndApplyDefaults_UnsupportedControllerType(t *testing.T) {
+	h := &traits.ExposeRule{}
 	rendering := map[string]any{
 		"controllerType": "foo",
 	}
@@ -2051,10 +2072,9 @@ func TestExposeHandler_ValidateAndApplyDefaults_UnsupportedControllerType(t *tes
 	}
 }
 
-// --- ExposeHandler.Apply gateway dispatch ---
+// --- ExposeRule.LowerTrait + real handler.Apply gateway dispatch ---
 
-func TestExposeHandler_Apply_Gateway_DispatchesToHTTPRoute(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_Gateway_DispatchesToHTTPRoute(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "expose",
 		Properties: map[string]any{
@@ -2065,7 +2085,7 @@ func TestExposeHandler_Apply_Gateway_DispatchesToHTTPRoute(t *testing.T) {
 	}
 	app := newWebApp("web", "default")
 	bundle := newBundle()
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	if len(bundle.Applications) != 1 {
@@ -2095,8 +2115,7 @@ func TestExposeHandler_Apply_Gateway_DispatchesToHTTPRoute(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_Apply_Gateway_ExplicitNamespace(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_Gateway_ExplicitNamespace(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "expose",
 		Properties: map[string]any{
@@ -2108,7 +2127,7 @@ func TestExposeHandler_Apply_Gateway_ExplicitNamespace(t *testing.T) {
 	}
 	app := newWebApp("web", "default")
 	bundle := newBundle()
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	subApp := bundle.Applications[0]
@@ -2126,8 +2145,7 @@ func TestExposeHandler_Apply_Gateway_ExplicitNamespace(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_Apply_Gateway_NoServicePort_Errors(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_Gateway_NoServicePort_Errors(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "expose",
 		Properties: map[string]any{
@@ -2138,7 +2156,7 @@ func TestExposeHandler_Apply_Gateway_NoServicePort_Errors(t *testing.T) {
 	}
 	app := newApp("wrk", "default")
 	bundle := newBundle()
-	err := h.Apply(trait, app, bundle)
+	err := applyExpose(trait, app, bundle)
 	if err == nil {
 		t.Fatal("expected error for component with no service port")
 	}

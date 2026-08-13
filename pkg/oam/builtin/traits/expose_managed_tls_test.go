@@ -9,7 +9,6 @@ import (
 
 	pkgerrors "github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
 // ingressFromBundle generates the first sub-application and returns it as an Ingress.
@@ -53,13 +52,12 @@ func exposeIngressTrait(issuer, wildcard string, hosts ...string) *oam.Trait {
 	return &oam.Trait{Type: "expose", Properties: props}
 }
 
-func TestExposeHandler_Apply_IngressManagedTLS(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_IngressManagedTLS(t *testing.T) {
 	app := newWebApp("my-app", "default")
 	bundle := &stack.Bundle{}
 	// Two rules, one duplicate host — synthesized TLS must dedupe.
 	trait := exposeIngressTrait("letsencrypt-prod", "", "a.apps.example.com", "a.apps.example.com", "b.apps.example.com")
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	ing := ingressFromBundle(t, bundle)
@@ -79,11 +77,10 @@ func TestExposeHandler_Apply_IngressManagedTLS(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_Apply_IngressNoIssuer_NoTLS(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_IngressNoIssuer_NoTLS(t *testing.T) {
 	app := newWebApp("my-app", "default")
 	bundle := &stack.Bundle{}
-	if err := h.Apply(exposeIngressTrait("", "", "a.apps.example.com"), app, bundle); err != nil {
+	if err := applyExpose(exposeIngressTrait("", "", "a.apps.example.com"), app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	ing := ingressFromBundle(t, bundle)
@@ -95,8 +92,7 @@ func TestExposeHandler_Apply_IngressNoIssuer_NoTLS(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_Apply_IngressUserTLSIgnored(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_IngressUserTLSIgnored(t *testing.T) {
 	app := newWebApp("my-app", "default")
 	bundle := &stack.Bundle{}
 	trait := exposeIngressTrait("letsencrypt-prod", "", "a.apps.example.com")
@@ -104,7 +100,7 @@ func TestExposeHandler_Apply_IngressUserTLSIgnored(t *testing.T) {
 	trait.Properties["tls"] = []any{map[string]any{
 		"hosts": []any{"evil.example.com"}, "secretName": "user-secret",
 	}}
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	ing := ingressFromBundle(t, bundle)
@@ -113,45 +109,41 @@ func TestExposeHandler_Apply_IngressUserTLSIgnored(t *testing.T) {
 	}
 }
 
-func TestExposeHandler_Apply_IngressHostnameRejected(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_IngressHostnameRejected(t *testing.T) {
 	app := newWebApp("my-app", "default")
 	bundle := &stack.Bundle{}
 	trait := exposeIngressTrait("", "*.apps.example.com", "not-allowed.example.com")
-	err := h.Apply(trait, app, bundle)
+	err := applyExpose(trait, app, bundle)
 	var ve *pkgerrors.ValidationError
 	if !stderrors.As(err, &ve) {
 		t.Fatalf("expected *ValidationError, got %v", err)
 	}
 }
 
-func TestExposeHandler_Apply_IngressHostnameAllowed(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_IngressHostnameAllowed(t *testing.T) {
 	app := newWebApp("my-app", "default")
 	bundle := &stack.Bundle{}
 	trait := exposeIngressTrait("", "*.apps.example.com", "foo.apps.example.com")
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 }
 
-func TestExposeHandler_Apply_ClusterIssuerCollision(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_ClusterIssuerCollision(t *testing.T) {
 	app := newWebApp("my-app", "default")
 	bundle := &stack.Bundle{}
 	trait := exposeIngressTrait("letsencrypt-prod", "", "a.apps.example.com")
 	trait.Properties["annotations"] = map[string]any{
 		"cert-manager.io/cluster-issuer": "self-signed", // conflicts with platform
 	}
-	err := h.Apply(trait, app, bundle)
+	err := applyExpose(trait, app, bundle)
 	var ve *pkgerrors.ValidationError
 	if !stderrors.As(err, &ve) {
 		t.Fatalf("expected *ValidationError for annotation collision, got %v", err)
 	}
 }
 
-func TestExposeHandler_Apply_GatewayHostnameRejected(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_GatewayHostnameRejected(t *testing.T) {
 	app := newWebApp("my-app", "default")
 	bundle := &stack.Bundle{}
 	trait := &oam.Trait{Type: "expose", Properties: map[string]any{
@@ -161,15 +153,14 @@ func TestExposeHandler_Apply_GatewayHostnameRejected(t *testing.T) {
 		"hostnames":               []any{"bad.example.com"},
 		"rules":                   []any{map[string]any{}},
 	}}
-	err := h.Apply(trait, app, bundle)
+	err := applyExpose(trait, app, bundle)
 	var ve *pkgerrors.ValidationError
 	if !stderrors.As(err, &ve) {
 		t.Fatalf("expected *ValidationError for gateway hostname, got %v", err)
 	}
 }
 
-func TestExposeHandler_Apply_GatewayNoTLS(t *testing.T) {
-	h := &traits.ExposeHandler{}
+func TestExposeRule_Apply_GatewayNoTLS(t *testing.T) {
 	app := newWebApp("my-app", "default")
 	bundle := &stack.Bundle{}
 	trait := &oam.Trait{Type: "expose", Properties: map[string]any{
@@ -181,7 +172,7 @@ func TestExposeHandler_Apply_GatewayNoTLS(t *testing.T) {
 			"matches": []any{map[string]any{"path": map[string]any{"type": "PathPrefix", "value": "/"}}},
 		}},
 	}}
-	if err := h.Apply(trait, app, bundle); err != nil {
+	if err := applyExpose(trait, app, bundle); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	// Gateway path emits an HTTPRoute, never an Ingress.

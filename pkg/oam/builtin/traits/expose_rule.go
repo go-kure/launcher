@@ -5,28 +5,35 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-kure/kure/pkg/stack"
-
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
 )
 
-// ExposeHandler handles OAM expose traits, dispatching to IngressHandler based
-// on the controllerType field injected by capability rendering.
-type ExposeHandler struct{}
+// ExposeRule lowers an "expose" trait (D5, D1 trait position) into a terminal
+// "ingress" or "httproute" trait, dispatching on the controllerType capability
+// value. It is the C5 port of the former ExposeHandler.Apply: the engine now merges
+// capability rendering into the trait before calling LowerTrait (lowering.go), so
+// this rule reads trait.Properties exactly as ExposeHandler.Apply once read them
+// post-merge — only the two direct handler calls at the end of each branch changed,
+// from invoking IngressHandler/HTTPRouteHandler.Apply directly to emitting a Trait
+// for the engine's fixpoint to dispatch on the next round.
+type ExposeRule struct{}
 
-// CanHandle returns true for expose trait type.
-func (h *ExposeHandler) CanHandle(traitType string) bool {
-	return traitType == "expose"
-}
+// TraitType claims the "expose" trait type at the trait lowering position.
+func (ExposeRule) TraitType() string { return "expose" }
 
-// CapabilityRequired returns true: the expose trait needs controllerType from
-// a ClusterProfile capability and cannot produce valid output without it.
-func (h *ExposeHandler) CapabilityRequired() bool { return true }
+// CapabilityRequired returns true: the expose trait needs controllerType from a
+// ClusterProfile capability and cannot produce valid output without it. The engine
+// enforces this (lowering.go) exactly as applyTraits enforces it for a dispatchable
+// TraitHandler.
+func (ExposeRule) CapabilityRequired() bool { return true }
 
 // ValidateAndApplyDefaults validates the capability rendering for the expose trait.
-func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
+// Identical to the former ExposeHandler.ValidateAndApplyDefaults; EvaluateProfile
+// (transform.go) now calls it via the trait-lowering-rule registry instead of the
+// trait-handler registry.
+func (ExposeRule) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
 	r, err := builtin.DecodeStrict[builtin.ExposeRendering](rendering)
 	if err != nil {
 		return nil, errors.Wrap(err, "expose rendering")
@@ -73,12 +80,11 @@ func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[
 	return rendering, nil
 }
 
-// PropertySchema declares the expose trait's user-facing properties. expose is a
-// dispatcher, so its surface is the effective union it passes through to the
-// ingress (rules) or gateway (hostnames) handler, minus `tls` (platform-managed).
-// controllerType and the ingressClassName/gateway*/certManager* keys are supplied
-// by capability rendering.
-func (h *ExposeHandler) PropertySchema() map[string]oam.PropertySchema {
+// PropertySchema declares the expose trait's user-facing properties. Identical to
+// the former ExposeHandler.PropertySchema; kept for documentation and for a future
+// authored-element validation pass (D4 currently validates only emitted elements
+// and the settled whole document, not authored input — see pkg/oam/README.md).
+func (ExposeRule) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		// controllerType is capability-injected, not user-set (see doc above), so it is
 		// NOT user-required here; it is validated in ValidateAndApplyDefaults. Kept in the
@@ -107,11 +113,17 @@ func (h *ExposeHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
-// Apply dispatches to IngressHandler or HTTPRouteHandler based on controllerType.
-// It also implements platform-managed TLS (ingress path) and hostname validation
-// (both paths), consuming the certManagerClusterIssuer/allowedHostnameWildcard
-// capability keys so they never leak into the low-level handlers.
-func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
+// LowerTrait dispatches to an emitted "ingress" or "httproute" trait based on
+// controllerType. It also implements platform-managed TLS (ingress path) and
+// hostname validation (both paths), consuming the certManagerClusterIssuer/
+// allowedHostnameWildcard capability keys so they never leak into the low-level
+// handlers — the same responsibilities ExposeHandler.Apply had, ported to lowering:
+// lctx.Component.Name replaces app.Name (identical value, transform.go:452), and
+// the emitted Trait replaces the direct IngressHandler/HTTPRouteHandler.Apply call
+// — the engine dispatches to those handlers itself once the emitted trait settles.
+func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.LoweringResult, error) {
+	componentName := lctx.Component.Name
+
 	controllerType, _ := trait.Properties["controllerType"].(string)
 	props := maps.Clone(trait.Properties)
 	delete(props, "controllerType")
@@ -136,8 +148,8 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 		delete(props, "hostnames")
 		// Validate every host that appears — the rules' hosts and any shorthand
 		// hostnames — against the platform wildcard, even when both are present.
-		if err := validateHostnames(uniqueStrings(append(ruleHosts(props), shorthand...)), wildcard, app.Name); err != nil {
-			return err
+		if err := validateHostnames(uniqueStrings(append(ruleHosts(props), shorthand...)), wildcard, componentName); err != nil {
+			return oam.LoweringResult{}, err
 		}
 		// expose is platform-managed: the user does not author the TLS block, only
 		// (optionally) the managed secret's name. Present-but-wrong-typed/empty is an
@@ -146,9 +158,9 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 		if raw, present := props["secretName"]; present {
 			s, ok := raw.(string)
 			if !ok || s == "" {
-				return &errors.ValidationError{
+				return oam.LoweringResult{}, &errors.ValidationError{
 					Field:     "secretName",
-					Component: app.Name,
+					Component: componentName,
 					Message:   "secretName must be a non-empty string",
 				}
 			}
@@ -157,21 +169,21 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 		delete(props, "secretName")
 		delete(props, "tls")
 		if issuer != "" {
-			if err := setClusterIssuerAnnotation(props, issuer, app.Name); err != nil {
-				return err
+			if err := setClusterIssuerAnnotation(props, issuer, componentName); err != nil {
+				return oam.LoweringResult{}, err
 			}
 			// TLS covers the effective routing hosts only. When both `rules` and
 			// `hostnames` are supplied, `rules` drives routing, so a hostnames entry
 			// that is not routed must not get a synthesized certificate.
 			if routingHosts := uniqueStrings(ruleHosts(props)); len(routingHosts) > 0 {
-				props["tls"] = synthesizedIngressTLS(routingHosts, app.Name, secretName)
+				props["tls"] = synthesizedIngressTLS(routingHosts, componentName, secretName)
 			}
 		} else if secretName != "" {
 			// No cluster-issuer capability → no synthesized TLS, so an authored
 			// secretName would be silently dropped. Reject instead.
-			return &errors.ValidationError{
+			return oam.LoweringResult{}, &errors.ValidationError{
 				Field:     "secretName",
-				Component: app.Name,
+				Component: componentName,
 				Message:   "secretName requires platform-managed TLS (no cert-manager cluster-issuer capability)",
 			}
 		}
@@ -180,33 +192,33 @@ func (h *ExposeHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 		setSSLRedirectAnnotations(props)
 		// external-auth: when the trait authors allowedGroups, inject the nginx
 		// auth-* annotations from the capability rendering.
-		if err := setAuthAnnotations(props, app.Name); err != nil {
-			return err
+		if err := setAuthAnnotations(props, componentName); err != nil {
+			return oam.LoweringResult{}, err
 		}
-		return (&IngressHandler{}).Apply(&oam.Trait{Type: "expose", Properties: props}, app, bundle)
+		return oam.LoweringResult{Traits: []oam.Trait{{Type: "ingress", Properties: props}}}, nil
 	case "gateway":
 		// These properties are nginx-ingress-specific; reject them inline on the
 		// gateway path (the rendering guard only covers the capability-supplied form).
 		for _, k := range []string{"sslRedirect", "forceSslRedirect", "allowedGroups", "authSigninURL", "secretName"} {
 			if _, ok := props[k]; ok {
-				return &errors.ValidationError{
+				return oam.LoweringResult{}, &errors.ValidationError{
 					Field:     k,
-					Component: app.Name,
+					Component: componentName,
 					Message:   k + " is only valid when controllerType is \"ingress\"",
 				}
 			}
 		}
-		if err := validateHostnames(hostnameList(props), wildcard, app.Name); err != nil {
-			return err
+		if err := validateHostnames(hostnameList(props), wildcard, componentName); err != nil {
+			return oam.LoweringResult{}, err
 		}
 		gatewayName, _ := props["gatewayName"].(string)
 		gatewayNamespace, _ := props["gatewayNamespace"].(string)
 		delete(props, "gatewayName")
 		delete(props, "gatewayNamespace")
 		props["parentRefs"] = []any{synthesizeParentRef(gatewayName, gatewayNamespace)}
-		return (&HTTPRouteHandler{}).Apply(&oam.Trait{Type: "expose", Properties: props}, app, bundle)
+		return oam.LoweringResult{Traits: []oam.Trait{{Type: "httproute", Properties: props}}}, nil
 	default:
-		return errors.Errorf("expose trait: unsupported controllerType %q", controllerType)
+		return oam.LoweringResult{}, errors.Errorf("expose trait: unsupported controllerType %q", controllerType)
 	}
 }
 

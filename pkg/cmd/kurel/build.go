@@ -265,7 +265,6 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 // newBuiltinTransformer and the handler-schema parity test.
 func builtinTraitHandlers() map[string]oam.TraitHandler {
 	return map[string]oam.TraitHandler{
-		"expose":               &traits.ExposeHandler{},
 		"ingress":              &traits.IngressHandler{},
 		"httproute":            &traits.HTTPRouteHandler{},
 		"certificate":          &traits.CertificateHandler{},
@@ -291,6 +290,10 @@ func newBuiltinTransformer() *oam.Transformer {
 	for name, h := range builtinTraitHandlers() {
 		t.RegisterBuiltinTrait(name, h)
 	}
+	// expose is a trait lowering rule (C5), not a dispatchable handler: it never
+	// produces output itself, only an emitted "ingress" or "httproute" trait for
+	// the handlers above to dispatch on. See pkg/oam/builtin/traits/expose_rule.go.
+	t.RegisterTraitLowering(traits.ExposeRule{})
 	return t
 }
 

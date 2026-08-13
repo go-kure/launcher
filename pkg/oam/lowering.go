@@ -482,8 +482,25 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				newTraits = append(newTraits, trait)
 				continue
 			}
+			// CapabilityAware is engine-enforced here exactly as applyTraits enforces it
+			// for a dispatchable TraitHandler (transform.go:701): a lowering rule that
+			// needs a ClusterProfile capability and finds none fails with
+			// ErrMissingCapability, since the rule itself never runs through applyTraits.
+			if aware, ok := rule.(CapabilityAware); ok && aware.CapabilityRequired() {
+				key := buildCapabilityKey(trait)
+				_, foundScoped := ctx.Capabilities[key]
+				_, foundBare := ctx.Capabilities[trait.Type]
+				if !foundScoped && !foundBare {
+					return false, steps, errors.Wrapf(ErrMissingCapability, "%s: capability %q not found in ClusterProfile", traitOrigin, key)
+				}
+			}
+			// Capability rendering is merged in before the rule runs (D5 input 3), the
+			// same merge applyTraits performs for a dispatchable handler — so a
+			// TraitLoweringRule sees the identical "rendering as defaults, inline wins"
+			// view a TraitHandler would.
+			resolvedTrait := resolveCapability(trait, ctx.Capabilities)
 			lctx := LoweringContext{Document: doc, Component: &comp, Capabilities: ctx.Capabilities, Origin: traitOrigin, Namer: namer}
-			result, err := rule.LowerTrait(&trait, lctx)
+			result, err := rule.LowerTrait(&resolvedTrait, lctx)
 			if err != nil {
 				return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 			}

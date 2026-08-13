@@ -249,6 +249,23 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 		typeName, _, _ := strings.Cut(key, ".")
 		handler, ok := t.traitHandlers[typeName]
 		if !ok {
+			// The type may be a trait-position lowering rule instead of a dispatchable
+			// handler (e.g. "expose": D5, friction #2) — a rule never reaches
+			// applyTraits, so this is the only place its ValidateAndApplyDefaults ever
+			// runs. Rule-registry types have no CapabilityDefinition-schema-defaults
+			// step: unlike RegisterTrait/RegisterBuiltinTrait, RegisterTraitLowering
+			// draws no custom/built-in distinction today, and every trait lowering
+			// rule in this spike is built-in.
+			if rule, ok := t.traitLoweringRules[typeName]; ok {
+				if vad, ok := rule.(ValidateAndApplyDefaults); ok {
+					validated, err := vad.ValidateAndApplyDefaults(binding.Rendering)
+					if err != nil {
+						return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
+					}
+					evaluated[key] = CapabilityBinding{Rendering: validated}
+					continue
+				}
+			}
 			evaluated[key] = binding
 			continue
 		}
@@ -698,39 +715,47 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 				return &TransformError{Message: fmt.Sprintf("no handler for trait type %q", trait.Type)}
 			}
 
-			if aware, ok := handler.(CapabilityAware); ok && aware.CapabilityRequired() {
-				key := buildCapabilityKey(trait)
-				_, foundScoped := ctx.Capabilities[key]
-				_, foundBare := ctx.Capabilities[trait.Type]
-				if !foundScoped && !foundBare {
-					return &TransformError{
-						Message: fmt.Sprintf("component %q trait %q: capability %q not found in ClusterProfile",
-							entry.component.Name, trait.Type, key),
-						Cause: ErrMissingCapability,
-					}
-				}
-			}
-
-			// For custom (non-built-in) traits whose capability rendering resolved in the
-			// profile, warn or error when no CapabilityDefinition was loaded for the type.
-			if !t.builtinTraitTypes[trait.Type] {
-				key := buildCapabilityKey(trait)
-				_, foundScoped := ctx.Capabilities[key]
-				_, foundBare := ctx.Capabilities[trait.Type]
-				if foundScoped || foundBare {
-					if _, hasDef := t.capabilityDefs[trait.Type]; !hasDef {
-						msg := fmt.Sprintf("no CapabilityDefinition found for custom trait %q", trait.Type)
-						if t.strictCapabilities {
-							return &TransformError{Message: msg}
-						}
-						if t.warnHandler != nil {
-							t.warnHandler(msg)
+			// A sealed trait was emitted by a lowering rule, which already merged
+			// capability rendering into it (D5) before the fixpoint settled — the
+			// information-closure rule does not allow a second, different-key merge
+			// here (a fifth input). So every capability-processing step below is
+			// skipped entirely for a sealed trait; the trait's Properties are final.
+			resolved := trait
+			if !trait.sealed {
+				if aware, ok := handler.(CapabilityAware); ok && aware.CapabilityRequired() {
+					key := buildCapabilityKey(trait)
+					_, foundScoped := ctx.Capabilities[key]
+					_, foundBare := ctx.Capabilities[trait.Type]
+					if !foundScoped && !foundBare {
+						return &TransformError{
+							Message: fmt.Sprintf("component %q trait %q: capability %q not found in ClusterProfile",
+								entry.component.Name, trait.Type, key),
+							Cause: ErrMissingCapability,
 						}
 					}
 				}
-			}
 
-			resolved := resolveCapability(trait, ctx.Capabilities)
+				// For custom (non-built-in) traits whose capability rendering resolved in the
+				// profile, warn or error when no CapabilityDefinition was loaded for the type.
+				if !t.builtinTraitTypes[trait.Type] {
+					key := buildCapabilityKey(trait)
+					_, foundScoped := ctx.Capabilities[key]
+					_, foundBare := ctx.Capabilities[trait.Type]
+					if foundScoped || foundBare {
+						if _, hasDef := t.capabilityDefs[trait.Type]; !hasDef {
+							msg := fmt.Sprintf("no CapabilityDefinition found for custom trait %q", trait.Type)
+							if t.strictCapabilities {
+								return &TransformError{Message: msg}
+							}
+							if t.warnHandler != nil {
+								t.warnHandler(msg)
+							}
+						}
+					}
+				}
+
+				resolved = resolveCapability(trait, ctx.Capabilities)
+			}
 			prevLen := len(bundle.Applications)
 			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {
 				return &TransformError{

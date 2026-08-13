@@ -62,6 +62,24 @@ the full chain through the real pipeline (`testdata/toy-webapplication/`, marked
 `SPIKE_ONLY` so the generic `TestFixtures` loop skips it) and asserts the resulting
 `stack.Bundle.DependsOn` edge, not just the golden manifests.
 
+`pkg/oam/builtin/traits.ExposeRule` re-expresses the built-in `expose` trait as a
+`TraitLoweringRule` (D5 worked example, not a toy): it is no longer a dispatchable
+`TraitHandler`, so `applyTraits`' capability-merge/dispatch path never sees it.
+Instead the engine merges the `expose` capability's rendering into the trait
+*before* calling `LowerTrait` (mirroring what `applyTraits` used to do for
+`ExposeHandler.Apply`), and `ExposeRule.LowerTrait` emits a terminal `ingress` or
+`httproute` trait for the fixpoint's next round to dispatch on normally. Two
+consequences follow directly from D5's closed-input rule: emitted traits are
+marked `sealed`, so `applyTraits` skips capability resolution for them entirely —
+without this, a component that also had an unrelated `ingress`/`httproute`
+capability defined would leak a second, uninvited merge into the emitted trait,
+a fifth input D5 forbids. And because `ExposeRule` is never in `traitHandlers`,
+`EvaluateProfile` falls back to the trait-lowering-rule registry so the `expose`
+capability's `ValidateAndApplyDefaults` (the `gatewayName`/`gatewayNamespace`
+checks) still runs — otherwise those checks would silently stop firing with no
+failing test to catch it (see `TestExposeRule_EvaluateProfile_GatewayValidation`
+and `TestExposeRule_SealedGuard_ExtraIngressCapabilityIgnored`).
+
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /
 `cilium-networkpolicy` traits are unaffected):
