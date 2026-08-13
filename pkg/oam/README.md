@@ -179,9 +179,10 @@ exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing 
 required `ClusterProfile` capability fails with `ErrMissingCapability`. A rule that
 also implements `PropertySchemaProvider` has an authored value for one of its
 platform-reserved properties rejected before capability rendering is merged into the
-trait it receives, and its emitted component/trait/policy properties validated
-against the TARGET handler's declared schema before the emitted element is accepted
-into the next round (see Property schemas below).
+trait it receives. Independently of that — every lowering rule, whether or not it
+declares its own schema — has each element it emits (component, trait, or policy)
+validated against the TARGET handler's declared schema before the emitted element is
+accepted into the next round (see Property schemas below).
 
 ## Property schemas
 
