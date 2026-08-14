@@ -287,6 +287,29 @@ func TestLowerRaws_CrossDocumentNameCollision(t *testing.T) {
 	}
 }
 
+// TestLowerRaws_PassThroughDocumentBlocksGeneratedNameCollision is the round-8
+// Codex regression (review comment 3783340518): a pass-through terminal Application
+// is never decoded and never joins the shared fixpoint, so before this fix its own
+// identity never touched the shared NameAllocator at all. A claimed raw document's
+// rule could then legitimately reserve the exact same (namespace, name) via
+// lctx.Namer.Name — the collision API used correctly — and LowerRaws would return
+// BOTH documents sharing one identity: a duplicate-Application output, not merely a
+// missed diagnostic.
+func TestLowerRaws_PassThroughDocumentBlocksGeneratedNameCollision(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(testRawRule{kind: "WebApplication", nameBase: "shop", nameSuffixes: []string{"1"}})
+
+	passThrough := json.RawMessage(`{"apiVersion":"` + SupportedAPIVersion + `","kind":"Application","metadata":{"name":"shop-1"},"spec":{"components":[{"name":"web","type":"webservice","properties":{"image":"nginx"}}]}}`)
+
+	_, err := tr.LowerRaws([]json.RawMessage{passThrough, rawWebApplication("shop")}, TransformContext{})
+	if err == nil {
+		t.Fatal("expected a generated-name collision against the pass-through document's identity")
+	}
+	if !strings.Contains(err.Error(), "shop-1") {
+		t.Errorf("expected the error to name the colliding identity %q, got: %v", "shop-1", err)
+	}
+}
+
 // TestLowerRaws_DuplicateOrigin_RejectsBeforeLowering proves the duplicate-origin
 // check short-circuits: two raw inputs sharing one authored name+kind are rejected
 // before either rule's DecodeDocument runs, so the shared NameAllocator never has to

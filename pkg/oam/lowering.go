@@ -187,6 +187,13 @@ func newNameAllocator() *NameAllocator {
 	return &NameAllocator{taken: make(map[string]nameClaim)}
 }
 
+// reservedIdentity is one pre-existing document identity runLowering claims against its
+// NameAllocator before any rule runs — see runLowering's preReserved parameter.
+type reservedIdentity struct {
+	name   string
+	origin Origin
+}
+
 // Reserve claims name for origin. Reserving an already-claimed name is always an
 // error, regardless of round or whether the origin matches the prior claim's.
 //
@@ -522,8 +529,24 @@ type loweringDoc struct {
 // call it exactly once per invocation, so one NameAllocator (D2), one expansion chain
 // and one MaxLoweringDepth budget (D7) are shared by every document in the call,
 // siblings from different raw inputs included. seed must be non-empty.
-func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext) ([]loweringDoc, error) {
+//
+// preReserved claims every identity in it against namer before any rule runs. LowerRaws
+// uses this to register each pass-through document's own (namespace, name) — a document
+// it never decodes or hands to a rule, so it would otherwise never touch namer at all.
+// Without this, a claimed raw document's rule could generate a child document sharing a
+// pass-through document's exact identity: namer.Reserve would see no prior claim for
+// that key and let it through, and LowerRaws would then return two Application entries
+// with the same (namespace, name) — a real duplicate-identity output, not merely a
+// missed diagnostic, even though the generating rule used the collision API correctly.
+// t.lower has no pass-through concept (a single in-transform document has nothing else
+// in its batch to collide with), so it always passes nil.
+func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext, preReserved []reservedIdentity) ([]loweringDoc, error) {
 	namer := newNameAllocator()
+	for _, r := range preReserved {
+		if err := namer.Reserve(r.name, r.origin); err != nil {
+			return nil, &LoweringError{Origin: r.origin, Cause: err}
+		}
+	}
 	var chain []LoweringStep
 	cur := seed
 	culprit := seed[0].origin // first document still expanding in the latest round
@@ -643,7 +666,7 @@ func (t *Transformer) lower(app *Application, ctx TransformContext) ([]*Applicat
 		origin: Origin{Document: app.Metadata.Name, DocumentKind: app.Kind, Namespace: app.Metadata.Namespace},
 		slot:   0,
 	}}
-	settled, err := t.runLowering(seed, ctx)
+	settled, err := t.runLowering(seed, ctx, nil)
 	if err != nil {
 		return nil, err
 	}

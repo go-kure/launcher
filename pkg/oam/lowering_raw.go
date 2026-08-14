@@ -61,6 +61,13 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 	claimed := make([]bool, len(raws))
 	seenKeys := make(map[rawDocKey]int, len(raws))
 	var seed []loweringDoc
+	// preReserved claims every pass-through document's own identity against the shared
+	// NameAllocator before any rule runs — see runLowering's preReserved parameter. A
+	// pass-through document is never decoded and never joins seed, so without this it
+	// would never touch the allocator at all: a claimed raw document's rule could then
+	// generate a child document sharing a pass-through's exact (namespace, name), and
+	// LowerRaws would return both, an undetected duplicate identity.
+	var preReserved []reservedIdentity
 	for i, raw := range raws {
 		var env documentEnvelope
 		if err := yaml.Unmarshal(raw, &env); err != nil {
@@ -84,7 +91,18 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		}
 		rule, ok := t.rawDocLoweringRules[env.Kind]
 		if !ok {
-			continue // pass-through: never decoded, never re-serialized
+			// Pass-through: never decoded, never re-serialized — but its identity
+			// still has to be visible to collision detection (see preReserved
+			// above), so register it here rather than skipping silently. An empty
+			// or malformed name is not this pass's error to reject (env.Kind isn't
+			// even a lowerable kind here), so only register a usable name.
+			if env.Metadata.Name != "" {
+				preReserved = append(preReserved, reservedIdentity{
+					name:   env.Metadata.Name,
+					origin: Origin{Document: env.Metadata.Name, DocumentKind: env.Kind, Namespace: env.Metadata.Namespace},
+				})
+			}
+			continue
 		}
 
 		// Validate the two fields this pass itself relies on before claiming the
@@ -151,7 +169,7 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		return raws, nil
 	}
 
-	settled, err := t.runLowering(seed, ctx)
+	settled, err := t.runLowering(seed, ctx, preReserved)
 	if err != nil {
 		return nil, err
 	}
