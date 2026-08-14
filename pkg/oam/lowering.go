@@ -195,7 +195,14 @@ func newNameAllocator() *NameAllocator {
 // a stable per-sibling index into the name itself), since the engine cannot perform
 // that disambiguation on its behalf.
 func (n *NameAllocator) Reserve(name string, origin Origin) error {
-	if prior, ok := n.taken[name]; ok {
+	// Keyed on (namespace, name), not name alone: two documents authored in
+	// different namespaces (Origin.Namespace) may legitimately generate the same
+	// child name — they lower to namespace-disjoint resources, exactly as two
+	// same-named Kubernetes resources in different namespaces do not collide. A
+	// bare-name key would reject that valid case, undermining LowerRaws's own
+	// namespace-scoped duplicate-document detection (rawDocKey, lowering_raw.go).
+	key := origin.Namespace + "\x00" + name
+	if prior, ok := n.taken[key]; ok {
 		if prior.origin != origin {
 			return errors.Errorf("lowering: generated name %q collides — already used by %s, also wanted by %s", name, prior.origin, origin)
 		}
@@ -204,7 +211,7 @@ func (n *NameAllocator) Reserve(name string, origin Origin) error {
 		}
 		return errors.Errorf("lowering: generated name %q collides — %s already used it in an earlier lowering round", name, origin)
 	}
-	n.taken[name] = nameClaim{origin: origin, round: n.round}
+	n.taken[key] = nameClaim{origin: origin, round: n.round}
 	return nil
 }
 

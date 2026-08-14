@@ -173,6 +173,11 @@ func rawOfKind(kind, name string) json.RawMessage {
 		"\nspec:\n  image: nginx\n")
 }
 
+func rawWebApplicationNS(name, namespace string) json.RawMessage {
+	return json.RawMessage("apiVersion: " + SupportedAPIVersion + "\nkind: WebApplication\nmetadata:\n  name: " + name +
+		"\n  namespace: " + namespace + "\nspec:\n  image: nginx:1.27\n  hostname: " + name + ".example.com\n  database:\n    version: \"16\"\n")
+}
+
 // --- tests -----------------------------------------------------------------
 
 // TestLowerRaws_PassThroughIsByteIdentical proves an input whose kind no raw rule
@@ -327,6 +332,34 @@ func TestLowerRaws_SameNameDifferentNamespace_NotRejectedAsDuplicate(t *testing.
 	}
 	if err != nil && strings.Contains(err.Error(), "duplicate authored document") {
 		t.Fatalf("namespace-disjoint inputs were rejected as duplicates: %v", err)
+	}
+}
+
+// TestLowerRaws_NameAllocator_ScopedByNamespace is the round-6 Codex regression: the
+// batch-level duplicate check above (F6) does not reject two namespace-disjoint raw
+// inputs sharing a name and kind, but NameAllocator.Reserve was still keyed on the
+// bare generated name, ignoring Origin.Namespace — so two rules that independently
+// derive the SAME child name from the SAME authored name (the ordinary case: a
+// deterministic "<name>-<suffix>" scheme, exactly what testRawRule uses with no
+// nameBase override) would collide even though they lower to namespace-disjoint
+// resources, same as two identically-named Kubernetes objects in different
+// namespaces do not collide. This is exactly the gap
+// TestLowerRaws_SameNameDifferentNamespace_NotRejectedAsDuplicate's own doc comment
+// says it leaves unproven. Fixed by keying NameAllocator.taken on
+// (Origin.Namespace, name).
+func TestLowerRaws_NameAllocator_ScopedByNamespace(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(testRawRule{kind: "WebApplication"})
+
+	prod := rawWebApplicationNS("shop", "prod")
+	staging := rawWebApplicationNS("shop", "staging")
+
+	out, err := tr.LowerRaws([]json.RawMessage{prod, staging}, TransformContext{})
+	if err != nil {
+		t.Fatalf("LowerRaws rejected namespace-disjoint documents whose rules generated the same child name: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("len(out) = %d, want 2", len(out))
 	}
 }
 
