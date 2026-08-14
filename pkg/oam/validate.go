@@ -187,7 +187,7 @@ func validateComponent(c *Component, index int, seenNames map[string]bool, custo
 	}
 
 	for j, t := range c.Traits {
-		if err := validateTrait(&t, c.Name, c.Type, j, customTraitTypes); err != nil {
+		if err := validateTrait(&t, c.Name, c.Type, j, customTraitTypes, lowerableComponentTypes[c.Type]); err != nil {
 			return err
 		}
 	}
@@ -195,7 +195,17 @@ func validateComponent(c *Component, index int, seenNames map[string]bool, custo
 	return nil
 }
 
-func validateTrait(t *Trait, componentName, componentType string, index int, customTraitTypes map[string]bool) error {
+// validateTrait checks a trait's type and, unless componentIsLowerable, its
+// trait-component restriction. componentIsLowerable is true when componentType is not
+// yet terminal — it will be rewritten by a registered ComponentLoweringRule before the
+// fixpoint settles, so componentType is not the type the trait will actually end up
+// attached to. Checking the restriction here would validate against the wrong
+// component type (e.g. rejecting "scaler" on a higher-level component whose lowering
+// rule would emit "webservice", which does support it). validateSettled (lowering.go)
+// re-runs this same check after the fixpoint settles, against the real terminal
+// component type, so deferring here does not skip the check — it moves it to where the
+// terminal type is known.
+func validateTrait(t *Trait, componentName, componentType string, index int, customTraitTypes map[string]bool, componentIsLowerable bool) error {
 	if t.Type == "" {
 		return oamValidationError("type", fmt.Sprintf("component %q trait[%d] missing type",
 			componentName, index))
@@ -203,6 +213,10 @@ func validateTrait(t *Trait, componentName, componentType string, index int, cus
 
 	if !validTraitTypes[t.Type] && !customTraitTypes[t.Type] {
 		return errors.NewValidationError("type", t.Type, componentName, supportedTraitTypes())
+	}
+
+	if componentIsLowerable {
+		return nil
 	}
 
 	if allowed, restricted := traitComponentRestrictions[t.Type]; restricted {
