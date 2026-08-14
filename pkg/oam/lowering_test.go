@@ -975,6 +975,100 @@ func TestLower_NestedTraitInDocumentRuleOutput_IsSealed(t *testing.T) {
 	}
 }
 
+// documentWithNestedComponentAndPolicyRule is a document-position rule that emits a
+// fresh component and a fresh policy, neither forwarded from doc — the round-11-
+// batch-2 regression fixture: nested COMPONENTS and POLICIES, not just traits
+// (documentWithNestedTraitRule above), left unstamped at document-rule emission.
+type documentWithNestedComponentAndPolicyRule struct{ kind string }
+
+func (r documentWithNestedComponentAndPolicyRule) Kind() string { return r.kind }
+
+func (r documentWithNestedComponentAndPolicyRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name + "-lowered"},
+		Spec: ApplicationSpec{
+			Components: []Component{{
+				Name:       "web",
+				Type:       "webservice",
+				Properties: map[string]any{"image": "nginx"},
+			}},
+			Policies: []ApplicationPolicy{{
+				Name:       "pol",
+				Type:       "widget-policy",
+				Properties: map[string]any{},
+			}},
+		},
+	}}}, nil
+}
+
+// TestLower_ComponentAndPolicyInDocumentRuleOutput_AreStamped is the round-11-batch-2
+// Codex regression test (pullrequestreview-4937433461, flagging lowering.go:717 as
+// reviewed at commit b9bfe94): a DocumentLoweringRule's emitted Application had only
+// the Application ITSELF stamped with the authored origin (line 723); nested
+// components and policies fell through to lowerDocumentBody's fallback derivation a
+// round later, or — for an already-terminal component/policy no later round ever
+// touches — were never stamped at all, so Origin() on the final settled output
+// returned false, violating the "stamped once, copied verbatim onto every element it
+// expands into at any depth" doctrine (Origin's own doc comment). Proves both are now
+// stamped at document-rule emission time, with the authored document identity
+// preserved (Document/DocumentKind/Namespace) and their own Component/PolicyName
+// filled in.
+func TestLower_ComponentAndPolicyInDocumentRuleOutput_AreStamped(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		nil,
+	)
+	tr.RegisterPolicy("widget-policy", &stubPolicyHandler{typ: "widget-policy"})
+	tr.RegisterDocumentLowering(documentWithNestedComponentAndPolicyRule{kind: "Wrapper"})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Wrapper",
+		Metadata:   Metadata{Name: "myapp", Namespace: "team-a"},
+	}
+
+	got, err := tr.lower(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("lower returned %d docs, want 1", len(got))
+	}
+	settled := got[0]
+
+	if len(settled.Spec.Components) != 1 {
+		t.Fatalf("settled components = %d, want 1", len(settled.Spec.Components))
+	}
+	comp := settled.Spec.Components[0]
+	compOrigin, ok := comp.Origin()
+	if !ok {
+		t.Fatal("expected the emitted component to carry a stamped origin")
+	}
+	if compOrigin.Document != "myapp" || compOrigin.DocumentKind != "Wrapper" || compOrigin.Namespace != "team-a" {
+		t.Errorf("component origin = %+v, want authored document identity (myapp/Wrapper/team-a)", compOrigin)
+	}
+	if compOrigin.Component != "web" || compOrigin.ComponentType != "webservice" {
+		t.Errorf("component origin = %+v, want Component=web ComponentType=webservice", compOrigin)
+	}
+
+	if len(settled.Spec.Policies) != 1 {
+		t.Fatalf("settled policies = %d, want 1", len(settled.Spec.Policies))
+	}
+	pol := settled.Spec.Policies[0]
+	polOrigin, ok := pol.Origin()
+	if !ok {
+		t.Fatal("expected the emitted policy to carry a stamped origin")
+	}
+	if polOrigin.Document != "myapp" || polOrigin.DocumentKind != "Wrapper" || polOrigin.Namespace != "team-a" {
+		t.Errorf("policy origin = %+v, want authored document identity (myapp/Wrapper/team-a)", polOrigin)
+	}
+	if polOrigin.PolicyName != "pol" {
+		t.Errorf("policy origin = %+v, want PolicyName=pol", polOrigin)
+	}
+}
+
 // forwardingComponentRule is a component-position rule that retypes a component but
 // preserves whatever traits were already attached to it, using the natural
 // `Traits: comp.Traits` idiom described in the round-7 Codex finding (lowering.go:945).
