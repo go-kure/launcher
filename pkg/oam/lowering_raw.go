@@ -53,6 +53,22 @@ type rawDocKey struct {
 // trait rule declaring CapabilityRequired() then fails with ErrMissingCapability, the
 // same failure the in-transform path produces for the same input. Making capability
 // evaluation available at this seam is the consumer's problem, not this function's.
+//
+// KNOWN LIMITATION (round-9-batch-2 Codex finding, unfixed — no RawDocumentLoweringRule
+// ships in this package yet, so nothing currently triggers it): Trait.sealed is
+// unexported, so yaml.Marshal silently drops it from the returned bytes. If a claimed
+// raw document's shared fixpoint round (lowerRawOnce, then the ordinary
+// component/trait dispatch it feeds into) seals a synthesized terminal trait, that
+// seal is lost the moment this function serializes its output. A caller that re-parses
+// the returned bytes and then calls Transform/TransformWithPolicy on the SAME
+// Transformer will have applyTraits (transform.go) treat that trait as unsealed and
+// perform a second, redundant capability-rendering merge — or fail with
+// ErrMissingCapability for a capability the raw-lowering rule already accounted for.
+// Before registering a RawDocumentLoweringRule whose LowerDocument (directly or via a
+// component/trait-position rule dispatched during the same call) can emit a sealed
+// trait, this must be fixed: either preserve sealed state across the round-trip, or
+// defer all trait-position capability processing for a raw-entered document until the
+// caller's own post-parse Transform call.
 func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([]json.RawMessage, error) {
 	if len(t.rawDocLoweringRules) == 0 {
 		return raws, nil // raw-path analogue of the pointer-identity guarantee: nothing to do, nothing touched

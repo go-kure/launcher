@@ -404,6 +404,47 @@ func (r schemaTraitLoweringRule) PropertySchema() map[string]PropertySchema {
 	return map[string]PropertySchema{"hostnames": {Type: PropertyTypeArray, Required: true, Items: &PropertySchema{Type: PropertyTypeString}}}
 }
 
+// requiredSchemaPolicyLoweringRule is requiredSchemaComponentLoweringRule's
+// policy-position counterpart.
+type requiredSchemaPolicyLoweringRule struct{ typ string }
+
+func (r requiredSchemaPolicyLoweringRule) PolicyType() string { return r.typ }
+func (r requiredSchemaPolicyLoweringRule) LowerPolicy(pol *ApplicationPolicy, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Policies: []ApplicationPolicy{{Name: pol.Name, Type: "dependency", Properties: map[string]any{}}}}, nil
+}
+func (r requiredSchemaPolicyLoweringRule) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{"owner": {Type: PropertyTypeString, Required: true}}
+}
+
+// TestValidateEmittedPolicy_ConsultsPolicyLoweringRuleSchema is the
+// round-9-batch-2 Codex regression test (property_validate.go:429): unlike
+// validateEmittedComponent/validateEmittedTrait, validateEmittedPolicy never fell
+// back to policyLoweringRules when no terminal policyHandler claimed the emitted
+// type — so a PolicyLoweringRule's own declared PropertySchema went completely
+// unenforced at emission time, even though HandlerSchemas (transform.go) already
+// publishes it as a discoverable schema (same gap round-8's component/trait fix
+// closed for those two positions, left open here).
+func TestValidateEmittedPolicy_ConsultsPolicyLoweringRuleSchema(t *testing.T) {
+	tr := newSchemaTransformer()
+	tr.RegisterPolicyLowering(requiredSchemaPolicyLoweringRule{typ: "higher-dependency"})
+
+	if err := tr.validateEmittedPolicy(&ApplicationPolicy{
+		Name: "order", Type: "higher-dependency", Properties: map[string]any{"owner": "team-a"},
+	}); err != nil {
+		t.Fatalf("expected a schema-conformant emitted policy to be accepted, got: %v", err)
+	}
+
+	err := tr.validateEmittedPolicy(&ApplicationPolicy{
+		Name: "order", Type: "higher-dependency", Properties: map[string]any{},
+	})
+	if err == nil {
+		t.Fatal("expected a missing required property to be rejected against the lowering rule's own schema")
+	}
+	if !strings.Contains(err.Error(), `emitted policy "order"`) || !strings.Contains(err.Error(), `"owner" is required`) {
+		t.Errorf("unexpected message: %v", err)
+	}
+}
+
 // TestValidateEmittedComponent_ConsultsComponentLoweringRuleSchema is the round-8
 // Codex regression test (property_validate.go:379-386): when a rule emits an
 // intermediate component whose target type is claimed by a ComponentLoweringRule
