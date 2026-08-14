@@ -294,8 +294,11 @@ func newBuiltinTransformer() *oam.Transformer {
 	// HTTPRouteHandler (registered above) to dispatch on the next fixpoint round.
 	// It must not also appear in builtinTraitHandlers — RegisterTraitLowering
 	// panics on that collision, which is the guard doing its job.
+	// RegisterBuiltinTraitLowering (not RegisterTraitLowering) so EvaluateProfile
+	// exempts "expose" from CapabilityDefinition schema application exactly like a
+	// built-in TraitHandler is exempt.
 	for _, r := range builtinTraitLoweringRules() {
-		t.RegisterTraitLowering(r)
+		t.RegisterBuiltinTraitLowering(r)
 	}
 	return t
 }
