@@ -249,3 +249,59 @@ func TestLower_IllegalPositionEmission_Rejected(t *testing.T) {
 		t.Fatalf("expected a policy-position/Traits rejection message, got: %v", err)
 	}
 }
+
+// chainDepthRule is a component-lowering rule for exactly one type in a fixed chain
+// "chain-0" -> "chain-1" -> ... -> "chain-6" -> "webservice". Each hop is a genuine
+// expansion (changed=true); "webservice" is terminal (no lowering rule registered
+// for it), so the chain settles there with no further change.
+type chainDepthRule struct{ depth int }
+
+func (r chainDepthRule) ComponentType() string { return "chain-" + strconv.Itoa(r.depth) }
+
+func (r chainDepthRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	next := "chain-" + strconv.Itoa(r.depth+1)
+	if r.depth+1 == wantRealExpansions {
+		next = "webservice"
+	}
+	return LoweringResult{Components: []Component{{Name: comp.Name, Type: next, Properties: map[string]any{"image": "nginx"}}}}, nil
+}
+
+// wantRealExpansions is deliberately a literal, not MaxLoweringDepth-1: this test's
+// whole point is proving the engine supports 8 genuine expansion rounds regardless of
+// how the production constant is currently set, so it must not silently track a
+// regression in that constant.
+const wantRealExpansions = 8
+
+// TestLower_ExactlyMaxRealExpansions_Settles is the round-7 Codex regression test
+// (lowering.go:522): a chain performing exactly wantRealExpansions genuine
+// expansions — the terminal element emitted on the last of those rounds — must still
+// succeed. The engine needs one further round after that last expansion purely to
+// observe that nothing changed; before the fix, the depth guard fired on exactly that
+// observing round instead of letting it run, rejecting a chain that never actually
+// exceeded the advertised budget.
+func TestLower_ExactlyMaxRealExpansions_Settles(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		nil,
+	)
+	for d := 0; d < wantRealExpansions; d++ {
+		tr.RegisterComponentLowering(chainDepthRule{depth: d})
+	}
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{
+			Components: []Component{{Name: "web", Type: "chain-0", Properties: map[string]any{}}},
+		},
+	}
+
+	got, err := tr.lower(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("lower: a chain of exactly %d real expansions must settle, not exceed the depth budget: %v", wantRealExpansions, err)
+	}
+	if len(got) != 1 || len(got[0].Spec.Components) != 1 || got[0].Spec.Components[0].Type != "webservice" {
+		t.Fatalf("expected the chain to settle on a single webservice component, got: %+v", got)
+	}
+}

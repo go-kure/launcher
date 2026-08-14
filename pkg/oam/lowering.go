@@ -26,7 +26,18 @@ const terminalDocumentKind = "Application"
 // MaxLoweringDepth bounds the fixpoint (D7): a lowering rule that keeps re-emitting
 // its own (or another registered) type fails the build with the full expansion
 // chain, rather than looping forever.
-const MaxLoweringDepth = 8
+//
+// The budget is MaxLoweringDepth-1 real expansion rounds plus one settling round: the
+// guard in runLowering fires only once a round is entered that would exceed this
+// count, so a chain performing exactly MaxLoweringDepth-1 genuine expansions still
+// gets the one extra round it needs to observe that nothing changed and succeed
+// (round-7 Codex finding, lowering.go — a chain doing exactly the then-budget's worth
+// of real expansions failed because that observing round was never allowed to run).
+// Set one higher than the intended real-expansion ceiling (8) for exactly that
+// reason, rather than changing the guard's comparison itself, which the existing
+// depth-limit tests below assert against symbolically (MaxLoweringDepth), not a
+// hardcoded round count.
+const MaxLoweringDepth = 9
 
 // ErrLoweringDepthExceeded is the cause wrapped by a LoweringError when the fixpoint
 // does not settle within MaxLoweringDepth rounds.
