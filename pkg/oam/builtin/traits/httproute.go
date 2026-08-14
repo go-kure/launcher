@@ -102,6 +102,7 @@ func (h *HTTPRouteHandler) PropertySchema() map[string]oam.PropertySchema {
 				},
 			},
 		},
+		"annotations":      {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Additional annotations to set on the generated HTTPRoute resource."},
 		"gatewayName":      {Type: oam.PropertyTypeString, Description: "Capability-supplied Gateway name used to synthesize parentRefs."},
 		"gatewayNamespace": {Type: oam.PropertyTypeString, Default: "gateway-system", Description: "Namespace of the capability-supplied Gateway."},
 		"servicePort":      {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one."},
@@ -152,6 +153,17 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	// set and name is empty, enabling multiple httproute traits per component.
 	if scope, ok := props["scope"].(string); ok && scope != "" {
 		config.Scope = scope
+	}
+
+	// Optional: additional annotations on the generated HTTPRoute. Mirrors
+	// IngressHandler.parseProperties's identical block (ingress.go) — annotations
+	// are a generic Kubernetes concept, not nginx-ingress-specific, so both
+	// controllerType paths support them the same way.
+	if rawAnnotations, ok := props["annotations"].(map[string]any); ok {
+		config.Annotations = make(map[string]string, len(rawAnnotations))
+		for k, v := range rawAnnotations {
+			config.Annotations[k] = fmt.Sprintf("%v", v)
+		}
 	}
 
 	// parentRefs: user-authored take precedence; otherwise synthesize a single ref
@@ -930,6 +942,7 @@ type HTTPRouteConfig struct {
 	ParentRefs    []ParentRef
 	Hostnames     []string
 	Rules         []HTTPRouteRule
+	Annotations   map[string]string
 
 	// sources/ports are populated in parseProperties from the platform-reserved
 	// networkPolicy.trafficSources rendering; they drive auto-NetworkPolicy synthesis.
@@ -1117,7 +1130,7 @@ type BackendRef struct {
 func (c *HTTPRouteConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	route := kubernetes.CreateHTTPRoute(app.Name, app.Namespace)
 	route.Labels = map[string]string{"app": c.componentName}
-	route.Annotations = nil
+	route.Annotations = c.Annotations
 
 	for _, ref := range c.ParentRefs {
 		pr := gatewayv1.ParentReference{

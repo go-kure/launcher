@@ -177,6 +177,51 @@ func TestHTTPRouteConfig_Generate_Basic(t *testing.T) {
 	}
 }
 
+// TestHTTPRouteHandler_Annotations is the round-6 Codex regression: ExposeRule's
+// gateway path (expose_rule.go) passes an authored "annotations" property through
+// unchanged to the emitted httproute trait — it is only rejected on the ingress-only
+// nginx-specific keys (sslRedirect, forceSslRedirect, allowedGroups, authSigninURL,
+// secretName) — but HTTPRouteHandler.PropertySchema previously had no "annotations"
+// entry and Generate unconditionally nil'd out whatever the kure constructor set, so
+// the property silently disappeared instead of reaching the generated HTTPRoute.
+// Mirrors TestHTTPRouteConfig_Generate_Basic above, adding Annotations.
+func TestHTTPRouteHandler_Annotations(t *testing.T) {
+	h := &HTTPRouteHandler{}
+	app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
+	bundle := &stack.Bundle{}
+
+	trait := &oam.Trait{
+		Type: "httproute",
+		Properties: map[string]any{
+			"parentRefs":  []any{map[string]any{"name": "gw"}},
+			"rules":       []any{map[string]any{}},
+			"annotations": map[string]any{"example.com/owner": "platform-team"},
+		},
+	}
+	if err := h.Apply(trait, app, bundle); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	cfg, ok := bundle.Applications[0].Config.(*HTTPRouteConfig)
+	if !ok {
+		t.Fatalf("sub-app config = %T, want *HTTPRouteConfig", bundle.Applications[0].Config)
+	}
+	if cfg.Annotations["example.com/owner"] != "platform-team" {
+		t.Fatalf("cfg.Annotations = %v, want example.com/owner=platform-team", cfg.Annotations)
+	}
+
+	objs, err := cfg.Generate(bundle.Applications[0])
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objs) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objs))
+	}
+	route := *objs[0]
+	if got := route.GetAnnotations()["example.com/owner"]; got != "platform-team" {
+		t.Errorf("generated HTTPRoute annotations[example.com/owner] = %q, want \"platform-team\"", got)
+	}
+}
+
 // mockServicePortConfig is a minimal ApplicationConfig that also implements servicePortProvider.
 type mockServicePortConfig struct{ port int32 }
 
