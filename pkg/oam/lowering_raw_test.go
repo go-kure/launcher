@@ -363,6 +363,43 @@ func TestLowerRaws_NameAllocator_ScopedByNamespace(t *testing.T) {
 	}
 }
 
+// TestLowerRaws_RejectsEmptyName is the round-6 Codex regression: LowerRaws claims a
+// document (its kind is registered) without ever validating metadata.name, unlike the
+// in-transform path (ParseWithExtraTypes -> validateWithExtraTypes,
+// validate.go:105-107). An empty name propagates uncaught into Origin and into every
+// rule-generated child name, surfacing far downstream as an opaque generated-name
+// failure instead of a clear validation error here.
+func TestLowerRaws_RejectsEmptyName(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(testRawRule{kind: "WebApplication"})
+
+	raw := json.RawMessage("apiVersion: " + SupportedAPIVersion + "\nkind: WebApplication\nmetadata:\n  name: \"\"\nspec:\n  image: nginx:1.27\n")
+	_, err := tr.LowerRaws([]json.RawMessage{raw}, TransformContext{})
+	if err == nil {
+		t.Fatal("expected an error for an empty metadata.name")
+	}
+	if !strings.Contains(err.Error(), "metadata.name is required") {
+		t.Fatalf("expected a metadata.name-is-required error, got: %v", err)
+	}
+}
+
+// TestLowerRaws_RejectsInvalidDNS1123Name is the same round-6 regression, for a name
+// that fails the DNS-1123 subdomain check the in-transform path enforces
+// (validate.go:110-112) rather than an empty one.
+func TestLowerRaws_RejectsInvalidDNS1123Name(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(testRawRule{kind: "WebApplication"})
+
+	raw := json.RawMessage("apiVersion: " + SupportedAPIVersion + "\nkind: WebApplication\nmetadata:\n  name: Not_A_Valid_Name!\nspec:\n  image: nginx:1.27\n")
+	_, err := tr.LowerRaws([]json.RawMessage{raw}, TransformContext{})
+	if err == nil {
+		t.Fatal("expected an error for an invalid DNS-1123 metadata.name")
+	}
+	if !strings.Contains(err.Error(), "not a valid DNS-1123 subdomain") {
+		t.Fatalf("expected a DNS-1123 subdomain error, got: %v", err)
+	}
+}
+
 // TestLowerRaws_SlotSplicePreservesOrder proves output is spliced back on slot, not on
 // Origin and not on position within the settled set: two DIFFERENT lowered inputs
 // interleaved with pass-throughs, one emitting 2 documents and one emitting 1.
