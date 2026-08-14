@@ -589,6 +589,35 @@ func TestRegisterRawDocumentLowering_RejectsDuplicateKind(t *testing.T) {
 	})
 }
 
+// TestRegisterComponentLowering_RejectsEmptyType,
+// TestRegisterTraitLowering_RejectsEmptyType and
+// TestRegisterPolicyLowering_RejectsEmptyType are the round-9 Codex regression tests:
+// RegisterDocumentLowering/RegisterRawDocumentLowering already reject a rule whose
+// Kind() returns "" (TestRegisterDocumentLowering_RejectsEmptyKind above, Codex
+// finding F7), but the three component/trait/policy-position registrars had no
+// equivalent guard — a buggy rule returning "" from ComponentType()/TraitType()/
+// PolicyType() was silently accepted and registered under the empty string.
+func TestRegisterComponentLowering_RejectsEmptyType(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	mustPanicContaining(t, "empty type", func() {
+		tr.RegisterComponentLowering(extraTypesComponentRule{typeName: ""})
+	})
+}
+
+func TestRegisterTraitLowering_RejectsEmptyType(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	mustPanicContaining(t, "empty type", func() {
+		tr.RegisterTraitLowering(extraTypesTraitRule{typeName: ""})
+	})
+}
+
+func TestRegisterPolicyLowering_RejectsEmptyType(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	mustPanicContaining(t, "empty type", func() {
+		tr.RegisterPolicyLowering(extraTypesPolicyRule{typeName: ""})
+	})
+}
+
 // --- RegisterTraitLowering: CapabilityAware⇒ValidateAndApplyDefaults guard --------
 //
 // RegisterTrait (transform.go) panics at registration time if a dispatchable
@@ -931,6 +960,126 @@ func TestLower_ForwardedAuthoredTrait_NotSealed(t *testing.T) {
 	}
 	if !stderrors.Is(err, ErrMissingCapability) {
 		t.Fatalf("expected ErrMissingCapability, got: %v", err)
+	}
+}
+
+// renamingForwardingComponentRule renames a component (both Name and Type) while
+// forwarding its authored Traits unchanged via `Traits: comp.Traits` — the same
+// idiom forwardingComponentRule above uses, but renaming Name too, so the round-1
+// trait-origin fallback (below) has a component identity that actually differs from
+// the original authored one to get wrong.
+type renamingForwardingComponentRule struct{ fromType, toName, toType string }
+
+func (r renamingForwardingComponentRule) ComponentType() string { return r.fromType }
+
+func (r renamingForwardingComponentRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{
+		Name:       r.toName,
+		Type:       r.toType,
+		Properties: map[string]any{"image": "nginx"},
+		Traits:     comp.Traits,
+	}}}, nil
+}
+
+// originCaptureTraitRule records the LoweringContext.Origin handed to LowerTrait.
+type originCaptureTraitRule struct {
+	typ  string
+	seen *Origin
+}
+
+func (r originCaptureTraitRule) TraitType() string { return r.typ }
+
+func (r originCaptureTraitRule) LowerTrait(trait *Trait, lctx LoweringContext) (LoweringResult, error) {
+	*r.seen = lctx.Origin
+	return LoweringResult{Traits: []Trait{{Type: "expose", Properties: map[string]any{}}}}, nil
+}
+
+// TestLower_ForwardedTraitOrigin_KeepsOriginalComponentIdentity is the round-9 Codex
+// regression test (lowering.go, the trait-origin fallback in lowerDocumentBody): a
+// forwarded trait (sealEmittedNestedTraits' carve-out above deliberately leaves it
+// unstamped, so trait.Origin() returns !ok on the round it is reprocessed) must fall
+// back to the component's already-resolved AUTHORED origin (compOrigin, itself
+// falling back to comp.Origin() first), not to the CURRENT component's possibly-
+// renamed Name/Type. Before the fix, a component rule that renames a component while
+// forwarding its traits unchanged (exactly renamingForwardingComponentRule below)
+// makes the forwarded trait's Origin.Component/ComponentType report the SYNTHESIZED
+// identity ("app-renamed"/"webservice") instead of the authored one ("app"/"wrapper")
+// — violating the Origin doctrine's "authored location first" rule for exactly the
+// case it exists to cover.
+func TestLower_ForwardedTraitOrigin_KeepsOriginalComponentIdentity(t *testing.T) {
+	var seen Origin
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(renamingForwardingComponentRule{fromType: "wrapper", toName: "app-renamed", toType: "webservice"})
+	tr.RegisterTraitLowering(originCaptureTraitRule{typ: "probe-trait", seen: &seen})
+
+	comp := Component{
+		Name:   "app",
+		Type:   "wrapper",
+		Traits: []Trait{{Type: "probe-trait", Properties: map[string]any{}}},
+	}
+	app := makeApp("myapp", comp)
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+
+	if _, err := tr.lower(app, TransformContext{}); err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if seen.Component != "app" {
+		t.Errorf("Origin.Component = %q, want the authored name %q (not the renamed %q)", seen.Component, "app", "app-renamed")
+	}
+	if seen.ComponentType != "wrapper" {
+		t.Errorf("Origin.ComponentType = %q, want the authored type %q (not the renamed %q)", seen.ComponentType, "wrapper", "webservice")
+	}
+}
+
+// malformedNestedComponentDocRule emits an Application whose one component already
+// carries a lowerable type (needs-image, registered separately as a
+// ComponentLoweringRule below) with malformed properties — a document-position rule
+// emitting an already-typed nested element directly, rather than a component-position
+// rule emitting it at its own position.
+type malformedNestedComponentDocRule struct{ kind string }
+
+func (r malformedNestedComponentDocRule) Kind() string { return r.kind }
+
+func (r malformedNestedComponentDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name + "-lowered"},
+		Spec: ApplicationSpec{Components: []Component{{
+			Name:       "web",
+			Type:       "needs-image",
+			Properties: map[string]any{}, // missing required "image"
+		}}},
+	}}}, nil
+}
+
+// TestLower_DocumentRuleEmission_ValidatesNestedComponentSchema is the round-9 Codex
+// regression test (lowering.go:710): a DocumentLoweringRule/RawDocumentLoweringRule
+// hands back a whole *Application, and until this fix nothing ever validated its
+// nested components/traits/policies against their own handler's PropertySchema —
+// validatePositionResult only checks arity, and validateSettled (post-fixpoint) only
+// checks identity/type allowlists. A component arriving already lowerable-typed
+// inside a document rule's emission — rather than being emitted at its own
+// component-position — silently bypassed the same emission-time check
+// validateEmittedComponent already applies at the component and trait positions.
+func TestLower_DocumentRuleEmission_ValidatesNestedComponentSchema(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterDocumentLowering(malformedNestedComponentDocRule{kind: "Wrapper"})
+	tr.RegisterComponentLowering(requiredSchemaComponentLoweringRule{typ: "needs-image"})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Wrapper",
+		Metadata:   Metadata{Name: "myapp"},
+	}
+
+	_, err := tr.lower(app, TransformContext{})
+	if err == nil {
+		t.Fatal("expected the document rule's emitted nested component to be validated against its schema and rejected")
+	}
+	if !strings.Contains(err.Error(), `"image" is required`) {
+		t.Errorf("expected a required-field error, got: %v", err)
 	}
 }
 

@@ -239,6 +239,9 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 		result.Documents[i].origin = &origin
 		emitted[i] = &result.Documents[i]
 		names[i] = result.Documents[i].Metadata.Name
+		if err := t.validateEmittedDocument(emitted[i]); err != nil {
+			return nil, nil, errors.Wrapf(err, "%s", d.origin)
+		}
 	}
 	step := LoweringStep{
 		Rule:     "rawdocument/" + d.origin.DocumentKind,

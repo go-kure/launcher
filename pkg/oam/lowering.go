@@ -393,6 +393,9 @@ func (t *Transformer) RegisterRawDocumentLowering(r RawDocumentLoweringRule) {
 // handler would win the dispatch and the rule would never run.
 func (t *Transformer) RegisterComponentLowering(r ComponentLoweringRule) {
 	typeName := r.ComponentType()
+	if typeName == "" {
+		panic("oam: component lowering rule may not claim an empty type")
+	}
 	if _, exists := t.componentLoweringRules[typeName]; exists {
 		panic("oam: component lowering rule already registered for type " + typeName)
 	}
@@ -417,6 +420,9 @@ func (t *Transformer) RegisterComponentLowering(r ComponentLoweringRule) {
 // this general registration path until now.
 func (t *Transformer) RegisterTraitLowering(r TraitLoweringRule) {
 	typeName := r.TraitType()
+	if typeName == "" {
+		panic("oam: trait lowering rule may not claim an empty type")
+	}
 	if _, exists := t.traitLoweringRules[typeName]; exists {
 		panic("oam: trait lowering rule already registered for type " + typeName)
 	}
@@ -447,6 +453,9 @@ func (t *Transformer) RegisterBuiltinTraitLowering(r TraitLoweringRule) {
 // dispatchable-collision guard as RegisterComponentLowering.
 func (t *Transformer) RegisterPolicyLowering(r PolicyLoweringRule) {
 	typeName := r.PolicyType()
+	if typeName == "" {
+		panic("oam: policy lowering rule may not claim an empty type")
+	}
 	if _, exists := t.policyLoweringRules[typeName]; exists {
 		panic("oam: policy lowering rule already registered for type " + typeName)
 	}
@@ -708,6 +717,9 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 			result.Documents[i].origin = &origin
 			emitted[i] = &result.Documents[i]
 			names[i] = result.Documents[i].Metadata.Name
+			if err := t.validateEmittedDocument(emitted[i]); err != nil {
+				return nil, false, nil, errors.Wrapf(err, "%s", origin)
+			}
 		}
 		step := LoweringStep{Rule: "document/" + doc.Kind, Position: PositionDocument, Round: round, From: doc.Metadata.Name, To: names}
 		return emitted, true, []LoweringStep{step}, nil
@@ -763,6 +775,19 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// forwarding already-authored traits, not synthesizing new ones — see
 			// sealEmittedNestedTraits's forwarded-trait carve-out below.
 			originalTraits := comp.Traits
+			// D3: reject an authored value for a platform-reserved property before the
+			// rule runs — the same check the trait-lowering-rule dispatch below performs
+			// (enforcePlatformReserved, further down this function) and applyTraits/
+			// createApplications (transform.go) perform for a dispatchable handler.
+			// Round-9 Codex regression: this was missing here, so a ComponentLoweringRule
+			// — reachable via the same public RegisterComponentLowering extension point a
+			// TraitLoweringRule uses — could accept an authored platform-reserved value
+			// with no enforcement at all.
+			if p, ok := rule.(PropertySchemaProvider); ok {
+				if err := enforcePlatformReserved(p.PropertySchema(), comp.Properties, "properties"); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", compOrigin)
+				}
+			}
 			lctx := LoweringContext{Document: doc, Component: &comp, Capabilities: ctx.Capabilities, Origin: compOrigin, Namer: namer}
 			result, err := rule.LowerComponent(&comp, lctx)
 			if err != nil {
@@ -808,7 +833,19 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// its own authored origin instead of one re-derived from its current type.
 			traitOrigin, traitOK := trait.Origin()
 			if !traitOK {
-				traitOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Namespace: docOrigin.Namespace, Component: comp.Name, ComponentType: comp.Type, TraitType: trait.Type, Index: k}
+				// Derive from compOrigin (already resolved above, itself falling back to
+				// comp.Origin() first), not from comp.Name/comp.Type directly. Round-9
+				// Codex regression: a forwarded trait (sealEmittedNestedTraits' carve-out
+				// below deliberately leaves it unstamped) previously fell back to
+				// doc.Metadata.Name/comp.Name/comp.Type here — the CURRENT, possibly
+				// synthesized identity — instead of the already-correctly-resolved
+				// authored identity compOrigin holds, losing Origin's "authored location
+				// first" doctrine (see Origin's doc comment) for exactly the case
+				// (a renamed component forwarding its original traits unchanged) that
+				// doctrine exists to cover.
+				traitOrigin = compOrigin
+				traitOrigin.TraitType = trait.Type
+				traitOrigin.Index = k
 			}
 
 			rule, ok := t.traitLoweringRules[trait.Type]

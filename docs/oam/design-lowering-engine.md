@@ -190,15 +190,15 @@ output to one defining `expose` alone.
 
 ## D7 — recursion bound and provenance-first errors
 
-Both proposed defaults survived unchanged and ship as written. `MaxLoweringDepth = 8`
-(`lowering.go:29`) was never approached by any rule exercised so far — the deepest
+Both proposed defaults survived unchanged and ship as written. `MaxLoweringDepth = 9`
+(`lowering.go:40`) was never approached by any rule exercised so far — the deepest
 chain any test drives is three rounds. The bound exists for the pathological case (a
 rule that keeps re-emitting a type another rule also claims) and `LoweringError` prints
 the **authored** `Origin` first, the `Cause` second, then the full `Chain` of
 `LoweringStep`s (`LoweringError` struct at `lowering.go:248-263`) — one of the negative
-tests specifically asserts a depth-limit failure prints all 8 chain steps, not just the
-last one (`TestLower_DepthLimit_PrintsFullChain`, `pkg/oam/lowering_negative_test.go`).
-No change to either default was needed.
+tests specifically asserts a depth-limit failure prints all `MaxLoweringDepth` chain
+steps, not just the last one (`TestLower_DepthLimit_PrintsFullChain`,
+`pkg/oam/lowering_negative_test.go`). No change to either default was needed.
 
 ## Frictions
 
