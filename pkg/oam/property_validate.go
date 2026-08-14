@@ -426,14 +426,24 @@ func (t *Transformer) validateEmittedTrait(trait *Trait) error {
 	return nil
 }
 
-// validateEmittedPolicy is validateEmittedComponent for the policy position.
+// validateEmittedPolicy is validateEmittedComponent for the policy position: falls
+// back to policyLoweringRules when no terminal handler claims pol.Type, exactly as
+// validateEmittedComponent/validateEmittedTrait already fall back to their own
+// *LoweringRule registries. Round-9-batch-2 Codex finding: this fallback was missing
+// here, so a PolicyLoweringRule implementing PropertySchemaProvider went unenforced —
+// a component/trait/document-position rule emitting a malformed intermediate policy
+// (one still claimed by another registered PolicyLoweringRule) bypassed emission-time
+// validation and reached that rule next round, where an assertion on the malformed
+// properties could mis-lower or panic.
 func (t *Transformer) validateEmittedPolicy(pol *ApplicationPolicy) error {
-	h, ok := t.policyHandlers[pol.Type]
-	if !ok {
-		return nil
+	path := fmt.Sprintf("emitted policy %q (type %q): properties", pol.Name, pol.Type)
+	if h, ok := t.policyHandlers[pol.Type]; ok {
+		return validateEmittedProperties(h, pol.Properties, path)
 	}
-	return validateEmittedProperties(h, pol.Properties,
-		fmt.Sprintf("emitted policy %q (type %q): properties", pol.Name, pol.Type))
+	if rule, ok := t.policyLoweringRules[pol.Type]; ok {
+		return validateEmittedProperties(rule, pol.Properties, path)
+	}
+	return nil
 }
 
 // validateEmittedProperties validates props against handler's schema, if handler

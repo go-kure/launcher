@@ -711,6 +711,12 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		if verr := validatePositionResult(PositionDocument, origin, result); verr != nil {
 			return nil, false, nil, verr
 		}
+		// Snapshot the components doc had BEFORE the rule ran: a rule that forwards
+		// one of them unchanged into its output (rather than constructing a fresh
+		// component) is forwarding its already-authored traits too, not synthesizing
+		// them — same reasoning as originalTraits below for the component-position
+		// case, extended to however many components the document rule forwards.
+		originalComponents := doc.Spec.Components
 		emitted := make([]*Application, len(result.Documents))
 		names := make([]string, len(result.Documents))
 		for i := range result.Documents {
@@ -719,6 +725,11 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 			names[i] = result.Documents[i].Metadata.Name
 			if err := t.validateEmittedDocument(emitted[i]); err != nil {
 				return nil, false, nil, errors.Wrapf(err, "%s", origin)
+			}
+			for j := range result.Documents[i].Spec.Components {
+				if err := t.sealNestedTraitsInDocument(&result.Documents[i].Spec.Components[j], origin, originalComponents); err != nil {
+					return nil, false, nil, errors.Wrapf(err, "%s", origin)
+				}
 			}
 		}
 		step := LoweringStep{Rule: "document/" + doc.Kind, Position: PositionDocument, Round: round, From: doc.Metadata.Name, To: names}
@@ -1047,9 +1058,38 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 // — no origin stamp, no seal, no emitted-trait validation — exactly as if it still
 // belonged to a component no rule had ever claimed.
 func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Origin, forwarded []Trait) error {
+	return t.sealNestedTraits(comp, parentOrigin, func(trait *Trait) bool {
+		return isForwardedTrait(trait, forwarded)
+	})
+}
+
+// sealNestedTraitsInDocument is sealEmittedNestedTraits' document-position analogue
+// (round-9-batch-2 Codex finding, lowering.go:717): a DocumentLoweringRule emits a
+// whole *Application, potentially with several components, each potentially
+// forwarding traits from ANY of the original document's components (not just one) —
+// e.g. by reorganizing doc.Spec.Components across several output documents. A single
+// []Trait forwarded slice cannot express "forwarded from one of N original
+// components", so this checks pointer identity against every original component's
+// own Traits slice instead of one.
+func (t *Transformer) sealNestedTraitsInDocument(comp *Component, parentOrigin Origin, originalComponents []Component) error {
+	return t.sealNestedTraits(comp, parentOrigin, func(trait *Trait) bool {
+		for i := range originalComponents {
+			if isForwardedTrait(trait, originalComponents[i].Traits) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// sealNestedTraits is the shared body: stamp origin and seal every trait in
+// comp.Traits that isForwarded reports false for — the "hard-coded by the emitting
+// rule, not forwarded from an authored input" traits sealEmittedNestedTraits' own doc
+// comment (above) describes.
+func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, isForwarded func(*Trait) bool) error {
 	for k := range comp.Traits {
 		trait := &comp.Traits[k]
-		if isForwardedTrait(trait, forwarded) {
+		if isForwarded(trait) {
 			continue
 		}
 		nestedOrigin := parentOrigin

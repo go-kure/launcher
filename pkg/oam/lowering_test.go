@@ -905,6 +905,76 @@ func TestLower_NestedTraitInEmittedComponent_IsSealed(t *testing.T) {
 	}
 }
 
+// documentWithNestedTraitRule is a document-position rule that emits a fresh
+// component carrying an already-populated nested Trait — the document-position
+// analogue of componentWithNestedTraitRule above.
+type documentWithNestedTraitRule struct {
+	kind            string
+	nestedTraitType string
+}
+
+func (r documentWithNestedTraitRule) Kind() string { return r.kind }
+
+func (r documentWithNestedTraitRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name + "-lowered"},
+		Spec: ApplicationSpec{Components: []Component{{
+			Name:       "web",
+			Type:       "webservice",
+			Properties: map[string]any{"image": "nginx"},
+			Traits:     []Trait{{Type: r.nestedTraitType, Properties: map[string]any{"orig": "value"}}},
+		}}},
+	}}}, nil
+}
+
+// TestLower_NestedTraitInDocumentRuleOutput_IsSealed is the round-9-batch-2 Codex
+// regression test (lowering.go:717): a DocumentLoweringRule emits a whole
+// *Application, and — before this fix — only the document itself got an origin
+// stamp; a terminal trait the rule hard-coded into one of the document's components
+// was left unsealed, indistinguishable from an authored one, and would pick up a
+// second, redundant capability-rendering merge in applyTraits (transform.go) if no
+// TraitLoweringRule ever claimed its type. Proves the engine now seals it at
+// document-rule emission too, exactly as TestLower_NestedTraitInEmittedComponent_
+// IsSealed above proves for component-position emission.
+func TestLower_NestedTraitInDocumentRuleOutput_IsSealed(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"final": &stubTraitHandler{typ: "final"}},
+	)
+	tr.RegisterDocumentLowering(documentWithNestedTraitRule{kind: "Wrapper", nestedTraitType: "final"})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Wrapper",
+		Metadata:   Metadata{Name: "myapp"},
+	}
+
+	got, err := tr.lower(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("lower returned %d docs, want 1", len(got))
+	}
+	settled := got[0]
+	if len(settled.Spec.Components) != 1 {
+		t.Fatalf("settled components = %d, want 1", len(settled.Spec.Components))
+	}
+	web := settled.Spec.Components[0]
+	if len(web.Traits) != 1 {
+		t.Fatalf("emitted component's traits = %d, want 1", len(web.Traits))
+	}
+	nested := web.Traits[0]
+	if !nested.sealed {
+		t.Fatal("expected the nested trait to be sealed=true at emission")
+	}
+	if _, ok := nested.Origin(); !ok {
+		t.Fatal("expected the nested trait to carry a stamped origin")
+	}
+}
+
 // forwardingComponentRule is a component-position rule that retypes a component but
 // preserves whatever traits were already attached to it, using the natural
 // `Traits: comp.Traits` idiom described in the round-7 Codex finding (lowering.go:945).
