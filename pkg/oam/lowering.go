@@ -814,6 +814,29 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 						return false, steps, errors.Wrapf(ErrMissingCapability, "%s: capability %q not found in ClusterProfile", traitOrigin, key)
 					}
 				}
+				// For a custom (non-built-in) trait type whose capability rendering
+				// resolved in the profile, warn or (under SetStrictCapabilities) error
+				// when no CapabilityDefinition was loaded for the type — the same check
+				// applyTraits performs for a dispatchable TraitHandler (transform.go). A
+				// TraitLoweringRule never runs through applyTraits, so without this it
+				// silently bypasses strict mode entirely for a lowering-rule-consumed
+				// capability (round-7 Codex finding, lowering.go).
+				if !t.builtinTraitTypes[trait.Type] {
+					key := buildCapabilityKey(trait)
+					_, foundScoped := ctx.Capabilities[key]
+					_, foundBare := ctx.Capabilities[trait.Type]
+					if foundScoped || foundBare {
+						if _, hasDef := t.capabilityDefs[trait.Type]; !hasDef {
+							msg := fmt.Sprintf("no CapabilityDefinition found for custom trait %q", trait.Type)
+							if t.strictCapabilities {
+								return false, steps, errors.Errorf("%s: %s", traitOrigin, msg)
+							}
+							if t.warnHandler != nil {
+								t.warnHandler(msg)
+							}
+						}
+					}
+				}
 				// D3: reject an authored value for a platform-reserved property before
 				// capability rendering is merged in. applyTraits (transform.go, for a
 				// dispatchable handler) and createApplications (transform.go, for a

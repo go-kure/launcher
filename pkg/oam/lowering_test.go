@@ -635,6 +635,49 @@ func TestRegisterTraitLowering_CapabilityAwareWithVAD_OK(t *testing.T) {
 	}
 }
 
+// TestLower_StrictCapabilities_MissingDefinitionRejected is the round-7 Codex
+// regression test (lowering.go:815): applyTraits (transform.go) errors, under
+// SetStrictCapabilities(true), when a custom (non-built-in) trait's capability
+// rendering resolved in the profile but no CapabilityDefinition was loaded for it —
+// but a TraitLoweringRule dispatch never runs through applyTraits, so it had no
+// equivalent check and silently accepted the same situation. Register a custom
+// CapabilityAware TraitLoweringRule, resolve its capability via the profile, enable
+// strict mode, and load no CapabilityDefinition for the type: expect a rejection, not
+// a silent merge.
+func TestLower_StrictCapabilities_MissingDefinitionRejected(t *testing.T) {
+	traitRule := capAwareTraitLoweringRuleWithVAD{capAwareTraitLoweringRule{typ: "needs-cap"}}
+
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		nil,
+	)
+	tr.RegisterTraitLowering(traitRule)
+	tr.SetStrictCapabilities(true)
+	// Deliberately no SetCapabilityDefs call: no CapabilityDefinition is loaded for
+	// "needs-cap", the exact gap this test proves is now rejected.
+
+	comp := Component{
+		Name:   "web",
+		Type:   "webservice",
+		Traits: []Trait{{Type: "needs-cap", Properties: map[string]any{}}},
+	}
+	app := makeApp("myapp", comp)
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+
+	caps := map[string]CapabilityBinding{
+		"needs-cap": {Rendering: map[string]any{"key": "value"}},
+	}
+
+	_, err := tr.lower(app, TransformContext{Capabilities: caps})
+	if err == nil {
+		t.Fatal("expected a strict-capabilities rejection for a custom trait with no loaded CapabilityDefinition")
+	}
+	if !strings.Contains(err.Error(), "no CapabilityDefinition found for custom trait") {
+		t.Fatalf("expected a missing-CapabilityDefinition error, got: %v", err)
+	}
+}
+
 // TestLowerableTypes_ExcludesRawRegisteredKinds proves the other half of the mutual
 // exclusion: a raw-registered kind has no LowerableTypes entry, so ParseWithExtraTypes
 // can never be pointed at it and the in-transform parse gate cannot admit it.
