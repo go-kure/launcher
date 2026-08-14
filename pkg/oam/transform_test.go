@@ -1030,6 +1030,38 @@ func TestEvaluateProfile_CapabilityDefinition_BuiltinIgnoresDefinition(t *testin
 	}
 }
 
+// TestEvaluateProfile_TraitLoweringRule_NoVAD_StillAppliesDefinitionSchema is the
+// round-8 Codex regression test (transform.go:302-324): a custom TraitLoweringRule
+// with a loaded CapabilityDefinition but no ValidateAndApplyDefaults implementation
+// (registration permits this unless the rule also implements CapabilityAware) fell
+// through the `if vad, ok := rule.(ValidateAndApplyDefaults); ok` branch entirely,
+// so applyDefinitionSchema — nested inside that same branch — never ran and the
+// rendering reached lowerDocumentBody's unconditional merge with no schema defaults
+// applied, unlike the identical-shaped traitHandlers branch just below it (which
+// applies definition-schema defaults regardless of whether the handler implements
+// VAD). Uses stubTraitLoweringRule, which implements neither CapabilityAware nor
+// ValidateAndApplyDefaults, with capDefFixture's "mode" default.
+func TestEvaluateProfile_TraitLoweringRule_NoVAD_StillAppliesDefinitionSchema(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterTraitLowering(stubTraitLoweringRule{typ: "custom-no-vad"})
+	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"custom-no-vad": capDefFixture("custom-no-vad")})
+
+	profile := &ClusterProfile{
+		Spec: ClusterProfileSpec{
+			Capabilities: map[string]CapabilityBinding{
+				"custom-no-vad": {Rendering: map[string]any{"timeout": float64(30)}},
+			},
+		},
+	}
+	got, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Spec.Capabilities["custom-no-vad"].Rendering["mode"] != "auto" {
+		t.Errorf("mode = %v, want %q (definition schema default was skipped)", got.Spec.Capabilities["custom-no-vad"].Rendering["mode"], "auto")
+	}
+}
+
 // minimalApp returns an OAM Application with one component and one trait for pipeline tests.
 func minimalApp(componentType, traitType string) *Application {
 	return &Application{
