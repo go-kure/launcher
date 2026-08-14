@@ -7,7 +7,7 @@ Package `traits` implements `oam.TraitHandler` for most built-in trait types, pl
 component — adding networking, security, storage, scaling, or operational behavior.
 Handlers are registered with the transformer in `pkg/cmd/kurel` via
 `RegisterBuiltinTrait(type, handler)`; each implements `CanHandle` + `Apply`. `expose`
-is registered separately, via `RegisterTraitLowering` (`builtinTraitLoweringRules()`
+is registered separately, via `RegisterBuiltinTraitLowering` (`builtinTraitLoweringRules()`
 in `pkg/cmd/kurel`) — it lowers into a terminal `ingress` or `httproute` trait rather
 than building a resource itself, so it is never also present in the dispatchable
 trait-handler map (a lowerable type and a dispatchable handler type are mutually
