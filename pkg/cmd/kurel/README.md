@@ -33,7 +33,7 @@ All built-in component and trait handlers are registered automatically (via
 `builtinComponentHandlers()` / `builtinTraitHandlers()`, the shared registration
 source), alongside the built-in trait-position lowering rules
 (`builtinTraitLoweringRules()` — currently just `expose`, registered via
-`RegisterTraitLowering` rather than `RegisterBuiltinTrait`). Every registered handler
+`RegisterBuiltinTraitLowering` rather than `RegisterBuiltinTrait`). Every registered handler
 declares a `PropertySchema` for its user-facing properties, so a component/trait's
 properties can be validated before dispatch. See
 [Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
