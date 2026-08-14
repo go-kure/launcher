@@ -458,31 +458,40 @@ func validateEmittedProperties(handler any, props map[string]any, path string) e
 	return validateProperties(p.PropertySchema(), props, path)
 }
 
-// validateEmittedDocument applies validateEmittedComponent/validateEmittedTrait/
-// validateEmittedPolicy to every nested element of a document a DocumentLoweringRule
-// or RawDocumentLoweringRule just emitted — round-9 Codex regression (lowering.go:710):
+// validateEmittedDocument applies validateEmittedComponent/validateEmittedPolicy to
+// every nested component and policy of a document a DocumentLoweringRule or
+// RawDocumentLoweringRule just emitted — round-9 Codex regression (lowering.go:710):
 // those rules hand back a whole *Application, and the only checks ever run against
 // it are validatePositionResult (arity) and, once the fixpoint settles,
 // validateSettled (identity/type allowlists only, no property schemas). A component
-// or trait that arrives already terminal-handler-typed inside such a document —
-// rather than being emitted at its own component/trait position — never passes
-// through validateEmittedComponent/validateEmittedTrait at all: lowerDocumentBody's
-// per-round component loop only calls them at the emission sites reached via
-// componentLoweringRules/traitLoweringRules dispatch, and a component whose type
-// matches neither is carried forward via newComponents unchanged, at every round,
-// forever. Calling this once, right after a document rule emits, closes that gap the
-// same way emission-time validation already does at the component and trait
-// positions themselves.
+// that arrives already terminal-handler-typed inside such a document — rather than
+// being emitted at its own component position — never passes through
+// validateEmittedComponent at all: lowerDocumentBody's per-round component loop only
+// calls it at the emission sites reached via componentLoweringRules dispatch, and a
+// component whose type matches neither is carried forward via newComponents
+// unchanged, at every round, forever. Calling this once, right after a document rule
+// emits, closes that gap the same way emission-time validation already does at the
+// component position itself.
+//
+// Deliberately does NOT validate traits (round-12-batch-2 Codex finding,
+// lowering.go:717 as reviewed): at the point this runs, a document-rule branch has
+// not yet determined which of comp.Traits are freshly synthesized versus forwarded
+// unchanged from an authored component (sealNestedTraitsInDocument, called
+// immediately after this in lowerDocumentOnce, is what tells the two apart). A
+// forwarded trait has not gone through capability rendering yet and is not meant to
+// look complete against its handler's full PropertySchema — validating it here,
+// before forwarding is known, rejected a capability-aware trait whose
+// capability-supplied required property was still pending, with a spurious "is
+// required" error. Trait validation instead happens exclusively in the
+// forwarding-aware pass every caller runs immediately after this: sealNestedTraits
+// (via sealNestedTraitsInDocument here, sealEmittedNestedTraits in lowerRawOnce)
+// calls validateEmittedTrait on every trait it does NOT skip as forwarded, so a
+// freshly synthesized trait is still validated — just after forwarding is known,
+// not before.
 func (t *Transformer) validateEmittedDocument(app *Application) error {
 	for i := range app.Spec.Components {
-		comp := &app.Spec.Components[i]
-		if err := t.validateEmittedComponent(comp); err != nil {
+		if err := t.validateEmittedComponent(&app.Spec.Components[i]); err != nil {
 			return err
-		}
-		for j := range comp.Traits {
-			if err := t.validateEmittedTrait(&comp.Traits[j]); err != nil {
-				return err
-			}
 		}
 	}
 	for i := range app.Spec.Policies {

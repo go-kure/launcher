@@ -258,6 +258,36 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 		if err := t.validateEmittedDocument(emitted[i]); err != nil {
 			return nil, nil, errors.Wrapf(err, "%s", d.origin)
 		}
+		// Round-12-batch-2 Codex finding (lowering_raw.go, "Seal traits emitted
+		// directly by raw rules"): lowerDocumentOnce's document-rule branch seals
+		// every freshly synthesized nested trait via sealNestedTraitsInDocument, but
+		// this raw-entry counterpart never did — a terminal trait nested inside a
+		// RawDocumentLoweringRule's emitted Application flowed through unsealed, so
+		// applyTraits later treated it as authored and merged capability rendering
+		// into it a second time (or rejected it for a capability it was never meant
+		// to require). A RawDocumentLoweringRule decodes from raw bytes into its own
+		// custom type (DecodeDocument), never from a pre-existing *Application, so
+		// there is no authored component/trait it could ever forward unchanged —
+		// every trait in its output is freshly synthesized. Pass forwarded=nil
+		// (sealEmittedNestedTraits' documented "no such trait" case) to seal and
+		// validate every one, and stamp per-component/per-policy Origin at the same
+		// time — the identical Origin-doctrine gap round-12-batch-1 fixed for
+		// lowerDocumentOnce's own document-rule branch (lowering.go:729-757), safe
+		// unconditionally here for the same reason: origin.Document/DocumentKind/
+		// Namespace are the stable authored-root values already computed above.
+		for j := range result.Documents[i].Spec.Components {
+			comp := &result.Documents[i].Spec.Components[j]
+			compOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: j}
+			comp.origin = &compOrigin
+			if err := t.sealEmittedNestedTraits(comp, compOrigin, nil); err != nil {
+				return nil, nil, errors.Wrapf(err, "%s", d.origin)
+			}
+		}
+		for k := range result.Documents[i].Spec.Policies {
+			pol := &result.Documents[i].Spec.Policies[k]
+			polOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, PolicyName: pol.Name, Index: k}
+			pol.origin = &polOrigin
+		}
 	}
 	step := LoweringStep{
 		Rule:     "rawdocument/" + d.origin.DocumentKind,

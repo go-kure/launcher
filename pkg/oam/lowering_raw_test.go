@@ -623,3 +623,83 @@ func TestLowerRaws_NoRawRulesRegistered_ReturnsInputUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// rawRuleWithNestedTrait is a RawDocumentLoweringRule that hard-codes an
+// already-populated nested Trait into the one component it emits — the raw-entry
+// analogue of documentWithNestedTraitRule (lowering_test.go), used to prove
+// lowerRawOnce seals a freshly synthesized nested trait exactly as
+// lowerDocumentOnce's document-rule branch already does.
+type rawRuleWithNestedTrait struct {
+	kind            string
+	nestedTraitType string
+}
+
+func (r rawRuleWithNestedTrait) Kind() string { return r.kind }
+
+func (r rawRuleWithNestedTrait) DecodeDocument(raw []byte) (any, error) {
+	var doc testRawDoc
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&doc); err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
+func (r rawRuleWithNestedTrait) LowerDocument(doc any, lctx LoweringContext) (LoweringResult, error) {
+	src := doc.(*testRawDoc)
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: src.Metadata.Name + "-lowered"},
+		Spec: ApplicationSpec{Components: []Component{{
+			Name:       "web",
+			Type:       "webservice",
+			Properties: map[string]any{"image": src.Spec.Image},
+			Traits:     []Trait{{Type: r.nestedTraitType, Properties: map[string]any{"orig": "value"}}},
+		}}},
+	}}}, nil
+}
+
+// TestLowerRaws_NestedTraitInRawDocumentRuleOutput_IsSealed is the round-12-batch-2
+// Codex regression test (pullrequestreview-4937572399, "Seal traits emitted directly
+// by raw rules"): a RawDocumentLoweringRule hands back a whole *Application via
+// lowerRawOnce, and — before this fix — only validateEmittedDocument ran against it;
+// no code ever sealed a terminal trait the rule hard-coded into one of its
+// components, unlike lowerDocumentOnce's document-rule branch
+// (TestLower_NestedTraitInDocumentRuleOutput_IsSealed). Left unsealed, that trait
+// would be indistinguishable from an authored one and pick up a second, redundant
+// capability-rendering merge in applyTraits once the caller re-parses LowerRaws'
+// output and transforms it.
+func TestLowerRaws_NestedTraitInRawDocumentRuleOutput_IsSealed(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"final": &stubTraitHandler{typ: "final"}},
+	)
+	rule := rawRuleWithNestedTrait{kind: "WebApplication", nestedTraitType: "final"}
+	tr.RegisterRawDocumentLowering(rule)
+
+	raw := rawWebApplication("shop")
+	d := loweringDoc{raw: raw, rule: rule, origin: Origin{Document: "shop", DocumentKind: "WebApplication"}}
+	emitted, _, err := tr.lowerRawOnce(d, TransformContext{}, newNameAllocator(), 0)
+	if err != nil {
+		t.Fatalf("lowerRawOnce: %v", err)
+	}
+	if len(emitted) != 1 || len(emitted[0].Spec.Components) != 1 {
+		t.Fatalf("unexpected lowerRawOnce output: %+v", emitted)
+	}
+	web := emitted[0].Spec.Components[0]
+	if len(web.Traits) != 1 {
+		t.Fatalf("emitted component's traits = %d, want 1", len(web.Traits))
+	}
+	nested := web.Traits[0]
+	if !nested.sealed {
+		t.Fatal("expected the nested trait to be sealed=true at raw-entry emission")
+	}
+	if _, ok := nested.Origin(); !ok {
+		t.Fatal("expected the nested trait to carry a stamped origin")
+	}
+	if _, ok := web.Origin(); !ok {
+		t.Fatal("expected the emitted component to carry a stamped origin")
+	}
+}
