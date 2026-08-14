@@ -22,10 +22,9 @@ see the D3 section below. D5's four-input closure forced an
 engine-level design choice — capability rendering is merged in by the engine, not the
 rule — that was not spelled out in the original decisions doc. Everything else matched
 the design as written. `pkg/oam`'s scope genuinely widened beyond its doc-comment's
-stated "model + parser + validator" (`pkg/oam/doc.go:1-3`) — the lowering engine is now
-part of the package's production surface, not a spike-only detour that reverts before
-merge. (Whether `doc.go`'s scope statement itself should be reworded is left for a
-follow-up, out of scope for this document.)
+stated "model + parser + validator" — the lowering engine is now part of the
+package's production surface, not a spike-only detour that reverts before merge.
+`pkg/oam/doc.go`'s package comment was updated in this PR to say so.
 
 ## D1 — one engine for all four positions
 
