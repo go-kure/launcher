@@ -610,3 +610,81 @@ func TestLower_DepthExceeded_NamesTheDocument(t *testing.T) {
 		t.Fatalf("expected the error to name document %q (kind %q), got %+v", "loopdoc", "LoopyDoc", loweringErr.Origin)
 	}
 }
+
+// --- G1: sealed traits must not be re-merged with capability rendering ------
+
+// twoStageTraitRule is a TraitLoweringRule that claims fromType and emits a trait of
+// toType, optionally capturing the trait it actually received so a test can assert
+// whether capability rendering was merged into it.
+type twoStageTraitRule struct {
+	fromType, toType string
+	emitProperties   map[string]any
+	captured         *Trait
+}
+
+func (r *twoStageTraitRule) TraitType() string { return r.fromType }
+
+func (r *twoStageTraitRule) LowerTrait(trait *Trait, lctx LoweringContext) (LoweringResult, error) {
+	if r.captured != nil {
+		*r.captured = *trait
+	}
+	return LoweringResult{Traits: []Trait{{Type: r.toType, Properties: r.emitProperties}}}, nil
+}
+
+// TestLower_SealedTrait_NotReMergedWithCapabilityRendering is the regression test for
+// G1 (Codex-bot wave 2): the trait-lowering-rule dispatch path in lowering.go merged
+// capability rendering into a trait's Properties unconditionally, even when that trait
+// had already been sealed by an earlier lowering round — violating the same D5
+// information-closure invariant applyTraits (transform.go) already enforces for a
+// dispatchable TraitHandler. A first rule emits a sealed trait of a type a SECOND rule
+// claims; a capability is registered for that second type. The second rule must
+// receive the trait's ORIGINAL properties, never capability-rendering-merged a second
+// time.
+func TestLower_SealedTrait_NotReMergedWithCapabilityRendering(t *testing.T) {
+	var captured Trait
+	stage1 := &twoStageTraitRule{
+		fromType:       "stage1",
+		toType:         "stage2",
+		emitProperties: map[string]any{"orig": "value"},
+	}
+	stage2 := &twoStageTraitRule{
+		fromType:       "stage2",
+		toType:         "final",
+		emitProperties: map[string]any{},
+		captured:       &captured,
+	}
+
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"final": &stubTraitHandler{typ: "final"}},
+	)
+	tr.RegisterTraitLowering(stage1)
+	tr.RegisterTraitLowering(stage2)
+
+	comp := Component{
+		Name:   "web",
+		Type:   "webservice",
+		Traits: []Trait{{Type: "stage1", Properties: map[string]any{}}},
+	}
+	app := makeApp("myapp", comp)
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+
+	caps := map[string]CapabilityBinding{
+		"stage2": {Rendering: map[string]any{"injected": "leaked"}},
+	}
+
+	if _, err := tr.lower(app, TransformContext{Capabilities: caps}); err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+
+	if _, leaked := captured.Properties["injected"]; leaked {
+		t.Fatalf("stage2 rule received capability-rendering-merged properties on a sealed trait: %+v", captured.Properties)
+	}
+	if got, want := captured.Properties["orig"], "value"; got != want {
+		t.Fatalf(`stage2 rule's captured trait.Properties["orig"] = %v, want %v`, got, want)
+	}
+	if !captured.sealed {
+		t.Fatal("expected the trait passed to stage2 to be sealed=true (emitted by stage1's lowering round)")
+	}
+}
