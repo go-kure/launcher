@@ -108,6 +108,37 @@ func TestParseWithExtraTypes_ComponentType(t *testing.T) {
 	}
 }
 
+const lowerableComponentWithRestrictedTraitYAML = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: myapp
+spec:
+  components:
+    - name: shop
+      type: web-and-cache
+      properties: {}
+      traits:
+        - type: scaler
+          properties: {}
+`
+
+// TestParseWithExtraTypes_DefersTraitRestrictionForLowerableComponent proves that a
+// trait restricted to specific component types ("scaler": webservice/worker only,
+// traitComponentRestrictions in validate.go) is NOT rejected against a lowerable
+// component type's authored type. web-and-cache is not terminal — a registered
+// ComponentLoweringRule would rewrite it before the fixpoint settles, so validating
+// the restriction against "web-and-cache" here would check the wrong component type.
+// validateSettled re-runs this same restriction after lowering, against whatever
+// terminal type the rule actually emits.
+func TestParseWithExtraTypes_DefersTraitRestrictionForLowerableComponent(t *testing.T) {
+	if _, err := ParseWithExtraTypes([]byte(lowerableComponentWithRestrictedTraitYAML), nil, LowerableTypes{}); err == nil {
+		t.Fatal("expected ParseWithExtraTypes with empty LowerableTypes to reject non-terminal component type web-and-cache")
+	}
+	if _, err := ParseWithExtraTypes([]byte(lowerableComponentWithRestrictedTraitYAML), nil, LowerableTypes{ComponentTypes: []string{"web-and-cache"}}); err != nil {
+		t.Fatalf("expected the scaler trait-component restriction to be deferred for a lowerable component type, got: %v", err)
+	}
+}
+
 // TestParseWithExtraTypes_TraitType is the same proof for the trait position.
 func TestParseWithExtraTypes_TraitType(t *testing.T) {
 	if _, err := Parse([]byte(nonTerminalTraitTypeYAML)); err == nil {
