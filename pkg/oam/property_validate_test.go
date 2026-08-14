@@ -375,6 +375,84 @@ func TestValidateEmittedTrait(t *testing.T) {
 	}
 }
 
+// requiredSchemaComponentLoweringRule is a ComponentLoweringRule that also
+// declares a PropertySchema with a required field — the round-8 Codex
+// regression fixture: HandlerSchemas (transform.go) already publishes a
+// lowering rule's schema, but before this fix validateEmittedComponent never
+// consulted it, checking only t.componentHandlers. Named distinctly from
+// schema_test.go's schemaComponentLoweringRule (used by
+// TestHandlerSchemas_IncludesComponentLoweringRules), whose schema has no
+// required field and so cannot exercise the rejection path this test needs.
+type requiredSchemaComponentLoweringRule struct{ typ string }
+
+func (r requiredSchemaComponentLoweringRule) ComponentType() string { return r.typ }
+func (r requiredSchemaComponentLoweringRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: comp.Name, Type: "webservice", Properties: map[string]any{"image": "nginx"}}}}, nil
+}
+func (r requiredSchemaComponentLoweringRule) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{"image": {Type: PropertyTypeString, Required: true}}
+}
+
+// schemaTraitLoweringRule is the trait-position counterpart.
+type schemaTraitLoweringRule struct{ typ string }
+
+func (r schemaTraitLoweringRule) TraitType() string { return r.typ }
+func (r schemaTraitLoweringRule) LowerTrait(trait *Trait, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Traits: []Trait{{Type: "ingress", Properties: map[string]any{}}}}, nil
+}
+func (r schemaTraitLoweringRule) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{"hostnames": {Type: PropertyTypeArray, Required: true, Items: &PropertySchema{Type: PropertyTypeString}}}
+}
+
+// TestValidateEmittedComponent_ConsultsComponentLoweringRuleSchema is the round-8
+// Codex regression test (property_validate.go:379-386): when a rule emits an
+// intermediate component whose target type is claimed by a ComponentLoweringRule
+// (not a terminal ComponentHandler), validateEmittedComponent silently accepted
+// anything instead of checking that rule's own declared PropertySchema — even
+// though HandlerSchemas (transform.go) already publishes it as a discoverable
+// schema, so the gap was enforcement, not availability.
+func TestValidateEmittedComponent_ConsultsComponentLoweringRuleSchema(t *testing.T) {
+	tr := newSchemaTransformer()
+	tr.RegisterComponentLowering(requiredSchemaComponentLoweringRule{typ: "higher-webservice"})
+
+	if err := tr.validateEmittedComponent(&Component{
+		Name: "web", Type: "higher-webservice", Properties: map[string]any{"image": "nginx"},
+	}); err != nil {
+		t.Fatalf("expected a schema-conformant emitted component to be accepted, got: %v", err)
+	}
+
+	err := tr.validateEmittedComponent(&Component{
+		Name: "web", Type: "higher-webservice", Properties: map[string]any{},
+	})
+	if err == nil {
+		t.Fatal("expected a missing required property to be rejected against the lowering rule's own schema")
+	}
+	if !strings.Contains(err.Error(), `emitted component "web"`) || !strings.Contains(err.Error(), `"image" is required`) {
+		t.Errorf("unexpected message: %v", err)
+	}
+}
+
+// TestValidateEmittedTrait_ConsultsTraitLoweringRuleSchema is the trait-position
+// counterpart of TestValidateEmittedComponent_ConsultsComponentLoweringRuleSchema.
+func TestValidateEmittedTrait_ConsultsTraitLoweringRuleSchema(t *testing.T) {
+	tr := newSchemaTransformer()
+	tr.RegisterTraitLowering(schemaTraitLoweringRule{typ: "higher-expose"})
+
+	if err := tr.validateEmittedTrait(&Trait{
+		Type: "higher-expose", Properties: map[string]any{"hostnames": []any{"shop.example.com"}},
+	}); err != nil {
+		t.Fatalf("expected a schema-conformant emitted trait to be accepted, got: %v", err)
+	}
+
+	err := tr.validateEmittedTrait(&Trait{Type: "higher-expose", Properties: map[string]any{}})
+	if err == nil {
+		t.Fatal("expected a missing required property to be rejected against the lowering rule's own schema")
+	}
+	if !strings.Contains(err.Error(), `emitted trait "higher-expose"`) || !strings.Contains(err.Error(), `"hostnames" is required`) {
+		t.Errorf("unexpected message: %v", err)
+	}
+}
+
 // TestValidateEmittedTrait_NormalizesArrayWriteBack is the regression test for G4
 // (Codex-bot wave 2): asArrayValue built a fresh []any copy purely to validate a
 // Go-native []string, then discarded the copy — trait.Properties kept the original,

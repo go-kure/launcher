@@ -367,32 +367,39 @@ func equalPropertyValues(a, b any) bool {
 }
 
 // validateEmittedComponent checks an emitted component's Properties against its
-// target ComponentHandler's declared schema (D4), when a handler is registered for
-// its type and that handler declares one.
+// target's declared schema (D4): a terminal ComponentHandler when one is registered
+// for its type, or else a ComponentLoweringRule claiming that type (an intermediate
+// emission a later round will expand further) — whichever one declares a schema.
 //
-// A component whose type has no registered handler is passed over on purpose: it is
-// either lowerable (a rule will expand it in a later round) or an unknown type, and
-// in both cases there is no target schema to check it against yet. Neither case is
+// A component whose type is claimed by neither is passed over on purpose: it is an
+// unknown type, and there is no target schema to check it against. That case is not
 // silently accepted overall — the post-fixpoint whole-document pass
 // (Transformer.validateSettled) rejects a type that is still unclaimed once the
-// fixpoint has settled.
+// fixpoint has settled. Checking the lowering-rule registry here, rather than only
+// the terminal handler, closes the gap HandlerSchemas already closed for schema
+// *publication* (transform.go): a rule-claimed type's schema was discoverable
+// through HandlerSchemas but was never actually enforced against what a rule emits.
 func (t *Transformer) validateEmittedComponent(comp *Component) error {
-	h, ok := t.componentHandlers[comp.Type]
-	if !ok {
-		return nil
+	path := fmt.Sprintf("emitted component %q (type %q): properties", comp.Name, comp.Type)
+	if h, ok := t.componentHandlers[comp.Type]; ok {
+		return validateEmittedProperties(h, comp.Properties, path)
 	}
-	return validateEmittedProperties(h, comp.Properties,
-		fmt.Sprintf("emitted component %q (type %q): properties", comp.Name, comp.Type))
+	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
+		return validateEmittedProperties(rule, comp.Properties, path)
+	}
+	return nil
 }
 
 // validateEmittedTrait is validateEmittedComponent for the trait position.
 func (t *Transformer) validateEmittedTrait(trait *Trait) error {
-	h, ok := t.traitHandlers[trait.Type]
-	if !ok {
-		return nil
+	path := fmt.Sprintf("emitted trait %q: properties", trait.Type)
+	if h, ok := t.traitHandlers[trait.Type]; ok {
+		return validateEmittedProperties(h, trait.Properties, path)
 	}
-	return validateEmittedProperties(h, trait.Properties,
-		fmt.Sprintf("emitted trait %q: properties", trait.Type))
+	if rule, ok := t.traitLoweringRules[trait.Type]; ok {
+		return validateEmittedProperties(rule, trait.Properties, path)
+	}
+	return nil
 }
 
 // validateEmittedPolicy is validateEmittedComponent for the policy position.
