@@ -300,27 +300,30 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 			// caller loading a definition that happens to share a built-in lowering
 			// rule's type name would have it silently applied to that rule's rendering.
 			if rule, ok := t.traitLoweringRules[typeName]; ok {
-				if vad, ok := rule.(ValidateAndApplyDefaults); ok {
-					currentRendering := binding.Rendering
-					if !t.builtinTraitTypes[typeName] {
-						if def, hasDef := t.capabilityDefs[typeName]; hasDef {
-							withDefaults, err := applyDefinitionSchema(currentRendering, def)
-							if err != nil {
-								return nil, &TransformError{
-									Message: fmt.Sprintf("capability %q definition schema", key),
-									Cause:   err,
-								}
+				currentRendering := binding.Rendering
+				if !t.builtinTraitTypes[typeName] {
+					if def, hasDef := t.capabilityDefs[typeName]; hasDef {
+						withDefaults, err := applyDefinitionSchema(currentRendering, def)
+						if err != nil {
+							return nil, &TransformError{
+								Message: fmt.Sprintf("capability %q definition schema", key),
+								Cause:   err,
 							}
-							currentRendering = withDefaults
 						}
+						currentRendering = withDefaults
 					}
-					validated, err := vad.ValidateAndApplyDefaults(currentRendering)
-					if err != nil {
-						return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
-					}
-					evaluated[key] = CapabilityBinding{Rendering: validated}
+				}
+				vad, ok := rule.(ValidateAndApplyDefaults)
+				if !ok {
+					evaluated[key] = CapabilityBinding{Rendering: currentRendering}
 					continue
 				}
+				validated, err := vad.ValidateAndApplyDefaults(currentRendering)
+				if err != nil {
+					return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
+				}
+				evaluated[key] = CapabilityBinding{Rendering: validated}
+				continue
 			}
 			evaluated[key] = binding
 			continue
