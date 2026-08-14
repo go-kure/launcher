@@ -265,16 +265,30 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 		// RawDocumentLoweringRule's emitted Application flowed through unsealed, so
 		// applyTraits later treated it as authored and merged capability rendering
 		// into it a second time (or rejected it for a capability it was never meant
-		// to require). A RawDocumentLoweringRule decodes from raw bytes into its own
-		// custom type (DecodeDocument), never from a pre-existing *Application, so
-		// there is no authored component/trait it could ever forward unchanged —
-		// every trait in its output is freshly synthesized. Pass forwarded=nil
-		// (sealEmittedNestedTraits' documented "no such trait" case) to seal and
-		// validate every one, and stamp per-component/per-policy Origin at the same
-		// time — the identical Origin-doctrine gap round-12-batch-1 fixed for
-		// lowerDocumentOnce's own document-rule branch (lowering.go:729-757), safe
-		// unconditionally here for the same reason: origin.Document/DocumentKind/
-		// Namespace are the stable authored-root values already computed above.
+		// to require). Pass forwarded=nil (sealEmittedNestedTraits' documented "no
+		// such trait" case) to seal and validate every one, and stamp per-component/
+		// per-policy Origin at the same time — the identical Origin-doctrine gap
+		// round-12-batch-1 fixed for lowerDocumentOnce's own document-rule branch
+		// (lowering.go:729-757), safe unconditionally here for the same reason:
+		// origin.Document/DocumentKind/Namespace are the stable authored-root values
+		// already computed above.
+		//
+		// KNOWN LIMITATION (round-14 Codex finding "Preserve authored traits exposed
+		// by raw decoders", deferred — no RawDocumentLoweringRule ships in this
+		// package yet, so nothing currently triggers it): forwarded=nil is wrong for
+		// a rule whose DecodeDocument target embeds real, authored oam.Trait values
+		// (e.g. its own Traits field, decoded straight from YAML) that LowerDocument
+		// then copies unchanged into the emitted component. Unlike
+		// sealNestedTraitsInDocument's DocumentLoweringRule case, this function has
+		// no typed "original components" to pointer-compare against — decoded is
+		// `any`, defined entirely by the rule — so there is no forwarded slice to
+		// pass today. A rule that legitimately forwards an authored, capability-aware
+		// trait (e.g. expose) this way would have it wrongly sealed here, skipping
+		// the capability merge it still needs. Before registering a
+		// RawDocumentLoweringRule that forwards authored traits, this needs either an
+		// optional interface the decode target can implement to expose its forwarded
+		// traits (mirroring isForwardedTrait's pointer-identity check), or an
+		// equivalent mechanism — not a blanket forwarded=nil.
 		for j := range result.Documents[i].Spec.Components {
 			comp := &result.Documents[i].Spec.Components[j]
 			compOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: j}
