@@ -254,3 +254,64 @@ func TestLower_RuleWithoutSchemaReservesNothing(t *testing.T) {
 		t.Fatalf("a rule declaring no schema must reserve nothing, got: %v", err)
 	}
 }
+
+// --- round-9 Codex regression: the component-lowering-rule call site -------
+
+// reservingComponentRule is reservingRule for the component position: it declares
+// one platform-reserved property, so the D3 check the component-lowering-rule
+// dispatch must enforce has something to catch.
+type reservingComponentRule struct{ seen map[string]any }
+
+func (r *reservingComponentRule) ComponentType() string { return "reserving-component" }
+
+func (r *reservingComponentRule) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{
+		"image":         {Type: PropertyTypeString, Description: "Authored freely."},
+		"networkPolicy": {Type: PropertyTypeObject, PlatformReserved: true, AdditionalProperties: true, Description: "Platform-supplied."},
+	}
+}
+
+func (r *reservingComponentRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	r.seen = comp.Properties
+	return LoweringResult{Components: []Component{{Name: comp.Name, Type: "webservice", Properties: map[string]any{"image": "nginx"}}}}, nil
+}
+
+// TestLower_RejectsAuthoredPlatformReservedComponentProperty is
+// TestLower_RejectsAuthoredPlatformReservedTraitProperty at the component position —
+// round-9 Codex regression: enforcePlatformReserved was called before dispatching a
+// TraitLoweringRule (above) and before terminal ComponentHandler/TraitHandler dispatch
+// (transform.go), but NOT before dispatching a ComponentLoweringRule, even though
+// RegisterComponentLowering is the identical public extension point
+// RegisterTraitLowering is. Without the fix, this authored platform-reserved value
+// reaches the rule unchecked instead of being rejected here.
+func TestLower_RejectsAuthoredPlatformReservedComponentProperty(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(&reservingComponentRule{})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{
+			Components: []Component{{
+				Name:       "web",
+				Type:       "reserving-component",
+				Properties: map[string]any{"image": "nginx", "networkPolicy": map[string]any{"trafficSources": []any{}}},
+			}},
+		},
+	}
+
+	_, err := tr.lower(app, TransformContext{})
+	if err == nil {
+		t.Fatal("expected an authored platform-reserved component property to be rejected")
+	}
+	if !stderrors.Is(err, ErrPlatformReserved) {
+		t.Errorf("expected the error to wrap ErrPlatformReserved, got: %v", err)
+	}
+	msg := err.Error()
+	for _, want := range []string{`component "web"`, "networkPolicy"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("expected the error to contain %q, got: %v", want, msg)
+		}
+	}
+}

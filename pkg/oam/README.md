@@ -170,7 +170,7 @@ a caller to pass into `ParseWithExtraTypes` ahead of a transform that will lower
 Expansion runs to a **fixpoint**: every round, every current document's non-terminal
 kind, components, traits, and policies are lowered once via their registered rule (if
 any); the loop repeats until a round changes nothing, bounded by `MaxLoweringDepth`
-(8) — a rule that keeps re-emitting its own (or another registered) type fails the
+(9) — a rule that keeps re-emitting its own (or another registered) type fails the
 build with the full expansion chain rather than looping forever. A transformer with no
 lowering rules registered anywhere returns the input `*Application` unchanged (the
 same pointer — no copy, no allocation); registering rules only on the raw entry point

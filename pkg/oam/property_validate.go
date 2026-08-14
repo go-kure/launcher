@@ -58,8 +58,12 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 		// An explicit nil counts as absent, not as a present null: `size:` with no
 		// value decodes to a nil entry, and a rule that assembles properties in Go
 		// can leave a key mapped to nil the same way. Treating that as satisfying
-		// Required would let a required field through empty.
-		if v, present := props[key]; !present || v == nil {
+		// Required would let a required field through empty. A bare `v == nil` only
+		// catches the untyped case — a rule that assigns an uninitialized Go slice
+		// or map (`[]any(nil)`, `map[string]any(nil)`) produces an `any` whose
+		// interface value is non-nil even though the data it holds is, and that
+		// value still serializes to JSON `null` — so isNullValue is needed here too.
+		if v, present := props[key]; !present || isNullValue(v) {
 			return errors.Errorf("%s: %q is required", path, key)
 		}
 	}
@@ -101,7 +105,7 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 // sees the same normalized shape validation itself checked, instead of the
 // original, still-typed value silently surviving unassertable.
 func validatePropertyValue(schema PropertySchema, value any, path string) (any, error) {
-	if value == nil {
+	if isNullValue(value) {
 		// Absent/null. Presence is enforced by Required at the caller; a nil under
 		// an optional field constrains nothing.
 		return value, nil
@@ -268,6 +272,26 @@ func isNumberValue(value any) bool {
 	return ok
 }
 
+// isNullValue reports whether value is a bare nil interface OR a typed nil map,
+// slice, pointer, channel or function — round-9 Codex regression (property_validate.go:63):
+// asArrayValue/asObjectValue's type assertions succeed on a typed nil
+// ([]any(nil), map[string]any(nil)) with ok=true, so a plain `value == nil` check
+// lets one through as a present, validly-typed empty collection even though it
+// serializes to JSON/YAML `null`, not `[]`/`{}`. A rule that assigns an
+// uninitialized Go slice or map to a Properties entry hits this by construction,
+// with no unusual authoring required.
+func isNullValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	switch rv := reflect.ValueOf(value); rv.Kind() {
+	case reflect.Map, reflect.Slice, reflect.Ptr, reflect.Chan, reflect.Func, reflect.Interface:
+		return rv.IsNil()
+	default:
+		return false
+	}
+}
+
 // asArrayValue normalises any slice or array value to []any. A string is never an
 // array here even though it is indexable, and neither is a map.
 func asArrayValue(value any) ([]any, bool) {
@@ -422,4 +446,39 @@ func validateEmittedProperties(handler any, props map[string]any, path string) e
 		return nil
 	}
 	return validateProperties(p.PropertySchema(), props, path)
+}
+
+// validateEmittedDocument applies validateEmittedComponent/validateEmittedTrait/
+// validateEmittedPolicy to every nested element of a document a DocumentLoweringRule
+// or RawDocumentLoweringRule just emitted — round-9 Codex regression (lowering.go:710):
+// those rules hand back a whole *Application, and the only checks ever run against
+// it are validatePositionResult (arity) and, once the fixpoint settles,
+// validateSettled (identity/type allowlists only, no property schemas). A component
+// or trait that arrives already terminal-handler-typed inside such a document —
+// rather than being emitted at its own component/trait position — never passes
+// through validateEmittedComponent/validateEmittedTrait at all: lowerDocumentBody's
+// per-round component loop only calls them at the emission sites reached via
+// componentLoweringRules/traitLoweringRules dispatch, and a component whose type
+// matches neither is carried forward via newComponents unchanged, at every round,
+// forever. Calling this once, right after a document rule emits, closes that gap the
+// same way emission-time validation already does at the component and trait
+// positions themselves.
+func (t *Transformer) validateEmittedDocument(app *Application) error {
+	for i := range app.Spec.Components {
+		comp := &app.Spec.Components[i]
+		if err := t.validateEmittedComponent(comp); err != nil {
+			return err
+		}
+		for j := range comp.Traits {
+			if err := t.validateEmittedTrait(&comp.Traits[j]); err != nil {
+				return err
+			}
+		}
+	}
+	for i := range app.Spec.Policies {
+		if err := t.validateEmittedPolicy(&app.Spec.Policies[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
