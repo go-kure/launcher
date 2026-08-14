@@ -35,8 +35,10 @@ Each built-in handler defines a typed Go struct in `pkg/oam/builtin/` that repre
 rendering keys it accepts. The struct is the single source of truth — it is both the schema
 declaration and the parse target. There is no separate schema file to maintain.
 
-Structs carry dual `yaml:` and `json:` tags so the same type serves both the YAML decoder
-(`gopkg.in/yaml.v3`) and the JSON Schema generator (`github.com/invopop/jsonschema`).
+Structs carry dual `yaml:` and `json:` tags so the same type serves the YAML decoder
+(`gopkg.in/yaml.v3`) and, historically, a JSON Schema generator (`github.com/invopop/jsonschema`)
+— that generator is no longer used (see §2.3); the `json:` tags remain for any future consumer
+that wants them, but nothing in the current codebase reads them.
 
 ```go
 // pkg/oam/builtin/expose.go
@@ -106,11 +108,14 @@ func decodeStrict[T any](src map[string]any) (*T, error) {
 }
 ```
 
-Example implementation for the expose handler:
+Example implementation, the expose trait's real current handler (`ExposeRule`, a value
+receiver — not the `*ExposeHandler` this section originally showed; `ExposeHandler` was
+deleted and replaced by `ExposeRule`, `pkg/oam/builtin/traits/expose_rule.go:33,51`, when the
+expose trait moved from a directly-dispatched `TraitHandler` to a `TraitLoweringRule`):
 
 ```go
-func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
-    r, err := decodeStrict[ExposeRendering](rendering)
+func (ExposeRule) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
+    r, err := builtin.DecodeStrict[builtin.ExposeRendering](rendering)
     if err != nil {
         return nil, errors.Wrap(err, "expose rendering")
     }
@@ -128,6 +133,9 @@ func (h *ExposeHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[
 }
 ```
 
+(Simplified for illustration — the real method also validates several other
+`controllerType`-conditional fields; see `expose_rule.go:51-96` for the full body.)
+
 **Note on conditional constraints:** Mutual exclusivity and conditional required fields
 (e.g. "gatewayName is required when controllerType is gateway") are expressed as Go code
 inside `ValidateAndApplyDefaults`. The struct tags themselves cannot express these
@@ -139,23 +147,33 @@ A default is only applied when the relevant condition is true. Applying a gatewa
 when the controller type is ingress would be wrong; the handler's method handles this
 naturally with an `if` statement.
 
-### 2.3 JSON Schema generation
+### 2.3 Machine-readable schema publishing
 
-Each handler can expose a machine-readable schema derived from its rendering struct via
-`github.com/invopop/jsonschema`:
+This section originally described a per-handler `RenderingSchema() *jsonschema.Schema`
+method, generated from the rendering struct via `github.com/invopop/jsonschema`. That
+mechanism was never wired to a consumer and is absent from the codebase today — no handler
+implements it, and `invopop/jsonschema` is not imported anywhere in `pkg/oam`.
+
+What launcher actually built instead, as part of the lowering engine (D4,
+`docs/oam/design-lowering-engine.md`), is `PropertySchemaProvider`: a handler declares its
+full user-facing property vocabulary — not just the rendering keys, and using the package's
+own `PropertySchema` type (`schema.go`), not a JSON-Schema struct reflection — and the engine
+both validates emitted properties against it and publishes it via
+`Transformer.HandlerSchemas()`. `ExposeRule` is a concrete instance:
 
 ```go
-func (h *ExposeHandler) RenderingSchema() *jsonschema.Schema {
-    return jsonschema.Reflect(&ExposeRendering{})
+func (ExposeRule) PropertySchema() map[string]oam.PropertySchema {
+    return map[string]oam.PropertySchema{
+        "controllerType": {Type: oam.PropertyTypeString, Enum: []any{"ingress", "gateway"}, PlatformReserved: true, ...},
+        // ...
+    }
 }
 ```
 
-This schema is approximate for conditional constraints (see §2.2). It is suitable for
-tooling (editor autocomplete, `kurel schema expose`) but not authoritative for validation —
-validation is the handler's `ValidateAndApplyDefaults` method.
-
-The dual `yaml:`/`json:` tag requirement exists because `invopop/jsonschema` reads `json:`
-tags for field names.
+(`expose_rule.go:111-138` has the full field list.) `PropertySchema.PlatformReserved` marks
+a field as capability-injected only (D3) — a concern the original `RenderingSchema()` design
+never had, since it only ever covered rendering keys, not the full authored-property
+vocabulary.
 
 ### 2.4 Handlers with no rendering keys
 
@@ -335,4 +353,4 @@ this PR.
 | `CapabilityBinding` rename in `pkg/oam` | #45 (Phase 1) |
 | App-facing property schema for custom traits | Future (schema-provider interface or separate document kinds) |
 | Plugin-style external handler dispatch | Phase 4+ |
-| Editor integration for `cluster.yaml` (schema publishing) | Phase 3+ (enabled by `RenderingSchema()` output) |
+| Editor integration for `cluster.yaml` (schema publishing) | Phase 3+ (enabled by `PropertySchema()` output, published via `Transformer.HandlerSchemas()`) |
