@@ -210,6 +210,18 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 			set.Traits[name] = p.PropertySchema()
 		}
 	}
+	// Mirror the trait-lowering-rule loop above for component-lowering rules: a
+	// component type reachable only through a ComponentLoweringRule must still
+	// publish its schema here, for the identical reason — HandlerSchemas is the one
+	// place a caller discovers property schemas, regardless of which position
+	// registry actually claims the type. Omitting this left a downstream validator
+	// unable to check a higher-level component's user-facing properties before its
+	// lowering rule runs.
+	for name, r := range t.componentLoweringRules {
+		if p, ok := r.(PropertySchemaProvider); ok {
+			set.Components[name] = p.PropertySchema()
+		}
+	}
 	return set
 }
 

@@ -110,3 +110,40 @@ func TestHandlerSchemas_IncludesTraitLoweringRules(t *testing.T) {
 		t.Errorf("expose.controllerType schema = %+v", got)
 	}
 }
+
+// schemaComponentLoweringRule is a stub ComponentLoweringRule (D5, component position)
+// that also declares a property schema — the component-position counterpart of
+// schemaLoweringRule above.
+type schemaComponentLoweringRule struct{ typ string }
+
+func (r schemaComponentLoweringRule) ComponentType() string { return r.typ }
+func (r schemaComponentLoweringRule) LowerComponent(*Component, LoweringContext) (LoweringResult, error) {
+	return LoweringResult{}, nil
+}
+func (r schemaComponentLoweringRule) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{
+		"replicas": {Type: PropertyTypeInteger, Description: "replica count"},
+	}
+}
+
+// TestHandlerSchemas_IncludesComponentLoweringRules is the component-position mirror
+// of TestHandlerSchemas_IncludesTraitLoweringRules above, for a second-round Codex
+// review finding: HandlerSchemas() folded t.traitLoweringRules implementing
+// PropertySchemaProvider into set.Traits but had no matching loop for
+// t.componentLoweringRules into set.Components — the identical C6-class bug, just
+// unaddressed on the component side. A downstream validator could not check a
+// higher-level component's user-facing properties before its lowering rule ran.
+func TestHandlerSchemas_IncludesComponentLoweringRules(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(schemaComponentLoweringRule{typ: "widget"})
+
+	set := tr.HandlerSchemas()
+
+	schema, ok := set.Components["widget"]
+	if !ok {
+		t.Fatalf("expected component-lowering-rule 'widget' schema in set.Components, got %v", set.Components)
+	}
+	if got := schema["replicas"]; got.Type != PropertyTypeInteger || got.Description == "" {
+		t.Errorf("widget.replicas schema = %+v", got)
+	}
+}
