@@ -52,4 +52,13 @@ type ExposeRendering struct {
 
 	// AuthResponseHeaders is the nginx auth-response-headers value. Ingress-only.
 	AuthResponseHeaders string `yaml:"authResponseHeaders,omitempty" json:"authResponseHeaders,omitempty"`
+
+	// NetworkPolicy carries the platform-reserved networkPolicy.trafficSources[]
+	// value (traits.schemaNetworkPolicy). It is untyped here because
+	// ValidateAndApplyDefaults never inspects its shape — that validation runs
+	// later, on the fully merged trait properties, via parseTrafficSources
+	// (networkpolicy_auto.go) — this field exists solely so a platform author can
+	// declare networkPolicy under the "expose" capability's rendering without
+	// DecodeStrict rejecting it as an unknown key.
+	NetworkPolicy map[string]any `yaml:"networkPolicy,omitempty" json:"networkPolicy,omitempty"`
 }
