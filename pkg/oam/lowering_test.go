@@ -833,6 +833,64 @@ func TestLower_NestedTraitInEmittedComponent_IsSealed(t *testing.T) {
 	}
 }
 
+// forwardingComponentRule is a component-position rule that retypes a component but
+// preserves whatever traits were already attached to it, using the natural
+// `Traits: comp.Traits` idiom described in the round-7 Codex finding (lowering.go:945).
+type forwardingComponentRule struct{ fromType, toType string }
+
+func (r forwardingComponentRule) ComponentType() string { return r.fromType }
+
+func (r forwardingComponentRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{
+		Name:       comp.Name,
+		Type:       r.toType,
+		Properties: map[string]any{"image": "nginx"},
+		Traits:     comp.Traits,
+	}}}, nil
+}
+
+// TestLower_ForwardedAuthoredTrait_NotSealed is the round-7 Codex regression test
+// (lowering.go:945): a component-position rule that preserves attached authored
+// traits via `Traits: comp.Traits` must not have those traits swept up by
+// sealEmittedNestedTraits. Sealing skips ALL capability processing — both the
+// engine's own CapabilityAware/ErrMissingCapability check here (lowering.go) and
+// applyTraits' capability-rendering merge (transform.go) — so a forwarded
+// CapabilityAware trait such as expose would silently never receive its
+// ClusterProfile rendering or its required-capability enforcement.
+//
+// Proof: register the forwarded trait's type against a CapabilityAware
+// TraitLoweringRule with no matching capability in the context. Before the fix, the
+// forwarded trait is sealed at round 0, so round 1's CapabilityRequired check is
+// skipped entirely and lower() succeeds. After the fix, the trait is left unsealed,
+// the check runs, and lower() fails with ErrMissingCapability.
+func TestLower_ForwardedAuthoredTrait_NotSealed(t *testing.T) {
+	traitRule := capAwareTraitLoweringRuleWithVAD{capAwareTraitLoweringRule{typ: "needs-cap"}}
+
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		nil,
+	)
+	tr.RegisterComponentLowering(forwardingComponentRule{fromType: "wrapper", toType: "webservice"})
+	tr.RegisterTraitLowering(traitRule)
+
+	comp := Component{
+		Name:   "app",
+		Type:   "wrapper",
+		Traits: []Trait{{Type: "needs-cap", Properties: map[string]any{}}},
+	}
+	app := makeApp("myapp", comp)
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+
+	_, err := tr.lower(app, TransformContext{}) // no capabilities registered
+	if err == nil {
+		t.Fatal("expected ErrMissingCapability: a forwarded authored trait must still undergo normal capability enforcement, not be silently sealed past it")
+	}
+	if !stderrors.Is(err, ErrMissingCapability) {
+		t.Fatalf("expected ErrMissingCapability, got: %v", err)
+	}
+}
+
 func containsName(names []string, want string) bool {
 	for _, n := range names {
 		if n == want {
