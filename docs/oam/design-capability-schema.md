@@ -139,8 +139,8 @@ func (ExposeRule) ValidateAndApplyDefaults(rendering map[string]any) (map[string
 **Note on conditional constraints:** Mutual exclusivity and conditional required fields
 (e.g. "gatewayName is required when controllerType is gateway") are expressed as Go code
 inside `ValidateAndApplyDefaults`. The struct tags themselves cannot express these
-constraints. The generated JSON Schema (§2.3) is authoritative for simple required/optional
-constraints and approximate for conditional ones.
+constraints. The published `PropertySchema` (§2.3) is authoritative for simple
+required/optional constraints and does not express conditional ones at all.
 
 **Note on defaults:** Defaults are conditional Go logic, not declarative struct annotations.
 A default is only applied when the relevant condition is true. Applying a gateway default

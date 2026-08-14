@@ -989,9 +989,9 @@ func TestEvaluateProfile_TraitLoweringRule_AppliesCapabilityDefinitionSchemaBefo
 // TestEvaluateProfile_CapabilityDefinition_BuiltinIgnoresDefinition below. A rule
 // registered via RegisterBuiltinTraitLowering (e.g. "expose") must be exempt from a
 // CapabilityDefinition that happens to share its type name, exactly like a built-in
-// TraitHandler is. The fixture definition declares "timeout" as required; the
-// rendering omits it, so if the exemption isn't honored, applyDefinitionSchema fails
-// the missing-required-field check before VAD ever runs.
+// TraitHandler is. The fixture definition does not declare "controllerType"; the
+// rendering supplies it, so if the exemption isn't honored, applyDefinitionSchema
+// rejects it as an unknown rendering property before VAD ever runs.
 func TestEvaluateProfile_TraitLoweringRule_BuiltinIgnoresDefinition(t *testing.T) {
 	tr := NewTransformer(nil, nil)
 	tr.RegisterBuiltinTraitLowering(customVADLoweringRule{typ: "expose"})
