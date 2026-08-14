@@ -975,6 +975,76 @@ func TestLower_NestedTraitInDocumentRuleOutput_IsSealed(t *testing.T) {
 	}
 }
 
+// requiredSchemaTraitHandler is a terminal TraitHandler that also declares a
+// PropertySchema with a required field — one the platform's own capability
+// rendering is meant to supply later, in applyTraits, never authored directly.
+type requiredSchemaTraitHandler struct {
+	stubTraitHandler
+}
+
+func (h *requiredSchemaTraitHandler) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{"injected": {Type: PropertyTypeString, Required: true}}
+}
+
+// forwardingDocRule is a DocumentLoweringRule that forwards doc's one authored
+// component's Traits slice unchanged (Traits: comp.Traits, the same idiom
+// forwardingComponentRule uses at component position) — the document-position
+// shape needed to reproduce the round-12-batch-2 finding below.
+type forwardingDocRule struct{ kind string }
+
+func (r forwardingDocRule) Kind() string { return r.kind }
+
+func (r forwardingDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
+	comp := doc.Spec.Components[0]
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name + "-lowered"},
+		Spec: ApplicationSpec{Components: []Component{{
+			Name:       comp.Name,
+			Type:       comp.Type,
+			Properties: comp.Properties,
+			Traits:     comp.Traits,
+		}}},
+	}}}, nil
+}
+
+// TestLower_DocumentRuleEmission_DoesNotPrematurelyValidateForwardedTrait is the
+// round-12-batch-2 Codex regression test (pullrequestreview-4937572399, "Skip
+// emission validation for forwarded traits"): validateEmittedDocument validated
+// every nested trait against its handler's full PropertySchema before
+// sealNestedTraitsInDocument had determined which traits were forwarded from an
+// authored component rather than freshly synthesized by the rule. A forwarded
+// trait has not gone through capability rendering yet, so a property capability
+// rendering is meant to supply later is legitimately absent at this point — the
+// premature check rejected it with a spurious "is required" error. Proves lower()
+// now succeeds: the forwarded trait is validated only by the forwarding-aware pass
+// (sealNestedTraitsInDocument -> sealNestedTraits), which correctly exempts it.
+func TestLower_DocumentRuleEmission_DoesNotPrematurelyValidateForwardedTrait(t *testing.T) {
+	tr := NewTransformer(
+		nil,
+		map[string]TraitHandler{"needs-injected": &requiredSchemaTraitHandler{stubTraitHandler{typ: "needs-injected"}}},
+	)
+	tr.RegisterDocumentLowering(forwardingDocRule{kind: "Wrapper"})
+
+	comp := Component{
+		Name:       "app",
+		Type:       "webservice",
+		Properties: map[string]any{},
+		Traits:     []Trait{{Type: "needs-injected", Properties: map[string]any{}}}, // "injected" deliberately absent
+	}
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Wrapper",
+		Metadata:   Metadata{Name: "myapp"},
+		Spec:       ApplicationSpec{Components: []Component{comp}},
+	}
+
+	if _, err := tr.lower(app, TransformContext{}); err != nil {
+		t.Fatalf("lower: %v (a forwarded trait must not be validated against its full schema before forwarding is known)", err)
+	}
+}
+
 // documentWithNestedComponentAndPolicyRule is a document-position rule that emits a
 // fresh component and a fresh policy, neither forwarded from doc — the round-11-
 // batch-2 regression fixture: nested COMPONENTS and POLICIES, not just traits
