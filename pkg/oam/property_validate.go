@@ -71,9 +71,11 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 			}
 			return errors.Errorf("%s: unsupported field %q (allowed: %s)", path, key, declaredFields(schema))
 		}
-		if err := validatePropertyValue(field, props[key], path+"."+key); err != nil {
+		normalized, err := validatePropertyValue(field, props[key], path+"."+key)
+		if err != nil {
 			return err
 		}
+		props[key] = normalized
 	}
 	return nil
 }
@@ -89,11 +91,20 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 // where []string, map[string]string and named scalar types are the natural things
 // to write; rejecting those would fail correct rule output on its Go
 // representation alone.
-func validatePropertyValue(schema PropertySchema, value any, path string) error {
+//
+// It returns the normalized value alongside the error: for an array or object,
+// asArrayValue/asObjectValue may have built a fresh []any/map[string]any copy from a
+// typed Go collection (a rule's own []string or map[string]string), and that copy —
+// not the original typed value — is what nested validation actually checked. The
+// caller (validateObjectProperties) writes the returned value back into the props
+// map it holds, so a downstream consumer's type assertion (e.g. .(map[string]any))
+// sees the same normalized shape validation itself checked, instead of the
+// original, still-typed value silently surviving unassertable.
+func validatePropertyValue(schema PropertySchema, value any, path string) (any, error) {
 	if value == nil {
 		// Absent/null. Presence is enforced by Required at the caller; a nil under
 		// an optional field constrains nothing.
-		return nil
+		return value, nil
 	}
 
 	switch schema.Type {
@@ -102,36 +113,39 @@ func validatePropertyValue(schema PropertySchema, value any, path string) error 
 		// schema built for a call site that leaves Type empty (flatschema.go).
 	case PropertyTypeString:
 		if !isStringValue(value) {
-			return errors.Errorf("%s: expected string, got %T", path, value)
+			return value, errors.Errorf("%s: expected string, got %T", path, value)
 		}
 	case PropertyTypeBoolean:
 		if !isBooleanValue(value) {
-			return errors.Errorf("%s: expected boolean, got %T", path, value)
+			return value, errors.Errorf("%s: expected boolean, got %T", path, value)
 		}
 	case PropertyTypeInteger:
 		if !isIntegerValue(value) {
-			return errors.Errorf("%s: expected integer, got %T (%v)", path, value, value)
+			return value, errors.Errorf("%s: expected integer, got %T (%v)", path, value, value)
 		}
 	case PropertyTypeNumber:
 		if !isNumberValue(value) {
-			return errors.Errorf("%s: expected number, got %T", path, value)
+			return value, errors.Errorf("%s: expected number, got %T", path, value)
 		}
 	case PropertyTypeArray:
 		items, ok := asArrayValue(value)
 		if !ok {
-			return errors.Errorf("%s: expected array, got %T", path, value)
+			return value, errors.Errorf("%s: expected array, got %T", path, value)
 		}
 		if schema.Items != nil {
 			for i, item := range items {
-				if err := validatePropertyValue(*schema.Items, item, fmt.Sprintf("%s[%d]", path, i)); err != nil {
-					return err
+				normalized, err := validatePropertyValue(*schema.Items, item, fmt.Sprintf("%s[%d]", path, i))
+				if err != nil {
+					return value, err
 				}
+				items[i] = normalized
 			}
 		}
+		value = items
 	case PropertyTypeObject:
 		obj, ok := asObjectValue(value)
 		if !ok {
-			return errors.Errorf("%s: expected object, got %T", path, value)
+			return value, errors.Errorf("%s: expected object, got %T", path, value)
 		}
 		// Run unconditionally, even when schema.Properties is nil: a nil map has no
 		// declared keys, so every key in obj is "not declared" by definition, and
@@ -140,20 +154,21 @@ func validatePropertyValue(schema PropertySchema, value any, path string) error 
 		// here previously let AdditionalProperties:false silently accept anything when
 		// a handler declared an object-typed field with no sub-schema at all.
 		if err := validateObjectProperties(schema.Properties, schema.AdditionalProperties, obj, path); err != nil {
-			return err
+			return value, err
 		}
+		value = obj
 	default:
 		// A schema, not a document, is wrong here: some handler declared a type
 		// outside the PropertyType vocabulary. Silently accepting it would make the
 		// field unvalidated forever, so it fails loudly at the one place that reads
 		// the schema.
-		return errors.Errorf("%s: schema declares unsupported property type %q", path, schema.Type)
+		return value, errors.Errorf("%s: schema declares unsupported property type %q", path, schema.Type)
 	}
 
 	if len(schema.Enum) > 0 && !enumContainsValue(schema.Enum, value) {
-		return errors.Errorf("%s: value %v not in allowed set %v", path, value, schema.Enum)
+		return value, errors.Errorf("%s: value %v not in allowed set %v", path, value, schema.Enum)
 	}
-	return nil
+	return value, nil
 }
 
 // enforcePlatformReserved rejects an AUTHORED value for any property the schema marks
