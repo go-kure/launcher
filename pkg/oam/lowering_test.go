@@ -466,6 +466,55 @@ func TestLower_ValidateSettled_AcceptsHandlerRegisteredCustomComponentWithNoCapa
 	}
 }
 
+// TestLower_ValidateSettled_HandlerRegisteredComponentStillEnforcesTraitRestriction is
+// the regression test for the round-5 Codex finding at lowering.go:589 (the
+// "lowerable-types leak"): validateSettled populated LowerableTypes.ComponentTypes from
+// t.componentHandlers — terminal, already-settled types — but LowerableTypes.ComponentTypes
+// is also the signal validateTrait (validate.go) reads to defer the trait/component
+// restriction check ("componentIsLowerable"), which is correct only for a component
+// still awaiting a ComponentLoweringRule rewrite. Routing a terminal handler-backed
+// type through that channel let it wrongly skip the restriction recheck at settlement.
+//
+// "gizmo" here is accepted only via a registered ComponentHandler (never via a
+// ComponentLoweringRule, so it is never genuinely still-lowering); its "scaler" trait is
+// restricted by traitComponentRestrictions to "webservice"/"worker" only
+// (validate.go:56). Pre-fix, this incorrectly settled with no error. Post-fix, the
+// restriction is re-enforced and this must be rejected.
+func TestLower_ValidateSettled_HandlerRegisteredComponentStillEnforcesTraitRestriction(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"gizmo": &pipelineComponentHandler{typ: "gizmo"}},
+		map[string]TraitHandler{"scaler": &stubTraitHandler{typ: "scaler"}},
+	)
+	// Register an unrelated lowering rule purely so hasLoweringRules() is true and
+	// lower() actually exercises the fixpoint (and therefore validateSettled) —
+	// without any rule registered anywhere, lower() short-circuits to the bit-identity
+	// no-op path and validateSettled never runs at all. "gizmo" itself is never claimed
+	// by any lowering rule, so it never enters LowerableTypes.ComponentTypes on its own.
+	tr.RegisterComponentLowering(stubComponentLoweringRule{typ: "widget"})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{
+			Components: []Component{{
+				Name:       "gadget",
+				Type:       "gizmo",
+				Properties: map[string]any{},
+				Traits:     []Trait{{Type: "scaler", Properties: map[string]any{}}},
+			}},
+		},
+	}
+
+	_, err := tr.lower(app, TransformContext{})
+	if err == nil {
+		t.Fatal("expected settlement to reject \"scaler\" on component type \"gizmo\" (not webservice/worker), got nil error")
+	}
+	if !strings.Contains(err.Error(), "scaler") || !strings.Contains(err.Error(), "gizmo") {
+		t.Fatalf("expected the restriction error to name the trait and component type, got: %v", err)
+	}
+}
+
 // --- C2b: two registrars, one kind each ------------------------------------
 
 // The same-value case — one concrete type satisfying both DocumentLoweringRule and
@@ -720,6 +769,70 @@ func TestLower_SealedTrait_NotReMergedWithCapabilityRendering(t *testing.T) {
 	}
 }
 
+// componentWithNestedTraitRule is a component-position rule that emits a Component
+// carrying an already-populated nested Trait — the shape a real rule uses when it
+// hard-codes a terminal trait's final properties into the component it constructs,
+// rather than emitting the trait through a registered TraitLoweringRule of its own.
+type componentWithNestedTraitRule struct {
+	nestedTraitType string
+}
+
+func (r componentWithNestedTraitRule) ComponentType() string { return "wraps-trait" }
+
+func (r componentWithNestedTraitRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{
+		Name:       comp.Name + "-web",
+		Type:       "webservice",
+		Properties: map[string]any{"image": "nginx"},
+		Traits:     []Trait{{Type: r.nestedTraitType, Properties: map[string]any{"orig": "value"}}},
+	}}}, nil
+}
+
+// TestLower_NestedTraitInEmittedComponent_IsSealed is the regression test for the
+// round-5 Codex finding (lowering.go:712): a component-position rule cannot set the
+// unexported Trait.sealed field itself (different package), so a terminal trait it
+// hard-codes into an emitted component was, before this fix, indistinguishable from
+// an authored one — leaving it to pick up a second, redundant capability-rendering
+// merge in applyTraits (transform.go) if no TraitLoweringRule ever claims its type.
+// Proves the engine now seals it itself, at emission, exactly as it already does for
+// a trait a TraitLoweringRule returns directly (TestLower_SealedTrait_
+// NotReMergedWithCapabilityRendering above).
+func TestLower_NestedTraitInEmittedComponent_IsSealed(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"final": &stubTraitHandler{typ: "final"}},
+	)
+	tr.RegisterComponentLowering(componentWithNestedTraitRule{nestedTraitType: "final"})
+
+	comp := Component{Name: "app", Type: "wraps-trait", Properties: map[string]any{}}
+	app := makeApp("myapp", comp)
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+
+	got, err := tr.lower(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("lower returned %d docs, want 1", len(got))
+	}
+	settled := got[0]
+	if len(settled.Spec.Components) != 1 {
+		t.Fatalf("settled components = %d, want 1", len(settled.Spec.Components))
+	}
+	web := settled.Spec.Components[0]
+	if len(web.Traits) != 1 {
+		t.Fatalf("emitted component's traits = %d, want 1", len(web.Traits))
+	}
+	nested := web.Traits[0]
+	if !nested.sealed {
+		t.Fatal("expected the nested trait to be sealed=true at emission")
+	}
+	if _, ok := nested.Origin(); !ok {
+		t.Fatal("expected the nested trait to carry a stamped origin")
+	}
+}
+
 func containsName(names []string, want string) bool {
 	for _, n := range names {
 		if n == want {
@@ -811,5 +924,62 @@ func TestLower_TraitStep_RecordsEmittedComponentAndPolicyNames(t *testing.T) {
 	}
 	if !containsName(to, "provision-order") {
 		t.Errorf("step.To = %v, missing emitted policy name %q", to, "provision-order")
+	}
+}
+
+// addsSiblingComponentRule expands one component into itself plus a NEW sibling
+// ("extra"), so newComponents (lowerDocumentBody's local accumulator) differs from
+// doc.Spec.Components as it stood at the START of this round.
+type addsSiblingComponentRule struct{}
+
+func (addsSiblingComponentRule) ComponentType() string { return "adds-sibling" }
+func (addsSiblingComponentRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{
+		{Name: comp.Name, Type: "webservice", Properties: map[string]any{"image": "nginx"}},
+		{Name: "extra", Type: "webservice", Properties: map[string]any{"image": "nginx"}},
+	}}, nil
+}
+
+// policySnapshotRule records the component names it observes via lctx.Document —
+// the same *Application pointer every rule in the round is handed — so the test can
+// tell whether it saw the PRE-round or the just-committed component list.
+type policySnapshotRule struct {
+	seen *[]string
+}
+
+func (r policySnapshotRule) PolicyType() string { return "snapshot" }
+func (r policySnapshotRule) LowerPolicy(pol *ApplicationPolicy, lctx LoweringContext) (LoweringResult, error) {
+	for _, c := range lctx.Document.Spec.Components {
+		*r.seen = append(*r.seen, c.Name)
+	}
+	return LoweringResult{Policies: []ApplicationPolicy{{Name: "settled", Type: "noop-settled", Properties: map[string]any{}}}}, nil
+}
+
+// TestLower_PolicyRule_SeesPreRoundComponentSnapshot is the round-4 Codex regression:
+// a component-position rule and a policy-position rule firing in the SAME round must
+// see the SAME document snapshot via lctx.Document — the one that stood at the start
+// of the round — not have the policy rule observe components the component rule just
+// emitted THIS round while the component rule itself saw the round's starting state.
+func TestLower_PolicyRule_SeesPreRoundComponentSnapshot(t *testing.T) {
+	var seen []string
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(addsSiblingComponentRule{})
+	tr.RegisterPolicyLowering(policySnapshotRule{seen: &seen})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{
+			Components: []Component{{Name: "web", Type: "adds-sibling", Properties: map[string]any{}}},
+			Policies:   []ApplicationPolicy{{Name: "pol1", Type: "snapshot", Properties: map[string]any{}}},
+		},
+	}
+
+	if _, err := tr.lower(app, TransformContext{}); err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if len(seen) != 1 || seen[0] != "web" {
+		t.Fatalf("policy rule saw components %v, want exactly [\"web\"] (the pre-round snapshot) — not the sibling \"extra\" the component rule emitted this same round", seen)
 	}
 }

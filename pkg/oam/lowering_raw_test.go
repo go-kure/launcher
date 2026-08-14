@@ -303,6 +303,33 @@ func TestLowerRaws_DuplicateOrigin_RejectsBeforeLowering(t *testing.T) {
 	}
 }
 
+// TestLowerRaws_SameNameDifferentNamespace_NotRejectedAsDuplicate is the round-4
+// Codex regression (F6): the batch-level duplicate check must not reject two raw
+// inputs that share a kind and name but were authored in DIFFERENT namespaces —
+// those are distinct resources, not duplicates. This isolates the ONE gate this fix
+// changes: whether the early rejection at the top of LowerRaws's loop fires. It does
+// NOT prove the whole LowerRaws call succeeds end to end for namespace-disjoint
+// inputs — NameAllocator's generated-name keyspace is still shared across the whole
+// batch regardless of namespace (a separate, broader gap; see the reply to the
+// review comment this finding maps to), so two rules that go on to generate the
+// IDENTICAL final name string can still collide downstream even after this fix.
+func TestLowerRaws_SameNameDifferentNamespace_NotRejectedAsDuplicate(t *testing.T) {
+	decodes := 0
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(testRawRule{kind: "WebApplication", decodes: &decodes})
+
+	prod := json.RawMessage("apiVersion: " + SupportedAPIVersion + "\nkind: WebApplication\nmetadata:\n  name: shop\n  namespace: prod\nspec:\n  image: nginx:1.27\n")
+	staging := json.RawMessage("apiVersion: " + SupportedAPIVersion + "\nkind: WebApplication\nmetadata:\n  name: shop\n  namespace: staging\nspec:\n  image: nginx:1.27\n")
+
+	_, err := tr.LowerRaws([]json.RawMessage{prod, staging}, TransformContext{})
+	if decodes != 2 {
+		t.Fatalf("expected DecodeDocument to run for both namespace-disjoint inputs, got %d call(s) (err=%v)", decodes, err)
+	}
+	if err != nil && strings.Contains(err.Error(), "duplicate authored document") {
+		t.Fatalf("namespace-disjoint inputs were rejected as duplicates: %v", err)
+	}
+}
+
 // TestLowerRaws_SlotSplicePreservesOrder proves output is spliced back on slot, not on
 // Origin and not on position within the settled set: two DIFFERENT lowered inputs
 // interleaved with pass-throughs, one emitting 2 documents and one emitting 1.
