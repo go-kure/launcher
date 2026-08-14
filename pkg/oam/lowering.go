@@ -724,6 +724,11 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 		}
 
 		if rule, ok := t.componentLoweringRules[comp.Type]; ok {
+			// Snapshot the traits attached BEFORE the rule runs: a rule that preserves
+			// them by returning Traits: comp.Traits (or listing the same elements) is
+			// forwarding already-authored traits, not synthesizing new ones — see
+			// sealEmittedNestedTraits's forwarded-trait carve-out below.
+			originalTraits := comp.Traits
 			lctx := LoweringContext{Document: doc, Component: &comp, Capabilities: ctx.Capabilities, Origin: compOrigin, Namer: namer}
 			result, err := rule.LowerComponent(&comp, lctx)
 			if err != nil {
@@ -739,7 +744,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
-				if err := t.sealEmittedNestedTraits(&result.Components[j], compOrigin); err != nil {
+				if err := t.sealEmittedNestedTraits(&result.Components[j], compOrigin, originalTraits); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
@@ -837,7 +842,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
-				if err := t.sealEmittedNestedTraits(&result.Components[j], traitOrigin); err != nil {
+				if err := t.sealEmittedNestedTraits(&result.Components[j], traitOrigin, nil); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
 				// A trait-position rule may also emit Components (loweringPositionRules);
@@ -916,28 +921,43 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 	return changed, steps, nil
 }
 
-// sealEmittedNestedTraits stamps origin and seals every trait nested inside an
-// emitted component (comp.Traits), the same treatment a trait-position rule's
-// directly-emitted Traits already get (result.Traits[j].sealed = true, above). A
-// component/trait-position rule constructs comp with Go struct literals, from a
-// different package — it cannot set the unexported Trait.sealed field itself — so a
-// nested trait it hard-codes into an emitted component is, without this, silently
-// indistinguishable from an authored one. If that nested trait's type has no
-// registered TraitLoweringRule (most cases: it is a terminal, dispatchable-only
-// type), it flows unprocessed straight through to the settled document and then to
-// applyTraits (transform.go), which — with sealed left false — merges capability
-// rendering into it exactly as it would for an authored trait: a rendering the
-// emitting rule already accounted for once, an unwanted "fifth input" (D5), or an
-// ErrMissingCapability failure for a capability the settled document was never
-// authored to require. Sealing here does not stop the trait from being picked up by
-// a registered TraitLoweringRule next round — lowerDocumentBody's own trait branch
-// dispatches on trait.Type regardless of trait.sealed, exactly as it already does for
-// a trait sealed at trait-position (the "second TraitLoweringRule" case its own
-// comment documents) — it only marks the trait as already-final if no such rule
-// exists to claim it.
-func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Origin) error {
+// sealEmittedNestedTraits stamps origin and seals every NEWLY SYNTHESIZED trait
+// nested inside an emitted component (comp.Traits), the same treatment a
+// trait-position rule's directly-emitted Traits already get
+// (result.Traits[j].sealed = true, above). A component/trait-position rule
+// constructs comp with Go struct literals, from a different package — it cannot set
+// the unexported Trait.sealed field itself — so a nested trait it hard-codes into an
+// emitted component is, without this, silently indistinguishable from an authored
+// one. If that nested trait's type has no registered TraitLoweringRule (most cases:
+// it is a terminal, dispatchable-only type), it flows unprocessed straight through to
+// the settled document and then to applyTraits (transform.go), which — with sealed
+// left false — merges capability rendering into it exactly as it would for an
+// authored trait: a rendering the emitting rule already accounted for once, an
+// unwanted "fifth input" (D5), or an ErrMissingCapability failure for a capability
+// the settled document was never authored to require. Sealing here does not stop the
+// trait from being picked up by a registered TraitLoweringRule next round —
+// lowerDocumentBody's own trait branch dispatches on trait.Type regardless of
+// trait.sealed, exactly as it already does for a trait sealed at trait-position (the
+// "second TraitLoweringRule" case its own comment documents) — it only marks the
+// trait as already-final if no such rule exists to claim it.
+//
+// forwarded is the traits slice the component/trait had BEFORE this rule ran
+// (round-7 Codex finding, lowering.go:945). A rule that preserves attached authored
+// traits by returning them unchanged — e.g. `Traits: comp.Traits` — is not
+// synthesizing anything for them: those traits were never touched by the rule and
+// must undergo the SAME capability processing any other authored trait gets, either
+// via a registered TraitLoweringRule next round or via applyTraits at settle time.
+// Sealing them anyway would (per the reasoning above) skip that processing entirely,
+// silently dropping capability rendering for a forwarded CapabilityAware trait such
+// as expose. A trait found in forwarded, by pointer identity, is left untouched here
+// — no origin stamp, no seal, no emitted-trait validation — exactly as if it still
+// belonged to a component no rule had ever claimed.
+func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Origin, forwarded []Trait) error {
 	for k := range comp.Traits {
 		trait := &comp.Traits[k]
+		if isForwardedTrait(trait, forwarded) {
+			continue
+		}
 		nestedOrigin := parentOrigin
 		nestedOrigin.TraitType = trait.Type
 		nestedOrigin.Index = k
@@ -948,4 +968,20 @@ func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Orig
 		}
 	}
 	return nil
+}
+
+// isForwardedTrait reports whether trait is literally one of the elements of
+// original — i.e. the same Trait struct forwarded unchanged by a lowering rule,
+// rather than a new value the rule constructed. Pointer identity (not a value/deep
+// comparison) is deliberate: it matches exactly the `Traits: comp.Traits` idiom the
+// round-7 finding describes, without risking a false match against a rule that
+// legitimately constructs a NEW trait whose type and properties happen to equal an
+// authored one.
+func isForwardedTrait(trait *Trait, original []Trait) bool {
+	for i := range original {
+		if trait == &original[i] {
+			return true
+		}
+	}
+	return false
 }
