@@ -387,6 +387,18 @@ func (t *Transformer) RegisterTraitLowering(r TraitLoweringRule) {
 	t.traitLoweringRules[typeName] = r
 }
 
+// RegisterBuiltinTraitLowering is RegisterTraitLowering for launcher's own built-in
+// trait-position lowering rules (e.g. "expose"). It marks typeName in the same
+// builtinTraitTypes set RegisterBuiltinTrait uses, so EvaluateProfile's
+// traitLoweringRules branch exempts it from CapabilityDefinition schema application
+// exactly like a built-in TraitHandler is exempt — a caller loading a
+// CapabilityDefinition that happens to share a built-in lowering rule's type name
+// (e.g. "expose") must not have it silently applied to that rule's rendering.
+func (t *Transformer) RegisterBuiltinTraitLowering(r TraitLoweringRule) {
+	t.RegisterTraitLowering(r)
+	t.builtinTraitTypes[r.TraitType()] = true
+}
+
 // RegisterPolicyLowering registers a policy-position lowering rule. Same duplicate/
 // dispatchable-collision guard as RegisterComponentLowering.
 func (t *Transformer) RegisterPolicyLowering(r PolicyLoweringRule) {

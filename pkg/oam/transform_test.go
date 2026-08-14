@@ -982,6 +982,34 @@ func TestEvaluateProfile_TraitLoweringRule_AppliesCapabilityDefinitionSchemaBefo
 	}
 }
 
+// TestEvaluateProfile_TraitLoweringRule_BuiltinIgnoresDefinition is the regression
+// test for a second-round Codex review finding: EvaluateProfile's traitLoweringRules
+// branch applied a loaded CapabilityDefinition unconditionally, with no built-in
+// exemption — unlike the traitHandlers branch, mirrored by
+// TestEvaluateProfile_CapabilityDefinition_BuiltinIgnoresDefinition below. A rule
+// registered via RegisterBuiltinTraitLowering (e.g. "expose") must be exempt from a
+// CapabilityDefinition that happens to share its type name, exactly like a built-in
+// TraitHandler is. The fixture definition declares "timeout" as required; the
+// rendering omits it, so if the exemption isn't honored, applyDefinitionSchema fails
+// the missing-required-field check before VAD ever runs.
+func TestEvaluateProfile_TraitLoweringRule_BuiltinIgnoresDefinition(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterBuiltinTraitLowering(customVADLoweringRule{typ: "expose"})
+	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"expose": capDefFixture("expose")})
+
+	profile := &ClusterProfile{
+		Spec: ClusterProfileSpec{
+			Capabilities: map[string]CapabilityBinding{
+				"expose": {Rendering: map[string]any{"controllerType": "ingress"}},
+			},
+		},
+	}
+	_, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("built-in trait-lowering rule should ignore definition schema; got error: %v", err)
+	}
+}
+
 func TestEvaluateProfile_CapabilityDefinition_BuiltinIgnoresDefinition(t *testing.T) {
 	// Definition for a built-in type declares timeout as required; even though the
 	// rendering omits it, no error fires because built-ins skip definition schema.

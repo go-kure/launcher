@@ -276,25 +276,31 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 		if !ok {
 			// The type may be a trait-position lowering rule instead of a dispatchable
 			// handler (e.g. "expose") — a rule never reaches applyTraits, so this is
-			// the only place its ValidateAndApplyDefaults ever runs. RegisterTraitLowering
-			// draws no custom/built-in distinction today (there is no t.builtinTraitTypes
-			// gate to replicate for this branch), but a lowering-rule type CAN still have
-			// a loaded CapabilityDefinition, and must get the identical schema-defaults
-			// step the handler branch below applies before its own VAD runs — otherwise a
-			// TraitLoweringRule's VAD sees undefaulted, unchecked-against-declared-schema
-			// values purely because its type lowers instead of dispatching.
+			// the only place its ValidateAndApplyDefaults ever runs. A lowering-rule
+			// type CAN still have a loaded CapabilityDefinition, and must get the
+			// identical schema-defaults step the handler branch below applies before
+			// its own VAD runs — otherwise a TraitLoweringRule's VAD sees undefaulted,
+			// unchecked-against-declared-schema values purely because its type lowers
+			// instead of dispatching. But a BUILT-IN lowering rule (registered via
+			// RegisterBuiltinTraitLowering, e.g. "expose") is exempt from
+			// CapabilityDefinition application exactly like a built-in TraitHandler is
+			// (t.builtinTraitTypes gates both registries identically) — otherwise a
+			// caller loading a definition that happens to share a built-in lowering
+			// rule's type name would have it silently applied to that rule's rendering.
 			if rule, ok := t.traitLoweringRules[typeName]; ok {
 				if vad, ok := rule.(ValidateAndApplyDefaults); ok {
 					currentRendering := binding.Rendering
-					if def, hasDef := t.capabilityDefs[typeName]; hasDef {
-						withDefaults, err := applyDefinitionSchema(currentRendering, def)
-						if err != nil {
-							return nil, &TransformError{
-								Message: fmt.Sprintf("capability %q definition schema", key),
-								Cause:   err,
+					if !t.builtinTraitTypes[typeName] {
+						if def, hasDef := t.capabilityDefs[typeName]; hasDef {
+							withDefaults, err := applyDefinitionSchema(currentRendering, def)
+							if err != nil {
+								return nil, &TransformError{
+									Message: fmt.Sprintf("capability %q definition schema", key),
+									Cause:   err,
+								}
 							}
+							currentRendering = withDefaults
 						}
-						currentRendering = withDefaults
 					}
 					validated, err := vad.ValidateAndApplyDefaults(currentRendering)
 					if err != nil {
