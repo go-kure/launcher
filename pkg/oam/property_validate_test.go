@@ -235,7 +235,7 @@ func TestValidatePropertyValue_EmptyObjectSchema(t *testing.T) {
 
 	t.Run("AdditionalProperties false (the default) rejects an undeclared key", func(t *testing.T) {
 		schema := PropertySchema{Type: PropertyTypeObject}
-		err := validatePropertyValue(schema, value, "properties.field")
+		_, err := validatePropertyValue(schema, value, "properties.field")
 		if err == nil {
 			t.Fatal("expected an undeclared-key error, got nil")
 		}
@@ -246,7 +246,7 @@ func TestValidatePropertyValue_EmptyObjectSchema(t *testing.T) {
 
 	t.Run("AdditionalProperties true still accepts an undeclared key", func(t *testing.T) {
 		schema := PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true}
-		if err := validatePropertyValue(schema, value, "properties.field"); err != nil {
+		if _, err := validatePropertyValue(schema, value, "properties.field"); err != nil {
 			t.Fatalf("expected acceptance with AdditionalProperties:true, got: %v", err)
 		}
 	})
@@ -371,6 +371,55 @@ func TestValidateEmittedTrait(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "properties.accessModes[0]: expected string") {
 		t.Fatalf("expected an indexed item-type error, got: %v", err)
+	}
+}
+
+// TestValidateEmittedTrait_NormalizesArrayWriteBack is the regression test for G4
+// (Codex-bot wave 2): asArrayValue built a fresh []any copy purely to validate a
+// Go-native []string, then discarded the copy — trait.Properties kept the original,
+// still-typed []string. A downstream handler asserting .([]any) on it (the shape a
+// YAML-decoded document would have produced) silently failed and dropped the field
+// with no error. validateEmittedTrait must write the normalized []any back.
+func TestValidateEmittedTrait_NormalizesArrayWriteBack(t *testing.T) {
+	tr := newSchemaTransformer()
+	trait := &Trait{
+		Type:       "pvc",
+		Properties: map[string]any{"size": "1Gi", "accessModes": []string{"ReadWriteOnce"}},
+	}
+	if err := tr.validateEmittedTrait(trait); err != nil {
+		t.Fatalf("validateEmittedTrait: %v", err)
+	}
+	modes, ok := trait.Properties["accessModes"].([]any)
+	if !ok {
+		t.Fatalf("trait.Properties[%q] = %T, want []any (write-back did not normalize the original []string)", "accessModes", trait.Properties["accessModes"])
+	}
+	if len(modes) != 1 || modes[0] != "ReadWriteOnce" {
+		t.Fatalf("normalized accessModes lost content: %+v", modes)
+	}
+}
+
+// TestValidateEmittedComponent_NormalizesObjectWriteBack is the object-position
+// counterpart of the array test above: asObjectValue built a fresh map[string]any
+// copy from a Go-native map[string]string purely to validate it, then discarded the
+// copy. Confirmed real downstream consumer: expose_rule.go does
+// `anns, _ := props["annotations"].(map[string]any)` — comma-ok, so it doesn't panic,
+// but a map[string]string there silently fails the assertion and drops the field.
+func TestValidateEmittedComponent_NormalizesObjectWriteBack(t *testing.T) {
+	tr := newSchemaTransformer()
+	comp := &Component{
+		Name:       "web",
+		Type:       "rich",
+		Properties: map[string]any{"labels": map[string]string{"tier": "gold", "team": "x"}},
+	}
+	if err := tr.validateEmittedComponent(comp); err != nil {
+		t.Fatalf("validateEmittedComponent: %v", err)
+	}
+	labels, ok := comp.Properties["labels"].(map[string]any)
+	if !ok {
+		t.Fatalf("comp.Properties[%q] = %T, want map[string]any (write-back did not normalize the original map[string]string)", "labels", comp.Properties["labels"])
+	}
+	if labels["tier"] != "gold" || labels["team"] != "x" {
+		t.Fatalf("normalized labels lost content: %+v", labels)
 	}
 }
 
