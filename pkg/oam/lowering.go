@@ -735,33 +735,43 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				newTraits = append(newTraits, trait)
 				continue
 			}
-			// CapabilityAware is engine-enforced here exactly as applyTraits enforces it
-			// for a dispatchable TraitHandler: a lowering rule that needs a ClusterProfile
-			// capability and finds none fails with ErrMissingCapability, since the rule
-			// itself never runs through applyTraits.
-			if aware, ok := rule.(CapabilityAware); ok && aware.CapabilityRequired() {
-				key := buildCapabilityKey(trait)
-				_, foundScoped := ctx.Capabilities[key]
-				_, foundBare := ctx.Capabilities[trait.Type]
-				if !foundScoped && !foundBare {
-					return false, steps, errors.Wrapf(ErrMissingCapability, "%s: capability %q not found in ClusterProfile", traitOrigin, key)
+			// A sealed trait was emitted by an earlier lowering round, which already
+			// merged capability rendering into it (D5) before the fixpoint settled —
+			// the information-closure rule does not allow a second, different-key
+			// merge here (a fifth input), mirroring applyTraits' identical guard
+			// (transform.go). Every capability-processing step below is skipped
+			// entirely for a sealed trait; its Properties are final.
+			resolvedTrait := trait
+			if !trait.sealed {
+				// CapabilityAware is engine-enforced here exactly as applyTraits
+				// enforces it for a dispatchable TraitHandler: a lowering rule that
+				// needs a ClusterProfile capability and finds none fails with
+				// ErrMissingCapability, since the rule itself never runs through
+				// applyTraits.
+				if aware, ok := rule.(CapabilityAware); ok && aware.CapabilityRequired() {
+					key := buildCapabilityKey(trait)
+					_, foundScoped := ctx.Capabilities[key]
+					_, foundBare := ctx.Capabilities[trait.Type]
+					if !foundScoped && !foundBare {
+						return false, steps, errors.Wrapf(ErrMissingCapability, "%s: capability %q not found in ClusterProfile", traitOrigin, key)
+					}
 				}
-			}
-			// D3: reject an authored value for a platform-reserved property before
-			// capability rendering is merged in. applyTraits (transform.go, for a
-			// dispatchable handler) and createApplications (transform.go, for a
-			// component handler) perform the same check at their own merge points,
-			// alongside honoring Trait.sealed in applyTraits.
-			if p, ok := rule.(PropertySchemaProvider); ok {
-				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
-					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+				// D3: reject an authored value for a platform-reserved property before
+				// capability rendering is merged in. applyTraits (transform.go, for a
+				// dispatchable handler) and createApplications (transform.go, for a
+				// component handler) perform the same check at their own merge points,
+				// alongside honoring Trait.sealed in applyTraits.
+				if p, ok := rule.(PropertySchemaProvider); ok {
+					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
+						return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+					}
 				}
+				// Capability rendering is merged in before the rule runs (D5 input 3),
+				// the same merge applyTraits performs for a dispatchable handler — so a
+				// TraitLoweringRule sees the identical "rendering as defaults, inline
+				// wins" view a TraitHandler would.
+				resolvedTrait = resolveCapability(trait, ctx.Capabilities)
 			}
-			// Capability rendering is merged in before the rule runs (D5 input 3), the
-			// same merge applyTraits performs for a dispatchable handler — so a
-			// TraitLoweringRule sees the identical "rendering as defaults, inline wins"
-			// view a TraitHandler would.
-			resolvedTrait := resolveCapability(trait, ctx.Capabilities)
 			lctx := LoweringContext{Document: doc, Component: &comp, Capabilities: ctx.Capabilities, Origin: traitOrigin, Namer: namer}
 			result, err := rule.LowerTrait(&resolvedTrait, lctx)
 			if err != nil {
