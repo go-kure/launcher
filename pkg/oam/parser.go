@@ -111,7 +111,7 @@ func ParseWithExtraTypes(data []byte, extraTraitTypes []string, lowerable Lowera
 		custom[t] = true
 	}
 
-	if err := validateWithExtraTypes(&app, custom, lowerable); err != nil {
+	if err := validateWithExtraTypes(&app, custom, nil, lowerable); err != nil {
 		return nil, err
 	}
 

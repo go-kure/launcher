@@ -2,6 +2,7 @@ package oam
 
 import (
 	stderrors "errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -501,5 +502,44 @@ func TestLower_EmittedComponentIsValidated(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q does not contain %q", msg, want)
 		}
+	}
+}
+
+// TestValidatePropertyValue_NumberRejectsNaNAndInf is the regression test for the
+// round-5 Codex finding at property_validate.go:325 (F8): asFloatValue's float branch
+// returned rv.Float() unconditionally, so isNumberValue (its only type-check caller)
+// accepted NaN and +/-Inf as valid PropertyTypeNumber values. Neither round-trips
+// through the YAML/JSON a validated property eventually serializes to — isIntegerValue,
+// just above asFloatValue in this same file, already excludes both for the integer
+// path (math.IsInf check, plus NaN failing its own Trunc equality), so the number path
+// was the one left unguarded.
+func TestValidatePropertyValue_NumberRejectsNaNAndInf(t *testing.T) {
+	schema := PropertySchema{Type: PropertyTypeNumber}
+	for _, tc := range []struct {
+		name  string
+		value float64
+	}{
+		{"NaN", math.NaN()},
+		{"+Inf", math.Inf(1)},
+		{"-Inf", math.Inf(-1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validatePropertyValue(schema, tc.value, "properties.field")
+			if err == nil {
+				t.Fatalf("expected %v to be rejected as a PropertyTypeNumber value, got nil error", tc.value)
+			}
+			if !strings.Contains(err.Error(), "expected number") {
+				t.Fatalf("expected an \"expected number\" error, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidatePropertyValue_NumberAcceptsFiniteFloat guards against an overcorrection:
+// an ordinary finite float must still validate as PropertyTypeNumber.
+func TestValidatePropertyValue_NumberAcceptsFiniteFloat(t *testing.T) {
+	schema := PropertySchema{Type: PropertyTypeNumber}
+	if _, err := validatePropertyValue(schema, 3.5, "properties.field"); err != nil {
+		t.Fatalf("expected a finite float to validate, got: %v", err)
 	}
 }

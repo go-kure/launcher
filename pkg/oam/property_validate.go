@@ -314,6 +314,11 @@ func asStringValue(value any) (string, bool) {
 	return rv.String(), true
 }
 
+// asFloatValue rejects NaN and ±Inf for a float-kinded value: neither is a valid
+// PropertyTypeNumber value (isNumberValue is this function's only type-check caller),
+// since both fail to round-trip through the YAML/JSON a validated property eventually
+// serializes to. This mirrors isIntegerValue's existing !math.IsInf/NaN-via-Trunc
+// checks just above, which only ever applied to the integer path.
 func asFloatValue(value any) (float64, bool) {
 	rv := reflect.ValueOf(value)
 	switch rv.Kind() {
@@ -322,7 +327,11 @@ func asFloatValue(value any) (float64, bool) {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return float64(rv.Uint()), true
 	case reflect.Float32, reflect.Float64:
-		return rv.Float(), true
+		f := rv.Float()
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, false
+		}
+		return f, true
 	default:
 		return 0, false
 	}

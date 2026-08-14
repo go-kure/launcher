@@ -38,8 +38,18 @@ var ErrLoweringDepthExceeded = errors.New("oam: lowering exceeded max recursion 
 // element's Origin() accessor lead with it, so a user always sees the YAML they wrote
 // (D7: authored location first, synthesized detail second).
 type Origin struct {
-	Document      string // authored metadata.name
-	DocumentKind  string // authored kind, e.g. "WebApplication"
+	Document     string // authored metadata.name
+	DocumentKind string // authored kind, e.g. "WebApplication"
+	// Namespace is the authored document's metadata.namespace. It exists on Origin
+	// purely so two elements authored in DIFFERENT namespaces are never treated as
+	// the same Origin by identity/equality (NameAllocator.Reserve's prior.origin !=
+	// origin check, and LowerRaws' own duplicate-input check) — a name collision
+	// within one namespace is real, the identical collision across two disjoint
+	// namespaces is not. Deliberately excluded from String(): every existing
+	// caller of String() already identifies a document by name+kind, and adding
+	// namespace there would be a message-format change independent of this field's
+	// actual purpose.
+	Namespace     string
 	Component     string // authored component name; "" at document/policy position
 	ComponentType string
 	TraitType     string // authored trait type; "" unless the origin is a trait
@@ -582,11 +592,19 @@ func (t *Transformer) validateSettled(doc *Application) error {
 	// same rationale: a custom component type accepted via ParseWithExtraTypes and
 	// backed by a registered handler is terminal, and must not be rejected purely
 	// because some OTHER lowering rule routes execution through validateSettled.
-	componentTypes := make([]string, 0, len(t.componentHandlers))
+	//
+	// Passed via customComponentTypes, NOT LowerableTypes{ComponentTypes: ...}: the
+	// latter also tells validateTrait to defer the trait/component restriction check
+	// (componentIsLowerable, validate.go), which is correct only for a component that
+	// is still going to be rewritten by a ComponentLoweringRule. A componentHandlers
+	// entry is the opposite — a terminal type that has already settled — so routing it
+	// through LowerableTypes.ComponentTypes would wrongly let a terminal component skip
+	// the restriction recheck this function exists to re-run post-settlement.
+	customComponentTypes := make(map[string]bool, len(t.componentHandlers))
 	for name := range t.componentHandlers {
-		componentTypes = append(componentTypes, name)
+		customComponentTypes[name] = true
 	}
-	return validateWithExtraTypes(doc, customTraitTypes, LowerableTypes{ComponentTypes: componentTypes})
+	return validateWithExtraTypes(doc, customTraitTypes, customComponentTypes, LowerableTypes{})
 }
 
 // lower runs the recursive fixpoint expansion over app (D1/D2): every round, every
@@ -604,7 +622,7 @@ func (t *Transformer) lower(app *Application, ctx TransformContext) ([]*Applicat
 	appCopy := *app // shallow: never index-mutate a shared slice element; always rebuild via new slices
 	seed := []loweringDoc{{
 		doc:    &appCopy,
-		origin: Origin{Document: app.Metadata.Name, DocumentKind: app.Kind},
+		origin: Origin{Document: app.Metadata.Name, DocumentKind: app.Kind, Namespace: app.Metadata.Namespace},
 		slot:   0,
 	}}
 	settled, err := t.runLowering(seed, ctx)
@@ -633,7 +651,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		}
 		origin, _ := doc.Origin()
 		if origin == (Origin{}) {
-			origin = Origin{Document: doc.Metadata.Name, DocumentKind: doc.Kind}
+			origin = Origin{Document: doc.Metadata.Name, DocumentKind: doc.Kind, Namespace: doc.Metadata.Namespace}
 		}
 		lctx := LoweringContext{Document: doc, Capabilities: ctx.Capabilities, Origin: origin, Namer: namer}
 		result, err := rule.LowerDocument(doc, lctx)
@@ -676,7 +694,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 	// lowerDocumentOnce applies at document position.
 	docOrigin, _ := doc.Origin()
 	if docOrigin == (Origin{}) {
-		docOrigin = Origin{Document: doc.Metadata.Name, DocumentKind: doc.Kind}
+		docOrigin = Origin{Document: doc.Metadata.Name, DocumentKind: doc.Kind, Namespace: doc.Metadata.Namespace}
 	}
 
 	changed := false
@@ -695,7 +713,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 		// form.
 		compOrigin, ok := comp.Origin()
 		if !ok {
-			compOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Component: comp.Name, ComponentType: comp.Type, Index: i}
+			compOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Namespace: docOrigin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: i}
 		}
 
 		if rule, ok := t.componentLoweringRules[comp.Type]; ok {
@@ -712,6 +730,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				result.Components[j].origin = &compOrigin
 				names[j] = result.Components[j].Name
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", compOrigin)
+				}
+				if err := t.sealEmittedNestedTraits(&result.Components[j], compOrigin); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
@@ -741,7 +762,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// its own authored origin instead of one re-derived from its current type.
 			traitOrigin, traitOK := trait.Origin()
 			if !traitOK {
-				traitOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Component: comp.Name, ComponentType: comp.Type, TraitType: trait.Type, Index: k}
+				traitOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Namespace: docOrigin.Namespace, Component: comp.Name, ComponentType: comp.Type, TraitType: trait.Type, Index: k}
 			}
 
 			rule, ok := t.traitLoweringRules[trait.Type]
@@ -809,6 +830,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
+				if err := t.sealEmittedNestedTraits(&result.Components[j], traitOrigin); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+				}
 				// A trait-position rule may also emit Components (loweringPositionRules);
 				// include them in the step's To — see the matching comment on the
 				// component-position block above.
@@ -829,7 +853,18 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 		comp.Traits = newTraits
 		newComponents = append(newComponents, comp)
 	}
-	doc.Spec.Components = newComponents
+
+	// doc.Spec.Components is deliberately NOT updated here, before the policy loop
+	// below runs. lctx.Document (== doc) is the same pointer handed to every rule
+	// in this round; component/trait rules above see doc.Spec.Components as it
+	// stood at the START of this round (they read from newComponents/local
+	// variables, never from doc.Spec.Components directly). Assigning newComponents
+	// into doc here would make a policy rule further down see THIS round's
+	// component output while a component rule earlier in the SAME round saw the
+	// PRE-round document — an inconsistent, traversal-order-dependent snapshot,
+	// contradicting LoweringContext.Document's own doc comment ("the enclosing
+	// document as it stands at this round"). Both newComponents and newPolicies
+	// are committed to doc together, after every rule in this round has run.
 
 	newPolicies := make([]ApplicationPolicy, 0, len(doc.Spec.Policies))
 	for i := range doc.Spec.Policies {
@@ -839,7 +874,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 		// by a policy-position rule) keeps its own authored origin.
 		polOrigin, polOK := pol.Origin()
 		if !polOK {
-			polOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, PolicyName: pol.Name, Index: i}
+			polOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Namespace: docOrigin.Namespace, PolicyName: pol.Name, Index: i}
 		}
 
 		rule, ok := t.policyLoweringRules[pol.Type]
@@ -868,7 +903,42 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 		changed = true
 	}
 	newPolicies = append(newPolicies, pendingPolicies...)
+	doc.Spec.Components = newComponents
 	doc.Spec.Policies = newPolicies
 
 	return changed, steps, nil
+}
+
+// sealEmittedNestedTraits stamps origin and seals every trait nested inside an
+// emitted component (comp.Traits), the same treatment a trait-position rule's
+// directly-emitted Traits already get (result.Traits[j].sealed = true, above). A
+// component/trait-position rule constructs comp with Go struct literals, from a
+// different package — it cannot set the unexported Trait.sealed field itself — so a
+// nested trait it hard-codes into an emitted component is, without this, silently
+// indistinguishable from an authored one. If that nested trait's type has no
+// registered TraitLoweringRule (most cases: it is a terminal, dispatchable-only
+// type), it flows unprocessed straight through to the settled document and then to
+// applyTraits (transform.go), which — with sealed left false — merges capability
+// rendering into it exactly as it would for an authored trait: a rendering the
+// emitting rule already accounted for once, an unwanted "fifth input" (D5), or an
+// ErrMissingCapability failure for a capability the settled document was never
+// authored to require. Sealing here does not stop the trait from being picked up by
+// a registered TraitLoweringRule next round — lowerDocumentBody's own trait branch
+// dispatches on trait.Type regardless of trait.sealed, exactly as it already does for
+// a trait sealed at trait-position (the "second TraitLoweringRule" case its own
+// comment documents) — it only marks the trait as already-final if no such rule
+// exists to claim it.
+func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Origin) error {
+	for k := range comp.Traits {
+		trait := &comp.Traits[k]
+		nestedOrigin := parentOrigin
+		nestedOrigin.TraitType = trait.Type
+		nestedOrigin.Index = k
+		trait.origin = &nestedOrigin
+		trait.sealed = true
+		if err := t.validateEmittedTrait(trait); err != nil {
+			return err
+		}
+	}
+	return nil
 }

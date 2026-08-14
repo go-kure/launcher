@@ -166,7 +166,7 @@ func TestParseWithExtraTypes_LeavesCallerTraitSetUnmodified(t *testing.T) {
 		},
 	}
 
-	if err := validateWithExtraTypes(app, base, LowerableTypes{TraitTypes: []string{"expose-plus"}}); err != nil {
+	if err := validateWithExtraTypes(app, base, nil, LowerableTypes{TraitTypes: []string{"expose-plus"}}); err != nil {
 		t.Fatalf("validateWithExtraTypes: %v", err)
 	}
 	if len(base) != 1 || !base["site-mesh"] {

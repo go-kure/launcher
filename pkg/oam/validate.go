@@ -58,13 +58,13 @@ var traitComponentRestrictions = map[string]map[string]bool{
 
 // validate performs semantic validation on a parsed Application.
 func validate(app *Application) error {
-	return validateWithExtraTypes(app, nil, LowerableTypes{})
+	return validateWithExtraTypes(app, nil, nil, LowerableTypes{})
 }
 
 // validateWithCustomTraits is like validate but also accepts custom trait type names
 // derived from CapabilityDefinition files supplied via --capability-def.
 func validateWithCustomTraits(app *Application, customTraitTypes map[string]bool) error {
-	return validateWithExtraTypes(app, customTraitTypes, LowerableTypes{})
+	return validateWithExtraTypes(app, customTraitTypes, nil, LowerableTypes{})
 }
 
 // validateWithExtraTypes is validateWithCustomTraits widened with a LowerableTypes
@@ -83,7 +83,17 @@ func validateWithCustomTraits(app *Application, customTraitTypes map[string]bool
 // lowerable.PolicyTypes is deliberately not consulted here: policy types carry no
 // allowlist at all (see validateApplicationPolicy), so there is nothing to widen.
 // It exists on LowerableTypes for callers that inspect a Transformer's claims.
-func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, lowerable LowerableTypes) error {
+//
+// customComponentTypes is a SEPARATE type-acceptance channel from
+// lowerable.ComponentTypes: it widens which component type names are accepted, exactly
+// like customTraitTypes does for traits, but — unlike lowerable.ComponentTypes — never
+// signals "this component is still being lowered, defer the trait/component
+// restriction check" to validateTrait. Passing a terminal handler-backed component type
+// (e.g. from validateSettled's t.componentHandlers) via lowerable.ComponentTypes would
+// incorrectly skip that restriction recheck for a component that is done lowering;
+// customComponentTypes exists so a caller can accept such a type without also
+// suppressing the recheck.
+func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, customComponentTypes map[string]bool, lowerable LowerableTypes) error {
 	if app.APIVersion != SupportedAPIVersion {
 		return oamValidationError("apiVersion", fmt.Sprintf("unsupported apiVersion %q, expected %q",
 			app.APIVersion, SupportedAPIVersion))
@@ -118,7 +128,7 @@ func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, 
 
 	seenNames := make(map[string]bool)
 	for i, c := range app.Spec.Components {
-		if err := validateComponent(&c, i, seenNames, allTraitTypes, lowerableComponentTypes); err != nil {
+		if err := validateComponent(&c, i, seenNames, allTraitTypes, lowerableComponentTypes, customComponentTypes); err != nil {
 			return err
 		}
 	}
@@ -164,7 +174,7 @@ func mergeTypeSets(base map[string]bool, extra []string) map[string]bool {
 	return merged
 }
 
-func validateComponent(c *Component, index int, seenNames map[string]bool, customTraitTypes map[string]bool, lowerableComponentTypes map[string]bool) error {
+func validateComponent(c *Component, index int, seenNames map[string]bool, customTraitTypes map[string]bool, lowerableComponentTypes map[string]bool, customComponentTypes map[string]bool) error {
 	if c.Name == "" {
 		return oamValidationError("name", fmt.Sprintf("spec.components[%d].name is required", index))
 	}
@@ -182,7 +192,7 @@ func validateComponent(c *Component, index int, seenNames map[string]bool, custo
 		return oamValidationError("type", fmt.Sprintf("component %q missing type", c.Name))
 	}
 
-	if !validComponentTypes[c.Type] && !lowerableComponentTypes[c.Type] {
+	if !validComponentTypes[c.Type] && !lowerableComponentTypes[c.Type] && !customComponentTypes[c.Type] {
 		return errors.NewValidationError("type", c.Type, c.Name, supportedComponentTypes())
 	}
 

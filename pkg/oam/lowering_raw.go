@@ -19,8 +19,20 @@ type documentEnvelope struct {
 	APIVersion string `yaml:"apiVersion"`
 	Kind       string `yaml:"kind"`
 	Metadata   struct {
-		Name string `yaml:"name"`
+		Name      string `yaml:"name"`
+		Namespace string `yaml:"namespace"`
 	} `yaml:"metadata"`
+}
+
+// rawDocKey is the LowerRaws batch-duplicate-detection key. It is deliberately NOT
+// Origin: Origin (Document, DocumentKind — lowering.go) has no Namespace field, so
+// two raw inputs sharing a name and kind but authored in different namespaces are
+// distinct Kubernetes-adjacent resources that must both be claimed and lowered, not
+// collapsed into one "duplicate" by a key that cannot tell them apart.
+type rawDocKey struct {
+	namespace string
+	kind      string
+	name      string
 }
 
 // LowerRaws lowers every raw document whose kind has a registered
@@ -46,7 +58,7 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 	}
 
 	claimed := make([]bool, len(raws))
-	seenOrigin := make(map[Origin]int, len(raws))
+	seenKeys := make(map[rawDocKey]int, len(raws))
 	var seed []loweringDoc
 	for i, raw := range raws {
 		var env documentEnvelope
@@ -73,7 +85,7 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		if !ok {
 			continue // pass-through: never decoded, never re-serialized
 		}
-		origin := Origin{Document: env.Metadata.Name, DocumentKind: env.Kind}
+		origin := Origin{Document: env.Metadata.Name, DocumentKind: env.Kind, Namespace: env.Metadata.Namespace}
 		// NameAllocator.Reserve treats reserving a name for an EQUAL Origin as a
 		// no-op — correct within one document, where an identical Origin means
 		// "the same element asking twice", but wrong across raw inputs, where
@@ -85,12 +97,18 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		// NameAllocator, so Reserve's existing same-Origin-is-a-no-op rule never
 		// has to distinguish two different documents that happen to share an
 		// Origin — that case cannot reach it anymore.
-		if prior, dup := seenOrigin[origin]; dup {
+		//
+		// The duplicate check itself keys on rawDocKey, not Origin: Origin has no
+		// Namespace field, so two raw inputs sharing a name and kind but authored
+		// in different namespaces are distinct resources, not duplicates of each
+		// other — see rawDocKey's doc comment.
+		key := rawDocKey{namespace: env.Metadata.Namespace, kind: env.Kind, name: env.Metadata.Name}
+		if prior, dup := seenKeys[key]; dup {
 			return nil, &LoweringError{Origin: origin, Cause: errors.Errorf(
-				"duplicate authored document: raw input %d and raw input %d both name %q (kind %q)",
-				prior, i, env.Metadata.Name, env.Kind)}
+				"duplicate authored document: raw input %d and raw input %d both name %q (kind %q, namespace %q)",
+				prior, i, env.Metadata.Name, env.Kind, env.Metadata.Namespace)}
 		}
-		seenOrigin[origin] = i
+		seenKeys[key] = i
 		claimed[i] = true
 		seed = append(seed, loweringDoc{
 			raw:  raw,
