@@ -197,6 +197,32 @@ func TestLowerRaws_PassThroughIsByteIdentical(t *testing.T) {
 	}
 }
 
+// TestLowerRaws_DifferentAPIVersion_PassesThrough is the round-3 Codex regression:
+// an unrelated resource that happens to share a registered kind string ("WebApplication")
+// but carries a foreign apiVersion must be preserved byte-for-byte, not claimed by a
+// decoder that was never meant for it. Dispatch must key on (apiVersion, kind), not
+// kind alone.
+func TestLowerRaws_DifferentAPIVersion_PassesThrough(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	var decodes int
+	tr.RegisterRawDocumentLowering(testRawRule{kind: "WebApplication", decodes: &decodes})
+
+	foreign := json.RawMessage("apiVersion: unrelated.example.com/v1\nkind: WebApplication\nmetadata:\n  name: not-ours\nspec:\n  whatever: true\n")
+	out, err := tr.LowerRaws([]json.RawMessage{foreign}, TransformContext{})
+	if err != nil {
+		t.Fatalf("LowerRaws: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 output document, got %d", len(out))
+	}
+	if string(out[0]) != string(foreign) {
+		t.Fatalf("foreign-apiVersion document was rewritten:\n--- want ---\n%s\n--- got ---\n%s", foreign, out[0])
+	}
+	if decodes != 0 {
+		t.Fatalf("expected DecodeDocument to never be called for a foreign apiVersion, got %d call(s)", decodes)
+	}
+}
+
 // TestLowerRaws_DecodeTargetFieldsSurvive proves the gap the in-transform path
 // structurally cannot cross: authored fields with no ApplicationSpec home reach the
 // rule's own decode target and land in the emitted components' properties.

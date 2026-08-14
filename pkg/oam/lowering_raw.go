@@ -16,8 +16,9 @@ import (
 // pass. It mirrors the kind probe a downstream consumer runs at the same seam,
 // extended to also read metadata.name.
 type documentEnvelope struct {
-	Kind     string `yaml:"kind"`
-	Metadata struct {
+	APIVersion string `yaml:"apiVersion"`
+	Kind       string `yaml:"kind"`
+	Metadata   struct {
 		Name string `yaml:"name"`
 	} `yaml:"metadata"`
 }
@@ -53,6 +54,20 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 			// Not this pass's error to report: the caller's own parser produces
 			// the canonical message for a malformed document. Pass through.
 			continue
+		}
+		// Dispatch on the full (apiVersion, kind) pair, not kind alone: an
+		// unrelated resource that happens to share a registered kind string under
+		// a different apiVersion must be preserved byte-for-byte, not claimed and
+		// mis-lowered (or failed) by a decoder that was never meant for it. This
+		// package supports exactly one apiVersion end to end — the in-transform
+		// path enforces the identical single-group gate before a document ever
+		// reaches lowering (validate.go, checked before the kind allowlist) — so
+		// gating on SupportedAPIVersion here, rather than adding a per-rule
+		// apiVersion to RawDocumentLoweringRule, matches that existing invariant
+		// instead of introducing multi-group registration this package has no
+		// other use for.
+		if env.APIVersion != SupportedAPIVersion {
+			continue // pass-through: different apiVersion, not this pass's business
 		}
 		rule, ok := t.rawDocLoweringRules[env.Kind]
 		if !ok {
