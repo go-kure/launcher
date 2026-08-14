@@ -719,3 +719,97 @@ func TestLower_SealedTrait_NotReMergedWithCapabilityRendering(t *testing.T) {
 		t.Fatal("expected the trait passed to stage2 to be sealed=true (emitted by stage1's lowering round)")
 	}
 }
+
+func containsName(names []string, want string) bool {
+	for _, n := range names {
+		if n == want {
+			return true
+		}
+	}
+	return false
+}
+
+// componentAndPolicyRule is a component-position rule that emits both a
+// Component and a Policy in one call — a position loweringPositionRules
+// explicitly permits (PositionComponent: {components: true, policies: true}).
+type componentAndPolicyRule struct{}
+
+func (componentAndPolicyRule) ComponentType() string { return "web-and-db" }
+func (componentAndPolicyRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{
+		Components: []Component{{Name: comp.Name + "-web", Type: "webservice", Properties: map[string]any{"image": "nginx"}}},
+		Policies:   []ApplicationPolicy{{Name: comp.Name + "-db-order", Type: "dependency", Properties: map[string]any{"rules": []any{}}}},
+	}, nil
+}
+
+// TestLower_ComponentStep_RecordsEmittedPolicyNames is the round-3 Codex
+// regression: a component-position rule's LoweringStep.To was built only from
+// result.Components, silently dropping any result.Policies it also emitted —
+// making the recorded expansion chain understate what the rule actually did.
+func TestLower_ComponentStep_RecordsEmittedPolicyNames(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(componentAndPolicyRule{})
+	doc := makeApp("myapp", Component{Name: "shop", Type: "web-and-db", Properties: map[string]any{}})
+	doc.APIVersion = SupportedAPIVersion
+	doc.Kind = terminalDocumentKind
+
+	_, steps, err := tr.lowerDocumentBody(doc, TransformContext{}, newNameAllocator(), 0)
+	if err != nil {
+		t.Fatalf("lowerDocumentBody: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step, got %d: %+v", len(steps), steps)
+	}
+	to := steps[0].To
+	if !containsName(to, "shop-web") {
+		t.Errorf("step.To = %v, missing emitted component name %q", to, "shop-web")
+	}
+	if !containsName(to, "shop-db-order") {
+		t.Errorf("step.To = %v, missing emitted policy name %q", to, "shop-db-order")
+	}
+}
+
+// traitEmitsEverythingRule is a trait-position rule that emits a Trait, a
+// Component, and a Policy in one call — all three are permitted at
+// PositionTrait.
+type traitEmitsEverythingRule struct{}
+
+func (traitEmitsEverythingRule) TraitType() string { return "provision" }
+func (traitEmitsEverythingRule) LowerTrait(trait *Trait, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{
+		Traits:     []Trait{{Type: "expose", Properties: map[string]any{}}},
+		Components: []Component{{Name: "sidecar", Type: "webservice", Properties: map[string]any{"image": "nginx"}}},
+		Policies:   []ApplicationPolicy{{Name: "provision-order", Type: "dependency", Properties: map[string]any{"rules": []any{}}}},
+	}, nil
+}
+
+// TestLower_TraitStep_RecordsEmittedComponentAndPolicyNames is the round-3
+// Codex regression for the trait-position analogue: LoweringStep.To was built
+// only from result.Traits, silently dropping any result.Components/
+// result.Policies the rule also emitted.
+func TestLower_TraitStep_RecordsEmittedComponentAndPolicyNames(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterTraitLowering(traitEmitsEverythingRule{})
+	comp := Component{Name: "web", Type: "webservice", Traits: []Trait{{Type: "provision", Properties: map[string]any{}}}}
+	doc := makeApp("myapp", comp)
+	doc.APIVersion = SupportedAPIVersion
+	doc.Kind = terminalDocumentKind
+
+	_, steps, err := tr.lowerDocumentBody(doc, TransformContext{}, newNameAllocator(), 0)
+	if err != nil {
+		t.Fatalf("lowerDocumentBody: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step, got %d: %+v", len(steps), steps)
+	}
+	to := steps[0].To
+	if !containsName(to, "expose") {
+		t.Errorf("step.To = %v, missing emitted trait type %q", to, "expose")
+	}
+	if !containsName(to, "sidecar") {
+		t.Errorf("step.To = %v, missing emitted component name %q", to, "sidecar")
+	}
+	if !containsName(to, "provision-order") {
+		t.Errorf("step.To = %v, missing emitted policy name %q", to, "provision-order")
+	}
+}

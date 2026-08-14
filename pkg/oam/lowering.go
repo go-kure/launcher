@@ -143,20 +143,20 @@ type LoweringContext struct {
 type NameAllocator struct {
 	taken map[string]nameClaim
 	// round is the fixpoint round currently being processed, set by runLowering
-	// before it dispatches any rule in that round. A given origin's rule fires at
-	// most once per round (lowerDocumentBody/lowerDocumentOnce each call a rule's
-	// LowerXxx exactly once per element per round), so round is what lets Reserve
-	// tell apart two DIFFERENT failure/no-op cases that otherwise look identical
-	// (same name, same origin): a second claim in the SAME round can only come from
-	// that one invocation trying to name two different emitted siblings (a real
-	// collision — see Reserve); a claim repeated in a LATER round is the same
-	// conceptual element re-affirming a name it already owns (e.g. a sealed trait
-	// picked up again by a second, chained TraitLoweringRule — legitimate, a no-op).
+	// before it dispatches any rule in that round. Recorded on every claim purely
+	// to make Reserve's error message more specific (same round vs. an earlier
+	// round) — see Reserve. It is NOT used to treat any repeat claim as a
+	// legitimate no-op: Origin carries no per-sibling discriminator (two elements
+	// independently emitted from one authored origin — LoweringResult's doc
+	// comment — share one Origin value), so a repeat claim for the same origin in
+	// a later round cannot be safely told apart from a genuinely different
+	// sibling colliding with an earlier one.
 	round int
 }
 
 // nameClaim records which origin claimed a generated name, and in which round, so
-// Reserve can distinguish the two cases above.
+// Reserve's error message can say whether the collision was within one round or
+// across rounds.
 type nameClaim struct {
 	origin Origin
 	round  int
@@ -166,16 +166,24 @@ func newNameAllocator() *NameAllocator {
 	return &NameAllocator{taken: make(map[string]nameClaim)}
 }
 
-// Reserve claims name for origin.
+// Reserve claims name for origin. Reserving an already-claimed name is always an
+// error, regardless of round or whether the origin matches the prior claim's.
 //
-// Reserving the same name again for the SAME origin in a LATER round is a no-op — the
-// same conceptual element re-affirming a name it already owns. Reserving it again for
-// the same origin in THE SAME round is an error: since one origin's rule invocation
-// runs at most once per round, a second claim within that round means the rule itself
-// generated the identical name for two different emitted siblings (they share one
-// Origin — LoweringResult carries no per-sibling discriminator — so this is the only
-// signal available to catch it). Reserving it for a different origin, in any round, is
-// always an error naming both origins.
+// An earlier version of this function treated a repeat claim for the SAME origin in
+// a LATER round as a no-op — "the same conceptual element re-affirming a name it
+// already owns". That is unsound: LoweringResult carries no per-sibling
+// discriminator, so when one origin's rule invocation emits two elements (e.g. a
+// component-position rule emitting a Component and a Policy, or a trait rule
+// emitting several), both share the identical Origin value. If those elements then
+// take a different number of further rounds to settle, their own name-generating
+// calls can land in different rounds — and the no-op carve-out let a genuine
+// collision between two such siblings through silently whenever that happened. No
+// registered rule in this codebase currently relies on re-deriving an identical name
+// across rounds for the same conceptual element (verified: nothing outside this
+// package's own tests calls NameAllocator.Name); a rule that legitimately needs to
+// must derive a name that varies with something the engine can tell apart (e.g. fold
+// a stable per-sibling index into the name itself), since the engine cannot perform
+// that disambiguation on its behalf.
 func (n *NameAllocator) Reserve(name string, origin Origin) error {
 	if prior, ok := n.taken[name]; ok {
 		if prior.origin != origin {
@@ -184,6 +192,7 @@ func (n *NameAllocator) Reserve(name string, origin Origin) error {
 		if prior.round == n.round {
 			return errors.Errorf("lowering: generated name %q collides — %s already used it for a different emitted element in the same lowering round", name, origin)
 		}
+		return errors.Errorf("lowering: generated name %q collides — %s already used it in an earlier lowering round", name, origin)
 	}
 	n.taken[name] = nameClaim{origin: origin, round: n.round}
 	return nil
@@ -712,6 +721,11 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				if err := t.validateEmittedPolicy(&result.Policies[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
+				// A component-position rule may also emit Policies
+				// (loweringPositionRules); include them in the step's To so the
+				// recorded chain reflects everything this round actually emitted,
+				// not only the position's primary field.
+				names = append(names, result.Policies[j].Name)
 				pendingPolicies = append(pendingPolicies, result.Policies[j])
 			}
 			steps = append(steps, LoweringStep{Rule: "component/" + comp.Type, Position: PositionComponent, Round: round, From: comp.Name, To: names})
@@ -795,6 +809,10 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
+				// A trait-position rule may also emit Components (loweringPositionRules);
+				// include them in the step's To — see the matching comment on the
+				// component-position block above.
+				names = append(names, result.Components[j].Name)
 				newComponents = append(newComponents, result.Components[j])
 			}
 			for j := range result.Policies {
@@ -802,6 +820,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				if err := t.validateEmittedPolicy(&result.Policies[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
+				names = append(names, result.Policies[j].Name)
 				pendingPolicies = append(pendingPolicies, result.Policies[j])
 			}
 			steps = append(steps, LoweringStep{Rule: "trait/" + trait.Type, Position: PositionTrait, Round: round, From: trait.Type, To: names})

@@ -102,6 +102,68 @@ func TestLower_DuplicateSiblingName_Rejected(t *testing.T) {
 	}
 }
 
+// crossRoundRootRule emits two siblings from one LowerComponent call: a leaf that
+// reserves a generated name immediately (round N), and a "cross-round-chain"-typed
+// placeholder that crossRoundChainRule picks up next round and reserves the SAME
+// generated name for. Both siblings share the identical Origin — the one call that
+// emitted them — so their name claims land in different rounds even though they are
+// different elements: the round-3 Codex finding this pair reproduces.
+type crossRoundRootRule struct{}
+
+func (crossRoundRootRule) ComponentType() string { return "cross-round-root" }
+
+func (crossRoundRootRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	leafName, err := lctx.Namer.Name("dup", "child", lctx.Origin)
+	if err != nil {
+		return LoweringResult{}, err
+	}
+	return LoweringResult{Components: []Component{
+		{Name: leafName, Type: "webservice", Properties: map[string]any{"image": "nginx"}},
+		{Name: "placeholder", Type: "cross-round-chain", Properties: map[string]any{}},
+	}}, nil
+}
+
+type crossRoundChainRule struct{}
+
+func (crossRoundChainRule) ComponentType() string { return "cross-round-chain" }
+
+func (crossRoundChainRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	name, err := lctx.Namer.Name("dup", "child", lctx.Origin)
+	if err != nil {
+		return LoweringResult{}, err
+	}
+	return LoweringResult{Components: []Component{{Name: name, Type: "webservice", Properties: map[string]any{"image": "nginx"}}}}, nil
+}
+
+// TestLower_CrossRoundSiblingNameCollision_Rejected is the round-3 Codex regression:
+// two siblings emitted from ONE origin (LoweringResult carries no per-sibling
+// discriminator) that independently reserve the SAME generated name in DIFFERENT
+// rounds must still be rejected as a collision — not silently accepted as "the same
+// conceptual element re-affirming its name", which is what NameAllocator.Reserve did
+// before this fix whenever the round differed.
+func TestLower_CrossRoundSiblingNameCollision_Rejected(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(crossRoundRootRule{})
+	tr.RegisterComponentLowering(crossRoundChainRule{})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{
+			Components: []Component{{Name: "root", Type: "cross-round-root", Properties: map[string]any{}}},
+		},
+	}
+
+	_, err := tr.lower(app, TransformContext{})
+	if err == nil {
+		t.Fatal("expected a cross-round sibling name collision error")
+	}
+	if !strings.Contains(err.Error(), "earlier lowering round") {
+		t.Fatalf("expected a cross-round collision message, got: %v", err)
+	}
+}
+
 // loopyRule always re-emits a "loopy" component, so it never reaches a fixpoint —
 // proving the MaxLoweringDepth guard actually fires rather than looping forever.
 type loopyRule struct{}
