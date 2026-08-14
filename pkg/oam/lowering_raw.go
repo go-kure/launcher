@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -85,6 +86,30 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		if !ok {
 			continue // pass-through: never decoded, never re-serialized
 		}
+
+		// Validate the two fields this pass itself relies on before claiming the
+		// document: an empty or malformed name propagates uncaught into Origin
+		// (rawDocKey dedup, LoweringError attribution below) and into every
+		// generated child name a rule derives from it (a rule's own call to
+		// NameAllocator.Name takes this name as its base), surfacing far
+		// downstream as an opaque generated-name failure instead of here — the
+		// same DNS-1123 gate ParseWithExtraTypes enforces for the in-transform
+		// path (validate.go:107-119).
+		if env.Metadata.Name == "" {
+			return nil, &LoweringError{Origin: Origin{DocumentKind: env.Kind}, Cause: errors.Errorf(
+				"raw input %d: metadata.name is required", i)}
+		}
+		if errs := validation.IsDNS1123Subdomain(env.Metadata.Name); len(errs) > 0 {
+			return nil, &LoweringError{Origin: Origin{Document: env.Metadata.Name, DocumentKind: env.Kind}, Cause: errors.Errorf(
+				"raw input %d: metadata.name %q is not a valid DNS-1123 subdomain", i, env.Metadata.Name)}
+		}
+		if env.Metadata.Namespace != "" {
+			if errs := validation.IsDNS1123Subdomain(env.Metadata.Namespace); len(errs) > 0 {
+				return nil, &LoweringError{Origin: Origin{Document: env.Metadata.Name, DocumentKind: env.Kind, Namespace: env.Metadata.Namespace}, Cause: errors.Errorf(
+					"raw input %d: metadata.namespace %q is not a valid DNS-1123 subdomain", i, env.Metadata.Namespace)}
+			}
+		}
+
 		origin := Origin{Document: env.Metadata.Name, DocumentKind: env.Kind, Namespace: env.Metadata.Namespace}
 		// NameAllocator.Reserve treats reserving a name for an EQUAL Origin as a
 		// no-op — correct within one document, where an identical Origin means
