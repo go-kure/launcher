@@ -727,9 +727,33 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 				return nil, false, nil, errors.Wrapf(err, "%s", origin)
 			}
 			for j := range result.Documents[i].Spec.Components {
-				if err := t.sealNestedTraitsInDocument(&result.Documents[i].Spec.Components[j], origin, originalComponents); err != nil {
+				comp := &result.Documents[i].Spec.Components[j]
+				// Round-11-batch-2 Codex finding (lowering.go:717 as reviewed): only
+				// the emitted Application itself was stamped above; its nested
+				// components and policies were left unstamped, falling through to
+				// lowerDocumentBody's fallback derivation a round later (or, for an
+				// already-terminal component/policy no later round ever touches,
+				// never stamped at all — Origin() would return false on the final
+				// settled output). Stamp explicitly here, the same treatment
+				// component/trait-position rule output already gets
+				// (result.Components[j].origin = &compOrigin below). Safe to do
+				// unconditionally, including for a forwarded (pointer-identical)
+				// component: origin.Document/DocumentKind/Namespace are already the
+				// correct authored-root values (copied from doc.Origin() above,
+				// stable across any number of chained document-rule rounds), and a
+				// forwarded component's own Name/Type are unchanged by construction,
+				// so recomputing here reproduces whatever value it would already
+				// carry rather than overwriting it with something different.
+				compOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: j}
+				comp.origin = &compOrigin
+				if err := t.sealNestedTraitsInDocument(comp, compOrigin, originalComponents); err != nil {
 					return nil, false, nil, errors.Wrapf(err, "%s", origin)
 				}
+			}
+			for k := range result.Documents[i].Spec.Policies {
+				pol := &result.Documents[i].Spec.Policies[k]
+				polOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, PolicyName: pol.Name, Index: k}
+				pol.origin = &polOrigin
 			}
 		}
 		step := LoweringStep{Rule: "document/" + doc.Kind, Position: PositionDocument, Round: round, From: doc.Metadata.Name, To: names}

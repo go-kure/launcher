@@ -97,17 +97,26 @@ func (ExposeRule) ValidateAndApplyDefaults(rendering map[string]any) (map[string
 
 // PropertySchema declares the expose trait's user-facing properties. Identical to
 // the former ExposeHandler.PropertySchema, plus PlatformReserved: true on
-// controllerType, certManagerClusterIssuer, allowedHostnameWildcard, authURL and
-// authResponseHeaders (matching the spike) — these five are capability-injected
-// only and must never be authored inline (D3). This closes the enforcement gap the
-// D3 call sites exist to catch: createApplications and applyTraits
-// (transform.go) now run enforcePlatformReserved exactly like lowering.go's
-// trait-position check already did, so a schema that marks a field reserved is
-// actually enforced everywhere capability rendering merges in, not just here.
+// controllerType, certManagerClusterIssuer, allowedHostnameWildcard, authURL,
+// authResponseHeaders, gatewayName and gatewayNamespace — these seven are
+// capability-injected only and must never be authored inline (D3). This closes the
+// enforcement gap the D3 call sites exist to catch: createApplications and
+// applyTraits (transform.go) now run enforcePlatformReserved exactly like
+// lowering.go's trait-position check already did, so a schema that marks a field
+// reserved is actually enforced everywhere capability rendering merges in, not
+// just here.
 // testdata/webservice-expose-ingress/app.yaml previously authored
 // `controllerType: ingress` inline; that line moved out to the fixture's
 // cluster.yaml capability rendering (which already supplied it) so the fixture
 // itself proves the enforcement is live without changing expected.yaml.
+//
+// gatewayName/gatewayNamespace were NOT reserved until round-11-batch-2
+// (pullrequestreview-4937433461): resolveCapability gives an authored inline
+// property precedence over the platform's ClusterProfile rendering (D5), so
+// without PlatformReserved an application could author gatewayName inline under
+// the gateway controllerType and attach its route to a different Gateway than the
+// platform selected — the exact bypass PlatformReserved exists to close for
+// controllerType/certManagerClusterIssuer/etc. above.
 func (ExposeRule) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		// controllerType is capability-injected, not user-set (see doc above), so it is
@@ -117,8 +126,8 @@ func (ExposeRule) PropertySchema() map[string]oam.PropertySchema {
 		"certManagerClusterIssuer": {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "cert-manager ClusterIssuer used to synthesize TLS (ingress controllerType only)."},
 		"secretName":               {Type: oam.PropertyTypeString, Description: "Overrides the synthesized <component>-tls secret name for platform-managed TLS (ingress controllerType only; requires a cert-manager cluster-issuer capability)."},
 		"allowedHostnameWildcard":  {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "Platform-reserved wildcard the hostnames must fall under."},
-		"gatewayName":              {Type: oam.PropertyTypeString, Description: "Gateway name used to synthesize parentRefs (gateway controllerType only)."},
-		"gatewayNamespace":         {Type: oam.PropertyTypeString, Default: "gateway-system", Description: "Namespace of the Gateway (gateway controllerType only)."},
+		"gatewayName":              {Type: oam.PropertyTypeString, PlatformReserved: true, Description: "Capability-injected Gateway name used to synthesize parentRefs (gateway controllerType only)."},
+		"gatewayNamespace":         {Type: oam.PropertyTypeString, PlatformReserved: true, Default: "gateway-system", Description: "Capability-injected namespace of the Gateway (gateway controllerType only)."},
 		"annotations":              {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Additional annotations to set on the generated resource."},
 		"rules":                    {Type: oam.PropertyTypeArray, Description: "Ingress-style host rules passed through to the ingress handler.", Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "A single ingress-style host rule."}},
 		"hostnames":                {Type: oam.PropertyTypeArray, Description: "Hostnames: gateway routes, or an ingress shorthand that expands to one rule per host when rules is absent.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A hostname to route."}},
