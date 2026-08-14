@@ -310,6 +310,36 @@ func TestLowerRaws_PassThroughDocumentBlocksGeneratedNameCollision(t *testing.T)
 	}
 }
 
+// TestLowerRaws_PassThroughDifferentKindsSameNameNotCollision is the round-9 Codex
+// regression (review comment 3783532124): NameAllocator.Reserve keys on
+// (namespace, name) alone, with no kind component (lowering.go:222). The
+// dcbc759 preReserved fix (for the finding above) originally registered EVERY
+// pass-through document's identity regardless of kind, so two pass-through
+// resources of different kinds sharing a namespace/name — e.g. an
+// Application and a ClusterProfile both named "foo" — collided with each
+// other in the reservation itself, even though they are distinct resource
+// identities and lowering never produces a ClusterProfile. Restricting
+// preReserved to the terminal kind (the only kind lowering ever generates)
+// fixes this without reopening the original gap: a claimed raw document's
+// rule still cannot reuse a pass-through Application's name.
+func TestLowerRaws_PassThroughDifferentKindsSameNameNotCollision(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(testRawRule{kind: "WebApplication"})
+
+	in := []json.RawMessage{
+		rawOfKind("Application", "foo"),
+		rawOfKind("ClusterProfile", "foo"),
+		rawWebApplication("shop"),
+	}
+	out, err := tr.LowerRaws(in, TransformContext{})
+	if err != nil {
+		t.Fatalf("LowerRaws: unexpected collision between differently-kinded pass-through documents: %v", err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("expected 3 output documents, got %d", len(out))
+	}
+}
+
 // TestLowerRaws_DuplicateOrigin_RejectsBeforeLowering proves the duplicate-origin
 // check short-circuits: two raw inputs sharing one authored name+kind are rejected
 // before either rule's DecodeDocument runs, so the shared NameAllocator never has to

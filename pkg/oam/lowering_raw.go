@@ -91,12 +91,21 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		}
 		rule, ok := t.rawDocLoweringRules[env.Kind]
 		if !ok {
-			// Pass-through: never decoded, never re-serialized — but its identity
-			// still has to be visible to collision detection (see preReserved
-			// above), so register it here rather than skipping silently. An empty
-			// or malformed name is not this pass's error to reject (env.Kind isn't
-			// even a lowerable kind here), so only register a usable name.
-			if env.Metadata.Name != "" {
+			// Pass-through: never decoded, never re-serialized — but a pass-through
+			// Application's identity still has to be visible to collision detection
+			// (see preReserved above), since a claimed raw document's rule could
+			// otherwise generate a same-named Application. Restricted to the
+			// terminal kind: NameAllocator.Reserve's key is (namespace, name) alone,
+			// with no kind component (lowering.go:222), and lowering only ever
+			// PRODUCES Application documents (terminalDocumentKind) — so a
+			// same-named pass-through of any OTHER kind (e.g. a ClusterProfile
+			// sharing a name with an Application) is not a real identity collision
+			// and must not be pre-reserved, or it would collide with that
+			// Application's own legitimate reservation despite naming a distinct
+			// resource. An empty or malformed name is not this pass's error to
+			// reject (env.Kind isn't even a lowerable kind here), so only register
+			// a usable name.
+			if env.Kind == terminalDocumentKind && env.Metadata.Name != "" {
 				preReserved = append(preReserved, reservedIdentity{
 					name:   env.Metadata.Name,
 					origin: Origin{Document: env.Metadata.Name, DocumentKind: env.Kind, Namespace: env.Metadata.Namespace},
