@@ -546,11 +546,15 @@ func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext) ([]l
 // origin — a batched pass over every document returns the first failure with no index
 // into them, which is adequate only while every document shares one root origin.
 //
-// The check runs against an EMPTY LowerableTypes: after the fixpoint settles, a
-// document kind or component/trait type still present is by construction not claimed
-// by any registered rule, so it is a non-terminating rule's leftover rather than a
-// legitimate terminal type. Custom trait types from --capability-def stay accepted:
-// they are terminal handler types, not lowering claims.
+// The check runs against a LowerableTypes carrying no *Kinds* or *TraitTypes* — a
+// document kind or component/trait type still present after the fixpoint settles is,
+// for those two positions, by construction not claimed by any registered rule, so it
+// is a non-terminating rule's leftover rather than a legitimate terminal type. Custom
+// trait types from --capability-def stay accepted via customTraitTypes: they are
+// terminal handler types, not lowering claims. ComponentTypes is populated below with
+// every registered ComponentHandler type for the identical reason customTraitTypes
+// exists on the trait side (see the loop below) — a registered component handler is
+// a terminal type whether or not a CapabilityDefinition matches it.
 func (t *Transformer) validateSettled(doc *Application) error {
 	customTraitTypes := make(map[string]bool, len(t.capabilityDefs)+len(t.traitHandlers))
 	for name := range t.capabilityDefs {
@@ -565,7 +569,15 @@ func (t *Transformer) validateSettled(doc *Application) error {
 	for name := range t.traitHandlers {
 		customTraitTypes[name] = true
 	}
-	return validateWithExtraTypes(doc, customTraitTypes, LowerableTypes{})
+	// Mirror the trait-handler allowlist above for registered ComponentHandler types —
+	// same rationale: a custom component type accepted via ParseWithExtraTypes and
+	// backed by a registered handler is terminal, and must not be rejected purely
+	// because some OTHER lowering rule routes execution through validateSettled.
+	componentTypes := make([]string, 0, len(t.componentHandlers))
+	for name := range t.componentHandlers {
+		componentTypes = append(componentTypes, name)
+	}
+	return validateWithExtraTypes(doc, customTraitTypes, LowerableTypes{ComponentTypes: componentTypes})
 }
 
 // lower runs the recursive fixpoint expansion over app (D1/D2): every round, every
