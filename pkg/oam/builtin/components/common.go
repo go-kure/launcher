@@ -459,7 +459,7 @@ func parseResourceList(m map[string]any) (corev1.ResourceList, error) {
 	for k, v := range m {
 		s, ok := v.(string)
 		if !ok {
-			continue
+			return nil, errors.Errorf("%s: quantity must be a string (e.g. %q, not a bare number), got %T", k, "1", v)
 		}
 		q, err := resource.ParseQuantity(s)
 		if err != nil {
@@ -516,21 +516,21 @@ func parseProbes(props map[string]any) (ProbeConfig, error) {
 		return config, nil
 	}
 	if r, ok := probes["readiness"].(map[string]any); ok {
-		p, err := parseProbe(r)
+		p, err := parseProbe(r, "readiness")
 		if err != nil {
 			return config, errors.Errorf("readiness probe: %w", err)
 		}
 		config.Readiness = p
 	}
 	if l, ok := probes["liveness"].(map[string]any); ok {
-		p, err := parseProbe(l)
+		p, err := parseProbe(l, "liveness")
 		if err != nil {
 			return config, errors.Errorf("liveness probe: %w", err)
 		}
 		config.Liveness = p
 	}
 	if s, ok := probes["startup"].(map[string]any); ok {
-		p, err := parseProbe(s)
+		p, err := parseProbe(s, "startup")
 		if err != nil {
 			return config, errors.Errorf("startup probe: %w", err)
 		}
@@ -549,7 +549,10 @@ func countProbeHandlers(m map[string]any) int {
 	return count
 }
 
-func parseProbe(m map[string]any) (*corev1.Probe, error) {
+// kind is "readiness", "liveness", or "startup" — needed only to enforce
+// terminationGracePeriodSeconds' cross-field constraint (see below); every
+// other field's validation is identical across probe kinds.
+func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 	if countProbeHandlers(m) > 1 {
 		return nil, errors.Errorf("probe must specify exactly one handler, but multiple were provided")
 	}
@@ -658,8 +661,16 @@ func parseProbe(m map[string]any) (*corev1.Probe, error) {
 	}
 	if v, n := m["terminationGracePeriodSeconds"]; n {
 		if i, ok := toInt64(v); ok {
-			if i < 0 {
-				return nil, errors.Errorf("terminationGracePeriodSeconds: must not be negative, got %d", i)
+			// Cross-field constraint, so it's checked ahead of the bounds check:
+			// a failed readiness probe never terminates anything (it only marks
+			// the pod not-ready and pulls it from Service endpoints), so this
+			// field has nothing to apply to on a readiness probe — only
+			// liveness and startup probe failures kill the container.
+			if kind == "readiness" {
+				return nil, errors.Errorf("terminationGracePeriodSeconds: not permitted on a readiness probe, only liveness and startup probes support it")
+			}
+			if i < 1 {
+				return nil, errors.Errorf("terminationGracePeriodSeconds: must be at least 1, got %d", i)
 			}
 			probe.TerminationGracePeriodSeconds = &i
 		}
@@ -671,6 +682,9 @@ func parseProbe(m map[string]any) (*corev1.Probe, error) {
 func parsePort(v any) (intstr.IntOrString, error) {
 	switch p := v.(type) {
 	case float64:
+		if math.IsNaN(p) || math.IsInf(p, 0) || p != math.Trunc(p) {
+			return intstr.IntOrString{}, errors.Errorf("port must be an integer, got %v", p)
+		}
 		return validateNumericPort(int64(p))
 	case int:
 		return validateNumericPort(int64(p))
@@ -794,6 +808,9 @@ func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
 		if !ok {
 			return nil, errors.Errorf("sleep handler: seconds is required and must be an integer")
 		}
+		if seconds < 0 {
+			return nil, errors.Errorf("sleep handler: seconds must not be negative, got %d", seconds)
+		}
 		handler.Sleep = &corev1.SleepAction{Seconds: seconds}
 		return handler, nil
 	}
@@ -837,12 +854,18 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 
 	if v, n := raw["runAsUser"]; n {
 		if i, ok := toInt64(v); ok {
+			if i < 0 {
+				return nil, errors.Errorf("securityContext.runAsUser: must not be negative, got %d", i)
+			}
 			sc.RunAsUser = &i
 			set = true
 		}
 	}
 	if v, n := raw["runAsGroup"]; n {
 		if i, ok := toInt64(v); ok {
+			if i < 0 {
+				return nil, errors.Errorf("securityContext.runAsGroup: must not be negative, got %d", i)
+			}
 			sc.RunAsGroup = &i
 			set = true
 		}
@@ -888,6 +911,9 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		typ, _ := spRaw["type"].(string)
 		switch corev1.SeccompProfileType(typ) {
 		case corev1.SeccompProfileTypeRuntimeDefault, corev1.SeccompProfileTypeUnconfined:
+			if profile, ok := spRaw["localhostProfile"].(string); ok && profile != "" {
+				return nil, errors.Errorf("securityContext.seccompProfile: localhostProfile is only valid when type is Localhost, got type %q", typ)
+			}
 			sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileType(typ)}
 			set = true
 		case corev1.SeccompProfileTypeLocalhost:

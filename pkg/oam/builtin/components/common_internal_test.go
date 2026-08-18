@@ -2,6 +2,7 @@ package components
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -324,6 +325,21 @@ func TestParseResources_InvalidQuantity_Error(t *testing.T) {
 	}
 }
 
+func TestParseResources_NumericValue_Error(t *testing.T) {
+	// A bare YAML/JSON number (e.g. `nvidia.com/gpu: 1`, decoded as float64) must
+	// be rejected, not silently skipped — silently skipping it would drop the
+	// GPU request/limit from the generated workload entirely.
+	_, err := parseResources(map[string]any{
+		"requests": map[string]any{"nvidia.com/gpu": float64(1)},
+	})
+	if err == nil {
+		t.Fatal("expected error for a numeric (non-string) resource quantity")
+	}
+	if !strings.Contains(err.Error(), "nvidia.com/gpu") {
+		t.Errorf("expected error to name the offending key, got: %v", err)
+	}
+}
+
 func TestParseLifecycle_Absent(t *testing.T) {
 	lc, err := parseLifecycle(map[string]any{})
 	if err != nil || lc != nil {
@@ -366,6 +382,18 @@ func TestParseLifecycleHandler_HTTPGet(t *testing.T) {
 	}
 }
 
+func TestParseLifecycleHandler_HTTPGet_FractionalPort_Error(t *testing.T) {
+	// A fractional YAML/JSON number (decoded as float64) must be rejected, not
+	// silently truncated — Kubernetes container ports are integers, and silent
+	// truncation (8080.5 -> 8080) would mask an authoring mistake.
+	_, err := parseLifecycleHandler(map[string]any{
+		"httpGet": map[string]any{"path": "/x", "port": 8080.5},
+	})
+	if err == nil {
+		t.Fatal("expected error for a fractional httpGet port")
+	}
+}
+
 func TestParseLifecycleHandler_TCPSocket_Unsupported(t *testing.T) {
 	h, err := parseLifecycleHandler(map[string]any{
 		"tcpSocket": map[string]any{"port": 8080},
@@ -391,6 +419,15 @@ func TestParseLifecycleHandler_Sleep_MissingSeconds_Error(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for sleep handler missing seconds")
+	}
+}
+
+func TestParseLifecycleHandler_Sleep_NegativeSeconds_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"sleep": map[string]any{"seconds": -1},
+	})
+	if err == nil {
+		t.Fatal("expected error for sleep handler with negative seconds")
 	}
 }
 
@@ -451,6 +488,24 @@ func TestParseSecurityContext_FullFidelity(t *testing.T) {
 	}
 }
 
+func TestParseSecurityContext_RunAsUser_Negative_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{"runAsUser": int64(-1)},
+	})
+	if err == nil {
+		t.Fatal("expected error for negative runAsUser")
+	}
+}
+
+func TestParseSecurityContext_RunAsGroup_Negative_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{"runAsGroup": int64(-1)},
+	})
+	if err == nil {
+		t.Fatal("expected error for negative runAsGroup")
+	}
+}
+
 func TestParseSecurityContext_SeccompLocalhost_RequiresProfile(t *testing.T) {
 	_, err := parseSecurityContext(map[string]any{
 		"securityContext": map[string]any{
@@ -476,6 +531,37 @@ func TestParseSecurityContext_SeccompLocalhost_WithProfile(t *testing.T) {
 	}
 	if sc.SeccompProfile == nil || sc.SeccompProfile.LocalhostProfile == nil || *sc.SeccompProfile.LocalhostProfile != "profiles/my-profile.json" {
 		t.Errorf("unexpected seccompProfile: %+v", sc.SeccompProfile)
+	}
+}
+
+func TestParseSecurityContext_SeccompRuntimeDefault_WithLocalhostProfile_Error(t *testing.T) {
+	// localhostProfile is only meaningful (and only documented as valid) when
+	// type is Localhost; authoring it alongside RuntimeDefault/Unconfined is a
+	// contradictory input that must be rejected, not silently dropped.
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seccompProfile": map[string]any{
+				"type":             "RuntimeDefault",
+				"localhostProfile": "profiles/my-profile.json",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for RuntimeDefault seccompProfile with a localhostProfile set")
+	}
+}
+
+func TestParseSecurityContext_SeccompUnconfined_WithLocalhostProfile_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seccompProfile": map[string]any{
+				"type":             "Unconfined",
+				"localhostProfile": "profiles/my-profile.json",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for Unconfined seccompProfile with a localhostProfile set")
 	}
 }
 
@@ -513,7 +599,7 @@ func TestParseProbe_HTTPGetHost(t *testing.T) {
 			"port": 8080,
 			"host": "10.0.0.1",
 		},
-	})
+	}, "liveness")
 	if err != nil {
 		t.Fatalf("parseProbe: %v", err)
 	}
@@ -526,7 +612,7 @@ func TestParseProbe_TerminationGracePeriodSeconds(t *testing.T) {
 	probe, err := parseProbe(map[string]any{
 		"exec":                          map[string]any{"command": []any{"/bin/true"}},
 		"terminationGracePeriodSeconds": 30,
-	})
+	}, "liveness")
 	if err != nil {
 		t.Fatalf("parseProbe: %v", err)
 	}
@@ -539,9 +625,32 @@ func TestParseProbe_TerminationGracePeriodSeconds_Negative_Error(t *testing.T) {
 	_, err := parseProbe(map[string]any{
 		"exec":                          map[string]any{"command": []any{"/bin/true"}},
 		"terminationGracePeriodSeconds": -5,
-	})
+	}, "liveness")
 	if err == nil {
 		t.Fatal("expected error for negative terminationGracePeriodSeconds")
+	}
+}
+
+func TestParseProbe_TerminationGracePeriodSeconds_Zero_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec":                          map[string]any{"command": []any{"/bin/true"}},
+		"terminationGracePeriodSeconds": 0,
+	}, "startup")
+	if err == nil {
+		t.Fatal("expected error for zero terminationGracePeriodSeconds (minimum is 1)")
+	}
+}
+
+func TestParseProbe_TerminationGracePeriodSeconds_NotPermittedOnReadiness_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec":                          map[string]any{"command": []any{"/bin/true"}},
+		"terminationGracePeriodSeconds": 30,
+	}, "readiness")
+	if err == nil {
+		t.Fatal("expected error for terminationGracePeriodSeconds on a readiness probe")
+	}
+	if !strings.Contains(err.Error(), "readiness") {
+		t.Errorf("expected error to mention readiness, got: %v", err)
 	}
 }
 
