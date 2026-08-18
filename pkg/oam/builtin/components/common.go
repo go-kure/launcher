@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -109,6 +111,36 @@ func toInt64(v any) (int64, bool) {
 		return n, true
 	default:
 		return 0, false
+	}
+}
+
+// decodedQuantityString converts a decoded YAML/JSON scalar into the string
+// form resource.ParseQuantity expects. A bare numeric literal (`cpu: 1`,
+// `memory: 0.5`) is valid Kubernetes Quantity input, not just a quoted string
+// — corev1.Quantity.UnmarshalJSON only strips surrounding quotes *if
+// present* and otherwise parses the raw literal directly, so `1` and `"1"`
+// are equivalent on the wire. Suffixed forms ("500m", "2Gi") only ever arrive
+// as strings; a bare number is always unsuffixed, so integer/decimal
+// formatting (not scientific notation) is always the right rendering.
+// (Named distinctly from enforce.go's quantityString, which formats an
+// *already-parsed* Quantity out of a ResourceList — opposite direction.)
+func decodedQuantityString(v any) (string, bool) {
+	switch n := v.(type) {
+	case string:
+		return n, true
+	case float64:
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return "", false
+		}
+		return strconv.FormatFloat(n, 'f', -1, 64), true
+	case int:
+		return strconv.FormatInt(int64(n), 10), true
+	case int32:
+		return strconv.FormatInt(int64(n), 10), true
+	case int64:
+		return strconv.FormatInt(n, 10), true
+	default:
+		return "", false
 	}
 }
 
@@ -340,6 +372,13 @@ func parseFieldRef(m map[string]any) (*corev1.ObjectFieldSelector, error) {
 	}
 	ref := &corev1.ObjectFieldSelector{FieldPath: path}
 	if av, ok := m["apiVersion"].(string); ok && av != "" {
+		// corev1.ObjectFieldSelector.APIVersion "defaults to v1" (field doc
+		// comment) because v1 is the only field-label conversion Kubernetes has
+		// ever shipped for the downward API; any other value builds but is
+		// rejected by admission.
+		if av != "v1" {
+			return nil, errors.Errorf("fieldRef: apiVersion must be \"v1\", got %q", av)
+		}
 		ref.APIVersion = av
 	}
 	return ref, nil
@@ -387,6 +426,16 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 		}
 		src := corev1.EnvFromSource{}
 		if prefix, ok := m["prefix"].(string); ok {
+			// corev1.EnvFromSource.Prefix's field doc comment: "May consist of
+			// any printable ASCII characters except '='" — not a C-identifier
+			// restriction (the final env var name is prefix+key, and only that
+			// concatenation need be a valid identifier; the prefix alone does
+			// not).
+			for _, r := range prefix {
+				if r == '=' || r < 0x20 || r > 0x7e {
+					return nil, errors.Errorf("envFrom[%d].prefix: must consist of printable ASCII characters other than '=', got %q", i, prefix)
+				}
+			}
 			src.Prefix = prefix
 		}
 		if cm, ok := m["configMapRef"].(map[string]any); ok {
@@ -457,9 +506,12 @@ func parseResources(resources map[string]any) (ResourceRequirements, error) {
 func parseResourceList(m map[string]any) (corev1.ResourceList, error) {
 	var rl corev1.ResourceList
 	for k, v := range m {
-		s, ok := v.(string)
+		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
+			return nil, errors.Errorf("%s: invalid resource name: %s", k, strings.Join(errs, "; "))
+		}
+		s, ok := decodedQuantityString(v)
 		if !ok {
-			return nil, errors.Errorf("%s: quantity must be a string (e.g. %q, not a bare number), got %T", k, "1", v)
+			return nil, errors.Errorf("%s: quantity must be a string or number, got %T", k, v)
 		}
 		q, err := resource.ParseQuantity(s)
 		if err != nil {
@@ -957,6 +1009,9 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		typ, _ := apRaw["type"].(string)
 		switch corev1.AppArmorProfileType(typ) {
 		case corev1.AppArmorProfileTypeRuntimeDefault, corev1.AppArmorProfileTypeUnconfined:
+			if profile, ok := apRaw["localhostProfile"].(string); ok && profile != "" {
+				return nil, errors.Errorf("securityContext.appArmorProfile: localhostProfile is only valid when type is Localhost, got type %q", typ)
+			}
 			sc.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileType(typ)}
 			set = true
 		case corev1.AppArmorProfileTypeLocalhost:
