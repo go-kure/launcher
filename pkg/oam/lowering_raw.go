@@ -248,10 +248,17 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 	if err := validatePositionResult(PositionDocument, d.origin, result); err != nil {
 		return nil, nil, err
 	}
+	// Rule is re-derived here — see Origin.Rule's doc comment. d.origin is the raw
+	// seed's own authored origin (lowerRawOnce is always round 0 for a raw entry — see
+	// the doc comment above — so d.origin never itself carries a prior Rule value),
+	// computed the identical way loweringRuleIdentity is used at every other call site
+	// for consistency, not because a prior value needs overwriting here specifically.
+	ruleID := loweringRuleIdentity(PositionDocument, d.origin.DocumentKind, d.rule)
 	emitted := make([]*Application, len(result.Documents))
 	names := make([]string, len(result.Documents))
 	for i := range result.Documents {
 		origin := d.origin
+		origin.Rule = ruleID
 		result.Documents[i].origin = &origin
 		emitted[i] = &result.Documents[i]
 		names[i] = result.Documents[i].Metadata.Name
@@ -291,7 +298,7 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 		// equivalent mechanism — not a blanket forwarded=nil.
 		for j := range result.Documents[i].Spec.Components {
 			comp := &result.Documents[i].Spec.Components[j]
-			compOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: j}
+			compOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: j, Rule: origin.Rule}
 			comp.origin = &compOrigin
 			if err := t.sealEmittedNestedTraits(comp, compOrigin, nil); err != nil {
 				return nil, nil, errors.Wrapf(err, "%s", d.origin)
@@ -299,7 +306,7 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 		}
 		for k := range result.Documents[i].Spec.Policies {
 			pol := &result.Documents[i].Spec.Policies[k]
-			polOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, PolicyName: pol.Name, Index: k}
+			polOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, PolicyName: pol.Name, Index: k, Rule: origin.Rule}
 			pol.origin = &polOrigin
 		}
 	}
