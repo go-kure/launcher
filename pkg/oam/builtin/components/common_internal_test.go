@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/go-kure/launcher/pkg/oam"
 )
@@ -62,6 +63,47 @@ func TestParseEnv_FieldRef(t *testing.T) {
 	}
 	if vars[0].ValueFrom.FieldRef.FieldPath != "metadata.name" {
 		t.Errorf("fieldPath = %q, want metadata.name", vars[0].ValueFrom.FieldRef.FieldPath)
+	}
+}
+
+func TestParseEnv_FieldRef_ExplicitV1_Accepted(t *testing.T) {
+	// corev1.ObjectFieldSelector.APIVersion "defaults to v1" per its field doc
+	// comment; an explicit "v1" must round-trip identically to the field being
+	// left unset.
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "POD_NAME",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "metadata.name", "apiVersion": "v1"},
+				},
+			},
+		},
+	}
+	vars, err := parseEnv(props)
+	if err != nil {
+		t.Fatalf("parseEnv: %v", err)
+	}
+	if vars[0].ValueFrom.FieldRef.APIVersion != "v1" {
+		t.Errorf("apiVersion = %q, want v1", vars[0].ValueFrom.FieldRef.APIVersion)
+	}
+}
+
+func TestParseEnv_FieldRef_InvalidAPIVersion_Error(t *testing.T) {
+	// v1 is the only field-label conversion Kubernetes has ever shipped for the
+	// downward API; any other apiVersion builds a Pod admission rejects.
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "POD_NAME",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "metadata.name", "apiVersion": "v2"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for fieldRef.apiVersion other than v1")
 	}
 }
 
@@ -273,6 +315,40 @@ func TestParseEnvFrom_MissingName_Error(t *testing.T) {
 	}
 }
 
+func TestParseEnvFrom_InvalidPrefix_Error(t *testing.T) {
+	// corev1.EnvFromSource.Prefix's field doc comment: "May consist of any
+	// printable ASCII characters except '='" — a literal '=' would produce a
+	// nonsensical env var definition (a key containing the KEY=VALUE
+	// separator) that Kubernetes rejects at admission.
+	props := map[string]any{
+		"envFrom": []any{
+			map[string]any{"configMapRef": map[string]any{"name": "cfg"}, "prefix": "BAD=PREFIX_"},
+		},
+	}
+	if _, err := parseEnvFrom(props); err == nil {
+		t.Fatal("expected error for a prefix containing '='")
+	}
+}
+
+func TestParseEnvFrom_HyphenatedPrefix_Accepted(t *testing.T) {
+	// Only '=' and non-printable-ASCII are excluded — a prefix like
+	// "APP-CONFIG_" is valid printable ASCII and must not be rejected as if it
+	// had to be a C identifier itself (only the final prefix+key concatenation
+	// needs to be one).
+	props := map[string]any{
+		"envFrom": []any{
+			map[string]any{"configMapRef": map[string]any{"name": "cfg"}, "prefix": "APP-CONFIG_"},
+		},
+	}
+	out, err := parseEnvFrom(props)
+	if err != nil {
+		t.Fatalf("parseEnvFrom: %v", err)
+	}
+	if out[0].Prefix != "APP-CONFIG_" {
+		t.Errorf("prefix = %q, want APP-CONFIG_", out[0].Prefix)
+	}
+}
+
 func TestParseResources_ExtraNamedResources(t *testing.T) {
 	resources := map[string]any{
 		"requests": map[string]any{
@@ -325,17 +401,40 @@ func TestParseResources_InvalidQuantity_Error(t *testing.T) {
 	}
 }
 
-func TestParseResources_NumericValue_Error(t *testing.T) {
-	// A bare YAML/JSON number (e.g. `nvidia.com/gpu: 1`, decoded as float64) must
-	// be rejected, not silently skipped — silently skipping it would drop the
-	// GPU request/limit from the generated workload entirely.
+func TestParseResources_NumericValue_Accepted(t *testing.T) {
+	// A bare YAML/JSON number (e.g. `nvidia.com/gpu: 1`, decoded as float64) is
+	// valid Kubernetes Quantity input, equivalent to the quoted string form —
+	// corev1.Quantity.UnmarshalJSON parses the raw numeric literal directly
+	// when it isn't wrapped in quotes. Silently rejecting it would make this
+	// schema stricter than real Kubernetes and break a documented, commonly
+	// authored form (the README documents nvidia.com/gpu as supported).
+	req, err := parseResources(map[string]any{
+		"requests": map[string]any{"nvidia.com/gpu": float64(1), "cpu": float64(0.5)},
+	})
+	if err != nil {
+		t.Fatalf("parseResources: %v", err)
+	}
+	gpu, ok := req.Requests["nvidia.com/gpu"]
+	if !ok || gpu.Cmp(resource.MustParse("1")) != 0 {
+		t.Errorf("nvidia.com/gpu = %v, ok=%v, want 1", gpu, ok)
+	}
+	cpu, ok := req.Requests[corev1.ResourceCPU]
+	if !ok || cpu.Cmp(resource.MustParse("500m")) != 0 {
+		t.Errorf("cpu = %v, ok=%v, want 500m", cpu, ok)
+	}
+}
+
+func TestParseResources_InvalidResourceName_Error(t *testing.T) {
+	// A malformed resource name key must be rejected at parse time — casting
+	// it straight to corev1.ResourceName without validation would build
+	// successfully and only fail Kubernetes admission at apply time.
 	_, err := parseResources(map[string]any{
-		"requests": map[string]any{"nvidia.com/gpu": float64(1)},
+		"requests": map[string]any{"nvidia.com/gpu!": "1"},
 	})
 	if err == nil {
-		t.Fatal("expected error for a numeric (non-string) resource quantity")
+		t.Fatal("expected error for an invalid resource name")
 	}
-	if !strings.Contains(err.Error(), "nvidia.com/gpu") {
+	if !strings.Contains(err.Error(), "nvidia.com/gpu!") {
 		t.Errorf("expected error to name the offending key, got: %v", err)
 	}
 }
@@ -573,6 +672,36 @@ func TestParseSecurityContext_SeccompInvalidType_Error(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for invalid seccompProfile type")
+	}
+}
+
+func TestParseSecurityContext_AppArmorRuntimeDefault_WithLocalhostProfile_Error(t *testing.T) {
+	// Same contradictory-input rule as seccompProfile above: localhostProfile
+	// is only meaningful when type is Localhost.
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"appArmorProfile": map[string]any{
+				"type":             "RuntimeDefault",
+				"localhostProfile": "my-profile",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for RuntimeDefault appArmorProfile with a localhostProfile set")
+	}
+}
+
+func TestParseSecurityContext_AppArmorUnconfined_WithLocalhostProfile_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"appArmorProfile": map[string]any{
+				"type":             "Unconfined",
+				"localhostProfile": "my-profile",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for Unconfined appArmorProfile with a localhostProfile set")
 	}
 }
 

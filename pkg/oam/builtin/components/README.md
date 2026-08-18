@@ -40,18 +40,26 @@ structural pattern as `ProbeConfig` holding `*corev1.Probe`) rather than a
 hand-rolled parallel schema: `image` (validated — no untagged/`latest`), `env`
 (`value` or `valueFrom` — mutually exclusive, matching `corev1.EnvVar`'s own
 doc comment ("cannot be used if value is not empty"); `valueFrom` is one of
-`secretKeyRef`, `configMapKeyRef` (both accept `optional`), `fieldRef`,
-`resourceFieldRef`, `fileKeyRef` (`volumeName`/`path`/`key` required,
+`secretKeyRef`, `configMapKeyRef` (both accept `optional`), `fieldRef`
+(`apiVersion` must be `v1` if authored — the only field-label conversion
+Kubernetes has ever shipped for the downward API; omitting it also defaults to
+`v1`), `resourceFieldRef`, `fileKeyRef` (`volumeName`/`path`/`key` required,
 `optional` accepted; corev1's `EnvFiles` feature) — mutually exclusive among
 themselves too), `envFrom` (bulk-import a ConfigMap's or Secret's keys, with
-`prefix`), `resources` — a `corev1.ResourceRequirements` projection: `requests`/
-`limits` accept `cpu`/`memory` (defaults 100m/128Mi) plus any other resource
-name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map, all parsed
-as `resource.Quantity` and round-tripped unmodified — no policy default/max
-hook exists for names other than cpu/memory today; `claims` (Dynamic Resource
-Allocation) is deliberately not covered — genuinely feature-gated in the
-pinned `k8s.io/api` version and meaningless without pod-level
-`PodSpec.ResourceClaims` wiring this schema doesn't have yet, see
+`prefix` — any printable ASCII character except `=`, matching
+`corev1.EnvFromSource.Prefix`'s own field doc comment; only the final
+prefix+key concatenation need be a valid env var name, not the prefix alone),
+`resources` — a `corev1.ResourceRequirements` projection: `requests`/`limits`
+accept `cpu`/`memory` (defaults 100m/128Mi) plus any other well-formed
+resource name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map,
+each value authored as either a quantity string (`"500m"`, `"2Gi"`) or a bare
+YAML/JSON number (`1`, `0.5`) — both are valid `resource.Quantity` input
+(`Quantity.UnmarshalJSON` parses a bare numeric literal the same way it parses
+a quoted one) — parsed as `resource.Quantity` and round-tripped unmodified; no
+policy default/max hook exists for names other than cpu/memory today; `claims`
+(Dynamic Resource Allocation) is deliberately not covered — genuinely
+feature-gated in the pinned `k8s.io/api` version and meaningless without
+pod-level `PodSpec.ResourceClaims` wiring this schema doesn't have yet, see
 `parseResources`'s doc comment), `command`/`args`, `probes`
 (httpGet/tcpSocket/exec/grpc), `lifecycle` (`postStart`/`preStop`:
 `exec`/`httpGet` (including `httpHeaders`)/`sleep` — `tcpSocket` is not
