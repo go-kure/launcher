@@ -1257,6 +1257,64 @@ func TestLower_DocumentRule_ForwardedComponent_KeepsEmptyRule(t *testing.T) {
 	}
 }
 
+// forwardingPoliciesDocRule is forwardingComponentsDocRule's policy-position
+// counterpart: it forwards doc.Spec.Policies verbatim (same backing array) instead of
+// constructing a new one. It also forwards Components verbatim (rather than
+// synthesizing one) only because a terminal document must contain at least one
+// component (spec.components validation) — the test below asserts solely on the
+// forwarded policy's Rule.
+type forwardingPoliciesDocRule struct{ kind string }
+
+func (r forwardingPoliciesDocRule) Kind() string { return r.kind }
+
+func (r forwardingPoliciesDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name + "-lowered"},
+		Spec:       ApplicationSpec{Components: doc.Spec.Components, Policies: doc.Spec.Policies},
+	}}}, nil
+}
+
+// TestLower_DocumentRule_ForwardedPolicy_KeepsEmptyRule is the regression guard for the
+// C1 codex finding on launcher#277 PR #283 (pullrequestreview thread on
+// lowering.go:869, filed after the /gmr loop's own termination — the review bot fires
+// on undraft, so no pre-undraft comment check could have seen it): the policy loop in
+// lowerDocumentOnce's document-rule branch stamped Rule unconditionally, missing the
+// guard TestLower_DocumentRule_ForwardedComponent_KeepsEmptyRule above already proved
+// for the sibling component loop. isForwardedPolicy now exempts a pointer-identical
+// forwarded policy the same way isForwardedComponent does.
+func TestLower_DocumentRule_ForwardedPolicy_KeepsEmptyRule(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterDocumentLowering(forwardingPoliciesDocRule{kind: "Wrapper"})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Wrapper",
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{
+			Components: []Component{{Name: "shop", Type: "webservice", Properties: map[string]any{}}},
+			Policies:   []ApplicationPolicy{{Name: "pol", Type: "widget-policy", Properties: map[string]any{}}},
+		},
+	}
+
+	docs, err := tr.lower(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if len(docs) != 1 || len(docs[0].Spec.Policies) != 1 {
+		t.Fatalf("expected exactly 1 document with 1 settled policy, got %+v", docs)
+	}
+	settled := docs[0].Spec.Policies[0]
+	origin, ok := settled.Origin()
+	if !ok {
+		t.Fatal("expected the forwarded policy to still carry a stamped origin (Document/DocumentKind/etc. are unaffected by forwarding, only Rule is)")
+	}
+	if origin.Rule != "" {
+		t.Errorf("forwarded policy Origin.Rule = %q, want \"\" (never itself the direct output of a lowering rule invocation)", origin.Rule)
+	}
+}
+
 // documentWithNestedComponentAndPolicyRule is a document-position rule that emits a
 // fresh component and a fresh policy, neither forwarded from doc — the round-11-
 // batch-2 regression fixture: nested COMPONENTS and POLICIES, not just traits
