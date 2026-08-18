@@ -39,10 +39,13 @@ type PropertySchemaProvider interface {
 
 // ContractMetadata is optional registration metadata describing the contract a
 // handler or lowering rule implements: its family, version, the ClusterProfile
-// capability keys it requires, and deprecation status. It is discovery/
-// documentation surface only — the engine neither reads nor enforces any of these
-// fields (CapabilityAware.CapabilityRequired is what the engine actually enforces;
-// RequiredCapabilityKeys here is declarative, for a consumer to introspect).
+// capability keys it requires, and deprecation status. It is primarily a discovery/
+// documentation surface — the engine does not enforce any of these fields
+// (CapabilityAware.CapabilityRequired is what the engine actually enforces;
+// RequiredCapabilityKeys here is declarative, for a consumer to introspect). The one
+// exception is Version: loweringRuleIdentity (lowering.go) reads it to compose the
+// "@<version>" suffix on Origin.Rule for a lowering rule that also implements
+// ContractDescriber — nothing else on this struct is read or enforced by the engine.
 type ContractMetadata struct {
 	// Family is the contract family this handler/rule belongs to, e.g. "webservice".
 	Family string
