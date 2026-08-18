@@ -5,6 +5,7 @@ import (
 
 	kurecnpg "github.com/go-kure/kure/pkg/kubernetes/cnpg"
 	"github.com/go-kure/kure/pkg/stack"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -139,9 +140,12 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	config.explicitReplicas = hasExplicitReplicas(props)
 
 	if resources, ok := props["resources"].(map[string]any); ok {
-		config.Resources = parseResources(resources)
+		r, err := parseResources(resources)
+		if err != nil {
+			return nil, errors.Wrap(err, "invalid resources configuration")
+		}
+		config.Resources = r
 	}
-	config.explicitResources = resourceExplicitFlags(props)
 
 	if backup, ok := props["backup"].(map[string]any); ok {
 		if v, ok := backup["retentionPolicy"].(string); ok {
@@ -578,7 +582,6 @@ type PostgresqlConfig struct {
 	AffinityNodeSelector          map[string]string
 
 	explicitReplicas    bool
-	explicitResources   explicitResourceFlags
 	explicitStorageSize bool
 }
 
@@ -590,17 +593,17 @@ func (c *PostgresqlConfig) ApplyPolicy(p oam.Policy) error {
 	}
 
 	c.Replicas = applyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
-	if !c.explicitResources.cpuRequest {
-		c.Resources.CPURequest = applyDefaultResource(c.Resources.CPURequest, p.DefaultCPURequest())
+	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
+		return err
 	}
-	if !c.explicitResources.memoryRequest {
-		c.Resources.MemoryRequest = applyDefaultResource(c.Resources.MemoryRequest, p.DefaultMemoryRequest())
+	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
+		return err
 	}
-	if !c.explicitResources.cpuLimit {
-		c.Resources.CPULimit = applyDefaultResource(c.Resources.CPULimit, p.DefaultCPULimit())
+	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
+		return err
 	}
-	if !c.explicitResources.memoryLimit {
-		c.Resources.MemoryLimit = applyDefaultResource(c.Resources.MemoryLimit, p.DefaultMemoryLimit())
+	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
+		return err
 	}
 	// StorageSize precedence: authored > policy default > "1Gi" handler default.
 	// The parse-time fallback is already "1Gi", so let a policy default override it
@@ -612,16 +615,16 @@ func (c *PostgresqlConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
 		return err
 	}
-	if err := enforceMaxResource(c.Resources.CPURequest, p.MaxCPU(), "cpu request"); err != nil {
+	if err := enforceMaxResource(quantityString(c.Resources.Requests, corev1.ResourceCPU), p.MaxCPU(), "cpu request"); err != nil {
 		return err
 	}
-	if err := enforceMaxResource(c.Resources.CPULimit, p.MaxCPU(), "cpu limit"); err != nil {
+	if err := enforceMaxResource(quantityString(c.Resources.Limits, corev1.ResourceCPU), p.MaxCPU(), "cpu limit"); err != nil {
 		return err
 	}
-	if err := enforceMaxResource(c.Resources.MemoryRequest, p.MaxMemory(), "memory request"); err != nil {
+	if err := enforceMaxResource(quantityString(c.Resources.Requests, corev1.ResourceMemory), p.MaxMemory(), "memory request"); err != nil {
 		return err
 	}
-	if err := enforceMaxResource(c.Resources.MemoryLimit, p.MaxMemory(), "memory limit"); err != nil {
+	if err := enforceMaxResource(quantityString(c.Resources.Limits, corev1.ResourceMemory), p.MaxMemory(), "memory limit"); err != nil {
 		return err
 	}
 	if err := enforceMaxStorageSize(c.StorageSize, p.MaxStorageSize()); err != nil {
@@ -672,13 +675,16 @@ func (c *PostgresqlConfig) createCluster(app *stack.Application) (client.Object,
 		PostgresParams:       c.PostgresqlParameters,
 	}
 
-	if c.Resources.CPURequest != "" || c.Resources.MemoryRequest != "" ||
-		c.Resources.CPULimit != "" || c.Resources.MemoryLimit != "" {
+	cpuRequest := quantityString(c.Resources.Requests, corev1.ResourceCPU)
+	memoryRequest := quantityString(c.Resources.Requests, corev1.ResourceMemory)
+	cpuLimit := quantityString(c.Resources.Limits, corev1.ResourceCPU)
+	memoryLimit := quantityString(c.Resources.Limits, corev1.ResourceMemory)
+	if cpuRequest != "" || memoryRequest != "" || cpuLimit != "" || memoryLimit != "" {
 		opts.Resources = &kurecnpg.ResourceOptions{
-			RequestsCPU:    c.Resources.CPURequest,
-			RequestsMemory: c.Resources.MemoryRequest,
-			LimitsCPU:      c.Resources.CPULimit,
-			LimitsMemory:   c.Resources.MemoryLimit,
+			RequestsCPU:    cpuRequest,
+			RequestsMemory: memoryRequest,
+			LimitsCPU:      cpuLimit,
+			LimitsMemory:   memoryLimit,
 		}
 	}
 

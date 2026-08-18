@@ -50,7 +50,7 @@ func (h *WebserviceHandler) PropertySchema() map[string]oam.PropertySchema {
 		"resources":       schemaResources(false),
 		"command":         schemaStringArray(),
 		"args":            schemaStringArray(),
-		"probes":          schemaProbes(),
+		"probes":          schemaProbes(false),
 		"lifecycle":       schemaLifecycle(false),
 		"securityContext": schemaSecurityContext(false),
 		"workingDir":      schemaWorkingDir(false),
@@ -98,9 +98,12 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.EnvFrom = envFrom
 	if resources, ok := props["resources"].(map[string]any); ok {
-		config.Resources = parseResources(resources)
+		r, err := parseResources(resources)
+		if err != nil {
+			return nil, errors.Wrap(err, "invalid resources configuration")
+		}
+		config.Resources = r
 	}
-	config.explicitResources = resourceExplicitFlags(props)
 	config.Command = parseCommand(props)
 	config.Args = parseArgs(props)
 	probes, err := parseProbes(props)
@@ -180,7 +183,6 @@ type WebserviceConfig struct {
 	TopologySpreadDisabled bool
 	Affinity               AffinityConfig
 	explicitReplicas       bool
-	explicitResources      explicitResourceFlags
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -191,32 +193,32 @@ func (c *WebserviceConfig) ApplyPolicy(p oam.Policy) error {
 	}
 
 	c.Replicas = applyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
-	if !c.explicitResources.cpuRequest {
-		c.Resources.CPURequest = applyDefaultResource(c.Resources.CPURequest, p.DefaultCPURequest())
+	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
+		return err
 	}
-	if !c.explicitResources.memoryRequest {
-		c.Resources.MemoryRequest = applyDefaultResource(c.Resources.MemoryRequest, p.DefaultMemoryRequest())
+	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
+		return err
 	}
-	if !c.explicitResources.cpuLimit {
-		c.Resources.CPULimit = applyDefaultResource(c.Resources.CPULimit, p.DefaultCPULimit())
+	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
+		return err
 	}
-	if !c.explicitResources.memoryLimit {
-		c.Resources.MemoryLimit = applyDefaultResource(c.Resources.MemoryLimit, p.DefaultMemoryLimit())
+	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
+		return err
 	}
 
 	if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
 		return err
 	}
-	if err := enforceMaxResource(c.Resources.CPURequest, p.MaxCPU(), "cpu request"); err != nil {
+	if err := enforceMaxResource(quantityString(c.Resources.Requests, corev1.ResourceCPU), p.MaxCPU(), "cpu request"); err != nil {
 		return err
 	}
-	if err := enforceMaxResource(c.Resources.CPULimit, p.MaxCPU(), "cpu limit"); err != nil {
+	if err := enforceMaxResource(quantityString(c.Resources.Limits, corev1.ResourceCPU), p.MaxCPU(), "cpu limit"); err != nil {
 		return err
 	}
-	if err := enforceMaxResource(c.Resources.MemoryRequest, p.MaxMemory(), "memory request"); err != nil {
+	if err := enforceMaxResource(quantityString(c.Resources.Requests, corev1.ResourceMemory), p.MaxMemory(), "memory request"); err != nil {
 		return err
 	}
-	if err := enforceMaxResource(c.Resources.MemoryLimit, p.MaxMemory(), "memory limit"); err != nil {
+	if err := enforceMaxResource(quantityString(c.Resources.Limits, corev1.ResourceMemory), p.MaxMemory(), "memory limit"); err != nil {
 		return err
 	}
 	if err := enforceAllowedRegistries(c.Image, p.AllowedRegistries()); err != nil {
@@ -268,11 +270,7 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	labels := map[string]string{"app": app.Name}
 
 	container := kubernetes.CreateContainer(app.Name, c.Image, c.Command, c.Args)
-	rr, err := buildResourceRequirements(c.Resources)
-	if err != nil {
-		return nil, errors.Wrap(err, "resource requirements")
-	}
-	kubernetes.SetContainerResources(container, rr)
+	kubernetes.SetContainerResources(container, buildResourceRequirements(c.Resources))
 	kubernetes.AddContainerPort(container, corev1.ContainerPort{
 		Name:          "http",
 		ContainerPort: c.Port,

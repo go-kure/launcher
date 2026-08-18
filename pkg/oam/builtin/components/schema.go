@@ -16,7 +16,7 @@ func accessModesEnum() []any {
 }
 
 // schemaEnv describes the shared `env` property (see parseEnv/parseEnvVarSource).
-// `valueFrom` models its four mutually-exclusive sources; each selector object
+// `valueFrom` models its five mutually-exclusive sources; each selector object
 // stays shallow (a handful of flat string fields — no further nesting needed).
 //
 // reserved is a required argument (D3), threaded through per schemaSecurityContext's
@@ -64,6 +64,16 @@ func schemaEnv(reserved bool) oam.PropertySchema {
 								"resource":      {Type: oam.PropertyTypeString, Required: true, Description: `Resource to select (e.g. "limits.cpu", "requests.memory").`},
 								"containerName": {Type: oam.PropertyTypeString, Description: "Container to select the resource from; defaults to this container."},
 								"divisor":       {Type: oam.PropertyTypeString, Description: `Output format divisor (e.g. "1", "1Mi"); defaults to "1".`},
+							},
+						},
+						"fileKeyRef": {
+							Type:        oam.PropertyTypeObject,
+							Description: "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate).",
+							Properties: map[string]oam.PropertySchema{
+								"volumeName": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the volume mount containing the env file."},
+								"path":       {Type: oam.PropertyTypeString, Required: true, Description: "Path within the volume to the env file."},
+								"key":        {Type: oam.PropertyTypeString, Required: true, Description: "Key within the env file."},
+								"optional":   {Type: oam.PropertyTypeBoolean, Description: "Whether the file or key may be absent."},
 							},
 						},
 					},
@@ -211,6 +221,7 @@ func schemaSecurityContext(reserved bool) oam.PropertySchema {
 					"localhostProfile": {Type: oam.PropertyTypeString, Description: "Profile loaded on the node; required (and only valid) when type is \"Localhost\"."},
 				},
 			},
+			"procMount": {Type: oam.PropertyTypeString, Enum: []any{"Default", "Unmasked"}, Description: "Procfs mount behavior for the container (Linux-only)."},
 		},
 	}
 }
@@ -239,13 +250,16 @@ func schemaStringArray() oam.PropertySchema {
 // schemaProbes describes the shared `probes` property (see parseProbes). Each
 // probe carries an int-or-string port and many optional K8s fields, so the
 // individual probe objects are kept open.
-func schemaProbes() oam.PropertySchema {
+//
+// reserved is a required argument (D3); see schemaEnv's doc comment above.
+func schemaProbes(reserved bool) oam.PropertySchema {
 	probe := func(desc string) oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: desc}
 	}
 	return oam.PropertySchema{
-		Type:        oam.PropertyTypeObject,
-		Description: "Health probes for the container.",
+		Type:             oam.PropertyTypeObject,
+		PlatformReserved: reserved,
+		Description:      "Health probes for the container.",
 		Properties: map[string]oam.PropertySchema{
 			"readiness": probe("Readiness probe determining when the container can receive traffic."),
 			"liveness":  probe("Liveness probe determining when the container should be restarted."),

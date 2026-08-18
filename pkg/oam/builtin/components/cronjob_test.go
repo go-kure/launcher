@@ -363,6 +363,42 @@ func TestCronjobHandler_WithSharedPodFields(t *testing.T) {
 	t.Error("CronJob not found")
 }
 
+func TestCronjobHandler_WithProbes(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+			"probes": map[string]any{
+				"liveness": map[string]any{
+					"exec": map[string]any{"command": []any{"/bin/sh", "-c", "true"}},
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+
+	app := stack.NewApplication("job", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if cj, ok := (*obj).(*batchv1.CronJob); ok {
+			c := cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
+			if c.LivenessProbe == nil || c.LivenessProbe.Exec == nil {
+				t.Error("expected liveness probe with exec handler")
+			}
+			return
+		}
+	}
+	t.Error("CronJob not found")
+}
+
 func TestCronjobConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 	h := &components.CronjobHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{

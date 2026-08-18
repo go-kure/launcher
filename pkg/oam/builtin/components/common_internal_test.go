@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -135,6 +137,71 @@ func TestParseEnv_ValueFrom_Empty(t *testing.T) {
 	}
 }
 
+func TestParseEnv_FileKeyRef(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "FROM_FILE",
+				"valueFrom": map[string]any{
+					"fileKeyRef": map[string]any{
+						"volumeName": "envfiles",
+						"path":       "app.env",
+						"key":        "SOME_KEY",
+						"optional":   true,
+					},
+				},
+			},
+		},
+	}
+	vars, err := parseEnv(props)
+	if err != nil {
+		t.Fatalf("parseEnv: %v", err)
+	}
+	if len(vars) != 1 || vars[0].ValueFrom == nil || vars[0].ValueFrom.FileKeyRef == nil {
+		t.Fatalf("unexpected result: %+v", vars)
+	}
+	fkr := vars[0].ValueFrom.FileKeyRef
+	if fkr.VolumeName != "envfiles" || fkr.Path != "app.env" || fkr.Key != "SOME_KEY" {
+		t.Errorf("unexpected fileKeyRef: %+v", fkr)
+	}
+	if fkr.Optional == nil || !*fkr.Optional {
+		t.Errorf("expected Optional=true, got %+v", fkr)
+	}
+}
+
+func TestParseEnv_FileKeyRef_MissingRequiredField_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"fileKeyRef": map[string]any{"volumeName": "envfiles", "path": "app.env"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for fileKeyRef missing key")
+	}
+}
+
+func TestParseEnv_FileKeyRef_MutuallyExclusiveWithSecretKeyRef(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"fileKeyRef":   map[string]any{"volumeName": "envfiles", "path": "app.env", "key": "K"},
+					"secretKeyRef": map[string]any{"name": "s", "key": "k"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for fileKeyRef + secretKeyRef both set")
+	}
+}
+
 func TestParseEnvFrom_ConfigMapAndSecret(t *testing.T) {
 	props := map[string]any{
 		"envFrom": []any{
@@ -216,24 +283,44 @@ func TestParseResources_ExtraNamedResources(t *testing.T) {
 			"nvidia.com/gpu": "1",
 		},
 	}
-	rr := parseResources(resources)
-	if rr.CPURequest != "100m" {
-		t.Errorf("CPURequest = %q, want 100m", rr.CPURequest)
+	rr, err := parseResources(resources)
+	if err != nil {
+		t.Fatalf("parseResources: unexpected error: %v", err)
 	}
-	if rr.ExtraRequests["nvidia.com/gpu"] != "1" || rr.ExtraRequests["ephemeral-storage"] != "1Gi" {
-		t.Errorf("unexpected ExtraRequests: %+v", rr.ExtraRequests)
+	if got := quantityString(rr.Requests, corev1.ResourceCPU); got != "100m" {
+		t.Errorf("Requests[cpu] = %q, want 100m", got)
 	}
-	if rr.ExtraLimits["nvidia.com/gpu"] != "1" {
-		t.Errorf("unexpected ExtraLimits: %+v", rr.ExtraLimits)
+	gpuReq := rr.Requests[corev1.ResourceName("nvidia.com/gpu")]
+	storageReq := rr.Requests[corev1.ResourceName("ephemeral-storage")]
+	if gpuReq.String() != "1" || storageReq.String() != "1Gi" {
+		t.Errorf("unexpected Requests: %+v", rr.Requests)
+	}
+	gpuLimit := rr.Limits[corev1.ResourceName("nvidia.com/gpu")]
+	if gpuLimit.String() != "1" {
+		t.Errorf("unexpected Limits: %+v", rr.Limits)
 	}
 }
 
 func TestParseResources_NoExtra_NilMaps(t *testing.T) {
-	rr := parseResources(map[string]any{
+	rr, err := parseResources(map[string]any{
 		"requests": map[string]any{"cpu": "100m"},
 	})
-	if rr.ExtraRequests != nil {
-		t.Errorf("expected nil ExtraRequests when no extra names present, got %+v", rr.ExtraRequests)
+	if err != nil {
+		t.Fatalf("parseResources: unexpected error: %v", err)
+	}
+	if rr.Limits != nil {
+		t.Errorf("expected nil Limits when limits was never authored, got %+v", rr.Limits)
+	}
+	if len(rr.Requests) != 1 {
+		t.Errorf("expected exactly the authored cpu request, got %+v", rr.Requests)
+	}
+}
+
+func TestParseResources_InvalidQuantity_Error(t *testing.T) {
+	if _, err := parseResources(map[string]any{
+		"requests": map[string]any{"cpu": "not-a-quantity"},
+	}); err == nil {
+		t.Fatal("expected error for invalid cpu quantity")
 	}
 }
 
@@ -661,6 +748,39 @@ func TestParseSecurityContext_AppArmorProfile_InvalidType_Error(t *testing.T) {
 	}
 }
 
+func TestParseSecurityContext_ProcMount_Default(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{"procMount": "Default"},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc == nil || sc.ProcMount == nil || *sc.ProcMount != corev1.DefaultProcMount {
+		t.Errorf("unexpected procMount: %+v", sc)
+	}
+}
+
+func TestParseSecurityContext_ProcMount_Unmasked(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{"procMount": "Unmasked"},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc == nil || sc.ProcMount == nil || *sc.ProcMount != corev1.UnmaskedProcMount {
+		t.Errorf("unexpected procMount: %+v", sc)
+	}
+}
+
+func TestParseSecurityContext_ProcMount_InvalidValue_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{"procMount": "Bogus"},
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid procMount value")
+	}
+}
+
 func TestSchemaFragments_ReservedParam(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -671,6 +791,7 @@ func TestSchemaFragments_ReservedParam(t *testing.T) {
 		{"schemaResources", schemaResources(true)},
 		{"schemaLifecycle", schemaLifecycle(true)},
 		{"schemaWorkingDir", schemaWorkingDir(true)},
+		{"schemaProbes", schemaProbes(true)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
