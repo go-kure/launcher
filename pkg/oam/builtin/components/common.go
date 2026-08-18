@@ -339,6 +339,21 @@ func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
 // secretKeyRef/configMapKeyRef's parseNameKey, which silently skips on a
 // missing name/key) — a partially-specified fileKeyRef cannot resolve to any
 // of the other four value sources either, so it is a hard validation error.
+// validateRelativePath rejects an absolute path or one containing a ".."
+// backstep component, per AGENTS.md's "reject paths that escape the working
+// directory" convention. label identifies the field in the returned error.
+func validateRelativePath(label, path string) error {
+	if gopath.IsAbs(path) {
+		return errors.Errorf("%s: path must be relative, got %q", label, path)
+	}
+	for _, elem := range strings.Split(path, "/") {
+		if elem == ".." {
+			return errors.Errorf("%s: path must not contain \"..\", got %q", label, path)
+		}
+	}
+	return nil
+}
+
 func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 	volumeName, _ := m["volumeName"].(string)
 	path, _ := m["path"].(string)
@@ -346,16 +361,9 @@ func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 	if volumeName == "" || path == "" || key == "" {
 		return nil, errors.Errorf("fileKeyRef: volumeName, path, and key are all required")
 	}
-	// path must stay relative to the referenced volume's mount point (per
-	// AGENTS.md's "reject paths that escape the working directory"): reject an
-	// absolute path or one containing a ".." backstep component.
-	if gopath.IsAbs(path) {
-		return nil, errors.Errorf("fileKeyRef: path must be relative, got %q", path)
-	}
-	for _, elem := range strings.Split(path, "/") {
-		if elem == ".." {
-			return nil, errors.Errorf("fileKeyRef: path must not contain \"..\", got %q", path)
-		}
+	// path must stay relative to the referenced volume's mount point.
+	if err := validateRelativePath("fileKeyRef.path", path); err != nil {
+		return nil, err
 	}
 	sel := &corev1.FileKeySelector{VolumeName: volumeName, Path: path, Key: key}
 	if opt, ok := m["optional"].(bool); ok {
@@ -635,6 +643,65 @@ func parseResources(resources map[string]any) (ResourceRequirements, error) {
 	return req, nil
 }
 
+// standardContainerResourceNames is the fixed set of unqualified (no "/")
+// resource names a container may request/limit directly, beyond the
+// hugepages-<size> family (mirrors standardContainerResources,
+// k8s.io/kubernetes/pkg/apis/core/helper/helpers.go — the container-specific
+// subset of IsStandardResourceName's broader, quota-only set, which also
+// allows unqualified names like "pods" that make no sense on a container).
+var standardContainerResourceNames = map[corev1.ResourceName]bool{
+	corev1.ResourceCPU:              true,
+	corev1.ResourceMemory:           true,
+	corev1.ResourceEphemeralStorage: true,
+}
+
+// validateContainerResourceName applies the same rule real Kubernetes
+// admission uses for a corev1.Container.Resources key (mirrors
+// ValidateContainerResourceName, k8s.io/kubernetes/pkg/apis/core/validation):
+// an unqualified name (no "/") must be one of the three standard container
+// resources or a hugepages-<size> name — validation.IsQualifiedName alone
+// accepts any unqualified token (e.g. "foo"), which Kubernetes actually
+// reserves for its own native resources and rejects from a workload author.
+// A qualified name (has "/") is accepted as an extended resource unless it
+// falsely claims to be native by containing "kubernetes.io/" while also
+// being formatted as a "requests.<name>" quota alias (mirrors
+// IsNativeResource/IsExtendedResourceName's requests.-prefix rejection).
+func validateContainerResourceName(k string) error {
+	if !strings.Contains(k, "/") {
+		if standardContainerResourceNames[corev1.ResourceName(k)] || isHugePageResourceName(corev1.ResourceName(k)) {
+			return nil
+		}
+		return errors.Errorf("%s: must be a standard container resource (cpu, memory, ephemeral-storage), a hugepages-<size> name, or a fully qualified extended resource name (e.g. \"example.com/foo\")", k)
+	}
+	if !strings.Contains(k, "kubernetes.io/") && strings.HasPrefix(k, "requests.") {
+		return errors.Errorf("%s: extended resource name must not start with %q", k, "requests.")
+	}
+	return nil
+}
+
+// isHugePageResourceName reports whether name is a "hugepages-<size>"
+// resource name (mirrors helper.IsHugePageResourceName).
+func isHugePageResourceName(name corev1.ResourceName) bool {
+	return strings.HasPrefix(string(name), "hugepages-")
+}
+
+// validateHugePageQuantity checks that q is an integer multiple of the page
+// size encoded in name's "hugepages-<size>" suffix (mirrors
+// helper.IsHugePageResourceValueDivisible) — Kubernetes rejects a hugepages
+// request/limit that is merely a whole number of bytes if it is not also a
+// whole number of that specific page size (e.g. hugepages-2Mi: 3Mi is a
+// whole number of bytes but not a multiple of the 2Mi page size).
+func validateHugePageQuantity(name corev1.ResourceName, q resource.Quantity) error {
+	pageSize, err := resource.ParseQuantity(strings.TrimPrefix(string(name), "hugepages-"))
+	if err != nil || pageSize.Sign() <= 0 || pageSize.MilliValue()%1000 != 0 {
+		return errors.Errorf("%s: invalid hugepage resource name", name)
+	}
+	if q.Value()%pageSize.Value() != 0 {
+		return errors.Errorf("%s: quantity %s must be an integer multiple of the page size %s", name, q.String(), pageSize.String())
+	}
+	return nil
+}
+
 // parseResourceList parses every string-valued entry of m as a
 // corev1.ResourceName -> resource.Quantity pair. Returns nil (not an empty
 // non-nil map) when m has no string-valued entries, so a caller comparing
@@ -645,6 +712,9 @@ func parseResourceList(m map[string]any) (corev1.ResourceList, error) {
 	for k, v := range m {
 		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
 			return nil, errors.Errorf("%s: invalid resource name: %s", k, strings.Join(errs, "; "))
+		}
+		if err := validateContainerResourceName(k); err != nil {
+			return nil, err
 		}
 		s, ok := decodedQuantityString(v)
 		if !ok {
@@ -659,6 +729,11 @@ func parseResourceList(m map[string]any) (corev1.ResourceList, error) {
 		}
 		if !isFractionalResourceName(corev1.ResourceName(k)) && q.MilliValue()%1000 != 0 {
 			return nil, errors.Errorf("%s: extended resource quantities must be whole numbers, got %q", k, s)
+		}
+		if isHugePageResourceName(corev1.ResourceName(k)) {
+			if err := validateHugePageQuantity(corev1.ResourceName(k), q); err != nil {
+				return nil, err
+			}
 		}
 		if rl == nil {
 			rl = corev1.ResourceList{}
@@ -1085,6 +1160,17 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		sc.RunAsNonRoot = &v
 		set = true
 	}
+	// A container authored with both an explicit root UID and runAsNonRoot
+	// builds fine and is admitted by the API server, but always fails at
+	// container-start time: the kubelet's verifyRunAsNonRoot check
+	// (pkg/kubelet/kuberuntime/security_context.go) deterministically rejects
+	// it as "container's runAsUser breaks non-root policy", a
+	// CreateContainerConfigError every time, not a possible-failure condition —
+	// so it is caught here instead of shipping a workload guaranteed never to
+	// start.
+	if sc.RunAsUser != nil && *sc.RunAsUser == 0 && sc.RunAsNonRoot != nil && *sc.RunAsNonRoot {
+		return nil, errors.Errorf("securityContext: runAsUser must not be 0 when runAsNonRoot is true")
+	}
 	if v, ok := raw["readOnlyRootFilesystem"].(bool); ok {
 		sc.ReadOnlyRootFilesystem = &v
 		set = true
@@ -1131,6 +1217,12 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			profile, ok := spRaw["localhostProfile"].(string)
 			if !ok || profile == "" {
 				return nil, errors.Errorf("securityContext.seccompProfile: localhostProfile is required when type is %q", typ)
+			}
+			// corev1.SeccompProfile.LocalhostProfile's field doc comment: "Must be
+			// a descending path, relative to the kubelet's configured seccomp
+			// profile location."
+			if err := validateRelativePath("securityContext.seccompProfile.localhostProfile", profile); err != nil {
+				return nil, err
 			}
 			sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeLocalhost, LocalhostProfile: &profile}
 			set = true
