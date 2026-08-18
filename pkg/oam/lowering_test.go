@@ -487,13 +487,22 @@ func TestLower_RuleIdentity(t *testing.T) {
 }
 
 // TestLower_RuleIdentity_UntouchedComponent_EmptyRule confirms a component whose type
-// matches no registered lowering rule keeps Origin.Rule empty: it was never itself the
-// output of a rule invocation, so there is no producer identity to record. Registers
-// an unrelated lowering rule so hasLoweringRules() is true and the fixpoint actually
-// runs the document through lowerDocumentBody — otherwise t.lower's empty-registry
-// fast path never stamps ANY origin at all (TestLower_EmptyRegistry_ReturnsSamePointer),
-// which would make this assertion vacuous rather than a genuine "touched but not
-// claimed" case.
+// matches no registered lowering rule, and carries no traits, is left completely
+// untouched by the fixpoint. lowerDocumentBody only stamps Origin at a firing rule's
+// emission site (component/trait/policy) — there is no "stamp every authored element
+// up front" step — so the correct, checkable behavior for a component nothing ever
+// claims is that its Origin() reports ok=false, not merely that some already-stamped
+// Origin happens to carry Rule=="". (Round-2 Codex finding F4: the previous version of
+// this test asserted `ok && origin.Rule != ""`, which never actually evaluated the
+// Rule half — ok is always false for this exact scenario, confirmed by hand-tracing
+// lowerDocumentBody, so the test passed regardless of what Rule contained. For the
+// complementary case — a component that DOES end up stamped while still correctly
+// keeping Rule=="", because a document rule forwarded it verbatim rather than
+// producing it — see TestLower_DocumentRule_ForwardedComponent_KeepsEmptyRule.)
+// Registers an unrelated lowering rule so hasLoweringRules() is true and the fixpoint
+// actually runs the document through lowerDocumentBody — otherwise t.lower's
+// empty-registry fast path (TestLower_EmptyRegistry_ReturnsSamePointer) would return
+// the input unchanged for an entirely different reason (lowering never runs at all).
 func TestLower_RuleIdentity_UntouchedComponent_EmptyRule(t *testing.T) {
 	tr := NewTransformer(nil, nil)
 	tr.RegisterComponentLowering(ridStageRule{typ: "unrelated-trigger", nextType: "webservice"})
@@ -515,8 +524,8 @@ func TestLower_RuleIdentity_UntouchedComponent_EmptyRule(t *testing.T) {
 		t.Fatalf("expected exactly 1 document with 1 settled component, got %+v", docs)
 	}
 	settled := docs[0].Spec.Components[0]
-	if origin, ok := settled.Origin(); ok && origin.Rule != "" {
-		t.Errorf("untouched component Origin.Rule = %q (stamped=%v), want \"\" (never produced by a lowering rule)", origin.Rule, ok)
+	if origin, ok := settled.Origin(); ok {
+		t.Errorf("untouched component unexpectedly carries a stamped origin %+v, want ok=false (lowerDocumentBody must not stamp a component whose type matched no rule)", origin)
 	}
 }
 
