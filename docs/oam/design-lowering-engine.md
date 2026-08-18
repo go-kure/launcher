@@ -42,11 +42,22 @@ Holds, at a real but bounded cost. `NameAllocator` (`lowering.go:140-172`) is th
 naming mechanism: deterministic `<base>-<suffix>` generation plus collision detection
 keyed by authored `Origin`, so two rules independently choosing the same generated name
 fail loudly and name both origins rather than silently overwriting. `Origin` provenance
-(`lowering.go:35-48`) rides as unexported `origin *Origin` / `sealed bool` fields on
+(`lowering.go:46-52`) rides as unexported `origin *Origin` / `sealed bool` fields on
 `Trait`/`Component`/`ApplicationPolicy`/`Application` — yaml.v3 ignores unexported
 fields, so this cost nothing in the wire format, and value-copy semantics at existing
 call sites (`transform.go` cluster-building) preserve it without a pointer-keyed side
 table.
+
+`Origin` carries one field, `Rule` (`lowering.go:72-111`), that breaks its own
+"stamped once, copied verbatim" rule: every other field names the AUTHORED location
+and is fixed forever once stamped, but `Rule` names whichever lowering rule MOST
+RECENTLY produced the element, so it is deliberately re-derived at every hop rather
+than copied — a verbatim copy would leave a round-1 rule's identity on an element a
+round-2 rule actually went on to produce. A component, policy, or trait a rule only
+*forwards* verbatim (rather than constructs) is exempted from that re-stamp via
+pointer-identity checks (`isForwardedComponent`, `isForwardedPolicy`,
+`isForwardedTrait`) and keeps whatever `Rule` it already carried — possibly `""`, if
+never itself the direct output of a rule invocation.
 
 Document-level 1→N (one authored document lowering into several) ships only at the
 **raw** entry point today: `testRawRule` (`pkg/oam/lowering_raw_test.go:41-139`) emits
