@@ -47,7 +47,9 @@ var ErrLoweringDepthExceeded = errors.New("oam: lowering exceeded max recursion 
 // authored element, and copied verbatim onto every element it expands into at any
 // depth — never re-derived from a synthesized element. Every lowering error and every
 // element's Origin() accessor lead with it, so a user always sees the YAML they wrote
-// (D7: authored location first, synthesized detail second).
+// (D7: authored location first, synthesized detail second). The one exception is the
+// Rule field: unlike every other field here, it is deliberately re-derived at every
+// lowering hop rather than copied verbatim — see its own doc comment below.
 type Origin struct {
 	Document     string // authored metadata.name
 	DocumentKind string // authored kind, e.g. "WebApplication"
@@ -66,6 +68,40 @@ type Origin struct {
 	TraitType     string // authored trait type; "" unless the origin is a trait
 	PolicyName    string // authored policy name; "" unless the origin is a policy
 	Index         int    // index in the authored parent slice
+
+	// Rule identifies the lowering rule that MOST RECENTLY produced the element
+	// carrying this Origin: "<position>/<type>" (e.g. "trait/expose"), suffixed with
+	// "@<version>" when the rule also implements ContractDescriber (handler.go) and
+	// declares a non-empty ContractMetadata().Version (e.g. "trait/expose@v1"). ""
+	// means the element was never itself the direct output of a lowering rule
+	// invocation — it is exactly as authored, or a descendant carried through
+	// untouched (e.g. a component forwarded verbatim by a document rule).
+	//
+	// Unlike every other field on Origin, Rule is DELIBERATELY NOT part of the
+	// "stamped once, copied verbatim" contract documented above: it is re-derived
+	// every time a rule fires on an element's lineage, so it always names the
+	// IMMEDIATE producer rather than the first rule in a multi-hop chain. A naive
+	// verbatim copy would leave a round-1 rule's identity on an element that a
+	// round-2 rule went on to actually produce — wrong, since "which rule produced
+	// this element" is a per-expansion fact, not an authored-location fact. Origin's
+	// other fields stay verbatim precisely because Document/Component/etc. name the
+	// AUTHORED origin, which by definition never changes across rounds; Rule names
+	// the most recent SYNTHESIS step, which by definition does. Every call site that
+	// stamps a rule's LoweringResult onto Origin sets Rule immediately before doing
+	// so (lowering.go, lowering_raw.go) via loweringRuleIdentity; a call site that
+	// merely carries an existing Origin forward (no rule fired this round) leaves it
+	// untouched, so it keeps whatever value — possibly "" — it already had.
+	//
+	// Granularity: set once per rule INVOCATION (every element one LowerXxx call
+	// emits shares the same Rule string), not per emitted element's own resulting
+	// type — a rule that emits several differently-typed elements in one call
+	// (LoweringResult permits it) does not get a different Rule per element. This
+	// matches the granularity Origin's other synthesized-detail fields already use
+	// (one stamp per invocation) and avoids needing a per-element Origin copy at
+	// every emission site — today every element from one invocation shares one
+	// Origin pointer (see the stamping loops in lowering.go), and Rule preserves
+	// that.
+	Rule string
 }
 
 // String renders the origin for error messages, e.g.
@@ -84,6 +120,42 @@ func (o Origin) String() string {
 	}
 	fmt.Fprintf(&b, " in document %q (kind %q)", o.Document, o.DocumentKind)
 	return b.String()
+}
+
+// loweringRuleIdentity formats the identity of the lowering rule that produced an
+// emitted element, for Origin.Rule: "<position>/<type>" (e.g. "trait/expose"),
+// matching the identical convention LoweringStep.Rule already uses at each of these
+// call sites — suffixed with "@<version>" when rule also implements ContractDescriber
+// (handler.go) and declares a non-empty ContractMetadata().Version.
+//
+// rule is `any` rather than one of the five lowering-rule interfaces
+// (DocumentLoweringRule, RawDocumentLoweringRule, ComponentLoweringRule,
+// TraitLoweringRule, PolicyLoweringRule) because they share no common type; the only
+// thing this function actually needs is the optional ContractDescriber assertion.
+func loweringRuleIdentity(position Position, typeName string, rule any) string {
+	id := string(position) + "/" + typeName
+	if cd, ok := rule.(ContractDescriber); ok {
+		if v := cd.ContractMetadata().Version; v != "" {
+			id += "@" + v
+		}
+	}
+	return id
+}
+
+// sameAuthoredLocation reports whether o and other name the same AUTHORED location —
+// every Origin field EXCEPT Rule. Rule records synthesis provenance (which lowering
+// rule most recently produced the element), not authored identity, and by design
+// changes across rounds for what is otherwise the identical conceptual origin (see
+// Rule's doc comment): two siblings emitted from ONE rule invocation share an Origin
+// whose Rule reflects that invocation, but if one sibling is itself lowered further in
+// a later round, ITS descendants' inherited origin then carries the LATER rule's
+// identity too — a difference that must not, by itself, make NameAllocator.Reserve
+// (the one caller that needs this) treat them as different origins. Every other field
+// keeps full "stamped once, copied verbatim" identity semantics, so comparing them
+// directly is correct.
+func (o Origin) sameAuthoredLocation(other Origin) bool {
+	other.Rule = o.Rule
+	return o == other
 }
 
 // LoweringResult is what a rule returns. Which fields a rule may populate is
@@ -221,7 +293,12 @@ func (n *NameAllocator) Reserve(name string, origin Origin) error {
 	// namespace-scoped duplicate-document detection (rawDocKey, lowering_raw.go).
 	key := origin.Namespace + "\x00" + name
 	if prior, ok := n.taken[key]; ok {
-		if prior.origin != origin {
+		// sameAuthoredLocation, not a raw !=: Origin.Rule deliberately differs across
+		// rounds for what is still the same conceptual origin (see Rule's doc
+		// comment) — a raw struct compare would misroute a legitimate cross-round
+		// sibling collision (the very case this function's own doc comment above
+		// exists to catch) into the "different origin entirely" message branch below.
+		if !prior.origin.sameAuthoredLocation(origin) {
 			return errors.Errorf("lowering: generated name %q collides — already used by %s, also wanted by %s", name, prior.origin, origin)
 		}
 		if prior.round == n.round {
@@ -711,6 +788,12 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		if verr := validatePositionResult(PositionDocument, origin, result); verr != nil {
 			return nil, false, nil, verr
 		}
+		// Rule is re-derived here, not carried over from origin's own (possibly
+		// already-set) value — see Origin.Rule's doc comment. doc.Kind is still the
+		// PRE-lowering kind at this point (doc itself is untouched; the new documents
+		// live in result.Documents), so this correctly names the rule that just fired,
+		// not whatever rule (if any) produced the input doc.
+		origin.Rule = loweringRuleIdentity(PositionDocument, doc.Kind, rule)
 		// Snapshot the components doc had BEFORE the rule ran: a rule that forwards
 		// one of them unchanged into its output (rather than constructing a fresh
 		// component) is forwarding its already-authored traits too, not synthesizing
@@ -744,7 +827,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 				// forwarded component's own Name/Type are unchanged by construction,
 				// so recomputing here reproduces whatever value it would already
 				// carry rather than overwriting it with something different.
-				compOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: j}
+				compOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: j, Rule: origin.Rule}
 				comp.origin = &compOrigin
 				if err := t.sealNestedTraitsInDocument(comp, compOrigin, originalComponents); err != nil {
 					return nil, false, nil, errors.Wrapf(err, "%s", origin)
@@ -752,7 +835,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 			}
 			for k := range result.Documents[i].Spec.Policies {
 				pol := &result.Documents[i].Spec.Policies[k]
-				polOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, PolicyName: pol.Name, Index: k}
+				polOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, PolicyName: pol.Name, Index: k, Rule: origin.Rule}
 				pol.origin = &polOrigin
 			}
 		}
@@ -831,6 +914,11 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			if err := validatePositionResult(PositionComponent, compOrigin, result); err != nil {
 				return false, steps, err
 			}
+			// Rule is re-derived here — see Origin.Rule's doc comment. compOrigin was
+			// captured into lctx.Origin (above) BEFORE this line runs, so the rule
+			// itself still saw its INPUT's prior identity; only the OUTPUT stamped
+			// below carries this invocation's own.
+			compOrigin.Rule = loweringRuleIdentity(PositionComponent, comp.Type, rule)
 			names := make([]string, len(result.Components))
 			for j := range result.Components {
 				result.Components[j].origin = &compOrigin
@@ -956,6 +1044,8 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			if err := validatePositionResult(PositionTrait, traitOrigin, result); err != nil {
 				return false, steps, err
 			}
+			// Rule is re-derived here — see Origin.Rule's doc comment.
+			traitOrigin.Rule = loweringRuleIdentity(PositionTrait, trait.Type, rule)
 			names := make([]string, len(result.Traits))
 			for j := range result.Traits {
 				result.Traits[j].origin = &traitOrigin
@@ -1031,6 +1121,8 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 		if err := validatePositionResult(PositionPolicy, polOrigin, result); err != nil {
 			return false, steps, err
 		}
+		// Rule is re-derived here — see Origin.Rule's doc comment.
+		polOrigin.Rule = loweringRuleIdentity(PositionPolicy, pol.Type, rule)
 		names := make([]string, len(result.Policies))
 		for j := range result.Policies {
 			result.Policies[j].origin = &polOrigin
