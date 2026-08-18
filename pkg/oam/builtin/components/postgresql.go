@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"sort"
 
 	kurecnpg "github.com/go-kure/kure/pkg/kubernetes/cnpg"
 	"github.com/go-kure/kure/pkg/stack"
@@ -107,6 +108,24 @@ func (h *PostgresqlHandler) PropertySchema() map[string]oam.PropertySchema {
 }
 
 // ToApplicationConfig converts an OAM postgresql component to a PostgresqlConfig.
+// unsupportedResourceNames returns any resource name in rl other than cpu/memory, sorted for a
+// deterministic error message. The shared `resources` schema (schemaResources) accepts any named
+// resource — e.g. "ephemeral-storage", "nvidia.com/gpu" — for every workload kind, forwarded
+// directly onto a real corev1.Container for the 5 direct workload kinds. postgresql instead
+// forwards through kurecnpg.ResourceOptions (an external go-kure/kure type), which has fields
+// only for cpu/memory; anything else would otherwise be silently dropped when createCluster
+// builds the CNPG Cluster. Rejecting it here, at parse time, surfaces that loudly instead.
+func unsupportedResourceNames(rl corev1.ResourceList) []string {
+	var names []string
+	for name := range rl {
+		if name != corev1.ResourceCPU && name != corev1.ResourceMemory {
+			names = append(names, string(name))
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &PostgresqlConfig{
 		Name:      component.Name,
@@ -143,6 +162,12 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 		r, err := parseResources(resources)
 		if err != nil {
 			return nil, errors.Wrap(err, "invalid resources configuration")
+		}
+		if extra := unsupportedResourceNames(r.Requests); len(extra) > 0 {
+			return nil, errors.Errorf("resources.requests: postgresql only supports cpu/memory, got unsupported name(s) %v", extra)
+		}
+		if extra := unsupportedResourceNames(r.Limits); len(extra) > 0 {
+			return nil, errors.Errorf("resources.limits: postgresql only supports cpu/memory, got unsupported name(s) %v", extra)
 		}
 		config.Resources = r
 	}

@@ -45,7 +45,7 @@ func schemaEnv(reserved bool) oam.PropertySchema {
 				"value": {Type: oam.PropertyTypeString, Description: "Literal value for the variable."},
 				"valueFrom": {
 					Type:        oam.PropertyTypeObject,
-					Description: "Source the value from another object. Exactly one of the four fields below may be set.",
+					Description: "Source the value from another object. Exactly one of the five fields below may be set.",
 					Properties: map[string]oam.PropertySchema{
 						"secretKeyRef":    keySelector("Select a key of a Secret in the component's namespace."),
 						"configMapKeyRef": keySelector("Select a key of a ConfigMap in the component's namespace."),
@@ -121,7 +121,18 @@ func schemaEnvFrom(reserved bool) oam.PropertySchema {
 // schemaResources describes the shared `resources` property (see parseResources).
 // requests/limits accept arbitrary named resources beyond cpu/memory (e.g.
 // ephemeral-storage, nvidia.com/gpu) via AdditionalProperties — parseResources
-// collects any such key into ResourceRequirements.Extra{Requests,Limits}.
+// collects any such key directly into the real corev1.ResourceList map on
+// ResourceRequirements.Requests/Limits (no separate "extra" bucket).
+//
+// `claims` (corev1.ResourceRequirements.Claims, Dynamic Resource Allocation) is
+// deliberately not projected: the pinned k8s.io/api@v0.36.3 type carries
+// `+featureGate=DynamicResourceAllocation` on that field (unlike procMount, whose
+// alpha rationale proved false — see parseSecurityContext), and a Claims entry
+// only means anything paired with a PodSpec.ResourceClaims entry, a pod-level
+// construct this component schema does not model at all yet. Adding a `claims`
+// property here without that pod-level wiring would validate but silently
+// produce an invalid corev1 object. Left for a follow-up once pod-level
+// resourceClaims support is designed.
 // reserved is a required argument (D3); see schemaEnv's doc comment above.
 func schemaResources(reserved bool) oam.PropertySchema {
 	// requests and limits each get their own map so the returned schema shares no

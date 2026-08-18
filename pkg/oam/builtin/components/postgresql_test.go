@@ -60,6 +60,42 @@ func TestPostgresqlHandler_InvalidProvider(t *testing.T) {
 	}
 }
 
+func TestPostgresqlHandler_UnsupportedResourceName_Requests_Error(t *testing.T) {
+	h := &components.PostgresqlHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "db", Type: "postgresql",
+		Properties: map[string]any{
+			"resources": map[string]any{
+				"requests": map[string]any{"cpu": "500m", "nvidia.com/gpu": "1"},
+			},
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for unsupported resource name in requests")
+	}
+	if !strings.Contains(err.Error(), "nvidia.com/gpu") {
+		t.Errorf("expected error to name the unsupported resource, got: %v", err)
+	}
+}
+
+func TestPostgresqlHandler_UnsupportedResourceName_Limits_Error(t *testing.T) {
+	h := &components.PostgresqlHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "db", Type: "postgresql",
+		Properties: map[string]any{
+			"resources": map[string]any{
+				"limits": map[string]any{"ephemeral-storage": "10Gi"},
+			},
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for unsupported resource name in limits")
+	}
+	if !strings.Contains(err.Error(), "ephemeral-storage") {
+		t.Errorf("expected error to name the unsupported resource, got: %v", err)
+	}
+}
+
 func TestPostgresqlHandler_PoolerValidation(t *testing.T) {
 	h := &components.PostgresqlHandler{}
 

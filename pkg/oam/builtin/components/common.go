@@ -425,6 +425,11 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 // Kubernetes API. Returns an error if any authored quantity string fails to
 // parse (validation that previously happened later, at build time, in
 // buildResourceRequirements/kubernetes.SetResourceRequestCPU etc.).
+//
+// Deliberately NOT covered: corev1.ResourceRequirements.Claims (Dynamic
+// Resource Allocation) — see schemaResources' doc comment for the rationale
+// (genuinely feature-gated in the pinned k8s.io/api version, and meaningless
+// without pod-level PodSpec.ResourceClaims wiring this component doesn't have).
 func parseResources(resources map[string]any) (ResourceRequirements, error) {
 	var req ResourceRequirements
 	if requests, ok := resources["requests"].(map[string]any); ok {
