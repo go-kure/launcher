@@ -100,9 +100,36 @@ func applyDefaultReplicas(current int32, explicit bool, dflt *int32) int32 {
 	return *dflt
 }
 
-func applyDefaultResource(current, dflt string) string {
-	if current != "" {
-		return current
+// quantityString returns the string form of rl[name], or "" if rl is nil or
+// name is absent — bridging corev1.ResourceList (the real
+// map[ResourceName]resource.Quantity type ResourceRequirements now embeds) to
+// enforceMaxResource's string-based comparison.
+func quantityString(rl corev1.ResourceList, name corev1.ResourceName) string {
+	if rl == nil {
+		return ""
 	}
-	return dflt
+	if q, ok := rl[name]; ok {
+		return q.String()
+	}
+	return ""
+}
+
+// applyDefaultQuantity sets (*rl)[name] = dflt when rl has no entry for name
+// (the author left this specific resource name unmentioned — map-key presence
+// is ResourceRequirements' equivalent of the old explicitResourceFlags bool,
+// now removed) and dflt is non-empty (the policy has a default for it); *rl
+// is allocated on first write if nil.
+func applyDefaultQuantity(rl *corev1.ResourceList, name corev1.ResourceName, dflt string) error {
+	if _, ok := (*rl)[name]; ok || dflt == "" {
+		return nil
+	}
+	q, err := resource.ParseQuantity(dflt)
+	if err != nil {
+		return errors.Errorf("policy default for %s: invalid quantity %q: %w", name, dflt, err)
+	}
+	if *rl == nil {
+		*rl = corev1.ResourceList{}
+	}
+	(*rl)[name] = q
+	return nil
 }

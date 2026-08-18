@@ -35,27 +35,31 @@ Reference.
 ## Common config
 
 Most workload types (`webservice`, `worker`, `statefulset`, `daemonset`, `cronjob`)
-share these fields, projected as a full-fidelity subset of `corev1.Container`/
-`PodSpec` rather than a hand-rolled parallel schema: `image` (validated — no
-untagged/`latest`), `env` (`value` or `valueFrom` — mutually exclusive, matching
-`corev1.EnvVar`'s own doc comment ("cannot be used if value is not empty");
-`valueFrom` is one of `secretKeyRef`, `configMapKeyRef` (both accept
-`optional`), `fieldRef`, `resourceFieldRef` — mutually exclusive among
+share these fields, projected directly onto real `corev1` types (same
+structural pattern as `ProbeConfig` holding `*corev1.Probe`) rather than a
+hand-rolled parallel schema: `image` (validated — no untagged/`latest`), `env`
+(`value` or `valueFrom` — mutually exclusive, matching `corev1.EnvVar`'s own
+doc comment ("cannot be used if value is not empty"); `valueFrom` is one of
+`secretKeyRef`, `configMapKeyRef` (both accept `optional`), `fieldRef`,
+`resourceFieldRef`, `fileKeyRef` (`volumeName`/`path`/`key` required,
+`optional` accepted; corev1's `EnvFiles` feature) — mutually exclusive among
 themselves too), `envFrom` (bulk-import a ConfigMap's or Secret's keys, with
-`prefix`), `resources` (requests/limits, defaults 100m/128Mi for `cpu`/`memory`;
-any other resource name, e.g. `ephemeral-storage` or `nvidia.com/gpu`,
-round-trips unmodified — no policy default/max hook exists for those today),
-`command`/`args`, `probes` (httpGet/tcpSocket/exec/grpc), `lifecycle`
-(`postStart`/`preStop`: `exec`/`httpGet` (including `httpHeaders`)/`sleep` —
-`tcpSocket` is not accepted, since corev1 documents it as broken for lifecycle
-hooks), `securityContext` (per-container:
-`runAsUser`/`runAsGroup`/`runAsNonRoot`, `readOnlyRootFilesystem`,
-`allowPrivilegeEscalation`, `privileged`, `capabilities.{add,drop}`,
-`seccompProfile`, `seLinuxOptions`, `appArmorProfile`; `windowsOptions` and
-`procMount` are deliberately not covered — this project targets Linux-only
-podman/distroless images (see the workspace-root `meta/CLAUDE.md`), and
-`procMount` is an alpha, rarely-used field with no precedent elsewhere in this
-package), `workingDir`, `volumes`, `initContainers`, `sidecars`, and `affinity`.
+`prefix`), `resources` — a `corev1.ResourceRequirements` projection: `requests`/
+`limits` accept `cpu`/`memory` (defaults 100m/128Mi) plus any other resource
+name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map, all parsed
+as `resource.Quantity` and round-tripped unmodified — no policy default/max
+hook exists for names other than cpu/memory today), `command`/`args`, `probes`
+(httpGet/tcpSocket/exec/grpc), `lifecycle` (`postStart`/`preStop`:
+`exec`/`httpGet` (including `httpHeaders`)/`sleep` — `tcpSocket` is not
+accepted, since corev1 documents it as broken for lifecycle hooks),
+`securityContext` (per-container: `runAsUser`/`runAsGroup`/`runAsNonRoot`,
+`readOnlyRootFilesystem`, `allowPrivilegeEscalation`, `privileged`,
+`capabilities.{add,drop}`, `seccompProfile`, `seLinuxOptions`,
+`appArmorProfile`, `procMount` (`Default`|`Unmasked`); `windowsOptions` is
+deliberately not covered — this project targets Linux-only podman/distroless
+images (see the workspace-root `meta/CLAUDE.md`), and `procMount` is
+Linux-specific by definition, so excluding `windowsOptions` does not extend to
+it), `workingDir`, `volumes`, `initContainers`, `sidecars`, and `affinity`.
 
 `securityContext.privileged: true` is rejected unless the environment policy's
 `AllowPrivileged()` allows it — the one `securityContext` field enforced today
@@ -69,8 +73,8 @@ both, the trait's `Generate()` pass runs later and unconditionally overwrites
 the same component. Use the trait for a safe, complete PSA-consistent
 default; use this property for raw, partial, full-fidelity authoring.
 
-`env`, `envFrom`, `resources`, `lifecycle`, `securityContext`, and `workingDir`
-are each schema fragments parameterized by a `reserved bool` (mirroring
+`env`, `envFrom`, `resources`, `lifecycle`, `securityContext`, `workingDir`, and
+`probes` are each schema fragments parameterized by a `reserved bool` (mirroring
 `pkg/oam/builtin/traits/schema.go`'s `schemaNetworkPolicy(reserved bool)`):
 every built-in call site passes `false` today. Deciding which of these fields
 should be platform-reserved (rejecting any authored value via

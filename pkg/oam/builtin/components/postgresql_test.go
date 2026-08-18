@@ -7,6 +7,7 @@ import (
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	"github.com/go-kure/kure/pkg/stack"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -429,8 +430,8 @@ func TestPostgresqlHandler_ValidProperties(t *testing.T) {
 	if pc.ImageName != "ghcr.io/tensorchord/pgvecto-rs:pg16-v0.3.0" {
 		t.Errorf("ImageName: got %q", pc.ImageName)
 	}
-	if pc.Resources.CPURequest != "500m" {
-		t.Errorf("CPURequest: got %q", pc.Resources.CPURequest)
+	if got := pc.Resources.Requests[corev1.ResourceCPU]; got.String() != "500m" {
+		t.Errorf("CPURequest: got %q", got.String())
 	}
 	if pc.PostgresqlParameters["shared_buffers"] != "256MB" {
 		t.Errorf("PostgresqlParameters: got %v", pc.PostgresqlParameters)

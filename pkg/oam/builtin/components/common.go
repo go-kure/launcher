@@ -124,31 +124,19 @@ func stringMap(m map[string]any) map[string]string {
 
 // --- Data types ---
 
-// ResourceRequirements represents CPU/memory requirements plus any additional
-// named resource quantities (e.g. ephemeral-storage, nvidia.com/gpu,
-// hugepages-2Mi). CPU/memory keep dedicated fields because policy defaulting
-// and enforcement (ApplyPolicy in each kind file; enforceMaxResource,
-// enforce.go) is keyed to them specifically. Every other resource name
-// round-trips through Extra{Requests,Limits} unmodified — no policy hook
-// exists for arbitrary resource names today (see R1-R7 ledger, launcher#278).
+// ResourceRequirements projects the real corev1.ResourceRequirements directly
+// (same structural pattern as ProbeConfig holding *corev1.Probe fields, and
+// parseEnvVarSource/parseSecurityContext above) rather than a hand-rolled
+// parallel struct, so every resource name — cpu, memory, ephemeral-storage,
+// hugepages-2Mi, an extended resource like nvidia.com/gpu, or any future
+// corev1.ResourceList entry — round-trips through Requests/Limits unmodified.
+// Policy defaulting/enforcement (ApplyPolicy in each kind file;
+// applyDefaultQuantity/enforceMaxResource in enforce.go) still targets cpu/
+// memory specifically; which individual resource names were explicitly
+// authored (vs. left for policy to default) is read directly off map-key
+// presence in Requests/Limits — see applyDefaultQuantity's doc comment.
 type ResourceRequirements struct {
-	CPURequest    string
-	CPULimit      string
-	MemoryRequest string
-	MemoryLimit   string
-	// ExtraRequests/ExtraLimits hold resource names other than cpu/memory,
-	// keyed by the raw resource name as authored (e.g. "ephemeral-storage",
-	// "nvidia.com/gpu").
-	ExtraRequests map[string]string
-	ExtraLimits   map[string]string
-}
-
-// explicitResourceFlags tracks which resource fields were explicitly set in OAM.
-type explicitResourceFlags struct {
-	cpuRequest    bool
-	memoryRequest bool
-	cpuLimit      bool
-	memoryLimit   bool
+	corev1.ResourceRequirements
 }
 
 // ProbeConfig holds parsed probe configuration for a container.
@@ -250,20 +238,21 @@ func parseEnv(props map[string]any) ([]corev1.EnvVar, error) {
 
 // parseEnvVarSource parses a `valueFrom` object into the real corev1.EnvVarSource
 // (same structural pattern as ProbeConfig holding *corev1.Probe directly): exactly
-// one of secretKeyRef, configMapKeyRef, fieldRef, or resourceFieldRef.
+// one of secretKeyRef, configMapKeyRef, fieldRef, resourceFieldRef, or fileKeyRef.
 func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
 	_, hasSecret := vf["secretKeyRef"].(map[string]any)
 	_, hasConfigMap := vf["configMapKeyRef"].(map[string]any)
 	_, hasFieldRef := vf["fieldRef"].(map[string]any)
 	_, hasResourceFieldRef := vf["resourceFieldRef"].(map[string]any)
+	_, hasFileKeyRef := vf["fileKeyRef"].(map[string]any)
 	count := 0
-	for _, present := range []bool{hasSecret, hasConfigMap, hasFieldRef, hasResourceFieldRef} {
+	for _, present := range []bool{hasSecret, hasConfigMap, hasFieldRef, hasResourceFieldRef, hasFileKeyRef} {
 		if present {
 			count++
 		}
 	}
 	if count > 1 {
-		return nil, errors.Errorf("valueFrom: secretKeyRef, configMapKeyRef, fieldRef, and resourceFieldRef are mutually exclusive")
+		return nil, errors.Errorf("valueFrom: secretKeyRef, configMapKeyRef, fieldRef, resourceFieldRef, and fileKeyRef are mutually exclusive")
 	}
 
 	src := &corev1.EnvVarSource{}
@@ -299,10 +288,36 @@ func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
 		}
 		src.ResourceFieldRef = ref
 	}
-	if src.SecretKeyRef == nil && src.ConfigMapKeyRef == nil && src.FieldRef == nil && src.ResourceFieldRef == nil {
-		return nil, errors.Errorf("invalid valueFrom: must contain a valid secretKeyRef, configMapKeyRef, fieldRef, or resourceFieldRef")
+	if fkr, ok := vf["fileKeyRef"].(map[string]any); ok {
+		ref, err := parseFileKeyRef(fkr)
+		if err != nil {
+			return nil, err
+		}
+		src.FileKeyRef = ref
+	}
+	if src.SecretKeyRef == nil && src.ConfigMapKeyRef == nil && src.FieldRef == nil && src.ResourceFieldRef == nil && src.FileKeyRef == nil {
+		return nil, errors.Errorf("invalid valueFrom: must contain a valid secretKeyRef, configMapKeyRef, fieldRef, resourceFieldRef, or fileKeyRef")
 	}
 	return src, nil
+}
+
+// parseFileKeyRef parses a `fileKeyRef` object into corev1.FileKeySelector.
+// volumeName/path/key are all `+required` on the real corev1 type (unlike
+// secretKeyRef/configMapKeyRef's parseNameKey, which silently skips on a
+// missing name/key) — a partially-specified fileKeyRef cannot resolve to any
+// of the other four value sources either, so it is a hard validation error.
+func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
+	volumeName, _ := m["volumeName"].(string)
+	path, _ := m["path"].(string)
+	key, _ := m["key"].(string)
+	if volumeName == "" || path == "" || key == "" {
+		return nil, errors.Errorf("fileKeyRef: volumeName, path, and key are all required")
+	}
+	sel := &corev1.FileKeySelector{VolumeName: volumeName, Path: path, Key: key}
+	if opt, ok := m["optional"].(bool); ok {
+		sel.Optional = &opt
+	}
+	return sel, nil
 }
 
 // parseNameKey extracts the "name"/"key" string pair shared by secretKeyRef and
@@ -401,67 +416,56 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 	return out, nil
 }
 
-func parseResources(resources map[string]any) ResourceRequirements {
+// parseResources parses the OAM "resources" property into a
+// corev1.ResourceRequirements-backed ResourceRequirements. Every key of
+// requests/limits — "cpu", "memory", or any other resource name such as
+// "ephemeral-storage" or an extended resource like "nvidia.com/gpu" — is
+// parsed as a resource.Quantity, matching how a real
+// corev1.Container.Resources.{Requests,Limits} round-trips through the
+// Kubernetes API. Returns an error if any authored quantity string fails to
+// parse (validation that previously happened later, at build time, in
+// buildResourceRequirements/kubernetes.SetResourceRequestCPU etc.).
+func parseResources(resources map[string]any) (ResourceRequirements, error) {
 	var req ResourceRequirements
 	if requests, ok := resources["requests"].(map[string]any); ok {
-		if cpu, ok := requests["cpu"].(string); ok {
-			req.CPURequest = cpu
+		rl, err := parseResourceList(requests)
+		if err != nil {
+			return ResourceRequirements{}, errors.Errorf("resources.requests: %w", err)
 		}
-		if memory, ok := requests["memory"].(string); ok {
-			req.MemoryRequest = memory
-		}
-		req.ExtraRequests = parseExtraResourceNames(requests)
+		req.Requests = rl
 	}
 	if limits, ok := resources["limits"].(map[string]any); ok {
-		if cpu, ok := limits["cpu"].(string); ok {
-			req.CPULimit = cpu
+		rl, err := parseResourceList(limits)
+		if err != nil {
+			return ResourceRequirements{}, errors.Errorf("resources.limits: %w", err)
 		}
-		if memory, ok := limits["memory"].(string); ok {
-			req.MemoryLimit = memory
-		}
-		req.ExtraLimits = parseExtraResourceNames(limits)
+		req.Limits = rl
 	}
-	return req
+	return req, nil
 }
 
-// parseExtraResourceNames returns every string-valued entry of m other than the
-// well-known "cpu"/"memory" keys — e.g. "ephemeral-storage" or an extended
-// resource such as "nvidia.com/gpu". Returns nil when there are none, so a caller
-// comparing against a zero-value ResourceRequirements{} still sees an empty map
-// as absent (matching how CPURequest=="" already means "not set").
-func parseExtraResourceNames(m map[string]any) map[string]string {
-	var extra map[string]string
+// parseResourceList parses every string-valued entry of m as a
+// corev1.ResourceName -> resource.Quantity pair. Returns nil (not an empty
+// non-nil map) when m has no string-valued entries, so a caller comparing
+// against a zero-value ResourceRequirements{} still sees an absent section as
+// absent — matching applyDefaultQuantity's map-key-presence convention.
+func parseResourceList(m map[string]any) (corev1.ResourceList, error) {
+	var rl corev1.ResourceList
 	for k, v := range m {
-		if k == "cpu" || k == "memory" {
-			continue
-		}
 		s, ok := v.(string)
 		if !ok {
 			continue
 		}
-		if extra == nil {
-			extra = make(map[string]string)
+		q, err := resource.ParseQuantity(s)
+		if err != nil {
+			return nil, errors.Errorf("%s: invalid quantity %q: %w", k, s, err)
 		}
-		extra[k] = s
+		if rl == nil {
+			rl = corev1.ResourceList{}
+		}
+		rl[corev1.ResourceName(k)] = q
 	}
-	return extra
-}
-
-func resourceExplicitFlags(props map[string]any) explicitResourceFlags {
-	var flags explicitResourceFlags
-	resources, ok := props["resources"].(map[string]any)
-	if !ok {
-		return flags
-	}
-	if requests, ok := resources["requests"].(map[string]any); ok {
-		_, flags.cpuRequest = requests["cpu"].(string)
-		_, flags.memoryRequest = requests["memory"].(string)
-	}
-	if limits, ok := resources["limits"].(map[string]any); ok {
-		_, flags.cpuLimit = limits["cpu"].(string)
-		_, flags.memoryLimit = limits["memory"].(string)
-	}
-	return flags
+	return rl, nil
 }
 
 func parseCommand(props map[string]any) []string {
@@ -795,13 +799,15 @@ func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
 // corev1.SecurityContext (same structural pattern as ProbeConfig/parseEnvVarSource
 // above): runAsUser/runAsGroup/runAsNonRoot, readOnlyRootFilesystem,
 // allowPrivilegeEscalation, privileged, capabilities add/drop, seccompProfile,
-// seLinuxOptions, and appArmorProfile. Deliberately NOT covered (round 2
-// candidate if needed — see launcher#278 ledger): windowsOptions (this project
-// targets Linux-only podman/distroless images per meta/CLAUDE.md — Windows
-// containers are out of scope entirely) and procMount (an alpha, rarely-used
-// field gated behind the ProcMountType feature, with no precedent elsewhere in
-// this package, matching this file's existing practice of keeping deeply-nested
-// K8s-adjacent shapes shallow — see schema.go's file header).
+// seLinuxOptions, appArmorProfile, and procMount. Deliberately NOT covered:
+// windowsOptions — this project targets Linux-only podman/distroless images per
+// meta/CLAUDE.md ("Container runtime: podman", "Base image: distroless"); Windows
+// containers are out of scope for this project entirely, not just this field.
+// (procMount was deferred alongside windowsOptions in round 1 under the same
+// "alpha feature" rationale; that premise was factually wrong — in the pinned
+// k8s.io/api v0.36.3, corev1.ProcMountType's constants carry no +featureGate
+// annotation, unlike FileKeyRef's explicit "+featureGate=EnvFiles" — i.e.
+// procMount is unconditional/GA, not alpha, so round 2 adds it below.)
 //
 // IMPORTANT interaction: setting ANY field here makes the built container's
 // SecurityContext non-nil. A downstream runtime's admission-time
@@ -933,6 +939,16 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			// no type specified: nothing to apply.
 		default:
 			return nil, errors.Errorf("securityContext.appArmorProfile: invalid type %q, must be Localhost, RuntimeDefault, or Unconfined", typ)
+		}
+	}
+	if pm, ok := raw["procMount"].(string); ok && pm != "" {
+		switch corev1.ProcMountType(pm) {
+		case corev1.DefaultProcMount, corev1.UnmaskedProcMount:
+			t := corev1.ProcMountType(pm)
+			sc.ProcMount = &t
+			set = true
+		default:
+			return nil, errors.Errorf("securityContext.procMount: invalid value %q, must be Default or Unmasked", pm)
 		}
 	}
 
@@ -1119,7 +1135,11 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 		}
 		ic.Env = env
 		if resources, ok := m["resources"].(map[string]any); ok {
-			ic.Resources = parseResources(resources)
+			r, err := parseResources(resources)
+			if err != nil {
+				return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
+			}
+			ic.Resources = r
 		}
 		mounts, err := parseVolumeMountList(m, fmt.Sprintf("initContainers[%d] %q", i, ic.Name))
 		if err != nil {
@@ -1162,7 +1182,11 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 		}
 		sc.Env = env
 		if resources, ok := m["resources"].(map[string]any); ok {
-			sc.Resources = parseResources(resources)
+			r, err := parseResources(resources)
+			if err != nil {
+				return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
+			}
+			sc.Resources = r
 		}
 		mounts, err := parseVolumeMountList(m, fmt.Sprintf("sidecars[%d] %q", i, sc.Name))
 		if err != nil {
@@ -1344,51 +1368,36 @@ func parseHistoryLimit(field string, v any) (int32, error) {
 
 // --- Builders ---
 
-func buildResourceRequirements(res ResourceRequirements) (corev1.ResourceRequirements, error) {
-	rr := kubernetes.CreateResourceRequirements()
-
-	cpuRequest := res.CPURequest
-	if cpuRequest == "" {
-		cpuRequest = "100m"
+// buildResourceRequirements returns res's corev1.ResourceRequirements with
+// this package's absolute fallback defaults applied: 100m CPU request and
+// 128Mi memory request when unset, and a memory limit equal to the
+// (possibly just-defaulted) memory request when no memory limit was set.
+// This is a distinct, lower-priority tier from the environment-policy
+// defaults ApplyPolicy already applied to the main container's Resources
+// before this call — init/sidecar containers have no ApplyPolicy equivalent,
+// so this is their only defaulting. Requests/Limits are deep-copied before
+// mutation so this never aliases the caller's maps (res is shared with the
+// ResourceRequirements still held by the container's Config).
+func buildResourceRequirements(res ResourceRequirements) corev1.ResourceRequirements {
+	rr := res.ResourceRequirements
+	rr.Requests = rr.Requests.DeepCopy()
+	rr.Limits = rr.Limits.DeepCopy()
+	if rr.Requests == nil {
+		rr.Requests = corev1.ResourceList{}
 	}
-	memoryRequest := res.MemoryRequest
-	if memoryRequest == "" {
-		memoryRequest = "128Mi"
+	if _, ok := rr.Requests[corev1.ResourceCPU]; !ok {
+		rr.Requests[corev1.ResourceCPU] = resource.MustParse("100m")
 	}
-
-	if err := kubernetes.SetResourceRequestCPU(rr, cpuRequest); err != nil {
-		return corev1.ResourceRequirements{}, err
+	if _, ok := rr.Requests[corev1.ResourceMemory]; !ok {
+		rr.Requests[corev1.ResourceMemory] = resource.MustParse("128Mi")
 	}
-	if err := kubernetes.SetResourceRequestMemory(rr, memoryRequest); err != nil {
-		return corev1.ResourceRequirements{}, err
+	if rr.Limits == nil {
+		rr.Limits = corev1.ResourceList{}
 	}
-	if res.CPULimit != "" {
-		if err := kubernetes.SetResourceLimitCPU(rr, res.CPULimit); err != nil {
-			return corev1.ResourceRequirements{}, err
-		}
+	if _, ok := rr.Limits[corev1.ResourceMemory]; !ok {
+		rr.Limits[corev1.ResourceMemory] = rr.Requests[corev1.ResourceMemory]
 	}
-	memoryLimit := res.MemoryLimit
-	if memoryLimit == "" {
-		memoryLimit = memoryRequest
-	}
-	if err := kubernetes.SetResourceLimitMemory(rr, memoryLimit); err != nil {
-		return corev1.ResourceRequirements{}, err
-	}
-
-	// Extra named resources (e.g. ephemeral-storage, nvidia.com/gpu) have no
-	// default and no policy hook — see ResourceRequirements' doc comment.
-	for name, value := range res.ExtraRequests {
-		if err := kubernetes.SetResourceRequest(rr, corev1.ResourceName(name), value); err != nil {
-			return corev1.ResourceRequirements{}, errors.Errorf("resource request %q: %w", name, err)
-		}
-	}
-	for name, value := range res.ExtraLimits {
-		if err := kubernetes.SetResourceLimit(rr, corev1.ResourceName(name), value); err != nil {
-			return corev1.ResourceRequirements{}, errors.Errorf("resource limit %q: %w", name, err)
-		}
-	}
-
-	return *rr, nil
+	return rr
 }
 
 func applyProbes(container *corev1.Container, probes ProbeConfig) {
@@ -1476,11 +1485,7 @@ func buildAffinity(cfg AffinityConfig, selectorLabels map[string]string) *corev1
 
 func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 	container := kubernetes.CreateContainer(ic.Name, ic.Image, ic.Command, ic.Args)
-	rr, err := buildResourceRequirements(ic.Resources)
-	if err != nil {
-		return nil, errors.Errorf("init container %q resources: %w", ic.Name, err)
-	}
-	kubernetes.SetContainerResources(container, rr)
+	kubernetes.SetContainerResources(container, buildResourceRequirements(ic.Resources))
 	for _, env := range ic.Env {
 		kubernetes.AddContainerEnv(container, env)
 	}
@@ -1492,11 +1497,7 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 
 func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error) {
 	container := kubernetes.CreateContainer(sc.Name, sc.Image, sc.Command, sc.Args)
-	rr, err := buildResourceRequirements(sc.Resources)
-	if err != nil {
-		return nil, errors.Errorf("sidecar container %q resources: %w", sc.Name, err)
-	}
-	kubernetes.SetContainerResources(container, rr)
+	kubernetes.SetContainerResources(container, buildResourceRequirements(sc.Resources))
 	for _, p := range sc.Ports {
 		kubernetes.AddContainerPort(container, p)
 	}
