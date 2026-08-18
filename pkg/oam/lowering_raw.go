@@ -316,7 +316,7 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 		}
 	}
 	step := LoweringStep{
-		Rule:     "rawdocument/" + d.origin.DocumentKind,
+		Rule:     ruleID,
 		Position: PositionDocument,
 		Round:    round,
 		From:     d.origin.Document,

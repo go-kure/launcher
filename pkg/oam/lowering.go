@@ -884,7 +884,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 				pol.origin = &polOrigin
 			}
 		}
-		step := LoweringStep{Rule: "document/" + doc.Kind, Position: PositionDocument, Round: round, From: doc.Metadata.Name, To: names}
+		step := LoweringStep{Rule: origin.Rule, Position: PositionDocument, Round: round, From: doc.Metadata.Name, To: names}
 		return emitted, true, []LoweringStep{step}, nil
 	}
 
@@ -988,7 +988,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				names = append(names, result.Policies[j].Name)
 				pendingPolicies = append(pendingPolicies, result.Policies[j])
 			}
-			steps = append(steps, LoweringStep{Rule: "component/" + comp.Type, Position: PositionComponent, Round: round, From: comp.Name, To: names})
+			steps = append(steps, LoweringStep{Rule: compOrigin.Rule, Position: PositionComponent, Round: round, From: comp.Name, To: names})
 			changed = true
 			continue
 		}
@@ -1123,7 +1123,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				names = append(names, result.Policies[j].Name)
 				pendingPolicies = append(pendingPolicies, result.Policies[j])
 			}
-			steps = append(steps, LoweringStep{Rule: "trait/" + trait.Type, Position: PositionTrait, Round: round, From: trait.Type, To: names})
+			steps = append(steps, LoweringStep{Rule: traitOrigin.Rule, Position: PositionTrait, Round: round, From: trait.Type, To: names})
 			changed = true
 		}
 		comp.Traits = newTraits
@@ -1177,7 +1177,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			}
 		}
 		newPolicies = append(newPolicies, result.Policies...)
-		steps = append(steps, LoweringStep{Rule: "policy/" + pol.Type, Position: PositionPolicy, Round: round, From: pol.Name, To: names})
+		steps = append(steps, LoweringStep{Rule: polOrigin.Rule, Position: PositionPolicy, Round: round, From: pol.Name, To: names})
 		changed = true
 	}
 	newPolicies = append(newPolicies, pendingPolicies...)
