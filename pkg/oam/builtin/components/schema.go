@@ -137,10 +137,18 @@ func schemaEnvFrom(reserved bool) oam.PropertySchema {
 func schemaResources(reserved bool) oam.PropertySchema {
 	// requests and limits each get their own map so the returned schema shares no
 	// sub-map state (honoring the file-level freshness contract above).
+	// cpu/memory are deliberately left with no declared Type. parseResourceList
+	// accepts either a quantity string ("500m") or a bare YAML/JSON number
+	// (0.5) — see its doc comment — but PropertySchema has no string-or-number
+	// union type, and a declared Type: PropertyTypeString would make
+	// validatePropertyValue reject the numeric form the parser and README both
+	// promise. Leaving Type unset matches how any other, non-cpu/memory
+	// resource name already validates today: AdditionalProperties skips a
+	// per-key type check for those entirely.
 	quantity := func() map[string]oam.PropertySchema {
 		return map[string]oam.PropertySchema{
-			"cpu":    {Type: oam.PropertyTypeString, Description: `CPU quantity (e.g. "500m" or "1").`},
-			"memory": {Type: oam.PropertyTypeString, Description: `Memory quantity (e.g. "512Mi" or "1Gi").`},
+			"cpu":    {Description: `CPU quantity as a string or bare number of cores (e.g. "500m", "1", or 0.5).`},
+			"memory": {Description: `Memory quantity as a string (e.g. "512Mi", "1Gi") or a bare number of bytes.`},
 		}
 	}
 	return oam.PropertySchema{

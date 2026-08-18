@@ -43,23 +43,43 @@ doc comment ("cannot be used if value is not empty"); `valueFrom` is one of
 `secretKeyRef`, `configMapKeyRef` (both accept `optional`), `fieldRef`
 (`apiVersion` must be `v1` if authored — the only field-label conversion
 Kubernetes has ever shipped for the downward API; omitting it also defaults to
-`v1`), `resourceFieldRef` (`resource` must start with `requests.` or
-`limits.` — e.g. `requests.cpu`, `limits.nvidia.com/gpu` — the only selector
-forms the downward API understands; a bare resource name is rejected),
+`v1`; `fieldPath` is validated against the exact set real admission accepts
+for an env var fieldRef — `metadata.name`/`metadata.namespace`/`metadata.uid`,
+`spec.nodeName`/`spec.serviceAccountName`, `status.hostIP`/`status.hostIPs`/
+`status.podIP`/`status.podIPs` — plus the `metadata.labels['KEY']`/
+`metadata.annotations['KEY']` subscript forms, each with `KEY` checked as a
+qualified name; a field like `status.phase` builds but is rejected by
+admission, so it is rejected here too), `resourceFieldRef` (`resource` must be
+one of `limits.cpu`, `limits.memory`, `limits.ephemeral-storage`,
+`requests.cpu`, `requests.memory`, `requests.ephemeral-storage`, or a
+`requests.hugepages-<size>`/`limits.hugepages-<size>` selector — the downward
+API cannot project an arbitrary extended resource such as
+`limits.nvidia.com/gpu`, unlike a plain `resources` map below; an authored
+`divisor` must be one of the canonical unit strings admission accepts for that
+resource's family — `1m`/`1` for cpu, one of `1`/`1k`/`1M`/`1G`/`1T`/`1P`/`1E`/
+`1Ki`/`1Mi`/`1Gi`/`1Ti`/`1Pi`/`1Ei` for memory/ephemeral-storage/hugepages — a
+zero-valued divisor such as `"0"` is treated as absent rather than rejected,
+matching admission's own zero-value defaulting),
 `fileKeyRef` (`volumeName`/`path`/`key` required, `optional` accepted;
 corev1's `EnvFiles` feature; `path` must be relative and must not contain a
 `..` backstep component, per this repo's own path-safety convention) —
 mutually exclusive among themselves too), `envFrom` (bulk-import a ConfigMap's
 or Secret's keys, with `prefix` — any printable ASCII character except `=`,
 matching `corev1.EnvFromSource.Prefix`'s own field doc comment; only the final
-prefix+key concatenation need be a valid env var name, not the prefix alone),
+prefix+key concatenation need be a valid env var name, not the prefix alone;
+`configMapRef.name`/`secretRef.name` must each be a valid DNS-1123 subdomain,
+matching how every Kubernetes object name is validated),
 `resources` — a `corev1.ResourceRequirements` projection: `requests`/`limits`
 accept `cpu`/`memory` (defaults 100m/128Mi) plus any other well-formed
 resource name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map,
 each value authored as either a quantity string (`"500m"`, `"2Gi"`) or a bare
 YAML/JSON number (`1`, `0.5`) — both are valid `resource.Quantity` input
 (`Quantity.UnmarshalJSON` parses a bare numeric literal the same way it parses
-a quoted one) — parsed as `resource.Quantity` and round-tripped unmodified.
+a quoted one), and both forms are also accepted by the published property
+schema itself: `cpu`/`memory` are declared with no `Type`, since the schema
+vocabulary has no string-or-number union and a `string`-only declaration would
+reject the numeric form the parser accepts — parsed as `resource.Quantity` and
+round-tripped unmodified.
 Every quantity must be non-negative; `cpu`/`memory`/`storage`/
 `ephemeral-storage` may be fractional, but any other (extended) resource name
 must be a whole number, matching Kubernetes' own extended-resource
