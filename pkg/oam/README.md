@@ -123,6 +123,7 @@ carrying its own authored fields still belongs to the raw lowering entry point.
 | `PolicyHandler` | Enforce/validate policies (`Enforceable`, `PolicyResult`). |
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
+| `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). |
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. |
 
@@ -181,6 +182,14 @@ stamped once and copied verbatim onto every element expanded from it at any dept
 so a `LoweringError` always leads with the YAML the user actually wrote, then the
 synthesized cause, then the expansion chain (`LoweringStep`s) that produced it.
 
+`Origin.Rule` is the one field on `Origin` that is NOT copied verbatim: it identifies
+the lowering rule that most recently produced the element — `"<position>/<type>"`
+(e.g. `"trait/expose"`), suffixed with `"@<version>"` when the rule also implements
+`ContractDescriber` (see Contract metadata below) — and is re-derived at every hop, so
+it always names the immediate producer rather than the first rule in a multi-hop
+chain. `""` means the element was never itself the direct output of a lowering rule
+(authored as-is, or carried through untouched).
+
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the
 required `ClusterProfile` capability fails with `ErrMissingCapability`. A rule that
@@ -229,6 +238,29 @@ cannot silently produce properties its own target handler would reject. This is
 in-process enforcement of what `HandlerSchemas()` only publishes for authored
 documents; an authored document's own property shape is still validated only by
 `ValidateAndApplyDefaults`/handler-specific logic, not by this path.
+
+## Contract metadata
+
+Handlers and lowering rules may implement `ContractDescriber` (`ContractMetadata()
+ContractMetadata`) to declare registration metadata about the contract they
+implement: `Family`, `Version`, `RequiredCapabilityKeys` (the `ClusterProfile`
+capability keys an entity of this contract needs), `Deprecated`, and
+`DeprecationMessage`. It is discovery/documentation surface only — the engine never
+reads or enforces these fields (`CapabilityAware.CapabilityRequired` is what the
+engine actually enforces); consumers are schema publication, artifact provenance in a
+downstream consumer, and deprecation tooling. Metadata rides the existing
+registration mechanism; there is no separate contract registry.
+
+`Transformer.HandlerContracts()` returns a `HandlerContractSet{ Components, Traits }`
+of every registered component/trait handler, and every component/trait lowering
+rule, that implements `ContractDescriber` — the same four-registry coverage
+`HandlerSchemas()` provides (componentHandlers, traitHandlers,
+componentLoweringRules, traitLoweringRules), for the identical reason: a type
+reachable only through a lowering rule must still publish its metadata.
+
+A lowering rule that implements `ContractDescriber` also has its `Version` folded
+into the lowering-rule identity recorded on `Origin.Rule` (see Lowering above), e.g.
+`"trait/expose@v1"`.
 
 ## Policy defaults & enforcement
 
