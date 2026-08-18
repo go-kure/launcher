@@ -79,11 +79,23 @@ a quoted one), and both forms are also accepted by the published property
 schema itself: `cpu`/`memory` are declared with no `Type`, since the schema
 vocabulary has no string-or-number union and a `string`-only declaration would
 reject the numeric form the parser accepts — parsed as `resource.Quantity` and
-round-tripped unmodified.
+round-tripped unmodified. A resource name is validated the same way real
+admission validates `corev1.Container.Resources` (mirrors
+`ValidateContainerResourceName`): an unqualified name (no `/`) must be
+`cpu`/`memory`/`ephemeral-storage` or a `hugepages-<size>` name — an arbitrary
+unqualified token such as `foo` builds but is reserved for Kubernetes' own
+native resources and is rejected here too; a qualified name (has `/`) is
+accepted as an extended resource (e.g. `nvidia.com/gpu`) unless it is
+`requests.`-prefixed without also containing `kubernetes.io/`, which collides
+with the `ResourceQuota` `requests.<name>` alias form.
 Every quantity must be non-negative; `cpu`/`memory`/`storage`/
 `ephemeral-storage` may be fractional, but any other (extended) resource name
 must be a whole number, matching Kubernetes' own extended-resource
-constraint. No policy default/max hook exists for names other than cpu/memory
+constraint. A `hugepages-<size>` quantity must additionally be an integer
+multiple of that page size (e.g. `hugepages-2Mi: 3Mi` is a whole number of
+bytes but not a whole number of 2Mi pages, and is rejected; `hugepages-2Mi:
+4Mi` is accepted), matching `IsHugePageResourceValueDivisible`. No policy
+default/max hook exists for names other than cpu/memory
 today; `claims` (Dynamic Resource Allocation) is deliberately not covered —
 genuinely feature-gated in the pinned `k8s.io/api` version and meaningless
 without pod-level `PodSpec.ResourceClaims` wiring this schema doesn't have
@@ -100,9 +112,18 @@ every kind component), `probes`
 rejected, not silently dropped)/`httpGet` (including `httpHeaders`)/`sleep` —
 `tcpSocket` is not
 accepted, since corev1 documents it as broken for lifecycle hooks),
-`securityContext` (per-container: `runAsUser`/`runAsGroup`/`runAsNonRoot`,
+`securityContext` (per-container: `runAsUser`/`runAsGroup`/`runAsNonRoot`
+(`runAsUser: 0` combined with `runAsNonRoot: true` builds and is admitted by
+the API server, but the kubelet's `verifyRunAsNonRoot` check deterministically
+fails it at container-start time — a `CreateContainerConfigError`, every
+time — so this contradictory combination is rejected here instead of
+shipping a workload guaranteed never to start),
 `readOnlyRootFilesystem`, `allowPrivilegeEscalation`, `privileged`,
-`capabilities.{add,drop}`, `seccompProfile`, `seLinuxOptions`,
+`capabilities.{add,drop}`, `seccompProfile` (`localhostProfile` must be
+relative and must not contain a `..` backstep component, matching
+`corev1.SeccompProfile.LocalhostProfile`'s own doc comment — "must be a
+descending path, relative to the kubelet's configured seccomp profile
+location" — and this repo's own path-safety convention), `seLinuxOptions`,
 `appArmorProfile`, `procMount` (`Default`|`Unmasked`); `windowsOptions` is
 deliberately not covered — this project's own container images are
 Linux-only (distroless base images run under podman), so a Windows-specific

@@ -1358,3 +1358,122 @@ func TestParseEnvFrom_InvalidSecretName_Error(t *testing.T) {
 		t.Fatal("expected error for an invalid envFrom.secretRef.name")
 	}
 }
+
+func TestParseSecurityContext_SeccompLocalhost_AbsolutePath_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seccompProfile": map[string]any{
+				"type":             "Localhost",
+				"localhostProfile": "/etc/profiles/my-profile.json",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an absolute seccompProfile.localhostProfile")
+	}
+}
+
+func TestParseSecurityContext_SeccompLocalhost_EscapingPath_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seccompProfile": map[string]any{
+				"type":             "Localhost",
+				"localhostProfile": "../../etc/passwd",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a seccompProfile.localhostProfile containing \"..\"")
+	}
+}
+
+func TestParseSecurityContext_RunAsUserZero_RunAsNonRootTrue_Error(t *testing.T) {
+	// Builds and is admitted by the API server, but the kubelet's
+	// verifyRunAsNonRoot check deterministically fails this combination at
+	// container-start time — reject it here instead of shipping a workload
+	// guaranteed never to start.
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"runAsUser":    int64(0),
+			"runAsNonRoot": true,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for runAsUser=0 combined with runAsNonRoot=true")
+	}
+}
+
+func TestParseSecurityContext_RunAsUserZero_RunAsNonRootFalse_Accepted(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"runAsUser":    int64(0),
+			"runAsNonRoot": false,
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc.RunAsUser == nil || *sc.RunAsUser != 0 {
+		t.Errorf("runAsUser = %v, want 0", sc.RunAsUser)
+	}
+}
+
+func TestParseSecurityContext_RunAsUserNonZero_RunAsNonRootTrue_Accepted(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"runAsUser":    int64(1000),
+			"runAsNonRoot": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc.RunAsUser == nil || *sc.RunAsUser != 1000 {
+		t.Errorf("runAsUser = %v, want 1000", sc.RunAsUser)
+	}
+}
+
+func TestParseResources_UnqualifiedNonStandardName_Error(t *testing.T) {
+	// An unqualified name passes validation.IsQualifiedName (it's a syntactically
+	// valid token) but is not one Kubernetes reserves for container use unless
+	// it's cpu/memory/ephemeral-storage or a hugepages-<size> name.
+	_, err := parseResources(map[string]any{
+		"requests": map[string]any{"foo": "1"},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unqualified non-standard resource name")
+	}
+}
+
+func TestParseResources_QuotaAliasExtendedResource_Error(t *testing.T) {
+	// A qualified name prefixed "requests." (without a "kubernetes.io/"
+	// segment) collides with the ResourceQuota "requests.<name>" alias form
+	// and is rejected on a container, mirroring IsExtendedResourceName.
+	_, err := parseResources(map[string]any{
+		"requests": map[string]any{"requests.example.com/foo": "1"},
+	})
+	if err == nil {
+		t.Fatal("expected error for a requests.-prefixed extended resource name")
+	}
+}
+
+func TestParseResources_HugePages_NonMultiple_Error(t *testing.T) {
+	_, err := parseResources(map[string]any{
+		"limits": map[string]any{"hugepages-2Mi": "3Mi"},
+	})
+	if err == nil {
+		t.Fatal("expected error for a hugepages quantity not a multiple of the page size")
+	}
+}
+
+func TestParseResources_HugePages_Multiple_Accepted(t *testing.T) {
+	req, err := parseResources(map[string]any{
+		"limits": map[string]any{"hugepages-2Mi": "4Mi"},
+	})
+	if err != nil {
+		t.Fatalf("parseResources: %v", err)
+	}
+	if q, ok := req.Limits["hugepages-2Mi"]; !ok || q.Cmp(resource.MustParse("4Mi")) != 0 {
+		t.Errorf("hugepages-2Mi = %v, ok=%v, want 4Mi", q, ok)
+	}
+}
