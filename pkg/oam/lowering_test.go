@@ -1737,3 +1737,52 @@ func TestLower_PolicyRule_SeesPreRoundComponentSnapshot(t *testing.T) {
 		t.Fatalf("policy rule saw components %v, want exactly [\"web\"] (the pre-round snapshot) — not the sibling \"extra\" the component rule emitted this same round", seen)
 	}
 }
+
+// TestLower_LoweringStep_MatchesVersionedOrigin is the regression guard for the C4
+// codex finding on launcher#277 PR #283 (surfaced by the bot's re-review of this PR's
+// own push, at commit cd20257 — a third review trigger beyond "open"/"mark ready"):
+// loweringRuleIdentity's "@<version>" suffix is computed once and stamped onto
+// Origin.Rule, but every LoweringStep{Rule: ...} construction site (document,
+// component, trait, policy, raw-document) independently rebuilt "<label>/<type>" by
+// hand instead of reusing that computed identity — so a versioned rule's error-chain
+// diagnostics (LoweringError.Chain) silently dropped the contract version Origin.Rule
+// itself advertises, and the two provenance surfaces disagreed. Forces a
+// depth-exceeded error via a self-looping, versioned component rule — the only way
+// Chain is observable (see runLowering's own comment: it is surfaced only on the
+// error path) — and asserts every recorded step names the SAME identity
+// loweringRuleIdentity computes, including the "@v1" suffix.
+func TestLower_LoweringStep_MatchesVersionedOrigin(t *testing.T) {
+	rule := ridVersionedStageRule{ridStageRule{typ: "loopy", nextType: "loopy"}, "v1"}
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(rule)
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: "app"},
+		Spec: ApplicationSpec{
+			Components: []Component{{Name: "web", Type: "loopy", Properties: map[string]any{}}},
+		},
+	}
+
+	_, err := tr.lower(app, TransformContext{})
+	if err == nil {
+		t.Fatal("expected a depth-limit error from the self-looping component rule")
+	}
+	var loweringErr *LoweringError
+	if !stderrors.As(err, &loweringErr) {
+		t.Fatalf("expected *LoweringError, got %T: %v", err, err)
+	}
+	if len(loweringErr.Chain) == 0 {
+		t.Fatal("expected a non-empty chain")
+	}
+	want := loweringRuleIdentity(string(PositionComponent), "loopy", rule)
+	if want != "component/loopy@v1" {
+		t.Fatalf("test setup broken: loweringRuleIdentity = %q, want \"component/loopy@v1\"", want)
+	}
+	for _, step := range loweringErr.Chain {
+		if step.Rule != want {
+			t.Errorf("LoweringStep.Rule = %q, want %q (must match loweringRuleIdentity/Origin.Rule exactly, including the @version suffix)", step.Rule, want)
+		}
+	}
+}
