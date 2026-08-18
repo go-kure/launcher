@@ -250,10 +250,15 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 	}
 	// Rule is re-derived here — see Origin.Rule's doc comment. d.origin is the raw
 	// seed's own authored origin (lowerRawOnce is always round 0 for a raw entry — see
-	// the doc comment above — so d.origin never itself carries a prior Rule value),
-	// computed the identical way loweringRuleIdentity is used at every other call site
-	// for consistency, not because a prior value needs overwriting here specifically.
-	ruleID := loweringRuleIdentity(PositionDocument, d.origin.DocumentKind, d.rule)
+	// the doc comment above — so d.origin never itself carries a prior Rule value).
+	// label is "rawdocument", not string(PositionDocument): d.rule is a
+	// RawDocumentLoweringRule, not a DocumentLoweringRule, and the LoweringStep this
+	// same function builds below (for the error-path chain) already used
+	// "rawdocument/"+d.origin.DocumentKind for exactly this distinction before
+	// Origin.Rule existed — the two provenance surfaces must agree on which rule
+	// produced a raw-entered document, not just on which POSITION-shaped
+	// LoweringResult it returned (both are validated as PositionDocument regardless).
+	ruleID := loweringRuleIdentity("rawdocument", d.origin.DocumentKind, d.rule)
 	emitted := make([]*Application, len(result.Documents))
 	names := make([]string, len(result.Documents))
 	for i := range result.Documents {
