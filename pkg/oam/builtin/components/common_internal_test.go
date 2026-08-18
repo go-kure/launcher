@@ -1137,3 +1137,224 @@ func TestSchemaFragments_ReservedParam(t *testing.T) {
 		t.Error("schemaEnv(false) unexpectedly set PlatformReserved")
 	}
 }
+
+func TestSchemaResources_QuantityFieldsHaveNoDeclaredType(t *testing.T) {
+	// cpu/memory must stay untyped so a bare numeric value validates the same
+	// way any other (additional) resource name already does — a declared
+	// Type: PropertyTypeString would reject the numeric form parseResourceList
+	// accepts and the README documents.
+	quantity := schemaResources(false).Properties["requests"].Properties
+	for _, name := range []string{"cpu", "memory"} {
+		if got := quantity[name].Type; got != "" {
+			t.Errorf("requests.%s: Type = %q, want unset", name, got)
+		}
+	}
+}
+
+func TestParseEnv_FieldRef_UnsupportedPath_Error(t *testing.T) {
+	// status.phase is a real corev1 field but is not in the downward API's
+	// env-var field path allow-list (it IS accepted for the downwardAPI
+	// *volume* form, but not for an env var fieldRef) — admission rejects it.
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "status.phase"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for unsupported fieldRef.fieldPath")
+	}
+}
+
+func TestParseEnv_FieldRef_SupportedPaths_Accepted(t *testing.T) {
+	for _, path := range []string{
+		"metadata.name", "metadata.namespace", "metadata.uid",
+		"spec.nodeName", "spec.serviceAccountName",
+		"status.hostIP", "status.hostIPs", "status.podIP", "status.podIPs",
+	} {
+		t.Run(path, func(t *testing.T) {
+			props := map[string]any{
+				"env": []any{
+					map[string]any{
+						"name":      "V",
+						"valueFrom": map[string]any{"fieldRef": map[string]any{"fieldPath": path}},
+					},
+				},
+			}
+			if _, err := parseEnv(props); err != nil {
+				t.Errorf("parseEnv: unexpected error for fieldPath %q: %v", path, err)
+			}
+		})
+	}
+}
+
+func TestParseEnv_FieldRef_LabelSubscript_Accepted(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "TIER",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "metadata.labels['app.kubernetes.io/component']"},
+				},
+			},
+		},
+	}
+	vars, err := parseEnv(props)
+	if err != nil {
+		t.Fatalf("parseEnv: %v", err)
+	}
+	if vars[0].ValueFrom.FieldRef.FieldPath != "metadata.labels['app.kubernetes.io/component']" {
+		t.Errorf("fieldPath = %q", vars[0].ValueFrom.FieldRef.FieldPath)
+	}
+}
+
+func TestParseEnv_FieldRef_AnnotationSubscript_Accepted(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "NOTE",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "metadata.annotations['example.com/note']"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err != nil {
+		t.Fatalf("parseEnv: %v", err)
+	}
+}
+
+func TestParseEnv_FieldRef_InvalidLabelKey_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "metadata.labels['not a valid key!']"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for an invalid label key in a fieldRef subscript")
+	}
+}
+
+func TestParseEnv_FieldRef_UnsupportedSubscriptBase_Error(t *testing.T) {
+	// Only metadata.labels/metadata.annotations support the subscript form;
+	// admission rejects a subscript on any other base field.
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "spec.nodeName['x']"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for a subscript on a field that does not support one")
+	}
+}
+
+func TestParseEnv_ResourceFieldRef_ExtendedResource_Error(t *testing.T) {
+	// Unlike a plain `resources` map, the downward API's resourceFieldRef
+	// cannot project an arbitrary extended resource — only cpu/memory/
+	// ephemeral-storage/hugepages-* are ever valid selectors.
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"resourceFieldRef": map[string]any{"resource": "limits.nvidia.com/gpu"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for an extended-resource resourceFieldRef.resource selector")
+	}
+}
+
+func TestParseEnv_ResourceFieldRef_HugePages_Accepted(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"resourceFieldRef": map[string]any{"resource": "requests.hugepages-2Mi", "divisor": "1Mi"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err != nil {
+		t.Fatalf("parseEnv: unexpected error for a hugepages resourceFieldRef selector: %v", err)
+	}
+}
+
+func TestParseEnv_ResourceFieldRef_NonCanonicalDivisor_Error(t *testing.T) {
+	// Real admission restricts a standard resource's divisor to a small
+	// canonical set of unit strings per resource family; "500m" is not one of
+	// the memory family's accepted values even though it parses fine as a
+	// quantity.
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"resourceFieldRef": map[string]any{"resource": "limits.memory", "divisor": "500m"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for a non-canonical resourceFieldRef.divisor")
+	}
+}
+
+func TestParseEnv_ResourceFieldRef_ZeroDivisor_Accepted(t *testing.T) {
+	// A zero-valued divisor ("0") is numerically equal to the unset Quantity
+	// zero value; real admission's own Cmp-to-zero check treats it as absent
+	// rather than rejecting it — this is NOT the same as validating "0" as a
+	// canonical unit string, which it is not.
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"resourceFieldRef": map[string]any{"resource": "limits.cpu", "divisor": "0"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err != nil {
+		t.Fatalf("parseEnv: unexpected error for a zero resourceFieldRef.divisor: %v", err)
+	}
+}
+
+func TestParseEnvFrom_InvalidConfigMapName_Error(t *testing.T) {
+	props := map[string]any{
+		"envFrom": []any{
+			map[string]any{"configMapRef": map[string]any{"name": "Not_A_Valid-Name"}},
+		},
+	}
+	if _, err := parseEnvFrom(props); err == nil {
+		t.Fatal("expected error for an invalid envFrom.configMapRef.name")
+	}
+}
+
+func TestParseEnvFrom_InvalidSecretName_Error(t *testing.T) {
+	props := map[string]any{
+		"envFrom": []any{
+			map[string]any{"secretRef": map[string]any{"name": "UPPERCASE"}},
+		},
+	}
+	if _, err := parseEnvFrom(props); err == nil {
+		t.Fatal("expected error for an invalid envFrom.secretRef.name")
+	}
+}

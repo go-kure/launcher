@@ -376,11 +376,81 @@ func parseNameKey(m map[string]any) (name, key string, ok bool) {
 	return n, k, true
 }
 
+// validEnvFieldPaths is the exact set of non-subscripted field paths real
+// Kubernetes admission accepts for a container env var fieldRef (mirrors
+// validEnvDownwardAPIFieldPathExpressions,
+// k8s.io/kubernetes/pkg/apis/core/validation/validation.go) — a strict
+// subset of what the downward API *volume* form accepts: status.phase,
+// spec.restartPolicy, spec.schedulerName, and bare metadata.labels/
+// metadata.annotations (without a subscript) are volume-only and rejected
+// here.
+var validEnvFieldPaths = map[string]bool{
+	"metadata.name":           true,
+	"metadata.namespace":      true,
+	"metadata.uid":            true,
+	"spec.nodeName":           true,
+	"spec.serviceAccountName": true,
+	"status.hostIP":           true,
+	"status.hostIPs":          true,
+	"status.podIP":            true,
+	"status.podIPs":           true,
+}
+
+// splitSubscriptedFieldPath mirrors k8s.io/kubernetes/pkg/fieldpath's
+// SplitMaybeSubscriptedPath byte-for-byte: a fieldPath of the form
+// "base['key']" splits into ("base", "key", true); anything else returns
+// (fieldPath, "", false). Not reused from upstream because that package is
+// internal to k8s.io/kubernetes, which this module does not otherwise
+// depend on.
+func splitSubscriptedFieldPath(path string) (base, key string, ok bool) {
+	if !strings.HasSuffix(path, "']") {
+		return path, "", false
+	}
+	trimmed := strings.TrimSuffix(path, "']")
+	parts := strings.SplitN(trimmed, "['", 2)
+	if len(parts) < 2 || parts[0] == "" {
+		return path, "", false
+	}
+	return parts[0], parts[1], true
+}
+
+// validateFieldPath applies the same two-stage rule real Kubernetes
+// admission uses for a container env var fieldRef: either an exact match in
+// validEnvFieldPaths, or a metadata.labels['KEY']/metadata.annotations['KEY']
+// subscript whose key is a valid qualified name (an annotation key is
+// matched case-insensitively, mirroring validateObjectFieldSelector's own
+// strings.ToLower(subscript) call — labels are not lowercased).
+func validateFieldPath(path string) error {
+	if base, key, ok := splitSubscriptedFieldPath(path); ok {
+		switch base {
+		case "metadata.annotations":
+			if errs := validation.IsQualifiedName(strings.ToLower(key)); len(errs) > 0 {
+				return errors.Errorf("fieldRef: invalid annotation key %q in fieldPath %q: %s", key, path, strings.Join(errs, "; "))
+			}
+			return nil
+		case "metadata.labels":
+			if errs := validation.IsQualifiedName(key); len(errs) > 0 {
+				return errors.Errorf("fieldRef: invalid label key %q in fieldPath %q: %s", key, path, strings.Join(errs, "; "))
+			}
+			return nil
+		default:
+			return errors.Errorf("fieldRef: fieldPath %q does not support a subscript", path)
+		}
+	}
+	if !validEnvFieldPaths[path] {
+		return errors.Errorf("fieldRef: unsupported fieldPath %q", path)
+	}
+	return nil
+}
+
 // parseFieldRef parses a `valueFrom.fieldRef` object into a corev1.ObjectFieldSelector.
 func parseFieldRef(m map[string]any) (*corev1.ObjectFieldSelector, error) {
 	path, _ := m["fieldPath"].(string)
 	if path == "" {
 		return nil, errors.Errorf("fieldRef: fieldPath is required")
+	}
+	if err := validateFieldPath(path); err != nil {
+		return nil, err
 	}
 	ref := &corev1.ObjectFieldSelector{FieldPath: path}
 	if av, ok := m["apiVersion"].(string); ok && av != "" {
@@ -396,6 +466,37 @@ func parseFieldRef(m map[string]any) (*corev1.ObjectFieldSelector, error) {
 	return ref, nil
 }
 
+// validResourceFieldSelectors is the exact set of resourceFieldRef.resource
+// values real Kubernetes admission accepts, combined with a
+// requests.hugepages-*/limits.hugepages-* prefix family (mirrors
+// validContainerResourceFieldPathExpressions +
+// validContainerResourceFieldPathPrefixesWithDownwardAPIHugePages,
+// k8s.io/kubernetes/pkg/apis/core/validation/validation.go). Unlike envFrom's
+// object-name fields, this is NOT open to arbitrary extended resources —
+// "limits.nvidia.com/gpu" builds but is rejected by admission; the downward
+// API can only project these four resource families.
+var validResourceFieldSelectors = map[string]bool{
+	"limits.cpu": true, "limits.memory": true, "limits.ephemeral-storage": true,
+	"requests.cpu": true, "requests.memory": true, "requests.ephemeral-storage": true,
+}
+
+// validDownwardAPIDivisorCPU and validDownwardAPIDivisor are the canonical
+// divisor strings real Kubernetes admission accepts for a resourceFieldRef,
+// by resource family (mirrors validContainerResourceDivisorForCPU and
+// validContainerResourceDivisorFor{Memory,EphemeralStorage,HugePages} —
+// memory/ephemeral-storage/hugepages all share one 13-value set). A divisor
+// is checked against these only when it is non-zero: an unset or
+// zero-valued divisor (e.g. authored as "0") is treated as absent, exactly
+// as validateContainerResourceDivisor's own Cmp-to-the-zero-value early
+// return does — real admission does NOT reject a zero divisor the way a
+// naive "must be non-zero" check would.
+var validDownwardAPIDivisorCPU = map[string]bool{"1m": true, "1": true}
+var validDownwardAPIDivisor = map[string]bool{
+	"1":  true,
+	"1k": true, "1M": true, "1G": true, "1T": true, "1P": true, "1E": true,
+	"1Ki": true, "1Mi": true, "1Gi": true, "1Ti": true, "1Pi": true, "1Ei": true,
+}
+
 // parseResourceFieldRef parses a `valueFrom.resourceFieldRef` object into a
 // corev1.ResourceFieldSelector.
 func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, error) {
@@ -403,12 +504,8 @@ func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, err
 	if res == "" {
 		return nil, errors.Errorf("resourceFieldRef: resource is required")
 	}
-	// The downward API only understands a resource selector of the form
-	// "requests.<name>" or "limits.<name>" (e.g. "requests.cpu",
-	// "limits.nvidia.com/gpu") — a bare resource name like "cpu" is not a
-	// valid selector and is rejected by admission.
-	if !strings.HasPrefix(res, "requests.") && !strings.HasPrefix(res, "limits.") {
-		return nil, errors.Errorf("resourceFieldRef: resource must start with \"requests.\" or \"limits.\", got %q", res)
+	if !validResourceFieldSelectors[res] && !strings.HasPrefix(res, "requests.hugepages-") && !strings.HasPrefix(res, "limits.hugepages-") {
+		return nil, errors.Errorf("resourceFieldRef: unsupported resource %q (must be one of limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory, requests.ephemeral-storage, or a requests.hugepages-<size>/limits.hugepages-<size> selector)", res)
 	}
 	ref := &corev1.ResourceFieldSelector{Resource: res}
 	if cn, ok := m["containerName"].(string); ok && cn != "" {
@@ -418,6 +515,15 @@ func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, err
 		qty, err := resource.ParseQuantity(dv)
 		if err != nil {
 			return nil, errors.Errorf("resourceFieldRef: invalid divisor %q: %w", dv, err)
+		}
+		if qty.Sign() != 0 {
+			allowed := validDownwardAPIDivisor
+			if res == "limits.cpu" || res == "requests.cpu" {
+				allowed = validDownwardAPIDivisorCPU
+			}
+			if !allowed[qty.String()] {
+				return nil, errors.Errorf("resourceFieldRef: divisor %q is not a supported unit for resource %q", dv, res)
+			}
 		}
 		ref.Divisor = qty
 	}
@@ -462,6 +568,12 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 			if name == "" {
 				return nil, errors.Errorf("envFrom[%d].configMapRef: name is required", i)
 			}
+			// Matches ValidateConfigMapName (= apimachineryvalidation.NameIsDNSSubdomain):
+			// every Kubernetes object name, ConfigMap included, must be a valid
+			// DNS-1123 subdomain.
+			if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+				return nil, errors.Errorf("envFrom[%d].configMapRef.name: invalid name %q: %s", i, name, strings.Join(errs, "; "))
+			}
 			ref := &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: name}}
 			if opt, ok := cm["optional"].(bool); ok {
 				ref.Optional = &opt
@@ -472,6 +584,12 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 			name, _ := sec["name"].(string)
 			if name == "" {
 				return nil, errors.Errorf("envFrom[%d].secretRef: name is required", i)
+			}
+			// Matches ValidateSecretName (= apimachineryvalidation.NameIsDNSSubdomain):
+			// every Kubernetes object name, Secret included, must be a valid
+			// DNS-1123 subdomain.
+			if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+				return nil, errors.Errorf("envFrom[%d].secretRef.name: invalid name %q: %s", i, name, strings.Join(errs, "; "))
 			}
 			ref := &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: name}}
 			if opt, ok := sec["optional"].(bool); ok {
