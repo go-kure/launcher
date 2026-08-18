@@ -1189,6 +1189,65 @@ func TestLower_DocumentRuleEmission_DoesNotPrematurelyValidateForwardedTrait(t *
 	}
 }
 
+// forwardingComponentsDocRule is a DocumentLoweringRule that forwards
+// doc.Spec.Components UNCHANGED — the whole slice, not a rebuilt one — so an emitted
+// component shares the same backing array as (and is pointer-identical to) its
+// original. This is the shape isForwardedComponent (lowering.go) detects; contrast
+// forwardingDocRule above, which rebuilds each Component by value and so is NOT
+// pointer-identical to the original, even though its field values are unchanged.
+type forwardingComponentsDocRule struct{ kind string }
+
+func (r forwardingComponentsDocRule) Kind() string { return r.kind }
+
+func (r forwardingComponentsDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name + "-lowered"},
+		Spec:       ApplicationSpec{Components: doc.Spec.Components},
+	}}}, nil
+}
+
+// TestLower_DocumentRule_ForwardedComponent_KeepsEmptyRule is the regression guard for
+// a codex round-1 review finding on launcher#277 ("A document rule overwrites Rule on
+// components it merely forwards"): Origin.Rule's own doc comment names "a component
+// forwarded verbatim by a document rule" as the canonical example of an element that
+// keeps Rule == "" (never itself the direct output of a lowering rule invocation), but
+// the document-rule branch unconditionally stamped every nested component with the
+// document rule's own identity — including one it only passed through unchanged,
+// misattributing it. isForwardedComponent (lowering.go) now exempts a
+// pointer-identical forwarded component from that stamp, the component-position
+// mirror of the pre-existing isForwardedTrait carve-out for nested traits.
+func TestLower_DocumentRule_ForwardedComponent_KeepsEmptyRule(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterDocumentLowering(forwardingComponentsDocRule{kind: "Wrapper"})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Wrapper",
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{
+			Components: []Component{{Name: "shop", Type: "webservice", Properties: map[string]any{}}},
+		},
+	}
+
+	docs, err := tr.lower(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if len(docs) != 1 || len(docs[0].Spec.Components) != 1 {
+		t.Fatalf("expected exactly 1 document with 1 settled component, got %+v", docs)
+	}
+	settled := docs[0].Spec.Components[0]
+	origin, ok := settled.Origin()
+	if !ok {
+		t.Fatal("expected the forwarded component to still carry a stamped origin (Document/DocumentKind/etc. are unaffected by forwarding, only Rule is)")
+	}
+	if origin.Rule != "" {
+		t.Errorf("forwarded component Origin.Rule = %q, want \"\" (never itself the direct output of a lowering rule invocation)", origin.Rule)
+	}
+}
+
 // documentWithNestedComponentAndPolicyRule is a document-position rule that emits a
 // fresh component and a fresh policy, neither forwarded from doc — the round-11-
 // batch-2 regression fixture: nested COMPONENTS and POLICIES, not just traits

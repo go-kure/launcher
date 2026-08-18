@@ -70,12 +70,19 @@ type Origin struct {
 	Index         int    // index in the authored parent slice
 
 	// Rule identifies the lowering rule that MOST RECENTLY produced the element
-	// carrying this Origin: "<position>/<type>" (e.g. "trait/expose"), suffixed with
+	// carrying this Origin: "<label>/<type>" (e.g. "trait/expose"), suffixed with
 	// "@<version>" when the rule also implements ContractDescriber (handler.go) and
-	// declares a non-empty ContractMetadata().Version (e.g. "trait/expose@v1"). ""
+	// declares a non-empty ContractMetadata().Version (e.g. "trait/expose@v1"). label
+	// is "document"/"component"/"trait"/"policy" (the Position the rule occupies) for
+	// every ordinary lowering rule, or "rawdocument" specifically for a
+	// RawDocumentLoweringRule dispatched via LowerRaws (lowering_raw.go) — matching
+	// the rule-class label LoweringStep.Rule already used for that path, so the two
+	// provenance surfaces agree on which rule produced a raw-entered document. ""
 	// means the element was never itself the direct output of a lowering rule
 	// invocation — it is exactly as authored, or a descendant carried through
-	// untouched (e.g. a component forwarded verbatim by a document rule).
+	// untouched (e.g. a component forwarded verbatim by a document rule — see
+	// isForwardedComponent below for how that case is told apart from one the rule
+	// actually produced).
 	//
 	// Unlike every other field on Origin, Rule is DELIBERATELY NOT part of the
 	// "stamped once, copied verbatim" contract documented above: it is re-derived
@@ -123,17 +130,26 @@ func (o Origin) String() string {
 }
 
 // loweringRuleIdentity formats the identity of the lowering rule that produced an
-// emitted element, for Origin.Rule: "<position>/<type>" (e.g. "trait/expose"),
-// matching the identical convention LoweringStep.Rule already uses at each of these
-// call sites — suffixed with "@<version>" when rule also implements ContractDescriber
+// emitted element, for Origin.Rule: "<label>/<type>" (e.g. "trait/expose"), matching
+// the identical convention LoweringStep.Rule already uses at each of these call sites
+// — suffixed with "@<version>" when rule also implements ContractDescriber
 // (handler.go) and declares a non-empty ContractMetadata().Version.
+//
+// label is a plain string, not Position, because the raw-document call site
+// (lowering_raw.go) must pass "rawdocument" — the rule-class label LoweringStep.Rule
+// already used there before Origin.Rule existed, distinguishing a
+// RawDocumentLoweringRule from an ordinary DocumentLoweringRule — even though both
+// validate their LoweringResult against PositionDocument (the tree slot the two rule
+// kinds occupy is identical; only the provenance label differs). Every other call
+// site passes string(PositionX), so Origin.Rule and LoweringStep.Rule stay in
+// lockstep by construction.
 //
 // rule is `any` rather than one of the five lowering-rule interfaces
 // (DocumentLoweringRule, RawDocumentLoweringRule, ComponentLoweringRule,
 // TraitLoweringRule, PolicyLoweringRule) because they share no common type; the only
 // thing this function actually needs is the optional ContractDescriber assertion.
-func loweringRuleIdentity(position Position, typeName string, rule any) string {
-	id := string(position) + "/" + typeName
+func loweringRuleIdentity(label string, typeName string, rule any) string {
+	id := label + "/" + typeName
 	if cd, ok := rule.(ContractDescriber); ok {
 		if v := cd.ContractMetadata().Version; v != "" {
 			id += "@" + v
@@ -793,7 +809,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		// PRE-lowering kind at this point (doc itself is untouched; the new documents
 		// live in result.Documents), so this correctly names the rule that just fired,
 		// not whatever rule (if any) produced the input doc.
-		origin.Rule = loweringRuleIdentity(PositionDocument, doc.Kind, rule)
+		origin.Rule = loweringRuleIdentity(string(PositionDocument), doc.Kind, rule)
 		// Snapshot the components doc had BEFORE the rule ran: a rule that forwards
 		// one of them unchanged into its output (rather than constructing a fresh
 		// component) is forwarding its already-authored traits too, not synthesizing
@@ -820,14 +836,29 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 				// settled output). Stamp explicitly here, the same treatment
 				// component/trait-position rule output already gets
 				// (result.Components[j].origin = &compOrigin below). Safe to do
-				// unconditionally, including for a forwarded (pointer-identical)
-				// component: origin.Document/DocumentKind/Namespace are already the
-				// correct authored-root values (copied from doc.Origin() above,
-				// stable across any number of chained document-rule rounds), and a
-				// forwarded component's own Name/Type are unchanged by construction,
-				// so recomputing here reproduces whatever value it would already
-				// carry rather than overwriting it with something different.
+				// unconditionally for every field EXCEPT Rule: origin.Document/
+				// DocumentKind/Namespace are already the correct authored-root values
+				// (copied from doc.Origin() above, stable across any number of
+				// chained document-rule rounds), and a forwarded component's own
+				// Name/Type are unchanged by construction, so recomputing those here
+				// reproduces whatever value they would already carry. Rule is
+				// different: it names WHICH rule most recently PRODUCED the element
+				// (Origin.Rule's doc comment), and this document rule did not produce
+				// a component it merely forwarded verbatim from originalComponents —
+				// only a freshly synthesized component was actually output by it.
+				// isForwardedComponent mirrors isForwardedTrait's pointer-identity
+				// check just below (same false-negative tradeoff, documented there):
+				// a forwarded component keeps whatever Rule it already carried
+				// (possibly "", if never itself the direct output of an earlier
+				// rule) instead of being misattributed to this document rule.
 				compOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: j, Rule: origin.Rule}
+				if isForwardedComponent(comp, originalComponents) {
+					if prior, ok := comp.Origin(); ok {
+						compOrigin.Rule = prior.Rule
+					} else {
+						compOrigin.Rule = ""
+					}
+				}
 				comp.origin = &compOrigin
 				if err := t.sealNestedTraitsInDocument(comp, compOrigin, originalComponents); err != nil {
 					return nil, false, nil, errors.Wrapf(err, "%s", origin)
@@ -918,7 +949,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// captured into lctx.Origin (above) BEFORE this line runs, so the rule
 			// itself still saw its INPUT's prior identity; only the OUTPUT stamped
 			// below carries this invocation's own.
-			compOrigin.Rule = loweringRuleIdentity(PositionComponent, comp.Type, rule)
+			compOrigin.Rule = loweringRuleIdentity(string(PositionComponent), comp.Type, rule)
 			names := make([]string, len(result.Components))
 			for j := range result.Components {
 				result.Components[j].origin = &compOrigin
@@ -1045,7 +1076,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				return false, steps, err
 			}
 			// Rule is re-derived here — see Origin.Rule's doc comment.
-			traitOrigin.Rule = loweringRuleIdentity(PositionTrait, trait.Type, rule)
+			traitOrigin.Rule = loweringRuleIdentity(string(PositionTrait), trait.Type, rule)
 			names := make([]string, len(result.Traits))
 			for j := range result.Traits {
 				result.Traits[j].origin = &traitOrigin
@@ -1122,7 +1153,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			return false, steps, err
 		}
 		// Rule is re-derived here — see Origin.Rule's doc comment.
-		polOrigin.Rule = loweringRuleIdentity(PositionPolicy, pol.Type, rule)
+		polOrigin.Rule = loweringRuleIdentity(string(PositionPolicy), pol.Type, rule)
 		names := make([]string, len(result.Policies))
 		for j := range result.Policies {
 			result.Policies[j].origin = &polOrigin
@@ -1230,6 +1261,28 @@ func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, isF
 func isForwardedTrait(trait *Trait, original []Trait) bool {
 	for i := range original {
 		if trait == &original[i] {
+			return true
+		}
+	}
+	return false
+}
+
+// isForwardedComponent is isForwardedTrait's component-position counterpart, used
+// only by lowerDocumentOnce's document-rule branch above: it reports whether comp is
+// literally one of the elements of original — i.e. the same Component struct
+// forwarded unchanged by a DocumentLoweringRule (e.g. via `Components:
+// doc.Spec.Components`, or a sub-slice of it that shares the same backing array),
+// rather than a new value the rule constructed. Pointer identity is deliberate,
+// matching isForwardedTrait's own tradeoff: a rule that builds a brand new slice by
+// copying an original component BY VALUE (e.g. appending into a freshly allocated
+// backing array) is treated as having synthesized a new component, not forwarded
+// one, even though the value is byte-for-byte unchanged — the same false-negative
+// isForwardedTrait already accepts, for the same reason (no risk of a false match
+// against a rule that legitimately constructs a new component equal to an authored
+// one).
+func isForwardedComponent(comp *Component, original []Component) bool {
+	for i := range original {
+		if comp == &original[i] {
 			return true
 		}
 	}
