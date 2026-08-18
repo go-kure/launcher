@@ -310,3 +310,77 @@ func TestCronjobConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
 		t.Error("expected error for disallowed registry")
 	}
 }
+
+func TestCronjobHandler_WithSharedPodFields(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":      "ghcr.io/org/job:v1.0.0",
+			"schedule":   "0 2 * * *",
+			"workingDir": "/job",
+			"envFrom": []any{
+				map[string]any{"configMapRef": map[string]any{"name": "job-cfg"}},
+			},
+			"lifecycle": map[string]any{
+				"preStop": map[string]any{
+					"exec": map[string]any{"command": []any{"/bin/sh", "-c", "cleanup"}},
+				},
+			},
+			"securityContext": map[string]any{
+				"readOnlyRootFilesystem": true,
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+
+	app := stack.NewApplication("job", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if cj, ok := (*obj).(*batchv1.CronJob); ok {
+			c := cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
+			if c.WorkingDir != "/job" {
+				t.Errorf("expected workingDir, got %q", c.WorkingDir)
+			}
+			if len(c.EnvFrom) != 1 {
+				t.Errorf("expected 1 envFrom entry, got %d", len(c.EnvFrom))
+			}
+			if c.Lifecycle == nil || c.Lifecycle.PreStop == nil {
+				t.Error("expected preStop lifecycle hook")
+			}
+			if c.SecurityContext == nil || c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem {
+				t.Error("expected readOnlyRootFilesystem=true")
+			}
+			return
+		}
+	}
+	t.Error("CronJob not found")
+}
+
+func TestCronjobConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+			"securityContext": map[string]any{
+				"privileged": true,
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
+		t.Error("expected error when privileged=true and policy disallows it")
+	}
+}

@@ -21,6 +21,7 @@ type stubPolicy struct {
 	maxStorageSize     string
 	defaultCPURequest  string
 	defaultStorageSize string
+	allowPrivileged    bool
 }
 
 func (s *stubPolicy) MaxReplicas() *int32              { return s.maxReplicas }
@@ -37,7 +38,7 @@ func (s *stubPolicy) DefaultStorageSize() string       { return s.defaultStorage
 func (s *stubPolicy) DefaultScalerMinReplicas() *int32 { return nil }
 func (s *stubPolicy) DefaultScalerMaxReplicas() *int32 { return nil }
 func (s *stubPolicy) AllowHostNetwork() bool           { return false }
-func (s *stubPolicy) AllowPrivileged() bool            { return false }
+func (s *stubPolicy) AllowPrivileged() bool            { return s.allowPrivileged }
 func (s *stubPolicy) AllowHostPID() bool               { return false }
 func (s *stubPolicy) AllowHostIPC() bool               { return false }
 func (s *stubPolicy) AllowHostPathVolumes() bool       { return false }
@@ -614,5 +615,377 @@ func TestWebserviceHandler_InvalidAffinity(t *testing.T) {
 	_, err := h.ToApplicationConfig(component, "default")
 	if err == nil {
 		t.Fatal("expected error for invalid podAntiAffinityType")
+	}
+}
+
+func TestWebserviceHandler_WithEnv_FieldRef(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"env": []any{
+				map[string]any{
+					"name": "POD_NAME",
+					"valueFrom": map[string]any{
+						"fieldRef": map[string]any{
+							"fieldPath": "metadata.name",
+						},
+					},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceHandler_WithEnv_ResourceFieldRef(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"env": []any{
+				map[string]any{
+					"name": "CPU_LIMIT",
+					"valueFrom": map[string]any{
+						"resourceFieldRef": map[string]any{
+							"resource": "limits.cpu",
+							"divisor":  "1m",
+						},
+					},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestWebserviceHandler_WithEnv_MultipleValueFromSources_Error(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"env": []any{
+				map[string]any{
+					"name": "BAD",
+					"valueFrom": map[string]any{
+						"fieldRef": map[string]any{
+							"fieldPath": "metadata.name",
+						},
+						"secretKeyRef": map[string]any{
+							"name": "s",
+							"key":  "k",
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := h.ToApplicationConfig(component, "default")
+	if err == nil {
+		t.Fatal("expected error for multiple valueFrom sources")
+	}
+}
+
+func TestWebserviceHandler_WithEnvFrom(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"envFrom": []any{
+				map[string]any{
+					"configMapRef": map[string]any{"name": "app-config"},
+					"prefix":       "CFG_",
+				},
+				map[string]any{
+					"secretRef": map[string]any{"name": "app-secret", "optional": true},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if dep, ok := (*obj).(*appsv1.Deployment); ok {
+			ef := dep.Spec.Template.Spec.Containers[0].EnvFrom
+			if len(ef) != 2 {
+				t.Fatalf("expected 2 envFrom entries, got %d", len(ef))
+			}
+			if ef[0].ConfigMapRef == nil || ef[0].ConfigMapRef.Name != "app-config" || ef[0].Prefix != "CFG_" {
+				t.Errorf("unexpected first envFrom entry: %+v", ef[0])
+			}
+			if ef[1].SecretRef == nil || ef[1].SecretRef.Name != "app-secret" || ef[1].SecretRef.Optional == nil || !*ef[1].SecretRef.Optional {
+				t.Errorf("unexpected second envFrom entry: %+v", ef[1])
+			}
+			return
+		}
+	}
+	t.Error("Deployment not found in output")
+}
+
+func TestWebserviceHandler_WithEnvFrom_BothRefs_Error(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"envFrom": []any{
+				map[string]any{
+					"configMapRef": map[string]any{"name": "a"},
+					"secretRef":    map[string]any{"name": "b"},
+				},
+			},
+		},
+	}
+	_, err := h.ToApplicationConfig(component, "default")
+	if err == nil {
+		t.Fatal("expected error when both configMapRef and secretRef are set")
+	}
+}
+
+func TestWebserviceHandler_WithResources_ExtraNamedResources(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"resources": map[string]any{
+				"requests": map[string]any{
+					"cpu":               "100m",
+					"nvidia.com/gpu":    "1",
+					"ephemeral-storage": "1Gi",
+				},
+				"limits": map[string]any{
+					"nvidia.com/gpu": "1",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if dep, ok := (*obj).(*appsv1.Deployment); ok {
+			res := dep.Spec.Template.Spec.Containers[0].Resources
+			if _, ok := res.Requests["nvidia.com/gpu"]; !ok {
+				t.Error("expected nvidia.com/gpu in requests")
+			}
+			if _, ok := res.Requests["ephemeral-storage"]; !ok {
+				t.Error("expected ephemeral-storage in requests")
+			}
+			if _, ok := res.Limits["nvidia.com/gpu"]; !ok {
+				t.Error("expected nvidia.com/gpu in limits")
+			}
+			return
+		}
+	}
+	t.Error("Deployment not found in output")
+}
+
+func TestWebserviceHandler_WithLifecycle(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"lifecycle": map[string]any{
+				"postStart": map[string]any{
+					"exec": map[string]any{"command": []any{"/bin/sh", "-c", "echo start"}},
+				},
+				"preStop": map[string]any{
+					"sleep": map[string]any{"seconds": 5},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if dep, ok := (*obj).(*appsv1.Deployment); ok {
+			lc := dep.Spec.Template.Spec.Containers[0].Lifecycle
+			if lc == nil || lc.PostStart == nil || lc.PostStart.Exec == nil {
+				t.Error("expected postStart.exec to be set")
+			}
+			if lc == nil || lc.PreStop == nil || lc.PreStop.Sleep == nil || lc.PreStop.Sleep.Seconds != 5 {
+				t.Error("expected preStop.sleep.seconds=5")
+			}
+			return
+		}
+	}
+	t.Error("Deployment not found in output")
+}
+
+func TestWebserviceHandler_WithSecurityContext(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"securityContext": map[string]any{
+				"runAsUser":                int64(1000),
+				"runAsNonRoot":             true,
+				"readOnlyRootFilesystem":   true,
+				"allowPrivilegeEscalation": false,
+				"capabilities": map[string]any{
+					"add":  []any{"NET_BIND_SERVICE"},
+					"drop": []any{"ALL"},
+				},
+				"seccompProfile": map[string]any{
+					"type": "RuntimeDefault",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if dep, ok := (*obj).(*appsv1.Deployment); ok {
+			sc := dep.Spec.Template.Spec.Containers[0].SecurityContext
+			if sc == nil {
+				t.Fatal("expected securityContext to be set")
+			}
+			if sc.RunAsUser == nil || *sc.RunAsUser != 1000 {
+				t.Errorf("expected runAsUser=1000, got %v", sc.RunAsUser)
+			}
+			if sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+				t.Error("expected runAsNonRoot=true")
+			}
+			if sc.Capabilities == nil || len(sc.Capabilities.Add) != 1 || len(sc.Capabilities.Drop) != 1 {
+				t.Errorf("unexpected capabilities: %+v", sc.Capabilities)
+			}
+			if sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+				t.Errorf("unexpected seccompProfile: %+v", sc.SeccompProfile)
+			}
+			return
+		}
+	}
+	t.Error("Deployment not found in output")
+}
+
+func TestWebserviceHandler_WithSecurityContext_SeccompLocalhost_MissingProfile_Error(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"securityContext": map[string]any{
+				"seccompProfile": map[string]any{
+					"type": "Localhost",
+				},
+			},
+		},
+	}
+	_, err := h.ToApplicationConfig(component, "default")
+	if err == nil {
+		t.Fatal("expected error for Localhost seccompProfile missing localhostProfile")
+	}
+}
+
+func TestWebserviceHandler_WithWorkingDir(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image":      "ghcr.io/org/app:v1",
+			"workingDir": "/app",
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if dep, ok := (*obj).(*appsv1.Deployment); ok {
+			if dep.Spec.Template.Spec.Containers[0].WorkingDir != "/app" {
+				t.Errorf("expected workingDir=/app, got %q", dep.Spec.Template.Spec.Containers[0].WorkingDir)
+			}
+			return
+		}
+	}
+	t.Error("Deployment not found in output")
+}
+
+func TestWebserviceConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"securityContext": map[string]any{
+				"privileged": true,
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
+		t.Error("expected error when privileged=true and policy disallows it")
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
+		t.Errorf("expected no error when policy allows privileged, got %v", err)
 	}
 }

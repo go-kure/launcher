@@ -222,3 +222,67 @@ func TestStatefulsetConfig_ApplyPolicy_VCTStorageSize(t *testing.T) {
 		t.Error("expected error when VCT size exceeds max")
 	}
 }
+
+func TestStatefulsetHandler_WithSharedPodFields(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image":      "ghcr.io/org/postgres:v15",
+			"workingDir": "/var/lib/postgresql",
+			"envFrom": []any{
+				map[string]any{"secretRef": map[string]any{"name": "db-secret"}},
+			},
+			"securityContext": map[string]any{
+				"runAsUser": int64(999),
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+
+	app := stack.NewApplication("db", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if sts, ok := (*obj).(*appsv1.StatefulSet); ok {
+			c := sts.Spec.Template.Spec.Containers[0]
+			if c.WorkingDir != "/var/lib/postgresql" {
+				t.Errorf("expected workingDir, got %q", c.WorkingDir)
+			}
+			if len(c.EnvFrom) != 1 {
+				t.Errorf("expected 1 envFrom entry, got %d", len(c.EnvFrom))
+			}
+			if c.SecurityContext == nil || c.SecurityContext.RunAsUser == nil || *c.SecurityContext.RunAsUser != 999 {
+				t.Error("expected runAsUser=999")
+			}
+			return
+		}
+	}
+	t.Error("StatefulSet not found in output")
+}
+
+func TestStatefulsetConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/postgres:v15",
+			"securityContext": map[string]any{
+				"privileged": true,
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
+		t.Error("expected error when privileged=true and policy disallows it")
+	}
+}

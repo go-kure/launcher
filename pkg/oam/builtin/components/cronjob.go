@@ -32,10 +32,14 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"restartPolicy":              {Type: oam.PropertyTypeString, Default: "OnFailure", Enum: []any{"Never", "OnFailure"}, Description: "Pod restart policy for the job's containers."},
 		"successfulJobsHistoryLimit": {Type: oam.PropertyTypeInteger, Default: 3, Description: "Number of successful finished jobs to retain."},
 		"failedJobsHistoryLimit":     {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of failed finished jobs to retain."},
-		"env":                        schemaEnv(),
-		"resources":                  schemaResources(),
+		"env":                        schemaEnv(false),
+		"envFrom":                    schemaEnvFrom(false),
+		"resources":                  schemaResources(false),
 		"command":                    schemaStringArray(),
 		"args":                       schemaStringArray(),
+		"lifecycle":                  schemaLifecycle(false),
+		"securityContext":            schemaSecurityContext(false),
+		"workingDir":                 schemaWorkingDir(false),
 		"initContainers":             schemaContainers(),
 	}
 }
@@ -102,12 +106,30 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		return nil, err
 	}
 	config.Env = env
+	envFrom, err := parseEnvFrom(props)
+	if err != nil {
+		return nil, err
+	}
+	config.EnvFrom = envFrom
 	if resources, ok := props["resources"].(map[string]any); ok {
 		config.Resources = parseResources(resources)
 	}
 	config.explicitResources = resourceExplicitFlags(props)
 	config.Command = parseCommand(props)
 	config.Args = parseArgs(props)
+	lifecycle, err := parseLifecycle(props)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid lifecycle configuration")
+	}
+	config.Lifecycle = lifecycle
+	securityContext, err := parseSecurityContext(props)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid securityContext configuration")
+	}
+	config.SecurityContext = securityContext
+	if workingDir, ok := props["workingDir"].(string); ok {
+		config.WorkingDir = workingDir
+	}
 
 	initContainers, err := parseInitContainers(props)
 	if err != nil {
@@ -127,10 +149,14 @@ type CronjobConfig struct {
 	RestartPolicy              corev1.RestartPolicy
 	SuccessfulJobsHistoryLimit int32
 	FailedJobsHistoryLimit     int32
-	Env                        []EnvVar
+	Env                        []corev1.EnvVar
+	EnvFrom                    []corev1.EnvFromSource
 	Resources                  ResourceRequirements
 	Command                    []string
 	Args                       []string
+	Lifecycle                  *corev1.Lifecycle
+	SecurityContext            *corev1.SecurityContext
+	WorkingDir                 string
 	InitContainers             []InitContainerConfig
 	explicitResources          explicitResourceFlags
 }
@@ -170,6 +196,9 @@ func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforceAllowedRegistries(c.Image, p.AllowedRegistries()); err != nil {
 		return err
 	}
+	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -198,8 +227,20 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 		return nil, errors.Wrap(err, "resource requirements")
 	}
 	kubernetes.SetContainerResources(container, rr)
-	for _, env := range buildEnvVars(c.Env) {
+	for _, env := range c.Env {
 		kubernetes.AddContainerEnv(container, env)
+	}
+	for _, ef := range c.EnvFrom {
+		kubernetes.AddContainerEnvFrom(container, ef)
+	}
+	if c.WorkingDir != "" {
+		kubernetes.SetContainerWorkingDir(container, c.WorkingDir)
+	}
+	if c.Lifecycle != nil {
+		kubernetes.SetContainerLifecycle(container, c.Lifecycle)
+	}
+	if c.SecurityContext != nil {
+		kubernetes.SetContainerSecurityContext(container, *c.SecurityContext)
 	}
 
 	cj := kubernetes.CreateCronJob(app.Name, app.Namespace, c.Schedule)

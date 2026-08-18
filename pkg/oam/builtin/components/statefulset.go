@@ -28,11 +28,15 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"replicas":             {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of StatefulSet pod replicas."},
 		"port":                 {Type: oam.PropertyTypeInteger, Description: "Container port to expose via the headless Service."},
 		"serviceName":          {Type: oam.PropertyTypeString, Description: "Name of the headless Service (defaults to the component name)."},
-		"env":                  schemaEnv(),
-		"resources":            schemaResources(),
+		"env":                  schemaEnv(false),
+		"envFrom":              schemaEnvFrom(false),
+		"resources":            schemaResources(false),
 		"command":              schemaStringArray(),
 		"args":                 schemaStringArray(),
 		"probes":               schemaProbes(),
+		"lifecycle":            schemaLifecycle(false),
+		"securityContext":      schemaSecurityContext(false),
+		"workingDir":           schemaWorkingDir(false),
 		"volumeClaimTemplates": schemaVolumeClaimTemplates(),
 		"volumes":              schemaVolumes(),
 		"initContainers":       schemaContainers(),
@@ -77,6 +81,11 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 		return nil, err
 	}
 	config.Env = env
+	envFrom, err := parseEnvFrom(props)
+	if err != nil {
+		return nil, err
+	}
+	config.EnvFrom = envFrom
 
 	if resources, ok := props["resources"].(map[string]any); ok {
 		config.Resources = parseResources(resources)
@@ -90,6 +99,19 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 		return nil, errors.Wrap(err, "invalid probe configuration")
 	}
 	config.Probes = probes
+	lifecycle, err := parseLifecycle(props)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid lifecycle configuration")
+	}
+	config.Lifecycle = lifecycle
+	securityContext, err := parseSecurityContext(props)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid securityContext configuration")
+	}
+	config.SecurityContext = securityContext
+	if workingDir, ok := props["workingDir"].(string); ok {
+		config.WorkingDir = workingDir
+	}
 
 	vcts, err := parseVolumeClaimTemplates(props)
 	if err != nil {
@@ -134,11 +156,15 @@ type StatefulsetConfig struct {
 	Replicas             int32
 	Port                 int32
 	ServiceName          string
-	Env                  []EnvVar
+	Env                  []corev1.EnvVar
+	EnvFrom              []corev1.EnvFromSource
 	Resources            ResourceRequirements
 	Command              []string
 	Args                 []string
 	Probes               ProbeConfig
+	Lifecycle            *corev1.Lifecycle
+	SecurityContext      *corev1.SecurityContext
+	WorkingDir           string
 	VolumeClaimTemplates []VolumeClaimTemplate
 	Volumes              []corev1.Volume
 	VolumeMounts         []corev1.VolumeMount
@@ -186,6 +212,9 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 		return err
 	}
 	if err := enforceAllowedRegistries(c.Image, p.AllowedRegistries()); err != nil {
+		return err
+	}
+	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
 		return err
 	}
 	for _, pvc := range c.PVCs {
@@ -251,8 +280,11 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 			Protocol:      corev1.ProtocolTCP,
 		})
 	}
-	for _, env := range buildEnvVars(c.Env) {
+	for _, env := range c.Env {
 		kubernetes.AddContainerEnv(container, env)
+	}
+	for _, ef := range c.EnvFrom {
+		kubernetes.AddContainerEnvFrom(container, ef)
 	}
 	for _, vct := range c.VolumeClaimTemplates {
 		kubernetes.AddContainerVolumeMount(container, corev1.VolumeMount{
@@ -264,6 +296,15 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 		kubernetes.AddContainerVolumeMount(container, m)
 	}
 	applyProbes(container, c.Probes)
+	if c.WorkingDir != "" {
+		kubernetes.SetContainerWorkingDir(container, c.WorkingDir)
+	}
+	if c.Lifecycle != nil {
+		kubernetes.SetContainerLifecycle(container, c.Lifecycle)
+	}
+	if c.SecurityContext != nil {
+		kubernetes.SetContainerSecurityContext(container, *c.SecurityContext)
+	}
 
 	sts := kubernetes.CreateStatefulSet(app.Name, app.Namespace)
 	sts.Labels = labels

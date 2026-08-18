@@ -35,10 +35,47 @@ Reference.
 ## Common config
 
 Most workload types (`webservice`, `worker`, `statefulset`, `daemonset`, `cronjob`)
-share these fields: `image` (validated — no untagged/`latest`), `env` (with
-`valueFrom` secret/configMap refs), `resources` (requests/limits, defaults
-100m/128Mi), `command`/`args`, `probes` (httpGet/tcpSocket/exec/grpc),
-`volumes`, `initContainers`, `sidecars`, and `affinity`.
+share these fields, projected as a full-fidelity subset of `corev1.Container`/
+`PodSpec` rather than a hand-rolled parallel schema: `image` (validated — no
+untagged/`latest`), `env` (`value` or `valueFrom` — mutually exclusive, matching
+`corev1.EnvVar`'s own doc comment ("cannot be used if value is not empty");
+`valueFrom` is one of `secretKeyRef`, `configMapKeyRef` (both accept
+`optional`), `fieldRef`, `resourceFieldRef` — mutually exclusive among
+themselves too), `envFrom` (bulk-import a ConfigMap's or Secret's keys, with
+`prefix`), `resources` (requests/limits, defaults 100m/128Mi for `cpu`/`memory`;
+any other resource name, e.g. `ephemeral-storage` or `nvidia.com/gpu`,
+round-trips unmodified — no policy default/max hook exists for those today),
+`command`/`args`, `probes` (httpGet/tcpSocket/exec/grpc), `lifecycle`
+(`postStart`/`preStop`: `exec`/`httpGet` (including `httpHeaders`)/`sleep` —
+`tcpSocket` is not accepted, since corev1 documents it as broken for lifecycle
+hooks), `securityContext` (per-container:
+`runAsUser`/`runAsGroup`/`runAsNonRoot`, `readOnlyRootFilesystem`,
+`allowPrivilegeEscalation`, `privileged`, `capabilities.{add,drop}`,
+`seccompProfile`, `seLinuxOptions`, `appArmorProfile`; `windowsOptions` and
+`procMount` are deliberately not covered — this project targets Linux-only
+podman/distroless images (see the workspace-root `meta/CLAUDE.md`), and
+`procMount` is an alpha, rarely-used field with no precedent elsewhere in this
+package), `workingDir`, `volumes`, `initContainers`, `sidecars`, and `affinity`.
+
+`securityContext.privileged: true` is rejected unless the environment policy's
+`AllowPrivileged()` allows it — the one `securityContext` field enforced today
+(`enforce.go`'s `enforcePrivileged`); the others have no policy hook yet.
+
+Setting any `securityContext` field makes the container's `SecurityContext`
+non-nil, which opts it out of the `security-context` trait's nil-only
+backfill for every *other* `SecurityContext` field too. If a component uses
+both, the trait's `Generate()` pass runs later and unconditionally overwrites
+`container.SecurityContext` — the trait always wins when both are applied to
+the same component. Use the trait for a safe, complete PSA-consistent
+default; use this property for raw, partial, full-fidelity authoring.
+
+`env`, `envFrom`, `resources`, `lifecycle`, `securityContext`, and `workingDir`
+are each schema fragments parameterized by a `reserved bool` (mirroring
+`pkg/oam/builtin/traits/schema.go`'s `schemaNetworkPolicy(reserved bool)`):
+every built-in call site passes `false` today. Deciding which of these fields
+should be platform-reserved (rejecting any authored value via
+`PropertySchema.PlatformReserved`/`enforcePlatformReserved`) is a consumer-side
+policy choice, not something this shared schema hardcodes.
 
 ## Per-type highlights
 

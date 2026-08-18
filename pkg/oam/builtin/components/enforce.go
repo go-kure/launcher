@@ -3,6 +3,7 @@ package components
 import (
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -72,6 +73,24 @@ func registryHost(image string) string {
 
 func enforceMaxStorageSize(current, max string) error {
 	return enforceMaxResource(current, max, "storageSize")
+}
+
+// enforcePrivileged rejects an authored `securityContext.privileged: true` when
+// the environment policy does not allow it. This is the one securityContext
+// field with a matching pre-existing Policy hook (oam.Policy.AllowPrivileged,
+// declared but previously uncallable from this package since no property could
+// ever produce a non-nil SecurityContext) — reusing it here, rather than adding
+// a new mechanism, closes the gap the new `securityContext` property would
+// otherwise open: an author could set privileged:true with nothing checking it.
+// The other securityContext fields (capabilities add/drop, hostNetwork/hostPID/
+// hostIPC — the latter three are pod-level and not part of this container-level
+// property at all) have no existing Policy hook and none is added here; see the
+// launcher#278 ledger.
+func enforcePrivileged(sc *corev1.SecurityContext, allowed bool) error {
+	if sc == nil || sc.Privileged == nil || !*sc.Privileged || allowed {
+		return nil
+	}
+	return errors.New("securityContext.privileged is not allowed by environment policy")
 }
 
 func applyDefaultReplicas(current int32, explicit bool, dflt *int32) int32 {

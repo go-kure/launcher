@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: frontend
+  name: frontend
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - env:
+        - name: LOG_LEVEL
+          value: info
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_CPU_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              divisor: 1m
+              resource: limits.cpu
+        envFrom:
+        - configMapRef:
+            name: frontend-config
+          prefix: CFG_
+        - secretRef:
+            name: frontend-secret
+            optional: true
+        image: ghcr.io/example/frontend:v1.0.0
+        imagePullPolicy: IfNotPresent
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - echo starting
+          preStop:
+            sleep:
+              seconds: 5
+        name: frontend
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            ephemeral-storage: 1Gi
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            add:
+            - NET_BIND_SERVICE
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+        workingDir: /app
+      serviceAccountName: frontend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: frontend
+  name: frontend
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: frontend
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: frontend
+  name: frontend
+  namespace: default
