@@ -48,7 +48,11 @@ themselves too), `envFrom` (bulk-import a ConfigMap's or Secret's keys, with
 `limits` accept `cpu`/`memory` (defaults 100m/128Mi) plus any other resource
 name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map, all parsed
 as `resource.Quantity` and round-tripped unmodified — no policy default/max
-hook exists for names other than cpu/memory today), `command`/`args`, `probes`
+hook exists for names other than cpu/memory today; `claims` (Dynamic Resource
+Allocation) is deliberately not covered — genuinely feature-gated in the
+pinned `k8s.io/api` version and meaningless without pod-level
+`PodSpec.ResourceClaims` wiring this schema doesn't have yet, see
+`parseResources`'s doc comment), `command`/`args`, `probes`
 (httpGet/tcpSocket/exec/grpc), `lifecycle` (`postStart`/`preStop`:
 `exec`/`httpGet` (including `httpHeaders`)/`sleep` — `tcpSocket` is not
 accepted, since corev1 documents it as broken for lifecycle hooks),
@@ -56,8 +60,9 @@ accepted, since corev1 documents it as broken for lifecycle hooks),
 `readOnlyRootFilesystem`, `allowPrivilegeEscalation`, `privileged`,
 `capabilities.{add,drop}`, `seccompProfile`, `seLinuxOptions`,
 `appArmorProfile`, `procMount` (`Default`|`Unmasked`); `windowsOptions` is
-deliberately not covered — this project targets Linux-only podman/distroless
-images (see the workspace-root `meta/CLAUDE.md`), and `procMount` is
+deliberately not covered — this project's own container images are
+Linux-only (distroless base images run under podman), so a Windows-specific
+security context has no target to apply to here, and `procMount` is
 Linux-specific by definition, so excluding `windowsOptions` does not extend to
 it), `workingDir`, `volumes`, `initContainers`, `sidecars`, and `affinity`.
 
@@ -103,6 +108,13 @@ policy choice, not something this shared schema hardcodes.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.
+  `resources` forwards `cpu`/`memory` only — the underlying CNPG builder
+  (`kurecnpg.ResourceOptions`, an external `go-kure/kure` type) has no fields
+  for other resource names, so any other name authored under `requests`/
+  `limits` (e.g. `ephemeral-storage`, `nvidia.com/gpu`) is rejected with an
+  explicit error rather than silently dropped; the other 5 workload kinds
+  forward every resource name directly onto the real `corev1.Container` and
+  have no such restriction.
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
   data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
   platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
