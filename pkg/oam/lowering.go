@@ -816,6 +816,10 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		// them — same reasoning as originalTraits below for the component-position
 		// case, extended to however many components the document rule forwards.
 		originalComponents := doc.Spec.Components
+		// Same snapshot, for the identical reason, on the policy side (C1 finding on
+		// PR #283: the policy loop below stamped Rule unconditionally while the
+		// component loop already guarded against exactly this).
+		originalPolicies := doc.Spec.Policies
 		emitted := make([]*Application, len(result.Documents))
 		names := make([]string, len(result.Documents))
 		for i := range result.Documents {
@@ -866,7 +870,17 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 			}
 			for k := range result.Documents[i].Spec.Policies {
 				pol := &result.Documents[i].Spec.Policies[k]
+				// Same Rule-attribution guard as the component loop above (isForwardedComponent):
+				// a policy this document rule only forwarded verbatim from originalPolicies keeps
+				// whatever Rule it already carried instead of being misattributed to this rule.
 				polOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, PolicyName: pol.Name, Index: k, Rule: origin.Rule}
+				if isForwardedPolicy(pol, originalPolicies) {
+					if prior, ok := pol.Origin(); ok {
+						polOrigin.Rule = prior.Rule
+					} else {
+						polOrigin.Rule = ""
+					}
+				}
 				pol.origin = &polOrigin
 			}
 		}
@@ -1283,6 +1297,21 @@ func isForwardedTrait(trait *Trait, original []Trait) bool {
 func isForwardedComponent(comp *Component, original []Component) bool {
 	for i := range original {
 		if comp == &original[i] {
+			return true
+		}
+	}
+	return false
+}
+
+// isForwardedPolicy is isForwardedComponent's policy-position counterpart, used only
+// by lowerDocumentOnce's document-rule branch above: it reports whether pol is
+// literally one of the elements of original — i.e. the same ApplicationPolicy struct
+// forwarded unchanged by a DocumentLoweringRule, rather than a new value the rule
+// constructed. Pointer identity is deliberate, matching isForwardedComponent's own
+// tradeoff and false-negative risk.
+func isForwardedPolicy(pol *ApplicationPolicy, original []ApplicationPolicy) bool {
+	for i := range original {
+		if pol == &original[i] {
 			return true
 		}
 	}
