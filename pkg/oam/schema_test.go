@@ -147,3 +147,133 @@ func TestHandlerSchemas_IncludesComponentLoweringRules(t *testing.T) {
 		t.Errorf("widget.replicas schema = %+v", got)
 	}
 }
+
+// --- ContractDescriber / HandlerContracts (R9): mirrors the PropertySchemaProvider /
+// HandlerSchemas tests above, including their two lowering-rule-registry regression
+// guards — HandlerContracts must cover the identical four registries HandlerSchemas
+// does (transform.go), for the identical reason.
+
+// contractComponent is a stub ComponentHandler that declares contract metadata.
+type contractComponent struct{ typ string }
+
+func (h contractComponent) CanHandle(t string) bool { return t == h.typ }
+func (h contractComponent) ToApplicationConfig(*Component, string) (stack.ApplicationConfig, error) {
+	return nil, nil
+}
+func (h contractComponent) ContractMetadata() ContractMetadata {
+	return ContractMetadata{Family: "webservice", Version: "v1"}
+}
+
+// contractTrait is a stub TraitHandler that declares contract metadata.
+type contractTrait struct{ typ string }
+
+func (h contractTrait) CanHandle(t string) bool                               { return t == h.typ }
+func (h contractTrait) Apply(*Trait, *stack.Application, *stack.Bundle) error { return nil }
+func (h contractTrait) ContractMetadata() ContractMetadata {
+	return ContractMetadata{Family: "pvc", Version: "v2", RequiredCapabilityKeys: []string{"storage"}}
+}
+
+func TestHandlerContracts(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{
+			"webservice": contractComponent{typ: "webservice"},
+			"plain":      plainComponent{typ: "plain"}, // no ContractMetadata method
+		},
+		map[string]TraitHandler{
+			"pvc": contractTrait{typ: "pvc"},
+		},
+	)
+
+	set := tr.HandlerContracts()
+
+	// Providers are included, split by kind; non-providers are omitted.
+	got, ok := set.Components["webservice"]
+	if !ok {
+		t.Fatalf("expected component 'webservice' contract metadata, got %v", set.Components)
+	}
+	if got.Family != "webservice" || got.Version != "v1" {
+		t.Errorf("webservice contract metadata = %+v", got)
+	}
+	if _, ok := set.Components["plain"]; ok {
+		t.Error("plain component has no ContractMetadata method and must be omitted")
+	}
+
+	traitGot, ok := set.Traits["pvc"]
+	if !ok {
+		t.Fatalf("expected trait 'pvc' contract metadata, got %v", set.Traits)
+	}
+	if traitGot.Family != "pvc" || traitGot.Version != "v2" || len(traitGot.RequiredCapabilityKeys) != 1 || traitGot.RequiredCapabilityKeys[0] != "storage" {
+		t.Errorf("pvc contract metadata = %+v", traitGot)
+	}
+
+	// Component and trait maps are distinct (no cross-registry collision).
+	if _, ok := set.Traits["webservice"]; ok {
+		t.Error("component contract metadata leaked into Traits map")
+	}
+}
+
+// contractTraitLoweringRule mirrors schemaLoweringRule above (D5, trait position),
+// modeling a versioned, deprecated ExposeRule-like rule.
+type contractTraitLoweringRule struct{ typ string }
+
+func (r contractTraitLoweringRule) TraitType() string { return r.typ }
+func (r contractTraitLoweringRule) LowerTrait(*Trait, LoweringContext) (LoweringResult, error) {
+	return LoweringResult{}, nil
+}
+func (r contractTraitLoweringRule) ContractMetadata() ContractMetadata {
+	return ContractMetadata{
+		Family:             "expose",
+		Version:            "v1",
+		Deprecated:         true,
+		DeprecationMessage: "use httproute directly",
+	}
+}
+
+// TestHandlerContracts_IncludesTraitLoweringRules is the ContractDescriber/
+// HandlerContracts mirror of TestHandlerSchemas_IncludesTraitLoweringRules: a trait
+// type claimed exclusively by a TraitLoweringRule (like ExposeRule claims "expose")
+// must still appear in set.Traits, not just a dispatchable TraitHandler.
+func TestHandlerContracts_IncludesTraitLoweringRules(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterTraitLowering(contractTraitLoweringRule{typ: "expose"})
+
+	set := tr.HandlerContracts()
+
+	got, ok := set.Traits["expose"]
+	if !ok {
+		t.Fatalf("expected trait-lowering-rule 'expose' contract metadata in set.Traits, got %v", set.Traits)
+	}
+	if !got.Deprecated || got.DeprecationMessage == "" {
+		t.Errorf("expose contract metadata = %+v, want Deprecated=true with a non-empty message", got)
+	}
+}
+
+// contractComponentLoweringRule is the component-position mirror of
+// contractTraitLoweringRule above.
+type contractComponentLoweringRule struct{ typ string }
+
+func (r contractComponentLoweringRule) ComponentType() string { return r.typ }
+func (r contractComponentLoweringRule) LowerComponent(*Component, LoweringContext) (LoweringResult, error) {
+	return LoweringResult{}, nil
+}
+func (r contractComponentLoweringRule) ContractMetadata() ContractMetadata {
+	return ContractMetadata{Family: "widget", Version: "v1", RequiredCapabilityKeys: []string{"widget-backend"}}
+}
+
+// TestHandlerContracts_IncludesComponentLoweringRules is the component-position
+// mirror of TestHandlerSchemas_IncludesComponentLoweringRules above: a component type
+// claimed exclusively by a ComponentLoweringRule must still appear in set.Components.
+func TestHandlerContracts_IncludesComponentLoweringRules(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(contractComponentLoweringRule{typ: "widget"})
+
+	set := tr.HandlerContracts()
+
+	got, ok := set.Components["widget"]
+	if !ok {
+		t.Fatalf("expected component-lowering-rule 'widget' contract metadata in set.Components, got %v", set.Components)
+	}
+	if len(got.RequiredCapabilityKeys) != 1 || got.RequiredCapabilityKeys[0] != "widget-backend" {
+		t.Errorf("widget contract metadata = %+v, want RequiredCapabilityKeys=[widget-backend]", got)
+	}
+}

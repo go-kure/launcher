@@ -376,6 +376,150 @@ func TestLower_ComponentOriginSurvivesSecondRoundLowering(t *testing.T) {
 	}
 }
 
+// --- Origin.Rule: lowering-rule identity, re-derived per hop, never copied verbatim ---
+//
+// ridStageRule is a table-driven ComponentLoweringRule stub: it always lowers its
+// claimed type into exactly one new component of nextType, preserving the name.
+type ridStageRule struct {
+	typ      string
+	nextType string
+}
+
+func (r ridStageRule) ComponentType() string { return r.typ }
+
+func (r ridStageRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: comp.Name, Type: r.nextType, Properties: map[string]any{}}}}, nil
+}
+
+// ridVersionedStageRule is ridStageRule plus ContractDescriber, so
+// loweringRuleIdentity folds ContractMetadata().Version into the emitted Origin.Rule.
+type ridVersionedStageRule struct {
+	ridStageRule
+	version string
+}
+
+func (r ridVersionedStageRule) ContractMetadata() ContractMetadata {
+	return ContractMetadata{Version: r.version}
+}
+
+// TestLower_RuleIdentity is the regression guard for the design tension Origin.Rule's
+// doc comment resolves: Rule is re-derived at every lowering hop rather than copied
+// verbatim, so it always names the IMMEDIATE producer, never the first rule in a
+// longer chain. Every case settles into a "webservice" component (t.lower performs
+// lowering only, not a full Transform, so no ComponentHandler registration is needed)
+// and asserts the SETTLED component's Origin().Rule.
+func TestLower_RuleIdentity(t *testing.T) {
+	tests := []struct {
+		name  string
+		rules []ComponentLoweringRule
+		seed  string // seed component type
+		want  string
+	}{
+		{
+			name:  "single hop, unversioned rule: position/type, no @version",
+			rules: []ComponentLoweringRule{ridStageRule{typ: "a1", nextType: "webservice"}},
+			seed:  "a1",
+			want:  "component/a1",
+		},
+		{
+			name:  "single hop, versioned rule: @version folded in",
+			rules: []ComponentLoweringRule{ridVersionedStageRule{ridStageRule{typ: "b1", nextType: "webservice"}, "v2"}},
+			seed:  "b1",
+			want:  "component/b1@v2",
+		},
+		{
+			name: "two hops (depth 2): settled Rule reflects hop 2, not hop 1's versioned identity",
+			rules: []ComponentLoweringRule{
+				ridVersionedStageRule{ridStageRule{typ: "c1", nextType: "c2"}, "v1"},
+				ridStageRule{typ: "c2", nextType: "webservice"},
+			},
+			seed: "c1",
+			want: "component/c2",
+		},
+		{
+			name: "three hops (depth 3): settled Rule reflects only the LAST hop",
+			rules: []ComponentLoweringRule{
+				ridStageRule{typ: "d1", nextType: "d2"},
+				ridVersionedStageRule{ridStageRule{typ: "d2", nextType: "d3"}, "v5"},
+				ridStageRule{typ: "d3", nextType: "webservice"},
+			},
+			seed: "d1",
+			want: "component/d3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTransformer(nil, nil)
+			for _, r := range tt.rules {
+				tr.RegisterComponentLowering(r)
+			}
+
+			app := &Application{
+				APIVersion: SupportedAPIVersion,
+				Kind:       terminalDocumentKind,
+				Metadata:   Metadata{Name: "myapp"},
+				Spec: ApplicationSpec{
+					Components: []Component{{Name: "shop", Type: tt.seed, Properties: map[string]any{}}},
+				},
+			}
+
+			docs, err := tr.lower(app, TransformContext{})
+			if err != nil {
+				t.Fatalf("lower: %v", err)
+			}
+			if len(docs) != 1 || len(docs[0].Spec.Components) != 1 {
+				t.Fatalf("expected exactly 1 document with 1 settled component, got %+v", docs)
+			}
+			settled := docs[0].Spec.Components[0]
+			if settled.Type != "webservice" {
+				t.Fatalf("settled component type = %q, want webservice (chain did not fully settle)", settled.Type)
+			}
+			origin, ok := settled.Origin()
+			if !ok {
+				t.Fatal("expected the settled component to carry a stamped origin")
+			}
+			if origin.Rule != tt.want {
+				t.Errorf("settled component Origin.Rule = %q, want %q", origin.Rule, tt.want)
+			}
+		})
+	}
+}
+
+// TestLower_RuleIdentity_UntouchedComponent_EmptyRule confirms a component whose type
+// matches no registered lowering rule keeps Origin.Rule empty: it was never itself the
+// output of a rule invocation, so there is no producer identity to record. Registers
+// an unrelated lowering rule so hasLoweringRules() is true and the fixpoint actually
+// runs the document through lowerDocumentBody — otherwise t.lower's empty-registry
+// fast path never stamps ANY origin at all (TestLower_EmptyRegistry_ReturnsSamePointer),
+// which would make this assertion vacuous rather than a genuine "touched but not
+// claimed" case.
+func TestLower_RuleIdentity_UntouchedComponent_EmptyRule(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(ridStageRule{typ: "unrelated-trigger", nextType: "webservice"})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{
+			Components: []Component{{Name: "shop", Type: "webservice", Properties: map[string]any{}}},
+		},
+	}
+
+	docs, err := tr.lower(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if len(docs) != 1 || len(docs[0].Spec.Components) != 1 {
+		t.Fatalf("expected exactly 1 document with 1 settled component, got %+v", docs)
+	}
+	settled := docs[0].Spec.Components[0]
+	if origin, ok := settled.Origin(); ok && origin.Rule != "" {
+		t.Errorf("untouched component Origin.Rule = %q (stamped=%v), want \"\" (never produced by a lowering rule)", origin.Rule, ok)
+	}
+}
+
 // --- F3: validateSettled must not drop a registered custom trait handler ---
 
 // TestLower_ValidateSettled_AcceptsHandlerRegisteredCustomTraitWithNoCapabilityDef is
