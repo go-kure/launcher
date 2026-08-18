@@ -37,6 +37,45 @@ type PropertySchemaProvider interface {
 	PropertySchema() map[string]PropertySchema
 }
 
+// ContractMetadata is optional registration metadata describing the contract a
+// handler or lowering rule implements: its family, version, the ClusterProfile
+// capability keys it requires, and deprecation status. It is discovery/
+// documentation surface only — the engine neither reads nor enforces any of these
+// fields (CapabilityAware.CapabilityRequired is what the engine actually enforces;
+// RequiredCapabilityKeys here is declarative, for a consumer to introspect).
+type ContractMetadata struct {
+	// Family is the contract family this handler/rule belongs to, e.g. "webservice".
+	Family string
+	// Version is the contract version within Family, e.g. "v1".
+	Version string
+	// RequiredCapabilityKeys lists the ClusterProfile capability keys ("<type>" or
+	// "<type>.<scope>", see buildCapabilityKey) an entity of this contract needs in
+	// the profile to produce correct output.
+	RequiredCapabilityKeys []string
+	// Deprecated marks the contract as deprecated.
+	Deprecated bool
+	// DeprecationMessage is guidance shown when Deprecated is true (e.g. pointing at
+	// a replacement contract). May be "" even when Deprecated is true.
+	DeprecationMessage string
+}
+
+// ContractDescriber is an optional interface implemented by component/trait handlers
+// and component/trait lowering rules that declare contract metadata: family,
+// version, required capability keys, and deprecation info. Queryable at
+// registration time alongside PropertySchema(), through
+// Transformer.HandlerContracts() — the HandlerSchemas-shaped accessor covering all
+// four registries a component/trait type can be claimed by (componentHandlers,
+// traitHandlers, componentLoweringRules, traitLoweringRules; see HandlerSchemas'
+// own comments for why the lowering-rule registries must be included, not just the
+// two dispatchable maps). Metadata rides the existing registration mechanism —
+// there is no separate contract registry. Consumers: schema publication, artifact
+// provenance in a downstream consumer, deprecation tooling. A lowering rule that
+// also implements ContractDescriber has its Version folded into the lowering-rule
+// identity Origin.Rule records (lowering.go), e.g. "trait/expose@v1".
+type ContractDescriber interface {
+	ContractMetadata() ContractMetadata
+}
+
 // SourceDeduplicatable is an optional interface for ApplicationConfig types
 // that generate source CRDs (e.g. HelmRepository). The runtime uses it to
 // suppress duplicate source generation when multiple components share the

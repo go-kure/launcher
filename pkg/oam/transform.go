@@ -225,6 +225,53 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 	return set
 }
 
+// HandlerContractSet is the set of ContractMetadata declared by registered
+// component/trait handlers and component/trait lowering rules, keyed by type name.
+// Mirrors HandlerSchemaSet's Components/Traits split for the identical reason: a
+// component and a trait that share a type name must not collide, and a consumer
+// needs to know which registry a contract came from.
+type HandlerContractSet struct {
+	Components map[string]ContractMetadata
+	Traits     map[string]ContractMetadata
+}
+
+// HandlerContracts returns the ContractMetadata of every registered component and
+// trait handler, and every component/trait lowering rule, that implements
+// ContractDescriber. Entries that do not implement it are omitted. The maps are
+// always non-nil. Covers all four registries HandlerSchemas covers, for the same
+// reason: a type reachable only through a lowering rule (e.g. "expose", claimed via
+// RegisterTraitLowering rather than RegisterBuiltinTrait) must still publish its
+// contract metadata here — otherwise a caller discovering contracts would see a gap
+// for exactly the types HandlerSchemas already had to stop omitting (see that
+// method's comments above).
+func (t *Transformer) HandlerContracts() HandlerContractSet {
+	set := HandlerContractSet{
+		Components: make(map[string]ContractMetadata),
+		Traits:     make(map[string]ContractMetadata),
+	}
+	for name, h := range t.componentHandlers {
+		if p, ok := h.(ContractDescriber); ok {
+			set.Components[name] = p.ContractMetadata()
+		}
+	}
+	for name, h := range t.traitHandlers {
+		if p, ok := h.(ContractDescriber); ok {
+			set.Traits[name] = p.ContractMetadata()
+		}
+	}
+	for name, r := range t.traitLoweringRules {
+		if p, ok := r.(ContractDescriber); ok {
+			set.Traits[name] = p.ContractMetadata()
+		}
+	}
+	for name, r := range t.componentLoweringRules {
+		if p, ok := r.(ContractDescriber); ok {
+			set.Components[name] = p.ContractMetadata()
+		}
+	}
+	return set
+}
+
 // RegisterPolicy registers a policy handler under the given type name.
 // Panics if typeName is already registered or if h.CanHandle(typeName) returns false.
 func (t *Transformer) RegisterPolicy(typeName string, h PolicyHandler) {
