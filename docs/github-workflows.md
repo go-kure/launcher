@@ -2,7 +2,7 @@
 
 This document provides an overview of all GitHub Actions workflows used in the launcher project.
 
-**Last Updated:** 2026-07-02
+**Last Updated:** 2026-08-18
 
 ---
 
@@ -14,7 +14,7 @@ This document provides an overview of all GitHub Actions workflows used in the l
 | [Deploy Docs](#deploy-docs-workflow) | `deploy-docs.yml` | push to main (docs paths), `workflow_dispatch` | Multi-version docs deployment |
 | [Release](#release-workflow) | `release.yml` | version tags | Release with GoReleaser, SBOM, docs deploy |
 | [Create Release](#create-release-workflow) | `release-create.yml` | `workflow_dispatch` | Pre-release test gate + tag creation |
-| [PR Review](#pr-review-workflow) | `pr-review.yml` | pull_request | Two-pass AI code review via claude-max-proxy |
+| [PR Review](#pr-review-workflow) | `pr-review.yml` | pull_request, merge_group | Two-pass AI code review via claude-max-proxy |
 | [Claude](#claude-workflow) | `claude.yml` | PR/issue/comment events | @claude AI assistant |
 
 The last five workflows are thin callers that delegate to reusable workflows in
@@ -292,6 +292,10 @@ subsequent workflows — `GITHUB_TOKEN` pushes do not trigger workflows).
 ### Triggers
 
 - Pull requests: `opened`, `synchronize`, `ready_for_review`, `reopened`
+- `merge_group` (no filters): required so this check reports on the merge queue's temporary
+  ref once it becomes a required status check — the queue payload has no `pull_request` field,
+  so the existing draft/fork skip below evaluates false and the job reports `skipped`/success
+  as a no-op
 - Skips draft PRs and fork PRs
 
 ### How It Works
