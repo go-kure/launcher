@@ -133,6 +133,25 @@ func TestParseEnv_ResourceFieldRef(t *testing.T) {
 	}
 }
 
+func TestParseEnv_ResourceFieldRef_UnprefixedSelector_Error(t *testing.T) {
+	// The downward API only understands "requests.<name>"/"limits.<name>"
+	// selectors; a bare resource name like "cpu" is not valid and builds a Pod
+	// admission rejects.
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"resourceFieldRef": map[string]any{"resource": "cpu"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for an unprefixed resourceFieldRef.resource selector")
+	}
+}
+
 func TestParseEnv_ResourceFieldRef_MissingResource(t *testing.T) {
 	props := map[string]any{
 		"env": []any{
@@ -209,6 +228,38 @@ func TestParseEnv_FileKeyRef(t *testing.T) {
 	}
 	if fkr.Optional == nil || !*fkr.Optional {
 		t.Errorf("expected Optional=true, got %+v", fkr)
+	}
+}
+
+func TestParseEnv_FileKeyRef_AbsolutePath_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"fileKeyRef": map[string]any{"volumeName": "envfiles", "path": "/etc/passwd", "key": "K"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for an absolute fileKeyRef.path")
+	}
+}
+
+func TestParseEnv_FileKeyRef_EscapingPath_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"fileKeyRef": map[string]any{"volumeName": "envfiles", "path": "../../etc/passwd", "key": "K"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for a fileKeyRef.path containing '..'")
 	}
 }
 
@@ -424,6 +475,38 @@ func TestParseResources_NumericValue_Accepted(t *testing.T) {
 	}
 }
 
+func TestParseResources_ExtendedResource_Fractional_Error(t *testing.T) {
+	// Unlike cpu/memory/storage/ephemeral-storage, extended resources (e.g.
+	// nvidia.com/gpu) can only be requested in whole-number amounts.
+	_, err := parseResources(map[string]any{
+		"requests": map[string]any{"nvidia.com/gpu": "0.5"},
+	})
+	if err == nil {
+		t.Fatal("expected error for a fractional extended-resource quantity")
+	}
+}
+
+func TestParseResources_ExtendedResource_WholeNumber_Accepted(t *testing.T) {
+	req, err := parseResources(map[string]any{
+		"requests": map[string]any{"nvidia.com/gpu": "2"},
+	})
+	if err != nil {
+		t.Fatalf("parseResources: %v", err)
+	}
+	if q, ok := req.Requests["nvidia.com/gpu"]; !ok || q.Cmp(resource.MustParse("2")) != 0 {
+		t.Errorf("nvidia.com/gpu = %v, ok=%v, want 2", q, ok)
+	}
+}
+
+func TestParseResources_NegativeQuantity_Error(t *testing.T) {
+	_, err := parseResources(map[string]any{
+		"requests": map[string]any{"cpu": "-100m"},
+	})
+	if err == nil {
+		t.Fatal("expected error for a negative resource quantity")
+	}
+}
+
 func TestParseResources_InvalidResourceName_Error(t *testing.T) {
 	// A malformed resource name key must be rejected at parse time — casting
 	// it straight to corev1.ResourceName without validation would build
@@ -527,6 +610,18 @@ func TestParseLifecycleHandler_Sleep_NegativeSeconds_Error(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for sleep handler with negative seconds")
+	}
+}
+
+func TestParseLifecycleHandler_Exec_NonStringElement_Error(t *testing.T) {
+	// A mixed-type command such as ["sleep", 5] must be rejected, not silently
+	// filtered down to ["sleep"] — that changes the authored hook and can make
+	// it hang or fail at runtime.
+	_, err := parseLifecycleHandler(map[string]any{
+		"exec": map[string]any{"command": []any{"sleep", float64(5)}},
+	})
+	if err == nil {
+		t.Fatal("expected error for a non-string exec command element")
 	}
 }
 
