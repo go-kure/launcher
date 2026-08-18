@@ -41,19 +41,23 @@ func (h *WebserviceHandler) Endpoints(component *oam.Component) ([]netpol.Endpoi
 // PropertySchema declares the webservice component's user-facing properties.
 func (h *WebserviceHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"image":          {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
-		"port":           {Type: oam.PropertyTypeInteger, Default: 80, Description: "Container port exposed by the Deployment and its ClusterIP Service."},
-		"replicas":       {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of Deployment pod replicas."},
-		"topologySpread": {Type: oam.PropertyTypeBoolean, Default: true, Description: "Whether default topology spread constraints are applied across nodes."},
-		"env":            schemaEnv(),
-		"resources":      schemaResources(),
-		"command":        schemaStringArray(),
-		"args":           schemaStringArray(),
-		"probes":         schemaProbes(),
-		"volumes":        schemaVolumes(),
-		"initContainers": schemaContainers(),
-		"sidecars":       schemaContainers(),
-		"affinity":       schemaAffinity(),
+		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
+		"port":            {Type: oam.PropertyTypeInteger, Default: 80, Description: "Container port exposed by the Deployment and its ClusterIP Service."},
+		"replicas":        {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of Deployment pod replicas."},
+		"topologySpread":  {Type: oam.PropertyTypeBoolean, Default: true, Description: "Whether default topology spread constraints are applied across nodes."},
+		"env":             schemaEnv(false),
+		"envFrom":         schemaEnvFrom(false),
+		"resources":       schemaResources(false),
+		"command":         schemaStringArray(),
+		"args":            schemaStringArray(),
+		"probes":          schemaProbes(),
+		"lifecycle":       schemaLifecycle(false),
+		"securityContext": schemaSecurityContext(false),
+		"workingDir":      schemaWorkingDir(false),
+		"volumes":         schemaVolumes(),
+		"initContainers":  schemaContainers(),
+		"sidecars":        schemaContainers(),
+		"affinity":        schemaAffinity(),
 	}
 }
 
@@ -88,6 +92,11 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 		return nil, err
 	}
 	config.Env = env
+	envFrom, err := parseEnvFrom(props)
+	if err != nil {
+		return nil, err
+	}
+	config.EnvFrom = envFrom
 	if resources, ok := props["resources"].(map[string]any); ok {
 		config.Resources = parseResources(resources)
 	}
@@ -99,6 +108,19 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 		return nil, errors.Wrap(err, "invalid probe configuration")
 	}
 	config.Probes = probes
+	lifecycle, err := parseLifecycle(props)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid lifecycle configuration")
+	}
+	config.Lifecycle = lifecycle
+	securityContext, err := parseSecurityContext(props)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid securityContext configuration")
+	}
+	config.SecurityContext = securityContext
+	if wd, ok := props["workingDir"].(string); ok && wd != "" {
+		config.WorkingDir = wd
+	}
 
 	parsed, err := parseVolumes(props)
 	if err != nil {
@@ -141,11 +163,15 @@ type WebserviceConfig struct {
 	Image                  string
 	Port                   int32
 	Replicas               int32
-	Env                    []EnvVar
+	Env                    []corev1.EnvVar
+	EnvFrom                []corev1.EnvFromSource
 	Resources              ResourceRequirements
 	Command                []string
 	Args                   []string
 	Probes                 ProbeConfig
+	Lifecycle              *corev1.Lifecycle
+	SecurityContext        *corev1.SecurityContext
+	WorkingDir             string
 	Volumes                []corev1.Volume
 	VolumeMounts           []corev1.VolumeMount
 	PVCs                   []PVCConfig
@@ -194,6 +220,9 @@ func (c *WebserviceConfig) ApplyPolicy(p oam.Policy) error {
 		return err
 	}
 	if err := enforceAllowedRegistries(c.Image, p.AllowedRegistries()); err != nil {
+		return err
+	}
+	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
 		return err
 	}
 	for _, pvc := range c.PVCs {
@@ -249,10 +278,22 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 		ContainerPort: c.Port,
 		Protocol:      corev1.ProtocolTCP,
 	})
-	for _, env := range buildEnvVars(c.Env) {
+	for _, env := range c.Env {
 		kubernetes.AddContainerEnv(container, env)
 	}
+	for _, ef := range c.EnvFrom {
+		kubernetes.AddContainerEnvFrom(container, ef)
+	}
 	applyProbes(container, c.Probes)
+	if c.WorkingDir != "" {
+		kubernetes.SetContainerWorkingDir(container, c.WorkingDir)
+	}
+	if c.Lifecycle != nil {
+		kubernetes.SetContainerLifecycle(container, c.Lifecycle)
+	}
+	if c.SecurityContext != nil {
+		kubernetes.SetContainerSecurityContext(container, *c.SecurityContext)
+	}
 	for _, m := range c.VolumeMounts {
 		kubernetes.AddContainerVolumeMount(container, m)
 	}

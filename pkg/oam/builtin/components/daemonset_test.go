@@ -373,3 +373,78 @@ func TestDaemonsetHandler_ServicePortName_IsHttp(t *testing.T) {
 		}
 	}
 }
+
+func TestDaemonsetHandler_WithSharedPodFields(t *testing.T) {
+	h := &components.DaemonsetHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "agent",
+		Type: "daemonset",
+		Properties: map[string]any{
+			"image":      "ghcr.io/org/agent:v1.0.0",
+			"workingDir": "/agent",
+			"envFrom": []any{
+				map[string]any{"configMapRef": map[string]any{"name": "agent-cfg"}},
+			},
+			"lifecycle": map[string]any{
+				"postStart": map[string]any{
+					"httpGet": map[string]any{"path": "/started", "port": 8080},
+				},
+			},
+			"securityContext": map[string]any{
+				"privileged": true,
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+
+	app := stack.NewApplication("agent", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if ds, ok := (*obj).(*appsv1.DaemonSet); ok {
+			c := ds.Spec.Template.Spec.Containers[0]
+			if c.WorkingDir != "/agent" {
+				t.Errorf("expected workingDir, got %q", c.WorkingDir)
+			}
+			if len(c.EnvFrom) != 1 {
+				t.Errorf("expected 1 envFrom entry, got %d", len(c.EnvFrom))
+			}
+			if c.Lifecycle == nil || c.Lifecycle.PostStart == nil || c.Lifecycle.PostStart.HTTPGet == nil {
+				t.Error("expected postStart.httpGet lifecycle hook")
+			}
+			if c.SecurityContext == nil || c.SecurityContext.Privileged == nil || !*c.SecurityContext.Privileged {
+				t.Error("expected privileged=true")
+			}
+			return
+		}
+	}
+	t.Error("DaemonSet not found in output")
+}
+
+func TestDaemonsetConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
+	h := &components.DaemonsetHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "agent",
+		Type: "daemonset",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/agent:v1.0.0",
+			"securityContext": map[string]any{
+				"privileged": true,
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
+		t.Error("expected error when privileged=true and policy disallows it")
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
+		t.Errorf("expected no error when policy allows privileged, got %v", err)
+	}
+}

@@ -23,16 +23,20 @@ func (h *DaemonsetHandler) CanHandle(componentType string) bool {
 // PropertySchema declares the daemonset component's user-facing properties.
 func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"image":          {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
-		"port":           {Type: oam.PropertyTypeInteger, Description: "Container port to expose; when set, a ClusterIP Service is generated."},
-		"env":            schemaEnv(),
-		"resources":      schemaResources(),
-		"command":        schemaStringArray(),
-		"args":           schemaStringArray(),
-		"probes":         schemaProbes(),
-		"tolerations":    schemaTolerations(),
-		"volumes":        schemaVolumes(),
-		"initContainers": schemaContainers(),
+		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
+		"port":            {Type: oam.PropertyTypeInteger, Description: "Container port to expose; when set, a ClusterIP Service is generated."},
+		"env":             schemaEnv(false),
+		"envFrom":         schemaEnvFrom(false),
+		"resources":       schemaResources(false),
+		"command":         schemaStringArray(),
+		"args":            schemaStringArray(),
+		"probes":          schemaProbes(),
+		"lifecycle":       schemaLifecycle(false),
+		"securityContext": schemaSecurityContext(false),
+		"workingDir":      schemaWorkingDir(false),
+		"tolerations":     schemaTolerations(),
+		"volumes":         schemaVolumes(),
+		"initContainers":  schemaContainers(),
 	}
 }
 
@@ -59,6 +63,11 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, err
 	}
 	config.Env = env
+	envFrom, err := parseEnvFrom(props)
+	if err != nil {
+		return nil, err
+	}
+	config.EnvFrom = envFrom
 	if resources, ok := props["resources"].(map[string]any); ok {
 		config.Resources = parseResources(resources)
 	}
@@ -70,6 +79,19 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, errors.Wrap(err, "invalid probe configuration")
 	}
 	config.Probes = probes
+	lifecycle, err := parseLifecycle(props)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid lifecycle configuration")
+	}
+	config.Lifecycle = lifecycle
+	securityContext, err := parseSecurityContext(props)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid securityContext configuration")
+	}
+	config.SecurityContext = securityContext
+	if workingDir, ok := props["workingDir"].(string); ok {
+		config.WorkingDir = workingDir
+	}
 
 	tolerations, err := parseTolerations(props)
 	if err != nil {
@@ -103,11 +125,15 @@ type DaemonsetConfig struct {
 	Namespace         string
 	Image             string
 	Port              int32 // when > 0, generates a ClusterIP Service exposing this port
-	Env               []EnvVar
+	Env               []corev1.EnvVar
+	EnvFrom           []corev1.EnvFromSource
 	Resources         ResourceRequirements
 	Command           []string
 	Args              []string
 	Probes            ProbeConfig
+	Lifecycle         *corev1.Lifecycle
+	SecurityContext   *corev1.SecurityContext
+	WorkingDir        string
 	Tolerations       []corev1.Toleration
 	Volumes           []corev1.Volume
 	VolumeMounts      []corev1.VolumeMount
@@ -153,6 +179,9 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 		return err
 	}
 	if err := enforceAllowedRegistries(c.Image, p.AllowedRegistries()); err != nil {
+		return err
+	}
+	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
 		return err
 	}
 	for _, pvc := range c.PVCs {
@@ -222,8 +251,11 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 		return nil, errors.Wrap(err, "resource requirements")
 	}
 	kubernetes.SetContainerResources(container, rr)
-	for _, env := range buildEnvVars(c.Env) {
+	for _, env := range c.Env {
 		kubernetes.AddContainerEnv(container, env)
+	}
+	for _, ef := range c.EnvFrom {
+		kubernetes.AddContainerEnvFrom(container, ef)
 	}
 	applyProbes(container, c.Probes)
 	if c.Port > 0 {
@@ -232,6 +264,15 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 			ContainerPort: c.Port,
 			Protocol:      corev1.ProtocolTCP,
 		})
+	}
+	if c.WorkingDir != "" {
+		kubernetes.SetContainerWorkingDir(container, c.WorkingDir)
+	}
+	if c.Lifecycle != nil {
+		kubernetes.SetContainerLifecycle(container, c.Lifecycle)
+	}
+	if c.SecurityContext != nil {
+		kubernetes.SetContainerSecurityContext(container, *c.SecurityContext)
 	}
 	for _, m := range c.VolumeMounts {
 		kubernetes.AddContainerVolumeMount(container, m)

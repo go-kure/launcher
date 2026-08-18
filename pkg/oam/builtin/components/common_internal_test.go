@@ -1,0 +1,685 @@
+package components
+
+import (
+	"math"
+	"testing"
+
+	"github.com/go-kure/launcher/pkg/oam"
+)
+
+func TestToInt64(t *testing.T) {
+	cases := []struct {
+		name   string
+		in     any
+		want   int64
+		wantOk bool
+	}{
+		{"float64 whole", float64(42), 42, true},
+		{"float64 fractional", 1.5, 0, false},
+		{"float64 NaN", math.NaN(), 0, false},
+		{"float64 large but valid", float64(1e15), 1e15, true},
+		{"float64 overflow", float64(1e20), 0, false},
+		{"float64 at MaxInt64 (rounds to 2^63, out of int64 range)", float64(math.MaxInt64), 0, false},
+		{"int", int(7), 7, true},
+		{"int32", int32(7), 7, true},
+		{"int64", int64(7), 7, true},
+		{"string rejected", "7", 0, false},
+		{"nil rejected", nil, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := toInt64(tc.in)
+			if ok != tc.wantOk {
+				t.Fatalf("toInt64(%v) ok = %v, want %v", tc.in, ok, tc.wantOk)
+			}
+			if ok && got != tc.want {
+				t.Errorf("toInt64(%v) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseEnv_FieldRef(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "POD_NAME",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "metadata.name"},
+				},
+			},
+		},
+	}
+	vars, err := parseEnv(props)
+	if err != nil {
+		t.Fatalf("parseEnv: %v", err)
+	}
+	if len(vars) != 1 || vars[0].ValueFrom == nil || vars[0].ValueFrom.FieldRef == nil {
+		t.Fatalf("unexpected result: %+v", vars)
+	}
+	if vars[0].ValueFrom.FieldRef.FieldPath != "metadata.name" {
+		t.Errorf("fieldPath = %q, want metadata.name", vars[0].ValueFrom.FieldRef.FieldPath)
+	}
+}
+
+func TestParseEnv_ResourceFieldRef(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "CPU_LIMIT",
+				"valueFrom": map[string]any{
+					"resourceFieldRef": map[string]any{
+						"resource": "limits.cpu",
+						"divisor":  "1m",
+					},
+				},
+			},
+		},
+	}
+	vars, err := parseEnv(props)
+	if err != nil {
+		t.Fatalf("parseEnv: %v", err)
+	}
+	if len(vars) != 1 || vars[0].ValueFrom == nil || vars[0].ValueFrom.ResourceFieldRef == nil {
+		t.Fatalf("unexpected result: %+v", vars)
+	}
+	if vars[0].ValueFrom.ResourceFieldRef.Resource != "limits.cpu" {
+		t.Errorf("resource = %q, want limits.cpu", vars[0].ValueFrom.ResourceFieldRef.Resource)
+	}
+}
+
+func TestParseEnv_ResourceFieldRef_MissingResource(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"resourceFieldRef": map[string]any{"divisor": "1m"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for missing resourceFieldRef.resource")
+	}
+}
+
+func TestParseEnv_ValueFrom_MutuallyExclusive(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"fieldRef":     map[string]any{"fieldPath": "metadata.name"},
+					"secretKeyRef": map[string]any{"name": "s", "key": "k"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for multiple valueFrom sources")
+	}
+}
+
+func TestParseEnv_ValueFrom_Empty(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name":      "BAD",
+				"valueFrom": map[string]any{},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for empty valueFrom")
+	}
+}
+
+func TestParseEnvFrom_ConfigMapAndSecret(t *testing.T) {
+	props := map[string]any{
+		"envFrom": []any{
+			map[string]any{
+				"configMapRef": map[string]any{"name": "cfg"},
+				"prefix":       "CFG_",
+			},
+			map[string]any{
+				"secretRef": map[string]any{"name": "sec", "optional": true},
+			},
+		},
+	}
+	out, err := parseEnvFrom(props)
+	if err != nil {
+		t.Fatalf("parseEnvFrom: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(out))
+	}
+	if out[0].ConfigMapRef == nil || out[0].ConfigMapRef.Name != "cfg" || out[0].Prefix != "CFG_" {
+		t.Errorf("unexpected entry 0: %+v", out[0])
+	}
+	if out[1].SecretRef == nil || out[1].SecretRef.Name != "sec" || out[1].SecretRef.Optional == nil || !*out[1].SecretRef.Optional {
+		t.Errorf("unexpected entry 1: %+v", out[1])
+	}
+}
+
+func TestParseEnvFrom_Absent(t *testing.T) {
+	out, err := parseEnvFrom(map[string]any{})
+	if err != nil || out != nil {
+		t.Fatalf("expected nil,nil for absent envFrom, got %v, %v", out, err)
+	}
+}
+
+func TestParseEnvFrom_BothRefs_Error(t *testing.T) {
+	props := map[string]any{
+		"envFrom": []any{
+			map[string]any{
+				"configMapRef": map[string]any{"name": "a"},
+				"secretRef":    map[string]any{"name": "b"},
+			},
+		},
+	}
+	if _, err := parseEnvFrom(props); err == nil {
+		t.Fatal("expected error when both configMapRef and secretRef are set")
+	}
+}
+
+func TestParseEnvFrom_NeitherRef_Error(t *testing.T) {
+	props := map[string]any{
+		"envFrom": []any{
+			map[string]any{"prefix": "X_"},
+		},
+	}
+	if _, err := parseEnvFrom(props); err == nil {
+		t.Fatal("expected error when neither configMapRef nor secretRef is set")
+	}
+}
+
+func TestParseEnvFrom_MissingName_Error(t *testing.T) {
+	props := map[string]any{
+		"envFrom": []any{
+			map[string]any{"configMapRef": map[string]any{}},
+		},
+	}
+	if _, err := parseEnvFrom(props); err == nil {
+		t.Fatal("expected error for missing configMapRef.name")
+	}
+}
+
+func TestParseResources_ExtraNamedResources(t *testing.T) {
+	resources := map[string]any{
+		"requests": map[string]any{
+			"cpu":               "100m",
+			"nvidia.com/gpu":    "1",
+			"ephemeral-storage": "1Gi",
+		},
+		"limits": map[string]any{
+			"nvidia.com/gpu": "1",
+		},
+	}
+	rr := parseResources(resources)
+	if rr.CPURequest != "100m" {
+		t.Errorf("CPURequest = %q, want 100m", rr.CPURequest)
+	}
+	if rr.ExtraRequests["nvidia.com/gpu"] != "1" || rr.ExtraRequests["ephemeral-storage"] != "1Gi" {
+		t.Errorf("unexpected ExtraRequests: %+v", rr.ExtraRequests)
+	}
+	if rr.ExtraLimits["nvidia.com/gpu"] != "1" {
+		t.Errorf("unexpected ExtraLimits: %+v", rr.ExtraLimits)
+	}
+}
+
+func TestParseResources_NoExtra_NilMaps(t *testing.T) {
+	rr := parseResources(map[string]any{
+		"requests": map[string]any{"cpu": "100m"},
+	})
+	if rr.ExtraRequests != nil {
+		t.Errorf("expected nil ExtraRequests when no extra names present, got %+v", rr.ExtraRequests)
+	}
+}
+
+func TestParseLifecycle_Absent(t *testing.T) {
+	lc, err := parseLifecycle(map[string]any{})
+	if err != nil || lc != nil {
+		t.Fatalf("expected nil,nil for absent lifecycle, got %v, %v", lc, err)
+	}
+}
+
+func TestParseLifecycle_PostStartAndPreStop(t *testing.T) {
+	props := map[string]any{
+		"lifecycle": map[string]any{
+			"postStart": map[string]any{
+				"exec": map[string]any{"command": []any{"/bin/sh", "-c", "echo start"}},
+			},
+			"preStop": map[string]any{
+				"sleep": map[string]any{"seconds": 5},
+			},
+		},
+	}
+	lc, err := parseLifecycle(props)
+	if err != nil {
+		t.Fatalf("parseLifecycle: %v", err)
+	}
+	if lc.PostStart == nil || lc.PostStart.Exec == nil {
+		t.Error("expected postStart.exec")
+	}
+	if lc.PreStop == nil || lc.PreStop.Sleep == nil || lc.PreStop.Sleep.Seconds != 5 {
+		t.Error("expected preStop.sleep.seconds=5")
+	}
+}
+
+func TestParseLifecycleHandler_HTTPGet(t *testing.T) {
+	h, err := parseLifecycleHandler(map[string]any{
+		"httpGet": map[string]any{"path": "/started", "port": 8080, "host": "127.0.0.1"},
+	})
+	if err != nil {
+		t.Fatalf("parseLifecycleHandler: %v", err)
+	}
+	if h.HTTPGet == nil || h.HTTPGet.Host != "127.0.0.1" {
+		t.Errorf("unexpected handler: %+v", h.HTTPGet)
+	}
+}
+
+func TestParseLifecycleHandler_TCPSocket_Unsupported(t *testing.T) {
+	h, err := parseLifecycleHandler(map[string]any{
+		"tcpSocket": map[string]any{"port": 8080},
+	})
+	if err == nil {
+		t.Fatalf("expected error for unsupported tcpSocket handler, got handler=%+v", h)
+	}
+}
+
+func TestParseLifecycleHandler_MultipleHandlers_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"httpGet": map[string]any{"path": "/x", "port": 80},
+		"exec":    map[string]any{"command": []any{"/bin/true"}},
+	})
+	if err == nil {
+		t.Fatal("expected error for multiple handlers")
+	}
+}
+
+func TestParseLifecycleHandler_Sleep_MissingSeconds_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"sleep": map[string]any{},
+	})
+	if err == nil {
+		t.Fatal("expected error for sleep handler missing seconds")
+	}
+}
+
+func TestParseLifecycleHandler_Exec_EmptyCommand_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"exec": map[string]any{"command": []any{}},
+	})
+	if err == nil {
+		t.Fatal("expected error for exec handler with empty command")
+	}
+}
+
+func TestParseLifecycleHandler_NoHandler_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{})
+	if err == nil {
+		t.Fatal("expected error when no handler is specified")
+	}
+}
+
+func TestParseSecurityContext_Absent(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{})
+	if err != nil || sc != nil {
+		t.Fatalf("expected nil,nil for absent securityContext, got %v, %v", sc, err)
+	}
+}
+
+func TestParseSecurityContext_FullFidelity(t *testing.T) {
+	props := map[string]any{
+		"securityContext": map[string]any{
+			"runAsUser":                int64(1000),
+			"runAsGroup":               int64(2000),
+			"runAsNonRoot":             true,
+			"readOnlyRootFilesystem":   true,
+			"allowPrivilegeEscalation": false,
+			"privileged":               false,
+			"capabilities": map[string]any{
+				"add":  []any{"NET_BIND_SERVICE"},
+				"drop": []any{"ALL"},
+			},
+			"seccompProfile": map[string]any{"type": "RuntimeDefault"},
+		},
+	}
+	sc, err := parseSecurityContext(props)
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc.RunAsUser == nil || *sc.RunAsUser != 1000 {
+		t.Errorf("RunAsUser = %v, want 1000", sc.RunAsUser)
+	}
+	if sc.RunAsGroup == nil || *sc.RunAsGroup != 2000 {
+		t.Errorf("RunAsGroup = %v, want 2000", sc.RunAsGroup)
+	}
+	if len(sc.Capabilities.Add) != 1 || len(sc.Capabilities.Drop) != 1 {
+		t.Errorf("unexpected capabilities: %+v", sc.Capabilities)
+	}
+	if sc.SeccompProfile == nil || string(sc.SeccompProfile.Type) != "RuntimeDefault" {
+		t.Errorf("unexpected seccompProfile: %+v", sc.SeccompProfile)
+	}
+}
+
+func TestParseSecurityContext_SeccompLocalhost_RequiresProfile(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seccompProfile": map[string]any{"type": "Localhost"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for Localhost seccompProfile missing localhostProfile")
+	}
+}
+
+func TestParseSecurityContext_SeccompLocalhost_WithProfile(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seccompProfile": map[string]any{
+				"type":             "Localhost",
+				"localhostProfile": "profiles/my-profile.json",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc.SeccompProfile == nil || sc.SeccompProfile.LocalhostProfile == nil || *sc.SeccompProfile.LocalhostProfile != "profiles/my-profile.json" {
+		t.Errorf("unexpected seccompProfile: %+v", sc.SeccompProfile)
+	}
+}
+
+func TestParseSecurityContext_SeccompInvalidType_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seccompProfile": map[string]any{"type": "Bogus"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid seccompProfile type")
+	}
+}
+
+func TestParseSecurityContext_EmptyObject_ReturnsNil(t *testing.T) {
+	// An authored but empty securityContext{} sets no recognized field, so `set`
+	// stays false and the function must return nil rather than an all-zero-value
+	// non-nil SecurityContext (which would make the container opt out of the
+	// security-context trait's nil-only backfill for no reason).
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc != nil {
+		t.Errorf("expected nil for empty securityContext object, got %+v", sc)
+	}
+}
+
+func TestParseProbe_HTTPGetHost(t *testing.T) {
+	probe, err := parseProbe(map[string]any{
+		"httpGet": map[string]any{
+			"path": "/healthz",
+			"port": 8080,
+			"host": "10.0.0.1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseProbe: %v", err)
+	}
+	if probe.HTTPGet.Host != "10.0.0.1" {
+		t.Errorf("Host = %q, want 10.0.0.1", probe.HTTPGet.Host)
+	}
+}
+
+func TestParseProbe_TerminationGracePeriodSeconds(t *testing.T) {
+	probe, err := parseProbe(map[string]any{
+		"exec":                          map[string]any{"command": []any{"/bin/true"}},
+		"terminationGracePeriodSeconds": 30,
+	})
+	if err != nil {
+		t.Fatalf("parseProbe: %v", err)
+	}
+	if probe.TerminationGracePeriodSeconds == nil || *probe.TerminationGracePeriodSeconds != 30 {
+		t.Errorf("TerminationGracePeriodSeconds = %v, want 30", probe.TerminationGracePeriodSeconds)
+	}
+}
+
+func TestParseProbe_TerminationGracePeriodSeconds_Negative_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec":                          map[string]any{"command": []any{"/bin/true"}},
+		"terminationGracePeriodSeconds": -5,
+	})
+	if err == nil {
+		t.Fatal("expected error for negative terminationGracePeriodSeconds")
+	}
+}
+
+// --- round-1 codex-review regression tests (launcher#278) ------------------
+
+func TestParseEnv_ValueAndValueFrom_MutuallyExclusive(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name":  "BAD",
+				"value": "literal",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "metadata.name"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error when both value and valueFrom are set")
+	}
+}
+
+func TestParseEnv_EmptyValueWithValueFrom_Allowed(t *testing.T) {
+	// Mirrors corev1.EnvVar.ValueFrom's own doc comment ("Cannot be used if value
+	// is not empty"): an explicitly-authored empty value alongside valueFrom is
+	// NOT rejected, matching upstream Kubernetes API validation exactly.
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name":  "OK",
+				"value": "",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "metadata.name"},
+				},
+			},
+		},
+	}
+	vars, err := parseEnv(props)
+	if err != nil {
+		t.Fatalf("parseEnv: %v", err)
+	}
+	if len(vars) != 1 || vars[0].ValueFrom == nil {
+		t.Fatalf("unexpected result: %+v", vars)
+	}
+}
+
+func TestParseEnv_SecretKeyRef_Optional(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "SECRET_VAL",
+				"valueFrom": map[string]any{
+					"secretKeyRef": map[string]any{"name": "s", "key": "k", "optional": true},
+				},
+			},
+		},
+	}
+	vars, err := parseEnv(props)
+	if err != nil {
+		t.Fatalf("parseEnv: %v", err)
+	}
+	if len(vars) != 1 || vars[0].ValueFrom == nil || vars[0].ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("unexpected result: %+v", vars)
+	}
+	if vars[0].ValueFrom.SecretKeyRef.Optional == nil || !*vars[0].ValueFrom.SecretKeyRef.Optional {
+		t.Errorf("expected SecretKeyRef.Optional=true, got %+v", vars[0].ValueFrom.SecretKeyRef)
+	}
+}
+
+func TestParseEnv_ConfigMapKeyRef_Optional(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "CONFIG_VAL",
+				"valueFrom": map[string]any{
+					"configMapKeyRef": map[string]any{"name": "c", "key": "k", "optional": false},
+				},
+			},
+		},
+	}
+	vars, err := parseEnv(props)
+	if err != nil {
+		t.Fatalf("parseEnv: %v", err)
+	}
+	if len(vars) != 1 || vars[0].ValueFrom == nil || vars[0].ValueFrom.ConfigMapKeyRef == nil {
+		t.Fatalf("unexpected result: %+v", vars)
+	}
+	if vars[0].ValueFrom.ConfigMapKeyRef.Optional == nil || *vars[0].ValueFrom.ConfigMapKeyRef.Optional {
+		t.Errorf("expected ConfigMapKeyRef.Optional=false (explicitly set), got %+v", vars[0].ValueFrom.ConfigMapKeyRef)
+	}
+}
+
+func TestParseLifecycleHandler_HTTPGet_Headers(t *testing.T) {
+	h, err := parseLifecycleHandler(map[string]any{
+		"httpGet": map[string]any{
+			"path": "/started",
+			"port": 8080,
+			"httpHeaders": []any{
+				map[string]any{"name": "X-Auth", "value": "secret"},
+				map[string]any{"name": "X-Empty"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseLifecycleHandler: %v", err)
+	}
+	if h.HTTPGet == nil || len(h.HTTPGet.HTTPHeaders) != 2 {
+		t.Fatalf("unexpected handler: %+v", h.HTTPGet)
+	}
+	if h.HTTPGet.HTTPHeaders[0].Name != "X-Auth" || h.HTTPGet.HTTPHeaders[0].Value != "secret" {
+		t.Errorf("unexpected header 0: %+v", h.HTTPGet.HTTPHeaders[0])
+	}
+	if h.HTTPGet.HTTPHeaders[1].Name != "X-Empty" || h.HTTPGet.HTTPHeaders[1].Value != "" {
+		t.Errorf("unexpected header 1: %+v", h.HTTPGet.HTTPHeaders[1])
+	}
+}
+
+func TestParseSecurityContext_SELinuxOptions(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seLinuxOptions": map[string]any{
+				"user":  "u",
+				"role":  "r",
+				"type":  "t",
+				"level": "l",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc == nil || sc.SELinuxOptions == nil {
+		t.Fatalf("expected SELinuxOptions to be set, got %+v", sc)
+	}
+	if sc.SELinuxOptions.User != "u" || sc.SELinuxOptions.Role != "r" || sc.SELinuxOptions.Type != "t" || sc.SELinuxOptions.Level != "l" {
+		t.Errorf("unexpected seLinuxOptions: %+v", sc.SELinuxOptions)
+	}
+}
+
+func TestParseSecurityContext_SELinuxOptions_EmptyObject_NoOp(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seLinuxOptions": map[string]any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc != nil {
+		t.Errorf("expected nil securityContext for an all-empty seLinuxOptions object, got %+v", sc)
+	}
+}
+
+func TestParseSecurityContext_AppArmorProfile_RuntimeDefault(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"appArmorProfile": map[string]any{"type": "RuntimeDefault"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc == nil || sc.AppArmorProfile == nil || string(sc.AppArmorProfile.Type) != "RuntimeDefault" {
+		t.Errorf("unexpected appArmorProfile: %+v", sc)
+	}
+}
+
+func TestParseSecurityContext_AppArmorProfile_Localhost_RequiresProfile(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"appArmorProfile": map[string]any{"type": "Localhost"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for Localhost appArmorProfile missing localhostProfile")
+	}
+}
+
+func TestParseSecurityContext_AppArmorProfile_Localhost_WithProfile(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"appArmorProfile": map[string]any{
+				"type":             "Localhost",
+				"localhostProfile": "profiles/my-profile.json",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc == nil || sc.AppArmorProfile == nil || sc.AppArmorProfile.LocalhostProfile == nil || *sc.AppArmorProfile.LocalhostProfile != "profiles/my-profile.json" {
+		t.Errorf("unexpected appArmorProfile: %+v", sc)
+	}
+}
+
+func TestParseSecurityContext_AppArmorProfile_InvalidType_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"appArmorProfile": map[string]any{"type": "Bogus"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid appArmorProfile type")
+	}
+}
+
+func TestSchemaFragments_ReservedParam(t *testing.T) {
+	cases := []struct {
+		name   string
+		schema oam.PropertySchema
+	}{
+		{"schemaEnv", schemaEnv(true)},
+		{"schemaEnvFrom", schemaEnvFrom(true)},
+		{"schemaResources", schemaResources(true)},
+		{"schemaLifecycle", schemaLifecycle(true)},
+		{"schemaWorkingDir", schemaWorkingDir(true)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !tc.schema.PlatformReserved {
+				t.Errorf("%s(true) did not set PlatformReserved", tc.name)
+			}
+		})
+	}
+	if schemaEnv(false).PlatformReserved {
+		t.Error("schemaEnv(false) unexpectedly set PlatformReserved")
+	}
+}

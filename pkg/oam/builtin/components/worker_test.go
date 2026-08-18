@@ -113,3 +113,75 @@ func TestWorkerConfig_ApplyPolicy_NilPolicy(t *testing.T) {
 		t.Errorf("nil policy should be a no-op, got: %v", err)
 	}
 }
+
+func TestWorkerHandler_WithSharedPodFields(t *testing.T) {
+	h := &components.WorkerHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "worker",
+		Properties: map[string]any{
+			"image":      "ghcr.io/org/app:v1",
+			"workingDir": "/app",
+			"envFrom": []any{
+				map[string]any{"configMapRef": map[string]any{"name": "cfg"}},
+			},
+			"lifecycle": map[string]any{
+				"preStop": map[string]any{
+					"exec": map[string]any{"command": []any{"/bin/sh", "-c", "sleep 1"}},
+				},
+			},
+			"securityContext": map[string]any{
+				"readOnlyRootFilesystem": true,
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if dep, ok := (*obj).(*appsv1.Deployment); ok {
+			c := dep.Spec.Template.Spec.Containers[0]
+			if c.WorkingDir != "/app" {
+				t.Errorf("expected workingDir=/app, got %q", c.WorkingDir)
+			}
+			if len(c.EnvFrom) != 1 {
+				t.Errorf("expected 1 envFrom entry, got %d", len(c.EnvFrom))
+			}
+			if c.Lifecycle == nil || c.Lifecycle.PreStop == nil {
+				t.Error("expected preStop lifecycle hook")
+			}
+			if c.SecurityContext == nil || c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem {
+				t.Error("expected readOnlyRootFilesystem=true")
+			}
+			return
+		}
+	}
+	t.Error("Deployment not found in output")
+}
+
+func TestWorkerConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
+	h := &components.WorkerHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "app",
+		Type: "worker",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"securityContext": map[string]any{
+				"privileged": true,
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
+		t.Error("expected error when privileged=true and policy disallows it")
+	}
+}

@@ -76,6 +76,42 @@ func toInt32(v any) (int32, bool) {
 	}
 }
 
+// toInt64 mirrors toInt32 for the *int64 fields corev1 uses for UID/GID
+// (SecurityContext.RunAsUser/RunAsGroup) and probe termination grace period
+// (Probe.TerminationGracePeriodSeconds). Kept local to this package with the
+// same (value, bool) shape as toInt32 rather than reusing
+// traits.toInt64(v)(int64,error): that sibling package's callers want a
+// descriptive error to wrap; this file's existing "present but wrong type is
+// silently skipped" convention (see every `if v, n := m[key]; n { if i, ok :=
+// toInt32(v); ok { ... } }` in parseProbe) is what every other optional
+// numeric field here already follows.
+func toInt64(v any) (int64, bool) {
+	switch n := v.(type) {
+	case float64:
+		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) {
+			return 0, false
+		}
+		// float64 cannot exactly represent math.MaxInt64 (nearest representable
+		// value rounds up to 2^63), so the upper bound must be a strict "<"
+		// against the rounded constant — the same overflow-safe comparison
+		// idiom Go's standard library uses for float-to-int64 conversions.
+		// math.MinInt64 (-2^63) IS exactly representable, so "<" is correct
+		// there too (n == MinInt64 must still be accepted).
+		if n < math.MinInt64 || n >= math.MaxInt64 {
+			return 0, false
+		}
+		return int64(n), true
+	case int:
+		return int64(n), true
+	case int32:
+		return int64(n), true
+	case int64:
+		return n, true
+	default:
+		return 0, false
+	}
+}
+
 func stringMap(m map[string]any) map[string]string {
 	result := make(map[string]string, len(m))
 	for k, v := range m {
@@ -88,31 +124,23 @@ func stringMap(m map[string]any) map[string]string {
 
 // --- Data types ---
 
-// EnvVar represents an environment variable.
-type EnvVar struct {
-	Name      string
-	Value     string
-	ValueFrom *EnvVarSource
-}
-
-// EnvVarSource represents a source for the value of an EnvVar.
-type EnvVarSource struct {
-	SecretKeyRef    *KeySelector
-	ConfigMapKeyRef *KeySelector
-}
-
-// KeySelector selects a key from a ConfigMap or Secret.
-type KeySelector struct {
-	Name string
-	Key  string
-}
-
-// ResourceRequirements represents CPU/memory requirements.
+// ResourceRequirements represents CPU/memory requirements plus any additional
+// named resource quantities (e.g. ephemeral-storage, nvidia.com/gpu,
+// hugepages-2Mi). CPU/memory keep dedicated fields because policy defaulting
+// and enforcement (ApplyPolicy in each kind file; enforceMaxResource,
+// enforce.go) is keyed to them specifically. Every other resource name
+// round-trips through Extra{Requests,Limits} unmodified — no policy hook
+// exists for arbitrary resource names today (see R1-R7 ledger, launcher#278).
 type ResourceRequirements struct {
 	CPURequest    string
 	CPULimit      string
 	MemoryRequest string
 	MemoryLimit   string
+	// ExtraRequests/ExtraLimits hold resource names other than cpu/memory,
+	// keyed by the raw resource name as authored (e.g. "ephemeral-storage",
+	// "nvidia.com/gpu").
+	ExtraRequests map[string]string
+	ExtraLimits   map[string]string
 }
 
 // explicitResourceFlags tracks which resource fields were explicitly set in OAM.
@@ -136,7 +164,7 @@ type InitContainerConfig struct {
 	Image        string
 	Command      []string
 	Args         []string
-	Env          []EnvVar
+	Env          []corev1.EnvVar
 	Resources    ResourceRequirements
 	VolumeMounts []corev1.VolumeMount
 }
@@ -147,7 +175,7 @@ type SidecarContainerConfig struct {
 	Image        string
 	Command      []string
 	Args         []string
-	Env          []EnvVar
+	Env          []corev1.EnvVar
 	Resources    ResourceRequirements
 	VolumeMounts []corev1.VolumeMount
 	Ports        []corev1.ContainerPort
@@ -186,8 +214,8 @@ type TolerationConfig struct {
 
 // --- Parsers ---
 
-func parseEnv(props map[string]any) ([]EnvVar, error) {
-	var envVars []EnvVar
+func parseEnv(props map[string]any) ([]corev1.EnvVar, error) {
+	var envVars []corev1.EnvVar
 	if envList, ok := props["env"].([]any); ok {
 		for _, e := range envList {
 			if envMap, ok := e.(map[string]any); ok {
@@ -195,15 +223,23 @@ func parseEnv(props map[string]any) ([]EnvVar, error) {
 				if envName == "" {
 					continue
 				}
-				ev := EnvVar{Name: envName}
-				if vf, ok := envMap["valueFrom"].(map[string]any); ok {
+				value, _ := envMap["value"].(string)
+				vf, hasValueFrom := envMap["valueFrom"].(map[string]any)
+				// Mirrors corev1.EnvVar.ValueFrom's own doc comment: "Cannot be
+				// used if value is not empty." An empty `value: ""` alongside
+				// valueFrom is not rejected (matches upstream validation exactly).
+				if value != "" && hasValueFrom {
+					return nil, errors.Errorf("env %q: value and valueFrom are mutually exclusive (valueFrom cannot be used if value is not empty)", envName)
+				}
+				ev := corev1.EnvVar{Name: envName}
+				if hasValueFrom {
 					src, err := parseEnvVarSource(vf)
 					if err != nil {
 						return nil, errors.Errorf("env %q: %w", envName, err)
 					}
 					ev.ValueFrom = src
 				} else {
-					ev.Value, _ = envMap["value"].(string)
+					ev.Value = value
 				}
 				envVars = append(envVars, ev)
 			}
@@ -212,32 +248,157 @@ func parseEnv(props map[string]any) ([]EnvVar, error) {
 	return envVars, nil
 }
 
-func parseEnvVarSource(vf map[string]any) (*EnvVarSource, error) {
-	src := &EnvVarSource{}
+// parseEnvVarSource parses a `valueFrom` object into the real corev1.EnvVarSource
+// (same structural pattern as ProbeConfig holding *corev1.Probe directly): exactly
+// one of secretKeyRef, configMapKeyRef, fieldRef, or resourceFieldRef.
+func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
 	_, hasSecret := vf["secretKeyRef"].(map[string]any)
 	_, hasConfigMap := vf["configMapKeyRef"].(map[string]any)
-	if hasSecret && hasConfigMap {
-		return nil, errors.Errorf("valueFrom: secretKeyRef and configMapKeyRef are mutually exclusive")
+	_, hasFieldRef := vf["fieldRef"].(map[string]any)
+	_, hasResourceFieldRef := vf["resourceFieldRef"].(map[string]any)
+	count := 0
+	for _, present := range []bool{hasSecret, hasConfigMap, hasFieldRef, hasResourceFieldRef} {
+		if present {
+			count++
+		}
 	}
+	if count > 1 {
+		return nil, errors.Errorf("valueFrom: secretKeyRef, configMapKeyRef, fieldRef, and resourceFieldRef are mutually exclusive")
+	}
+
+	src := &corev1.EnvVarSource{}
 	if skr, ok := vf["secretKeyRef"].(map[string]any); ok {
-		src.SecretKeyRef = parseKeySelector(skr)
+		if n, key, ok := parseNameKey(skr); ok {
+			sel := &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: n}, Key: key}
+			if opt, ok := skr["optional"].(bool); ok {
+				sel.Optional = &opt
+			}
+			src.SecretKeyRef = sel
+		}
 	}
 	if cmr, ok := vf["configMapKeyRef"].(map[string]any); ok {
-		src.ConfigMapKeyRef = parseKeySelector(cmr)
+		if n, key, ok := parseNameKey(cmr); ok {
+			sel := &corev1.ConfigMapKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: n}, Key: key}
+			if opt, ok := cmr["optional"].(bool); ok {
+				sel.Optional = &opt
+			}
+			src.ConfigMapKeyRef = sel
+		}
 	}
-	if src.SecretKeyRef == nil && src.ConfigMapKeyRef == nil {
-		return nil, errors.Errorf("invalid valueFrom: must contain a valid secretKeyRef or configMapKeyRef with both name and key")
+	if fr, ok := vf["fieldRef"].(map[string]any); ok {
+		ref, err := parseFieldRef(fr)
+		if err != nil {
+			return nil, err
+		}
+		src.FieldRef = ref
+	}
+	if rfr, ok := vf["resourceFieldRef"].(map[string]any); ok {
+		ref, err := parseResourceFieldRef(rfr)
+		if err != nil {
+			return nil, err
+		}
+		src.ResourceFieldRef = ref
+	}
+	if src.SecretKeyRef == nil && src.ConfigMapKeyRef == nil && src.FieldRef == nil && src.ResourceFieldRef == nil {
+		return nil, errors.Errorf("invalid valueFrom: must contain a valid secretKeyRef, configMapKeyRef, fieldRef, or resourceFieldRef")
 	}
 	return src, nil
 }
 
-func parseKeySelector(m map[string]any) *KeySelector {
+// parseNameKey extracts the "name"/"key" string pair shared by secretKeyRef and
+// configMapKeyRef. Returns ok=false when either is missing or empty (preserving
+// the pre-existing behavior: no "optional" support, both fields required).
+func parseNameKey(m map[string]any) (name, key string, ok bool) {
 	n, _ := m["name"].(string)
-	key, _ := m["key"].(string)
-	if n == "" || key == "" {
-		return nil
+	k, _ := m["key"].(string)
+	if n == "" || k == "" {
+		return "", "", false
 	}
-	return &KeySelector{Name: n, Key: key}
+	return n, k, true
+}
+
+// parseFieldRef parses a `valueFrom.fieldRef` object into a corev1.ObjectFieldSelector.
+func parseFieldRef(m map[string]any) (*corev1.ObjectFieldSelector, error) {
+	path, _ := m["fieldPath"].(string)
+	if path == "" {
+		return nil, errors.Errorf("fieldRef: fieldPath is required")
+	}
+	ref := &corev1.ObjectFieldSelector{FieldPath: path}
+	if av, ok := m["apiVersion"].(string); ok && av != "" {
+		ref.APIVersion = av
+	}
+	return ref, nil
+}
+
+// parseResourceFieldRef parses a `valueFrom.resourceFieldRef` object into a
+// corev1.ResourceFieldSelector.
+func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, error) {
+	res, _ := m["resource"].(string)
+	if res == "" {
+		return nil, errors.Errorf("resourceFieldRef: resource is required")
+	}
+	ref := &corev1.ResourceFieldSelector{Resource: res}
+	if cn, ok := m["containerName"].(string); ok && cn != "" {
+		ref.ContainerName = cn
+	}
+	if dv, ok := m["divisor"].(string); ok && dv != "" {
+		qty, err := resource.ParseQuantity(dv)
+		if err != nil {
+			return nil, errors.Errorf("resourceFieldRef: invalid divisor %q: %w", dv, err)
+		}
+		ref.Divisor = qty
+	}
+	return ref, nil
+}
+
+// parseEnvFrom parses the `envFrom` array: bulk-import a ConfigMap's or Secret's
+// keys as environment variables, mirroring corev1.EnvFromSource directly (same
+// structural pattern as parseEnvVarSource above).
+func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
+	raw, ok := props["envFrom"].([]any)
+	if !ok {
+		return nil, nil
+	}
+	var out []corev1.EnvFromSource
+	for i, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("envFrom[%d]: expected object, got %T", i, item)
+		}
+		_, hasConfigMap := m["configMapRef"].(map[string]any)
+		_, hasSecret := m["secretRef"].(map[string]any)
+		if hasConfigMap == hasSecret {
+			return nil, errors.Errorf("envFrom[%d]: must specify exactly one of configMapRef or secretRef", i)
+		}
+		src := corev1.EnvFromSource{}
+		if prefix, ok := m["prefix"].(string); ok {
+			src.Prefix = prefix
+		}
+		if cm, ok := m["configMapRef"].(map[string]any); ok {
+			name, _ := cm["name"].(string)
+			if name == "" {
+				return nil, errors.Errorf("envFrom[%d].configMapRef: name is required", i)
+			}
+			ref := &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: name}}
+			if opt, ok := cm["optional"].(bool); ok {
+				ref.Optional = &opt
+			}
+			src.ConfigMapRef = ref
+		}
+		if sec, ok := m["secretRef"].(map[string]any); ok {
+			name, _ := sec["name"].(string)
+			if name == "" {
+				return nil, errors.Errorf("envFrom[%d].secretRef: name is required", i)
+			}
+			ref := &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: name}}
+			if opt, ok := sec["optional"].(bool); ok {
+				ref.Optional = &opt
+			}
+			src.SecretRef = ref
+		}
+		out = append(out, src)
+	}
+	return out, nil
 }
 
 func parseResources(resources map[string]any) ResourceRequirements {
@@ -249,6 +410,7 @@ func parseResources(resources map[string]any) ResourceRequirements {
 		if memory, ok := requests["memory"].(string); ok {
 			req.MemoryRequest = memory
 		}
+		req.ExtraRequests = parseExtraResourceNames(requests)
 	}
 	if limits, ok := resources["limits"].(map[string]any); ok {
 		if cpu, ok := limits["cpu"].(string); ok {
@@ -257,8 +419,32 @@ func parseResources(resources map[string]any) ResourceRequirements {
 		if memory, ok := limits["memory"].(string); ok {
 			req.MemoryLimit = memory
 		}
+		req.ExtraLimits = parseExtraResourceNames(limits)
 	}
 	return req
+}
+
+// parseExtraResourceNames returns every string-valued entry of m other than the
+// well-known "cpu"/"memory" keys — e.g. "ephemeral-storage" or an extended
+// resource such as "nvidia.com/gpu". Returns nil when there are none, so a caller
+// comparing against a zero-value ResourceRequirements{} still sees an empty map
+// as absent (matching how CPURequest=="" already means "not set").
+func parseExtraResourceNames(m map[string]any) map[string]string {
+	var extra map[string]string
+	for k, v := range m {
+		if k == "cpu" || k == "memory" {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		if extra == nil {
+			extra = make(map[string]string)
+		}
+		extra[k] = s
+	}
+	return extra
 }
 
 func resourceExplicitFlags(props map[string]any) explicitResourceFlags {
@@ -372,6 +558,9 @@ func parseProbe(m map[string]any) (*corev1.Probe, error) {
 			handler.Path = path
 		}
 		handler.Port = port
+		if host, ok := httpGet["host"].(string); ok && host != "" {
+			handler.Host = host
+		}
 		if scheme, ok := httpGet["scheme"].(string); ok {
 			s := corev1.URIScheme(strings.ToUpper(scheme))
 			if s != corev1.URISchemeHTTP && s != corev1.URISchemeHTTPS {
@@ -458,6 +647,14 @@ func parseProbe(m map[string]any) (*corev1.Probe, error) {
 			probe.FailureThreshold = i
 		}
 	}
+	if v, n := m["terminationGracePeriodSeconds"]; n {
+		if i, ok := toInt64(v); ok {
+			if i < 0 {
+				return nil, errors.Errorf("terminationGracePeriodSeconds: must not be negative, got %d", i)
+			}
+			probe.TerminationGracePeriodSeconds = &i
+		}
+	}
 
 	return probe, nil
 }
@@ -487,6 +684,262 @@ func validateNumericPort(port int64) (intstr.IntOrString, error) {
 		return intstr.IntOrString{}, errors.Errorf("port %d out of valid range 1-65535", port)
 	}
 	return intstr.FromInt32(int32(port)), nil
+}
+
+// parseLifecycle parses the `lifecycle` object: postStart/preStop hooks run by
+// the kubelet around the container's own lifecycle (not to be confused with the
+// probes above, which are periodic health checks).
+func parseLifecycle(props map[string]any) (*corev1.Lifecycle, error) {
+	raw, ok := props["lifecycle"].(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	lc := &corev1.Lifecycle{}
+	if ps, ok := raw["postStart"].(map[string]any); ok {
+		h, err := parseLifecycleHandler(ps)
+		if err != nil {
+			return nil, errors.Errorf("lifecycle.postStart: %w", err)
+		}
+		lc.PostStart = h
+	}
+	if ps, ok := raw["preStop"].(map[string]any); ok {
+		h, err := parseLifecycleHandler(ps)
+		if err != nil {
+			return nil, errors.Errorf("lifecycle.preStop: %w", err)
+		}
+		lc.PreStop = h
+	}
+	if lc.PostStart == nil && lc.PreStop == nil {
+		return nil, nil
+	}
+	return lc, nil
+}
+
+// parseLifecycleHandler parses one postStart/preStop handler: exec, httpGet, or
+// sleep. tcpSocket is deliberately not supported here — corev1 documents it as
+// "NOT supported as a LifecycleHandler ... lifecycle hooks will fail at runtime
+// when it is specified", kept on the Go type only for backward compatibility, so
+// accepting it would let an OAM author write a handler that always fails.
+func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
+	count := 0
+	for _, key := range []string{"httpGet", "exec", "sleep"} {
+		if _, ok := m[key].(map[string]any); ok {
+			count++
+		}
+	}
+	if count > 1 {
+		return nil, errors.Errorf("must specify exactly one of httpGet, exec, or sleep")
+	}
+
+	handler := &corev1.LifecycleHandler{}
+	if httpGet, ok := m["httpGet"].(map[string]any); ok {
+		port, err := parsePort(httpGet["port"])
+		if err != nil {
+			return nil, errors.Errorf("httpGet handler: %w", err)
+		}
+		h := &corev1.HTTPGetAction{Port: port}
+		if path, ok := httpGet["path"].(string); ok {
+			h.Path = path
+		}
+		if host, ok := httpGet["host"].(string); ok && host != "" {
+			h.Host = host
+		}
+		if scheme, ok := httpGet["scheme"].(string); ok {
+			s := corev1.URIScheme(strings.ToUpper(scheme))
+			if s != corev1.URISchemeHTTP && s != corev1.URISchemeHTTPS {
+				return nil, errors.Errorf("httpGet handler: unsupported scheme %q, must be HTTP or HTTPS", scheme)
+			}
+			h.Scheme = s
+		}
+		if headers, ok := httpGet["httpHeaders"].([]any); ok {
+			for _, hdr := range headers {
+				if hm, ok := hdr.(map[string]any); ok {
+					hname, _ := hm["name"].(string)
+					value, _ := hm["value"].(string)
+					if hname != "" {
+						h.HTTPHeaders = append(h.HTTPHeaders, corev1.HTTPHeader{Name: hname, Value: value})
+					}
+				}
+			}
+		}
+		handler.HTTPGet = h
+		return handler, nil
+	}
+	if execCmd, ok := m["exec"].(map[string]any); ok {
+		var command []string
+		if cmd, ok := execCmd["command"].([]any); ok {
+			for _, c := range cmd {
+				if s, ok := c.(string); ok {
+					command = append(command, s)
+				}
+			}
+		}
+		if len(command) == 0 {
+			return nil, errors.Errorf("exec handler: command must not be empty")
+		}
+		handler.Exec = &corev1.ExecAction{Command: command}
+		return handler, nil
+	}
+	if sleep, ok := m["sleep"].(map[string]any); ok {
+		seconds, ok := toInt64(sleep["seconds"])
+		if !ok {
+			return nil, errors.Errorf("sleep handler: seconds is required and must be an integer")
+		}
+		handler.Sleep = &corev1.SleepAction{Seconds: seconds}
+		return handler, nil
+	}
+	return nil, errors.Errorf("must specify exactly one of httpGet, exec, or sleep")
+}
+
+// parseSecurityContext parses the `securityContext` object into a real
+// corev1.SecurityContext (same structural pattern as ProbeConfig/parseEnvVarSource
+// above): runAsUser/runAsGroup/runAsNonRoot, readOnlyRootFilesystem,
+// allowPrivilegeEscalation, privileged, capabilities add/drop, seccompProfile,
+// seLinuxOptions, and appArmorProfile. Deliberately NOT covered (round 2
+// candidate if needed — see launcher#278 ledger): windowsOptions (this project
+// targets Linux-only podman/distroless images per meta/CLAUDE.md — Windows
+// containers are out of scope entirely) and procMount (an alpha, rarely-used
+// field gated behind the ProcMountType feature, with no precedent elsewhere in
+// this package, matching this file's existing practice of keeping deeply-nested
+// K8s-adjacent shapes shallow — see schema.go's file header).
+//
+// IMPORTANT interaction: setting ANY field here makes the built container's
+// SecurityContext non-nil. A downstream runtime's admission-time
+// securityContextMutator (see traits/security_context.go's doc comment) only
+// backfills its restricted defaults when SecurityContext is nil — so authoring
+// one field here (e.g. just runAsUser) silently opts the container out of that
+// backfill for every OTHER SecurityContext field too, unlike the `security-context`
+// trait, which always fills a complete PSA-consistent context. Callers that want
+// a safe partial override should use the `security-context` trait instead; this
+// property is for raw, full-fidelity authoring. If the `security-context` trait is
+// also applied to the same component, the trait's Generate()-time pass runs after
+// this component's own Generate() and unconditionally overwrites
+// container.SecurityContext (traits/security_context.go:190) — the trait always
+// wins when both are used together.
+func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error) {
+	raw, ok := props["securityContext"].(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	sc := &corev1.SecurityContext{}
+	set := false
+
+	if v, n := raw["runAsUser"]; n {
+		if i, ok := toInt64(v); ok {
+			sc.RunAsUser = &i
+			set = true
+		}
+	}
+	if v, n := raw["runAsGroup"]; n {
+		if i, ok := toInt64(v); ok {
+			sc.RunAsGroup = &i
+			set = true
+		}
+	}
+	if v, ok := raw["runAsNonRoot"].(bool); ok {
+		sc.RunAsNonRoot = &v
+		set = true
+	}
+	if v, ok := raw["readOnlyRootFilesystem"].(bool); ok {
+		sc.ReadOnlyRootFilesystem = &v
+		set = true
+	}
+	if v, ok := raw["allowPrivilegeEscalation"].(bool); ok {
+		sc.AllowPrivilegeEscalation = &v
+		set = true
+	}
+	if v, ok := raw["privileged"].(bool); ok {
+		sc.Privileged = &v
+		set = true
+	}
+	if capsRaw, ok := raw["capabilities"].(map[string]any); ok {
+		caps := &corev1.Capabilities{}
+		if add, ok := capsRaw["add"].([]any); ok {
+			for _, a := range add {
+				if s, ok := a.(string); ok && s != "" {
+					caps.Add = append(caps.Add, corev1.Capability(s))
+				}
+			}
+		}
+		if drop, ok := capsRaw["drop"].([]any); ok {
+			for _, d := range drop {
+				if s, ok := d.(string); ok && s != "" {
+					caps.Drop = append(caps.Drop, corev1.Capability(s))
+				}
+			}
+		}
+		if len(caps.Add) > 0 || len(caps.Drop) > 0 {
+			sc.Capabilities = caps
+			set = true
+		}
+	}
+	if spRaw, ok := raw["seccompProfile"].(map[string]any); ok {
+		typ, _ := spRaw["type"].(string)
+		switch corev1.SeccompProfileType(typ) {
+		case corev1.SeccompProfileTypeRuntimeDefault, corev1.SeccompProfileTypeUnconfined:
+			sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileType(typ)}
+			set = true
+		case corev1.SeccompProfileTypeLocalhost:
+			profile, ok := spRaw["localhostProfile"].(string)
+			if !ok || profile == "" {
+				return nil, errors.Errorf("securityContext.seccompProfile: localhostProfile is required when type is %q", typ)
+			}
+			sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeLocalhost, LocalhostProfile: &profile}
+			set = true
+		case "":
+			// no type specified: nothing to apply.
+		default:
+			return nil, errors.Errorf("securityContext.seccompProfile: invalid type %q, must be Localhost, RuntimeDefault, or Unconfined", typ)
+		}
+	}
+	if seRaw, ok := raw["seLinuxOptions"].(map[string]any); ok {
+		se := &corev1.SELinuxOptions{}
+		anySet := false
+		if v, ok := seRaw["user"].(string); ok && v != "" {
+			se.User = v
+			anySet = true
+		}
+		if v, ok := seRaw["role"].(string); ok && v != "" {
+			se.Role = v
+			anySet = true
+		}
+		if v, ok := seRaw["type"].(string); ok && v != "" {
+			se.Type = v
+			anySet = true
+		}
+		if v, ok := seRaw["level"].(string); ok && v != "" {
+			se.Level = v
+			anySet = true
+		}
+		if anySet {
+			sc.SELinuxOptions = se
+			set = true
+		}
+	}
+	if apRaw, ok := raw["appArmorProfile"].(map[string]any); ok {
+		typ, _ := apRaw["type"].(string)
+		switch corev1.AppArmorProfileType(typ) {
+		case corev1.AppArmorProfileTypeRuntimeDefault, corev1.AppArmorProfileTypeUnconfined:
+			sc.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileType(typ)}
+			set = true
+		case corev1.AppArmorProfileTypeLocalhost:
+			profile, ok := apRaw["localhostProfile"].(string)
+			if !ok || profile == "" {
+				return nil, errors.Errorf("securityContext.appArmorProfile: localhostProfile is required when type is %q", typ)
+			}
+			sc.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeLocalhost, LocalhostProfile: &profile}
+			set = true
+		case "":
+			// no type specified: nothing to apply.
+		default:
+			return nil, errors.Errorf("securityContext.appArmorProfile: invalid type %q, must be Localhost, RuntimeDefault, or Unconfined", typ)
+		}
+	}
+
+	if !set {
+		return nil, nil
+	}
+	return sc, nil
 }
 
 func parseVolumes(props map[string]any) (ParsedVolumes, error) {
@@ -891,32 +1344,6 @@ func parseHistoryLimit(field string, v any) (int32, error) {
 
 // --- Builders ---
 
-func buildEnvVars(envs []EnvVar) []corev1.EnvVar {
-	var result []corev1.EnvVar
-	for _, env := range envs {
-		k8sEnv := corev1.EnvVar{Name: env.Name}
-		if env.ValueFrom != nil {
-			k8sEnv.ValueFrom = &corev1.EnvVarSource{}
-			if env.ValueFrom.SecretKeyRef != nil {
-				k8sEnv.ValueFrom.SecretKeyRef = &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: env.ValueFrom.SecretKeyRef.Name},
-					Key:                  env.ValueFrom.SecretKeyRef.Key,
-				}
-			}
-			if env.ValueFrom.ConfigMapKeyRef != nil {
-				k8sEnv.ValueFrom.ConfigMapKeyRef = &corev1.ConfigMapKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: env.ValueFrom.ConfigMapKeyRef.Name},
-					Key:                  env.ValueFrom.ConfigMapKeyRef.Key,
-				}
-			}
-		} else {
-			k8sEnv.Value = env.Value
-		}
-		result = append(result, k8sEnv)
-	}
-	return result
-}
-
 func buildResourceRequirements(res ResourceRequirements) (corev1.ResourceRequirements, error) {
 	rr := kubernetes.CreateResourceRequirements()
 
@@ -946,6 +1373,19 @@ func buildResourceRequirements(res ResourceRequirements) (corev1.ResourceRequire
 	}
 	if err := kubernetes.SetResourceLimitMemory(rr, memoryLimit); err != nil {
 		return corev1.ResourceRequirements{}, err
+	}
+
+	// Extra named resources (e.g. ephemeral-storage, nvidia.com/gpu) have no
+	// default and no policy hook — see ResourceRequirements' doc comment.
+	for name, value := range res.ExtraRequests {
+		if err := kubernetes.SetResourceRequest(rr, corev1.ResourceName(name), value); err != nil {
+			return corev1.ResourceRequirements{}, errors.Errorf("resource request %q: %w", name, err)
+		}
+	}
+	for name, value := range res.ExtraLimits {
+		if err := kubernetes.SetResourceLimit(rr, corev1.ResourceName(name), value); err != nil {
+			return corev1.ResourceRequirements{}, errors.Errorf("resource limit %q: %w", name, err)
+		}
 	}
 
 	return *rr, nil
@@ -1041,7 +1481,7 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 		return nil, errors.Errorf("init container %q resources: %w", ic.Name, err)
 	}
 	kubernetes.SetContainerResources(container, rr)
-	for _, env := range buildEnvVars(ic.Env) {
+	for _, env := range ic.Env {
 		kubernetes.AddContainerEnv(container, env)
 	}
 	for _, m := range ic.VolumeMounts {
@@ -1060,7 +1500,7 @@ func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error)
 	for _, p := range sc.Ports {
 		kubernetes.AddContainerPort(container, p)
 	}
-	for _, env := range buildEnvVars(sc.Env) {
+	for _, env := range sc.Env {
 		kubernetes.AddContainerEnv(container, env)
 	}
 	for _, m := range sc.VolumeMounts {

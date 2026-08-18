@@ -89,7 +89,7 @@ func (h *PostgresqlHandler) PropertySchema() map[string]oam.PropertySchema {
 		"storageSize":       {Type: oam.PropertyTypeString, Default: "1Gi", Description: "Persistent storage size requested for each instance."},
 		"replicas":          {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of PostgreSQL instances in the cluster."},
 		"imageName":         {Type: oam.PropertyTypeString, Description: "Override for the container image (defaults to the CloudNativePG image for the version)."},
-		"resources":         schemaResources(),
+		"resources":         schemaResources(false),
 		"backup":            openObj("Barman object-store backup settings (retentionPolicy, destinationPath, endpointURL, secretName)."),
 		"monitoring":        openObj("Monitoring settings, including the PodMonitor toggle and custom queries."),
 		"pooler":            openObj("PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters)."),
