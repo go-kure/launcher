@@ -43,11 +43,15 @@ doc comment ("cannot be used if value is not empty"); `valueFrom` is one of
 `secretKeyRef`, `configMapKeyRef` (both accept `optional`), `fieldRef`
 (`apiVersion` must be `v1` if authored — the only field-label conversion
 Kubernetes has ever shipped for the downward API; omitting it also defaults to
-`v1`), `resourceFieldRef`, `fileKeyRef` (`volumeName`/`path`/`key` required,
-`optional` accepted; corev1's `EnvFiles` feature) — mutually exclusive among
-themselves too), `envFrom` (bulk-import a ConfigMap's or Secret's keys, with
-`prefix` — any printable ASCII character except `=`, matching
-`corev1.EnvFromSource.Prefix`'s own field doc comment; only the final
+`v1`), `resourceFieldRef` (`resource` must start with `requests.` or
+`limits.` — e.g. `requests.cpu`, `limits.nvidia.com/gpu` — the only selector
+forms the downward API understands; a bare resource name is rejected),
+`fileKeyRef` (`volumeName`/`path`/`key` required, `optional` accepted;
+corev1's `EnvFiles` feature; `path` must be relative and must not contain a
+`..` backstep component, per this repo's own path-safety convention) —
+mutually exclusive among themselves too), `envFrom` (bulk-import a ConfigMap's
+or Secret's keys, with `prefix` — any printable ASCII character except `=`,
+matching `corev1.EnvFromSource.Prefix`'s own field doc comment; only the final
 prefix+key concatenation need be a valid env var name, not the prefix alone),
 `resources` — a `corev1.ResourceRequirements` projection: `requests`/`limits`
 accept `cpu`/`memory` (defaults 100m/128Mi) plus any other well-formed
@@ -55,14 +59,26 @@ resource name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map,
 each value authored as either a quantity string (`"500m"`, `"2Gi"`) or a bare
 YAML/JSON number (`1`, `0.5`) — both are valid `resource.Quantity` input
 (`Quantity.UnmarshalJSON` parses a bare numeric literal the same way it parses
-a quoted one) — parsed as `resource.Quantity` and round-tripped unmodified; no
-policy default/max hook exists for names other than cpu/memory today; `claims`
-(Dynamic Resource Allocation) is deliberately not covered — genuinely
-feature-gated in the pinned `k8s.io/api` version and meaningless without
-pod-level `PodSpec.ResourceClaims` wiring this schema doesn't have yet, see
-`parseResources`'s doc comment), `command`/`args`, `probes`
+a quoted one) — parsed as `resource.Quantity` and round-tripped unmodified.
+Every quantity must be non-negative; `cpu`/`memory`/`storage`/
+`ephemeral-storage` may be fractional, but any other (extended) resource name
+must be a whole number, matching Kubernetes' own extended-resource
+constraint. No policy default/max hook exists for names other than cpu/memory
+today; `claims` (Dynamic Resource Allocation) is deliberately not covered —
+genuinely feature-gated in the pinned `k8s.io/api` version and meaningless
+without pod-level `PodSpec.ResourceClaims` wiring this schema doesn't have
+yet, see `parseResources`'s doc comment), `command`/`args` (each element must
+be a string — **note:** unlike every other array field in this schema,
+`command`/`args` still silently drop a non-string element rather than
+rejecting it; `lifecycle.{postStart,preStop}.exec.command` below was fixed to
+reject, but the top-level `command`/`args` fix was deliberately left out of
+that change to keep it self-contained to `common.go`'s `parseLifecycleHandler`
+— touching `parseCommand`/`parseArgs` would ripple into all 7 call sites across
+every kind component), `probes`
 (httpGet/tcpSocket/exec/grpc), `lifecycle` (`postStart`/`preStop`:
-`exec`/`httpGet` (including `httpHeaders`)/`sleep` — `tcpSocket` is not
+`exec` (every `command` element must be a string; a non-string element is
+rejected, not silently dropped)/`httpGet` (including `httpHeaders`)/`sleep` —
+`tcpSocket` is not
 accepted, since corev1 documents it as broken for lifecycle hooks),
 `securityContext` (per-container: `runAsUser`/`runAsGroup`/`runAsNonRoot`,
 `readOnlyRootFilesystem`, `allowPrivilegeEscalation`, `privileged`,

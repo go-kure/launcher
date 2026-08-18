@@ -3,6 +3,7 @@ package components
 import (
 	"fmt"
 	"math"
+	gopath "path"
 	"slices"
 	"strconv"
 	"strings"
@@ -345,6 +346,17 @@ func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 	if volumeName == "" || path == "" || key == "" {
 		return nil, errors.Errorf("fileKeyRef: volumeName, path, and key are all required")
 	}
+	// path must stay relative to the referenced volume's mount point (per
+	// AGENTS.md's "reject paths that escape the working directory"): reject an
+	// absolute path or one containing a ".." backstep component.
+	if gopath.IsAbs(path) {
+		return nil, errors.Errorf("fileKeyRef: path must be relative, got %q", path)
+	}
+	for _, elem := range strings.Split(path, "/") {
+		if elem == ".." {
+			return nil, errors.Errorf("fileKeyRef: path must not contain \"..\", got %q", path)
+		}
+	}
 	sel := &corev1.FileKeySelector{VolumeName: volumeName, Path: path, Key: key}
 	if opt, ok := m["optional"].(bool); ok {
 		sel.Optional = &opt
@@ -390,6 +402,13 @@ func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, err
 	res, _ := m["resource"].(string)
 	if res == "" {
 		return nil, errors.Errorf("resourceFieldRef: resource is required")
+	}
+	// The downward API only understands a resource selector of the form
+	// "requests.<name>" or "limits.<name>" (e.g. "requests.cpu",
+	// "limits.nvidia.com/gpu") — a bare resource name like "cpu" is not a
+	// valid selector and is rejected by admission.
+	if !strings.HasPrefix(res, "requests.") && !strings.HasPrefix(res, "limits.") {
+		return nil, errors.Errorf("resourceFieldRef: resource must start with \"requests.\" or \"limits.\", got %q", res)
 	}
 	ref := &corev1.ResourceFieldSelector{Resource: res}
 	if cn, ok := m["containerName"].(string); ok && cn != "" {
@@ -517,12 +536,32 @@ func parseResourceList(m map[string]any) (corev1.ResourceList, error) {
 		if err != nil {
 			return nil, errors.Errorf("%s: invalid quantity %q: %w", k, s, err)
 		}
+		if q.Sign() < 0 {
+			return nil, errors.Errorf("%s: quantity must not be negative, got %q", k, s)
+		}
+		if !isFractionalResourceName(corev1.ResourceName(k)) && q.MilliValue()%1000 != 0 {
+			return nil, errors.Errorf("%s: extended resource quantities must be whole numbers, got %q", k, s)
+		}
 		if rl == nil {
 			rl = corev1.ResourceList{}
 		}
 		rl[corev1.ResourceName(k)] = q
 	}
 	return rl, nil
+}
+
+// isFractionalResourceName reports whether name is one of the four standard
+// resource names Kubernetes allows a fractional quantity for. Every other
+// resource name — an extended resource such as "nvidia.com/gpu", or a
+// hugepages- entry, which is always a whole multiple of its page size — must
+// be a whole number.
+func isFractionalResourceName(name corev1.ResourceName) bool {
+	switch name {
+	case corev1.ResourceCPU, corev1.ResourceMemory, corev1.ResourceStorage, corev1.ResourceEphemeralStorage:
+		return true
+	default:
+		return false
+	}
 }
 
 func parseCommand(props map[string]any) []string {
@@ -843,10 +882,12 @@ func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
 	if execCmd, ok := m["exec"].(map[string]any); ok {
 		var command []string
 		if cmd, ok := execCmd["command"].([]any); ok {
-			for _, c := range cmd {
-				if s, ok := c.(string); ok {
-					command = append(command, s)
+			for i, c := range cmd {
+				s, ok := c.(string)
+				if !ok {
+					return nil, errors.Errorf("exec handler: command[%d] must be a string, got %T", i, c)
 				}
+				command = append(command, s)
 			}
 		}
 		if len(command) == 0 {
