@@ -632,6 +632,14 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 		if !ok {
 			return nil, errors.Errorf("envFrom[%d]: expected object, got %T", i, item)
 		}
+		// A typo (e.g. `prefx` for `prefix`) matches none of the three
+		// recognized keys and would otherwise be silently ignored — on the
+		// prefix case specifically, that leaves the expected APP_* variables
+		// unset and can collide with existing ones instead of surfacing the
+		// mistake.
+		if err := rejectUnknownKeys(m, []string{"prefix", "configMapRef", "secretRef"}, fmt.Sprintf("envFrom[%d]", i)); err != nil {
+			return nil, err
+		}
 		cm, hasConfigMap, err := parseObjectField(m, "configMapRef", fmt.Sprintf("envFrom[%d].configMapRef", i))
 		if err != nil {
 			return nil, err
@@ -1031,6 +1039,18 @@ func countProbeHandlers(m map[string]any) (int, error) {
 // other field's validation is identical across probe kinds. namedPortsAllowed
 // and matchName are documented on parseProbes above.
 func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName string) (*corev1.Probe, error) {
+	// A typo (e.g. `failureTreshold` for `failureThreshold`) matches none of
+	// the recognized keys below — parseProbes' own outer check only
+	// validates the readiness/liveness/startup kind name, not the fields
+	// inside each probe object, so this parser would otherwise silently use
+	// Kubernetes' default instead of the authored value.
+	if err := rejectUnknownKeys(m, []string{
+		"httpGet", "tcpSocket", "exec", "grpc",
+		"initialDelaySeconds", "periodSeconds", "timeoutSeconds",
+		"successThreshold", "failureThreshold", "terminationGracePeriodSeconds",
+	}, "probe"); err != nil {
+		return nil, err
+	}
 	handlerCount, err := countProbeHandlers(m)
 	if err != nil {
 		return nil, err
@@ -1043,6 +1063,12 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName
 	hasHandler := false
 
 	if httpGet, ok := m["httpGet"].(map[string]any); ok {
+		// A typo inside httpGet (e.g. `pth` for `path`) is otherwise silently
+		// ignored — the outer probe-level check above only validates this
+		// object's own key (`httpGet` itself), not the keys nested inside it.
+		if err := rejectUnknownKeys(httpGet, []string{"port", "path", "host", "scheme", "httpHeaders"}, "httpGet"); err != nil {
+			return nil, err
+		}
 		port, err := parsePort(httpGet["port"], namedPortsAllowed, matchName)
 		if err != nil {
 			return nil, errors.Errorf("httpGet handler: %w", err)
@@ -1423,6 +1449,14 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 
 	handler := &corev1.LifecycleHandler{}
 	if httpGet, ok := m["httpGet"].(map[string]any); ok {
+		// A typo inside httpGet (e.g. `pth` for `path`) is otherwise silently
+		// ignored — the outer lifecycle-key check only validates postStart/
+		// preStop, not the keys nested inside this handler's own httpGet
+		// object — so Kubernetes falls back to defaulting the field (e.g.
+		// path defaults to "/") instead of the authored value.
+		if err := rejectUnknownKeys(httpGet, []string{"port", "path", "host", "scheme", "httpHeaders"}, "httpGet"); err != nil {
+			return nil, err
+		}
 		port, err := parsePort(httpGet["port"], namedPortsAllowed, matchName)
 		if err != nil {
 			return nil, errors.Errorf("httpGet handler: %w", err)
@@ -1653,6 +1687,17 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 	if !ok {
 		return nil, errors.Errorf("securityContext: must be an object, got %T", v)
 	}
+	// A typo (e.g. `readOnlyRootFileSystem` for `readOnlyRootFilesystem`)
+	// matches none of the recognized keys below and would otherwise be
+	// silently ignored, leaving `set` false and discarding the whole
+	// hardening request instead of rejecting the unrecognized key.
+	if err := rejectUnknownKeys(raw, []string{
+		"runAsUser", "runAsGroup", "runAsNonRoot", "readOnlyRootFilesystem",
+		"allowPrivilegeEscalation", "privileged", "capabilities", "seccompProfile",
+		"seLinuxOptions", "appArmorProfile", "procMount",
+	}, "securityContext"); err != nil {
+		return nil, err
+	}
 	sc := &corev1.SecurityContext{}
 	set := false
 
@@ -1708,6 +1753,15 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 	} else if v != nil {
 		sc.Privileged = v
 		set = true
+	}
+	// AllowPrivilegeEscalation is unconditionally true once a container runs
+	// privileged (corev1.SecurityContext.AllowPrivilegeEscalation's own field
+	// doc: "AllowPrivilegeEscalation is true always when the container is:
+	// 1) run as Privileged"), so an authored false alongside privileged: true
+	// claims a hardening guarantee the runtime cannot honor — same
+	// contradiction shape as the runAsUser/runAsNonRoot check above.
+	if sc.Privileged != nil && *sc.Privileged && sc.AllowPrivilegeEscalation != nil && !*sc.AllowPrivilegeEscalation {
+		return nil, errors.Errorf("securityContext: allowPrivilegeEscalation must not be false when privileged is true")
 	}
 	if v, present := raw["capabilities"]; present {
 		capsRaw, ok := v.(map[string]any)
@@ -1885,11 +1939,25 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 		if !ok {
 			return result, errors.Errorf("volumes[%d]: expected object, got %T", i, v)
 		}
-		volName, _ := m["name"].(string)
+		// parseStringField, not a bare assertion: a missing name/mountPath and
+		// a present-but-wrong-type one (e.g. a numeric mountPath) previously
+		// collapsed to the same empty string and were silently skipped via
+		// `continue` — an authored-but-incomplete volume built with no volume
+		// and no mount at all, instead of reporting what was missing.
+		volName, namePresent, err := parseStringField(m, "name", fmt.Sprintf("volumes[%d].name", i))
+		if err != nil {
+			return result, err
+		}
+		if !namePresent {
+			return result, errors.Errorf("volumes[%d]: name is required", i)
+		}
 		volType, _ := m["type"].(string)
-		mountPath, _ := m["mountPath"].(string)
-		if volName == "" || mountPath == "" {
-			continue
+		mountPath, mountPresent, err := parseStringField(m, "mountPath", fmt.Sprintf("volume %q: mountPath", volName))
+		if err != nil {
+			return result, err
+		}
+		if !mountPresent {
+			return result, errors.Errorf("volume %q: mountPath is required", volName)
 		}
 		// Every corev1.Volume.Name, regardless of source type, must be a
 		// valid DNS-1123 label (mirrors validateVolumes' shared name check,
@@ -1925,9 +1993,12 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 
 		switch volType {
 		case "hostPath":
-			path, _ := m["path"].(string)
-			if path == "" {
-				continue
+			path, present, err := parseStringField(m, "path", fmt.Sprintf("volume %q: hostPath.path", volName))
+			if err != nil {
+				return result, err
+			}
+			if !present {
+				return result, errors.Errorf("volume %q: hostPath.path is required", volName)
 			}
 			// corev1.HostPathVolumeSource.Path is a raw host filesystem path —
 			// a relative value has no defined root to resolve against, and
@@ -1961,9 +2032,12 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			}
 			result.Volumes = append(result.Volumes, vol)
 		case "pvc":
-			size, _ := m["size"].(string)
-			if size == "" {
-				continue
+			size, present, err := parseStringField(m, "size", fmt.Sprintf("volume %q: PVC size", volName))
+			if err != nil {
+				return result, err
+			}
+			if !present {
+				return result, errors.Errorf("volume %q: PVC size is required", volName)
 			}
 			qty, err := resource.ParseQuantity(size)
 			if err != nil {
@@ -1993,9 +2067,12 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				AccessModes:  accessModes,
 			})
 		case "configMap":
-			cmName, _ := m["configMapName"].(string)
-			if cmName == "" {
-				continue
+			cmName, present, err := parseStringField(m, "configMapName", fmt.Sprintf("volume %q: configMapName", volName))
+			if err != nil {
+				return result, err
+			}
+			if !present {
+				return result, errors.Errorf("volume %q: configMapName is required", volName)
 			}
 			result.Volumes = append(result.Volumes, corev1.Volume{
 				Name: volName,
@@ -2006,9 +2083,12 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				},
 			})
 		case "secret":
-			secretName, _ := m["secretName"].(string)
-			if secretName == "" {
-				continue
+			secretName, present, err := parseStringField(m, "secretName", fmt.Sprintf("volume %q: secretName", volName))
+			if err != nil {
+				return result, err
+			}
+			if !present {
+				return result, errors.Errorf("volume %q: secretName is required", volName)
 			}
 			result.Volumes = append(result.Volumes, corev1.Volume{
 				Name: volName,
