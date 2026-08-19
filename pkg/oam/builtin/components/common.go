@@ -2883,6 +2883,19 @@ func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev
 // references it, are left untouched, since those only need to resolve within
 // this one pod spec and qualifying them would just rename the mount for no
 // reason.
+// escapeForPVCQualification doubles every hyphen in s, so a single
+// unescaped "-" can serve as an unambiguous join delimiter between two
+// escaped components. Without this, plain "<appName>-<localName>"
+// concatenation is not collision-free: appName "a-b" with localName "data"
+// and appName "a" with localName "b-data" both produce "a-b-data". Escaping
+// first makes the two encoded halves distinguishable from any "-" that was
+// already part of either input — DNS-1123 names never start or end with
+// "-", so doubling interior hyphens cannot introduce a leading/trailing "-"
+// either.
+func escapeForPVCQualification(s string) string {
+	return strings.ReplaceAll(s, "-", "--")
+}
+
 func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) []PVCConfig {
 	if len(pvcs) == 0 {
 		return pvcs
@@ -2912,7 +2925,7 @@ func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) 
 			localName = pvc.Name
 		}
 		out[i] = pvc
-		out[i].Name = appName + "-" + localName
+		out[i].Name = escapeForPVCQualification(appName) + "-" + escapeForPVCQualification(localName)
 		qualifiedNames[pvc.Name] = out[i].Name
 	}
 	for i := range volumes {

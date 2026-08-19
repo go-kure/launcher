@@ -2218,6 +2218,35 @@ func TestQualifyPVCNames_Idempotent(t *testing.T) {
 	}
 }
 
+// TestQualifyPVCNames_NoCollisionAcrossHyphenatedNames regression-tests a
+// review finding (launcher#284): plain "<appName>-<localName>" concatenation
+// is not collision-free when either component itself contains a hyphen —
+// appName "a-b" with localName "data", and appName "a" with localName
+// "b-data", both produced the same qualified name "a-b-data". The fix
+// escapes interior hyphens in each half before joining, so the two distinct
+// (appName, localName) pairs must qualify to distinct names.
+func TestQualifyPVCNames_NoCollisionAcrossHyphenatedNames(t *testing.T) {
+	volumesA := []corev1.Volume{{Name: "data", VolumeSource: corev1.VolumeSource{
+		PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"},
+	}}}
+	pvcsA := []PVCConfig{{Name: "data", Size: "1Gi"}}
+	qualifiedA := qualifyPVCNames(volumesA, pvcsA, "a-b")
+
+	volumesB := []corev1.Volume{{Name: "b-data", VolumeSource: corev1.VolumeSource{
+		PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "b-data"},
+	}}}
+	pvcsB := []PVCConfig{{Name: "b-data", Size: "1Gi"}}
+	qualifiedB := qualifyPVCNames(volumesB, pvcsB, "a")
+
+	if len(qualifiedA) != 1 || len(qualifiedB) != 1 {
+		t.Fatalf("qualifiedA = %+v, qualifiedB = %+v, want one PVC each", qualifiedA, qualifiedB)
+	}
+	if qualifiedA[0].Name == qualifiedB[0].Name {
+		t.Fatalf("collision: appName %q + volume %q and appName %q + volume %q both qualified to %q",
+			"a-b", "data", "a", "b-data", qualifiedA[0].Name)
+	}
+}
+
 func TestParseVolumeClaimTemplates_StorageClass_Accepted(t *testing.T) {
 	vcts, err := parseVolumeClaimTemplates(map[string]any{
 		"volumeClaimTemplates": []any{

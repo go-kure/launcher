@@ -486,7 +486,12 @@ unqualified, only the PVC object's name and the matching
 off the stable pod-local `Volume.Name` rather than the PVC's own (mutable)
 object name, so a second `Generate()` call on the same component instance
 reproduces the same qualified name instead of re-qualifying an
-already-qualified one (e.g. `app-data` becoming `app-app-data`); `hostPath.path`
+already-qualified one (e.g. `app-data` becoming `app-app-data`); the join
+itself escapes interior hyphens in each half (`escapeForPVCQualification`)
+before concatenating, since plain `<appName>-<localName>` string
+concatenation is not collision-free when either half itself contains a
+hyphen — component `a-b` with volume `data`, and component `a` with volume
+`b-data`, would otherwise both qualify to `a-b-data`; `hostPath.path`
 is likewise required and must be absolute — a raw host filesystem path has
 no defined root to resolve a relative value against, and real admission
 (`validateHostPathVolumeSource`) rejects a relative one the same way;
