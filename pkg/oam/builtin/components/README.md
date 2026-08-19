@@ -165,7 +165,11 @@ and likewise for each of its own `readiness`/`liveness`/`startup` keys, e.g.
 httpGet/tcpSocket/exec/grpc — exactly one handler may be authored; a
 present-but-non-object value for any of the four (e.g. `httpGet: "invalid"`)
 is rejected outright, even when paired with a well-formed sibling handler,
-rather than silently discarded while the sibling wins; `exec.command` must be
+rather than silently discarded while the sibling wins; an authored probe
+object with none of the four handlers present (e.g. `probes: {liveness:
+{periodSeconds: 10}}`) is rejected too, matching real admission
+(`validateHandler`'s `numHandlers == 0` check) instead of silently discarding
+the whole authored probe; `exec.command` must be
 a non-empty array of strings — a present-but-wrong-type `command` (e.g. a
 bare string instead of an array) or an array containing a non-string element
 is rejected the same way, instead of silently producing no probe at all,
@@ -190,7 +194,10 @@ any syntactically valid name: a syntactically valid but different name (e.g.
 `httpGet.port: metrics` on a `webservice`, whose only declared container
 port is `"http"`) builds successfully but is exactly as unresolvable by the
 kubelet at runtime as a named port on a portless component, so it is
-rejected the same way; `grpc.service`, if authored, must be no more than 63
+rejected the same way; `grpc.service`, if authored, must be a string — a
+present-but-non-string value (e.g. `service: 123`) is rejected rather than
+silently treated as absent (which would check the overall server instead of
+the intended named service) — and must be no more than 63
 characters (mirrors `validateGRPCService`'s length cap — the gRPC
 health-checking service name is not DNS-1123 formatted, but admission still
 bounds its length), and `grpc.port` is always numeric regardless of any
@@ -327,6 +334,14 @@ invalid name, e.g. containing `/`, builds successfully but is rejected at Pod
 admission; two volumes sharing the same valid name are likewise rejected —
 Pod volume names must be unique (`validateVolumes`' own duplicate check),
 so the second entry is caught at parse time rather than only at admission;
+two volumes with distinct names sharing the same `mountPath` are also
+rejected — a container's own volume mounts must have unique mount paths
+(`ValidateVolumeMounts`' own duplicate check), so only the first of two
+colliding mounts would ever actually be reachable at admission; `readOnly`,
+if authored, must be a boolean — a present-but-non-boolean value (e.g.
+`readOnly: "true"`) is rejected rather than silently defaulting to a
+writable mount (same fix applied to `initContainers`/`sidecars`' own
+`volumeMounts` entries below, which had the identical gap);
 `emptyDir.sizeLimit` and `pvc.size` are each parsed as a
 `resource.Quantity` and rejected if negative (e.g. `"-1Gi"`) — syntactically
 valid but a storage quantity real Kubernetes resource validation refuses,
@@ -334,7 +349,13 @@ same as `resources`' own quantity fields above; `hostPath.path` must be
 absolute — a raw host filesystem path has no defined root to resolve a
 relative value against, and real admission (`validateHostPathVolumeSource`)
 rejects a relative one the same way),
-`initContainers`, `sidecars`, and `affinity`.
+`initContainers`, `sidecars` (each entry's own `volumeMounts[].readOnly`
+must be a boolean and `volumeMounts[].subPath` must be a string when
+present — same presence-then-type-check shape as `volumes.readOnly` above;
+`volumeMounts[].mountPath` must also be unique within that entry's own
+mount list, the identical rule as `volumes`' duplicate-mountPath check
+above, since each `initContainers`/`sidecars` entry is its own container),
+and `affinity`.
 
 `securityContext.privileged: true` is rejected unless the environment policy's
 `AllowPrivileged()` allows it — the one `securityContext` field enforced today
