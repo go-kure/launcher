@@ -2105,6 +2105,76 @@ func TestParseVolumeClaimTemplates_NegativeSize_Error(t *testing.T) {
 	}
 }
 
+// TestParseVolumes_HostPath_RelativePath_Error regression-tests a review
+// finding (launcher#284): corev1.HostPathVolumeSource.Path has no defined
+// root to resolve a relative value against, and real admission rejects a
+// non-absolute hostPath.path — this schema only checked for an empty path,
+// so a relative one built successfully but was rejected at Pod admission.
+func TestParseVolumes_HostPath_RelativePath_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "logs",
+				"type":      "hostPath",
+				"mountPath": "/var/log",
+				"path":      "data",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a relative hostPath.path")
+	}
+}
+
+func TestParseVolumes_HostPath_AbsolutePath_Accepted(t *testing.T) {
+	parsed, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "logs",
+				"type":      "hostPath",
+				"mountPath": "/var/log",
+				"path":      "/var/log/app",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseVolumes: %v", err)
+	}
+	if len(parsed.Volumes) != 1 || parsed.Volumes[0].HostPath == nil || parsed.Volumes[0].HostPath.Path != "/var/log/app" {
+		t.Errorf("Volumes = %+v, want one hostPath volume at /var/log/app", parsed.Volumes)
+	}
+}
+
+// TestParseProbes_MistypedProbesObject_Error regression-tests a review
+// finding (launcher#284): the outer `props["probes"].(map[string]any)`
+// assertion silently treated a present-but-non-object probes value as
+// absent, returning a valid empty ProbeConfig instead of an error — mirrors
+// parseLifecycle's existing outer-level check for the analogous `lifecycle`
+// property.
+func TestParseProbes_MistypedProbesObject_Error(t *testing.T) {
+	_, err := parseProbes(map[string]any{
+		"probes": true,
+	}, true, "http")
+	if err == nil {
+		t.Fatal("expected error for a non-object probes value")
+	}
+}
+
+// TestParseProbes_MistypedIndividualProbe_Error covers the finding's own
+// example: a well-formed probes object whose individual liveness key is
+// mistyped must be rejected too, not silently dropped while returning a
+// ProbeConfig with no liveness probe set.
+func TestParseProbes_MistypedIndividualProbe_Error(t *testing.T) {
+	_, err := parseProbes(map[string]any{
+		"probes": map[string]any{
+			"liveness": true,
+		},
+	}, true, "http")
+	if err == nil {
+		t.Fatal("expected error for a non-object probes.liveness value")
+	}
+}
+
 func TestParseProbe_HTTPGet_NamedPort_Invalid_Error(t *testing.T) {
 	_, err := parseProbe(map[string]any{
 		"httpGet": map[string]any{"path": "/healthz", "port": "8080"},

@@ -158,7 +158,11 @@ reject, but the top-level `command`/`args` fix was deliberately left out of
 that change to keep it self-contained to `common.go`'s `parseLifecycleHandler`
 — touching `parseCommand`/`parseArgs` would ripple into all 7 call sites across
 every kind component), `probes`
-(httpGet/tcpSocket/exec/grpc — exactly one handler may be authored; a
+(rejected outright if authored with a non-object value, e.g. `probes: true`,
+and likewise for each of its own `readiness`/`liveness`/`startup` keys, e.g.
+`probes: {liveness: true}` — same two-level presence-then-type-check shape as
+`lifecycle` below, instead of silently discarding the authored health check;
+httpGet/tcpSocket/exec/grpc — exactly one handler may be authored; a
 present-but-non-object value for any of the four (e.g. `httpGet: "invalid"`)
 is rejected outright, even when paired with a well-formed sibling handler,
 rather than silently discarded while the sibling wins; a string `port` is a named container port, not
@@ -319,7 +323,10 @@ invalid name, e.g. containing `/`, builds successfully but is rejected at Pod
 admission; `emptyDir.sizeLimit` and `pvc.size` are each parsed as a
 `resource.Quantity` and rejected if negative (e.g. `"-1Gi"`) — syntactically
 valid but a storage quantity real Kubernetes resource validation refuses,
-same as `resources`' own quantity fields above),
+same as `resources`' own quantity fields above; `hostPath.path` must be
+absolute — a raw host filesystem path has no defined root to resolve a
+relative value against, and real admission (`validateHostPathVolumeSource`)
+rejects a relative one the same way),
 `initContainers`, `sidecars`, and `affinity`.
 
 `securityContext.privileged: true` is rejected unless the environment policy's
