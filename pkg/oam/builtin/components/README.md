@@ -203,6 +203,13 @@ health-checking service name is not DNS-1123 formatted, but admission still
 bounds its length), and `grpc.port` is always numeric regardless of any
 kind's named-port rules — a named `grpc.port` is rejected outright with its
 own message, never resolved against a declared container port;
+`tcpSocket.host`, if authored, is preserved on the probe — a
+present-but-non-string value (e.g. `host: 123`) is rejected the same as
+every other typed scalar field in this document, instead of silently
+discarded while the probe still dials the Pod IP; when omitted,
+`corev1.TCPSocketAction.Host`'s own doc comment says it then defaults to the
+Pod IP, so no explicit default needs to be authored here — the same
+optional-override shape as `httpGet.host` below;
 `httpGet.httpHeaders` itself and its entries are validated
 rather than silently dropped/coerced — an authored non-array `httpHeaders`
 value (e.g. a single header object instead of a list) is rejected the same
@@ -327,7 +334,11 @@ not invent a stricter constraint upstream itself does not have; a
 present-but-non-string value, e.g. `workingDir: 123`, is rejected rather than
 silently treated as absent, in all five kind handlers — this is a type check,
 distinct from the content-validation question the previous paragraph answers),
-`volumes` (every volume's `name`, regardless of source type — `hostPath`,
+`volumes` (the `volumes` property itself, if authored, must be an array — a
+present-but-non-array value, e.g. `volumes: {name: data}`, is rejected
+outright rather than silently treated as absent and building without the
+requested volume/mount, the same presence-then-type-check shape as `probes`
+above; every volume's `name`, regardless of source type — `hostPath`,
 `emptyDir`, `pvc`, `configMap`, `secret`, etc. — must be a valid DNS-1123
 label, matching how real admission validates every `corev1.Volume.Name`; an
 invalid name, e.g. containing `/`, builds successfully but is rejected at Pod
@@ -360,6 +371,15 @@ and `affinity`.
 `securityContext.privileged: true` is rejected unless the environment policy's
 `AllowPrivileged()` allows it — the one `securityContext` field enforced today
 (`enforce.go`'s `enforcePrivileged`); the others have no policy hook yet.
+
+A `volumes` entry sourced from `hostPath` is rejected unless the environment
+policy's `AllowHostPathVolumes()` allows it (`enforce.go`'s
+`enforceHostPathVolumes`, the same reused-mechanism shape as
+`enforcePrivileged` above); like `enforcePrivileged`, it is called from all
+five kind components' `ApplyPolicy`, not just one — a hostPath volume mounts
+an arbitrary path from the node's own filesystem into the Pod, so an
+unenforced policy denial here is a container-escape-adjacent gap, not merely
+a style one.
 
 Setting any `securityContext` field makes the container's `SecurityContext`
 non-nil, which opts it out of the `security-context` trait's nil-only

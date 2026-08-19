@@ -254,3 +254,32 @@ func TestWorkerConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 		t.Error("expected error when privileged=true and policy disallows it")
 	}
 }
+
+// TestWorkerConfig_ApplyPolicy_HostPathDenied is worker's sibling of
+// TestWebserviceConfig_ApplyPolicy_HostPathDenied (launcher#284, P1) — the
+// same shared ApplyPolicy gap, same shared enforceHostPathVolumes fix.
+func TestWorkerConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
+	h := &components.WorkerHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "app",
+		Type: "worker",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"volumes": []any{
+				map[string]any{
+					"name":      "logs",
+					"type":      "hostPath",
+					"mountPath": "/var/log",
+					"path":      "/var/log/app",
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: false}); err == nil {
+		t.Error("expected error when a hostPath volume is authored and policy disallows it")
+	}
+}

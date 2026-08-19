@@ -22,6 +22,7 @@ type stubPolicy struct {
 	defaultCPURequest  string
 	defaultStorageSize string
 	allowPrivileged    bool
+	allowHostPathVols  bool
 }
 
 func (s *stubPolicy) MaxReplicas() *int32              { return s.maxReplicas }
@@ -41,7 +42,7 @@ func (s *stubPolicy) AllowHostNetwork() bool           { return false }
 func (s *stubPolicy) AllowPrivileged() bool            { return s.allowPrivileged }
 func (s *stubPolicy) AllowHostPID() bool               { return false }
 func (s *stubPolicy) AllowHostIPC() bool               { return false }
-func (s *stubPolicy) AllowHostPathVolumes() bool       { return false }
+func (s *stubPolicy) AllowHostPathVolumes() bool       { return s.allowHostPathVols }
 func (s *stubPolicy) AllowedCapabilities() []string    { return nil }
 func (s *stubPolicy) ForbiddenCapabilities() []string  { return nil }
 func (s *stubPolicy) RequiredCapabilities() []string   { return nil }
@@ -1013,5 +1014,41 @@ func TestWebserviceConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 	}
 	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
 		t.Errorf("expected no error when policy allows privileged, got %v", err)
+	}
+}
+
+// TestWebserviceConfig_ApplyPolicy_HostPathDenied regression-tests a review
+// finding (launcher#284, P1): ApplyPolicy never checked a parsed hostPath
+// volume against oam.Policy.AllowHostPathVolumes(), so the default-deny
+// policy (including NoopPolicy) did not actually stop a hostPath volume from
+// being authored — a container-escape-adjacent gap, not merely a style one.
+func TestWebserviceConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"volumes": []any{
+				map[string]any{
+					"name":      "logs",
+					"type":      "hostPath",
+					"mountPath": "/var/log",
+					"path":      "/var/log/app",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: false}); err == nil {
+		t.Error("expected error when a hostPath volume is authored and policy disallows it")
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: true}); err != nil {
+		t.Errorf("expected no error when policy allows hostPath volumes, got %v", err)
 	}
 }

@@ -2105,6 +2105,21 @@ func TestParseVolumeClaimTemplates_NegativeSize_Error(t *testing.T) {
 	}
 }
 
+// TestParseVolumes_MistypedCollection_Error regression-tests a review
+// finding (launcher#284): the outer `props["volumes"].([]any)` assertion
+// silently treated a present-but-non-array volumes value as absent,
+// returning an empty ParsedVolumes instead of an error — mirrors
+// parseProbes' existing outer-level check for the analogous `probes`
+// property.
+func TestParseVolumes_MistypedCollection_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": map[string]any{"name": "data"},
+	})
+	if err == nil {
+		t.Fatal("expected error for a non-array volumes value")
+	}
+}
+
 // TestParseVolumes_HostPath_RelativePath_Error regression-tests a review
 // finding (launcher#284): corev1.HostPathVolumeSource.Path has no defined
 // root to resolve a relative value against, and real admission rejects a
@@ -2758,6 +2773,35 @@ func TestParseProbe_ExecCommand_Valid_Accepted(t *testing.T) {
 	}
 	if probe == nil || probe.Exec == nil || len(probe.Exec.Command) != 2 {
 		t.Errorf("Probe = %+v, want an exec probe with a 2-element command", probe)
+	}
+}
+
+// TestParseProbe_TCPSocket_HostPreserved regression-tests a review finding
+// (launcher#284): the tcpSocket branch constructed corev1.TCPSocketAction
+// from only its port, silently discarding an authored `host` — the kubelet
+// then always probed the Pod IP instead of the explicitly requested
+// endpoint, which can invert the health result. Mirrors the httpGet branch's
+// existing host handling just above it in the same function.
+func TestParseProbe_TCPSocket_HostPreserved(t *testing.T) {
+	probe, err := parseProbe(map[string]any{
+		"tcpSocket": map[string]any{"port": 8080, "host": "127.0.0.1"},
+	}, "liveness", true, "")
+	if err != nil {
+		t.Fatalf("parseProbe: %v", err)
+	}
+	if probe == nil || probe.TCPSocket == nil || probe.TCPSocket.Host != "127.0.0.1" {
+		t.Errorf("Probe = %+v, want a tcpSocket probe with host 127.0.0.1", probe)
+	}
+}
+
+// TestParseProbe_TCPSocket_NonStringHost_Error covers the same
+// presence-then-type-check fix applied to tcpSocket.host in the same branch.
+func TestParseProbe_TCPSocket_NonStringHost_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"tcpSocket": map[string]any{"port": 8080, "host": 123},
+	}, "liveness", true, "")
+	if err == nil {
+		t.Fatal("expected error for a non-string tcpSocket.host value")
 	}
 }
 

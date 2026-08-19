@@ -1087,7 +1087,18 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName
 		if err != nil {
 			return nil, errors.Errorf("tcpSocket handler: %w", err)
 		}
-		probe.TCPSocket = &corev1.TCPSocketAction{Port: port}
+		handler := &corev1.TCPSocketAction{Port: port}
+		// host defaults to the Pod IP when omitted (corev1.TCPSocketAction.Host
+		// doc comment) — same optional-override shape as httpGet.host above,
+		// which this branch previously did not mirror: an authored host was
+		// silently discarded, so the kubelet always probed the Pod IP even
+		// when a specific endpoint was requested.
+		if host, present, err := parseStringField(tcpSocket, "host", "tcpSocket.host"); err != nil {
+			return nil, err
+		} else if present {
+			handler.Host = host
+		}
+		probe.TCPSocket = handler
 		hasHandler = true
 	} else if execCmd, ok := m["exec"].(map[string]any); ok {
 		// Presence-then-type-check per command element, and an empty command
@@ -1830,9 +1841,18 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 
 func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 	var result ParsedVolumes
-	volList, ok := props["volumes"].([]any)
-	if !ok {
+	v, present := props["volumes"]
+	if !present {
 		return result, nil
+	}
+	// Presence-then-type-check, not a bare assertion — same shape as
+	// parseProbes' outer level: a present-but-non-array volumes value (e.g.
+	// `volumes: {name: data}`) previously fell through this check exactly
+	// like an absent property, silently building without the requested
+	// volume/mount instead of rejecting the malformed value.
+	volList, ok := v.([]any)
+	if !ok {
+		return result, errors.Errorf("volumes: must be an array, got %T", v)
 	}
 	seenNames := map[string]bool{}
 	seenMountPaths := map[string]bool{}

@@ -521,3 +521,32 @@ func TestDaemonsetConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 		t.Errorf("expected no error when policy allows privileged, got %v", err)
 	}
 }
+
+// TestDaemonsetConfig_ApplyPolicy_HostPathDenied is daemonset's sibling of
+// TestWebserviceConfig_ApplyPolicy_HostPathDenied (launcher#284, P1) — the
+// same shared ApplyPolicy gap, same shared enforceHostPathVolumes fix.
+func TestDaemonsetConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
+	h := &components.DaemonsetHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "agent",
+		Type: "daemonset",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/agent:v1.0.0",
+			"volumes": []any{
+				map[string]any{
+					"name":      "logs",
+					"type":      "hostPath",
+					"mountPath": "/var/log",
+					"path":      "/var/log/app",
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: false}); err == nil {
+		t.Error("expected error when a hostPath volume is authored and policy disallows it")
+	}
+}
