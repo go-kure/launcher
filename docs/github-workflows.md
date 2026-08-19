@@ -297,7 +297,10 @@ subsequent workflows — `GITHUB_TOKEN` pushes do not trigger workflows).
   ref once it becomes a required status check — the queue payload has no `pull_request` field,
   so the existing fork skip below evaluates false and the job reports `skipped`/success as a
   no-op
-- Runs on draft PRs (2026-08-19, GitLab `mr-review` parity); skips fork PRs
+- Runs on draft PRs (2026-08-19, GitLab `mr-review` parity) — **effective once
+  go-kure/.github#75 merges**; until then the callee (`pr-review.yml@main`) still gates on
+  `draft == false`, so a draft PR here still gets a skipped reviewer job, and `ready_for_review`
+  below is what actually triggers the review; skips fork PRs
 - `ready_for_review` is kept here (unlike `ci.yml`, which omits it) because the reviewer itself
   lives in `go-kure/.github` and is called `@main`: its no-longer-draft-gated behavior only takes
   effect once that repo's own parity change merges, an async window this caller can't see. Without
