@@ -2195,6 +2195,115 @@ func TestParseVolumes_DistinctNames_Accepted(t *testing.T) {
 	}
 }
 
+// TestParseVolumes_DuplicateMountPath_Error regression-tests a review
+// finding (launcher#284): parseVolumes tracked duplicate names but not
+// duplicate mountPaths, so two volumes with distinct names sharing the same
+// mountPath both built into the Pod template — real admission
+// (ValidateVolumeMounts' mountpoints.Has(mnt.MountPath) check) requires
+// unique mount paths within a container.
+func TestParseVolumes_DuplicateMountPath_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "data",
+				"type":      "emptyDir",
+				"mountPath": "/shared",
+			},
+			map[string]any{
+				"name":      "cache",
+				"type":      "emptyDir",
+				"mountPath": "/shared",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for two volumes sharing the same mountPath")
+	}
+}
+
+// TestParseVolumes_ReadOnly_NonBoolean_Error regression-tests a review
+// finding (launcher#284): `m["readOnly"].(bool)` silently defaulted a
+// present-but-non-boolean readOnly value (e.g. "true" as a string) to false,
+// installing a writable mount instead of rejecting the malformed value.
+func TestParseVolumes_ReadOnly_NonBoolean_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "data",
+				"type":      "emptyDir",
+				"mountPath": "/data",
+				"readOnly":  "true",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a non-boolean readOnly value")
+	}
+}
+
+// TestParseVolumes_ReadOnly_Boolean_Accepted is the accept-path sibling.
+func TestParseVolumes_ReadOnly_Boolean_Accepted(t *testing.T) {
+	parsed, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "data",
+				"type":      "emptyDir",
+				"mountPath": "/data",
+				"readOnly":  true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseVolumes: %v", err)
+	}
+	if len(parsed.Mounts) != 1 || !parsed.Mounts[0].ReadOnly {
+		t.Errorf("Mounts = %+v, want one read-only mount", parsed.Mounts)
+	}
+}
+
+// TestParseVolumeMountList_ReadOnly_NonBoolean_Error is the self-found
+// sibling of the parseVolumes readOnly finding above: parseVolumeMountList
+// (used by initContainers/sidecars) had the identical bare-assertion bug.
+func TestParseVolumeMountList_ReadOnly_NonBoolean_Error(t *testing.T) {
+	_, err := parseVolumeMountList(map[string]any{
+		"volumeMounts": []any{
+			map[string]any{"name": "data", "mountPath": "/data", "readOnly": "true"},
+		},
+	}, "sidecars[0]")
+	if err == nil {
+		t.Fatal("expected error for a non-boolean readOnly value")
+	}
+}
+
+// TestParseVolumeMountList_SubPath_NonString_Error covers the same
+// presence-then-type-check fix applied to subPath in the same function.
+func TestParseVolumeMountList_SubPath_NonString_Error(t *testing.T) {
+	_, err := parseVolumeMountList(map[string]any{
+		"volumeMounts": []any{
+			map[string]any{"name": "data", "mountPath": "/data", "subPath": 123},
+		},
+	}, "sidecars[0]")
+	if err == nil {
+		t.Fatal("expected error for a non-string subPath value")
+	}
+}
+
+// TestParseVolumeMountList_DuplicateMountPath_Error is the self-found
+// sibling of the parseVolumes duplicate-mountPath finding above:
+// parseVolumeMountList (used by initContainers/sidecars) had the identical
+// gap for one container's own volumeMounts list.
+func TestParseVolumeMountList_DuplicateMountPath_Error(t *testing.T) {
+	_, err := parseVolumeMountList(map[string]any{
+		"volumeMounts": []any{
+			map[string]any{"name": "data", "mountPath": "/shared"},
+			map[string]any{"name": "cache", "mountPath": "/shared"},
+		},
+	}, "sidecars[0]")
+	if err == nil {
+		t.Fatal("expected error for two volumeMounts sharing the same mountPath")
+	}
+}
+
 // TestParseProbes_MistypedProbesObject_Error regression-tests a review
 // finding (launcher#284): the outer `props["probes"].(map[string]any)`
 // assertion silently treated a present-but-non-object probes value as
@@ -2649,6 +2758,35 @@ func TestParseProbe_ExecCommand_Valid_Accepted(t *testing.T) {
 	}
 	if probe == nil || probe.Exec == nil || len(probe.Exec.Command) != 2 {
 		t.Errorf("Probe = %+v, want an exec probe with a 2-element command", probe)
+	}
+}
+
+// TestParseProbe_GRPC_NonStringService_Error regression-tests a review
+// finding (launcher#284): `grpc["service"].(string)` silently skipped a
+// present-but-non-string service value, emitting a gRPC probe with no
+// service name (checks the overall server) instead of rejecting the
+// malformed value.
+func TestParseProbe_GRPC_NonStringService_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"grpc": map[string]any{"port": float64(9090), "service": float64(123)},
+	}, "readiness", true, "")
+	if err == nil {
+		t.Fatal("expected error for a non-string grpc.service value")
+	}
+}
+
+// TestParseProbe_HandlerlessObject_Error regression-tests a review finding
+// (launcher#284): an authored probe object with only timing fields and no
+// handler (httpGet/tcpSocket/exec/grpc) returned (nil, nil) from parseProbe,
+// silently discarding the authored probe instead of rejecting it — real
+// admission (validateHandler's numHandlers == 0 check) requires exactly one
+// handler.
+func TestParseProbe_HandlerlessObject_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"periodSeconds": float64(10),
+	}, "liveness", true, "")
+	if err == nil {
+		t.Fatal("expected error for a probe object with no handler")
 	}
 }
 

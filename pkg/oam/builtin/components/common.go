@@ -1125,7 +1125,9 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName
 			return nil, errors.Errorf("grpc handler: port must be numeric, got named port %q", port.StrVal)
 		}
 		handler.Port = port.IntVal
-		if svc, ok := grpc["service"].(string); ok {
+		if svc, present, err := parseStringField(grpc, "service", "grpc.service"); err != nil {
+			return nil, err
+		} else if present {
 			// Mirrors validateGRPCService (k8s.io/kubernetes/pkg/apis/core/validation):
 			// the gRPC health-checking service name is not DNS-1123 formatted, but
 			// admission still caps it at maxGRPCServiceNameLength (63) — an unbounded
@@ -1140,7 +1142,14 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName
 	}
 
 	if !hasHandler {
-		return nil, nil
+		// parseProbe is only ever called (via parseProbes) once the caller has
+		// already confirmed the readiness/liveness/startup object itself is
+		// present, so reaching here means one was authored with none of the
+		// four handler keys — e.g. `probes: {liveness: {periodSeconds: 10}}`.
+		// Real admission (validateHandler's numHandlers == 0 check) rejects a
+		// probe with no handler outright; returning (nil, nil) here would
+		// silently drop the authored probe instead.
+		return nil, errors.Errorf("probe must specify exactly one handler, but none was provided")
 	}
 
 	if i, present, err := parseInt32Field(m, "initialDelaySeconds", "initialDelaySeconds"); err != nil {
@@ -1826,6 +1835,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 		return result, nil
 	}
 	seenNames := map[string]bool{}
+	seenMountPaths := map[string]bool{}
 	for _, v := range volList {
 		m, ok := v.(map[string]any)
 		if !ok {
@@ -1854,7 +1864,20 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			return result, errors.Errorf("volume: duplicate name %q", volName)
 		}
 		seenNames[volName] = true
-		readOnly, _ := m["readOnly"].(bool)
+		// A container's own VolumeMounts must have unique MountPath values
+		// (ValidateVolumeMounts' mountpoints.Has(mnt.MountPath) check, same
+		// source as above) — two volumes with distinct names but the same
+		// mountPath both build successfully here but only the first mount is
+		// honored once admission's own uniqueness check would apply.
+		if seenMountPaths[mountPath] {
+			return result, errors.Errorf("volume %q: duplicate mountPath %q", volName, mountPath)
+		}
+		seenMountPaths[mountPath] = true
+		roPtr, err := parseBoolField(m, "readOnly", fmt.Sprintf("volume %q: readOnly", volName))
+		if err != nil {
+			return result, err
+		}
+		readOnly := roPtr != nil && *roPtr
 
 		switch volType {
 		case "hostPath":
@@ -2125,6 +2148,7 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 		return nil, nil
 	}
 	var out []corev1.VolumeMount
+	seenMountPaths := map[string]bool{}
 	for i, v := range raw {
 		mm, ok := v.(map[string]any)
 		if !ok {
@@ -2135,11 +2159,28 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 		if n == "" || mountPath == "" {
 			return nil, errors.Errorf("%s: volumeMounts[%d]: name and mountPath are required", prefix, i)
 		}
-		vm := corev1.VolumeMount{Name: n, MountPath: mountPath}
-		if ro, ok := mm["readOnly"].(bool); ok {
-			vm.ReadOnly = ro
+		// Same per-container mountPath-uniqueness rule as parseVolumes' own
+		// fix above (ValidateVolumeMounts' mountpoints.Has check) — this
+		// list is one container's own volumeMounts, so a repeated path here
+		// hits the identical admission-time rejection.
+		if seenMountPaths[mountPath] {
+			return nil, errors.Errorf("%s: volumeMounts[%d]: duplicate mountPath %q", prefix, i, mountPath)
 		}
-		if sp, ok := mm["subPath"].(string); ok && sp != "" {
+		seenMountPaths[mountPath] = true
+		vm := corev1.VolumeMount{Name: n, MountPath: mountPath}
+		// Same presence-then-type-check shape as parseVolumes' readOnly fix
+		// above — a present-but-wrong-type value (e.g. readOnly: "true") was
+		// silently treated as false/absent rather than rejected.
+		roPtr, err := parseBoolField(mm, "readOnly", fmt.Sprintf("%s: volumeMounts[%d].readOnly", prefix, i))
+		if err != nil {
+			return nil, err
+		}
+		if roPtr != nil {
+			vm.ReadOnly = *roPtr
+		}
+		if sp, present, err := parseStringField(mm, "subPath", fmt.Sprintf("%s: volumeMounts[%d].subPath", prefix, i)); err != nil {
+			return nil, err
+		} else if present {
 			vm.SubPath = sp
 		}
 		out = append(out, vm)
