@@ -715,6 +715,21 @@ func TestParseLifecycle_NonObject_Error(t *testing.T) {
 	}
 }
 
+// TestParseLifecycle_UnknownKey_Error regression-tests a review finding
+// (launcher#284): a misspelled hook name (e.g. `postStop` instead of
+// `preStop`) matched neither recognized key and was silently ignored,
+// returning nil, nil instead of rejecting the typo.
+func TestParseLifecycle_UnknownKey_Error(t *testing.T) {
+	_, err := parseLifecycle(map[string]any{
+		"lifecycle": map[string]any{
+			"postStop": map[string]any{"exec": map[string]any{"command": []any{"flush"}}},
+		},
+	}, true, "")
+	if err == nil {
+		t.Fatal("expected error for an unrecognized lifecycle key")
+	}
+}
+
 func TestParseLifecycle_PostStartAndPreStop(t *testing.T) {
 	props := map[string]any{
 		"lifecycle": map[string]any{
@@ -2120,6 +2135,40 @@ func TestParseVolumes_MistypedCollection_Error(t *testing.T) {
 	}
 }
 
+// TestParseVolumes_NonObjectEntry_Error regression-tests a review finding
+// (launcher#284): a non-object entry in the volumes array (e.g. `volumes:
+// [data]`) was silently skipped via `continue` instead of rejected,
+// building successfully with no volume or mount for the malformed entry.
+func TestParseVolumes_NonObjectEntry_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{"data"},
+	})
+	if err == nil {
+		t.Fatal("expected error for a non-object volumes entry")
+	}
+}
+
+// TestParseVolumes_UnrecognizedType_Error is a self-found sibling of the
+// review findings above, same function, same silent-discard shape: a
+// fully-authored volume (non-empty name and mountPath) with a `type` that
+// matches none of the five recognized sources fell through to `default:
+// continue`, silently producing no volume or mount instead of rejecting the
+// unrecognized (or omitted) type.
+func TestParseVolumes_UnrecognizedType_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "logs",
+				"type":      "bogus",
+				"mountPath": "/var/log",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unrecognized volume type")
+	}
+}
+
 // TestParseVolumes_HostPath_RelativePath_Error regression-tests a review
 // finding (launcher#284): corev1.HostPathVolumeSource.Path has no defined
 // root to resolve a relative value against, and real admission rejects a
@@ -2346,6 +2395,21 @@ func TestParseProbes_MistypedIndividualProbe_Error(t *testing.T) {
 	}, true, "http")
 	if err == nil {
 		t.Fatal("expected error for a non-object probes.liveness value")
+	}
+}
+
+// TestParseProbes_UnknownKey_Error regression-tests a review finding
+// (launcher#284): a misspelled probe kind (e.g. `live` instead of
+// `liveness`) matched none of the three recognized keys and was silently
+// ignored, returning an empty ProbeConfig instead of rejecting the typo.
+func TestParseProbes_UnknownKey_Error(t *testing.T) {
+	_, err := parseProbes(map[string]any{
+		"probes": map[string]any{
+			"live": map[string]any{"httpGet": map[string]any{"port": 8080}},
+		},
+	}, true, "http")
+	if err == nil {
+		t.Fatal("expected error for an unrecognized probes key")
 	}
 }
 
