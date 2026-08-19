@@ -97,7 +97,9 @@ func (h *WorkerHandler) ToApplicationConfig(component *oam.Component, namespace 
 		return nil, errors.Wrap(err, "invalid securityContext configuration")
 	}
 	config.SecurityContext = securityContext
-	if workingDir, ok := props["workingDir"].(string); ok {
+	if workingDir, present, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
+		return nil, err
+	} else if present {
 		config.WorkingDir = workingDir
 	}
 

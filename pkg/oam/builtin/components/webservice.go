@@ -121,7 +121,9 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 		return nil, errors.Wrap(err, "invalid securityContext configuration")
 	}
 	config.SecurityContext = securityContext
-	if wd, ok := props["workingDir"].(string); ok && wd != "" {
+	if wd, present, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
+		return nil, err
+	} else if present {
 		config.WorkingDir = wd
 	}
 

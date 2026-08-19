@@ -362,6 +362,22 @@ func validateRelativePath(label, path string) error {
 	return nil
 }
 
+// NOTE on a deliberately deferred cross-check: this function validates
+// volumeName's own shape (a DNS-1123 label) but never checks it against the
+// component's actual `volumes` list, because parseEnv (and therefore this
+// function, reached through parseValueFrom) runs before parseVolumes in
+// every one of its 7 call sites (5 kind handlers plus parseInitContainers
+// and parseSidecars) and has no access to the parsed volume set. A shallow
+// name-only cross-check would also be incomplete on its own: real
+// FileKeySelector semantics need the referenced volume to be an Image
+// volume (corev1.VolumeSource.Image) specifically, and this schema's
+// parseVolumes supports only hostPath/emptyDir/pvc/configMap/secret — no
+// "image" case exists yet, so no fileKeyRef.volumeName can ever resolve to a
+// conformant target today regardless of a name match. Closing this gap
+// needs Image-volume schema support first, then threading the resulting
+// volume-name set through parseEnv's call chain (or a post-hoc validation
+// pass once env and volumes are both parsed) — out of scope for this
+// shared-schema-fidelity PR; see the launcher#278 ledger.
 func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 	volumeName, _ := m["volumeName"].(string)
 	path, _ := m["path"].(string)
@@ -1411,9 +1427,13 @@ func parseCapabilityList(raw map[string]any, key, label string) ([]corev1.Capabi
 }
 
 func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error) {
-	raw, ok := props["securityContext"].(map[string]any)
-	if !ok {
+	v, present := props["securityContext"]
+	if !present {
 		return nil, nil
+	}
+	raw, ok := v.(map[string]any)
+	if !ok {
+		return nil, errors.Errorf("securityContext: must be an object, got %T", v)
 	}
 	sc := &corev1.SecurityContext{}
 	set := false

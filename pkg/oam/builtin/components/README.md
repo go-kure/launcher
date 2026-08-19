@@ -77,7 +77,12 @@ non-boolean rejection as above); corev1's `EnvFiles` feature; `volumeName`
 must be a valid DNS-1123 label and `key` a valid (relaxed) env var name,
 matching real admission's own `validateFileKeySelector`; `path` must be
 relative and must not contain a `..` backstep component, per this repo's own
-path-safety convention) —
+path-safety convention; **deferred:** `volumeName` is not cross-checked
+against the component's declared `volumes` — env parsing runs before volume
+parsing in every call site, and this schema has no `image`-type volume yet
+(the only volume source real `FileKeySelector` semantics resolve against), so
+a name-only match would be misleadingly incomplete; see the doc comment on
+`parseFileKeyRef` in `common.go`) —
 mutually exclusive among themselves too), `envFrom` (an authored non-array
 value, e.g. a single ConfigMap/Secret object instead of a list of them, is
 rejected rather than silently treated as absent; bulk-import a ConfigMap's
@@ -179,7 +184,10 @@ and simply ignoring the extra key would silently drop the authored
 `tcpSocket` while emitting only the other handler; `postStart`/`preStop` are
 each rejected outright if present with a non-object value, e.g. `preStop:
 "flush"`, instead of silently discarding the whole hook),
-`securityContext` (per-container: `runAsUser`/`runAsGroup`/`runAsNonRoot`
+`securityContext` (rejected outright if authored with a non-object value,
+e.g. a scalar or array, instead of silently treating it as absent and
+emitting a container with a nil security context;
+per-container: `runAsUser`/`runAsGroup`/`runAsNonRoot`
 (`runAsUser: 0` combined with `runAsNonRoot: true` builds and is admitted by
 the API server, but the kubelet's `verifyRunAsNonRoot` check deterministically
 fails it at container-start time — a `CreateContainerConfigError`, every
@@ -227,7 +235,11 @@ Linux-specific by definition, so excluding `windowsOptions` does not extend to
 it), `workingDir` (a bare pass-through — `corev1.Container.WorkingDir`'s own
 doc comment states only that the container runtime's default applies when
 unset, and real admission enforces no path shape for it, so this schema does
-not invent a stricter constraint upstream itself does not have), `volumes`,
+not invent a stricter constraint upstream itself does not have; a
+present-but-non-string value, e.g. `workingDir: 123`, is rejected rather than
+silently treated as absent, in all five kind handlers — this is a type check,
+distinct from the content-validation question the previous paragraph answers),
+`volumes`,
 `initContainers`, `sidecars`, and `affinity`.
 
 `securityContext.privileged: true` is rejected unless the environment policy's

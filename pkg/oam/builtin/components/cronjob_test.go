@@ -363,6 +363,28 @@ func TestCronjobHandler_WithSharedPodFields(t *testing.T) {
 	t.Error("CronJob not found")
 }
 
+// TestCronjobHandler_WorkingDir_NonString_Error covers a bug pattern shared
+// identically across all five kind handlers (cronjob, statefulset, worker,
+// daemonset, webservice): a mistyped workingDir value was previously
+// silently treated as absent instead of rejected. Exercised once here since
+// the fix is the same one-line change (routed through parseStringField) in
+// every handler.
+func TestCronjobHandler_WorkingDir_NonString_Error(t *testing.T) {
+	h := &components.CronjobHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":      "ghcr.io/org/job:v1.0.0",
+			"schedule":   "0 2 * * *",
+			"workingDir": 123,
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for non-string workingDir, got nil")
+	}
+}
+
 func TestCronjobHandler_WithProbes(t *testing.T) {
 	h := &components.CronjobHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
