@@ -619,7 +619,9 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 			return nil, errors.Errorf("envFrom[%d]: must specify exactly one of configMapRef or secretRef", i)
 		}
 		src := corev1.EnvFromSource{}
-		if prefix, ok := m["prefix"].(string); ok {
+		if prefix, present, err := parseStringField(m, "prefix", fmt.Sprintf("envFrom[%d].prefix", i)); err != nil {
+			return nil, err
+		} else if present {
 			// corev1.EnvFromSource.Prefix's field doc comment: "May consist of
 			// any printable ASCII characters except '='" — not a C-identifier
 			// restriction (the final env var name is prefix+key, and only that
@@ -1512,7 +1514,11 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			set = true
 		}
 	}
-	if spRaw, ok := raw["seccompProfile"].(map[string]any); ok {
+	if v, present := raw["seccompProfile"]; present {
+		spRaw, ok := v.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("securityContext.seccompProfile: must be an object, got %T", v)
+		}
 		typ, _ := spRaw["type"].(string)
 		switch corev1.SeccompProfileType(typ) {
 		case corev1.SeccompProfileTypeRuntimeDefault, corev1.SeccompProfileTypeUnconfined:
@@ -1548,7 +1554,11 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			return nil, errors.Errorf("securityContext.seccompProfile: invalid type %q, must be Localhost, RuntimeDefault, or Unconfined", typ)
 		}
 	}
-	if seRaw, ok := raw["seLinuxOptions"].(map[string]any); ok {
+	if v, present := raw["seLinuxOptions"]; present {
+		seRaw, ok := v.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("securityContext.seLinuxOptions: must be an object, got %T", v)
+		}
 		se := &corev1.SELinuxOptions{}
 		anySet := false
 		if v, present, err := parseStringField(seRaw, "user", "securityContext.seLinuxOptions.user"); err != nil {
@@ -1580,7 +1590,11 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			set = true
 		}
 	}
-	if apRaw, ok := raw["appArmorProfile"].(map[string]any); ok {
+	if v, present := raw["appArmorProfile"]; present {
+		apRaw, ok := v.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("securityContext.appArmorProfile: must be an object, got %T", v)
+		}
 		typ, _ := apRaw["type"].(string)
 		switch corev1.AppArmorProfileType(typ) {
 		case corev1.AppArmorProfileTypeRuntimeDefault, corev1.AppArmorProfileTypeUnconfined:

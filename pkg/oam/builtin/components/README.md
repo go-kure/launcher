@@ -89,6 +89,10 @@ rejected rather than silently treated as absent; bulk-import a ConfigMap's
 or Secret's keys, with `prefix` — any printable ASCII character except `=`,
 matching `corev1.EnvFromSource.Prefix`'s own field doc comment; only the final
 prefix+key concatenation need be a valid env var name, not the prefix alone;
+a present-but-non-string `prefix` (e.g. a bare YAML number) is rejected
+rather than silently omitted while still emitting the rest of the source —
+an unprefixed import can collide with existing names and leaves the names
+the application expects unset;
 `configMapRef.name`/`secretRef.name` must each be a valid DNS-1123 subdomain,
 matching how every Kubernetes object name is validated; both `configMapRef`
 and `secretRef` also accept `optional`, with the same non-boolean rejection
@@ -213,7 +217,9 @@ declares `AllowedCapabilities`/`ForbiddenCapabilities`/`RequiredCapabilities`,
 but those gate OAM trait-type usage (e.g. "ingress"), not container Linux
 capability strings (e.g. "NET_ADMIN"); see `enforce.go`'s `enforcePrivileged`
 doc comment for the naming-collision detail. Enforcing these would need a new
-`Policy` method, which is out of scope here), `seccompProfile` (`type` is required whenever the
+`Policy` method, which is out of scope here), `seccompProfile` (rejected outright if authored with
+a non-object value, e.g. `seccompProfile: RuntimeDefault`, instead of silently skipping the field
+and dropping the requested sandboxing entirely; `type` is required whenever the
 `seccompProfile` object is authored at all, matching real admission's own
 `field.Required` — omitting it (e.g. authoring only `localhostProfile` with
 no `type` key) is rejected rather than silently discarding the whole
@@ -222,12 +228,15 @@ relative and must not contain a `..` backstep component, matching
 `corev1.SeccompProfile.LocalhostProfile`'s own doc comment — "must be a
 descending path, relative to the kubelet's configured seccomp profile
 location" — and this repo's own path-safety convention), `seLinuxOptions`
-(`user`/`role`/`type`/`level` are each rejected if authored with a
+(also rejected outright if authored with a non-object value, same reasoning as
+`seccompProfile` above;
+`user`/`role`/`type`/`level` are each rejected if authored with a
 non-string value, e.g. `type: 123`, instead of silently discarding just that
 sub-field — if it were the only one set, the whole SELinux context would
 otherwise vanish rather than reporting the malformed input),
 `appArmorProfile` (same "`type` required when authored" rule as
-`seccompProfile` above), `procMount` (`Default`|`Unmasked`); `windowsOptions` is
+`seccompProfile` above, and the same non-object rejection as `seccompProfile`
+and `seLinuxOptions`), `procMount` (`Default`|`Unmasked`); `windowsOptions` is
 deliberately not covered — this project's own container images are
 Linux-only (distroless base images run under podman), so a Windows-specific
 security context has no target to apply to here, and `procMount` is
