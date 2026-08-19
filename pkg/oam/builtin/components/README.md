@@ -165,7 +165,11 @@ and likewise for each of its own `readiness`/`liveness`/`startup` keys, e.g.
 httpGet/tcpSocket/exec/grpc — exactly one handler may be authored; a
 present-but-non-object value for any of the four (e.g. `httpGet: "invalid"`)
 is rejected outright, even when paired with a well-formed sibling handler,
-rather than silently discarded while the sibling wins; a string `port` is a named container port, not
+rather than silently discarded while the sibling wins; `exec.command` must be
+a non-empty array of strings — a present-but-wrong-type `command` (e.g. a
+bare string instead of an array) or an array containing a non-string element
+is rejected the same way, instead of silently producing no probe at all,
+mirroring `lifecycle.{postStart,preStop}.exec.command` below; a string `port` is a named container port, not
 an arbitrary label, and is validated against `validation.IsValidPortName`
 just as real admission's `ValidatePortNumOrName` does: lowercase
 `[-a-z0-9]` only, at least one letter, no leading/trailing/adjacent hyphen,
@@ -320,7 +324,10 @@ distinct from the content-validation question the previous paragraph answers),
 `emptyDir`, `pvc`, `configMap`, `secret`, etc. — must be a valid DNS-1123
 label, matching how real admission validates every `corev1.Volume.Name`; an
 invalid name, e.g. containing `/`, builds successfully but is rejected at Pod
-admission; `emptyDir.sizeLimit` and `pvc.size` are each parsed as a
+admission; two volumes sharing the same valid name are likewise rejected —
+Pod volume names must be unique (`validateVolumes`' own duplicate check),
+so the second entry is caught at parse time rather than only at admission;
+`emptyDir.sizeLimit` and `pvc.size` are each parsed as a
 `resource.Quantity` and rejected if negative (e.g. `"-1Gi"`) — syntactically
 valid but a storage quantity real Kubernetes resource validation refuses,
 same as `resources`' own quantity fields above; `hostPath.path` must be

@@ -2145,6 +2145,56 @@ func TestParseVolumes_HostPath_AbsolutePath_Accepted(t *testing.T) {
 	}
 }
 
+// TestParseVolumes_DuplicateName_Error regression-tests a review finding
+// (launcher#284): parseVolumes validated each volume's name individually but
+// never tracked names across entries, so two volumes sharing a valid name
+// both built successfully into the Pod template — real admission
+// (validateVolumes' allNames.Has(vol.Name) check) rejects the duplicate.
+func TestParseVolumes_DuplicateName_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "data",
+				"type":      "emptyDir",
+				"mountPath": "/data",
+			},
+			map[string]any{
+				"name":      "data",
+				"type":      "emptyDir",
+				"mountPath": "/other",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for two volumes sharing the same name")
+	}
+}
+
+// TestParseVolumes_DistinctNames_Accepted is the accept-path sibling,
+// confirming the fix above didn't also reject legitimately distinct names.
+func TestParseVolumes_DistinctNames_Accepted(t *testing.T) {
+	parsed, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "data",
+				"type":      "emptyDir",
+				"mountPath": "/data",
+			},
+			map[string]any{
+				"name":      "cache",
+				"type":      "emptyDir",
+				"mountPath": "/cache",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseVolumes: %v", err)
+	}
+	if len(parsed.Volumes) != 2 {
+		t.Errorf("Volumes = %+v, want 2 distinct volumes", parsed.Volumes)
+	}
+}
+
 // TestParseProbes_MistypedProbesObject_Error regression-tests a review
 // finding (launcher#284): the outer `props["probes"].(map[string]any)`
 // assertion silently treated a present-but-non-object probes value as
@@ -2547,6 +2597,58 @@ func TestParseProbe_MalformedHandlerAlone_Error(t *testing.T) {
 	}, "readiness", true, "")
 	if err == nil {
 		t.Fatal("expected error for a malformed tcpSocket handler with no other handler present")
+	}
+}
+
+// TestParseProbe_ExecCommand_NonArray_Error regression-tests a review finding
+// (launcher#284): `execCmd["command"].([]any)` silently produced an empty
+// command on a present-but-wrong-type command value (e.g. a bare string
+// instead of an array), so parseProbe fell through to hasHandler=false and
+// returned (nil, nil) — silently discarding the authored exec probe instead
+// of rejecting the malformed command. Mirrors parseLifecycleHandler's
+// already-correct exec branch.
+func TestParseProbe_ExecCommand_NonArray_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec": map[string]any{"command": "check"},
+	}, "liveness", true, "")
+	if err == nil {
+		t.Fatal("expected error for a non-array exec command")
+	}
+}
+
+// TestParseProbe_ExecCommand_NonStringElement_Error covers an array command
+// with a non-string element, the other half of the same finding.
+func TestParseProbe_ExecCommand_NonStringElement_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec": map[string]any{"command": []any{"check", float64(123)}},
+	}, "liveness", true, "")
+	if err == nil {
+		t.Fatal("expected error for an exec command with a non-string element")
+	}
+}
+
+// TestParseProbe_ExecCommand_Empty_Error covers an explicitly empty command
+// array, which real admission also rejects (ExecAction.Command is required).
+func TestParseProbe_ExecCommand_Empty_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec": map[string]any{"command": []any{}},
+	}, "liveness", true, "")
+	if err == nil {
+		t.Fatal("expected error for an empty exec command")
+	}
+}
+
+// TestParseProbe_ExecCommand_Valid_Accepted is the accept-path sibling,
+// confirming the fix above didn't also break the well-formed case.
+func TestParseProbe_ExecCommand_Valid_Accepted(t *testing.T) {
+	probe, err := parseProbe(map[string]any{
+		"exec": map[string]any{"command": []any{"cat", "/tmp/healthy"}},
+	}, "liveness", true, "")
+	if err != nil {
+		t.Fatalf("parseProbe: %v", err)
+	}
+	if probe == nil || probe.Exec == nil || len(probe.Exec.Command) != 2 {
+		t.Errorf("Probe = %+v, want an exec probe with a 2-element command", probe)
 	}
 }
 
