@@ -374,6 +374,55 @@ func TestDaemonsetHandler_ServicePortName_IsHttp(t *testing.T) {
 	}
 }
 
+// TestDaemonsetHandler_NamedProbePort_WithPort_Accepted and
+// TestDaemonsetHandler_NamedProbePort_WithoutPort_Error cover launcher#278
+// wave-11 finding 5: daemonset's main container is only named "http" when
+// `port` is set (see TestDaemonsetConfig_WithoutPort above) — so unlike
+// worker/cronjob, whether a named probe/lifecycle port resolves depends on
+// the specific component instance, not the kind alone.
+func TestDaemonsetHandler_NamedProbePort_WithPort_Accepted(t *testing.T) {
+	h := &components.DaemonsetHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "agent",
+		Type: "daemonset",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/agent:v1.0.0",
+			"port":  9090,
+			"probes": map[string]any{
+				"liveness": map[string]any{
+					"httpGet": map[string]any{"port": "http", "path": "/healthz"},
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("agent", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestDaemonsetHandler_NamedProbePort_WithoutPort_Error(t *testing.T) {
+	h := &components.DaemonsetHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "agent",
+		Type: "daemonset",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/agent:v1.0.0",
+			"probes": map[string]any{
+				"liveness": map[string]any{
+					"httpGet": map[string]any{"port": "http", "path": "/healthz"},
+				},
+			},
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for a named probe port when no port is configured")
+	}
+}
+
 func TestDaemonsetHandler_WithSharedPodFields(t *testing.T) {
 	h := &components.DaemonsetHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{

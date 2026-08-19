@@ -165,6 +165,75 @@ func TestWorkerHandler_WithSharedPodFields(t *testing.T) {
 	t.Error("Deployment not found in output")
 }
 
+// TestWorkerHandler_NamedLifecyclePort_Error covers launcher#278 wave-11
+// finding 5: worker's main container never declares any port (there is no
+// `port` property at all — see PropertySchema above), so a named httpGet
+// port in `lifecycle`/`probes` can never resolve against it and is rejected
+// at parse time instead of authoring a hook guaranteed to fail at runtime.
+// worker is the representative test for this fix — cronjob shares the same
+// portless shape and the same shared parsing path (parseProbes/
+// parseLifecycle's namedPortsAllowed parameter, common.go).
+func TestWorkerHandler_NamedLifecyclePort_Error(t *testing.T) {
+	h := &components.WorkerHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "app",
+		Type: "worker",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"lifecycle": map[string]any{
+				"preStop": map[string]any{
+					"httpGet": map[string]any{"port": "http", "path": "/shutdown"},
+				},
+			},
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for a named lifecycle port on a portless worker")
+	}
+}
+
+func TestWorkerHandler_NamedProbePort_Error(t *testing.T) {
+	h := &components.WorkerHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "app",
+		Type: "worker",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"probes": map[string]any{
+				"liveness": map[string]any{
+					"httpGet": map[string]any{"port": "http", "path": "/healthz"},
+				},
+			},
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for a named probe port on a portless worker")
+	}
+}
+
+func TestWorkerHandler_NumericLifecyclePort_Accepted(t *testing.T) {
+	h := &components.WorkerHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "app",
+		Type: "worker",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"lifecycle": map[string]any{
+				"preStop": map[string]any{
+					"httpGet": map[string]any{"port": 8080, "path": "/shutdown"},
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
 func TestWorkerConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 	h := &components.WorkerHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{

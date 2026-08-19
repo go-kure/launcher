@@ -635,7 +635,7 @@ func TestParseResources_InvalidResourceName_Error(t *testing.T) {
 }
 
 func TestParseLifecycle_Absent(t *testing.T) {
-	lc, err := parseLifecycle(map[string]any{})
+	lc, err := parseLifecycle(map[string]any{}, true)
 	if err != nil || lc != nil {
 		t.Fatalf("expected nil,nil for absent lifecycle, got %v, %v", lc, err)
 	}
@@ -650,7 +650,7 @@ func TestParseLifecycle_NonObject_Error(t *testing.T) {
 		{"array", []any{"a"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := parseLifecycle(map[string]any{"lifecycle": tc.val})
+			_, err := parseLifecycle(map[string]any{"lifecycle": tc.val}, true)
 			if err == nil {
 				t.Fatal("expected error for non-object lifecycle, got nil")
 			}
@@ -669,7 +669,7 @@ func TestParseLifecycle_PostStartAndPreStop(t *testing.T) {
 			},
 		},
 	}
-	lc, err := parseLifecycle(props)
+	lc, err := parseLifecycle(props, true)
 	if err != nil {
 		t.Fatalf("parseLifecycle: %v", err)
 	}
@@ -684,7 +684,7 @@ func TestParseLifecycle_PostStartAndPreStop(t *testing.T) {
 func TestParseLifecycleHandler_HTTPGet(t *testing.T) {
 	h, err := parseLifecycleHandler(map[string]any{
 		"httpGet": map[string]any{"path": "/started", "port": 8080, "host": "127.0.0.1"},
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("parseLifecycleHandler: %v", err)
 	}
@@ -699,7 +699,7 @@ func TestParseLifecycleHandler_HTTPGet_FractionalPort_Error(t *testing.T) {
 	// truncation (8080.5 -> 8080) would mask an authoring mistake.
 	_, err := parseLifecycleHandler(map[string]any{
 		"httpGet": map[string]any{"path": "/x", "port": 8080.5},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for a fractional httpGet port")
 	}
@@ -708,7 +708,7 @@ func TestParseLifecycleHandler_HTTPGet_FractionalPort_Error(t *testing.T) {
 func TestParseLifecycleHandler_TCPSocket_Unsupported(t *testing.T) {
 	h, err := parseLifecycleHandler(map[string]any{
 		"tcpSocket": map[string]any{"port": 8080},
-	})
+	}, true)
 	if err == nil {
 		t.Fatalf("expected error for unsupported tcpSocket handler, got handler=%+v", h)
 	}
@@ -718,7 +718,7 @@ func TestParseLifecycleHandler_MultipleHandlers_Error(t *testing.T) {
 	_, err := parseLifecycleHandler(map[string]any{
 		"httpGet": map[string]any{"path": "/x", "port": 80},
 		"exec":    map[string]any{"command": []any{"/bin/true"}},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for multiple handlers")
 	}
@@ -727,7 +727,7 @@ func TestParseLifecycleHandler_MultipleHandlers_Error(t *testing.T) {
 func TestParseLifecycleHandler_Sleep_MissingSeconds_Error(t *testing.T) {
 	_, err := parseLifecycleHandler(map[string]any{
 		"sleep": map[string]any{},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for sleep handler missing seconds")
 	}
@@ -736,7 +736,7 @@ func TestParseLifecycleHandler_Sleep_MissingSeconds_Error(t *testing.T) {
 func TestParseLifecycleHandler_Sleep_NegativeSeconds_Error(t *testing.T) {
 	_, err := parseLifecycleHandler(map[string]any{
 		"sleep": map[string]any{"seconds": -1},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for sleep handler with negative seconds")
 	}
@@ -748,7 +748,7 @@ func TestParseLifecycleHandler_Exec_NonStringElement_Error(t *testing.T) {
 	// it hang or fail at runtime.
 	_, err := parseLifecycleHandler(map[string]any{
 		"exec": map[string]any{"command": []any{"sleep", float64(5)}},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for a non-string exec command element")
 	}
@@ -757,14 +757,14 @@ func TestParseLifecycleHandler_Exec_NonStringElement_Error(t *testing.T) {
 func TestParseLifecycleHandler_Exec_EmptyCommand_Error(t *testing.T) {
 	_, err := parseLifecycleHandler(map[string]any{
 		"exec": map[string]any{"command": []any{}},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for exec handler with empty command")
 	}
 }
 
 func TestParseLifecycleHandler_NoHandler_Error(t *testing.T) {
-	_, err := parseLifecycleHandler(map[string]any{})
+	_, err := parseLifecycleHandler(map[string]any{}, true)
 	if err == nil {
 		t.Fatal("expected error when no handler is specified")
 	}
@@ -969,7 +969,7 @@ func TestParseProbe_HTTPGetHost(t *testing.T) {
 			"port": 8080,
 			"host": "10.0.0.1",
 		},
-	}, "liveness")
+	}, "liveness", true)
 	if err != nil {
 		t.Fatalf("parseProbe: %v", err)
 	}
@@ -982,7 +982,7 @@ func TestParseProbe_TerminationGracePeriodSeconds(t *testing.T) {
 	probe, err := parseProbe(map[string]any{
 		"exec":                          map[string]any{"command": []any{"/bin/true"}},
 		"terminationGracePeriodSeconds": 30,
-	}, "liveness")
+	}, "liveness", true)
 	if err != nil {
 		t.Fatalf("parseProbe: %v", err)
 	}
@@ -995,7 +995,7 @@ func TestParseProbe_TerminationGracePeriodSeconds_Negative_Error(t *testing.T) {
 	_, err := parseProbe(map[string]any{
 		"exec":                          map[string]any{"command": []any{"/bin/true"}},
 		"terminationGracePeriodSeconds": -5,
-	}, "liveness")
+	}, "liveness", true)
 	if err == nil {
 		t.Fatal("expected error for negative terminationGracePeriodSeconds")
 	}
@@ -1005,7 +1005,7 @@ func TestParseProbe_TerminationGracePeriodSeconds_Zero_Error(t *testing.T) {
 	_, err := parseProbe(map[string]any{
 		"exec":                          map[string]any{"command": []any{"/bin/true"}},
 		"terminationGracePeriodSeconds": 0,
-	}, "startup")
+	}, "startup", true)
 	if err == nil {
 		t.Fatal("expected error for zero terminationGracePeriodSeconds (minimum is 1)")
 	}
@@ -1015,12 +1015,101 @@ func TestParseProbe_TerminationGracePeriodSeconds_NotPermittedOnReadiness_Error(
 	_, err := parseProbe(map[string]any{
 		"exec":                          map[string]any{"command": []any{"/bin/true"}},
 		"terminationGracePeriodSeconds": 30,
-	}, "readiness")
+	}, "readiness", true)
 	if err == nil {
 		t.Fatal("expected error for terminationGracePeriodSeconds on a readiness probe")
 	}
 	if !strings.Contains(err.Error(), "readiness") {
 		t.Errorf("expected error to mention readiness, got: %v", err)
+	}
+}
+
+func TestParseProbe_PeriodSeconds_Zero_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec":          map[string]any{"command": []any{"/bin/true"}},
+		"periodSeconds": 0,
+	}, "liveness", true)
+	if err == nil {
+		t.Fatal("expected error for zero periodSeconds (minimum is 1)")
+	}
+}
+
+func TestParseProbe_TimeoutSeconds_Zero_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec":           map[string]any{"command": []any{"/bin/true"}},
+		"timeoutSeconds": 0,
+	}, "liveness", true)
+	if err == nil {
+		t.Fatal("expected error for zero timeoutSeconds (minimum is 1)")
+	}
+}
+
+func TestParseProbe_FailureThreshold_Zero_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec":             map[string]any{"command": []any{"/bin/true"}},
+		"failureThreshold": 0,
+	}, "liveness", true)
+	if err == nil {
+		t.Fatal("expected error for zero failureThreshold (minimum is 1)")
+	}
+}
+
+func TestParseProbe_SuccessThreshold_Zero_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec":             map[string]any{"command": []any{"/bin/true"}},
+		"successThreshold": 0,
+	}, "readiness", true)
+	if err == nil {
+		t.Fatal("expected error for zero successThreshold (minimum is 1)")
+	}
+}
+
+func TestParseProbe_InitialDelaySeconds_Negative_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec":                map[string]any{"command": []any{"/bin/true"}},
+		"initialDelaySeconds": -1,
+	}, "liveness", true)
+	if err == nil {
+		t.Fatal("expected error for negative initialDelaySeconds")
+	}
+}
+
+func TestParseProbe_SuccessThreshold_ReadinessAboveOne_Accepted(t *testing.T) {
+	probe, err := parseProbe(map[string]any{
+		"exec":             map[string]any{"command": []any{"/bin/true"}},
+		"successThreshold": 3,
+	}, "readiness", true)
+	if err != nil {
+		t.Fatalf("parseProbe: %v", err)
+	}
+	if probe.SuccessThreshold != 3 {
+		t.Errorf("SuccessThreshold = %d, want 3", probe.SuccessThreshold)
+	}
+}
+
+func TestParseProbe_SuccessThreshold_LivenessAboveOne_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec":             map[string]any{"command": []any{"/bin/true"}},
+		"successThreshold": 2,
+	}, "liveness", true)
+	if err == nil {
+		t.Fatal("expected error for successThreshold > 1 on a liveness probe")
+	}
+	if !strings.Contains(err.Error(), "liveness") {
+		t.Errorf("expected error to mention liveness, got: %v", err)
+	}
+}
+
+func TestParseProbe_SuccessThreshold_StartupAboveOne_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec":             map[string]any{"command": []any{"/bin/true"}},
+		"successThreshold": 2,
+	}, "startup", true)
+	if err == nil {
+		t.Fatal("expected error for successThreshold > 1 on a startup probe")
+	}
+	if !strings.Contains(err.Error(), "startup") {
+		t.Errorf("expected error to mention startup, got: %v", err)
 	}
 }
 
@@ -1123,7 +1212,7 @@ func TestParseLifecycleHandler_HTTPGet_Headers(t *testing.T) {
 				map[string]any{"name": "X-Empty"},
 			},
 		},
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("parseLifecycleHandler: %v", err)
 	}
@@ -1711,14 +1800,14 @@ func TestParseSecurityContext_AppArmorProfile_MissingType_Error(t *testing.T) {
 func TestParsePort_InvalidName_Error(t *testing.T) {
 	cases := []string{"8080", "UPPER", "-leading-hyphen", "trailing-hyphen-", "a--b", ""}
 	for _, name := range cases {
-		if _, err := parsePort(name); err == nil {
+		if _, err := parsePort(name, true); err == nil {
 			t.Errorf("parsePort(%q): expected error for an invalid port name", name)
 		}
 	}
 }
 
 func TestParsePort_ValidName_Accepted(t *testing.T) {
-	port, err := parsePort("http")
+	port, err := parsePort("http", true)
 	if err != nil {
 		t.Fatalf("parsePort: %v", err)
 	}
@@ -1727,10 +1816,32 @@ func TestParsePort_ValidName_Accepted(t *testing.T) {
 	}
 }
 
+// TestParsePort_NamedPortsDisallowed_Error covers launcher#278 wave-11
+// finding 5: a component kind whose main container never declares any port
+// (worker, cronjob) passes namedPortsAllowed=false, so even an otherwise
+// validly-formatted name like "http" is rejected — the kubelet has nothing
+// to resolve it against on that container.
+func TestParsePort_NamedPortsDisallowed_Error(t *testing.T) {
+	_, err := parsePort("http", false)
+	if err == nil {
+		t.Fatal("expected error for a named port when namedPortsAllowed is false")
+	}
+}
+
+func TestParsePort_NamedPortsDisallowed_NumericStillAccepted(t *testing.T) {
+	port, err := parsePort(8080, false)
+	if err != nil {
+		t.Fatalf("parsePort: %v", err)
+	}
+	if port.IntVal != 8080 {
+		t.Errorf("IntVal = %d, want 8080", port.IntVal)
+	}
+}
+
 func TestParseProbe_HTTPGet_NamedPort_Invalid_Error(t *testing.T) {
 	_, err := parseProbe(map[string]any{
 		"httpGet": map[string]any{"path": "/healthz", "port": "8080"},
-	}, "liveness")
+	}, "liveness", true)
 	if err == nil {
 		t.Fatal("expected error for an invalid httpGet named port")
 	}
@@ -1739,7 +1850,7 @@ func TestParseProbe_HTTPGet_NamedPort_Invalid_Error(t *testing.T) {
 func TestParseLifecycleHandler_HTTPGet_NamedPort_Invalid_Error(t *testing.T) {
 	_, err := parseLifecycleHandler(map[string]any{
 		"httpGet": map[string]any{"path": "/started", "port": "bad_name"},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for an invalid lifecycle httpGet named port")
 	}
@@ -1956,7 +2067,7 @@ func TestParseResources_StandardResource_RequestBelowLimit_Accepted(t *testing.T
 func TestParseProbe_HTTPGet_MissingPath_Accepted(t *testing.T) {
 	probe, err := parseProbe(map[string]any{
 		"httpGet": map[string]any{"port": 8080},
-	}, "liveness")
+	}, "liveness", true)
 	if err != nil {
 		t.Fatalf("parseProbe: %v", err)
 	}
@@ -1968,7 +2079,7 @@ func TestParseProbe_HTTPGet_MissingPath_Accepted(t *testing.T) {
 func TestParseProbe_HTTPGet_EmptyPath_Accepted(t *testing.T) {
 	probe, err := parseProbe(map[string]any{
 		"httpGet": map[string]any{"path": "", "port": 8080},
-	}, "liveness")
+	}, "liveness", true)
 	if err != nil {
 		t.Fatalf("parseProbe: %v", err)
 	}
@@ -1980,7 +2091,7 @@ func TestParseProbe_HTTPGet_EmptyPath_Accepted(t *testing.T) {
 func TestParseProbe_HTTPGet_NonStringPath_Error(t *testing.T) {
 	_, err := parseProbe(map[string]any{
 		"httpGet": map[string]any{"path": 123, "port": 8080},
-	}, "liveness")
+	}, "liveness", true)
 	if err == nil {
 		t.Fatal("expected error for a non-string httpGet path")
 	}
@@ -1991,7 +2102,7 @@ func TestParseProbe_HTTPGet_PathWithoutLeadingSlash_Accepted(t *testing.T) {
 	// non-empty. "healthz" (no leading "/") must not be rejected.
 	probe, err := parseProbe(map[string]any{
 		"httpGet": map[string]any{"path": "healthz", "port": 8080},
-	}, "liveness")
+	}, "liveness", true)
 	if err != nil {
 		t.Fatalf("parseProbe: %v", err)
 	}
@@ -2003,7 +2114,7 @@ func TestParseProbe_HTTPGet_PathWithoutLeadingSlash_Accepted(t *testing.T) {
 func TestParseLifecycleHandler_HTTPGet_MissingPath_Accepted(t *testing.T) {
 	handler, err := parseLifecycleHandler(map[string]any{
 		"httpGet": map[string]any{"port": 8080},
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("parseLifecycleHandler: %v", err)
 	}
@@ -2015,7 +2126,7 @@ func TestParseLifecycleHandler_HTTPGet_MissingPath_Accepted(t *testing.T) {
 func TestParseLifecycleHandler_HTTPGet_NonStringPath_Error(t *testing.T) {
 	_, err := parseLifecycleHandler(map[string]any{
 		"httpGet": map[string]any{"path": 123, "port": 8080},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for a non-string lifecycle httpGet path")
 	}
@@ -2030,7 +2141,7 @@ func TestParseLifecycleHandler_TCPSocket_WithOtherHandler_Error(t *testing.T) {
 	_, err := parseLifecycleHandler(map[string]any{
 		"tcpSocket": map[string]any{"port": 8080},
 		"exec":      map[string]any{"command": []any{"true"}},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for tcpSocket paired with another lifecycle handler")
 	}
@@ -2039,7 +2150,7 @@ func TestParseLifecycleHandler_TCPSocket_WithOtherHandler_Error(t *testing.T) {
 func TestParseLifecycleHandler_TCPSocket_Alone_Error(t *testing.T) {
 	_, err := parseLifecycleHandler(map[string]any{
 		"tcpSocket": map[string]any{"port": 8080},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for a lifecycle handler containing only tcpSocket")
 	}
@@ -2052,7 +2163,7 @@ func TestParseLifecycleHandler_TCPSocket_Alone_Error(t *testing.T) {
 func TestParseLifecycle_NonObjectPostStart_Error(t *testing.T) {
 	_, err := parseLifecycle(map[string]any{
 		"lifecycle": map[string]any{"postStart": "flush"},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for a non-object lifecycle.postStart")
 	}
@@ -2061,7 +2172,7 @@ func TestParseLifecycle_NonObjectPostStart_Error(t *testing.T) {
 func TestParseLifecycle_NonObjectPreStop_Error(t *testing.T) {
 	_, err := parseLifecycle(map[string]any{
 		"lifecycle": map[string]any{"preStop": "flush"},
-	})
+	}, true)
 	if err == nil {
 		t.Fatal("expected error for a non-object lifecycle.preStop")
 	}
@@ -2251,7 +2362,7 @@ func TestParseProbe_NonIntNumericField_Error(t *testing.T) {
 			_, err := parseProbe(map[string]any{
 				"tcpSocket": map[string]any{"port": 8080},
 				key:         "30",
-			}, "liveness")
+			}, "liveness", true)
 			if err == nil {
 				t.Fatalf("expected error for non-integer probe.%s", key)
 			}

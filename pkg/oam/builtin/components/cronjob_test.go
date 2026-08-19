@@ -363,6 +363,33 @@ func TestCronjobHandler_WithSharedPodFields(t *testing.T) {
 	t.Error("CronJob not found")
 }
 
+// TestCronjobHandler_NamedLifecyclePort_Error covers launcher#278 wave-11
+// finding 5 — the literal example the finding cited: cronjob has no `port`
+// property at all, so a named lifecycle httpGet port (`port: http`) can
+// never resolve against the main container and is rejected at parse time.
+// See TestWorkerHandler_NamedLifecyclePort_Error for the fuller set of cases
+// (probes, numeric-still-accepted) — cronjob shares the identical portless
+// shape and the same shared parsing path, so it is not repeated here.
+func TestCronjobHandler_NamedLifecyclePort_Error(t *testing.T) {
+	h := &components.CronjobHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+			"lifecycle": map[string]any{
+				"preStop": map[string]any{
+					"httpGet": map[string]any{"port": "http", "path": "/shutdown"},
+				},
+			},
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for a named lifecycle port on a portless cronjob")
+	}
+}
+
 // TestCronjobHandler_WorkingDir_NonString_Error covers a bug pattern shared
 // identically across all five kind handlers (cronjob, statefulset, worker,
 // daemonset, webservice): a mistyped workingDir value was previously
