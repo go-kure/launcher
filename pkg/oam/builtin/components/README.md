@@ -41,7 +41,9 @@ hand-rolled parallel schema: `image` (validated — no untagged/`latest`), `env`
 (`value` or `valueFrom` — mutually exclusive, matching `corev1.EnvVar`'s own
 doc comment ("cannot be used if value is not empty"); `valueFrom` is one of
 `secretKeyRef`, `configMapKeyRef` (both accept `optional`, rejecting a
-present non-boolean value rather than silently treating it as unset), `fieldRef`
+present non-boolean value rather than silently treating it as unset; a key
+other than `name`/`key`/`optional` in either is rejected outright too, rather
+than being silently ignored), `fieldRef`
 (`apiVersion` must be `v1` if authored — the only field-label conversion
 Kubernetes has ever shipped for the downward API; omitting it also defaults to
 `v1`; a present-but-non-string `apiVersion` (e.g. a bare YAML number) is
@@ -52,7 +54,9 @@ for an env var fieldRef — `metadata.name`/`metadata.namespace`/`metadata.uid`,
 `status.podIP`/`status.podIPs` — plus the `metadata.labels['KEY']`/
 `metadata.annotations['KEY']` subscript forms, each with `KEY` checked as a
 qualified name; a field like `status.phase` builds but is rejected by
-admission, so it is rejected here too), `resourceFieldRef` (`resource` must be
+admission, so it is rejected here too; a key other than `fieldPath`/
+`apiVersion` is rejected outright too, rather than being silently ignored),
+`resourceFieldRef` (`resource` must be
 one of `limits.cpu`, `limits.memory`, `limits.ephemeral-storage`,
 `requests.cpu`, `requests.memory`, `requests.ephemeral-storage`, or a
 `requests.hugepages-<size>`/`limits.hugepages-<size>` selector — the downward
@@ -89,7 +93,9 @@ parsing in every call site — so a `fileKeyRef` naming a nonexistent volume,
 or an existing but non-`emptyDir` one, builds successfully here but is
 rejected at real admission: `validateFileKeyRefVolumes` requires the
 referenced volume be specifically `emptyDir`, not any other source type this
-schema supports; see the doc comment on `parseFileKeyRef` in `common.go`) —
+schema supports; see the doc comment on `parseFileKeyRef` in `common.go`; a
+key other than `volumeName`/`path`/`key`/`optional` is rejected outright too,
+rather than being silently ignored) —
 mutually exclusive among themselves too), `envFrom` (an authored non-array
 value, e.g. a single ConfigMap/Secret object instead of a list of them, is
 rejected rather than silently treated as absent; bulk-import a ConfigMap's
@@ -243,7 +249,9 @@ value (e.g. a single header object instead of a list) is rejected the same
 as a non-object entry within it, a missing/empty/invalid `name`
 (`validation.IsHTTPHeaderName`, matching `validateHTTPGetAction`), or a
 present-but-non-string `value` are all rejected instead of quietly
-disappearing or turning into `""`; an omitted `value` key still defaults to
+disappearing or turning into `""`; a key other than `name`/`value` in a
+header entry (e.g. a misspelled `vaule`) is rejected outright too, rather
+than being silently ignored; an omitted `value` key still defaults to
 `""` — shared by `lifecycle.{postStart,preStop}.httpGet` below via the same
 parsing helper; a key other than `port`/`path`/`host`/`scheme`/`httpHeaders`
 anywhere in an httpGet object (e.g. a misspelled `pth` for `path`) is
@@ -300,7 +308,11 @@ handler such as `exec`, and regardless of its own value's shape (an
 authored-but-malformed `tcpSocket`, e.g. a string, is rejected the same as a
 well-formed one) — corev1 documents it as broken for lifecycle hooks,
 and simply ignoring the extra key would silently drop the authored
-`tcpSocket` while emitting only the other handler; `postStart`/`preStop` are
+`tcpSocket` while emitting only the other handler; a key on a `postStart`/
+`preStop` value outside `httpGet`/`exec`/`sleep`/`tcpSocket` itself (e.g. a
+misspelled `timeoutSeconds` alongside a valid `exec`) is rejected outright
+too, rather than being silently ignored while the valid sibling handler
+still builds; `postStart`/`preStop` are
 each rejected outright if present with a non-object value, e.g. `preStop:
 "flush"`, instead of silently discarding the whole hook),
 `securityContext` (rejected outright if authored with a non-object value,
@@ -426,7 +438,16 @@ value (e.g. `sizeLimit: 1048576`) is rejected the same way, instead of
 failing the bare type assertion silently and building an emptyDir with no
 size limit at all; `pvc.size` is required (the
 same missing-vs-wrong-type rejection as `name`/`mountPath` above) and, once
-present, is validated the same way as `emptyDir.sizeLimit`; `hostPath.path`
+present, is validated the same way as `emptyDir.sizeLimit`; `pvc.storageClass`,
+if authored, must be a string — a present-but-non-string value (e.g. a bare
+number) is rejected rather than silently building with the cluster default
+class; `pvc.accessModes`, if authored, must be a non-empty array of non-empty
+strings, each one of the three real `corev1.PersistentVolumeAccessMode`
+values — a present-but-non-array value (e.g. a bare string) or a non-string
+element is rejected outright too, instead of silently falling through to the
+`ReadWriteOnce` default while discarding the author's actual list; an absent
+`accessModes` still defaults to `ReadWriteOnce`, unchanged; the same parser
+backs `volumeClaimTemplates.accessModes` below; `hostPath.path`
 is likewise required and must be absolute — a raw host filesystem path has
 no defined root to resolve a relative value against, and real admission
 (`validateHostPathVolumeSource`) rejects a relative one the same way;
@@ -481,8 +502,9 @@ policy choice, not something this shared schema hardcodes.
   app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
   Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
 - **statefulset** — `volumeClaimTemplates` (`name`, `size` — a `resource.Quantity`
-  rejected if negative, same as `volumes`' `pvc.size` above — `storageClass`,
-  `accessModes`, `mountPath`), `serviceName` (headless).
+  rejected if negative, same as `volumes`' `pvc.size` above — `storageClass`
+  (a present-but-non-string value is rejected outright, same as `volumes`'
+  `pvc.storageClass`), `accessModes`, `mountPath`), `serviceName` (headless).
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`); `port`
   optionally adds a Service.
 - **cronjob** — `schedule` (5-field cron), `restartPolicy` (default `OnFailure`),
