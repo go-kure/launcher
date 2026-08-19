@@ -2,7 +2,7 @@
 
 This document provides an overview of all GitHub Actions workflows used in the launcher project.
 
-**Last Updated:** 2026-08-18
+**Last Updated:** 2026-08-19
 
 ---
 
@@ -130,7 +130,8 @@ Runs on main and `release/*` branches only (not PRs):
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages
 - **Binary artifact** — `kurel` linux/amd64 binary uploaded per run (7-day retention)
 - **Cross-platform artifacts** — 5 binaries uploaded per main push (30-day retention)
-- **Skip draft PRs** — `if: github.event.pull_request.draft == false`
+- **Runs on draft PRs** — no draft gate on any job (2026-08-19, GitLab `mr-review` parity — draft
+  blocks merge only, via branch protection, not what CI runs)
 - **make install guard** — every job that calls `make` installs it first (runner image lacks it)
 - **govulncheck allowlist** — the `Security` job runs `govulncheck -scan symbol -format json`, then
   gates the report through the shared `go-kure/.github` `govulncheck-gate` composite action (same
@@ -291,12 +292,12 @@ subsequent workflows — `GITHUB_TOKEN` pushes do not trigger workflows).
 
 ### Triggers
 
-- Pull requests: `opened`, `synchronize`, `ready_for_review`, `reopened`
+- Pull requests: `opened`, `synchronize`, `reopened`
 - `merge_group` (no filters): required so this check reports on the merge queue's temporary
   ref once it becomes a required status check — the queue payload has no `pull_request` field,
-  so the existing draft/fork skip below evaluates false and the job reports `skipped`/success
-  as a no-op
-- Skips draft PRs and fork PRs
+  so the existing fork skip below evaluates false and the job reports `skipped`/success as a
+  no-op
+- Runs on draft PRs (2026-08-19, GitLab `mr-review` parity); skips fork PRs
 
 ### How It Works
 
