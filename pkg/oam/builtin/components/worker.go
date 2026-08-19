@@ -219,6 +219,7 @@ func (c *WorkerConfig) ApplyPolicy(p oam.Policy) error {
 // Generate creates a Kubernetes Deployment and ServiceAccount (no Service).
 func (c *WorkerConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}
+	c.PVCs = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 	deployment, err := c.createDeployment(app)
 	if err != nil {
 		return nil, err
