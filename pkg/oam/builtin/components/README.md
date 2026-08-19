@@ -348,7 +348,14 @@ outright too, instead of silently ignored; `add`/`drop`
 are each rejected if authored with a non-array value, e.g. `drop: ALL`
 instead of a list, or with a non-string array element — an empty-string
 element is silently skipped rather than rejected, since real admission places
-no format constraint on a Capability string at all. No environment-policy
+no format constraint on a Capability string at all. Adding the literal
+capability `CAP_SYS_ADMIN` alongside `allowPrivilegeEscalation: false` is
+rejected outright — Kubernetes admission always treats a container holding
+that capability as privilege-escalated regardless of the field's own value,
+so the combination promises hardening the runtime cannot honor; the
+unprefixed conventional form `SYS_ADMIN` is not rejected, matching real
+admission's own exact-string scope (it checks only `CAP_SYS_ADMIN`,
+literally). No environment-policy
 enforcement hook exists for these two fields — `oam.Policy` separately
 declares `AllowedCapabilities`/`ForbiddenCapabilities`/`RequiredCapabilities`,
 but those gate OAM trait-type usage (e.g. "ingress"), not container Linux
@@ -441,12 +448,22 @@ same missing-vs-wrong-type rejection as `name`/`mountPath` above) and, once
 present, is validated the same way as `emptyDir.sizeLimit`; `pvc.storageClass`,
 if authored, must be a string — a present-but-non-string value (e.g. a bare
 number) is rejected rather than silently building with the cluster default
-class; `pvc.accessModes`, if authored, must be a non-empty array of non-empty
+class. An explicitly authored `storageClass: ""` is preserved as an
+opt-out request (Kubernetes distinguishes a nil `StorageClassName` — use the
+cluster default — from a pointer to `""` — request no class) rather than
+being collapsed to "absent" and silently provisioned through the default
+class; this distinction is not available for `volumeClaimTemplates.storageClass`
+below, since the underlying `go-kure/kure` `CreateVolumeClaimTemplate` helper
+that path builds on only ever sets a non-empty storage class name on the
+generated claim — a cross-repo limitation, out of scope here.
+`pvc.accessModes`, if authored, must be a non-empty array of non-empty
 strings, each one of the three real `corev1.PersistentVolumeAccessMode`
 values — a present-but-non-array value (e.g. a bare string) or a non-string
 element is rejected outright too, instead of silently falling through to the
 `ReadWriteOnce` default while discarding the author's actual list; an absent
-`accessModes` still defaults to `ReadWriteOnce`, unchanged; the same parser
+`accessModes` still defaults to `ReadWriteOnce`, unchanged; `ReadWriteOncePod`
+combined with any other access mode is rejected outright — real Kubernetes
+requires it be the claim's only mode; the same parser
 backs `volumeClaimTemplates.accessModes` below; the generated
 `PersistentVolumeClaim` object's own Kubernetes name is the component's
 `<app.Name>-<pod-local volume name>`, not the bare pod-local name — two
