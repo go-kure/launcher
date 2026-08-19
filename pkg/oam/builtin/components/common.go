@@ -558,7 +558,9 @@ func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, err
 		}
 		ref.ContainerName = cn
 	}
-	if dv, ok := m["divisor"].(string); ok && dv != "" {
+	if dv, present, err := parseStringField(m, "divisor", "resourceFieldRef.divisor"); err != nil {
+		return nil, err
+	} else if present {
 		qty, err := resource.ParseQuantity(dv)
 		if err != nil {
 			return nil, errors.Errorf("resourceFieldRef: invalid divisor %q: %w", dv, err)
@@ -581,9 +583,13 @@ func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, err
 // keys as environment variables, mirroring corev1.EnvFromSource directly (same
 // structural pattern as parseEnvVarSource above).
 func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
-	raw, ok := props["envFrom"].([]any)
-	if !ok {
+	v, present := props["envFrom"]
+	if !present {
 		return nil, nil
+	}
+	raw, ok := v.([]any)
+	if !ok {
+		return nil, errors.Errorf("envFrom: must be an array, got %T", v)
 	}
 	var out []corev1.EnvFromSource
 	for i, item := range raw {
@@ -972,7 +978,7 @@ func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 			}
 			handler.Scheme = s
 		}
-		headers, err := parseHTTPHeaders(httpGet["httpHeaders"])
+		headers, err := parseHTTPHeaders(httpGet, "httpHeaders")
 		if err != nil {
 			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
@@ -1077,10 +1083,14 @@ func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 // (as opposed to one present with the wrong type) still defaults to "",
 // since corev1.HTTPHeader.Value has no meaningful zero-value distinction
 // from an intentionally-empty header value.
-func parseHTTPHeaders(raw any) ([]corev1.HTTPHeader, error) {
-	headers, ok := raw.([]any)
-	if !ok {
+func parseHTTPHeaders(raw map[string]any, key string) ([]corev1.HTTPHeader, error) {
+	v, present := raw[key]
+	if !present {
 		return nil, nil
+	}
+	headers, ok := v.([]any)
+	if !ok {
+		return nil, errors.Errorf("%s: must be an array, got %T", key, v)
 	}
 	var out []corev1.HTTPHeader
 	for i, h := range headers {
@@ -1239,7 +1249,7 @@ func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
 			}
 			h.Scheme = s
 		}
-		headers, err := parseHTTPHeaders(httpGet["httpHeaders"])
+		headers, err := parseHTTPHeaders(httpGet, "httpHeaders")
 		if err != nil {
 			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
@@ -1371,6 +1381,35 @@ func parseStringField(raw map[string]any, key, label string) (string, bool, erro
 	return s, true, nil
 }
 
+// parseCapabilityList parses a `capabilities.add`/`capabilities.drop` array:
+// present-but-non-array is an error, same present/absent/wrong-type contract
+// as parseBoolField, as is any non-string element. An empty-string element is
+// silently skipped rather than rejected — real admission places no format
+// constraint on a Capability string at all (a bare `type Capability string`,
+// no dedicated validation function in k8s.io/kubernetes's validation
+// package), so this file does not invent one for a merely-empty entry.
+func parseCapabilityList(raw map[string]any, key, label string) ([]corev1.Capability, error) {
+	v, present := raw[key]
+	if !present {
+		return nil, nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, errors.Errorf("%s: must be an array, got %T", label, v)
+	}
+	var out []corev1.Capability
+	for i, item := range arr {
+		s, ok := item.(string)
+		if !ok {
+			return nil, errors.Errorf("%s[%d]: must be a string, got %T", label, i, item)
+		}
+		if s != "" {
+			out = append(out, corev1.Capability(s))
+		}
+	}
+	return out, nil
+}
+
 func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error) {
 	raw, ok := props["securityContext"].(map[string]any)
 	if !ok {
@@ -1432,22 +1471,22 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		sc.Privileged = v
 		set = true
 	}
-	if capsRaw, ok := raw["capabilities"].(map[string]any); ok {
+	if v, present := raw["capabilities"]; present {
+		capsRaw, ok := v.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("securityContext.capabilities: must be an object, got %T", v)
+		}
 		caps := &corev1.Capabilities{}
-		if add, ok := capsRaw["add"].([]any); ok {
-			for _, a := range add {
-				if s, ok := a.(string); ok && s != "" {
-					caps.Add = append(caps.Add, corev1.Capability(s))
-				}
-			}
+		add, err := parseCapabilityList(capsRaw, "add", "securityContext.capabilities.add")
+		if err != nil {
+			return nil, err
 		}
-		if drop, ok := capsRaw["drop"].([]any); ok {
-			for _, d := range drop {
-				if s, ok := d.(string); ok && s != "" {
-					caps.Drop = append(caps.Drop, corev1.Capability(s))
-				}
-			}
+		caps.Add = add
+		drop, err := parseCapabilityList(capsRaw, "drop", "securityContext.capabilities.drop")
+		if err != nil {
+			return nil, err
 		}
+		caps.Drop = drop
 		if len(caps.Add) > 0 || len(caps.Drop) > 0 {
 			sc.Capabilities = caps
 			set = true

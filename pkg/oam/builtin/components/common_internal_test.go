@@ -420,6 +420,15 @@ func TestParseEnvFrom_Absent(t *testing.T) {
 	}
 }
 
+func TestParseEnvFrom_NonArray_Error(t *testing.T) {
+	props := map[string]any{
+		"envFrom": map[string]any{"secretRef": map[string]any{"name": "credentials"}},
+	}
+	if _, err := parseEnvFrom(props); err == nil {
+		t.Fatal("expected error for a non-array envFrom value")
+	}
+}
+
 func TestParseEnvFrom_BothRefs_Error(t *testing.T) {
 	props := map[string]any{
 		"envFrom": []any{
@@ -1409,6 +1418,22 @@ func TestParseEnv_ResourceFieldRef_NonCanonicalDivisor_Error(t *testing.T) {
 	}
 }
 
+func TestParseEnv_ResourceFieldRef_NonStringDivisor_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"resourceFieldRef": map[string]any{"resource": "limits.cpu", "divisor": 1000},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for a non-string resourceFieldRef.divisor")
+	}
+}
+
 func TestParseEnv_ResourceFieldRef_ZeroDivisor_Accepted(t *testing.T) {
 	// A zero-valued divisor ("0") is numerically equal to the unset Quantity
 	// zero value; real admission's own Cmp-to-zero check treats it as absent
@@ -1649,14 +1674,14 @@ func TestParseLifecycleHandler_HTTPGet_NamedPort_Invalid_Error(t *testing.T) {
 }
 
 func TestParseHTTPHeaders_NonObjectEntry_Error(t *testing.T) {
-	_, err := parseHTTPHeaders([]any{"not-an-object"})
+	_, err := parseHTTPHeaders(map[string]any{"httpHeaders": []any{"not-an-object"}}, "httpHeaders")
 	if err == nil {
 		t.Fatal("expected error for a non-object httpHeaders entry")
 	}
 }
 
 func TestParseHTTPHeaders_MissingName_Error(t *testing.T) {
-	_, err := parseHTTPHeaders([]any{map[string]any{"value": "x"}})
+	_, err := parseHTTPHeaders(map[string]any{"httpHeaders": []any{map[string]any{"value": "x"}}}, "httpHeaders")
 	if err == nil {
 		t.Fatal("expected error for an httpHeaders entry with no name")
 	}
@@ -1664,26 +1689,43 @@ func TestParseHTTPHeaders_MissingName_Error(t *testing.T) {
 
 func TestParseHTTPHeaders_InvalidName_Error(t *testing.T) {
 	// A space is not a valid Go http header field name.
-	_, err := parseHTTPHeaders([]any{map[string]any{"name": "X Auth", "value": "x"}})
+	_, err := parseHTTPHeaders(map[string]any{"httpHeaders": []any{map[string]any{"name": "X Auth", "value": "x"}}}, "httpHeaders")
 	if err == nil {
 		t.Fatal("expected error for an httpHeaders entry with an invalid name")
 	}
 }
 
 func TestParseHTTPHeaders_NonStringValue_Error(t *testing.T) {
-	_, err := parseHTTPHeaders([]any{map[string]any{"name": "Authorization", "value": float64(123)}})
+	_, err := parseHTTPHeaders(map[string]any{"httpHeaders": []any{map[string]any{"name": "Authorization", "value": float64(123)}}}, "httpHeaders")
 	if err == nil {
 		t.Fatal("expected error for an httpHeaders entry with a non-string value")
 	}
 }
 
 func TestParseHTTPHeaders_MissingValue_DefaultsEmpty(t *testing.T) {
-	headers, err := parseHTTPHeaders([]any{map[string]any{"name": "X-Flag"}})
+	headers, err := parseHTTPHeaders(map[string]any{"httpHeaders": []any{map[string]any{"name": "X-Flag"}}}, "httpHeaders")
 	if err != nil {
 		t.Fatalf("parseHTTPHeaders: %v", err)
 	}
 	if len(headers) != 1 || headers[0].Name != "X-Flag" || headers[0].Value != "" {
 		t.Errorf("unexpected headers: %+v", headers)
+	}
+}
+
+func TestParseHTTPHeaders_NonArray_Error(t *testing.T) {
+	_, err := parseHTTPHeaders(map[string]any{"httpHeaders": map[string]any{"name": "X-Flag", "value": "x"}}, "httpHeaders")
+	if err == nil {
+		t.Fatal("expected error for a non-array httpHeaders value")
+	}
+}
+
+func TestParseHTTPHeaders_Absent_NoError(t *testing.T) {
+	headers, err := parseHTTPHeaders(map[string]any{}, "httpHeaders")
+	if err != nil {
+		t.Fatalf("parseHTTPHeaders: %v", err)
+	}
+	if headers != nil {
+		t.Errorf("expected nil headers, got %+v", headers)
 	}
 }
 
@@ -2047,6 +2089,61 @@ func TestParseSecurityContext_SELinuxOptions_Accepted(t *testing.T) {
 	if sc.SELinuxOptions == nil || sc.SELinuxOptions.User != "u" || sc.SELinuxOptions.Role != "r" ||
 		sc.SELinuxOptions.Type != "t" || sc.SELinuxOptions.Level != "l" {
 		t.Errorf("SELinuxOptions = %+v, want {u r t l}", sc.SELinuxOptions)
+	}
+}
+
+// TestParseSecurityContext_NonArrayCapabilityField_Error regression-tests a
+// review finding (launcher#284): authoring capabilities.add/drop as a scalar
+// (e.g. `drop: ALL`) instead of an array previously fell through the failed
+// type assertion silently, discarding the requested hardening entirely.
+func TestParseSecurityContext_NonArrayCapabilityField_Error(t *testing.T) {
+	for _, key := range []string{"add", "drop"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := parseSecurityContext(map[string]any{
+				"securityContext": map[string]any{
+					"capabilities": map[string]any{key: "ALL"},
+				},
+			})
+			if err == nil {
+				t.Fatalf("expected error for non-array capabilities.%s", key)
+			}
+		})
+	}
+}
+
+func TestParseSecurityContext_NonStringCapabilityElement_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"capabilities": map[string]any{"add": []any{123}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a non-string capabilities.add element")
+	}
+}
+
+func TestParseSecurityContext_NonObjectCapabilities_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"capabilities": "ALL",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a non-object capabilities value")
+	}
+}
+
+func TestParseSecurityContext_EmptyCapabilityElement_Skipped(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"capabilities": map[string]any{"add": []any{"", "NET_BIND_SERVICE"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if len(sc.Capabilities.Add) != 1 || sc.Capabilities.Add[0] != "NET_BIND_SERVICE" {
+		t.Errorf("Capabilities.Add = %+v, want [NET_BIND_SERVICE]", sc.Capabilities.Add)
 	}
 }
 

@@ -60,7 +60,10 @@ API cannot project an arbitrary extended resource such as
 resource's family — `1m`/`1` for cpu, one of `1`/`1k`/`1M`/`1G`/`1T`/`1P`/`1E`/
 `1Ki`/`1Mi`/`1Gi`/`1Ti`/`1Pi`/`1Ei` for memory/ephemeral-storage/hugepages — a
 zero-valued divisor such as `"0"` is treated as absent rather than rejected,
-matching admission's own zero-value defaulting; `containerName`, if authored,
+matching admission's own zero-value defaulting; a present-but-non-string
+divisor (e.g. a bare YAML number) is rejected rather than silently treated as
+absent, same as every other typed scalar field in this document;
+`containerName`, if authored,
 must be a syntactically valid container name (`ValidateDNS1123Label`) —
 **note:** whether it actually names a container present in the generated pod
 is deliberately not checked, since that needs the full sibling
@@ -75,7 +78,9 @@ must be a valid DNS-1123 label and `key` a valid (relaxed) env var name,
 matching real admission's own `validateFileKeySelector`; `path` must be
 relative and must not contain a `..` backstep component, per this repo's own
 path-safety convention) —
-mutually exclusive among themselves too), `envFrom` (bulk-import a ConfigMap's
+mutually exclusive among themselves too), `envFrom` (an authored non-array
+value, e.g. a single ConfigMap/Secret object instead of a list of them, is
+rejected rather than silently treated as absent; bulk-import a ConfigMap's
 or Secret's keys, with `prefix` — any printable ASCII character except `=`,
 matching `corev1.EnvFromSource.Prefix`'s own field doc comment; only the final
 prefix+key concatenation need be a valid env var name, not the prefix alone;
@@ -140,8 +145,10 @@ an arbitrary label, and is validated against `validation.IsValidPortName`
 just as real admission's `ValidatePortNumOrName` does: lowercase
 `[-a-z0-9]` only, at least one letter, no leading/trailing/adjacent hyphen,
 max 15 characters — a purely numeric string like `"8080"` is rejected, since
-it has no letter; `httpGet.httpHeaders` entries are validated rather than
-silently dropped/coerced — a non-object entry, a missing/empty/invalid `name`
+it has no letter; `httpGet.httpHeaders` itself and its entries are validated
+rather than silently dropped/coerced — an authored non-array `httpHeaders`
+value (e.g. a single header object instead of a list) is rejected the same
+as a non-object entry within it, a missing/empty/invalid `name`
 (`validation.IsHTTPHeaderName`, matching `validateHTTPGetAction`), or a
 present-but-non-string `value` are all rejected instead of quietly
 disappearing or turning into `""`; an omitted `value` key still defaults to
@@ -188,7 +195,17 @@ a non-boolean value, e.g. a quoted `"false"`, instead of being silently
 skipped: since Kubernetes' default for each is permissive, silently dropping
 a mistyped value would leave the container permissive while looking like the
 authored hardening request was honored),
-`capabilities.{add,drop}`, `seccompProfile` (`type` is required whenever the
+`capabilities` (rejected if authored with a non-object value; `add`/`drop`
+are each rejected if authored with a non-array value, e.g. `drop: ALL`
+instead of a list, or with a non-string array element — an empty-string
+element is silently skipped rather than rejected, since real admission places
+no format constraint on a Capability string at all. No environment-policy
+enforcement hook exists for these two fields — `oam.Policy` separately
+declares `AllowedCapabilities`/`ForbiddenCapabilities`/`RequiredCapabilities`,
+but those gate OAM trait-type usage (e.g. "ingress"), not container Linux
+capability strings (e.g. "NET_ADMIN"); see `enforce.go`'s `enforcePrivileged`
+doc comment for the naming-collision detail. Enforcing these would need a new
+`Policy` method, which is out of scope here), `seccompProfile` (`type` is required whenever the
 `seccompProfile` object is authored at all, matching real admission's own
 `field.Required` — omitting it (e.g. authoring only `localhostProfile` with
 no `type` key) is rejected rather than silently discarding the whole

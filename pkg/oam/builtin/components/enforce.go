@@ -86,6 +86,18 @@ func enforceMaxStorageSize(current, max string) error {
 // hostIPC — the latter three are pod-level and not part of this container-level
 // property at all) have no existing Policy hook and none is added here; see the
 // launcher#278 ledger.
+//
+// NOTE on a naming collision: oam.Policy already declares AllowedCapabilities/
+// ForbiddenCapabilities/RequiredCapabilities, but those gate OAM trait-type
+// usage (e.g. "ingress", "autoscaling"), not corev1 Linux capability strings
+// (e.g. "NET_ADMIN") — their only call site is
+// enforceCapabilityConstraints(authoredTraitTypes, policy) in transform.go,
+// operating on Component.Traits[].Type. Wiring securityContext.capabilities.
+// add/drop through those three methods, as suggested in a launcher#278 review
+// round, would check container capability strings against a policy list of
+// trait-type names — always-fail or always-no-op depending on the data, never
+// correct. Enforcing container capabilities needs a new Policy method; it is
+// not a gap in these three.
 func enforcePrivileged(sc *corev1.SecurityContext, allowed bool) error {
 	if sc == nil || sc.Privileged == nil || !*sc.Privileged || allowed {
 		return nil
