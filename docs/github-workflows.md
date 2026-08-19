@@ -113,6 +113,7 @@ Runs on main and `release/*` branches only (not PRs):
 
 - Go Version: read from `mise.toml` (single source of truth)
 - Golangci-lint Version: `v2.10.1`
+- govulncheck Version: `v1.7.0` (pinned via the `GOVULNCHECK_VERSION` workflow env)
 - Coverage Threshold: `80%`
 - Test Timeout: `5m` (longer than kure; builds include CGO)
 
