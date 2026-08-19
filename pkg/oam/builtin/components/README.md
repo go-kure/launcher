@@ -40,7 +40,8 @@ structural pattern as `ProbeConfig` holding `*corev1.Probe`) rather than a
 hand-rolled parallel schema: `image` (validated — no untagged/`latest`), `env`
 (`value` or `valueFrom` — mutually exclusive, matching `corev1.EnvVar`'s own
 doc comment ("cannot be used if value is not empty"); `valueFrom` is one of
-`secretKeyRef`, `configMapKeyRef` (both accept `optional`), `fieldRef`
+`secretKeyRef`, `configMapKeyRef` (both accept `optional`, rejecting a
+present non-boolean value rather than silently treating it as unset), `fieldRef`
 (`apiVersion` must be `v1` if authored — the only field-label conversion
 Kubernetes has ever shipped for the downward API; omitting it also defaults to
 `v1`; `fieldPath` is validated against the exact set real admission accepts
@@ -68,15 +69,20 @@ single-env-var parsing depth; real admission doesn't check it either (only
 the downward API *volume* form of `resourceFieldRef` requires
 `containerName` at all), so an unresolvable target only surfaces later, as a
 kubelet-time `CreateContainerConfigError`),
-`fileKeyRef` (`volumeName`/`path`/`key` required, `optional` accepted;
-corev1's `EnvFiles` feature; `path` must be relative and must not contain a
-`..` backstep component, per this repo's own path-safety convention) —
+`fileKeyRef` (`volumeName`/`path`/`key` required, `optional` accepted (same
+non-boolean rejection as above); corev1's `EnvFiles` feature; `volumeName`
+must be a valid DNS-1123 label and `key` a valid (relaxed) env var name,
+matching real admission's own `validateFileKeySelector`; `path` must be
+relative and must not contain a `..` backstep component, per this repo's own
+path-safety convention) —
 mutually exclusive among themselves too), `envFrom` (bulk-import a ConfigMap's
 or Secret's keys, with `prefix` — any printable ASCII character except `=`,
 matching `corev1.EnvFromSource.Prefix`'s own field doc comment; only the final
 prefix+key concatenation need be a valid env var name, not the prefix alone;
 `configMapRef.name`/`secretRef.name` must each be a valid DNS-1123 subdomain,
-matching how every Kubernetes object name is validated),
+matching how every Kubernetes object name is validated; both `configMapRef`
+and `secretRef` also accept `optional`, with the same non-boolean rejection
+as `env`'s `secretKeyRef`/`configMapKeyRef` above),
 `resources` — a `corev1.ResourceRequirements` projection: `requests`/`limits`
 accept `cpu`/`memory` (defaults 100m/128Mi) plus any other well-formed
 resource name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map,
@@ -140,21 +146,42 @@ silently dropped/coerced — a non-object entry, a missing/empty/invalid `name`
 present-but-non-string `value` are all rejected instead of quietly
 disappearing or turning into `""`; an omitted `value` key still defaults to
 `""` — shared by `lifecycle.{postStart,preStop}.httpGet` below via the same
-parsing helper; `path` is required and must be non-empty, matching
-`validateHTTPGetAction`'s unconditional `field.Required` check — **note:**
-that check has no leading-slash requirement, so a path such as `healthz`
-(no leading `/`) is accepted, same as real admission), `lifecycle` (`postStart`/`preStop`:
+parsing helper; `path`/`host`/`scheme` are all optional — an absent or empty
+`path` matches real Kubernetes' own defaulting (`SetDefaults_HTTPGetAction`
+fills it with `"/"` before validation ever runs, wired for both probe and
+lifecycle httpGet handlers), so this schema does not require what upstream
+itself fills in; `host` has no format validation in real admission either
+(only rejected in combination with an HTTP2 protocol, which this schema does
+not expose), so an unusual-looking host string is accepted verbatim, same as
+real admission; `scheme`, if authored, must be `HTTP` or `HTTPS`
+(case-insensitive); all three, plus every probe numeric field below, reject a
+present-but-wrong-type value instead of silently treating it as absent;
+`initialDelaySeconds`/`periodSeconds`/`timeoutSeconds`/`successThreshold`/
+`failureThreshold`/`terminationGracePeriodSeconds` are typed integers —
+`terminationGracePeriodSeconds` is additionally rejected outright on a
+readiness probe (a failed readiness check only pulls the pod from Service
+endpoints, it never terminates the container, so the field has nothing to
+apply to there) and must be at least 1 when set on a liveness or startup
+probe), `lifecycle` (`postStart`/`preStop`:
 `exec` (every `command` element must be a string; a non-string element is
 rejected, not silently dropped)/`httpGet` (same named-port, `httpHeaders`,
-and required-non-empty-`path` rules as `probes` above)/`sleep` —
-`tcpSocket` is not
-accepted, since corev1 documents it as broken for lifecycle hooks),
+and optional-`path`/`host`/`scheme` rules as `probes` above)/`sleep` —
+`tcpSocket` is rejected unconditionally, even when paired with another valid
+handler such as `exec` — corev1 documents it as broken for lifecycle hooks,
+and simply ignoring the extra key would silently drop the authored
+`tcpSocket` while emitting only the other handler; `postStart`/`preStop` are
+each rejected outright if present with a non-object value, e.g. `preStop:
+"flush"`, instead of silently discarding the whole hook),
 `securityContext` (per-container: `runAsUser`/`runAsGroup`/`runAsNonRoot`
 (`runAsUser: 0` combined with `runAsNonRoot: true` builds and is admitted by
 the API server, but the kubelet's `verifyRunAsNonRoot` check deterministically
 fails it at container-start time — a `CreateContainerConfigError`, every
 time — so this contradictory combination is rejected here instead of
-shipping a workload guaranteed never to start),
+shipping a workload guaranteed never to start; `runAsUser`/`runAsGroup` are
+each rejected if authored with a non-integer value, e.g. a quoted `"1000"`,
+rather than silently omitting the UID/GID — since the container would then
+fall back to the image's own default, which may be root, while looking like
+the authored value was honored; both must also be non-negative),
 `readOnlyRootFilesystem`, `allowPrivilegeEscalation`, `privileged` (these
 three, plus `runAsNonRoot` above, are each rejected outright if authored with
 a non-boolean value, e.g. a quoted `"false"`, instead of being silently
@@ -169,14 +196,22 @@ profile; `localhostProfile` must be
 relative and must not contain a `..` backstep component, matching
 `corev1.SeccompProfile.LocalhostProfile`'s own doc comment — "must be a
 descending path, relative to the kubelet's configured seccomp profile
-location" — and this repo's own path-safety convention), `seLinuxOptions`,
+location" — and this repo's own path-safety convention), `seLinuxOptions`
+(`user`/`role`/`type`/`level` are each rejected if authored with a
+non-string value, e.g. `type: 123`, instead of silently discarding just that
+sub-field — if it were the only one set, the whole SELinux context would
+otherwise vanish rather than reporting the malformed input),
 `appArmorProfile` (same "`type` required when authored" rule as
 `seccompProfile` above), `procMount` (`Default`|`Unmasked`); `windowsOptions` is
 deliberately not covered — this project's own container images are
 Linux-only (distroless base images run under podman), so a Windows-specific
 security context has no target to apply to here, and `procMount` is
 Linux-specific by definition, so excluding `windowsOptions` does not extend to
-it), `workingDir`, `volumes`, `initContainers`, `sidecars`, and `affinity`.
+it), `workingDir` (a bare pass-through — `corev1.Container.WorkingDir`'s own
+doc comment states only that the container runtime's default applies when
+unset, and real admission enforces no path shape for it, so this schema does
+not invent a stricter constraint upstream itself does not have), `volumes`,
+`initContainers`, `sidecars`, and `affinity`.
 
 `securityContext.privileged: true` is rejected unless the environment policy's
 `AllowPrivileged()` allows it — the one `securityContext` field enforced today

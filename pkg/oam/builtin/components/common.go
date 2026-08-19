@@ -84,10 +84,14 @@ func toInt32(v any) (int32, bool) {
 // (Probe.TerminationGracePeriodSeconds). Kept local to this package with the
 // same (value, bool) shape as toInt32 rather than reusing
 // traits.toInt64(v)(int64,error): that sibling package's callers want a
-// descriptive error to wrap; this file's existing "present but wrong type is
-// silently skipped" convention (see every `if v, n := m[key]; n { if i, ok :=
-// toInt32(v); ok { ... } }` in parseProbe) is what every other optional
-// numeric field here already follows.
+// descriptive error to wrap, which is exactly what this file's own
+// parseInt32Field/parseInt64Field wrappers below now do too — a present key
+// whose value toInt32/toInt64 cannot convert is a malformed-input error, not
+// a silently-ignored absence (a present-but-wrong-type value was previously
+// treated as though the key were absent at every call site in this file;
+// that silently discarded the author's intent — e.g. a mistyped
+// securityContext.runAsUser fell back to the container image's own default
+// user, which may be root).
 func toInt64(v any) (int64, bool) {
 	switch n := v.(type) {
 	case float64:
@@ -292,18 +296,22 @@ func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
 	if skr, ok := vf["secretKeyRef"].(map[string]any); ok {
 		if n, key, ok := parseNameKey(skr); ok {
 			sel := &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: n}, Key: key}
-			if opt, ok := skr["optional"].(bool); ok {
-				sel.Optional = &opt
+			opt, err := parseBoolField(skr, "optional", "secretKeyRef.optional")
+			if err != nil {
+				return nil, err
 			}
+			sel.Optional = opt
 			src.SecretKeyRef = sel
 		}
 	}
 	if cmr, ok := vf["configMapKeyRef"].(map[string]any); ok {
 		if n, key, ok := parseNameKey(cmr); ok {
 			sel := &corev1.ConfigMapKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: n}, Key: key}
-			if opt, ok := cmr["optional"].(bool); ok {
-				sel.Optional = &opt
+			opt, err := parseBoolField(cmr, "optional", "configMapKeyRef.optional")
+			if err != nil {
+				return nil, err
 			}
+			sel.Optional = opt
 			src.ConfigMapKeyRef = sel
 		}
 	}
@@ -361,14 +369,28 @@ func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 	if volumeName == "" || path == "" || key == "" {
 		return nil, errors.Errorf("fileKeyRef: volumeName, path, and key are all required")
 	}
-	// path must stay relative to the referenced volume's mount point.
+	// Mirrors real admission's validateFileKeySelector exactly: volumeName
+	// must be a valid DNS-1123 label (it names a pod volume, which has that
+	// same name constraint), key must be a valid (relaxed) env var name, and
+	// path must not contain a ".." backstep — this file's own
+	// validateRelativePath is stricter still (also rejects an absolute path,
+	// an existing project-level policy per AGENTS.md, not a real-admission
+	// requirement).
+	if errs := validation.IsDNS1123Label(volumeName); len(errs) > 0 {
+		return nil, errors.Errorf("fileKeyRef.volumeName: invalid volume name %q: %s", volumeName, strings.Join(errs, "; "))
+	}
+	if errs := validation.IsRelaxedEnvVarName(key); len(errs) > 0 {
+		return nil, errors.Errorf("fileKeyRef.key: invalid key %q: %s", key, strings.Join(errs, "; "))
+	}
 	if err := validateRelativePath("fileKeyRef.path", path); err != nil {
 		return nil, err
 	}
 	sel := &corev1.FileKeySelector{VolumeName: volumeName, Path: path, Key: key}
-	if opt, ok := m["optional"].(bool); ok {
-		sel.Optional = &opt
+	opt, err := parseBoolField(m, "optional", "fileKeyRef.optional")
+	if err != nil {
+		return nil, err
 	}
+	sel.Optional = opt
 	return sel, nil
 }
 
@@ -600,9 +622,11 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 				return nil, errors.Errorf("envFrom[%d].configMapRef.name: invalid name %q: %s", i, name, strings.Join(errs, "; "))
 			}
 			ref := &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: name}}
-			if opt, ok := cm["optional"].(bool); ok {
-				ref.Optional = &opt
+			opt, err := parseBoolField(cm, "optional", fmt.Sprintf("envFrom[%d].configMapRef.optional", i))
+			if err != nil {
+				return nil, err
 			}
+			ref.Optional = opt
 			src.ConfigMapRef = ref
 		}
 		if sec, ok := m["secretRef"].(map[string]any); ok {
@@ -617,9 +641,11 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 				return nil, errors.Errorf("envFrom[%d].secretRef.name: invalid name %q: %s", i, name, strings.Join(errs, "; "))
 			}
 			ref := &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: name}}
-			if opt, ok := sec["optional"].(bool); ok {
-				ref.Optional = &opt
+			opt, err := parseBoolField(sec, "optional", fmt.Sprintf("envFrom[%d].secretRef.optional", i))
+			if err != nil {
+				return nil, err
 			}
+			ref.Optional = opt
 			src.SecretRef = ref
 		}
 		out = append(out, src)
@@ -916,16 +942,30 @@ func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
 		handler := &corev1.HTTPGetAction{}
-		path, ok := httpGet["path"].(string)
-		if !ok || path == "" {
-			return nil, errors.Errorf("httpGet handler: path is required")
+		// path is optional: real Kubernetes defaults an empty
+		// HTTPGetAction.Path to "/" before validation ever sees it
+		// (k8s.io/kubernetes/pkg/apis/core/v1/defaults.go's
+		// SetDefaults_HTTPGetAction, wired for both probes and lifecycle
+		// hooks by zz_generated.defaults.go), so omitting it here matches
+		// upstream exactly rather than rejecting a manifest a real cluster
+		// would accept.
+		if path, present, err := parseStringField(httpGet, "path", "httpGet.path"); err != nil {
+			return nil, err
+		} else if present {
+			handler.Path = path
 		}
-		handler.Path = path
 		handler.Port = port
-		if host, ok := httpGet["host"].(string); ok && host != "" {
+		// host has no format validation in real admission (validateHTTPGetAction
+		// only rejects a non-empty host when protocol is HTTP2) — a mistyped
+		// value is still rejected, but an unusual-looking host string is not.
+		if host, present, err := parseStringField(httpGet, "host", "httpGet.host"); err != nil {
+			return nil, err
+		} else if present {
 			handler.Host = host
 		}
-		if scheme, ok := httpGet["scheme"].(string); ok {
+		if scheme, present, err := parseStringField(httpGet, "scheme", "httpGet.scheme"); err != nil {
+			return nil, err
+		} else if present {
 			s := corev1.URIScheme(strings.ToUpper(scheme))
 			if s != corev1.URISchemeHTTP && s != corev1.URISchemeHTTPS {
 				return nil, errors.Errorf("httpGet handler: unsupported scheme %q, must be HTTP or HTTPS", scheme)
@@ -980,46 +1020,46 @@ func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 		return nil, nil
 	}
 
-	if v, n := m["initialDelaySeconds"]; n {
-		if i, ok := toInt32(v); ok {
-			probe.InitialDelaySeconds = i
-		}
+	if i, present, err := parseInt32Field(m, "initialDelaySeconds", "initialDelaySeconds"); err != nil {
+		return nil, err
+	} else if present {
+		probe.InitialDelaySeconds = i
 	}
-	if v, n := m["periodSeconds"]; n {
-		if i, ok := toInt32(v); ok {
-			probe.PeriodSeconds = i
-		}
+	if i, present, err := parseInt32Field(m, "periodSeconds", "periodSeconds"); err != nil {
+		return nil, err
+	} else if present {
+		probe.PeriodSeconds = i
 	}
-	if v, n := m["timeoutSeconds"]; n {
-		if i, ok := toInt32(v); ok {
-			probe.TimeoutSeconds = i
-		}
+	if i, present, err := parseInt32Field(m, "timeoutSeconds", "timeoutSeconds"); err != nil {
+		return nil, err
+	} else if present {
+		probe.TimeoutSeconds = i
 	}
-	if v, n := m["successThreshold"]; n {
-		if i, ok := toInt32(v); ok {
-			probe.SuccessThreshold = i
-		}
+	if i, present, err := parseInt32Field(m, "successThreshold", "successThreshold"); err != nil {
+		return nil, err
+	} else if present {
+		probe.SuccessThreshold = i
 	}
-	if v, n := m["failureThreshold"]; n {
-		if i, ok := toInt32(v); ok {
-			probe.FailureThreshold = i
-		}
+	if i, present, err := parseInt32Field(m, "failureThreshold", "failureThreshold"); err != nil {
+		return nil, err
+	} else if present {
+		probe.FailureThreshold = i
 	}
-	if v, n := m["terminationGracePeriodSeconds"]; n {
-		if i, ok := toInt64(v); ok {
-			// Cross-field constraint, so it's checked ahead of the bounds check:
-			// a failed readiness probe never terminates anything (it only marks
-			// the pod not-ready and pulls it from Service endpoints), so this
-			// field has nothing to apply to on a readiness probe — only
-			// liveness and startup probe failures kill the container.
-			if kind == "readiness" {
-				return nil, errors.Errorf("terminationGracePeriodSeconds: not permitted on a readiness probe, only liveness and startup probes support it")
-			}
-			if i < 1 {
-				return nil, errors.Errorf("terminationGracePeriodSeconds: must be at least 1, got %d", i)
-			}
-			probe.TerminationGracePeriodSeconds = &i
+	if i, present, err := parseInt64Field(m, "terminationGracePeriodSeconds", "terminationGracePeriodSeconds"); err != nil {
+		return nil, err
+	} else if present {
+		// Cross-field constraint, so it's checked ahead of the bounds check:
+		// a failed readiness probe never terminates anything (it only marks
+		// the pod not-ready and pulls it from Service endpoints), so this
+		// field has nothing to apply to on a readiness probe — only
+		// liveness and startup probe failures kill the container.
+		if kind == "readiness" {
+			return nil, errors.Errorf("terminationGracePeriodSeconds: not permitted on a readiness probe, only liveness and startup probes support it")
 		}
+		if i < 1 {
+			return nil, errors.Errorf("terminationGracePeriodSeconds: must be at least 1, got %d", i)
+		}
+		probe.TerminationGracePeriodSeconds = &i
 	}
 
 	return probe, nil
@@ -1118,14 +1158,22 @@ func parseLifecycle(props map[string]any) (*corev1.Lifecycle, error) {
 		return nil, nil
 	}
 	lc := &corev1.Lifecycle{}
-	if ps, ok := raw["postStart"].(map[string]any); ok {
+	if v, present := raw["postStart"]; present {
+		ps, ok := v.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("lifecycle.postStart: must be an object, got %T", v)
+		}
 		h, err := parseLifecycleHandler(ps)
 		if err != nil {
 			return nil, errors.Errorf("lifecycle.postStart: %w", err)
 		}
 		lc.PostStart = h
 	}
-	if ps, ok := raw["preStop"].(map[string]any); ok {
+	if v, present := raw["preStop"]; present {
+		ps, ok := v.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("lifecycle.preStop: must be an object, got %T", v)
+		}
 		h, err := parseLifecycleHandler(ps)
 		if err != nil {
 			return nil, errors.Errorf("lifecycle.preStop: %w", err)
@@ -1144,6 +1192,14 @@ func parseLifecycle(props map[string]any) (*corev1.Lifecycle, error) {
 // when it is specified", kept on the Go type only for backward compatibility, so
 // accepting it would let an OAM author write a handler that always fails.
 func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
+	// Rejected unconditionally, not folded into the count below: the count
+	// only tracks the three keys this parser actually builds a handler from,
+	// so a hook that pairs tcpSocket with e.g. a valid exec previously slipped
+	// through as "single handler" and silently built the exec handler alone,
+	// dropping the disallowed tcpSocket instead of rejecting the hook.
+	if _, ok := m["tcpSocket"].(map[string]any); ok {
+		return nil, errors.Errorf("tcpSocket is not supported as a lifecycle handler")
+	}
 	count := 0
 	for _, key := range []string{"httpGet", "exec", "sleep"} {
 		if _, ok := m[key].(map[string]any); ok {
@@ -1161,15 +1217,22 @@ func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
 			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
 		h := &corev1.HTTPGetAction{Port: port}
-		path, ok := httpGet["path"].(string)
-		if !ok || path == "" {
-			return nil, errors.Errorf("httpGet handler: path is required")
+		// Same upstream-defaulting rationale as parseProbe's httpGet block
+		// above: path/host/scheme are all optional, but a present-and-wrong-
+		// type value is still a malformed-input error.
+		if path, present, err := parseStringField(httpGet, "path", "httpGet.path"); err != nil {
+			return nil, err
+		} else if present {
+			h.Path = path
 		}
-		h.Path = path
-		if host, ok := httpGet["host"].(string); ok && host != "" {
+		if host, present, err := parseStringField(httpGet, "host", "httpGet.host"); err != nil {
+			return nil, err
+		} else if present {
 			h.Host = host
 		}
-		if scheme, ok := httpGet["scheme"].(string); ok {
+		if scheme, present, err := parseStringField(httpGet, "scheme", "httpGet.scheme"); err != nil {
+			return nil, err
+		} else if present {
 			s := corev1.URIScheme(strings.ToUpper(scheme))
 			if s != corev1.URISchemeHTTP && s != corev1.URISchemeHTTPS {
 				return nil, errors.Errorf("httpGet handler: unsupported scheme %q, must be HTTP or HTTPS", scheme)
@@ -1243,26 +1306,69 @@ func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
 // container.SecurityContext (traits/security_context.go:190) — the trait always
 // wins when both are used together.
 // parseBoolField extracts an optional bool from raw[key], erroring if key is
-// present with a non-bool value rather than silently skipping it. Used only
-// for the four SecurityContext hardening flags below (runAsNonRoot,
-// readOnlyRootFilesystem, allowPrivilegeEscalation, privileged): each gates a
-// Kubernetes default that stays permissive when the field is left unset, so a
-// mistyped value (e.g. a quoted `"false"`) must not silently fall back to
-// that permissive default while looking like the hardening request was
-// honored. This deliberately does NOT extend to runAsUser/runAsGroup, which
-// keep this file's established silent-skip convention for numeric fields
-// (see toInt64's doc comment) — an unset UID/GID has no equivalent
-// permissive-security-default consequence.
-func parseBoolField(raw map[string]any, key string) (*bool, error) {
+// present with a non-bool value rather than silently skipping it — a mistyped
+// value (e.g. a quoted `"false"`) must not silently fall back to whatever
+// default applies when the field is left unset while looking like the
+// authored value was honored. label is the dotted field path used in the
+// error message, kept separate from key so nested callers (e.g. envFrom[i])
+// can report a fully-qualified path.
+func parseBoolField(raw map[string]any, key, label string) (*bool, error) {
 	v, present := raw[key]
 	if !present {
 		return nil, nil
 	}
 	b, ok := v.(bool)
 	if !ok {
-		return nil, errors.Errorf("securityContext.%s: must be a boolean, got %T", key, v)
+		return nil, errors.Errorf("%s: must be a boolean, got %T", label, v)
 	}
 	return &b, nil
+}
+
+// parseInt32Field mirrors parseBoolField for toInt32-convertible fields.
+func parseInt32Field(raw map[string]any, key, label string) (int32, bool, error) {
+	v, present := raw[key]
+	if !present {
+		return 0, false, nil
+	}
+	i, ok := toInt32(v)
+	if !ok {
+		return 0, false, errors.Errorf("%s: must be an integer, got %T", label, v)
+	}
+	return i, true, nil
+}
+
+// parseInt64Field mirrors parseBoolField for toInt64-convertible fields.
+func parseInt64Field(raw map[string]any, key, label string) (int64, bool, error) {
+	v, present := raw[key]
+	if !present {
+		return 0, false, nil
+	}
+	i, ok := toInt64(v)
+	if !ok {
+		return 0, false, errors.Errorf("%s: must be an integer, got %T", label, v)
+	}
+	return i, true, nil
+}
+
+// parseStringField mirrors parseBoolField for optional string fields, erroring
+// on a present-but-non-string value. An explicitly empty string is treated the
+// same as absent (ok=false, no error) — several callers (e.g. seLinuxOptions'
+// four sub-fields) already used "present, non-empty" as their notion of "set"
+// before this helper existed, and an author-supplied "" is a reasonable way to
+// opt back out rather than a malformed value.
+func parseStringField(raw map[string]any, key, label string) (string, bool, error) {
+	v, present := raw[key]
+	if !present {
+		return "", false, nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", false, errors.Errorf("%s: must be a string, got %T", label, v)
+	}
+	if s == "" {
+		return "", false, nil
+	}
+	return s, true, nil
 }
 
 func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error) {
@@ -1273,25 +1379,25 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 	sc := &corev1.SecurityContext{}
 	set := false
 
-	if v, n := raw["runAsUser"]; n {
-		if i, ok := toInt64(v); ok {
-			if i < 0 {
-				return nil, errors.Errorf("securityContext.runAsUser: must not be negative, got %d", i)
-			}
-			sc.RunAsUser = &i
-			set = true
+	if i, present, err := parseInt64Field(raw, "runAsUser", "securityContext.runAsUser"); err != nil {
+		return nil, err
+	} else if present {
+		if i < 0 {
+			return nil, errors.Errorf("securityContext.runAsUser: must not be negative, got %d", i)
 		}
+		sc.RunAsUser = &i
+		set = true
 	}
-	if v, n := raw["runAsGroup"]; n {
-		if i, ok := toInt64(v); ok {
-			if i < 0 {
-				return nil, errors.Errorf("securityContext.runAsGroup: must not be negative, got %d", i)
-			}
-			sc.RunAsGroup = &i
-			set = true
+	if i, present, err := parseInt64Field(raw, "runAsGroup", "securityContext.runAsGroup"); err != nil {
+		return nil, err
+	} else if present {
+		if i < 0 {
+			return nil, errors.Errorf("securityContext.runAsGroup: must not be negative, got %d", i)
 		}
+		sc.RunAsGroup = &i
+		set = true
 	}
-	if v, err := parseBoolField(raw, "runAsNonRoot"); err != nil {
+	if v, err := parseBoolField(raw, "runAsNonRoot", "securityContext.runAsNonRoot"); err != nil {
 		return nil, err
 	} else if v != nil {
 		sc.RunAsNonRoot = v
@@ -1308,19 +1414,19 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 	if sc.RunAsUser != nil && *sc.RunAsUser == 0 && sc.RunAsNonRoot != nil && *sc.RunAsNonRoot {
 		return nil, errors.Errorf("securityContext: runAsUser must not be 0 when runAsNonRoot is true")
 	}
-	if v, err := parseBoolField(raw, "readOnlyRootFilesystem"); err != nil {
+	if v, err := parseBoolField(raw, "readOnlyRootFilesystem", "securityContext.readOnlyRootFilesystem"); err != nil {
 		return nil, err
 	} else if v != nil {
 		sc.ReadOnlyRootFilesystem = v
 		set = true
 	}
-	if v, err := parseBoolField(raw, "allowPrivilegeEscalation"); err != nil {
+	if v, err := parseBoolField(raw, "allowPrivilegeEscalation", "securityContext.allowPrivilegeEscalation"); err != nil {
 		return nil, err
 	} else if v != nil {
 		sc.AllowPrivilegeEscalation = v
 		set = true
 	}
-	if v, err := parseBoolField(raw, "privileged"); err != nil {
+	if v, err := parseBoolField(raw, "privileged", "securityContext.privileged"); err != nil {
 		return nil, err
 	} else if v != nil {
 		sc.Privileged = v
@@ -1386,19 +1492,27 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 	if seRaw, ok := raw["seLinuxOptions"].(map[string]any); ok {
 		se := &corev1.SELinuxOptions{}
 		anySet := false
-		if v, ok := seRaw["user"].(string); ok && v != "" {
+		if v, present, err := parseStringField(seRaw, "user", "securityContext.seLinuxOptions.user"); err != nil {
+			return nil, err
+		} else if present {
 			se.User = v
 			anySet = true
 		}
-		if v, ok := seRaw["role"].(string); ok && v != "" {
+		if v, present, err := parseStringField(seRaw, "role", "securityContext.seLinuxOptions.role"); err != nil {
+			return nil, err
+		} else if present {
 			se.Role = v
 			anySet = true
 		}
-		if v, ok := seRaw["type"].(string); ok && v != "" {
+		if v, present, err := parseStringField(seRaw, "type", "securityContext.seLinuxOptions.type"); err != nil {
+			return nil, err
+		} else if present {
 			se.Type = v
 			anySet = true
 		}
-		if v, ok := seRaw["level"].(string); ok && v != "" {
+		if v, present, err := parseStringField(seRaw, "level", "securityContext.seLinuxOptions.level"); err != nil {
+			return nil, err
+		} else if present {
 			se.Level = v
 			anySet = true
 		}

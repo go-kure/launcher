@@ -296,6 +296,96 @@ func TestParseEnv_FileKeyRef_MutuallyExclusiveWithSecretKeyRef(t *testing.T) {
 	}
 }
 
+// TestParseEnv_FileKeyRef_InvalidVolumeName_Error regression-tests a review
+// finding (launcher#284): fileKeyRef.volumeName was copied into the Pod with
+// no shape validation, so a value like "bad/name" could never resolve to any
+// legal Pod volume (real admission's validateFileKeySelector requires it be a
+// valid DNS-1123 label, matching Volume.Name's own constraint).
+func TestParseEnv_FileKeyRef_InvalidVolumeName_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"fileKeyRef": map[string]any{"volumeName": "bad/name", "path": "app.env", "key": "K"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for an invalid fileKeyRef.volumeName")
+	}
+}
+
+func TestParseEnv_FileKeyRef_InvalidKey_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"fileKeyRef": map[string]any{"volumeName": "envfiles", "path": "app.env", "key": "BAD=KEY"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for a fileKeyRef.key containing '='")
+	}
+}
+
+func TestParseEnv_FileKeyRef_NonBoolOptional_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"fileKeyRef": map[string]any{"volumeName": "envfiles", "path": "app.env", "key": "K", "optional": "true"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for a non-boolean fileKeyRef.optional")
+	}
+}
+
+// TestParseEnv_SecretKeyRef_NonBoolOptional_Error and its configMapKeyRef
+// sibling regression-test a review finding (launcher#284): a mistyped
+// `optional: "true"` fell through the failed type assertion silently, so
+// Optional stayed nil (defaults to required) — turning a requested optional
+// dependency into a required one, the opposite of authored intent.
+func TestParseEnv_SecretKeyRef_NonBoolOptional_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"secretKeyRef": map[string]any{"name": "s", "key": "k", "optional": "true"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for a non-boolean secretKeyRef.optional")
+	}
+}
+
+func TestParseEnv_ConfigMapKeyRef_NonBoolOptional_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "BAD",
+				"valueFrom": map[string]any{
+					"configMapKeyRef": map[string]any{"name": "c", "key": "k", "optional": "true"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for a non-boolean configMapKeyRef.optional")
+	}
+}
+
 func TestParseEnvFrom_ConfigMapAndSecret(t *testing.T) {
 	props := map[string]any{
 		"envFrom": []any{
@@ -1361,6 +1451,25 @@ func TestParseEnvFrom_InvalidSecretName_Error(t *testing.T) {
 	}
 }
 
+// TestParseEnvFrom_NonBoolOptional_Error regression-tests a review finding
+// (launcher#284): the same mistyped-optional-silently-dropped bug fixed for
+// secretKeyRef/configMapKeyRef/fileKeyRef above also applied to envFrom's
+// configMapRef and secretRef.
+func TestParseEnvFrom_NonBoolOptional_Error(t *testing.T) {
+	for _, refKey := range []string{"configMapRef", "secretRef"} {
+		t.Run(refKey, func(t *testing.T) {
+			props := map[string]any{
+				"envFrom": []any{
+					map[string]any{refKey: map[string]any{"name": "n", "optional": "true"}},
+				},
+			}
+			if _, err := parseEnvFrom(props); err == nil {
+				t.Fatalf("expected error for a non-boolean envFrom.%s.optional", refKey)
+			}
+		})
+	}
+}
+
 func TestParseSecurityContext_SeccompLocalhost_AbsolutePath_Error(t *testing.T) {
 	_, err := parseSecurityContext(map[string]any{
 		"securityContext": map[string]any{
@@ -1715,28 +1824,51 @@ func TestParseResources_StandardResource_RequestBelowLimit_Accepted(t *testing.T
 	}
 }
 
-// TestParseProbe_HTTPGet_MissingPath_Error and
-// TestParseLifecycleHandler_HTTPGet_MissingPath_Error regression-test a
-// review finding (launcher#284): the finding's own claim (a path must begin
-// with "/") does not hold against the real validateHTTPGetAction — it has
-// no leading-slash check at all — but investigating it surfaced the actual
-// rule: validateHTTPGetAction unconditionally rejects an empty path
-// (field.Required), which neither handler enforced.
-func TestParseProbe_HTTPGet_MissingPath_Error(t *testing.T) {
-	_, err := parseProbe(map[string]any{
+// TestParseProbe_HTTPGet_MissingPath_Accepted and its siblings below
+// regression-test two rounds of the same review finding (launcher#284).
+// Round 5's finding claimed a path must begin with "/" — false against the
+// real validateHTTPGetAction, which has no leading-slash check — but
+// investigating it surfaced that validateHTTPGetAction unconditionally
+// rejects an empty path (field.Required), so a "missing path" requirement
+// was added. Round 6's finding then disputed that requirement itself:
+// k8s.io/kubernetes/pkg/apis/core/v1/defaults.go's SetDefaults_HTTPGetAction
+// defaults an empty Path to "/" during the apiserver's decode/conversion
+// step, strictly before validation runs — wired for both probe and
+// lifecycle httpGet (zz_generated.defaults.go) — so a real cluster never
+// sees the field.Required rejection for an omitted or empty path. Requiring
+// it here was stricter than upstream, so it was reverted; only a
+// present-but-wrong-type value (never a valid corev1.HTTPGetAction.Path
+// value under any circumstance) is still an error.
+func TestParseProbe_HTTPGet_MissingPath_Accepted(t *testing.T) {
+	probe, err := parseProbe(map[string]any{
 		"httpGet": map[string]any{"port": 8080},
 	}, "liveness")
-	if err == nil {
-		t.Fatal("expected error for a missing httpGet path")
+	if err != nil {
+		t.Fatalf("parseProbe: %v", err)
+	}
+	if probe.HTTPGet.Path != "" {
+		t.Errorf("Path = %q, want empty (left for upstream SetDefaults_HTTPGetAction to default to /)", probe.HTTPGet.Path)
 	}
 }
 
-func TestParseProbe_HTTPGet_EmptyPath_Error(t *testing.T) {
-	_, err := parseProbe(map[string]any{
+func TestParseProbe_HTTPGet_EmptyPath_Accepted(t *testing.T) {
+	probe, err := parseProbe(map[string]any{
 		"httpGet": map[string]any{"path": "", "port": 8080},
 	}, "liveness")
+	if err != nil {
+		t.Fatalf("parseProbe: %v", err)
+	}
+	if probe.HTTPGet.Path != "" {
+		t.Errorf("Path = %q, want empty", probe.HTTPGet.Path)
+	}
+}
+
+func TestParseProbe_HTTPGet_NonStringPath_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"httpGet": map[string]any{"path": 123, "port": 8080},
+	}, "liveness")
 	if err == nil {
-		t.Fatal("expected error for an empty httpGet path")
+		t.Fatal("expected error for a non-string httpGet path")
 	}
 }
 
@@ -1754,12 +1886,70 @@ func TestParseProbe_HTTPGet_PathWithoutLeadingSlash_Accepted(t *testing.T) {
 	}
 }
 
-func TestParseLifecycleHandler_HTTPGet_MissingPath_Error(t *testing.T) {
-	_, err := parseLifecycleHandler(map[string]any{
+func TestParseLifecycleHandler_HTTPGet_MissingPath_Accepted(t *testing.T) {
+	handler, err := parseLifecycleHandler(map[string]any{
 		"httpGet": map[string]any{"port": 8080},
 	})
+	if err != nil {
+		t.Fatalf("parseLifecycleHandler: %v", err)
+	}
+	if handler.HTTPGet.Path != "" {
+		t.Errorf("Path = %q, want empty", handler.HTTPGet.Path)
+	}
+}
+
+func TestParseLifecycleHandler_HTTPGet_NonStringPath_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"httpGet": map[string]any{"path": 123, "port": 8080},
+	})
 	if err == nil {
-		t.Fatal("expected error for a missing lifecycle httpGet path")
+		t.Fatal("expected error for a non-string lifecycle httpGet path")
+	}
+}
+
+// TestParseLifecycleHandler_TCPSocket_WithOtherHandler_Error regression-tests
+// a review finding (launcher#284): parseLifecycleHandler's handler-count loop
+// only tracked httpGet/exec/sleep, so a hook pairing tcpSocket with a valid
+// exec counted as "single handler" and silently built the exec handler
+// alone, dropping the disallowed tcpSocket instead of rejecting the hook.
+func TestParseLifecycleHandler_TCPSocket_WithOtherHandler_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"tcpSocket": map[string]any{"port": 8080},
+		"exec":      map[string]any{"command": []any{"true"}},
+	})
+	if err == nil {
+		t.Fatal("expected error for tcpSocket paired with another lifecycle handler")
+	}
+}
+
+func TestParseLifecycleHandler_TCPSocket_Alone_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"tcpSocket": map[string]any{"port": 8080},
+	})
+	if err == nil {
+		t.Fatal("expected error for a lifecycle handler containing only tcpSocket")
+	}
+}
+
+// TestParseLifecycle_NonObjectPostStart_Error and its preStop sibling
+// regression-test a review finding (launcher#284): `raw["postStart"].(map[string]any)`
+// silently no-ops when the key is present with a non-object value (e.g. a
+// string), so the build succeeded while silently dropping the authored hook.
+func TestParseLifecycle_NonObjectPostStart_Error(t *testing.T) {
+	_, err := parseLifecycle(map[string]any{
+		"lifecycle": map[string]any{"postStart": "flush"},
+	})
+	if err == nil {
+		t.Fatal("expected error for a non-object lifecycle.postStart")
+	}
+}
+
+func TestParseLifecycle_NonObjectPreStop_Error(t *testing.T) {
+	_, err := parseLifecycle(map[string]any{
+		"lifecycle": map[string]any{"preStop": "flush"},
+	})
+	if err == nil {
+		t.Fatal("expected error for a non-object lifecycle.preStop")
 	}
 }
 
@@ -1786,5 +1976,101 @@ func TestParseSecurityContext_BoolHardeningFields_Accepted(t *testing.T) {
 	}
 	if sc.Privileged == nil || *sc.Privileged {
 		t.Error("expected privileged=false")
+	}
+}
+
+// TestParseSecurityContext_NonIntUIDGIDField_Error regression-tests a review
+// finding (launcher#284, P1): a mistyped runAsUser (e.g. the quoted string
+// "1000") previously fell through toInt64's ok=false silently, leaving the
+// container to fall back to the image's own default user, which may be
+// root — the opposite of the hardening the author asked for. runAsGroup gets
+// the identical fix as a same-function sibling.
+func TestParseSecurityContext_NonIntUIDGIDField_Error(t *testing.T) {
+	for _, key := range []string{"runAsUser", "runAsGroup"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := parseSecurityContext(map[string]any{
+				"securityContext": map[string]any{key: "1000"},
+			})
+			if err == nil {
+				t.Fatalf("expected error for non-integer securityContext.%s", key)
+			}
+		})
+	}
+}
+
+func TestParseSecurityContext_UIDGIDFields_Accepted(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{"runAsUser": 1000, "runAsGroup": 2000},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc.RunAsUser == nil || *sc.RunAsUser != 1000 {
+		t.Errorf("RunAsUser = %v, want 1000", sc.RunAsUser)
+	}
+	if sc.RunAsGroup == nil || *sc.RunAsGroup != 2000 {
+		t.Errorf("RunAsGroup = %v, want 2000", sc.RunAsGroup)
+	}
+}
+
+// TestParseSecurityContext_NonStringSELinuxField_Error regression-tests a
+// review finding (launcher#284): a non-string seLinuxOptions.type (e.g. the
+// number 123) previously fell through the failed type assertion silently; if
+// it was the only field authored, the entire SELinux context was discarded.
+// user/role/level get the identical fix as same-block siblings.
+func TestParseSecurityContext_NonStringSELinuxField_Error(t *testing.T) {
+	for _, key := range []string{"user", "role", "type", "level"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := parseSecurityContext(map[string]any{
+				"securityContext": map[string]any{
+					"seLinuxOptions": map[string]any{key: 123},
+				},
+			})
+			if err == nil {
+				t.Fatalf("expected error for non-string seLinuxOptions.%s", key)
+			}
+		})
+	}
+}
+
+func TestParseSecurityContext_SELinuxOptions_Accepted(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seLinuxOptions": map[string]any{
+				"user": "u", "role": "r", "type": "t", "level": "l",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc.SELinuxOptions == nil || sc.SELinuxOptions.User != "u" || sc.SELinuxOptions.Role != "r" ||
+		sc.SELinuxOptions.Type != "t" || sc.SELinuxOptions.Level != "l" {
+		t.Errorf("SELinuxOptions = %+v, want {u r t l}", sc.SELinuxOptions)
+	}
+}
+
+// TestParseProbe_NonIntNumericField_Error regression-tests a review finding
+// (launcher#284, terminationGracePeriodSeconds specifically): every optional
+// numeric probe field shared the same toInt64/toInt32 silent-skip idiom, so a
+// mistyped value was treated as though the field were absent — e.g. a
+// mistyped terminationGracePeriodSeconds silently fell back to the pod-level
+// grace period instead of the explicitly requested probe override. All six
+// fields share the identical helper and are tested together as same-function
+// siblings.
+func TestParseProbe_NonIntNumericField_Error(t *testing.T) {
+	for _, key := range []string{
+		"initialDelaySeconds", "periodSeconds", "timeoutSeconds",
+		"successThreshold", "failureThreshold", "terminationGracePeriodSeconds",
+	} {
+		t.Run(key, func(t *testing.T) {
+			_, err := parseProbe(map[string]any{
+				"tcpSocket": map[string]any{"port": 8080},
+				key:         "30",
+			}, "liveness")
+			if err == nil {
+				t.Fatalf("expected error for non-integer probe.%s", key)
+			}
+		})
 	}
 }
