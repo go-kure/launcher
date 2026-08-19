@@ -657,35 +657,48 @@ func parseResources(resources map[string]any) (ResourceRequirements, error) {
 		}
 		req.Limits = rl
 	}
-	if err := validateNonOvercommitableResources(req.Requests, req.Limits); err != nil {
+	if err := validateResourceRequestLimit(req.Requests, req.Limits); err != nil {
 		return ResourceRequirements{}, err
 	}
 	return req, nil
 }
 
-// validateNonOvercommitableResources applies the request/limit cross-check
-// real Kubernetes admission enforces for any resource IsOvercommitAllowed
-// disallows — every hugepages-<size> resource, and every extended resource
-// (mirrors validateResourceRequirements' Requests-side loop,
-// k8s.io/kubernetes/pkg/apis/core/validation/validation.go): when both a
-// request and a limit are present they must be exactly equal, and a request
-// alone is rejected outright ("Limit must be set for non overcommitable
-// resources") since — unlike cpu/memory, which get a request defaulted from
-// a limit — nothing defaults a missing limit from a request. Any resource
-// name not in standardContainerResourceNames (cpu/memory/ephemeral-storage)
-// is exactly the non-overcommitable set once validateContainerResourceName
-// has already run on every key (called from parseResourceList before this),
-// so the two are: a hugepages-<size> name, or a "/"-qualified extended
-// resource. A limit set alone, with no matching request, is deliberately NOT
-// rejected here: the real apiserver's defaulter copies limit into request
-// before validation ever runs, so a limit-only author input is
+// validateResourceRequestLimit applies the request/limit cross-check real
+// Kubernetes admission enforces for every resource name (mirrors
+// validateResourceRequirements' Requests-side loop,
+// k8s.io/kubernetes/pkg/apis/core/validation/validation.go), split by
+// IsOvercommitAllowed:
+//
+// For a resource IsOvercommitAllowed disallows — every hugepages-<size>
+// resource, and every extended resource — when both a request and a limit
+// are present they must be exactly equal, and a request alone is rejected
+// outright ("Limit must be set for non overcommitable resources") since —
+// unlike cpu/memory, which get a request defaulted from a limit — nothing
+// defaults a missing limit from a request. Any resource name not in
+// standardContainerResourceNames (cpu/memory/ephemeral-storage) is exactly
+// this non-overcommitable set once validateContainerResourceName has already
+// run on every key (called from parseResourceList before this), so the two
+// are: a hugepages-<size> name, or a "/"-qualified extended resource.
+//
+// For a standardContainerResourceNames entry (cpu/memory/ephemeral-storage,
+// where IsOvercommitAllowed is true), a request may be lower than its limit —
+// that's the point of overcommit — but not higher: real admission still
+// rejects request > limit for these. Either may also be absent independently
+// of the other; only the non-overcommitable set above requires both.
+//
+// A limit set alone, with no matching request, is deliberately NOT rejected
+// here for either case: the real apiserver's defaulter copies limit into
+// request before validation ever runs, so a limit-only author input is
 // admission-valid and this parser has no matching case to reject.
-func validateNonOvercommitableResources(requests, limits corev1.ResourceList) error {
+func validateResourceRequestLimit(requests, limits corev1.ResourceList) error {
 	for name, reqQty := range requests {
+		limQty, ok := limits[name]
 		if standardContainerResourceNames[name] {
+			if ok && reqQty.Cmp(limQty) > 0 {
+				return errors.Errorf("resources: %s: request %s must not exceed limit %s", name, reqQty.String(), limQty.String())
+			}
 			continue
 		}
-		limQty, ok := limits[name]
 		if !ok {
 			return errors.Errorf("resources: %s: limit must be set when request is set (extended and hugepages resources cannot be overcommitted)", name)
 		}
@@ -903,9 +916,11 @@ func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
 		handler := &corev1.HTTPGetAction{}
-		if path, ok := httpGet["path"].(string); ok {
-			handler.Path = path
+		path, ok := httpGet["path"].(string)
+		if !ok || path == "" {
+			return nil, errors.Errorf("httpGet handler: path is required")
 		}
+		handler.Path = path
 		handler.Port = port
 		if host, ok := httpGet["host"].(string); ok && host != "" {
 			handler.Host = host
@@ -1146,9 +1161,11 @@ func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
 			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
 		h := &corev1.HTTPGetAction{Port: port}
-		if path, ok := httpGet["path"].(string); ok {
-			h.Path = path
+		path, ok := httpGet["path"].(string)
+		if !ok || path == "" {
+			return nil, errors.Errorf("httpGet handler: path is required")
 		}
+		h.Path = path
 		if host, ok := httpGet["host"].(string); ok && host != "" {
 			h.Host = host
 		}
