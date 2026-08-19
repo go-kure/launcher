@@ -1090,18 +1090,26 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName
 		probe.TCPSocket = &corev1.TCPSocketAction{Port: port}
 		hasHandler = true
 	} else if execCmd, ok := m["exec"].(map[string]any); ok {
+		// Presence-then-type-check per command element, and an empty command
+		// rejected outright — mirrors parseLifecycleHandler's exec branch, so
+		// a malformed command (e.g. `command: check` instead of an array, or
+		// an array with a non-string element) errors out instead of silently
+		// producing no probe at all.
+		var command []string
 		if cmd, ok := execCmd["command"].([]any); ok {
-			var command []string
-			for _, c := range cmd {
-				if s, ok := c.(string); ok {
-					command = append(command, s)
+			for i, c := range cmd {
+				s, ok := c.(string)
+				if !ok {
+					return nil, errors.Errorf("exec handler: command[%d] must be a string, got %T", i, c)
 				}
-			}
-			if len(command) > 0 {
-				probe.Exec = &corev1.ExecAction{Command: command}
-				hasHandler = true
+				command = append(command, s)
 			}
 		}
+		if len(command) == 0 {
+			return nil, errors.Errorf("exec handler: command must not be empty")
+		}
+		probe.Exec = &corev1.ExecAction{Command: command}
+		hasHandler = true
 	} else if grpc, ok := m["grpc"].(map[string]any); ok {
 		handler := &corev1.GRPCAction{}
 		// grpc's port is always numeric regardless of namedPortsAllowed — the
@@ -1817,6 +1825,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 	if !ok {
 		return result, nil
 	}
+	seenNames := map[string]bool{}
 	for _, v := range volList {
 		m, ok := v.(map[string]any)
 		if !ok {
@@ -1836,6 +1845,15 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 		if errs := validation.IsDNS1123Label(volName); len(errs) > 0 {
 			return result, errors.Errorf("volume: invalid name %q: %s", volName, strings.Join(errs, "; "))
 		}
+		// Pod volume names must be unique within the Pod (validateVolumes'
+		// allNames.Has(vol.Name) check, same source as above) — two entries
+		// with the same valid name both build successfully here but only
+		// the first is addressable once admission's own duplicate check
+		// would apply, so reject the duplicate at parse time instead.
+		if seenNames[volName] {
+			return result, errors.Errorf("volume: duplicate name %q", volName)
+		}
+		seenNames[volName] = true
 		readOnly, _ := m["readOnly"].(bool)
 
 		switch volType {
