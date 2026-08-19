@@ -641,6 +641,23 @@ func TestParseLifecycle_Absent(t *testing.T) {
 	}
 }
 
+func TestParseLifecycle_NonObject_Error(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  any
+	}{
+		{"scalar", "PreStop"},
+		{"array", []any{"a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseLifecycle(map[string]any{"lifecycle": tc.val})
+			if err == nil {
+				t.Fatal("expected error for non-object lifecycle, got nil")
+			}
+		})
+	}
+}
+
 func TestParseLifecycle_PostStartAndPreStop(t *testing.T) {
 	props := map[string]any{
 		"lifecycle": map[string]any{
@@ -1240,6 +1257,33 @@ func TestParseSecurityContext_ProcMount_InvalidValue_Error(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for invalid procMount value")
+	}
+}
+
+func TestParseSecurityContext_ProcMount_NonString_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{"procMount": false},
+	})
+	if err == nil {
+		t.Fatal("expected error for non-string procMount value")
+	}
+}
+
+// TestParseSecurityContext_ProcMount_Empty_NoError intentionally documents
+// that an explicit empty string is treated as absent, not an error — the
+// same convention parseStringField already applies to every other string
+// field in this file (workingDir, seLinuxOptions.*, etc.); singling out
+// procMount for stricter empty-string handling would be an inconsistent
+// special case.
+func TestParseSecurityContext_ProcMount_Empty_NoError(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{"procMount": ""},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc != nil && sc.ProcMount != nil {
+		t.Errorf("expected ProcMount unset for an empty string, got %v", sc.ProcMount)
 	}
 }
 

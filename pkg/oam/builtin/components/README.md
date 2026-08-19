@@ -178,7 +178,10 @@ present-but-wrong-type value instead of silently treating it as absent;
 readiness probe (a failed readiness check only pulls the pod from Service
 endpoints, it never terminates the container, so the field has nothing to
 apply to there) and must be at least 1 when set on a liveness or startup
-probe), `lifecycle` (`postStart`/`preStop`:
+probe), `lifecycle` (rejected outright if authored with a non-object value,
+e.g. a scalar or array, instead of silently treating it as absent and
+running the container with no startup/shutdown hooks;
+`postStart`/`preStop`:
 `exec` (every `command` element must be a string; a non-string element is
 rejected, not silently dropped)/`httpGet` (same named-port, `httpHeaders`,
 and optional-`path`/`host`/`scheme` rules as `probes` above)/`sleep` —
@@ -236,7 +239,11 @@ sub-field — if it were the only one set, the whole SELinux context would
 otherwise vanish rather than reporting the malformed input),
 `appArmorProfile` (same "`type` required when authored" rule as
 `seccompProfile` above, and the same non-object rejection as `seccompProfile`
-and `seLinuxOptions`), `procMount` (`Default`|`Unmasked`); `windowsOptions` is
+and `seLinuxOptions`), `procMount` (`Default`|`Unmasked`; a present-but-non-string
+value, e.g. `procMount: false`, is rejected rather than silently omitted —
+same as every other typed scalar field in this document; an explicit empty
+string is still treated as absent, not an error, matching `parseStringField`'s
+own convention for every other string field here); `windowsOptions` is
 deliberately not covered — this project's own container images are
 Linux-only (distroless base images run under podman), so a Windows-specific
 security context has no target to apply to here, and `procMount` is
