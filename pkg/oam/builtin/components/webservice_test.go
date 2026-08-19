@@ -573,6 +573,32 @@ func TestWebserviceHandler_WithProbes_NamedPort(t *testing.T) {
 	}
 }
 
+// TestWebserviceHandler_NamedPort_Mismatch_Error covers launcher#278 wave-12
+// finding 3: webservice always names its container port "http" — a
+// syntactically valid but different name is guaranteed unresolvable by the
+// kubelet and must be rejected, not accepted merely because a port exists.
+func TestWebserviceHandler_NamedPort_Mismatch_Error(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"probes": map[string]any{
+				"readiness": map[string]any{
+					"httpGet": map[string]any{
+						"path": "/ready",
+						"port": "metrics",
+					},
+				},
+			},
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for a named port that does not match webservice's declared \"http\" container port")
+	}
+}
+
 func TestWebserviceHandler_WithAffinity(t *testing.T) {
 	h := &components.WebserviceHandler{}
 	component := &oam.Component{

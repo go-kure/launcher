@@ -82,14 +82,14 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 	}
 	// namedPortsAllowed mirrors createContainer's own `c.Port > 0` guard below:
 	// the main container only gets a Name: "http" ContainerPort when a port
-	// was actually configured, so a same-named probe/lifecycle port resolves
-	// only in that case.
-	probes, err := parseProbes(props, config.Port > 0)
+	// was actually configured, so a probe/lifecycle port resolves only in
+	// that case, and only when it names that same "http" port.
+	probes, err := parseProbes(props, config.Port > 0, "http")
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid probe configuration")
 	}
 	config.Probes = probes
-	lifecycle, err := parseLifecycle(props, config.Port > 0)
+	lifecycle, err := parseLifecycle(props, config.Port > 0, "http")
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid lifecycle configuration")
 	}
