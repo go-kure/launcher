@@ -970,6 +970,9 @@ func parseProbes(props map[string]any, namedPortsAllowed bool, matchName string)
 	if !ok {
 		return config, errors.Errorf("probes: must be an object, got %T", v)
 	}
+	if err := rejectUnknownKeys(probes, []string{"readiness", "liveness", "startup"}, "probes"); err != nil {
+		return config, err
+	}
 	if v, present := probes["readiness"]; present {
 		r, ok := v.(map[string]any)
 		if !ok {
@@ -1353,6 +1356,9 @@ func parseLifecycle(props map[string]any, namedPortsAllowed bool, matchName stri
 	if !ok {
 		return nil, errors.Errorf("lifecycle: must be an object, got %T", v)
 	}
+	if err := rejectUnknownKeys(raw, []string{"postStart", "preStop"}, "lifecycle"); err != nil {
+		return nil, err
+	}
 	lc := &corev1.Lifecycle{}
 	if v, present := raw["postStart"]; present {
 		ps, ok := v.(map[string]any)
@@ -1589,6 +1595,24 @@ func parseObjectField(raw map[string]any, key, label string) (map[string]any, bo
 		return nil, false, errors.Errorf("%s: must be an object, got %T", label, v)
 	}
 	return m, true, nil
+}
+
+// rejectUnknownKeys errors on the first key in raw that is not in allowed.
+// A misspelled key (e.g. `probes.live` instead of `probes.liveness`,
+// `lifecycle.postStop` instead of `lifecycle.preStop`) would otherwise match
+// none of the recognized keys and silently produce no probe/hook at all,
+// with nothing pointing at the typo.
+func rejectUnknownKeys(raw map[string]any, allowed []string, label string) error {
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, k := range allowed {
+		allowedSet[k] = true
+	}
+	for k := range raw {
+		if !allowedSet[k] {
+			return errors.Errorf("%s: unrecognized key %q", label, k)
+		}
+	}
+	return nil
 }
 
 // parseCapabilityList parses a `capabilities.add`/`capabilities.drop` array:
@@ -1856,10 +1880,10 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 	}
 	seenNames := map[string]bool{}
 	seenMountPaths := map[string]bool{}
-	for _, v := range volList {
+	for i, v := range volList {
 		m, ok := v.(map[string]any)
 		if !ok {
-			continue
+			return result, errors.Errorf("volumes[%d]: expected object, got %T", i, v)
 		}
 		volName, _ := m["name"].(string)
 		volType, _ := m["type"].(string)
@@ -1993,7 +2017,12 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				},
 			})
 		default:
-			continue
+			// A volume with a name and mountPath but no recognized type
+			// (including type omitted entirely, volType == "") is clearly an
+			// authored volume, not an absent one — same silent-discard shape
+			// as this function's other findings this wave, so it is rejected
+			// here rather than falling through to "no volume, no mount".
+			return result, errors.Errorf("volume %q: unrecognized type %q", volName, volType)
 		}
 
 		result.Mounts = append(result.Mounts, corev1.VolumeMount{

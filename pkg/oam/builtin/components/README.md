@@ -162,6 +162,9 @@ every kind component), `probes`
 and likewise for each of its own `readiness`/`liveness`/`startup` keys, e.g.
 `probes: {liveness: true}` — same two-level presence-then-type-check shape as
 `lifecycle` below, instead of silently discarding the authored health check;
+a key other than `readiness`/`liveness`/`startup` (e.g. a misspelled
+`probes: {live: {...}}`) is rejected outright too, rather than matching none
+of the three recognized keys and silently producing no probe at all;
 httpGet/tcpSocket/exec/grpc — exactly one handler may be authored; a
 present-but-non-object value for any of the four (e.g. `httpGet: "invalid"`)
 is rejected outright, even when paired with a well-formed sibling handler,
@@ -246,7 +249,10 @@ endpoints, it never terminates the container, so the field has nothing to
 apply to there) and must be at least 1 when set on a liveness or startup
 probe), `lifecycle` (rejected outright if authored with a non-object value,
 e.g. a scalar or array, instead of silently treating it as absent and
-running the container with no startup/shutdown hooks;
+running the container with no startup/shutdown hooks; a key other than
+`postStart`/`preStop` (e.g. a misspelled `lifecycle: {postStop: {...}}`) is
+rejected outright too, rather than matching neither recognized key and
+silently producing no hook at all;
 `postStart`/`preStop`:
 `exec` (every `command` element must be a string; a non-string element is
 rejected, not silently dropped)/`httpGet` (same named-port, `httpHeaders`,
@@ -338,7 +344,10 @@ distinct from the content-validation question the previous paragraph answers),
 present-but-non-array value, e.g. `volumes: {name: data}`, is rejected
 outright rather than silently treated as absent and building without the
 requested volume/mount, the same presence-then-type-check shape as `probes`
-above; every volume's `name`, regardless of source type — `hostPath`,
+above; each entry in that array must itself be an object — a non-object
+entry, e.g. `volumes: [data]`, is rejected outright rather than silently
+skipped while any well-formed sibling entries still build; every volume's
+`name`, regardless of source type — `hostPath`,
 `emptyDir`, `pvc`, `configMap`, `secret`, etc. — must be a valid DNS-1123
 label, matching how real admission validates every `corev1.Volume.Name`; an
 invalid name, e.g. containing `/`, builds successfully but is rejected at Pod
@@ -359,7 +368,11 @@ valid but a storage quantity real Kubernetes resource validation refuses,
 same as `resources`' own quantity fields above; `hostPath.path` must be
 absolute — a raw host filesystem path has no defined root to resolve a
 relative value against, and real admission (`validateHostPathVolumeSource`)
-rejects a relative one the same way),
+rejects a relative one the same way; a fully-authored entry (non-empty
+`name` and `mountPath`) whose `type` matches none of the five recognized
+sources — including `type` omitted entirely — is rejected outright rather
+than silently producing no volume or mount for an entry the author clearly
+intended to add),
 `initContainers`, `sidecars` (each entry's own `volumeMounts[].readOnly`
 must be a boolean and `volumeMounts[].subPath` must be a string when
 present — same presence-then-type-check shape as `volumes.readOnly` above;
