@@ -448,7 +448,11 @@ same missing-vs-wrong-type rejection as `name`/`mountPath` above) and, once
 present, is validated the same way as `emptyDir.sizeLimit`; `pvc.storageClass`,
 if authored, must be a string — a present-but-non-string value (e.g. a bare
 number) is rejected rather than silently building with the cluster default
-class. An explicitly authored `storageClass: ""` is preserved as an
+class — and, once confirmed a string, a non-empty value must also be a valid
+DNS-1123 subdomain, matching `ValidatePersistentVolumeClaimSpec`'s own
+`ValidateClassName` check; a malformed class name (e.g. containing `_` or
+`!`) previously built successfully and was rejected only at admission. An
+explicitly authored `storageClass: ""` is preserved as an
 opt-out request (Kubernetes distinguishes a nil `StorageClassName` — use the
 cluster default — from a pointer to `""` — request no class) rather than
 being collapsed to "absent" and silently provisioned through the default
@@ -460,8 +464,14 @@ generated claim — a cross-repo limitation, out of scope here.
 strings, each one of the three real `corev1.PersistentVolumeAccessMode`
 values — a present-but-non-array value (e.g. a bare string) or a non-string
 element is rejected outright too, instead of silently falling through to the
-`ReadWriteOnce` default while discarding the author's actual list; an absent
-`accessModes` still defaults to `ReadWriteOnce`, unchanged; `ReadWriteOncePod`
+`ReadWriteOnce` default while discarding the author's actual list; an
+authored empty array (`accessModes: []`) is rejected outright as well —
+`ValidatePersistentVolumeClaimSpec` itself requires at least one access
+mode, so silently defaulting an explicit empty list to `ReadWriteOnce` would
+build a claim the author never asked for rather than reporting the
+malformed input; an absent `accessModes` key still defaults to
+`ReadWriteOnce`, unchanged — only an authored-and-empty array is treated as
+malformed; `ReadWriteOncePod`
 combined with any other access mode is rejected outright — real Kubernetes
 requires it be the claim's only mode; the same parser
 backs `volumeClaimTemplates.accessModes` below; the generated
@@ -472,7 +482,11 @@ components in the same namespace that both author a `pvc` volume named
 objects; the pod-local `Volume.Name` and its `VolumeMount` reference stay
 unqualified, only the PVC object's name and the matching
 `Volume.PersistentVolumeClaim.ClaimName` are qualified (`qualifyPVCNames` in
-`common.go`, called once per kind's `Generate()`); `hostPath.path`
+`common.go`, called once per kind's `Generate()`) — qualification is keyed
+off the stable pod-local `Volume.Name` rather than the PVC's own (mutable)
+object name, so a second `Generate()` call on the same component instance
+reproduces the same qualified name instead of re-qualifying an
+already-qualified one (e.g. `app-data` becoming `app-app-data`); `hostPath.path`
 is likewise required and must be absolute — a raw host filesystem path has
 no defined root to resolve a relative value against, and real admission
 (`validateHostPathVolumeSource`) rejects a relative one the same way;
@@ -480,7 +494,12 @@ no defined root to resolve a relative value against, and real admission
 way as `pvc.size`; a fully-authored entry whose `type` matches none of the
 five recognized sources — including `type` omitted entirely — is rejected
 outright rather than silently producing no volume or mount for an entry the
-author clearly intended to add),
+author clearly intended to add; each recognized type's own field set is
+closed the same way `securityContext` and its nested objects are elsewhere
+in this file — an unrecognized key on a `hostPath`, `emptyDir`, `pvc`,
+`configMap`, or `secret` entry (e.g. a typo'd `sizeLmit` instead of
+`sizeLimit`) is rejected rather than silently ignored, which previously let
+the author's intended value take no effect with no error explaining why),
 `initContainers`, `sidecars` (each entry's own `volumeMounts[].readOnly`
 must be a boolean and `volumeMounts[].subPath` must be a string when
 present — same presence-then-type-check shape as `volumes.readOnly` above;
