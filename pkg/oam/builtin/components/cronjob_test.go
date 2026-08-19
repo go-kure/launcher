@@ -470,6 +470,47 @@ func TestCronjobConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 	}
 }
 
+// TestCronjobConfig_ApplyPolicy_HostPathDenied regression-tests the review
+// finding this fix was anchored at (launcher#284, P1): ApplyPolicy never
+// checked a parsed hostPath volume against oam.Policy.AllowHostPathVolumes(),
+// so the default-deny policy (including NoopPolicy) did not actually stop a
+// hostPath volume from being authored on a CronJob.
+func TestCronjobConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+			"volumes": []any{
+				map[string]any{
+					"name":      "logs",
+					"type":      "hostPath",
+					"mountPath": "/var/log",
+					"path":      "/var/log/app",
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: false}); err == nil {
+		t.Error("expected error when a hostPath volume is authored and policy disallows it")
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: true}); err != nil {
+		t.Errorf("expected no error when policy allows hostPath volumes, got %v", err)
+	}
+	// oam.NoopPolicy is the real default-deny policy (not just the test
+	// stub) — confirm the fix is actually reachable through it, not only
+	// through a test double that happens to agree with the real default.
+	if err := enforceable.ApplyPolicy(&oam.NoopPolicy{}); err == nil {
+		t.Error("expected error from the real NoopPolicy default-deny for hostPath volumes")
+	}
+}
+
 func TestCronjobHandler_WithVolumes_EmptyDir(t *testing.T) {
 	h := &components.CronjobHandler{}
 	component := &oam.Component{

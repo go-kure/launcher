@@ -105,6 +105,26 @@ func enforcePrivileged(sc *corev1.SecurityContext, allowed bool) error {
 	return errors.New("securityContext.privileged is not allowed by environment policy")
 }
 
+// enforceHostPathVolumes rejects an authored hostPath volume when the
+// environment policy does not allow it. Same shape and same reused-not-new-
+// mechanism rationale as enforcePrivileged above: oam.Policy.AllowHostPathVolumes
+// is a pre-existing method (default-deny even for NoopPolicy, pkg/oam/policy.go:79)
+// that had nothing to call it — parseVolumes could not produce a hostPath source
+// before the shared pod/container schema landed. A hostPath volume mounts an
+// arbitrary path from the node's own filesystem into the Pod, so an unenforced
+// policy denial here is a container-escape-adjacent gap, not merely a style one.
+func enforceHostPathVolumes(volumes []corev1.Volume, allowed bool) error {
+	if allowed {
+		return nil
+	}
+	for _, v := range volumes {
+		if v.HostPath != nil {
+			return errors.Errorf("volume %q: hostPath volumes are not allowed by environment policy", v.Name)
+		}
+	}
+	return nil
+}
+
 func applyDefaultReplicas(current int32, explicit bool, dflt *int32) int32 {
 	if explicit || dflt == nil {
 		return current
