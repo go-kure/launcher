@@ -948,6 +948,26 @@ func TestParseSecurityContext_SeccompRuntimeDefault_WithLocalhostProfile_Error(t
 	}
 }
 
+// TestParseSecurityContext_SeccompRuntimeDefault_NonStringLocalhostProfile_Error
+// regression-tests a review finding (launcher#284): a bare
+// `spRaw["localhostProfile"].(string)` type assertion treated a
+// present-but-non-string localhostProfile the same as absent, silently
+// accepting the profile as if localhostProfile had never been authored,
+// instead of rejecting the mistyped value the same as a well-formed one.
+func TestParseSecurityContext_SeccompRuntimeDefault_NonStringLocalhostProfile_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seccompProfile": map[string]any{
+				"type":             "RuntimeDefault",
+				"localhostProfile": 123,
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for RuntimeDefault seccompProfile with a non-string localhostProfile")
+	}
+}
+
 func TestParseSecurityContext_SeccompUnconfined_WithLocalhostProfile_Error(t *testing.T) {
 	_, err := parseSecurityContext(map[string]any{
 		"securityContext": map[string]any{
@@ -986,6 +1006,23 @@ func TestParseSecurityContext_AppArmorRuntimeDefault_WithLocalhostProfile_Error(
 	})
 	if err == nil {
 		t.Fatal("expected error for RuntimeDefault appArmorProfile with a localhostProfile set")
+	}
+}
+
+// TestParseSecurityContext_AppArmorRuntimeDefault_NonStringLocalhostProfile_Error
+// is appArmorProfile's sibling of the seccompProfile regression test above —
+// same review finding (launcher#284), same fix (parseStringField).
+func TestParseSecurityContext_AppArmorRuntimeDefault_NonStringLocalhostProfile_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"appArmorProfile": map[string]any{
+				"type":             "RuntimeDefault",
+				"localhostProfile": 123,
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for RuntimeDefault appArmorProfile with a non-string localhostProfile")
 	}
 }
 
@@ -2006,6 +2043,65 @@ func TestParseVolumes_ValidName_Accepted(t *testing.T) {
 	}
 	if len(parsed.Volumes) != 1 || parsed.Volumes[0].Name != "tmp-data" {
 		t.Errorf("Volumes = %+v, want one volume named %q", parsed.Volumes, "tmp-data")
+	}
+}
+
+// TestParseVolumes_EmptyDir_NegativeSizeLimit_Error regression-tests a review
+// finding (launcher#284): resource.ParseQuantity accepts a syntactically
+// valid negative quantity like "-1Gi", but real Kubernetes resource
+// validation rejects negative storage quantities — the build must reject it
+// here too rather than emitting a Pod admission will refuse.
+func TestParseVolumes_EmptyDir_NegativeSizeLimit_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "scratch",
+				"type":      "emptyDir",
+				"mountPath": "/tmp",
+				"sizeLimit": "-1Gi",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a negative emptyDir sizeLimit")
+	}
+}
+
+// TestParseVolumes_PVC_NegativeSize_Error is the pvc-type sibling of the
+// emptyDir case above — same root cause, same fix.
+func TestParseVolumes_PVC_NegativeSize_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "data",
+				"type":      "pvc",
+				"mountPath": "/data",
+				"size":      "-1Gi",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a negative PVC size")
+	}
+}
+
+// TestParseVolumeClaimTemplates_NegativeSize_Error covers the identical
+// negative-quantity defect found independently in parseVolumeClaimTemplates
+// (StatefulSet's volumeClaimTemplates) while fixing the parseVolumes cases
+// above — same resource.ParseQuantity-accepts-negative root cause, different
+// call site.
+func TestParseVolumeClaimTemplates_NegativeSize_Error(t *testing.T) {
+	_, err := parseVolumeClaimTemplates(map[string]any{
+		"volumeClaimTemplates": []any{
+			map[string]any{
+				"name":      "data",
+				"size":      "-1Gi",
+				"mountPath": "/data",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a negative volumeClaimTemplate size")
 	}
 }
 
