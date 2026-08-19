@@ -275,7 +275,13 @@ and dropping the requested sandboxing entirely; `type` is required whenever the
 `seccompProfile` object is authored at all, matching real admission's own
 `field.Required` — omitting it (e.g. authoring only `localhostProfile` with
 no `type` key) is rejected rather than silently discarding the whole
-profile; `localhostProfile` must be
+profile; `localhostProfile` is rejected outright when authored alongside
+`type: RuntimeDefault`/`Unconfined` (only meaningful for `type: Localhost`),
+including a present-but-non-string value in that position (e.g.
+`localhostProfile: 123`) — the same present-but-wrong-type rejection as
+every other typed scalar field in this document, not silently treated as
+absent while the contradictory type is accepted as authored; when `type` is
+`Localhost`, `localhostProfile` must be
 relative and must not contain a `..` backstep component, matching
 `corev1.SeccompProfile.LocalhostProfile`'s own doc comment — "must be a
 descending path, relative to the kubelet's configured seccomp profile
@@ -287,8 +293,10 @@ non-string value, e.g. `type: 123`, instead of silently discarding just that
 sub-field — if it were the only one set, the whole SELinux context would
 otherwise vanish rather than reporting the malformed input),
 `appArmorProfile` (same "`type` required when authored" rule as
-`seccompProfile` above, and the same non-object rejection as `seccompProfile`
-and `seLinuxOptions`), `procMount` (`Default`|`Unmasked`; a present-but-non-string
+`seccompProfile` above, the same non-object rejection as `seccompProfile`
+and `seLinuxOptions`, and the same `localhostProfile`
+mutual-exclusivity-with-RuntimeDefault/Unconfined and present-but-non-string
+rejection as `seccompProfile` above), `procMount` (`Default`|`Unmasked`; a present-but-non-string
 value, e.g. `procMount: false`, is rejected rather than silently omitted —
 same as every other typed scalar field in this document; an explicit empty
 string is still treated as absent, not an error, matching `parseStringField`'s
@@ -308,7 +316,10 @@ distinct from the content-validation question the previous paragraph answers),
 `emptyDir`, `pvc`, `configMap`, `secret`, etc. — must be a valid DNS-1123
 label, matching how real admission validates every `corev1.Volume.Name`; an
 invalid name, e.g. containing `/`, builds successfully but is rejected at Pod
-admission),
+admission; `emptyDir.sizeLimit` and `pvc.size` are each parsed as a
+`resource.Quantity` and rejected if negative (e.g. `"-1Gi"`) — syntactically
+valid but a storage quantity real Kubernetes resource validation refuses,
+same as `resources`' own quantity fields above),
 `initContainers`, `sidecars`, and `affinity`.
 
 `securityContext.privileged: true` is rejected unless the environment policy's
@@ -339,7 +350,8 @@ policy choice, not something this shared schema hardcodes.
   the container port and the Service port), letting a downstream platform synthesize generic
   app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
   Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
-- **statefulset** — `volumeClaimTemplates` (`name`, `size`, `storageClass`,
+- **statefulset** — `volumeClaimTemplates` (`name`, `size` — a `resource.Quantity`
+  rejected if negative, same as `volumes`' `pvc.size` above — `storageClass`,
   `accessModes`, `mountPath`), `serviceName` (headless).
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`); `port`
   optionally adds a Service.

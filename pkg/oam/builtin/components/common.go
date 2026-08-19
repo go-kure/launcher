@@ -1665,7 +1665,13 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		typ, _ := spRaw["type"].(string)
 		switch corev1.SeccompProfileType(typ) {
 		case corev1.SeccompProfileTypeRuntimeDefault, corev1.SeccompProfileTypeUnconfined:
-			if profile, ok := spRaw["localhostProfile"].(string); ok && profile != "" {
+			// parseStringField, not a bare type assertion: a present-but-non-string
+			// localhostProfile (e.g. a number) must be rejected here too, not
+			// silently treated as absent while the mutually-exclusive type is
+			// accepted as if localhostProfile had never been authored.
+			if _, present, err := parseStringField(spRaw, "localhostProfile", "securityContext.seccompProfile.localhostProfile"); err != nil {
+				return nil, err
+			} else if present {
 				return nil, errors.Errorf("securityContext.seccompProfile: localhostProfile is only valid when type is Localhost, got type %q", typ)
 			}
 			sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileType(typ)}
@@ -1741,7 +1747,10 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		typ, _ := apRaw["type"].(string)
 		switch corev1.AppArmorProfileType(typ) {
 		case corev1.AppArmorProfileTypeRuntimeDefault, corev1.AppArmorProfileTypeUnconfined:
-			if profile, ok := apRaw["localhostProfile"].(string); ok && profile != "" {
+			// Same parseStringField fix as seccompProfile's identical branch above.
+			if _, present, err := parseStringField(apRaw, "localhostProfile", "securityContext.appArmorProfile.localhostProfile"); err != nil {
+				return nil, err
+			} else if present {
 				return nil, errors.Errorf("securityContext.appArmorProfile: localhostProfile is only valid when type is Localhost, got type %q", typ)
 			}
 			sc.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileType(typ)}
@@ -1831,6 +1840,9 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				if err != nil {
 					return result, errors.Errorf("volume %q: invalid emptyDir sizeLimit %q: %w", volName, sizeLimit, err)
 				}
+				if qty.Sign() < 0 {
+					return result, errors.Errorf("volume %q: emptyDir sizeLimit must not be negative, got %q", volName, sizeLimit)
+				}
 				vol.EmptyDir.SizeLimit = &qty
 			}
 			result.Volumes = append(result.Volumes, vol)
@@ -1839,8 +1851,12 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			if size == "" {
 				continue
 			}
-			if _, err := resource.ParseQuantity(size); err != nil {
+			qty, err := resource.ParseQuantity(size)
+			if err != nil {
 				return result, errors.Errorf("volume %q: invalid PVC size %q: %w", volName, size, err)
+			}
+			if qty.Sign() < 0 {
+				return result, errors.Errorf("volume %q: PVC size must not be negative, got %q", volName, size)
 			}
 			storageClass, _ := m["storageClass"].(string)
 			accessModes, err := parseAccessModes(m)
@@ -2391,8 +2407,12 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		if vct.MountPath == "" {
 			return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'mountPath'", vct.Name)
 		}
-		if _, err := resource.ParseQuantity(vct.Size); err != nil {
+		qty, err := resource.ParseQuantity(vct.Size)
+		if err != nil {
 			return nil, errors.Errorf("volumeClaimTemplate %q: invalid size %q: %w", vct.Name, vct.Size, err)
+		}
+		if qty.Sign() < 0 {
+			return nil, errors.Errorf("volumeClaimTemplate %q: size must not be negative, got %q", vct.Name, vct.Size)
 		}
 		vcts = append(vcts, vct)
 	}
