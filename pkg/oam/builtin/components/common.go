@@ -957,25 +957,46 @@ func hasExplicitReplicas(props map[string]any) bool {
 // every named port regardless of name with its own message.
 func parseProbes(props map[string]any, namedPortsAllowed bool, matchName string) (ProbeConfig, error) {
 	var config ProbeConfig
-	probes, ok := props["probes"].(map[string]any)
-	if !ok {
+	v, present := props["probes"]
+	if !present {
 		return config, nil
 	}
-	if r, ok := probes["readiness"].(map[string]any); ok {
+	// Presence-then-type-check, not a bare assertion, at both this level and
+	// each of the three keys below — mirrors parseLifecycle's identical
+	// two-level shape, so a mistyped probes object or a mistyped individual
+	// probe (e.g. `probes: {liveness: true}`) is rejected outright instead of
+	// silently discarding the authored health check.
+	probes, ok := v.(map[string]any)
+	if !ok {
+		return config, errors.Errorf("probes: must be an object, got %T", v)
+	}
+	if v, present := probes["readiness"]; present {
+		r, ok := v.(map[string]any)
+		if !ok {
+			return config, errors.Errorf("probes.readiness: must be an object, got %T", v)
+		}
 		p, err := parseProbe(r, "readiness", namedPortsAllowed, matchName)
 		if err != nil {
 			return config, errors.Errorf("readiness probe: %w", err)
 		}
 		config.Readiness = p
 	}
-	if l, ok := probes["liveness"].(map[string]any); ok {
+	if v, present := probes["liveness"]; present {
+		l, ok := v.(map[string]any)
+		if !ok {
+			return config, errors.Errorf("probes.liveness: must be an object, got %T", v)
+		}
 		p, err := parseProbe(l, "liveness", namedPortsAllowed, matchName)
 		if err != nil {
 			return config, errors.Errorf("liveness probe: %w", err)
 		}
 		config.Liveness = p
 	}
-	if s, ok := probes["startup"].(map[string]any); ok {
+	if v, present := probes["startup"]; present {
+		s, ok := v.(map[string]any)
+		if !ok {
+			return config, errors.Errorf("probes.startup: must be an object, got %T", v)
+		}
 		p, err := parseProbe(s, "startup", namedPortsAllowed, matchName)
 		if err != nil {
 			return config, errors.Errorf("startup probe: %w", err)
@@ -1822,6 +1843,14 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			path, _ := m["path"].(string)
 			if path == "" {
 				continue
+			}
+			// corev1.HostPathVolumeSource.Path is a raw host filesystem path —
+			// a relative value has no defined root to resolve against, and
+			// real admission (validateHostPathVolumeSource, k8s.io/kubernetes/
+			// pkg/apis/core/validation) rejects it as "must be an absolute
+			// path".
+			if !gopath.IsAbs(path) {
+				return result, errors.Errorf("volume %q: hostPath.path must be absolute, got %q", volName, path)
 			}
 			hostPathType := corev1.HostPathUnset
 			result.Volumes = append(result.Volumes, corev1.Volume{
