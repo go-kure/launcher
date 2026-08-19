@@ -111,7 +111,12 @@ missing limit from a request, unlike cpu/memory), and a request/limit pair
 that merely differs is rejected too. A `limits`-only entry with no matching
 `requests` entry is deliberately not rejected here: the real apiserver's
 defaulter copies `limits` into `requests` before validation runs, so that
-shape is admission-valid. No policy
+shape is admission-valid. `cpu`/`memory`/`ephemeral-storage` stay
+overcommittable — a lower request than limit is fine, and either may be set
+without the other — but when both are present the request still must not
+*exceed* the limit, matching `validateResourceRequirements`'s
+request-vs-limit comparison for every resource name, not just the
+non-overcommitable set. No policy
 default/max hook exists for names other than cpu/memory
 today; `claims` (Dynamic Resource Allocation) is deliberately not covered —
 genuinely feature-gated in the pinned `k8s.io/api` version and meaningless
@@ -135,10 +140,13 @@ silently dropped/coerced — a non-object entry, a missing/empty/invalid `name`
 present-but-non-string `value` are all rejected instead of quietly
 disappearing or turning into `""`; an omitted `value` key still defaults to
 `""` — shared by `lifecycle.{postStart,preStop}.httpGet` below via the same
-parsing helper), `lifecycle` (`postStart`/`preStop`:
+parsing helper; `path` is required and must be non-empty, matching
+`validateHTTPGetAction`'s unconditional `field.Required` check — **note:**
+that check has no leading-slash requirement, so a path such as `healthz`
+(no leading `/`) is accepted, same as real admission), `lifecycle` (`postStart`/`preStop`:
 `exec` (every `command` element must be a string; a non-string element is
-rejected, not silently dropped)/`httpGet` (same named-port and `httpHeaders`
-rules as `probes` above)/`sleep` —
+rejected, not silently dropped)/`httpGet` (same named-port, `httpHeaders`,
+and required-non-empty-`path` rules as `probes` above)/`sleep` —
 `tcpSocket` is not
 accepted, since corev1 documents it as broken for lifecycle hooks),
 `securityContext` (per-container: `runAsUser`/`runAsGroup`/`runAsNonRoot`

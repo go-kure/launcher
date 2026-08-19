@@ -1688,6 +1688,81 @@ func TestParseSecurityContext_NonBoolHardeningField_Error(t *testing.T) {
 	}
 }
 
+// TestParseResources_StandardResource_RequestExceedsLimit_Error regression-
+// tests a review finding (launcher#284): standardContainerResourceNames
+// (cpu/memory/ephemeral-storage) skipped all request-vs-limit comparison, so
+// a request greater than its limit (e.g. ephemeral-storage request 2Gi,
+// limit 1Gi) was accepted even though real admission's
+// validateResourceRequirements rejects request > limit for every resource,
+// not just the non-overcommitable set.
+func TestParseResources_StandardResource_RequestExceedsLimit_Error(t *testing.T) {
+	_, err := parseResources(map[string]any{
+		"requests": map[string]any{"ephemeral-storage": "2Gi"},
+		"limits":   map[string]any{"ephemeral-storage": "1Gi"},
+	})
+	if err == nil {
+		t.Fatal("expected error when a standard resource's request exceeds its limit")
+	}
+}
+
+func TestParseResources_StandardResource_RequestBelowLimit_Accepted(t *testing.T) {
+	_, err := parseResources(map[string]any{
+		"requests": map[string]any{"ephemeral-storage": "1Gi"},
+		"limits":   map[string]any{"ephemeral-storage": "2Gi"},
+	})
+	if err != nil {
+		t.Fatalf("parseResources: %v", err)
+	}
+}
+
+// TestParseProbe_HTTPGet_MissingPath_Error and
+// TestParseLifecycleHandler_HTTPGet_MissingPath_Error regression-test a
+// review finding (launcher#284): the finding's own claim (a path must begin
+// with "/") does not hold against the real validateHTTPGetAction — it has
+// no leading-slash check at all — but investigating it surfaced the actual
+// rule: validateHTTPGetAction unconditionally rejects an empty path
+// (field.Required), which neither handler enforced.
+func TestParseProbe_HTTPGet_MissingPath_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"httpGet": map[string]any{"port": 8080},
+	}, "liveness")
+	if err == nil {
+		t.Fatal("expected error for a missing httpGet path")
+	}
+}
+
+func TestParseProbe_HTTPGet_EmptyPath_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"httpGet": map[string]any{"path": "", "port": 8080},
+	}, "liveness")
+	if err == nil {
+		t.Fatal("expected error for an empty httpGet path")
+	}
+}
+
+func TestParseProbe_HTTPGet_PathWithoutLeadingSlash_Accepted(t *testing.T) {
+	// Real admission has no leading-slash requirement for httpGet.path — only
+	// non-empty. "healthz" (no leading "/") must not be rejected.
+	probe, err := parseProbe(map[string]any{
+		"httpGet": map[string]any{"path": "healthz", "port": 8080},
+	}, "liveness")
+	if err != nil {
+		t.Fatalf("parseProbe: %v", err)
+	}
+	if probe.HTTPGet.Path != "healthz" {
+		t.Errorf("Path = %q, want healthz", probe.HTTPGet.Path)
+	}
+}
+
+func TestParseLifecycleHandler_HTTPGet_MissingPath_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"httpGet": map[string]any{"port": 8080},
+	})
+	if err == nil {
+		t.Fatal("expected error for a missing lifecycle httpGet path")
+	}
+}
+
 func TestParseSecurityContext_BoolHardeningFields_Accepted(t *testing.T) {
 	sc, err := parseSecurityContext(map[string]any{
 		"securityContext": map[string]any{
