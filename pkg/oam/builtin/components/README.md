@@ -447,7 +447,15 @@ values — a present-but-non-array value (e.g. a bare string) or a non-string
 element is rejected outright too, instead of silently falling through to the
 `ReadWriteOnce` default while discarding the author's actual list; an absent
 `accessModes` still defaults to `ReadWriteOnce`, unchanged; the same parser
-backs `volumeClaimTemplates.accessModes` below; `hostPath.path`
+backs `volumeClaimTemplates.accessModes` below; the generated
+`PersistentVolumeClaim` object's own Kubernetes name is the component's
+`<app.Name>-<pod-local volume name>`, not the bare pod-local name — two
+components in the same namespace that both author a `pvc` volume named
+`data` would otherwise emit two colliding `PersistentVolumeClaim/data`
+objects; the pod-local `Volume.Name` and its `VolumeMount` reference stay
+unqualified, only the PVC object's name and the matching
+`Volume.PersistentVolumeClaim.ClaimName` are qualified (`qualifyPVCNames` in
+`common.go`, called once per kind's `Generate()`); `hostPath.path`
 is likewise required and must be absolute — a raw host filesystem path has
 no defined root to resolve a relative value against, and real admission
 (`validateHostPathVolumeSource`) rejects a relative one the same way;
@@ -541,7 +549,10 @@ policy choice, not something this shared schema hardcodes.
 
 Custom component types implement `oam.ComponentHandler` (`CanHandle` +
 `ToApplicationConfig`) and are registered alongside the built-ins. Exported helpers:
-`ValidateImageRef` (image policy) and `BuildPVC` (PVC from a `PVCConfig`).
+`ValidateImageRef` (image policy) and `BuildPVC` (PVC from a `PVCConfig`). A custom
+`Generate()` that builds standalone PVCs from a `PVCConfig` list should qualify their
+names the same way every built-in kind does — see `qualifyPVCNames` (unexported,
+`common.go`) — to avoid two components colliding on the same pod-local volume name.
 
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
 for the full type/field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)

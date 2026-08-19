@@ -605,3 +605,80 @@ func TestCronjobHandler_FileKeyRef_VolumeWiring(t *testing.T) {
 	}
 	t.Error("CronJob not found")
 }
+
+// TestCronjobHandler_PVC_NamespacedByComponent regression-tests a review
+// finding (launcher#284): the generated PersistentVolumeClaim object used
+// the bare pod-local volume name verbatim, so two components in the same
+// namespace both authoring a "data" volume would emit two
+// PersistentVolumeClaim/data objects and collide. The PVC object's own name
+// must be qualified by the component/application name; the pod-local Volume
+// name and its VolumeMount reference must stay unqualified.
+func TestCronjobHandler_PVC_NamespacedByComponent(t *testing.T) {
+	h := &components.CronjobHandler{}
+	component := &oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+			"volumes": []any{
+				map[string]any{
+					"name":      "data",
+					"type":      "pvc",
+					"mountPath": "/data",
+					"size":      "1Gi",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("job", "default", cfg)
+	objs, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var sawPVC, sawVolume, sawMount bool
+	for _, obj := range objs {
+		switch o := (*obj).(type) {
+		case *corev1.PersistentVolumeClaim:
+			if o.Name != "job-data" {
+				t.Errorf("PVC name = %q, want %q", o.Name, "job-data")
+			}
+			sawPVC = true
+		case *batchv1.CronJob:
+			spec := o.Spec.JobTemplate.Spec.Template.Spec
+			for _, v := range spec.Volumes {
+				if v.Name != "data" {
+					continue
+				}
+				sawVolume = true
+				if v.PersistentVolumeClaim == nil {
+					t.Fatal("expected volume \"data\" to reference a PersistentVolumeClaim")
+				}
+				if v.PersistentVolumeClaim.ClaimName != "job-data" {
+					t.Errorf("Volume.PersistentVolumeClaim.ClaimName = %q, want %q", v.PersistentVolumeClaim.ClaimName, "job-data")
+				}
+			}
+			for _, c := range spec.Containers {
+				for _, m := range c.VolumeMounts {
+					if m.Name == "data" {
+						sawMount = true
+					}
+				}
+			}
+		}
+	}
+	if !sawPVC {
+		t.Fatal("expected a PersistentVolumeClaim object")
+	}
+	if !sawVolume {
+		t.Fatal("expected pod spec to declare the \"data\" volume, unqualified")
+	}
+	if !sawMount {
+		t.Fatal("expected container to mount the \"data\" volume, unqualified")
+	}
+}

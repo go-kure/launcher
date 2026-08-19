@@ -251,6 +251,7 @@ func (c *StatefulsetConfig) BackendServiceName() string { return c.ServiceName }
 // Generate creates Kubernetes StatefulSet, headless Service, ServiceAccount, and any standalone PVCs.
 func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}
+	c.PVCs = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 
 	sts, err := c.createStatefulSet(app)
 	if err != nil {

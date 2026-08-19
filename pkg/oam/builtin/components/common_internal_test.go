@@ -2143,6 +2143,44 @@ func TestParseVolumeClaimTemplates_NonStringStorageClass_Error(t *testing.T) {
 	}
 }
 
+// TestQualifyPVCNames_QualifiesObjectNameAndClaimRef regression-tests a
+// review finding (launcher#284): the generated PVC object reused the bare
+// pod-local volume name verbatim as its own Kubernetes object name, so two
+// components sharing the same pod-local name (e.g. both "data") would
+// collide on one PersistentVolumeClaim in the same namespace.
+func TestQualifyPVCNames_QualifiesObjectNameAndClaimRef(t *testing.T) {
+	volumes := []corev1.Volume{
+		{Name: "data", VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"},
+		}},
+		{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+	}
+	pvcs := []PVCConfig{{Name: "data", Size: "1Gi"}}
+
+	got := qualifyPVCNames(volumes, pvcs, "job")
+
+	if len(got) != 1 || got[0].Name != "job-data" {
+		t.Fatalf("qualified PVCs = %+v, want [{Name: job-data ...}]", got)
+	}
+	if volumes[0].Name != "data" {
+		t.Errorf("Volume.Name = %q, want unchanged %q", volumes[0].Name, "data")
+	}
+	if volumes[0].PersistentVolumeClaim.ClaimName != "job-data" {
+		t.Errorf("Volume.PersistentVolumeClaim.ClaimName = %q, want %q", volumes[0].PersistentVolumeClaim.ClaimName, "job-data")
+	}
+	if volumes[1].EmptyDir == nil {
+		t.Error("expected the unrelated emptyDir volume to be left untouched")
+	}
+}
+
+func TestQualifyPVCNames_NoPVCs_NoOp(t *testing.T) {
+	volumes := []corev1.Volume{{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
+	got := qualifyPVCNames(volumes, nil, "job")
+	if len(got) != 0 {
+		t.Errorf("qualifyPVCNames with no PVCs = %+v, want empty", got)
+	}
+}
+
 func TestParseVolumeClaimTemplates_StorageClass_Accepted(t *testing.T) {
 	vcts, err := parseVolumeClaimTemplates(map[string]any{
 		"volumeClaimTemplates": []any{

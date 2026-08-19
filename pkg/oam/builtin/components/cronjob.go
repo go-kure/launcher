@@ -240,6 +240,7 @@ func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
 // Generate creates a Kubernetes CronJob, ServiceAccount, and any declared PVCs.
 func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}
+	c.PVCs = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 	cronjob, err := c.createCronJob(app)
 	if err != nil {
 		return nil, err

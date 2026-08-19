@@ -2771,3 +2771,36 @@ func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev
 	}
 	return claim, nil
 }
+
+// qualifyPVCNames rewrites the Kubernetes object name of every generated PVC
+// to "<appName>-<pod-local name>", so two components in the same Application
+// (or two Applications in the same namespace, e.g. two CronJobs each
+// authoring a "data" volume) that happen to choose the same pod-local volume
+// name don't collide on a single PersistentVolumeClaim object. Only the PVC's
+// own object name and the matching Volume.PersistentVolumeClaim.ClaimName
+// reference are qualified — Volume.Name itself, and every VolumeMount that
+// references it, are left untouched, since those only need to resolve within
+// this one pod spec and qualifying them would just rename the mount for no
+// reason.
+func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) []PVCConfig {
+	if len(pvcs) == 0 {
+		return pvcs
+	}
+	qualifiedNames := make(map[string]string, len(pvcs))
+	out := make([]PVCConfig, len(pvcs))
+	for i, pvc := range pvcs {
+		out[i] = pvc
+		out[i].Name = appName + "-" + pvc.Name
+		qualifiedNames[pvc.Name] = out[i].Name
+	}
+	for i := range volumes {
+		claim := volumes[i].PersistentVolumeClaim
+		if claim == nil {
+			continue
+		}
+		if qualified, ok := qualifiedNames[claim.ClaimName]; ok {
+			claim.ClaimName = qualified
+		}
+	}
+	return out
+}
