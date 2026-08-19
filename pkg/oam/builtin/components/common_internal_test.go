@@ -107,6 +107,27 @@ func TestParseEnv_FieldRef_InvalidAPIVersion_Error(t *testing.T) {
 	}
 }
 
+// TestParseEnv_FieldRef_NonStringAPIVersion_Error regression-tests a review
+// finding (launcher#284): a bare `m["apiVersion"].(string)` type assertion
+// treated a present-but-non-string apiVersion the same as absent, silently
+// leaving APIVersion unset (which Kubernetes then defaults to "v1") instead
+// of rejecting the malformed value.
+func TestParseEnv_FieldRef_NonStringAPIVersion_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "POD_NAME",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "metadata.name", "apiVersion": 123},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for a non-string fieldRef.apiVersion")
+	}
+}
+
 func TestParseEnv_ResourceFieldRef(t *testing.T) {
 	props := map[string]any{
 		"env": []any{
@@ -2303,6 +2324,63 @@ func TestParseLifecycleHandler_TCPSocket_Alone_Error(t *testing.T) {
 	}, true, "")
 	if err == nil {
 		t.Fatal("expected error for a lifecycle handler containing only tcpSocket")
+	}
+}
+
+// TestParseLifecycleHandler_MalformedTCPSocketWithOtherHandler_Error
+// regression-tests a review finding (launcher#284): the unconditional
+// tcpSocket rejection used a bare `m["tcpSocket"].(map[string]any)` type
+// assertion, so an authored-but-malformed tcpSocket (e.g. a string) read as
+// absent and let a valid sibling handler win instead of being rejected.
+func TestParseLifecycleHandler_MalformedTCPSocketWithOtherHandler_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"tcpSocket": "disabled",
+		"exec":      map[string]any{"command": []any{"flush"}},
+	}, true, "")
+	if err == nil {
+		t.Fatal("expected error for a malformed tcpSocket paired with a valid exec handler")
+	}
+}
+
+// TestParseLifecycleHandler_MalformedHTTPGetWithValidExec_Error
+// regression-tests the same root cause as the tcpSocket case above, but in
+// the httpGet/exec/sleep count loop: a malformed httpGet must not silently
+// lose to a valid sibling exec handler either.
+func TestParseLifecycleHandler_MalformedHTTPGetWithValidExec_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"httpGet": "invalid",
+		"exec":    map[string]any{"command": []any{"true"}},
+	}, true, "")
+	if err == nil {
+		t.Fatal("expected error for a malformed httpGet paired with a valid exec handler")
+	}
+}
+
+// TestParseProbe_MalformedHTTPGetWithValidExec_Error regression-tests a
+// review finding (launcher#284): countProbeHandlers only counted keys whose
+// value was already a valid map, so a malformed handler (e.g. httpGet: a
+// string) went uncounted and parseProbe's own handler-selection chain then
+// silently fell through to a valid sibling handler instead of rejecting the
+// malformed one.
+func TestParseProbe_MalformedHTTPGetWithValidExec_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"httpGet": "invalid",
+		"exec":    map[string]any{"command": []any{"check"}},
+	}, "readiness", true, "")
+	if err == nil {
+		t.Fatal("expected error for a malformed httpGet paired with a valid exec handler")
+	}
+}
+
+// TestParseProbe_MalformedHandlerAlone_Error covers the single-handler case:
+// countProbeHandlers must reject a malformed handler even when it is the
+// only key present, not just when paired with a valid sibling.
+func TestParseProbe_MalformedHandlerAlone_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"tcpSocket": "invalid",
+	}, "readiness", true, "")
+	if err == nil {
+		t.Fatal("expected error for a malformed tcpSocket handler with no other handler present")
 	}
 }
 

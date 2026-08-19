@@ -44,7 +44,9 @@ doc comment ("cannot be used if value is not empty"); `valueFrom` is one of
 present non-boolean value rather than silently treating it as unset), `fieldRef`
 (`apiVersion` must be `v1` if authored — the only field-label conversion
 Kubernetes has ever shipped for the downward API; omitting it also defaults to
-`v1`; `fieldPath` is validated against the exact set real admission accepts
+`v1`; a present-but-non-string `apiVersion` (e.g. a bare YAML number) is
+rejected rather than silently treated as absent, same as every other typed
+scalar field in this document; `fieldPath` is validated against the exact set real admission accepts
 for an env var fieldRef — `metadata.name`/`metadata.namespace`/`metadata.uid`,
 `spec.nodeName`/`spec.serviceAccountName`, `status.hostIP`/`status.hostIPs`/
 `status.podIP`/`status.podIPs` — plus the `metadata.labels['KEY']`/
@@ -156,7 +158,10 @@ reject, but the top-level `command`/`args` fix was deliberately left out of
 that change to keep it self-contained to `common.go`'s `parseLifecycleHandler`
 — touching `parseCommand`/`parseArgs` would ripple into all 7 call sites across
 every kind component), `probes`
-(httpGet/tcpSocket/exec/grpc — a string `port` is a named container port, not
+(httpGet/tcpSocket/exec/grpc — exactly one handler may be authored; a
+present-but-non-object value for any of the four (e.g. `httpGet: "invalid"`)
+is rejected outright, even when paired with a well-formed sibling handler,
+rather than silently discarded while the sibling wins; a string `port` is a named container port, not
 an arbitrary label, and is validated against `validation.IsValidPortName`
 just as real admission's `ValidatePortNumOrName` does: lowercase
 `[-a-z0-9]` only, at least one letter, no leading/trailing/adjacent hyphen,
@@ -223,9 +228,14 @@ running the container with no startup/shutdown hooks;
 `postStart`/`preStop`:
 `exec` (every `command` element must be a string; a non-string element is
 rejected, not silently dropped)/`httpGet` (same named-port, `httpHeaders`,
-and optional-`path`/`host`/`scheme` rules as `probes` above)/`sleep` —
+and optional-`path`/`host`/`scheme` rules as `probes` above)/`sleep` — at
+most one of these three may be authored, and a present-but-non-object value
+for any of them is rejected outright rather than silently discarded while a
+well-formed sibling wins, same as `probes` above;
 `tcpSocket` is rejected unconditionally, even when paired with another valid
-handler such as `exec` — corev1 documents it as broken for lifecycle hooks,
+handler such as `exec`, and regardless of its own value's shape (an
+authored-but-malformed `tcpSocket`, e.g. a string, is rejected the same as a
+well-formed one) — corev1 documents it as broken for lifecycle hooks,
 and simply ignoring the extra key would silently drop the authored
 `tcpSocket` while emitting only the other handler; `postStart`/`preStop` are
 each rejected outright if present with a non-object value, e.g. `preStop:

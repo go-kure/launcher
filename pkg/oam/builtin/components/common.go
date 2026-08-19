@@ -514,7 +514,9 @@ func parseFieldRef(m map[string]any) (*corev1.ObjectFieldSelector, error) {
 		return nil, err
 	}
 	ref := &corev1.ObjectFieldSelector{FieldPath: path}
-	if av, ok := m["apiVersion"].(string); ok && av != "" {
+	if av, present, err := parseStringField(m, "apiVersion", "fieldRef.apiVersion"); err != nil {
+		return nil, err
+	} else if present {
 		// corev1.ObjectFieldSelector.APIVersion "defaults to v1" (field doc
 		// comment) because v1 is the only field-label conversion Kubernetes has
 		// ever shipped for the downward API; any other value builds but is
@@ -983,14 +985,21 @@ func parseProbes(props map[string]any, namedPortsAllowed bool, matchName string)
 	return config, nil
 }
 
-func countProbeHandlers(m map[string]any) int {
+// countProbeHandlers counts the probe handler keys authored in m, rejecting a
+// present-but-non-object handler outright instead of treating it the same as
+// absent — the latter would let a malformed handler silently lose to a
+// second, valid handler rather than being rejected as malformed.
+func countProbeHandlers(m map[string]any) (int, error) {
 	count := 0
 	for _, key := range []string{"httpGet", "tcpSocket", "exec", "grpc"} {
-		if _, ok := m[key].(map[string]any); ok {
+		if v, present := m[key]; present {
+			if _, ok := v.(map[string]any); !ok {
+				return 0, errors.Errorf("%s: must be an object, got %T", key, v)
+			}
 			count++
 		}
 	}
-	return count
+	return count, nil
 }
 
 // kind is "readiness", "liveness", or "startup" — needed only to enforce
@@ -998,7 +1007,11 @@ func countProbeHandlers(m map[string]any) int {
 // other field's validation is identical across probe kinds. namedPortsAllowed
 // and matchName are documented on parseProbes above.
 func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName string) (*corev1.Probe, error) {
-	if countProbeHandlers(m) > 1 {
+	handlerCount, err := countProbeHandlers(m)
+	if err != nil {
+		return nil, err
+	}
+	if handlerCount > 1 {
 		return nil, errors.Errorf("probe must specify exactly one handler, but multiple were provided")
 	}
 
@@ -1331,12 +1344,21 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 	// so a hook that pairs tcpSocket with e.g. a valid exec previously slipped
 	// through as "single handler" and silently built the exec handler alone,
 	// dropping the disallowed tcpSocket instead of rejecting the hook.
-	if _, ok := m["tcpSocket"].(map[string]any); ok {
+	// Presence alone triggers this, not a type-checked assertion, so an
+	// authored-but-malformed tcpSocket (e.g. a string) is rejected too,
+	// rather than reading as absent and letting a valid sibling handler win.
+	if _, present := m["tcpSocket"]; present {
 		return nil, errors.Errorf("tcpSocket is not supported as a lifecycle handler")
 	}
+	// Same present-but-non-object rejection as countProbeHandlers above,
+	// applied to this parser's own three handler keys — a malformed httpGet/
+	// exec/sleep must not silently lose to a valid sibling handler either.
 	count := 0
 	for _, key := range []string{"httpGet", "exec", "sleep"} {
-		if _, ok := m[key].(map[string]any); ok {
+		if v, present := m[key]; present {
+			if _, ok := v.(map[string]any); !ok {
+				return nil, errors.Errorf("%s: must be an object, got %T", key, v)
+			}
 			count++
 		}
 	}
