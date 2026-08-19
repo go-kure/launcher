@@ -461,6 +461,7 @@ func TestParseResources_NumericValue_Accepted(t *testing.T) {
 	// authored form (the README documents nvidia.com/gpu as supported).
 	req, err := parseResources(map[string]any{
 		"requests": map[string]any{"nvidia.com/gpu": float64(1), "cpu": float64(0.5)},
+		"limits":   map[string]any{"nvidia.com/gpu": float64(1)},
 	})
 	if err != nil {
 		t.Fatalf("parseResources: %v", err)
@@ -489,6 +490,7 @@ func TestParseResources_ExtendedResource_Fractional_Error(t *testing.T) {
 func TestParseResources_ExtendedResource_WholeNumber_Accepted(t *testing.T) {
 	req, err := parseResources(map[string]any{
 		"requests": map[string]any{"nvidia.com/gpu": "2"},
+		"limits":   map[string]any{"nvidia.com/gpu": "2"},
 	})
 	if err != nil {
 		t.Fatalf("parseResources: %v", err)
@@ -1475,5 +1477,192 @@ func TestParseResources_HugePages_Multiple_Accepted(t *testing.T) {
 	}
 	if q, ok := req.Limits["hugepages-2Mi"]; !ok || q.Cmp(resource.MustParse("4Mi")) != 0 {
 		t.Errorf("hugepages-2Mi = %v, ok=%v, want 4Mi", q, ok)
+	}
+}
+
+func TestParseSecurityContext_SeccompProfile_MissingType_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seccompProfile": map[string]any{"localhostProfile": "profiles/my-profile.json"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a seccompProfile object with no type")
+	}
+}
+
+func TestParseSecurityContext_AppArmorProfile_MissingType_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"appArmorProfile": map[string]any{"localhostProfile": "my-profile"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an appArmorProfile object with no type")
+	}
+}
+
+func TestParsePort_InvalidName_Error(t *testing.T) {
+	cases := []string{"8080", "UPPER", "-leading-hyphen", "trailing-hyphen-", "a--b", ""}
+	for _, name := range cases {
+		if _, err := parsePort(name); err == nil {
+			t.Errorf("parsePort(%q): expected error for an invalid port name", name)
+		}
+	}
+}
+
+func TestParsePort_ValidName_Accepted(t *testing.T) {
+	port, err := parsePort("http")
+	if err != nil {
+		t.Fatalf("parsePort: %v", err)
+	}
+	if port.StrVal != "http" {
+		t.Errorf("StrVal = %q, want http", port.StrVal)
+	}
+}
+
+func TestParseProbe_HTTPGet_NamedPort_Invalid_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"httpGet": map[string]any{"path": "/healthz", "port": "8080"},
+	}, "liveness")
+	if err == nil {
+		t.Fatal("expected error for an invalid httpGet named port")
+	}
+}
+
+func TestParseLifecycleHandler_HTTPGet_NamedPort_Invalid_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"httpGet": map[string]any{"path": "/started", "port": "bad_name"},
+	})
+	if err == nil {
+		t.Fatal("expected error for an invalid lifecycle httpGet named port")
+	}
+}
+
+func TestParseHTTPHeaders_NonObjectEntry_Error(t *testing.T) {
+	_, err := parseHTTPHeaders([]any{"not-an-object"})
+	if err == nil {
+		t.Fatal("expected error for a non-object httpHeaders entry")
+	}
+}
+
+func TestParseHTTPHeaders_MissingName_Error(t *testing.T) {
+	_, err := parseHTTPHeaders([]any{map[string]any{"value": "x"}})
+	if err == nil {
+		t.Fatal("expected error for an httpHeaders entry with no name")
+	}
+}
+
+func TestParseHTTPHeaders_InvalidName_Error(t *testing.T) {
+	// A space is not a valid Go http header field name.
+	_, err := parseHTTPHeaders([]any{map[string]any{"name": "X Auth", "value": "x"}})
+	if err == nil {
+		t.Fatal("expected error for an httpHeaders entry with an invalid name")
+	}
+}
+
+func TestParseHTTPHeaders_NonStringValue_Error(t *testing.T) {
+	_, err := parseHTTPHeaders([]any{map[string]any{"name": "Authorization", "value": float64(123)}})
+	if err == nil {
+		t.Fatal("expected error for an httpHeaders entry with a non-string value")
+	}
+}
+
+func TestParseHTTPHeaders_MissingValue_DefaultsEmpty(t *testing.T) {
+	headers, err := parseHTTPHeaders([]any{map[string]any{"name": "X-Flag"}})
+	if err != nil {
+		t.Fatalf("parseHTTPHeaders: %v", err)
+	}
+	if len(headers) != 1 || headers[0].Name != "X-Flag" || headers[0].Value != "" {
+		t.Errorf("unexpected headers: %+v", headers)
+	}
+}
+
+func TestParseEnv_ResourceFieldRef_InvalidContainerName_Error(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "CPU_LIMIT",
+				"valueFrom": map[string]any{
+					"resourceFieldRef": map[string]any{"resource": "limits.cpu", "containerName": "bad/name"},
+				},
+			},
+		},
+	}
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("expected error for an invalid resourceFieldRef.containerName")
+	}
+}
+
+func TestParseEnv_ResourceFieldRef_ValidContainerName_Accepted(t *testing.T) {
+	props := map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "CPU_LIMIT",
+				"valueFrom": map[string]any{
+					"resourceFieldRef": map[string]any{"resource": "limits.cpu", "containerName": "sidecar"},
+				},
+			},
+		},
+	}
+	env, err := parseEnv(props)
+	if err != nil {
+		t.Fatalf("parseEnv: %v", err)
+	}
+	if env[0].ValueFrom.ResourceFieldRef.ContainerName != "sidecar" {
+		t.Errorf("containerName = %q, want sidecar", env[0].ValueFrom.ResourceFieldRef.ContainerName)
+	}
+}
+
+func TestParseResources_ExtendedResource_MismatchedRequestLimit_Error(t *testing.T) {
+	_, err := parseResources(map[string]any{
+		"requests": map[string]any{"nvidia.com/gpu": "1"},
+		"limits":   map[string]any{"nvidia.com/gpu": "2"},
+	})
+	if err == nil {
+		t.Fatal("expected error for a mismatched extended-resource request/limit")
+	}
+}
+
+func TestParseResources_ExtendedResource_RequestWithoutLimit_Error(t *testing.T) {
+	_, err := parseResources(map[string]any{
+		"requests": map[string]any{"nvidia.com/gpu": "1"},
+	})
+	if err == nil {
+		t.Fatal("expected error for an extended-resource request with no matching limit")
+	}
+}
+
+func TestParseResources_HugePages_MismatchedRequestLimit_Error(t *testing.T) {
+	_, err := parseResources(map[string]any{
+		"requests": map[string]any{"hugepages-2Mi": "2Mi"},
+		"limits":   map[string]any{"hugepages-2Mi": "4Mi"},
+	})
+	if err == nil {
+		t.Fatal("expected error for a mismatched hugepages request/limit")
+	}
+}
+
+func TestParseResources_HugePages_RequestWithoutLimit_Error(t *testing.T) {
+	_, err := parseResources(map[string]any{
+		"requests": map[string]any{"hugepages-2Mi": "2Mi"},
+	})
+	if err == nil {
+		t.Fatal("expected error for a hugepages request with no matching limit")
+	}
+}
+
+func TestParseResources_StandardResource_MismatchedRequestLimit_Accepted(t *testing.T) {
+	// cpu/memory/ephemeral-storage remain overcommittable: a request lower
+	// than the limit (or a request with no limit at all) is fine.
+	req, err := parseResources(map[string]any{
+		"requests": map[string]any{"cpu": "100m"},
+		"limits":   map[string]any{"cpu": "500m"},
+	})
+	if err != nil {
+		t.Fatalf("parseResources: %v", err)
+	}
+	if q, ok := req.Requests[corev1.ResourceCPU]; !ok || q.Cmp(resource.MustParse("100m")) != 0 {
+		t.Errorf("cpu request = %v, ok=%v, want 100m", q, ok)
 	}
 }

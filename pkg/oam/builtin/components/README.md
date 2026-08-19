@@ -59,7 +59,15 @@ API cannot project an arbitrary extended resource such as
 resource's family — `1m`/`1` for cpu, one of `1`/`1k`/`1M`/`1G`/`1T`/`1P`/`1E`/
 `1Ki`/`1Mi`/`1Gi`/`1Ti`/`1Pi`/`1Ei` for memory/ephemeral-storage/hugepages — a
 zero-valued divisor such as `"0"` is treated as absent rather than rejected,
-matching admission's own zero-value defaulting),
+matching admission's own zero-value defaulting; `containerName`, if authored,
+must be a syntactically valid container name (`ValidateDNS1123Label`) —
+**note:** whether it actually names a container present in the generated pod
+is deliberately not checked, since that needs the full sibling
+container/initContainer/sidecar name set, which isn't available at this
+single-env-var parsing depth; real admission doesn't check it either (only
+the downward API *volume* form of `resourceFieldRef` requires
+`containerName` at all), so an unresolvable target only surfaces later, as a
+kubelet-time `CreateContainerConfigError`),
 `fileKeyRef` (`volumeName`/`path`/`key` required, `optional` accepted;
 corev1's `EnvFiles` feature; `path` must be relative and must not contain a
 `..` backstep component, per this repo's own path-safety convention) —
@@ -94,7 +102,16 @@ must be a whole number, matching Kubernetes' own extended-resource
 constraint. A `hugepages-<size>` quantity must additionally be an integer
 multiple of that page size (e.g. `hugepages-2Mi: 3Mi` is a whole number of
 bytes but not a whole number of 2Mi pages, and is rejected; `hugepages-2Mi:
-4Mi` is accepted), matching `IsHugePageResourceValueDivisible`. No policy
+4Mi` is accepted), matching `IsHugePageResourceValueDivisible`. A hugepages
+or extended resource cannot be overcommitted (mirrors
+`validateResourceRequirements`'s `IsOvercommitAllowed` check): if `requests`
+sets one, `limits` must set the identical value for that same name — a
+request with no matching limit is rejected outright (nothing defaults a
+missing limit from a request, unlike cpu/memory), and a request/limit pair
+that merely differs is rejected too. A `limits`-only entry with no matching
+`requests` entry is deliberately not rejected here: the real apiserver's
+defaulter copies `limits` into `requests` before validation runs, so that
+shape is admission-valid. No policy
 default/max hook exists for names other than cpu/memory
 today; `claims` (Dynamic Resource Allocation) is deliberately not covered —
 genuinely feature-gated in the pinned `k8s.io/api` version and meaningless
@@ -107,9 +124,21 @@ reject, but the top-level `command`/`args` fix was deliberately left out of
 that change to keep it self-contained to `common.go`'s `parseLifecycleHandler`
 — touching `parseCommand`/`parseArgs` would ripple into all 7 call sites across
 every kind component), `probes`
-(httpGet/tcpSocket/exec/grpc), `lifecycle` (`postStart`/`preStop`:
+(httpGet/tcpSocket/exec/grpc — a string `port` is a named container port, not
+an arbitrary label, and is validated against `validation.IsValidPortName`
+just as real admission's `ValidatePortNumOrName` does: lowercase
+`[-a-z0-9]` only, at least one letter, no leading/trailing/adjacent hyphen,
+max 15 characters — a purely numeric string like `"8080"` is rejected, since
+it has no letter; `httpGet.httpHeaders` entries are validated rather than
+silently dropped/coerced — a non-object entry, a missing/empty/invalid `name`
+(`validation.IsHTTPHeaderName`, matching `validateHTTPGetAction`), or a
+present-but-non-string `value` are all rejected instead of quietly
+disappearing or turning into `""`; an omitted `value` key still defaults to
+`""` — shared by `lifecycle.{postStart,preStop}.httpGet` below via the same
+parsing helper), `lifecycle` (`postStart`/`preStop`:
 `exec` (every `command` element must be a string; a non-string element is
-rejected, not silently dropped)/`httpGet` (including `httpHeaders`)/`sleep` —
+rejected, not silently dropped)/`httpGet` (same named-port and `httpHeaders`
+rules as `probes` above)/`sleep` —
 `tcpSocket` is not
 accepted, since corev1 documents it as broken for lifecycle hooks),
 `securityContext` (per-container: `runAsUser`/`runAsGroup`/`runAsNonRoot`
@@ -119,12 +148,17 @@ fails it at container-start time — a `CreateContainerConfigError`, every
 time — so this contradictory combination is rejected here instead of
 shipping a workload guaranteed never to start),
 `readOnlyRootFilesystem`, `allowPrivilegeEscalation`, `privileged`,
-`capabilities.{add,drop}`, `seccompProfile` (`localhostProfile` must be
+`capabilities.{add,drop}`, `seccompProfile` (`type` is required whenever the
+`seccompProfile` object is authored at all, matching real admission's own
+`field.Required` — omitting it (e.g. authoring only `localhostProfile` with
+no `type` key) is rejected rather than silently discarding the whole
+profile; `localhostProfile` must be
 relative and must not contain a `..` backstep component, matching
 `corev1.SeccompProfile.LocalhostProfile`'s own doc comment — "must be a
 descending path, relative to the kubelet's configured seccomp profile
 location" — and this repo's own path-safety convention), `seLinuxOptions`,
-`appArmorProfile`, `procMount` (`Default`|`Unmasked`); `windowsOptions` is
+`appArmorProfile` (same "`type` required when authored" rule as
+`seccompProfile` above), `procMount` (`Default`|`Unmasked`); `windowsOptions` is
 deliberately not covered — this project's own container images are
 Linux-only (distroless base images run under podman), so a Windows-specific
 security context has no target to apply to here, and `procMount` is
