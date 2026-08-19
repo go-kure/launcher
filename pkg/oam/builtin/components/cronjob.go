@@ -122,12 +122,15 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	}
 	config.Command = parseCommand(props)
 	config.Args = parseArgs(props)
-	probes, err := parseProbes(props)
+	// namedPortsAllowed=false: cronjob exposes no port property at all, so its
+	// main container never declares a ContainerPort for the kubelet to
+	// resolve a named probe/lifecycle port against.
+	probes, err := parseProbes(props, false)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid probe configuration")
 	}
 	config.Probes = probes
-	lifecycle, err := parseLifecycle(props)
+	lifecycle, err := parseLifecycle(props, false)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid lifecycle configuration")
 	}

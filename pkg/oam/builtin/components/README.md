@@ -24,7 +24,7 @@ Reference.
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). |
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
-| `cronjob` | CronJob, SA | Scheduled job; cron `schedule` + history limits. |
+| `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits. |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
@@ -154,7 +154,16 @@ an arbitrary label, and is validated against `validation.IsValidPortName`
 just as real admission's `ValidatePortNumOrName` does: lowercase
 `[-a-z0-9]` only, at least one letter, no leading/trailing/adjacent hyphen,
 max 15 characters — a purely numeric string like `"8080"` is rejected, since
-it has no letter; `httpGet.httpHeaders` itself and its entries are validated
+it has no letter; beyond syntax, a named port is rejected outright on a
+component kind whose main container never declares any port for the kubelet
+to resolve the name against — `worker` and `cronjob` unconditionally (neither
+exposes a `port` property at all), `daemonset`/`statefulset` only when their
+own optional `port` was not set on that component instance (their main
+container is named `"http"`/`"tcp"` respectively, but only when `port > 0`),
+and `webservice` never (its `port` always defaults to 80, so the main
+container is always named `"http"`) — a numeric port is unaffected either way,
+since it dials the kubelet directly rather than resolving a declared name;
+`httpGet.httpHeaders` itself and its entries are validated
 rather than silently dropped/coerced — an authored non-array `httpHeaders`
 value (e.g. a single header object instead of a list) is rejected the same
 as a non-object entry within it, a missing/empty/invalid `name`
@@ -173,7 +182,17 @@ real admission; `scheme`, if authored, must be `HTTP` or `HTTPS`
 (case-insensitive); all three, plus every probe numeric field below, reject a
 present-but-wrong-type value instead of silently treating it as absent;
 `initialDelaySeconds`/`periodSeconds`/`timeoutSeconds`/`successThreshold`/
-`failureThreshold`/`terminationGracePeriodSeconds` are typed integers —
+`failureThreshold`/`terminationGracePeriodSeconds` are typed integers, each
+bounds-checked to match real Kubernetes admission (`validateProbeTimeouts`
+plus the liveness/startup `successThreshold` rule) rather than accepting any
+integer at face value: `initialDelaySeconds` must not be negative;
+`periodSeconds`/`timeoutSeconds`/`successThreshold`/`failureThreshold` must
+each be at least 1 (a `periodSeconds: 0`, for example, would otherwise author
+a probe Kubernetes itself would reject); `successThreshold` must additionally
+be exactly 1 on a liveness or startup probe — only a readiness probe may set
+it above 1, since liveness/startup have only two outcomes (still healthy,
+or restart) and "N consecutive successes to reset that state" has no defined
+meaning for either —
 `terminationGracePeriodSeconds` is additionally rejected outright on a
 readiness probe (a failed readiness check only pulls the pod from Service
 endpoints, it never terminates the container, so the field has nothing to

@@ -266,6 +266,54 @@ func TestStatefulsetHandler_WithSharedPodFields(t *testing.T) {
 	t.Error("StatefulSet not found in output")
 }
 
+// TestStatefulsetHandler_NamedProbePort_WithPort_Accepted and
+// TestStatefulsetHandler_NamedProbePort_WithoutPort_Error cover launcher#278
+// wave-11 finding 5: statefulset's main container is only named "tcp" when
+// `port` is set, mirroring daemonset's identical conditional shape (see
+// TestDaemonsetHandler_NamedProbePort_WithPort_Accepted).
+func TestStatefulsetHandler_NamedProbePort_WithPort_Accepted(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/postgres:v15",
+			"port":  5432,
+			"probes": map[string]any{
+				"readiness": map[string]any{
+					"tcpSocket": map[string]any{"port": "tcp"},
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("db", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+func TestStatefulsetHandler_NamedProbePort_WithoutPort_Error(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/postgres:v15",
+			"probes": map[string]any{
+				"readiness": map[string]any{
+					"tcpSocket": map[string]any{"port": "tcp"},
+				},
+			},
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for a named probe port when no port is configured")
+	}
+}
+
 func TestStatefulsetConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 	h := &components.StatefulsetHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{

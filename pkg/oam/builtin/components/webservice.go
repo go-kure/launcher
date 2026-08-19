@@ -106,12 +106,16 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.Command = parseCommand(props)
 	config.Args = parseArgs(props)
-	probes, err := parseProbes(props)
+	// namedPortsAllowed=true: webservice always attaches a Name: "http"
+	// ContainerPort to the main container (createDeployment, unconditional —
+	// config.Port defaults to 80), so a same-named probe/lifecycle port
+	// always resolves.
+	probes, err := parseProbes(props, true)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid probe configuration")
 	}
 	config.Probes = probes
-	lifecycle, err := parseLifecycle(props)
+	lifecycle, err := parseLifecycle(props, true)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid lifecycle configuration")
 	}

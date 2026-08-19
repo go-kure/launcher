@@ -277,11 +277,26 @@ func parseEnv(props map[string]any) ([]corev1.EnvVar, error) {
 // (same structural pattern as ProbeConfig holding *corev1.Probe directly): exactly
 // one of secretKeyRef, configMapKeyRef, fieldRef, resourceFieldRef, or fileKeyRef.
 func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
-	_, hasSecret := vf["secretKeyRef"].(map[string]any)
-	_, hasConfigMap := vf["configMapKeyRef"].(map[string]any)
-	_, hasFieldRef := vf["fieldRef"].(map[string]any)
-	_, hasResourceFieldRef := vf["resourceFieldRef"].(map[string]any)
-	_, hasFileKeyRef := vf["fileKeyRef"].(map[string]any)
+	skr, hasSecret, err := parseObjectField(vf, "secretKeyRef", "valueFrom.secretKeyRef")
+	if err != nil {
+		return nil, err
+	}
+	cmr, hasConfigMap, err := parseObjectField(vf, "configMapKeyRef", "valueFrom.configMapKeyRef")
+	if err != nil {
+		return nil, err
+	}
+	fr, hasFieldRef, err := parseObjectField(vf, "fieldRef", "valueFrom.fieldRef")
+	if err != nil {
+		return nil, err
+	}
+	rfr, hasResourceFieldRef, err := parseObjectField(vf, "resourceFieldRef", "valueFrom.resourceFieldRef")
+	if err != nil {
+		return nil, err
+	}
+	fkr, hasFileKeyRef, err := parseObjectField(vf, "fileKeyRef", "valueFrom.fileKeyRef")
+	if err != nil {
+		return nil, err
+	}
 	count := 0
 	for _, present := range []bool{hasSecret, hasConfigMap, hasFieldRef, hasResourceFieldRef, hasFileKeyRef} {
 		if present {
@@ -293,7 +308,7 @@ func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
 	}
 
 	src := &corev1.EnvVarSource{}
-	if skr, ok := vf["secretKeyRef"].(map[string]any); ok {
+	if hasSecret {
 		if n, key, ok := parseNameKey(skr); ok {
 			sel := &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: n}, Key: key}
 			opt, err := parseBoolField(skr, "optional", "secretKeyRef.optional")
@@ -304,7 +319,7 @@ func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
 			src.SecretKeyRef = sel
 		}
 	}
-	if cmr, ok := vf["configMapKeyRef"].(map[string]any); ok {
+	if hasConfigMap {
 		if n, key, ok := parseNameKey(cmr); ok {
 			sel := &corev1.ConfigMapKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: n}, Key: key}
 			opt, err := parseBoolField(cmr, "optional", "configMapKeyRef.optional")
@@ -315,21 +330,21 @@ func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
 			src.ConfigMapKeyRef = sel
 		}
 	}
-	if fr, ok := vf["fieldRef"].(map[string]any); ok {
+	if hasFieldRef {
 		ref, err := parseFieldRef(fr)
 		if err != nil {
 			return nil, err
 		}
 		src.FieldRef = ref
 	}
-	if rfr, ok := vf["resourceFieldRef"].(map[string]any); ok {
+	if hasResourceFieldRef {
 		ref, err := parseResourceFieldRef(rfr)
 		if err != nil {
 			return nil, err
 		}
 		src.ResourceFieldRef = ref
 	}
-	if fkr, ok := vf["fileKeyRef"].(map[string]any); ok {
+	if hasFileKeyRef {
 		ref, err := parseFileKeyRef(fkr)
 		if err != nil {
 			return nil, err
@@ -554,7 +569,9 @@ func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, err
 		return nil, errors.Errorf("resourceFieldRef: unsupported resource %q (must be one of limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory, requests.ephemeral-storage, or a requests.hugepages-<size>/limits.hugepages-<size> selector)", res)
 	}
 	ref := &corev1.ResourceFieldSelector{Resource: res}
-	if cn, ok := m["containerName"].(string); ok && cn != "" {
+	if cn, present, err := parseStringField(m, "containerName", "resourceFieldRef.containerName"); err != nil {
+		return nil, err
+	} else if present {
 		// Syntax only: a container name must be a DNS-1123 label
 		// (ValidateDNS1123Label, used for every corev1.Container.Name).
 		// Whether cn actually names a container that exists in this pod is
@@ -909,28 +926,37 @@ func hasExplicitReplicas(props map[string]any) bool {
 	return ok
 }
 
-func parseProbes(props map[string]any) (ProbeConfig, error) {
+// namedPortsAllowed is false for a component kind whose main container never
+// declares any port (worker, cronjob): the kubelet resolves a named httpGet/
+// tcpSocket port by looking it up in that same container's own declared
+// Ports, so a string port can never resolve there and is rejected outright
+// rather than authoring a probe/lifecycle hook that is guaranteed to fail at
+// runtime. Kinds that do declare a main-container port pass the port's own
+// presence (e.g. `c.Port > 0`) through here instead of a blanket true/false,
+// since the port is itself optional on some of those kinds (daemonset,
+// statefulset) — see each ToApplicationConfig call site.
+func parseProbes(props map[string]any, namedPortsAllowed bool) (ProbeConfig, error) {
 	var config ProbeConfig
 	probes, ok := props["probes"].(map[string]any)
 	if !ok {
 		return config, nil
 	}
 	if r, ok := probes["readiness"].(map[string]any); ok {
-		p, err := parseProbe(r, "readiness")
+		p, err := parseProbe(r, "readiness", namedPortsAllowed)
 		if err != nil {
 			return config, errors.Errorf("readiness probe: %w", err)
 		}
 		config.Readiness = p
 	}
 	if l, ok := probes["liveness"].(map[string]any); ok {
-		p, err := parseProbe(l, "liveness")
+		p, err := parseProbe(l, "liveness", namedPortsAllowed)
 		if err != nil {
 			return config, errors.Errorf("liveness probe: %w", err)
 		}
 		config.Liveness = p
 	}
 	if s, ok := probes["startup"].(map[string]any); ok {
-		p, err := parseProbe(s, "startup")
+		p, err := parseProbe(s, "startup", namedPortsAllowed)
 		if err != nil {
 			return config, errors.Errorf("startup probe: %w", err)
 		}
@@ -951,8 +977,9 @@ func countProbeHandlers(m map[string]any) int {
 
 // kind is "readiness", "liveness", or "startup" — needed only to enforce
 // terminationGracePeriodSeconds' cross-field constraint (see below); every
-// other field's validation is identical across probe kinds.
-func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
+// other field's validation is identical across probe kinds. namedPortsAllowed
+// is documented on parseProbes above.
+func parseProbe(m map[string]any, kind string, namedPortsAllowed bool) (*corev1.Probe, error) {
 	if countProbeHandlers(m) > 1 {
 		return nil, errors.Errorf("probe must specify exactly one handler, but multiple were provided")
 	}
@@ -961,7 +988,7 @@ func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 	hasHandler := false
 
 	if httpGet, ok := m["httpGet"].(map[string]any); ok {
-		port, err := parsePort(httpGet["port"])
+		port, err := parsePort(httpGet["port"], namedPortsAllowed)
 		if err != nil {
 			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
@@ -1004,7 +1031,7 @@ func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 		probe.HTTPGet = handler
 		hasHandler = true
 	} else if tcpSocket, ok := m["tcpSocket"].(map[string]any); ok {
-		port, err := parsePort(tcpSocket["port"])
+		port, err := parsePort(tcpSocket["port"], namedPortsAllowed)
 		if err != nil {
 			return nil, errors.Errorf("tcpSocket handler: %w", err)
 		}
@@ -1025,7 +1052,11 @@ func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 		}
 	} else if grpc, ok := m["grpc"].(map[string]any); ok {
 		handler := &corev1.GRPCAction{}
-		port, err := parsePort(grpc["port"])
+		// grpc's port is always numeric regardless of namedPortsAllowed — the
+		// check right below rejects a named port unconditionally, with its own
+		// message, so this always passes true to reach that check rather than
+		// being intercepted earlier by parsePort's own named-port rejection.
+		port, err := parsePort(grpc["port"], true)
 		if err != nil {
 			return nil, errors.Errorf("grpc handler: %w", err)
 		}
@@ -1047,26 +1078,49 @@ func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 	if i, present, err := parseInt32Field(m, "initialDelaySeconds", "initialDelaySeconds"); err != nil {
 		return nil, err
 	} else if present {
+		if i < 0 {
+			return nil, errors.Errorf("initialDelaySeconds: must not be negative, got %d", i)
+		}
 		probe.InitialDelaySeconds = i
 	}
 	if i, present, err := parseInt32Field(m, "periodSeconds", "periodSeconds"); err != nil {
 		return nil, err
 	} else if present {
+		if i < 1 {
+			return nil, errors.Errorf("periodSeconds: must be at least 1, got %d", i)
+		}
 		probe.PeriodSeconds = i
 	}
 	if i, present, err := parseInt32Field(m, "timeoutSeconds", "timeoutSeconds"); err != nil {
 		return nil, err
 	} else if present {
+		if i < 1 {
+			return nil, errors.Errorf("timeoutSeconds: must be at least 1, got %d", i)
+		}
 		probe.TimeoutSeconds = i
 	}
 	if i, present, err := parseInt32Field(m, "successThreshold", "successThreshold"); err != nil {
 		return nil, err
 	} else if present {
+		if i < 1 {
+			return nil, errors.Errorf("successThreshold: must be at least 1, got %d", i)
+		}
+		// Real Kubernetes admission (validateLivenessProbe/validateStartupProbe)
+		// rejects anything but 1 here: a liveness/startup probe's only two
+		// outcomes are "still healthy" and "restart", so requiring more than
+		// one consecutive success to reset that state has no defined meaning.
+		// Only readiness probes may set this above 1.
+		if i != 1 && kind != "readiness" {
+			return nil, errors.Errorf("successThreshold: must be 1 for a %s probe, got %d", kind, i)
+		}
 		probe.SuccessThreshold = i
 	}
 	if i, present, err := parseInt32Field(m, "failureThreshold", "failureThreshold"); err != nil {
 		return nil, err
 	} else if present {
+		if i < 1 {
+			return nil, errors.Errorf("failureThreshold: must be at least 1, got %d", i)
+		}
 		probe.FailureThreshold = i
 	}
 	if i, present, err := parseInt64Field(m, "terminationGracePeriodSeconds", "terminationGracePeriodSeconds"); err != nil {
@@ -1136,7 +1190,13 @@ func parseHTTPHeaders(raw map[string]any, key string) ([]corev1.HTTPHeader, erro
 	return out, nil
 }
 
-func parsePort(v any) (intstr.IntOrString, error) {
+// namedPortsAllowed rejects the string form outright before the name-syntax
+// check below: the kubelet resolves a named port only against that same
+// container's own declared Ports, so on a component kind whose main
+// container never declares any port (worker, cronjob — see parseProbes),
+// a string port is guaranteed unresolvable at runtime, not just possibly
+// wrong.
+func parsePort(v any, namedPortsAllowed bool) (intstr.IntOrString, error) {
 	switch p := v.(type) {
 	case float64:
 		if math.IsNaN(p) || math.IsInf(p, 0) || p != math.Trunc(p) {
@@ -1152,6 +1212,9 @@ func parsePort(v any) (intstr.IntOrString, error) {
 	case string:
 		if p == "" {
 			return intstr.IntOrString{}, errors.Errorf("port must not be an empty string")
+		}
+		if !namedPortsAllowed {
+			return intstr.IntOrString{}, errors.Errorf("named port %q is not supported here: this component declares no container ports for the kubelet to resolve the name against — use a numeric port instead", p)
 		}
 		// A string port names a container's declared `ports[].name`, not an
 		// arbitrary label — real admission (ValidatePortNumOrName) checks it
@@ -1179,8 +1242,10 @@ func validateNumericPort(port int64) (intstr.IntOrString, error) {
 
 // parseLifecycle parses the `lifecycle` object: postStart/preStop hooks run by
 // the kubelet around the container's own lifecycle (not to be confused with the
-// probes above, which are periodic health checks).
-func parseLifecycle(props map[string]any) (*corev1.Lifecycle, error) {
+// probes above, which are periodic health checks). namedPortsAllowed is
+// documented on parseProbes above — the same "resolves only against this
+// container's own declared Ports" reasoning applies identically here.
+func parseLifecycle(props map[string]any, namedPortsAllowed bool) (*corev1.Lifecycle, error) {
 	v, present := props["lifecycle"]
 	if !present {
 		return nil, nil
@@ -1195,7 +1260,7 @@ func parseLifecycle(props map[string]any) (*corev1.Lifecycle, error) {
 		if !ok {
 			return nil, errors.Errorf("lifecycle.postStart: must be an object, got %T", v)
 		}
-		h, err := parseLifecycleHandler(ps)
+		h, err := parseLifecycleHandler(ps, namedPortsAllowed)
 		if err != nil {
 			return nil, errors.Errorf("lifecycle.postStart: %w", err)
 		}
@@ -1206,7 +1271,7 @@ func parseLifecycle(props map[string]any) (*corev1.Lifecycle, error) {
 		if !ok {
 			return nil, errors.Errorf("lifecycle.preStop: must be an object, got %T", v)
 		}
-		h, err := parseLifecycleHandler(ps)
+		h, err := parseLifecycleHandler(ps, namedPortsAllowed)
 		if err != nil {
 			return nil, errors.Errorf("lifecycle.preStop: %w", err)
 		}
@@ -1223,7 +1288,7 @@ func parseLifecycle(props map[string]any) (*corev1.Lifecycle, error) {
 // "NOT supported as a LifecycleHandler ... lifecycle hooks will fail at runtime
 // when it is specified", kept on the Go type only for backward compatibility, so
 // accepting it would let an OAM author write a handler that always fails.
-func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
+func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool) (*corev1.LifecycleHandler, error) {
 	// Rejected unconditionally, not folded into the count below: the count
 	// only tracks the three keys this parser actually builds a handler from,
 	// so a hook that pairs tcpSocket with e.g. a valid exec previously slipped
@@ -1244,7 +1309,7 @@ func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
 
 	handler := &corev1.LifecycleHandler{}
 	if httpGet, ok := m["httpGet"].(map[string]any); ok {
-		port, err := parsePort(httpGet["port"])
+		port, err := parsePort(httpGet["port"], namedPortsAllowed)
 		if err != nil {
 			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
@@ -1401,6 +1466,21 @@ func parseStringField(raw map[string]any, key, label string) (string, bool, erro
 		return "", false, nil
 	}
 	return s, true, nil
+}
+
+// parseObjectField mirrors parseStringField for object-typed fields — used
+// where a bare `v.(map[string]any), ok` type assertion would silently treat
+// a present-but-wrong-type value the same as absent.
+func parseObjectField(raw map[string]any, key, label string) (map[string]any, bool, error) {
+	v, present := raw[key]
+	if !present {
+		return nil, false, nil
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, false, errors.Errorf("%s: must be an object, got %T", label, v)
+	}
+	return m, true, nil
 }
 
 // parseCapabilityList parses a `capabilities.add`/`capabilities.drop` array:
