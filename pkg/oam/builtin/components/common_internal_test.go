@@ -2181,6 +2181,43 @@ func TestQualifyPVCNames_NoPVCs_NoOp(t *testing.T) {
 	}
 }
 
+// TestQualifyPVCNames_Idempotent regression-tests a review finding
+// (launcher#284): each workload kind's Generate() mutates c.PVCs/c.Volumes in
+// place via `c.PVCs = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)`, so a
+// second Generate() call on the same component instance re-invokes this
+// function with already-qualified state. The prior implementation keyed
+// qualification off PVCConfig.Name, which is exactly the field the first
+// call rewrote — "app-data" became "app-app-data" on the second pass. The
+// fix keys off Volume.Name, which this function never rewrites, so a second
+// call must reproduce the first call's result exactly.
+func TestQualifyPVCNames_Idempotent(t *testing.T) {
+	volumes := []corev1.Volume{
+		{Name: "data", VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"},
+		}},
+	}
+	pvcs := []PVCConfig{{Name: "data", Size: "1Gi"}}
+
+	first := qualifyPVCNames(volumes, pvcs, "app")
+	if len(first) != 1 || first[0].Name != "app-data" {
+		t.Fatalf("first call: qualified PVCs = %+v, want [{Name: app-data ...}]", first)
+	}
+	if volumes[0].PersistentVolumeClaim.ClaimName != "app-data" {
+		t.Fatalf("first call: ClaimName = %q, want %q", volumes[0].PersistentVolumeClaim.ClaimName, "app-data")
+	}
+
+	second := qualifyPVCNames(volumes, first, "app")
+	if len(second) != 1 || second[0].Name != "app-data" {
+		t.Fatalf("second call: qualified PVCs = %+v, want [{Name: app-data ...}] (unchanged)", second)
+	}
+	if volumes[0].PersistentVolumeClaim.ClaimName != "app-data" {
+		t.Fatalf("second call: ClaimName = %q, want %q (unchanged)", volumes[0].PersistentVolumeClaim.ClaimName, "app-data")
+	}
+	if volumes[0].Name != "data" {
+		t.Errorf("Volume.Name = %q, want unchanged %q", volumes[0].Name, "data")
+	}
+}
+
 func TestParseVolumeClaimTemplates_StorageClass_Accepted(t *testing.T) {
 	vcts, err := parseVolumeClaimTemplates(map[string]any{
 		"volumeClaimTemplates": []any{
@@ -3425,6 +3462,95 @@ func TestParseVolumes_EmptyDir_NonStringSizeLimit_Error(t *testing.T) {
 	}
 }
 
+// TestParseVolumes_*_UnknownKey_Error below regression-test a review finding
+// (launcher#284): none of parseVolumes' per-type branches closed their field
+// set with rejectUnknownKeys, so a typo'd field name (e.g. `sizeLmit` instead
+// of `sizeLimit`) was silently ignored rather than rejected — the author's
+// intended value never took effect and no error said why.
+func TestParseVolumes_EmptyDir_UnknownKey_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "scratch",
+				"type":      "emptyDir",
+				"mountPath": "/tmp",
+				"sizeLmit":  "1Gi",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unrecognized emptyDir key \"sizeLmit\"")
+	}
+}
+
+func TestParseVolumes_HostPath_UnknownKey_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "host",
+				"type":      "hostPath",
+				"mountPath": "/host",
+				"path":      "/data",
+				"pth":       "/typo",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unrecognized hostPath key \"pth\"")
+	}
+}
+
+func TestParseVolumes_PVC_UnknownKey_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "data",
+				"type":      "pvc",
+				"mountPath": "/data",
+				"size":      "1Gi",
+				"sze":       "typo",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unrecognized pvc key \"sze\"")
+	}
+}
+
+func TestParseVolumes_ConfigMap_UnknownKey_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":          "cfg",
+				"type":          "configMap",
+				"mountPath":     "/cfg",
+				"configMapName": "app-config",
+				"configMapNaem": "typo",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unrecognized configMap key \"configMapNaem\"")
+	}
+}
+
+func TestParseVolumes_Secret_UnknownKey_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":       "sec",
+				"type":       "secret",
+				"mountPath":  "/sec",
+				"secretName": "app-secret",
+				"secertName": "typo",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unrecognized secret key \"secertName\"")
+	}
+}
+
 // TestParseSecurityContext_Capabilities_UnknownKey_Error and its three
 // siblings below are self-found extensions of the wave-20
 // TestParseSecurityContext_UnknownKey_Error fix: that fix rejects an unknown
@@ -3766,6 +3892,13 @@ func TestParseAccessModes_Absent_DefaultsToReadWriteOnce(t *testing.T) {
 	}
 }
 
+func TestParseAccessModes_AuthoredEmpty_Error(t *testing.T) {
+	_, err := parseAccessModes(map[string]any{"accessModes": []any{}})
+	if err == nil {
+		t.Fatal("expected error for authored empty accessModes array, got nil")
+	}
+}
+
 func TestParseAccessModes_Valid_Accepted(t *testing.T) {
 	modes, err := parseAccessModes(map[string]any{"accessModes": []any{"ReadWriteMany", "ReadOnlyMany"}})
 	if err != nil {
@@ -3815,6 +3948,23 @@ func TestParseVolumes_PVC_StorageClass_Accepted(t *testing.T) {
 	}
 	if len(result.PVCs) != 1 || result.PVCs[0].StorageClass != "fast-ssd" {
 		t.Errorf("PVCs = %+v, want StorageClass fast-ssd", result.PVCs)
+	}
+}
+
+func TestParseVolumes_PVC_InvalidStorageClassName_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":         "data",
+				"type":         "pvc",
+				"mountPath":    "/data",
+				"size":         "1Gi",
+				"storageClass": "Not_A_Valid-Name!",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a storageClass that is not a valid DNS-1123 subdomain")
 	}
 }
 

@@ -1722,6 +1722,14 @@ func parseStorageClassField(raw map[string]any, label string) (value string, exp
 	if !ok {
 		return "", false, errors.Errorf("%s: must be a string, got %T", label, v)
 	}
+	// Matches ValidatePersistentVolumeClaimSpec's own class-name check
+	// (ValidateClassName = apimachineryvalidation.NameIsDNSSubdomain),
+	// which real admission runs only when the name is non-empty.
+	if s != "" {
+		if errs := validation.IsDNS1123Subdomain(s); len(errs) > 0 {
+			return "", false, errors.Errorf("%s: invalid storageClass %q: %s", label, s, strings.Join(errs, "; "))
+		}
+	}
 	return s, s == "", nil
 }
 
@@ -2114,6 +2122,12 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 
 		switch volType {
 		case "hostPath":
+			// Same typo-tolerance gap as every other per-type field set below:
+			// an unrecognized key (e.g. a typo'd field name) was previously
+			// silently ignored rather than rejected.
+			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "readOnly", "path"}, fmt.Sprintf("volume %q: hostPath", volName)); err != nil {
+				return result, err
+			}
 			path, present, err := parseStringField(m, "path", fmt.Sprintf("volume %q: hostPath.path", volName))
 			if err != nil {
 				return result, err
@@ -2137,6 +2151,9 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				},
 			})
 		case "emptyDir":
+			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "readOnly", "sizeLimit"}, fmt.Sprintf("volume %q: emptyDir", volName)); err != nil {
+				return result, err
+			}
 			vol := corev1.Volume{
 				Name:         volName,
 				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
@@ -2155,6 +2172,9 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			}
 			result.Volumes = append(result.Volumes, vol)
 		case "pvc":
+			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "readOnly", "size", "storageClass", "accessModes"}, fmt.Sprintf("volume %q: pvc", volName)); err != nil {
+				return result, err
+			}
 			size, present, err := parseStringField(m, "size", fmt.Sprintf("volume %q: PVC size", volName))
 			if err != nil {
 				return result, err
@@ -2194,6 +2214,9 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				AccessModes:               accessModes,
 			})
 		case "configMap":
+			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "readOnly", "configMapName"}, fmt.Sprintf("volume %q: configMap", volName)); err != nil {
+				return result, err
+			}
 			cmName, present, err := parseStringField(m, "configMapName", fmt.Sprintf("volume %q: configMapName", volName))
 			if err != nil {
 				return result, err
@@ -2210,6 +2233,9 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				},
 			})
 		case "secret":
+			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "readOnly", "secretName"}, fmt.Sprintf("volume %q: secret", volName)); err != nil {
+				return result, err
+			}
 			secretName, present, err := parseStringField(m, "secretName", fmt.Sprintf("volume %q: secretName", volName))
 			if err != nil {
 				return result, err
@@ -2272,8 +2298,13 @@ func parseAccessModes(m map[string]any) ([]string, error) {
 	if !ok {
 		return nil, errors.Errorf("accessModes: must be an array, got %T", v)
 	}
+	// An authored empty array is not the same as an absent key: Kubernetes
+	// itself requires at least one access mode (validation.go's
+	// ValidatePersistentVolumeClaimSpec), so silently defaulting an
+	// explicit `[]` to ReadWriteOnce would build a claim the author never
+	// asked for instead of telling them the input is malformed.
 	if len(modes) == 0 {
-		return []string{string(corev1.ReadWriteOnce)}, nil
+		return nil, errors.Errorf("accessModes: at least one access mode is required")
 	}
 	result := make([]string, 0, len(modes))
 	for i, mode := range modes {
@@ -2856,11 +2887,32 @@ func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) 
 	if len(pvcs) == 0 {
 		return pvcs
 	}
+	// Volume.Name is the pod-local volume name and is never rewritten by
+	// this function — only the PVC's own object Name and the matching
+	// Volume.PersistentVolumeClaim.ClaimName are. It is therefore the
+	// stable qualification source even if this function runs more than
+	// once against the same component (e.g. Generate called a second
+	// time): re-deriving "<appName>-<pod-local name>" from Volume.Name
+	// each time keeps the result idempotent, instead of qualifying an
+	// already-qualified PVCConfig.Name/ClaimName left over from a prior
+	// run and doubling the prefix (e.g. "app-data" -> "app-app-data").
+	localNameByClaimName := make(map[string]string, len(volumes))
+	for i := range volumes {
+		claim := volumes[i].PersistentVolumeClaim
+		if claim == nil {
+			continue
+		}
+		localNameByClaimName[claim.ClaimName] = volumes[i].Name
+	}
 	qualifiedNames := make(map[string]string, len(pvcs))
 	out := make([]PVCConfig, len(pvcs))
 	for i, pvc := range pvcs {
+		localName, ok := localNameByClaimName[pvc.Name]
+		if !ok {
+			localName = pvc.Name
+		}
 		out[i] = pvc
-		out[i].Name = appName + "-" + pvc.Name
+		out[i].Name = appName + "-" + localName
 		qualifiedNames[pvc.Name] = out[i].Name
 	}
 	for i := range volumes {
