@@ -3817,3 +3817,123 @@ func TestParseVolumes_PVC_StorageClass_Accepted(t *testing.T) {
 		t.Errorf("PVCs = %+v, want StorageClass fast-ssd", result.PVCs)
 	}
 }
+
+// TestParseVolumes_PVC_ExplicitEmptyStorageClass_Preserved regression-tests a
+// review finding (launcher#284): parseStorageClassField's predecessor
+// (parseStringField) treated an authored `storageClass: ""` the same as an
+// absent key, so BuildPVC never called SetPVCStorageClassName and the
+// generated claim's StorageClassName stayed nil (cluster default) instead of
+// a pointer-to-"" (explicit opt-out) — the two are different requests to
+// Kubernetes.
+func TestParseVolumes_PVC_ExplicitEmptyStorageClass_Preserved(t *testing.T) {
+	result, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":         "data",
+				"type":         "pvc",
+				"mountPath":    "/data",
+				"size":         "1Gi",
+				"storageClass": "",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseVolumes: %v", err)
+	}
+	if len(result.PVCs) != 1 || !result.PVCs[0].StorageClassExplicitEmpty {
+		t.Fatalf("PVCs = %+v, want StorageClassExplicitEmpty true", result.PVCs)
+	}
+	claim, err := BuildPVC(result.PVCs[0], "default", nil)
+	if err != nil {
+		t.Fatalf("BuildPVC: %v", err)
+	}
+	if claim.Spec.StorageClassName == nil || *claim.Spec.StorageClassName != "" {
+		t.Errorf("StorageClassName = %v, want pointer to \"\"", claim.Spec.StorageClassName)
+	}
+}
+
+func TestParseVolumes_PVC_AbsentStorageClass_LeavesNilPointer(t *testing.T) {
+	result, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "data",
+				"type":      "pvc",
+				"mountPath": "/data",
+				"size":      "1Gi",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseVolumes: %v", err)
+	}
+	claim, err := BuildPVC(result.PVCs[0], "default", nil)
+	if err != nil {
+		t.Fatalf("BuildPVC: %v", err)
+	}
+	if claim.Spec.StorageClassName != nil {
+		t.Errorf("StorageClassName = %v, want nil (cluster default)", claim.Spec.StorageClassName)
+	}
+}
+
+// TestParseAccessModes_ReadWriteOncePod_WithOtherMode_Error regression-tests
+// a review finding (launcher#284): Kubernetes admission rejects
+// ReadWriteOncePod combined with any other access mode (it must be the
+// claim's only mode) — every individual mode passed the old per-element loop
+// and both were emitted on the generated claim.
+func TestParseAccessModes_ReadWriteOncePod_WithOtherMode_Error(t *testing.T) {
+	_, err := parseAccessModes(map[string]any{"accessModes": []any{"ReadWriteOncePod", "ReadOnlyMany"}})
+	if err == nil {
+		t.Fatal("expected error combining ReadWriteOncePod with another access mode")
+	}
+}
+
+func TestParseAccessModes_ReadWriteOncePod_Alone_Accepted(t *testing.T) {
+	modes, err := parseAccessModes(map[string]any{"accessModes": []any{"ReadWriteOncePod"}})
+	if err != nil {
+		t.Fatalf("parseAccessModes: %v", err)
+	}
+	if len(modes) != 1 || modes[0] != string(corev1.ReadWriteOncePod) {
+		t.Errorf("modes = %v, want [ReadWriteOncePod]", modes)
+	}
+}
+
+// TestParseSecurityContext_SysAdminCapability_WithPrivilegeEscalationFalse_Error
+// regression-tests a review finding (launcher#284): Kubernetes admission
+// (ValidateSecurityContext) rejects adding the literal capability
+// "CAP_SYS_ADMIN" alongside allowPrivilegeEscalation: false for a
+// newly-created pod — that capability always implies privilege escalation
+// regardless of the field's own value.
+func TestParseSecurityContext_SysAdminCapability_WithPrivilegeEscalationFalse_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"allowPrivilegeEscalation": false,
+			"capabilities": map[string]any{
+				"add": []any{"CAP_SYS_ADMIN"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for CAP_SYS_ADMIN with allowPrivilegeEscalation: false")
+	}
+}
+
+func TestParseSecurityContext_UnprefixedSysAdminCapability_WithPrivilegeEscalationFalse_Accepted(t *testing.T) {
+	// Real k8s admission's check is scoped to the exact string
+	// "CAP_SYS_ADMIN" (validation.go:8825-8836) — the conventional
+	// unprefixed "SYS_ADMIN" form is not rejected by that check, so this
+	// repo should not over-reject it either.
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"allowPrivilegeEscalation": false,
+			"capabilities": map[string]any{
+				"add": []any{"SYS_ADMIN"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc.Capabilities == nil || len(sc.Capabilities.Add) != 1 || sc.Capabilities.Add[0] != "SYS_ADMIN" {
+		t.Errorf("Capabilities = %+v, want Add [SYS_ADMIN]", sc.Capabilities)
+	}
+}

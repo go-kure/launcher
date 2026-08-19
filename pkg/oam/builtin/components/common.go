@@ -216,10 +216,15 @@ type AffinityConfig struct {
 
 // PVCConfig holds configuration for a PersistentVolumeClaim to be generated.
 type PVCConfig struct {
-	Name         string
-	Size         string
-	StorageClass string
-	AccessModes  []string
+	Name        string
+	Size        string
+	AccessModes []string
+	// StorageClass is the authored value, if any. An empty string is
+	// ambiguous on its own (absent vs. explicitly ""), so
+	// StorageClassExplicitEmpty disambiguates it — see parseStorageClassField
+	// and BuildPVC.
+	StorageClass              string
+	StorageClassExplicitEmpty bool
 }
 
 // ParsedVolumes holds the results of parsing volume definitions from OAM properties.
@@ -1700,6 +1705,26 @@ func parseObjectField(raw map[string]any, key, label string) (map[string]any, bo
 	return m, true, nil
 }
 
+// parseStorageClassField parses an optional PVC "storageClass" string,
+// distinguishing an authored empty string ("request no StorageClass") from an
+// absent key ("use the cluster default") — a distinction
+// corev1.PersistentVolumeClaimSpec.StorageClassName itself encodes as a
+// *string (nil vs pointer-to-""), which parseStringField's empty-means-absent
+// convention (correct for every other optional string field in this file)
+// would otherwise collapse, silently provisioning through the default class
+// instead of honoring an explicit opt-out.
+func parseStorageClassField(raw map[string]any, label string) (value string, explicitEmpty bool, err error) {
+	v, present := raw["storageClass"]
+	if !present {
+		return "", false, nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", false, errors.Errorf("%s: must be a string, got %T", label, v)
+	}
+	return s, s == "", nil
+}
+
 // rejectUnknownKeys errors on the first key in raw that is not in allowed.
 // A misspelled key (e.g. `probes.live` instead of `probes.liveness`,
 // `lifecycle.postStop` instead of `lifecycle.preStop`) would otherwise match
@@ -1851,6 +1876,21 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			return nil, err
 		}
 		caps.Drop = drop
+		// Kubernetes admission (ValidateSecurityContext) rejects adding the
+		// literal capability "CAP_SYS_ADMIN" alongside
+		// allowPrivilegeEscalation: false for a newly-created pod — holding
+		// that capability always implies privilege escalation regardless of
+		// the field's own value, so the combination promises hardening the
+		// runtime cannot honor. The check is scoped to that exact string, not
+		// the unprefixed "SYS_ADMIN" form most manifests use, mirroring real
+		// admission precisely rather than over-rejecting the common case.
+		if sc.AllowPrivilegeEscalation != nil && !*sc.AllowPrivilegeEscalation {
+			for _, c := range caps.Add {
+				if string(c) == "CAP_SYS_ADMIN" {
+					return nil, errors.Errorf("securityContext: allowPrivilegeEscalation must not be false when capabilities.add includes CAP_SYS_ADMIN")
+				}
+			}
+		}
 		if len(caps.Add) > 0 || len(caps.Drop) > 0 {
 			sc.Capabilities = caps
 			set = true
@@ -2129,7 +2169,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			if qty.Sign() < 0 {
 				return result, errors.Errorf("volume %q: PVC size must not be negative, got %q", volName, size)
 			}
-			storageClass, _, err := parseStringField(m, "storageClass", fmt.Sprintf("volume %q: storageClass", volName))
+			storageClass, storageClassExplicitEmpty, err := parseStorageClassField(m, fmt.Sprintf("volume %q: storageClass", volName))
 			if err != nil {
 				return result, err
 			}
@@ -2147,10 +2187,11 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				},
 			})
 			result.PVCs = append(result.PVCs, PVCConfig{
-				Name:         volName,
-				Size:         size,
-				StorageClass: storageClass,
-				AccessModes:  accessModes,
+				Name:                      volName,
+				Size:                      size,
+				StorageClass:              storageClass,
+				StorageClassExplicitEmpty: storageClassExplicitEmpty,
+				AccessModes:               accessModes,
 			})
 		case "configMap":
 			cmName, present, err := parseStringField(m, "configMapName", fmt.Sprintf("volume %q: configMapName", volName))
@@ -2248,6 +2289,20 @@ func parseAccessModes(m map[string]any) ([]string, error) {
 			return nil, errors.Errorf("invalid accessMode %q", s)
 		}
 		result = append(result, s)
+	}
+	// Kubernetes rejects ReadWriteOncePod combined with any other access
+	// mode at admission (it must be the claim's only mode) — mirror that
+	// here instead of building a PVC that would fail at apply time.
+	hasRWOP, hasOther := false, false
+	for _, s := range result {
+		if s == string(corev1.ReadWriteOncePod) {
+			hasRWOP = true
+		} else {
+			hasOther = true
+		}
+	}
+	if hasRWOP && hasOther {
+		return nil, errors.Errorf("accessModes: %s cannot be combined with other access modes", corev1.ReadWriteOncePod)
 	}
 	return result, nil
 }
@@ -2687,6 +2742,15 @@ func createServiceAccount(name, namespace string, labels map[string]string) *cor
 }
 
 // VolumeClaimTemplate represents a PVC template for a StatefulSet.
+// StorageClass has no explicit-empty-string escape here, unlike PVCConfig's
+// StorageClassExplicitEmpty: kure.CreateVolumeClaimTemplate's own
+// VolumeClaimTemplateOptions.StorageClassName is a plain string that the
+// external go-kure/kure dependency itself only ever sets on the generated
+// claim when non-empty — an authored `storageClass: ""` on a StatefulSet's
+// volumeClaimTemplates entry cannot be distinguished from an absent one
+// without a change to that upstream API. Cross-repo, out of scope for this
+// PR (same category as the postgresql resource-name gap noted elsewhere in
+// this package).
 type VolumeClaimTemplate struct {
 	Name         string
 	StorageClass string
@@ -2766,7 +2830,13 @@ func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev
 	for _, m := range pvc.AccessModes {
 		kubernetes.AddPVCAccessMode(claim, corev1.PersistentVolumeAccessMode(m))
 	}
-	if pvc.StorageClass != "" {
+	// Kubernetes distinguishes a nil StorageClassName (use the cluster
+	// default) from a pointer to "" (explicitly request no StorageClass) —
+	// StorageClassExplicitEmpty carries that distinction through from
+	// parseStorageClassField so an authored `storageClass: ""` opt-out isn't
+	// silently collapsed into "unset" and provisioned through the default
+	// class instead.
+	if pvc.StorageClass != "" || pvc.StorageClassExplicitEmpty {
 		kubernetes.SetPVCStorageClassName(claim, pvc.StorageClass)
 	}
 	return claim, nil
