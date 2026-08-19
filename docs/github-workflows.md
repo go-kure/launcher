@@ -292,12 +292,17 @@ subsequent workflows — `GITHUB_TOKEN` pushes do not trigger workflows).
 
 ### Triggers
 
-- Pull requests: `opened`, `synchronize`, `reopened`
+- Pull requests: `opened`, `synchronize`, `reopened`, `ready_for_review`
 - `merge_group` (no filters): required so this check reports on the merge queue's temporary
   ref once it becomes a required status check — the queue payload has no `pull_request` field,
   so the existing fork skip below evaluates false and the job reports `skipped`/success as a
   no-op
 - Runs on draft PRs (2026-08-19, GitLab `mr-review` parity); skips fork PRs
+- `ready_for_review` is kept here (unlike `ci.yml`, which omits it) because the reviewer itself
+  lives in `go-kure/.github` and is called `@main`: its no-longer-draft-gated behavior only takes
+  effect once that repo's own parity change merges, an async window this caller can't see. Without
+  the type, a PR whose branch already dropped it and gets marked ready with no further push gets no
+  re-trigger until that merge lands. Costs one redundant run at ready-time once the rollout is done.
 
 ### How It Works
 
