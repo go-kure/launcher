@@ -3473,3 +3473,65 @@ func TestParseLifecycleHandler_Sleep_UnknownKey_Error(t *testing.T) {
 		t.Fatal("expected error for an unknown key in lifecycle sleep")
 	}
 }
+
+// TestParseResourceFieldRef_UnknownKey_Error regression-tests a review
+// finding (launcher#284): a typo such as `divisorr` for `divisor` matched
+// none of the recognized keys and was silently ignored, leaving Divisor at
+// its zero value — Kubernetes treats a zero divisor as the default of 1, so
+// the env value ends up expressed in the resource's base unit instead of the
+// authored one.
+func TestParseResourceFieldRef_UnknownKey_Error(t *testing.T) {
+	_, err := parseResourceFieldRef(map[string]any{
+		"resource": "limits.memory",
+		"divisorr": "1Mi",
+	})
+	if err == nil {
+		t.Fatal("expected error for an unrecognized resourceFieldRef key")
+	}
+}
+
+func TestParseResourceFieldRef_Valid_Accepted(t *testing.T) {
+	ref, err := parseResourceFieldRef(map[string]any{
+		"resource":      "limits.memory",
+		"containerName": "app",
+		"divisor":       "1Mi",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ref.Resource != "limits.memory" || ref.ContainerName != "app" || ref.Divisor.String() != "1Mi" {
+		t.Fatalf("unexpected selector: %+v", ref)
+	}
+}
+
+// TestParseEnvFrom_ConfigMapRef_UnknownKey_Error and its secretRef sibling
+// below regression-test a review finding (launcher#284): the outer envFrom
+// entry's unknown-key check (wave 20) did not extend to the nested
+// configMapRef/secretRef objects — a typo such as `optoinal` for `optional`
+// was silently ignored, leaving Optional unset (required) instead of the
+// authored opt-out.
+func TestParseEnvFrom_ConfigMapRef_UnknownKey_Error(t *testing.T) {
+	_, err := parseEnvFrom(map[string]any{
+		"envFrom": []any{
+			map[string]any{
+				"configMapRef": map[string]any{"name": "settings", "optoinal": true},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unrecognized configMapRef key")
+	}
+}
+
+func TestParseEnvFrom_SecretRef_UnknownKey_Error(t *testing.T) {
+	_, err := parseEnvFrom(map[string]any{
+		"envFrom": []any{
+			map[string]any{
+				"secretRef": map[string]any{"name": "creds", "optoinal": true},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unrecognized secretRef key")
+	}
+}

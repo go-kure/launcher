@@ -357,11 +357,6 @@ func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
 	return src, nil
 }
 
-// parseFileKeyRef parses a `fileKeyRef` object into corev1.FileKeySelector.
-// volumeName/path/key are all `+required` on the real corev1 type (unlike
-// secretKeyRef/configMapKeyRef's parseNameKey, which silently skips on a
-// missing name/key) — a partially-specified fileKeyRef cannot resolve to any
-// of the other four value sources either, so it is a hard validation error.
 // validateRelativePath rejects an absolute path or one containing a ".."
 // backstep component, per AGENTS.md's "reject paths that escape the working
 // directory" convention. label identifies the field in the returned error.
@@ -389,20 +384,21 @@ func validateRelativePath(label, path string) error {
 // component's actual `volumes` list, because parseEnv (and therefore this
 // function, reached through parseValueFrom) runs before parseVolumes in
 // every one of its 7 call sites (5 kind handlers plus parseInitContainers
-// and parseSidecars) and has no access to the parsed volume set. This is a
-// narrower gap than it first appears: real admission's
-// validateFileKeyRefVolumes checks only that volumeName matches some
-// declared pod volume by name — it does not restrict the volume's source
-// type to Image (confirmed by TestCronjobHandler_FileKeyRef_VolumeWiring,
-// which authors an emptyDir volume as the fileKeyRef target and asserts the
-// resulting CronJob is valid) — so a same-named volume declared via this
-// schema's existing hostPath/emptyDir/pvc/configMap/secret support already
-// satisfies real admission's actual constraint in most cases; only a
-// genuinely mismatched or absent name reaches Kubernetes as a NotFound this
-// parser cannot catch early. Closing that residual gap needs threading the
-// parsed volume-name set through parseEnv's call chain (or a post-hoc
-// validation pass once env and volumes are both parsed) — out of scope for
-// this shared-schema-fidelity PR; see the launcher#278 ledger.
+// and parseSidecars) and has no access to the parsed volume set. Real
+// admission's validateFileKeyRefVolumes
+// (k8s.io/kubernetes/pkg/apis/core/validation/validation.go, confirmed by
+// direct read of the upstream source) requires the referenced volume be
+// specifically emptyDir — its literal rejection message is "referenced
+// volume must be of type emptyDir" for any other source type — matching
+// TestCronjobHandler_FileKeyRef_VolumeWiring's existing emptyDir-sourced
+// coverage. A fileKeyRef naming a hostPath/pvc/configMap/secret volume (all
+// of which this schema also supports) therefore builds successfully here
+// today but would be rejected at real admission — a narrower, source-type
+// gap, not the bare by-name NotFound gap this note previously described.
+// Closing it needs threading the parsed volume set (name plus source type)
+// through parseEnv's call chain (or a post-hoc validation pass once env and
+// volumes are both parsed) — out of scope for this shared-schema-fidelity
+// PR; see the launcher#278 ledger.
 func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 	volumeName, _ := m["volumeName"].(string)
 	path, _ := m["path"].(string)
@@ -573,6 +569,13 @@ var validDownwardAPIDivisor = map[string]bool{
 // parseResourceFieldRef parses a `valueFrom.resourceFieldRef` object into a
 // corev1.ResourceFieldSelector.
 func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, error) {
+	// A typo (e.g. `divisorr` for `divisor`) would otherwise be silently
+	// ignored, leaving Divisor at its zero value — Kubernetes treats a zero
+	// divisor as the default of 1, so the env value ends up expressed in the
+	// resource's base unit (bytes, for memory) instead of the authored unit.
+	if err := rejectUnknownKeys(m, []string{"resource", "containerName", "divisor"}, "resourceFieldRef"); err != nil {
+		return nil, err
+	}
 	res, _ := m["resource"].(string)
 	if res == "" {
 		return nil, errors.Errorf("resourceFieldRef: resource is required")
@@ -678,6 +681,13 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 			src.Prefix = prefix
 		}
 		if hasConfigMap {
+			// A typo (e.g. `optoinal` for `optional`) would otherwise be
+			// silently ignored, leaving Optional unset (required) instead
+			// of the authored opt-out — the Pod then fails to start if the
+			// ConfigMap is absent, despite the author's intent.
+			if err := rejectUnknownKeys(cm, []string{"name", "optional"}, fmt.Sprintf("envFrom[%d].configMapRef", i)); err != nil {
+				return nil, err
+			}
 			name, _ := cm["name"].(string)
 			if name == "" {
 				return nil, errors.Errorf("envFrom[%d].configMapRef: name is required", i)
@@ -697,6 +707,10 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 			src.ConfigMapRef = ref
 		}
 		if hasSecret {
+			// Same typo-tolerance gap and consequence as configMapRef above.
+			if err := rejectUnknownKeys(sec, []string{"name", "optional"}, fmt.Sprintf("envFrom[%d].secretRef", i)); err != nil {
+				return nil, err
+			}
 			name, _ := sec["name"].(string)
 			if name == "" {
 				return nil, errors.Errorf("envFrom[%d].secretRef: name is required", i)

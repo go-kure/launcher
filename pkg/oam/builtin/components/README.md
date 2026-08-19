@@ -73,7 +73,11 @@ container/initContainer/sidecar name set, which isn't available at this
 single-env-var parsing depth; real admission doesn't check it either (only
 the downward API *volume* form of `resourceFieldRef` requires
 `containerName` at all), so an unresolvable target only surfaces later, as a
-kubelet-time `CreateContainerConfigError`),
+kubelet-time `CreateContainerConfigError`; a key other than
+`resource`/`containerName`/`divisor` is rejected outright rather than
+silently ignored, since a typo such as `divisorr` would otherwise leave the
+divisor unset — Kubernetes treats a zero divisor as its default of 1,
+changing the emitted unit),
 `fileKeyRef` (`volumeName`/`path`/`key` required, `optional` accepted (same
 non-boolean rejection as above); corev1's `EnvFiles` feature; `volumeName`
 must be a valid DNS-1123 label and `key` a valid (relaxed) env var name,
@@ -81,10 +85,11 @@ matching real admission's own `validateFileKeySelector`; `path` must be
 relative and must not contain a `..` backstep component, per this repo's own
 path-safety convention; **deferred:** `volumeName` is not cross-checked
 against the component's declared `volumes` — env parsing runs before volume
-parsing in every call site, and this schema has no `image`-type volume yet
-(the only volume source real `FileKeySelector` semantics resolve against), so
-a name-only match would be misleadingly incomplete; see the doc comment on
-`parseFileKeyRef` in `common.go`) —
+parsing in every call site — so a `fileKeyRef` naming a nonexistent volume,
+or an existing but non-`emptyDir` one, builds successfully here but is
+rejected at real admission: `validateFileKeyRefVolumes` requires the
+referenced volume be specifically `emptyDir`, not any other source type this
+schema supports; see the doc comment on `parseFileKeyRef` in `common.go`) —
 mutually exclusive among themselves too), `envFrom` (an authored non-array
 value, e.g. a single ConfigMap/Secret object instead of a list of them, is
 rejected rather than silently treated as absent; bulk-import a ConfigMap's
@@ -98,7 +103,10 @@ the application expects unset;
 `configMapRef.name`/`secretRef.name` must each be a valid DNS-1123 subdomain,
 matching how every Kubernetes object name is validated; both `configMapRef`
 and `secretRef` also accept `optional`, with the same non-boolean rejection
-as `env`'s `secretKeyRef`/`configMapKeyRef` above; a present-but-malformed
+as `env`'s `secretKeyRef`/`configMapKeyRef` above; a key other than
+`name`/`optional` inside either nested ref (e.g. a misspelled `optoinal`) is
+rejected outright too, rather than silently leaving the ref at its required
+default; a present-but-malformed
 `configMapRef`/`secretRef` (e.g. a scalar instead of an object) is rejected
 outright rather than silently treated as absent — the latter would let the
 other, well-formed ref alone satisfy the "exactly one" check below and
