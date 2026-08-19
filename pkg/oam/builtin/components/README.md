@@ -96,7 +96,11 @@ the application expects unset;
 `configMapRef.name`/`secretRef.name` must each be a valid DNS-1123 subdomain,
 matching how every Kubernetes object name is validated; both `configMapRef`
 and `secretRef` also accept `optional`, with the same non-boolean rejection
-as `env`'s `secretKeyRef`/`configMapKeyRef` above),
+as `env`'s `secretKeyRef`/`configMapKeyRef` above; a present-but-malformed
+`configMapRef`/`secretRef` (e.g. a scalar instead of an object) is rejected
+outright rather than silently treated as absent — the latter would let the
+other, well-formed ref alone satisfy the "exactly one" check below and
+quietly discard the malformed one instead of reporting it),
 `resources` — a `corev1.ResourceRequirements` projection: `requests`/`limits`
 accept `cpu`/`memory` (defaults 100m/128Mi) plus any other well-formed
 resource name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map,
@@ -113,9 +117,12 @@ admission validates `corev1.Container.Resources` (mirrors
 `cpu`/`memory`/`ephemeral-storage` or a `hugepages-<size>` name — an arbitrary
 unqualified token such as `foo` builds but is reserved for Kubernetes' own
 native resources and is rejected here too; a qualified name (has `/`) is
-accepted as an extended resource (e.g. `nvidia.com/gpu`) unless it is
-`requests.`-prefixed without also containing `kubernetes.io/`, which collides
-with the `ResourceQuota` `requests.<name>` alias form.
+accepted as an extended resource (e.g. `nvidia.com/gpu`) unless it either
+contains `kubernetes.io/` (which claims to be a native resource, not an
+extended one, mirroring `IsNativeResource`) or is `requests.`-prefixed (which
+collides with the `ResourceQuota` `requests.<name>` alias form) — the two
+conditions are checked independently, so e.g. `kubernetes.io/foo` is rejected
+even though it is not `requests.`-prefixed.
 Every quantity must be non-negative; `cpu`/`memory`/`storage`/
 `ephemeral-storage` may be fractional, but any other (extended) resource name
 must be a whole number, matching Kubernetes' own extended-resource
@@ -162,7 +169,20 @@ own optional `port` was not set on that component instance (their main
 container is named `"http"`/`"tcp"` respectively, but only when `port > 0`),
 and `webservice` never (its `port` always defaults to 80, so the main
 container is always named `"http"`) — a numeric port is unaffected either way,
-since it dials the kubelet directly rather than resolving a declared name;
+since it dials the kubelet directly rather than resolving a declared name.
+Where a named port is allowed at all, it is further checked against the
+exact name the kind's builder actually declares — `"http"` for
+`webservice`/`daemonset`, `"tcp"` for `statefulset` — not merely accepted as
+any syntactically valid name: a syntactically valid but different name (e.g.
+`httpGet.port: metrics` on a `webservice`, whose only declared container
+port is `"http"`) builds successfully but is exactly as unresolvable by the
+kubelet at runtime as a named port on a portless component, so it is
+rejected the same way; `grpc.service`, if authored, must be no more than 63
+characters (mirrors `validateGRPCService`'s length cap — the gRPC
+health-checking service name is not DNS-1123 formatted, but admission still
+bounds its length), and `grpc.port` is always numeric regardless of any
+kind's named-port rules — a named `grpc.port` is rejected outright with its
+own message, never resolved against a declared container port;
 `httpGet.httpHeaders` itself and its entries are validated
 rather than silently dropped/coerced — an authored non-array `httpHeaders`
 value (e.g. a single header object instead of a list) is rejected the same
@@ -274,7 +294,11 @@ not invent a stricter constraint upstream itself does not have; a
 present-but-non-string value, e.g. `workingDir: 123`, is rejected rather than
 silently treated as absent, in all five kind handlers — this is a type check,
 distinct from the content-validation question the previous paragraph answers),
-`volumes`,
+`volumes` (every volume's `name`, regardless of source type — `hostPath`,
+`emptyDir`, `pvc`, `configMap`, `secret`, etc. — must be a valid DNS-1123
+label, matching how real admission validates every `corev1.Volume.Name`; an
+invalid name, e.g. containing `/`, builds successfully but is rejected at Pod
+admission),
 `initContainers`, `sidecars`, and `affinity`.
 
 `securityContext.privileged: true` is rejected unless the environment policy's

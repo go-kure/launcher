@@ -404,6 +404,30 @@ func TestDaemonsetHandler_NamedProbePort_WithPort_Accepted(t *testing.T) {
 	}
 }
 
+// TestDaemonsetHandler_NamedProbePort_Mismatch_Error covers launcher#278
+// wave-12 finding 3: with a port configured, daemonset names it "http" —
+// "tcp" (statefulset's own name) is syntactically valid but not what this
+// container declares, so it must be rejected too.
+func TestDaemonsetHandler_NamedProbePort_Mismatch_Error(t *testing.T) {
+	h := &components.DaemonsetHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "agent",
+		Type: "daemonset",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/agent:v1.0.0",
+			"port":  9090,
+			"probes": map[string]any{
+				"liveness": map[string]any{
+					"httpGet": map[string]any{"port": "tcp", "path": "/healthz"},
+				},
+			},
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for a named port that does not match daemonset's declared \"http\" container port")
+	}
+}
+
 func TestDaemonsetHandler_NamedProbePort_WithoutPort_Error(t *testing.T) {
 	h := &components.DaemonsetHandler{}
 	_, err := h.ToApplicationConfig(&oam.Component{

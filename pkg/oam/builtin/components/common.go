@@ -630,8 +630,14 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 		if !ok {
 			return nil, errors.Errorf("envFrom[%d]: expected object, got %T", i, item)
 		}
-		_, hasConfigMap := m["configMapRef"].(map[string]any)
-		_, hasSecret := m["secretRef"].(map[string]any)
+		cm, hasConfigMap, err := parseObjectField(m, "configMapRef", fmt.Sprintf("envFrom[%d].configMapRef", i))
+		if err != nil {
+			return nil, err
+		}
+		sec, hasSecret, err := parseObjectField(m, "secretRef", fmt.Sprintf("envFrom[%d].secretRef", i))
+		if err != nil {
+			return nil, err
+		}
 		if hasConfigMap == hasSecret {
 			return nil, errors.Errorf("envFrom[%d]: must specify exactly one of configMapRef or secretRef", i)
 		}
@@ -651,7 +657,7 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 			}
 			src.Prefix = prefix
 		}
-		if cm, ok := m["configMapRef"].(map[string]any); ok {
+		if hasConfigMap {
 			name, _ := cm["name"].(string)
 			if name == "" {
 				return nil, errors.Errorf("envFrom[%d].configMapRef: name is required", i)
@@ -670,7 +676,7 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 			ref.Optional = opt
 			src.ConfigMapRef = ref
 		}
-		if sec, ok := m["secretRef"].(map[string]any); ok {
+		if hasSecret {
 			name, _ := sec["name"].(string)
 			if name == "" {
 				return nil, errors.Errorf("envFrom[%d].secretRef: name is required", i)
@@ -795,10 +801,11 @@ var standardContainerResourceNames = map[corev1.ResourceName]bool{
 // resources or a hugepages-<size> name — validation.IsQualifiedName alone
 // accepts any unqualified token (e.g. "foo"), which Kubernetes actually
 // reserves for its own native resources and rejects from a workload author.
-// A qualified name (has "/") is accepted as an extended resource unless it
-// falsely claims to be native by containing "kubernetes.io/" while also
-// being formatted as a "requests.<name>" quota alias (mirrors
-// IsNativeResource/IsExtendedResourceName's requests.-prefix rejection).
+// A qualified name (has "/") is rejected as an extended resource if it
+// either claims to be native by containing "kubernetes.io/" (mirrors
+// IsNativeResource) or is formatted as a "requests.<name>" quota alias
+// (mirrors IsExtendedResourceName's requests.-prefix rejection); both
+// conditions are checked independently, not jointly.
 func validateContainerResourceName(k string) error {
 	if !strings.Contains(k, "/") {
 		if standardContainerResourceNames[corev1.ResourceName(k)] || isHugePageResourceName(corev1.ResourceName(k)) {
@@ -806,7 +813,10 @@ func validateContainerResourceName(k string) error {
 		}
 		return errors.Errorf("%s: must be a standard container resource (cpu, memory, ephemeral-storage), a hugepages-<size> name, or a fully qualified extended resource name (e.g. \"example.com/foo\")", k)
 	}
-	if !strings.Contains(k, "kubernetes.io/") && strings.HasPrefix(k, "requests.") {
+	if strings.Contains(k, "kubernetes.io/") {
+		return errors.Errorf("%s: extended resource name must not contain %q", k, "kubernetes.io/")
+	}
+	if strings.HasPrefix(k, "requests.") {
 		return errors.Errorf("%s: extended resource name must not start with %q", k, "requests.")
 	}
 	return nil
@@ -934,29 +944,37 @@ func hasExplicitReplicas(props map[string]any) bool {
 // runtime. Kinds that do declare a main-container port pass the port's own
 // presence (e.g. `c.Port > 0`) through here instead of a blanket true/false,
 // since the port is itself optional on some of those kinds (daemonset,
-// statefulset) — see each ToApplicationConfig call site.
-func parseProbes(props map[string]any, namedPortsAllowed bool) (ProbeConfig, error) {
+// statefulset) — see each ToApplicationConfig call site. matchName is the
+// exact `ports[].name` the kind's builder actually declares (e.g. "http",
+// "tcp"); when namedPortsAllowed is true a named port must equal matchName,
+// since the kubelet resolves it only against a name the container itself
+// declares — a syntactically valid but undeclared name (e.g. "metrics" on a
+// component whose only declared port is "http") would build successfully but
+// fail to resolve at runtime. matchName is ignored when namedPortsAllowed is
+// false, and passed "" by the grpc handler (see parseProbe), which rejects
+// every named port regardless of name with its own message.
+func parseProbes(props map[string]any, namedPortsAllowed bool, matchName string) (ProbeConfig, error) {
 	var config ProbeConfig
 	probes, ok := props["probes"].(map[string]any)
 	if !ok {
 		return config, nil
 	}
 	if r, ok := probes["readiness"].(map[string]any); ok {
-		p, err := parseProbe(r, "readiness", namedPortsAllowed)
+		p, err := parseProbe(r, "readiness", namedPortsAllowed, matchName)
 		if err != nil {
 			return config, errors.Errorf("readiness probe: %w", err)
 		}
 		config.Readiness = p
 	}
 	if l, ok := probes["liveness"].(map[string]any); ok {
-		p, err := parseProbe(l, "liveness", namedPortsAllowed)
+		p, err := parseProbe(l, "liveness", namedPortsAllowed, matchName)
 		if err != nil {
 			return config, errors.Errorf("liveness probe: %w", err)
 		}
 		config.Liveness = p
 	}
 	if s, ok := probes["startup"].(map[string]any); ok {
-		p, err := parseProbe(s, "startup", namedPortsAllowed)
+		p, err := parseProbe(s, "startup", namedPortsAllowed, matchName)
 		if err != nil {
 			return config, errors.Errorf("startup probe: %w", err)
 		}
@@ -978,8 +996,8 @@ func countProbeHandlers(m map[string]any) int {
 // kind is "readiness", "liveness", or "startup" — needed only to enforce
 // terminationGracePeriodSeconds' cross-field constraint (see below); every
 // other field's validation is identical across probe kinds. namedPortsAllowed
-// is documented on parseProbes above.
-func parseProbe(m map[string]any, kind string, namedPortsAllowed bool) (*corev1.Probe, error) {
+// and matchName are documented on parseProbes above.
+func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName string) (*corev1.Probe, error) {
 	if countProbeHandlers(m) > 1 {
 		return nil, errors.Errorf("probe must specify exactly one handler, but multiple were provided")
 	}
@@ -988,7 +1006,7 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool) (*corev1.
 	hasHandler := false
 
 	if httpGet, ok := m["httpGet"].(map[string]any); ok {
-		port, err := parsePort(httpGet["port"], namedPortsAllowed)
+		port, err := parsePort(httpGet["port"], namedPortsAllowed, matchName)
 		if err != nil {
 			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
@@ -1031,7 +1049,7 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool) (*corev1.
 		probe.HTTPGet = handler
 		hasHandler = true
 	} else if tcpSocket, ok := m["tcpSocket"].(map[string]any); ok {
-		port, err := parsePort(tcpSocket["port"], namedPortsAllowed)
+		port, err := parsePort(tcpSocket["port"], namedPortsAllowed, matchName)
 		if err != nil {
 			return nil, errors.Errorf("tcpSocket handler: %w", err)
 		}
@@ -1054,9 +1072,10 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool) (*corev1.
 		handler := &corev1.GRPCAction{}
 		// grpc's port is always numeric regardless of namedPortsAllowed — the
 		// check right below rejects a named port unconditionally, with its own
-		// message, so this always passes true to reach that check rather than
-		// being intercepted earlier by parsePort's own named-port rejection.
-		port, err := parsePort(grpc["port"], true)
+		// message, so this always passes true/"" (any syntactically valid
+		// name) to reach that check rather than being intercepted earlier by
+		// parsePort's own named-port rejection or its matchName filter.
+		port, err := parsePort(grpc["port"], true, "")
 		if err != nil {
 			return nil, errors.Errorf("grpc handler: %w", err)
 		}
@@ -1065,6 +1084,13 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool) (*corev1.
 		}
 		handler.Port = port.IntVal
 		if svc, ok := grpc["service"].(string); ok {
+			// Mirrors validateGRPCService (k8s.io/kubernetes/pkg/apis/core/validation):
+			// the gRPC health-checking service name is not DNS-1123 formatted, but
+			// admission still caps it at maxGRPCServiceNameLength (63) — an unbounded
+			// string here builds successfully but is rejected at probe admission.
+			if len(svc) > 63 {
+				return nil, errors.Errorf("grpc handler: service name must be no more than 63 characters, got %d", len(svc))
+			}
 			handler.Service = &svc
 		}
 		probe.GRPC = handler
@@ -1195,8 +1221,15 @@ func parseHTTPHeaders(raw map[string]any, key string) ([]corev1.HTTPHeader, erro
 // container's own declared Ports, so on a component kind whose main
 // container never declares any port (worker, cronjob — see parseProbes),
 // a string port is guaranteed unresolvable at runtime, not just possibly
-// wrong.
-func parsePort(v any, namedPortsAllowed bool) (intstr.IntOrString, error) {
+// wrong. matchName, when non-empty, further restricts an allowed named port
+// to that exact declared name — a syntactically valid but different name
+// (e.g. "metrics" where the container's only declared port is "http") is
+// just as unresolvable at runtime as a named port on a portless component,
+// so it is rejected the same way. matchName is ignored when namedPortsAllowed
+// is false, and "" plus namedPortsAllowed=true means "any syntactically
+// valid name" (used only by the grpc handler, which rejects every named
+// port afterward regardless of name with its own message).
+func parsePort(v any, namedPortsAllowed bool, matchName string) (intstr.IntOrString, error) {
 	switch p := v.(type) {
 	case float64:
 		if math.IsNaN(p) || math.IsInf(p, 0) || p != math.Trunc(p) {
@@ -1227,6 +1260,9 @@ func parsePort(v any, namedPortsAllowed bool) (intstr.IntOrString, error) {
 		if errs := validation.IsValidPortName(p); len(errs) > 0 {
 			return intstr.IntOrString{}, errors.Errorf("invalid port name %q: %s", p, strings.Join(errs, "; "))
 		}
+		if matchName != "" && p != matchName {
+			return intstr.IntOrString{}, errors.Errorf("named port %q does not match this component's declared container port %q: the kubelet resolves a named port only against a name the container itself declares", p, matchName)
+		}
 		return intstr.FromString(p), nil
 	default:
 		return intstr.IntOrString{}, errors.Errorf("unsupported port type: %T", v)
@@ -1242,10 +1278,11 @@ func validateNumericPort(port int64) (intstr.IntOrString, error) {
 
 // parseLifecycle parses the `lifecycle` object: postStart/preStop hooks run by
 // the kubelet around the container's own lifecycle (not to be confused with the
-// probes above, which are periodic health checks). namedPortsAllowed is
-// documented on parseProbes above — the same "resolves only against this
-// container's own declared Ports" reasoning applies identically here.
-func parseLifecycle(props map[string]any, namedPortsAllowed bool) (*corev1.Lifecycle, error) {
+// probes above, which are periodic health checks). namedPortsAllowed and
+// matchName are documented on parseProbes above — the same "resolves only
+// against this container's own declared Ports, under this exact name"
+// reasoning applies identically here.
+func parseLifecycle(props map[string]any, namedPortsAllowed bool, matchName string) (*corev1.Lifecycle, error) {
 	v, present := props["lifecycle"]
 	if !present {
 		return nil, nil
@@ -1260,7 +1297,7 @@ func parseLifecycle(props map[string]any, namedPortsAllowed bool) (*corev1.Lifec
 		if !ok {
 			return nil, errors.Errorf("lifecycle.postStart: must be an object, got %T", v)
 		}
-		h, err := parseLifecycleHandler(ps, namedPortsAllowed)
+		h, err := parseLifecycleHandler(ps, namedPortsAllowed, matchName)
 		if err != nil {
 			return nil, errors.Errorf("lifecycle.postStart: %w", err)
 		}
@@ -1271,7 +1308,7 @@ func parseLifecycle(props map[string]any, namedPortsAllowed bool) (*corev1.Lifec
 		if !ok {
 			return nil, errors.Errorf("lifecycle.preStop: must be an object, got %T", v)
 		}
-		h, err := parseLifecycleHandler(ps, namedPortsAllowed)
+		h, err := parseLifecycleHandler(ps, namedPortsAllowed, matchName)
 		if err != nil {
 			return nil, errors.Errorf("lifecycle.preStop: %w", err)
 		}
@@ -1288,7 +1325,7 @@ func parseLifecycle(props map[string]any, namedPortsAllowed bool) (*corev1.Lifec
 // "NOT supported as a LifecycleHandler ... lifecycle hooks will fail at runtime
 // when it is specified", kept on the Go type only for backward compatibility, so
 // accepting it would let an OAM author write a handler that always fails.
-func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool) (*corev1.LifecycleHandler, error) {
+func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName string) (*corev1.LifecycleHandler, error) {
 	// Rejected unconditionally, not folded into the count below: the count
 	// only tracks the three keys this parser actually builds a handler from,
 	// so a hook that pairs tcpSocket with e.g. a valid exec previously slipped
@@ -1309,7 +1346,7 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool) (*corev1.Li
 
 	handler := &corev1.LifecycleHandler{}
 	if httpGet, ok := m["httpGet"].(map[string]any); ok {
-		port, err := parsePort(httpGet["port"], namedPortsAllowed)
+		port, err := parsePort(httpGet["port"], namedPortsAllowed, matchName)
 		if err != nil {
 			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
@@ -1738,6 +1775,14 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 		mountPath, _ := m["mountPath"].(string)
 		if volName == "" || mountPath == "" {
 			continue
+		}
+		// Every corev1.Volume.Name, regardless of source type, must be a
+		// valid DNS-1123 label (mirrors validateVolumes' shared name check,
+		// k8s.io/kubernetes/pkg/apis/core/validation) — an invalid name
+		// (e.g. containing "/") builds successfully but is rejected at Pod
+		// admission.
+		if errs := validation.IsDNS1123Label(volName); len(errs) > 0 {
+			return result, errors.Errorf("volume: invalid name %q: %s", volName, strings.Join(errs, "; "))
 		}
 		readOnly, _ := m["readOnly"].(bool)
 

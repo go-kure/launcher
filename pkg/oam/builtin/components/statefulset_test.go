@@ -295,6 +295,30 @@ func TestStatefulsetHandler_NamedProbePort_WithPort_Accepted(t *testing.T) {
 	}
 }
 
+// TestStatefulsetHandler_NamedProbePort_Mismatch_Error covers launcher#278
+// wave-12 finding 3: with a port configured, statefulset names it "tcp" —
+// "http" (webservice/daemonset's own name) is syntactically valid but not
+// what this container declares, so it must be rejected too.
+func TestStatefulsetHandler_NamedProbePort_Mismatch_Error(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/postgres:v15",
+			"port":  5432,
+			"probes": map[string]any{
+				"readiness": map[string]any{
+					"tcpSocket": map[string]any{"port": "http"},
+				},
+			},
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for a named port that does not match statefulset's declared \"tcp\" container port")
+	}
+}
+
 func TestStatefulsetHandler_NamedProbePort_WithoutPort_Error(t *testing.T) {
 	h := &components.StatefulsetHandler{}
 	_, err := h.ToApplicationConfig(&oam.Component{
