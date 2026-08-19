@@ -3320,3 +3320,156 @@ func TestParseVolumes_Secret_MissingName_Error(t *testing.T) {
 		t.Fatal("expected error for a secret volume missing secretName")
 	}
 }
+
+// TestParseVolumes_EmptyDir_NonStringSizeLimit_Error regression-tests a
+// review finding on PR #284: sizeLimit used a bare `m["sizeLimit"].(string)`
+// type assertion, so a present-but-non-string value (e.g. a YAML integer
+// like 1048576) failed the assertion and was silently treated as absent,
+// producing an emptyDir with no size limit at all instead of rejecting the
+// malformed input — the same presence/type-validity conflation already
+// fixed via parseStringField for hostPath.path, pvc.size, configMapName,
+// and secretName.
+func TestParseVolumes_EmptyDir_NonStringSizeLimit_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "scratch",
+				"type":      "emptyDir",
+				"mountPath": "/tmp",
+				"sizeLimit": 1048576,
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a non-string emptyDir sizeLimit")
+	}
+}
+
+// TestParseSecurityContext_Capabilities_UnknownKey_Error and its three
+// siblings below are self-found extensions of the wave-20
+// TestParseSecurityContext_UnknownKey_Error fix: that fix rejects an unknown
+// key on the securityContext object itself, but the four nested objects
+// (capabilities, seccompProfile, seLinuxOptions, appArmorProfile) had no
+// unknown-key check of their own, so e.g. a typo'd `capabilities: {dorp:
+// [...]}` was silently ignored rather than rejected.
+func TestParseSecurityContext_Capabilities_UnknownKey_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"capabilities": map[string]any{
+				"dorp": []any{"NET_ADMIN"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unknown key in securityContext.capabilities")
+	}
+}
+
+func TestParseSecurityContext_SeccompProfile_UnknownKey_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seccompProfile": map[string]any{
+				"type":     "RuntimeDefault",
+				"locahost": "typo",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unknown key in securityContext.seccompProfile")
+	}
+}
+
+func TestParseSecurityContext_SELinuxOptions_UnknownKey_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"seLinuxOptions": map[string]any{
+				"user": "u",
+				"tpye": "t",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unknown key in securityContext.seLinuxOptions")
+	}
+}
+
+func TestParseSecurityContext_AppArmorProfile_UnknownKey_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"appArmorProfile": map[string]any{
+				"type":     "RuntimeDefault",
+				"locahost": "typo",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unknown key in securityContext.appArmorProfile")
+	}
+}
+
+// TestParseProbe_TCPSocket_UnknownKey_Error and its siblings below are
+// self-found extensions of the wave-20 TestParseProbe_HTTPGet_UnknownKey_Error
+// fix: that fix covers httpGet's nested keys, but the tcpSocket/exec/grpc
+// handler branches had no unknown-key check of their own.
+func TestParseProbe_TCPSocket_UnknownKey_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"tcpSocket": map[string]any{
+			"port": float64(8080),
+			"hots": "typo",
+		},
+	}, "readiness", false, "")
+	if err == nil {
+		t.Fatal("expected error for an unknown key in probe.tcpSocket")
+	}
+}
+
+func TestParseProbe_Exec_UnknownKey_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"exec": map[string]any{
+			"command": []any{"true"},
+			"commnad": []any{"typo"},
+		},
+	}, "readiness", false, "")
+	if err == nil {
+		t.Fatal("expected error for an unknown key in probe.exec")
+	}
+}
+
+func TestParseProbe_GRPC_UnknownKey_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"grpc": map[string]any{
+			"port":    float64(9090),
+			"servcie": "typo",
+		},
+	}, "readiness", false, "")
+	if err == nil {
+		t.Fatal("expected error for an unknown key in probe.grpc")
+	}
+}
+
+// TestParseLifecycleHandler_Exec_UnknownKey_Error and its sibling below are
+// self-found extensions of the same pattern applied to
+// parseLifecycleHandler's own exec/sleep branches.
+func TestParseLifecycleHandler_Exec_UnknownKey_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"exec": map[string]any{
+			"command": []any{"true"},
+			"commnad": []any{"typo"},
+		},
+	}, false, "")
+	if err == nil {
+		t.Fatal("expected error for an unknown key in lifecycle exec")
+	}
+}
+
+func TestParseLifecycleHandler_Sleep_UnknownKey_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"sleep": map[string]any{
+			"seconds": float64(5),
+			"sconds":  float64(5),
+		},
+	}, false, "")
+	if err == nil {
+		t.Fatal("expected error for an unknown key in lifecycle sleep")
+	}
+}

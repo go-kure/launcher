@@ -377,22 +377,32 @@ func validateRelativePath(label, path string) error {
 	return nil
 }
 
+// parseFileKeyRef parses a `fileKeyRef` object into corev1.FileKeySelector.
+// volumeName/path/key are all required (real admission's
+// validateFileKeySelector rejects a partially-specified fileKeyRef — e.g. a
+// missing name/key) — a partially-specified fileKeyRef cannot resolve to any
+// real file, so treating it as absent (like an empty optional field) would
+// silently drop the authored intent instead of rejecting the malformed input.
+//
 // NOTE on a deliberately deferred cross-check: this function validates
 // volumeName's own shape (a DNS-1123 label) but never checks it against the
 // component's actual `volumes` list, because parseEnv (and therefore this
 // function, reached through parseValueFrom) runs before parseVolumes in
 // every one of its 7 call sites (5 kind handlers plus parseInitContainers
-// and parseSidecars) and has no access to the parsed volume set. A shallow
-// name-only cross-check would also be incomplete on its own: real
-// FileKeySelector semantics need the referenced volume to be an Image
-// volume (corev1.VolumeSource.Image) specifically, and this schema's
-// parseVolumes supports only hostPath/emptyDir/pvc/configMap/secret — no
-// "image" case exists yet, so no fileKeyRef.volumeName can ever resolve to a
-// conformant target today regardless of a name match. Closing this gap
-// needs Image-volume schema support first, then threading the resulting
-// volume-name set through parseEnv's call chain (or a post-hoc validation
-// pass once env and volumes are both parsed) — out of scope for this
-// shared-schema-fidelity PR; see the launcher#278 ledger.
+// and parseSidecars) and has no access to the parsed volume set. This is a
+// narrower gap than it first appears: real admission's
+// validateFileKeyRefVolumes checks only that volumeName matches some
+// declared pod volume by name — it does not restrict the volume's source
+// type to Image (confirmed by TestCronjobHandler_FileKeyRef_VolumeWiring,
+// which authors an emptyDir volume as the fileKeyRef target and asserts the
+// resulting CronJob is valid) — so a same-named volume declared via this
+// schema's existing hostPath/emptyDir/pvc/configMap/secret support already
+// satisfies real admission's actual constraint in most cases; only a
+// genuinely mismatched or absent name reaches Kubernetes as a NotFound this
+// parser cannot catch early. Closing that residual gap needs threading the
+// parsed volume-name set through parseEnv's call chain (or a post-hoc
+// validation pass once env and volumes are both parsed) — out of scope for
+// this shared-schema-fidelity PR; see the launcher#278 ledger.
 func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 	volumeName, _ := m["volumeName"].(string)
 	path, _ := m["path"].(string)
@@ -1112,6 +1122,12 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName
 		probe.HTTPGet = handler
 		hasHandler = true
 	} else if tcpSocket, ok := m["tcpSocket"].(map[string]any); ok {
+		// Same nested-typo gap as httpGet above: the outer probe-level check
+		// only validates that `tcpSocket` itself is a recognized key, not the
+		// keys authored inside it.
+		if err := rejectUnknownKeys(tcpSocket, []string{"port", "host"}, "tcpSocket"); err != nil {
+			return nil, err
+		}
 		port, err := parsePort(tcpSocket["port"], namedPortsAllowed, matchName)
 		if err != nil {
 			return nil, errors.Errorf("tcpSocket handler: %w", err)
@@ -1130,6 +1146,9 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName
 		probe.TCPSocket = handler
 		hasHandler = true
 	} else if execCmd, ok := m["exec"].(map[string]any); ok {
+		if err := rejectUnknownKeys(execCmd, []string{"command"}, "exec"); err != nil {
+			return nil, err
+		}
 		// Presence-then-type-check per command element, and an empty command
 		// rejected outright — mirrors parseLifecycleHandler's exec branch, so
 		// a malformed command (e.g. `command: check` instead of an array, or
@@ -1151,6 +1170,9 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName
 		probe.Exec = &corev1.ExecAction{Command: command}
 		hasHandler = true
 	} else if grpc, ok := m["grpc"].(map[string]any); ok {
+		if err := rejectUnknownKeys(grpc, []string{"port", "service"}, "grpc"); err != nil {
+			return nil, err
+		}
 		handler := &corev1.GRPCAction{}
 		// grpc's port is always numeric regardless of namedPortsAllowed — the
 		// check right below rejects a named port unconditionally, with its own
@@ -1493,6 +1515,9 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 		return handler, nil
 	}
 	if execCmd, ok := m["exec"].(map[string]any); ok {
+		if err := rejectUnknownKeys(execCmd, []string{"command"}, "exec"); err != nil {
+			return nil, err
+		}
 		var command []string
 		if cmd, ok := execCmd["command"].([]any); ok {
 			for i, c := range cmd {
@@ -1510,6 +1535,9 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 		return handler, nil
 	}
 	if sleep, ok := m["sleep"].(map[string]any); ok {
+		if err := rejectUnknownKeys(sleep, []string{"seconds"}, "sleep"); err != nil {
+			return nil, err
+		}
 		seconds, ok := toInt64(sleep["seconds"])
 		if !ok {
 			return nil, errors.Errorf("sleep handler: seconds is required and must be an integer")
@@ -1768,6 +1796,9 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		if !ok {
 			return nil, errors.Errorf("securityContext.capabilities: must be an object, got %T", v)
 		}
+		if err := rejectUnknownKeys(capsRaw, []string{"add", "drop"}, "securityContext.capabilities"); err != nil {
+			return nil, err
+		}
 		caps := &corev1.Capabilities{}
 		add, err := parseCapabilityList(capsRaw, "add", "securityContext.capabilities.add")
 		if err != nil {
@@ -1788,6 +1819,9 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		spRaw, ok := v.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("securityContext.seccompProfile: must be an object, got %T", v)
+		}
+		if err := rejectUnknownKeys(spRaw, []string{"type", "localhostProfile"}, "securityContext.seccompProfile"); err != nil {
+			return nil, err
 		}
 		typ, _ := spRaw["type"].(string)
 		switch corev1.SeccompProfileType(typ) {
@@ -1835,6 +1869,9 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		if !ok {
 			return nil, errors.Errorf("securityContext.seLinuxOptions: must be an object, got %T", v)
 		}
+		if err := rejectUnknownKeys(seRaw, []string{"user", "role", "type", "level"}, "securityContext.seLinuxOptions"); err != nil {
+			return nil, err
+		}
 		se := &corev1.SELinuxOptions{}
 		anySet := false
 		if v, present, err := parseStringField(seRaw, "user", "securityContext.seLinuxOptions.user"); err != nil {
@@ -1870,6 +1907,9 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		apRaw, ok := v.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("securityContext.appArmorProfile: must be an object, got %T", v)
+		}
+		if err := rejectUnknownKeys(apRaw, []string{"type", "localhostProfile"}, "securityContext.appArmorProfile"); err != nil {
+			return nil, err
 		}
 		typ, _ := apRaw["type"].(string)
 		switch corev1.AppArmorProfileType(typ) {
@@ -2020,7 +2060,9 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				Name:         volName,
 				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 			}
-			if sizeLimit, ok := m["sizeLimit"].(string); ok && sizeLimit != "" {
+			if sizeLimit, present, err := parseStringField(m, "sizeLimit", fmt.Sprintf("volume %q: emptyDir.sizeLimit", volName)); err != nil {
+				return result, err
+			} else if present {
 				qty, err := resource.ParseQuantity(sizeLimit)
 				if err != nil {
 					return result, errors.Errorf("volume %q: invalid emptyDir sizeLimit %q: %w", volName, sizeLimit, err)

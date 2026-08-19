@@ -185,7 +185,10 @@ the whole authored probe; `exec.command` must be
 a non-empty array of strings — a present-but-wrong-type `command` (e.g. a
 bare string instead of an array) or an array containing a non-string element
 is rejected the same way, instead of silently producing no probe at all,
-mirroring `lifecycle.{postStart,preStop}.exec.command` below; a string `port` is a named container port, not
+mirroring `lifecycle.{postStart,preStop}.exec.command` below; a key other
+than `command` inside a probe `exec` object (e.g. a misspelled `commnad`) is
+rejected outright too, instead of silently ignored while the intended
+command never overrides the default; a string `port` is a named container port, not
 an arbitrary label, and is validated against `validation.IsValidPortName`
 just as real admission's `ValidatePortNumOrName` does: lowercase
 `[-a-z0-9]` only, at least one letter, no leading/trailing/adjacent hyphen,
@@ -214,14 +217,18 @@ characters (mirrors `validateGRPCService`'s length cap — the gRPC
 health-checking service name is not DNS-1123 formatted, but admission still
 bounds its length), and `grpc.port` is always numeric regardless of any
 kind's named-port rules — a named `grpc.port` is rejected outright with its
-own message, never resolved against a declared container port;
+own message, never resolved against a declared container port; a key other
+than `port`/`service` inside a probe `grpc` object (e.g. a misspelled
+`servcie`) is rejected outright too, instead of silently ignored;
 `tcpSocket.host`, if authored, is preserved on the probe — a
 present-but-non-string value (e.g. `host: 123`) is rejected the same as
 every other typed scalar field in this document, instead of silently
 discarded while the probe still dials the Pod IP; when omitted,
 `corev1.TCPSocketAction.Host`'s own doc comment says it then defaults to the
 Pod IP, so no explicit default needs to be authored here — the same
-optional-override shape as `httpGet.host` below;
+optional-override shape as `httpGet.host` below; a key other than
+`port`/`host` inside a probe `tcpSocket` object (e.g. a misspelled `hots`)
+is rejected outright too, instead of silently ignored;
 `httpGet.httpHeaders` itself and its entries are validated
 rather than silently dropped/coerced — an authored non-array `httpHeaders`
 value (e.g. a single header object instead of a list) is rejected the same
@@ -270,9 +277,13 @@ rejected outright too, rather than matching neither recognized key and
 silently producing no hook at all;
 `postStart`/`preStop`:
 `exec` (every `command` element must be a string; a non-string element is
-rejected, not silently dropped)/`httpGet` (same named-port, `httpHeaders`,
+rejected, not silently dropped; a key other than `command` in the object,
+e.g. a misspelled `commnad`, is rejected outright too, instead of silently
+ignored)/`httpGet` (same named-port, `httpHeaders`,
 unknown-key, and optional-`path`/`host`/`scheme` rules as `probes`
-above)/`sleep` — at
+above)/`sleep` (`seconds` is required and must be a non-negative integer; a
+key other than `seconds` in the object, e.g. a misspelled `sconds`, is
+rejected outright too, instead of silently ignored) — at
 most one of these three may be authored, and a present-but-non-object value
 for any of them is rejected outright rather than silently discarded while a
 well-formed sibling wins, same as `probes` above;
@@ -311,7 +322,9 @@ combined with `allowPrivilegeEscalation: false` is rejected outright —
 is always true once a container runs privileged, so the pair would claim a
 hardening guarantee the runtime cannot honor, the same contradiction shape as
 `runAsUser: 0` with `runAsNonRoot: true` above),
-`capabilities` (rejected if authored with a non-object value; `add`/`drop`
+`capabilities` (rejected if authored with a non-object value; a key other
+than `add`/`drop` in the object, e.g. a misspelled `dorp`, is rejected
+outright too, instead of silently ignored; `add`/`drop`
 are each rejected if authored with a non-array value, e.g. `drop: ALL`
 instead of a list, or with a non-string array element — an empty-string
 element is silently skipped rather than rejected, since real admission places
@@ -323,7 +336,9 @@ capability strings (e.g. "NET_ADMIN"); see `enforce.go`'s `enforcePrivileged`
 doc comment for the naming-collision detail. Enforcing these would need a new
 `Policy` method, which is out of scope here), `seccompProfile` (rejected outright if authored with
 a non-object value, e.g. `seccompProfile: RuntimeDefault`, instead of silently skipping the field
-and dropping the requested sandboxing entirely; `type` is required whenever the
+and dropping the requested sandboxing entirely; a key other than
+`type`/`localhostProfile` in the object, e.g. a misspelled `locahost`, is
+rejected outright too, instead of silently ignored; `type` is required whenever the
 `seccompProfile` object is authored at all, matching real admission's own
 `field.Required` — omitting it (e.g. authoring only `localhostProfile` with
 no `type` key) is rejected rather than silently discarding the whole
@@ -339,14 +354,18 @@ relative and must not contain a `..` backstep component, matching
 descending path, relative to the kubelet's configured seccomp profile
 location" — and this repo's own path-safety convention), `seLinuxOptions`
 (also rejected outright if authored with a non-object value, same reasoning as
-`seccompProfile` above;
+`seccompProfile` above; a key other than `user`/`role`/`type`/`level` in the
+object, e.g. a misspelled `tpye`, is rejected outright too, instead of
+silently ignored;
 `user`/`role`/`type`/`level` are each rejected if authored with a
 non-string value, e.g. `type: 123`, instead of silently discarding just that
 sub-field — if it were the only one set, the whole SELinux context would
 otherwise vanish rather than reporting the malformed input),
 `appArmorProfile` (same "`type` required when authored" rule as
 `seccompProfile` above, the same non-object rejection as `seccompProfile`
-and `seLinuxOptions`, and the same `localhostProfile`
+and `seLinuxOptions`, the same unknown-key rejection (only
+`type`/`localhostProfile` are recognized) as `seccompProfile` above, and the
+same `localhostProfile`
 mutual-exclusivity-with-RuntimeDefault/Unconfined and present-but-non-string
 rejection as `seccompProfile` above), `procMount` (`Default`|`Unmasked`; a present-but-non-string
 value, e.g. `procMount: false`, is rejected rather than silently omitted —
@@ -391,10 +410,13 @@ non-string value (e.g. a numeric `mountPath`) collapses to the same empty
 value as an absent one, so both are rejected the same way: an entry missing
 either, or authoring one with the wrong type, previously built with no
 volume and no mount for that entry instead of reporting what was missing;
-`emptyDir.sizeLimit` is parsed as a
+`emptyDir.sizeLimit`, if authored, is parsed as a
 `resource.Quantity` and rejected if negative (e.g. `"-1Gi"`) — syntactically
 valid but a storage quantity real Kubernetes resource validation refuses,
-same as `resources`' own quantity fields above; `pvc.size` is required (the
+same as `resources`' own quantity fields above; a present-but-non-string
+value (e.g. `sizeLimit: 1048576`) is rejected the same way, instead of
+failing the bare type assertion silently and building an emptyDir with no
+size limit at all; `pvc.size` is required (the
 same missing-vs-wrong-type rejection as `name`/`mountPath` above) and, once
 present, is validated the same way as `emptyDir.sizeLimit`; `hostPath.path`
 is likewise required and must be absolute — a raw host filesystem path has
