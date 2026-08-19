@@ -1181,9 +1181,13 @@ func validateNumericPort(port int64) (intstr.IntOrString, error) {
 // the kubelet around the container's own lifecycle (not to be confused with the
 // probes above, which are periodic health checks).
 func parseLifecycle(props map[string]any) (*corev1.Lifecycle, error) {
-	raw, ok := props["lifecycle"].(map[string]any)
-	if !ok {
+	v, present := props["lifecycle"]
+	if !present {
 		return nil, nil
+	}
+	raw, ok := v.(map[string]any)
+	if !ok {
+		return nil, errors.Errorf("lifecycle: must be an object, got %T", v)
 	}
 	lc := &corev1.Lifecycle{}
 	if v, present := raw["postStart"]; present {
@@ -1619,7 +1623,9 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			return nil, errors.Errorf("securityContext.appArmorProfile: invalid type %q, must be Localhost, RuntimeDefault, or Unconfined", typ)
 		}
 	}
-	if pm, ok := raw["procMount"].(string); ok && pm != "" {
+	if pm, present, err := parseStringField(raw, "procMount", "securityContext.procMount"); err != nil {
+		return nil, err
+	} else if present {
 		switch corev1.ProcMountType(pm) {
 		case corev1.DefaultProcMount, corev1.UnmaskedProcMount:
 			t := corev1.ProcMountType(pm)
