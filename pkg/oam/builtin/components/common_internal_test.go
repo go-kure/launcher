@@ -3111,3 +3111,212 @@ func TestParseProbe_NonIntNumericField_Error(t *testing.T) {
 		})
 	}
 }
+
+// TestParseSecurityContext_UnknownKey_Error regression-tests a review finding
+// (launcher#284): a typo such as `readOnlyRootFileSystem` (wrong case) for
+// `readOnlyRootFilesystem` matched none of the recognized fields, left `set`
+// false, and silently returned a nil security context instead of rejecting
+// the unrecognized key.
+func TestParseSecurityContext_UnknownKey_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"readOnlyRootFileSystem": true,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unrecognized securityContext key")
+	}
+}
+
+// TestParseSecurityContext_PrivilegedWithAllowPrivilegeEscalationFalse_Error
+// regression-tests a review finding (launcher#284): corev1.SecurityContext's
+// own field doc states AllowPrivilegeEscalation is always true once a
+// container runs privileged, so an authored `allowPrivilegeEscalation:
+// false` alongside `privileged: true` was accepted and emitted verbatim even
+// though the runtime cannot honor it.
+func TestParseSecurityContext_PrivilegedWithAllowPrivilegeEscalationFalse_Error(t *testing.T) {
+	_, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"privileged":               true,
+			"allowPrivilegeEscalation": false,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for privileged true with allowPrivilegeEscalation false")
+	}
+}
+
+// TestParseEnvFrom_UnknownKey_Error regression-tests a review finding
+// (launcher#284): a typo such as `prefx` for `prefix` matched none of the
+// three recognized keys and was silently ignored, emitting an unprefixed
+// import instead of rejecting the typo.
+func TestParseEnvFrom_UnknownKey_Error(t *testing.T) {
+	_, err := parseEnvFrom(map[string]any{
+		"envFrom": []any{
+			map[string]any{
+				"prefx":        "APP_",
+				"configMapRef": map[string]any{"name": "settings"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unrecognized envFrom key")
+	}
+}
+
+// TestParseProbe_UnknownKey_Error regression-tests a review finding
+// (launcher#284): a typo such as `failureTreshold` for `failureThreshold`
+// matched none of the recognized fields inside a single probe object —
+// parseProbes' own outer check validates only the readiness/liveness/startup
+// kind name, not the fields nested inside — so the generated probe silently
+// used Kubernetes' default rather than the authored value.
+func TestParseProbe_UnknownKey_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"httpGet":         map[string]any{"port": 8080},
+		"failureTreshold": 1,
+	}, "liveness", true, "")
+	if err == nil {
+		t.Fatal("expected error for an unrecognized probe key")
+	}
+}
+
+// TestParseProbe_HTTPGet_UnknownKey_Error is a self-found sibling of
+// TestParseLifecycle_HTTPGet_UnknownKey_Error below, same object shape
+// (httpGet's port/path/host/scheme/httpHeaders), same silent-discard gap: a
+// typo inside a probe's httpGet handler (e.g. `pth` for `path`) was silently
+// ignored instead of rejected.
+func TestParseProbe_HTTPGet_UnknownKey_Error(t *testing.T) {
+	_, err := parseProbe(map[string]any{
+		"httpGet": map[string]any{"port": 8080, "pth": "/healthz"},
+	}, "liveness", true, "")
+	if err == nil {
+		t.Fatal("expected error for an unrecognized probe httpGet key")
+	}
+}
+
+// TestParseLifecycle_HTTPGet_UnknownKey_Error regression-tests a review
+// finding (launcher#284): a typo inside a lifecycle hook's httpGet handler
+// (e.g. `pth` for `path`) matched none of the recognized fields and was
+// silently ignored — the outer lifecycle-key check (wave 19) validates only
+// postStart/preStop, not the fields nested inside httpGet — so Kubernetes
+// defaulted the request path instead of calling the intended endpoint.
+func TestParseLifecycle_HTTPGet_UnknownKey_Error(t *testing.T) {
+	_, err := parseLifecycle(map[string]any{
+		"lifecycle": map[string]any{
+			"preStop": map[string]any{
+				"httpGet": map[string]any{"port": 8080, "pth": "/shutdown"},
+			},
+		},
+	}, true, "")
+	if err == nil {
+		t.Fatal("expected error for an unrecognized lifecycle httpGet key")
+	}
+}
+
+// TestParseVolumes_MissingName_Error regression-tests a review finding
+// (launcher#284): an entry missing `name` entirely was silently skipped via
+// `continue`, building with no volume or mount for the entry instead of
+// reporting the missing required field.
+func TestParseVolumes_MissingName_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"type":      "emptyDir",
+				"mountPath": "/data",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a volume entry missing name")
+	}
+}
+
+// TestParseVolumes_MissingMountPath_Error regression-tests the review
+// finding cited above (launcher#284) directly: `{name: data, type:
+// emptyDir}` with no mountPath silently built with no volume and no mount
+// for the entry.
+func TestParseVolumes_MissingMountPath_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name": "data",
+				"type": "emptyDir",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a volume entry missing mountPath")
+	}
+}
+
+// TestParseVolumes_HostPath_MissingPath_Error is a self-found sibling of the
+// name/mountPath findings above, same function, same silent-discard shape: a
+// hostPath volume with no `path` fell through the same `continue` idiom.
+func TestParseVolumes_HostPath_MissingPath_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "logs",
+				"type":      "hostPath",
+				"mountPath": "/var/log",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a hostPath volume missing path")
+	}
+}
+
+// TestParseVolumes_PVC_MissingSize_Error is a self-found sibling of the
+// name/mountPath findings above: a pvc volume with no `size` fell through
+// the same silent-discard `continue` idiom.
+func TestParseVolumes_PVC_MissingSize_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "data",
+				"type":      "pvc",
+				"mountPath": "/data",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a pvc volume missing size")
+	}
+}
+
+// TestParseVolumes_ConfigMap_MissingName_Error is a self-found sibling of the
+// name/mountPath findings above: a configMap volume with no `configMapName`
+// fell through the same silent-discard `continue` idiom.
+func TestParseVolumes_ConfigMap_MissingName_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "config",
+				"type":      "configMap",
+				"mountPath": "/etc/config",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a configMap volume missing configMapName")
+	}
+}
+
+// TestParseVolumes_Secret_MissingName_Error is a self-found sibling of the
+// name/mountPath findings above: a secret volume with no `secretName` fell
+// through the same silent-discard `continue` idiom.
+func TestParseVolumes_Secret_MissingName_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":      "creds",
+				"type":      "secret",
+				"mountPath": "/etc/creds",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a secret volume missing secretName")
+	}
+}

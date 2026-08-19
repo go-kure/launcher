@@ -102,7 +102,11 @@ as `env`'s `secretKeyRef`/`configMapKeyRef` above; a present-but-malformed
 `configMapRef`/`secretRef` (e.g. a scalar instead of an object) is rejected
 outright rather than silently treated as absent — the latter would let the
 other, well-formed ref alone satisfy the "exactly one" check below and
-quietly discard the malformed one instead of reporting it),
+quietly discard the malformed one instead of reporting it); a key other
+than `prefix`/`configMapRef`/`secretRef` (e.g. a misspelled `prefx`) is
+rejected outright too, rather than being silently ignored while the rest of
+the entry still builds — on `prefix` specifically, that previously emitted
+an unprefixed import instead of the intended one),
 `resources` — a `corev1.ResourceRequirements` projection: `requests`/`limits`
 accept `cpu`/`memory` (defaults 100m/128Mi) plus any other well-formed
 resource name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map,
@@ -164,7 +168,12 @@ and likewise for each of its own `readiness`/`liveness`/`startup` keys, e.g.
 `lifecycle` below, instead of silently discarding the authored health check;
 a key other than `readiness`/`liveness`/`startup` (e.g. a misspelled
 `probes: {live: {...}}`) is rejected outright too, rather than matching none
-of the three recognized keys and silently producing no probe at all;
+of the three recognized keys and silently producing no probe at all; a key
+other than the ten recognized fields inside a single probe object — the four
+handlers below plus the six timing fields further down — (e.g. a misspelled
+`failureTreshold`) is rejected outright too, instead of silently falling
+back to Kubernetes' own default for the field the typo was meant to
+override;
 httpGet/tcpSocket/exec/grpc — exactly one handler may be authored; a
 present-but-non-object value for any of the four (e.g. `httpGet: "invalid"`)
 is rejected outright, even when paired with a well-formed sibling handler,
@@ -221,7 +230,13 @@ as a non-object entry within it, a missing/empty/invalid `name`
 present-but-non-string `value` are all rejected instead of quietly
 disappearing or turning into `""`; an omitted `value` key still defaults to
 `""` — shared by `lifecycle.{postStart,preStop}.httpGet` below via the same
-parsing helper; `path`/`host`/`scheme` are all optional — an absent or empty
+parsing helper; a key other than `port`/`path`/`host`/`scheme`/`httpHeaders`
+anywhere in an httpGet object (e.g. a misspelled `pth` for `path`) is
+rejected outright too, instead of silently ignored while Kubernetes defaults
+whatever field the typo was meant to override — the identical five-key
+allow-list is checked independently in `lifecycle.{postStart,preStop}.httpGet`
+below, which has its own copy of this handler; `path`/`host`/`scheme` are
+all optional — an absent or empty
 `path` matches real Kubernetes' own defaulting (`SetDefaults_HTTPGetAction`
 fills it with `"/"` before validation ever runs, wired for both probe and
 lifecycle httpGet handlers), so this schema does not require what upstream
@@ -256,7 +271,8 @@ silently producing no hook at all;
 `postStart`/`preStop`:
 `exec` (every `command` element must be a string; a non-string element is
 rejected, not silently dropped)/`httpGet` (same named-port, `httpHeaders`,
-and optional-`path`/`host`/`scheme` rules as `probes` above)/`sleep` — at
+unknown-key, and optional-`path`/`host`/`scheme` rules as `probes`
+above)/`sleep` — at
 most one of these three may be authored, and a present-but-non-object value
 for any of them is rejected outright rather than silently discarded while a
 well-formed sibling wins, same as `probes` above;
@@ -270,7 +286,10 @@ each rejected outright if present with a non-object value, e.g. `preStop:
 "flush"`, instead of silently discarding the whole hook),
 `securityContext` (rejected outright if authored with a non-object value,
 e.g. a scalar or array, instead of silently treating it as absent and
-emitting a container with a nil security context;
+emitting a container with a nil security context; a key other than the
+eleven recognized security-context fields (e.g. a misspelled
+`readOnlyRootFileSystem`) is rejected outright too, instead of matching none
+of them and silently discarding the whole hardening request;
 per-container: `runAsUser`/`runAsGroup`/`runAsNonRoot`
 (`runAsUser: 0` combined with `runAsNonRoot: true` builds and is admitted by
 the API server, but the kubelet's `verifyRunAsNonRoot` check deterministically
@@ -286,7 +305,12 @@ three, plus `runAsNonRoot` above, are each rejected outright if authored with
 a non-boolean value, e.g. a quoted `"false"`, instead of being silently
 skipped: since Kubernetes' default for each is permissive, silently dropping
 a mistyped value would leave the container permissive while looking like the
-authored hardening request was honored),
+authored hardening request was honored; additionally, `privileged: true`
+combined with `allowPrivilegeEscalation: false` is rejected outright —
+`corev1.SecurityContext.AllowPrivilegeEscalation`'s own field doc states it
+is always true once a container runs privileged, so the pair would claim a
+hardening guarantee the runtime cannot honor, the same contradiction shape as
+`runAsUser: 0` with `runAsNonRoot: true` above),
 `capabilities` (rejected if authored with a non-object value; `add`/`drop`
 are each rejected if authored with a non-array value, e.g. `drop: ALL`
 instead of a list, or with a non-string array element — an empty-string
@@ -362,17 +386,25 @@ if authored, must be a boolean — a present-but-non-boolean value (e.g.
 `readOnly: "true"`) is rejected rather than silently defaulting to a
 writable mount (same fix applied to `initContainers`/`sidecars`' own
 `volumeMounts` entries below, which had the identical gap);
-`emptyDir.sizeLimit` and `pvc.size` are each parsed as a
+`name` and `mountPath` are both required on every entry — a present-but-
+non-string value (e.g. a numeric `mountPath`) collapses to the same empty
+value as an absent one, so both are rejected the same way: an entry missing
+either, or authoring one with the wrong type, previously built with no
+volume and no mount for that entry instead of reporting what was missing;
+`emptyDir.sizeLimit` is parsed as a
 `resource.Quantity` and rejected if negative (e.g. `"-1Gi"`) — syntactically
 valid but a storage quantity real Kubernetes resource validation refuses,
-same as `resources`' own quantity fields above; `hostPath.path` must be
-absolute — a raw host filesystem path has no defined root to resolve a
-relative value against, and real admission (`validateHostPathVolumeSource`)
-rejects a relative one the same way; a fully-authored entry (non-empty
-`name` and `mountPath`) whose `type` matches none of the five recognized
-sources — including `type` omitted entirely — is rejected outright rather
-than silently producing no volume or mount for an entry the author clearly
-intended to add),
+same as `resources`' own quantity fields above; `pvc.size` is required (the
+same missing-vs-wrong-type rejection as `name`/`mountPath` above) and, once
+present, is validated the same way as `emptyDir.sizeLimit`; `hostPath.path`
+is likewise required and must be absolute — a raw host filesystem path has
+no defined root to resolve a relative value against, and real admission
+(`validateHostPathVolumeSource`) rejects a relative one the same way;
+`configMap.configMapName` and `secret.secretName` are each required the same
+way as `pvc.size`; a fully-authored entry whose `type` matches none of the
+five recognized sources — including `type` omitted entirely — is rejected
+outright rather than silently producing no volume or mount for an entry the
+author clearly intended to add),
 `initContainers`, `sidecars` (each entry's own `volumeMounts[].readOnly`
 must be a boolean and `volumeMounts[].subPath` must be a string when
 present — same presence-then-type-check shape as `volumes.readOnly` above;
