@@ -2120,6 +2120,48 @@ func TestParseVolumeClaimTemplates_NegativeSize_Error(t *testing.T) {
 	}
 }
 
+// TestParseVolumeClaimTemplates_NonStringStorageClass_Error regression-tests
+// a review finding (launcher#284): a bare `m["storageClass"].(string)` type
+// assertion treated a present-but-non-string storageClass the same as
+// absent, silently building with the cluster default class instead of
+// rejecting the malformed value — same defect as parseVolumes' pvc case,
+// found independently here since storageClass is optional and has no
+// requiredness check to surface the resulting empty string.
+func TestParseVolumeClaimTemplates_NonStringStorageClass_Error(t *testing.T) {
+	_, err := parseVolumeClaimTemplates(map[string]any{
+		"volumeClaimTemplates": []any{
+			map[string]any{
+				"name":         "data",
+				"size":         "1Gi",
+				"mountPath":    "/data",
+				"storageClass": 123,
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a non-string volumeClaimTemplate storageClass")
+	}
+}
+
+func TestParseVolumeClaimTemplates_StorageClass_Accepted(t *testing.T) {
+	vcts, err := parseVolumeClaimTemplates(map[string]any{
+		"volumeClaimTemplates": []any{
+			map[string]any{
+				"name":         "data",
+				"size":         "1Gi",
+				"mountPath":    "/data",
+				"storageClass": "fast-ssd",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseVolumeClaimTemplates: %v", err)
+	}
+	if len(vcts) != 1 || vcts[0].StorageClass != "fast-ssd" {
+		t.Errorf("vcts = %+v, want StorageClass fast-ssd", vcts)
+	}
+}
+
 // TestParseVolumes_MistypedCollection_Error regression-tests a review
 // finding (launcher#284): the outer `props["volumes"].([]any)` assertion
 // silently treated a present-but-non-array volumes value as absent,
@@ -3533,5 +3575,207 @@ func TestParseEnvFrom_SecretRef_UnknownKey_Error(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for an unrecognized secretRef key")
+	}
+}
+
+// TestParseEnv_SecretKeyRef_UnknownKey_Error regression-tests a review finding
+// (launcher#284): an extra, misspelled secretKeyRef key was previously
+// silently ignored by parseNameKey's own two-field read, which then failed
+// with the generic "name and key required" error instead of naming the
+// actual mistake.
+func TestParseEnv_SecretKeyRef_UnknownKey_Error(t *testing.T) {
+	_, err := parseEnv(map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "SECRET",
+				"valueFrom": map[string]any{
+					"secretKeyRef": map[string]any{"name": "s", "key": "k", "typo": "x"},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unrecognized secretKeyRef key")
+	}
+}
+
+func TestParseEnv_ConfigMapKeyRef_UnknownKey_Error(t *testing.T) {
+	_, err := parseEnv(map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "CONFIG",
+				"valueFrom": map[string]any{
+					"configMapKeyRef": map[string]any{"name": "c", "key": "k", "typo": "x"},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unrecognized configMapKeyRef key")
+	}
+}
+
+func TestParseEnv_FieldRef_UnknownKey_Error(t *testing.T) {
+	_, err := parseEnv(map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "POD_NAME",
+				"valueFrom": map[string]any{
+					"fieldRef": map[string]any{"fieldPath": "metadata.name", "typo": "x"},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unrecognized fieldRef key")
+	}
+}
+
+func TestParseEnv_FileKeyRef_UnknownKey_Error(t *testing.T) {
+	_, err := parseEnv(map[string]any{
+		"env": []any{
+			map[string]any{
+				"name": "FILEVAL",
+				"valueFrom": map[string]any{
+					"fileKeyRef": map[string]any{"volumeName": "envfiles", "path": "app.env", "key": "K", "typo": "x"},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unrecognized fileKeyRef key")
+	}
+}
+
+// TestParseHTTPHeaders_UnknownKey_Error regression-tests a review finding
+// (launcher#284): a typo'd header key (e.g. `vaule` for `value`) was
+// previously silently ignored — value read as absent and defaulted to "",
+// masking the author's mistake instead of rejecting it.
+func TestParseHTTPHeaders_UnknownKey_Error(t *testing.T) {
+	_, err := parseHTTPHeaders(map[string]any{
+		"httpHeaders": []any{
+			map[string]any{"name": "Authorization", "vaule": "Bearer token"},
+		},
+	}, "httpHeaders")
+	if err == nil {
+		t.Fatal("expected error for an unrecognized httpHeaders entry key")
+	}
+}
+
+// TestParseLifecycleHandler_OuterUnknownKey_Error regression-tests a review
+// finding (launcher#284): a sibling key outside httpGet/exec/sleep/tcpSocket
+// (e.g. a typo'd timeoutSeconds) was previously invisible to this parser —
+// uncounted and never rejected, discarding the authored key silently.
+func TestParseLifecycleHandler_OuterUnknownKey_Error(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"exec":           map[string]any{"command": []any{"true"}},
+		"timeoutSeconds": 5,
+	}, false, "")
+	if err == nil {
+		t.Fatal("expected error for an unrecognized lifecycle handler key")
+	}
+}
+
+// TestParseLifecycleHandler_TCPSocket_StillSpecificError confirms the outer
+// unknown-key check does not regress tcpSocket's own, more specific
+// rejection message: tcpSocket is a recognized-but-disallowed key, not an
+// unknown one.
+func TestParseLifecycleHandler_TCPSocket_StillSpecificError(t *testing.T) {
+	_, err := parseLifecycleHandler(map[string]any{
+		"tcpSocket": map[string]any{"port": float64(80)},
+	}, false, "")
+	if err == nil {
+		t.Fatal("expected an error for tcpSocket")
+	}
+	if !strings.Contains(err.Error(), "tcpSocket is not supported") {
+		t.Errorf("error = %q, want the specific tcpSocket-unsupported message", err.Error())
+	}
+}
+
+// TestParseAccessModes_NonArray_Error regression-tests a review finding
+// (launcher#284): a present-but-non-array accessModes value (e.g. a bare
+// string) previously fell through the `[]any` type assertion silently and
+// built with the ReadWriteOnce default instead of rejecting the malformed
+// input.
+func TestParseAccessModes_NonArray_Error(t *testing.T) {
+	_, err := parseAccessModes(map[string]any{"accessModes": "ReadWriteMany"})
+	if err == nil {
+		t.Fatal("expected error for a non-array accessModes value")
+	}
+}
+
+func TestParseAccessModes_NonStringElement_Error(t *testing.T) {
+	_, err := parseAccessModes(map[string]any{"accessModes": []any{123}})
+	if err == nil {
+		t.Fatal("expected error for a non-string accessModes element")
+	}
+}
+
+func TestParseAccessModes_InvalidMode_Error(t *testing.T) {
+	_, err := parseAccessModes(map[string]any{"accessModes": []any{"NotARealMode"}})
+	if err == nil {
+		t.Fatal("expected error for an unrecognized accessMode value")
+	}
+}
+
+func TestParseAccessModes_Absent_DefaultsToReadWriteOnce(t *testing.T) {
+	modes, err := parseAccessModes(map[string]any{})
+	if err != nil {
+		t.Fatalf("parseAccessModes: %v", err)
+	}
+	if len(modes) != 1 || modes[0] != string(corev1.ReadWriteOnce) {
+		t.Errorf("modes = %v, want [ReadWriteOnce]", modes)
+	}
+}
+
+func TestParseAccessModes_Valid_Accepted(t *testing.T) {
+	modes, err := parseAccessModes(map[string]any{"accessModes": []any{"ReadWriteMany", "ReadOnlyMany"}})
+	if err != nil {
+		t.Fatalf("parseAccessModes: %v", err)
+	}
+	if len(modes) != 2 || modes[0] != "ReadWriteMany" || modes[1] != "ReadOnlyMany" {
+		t.Errorf("modes = %v, want [ReadWriteMany ReadOnlyMany]", modes)
+	}
+}
+
+// TestParseVolumes_PVC_NonStringStorageClass_Error regression-tests a review
+// finding (launcher#284): a bare `m["storageClass"].(string)` type assertion
+// treated a present-but-non-string storageClass (e.g. a number) the same as
+// absent, silently building with the cluster default class instead of
+// rejecting the malformed value.
+func TestParseVolumes_PVC_NonStringStorageClass_Error(t *testing.T) {
+	_, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":         "data",
+				"type":         "pvc",
+				"mountPath":    "/data",
+				"size":         "1Gi",
+				"storageClass": 123,
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for a non-string storageClass")
+	}
+}
+
+func TestParseVolumes_PVC_StorageClass_Accepted(t *testing.T) {
+	result, err := parseVolumes(map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":         "data",
+				"type":         "pvc",
+				"mountPath":    "/data",
+				"size":         "1Gi",
+				"storageClass": "fast-ssd",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseVolumes: %v", err)
+	}
+	if len(result.PVCs) != 1 || result.PVCs[0].StorageClass != "fast-ssd" {
+		t.Errorf("PVCs = %+v, want StorageClass fast-ssd", result.PVCs)
 	}
 }

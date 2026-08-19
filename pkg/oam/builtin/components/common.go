@@ -309,6 +309,9 @@ func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
 
 	src := &corev1.EnvVarSource{}
 	if hasSecret {
+		if err := rejectUnknownKeys(skr, []string{"name", "key", "optional"}, "secretKeyRef"); err != nil {
+			return nil, err
+		}
 		if n, key, ok := parseNameKey(skr); ok {
 			sel := &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: n}, Key: key}
 			opt, err := parseBoolField(skr, "optional", "secretKeyRef.optional")
@@ -320,6 +323,9 @@ func parseEnvVarSource(vf map[string]any) (*corev1.EnvVarSource, error) {
 		}
 	}
 	if hasConfigMap {
+		if err := rejectUnknownKeys(cmr, []string{"name", "key", "optional"}, "configMapKeyRef"); err != nil {
+			return nil, err
+		}
 		if n, key, ok := parseNameKey(cmr); ok {
 			sel := &corev1.ConfigMapKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: n}, Key: key}
 			opt, err := parseBoolField(cmr, "optional", "configMapKeyRef.optional")
@@ -400,6 +406,9 @@ func validateRelativePath(label, path string) error {
 // volumes are both parsed) — out of scope for this shared-schema-fidelity
 // PR; see the launcher#278 ledger.
 func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
+	if err := rejectUnknownKeys(m, []string{"volumeName", "path", "key", "optional"}, "fileKeyRef"); err != nil {
+		return nil, err
+	}
 	volumeName, _ := m["volumeName"].(string)
 	path, _ := m["path"].(string)
 	key, _ := m["key"].(string)
@@ -512,6 +521,9 @@ func validateFieldPath(path string) error {
 
 // parseFieldRef parses a `valueFrom.fieldRef` object into a corev1.ObjectFieldSelector.
 func parseFieldRef(m map[string]any) (*corev1.ObjectFieldSelector, error) {
+	if err := rejectUnknownKeys(m, []string{"fieldPath", "apiVersion"}, "fieldRef"); err != nil {
+		return nil, err
+	}
 	path, _ := m["fieldPath"].(string)
 	if path == "" {
 		return nil, errors.Errorf("fieldRef: fieldPath is required")
@@ -1323,6 +1335,12 @@ func parseHTTPHeaders(raw map[string]any, key string) ([]corev1.HTTPHeader, erro
 		if !ok {
 			return nil, errors.Errorf("httpHeaders[%d]: must be an object with name and value", i)
 		}
+		// A typo (e.g. `vaule` for `value`) would otherwise be silently
+		// ignored — value would read as absent and default to "", exactly
+		// masking the author's mistake instead of rejecting it.
+		if err := rejectUnknownKeys(hm, []string{"name", "value"}, fmt.Sprintf("httpHeaders[%d]", i)); err != nil {
+			return nil, err
+		}
 		name, ok := hm["name"].(string)
 		if !ok || name == "" {
 			return nil, errors.Errorf("httpHeaders[%d].name: must be a non-empty string", i)
@@ -1456,6 +1474,15 @@ func parseLifecycle(props map[string]any, namedPortsAllowed bool, matchName stri
 // when it is specified", kept on the Go type only for backward compatibility, so
 // accepting it would let an OAM author write a handler that always fails.
 func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName string) (*corev1.LifecycleHandler, error) {
+	// A sibling key outside httpGet/exec/sleep/tcpSocket (e.g. a typo'd
+	// timeoutSeconds) was previously invisible to this parser — uncounted by
+	// the loop below and never rejected, discarding the authored key without
+	// telling the author. tcpSocket is allowed here so it still reaches its
+	// own, more specific rejection right below instead of a generic
+	// unrecognized-key error.
+	if err := rejectUnknownKeys(m, []string{"httpGet", "exec", "sleep", "tcpSocket"}, "lifecycle handler"); err != nil {
+		return nil, err
+	}
 	// Rejected unconditionally, not folded into the count below: the count
 	// only tracks the three keys this parser actually builds a handler from,
 	// so a hook that pairs tcpSocket with e.g. a valid exec previously slipped
@@ -2102,7 +2129,10 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			if qty.Sign() < 0 {
 				return result, errors.Errorf("volume %q: PVC size must not be negative, got %q", volName, size)
 			}
-			storageClass, _ := m["storageClass"].(string)
+			storageClass, _, err := parseStringField(m, "storageClass", fmt.Sprintf("volume %q: storageClass", volName))
+			if err != nil {
+				return result, err
+			}
 			accessModes, err := parseAccessModes(m)
 			if err != nil {
 				return result, errors.Errorf("volume %q: %w", volName, err)
@@ -2189,21 +2219,37 @@ func hasNonRWXPVC(pvcs []PVCConfig) bool {
 }
 
 func parseAccessModes(m map[string]any) ([]string, error) {
-	if modes, ok := m["accessModes"].([]any); ok && len(modes) > 0 {
-		var result []string
-		for _, mode := range modes {
-			if s, ok := mode.(string); ok && s != "" {
-				if !validAccessModes[s] {
-					return nil, errors.Errorf("invalid accessMode %q", s)
-				}
-				result = append(result, s)
-			}
-		}
-		if len(result) > 0 {
-			return result, nil
-		}
+	v, present := m["accessModes"]
+	if !present {
+		return []string{string(corev1.ReadWriteOnce)}, nil
 	}
-	return []string{string(corev1.ReadWriteOnce)}, nil
+	// Presence-then-type-check, not a bare assertion: a non-array value
+	// (e.g. a bare string) previously fell through this check silently and
+	// built with the ReadWriteOnce default instead of rejecting the
+	// malformed input.
+	modes, ok := v.([]any)
+	if !ok {
+		return nil, errors.Errorf("accessModes: must be an array, got %T", v)
+	}
+	if len(modes) == 0 {
+		return []string{string(corev1.ReadWriteOnce)}, nil
+	}
+	result := make([]string, 0, len(modes))
+	for i, mode := range modes {
+		// Same presence-then-type-check shape applied per element: a
+		// non-string or empty entry was previously skipped silently rather
+		// than rejected, which could discard every element and fall through
+		// to the ReadWriteOnce default without telling the author.
+		s, ok := mode.(string)
+		if !ok || s == "" {
+			return nil, errors.Errorf("accessModes[%d]: must be a non-empty string, got %T", i, mode)
+		}
+		if !validAccessModes[s] {
+			return nil, errors.Errorf("invalid accessMode %q", s)
+		}
+		result = append(result, s)
+	}
+	return result, nil
 }
 
 func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
@@ -2663,7 +2709,18 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		}
 		vct := VolumeClaimTemplate{}
 		vct.Name, _ = m["name"].(string)
-		vct.StorageClass, _ = m["storageClass"].(string)
+		// parseStringField, not a bare assertion: same silent-acceptance gap
+		// as the `volumes` pvc case above — a present-but-non-string
+		// storageClass (e.g. a number) previously read as absent and built
+		// with the cluster default class instead of being rejected. Unlike
+		// name/size/mountPath below, storageClass is optional and has no
+		// requiredness check to catch the resulting empty string, so this
+		// one was silent end-to-end.
+		storageClass, _, err := parseStringField(m, "storageClass", fmt.Sprintf("volumeClaimTemplate %q: storageClass", vct.Name))
+		if err != nil {
+			return nil, err
+		}
+		vct.StorageClass = storageClass
 		vct.Size, _ = m["size"].(string)
 		vct.MountPath, _ = m["mountPath"].(string)
 		accessModes, err := parseAccessModes(m)
