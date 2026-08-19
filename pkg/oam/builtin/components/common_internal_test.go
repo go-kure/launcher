@@ -480,6 +480,17 @@ func TestParseEnvFrom_InvalidPrefix_Error(t *testing.T) {
 	}
 }
 
+func TestParseEnvFrom_NonStringPrefix_Error(t *testing.T) {
+	props := map[string]any{
+		"envFrom": []any{
+			map[string]any{"configMapRef": map[string]any{"name": "cfg"}, "prefix": 123},
+		},
+	}
+	if _, err := parseEnvFrom(props); err == nil {
+		t.Fatal("expected error for a non-string prefix")
+	}
+}
+
 func TestParseEnvFrom_HyphenatedPrefix_Accepted(t *testing.T) {
 	// Only '=' and non-printable-ASCII are excluded — a prefix like
 	// "APP-CONFIG_" is valid printable ASCII and must not be rejected as if it
@@ -2147,6 +2158,21 @@ func TestParseSecurityContext_NonObjectCapabilities_Error(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for a non-object capabilities value")
+	}
+}
+
+func TestParseSecurityContext_NonObjectNestedProfile_Error(t *testing.T) {
+	for _, field := range []string{"seccompProfile", "seLinuxOptions", "appArmorProfile"} {
+		t.Run(field, func(t *testing.T) {
+			_, err := parseSecurityContext(map[string]any{
+				"securityContext": map[string]any{
+					field: "RuntimeDefault",
+				},
+			})
+			if err == nil {
+				t.Fatalf("expected error for a non-object %s value", field)
+			}
+		})
 	}
 }
 
