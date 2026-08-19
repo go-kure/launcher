@@ -517,6 +517,23 @@ func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, err
 	}
 	ref := &corev1.ResourceFieldSelector{Resource: res}
 	if cn, ok := m["containerName"].(string); ok && cn != "" {
+		// Syntax only: a container name must be a DNS-1123 label
+		// (ValidateDNS1123Label, used for every corev1.Container.Name).
+		// Whether cn actually names a container that exists in this pod is
+		// deliberately NOT checked here — that needs the full set of sibling
+		// container/initContainer/sidecar names, which no caller in this
+		// package threads through to a single env var's parsing (parseEnv is
+		// invoked per-component, before sidecars/initContainers are even
+		// parsed); real admission doesn't check it either (only the
+		// volume-projection form of resourceFieldRef requires containerName
+		// at all — validateContainerResourceFieldSelector's ContainerName
+		// check is gated on `volume`, which is false for an env var), so an
+		// unresolvable target only surfaces later, as a kubelet-time
+		// CreateContainerConfigError when the downward API can't find the
+		// named container.
+		if errs := validation.IsDNS1123Label(cn); len(errs) > 0 {
+			return nil, errors.Errorf("resourceFieldRef.containerName: invalid container name %q: %s", cn, strings.Join(errs, "; "))
+		}
 		ref.ContainerName = cn
 	}
 	if dv, ok := m["divisor"].(string); ok && dv != "" {
@@ -640,7 +657,43 @@ func parseResources(resources map[string]any) (ResourceRequirements, error) {
 		}
 		req.Limits = rl
 	}
+	if err := validateNonOvercommitableResources(req.Requests, req.Limits); err != nil {
+		return ResourceRequirements{}, err
+	}
 	return req, nil
+}
+
+// validateNonOvercommitableResources applies the request/limit cross-check
+// real Kubernetes admission enforces for any resource IsOvercommitAllowed
+// disallows — every hugepages-<size> resource, and every extended resource
+// (mirrors validateResourceRequirements' Requests-side loop,
+// k8s.io/kubernetes/pkg/apis/core/validation/validation.go): when both a
+// request and a limit are present they must be exactly equal, and a request
+// alone is rejected outright ("Limit must be set for non overcommitable
+// resources") since — unlike cpu/memory, which get a request defaulted from
+// a limit — nothing defaults a missing limit from a request. Any resource
+// name not in standardContainerResourceNames (cpu/memory/ephemeral-storage)
+// is exactly the non-overcommitable set once validateContainerResourceName
+// has already run on every key (called from parseResourceList before this),
+// so the two are: a hugepages-<size> name, or a "/"-qualified extended
+// resource. A limit set alone, with no matching request, is deliberately NOT
+// rejected here: the real apiserver's defaulter copies limit into request
+// before validation ever runs, so a limit-only author input is
+// admission-valid and this parser has no matching case to reject.
+func validateNonOvercommitableResources(requests, limits corev1.ResourceList) error {
+	for name, reqQty := range requests {
+		if standardContainerResourceNames[name] {
+			continue
+		}
+		limQty, ok := limits[name]
+		if !ok {
+			return errors.Errorf("resources: %s: limit must be set when request is set (extended and hugepages resources cannot be overcommitted)", name)
+		}
+		if reqQty.Cmp(limQty) != 0 {
+			return errors.Errorf("resources: %s: request %s must equal limit %s (extended and hugepages resources cannot be overcommitted)", name, reqQty.String(), limQty.String())
+		}
+	}
+	return nil
 }
 
 // standardContainerResourceNames is the fixed set of unqualified (no "/")
@@ -864,17 +917,11 @@ func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 			}
 			handler.Scheme = s
 		}
-		if headers, ok := httpGet["httpHeaders"].([]any); ok {
-			for _, h := range headers {
-				if hm, ok := h.(map[string]any); ok {
-					hname, _ := hm["name"].(string)
-					value, _ := hm["value"].(string)
-					if hname != "" {
-						handler.HTTPHeaders = append(handler.HTTPHeaders, corev1.HTTPHeader{Name: hname, Value: value})
-					}
-				}
-			}
+		headers, err := parseHTTPHeaders(httpGet["httpHeaders"])
+		if err != nil {
+			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
+		handler.HTTPHeaders = headers
 		probe.HTTPGet = handler
 		hasHandler = true
 	} else if tcpSocket, ok := m["tcpSocket"].(map[string]any); ok {
@@ -963,6 +1010,49 @@ func parseProbe(m map[string]any, kind string) (*corev1.Probe, error) {
 	return probe, nil
 }
 
+// parseHTTPHeaders parses an httpGet handler's `httpHeaders` array (shared by
+// both the probe and lifecycle httpGet handlers) into []corev1.HTTPHeader,
+// rejecting a malformed entry instead of silently dropping or coercing it: a
+// non-object entry, a missing/empty/invalid name (matching
+// validateHTTPGetAction's own validation.IsHTTPHeaderName(name) check), or a
+// present-but-non-string value would otherwise fail a failed type assertion
+// silently — e.g. {name: Authorization, value: 123} previously became
+// {Name: "Authorization", Value: ""}, silently corrupting the authored
+// header instead of surfacing the author's mistake. A missing value key
+// (as opposed to one present with the wrong type) still defaults to "",
+// since corev1.HTTPHeader.Value has no meaningful zero-value distinction
+// from an intentionally-empty header value.
+func parseHTTPHeaders(raw any) ([]corev1.HTTPHeader, error) {
+	headers, ok := raw.([]any)
+	if !ok {
+		return nil, nil
+	}
+	var out []corev1.HTTPHeader
+	for i, h := range headers {
+		hm, ok := h.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("httpHeaders[%d]: must be an object with name and value", i)
+		}
+		name, ok := hm["name"].(string)
+		if !ok || name == "" {
+			return nil, errors.Errorf("httpHeaders[%d].name: must be a non-empty string", i)
+		}
+		if errs := validation.IsHTTPHeaderName(name); len(errs) > 0 {
+			return nil, errors.Errorf("httpHeaders[%d].name: invalid header name %q: %s", i, name, strings.Join(errs, "; "))
+		}
+		value := ""
+		if v, present := hm["value"]; present {
+			s, ok := v.(string)
+			if !ok {
+				return nil, errors.Errorf("httpHeaders[%d].value: must be a string, got %T", i, v)
+			}
+			value = s
+		}
+		out = append(out, corev1.HTTPHeader{Name: name, Value: value})
+	}
+	return out, nil
+}
+
 func parsePort(v any) (intstr.IntOrString, error) {
 	switch p := v.(type) {
 	case float64:
@@ -979,6 +1069,17 @@ func parsePort(v any) (intstr.IntOrString, error) {
 	case string:
 		if p == "" {
 			return intstr.IntOrString{}, errors.Errorf("port must not be an empty string")
+		}
+		// A string port names a container's declared `ports[].name`, not an
+		// arbitrary label — real admission (ValidatePortNumOrName) checks it
+		// with validation.IsValidPortName, which is far stricter than
+		// "nonempty": lowercase [-a-z0-9] only, at least one letter, no
+		// leading/trailing/adjacent hyphen, max 15 chars. Applies uniformly to
+		// every parsePort call site (probe httpGet/tcpSocket/grpc, lifecycle
+		// httpGet), matching ValidatePortNumOrName's own single shared use
+		// across all of them upstream.
+		if errs := validation.IsValidPortName(p); len(errs) > 0 {
+			return intstr.IntOrString{}, errors.Errorf("invalid port name %q: %s", p, strings.Join(errs, "; "))
 		}
 		return intstr.FromString(p), nil
 	default:
@@ -1058,17 +1159,11 @@ func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
 			}
 			h.Scheme = s
 		}
-		if headers, ok := httpGet["httpHeaders"].([]any); ok {
-			for _, hdr := range headers {
-				if hm, ok := hdr.(map[string]any); ok {
-					hname, _ := hm["name"].(string)
-					value, _ := hm["value"].(string)
-					if hname != "" {
-						h.HTTPHeaders = append(h.HTTPHeaders, corev1.HTTPHeader{Name: hname, Value: value})
-					}
-				}
-			}
+		headers, err := parseHTTPHeaders(httpGet["httpHeaders"])
+		if err != nil {
+			return nil, errors.Errorf("httpGet handler: %w", err)
 		}
+		h.HTTPHeaders = headers
 		handler.HTTPGet = h
 		return handler, nil
 	}
@@ -1227,7 +1322,15 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeLocalhost, LocalhostProfile: &profile}
 			set = true
 		case "":
-			// no type specified: nothing to apply.
+			// Real admission's validateSeccompProfileType returns
+			// field.Required "type is required when seccompProfile is set" —
+			// an empty type is only reachable here because the author wrote a
+			// seccompProfile object at all (the outer `if spRaw, ok := ...`
+			// already gated on that), so treating it as a silent no-op would
+			// drop an authored profile (e.g. a localhostProfile with a typo'd
+			// or missing type key) without telling the author their intent
+			// was discarded.
+			return nil, errors.Errorf("securityContext.seccompProfile: type is required when seccompProfile is set")
 		default:
 			return nil, errors.Errorf("securityContext.seccompProfile: invalid type %q, must be Localhost, RuntimeDefault, or Unconfined", typ)
 		}
@@ -1273,7 +1376,10 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			sc.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeLocalhost, LocalhostProfile: &profile}
 			set = true
 		case "":
-			// no type specified: nothing to apply.
+			// Mirrors ValidateAppArmorProfileField's own field.Required "type
+			// is required when appArmorProfile is set" — same reasoning as
+			// the seccompProfile case above.
+			return nil, errors.Errorf("securityContext.appArmorProfile: type is required when appArmorProfile is set")
 		default:
 			return nil, errors.Errorf("securityContext.appArmorProfile: invalid type %q, must be Localhost, RuntimeDefault, or Unconfined", typ)
 		}
