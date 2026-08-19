@@ -1666,3 +1666,50 @@ func TestParseResources_StandardResource_MismatchedRequestLimit_Accepted(t *test
 		t.Errorf("cpu request = %v, ok=%v, want 100m", q, ok)
 	}
 }
+
+// TestParseSecurityContext_NonBoolHardeningField_Error regression-tests a
+// review finding (launcher#284): a quoted `"false"` for
+// allowPrivilegeEscalation (or any of its three sibling hardening flags)
+// used to fail the `.(bool)` type assertion silently, leaving the field unset
+// so the container fell back to Kubernetes's permissive default while
+// looking like the authored hardening request was honored.
+func TestParseSecurityContext_NonBoolHardeningField_Error(t *testing.T) {
+	for _, key := range []string{"runAsNonRoot", "readOnlyRootFilesystem", "allowPrivilegeEscalation", "privileged"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := parseSecurityContext(map[string]any{
+				"securityContext": map[string]any{
+					key: "false",
+				},
+			})
+			if err == nil {
+				t.Fatalf("expected error for non-bool %s", key)
+			}
+		})
+	}
+}
+
+func TestParseSecurityContext_BoolHardeningFields_Accepted(t *testing.T) {
+	sc, err := parseSecurityContext(map[string]any{
+		"securityContext": map[string]any{
+			"runAsNonRoot":             true,
+			"readOnlyRootFilesystem":   true,
+			"allowPrivilegeEscalation": false,
+			"privileged":               false,
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseSecurityContext: %v", err)
+	}
+	if sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+		t.Error("expected runAsNonRoot=true")
+	}
+	if sc.ReadOnlyRootFilesystem == nil || !*sc.ReadOnlyRootFilesystem {
+		t.Error("expected readOnlyRootFilesystem=true")
+	}
+	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+		t.Error("expected allowPrivilegeEscalation=false")
+	}
+	if sc.Privileged == nil || *sc.Privileged {
+		t.Error("expected privileged=false")
+	}
+}

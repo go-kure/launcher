@@ -420,3 +420,98 @@ func TestCronjobConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 		t.Error("expected error when privileged=true and policy disallows it")
 	}
 }
+
+func TestCronjobHandler_WithVolumes_EmptyDir(t *testing.T) {
+	h := &components.CronjobHandler{}
+	component := &oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+			"volumes": []any{
+				map[string]any{
+					"name":      "tmp",
+					"type":      "emptyDir",
+					"mountPath": "/tmp",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("job", "default", cfg)
+	if _, err := cfg.Generate(app); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+// TestCronjobHandler_FileKeyRef_VolumeWiring regression-tests a review finding
+// (launcher#284): the cronjob handler exposed env[].valueFrom.fileKeyRef
+// (shared via schemaEnv) without any way to declare the emptyDir volume its
+// volumeName must reference, so real Kubernetes admission's
+// validateFileKeyRefVolumes would reject every authored fileKeyRef with a
+// NotFound on volumeName. Confirms the volume the ref points at is actually
+// present in the generated CronJob's pod template.
+func TestCronjobHandler_FileKeyRef_VolumeWiring(t *testing.T) {
+	h := &components.CronjobHandler{}
+	component := &oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+			"volumes": []any{
+				map[string]any{
+					"name":      "envfiles",
+					"type":      "emptyDir",
+					"mountPath": "/etc/envfiles",
+				},
+			},
+			"env": []any{
+				map[string]any{
+					"name": "API_KEY",
+					"valueFrom": map[string]any{
+						"fileKeyRef": map[string]any{
+							"volumeName": "envfiles",
+							"path":       "api.env",
+							"key":        "API_KEY",
+						},
+					},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("job", "default", cfg)
+	objs, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objs {
+		cj, ok := (*obj).(*batchv1.CronJob)
+		if !ok {
+			continue
+		}
+		spec := cj.Spec.JobTemplate.Spec.Template.Spec
+		found := false
+		for _, v := range spec.Volumes {
+			if v.Name == "envfiles" {
+				if v.EmptyDir == nil {
+					t.Error("expected envfiles volume to be emptyDir")
+				}
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("expected pod spec to declare the envfiles volume referenced by fileKeyRef")
+		}
+		return
+	}
+	t.Error("CronJob not found")
+}

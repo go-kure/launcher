@@ -1225,6 +1225,29 @@ func parseLifecycleHandler(m map[string]any) (*corev1.LifecycleHandler, error) {
 // this component's own Generate() and unconditionally overwrites
 // container.SecurityContext (traits/security_context.go:190) — the trait always
 // wins when both are used together.
+// parseBoolField extracts an optional bool from raw[key], erroring if key is
+// present with a non-bool value rather than silently skipping it. Used only
+// for the four SecurityContext hardening flags below (runAsNonRoot,
+// readOnlyRootFilesystem, allowPrivilegeEscalation, privileged): each gates a
+// Kubernetes default that stays permissive when the field is left unset, so a
+// mistyped value (e.g. a quoted `"false"`) must not silently fall back to
+// that permissive default while looking like the hardening request was
+// honored. This deliberately does NOT extend to runAsUser/runAsGroup, which
+// keep this file's established silent-skip convention for numeric fields
+// (see toInt64's doc comment) — an unset UID/GID has no equivalent
+// permissive-security-default consequence.
+func parseBoolField(raw map[string]any, key string) (*bool, error) {
+	v, present := raw[key]
+	if !present {
+		return nil, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return nil, errors.Errorf("securityContext.%s: must be a boolean, got %T", key, v)
+	}
+	return &b, nil
+}
+
 func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error) {
 	raw, ok := props["securityContext"].(map[string]any)
 	if !ok {
@@ -1251,8 +1274,10 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			set = true
 		}
 	}
-	if v, ok := raw["runAsNonRoot"].(bool); ok {
-		sc.RunAsNonRoot = &v
+	if v, err := parseBoolField(raw, "runAsNonRoot"); err != nil {
+		return nil, err
+	} else if v != nil {
+		sc.RunAsNonRoot = v
 		set = true
 	}
 	// A container authored with both an explicit root UID and runAsNonRoot
@@ -1266,16 +1291,22 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 	if sc.RunAsUser != nil && *sc.RunAsUser == 0 && sc.RunAsNonRoot != nil && *sc.RunAsNonRoot {
 		return nil, errors.Errorf("securityContext: runAsUser must not be 0 when runAsNonRoot is true")
 	}
-	if v, ok := raw["readOnlyRootFilesystem"].(bool); ok {
-		sc.ReadOnlyRootFilesystem = &v
+	if v, err := parseBoolField(raw, "readOnlyRootFilesystem"); err != nil {
+		return nil, err
+	} else if v != nil {
+		sc.ReadOnlyRootFilesystem = v
 		set = true
 	}
-	if v, ok := raw["allowPrivilegeEscalation"].(bool); ok {
-		sc.AllowPrivilegeEscalation = &v
+	if v, err := parseBoolField(raw, "allowPrivilegeEscalation"); err != nil {
+		return nil, err
+	} else if v != nil {
+		sc.AllowPrivilegeEscalation = v
 		set = true
 	}
-	if v, ok := raw["privileged"].(bool); ok {
-		sc.Privileged = &v
+	if v, err := parseBoolField(raw, "privileged"); err != nil {
+		return nil, err
+	} else if v != nil {
+		sc.Privileged = v
 		set = true
 	}
 	if capsRaw, ok := raw["capabilities"].(map[string]any); ok {

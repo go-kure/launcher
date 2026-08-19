@@ -147,7 +147,12 @@ the API server, but the kubelet's `verifyRunAsNonRoot` check deterministically
 fails it at container-start time — a `CreateContainerConfigError`, every
 time — so this contradictory combination is rejected here instead of
 shipping a workload guaranteed never to start),
-`readOnlyRootFilesystem`, `allowPrivilegeEscalation`, `privileged`,
+`readOnlyRootFilesystem`, `allowPrivilegeEscalation`, `privileged` (these
+three, plus `runAsNonRoot` above, are each rejected outright if authored with
+a non-boolean value, e.g. a quoted `"false"`, instead of being silently
+skipped: since Kubernetes' default for each is permissive, silently dropping
+a mistyped value would leave the container permissive while looking like the
+authored hardening request was honored),
 `capabilities.{add,drop}`, `seccompProfile` (`type` is required whenever the
 `seccompProfile` object is authored at all, matching real admission's own
 `field.Required` — omitting it (e.g. authoring only `localhostProfile` with

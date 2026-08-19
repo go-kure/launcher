@@ -41,6 +41,7 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"lifecycle":                  schemaLifecycle(false),
 		"securityContext":            schemaSecurityContext(false),
 		"workingDir":                 schemaWorkingDir(false),
+		"volumes":                    schemaVolumes(),
 		"initContainers":             schemaContainers(),
 	}
 }
@@ -140,6 +141,14 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		config.WorkingDir = workingDir
 	}
 
+	parsed, err := parseVolumes(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Volumes = parsed.Volumes
+	config.VolumeMounts = parsed.Mounts
+	config.PVCs = parsed.PVCs
+
 	initContainers, err := parseInitContainers(props)
 	if err != nil {
 		return nil, err
@@ -167,7 +176,10 @@ type CronjobConfig struct {
 	Lifecycle                  *corev1.Lifecycle
 	SecurityContext            *corev1.SecurityContext
 	WorkingDir                 string
+	Volumes                    []corev1.Volume
+	VolumeMounts               []corev1.VolumeMount
 	InitContainers             []InitContainerConfig
+	PVCs                       []PVCConfig
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -208,11 +220,16 @@ func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
 		return err
 	}
+	for _, pvc := range c.PVCs {
+		if err := enforceMaxStorageSize(pvc.Size, p.MaxStorageSize()); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
 
-// Generate creates a Kubernetes CronJob and ServiceAccount.
+// Generate creates a Kubernetes CronJob, ServiceAccount, and any declared PVCs.
 func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}
 	cronjob, err := c.createCronJob(app)
@@ -223,8 +240,18 @@ func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, erro
 
 	obj := client.Object(cronjob)
 	saObj := client.Object(sa)
+	objects := []*client.Object{&obj, &saObj}
 
-	return []*client.Object{&obj, &saObj}, nil
+	for _, pvc := range c.PVCs {
+		p, err := BuildPVC(pvc, app.Namespace, labels)
+		if err != nil {
+			return nil, err
+		}
+		pObj := client.Object(p)
+		objects = append(objects, &pObj)
+	}
+
+	return objects, nil
 }
 
 func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob, error) {
@@ -246,6 +273,9 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	}
 	if c.SecurityContext != nil {
 		kubernetes.SetContainerSecurityContext(container, *c.SecurityContext)
+	}
+	for _, m := range c.VolumeMounts {
+		kubernetes.AddContainerVolumeMount(container, m)
 	}
 	applyProbes(container, c.Probes)
 
@@ -271,6 +301,11 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	}
 	if err := kubernetes.AddCronJobContainer(cj, container); err != nil {
 		return nil, errors.Wrapf(err, "add container %q", c.Name)
+	}
+	for i := range c.Volumes {
+		if err := kubernetes.AddCronJobVolume(cj, &c.Volumes[i]); err != nil {
+			return nil, errors.Wrapf(err, "add volume %q", c.Volumes[i].Name)
+		}
 	}
 
 	return cj, nil
