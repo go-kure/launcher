@@ -749,6 +749,23 @@ func TestParseSecurityContext_Absent(t *testing.T) {
 	}
 }
 
+func TestParseSecurityContext_NonObject_Error(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  any
+	}{
+		{"scalar", "true"},
+		{"array", []any{"a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseSecurityContext(map[string]any{"securityContext": tc.val})
+			if err == nil {
+				t.Fatal("expected error for non-object securityContext, got nil")
+			}
+		})
+	}
+}
+
 func TestParseSecurityContext_FullFidelity(t *testing.T) {
 	props := map[string]any{
 		"securityContext": map[string]any{

@@ -112,7 +112,9 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 		return nil, errors.Wrap(err, "invalid securityContext configuration")
 	}
 	config.SecurityContext = securityContext
-	if workingDir, ok := props["workingDir"].(string); ok {
+	if workingDir, present, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
+		return nil, err
+	} else if present {
 		config.WorkingDir = workingDir
 	}
 
