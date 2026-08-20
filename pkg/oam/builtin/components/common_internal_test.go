@@ -2157,7 +2157,10 @@ func TestQualifyPVCNames_QualifiesObjectNameAndClaimRef(t *testing.T) {
 	}
 	pvcs := []PVCConfig{{Name: "data", Size: "1Gi"}}
 
-	got := qualifyPVCNames(volumes, pvcs, "job")
+	got, err := qualifyPVCNames(volumes, pvcs, "job")
+	if err != nil {
+		t.Fatalf("qualifyPVCNames returned unexpected error: %v", err)
+	}
 
 	if len(got) != 1 || got[0].Name != "job-data" {
 		t.Fatalf("qualified PVCs = %+v, want [{Name: job-data ...}]", got)
@@ -2175,7 +2178,10 @@ func TestQualifyPVCNames_QualifiesObjectNameAndClaimRef(t *testing.T) {
 
 func TestQualifyPVCNames_NoPVCs_NoOp(t *testing.T) {
 	volumes := []corev1.Volume{{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
-	got := qualifyPVCNames(volumes, nil, "job")
+	got, err := qualifyPVCNames(volumes, nil, "job")
+	if err != nil {
+		t.Fatalf("qualifyPVCNames returned unexpected error: %v", err)
+	}
 	if len(got) != 0 {
 		t.Errorf("qualifyPVCNames with no PVCs = %+v, want empty", got)
 	}
@@ -2198,7 +2204,10 @@ func TestQualifyPVCNames_Idempotent(t *testing.T) {
 	}
 	pvcs := []PVCConfig{{Name: "data", Size: "1Gi"}}
 
-	first := qualifyPVCNames(volumes, pvcs, "app")
+	first, err := qualifyPVCNames(volumes, pvcs, "app")
+	if err != nil {
+		t.Fatalf("first call: qualifyPVCNames returned unexpected error: %v", err)
+	}
 	if len(first) != 1 || first[0].Name != "app-data" {
 		t.Fatalf("first call: qualified PVCs = %+v, want [{Name: app-data ...}]", first)
 	}
@@ -2206,7 +2215,10 @@ func TestQualifyPVCNames_Idempotent(t *testing.T) {
 		t.Fatalf("first call: ClaimName = %q, want %q", volumes[0].PersistentVolumeClaim.ClaimName, "app-data")
 	}
 
-	second := qualifyPVCNames(volumes, first, "app")
+	second, err := qualifyPVCNames(volumes, first, "app")
+	if err != nil {
+		t.Fatalf("second call: qualifyPVCNames returned unexpected error: %v", err)
+	}
 	if len(second) != 1 || second[0].Name != "app-data" {
 		t.Fatalf("second call: qualified PVCs = %+v, want [{Name: app-data ...}] (unchanged)", second)
 	}
@@ -2230,13 +2242,19 @@ func TestQualifyPVCNames_NoCollisionAcrossHyphenatedNames(t *testing.T) {
 		PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"},
 	}}}
 	pvcsA := []PVCConfig{{Name: "data", Size: "1Gi"}}
-	qualifiedA := qualifyPVCNames(volumesA, pvcsA, "a-b")
+	qualifiedA, err := qualifyPVCNames(volumesA, pvcsA, "a-b")
+	if err != nil {
+		t.Fatalf("qualifyPVCNames returned unexpected error: %v", err)
+	}
 
 	volumesB := []corev1.Volume{{Name: "b-data", VolumeSource: corev1.VolumeSource{
 		PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "b-data"},
 	}}}
 	pvcsB := []PVCConfig{{Name: "b-data", Size: "1Gi"}}
-	qualifiedB := qualifyPVCNames(volumesB, pvcsB, "a")
+	qualifiedB, err := qualifyPVCNames(volumesB, pvcsB, "a")
+	if err != nil {
+		t.Fatalf("qualifyPVCNames returned unexpected error: %v", err)
+	}
 
 	if len(qualifiedA) != 1 || len(qualifiedB) != 1 {
 		t.Fatalf("qualifiedA = %+v, qualifiedB = %+v, want one PVC each", qualifiedA, qualifiedB)
@@ -2244,6 +2262,24 @@ func TestQualifyPVCNames_NoCollisionAcrossHyphenatedNames(t *testing.T) {
 	if qualifiedA[0].Name == qualifiedB[0].Name {
 		t.Fatalf("collision: appName %q + volume %q and appName %q + volume %q both qualified to %q",
 			"a-b", "data", "a", "b-data", qualifiedA[0].Name)
+	}
+}
+
+func TestQualifyPVCNames_InvalidDNS_Error(t *testing.T) {
+	// Regression test: qualified PVC names must be valid DNS-1123 subdomains.
+	// Component names with uppercase letters would produce invalid qualified names.
+	volumes := []corev1.Volume{{
+		Name: "data",
+		VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"},
+		},
+	}}
+	pvcs := []PVCConfig{{Name: "data", Size: "1Gi"}}
+
+	// Uppercase in appName produces an invalid DNS-1123 subdomain
+	_, err := qualifyPVCNames(volumes, pvcs, "MyApp")
+	if err == nil {
+		t.Fatal("qualifyPVCNames: expected error for uppercase in appName, got nil")
 	}
 }
 

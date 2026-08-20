@@ -2896,9 +2896,9 @@ func escapeForPVCQualification(s string) string {
 	return strings.ReplaceAll(s, "-", "--")
 }
 
-func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) []PVCConfig {
+func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) ([]PVCConfig, error) {
 	if len(pvcs) == 0 {
-		return pvcs
+		return pvcs, nil
 	}
 	// Volume.Name is the pod-local volume name and is never rewritten by
 	// this function — only the PVC's own object Name and the matching
@@ -2924,9 +2924,15 @@ func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) 
 		if !ok {
 			localName = pvc.Name
 		}
+		qualified := escapeForPVCQualification(appName) + "-" + escapeForPVCQualification(localName)
+		// Validate the qualified PVC name is a valid DNS-1123 subdomain.
+		// Kubernetes PersistentVolumeClaim names must be valid DNS subdomains.
+		if errs := validation.IsDNS1123Subdomain(qualified); len(errs) > 0 {
+			return nil, errors.Errorf("PVC name %q is not a valid DNS-1123 subdomain: %s", qualified, strings.Join(errs, "; "))
+		}
 		out[i] = pvc
-		out[i].Name = escapeForPVCQualification(appName) + "-" + escapeForPVCQualification(localName)
-		qualifiedNames[pvc.Name] = out[i].Name
+		out[i].Name = qualified
+		qualifiedNames[pvc.Name] = qualified
 	}
 	for i := range volumes {
 		claim := volumes[i].PersistentVolumeClaim
@@ -2937,5 +2943,5 @@ func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) 
 			claim.ClaimName = qualified
 		}
 	}
-	return out
+	return out, nil
 }
