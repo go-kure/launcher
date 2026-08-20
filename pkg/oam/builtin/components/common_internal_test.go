@@ -1704,11 +1704,9 @@ func TestParseEnv_ResourceFieldRef_NonStringDivisor_Error(t *testing.T) {
 	}
 }
 
-func TestParseEnv_ResourceFieldRef_ZeroDivisor_Accepted(t *testing.T) {
-	// A zero-valued divisor ("0") is numerically equal to the unset Quantity
-	// zero value; real admission's own Cmp-to-zero check treats it as absent
-	// rather than rejecting it — this is NOT the same as validating "0" as a
-	// canonical unit string, which it is not.
+func TestParseEnv_ResourceFieldRef_ZeroDivisor_Error(t *testing.T) {
+	// Kubernetes requires divisor to be nonzero and rejects Pods with a zero
+	// divisor; reject it at parse time rather than emitting an invalid Pod.
 	props := map[string]any{
 		"env": []any{
 			map[string]any{
@@ -1719,8 +1717,8 @@ func TestParseEnv_ResourceFieldRef_ZeroDivisor_Accepted(t *testing.T) {
 			},
 		},
 	}
-	if _, err := parseEnv(props); err != nil {
-		t.Fatalf("parseEnv: unexpected error for a zero resourceFieldRef.divisor: %v", err)
+	if _, err := parseEnv(props); err == nil {
+		t.Fatal("parseEnv: expected error for a zero resourceFieldRef.divisor, got nil")
 	}
 }
 

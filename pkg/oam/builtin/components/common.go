@@ -630,14 +630,15 @@ func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, err
 		if err != nil {
 			return nil, errors.Errorf("resourceFieldRef: invalid divisor %q: %w", dv, err)
 		}
-		if qty.Sign() != 0 {
-			allowed := validDownwardAPIDivisor
-			if res == "limits.cpu" || res == "requests.cpu" {
-				allowed = validDownwardAPIDivisorCPU
-			}
-			if !allowed[qty.String()] {
-				return nil, errors.Errorf("resourceFieldRef: divisor %q is not a supported unit for resource %q", dv, res)
-			}
+		if qty.Sign() == 0 {
+			return nil, errors.Errorf("resourceFieldRef: divisor must not be zero")
+		}
+		allowed := validDownwardAPIDivisor
+		if res == "limits.cpu" || res == "requests.cpu" {
+			allowed = validDownwardAPIDivisorCPU
+		}
+		if !allowed[qty.String()] {
+			return nil, errors.Errorf("resourceFieldRef: divisor %q is not a supported unit for resource %q", dv, res)
 		}
 		ref.Divisor = qty
 	}
