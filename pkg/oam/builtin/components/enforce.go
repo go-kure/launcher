@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 func enforceMaxReplicas(current int32, max *int32) error {
@@ -122,6 +123,74 @@ func enforceHostPathVolumes(volumes []corev1.Volume, allowed bool) error {
 			return errors.Errorf("volume %q: hostPath volumes are not allowed by environment policy", v.Name)
 		}
 	}
+	return nil
+}
+
+// enforceCapabilities validates container securityContext capabilities against
+// environment policy. oam.Policy.AllowedCapabilities/ForbiddenCapabilities/
+// RequiredCapabilities are container-capability strings (e.g. "NET_ADMIN"), not
+// OAM trait types — the naming is unfortunate but correct: these methods gate
+// container Linux capabilities, not OAM trait usage. A nil return from any of
+// the three means unconstrained for that dimension.
+//
+// Validation order:
+// 1. If policy has ForbiddenCapabilities: reject any added capability in that list
+// 2. If policy has AllowedCapabilities: reject any added capability NOT in that list
+// 3. If policy has RequiredCapabilities: reject if any required capability is missing from add
+//
+// Note: Dropped capabilities are not validated against allowed/required lists —
+// dropping is always permitted as a hardening measure. Only explicitly added
+// capabilities are constrained.
+func enforceCapabilities(sc *corev1.SecurityContext, p oam.Policy) error {
+	if sc == nil || sc.Capabilities == nil {
+		return nil
+	}
+	// Only added capabilities are constrained; drop is always allowed.
+	for _, cap := range sc.Capabilities.Add {
+		// Normalize to uppercase for comparison (Kubernetes capability names are case-insensitive)
+		capUpper := strings.ToUpper(string(cap))
+
+		// Check forbidden list first
+		if forbidden := p.ForbiddenCapabilities(); len(forbidden) > 0 {
+			for _, f := range forbidden {
+				if strings.ToUpper(f) == capUpper {
+					return errors.Errorf("securityContext.capabilities: capability %q is forbidden by environment policy", cap)
+				}
+			}
+		}
+
+		// Check allowed list
+		if allowed := p.AllowedCapabilities(); len(allowed) > 0 {
+			found := false
+			for _, a := range allowed {
+				if strings.ToUpper(a) == capUpper {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return errors.Errorf("securityContext.capabilities: capability %q is not in the allowed list", cap)
+			}
+		}
+	}
+
+	// Check required capabilities
+	if required := p.RequiredCapabilities(); len(required) > 0 {
+		for _, r := range required {
+			reqUpper := strings.ToUpper(r)
+			found := false
+			for _, cap := range sc.Capabilities.Add {
+				if strings.ToUpper(string(cap)) == reqUpper {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return errors.Errorf("securityContext.capabilities: required capability %q is not present in add list", r)
+			}
+		}
+	}
+
 	return nil
 }
 
