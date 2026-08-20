@@ -207,7 +207,11 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 // A Service is generated when Port > 0.
 func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}
-	c.PVCs = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
+	var err error
+	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
+	if err != nil {
+		return nil, err
+	}
 	ds, err := c.createDaemonSet(app)
 	if err != nil {
 		return nil, err
