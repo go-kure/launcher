@@ -1,0 +1,28 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>go-kure/.github//renovate/shared"],
+  "packageRules": [
+    {
+      "description": "Direct deps shared with the imported kure are never proposed here: launcher must not lead the kure release it imports (MVS pulls launcher up automatically, so only the 'ahead' direction needs control — see AGENTS.md § 'Shared dependencies with kure'). CI enforces this via site/scripts/check-kure-dep-sync.sh; this list mirrors that guard's current shared-direct set and must be updated together with go.mod changes that add or drop a shared direct dep — a dep missing here is still caught by the CI guard, just as a red PR instead of never being proposed. Correct sequence for these: land the kure bump, cut a kure release, bump the go-kure/kure require, take the shared dep together.",
+      "enabled": false,
+      "matchPackageNames": [
+        "github.com/backube/volsync",
+        "github.com/cert-manager/cert-manager",
+        "github.com/cilium/cilium",
+        "github.com/cloudnative-pg/cloudnative-pg",
+        "github.com/cloudnative-pg/plugin-barman-cloud",
+        "github.com/external-secrets/external-secrets/apis",
+        "github.com/fluxcd/helm-controller/api",
+        "github.com/fluxcd/kustomize-controller/api",
+        "github.com/fluxcd/source-controller/api",
+        "gopkg.in/yaml.v3",
+        "k8s.io/api",
+        "k8s.io/apiextensions-apiserver",
+        "k8s.io/apimachinery",
+        "sigs.k8s.io/controller-runtime",
+        "sigs.k8s.io/gateway-api",
+        "sigs.k8s.io/yaml"
+      ]
+    }
+  ]
+}

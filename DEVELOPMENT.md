@@ -181,15 +181,29 @@ Releases are triggered by pushing a `vX.Y.Z` tag:
 
 The pushed tag triggers the release pipeline which runs GoReleaser to produce binaries and publish a GitHub release.
 
-## Dependabot Management
+## Renovate Management
 
-Use `@dependabot` commands in PR comments:
+Dependency updates come from Renovate (`renovate.json`, extending the shared
+`go-kure/.github` preset). The **Dependency Dashboard issue** is the control
+surface:
 
-| Command | Effect |
-|---------|--------|
-| `@dependabot close` | Close PR, prevent recreation |
-| `@dependabot ignore this dependency` | Ignore dependency permanently |
-| `@dependabot rebase` | Rebase the PR |
+- **Gated updates** (every major, all Go-toolchain updates) sit under
+  *Pending Approval* — tick the checkbox to let Renovate open the PR.
+  Nothing gated is ever proposed on its own.
+- **Deferring an update**: leave its dashboard checkbox unticked; there is
+  nothing to close. To reopen a closed/ignored update, tick its checkbox on
+  the dashboard.
+- **Rebasing a PR**: tick the "rebase/retry" checkbox in the PR body, or the
+  per-PR entry on the dashboard. Renovate also rebases automatically when the
+  PR falls behind the base branch.
+- **Closing a PR**: closing it normally tells Renovate not to recreate that
+  version; the dashboard lists it under *Closed/Ignored*.
+
+Direct dependencies shared with the imported kure are never proposed here at
+all — launcher must not lead the kure release it imports (see `AGENTS.md`
+§ shared dependencies; CI enforces it via `site/scripts/check-kure-dep-sync.sh`).
+The disable list lives in `renovate.json` and must be kept in step with that
+guard's shared-direct set.
 
 ## Makefile Targets Reference
 

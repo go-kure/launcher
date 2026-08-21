@@ -40,8 +40,8 @@ launcher/
 ├── examples/         # Runnable example applications and cluster profiles
 ├── site/             # Hugo docs site (docs-map.yaml, scripts/, content/)
 ├── .github/
-│   ├── workflows/    # CI, deploy-docs, release, pr-review
-│   └── dependabot.yml
+│   └── workflows/    # CI, deploy-docs, release, pr-review
+├── renovate.json     # Renovate config (extends the shared go-kure/.github preset)
 ├── .claude/          # Claude Code configuration
 ├── mise.toml         # Tool versions and tasks
 ├── Makefile          # Build system
@@ -264,7 +264,10 @@ graph), are unconstrained. Existing drift is grandfathered.
 **How it's enforced.** `site/scripts/check-kure-dep-sync.sh` (Go helper in
 `site/scripts/kuredepsync/`) runs in CI's `validate` job: diff-scoped and blocking on PRs /
 merge-queue (fails only when a change introduces or increases the lead), `--report`-only on
-push/schedule. Also wired into `make check` / `make precommit`.
+push/schedule. Also wired into `make check` / `make precommit`. Renovate never proposes
+these deps in the first place: `renovate.json` carries an `enabled: false` rule listing the
+shared-direct set — keep that list in step with go.mod changes that add or drop a shared
+direct dep (a missing entry is still caught by the CI guard, just as a red PR).
 
 **Exception path.** Never lead unilaterally. To adopt a newer shared dep: land the matching
 kure bump → cut a kure release → bump launcher's `go-kure/kure` require to it and take the

@@ -7,8 +7,12 @@
 #
 # This script ensures that:
 # 1. go.mod versions match versions.yaml "current" field EXACTLY
-# 2. dependabot.yml ignore rules match versions.yaml "max_dependabot" field
+# 2. The README Go badge matches the go.mod Go version
 # 3. Documentation is generated from versions.yaml
+#
+# Bot-side update caps live in renovate.json (repo rules on top of the shared
+# go-kure/.github preset) — the retired validate_dependabot check mirrored caps
+# into .github/dependabot.yml before the Renovate migration.
 
 set -euo pipefail
 
@@ -16,8 +20,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VERSIONS_FILE="$REPO_ROOT/versions.yaml"
 GO_MOD_FILE="$REPO_ROOT/go.mod"
-DEPENDABOT_FILE="$REPO_ROOT/.github/dependabot.yml"
 DOCS_FILE="$REPO_ROOT/docs/compatibility.md"
+README_FILE="$REPO_ROOT/README.md"
 
 # Colors for output
 RED='\033[0;31m'
@@ -73,6 +77,21 @@ validate_gomod() {
         success "Go version matches: $go_current"
     fi
 
+    # Check the README Go badge against go.mod (the badge drifted to 1.26.2
+    # while go.mod moved on — nothing validated it)
+    local badge_go_version
+    badge_go_version=$(grep -oE 'go-[0-9]+\.[0-9]+(\.[0-9]+)?-blue' "$README_FILE" | head -n1 | sed -E 's/^go-//; s/-blue$//')
+
+    if [[ -z "$badge_go_version" ]]; then
+        error "No Go version badge found in README.md (expected shields.io 'go-X.Y.Z-blue')"
+        ((errors++))
+    elif [[ "$badge_go_version" != "$gomod_go_version" ]]; then
+        error "README badge mismatch: badge says '$badge_go_version', go.mod has '$gomod_go_version'"
+        ((errors++))
+    else
+        success "README Go badge matches: $badge_go_version"
+    fi
+
     # Check infrastructure dependencies
     local deps
     deps=$(yq '.infrastructure | keys | .[]' "$VERSIONS_FILE" 2>/dev/null || true)
@@ -109,59 +128,6 @@ validate_gomod() {
     fi
 
     return $errors
-}
-
-# Validate that dependabot.yml ignore rules match versions.yaml
-validate_dependabot() {
-    local errors=0
-    info ""
-    info "Validating dependabot.yml ignore rules..."
-
-    local deps
-    deps=$(yq '.infrastructure | to_entries | .[] | select((.value.max_dependabot == null) | not) | .key' "$VERSIONS_FILE" 2>/dev/null) || true
-
-    if [[ -z "$deps" ]]; then
-        success "No max_dependabot constraints to validate"
-        return 0
-    fi
-
-    while IFS= read -r dep; do
-        [[ -z "$dep" ]] && continue
-        local go_module
-        go_module=$(yq ".infrastructure.${dep}.go_module" "$VERSIONS_FILE")
-        local max_version
-        max_version=$(yq ".infrastructure.${dep}.max_dependabot" "$VERSIONS_FILE")
-
-        local matched=false
-
-        if grep -qE "dependency-name:.*\"$go_module\"" "$DEPENDABOT_FILE" 2>/dev/null; then
-            matched=true
-        else
-            local module_path="$go_module"
-            while [[ "$module_path" == */* ]]; do
-                local parent_pattern
-                parent_pattern=$(echo "$module_path" | sed 's|/[^/]*$|/\\*|')
-                if grep -qE "dependency-name:.*\"$parent_pattern\"" "$DEPENDABOT_FILE" 2>/dev/null; then
-                    matched=true
-                    break
-                fi
-                module_path=$(echo "$module_path" | sed 's|/[^/]*$||')
-            done
-        fi
-
-        if [[ "$matched" == "true" ]]; then
-            success "$dep: ignore rule present"
-        else
-            warning "Dependency $go_module (max: $max_version) not found in dependabot ignore rules"
-            errors=$((errors + 1))
-        fi
-    done <<< "$deps"
-
-    if [[ $errors -eq 0 ]]; then
-        success "Dependabot ignore rules look consistent"
-    fi
-
-    return 0  # Don't fail on dependabot warnings for now
 }
 
 # Generate compatibility documentation
@@ -250,7 +216,6 @@ main() {
             info ""
             validate_gomod
             local gomod_result=$?
-            validate_dependabot
 
             if [[ $gomod_result -eq 0 ]]; then
                 info ""
