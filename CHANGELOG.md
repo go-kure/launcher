@@ -1,6 +1,146 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.21] - 2026-08-21
+
+### Added
+
+- External-secret envFrom and mountPath workload injection
+- Validate external-secret envFrom keys and mountPath volume name
+- Lowering engine core, property validator, extension channel, PlatformReserved
+- Expose as a registered lowering rule
+- Add ContractDescriber optional interface and HandlerContracts accessor
+- Record lowering-rule identity in Origin.Rule
+- Shared full-fidelity pod/container schema for builtin components
+
+### Build
+
+- Bump Go to 1.26.6 for stdlib CVE fixes
+
+### CI
+
+- Add merge_group trigger to pr-review.yml
+- Run checks + AI review on draft PRs (GitLab mr-review parity)
+- Bump govulncheck to v1.7.0 and pin it via workflow env
+- Reword the govulncheck pin comment to drop downstream names
+
+### Changed
+
+- Use the shared govulncheck gate
+
+### Dependencies
+
+- Group the cloudnative-pg and controlplaneio-fluxcd modules
+- Bump github.com/google/go-containerregistry
+
+### Documentation
+
+- Document the doc-sync composite actions in docs-build/doc-gate
+- Document and demonstrate external-secret workload injection
+- Document mount-path collision rejection, fix stale line citation
+- Specify raw-document entry point for lowering engine
+- Stop citing spike-only TransformAll as current-branch fact
+- Document the lowering engine's public API in package READMEs
+- Stop scoping emitted-property validation to schema-declaring rules
+- Drop dangling cross-reference to untracked review notes
+- Fix stale ExposeHandler/RenderingSchema references in design-capability-schema.md
+- Fix two stale references caught by scoped wave-2 re-review
+- Sync pkg/oam doc comment with lowering engine scope
+- Fix stale RegisterTraitLowering reference for built-in expose
+- Document ExposeRendering.NetworkPolicy (doc-gate fix)
+- Document NameAllocator namespace scoping and LowerRaws metadata validation
+- Correct round-13's forwarded-trait claim, document two deferred gaps
+- Document ContractDescriber, HandlerContracts, and Origin.Rule
+- Correct "engine never reads" claim re: ContractMetadata.Version
+- Document Origin.Rule's forwarded-element exception
+- Qualify draft-review claim on rollout dependency (codex confirm-round, wording)
+- Correct the go.work ignore rationale
+
+### Fixed
+
+- Consume canonical doc-sync scripts from go-kure/.github
+- Trigger CI on ready_for_review so draft-gated jobs actually run
+- Forward service interfaces through trait decorators
+- Reject mistyped envFrom/mountPath and close asymmetric volume collision
+- Forward LayoutAugmenter conditionally, reject mount-path collisions
+- Stop claiming applyTraits already enforces PlatformReserved
+- Correct policy-ordering, schema-parity, and PlatformReserved gaps in expose lowering
+- Close final-review gaps in hostname-wildcard reservation, lowering-rule registration, and docs
+- Make handler/lowering-rule collision checks reciprocal
+- Preserve stamped origin across a second lowering round
+- Stop validateSettled dropping registered custom trait handlers
+- Catch a same-round sibling name collision in NameAllocator
+- Reject an empty Kind() at document-lowering registration
+- Enforce AdditionalProperties on an object field with no sub-schema
+- Exempt built-in trait-lowering rules from CapabilityDefinition
+- Admit registered component handlers during settled validation
+- Publish component-lowering schemas alongside trait rules
+- Skip capability re-merge for sealed traits in lowering-rule dispatch
+- Write normalized collection values back onto validated properties
+- Defer trait-component restrictions for lowerable component types
+- Gate LowerRaws dispatch on apiVersion, not kind alone
+- Record every emitted sibling in LoweringStep.To; reject cross-round name reuse
+- Namespace-scoped raw dedup, sealed nested traits, lowerable-type leak, NaN/Inf rejection
+- Accept networkPolicy under the expose capability's rendering
+- Scope NameAllocator reservations by namespace
+- Validate claimed raw document metadata before lowering
+- Support annotations on the httproute trait
+- Don't seal traits a component rule merely forwards
+- Give a chain of exactly MaxLoweringDepth-1 expansions room to settle
+- Enforce strict-capabilities' missing-CapabilityDefinition check for lowering rules
+- Apply CapabilityDefinition schema to lowering rules without VAD
+- Enforce lowering-rule PropertySchema on emitted intermediate components/traits
+- Reserve pass-through document identities against LowerRaws collision detection
+- Scope pass-through identity reservation to the terminal kind
+- Close five round-9 Codex gaps in the lowering engine
+- Seal document-rule nested traits, validate policy lowering-rule schemas
+- Stamp nested document-rule output, reserve expose gateway fields
+- Seal raw-entry nested traits, defer trait validation past forwarding
+- Re-vendor check-forbidden-terms.sh to canonical
+- Correct rule-class label and forwarded-component Rule stamping
+- Preserve Origin.Rule on document-forwarded policies
+- Reuse the computed rule identity in LoweringStep, not a rebuilt one
+- Keep ready_for_review in pr-review caller (A6 finding)
+- Make resources/securityContext/env full-fidelity per round-2 review
+- Reject unsupported postgresql resource names, fix stale docs
+- Reject 6 more admission-invalid values instead of accepting them
+- Fix 4 more admission-invalid gaps, revert numeric-quantity rejection
+- Validate extended-resource quantities, resourceFieldRef prefix, fileKeyRef path, and lifecycle exec args
+- Validate env fieldRef paths, resourceFieldRef selectors, and envFrom object names
+- Reject 4 more contradictory/unsafe security-context and resource inputs
+- Reject 5 more silently-dropped or overcommit-invalid inputs
+- Wire CronJob volumes for fileKeyRef, reject non-bool hardening flags
+- Reject standard-resource request>limit and empty httpGet paths
+- Reject 15+ more silently-typed fields, fix httpGet.path regression
+- Reject 4 more silently-wrong-type array/scalar fields
+- Reject mistyped securityContext/workingDir, document fileKeyRef gap
+- Reject mistyped nested securityContext profiles and envFrom prefix
+- Reject mistyped lifecycle object and non-string procMount
+- Enforce probe bounds and reject unresolvable named ports
+- Correct 5 findings from wave-12 review of PR #284
+- Correct 3 findings from wave-13 review of PR #284
+- Correct 2 findings from wave-14 review of PR #284
+- Correct 2 findings from wave-15 review of PR #284
+- Correct 2 findings from wave-16 review of PR #284
+- Correct 4 findings from wave-17 review of PR #284
+- Correct 3 findings from wave-18 review of PR #284
+- Correct 3 findings from wave-19 review of PR #284
+- Correct 6 findings from wave-20 review of PR #284
+- Correct wave-21 bot finding, plus 9 self-found unknown-key siblings
+- Reject unknown resourceFieldRef/envFrom-ref keys, correct fileKeyRef doc
+- Reject unknown keys and malformed types across remaining valueFrom/pvc/lifecycle fields
+- Qualify generated PVC object names by component to avoid collisions
+- Reject RWOP+other-modes and CAP_SYS_ADMIN+no-escalation, preserve explicit empty storageClass
+- Reject malformed accessModes/storageClass, close per-type volume field sets, fix PVC re-qualification
+- Make qualified PVC names collision-free across hyphenated component/volume names
+- Validate qualified PVC names against DNS-1123 limits
+
+### Testing
+
+- Cover F5 capability-def schema defaults for trait-lowering rules
+- Cover ContractDescriber/HandlerContracts and Origin.Rule identity
+- Fix vacuous assertion in untouched-component rule-identity test
+
 ## [0.1.0-alpha.20] - 2026-08-03
 
 ### Dependencies
@@ -12,6 +152,10 @@ All notable changes to this project will be documented in this file.
 
 - Bump grpc to v1.82.1 for GO-2026-6061
 - Decode raw Cilium rules strictly; bump kure to v0.2.0-beta.9
+
+### Release
+
+- V0.1.0-alpha.20
 
 ## [0.1.0-alpha.19] - 2026-07-15
 
