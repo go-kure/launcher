@@ -26,12 +26,14 @@ trim = true
 # commit subjects, so the generated changelog never names a downstream consumer
 # (org "No Downstream References" rule; enforced by check-forbidden-terms.sh).
 # Ordered specific → catch-all; the catch-all is a safety net for stray words.
+# The terms below are the redaction patterns themselves, not references that leak
+# out — same self-referential case the standard grants an escape hatch for.
 postprocessors = [
-    { pattern = 'wharf\.zone/component', replace = "the platform component label" },
-    { pattern = 'wharf\.zone', replace = "the platform domain" },
-    { pattern = '(?i)\bfrom crane\b', replace = "from the downstream operator" },
-    { pattern = '(?i)\bwith crane\b', replace = "with the downstream operator" },
-    { pattern = '(?i)\b(wharf|crane|barge|harbor|rudder)\b', replace = "the downstream operator" },
+    { pattern = 'wharf\.zone/component', replace = "the platform component label" }, # allow-term:wharf
+    { pattern = 'wharf\.zone', replace = "the platform domain" }, # allow-term:wharf
+    { pattern = '(?i)\bfrom crane\b', replace = "from the downstream operator" }, # allow-term:crane
+    { pattern = '(?i)\bwith crane\b', replace = "with the downstream operator" }, # allow-term:crane
+    { pattern = '(?i)\b(wharf|crane|barge|harbor|rudder)\b', replace = "the downstream operator" }, # allow-term:wharf allow-term:crane allow-term:barge allow-term:harbor allow-term:rudder
 ]
 
 [git]
