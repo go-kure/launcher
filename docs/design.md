@@ -1,9 +1,10 @@
 # Launcher — Design Document
 
-*Date: 2026-04-19 | Updated: 2026-05-15 | Status: Phase 0 design complete*
+*Date: 2026-04-19 | Updated: 2026-08-22 | Status: Phase 3 shipped, Phase 5 gate met*
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4 | 2026-08-22 | Status refresh: Phase 1b and Phase 3 marked complete, Phase 5 noted gate-met; fix §5 kure-package paths and §13 cross-repo issue refs |
 | 1.3 | 2026-05-15 | Replace patch-centric §4 with OAM-native pipeline; add OAM model, Policy interface, launcher layout, and what-launcher-does-not-do sections; update roadmap |
 | 1.2 | 2026-05-14 | Record all Phase 0 decisions; add §9 decisions table; update roadmap; trim open questions |
 | 1.1 | 2026-05-14 | Update GVK, roadmap, and open questions for second design iteration |
@@ -113,7 +114,7 @@ OAM YAML input (app.yaml + cluster.yaml)
 ┌───────────────────┐
 │   kure library    │  github.com/go-kure/kure
 │  K8s builders +   │  Deployment, Service, HelmRelease, …
-│  GitOps layout    │  pkg/kubernetes + pkg/stack/fluxcd
+│  GitOps layout    │  pkg/kubernetes + pkg/kubernetes/fluxcd
 └────────┬──────────┘
          │
          ▼
@@ -134,7 +135,8 @@ Launcher is a consumer of kure, not a component of it.
 | GitOps engine (FluxCD, ArgoCD) | kure (`pkg/stack/fluxcd`, `pkg/stack/argocd`) |
 | Kubernetes resource builders for CRD operators | kure (`pkg/kubernetes/certmanager`, etc.) |
 | OAM package format and runtime | launcher |
-| Parameter resolution and patch application | launcher (`pkg/patch`) |
+| Parameter resolution | launcher (`pkg/oam`, `ResolveParameters`) |
+| Patch application — candidate building block, role not yet validated (see go-kure/launcher#293) | launcher (`pkg/patch`) |
 | Two-set parameter model (platform + app) | launcher |
 | CLI tool | launcher |
 
@@ -161,11 +163,13 @@ Launcher does **not** use the following kure packages. This is by design, not an
 |---|---|
 | `pkg/stack.ApplicationConfig` | Handler output interface — `ComponentHandler.ToApplicationConfig()` in `pkg/oam/handler.go` returns `stack.ApplicationConfig`, which is the bridge to kure's resource builders |
 | `pkg/kubernetes` | Kubernetes resource construction (Deployment, Service, etc.) |
-| `pkg/stack/fluxcd` | GitOps delivery object generation (OCIRepository, Kustomization) |
+| `pkg/kubernetes/fluxcd` | GitOps delivery object generation (OCIRepository, Kustomization) — used by the `oci` and `helmchart` component handlers |
+| `pkg/manifest` | CRD / manifest classification — used by the `crd` and `manifests` component handlers |
+| `pkg/stack/helm` | Helm chart handling — used by the `helmchart` component handler |
+| `pkg/stack/layout` | GitOps repo layout — used by trait decorators |
 | `pkg/errors` | Error types |
 | `pkg/io` | YAML parsing utilities |
 | `pkg/logger` | Logging interface |
-| `pkg/cmd/shared` | CLI infrastructure |
 
 ---
 
@@ -278,7 +282,7 @@ Launcher's GitOps output is intentionally simple:
 - **One `OCIRepository`** source per bundle
 - **One `Kustomization`** per bundle pointing at the OCI artifact
 
-This monolithic layout is owned by launcher and generated as part of `kurel build`. Downstream consumers may implement their own multi-layer delivery hierarchy on top of the same kure FluxCD primitives — that hierarchy is their own concern, not launcher's.
+This monolithic layout is owned by launcher and is designed, but not yet generated, as part of `kurel build` — `kurel build` today emits per-component delivery objects (e.g. the `oci` builtin's `OCIRepository` + `Kustomization`), not this bundle-level layer; see go-kure/launcher#104. Downstream consumers may implement their own multi-layer delivery hierarchy on top of the same kure FluxCD primitives — that hierarchy is their own concern, not launcher's.
 
 ---
 
@@ -302,10 +306,6 @@ This monolithic layout is owned by launcher and generated as part of `kurel buil
 - Design OAM-native application model (GVK, ClusterProfile, Policy, package spec) — *done* (#36, #37, #38)
 - Clean up prototype pipeline and align CLI with OAM design — *done* (#40, #41, #42)
 
-**Phase 0b / Vertical Slice (current): First end-to-end kurel build** (#56)
-- One component + one trait → working manifest output
-- Validates the OAM parser → handler → kure pipeline end-to-end
-
 **Phase 1: OAM Core** (#31)
 - `pkg/oam`: types, parser, validator (#43)
 - `pkg/oam`: handler interfaces (ComponentHandler, TraitHandler, CapabilityAware) (#44)
@@ -315,21 +315,25 @@ This monolithic layout is owned by launcher and generated as part of `kurel buil
 - `pkg/oam`: transform pipeline (capability wiring, policy application) (#53)
 - Fixture parity and regression coverage (#54)
 
+**Phase 1b / Vertical Slice (complete): First end-to-end kurel build** (#56)
+- One component + one trait → working manifest output
+- Validates the OAM parser → handler → kure pipeline end-to-end
+
 **Phase 2: Built-in handlers** (#32)
 - Component handlers: webservice, worker, postgresql, cronjob, helmchart, daemonset, statefulset (#48)
 - Trait handlers — workload set: expose, certificate, external-secret, pvc, scaler (#49)
 - Trait handlers — network/infra set: ingress, httproute, configmap, networkpolicy, cilium-networkpolicy, volsync (#50)
 - Generic `passthrough` component — emits arbitrary CRDs / non-standard objects with no per-type Go handler (#105)
-- Manifest-source components: `crd`, `manifests` — emit CRDs / arbitrary manifests from inline or http(s) URL sources, with scope-aware namespace stamping (classifier in kure `pkg/manifest`); ported from the downstream runtime (#237)
-- `oci` source component — emits an `OCIRepository` source CR (URL+version dedup, flux-namespace placement) plus a per-component Flux `Kustomization`; the OAM counterpart of a downstream platform OCI translator (#241)
+- Manifest-source components: `crd`, `manifests` — emit CRDs / arbitrary manifests from inline or http(s) URL sources, with scope-aware namespace stamping (classifier in kure `pkg/manifest`); for content authored as YAML rather than as typed component properties
+- `oci` source component — emits an `OCIRepository` source CR (URL+version dedup, flux-namespace placement) plus a per-component Flux `Kustomization`; for content already published as an OCI artifact, reconciled by Flux
 
-**Phase 3: CLI integration** (#33)
+**Phase 3 (complete): CLI integration** (#33)
 - `kurel build` — OAM mode (app.yaml + --profile cluster.yaml → manifests) (#51)
 
 **Phase 4: Downstream integration** (#34) — deferred
 - a downstream runtime becomes a launcher consumer; EnvironmentPolicy, handler migration
 
-**Phase 5: OCI distribution** (#35)
+**Phase 5: OCI distribution** (#35) — gate met, not yet started
 - OCI-based package publishing and pulling
 - Package catalog as OCI index (#16)
 
@@ -348,5 +352,6 @@ This monolithic layout is owned by launcher and generated as part of `kurel buil
    remain future work (#102).
 
 3. **Package distribution** — How kurel packages are published, versioned, and referenced
-   by consumers. A standard local layout that lets `kurel build` run without extra flags
-   is the Phase 3 starting point.
+   by consumers. `kurel build` runs today against a standard local layout without extra
+   flags (Phase 3, complete); OCI-based publishing and pulling is Phase 5, gate met but
+   not yet started.
