@@ -59,7 +59,7 @@ return errors.Errorf("invalid value: %s", val)
 
 - This open-source repo must not name downstream, closed-source platform consumers in source, docs, comments, tests, or identifiers — reword to a generic role (e.g. "a downstream consumer")
 - Org standard: `go-kure/.github` → `docs/standards.md` ("No Downstream References"); remediation runbook: `docs/no-downstream-references.md`
-- CI-enforced by `site/scripts/check-forbidden-terms.sh` (diff-scoped on PRs, full-tree otherwise); a legitimately unavoidable term needs an adjacent `allow-term:<word>` pragma
+- CI-enforced via the shared `go-kure/.github` `check-forbidden-terms` action, which scans `--full-tree` on every event (PR and merge queue alike); `scripts/release.sh` runs the byte-identical vendored copy (`site/scripts/check-forbidden-terms.sh`) as a release preflight. A legitimately unavoidable term needs an adjacent `allow-term:<word>` pragma
 
 ### Commits
 
