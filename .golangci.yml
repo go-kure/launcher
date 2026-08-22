@@ -1,6 +1,6 @@
 # golangci-lint configuration for Launcher
-# Aligned with Wharf standard (meta/standards/golangci-lint.md)
-# and Crane's linter set (gitlab.com/autops/wharf/crane)
+# Aligned with the downstream platform's golangci-lint standard
+# and a downstream consumer's linter set
 
 version: "2"
 
@@ -9,13 +9,13 @@ run:
 
 linters:
   enable:
-    # Default linters (listed explicitly per Wharf standard)
+    # Default linters (listed explicitly per the downstream platform standard)
     - errcheck
     - govet
     - ineffassign
     - staticcheck
     - unused
-    # Additional required linters (aligned with Crane)
+    # Additional required linters (aligned with a downstream consumer)
     - bodyclose
     - durationcheck
     - errorlint
@@ -24,7 +24,7 @@ linters:
     - nilerr
     - unconvert
     - whitespace
-    # Optional linters (launcher-specific, not required by Wharf standard)
+    # Optional linters (launcher-specific, not required by the downstream platform standard)
     - gosec
   settings:
     errcheck:
