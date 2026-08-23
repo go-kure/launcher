@@ -187,7 +187,7 @@ Launcher does **not** use the following kure packages. This is by design, not an
 | Platform customization | Via values + conditional templates | Via platform profile (trait implementation resolution) |
 | Output | Manifest apply to cluster | Static manifests → GitOps delivery |
 | Cluster runtime component | Tiller (Helm 2) / none (Helm 3) | None — compile-time only |
-| Composability | Helm subcharts | OAM package composition; standalone post-generation patching (`pkg/patch`) is a separate, opt-in step |
+| Composability | Helm subcharts | Multi-component Application model; cross-package composition deferred to Phase 2 (go-kure/launcher#39); standalone post-generation patching (`pkg/patch`) is a separate, opt-in step |
 
 ---
 
