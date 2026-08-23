@@ -20,7 +20,7 @@ See `docs/design.md` for the full vision and architecture.
 
 - **Two-config-set model**: Package config (app requirements) + site config (cluster capabilities)
 - **Resolution**: Merge configs at install time → produce Kubernetes manifests
-- **Patch system**: JSONPath-based patching for site-specific customization
+- **Patch library**: standalone JSONPath-based patching (`pkg/patch`), not part of the build pipeline — explicit, user-invoked resource customization
 - **OAM alignment**: Follows Open Application Model semantics
 
 ## Repository Structure
@@ -35,7 +35,7 @@ launcher/
 │   │   └── shared/   # shared CLI builders + global options
 │   ├── errors/       # structured error types + wrapping helpers
 │   ├── oam/          # OAM model, parser, transformer (+ builtin/ handlers, netpol/)
-│   └── patch/        # JSONPath-based patching (TOML/YAML, strategic merge)
+│   └── patch/        # JSONPath-based patching (TOML/YAML, strategic merge), standalone
 ├── docs/             # Documentation (design.md, oam/ specs, github-workflows)
 ├── examples/         # Runnable example applications and cluster profiles
 ├── site/             # Hugo docs site (docs-map.yaml, scripts/, content/)

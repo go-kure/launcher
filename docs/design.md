@@ -1,9 +1,10 @@
 # Launcher — Design Document
 
-*Date: 2026-04-19 | Updated: 2026-08-22 | Status: Phase 3 shipped, Phase 5 gate met*
+*Date: 2026-04-19 | Updated: 2026-08-23 | Status: Phase 3 shipped, Phase 5 gate met*
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5 | 2026-08-23 | Record the pkg/patch disposition in §9.1; note the pkg/launcher removal in §2; retitle the §5 patch row |
 | 1.4 | 2026-08-22 | Status refresh: Phase 1b and Phase 3 marked complete, Phase 5 noted gate-met; fix §5 kure-package paths and §13 cross-repo issue refs |
 | 1.3 | 2026-05-15 | Replace patch-centric §4 with OAM-native pipeline; add OAM model, Policy interface, launcher layout, and what-launcher-does-not-do sections; update roadmap |
 | 1.2 | 2026-05-14 | Record all Phase 0 decisions; add §9 decisions table; update roadmap; trim open questions |
@@ -36,6 +37,9 @@ The following code from kure moved to this repository as the starting point:
 - `pkg/launcher/` — the prototype pipeline (loader, resolver, patch processor, validator, builder)
 - `pkg/patch/` — the patch engine (TOML/YAML parsing, JSONPath application, strategic merge, conflict detection)
 - `cmd/kurel/` and `pkg/cmd/kurel/` — the CLI entry point and commands
+
+`pkg/launcher/` has since been removed; `pkg/patch/` was retained as a standalone library
+(see §9.1).
 
 ---
 
@@ -136,7 +140,7 @@ Launcher is a consumer of kure, not a component of it.
 | Kubernetes resource builders for CRD operators | kure (`pkg/kubernetes/certmanager`, etc.) |
 | OAM package format and runtime | launcher |
 | Parameter resolution | launcher (`pkg/oam`, `ResolveParameters`) |
-| Patch application — candidate building block, role not yet validated (see go-kure/launcher#293) | launcher (`pkg/patch`) |
+| Post-generation patch application (standalone library, not part of the build pipeline) | launcher (`pkg/patch`) |
 | Two-set parameter model (platform + app) | launcher |
 | CLI tool | launcher |
 
@@ -236,6 +240,7 @@ PR #58 closed issues #36 (package spec), #37 (ClusterProfile), #38 (policy inter
 | Concern | Decision | Document |
 |---|---|---|
 | Capability rendering schema | Typed Go struct per handler + reflection-derived JSON Schema; `ValidateAndApplyDefaults` interface; custom `CapabilityDefinition` document kind deferred to Phase 2/3 | `design-capability-schema.md` |
+| `pkg/patch` disposition | **Keep** as a supported, standalone library for post-generation resource modification (JSONPath ops, TOML/YAML patch dialects, strategic-merge patch, conflict detection). Deliberately not part of the `kurel build` pipeline — the OAM path stays typed and closed (parameters + trait handlers only). Designated implementation for interactive patch mode (#18); not a conditional-composition mechanism (#39 does not depend on it) | `pkg/patch/README.md` |
 
 ---
 
