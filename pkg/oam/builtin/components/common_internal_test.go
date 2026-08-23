@@ -1705,8 +1705,10 @@ func TestParseEnv_ResourceFieldRef_NonStringDivisor_Error(t *testing.T) {
 }
 
 func TestParseEnv_ResourceFieldRef_ZeroDivisor_Error(t *testing.T) {
-	// Kubernetes requires divisor to be nonzero and rejects Pods with a zero
-	// divisor; reject it at parse time rather than emitting an invalid Pod.
+	// Kubernetes' own zero-value defaulting silently substitutes 1 for a zero
+	// divisor rather than rejecting it; reject it at parse time instead, so an
+	// authored "0" can't silently change the emitted unit without the author
+	// asking for it.
 	props := map[string]any{
 		"env": []any{
 			map[string]any{
