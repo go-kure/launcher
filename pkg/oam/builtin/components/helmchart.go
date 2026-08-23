@@ -274,8 +274,11 @@ type HelmchartConfig struct {
 	sharedSrcName  string
 
 	// renderChart is the function used to render Helm charts in template delivery mode.
-	// Defaults to helm.RenderChart; injectable for testing.
-	renderChart func(chartURL, version string, values map[string]any) ([]byte, error)
+	// Defaults to helm.RenderChart; injectable for testing. Variadic opts matches
+	// kure's RenderChart signature (kure v0.2.0-beta.10+, helm.RenderOption) so that
+	// helm.RenderChart itself satisfies this field without a wrapper; generateTemplate
+	// does not pass any opts yet (see its doc comment).
+	renderChart func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error)
 
 	// fluxNS overrides the namespace for emitted Flux control-plane CRs
 	// (HelmRelease, HelmRepository, OCIRepository). Set by postProcessFluxNamespace
@@ -425,11 +428,12 @@ func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, er
 // generateTemplate renders the chart client-side via helm.RenderChart and returns the
 // resulting Kubernetes manifests as individual objects.
 //
-// Known limitation: kure's renderer hardcodes .Release.Name = "release" and
-// .Release.Namespace = "default" (kure/pkg/stack/helm/render.go). Charts that use
-// .Release.Name or .Release.Namespace in templates will render with those fixed values
-// regardless of component name or namespace. A follow-up kure PR is needed to expose
-// configurable release options.
+// Known limitation: this call passes no release-identity opts, so kure renders with
+// its defaults, .Release.Name = "release" and .Release.Namespace = "default" (kure
+// pkg/stack/helm/render.go). Charts that use .Release.Name or .Release.Namespace in
+// templates will render with those fixed values regardless of ReleaseName/TargetNamespace.
+// kure now exposes helm.WithReleaseName/helm.WithNamespace (kure v0.2.0-beta.10+) —
+// wiring them through is a follow-up, not yet done here.
 func (c *HelmchartConfig) generateTemplate() ([]*client.Object, error) {
 	renderFn := c.renderChart
 	if renderFn == nil {
