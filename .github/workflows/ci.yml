@@ -648,7 +648,7 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         repository: go-kure/.github
-        ref: d27eb622102c1d02552d238d993bb533ddb23f94
+        ref: ea71647ff43dfd1f24a7a70ca15abe164b2a758a
         path: .tmp/go-kure-dot-github
     - name: Diff vendored guard vs canonical
       run: diff -u .tmp/go-kure-dot-github/scripts/check-forbidden-terms.sh site/scripts/check-forbidden-terms.sh
