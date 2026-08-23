@@ -29,13 +29,13 @@ All launcher-native input files share a single API group and version:
 | `app.yaml` | `launcher.gokure.dev/v1alpha1` | `Application` |
 | `kurel.yaml` | `launcher.gokure.dev/v1alpha1` | `Package` |
 | `cluster.yaml` | `launcher.gokure.dev/v1alpha1` | `ClusterProfile` |
-| any `*.yaml` under a capability-definitions directory | `launcher.gokure.dev/v1alpha1` | `CapabilityDefinition` |
+| any `*.yaml` under a package's `definitions/` directory, or passed via `--capability-def` | `launcher.gokure.dev/v1alpha1` | `CapabilityDefinition` |
 
 These documents form one coherent API family. They are not split across groups or
 versions because they belong to the same ownership and lifecycle domain:
 `Application` is what to run, `Package` is how it is packaged, `ClusterProfile` is how
-the target platform resolves capabilities for it, and `CapabilityDefinition` declares what a
-`ClusterProfile` can offer.
+the target platform resolves capabilities for it, and `CapabilityDefinition` declares the
+rendering schema for a custom (non-builtin) trait or component type.
 
 ### Example document headers
 
@@ -75,9 +75,12 @@ Using the upstream OAM GVK would signal:
 - API ownership that launcher does not hold
 - stronger semantic alignment to upstream OAM than launcher intends
 
-Launcher's component and trait types (`webservice`, `expose`, `certificate`) are
-launcher-specific. No other OAM runtime understands them. The shared shape
-(components/traits/properties) is a design choice, not an API contract.
+Launcher's component and trait types (`webservice`, `expose`, `certificate`) carry
+launcher-specific schemas and rendering semantics. Another OAM runtime may define a type of
+the same name — KubeVela ships its own `webservice`/`expose` — but that name match does not
+imply compatibility: the two are governed independently, and nothing beyond the string is
+shared. The shared shape (components/traits/properties) is a design choice, not an API
+contract.
 
 **Not a platform-specific zone**
 
@@ -139,7 +142,7 @@ the fact. The covenant below prevents that.
 | Class | Names | Status |
 |---|---|---|
 | Reserved (downstream-only) | `backup` | No launcher component or trait of this name exists; launcher must not claim it for an unrelated feature. (Distinct from the existing `backup` *property* of the `postgresql` component — a property name, not a type name; no collision.) |
-| Shadowed (same name, downstream superset) | `helmchart`, `prune-protection` | Launcher builtins; the downstream implementation carries additive behaviour on top. Upstreaming these deltas — and retiring this shadowed class — is tracked in #245. |
+| Shadowed (same name, downstream superset) | `helmchart`, `prune-protection` | Launcher builtins; the downstream implementation carries additive behaviour on top. Upstreaming these deltas — and retiring this shadowed class — is tracked in go-kure/launcher#245. |
 
 **Enforcement is deliberately review discipline, not CI.** An extending dialect commonly lives
 in a separate, non-public project that launcher's CI cannot see or gate against; a downstream
@@ -216,7 +219,7 @@ changelog heading, distinct from ordinary feature/fix entries — scannable by a
 their launcher dependency without reading every line.
 
 **Compatibility-layer slot.** The reserved import/export layer described below under "Future:
-OAM Compatibility" (tracked in #247) is the natural home for translating a *different*
+OAM Compatibility" (tracked in go-kure/launcher#247) is the natural home for translating a *different*
 document format (`core.oam.dev/v1beta1`) into launcher's native one; it does not change this
 lifecycle discipline for `launcher.gokure.dev/v1alpha1` itself.
 
