@@ -10,7 +10,9 @@ import (
 // default-allow, forbidden-list-first semantics (go-kure/launcher#305 —
 // Design §2 in the implementation plan): normalisation of both authored and
 // policy-list values, "forbidden always wins", drop-is-never-checked, and the
-// ALL wildcard special-case on the forbidden side only.
+// ALL wildcard special-case on both the authored side (cases 8b-8d) and the
+// forbidden side (cases 9a-9b) — flagged by automated PR review on
+// go-kure/launcher#314 as originally covering only the authored side.
 func TestEnforceContainerCapabilities(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -91,6 +93,18 @@ func TestEnforceContainerCapabilities(t *testing.T) {
 			add:     []corev1.Capability{"ALL"},
 			allowed: []string{"NET_ADMIN", "ALL"},
 			wantErr: false,
+		},
+		{
+			name:      "9a: forbidden literally containing ALL rejects every authored capability, not just literal ALL",
+			add:       []corev1.Capability{"NET_ADMIN"},
+			forbidden: []string{"ALL"},
+			wantErr:   true,
+		},
+		{
+			name:      "9b: forbidden literally containing ALL still rejects an authored ALL - no regression at the boundary between the two ALL special-cases",
+			add:       []corev1.Capability{"ALL"},
+			forbidden: []string{"ALL"},
+			wantErr:   true,
 		},
 	}
 

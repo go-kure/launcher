@@ -167,17 +167,26 @@ func containsCapability(list []string, capability string) bool {
 // Capabilities.Drop is never checked — dropping a capability is strictly
 // hardening and can never violate a policy.
 //
-// "ALL" is special-cased, and only on the forbidden side: ALL grants every
-// Linux capability, so it necessarily includes whatever is in forbidden.
-// A normalised ALL entry is rejected whenever forbidden is non-empty,
-// regardless of whether "ALL" literally appears in forbidden — checking only
-// literal membership would let an author bypass a forbidden-list entry like
-// NET_ADMIN simply by authoring ALL instead. When forbidden is empty, ALL is
-// checked against allowed like any other entry — an opt-in allowlist that
-// omits "ALL" already rejects it with no special-casing needed.
+// "ALL" is special-cased symmetrically, on both sides. On the forbidden
+// side: a forbidden entry that normalises to ALL (e.g. "ALL", "all" or
+// "CAP_ALL") means "no capability may ever be added" — every entry in
+// Capabilities.Add is rejected unconditionally, without even consulting
+// allowed (forbidden always wins). On the authored side: ALL grants every
+// Linux capability, so authoring it necessarily includes whatever is in
+// forbidden — an authored entry that normalises to ALL is rejected whenever
+// forbidden is non-empty, regardless of whether an entry that normalises to
+// ALL literally appears in forbidden; checking only list membership there
+// would let an author bypass a forbidden-list entry like NET_ADMIN simply by
+// authoring ALL instead. When forbidden is empty (and contains no entry that
+// normalises to ALL), an authored ALL is checked against allowed like any
+// other entry — an opt-in allowlist that omits ALL already rejects it with
+// no special-casing needed.
 func enforceContainerCapabilities(sc *corev1.SecurityContext, allowed, forbidden []string) error {
 	if sc == nil || sc.Capabilities == nil {
 		return nil
+	}
+	if len(sc.Capabilities.Add) > 0 && containsCapability(forbidden, "ALL") {
+		return errors.Errorf("securityContext.capabilities.add: %q is forbidden by environment policy (forbidden list contains ALL)", string(sc.Capabilities.Add[0]))
 	}
 	for _, raw := range sc.Capabilities.Add {
 		capability := string(raw)

@@ -373,9 +373,13 @@ never checked against policy — dropping a capability is strictly hardening.
 Both the authored value and every policy-list entry are normalised
 (upper-cased, `CAP_` prefix stripped) before comparison, so `NET_ADMIN`,
 `CAP_NET_ADMIN` and `net_admin` are treated as the same capability on both
-sides; a normalised `ALL` entry is rejected whenever `Forbidden` is non-empty,
-even if `"ALL"` is not itself listed, since it necessarily grants every
-forbidden capability), `seccompProfile` (rejected outright if authored with
+sides; `ALL` is special-cased symmetrically on both sides. An authored entry
+that normalises to `ALL` is rejected whenever `Forbidden` is non-empty, even
+if no entry normalising to `ALL` is itself listed in `Forbidden`, since `ALL`
+necessarily grants every forbidden capability. Conversely, a `Forbidden`
+entry that normalises to `ALL` rejects every authored `add` entry
+unconditionally — `forbidden: ["ALL"]` means no capability may be added at
+all, regardless of what `Allowed` says), `seccompProfile` (rejected outright if authored with
 a non-object value, e.g. `seccompProfile: RuntimeDefault`, instead of silently skipping the field
 and dropping the requested sandboxing entirely; a key other than
 `type`/`localhostProfile` in the object, e.g. a misspelled `locahost`, is
