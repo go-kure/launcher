@@ -640,15 +640,27 @@ jobs:
     # scans what that pinned SHA's script can see, so diffing the vendored copy
     # against a moving main would go red the instant canonical drifts further,
     # before the pin catches up — that's what reddened main on 2026-08-22. Bumping
-    # the action pin above and this ref are one deliberate act, not two.
+    # the action pin above and this ref are one deliberate act, not two — and since
+    # 2026-08-23 that act only has to happen once: the ref below is derived from the
+    # action pin's own digest rather than duplicated by hand, so Renovate (or anyone)
+    # bumping the pin above can no longer leave this one behind (go-kure/launcher#298, #304).
     #
     # The release script (scripts/release.sh) still calls the vendored copy of the
     # guard; keep it byte-identical to the canonical so the release preflight can't rot.
+    - name: Resolve pinned guard revision
+      id: guardrev
+      run: |
+        sha=$(grep -oP 'check-forbidden-terms@\K[0-9a-f]{40}' .github/workflows/ci.yml)
+        if [ -z "$sha" ]; then
+          echo "::error::could not extract the check-forbidden-terms action pin from ci.yml — refusing to fall back to an unpinned ref" >&2
+          exit 1
+        fi
+        echo "sha=$sha" >> "$GITHUB_OUTPUT"
     - name: Verify vendored guard matches canonical
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         repository: go-kure/.github
-        ref: 75a91d8b1f5074d8ff51931f2aaa144938be9491
+        ref: ${{ steps.guardrev.outputs.sha }}
         path: .tmp/go-kure-dot-github
     - name: Diff vendored guard vs canonical
       run: diff -u .tmp/go-kure-dot-github/scripts/check-forbidden-terms.sh site/scripts/check-forbidden-terms.sh
