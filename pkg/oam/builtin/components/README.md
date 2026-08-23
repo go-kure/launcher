@@ -560,7 +560,10 @@ policy choice, not something this shared schema hardcodes.
   `successfulJobsHistoryLimit`/`failedJobsHistoryLimit`.
 - **helmchart** — `chart`, `version`, `delivery` (`native`|`template`), `source`
   (inline `url` or `{name,kind}` ref), `values`/`valuesFrom`, `driftDetection`,
-  `install.crds`/`upgrade.crds`.
+  `install.crds`/`upgrade.crds`. Known limitation: with `delivery: template`,
+  `releaseName`/`targetNamespace` are accepted but not yet passed to the render —
+  charts referencing `.Release.Name`/`.Release.Namespace` render with kure's
+  defaults (`release`/`default`) regardless. `delivery: native` is unaffected.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`

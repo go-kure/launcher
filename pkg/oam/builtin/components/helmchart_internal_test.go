@@ -2,6 +2,8 @@ package components
 
 import (
 	"testing"
+
+	"github.com/go-kure/kure/pkg/stack/helm"
 )
 
 func TestHelmchartConfig_GenerateTemplate_HTTP(t *testing.T) {
@@ -26,7 +28,7 @@ data:
 		Chart:      "myapp",
 		SourceURL:  "https://charts.example.com",
 		SourceKind: "HelmRepository",
-		renderChart: func(chartURL, version string, values map[string]any) ([]byte, error) {
+		renderChart: func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 			if chartURL != "https://charts.example.com/myapp" {
 				t.Errorf("chartURL = %q, want https://charts.example.com/myapp", chartURL)
 			}
@@ -58,7 +60,7 @@ data:
 		SourceURL:  "oci://ghcr.io/example/charts/myapp",
 		SourceKind: "OCIRepository",
 		Version:    "1.2.3",
-		renderChart: func(chartURL, version string, values map[string]any) ([]byte, error) {
+		renderChart: func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 			// OCI: chartURL must equal SourceURL as-is (no chart name appended)
 			if chartURL != "oci://ghcr.io/example/charts/myapp" {
 				t.Errorf("chartURL = %q, want oci://ghcr.io/example/charts/myapp", chartURL)
