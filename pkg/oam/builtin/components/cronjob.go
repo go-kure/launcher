@@ -225,9 +225,6 @@ func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
 		return err
 	}
-	if err := enforceCapabilities(c.SecurityContext, p); err != nil {
-		return err
-	}
 	if err := enforceHostPathVolumes(c.Volumes, p.AllowHostPathVolumes()); err != nil {
 		return err
 	}

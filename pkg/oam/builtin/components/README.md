@@ -357,14 +357,13 @@ that capability as privilege-escalated regardless of the field's own value,
 so the combination promises hardening the runtime cannot honor; the
 unprefixed conventional form `SYS_ADMIN` is not rejected, matching real
 admission's own exact-string scope (it checks only `CAP_SYS_ADMIN`,
-literally). Added capabilities are enforced against the environment policy's
-`AllowedCapabilities()`/`ForbiddenCapabilities()`/`RequiredCapabilities()`
-(`enforce.go`'s `enforceCapabilities`, called from all five kind components'
-`ApplyPolicy`) — despite the shared naming with the OAM trait-type
-policy fields (e.g. "ingress"), these three gate container Linux capability
-strings (e.g. "NET_ADMIN"), the same naming-collision `enforcePrivileged`'s
-own doc comment describes; dropped capabilities are never constrained by
-policy, since dropping is always a hardening move), `seccompProfile` (rejected outright if authored with
+literally). No environment-policy
+enforcement hook exists for these two fields — `oam.Policy` separately
+declares `AllowedCapabilities`/`ForbiddenCapabilities`/`RequiredCapabilities`,
+but those gate OAM trait-type usage (e.g. "ingress"), not container Linux
+capability strings (e.g. "NET_ADMIN"); see `enforce.go`'s `enforcePrivileged`
+doc comment for the naming-collision detail. Enforcing these would need a new
+`Policy` method, which is out of scope here), `seccompProfile` (rejected outright if authored with
 a non-object value, e.g. `seccompProfile: RuntimeDefault`, instead of silently skipping the field
 and dropping the requested sandboxing entirely; a key other than
 `type`/`localhostProfile` in the object, e.g. a misspelled `locahost`, is
@@ -517,10 +516,8 @@ above, since each `initContainers`/`sidecars` entry is its own container),
 and `affinity`.
 
 `securityContext.privileged: true` is rejected unless the environment policy's
-`AllowPrivileged()` allows it (`enforce.go`'s `enforcePrivileged`), and
-`securityContext.capabilities.add` is enforced against `AllowedCapabilities()`/
-`ForbiddenCapabilities()`/`RequiredCapabilities()` (`enforceCapabilities`,
-described above) — the other `securityContext` fields have no policy hook yet.
+`AllowPrivileged()` allows it — the one `securityContext` field enforced today
+(`enforce.go`'s `enforcePrivileged`); the others have no policy hook yet.
 
 A `volumes` entry sourced from `hostPath` is rejected unless the environment
 policy's `AllowHostPathVolumes()` allows it (`enforce.go`'s

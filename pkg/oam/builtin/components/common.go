@@ -570,12 +570,13 @@ var validResourceFieldSelectors = map[string]bool{
 // divisor strings real Kubernetes admission accepts for a resourceFieldRef,
 // by resource family (mirrors validContainerResourceDivisorForCPU and
 // validContainerResourceDivisorFor{Memory,EphemeralStorage,HugePages} —
-// memory/ephemeral-storage/hugepages all share one 13-value set). A divisor
-// is checked against these only when it is non-zero: an unset or
-// zero-valued divisor (e.g. authored as "0") is treated as absent, exactly
-// as validateContainerResourceDivisor's own Cmp-to-the-zero-value early
-// return does — real admission does NOT reject a zero divisor the way a
-// naive "must be non-zero" check would.
+// memory/ephemeral-storage/hugepages all share one 13-value set). An unset
+// divisor is left absent (Kubernetes defaults it to 1 at apply time); a
+// present-but-zero divisor (e.g. authored as "0") is rejected outright by
+// parseResourceFieldRef below rather than silently treated as absent —
+// silently accepting one would change the emitted unit without the author
+// asking for it. Only a present, non-zero divisor is checked against this
+// canonical-unit map.
 var validDownwardAPIDivisorCPU = map[string]bool{"1m": true, "1": true}
 var validDownwardAPIDivisor = map[string]bool{
 	"1":  true,
