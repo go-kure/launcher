@@ -41,6 +41,11 @@ conventional_commits = true
 filter_unconventional = true
 split_commits = false
 commit_parsers = [
+    # Document-format changes (docs/oam/design-gvk.md "Document-Format Lifecycle") are
+    # grouped separately so a consumer re-pinning launcher can scan them without reading
+    # every feature line. Must stay ahead of the generic ^feat/^fix/^doc rules below —
+    # git-cliff takes the first matching parser.
+    { message = "^(feat|fix|refactor|docs?)\\(format\\)", group = "Document Format" },
     { message = "^feat", group = "Added" },
     { message = "^fix", group = "Fixed" },
     { message = "^doc", group = "Documentation" },

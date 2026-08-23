@@ -6,6 +6,7 @@ options-policy-interface.md*
 | Version | Date | Summary |
 |---|---|---|
 | 1.0 | 2026-05-14 | Initial — records GVK decision, rationale, strictness rule, OAM reuse |
+| 1.1 | 2026-08-23 | Adds the type-name reservation covenant and document-format lifecycle |
 
 ---
 
@@ -93,6 +94,54 @@ documents are: launcher's native input format.
 
 ---
 
+## Type-Name Reservation Covenant
+
+Component, trait, and policy type names (`webservice`, `expose`, `certificate`, …) live in
+one flat namespace. That namespace is shared not only within launcher, but with any downstream
+dialect that extends launcher's model — a document format built as a deliberate superset of
+`launcher.gokure.dev/v1alpha1`, adding its own component/trait/policy types alongside
+launcher's own. Launcher's own registry is the allowlist in `pkg/oam/validate.go`
+(`validComponentTypes` / `validTraitTypes`); an extending dialect widens that namespace through
+its own custom-type channel, not through launcher's registry.
+
+Without a rule, launcher could later ship a builtin under a name an extending dialect already
+uses with different semantics — a permanent squatting collision neither side can resolve after
+the fact. The covenant below prevents that.
+
+1. **Reservation.** A type name in active use by a dialect that extends launcher's model is
+   reserved.
+2. **Upstream-or-rename.** Launcher may take a reserved name **only** by upstreaming that
+   feature into launcher with the same semantics, so the name becomes a launcher builtin
+   meaning what it already meant downstream. For a genuinely different feature, launcher picks
+   a different name.
+3. **Shadowed types stay compatible supersets.** Where a name is defined on both sides, the
+   downstream implementation must remain a compatible superset of launcher's — accepting
+   everything launcher accepts, with the same meaning — or be renamed on the downstream side.
+4. **Family reservation.** Some dialects spell a successor implementation as
+   `<family>.v<N>` (e.g. `webservice.v2`), with a bare name equivalent to `.v1` and the dot
+   reserved exclusively for that generation marker. A reservation under this covenant covers
+   the **whole family**: reserving `backup` also reserves `backup.v2`, `backup.v3`, and so on.
+   An upstreamed name follows the same upstream-or-rename discipline at each generation it
+   reaches. Note that launcher does not itself enforce a type-name grammar today — type names
+   are allowlist-checked, not pattern-checked (`pkg/oam/validate.go`) — so this convention
+   binds naming *choices*, not the parser.
+
+**Current inventory**
+
+| Class | Names | Status |
+|---|---|---|
+| Reserved (downstream-only) | `backup` | No launcher component or trait of this name exists; launcher must not claim it for an unrelated feature. (Distinct from the existing `backup` *property* of the `postgresql` component — a property name, not a type name; no collision.) |
+| Shadowed (same name, downstream superset) | `helmchart`, `prune-protection` | Launcher builtins; the downstream implementation carries additive behaviour on top. Upstreaming these deltas — and retiring this shadowed class — is tracked in #245. |
+
+**Enforcement is deliberately review discipline, not CI.** An extending dialect commonly lives
+in a separate, non-public project that launcher's CI cannot see or gate against; a downstream
+dialect statement (its own `extends` / reserved-types / shadowed-types declaration, where one
+is published) is informational input to review, not an automated check. This is revisitable if
+launcher gains outside contributors who cannot be expected to know the covenant by convention
+alone.
+
+---
+
 ## Parser Strictness
 
 Launcher rejects unknown fields in all launcher-native documents. An `app.yaml`,
@@ -105,6 +154,62 @@ time rather than silently ignoring them and producing incorrect output.
 
 Operators deriving a launcher `cluster.yaml` from a downstream runtime's `ClusterProfile`
 must remove the downstream-specific fields before use. See `design-cluster-profile.md §7`.
+
+---
+
+## Document-Format Lifecycle
+
+`launcher.gokure.dev/v1alpha1` names a document *format* for `app.yaml`, `kurel.yaml`, and
+`cluster.yaml`. This section states what stays true while that string is unchanged, and what
+must change it — binding on launcher itself, and relied on by any consumer that pins the
+version string, including a dialect that declares itself as extending it.
+
+**Stability promise.** While `launcher.gokure.dev/v1alpha1` is current, every document that
+was valid under it remains valid, and compiles to the same output.
+
+**The additive test.** A change is additive **if and only if** every previously valid document
+remains valid *and* compiles to the same output. Additive changes ship freely under the same
+version string — no coordination required, no deprecation cycle. Everything else — a removed
+or retyped field, a changed default, a changed rendering target — is a breaking change.
+Changing a default is a semantic change; there is no "just tweaking a default."
+
+**Breaking changes move the version string.** A breaking document-format change requires a new
+`apiVersion` (via graduation to `v1beta1`/`v1`, or otherwise). Nothing that pins
+`launcher.gokure.dev/v1alpha1` should ever observe a breaking change without a version-string
+move to signal it.
+
+**Evolution style.** Launcher's primary audience hand-writes `app.yaml`/`kurel.yaml`/
+`cluster.yaml` directly in git, rather than generating them from a higher-level API. That
+places launcher's document format at the kustomize/Compose end of the versioning-precedent
+spectrum, not the Kubernetes-API-graduation end: a long-lived version string, additive-only
+evolution under it, deprecation warnings ahead of any removal, and — eventually — a rewrite
+tool (a prospective `kurel fix`, not yet built) as the migration path, rather than a version
+bump for every evolution step.
+
+**Maturity suffix ≠ contract counter.** The `v1alpha1` suffix states the format's maturity; it
+is not a contract-revision counter that increments on every additive change. Launcher
+deliberately carries **no separate in-document format counter** (no `schemaVersion` field):
+Parser Strictness above makes an unrecognised key a build error, so introducing a required
+counter would itself be a breaking change to every existing document — the opposite of what it
+would exist to signal. The CHANGELOG's Document Format category (below) serves the
+at-a-glance-scanning need instead, without touching the wire format. Revisit this if a machine
+consumer ever needs to gate behavior on a format level rather than read a changelog.
+
+**Deprecation procedure.** A field slated for removal is documented as deprecated and continues
+to be accepted for at least one minor release before being dropped; it is removed only
+alongside a version-string move (or, while still pre-`v1beta1`, in a release whose Document
+Format changelog entry says so explicitly).
+
+**Changelog signal.** A commit that changes the shape or meaning of a
+`launcher.gokure.dev/v1alpha1` document uses the conventional-commit scope `format`
+(`feat(format):`, `fix(format):`, `docs(format):`) and is grouped under a **Document Format**
+changelog heading, distinct from ordinary feature/fix entries — scannable by anyone re-pinning
+their launcher dependency without reading every line.
+
+**Compatibility-layer slot.** The reserved import/export layer described below under "Future:
+OAM Compatibility" (tracked in #247) is the natural home for translating a *different*
+document format (`core.oam.dev/v1beta1`) into launcher's native one; it does not change this
+lifecycle discipline for `launcher.gokure.dev/v1alpha1` itself.
 
 ---
 
