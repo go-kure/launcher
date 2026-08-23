@@ -430,10 +430,12 @@ func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, er
 //
 // Known limitation: this call passes no release-identity opts, so kure renders with
 // its defaults, .Release.Name = "release" and .Release.Namespace = "default" (kure
-// pkg/stack/helm/render.go). Charts that use .Release.Name or .Release.Namespace in
-// templates will render with those fixed values regardless of ReleaseName/TargetNamespace.
-// kure now exposes helm.WithReleaseName/helm.WithNamespace (kure v0.2.0-beta.10+) —
-// wiring them through is a follow-up, not yet done here.
+// pkg/stack/helm/render.go). ToApplicationConfig already rejects releaseName/
+// targetNamespace outright for delivery: template (see the validation above), so this
+// path is never reached with either set — the rejection, not a silent drop, is today's
+// behavior for a chart that needs .Release.Name/.Release.Namespace. kure now exposes
+// helm.WithReleaseName/helm.WithNamespace (kure v0.2.0-beta.10+); wiring them through and
+// relaxing that validation is a follow-up, not attempted here.
 func (c *HelmchartConfig) generateTemplate() ([]*client.Object, error) {
 	renderFn := c.renderChart
 	if renderFn == nil {
