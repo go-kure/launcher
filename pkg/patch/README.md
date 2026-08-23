@@ -8,11 +8,12 @@ The `patch` package provides a JSONPath-based system for declaratively modifying
 
 `pkg/patch` is a supported, standalone library. It is **not** invoked by `kurel build` — that
 pipeline is closed through explicit registration (author-declared `${var}` parameters plus
-registered component and trait handlers), not universally typed: a custom handler may accept
-untyped properties unless it implements `PropertySchemaProvider`. No implicit patch step is
-planned. `pkg/patch` is the designated implementation for explicit, user-invoked patching (e.g.
-interactive patch mode), used directly by callers that want to modify Kubernetes resources outside
-the kurel build path.
+registered component, trait, and lowering-rule handlers), not universally typed: a handler may
+declare a `PropertySchema` for an out-of-process validator to consume, but launcher's own authored
+document path does not check property shape against it — see `pkg/oam/validate.go` and
+`pkg/oam/property_validate.go`'s scope note. No implicit patch step is planned. `pkg/patch` is the
+designated implementation for explicit, user-invoked patching (e.g. interactive patch mode), used
+directly by callers that want to modify Kubernetes resources outside the kurel build path.
 
 ## Overview
 
