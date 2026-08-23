@@ -4,6 +4,7 @@
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.6 | 2026-08-23 | Record the type-name reservation covenant and document-format lifecycle decisions in §9.1 |
 | 1.5 | 2026-08-23 | Record the pkg/patch disposition in §9.1; note the pkg/launcher removal in §2; retitle the §5 patch row |
 | 1.4 | 2026-08-22 | Status refresh: Phase 1b and Phase 3 marked complete, Phase 5 noted gate-met; fix §5 kure-package paths and §13 cross-repo issue refs |
 | 1.3 | 2026-05-15 | Replace patch-centric §4 with OAM-native pipeline; add OAM model, Policy interface, launcher layout, and what-launcher-does-not-do sections; update roadmap |

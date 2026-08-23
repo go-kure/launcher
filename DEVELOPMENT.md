@@ -36,7 +36,7 @@ The `main` branch is protected — all changes must go through pull requests.
    Use branch prefixes: `feat/`, `fix/`, `docs/`, `chore/`
 
    Changing the shape or meaning of a `launcher.gokure.dev/v1alpha1` document
-   (`app.yaml`/`kurel.yaml`/`cluster.yaml`)? Use the `format` commit scope
+   (`app.yaml`/`kurel.yaml`/`cluster.yaml`, or a `CapabilityDefinition`)? Use the `format` commit scope
    (`feat(format):`, `fix(format):`, `docs(format):`) — it groups under the changelog's
    Document Format heading. See `docs/oam/design-gvk.md` § Document-Format Lifecycle.
 
