@@ -643,14 +643,15 @@ jobs:
     # the action pin above and this ref are one deliberate act, not two — and since
     # 2026-08-23 that act only has to happen once: the ref below is derived from the
     # action pin's own digest rather than duplicated by hand, so Renovate (or anyone)
-    # bumping the pin above can no longer leave this one behind (go-kure/launcher#298, #304).
+    # bumping the pin above can no longer leave this one behind
+    # (go-kure/launcher#298, go-kure/launcher#304).
     #
     # The release script (scripts/release.sh) still calls the vendored copy of the
     # guard; keep it byte-identical to the canonical so the release preflight can't rot.
     - name: Resolve pinned guard revision
       id: guardrev
       run: |
-        sha=$(grep -oP 'check-forbidden-terms@\K[0-9a-f]{40}' .github/workflows/ci.yml)
+        sha=$(grep -oP 'check-forbidden-terms@\K[0-9a-f]{40}' .github/workflows/ci.yml || true)
         if [ -z "$sha" ]; then
           echo "::error::could not extract the check-forbidden-terms action pin from ci.yml — refusing to fall back to an unpinned ref" >&2
           exit 1
