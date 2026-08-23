@@ -7,10 +7,13 @@
 | 1.1 | 2026-05-14 | Record decision (Option A); add framing section; rename options A/B; remove Option B |
 | 1.0 | 2026-04-19 | Initial draft — compared typed accessor (Option A) and opaque marker (Option B) |
 
-**Decision:** `oam.Policy` is a typed accessor interface with 21 methods. Reason:
+**Decision:** `oam.Policy` is a typed accessor interface with 23 methods. Reason:
 compile-time verification, no type assertions in handler code, and explicit `NoopPolicy`
-behaviour (no limits, no defaults, security-sensitive bools default-deny) are more important
-than the flexibility of a marker interface for future policy types.
+behaviour (no limits, no defaults, security-sensitive boolean flags default-deny) are more
+important than the flexibility of a marker interface for future policy types. The two
+container-capability accessors (`AllowedContainerCapabilities`/
+`ForbiddenContainerCapabilities`, go-kure/launcher#305) are the one default-allow exception —
+see the Framing section below.
 
 **Scope:** The `Policy` and `Enforceable` interface definitions in `pkg/oam`, how a
 downstream runtime's `EnvironmentPolicy` type satisfies `Policy`, and how handler
@@ -47,11 +50,21 @@ When no policy is supplied, launcher passes `NoopPolicy` — a concrete type tha
 `oam.Policy` with the following semantics:
 - **No enforced limits** — all limit methods return nil or empty string
 - **No defaults applied** — all default methods return nil or empty string
-- **Security-sensitive features denied by default** — all security flag methods return false
+- **Security-sensitive boolean flags denied by default** — all security flag methods return false
 
-This is intentional default-deny behaviour for security flags, not a "permit everything"
-stance. Handlers always receive a non-nil `Policy` value; nil checks in handler code are
-not needed or intended.
+This is intentional default-deny behaviour for security-sensitive boolean flags, not a "permit
+everything" stance. Handlers always receive a non-nil `Policy` value; nil checks in handler code
+are not needed or intended.
+
+The two container-capability accessors, `AllowedContainerCapabilities()` and
+`ForbiddenContainerCapabilities()`, are the one deliberate exception: `NoopPolicy` returns nil
+for both, meaning **no restriction** on Linux capabilities a container may add
+(go-kure/launcher#305). This mirrors `AllowedRegistries`' existing default-allow shape rather
+than the boolean flags' default-deny — a nil/empty `Allowed` list imposes no restriction and a
+nil/empty `Forbidden` list imposes no forbids, while an explicit `Forbidden` entry always wins
+over an `Allowed` one. The rationale: `capabilities.add` is a working, golden-file-covered `kurel
+build` feature with no `--policy` flag to satisfy an allowlist, so default-deny would make it
+permanently unusable from the CLI rather than merely gated behind a policy document.
 
 ### Downstream compatibility
 
@@ -150,6 +163,14 @@ type Policy interface {
     AllowedCapabilities() []string
     ForbiddenCapabilities() []string
     RequiredCapabilities() []string
+
+    // Container capability constraints — Linux capabilities on a container's
+    // securityContext.capabilities.add, NOT the OAM trait-type strings the three
+    // methods above gate. Default-allow, mirroring AllowedRegistries: nil or empty
+    // Allowed means no restriction; nil or empty Forbidden means no forbids.
+    // Forbidden wins when both are set and overlap.
+    AllowedContainerCapabilities() []string
+    ForbiddenContainerCapabilities() []string
 }
 
 // Enforceable is implemented by component configs that accept policy enforcement.
@@ -162,8 +183,10 @@ type Enforceable interface {
 
 ```go
 // NoopPolicy is used when no policy is configured.
-// No enforced limits, no defaults applied, security-sensitive features denied by default.
+// No enforced limits, no defaults applied, security-sensitive boolean flags denied by default.
 // Security flags return false — intentional default-deny, not "permit everything".
+// The two container-capability accessors are the exception: default-allow, like
+// AllowedRegistries — nil leaves capabilities unconstrained absent an explicit Forbidden list.
 type NoopPolicy struct{}
 
 func (*NoopPolicy) MaxReplicas() *int32          { return nil }
@@ -187,6 +210,8 @@ func (*NoopPolicy) AllowHostPathVolumes() bool   { return false }
 func (*NoopPolicy) AllowedCapabilities() []string   { return nil }
 func (*NoopPolicy) ForbiddenCapabilities() []string { return nil }
 func (*NoopPolicy) RequiredCapabilities() []string  { return nil }
+func (*NoopPolicy) AllowedContainerCapabilities() []string   { return nil }
+func (*NoopPolicy) ForbiddenContainerCapabilities() []string { return nil }
 ```
 
 ### How a downstream runtime satisfies Policy
@@ -233,6 +258,15 @@ func (p *EnvironmentPolicy) ForbiddenCapabilities() []string {
 func (p *EnvironmentPolicy) RequiredCapabilities() []string {
     if p.Capabilities == nil { return nil }
     return p.Capabilities.Required
+}
+
+func (p *EnvironmentPolicy) AllowedContainerCapabilities() []string {
+    if p.ContainerCapabilities == nil { return nil }
+    return p.ContainerCapabilities.Allowed
+}
+func (p *EnvironmentPolicy) ForbiddenContainerCapabilities() []string {
+    if p.ContainerCapabilities == nil { return nil }
+    return p.ContainerCapabilities.Forbidden
 }
 ```
 
@@ -282,8 +316,8 @@ catches any omission immediately.
 
 ### Summary
 
-- 19 methods (as defined above)
-- the downstream type gains ~20 accessor methods on `EnvironmentPolicy` (pure boilerplate, no logic)
+- 23 methods (as defined above)
+- the downstream type gains ~23 accessor methods on `EnvironmentPolicy` (pure boilerplate, no logic)
 - Handler code: method calls, no type assertions, no adapter imports
 - Compiler verifies the contract at the downstream build time
 - Interface must grow manually as `EnvironmentPolicy` grows

@@ -82,10 +82,12 @@ func enforceMaxStorageSize(current, max string) error {
 // ever produce a non-nil SecurityContext) — reusing it here, rather than adding
 // a new mechanism, closes the gap the new `securityContext` property would
 // otherwise open: an author could set privileged:true with nothing checking it.
-// The other securityContext fields (capabilities add/drop, hostNetwork/hostPID/
-// hostIPC — the latter three are pod-level and not part of this container-level
-// property at all) have no existing Policy hook and none is added here; see the
-// launcher#278 ledger.
+// The pod-level fields (hostNetwork/hostPID/hostIPC — not part of this
+// container-level property at all) have no existing Policy hook and none is
+// added here; see the launcher#278 ledger. Of securityContext.capabilities,
+// Add is enforced separately (enforceContainerCapabilities below); Drop is
+// intentionally never checked against policy — dropping a capability is
+// strictly hardening and can never violate one.
 //
 // NOTE on a naming collision: oam.Policy already declares AllowedCapabilities/
 // ForbiddenCapabilities/RequiredCapabilities, but those gate OAM trait-type
@@ -96,8 +98,10 @@ func enforceMaxStorageSize(current, max string) error {
 // add/drop through those three methods, as suggested in a launcher#278 review
 // round, would check container capability strings against a policy list of
 // trait-type names — always-fail or always-no-op depending on the data, never
-// correct. Enforcing container capabilities needs a new Policy method; it is
-// not a gap in these three.
+// correct. Container capabilities are enforced separately, by
+// enforceContainerCapabilities below, against the dedicated
+// AllowedContainerCapabilities/ForbiddenContainerCapabilities accessor pair
+// (go-kure/launcher#305).
 func enforcePrivileged(sc *corev1.SecurityContext, allowed bool) error {
 	if sc == nil || sc.Privileged == nil || !*sc.Privileged || allowed {
 		return nil
@@ -108,7 +112,7 @@ func enforcePrivileged(sc *corev1.SecurityContext, allowed bool) error {
 // enforceHostPathVolumes rejects an authored hostPath volume when the
 // environment policy does not allow it. Same shape and same reused-not-new-
 // mechanism rationale as enforcePrivileged above: oam.Policy.AllowHostPathVolumes
-// is a pre-existing method (default-deny even for NoopPolicy, pkg/oam/policy.go:79)
+// is a pre-existing method (default-deny even for NoopPolicy, see pkg/oam/policy.go)
 // that had nothing to call it — parseVolumes could not produce a hostPath source
 // before the shared pod/container schema landed. A hostPath volume mounts an
 // arbitrary path from the node's own filesystem into the Pod, so an unenforced
@@ -120,6 +124,73 @@ func enforceHostPathVolumes(volumes []corev1.Volume, allowed bool) error {
 	for _, v := range volumes {
 		if v.HostPath != nil {
 			return errors.Errorf("volume %q: hostPath volumes are not allowed by environment policy", v.Name)
+		}
+	}
+	return nil
+}
+
+// normalizeCapability upper-cases a Linux capability string and strips a
+// leading "CAP_" prefix, so "NET_ADMIN", "CAP_NET_ADMIN" and "net_admin" all
+// compare equal. parseCapabilityList (common.go) does no normalisation of its
+// own, so authored values reach here in any of these spellings; this policy's
+// own normalisation treats them as the same capability for allow/forbid
+// matching. This is a deliberate, policy-defined aliasing, not a runtime
+// equivalence Kubernetes itself enforces — contrast the exact-string
+// CAP_SYS_ADMIN check in parseSecurityContext (common.go), which intentionally
+// does not alias because it mirrors real Kubernetes admission's own
+// exact-string scope. Applied to both authored values and policy-list entries:
+// a forbidden-list entry spelled "NET_ADMIN" must still catch an authored
+// "CAP_NET_ADMIN", and a policy list itself spelled non-canonically
+// ("cap_net_admin") must still match a canonically-authored value.
+func normalizeCapability(capability string) string {
+	return strings.TrimPrefix(strings.ToUpper(capability), "CAP_")
+}
+
+// containsCapability reports whether normalizeCapability(capability) appears
+// in list after normalising every entry of list the same way.
+func containsCapability(list []string, capability string) bool {
+	target := normalizeCapability(capability)
+	for _, c := range list {
+		if normalizeCapability(c) == target {
+			return true
+		}
+	}
+	return false
+}
+
+// enforceContainerCapabilities rejects an authored securityContext.capabilities.add
+// entry that the environment policy does not permit. Default-allow,
+// forbidden-list-first semantics (go-kure/launcher#305): nil/empty allowed
+// means no restriction; nil/empty forbidden means no forbids; forbidden wins
+// when an entry appears in both.
+//
+// Capabilities.Drop is never checked — dropping a capability is strictly
+// hardening and can never violate a policy.
+//
+// "ALL" is special-cased, and only on the forbidden side: ALL grants every
+// Linux capability, so it necessarily includes whatever is in forbidden.
+// A normalised ALL entry is rejected whenever forbidden is non-empty,
+// regardless of whether "ALL" literally appears in forbidden — checking only
+// literal membership would let an author bypass a forbidden-list entry like
+// NET_ADMIN simply by authoring ALL instead. When forbidden is empty, ALL is
+// checked against allowed like any other entry — an opt-in allowlist that
+// omits "ALL" already rejects it with no special-casing needed.
+func enforceContainerCapabilities(sc *corev1.SecurityContext, allowed, forbidden []string) error {
+	if sc == nil || sc.Capabilities == nil {
+		return nil
+	}
+	for _, raw := range sc.Capabilities.Add {
+		capability := string(raw)
+		normalized := normalizeCapability(capability)
+
+		if normalized == "ALL" && len(forbidden) > 0 {
+			return errors.Errorf("securityContext.capabilities.add: %q is forbidden by environment policy", capability)
+		}
+		if containsCapability(forbidden, capability) {
+			return errors.Errorf("securityContext.capabilities.add: %q is forbidden by environment policy", capability)
+		}
+		if len(allowed) > 0 && !containsCapability(allowed, capability) {
+			return errors.Errorf("securityContext.capabilities.add: %q is not allowed by environment policy", capability)
 		}
 	}
 	return nil
