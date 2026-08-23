@@ -29,11 +29,13 @@ All launcher-native input files share a single API group and version:
 | `app.yaml` | `launcher.gokure.dev/v1alpha1` | `Application` |
 | `kurel.yaml` | `launcher.gokure.dev/v1alpha1` | `Package` |
 | `cluster.yaml` | `launcher.gokure.dev/v1alpha1` | `ClusterProfile` |
+| any `*.yaml` under a capability-definitions directory | `launcher.gokure.dev/v1alpha1` | `CapabilityDefinition` |
 
-These three documents form one coherent API family. They are not split across groups or
+These documents form one coherent API family. They are not split across groups or
 versions because they belong to the same ownership and lifecycle domain:
 `Application` is what to run, `Package` is how it is packaged, `ClusterProfile` is how
-the target platform resolves capabilities for it.
+the target platform resolves capabilities for it, and `CapabilityDefinition` declares what a
+`ClusterProfile` can offer.
 
 ### Example document headers
 
@@ -96,13 +98,19 @@ documents are: launcher's native input format.
 
 ## Type-Name Reservation Covenant
 
-Component, trait, and policy type names (`webservice`, `expose`, `certificate`, …) live in
-one flat namespace. That namespace is shared not only within launcher, but with any downstream
-dialect that extends launcher's model — a document format built as a deliberate superset of
+Component, trait, and policy type names (`webservice`, `expose`, `certificate`, …) are treated
+as one flat namespace by convention — this covenant is what makes that true, not launcher's
+code. Today, components and traits are each checked against their own allowlist in
+`pkg/oam/validate.go` (`validComponentTypes` / `validTraitTypes`) with no cross-check
+preventing the same name from meaning different things in each, and policy type names carry no
+allowlist at all (`validateApplicationPolicy`). The covenant below is the naming discipline that
+stands in for that missing enforcement, applied uniformly across all three categories.
+
+That discipline is shared not only within launcher, but with any downstream dialect that
+extends launcher's model — a document format built as a deliberate superset of
 `launcher.gokure.dev/v1alpha1`, adding its own component/trait/policy types alongside
-launcher's own. Launcher's own registry is the allowlist in `pkg/oam/validate.go`
-(`validComponentTypes` / `validTraitTypes`); an extending dialect widens that namespace through
-its own custom-type channel, not through launcher's registry.
+launcher's own. An extending dialect widens the namespace through its own custom-type channel,
+not through launcher's registry.
 
 Without a rule, launcher could later ship a builtin under a name an extending dialect already
 uses with different semantics — a permanent squatting collision neither side can resolve after
@@ -159,10 +167,11 @@ must remove the downstream-specific fields before use. See `design-cluster-profi
 
 ## Document-Format Lifecycle
 
-`launcher.gokure.dev/v1alpha1` names a document *format* for `app.yaml`, `kurel.yaml`, and
-`cluster.yaml`. This section states what stays true while that string is unchanged, and what
-must change it — binding on launcher itself, and relied on by any consumer that pins the
-version string, including a dialect that declares itself as extending it.
+`launcher.gokure.dev/v1alpha1` names a document *format* for `app.yaml`, `kurel.yaml`,
+`cluster.yaml`, and any `CapabilityDefinition` document. This section states what stays true
+while that string is unchanged, and what must change it — binding on launcher itself, and
+relied on by any consumer that pins the version string, including a dialect that declares
+itself as extending it.
 
 **Stability promise.** While `launcher.gokure.dev/v1alpha1` is current, every document that
 was valid under it remains valid, and compiles to the same output.
@@ -196,9 +205,9 @@ at-a-glance-scanning need instead, without touching the wire format. Revisit thi
 consumer ever needs to gate behavior on a format level rather than read a changelog.
 
 **Deprecation procedure.** A field slated for removal is documented as deprecated and continues
-to be accepted for at least one minor release before being dropped; it is removed only
-alongside a version-string move (or, while still pre-`v1beta1`, in a release whose Document
-Format changelog entry says so explicitly).
+to be accepted for at least one minor release before being dropped. Dropping it is a breaking
+change like any other, so — per "Breaking changes move the version string" above — it is
+removed only alongside a version-string move; there is no pre-`v1beta1` exception.
 
 **Changelog signal.** A commit that changes the shape or meaning of a
 `launcher.gokure.dev/v1alpha1` document uses the conventional-commit scope `format`

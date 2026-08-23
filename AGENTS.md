@@ -139,8 +139,9 @@ make precommit
 - Use `gh pr create` to open pull requests
 - PR template: `.github/PULL_REQUEST_TEMPLATE.md`
 - **Document-format changes**: a commit that changes the shape or meaning of a
-  `launcher.gokure.dev/v1alpha1` document (`app.yaml`/`kurel.yaml`/`cluster.yaml`) uses the
-  `format` scope (`feat(format):`, `fix(format):`, `docs(format):`) so it lands under the
+  `launcher.gokure.dev/v1alpha1` document (`app.yaml`/`kurel.yaml`/`cluster.yaml`, or a
+  `CapabilityDefinition`) uses the `format` scope (`feat(format):`, `fix(format):`,
+  `docs(format):`) so it lands under the
   changelog's Document Format heading — see `docs/oam/design-gvk.md` § Document-Format
   Lifecycle for the additive/breaking test and the version-string discipline it implies
 
