@@ -1172,11 +1172,15 @@ func TestWebserviceConfig_ApplyPolicy_MaxCPU_PolicyDefaultEnforced(t *testing.T)
 	}
 }
 
-// TestWebserviceConfig_ApplyPolicy_MaxMemory_DerivedLimit proves the derived
-// memory limit tier is reachable through the effective-value check — here it
-// never gets that far because the memory request (checked first, matching
-// the pre-fix ordering) already exceeds the max.
-func TestWebserviceConfig_ApplyPolicy_MaxMemory_DerivedLimit(t *testing.T) {
+// TestWebserviceConfig_ApplyPolicy_MaxMemory_RequestCheckedBeforeLimit proves
+// the check ordering matches the pre-fix code (cpu request, cpu limit, memory
+// request, memory limit): a policy-defaulted 256Mi memory request against a
+// 128Mi max fails at the memory-request check. It does NOT exercise the
+// derived-memory-limit path — buildResourceRequirements mirrors the memory
+// limit from the (same) memory request, so a request that already exceeds
+// the max makes the limit exceed it identically, and the request check
+// (earlier in the fixed order) always reports first.
+func TestWebserviceConfig_ApplyPolicy_MaxMemory_RequestCheckedBeforeLimit(t *testing.T) {
 	h := &components.WebserviceHandler{}
 	component := &oam.Component{
 		Name: "app",
