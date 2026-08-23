@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -385,5 +386,43 @@ func TestStatefulsetConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
 	enforceable := cfg.(oam.Enforceable)
 	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: false}); err == nil {
 		t.Error("expected error when a hostPath volume is authored and policy disallows it")
+	}
+}
+
+// TestStatefulsetConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault is
+// statefulset's sibling of the two webservice
+// TestWebserviceConfig_ApplyPolicy_Max{CPU,Memory}_AgainstIntrinsicDefault
+// cases (launcher#251) — proving enforceMaxResources is actually wired into
+// StatefulsetConfig.ApplyPolicy, not just added to enforce.go.
+func TestStatefulsetConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testing.T) {
+	cases := []struct {
+		name   string
+		policy stubPolicy
+	}{
+		{"cpu", stubPolicy{maxCPU: "50m"}},
+		{"memory", stubPolicy{maxMemory: "64Mi"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &components.StatefulsetHandler{}
+			cfg, err := h.ToApplicationConfig(&oam.Component{
+				Name: "db",
+				Type: "statefulset",
+				Properties: map[string]any{
+					"image": "ghcr.io/org/postgres:v15",
+				},
+			}, "default")
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			enforceable := cfg.(oam.Enforceable)
+			err = enforceable.ApplyPolicy(&tc.policy)
+			if err == nil {
+				t.Fatal("expected error when the intrinsic default exceeds the enforced maximum")
+			}
+			if !strings.Contains(err.Error(), "generated default") {
+				t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
+			}
+		})
 	}
 }

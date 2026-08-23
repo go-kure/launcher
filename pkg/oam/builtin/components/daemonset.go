@@ -173,16 +173,7 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 		return err
 	}
 
-	if err := enforceMaxResource(quantityString(c.Resources.Requests, corev1.ResourceCPU), p.MaxCPU(), "cpu request"); err != nil {
-		return err
-	}
-	if err := enforceMaxResource(quantityString(c.Resources.Limits, corev1.ResourceCPU), p.MaxCPU(), "cpu limit"); err != nil {
-		return err
-	}
-	if err := enforceMaxResource(quantityString(c.Resources.Requests, corev1.ResourceMemory), p.MaxMemory(), "memory request"); err != nil {
-		return err
-	}
-	if err := enforceMaxResource(quantityString(c.Resources.Limits, corev1.ResourceMemory), p.MaxMemory(), "memory limit"); err != nil {
+	if err := enforceMaxResources(c.Resources, p.MaxCPU(), p.MaxMemory()); err != nil {
 		return err
 	}
 	if err := enforceAllowedRegistries(c.Image, p.AllowedRegistries()); err != nil {

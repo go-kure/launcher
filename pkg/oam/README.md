@@ -275,7 +275,13 @@ implement `Enforceable` receive it via `ApplyPolicy`; `NoopPolicy` supplies zero
 no policy is set (so `ApplyPolicy` is always called with a non-nil value at runtime).
 
 Handlers apply values with the precedence **authored > policy default > handler default**,
-then enforce the limits on the resulting effective value. For example the `scaler` trait fills
+then enforce the limits on the resulting effective value — for cpu/memory this explicitly
+includes the `pkg/oam/builtin/components` intrinsic handler-default tier (100m CPU / 128Mi
+memory request, applied by `buildResourceRequirements` at `Generate()` time, after
+`ApplyPolicy` runs), not just the authored/policy-defaulted value `ApplyPolicy` sees; see
+that package's README, "Policy defaults & enforcement ordering".
+
+For example the `scaler` trait fills
 `minReplicas`/`maxReplicas` from the scaler defaults when omitted (erroring if neither the trait
 nor a policy default supplies them), and the `pvc`/`postgresql` handlers default the storage
 size from `DefaultStorageSize`. See the Policy Interface design note under the Concepts
