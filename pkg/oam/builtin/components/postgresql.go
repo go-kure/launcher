@@ -640,6 +640,10 @@ func (c *PostgresqlConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
 		return err
 	}
+	// Direct form kept deliberately (not enforceMaxResources): createCluster
+	// forwards c.Resources straight into kurecnpg.ResourceOptions behind a
+	// != "" guard (see below) and never calls buildResourceRequirements, so
+	// there is no intrinsic-default tier here for c.Resources to diverge from.
 	if err := enforceMaxResource(quantityString(c.Resources.Requests, corev1.ResourceCPU), p.MaxCPU(), "cpu request"); err != nil {
 		return err
 	}

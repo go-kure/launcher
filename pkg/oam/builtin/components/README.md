@@ -124,7 +124,9 @@ rejected outright too, rather than being silently ignored while the rest of
 the entry still builds — on `prefix` specifically, that previously emitted
 an unprefixed import instead of the intended one),
 `resources` — a `corev1.ResourceRequirements` projection: `requests`/`limits`
-accept `cpu`/`memory` (defaults 100m/128Mi) plus any other well-formed
+accept `cpu`/`memory` (defaults 100m/128Mi — subject to the environment
+policy's `MaxCPU()`/`MaxMemory()` maxima the same as an authored value; see
+"Policy defaults & enforcement ordering" below) plus any other well-formed
 resource name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map,
 each value authored as either a quantity string (`"500m"`, `"2Gi"`) or a bare
 YAML/JSON number (`1`, `0.5`) — both are valid `resource.Quantity` input
@@ -543,6 +545,52 @@ every built-in call site passes `false` today. Deciding which of these fields
 should be platform-reserved (rejecting any authored value via
 `PropertySchema.PlatformReserved`/`enforcePlatformReserved`) is a consumer-side
 policy choice, not something this shared schema hardcodes.
+
+## Policy defaults & enforcement ordering
+
+A container's effective cpu/memory requests and limits are assembled in three
+tiers, in precedence order:
+
+1. **Authored** — whatever the component's `resources` property set explicitly.
+2. **Policy default** — `ApplyPolicy` fills any request/limit the author left
+   unset from `oam.Policy.DefaultCPURequest()`/`DefaultMemoryRequest()`/
+   `DefaultCPULimit()`/`DefaultMemoryLimit()` (`enforce.go`'s
+   `applyDefaultQuantity`).
+3. **Intrinsic handler default** — `buildResourceRequirements` (`common.go`)
+   fills anything still unset at `Generate()` time: 100m CPU request, 128Mi
+   memory request, and a memory limit mirroring the (possibly just-defaulted)
+   memory request.
+
+`oam.Policy.MaxCPU()`/`MaxMemory()` are enforced against the *effective*
+value — what `Generate()` will actually emit, after all three tiers — not
+just the authored/policy-defaulted `resources` field. Prior to launcher#251
+the enforcement check ran before the intrinsic tier was computed, so an
+application that omitted `spec.resources` entirely could ship a Deployment
+whose 100m CPU / 128Mi memory intrinsic defaults exceeded the enforced
+maximum. `enforceMaxResources` (`enforce.go`) closes this by calling the same
+`buildResourceRequirements` the generator calls, enforcing against its
+result, and discarding it — `buildResourceRequirements` deep-copies its
+maps, so this is read-only and generated output is unchanged. When a value
+came from the intrinsic tier specifically (absent from the authored/policy-
+defaulted value, present only after the intrinsic fallback), the error names
+it as a "generated default" so the mismatch isn't mysterious.
+
+This three-tier effective-value enforcement applies to the five kind
+components that call `buildResourceRequirements` on their main container
+(`webservice`, `worker`, `cronjob`, `statefulset`, `daemonset`).
+**`postgresql` is exempt**: `createCluster` forwards `c.Resources` straight
+into `kurecnpg.ResourceOptions` behind a `!= ""` guard and never calls
+`buildResourceRequirements`, so it has no intrinsic tier for its existing
+direct-form checks to diverge from.
+
+**Known gap, not covered by this enforcement:** init containers and sidecars
+receive the same intrinsic defaults (`common.go`'s `buildResourceRequirements`
+call sites at the init-container and sidecar builders) but `ApplyPolicy` does
+not inspect them at all — neither their resources nor their images are
+checked against `enforceMaxResources`/`enforceAllowedRegistries`. This is a
+wider gap than launcher#251 covers (authored init/sidecar values are
+unenforced too, not just defaults); see the tracked follow-up issue
+(TODO(main-agent): fill in follow-up issue number).
 
 ## Per-type highlights
 

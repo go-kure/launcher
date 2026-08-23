@@ -1,11 +1,13 @@
 package components_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -13,16 +15,19 @@ import (
 
 // stubPolicy implements oam.Policy for testing.
 type stubPolicy struct {
-	maxReplicas        *int32
-	defaultReplicas    *int32
-	allowedRegistries  []string
-	maxCPU             string
-	maxMemory          string
-	maxStorageSize     string
-	defaultCPURequest  string
-	defaultStorageSize string
-	allowPrivileged    bool
-	allowHostPathVols  bool
+	maxReplicas          *int32
+	defaultReplicas      *int32
+	allowedRegistries    []string
+	maxCPU               string
+	maxMemory            string
+	maxStorageSize       string
+	defaultCPURequest    string
+	defaultMemoryRequest string
+	defaultCPULimit      string
+	defaultMemoryLimit   string
+	defaultStorageSize   string
+	allowPrivileged      bool
+	allowHostPathVols    bool
 }
 
 func (s *stubPolicy) MaxReplicas() *int32              { return s.maxReplicas }
@@ -32,9 +37,9 @@ func (s *stubPolicy) MaxStorageSize() string           { return s.maxStorageSize
 func (s *stubPolicy) AllowedRegistries() []string      { return s.allowedRegistries }
 func (s *stubPolicy) DefaultReplicas() *int32          { return s.defaultReplicas }
 func (s *stubPolicy) DefaultCPURequest() string        { return s.defaultCPURequest }
-func (s *stubPolicy) DefaultMemoryRequest() string     { return "" }
-func (s *stubPolicy) DefaultCPULimit() string          { return "" }
-func (s *stubPolicy) DefaultMemoryLimit() string       { return "" }
+func (s *stubPolicy) DefaultMemoryRequest() string     { return s.defaultMemoryRequest }
+func (s *stubPolicy) DefaultCPULimit() string          { return s.defaultCPULimit }
+func (s *stubPolicy) DefaultMemoryLimit() string       { return s.defaultMemoryLimit }
 func (s *stubPolicy) DefaultStorageSize() string       { return s.defaultStorageSize }
 func (s *stubPolicy) DefaultScalerMinReplicas() *int32 { return nil }
 func (s *stubPolicy) DefaultScalerMaxReplicas() *int32 { return nil }
@@ -1050,5 +1055,201 @@ func TestWebserviceConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
 	}
 	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: true}); err != nil {
 		t.Errorf("expected no error when policy allows hostPath volumes, got %v", err)
+	}
+}
+
+// TestWebserviceConfig_ApplyPolicy_MaxCPU_AgainstIntrinsicDefault
+// regression-tests launcher#251: buildResourceRequirements' intrinsic 100m
+// CPU / 128Mi memory request fallback is injected at Generate() time, after
+// ApplyPolicy runs — so enforcing maxima against the pre-fallback
+// c.Resources let an application that omitted spec.resources ship above the
+// cap. The error must name the value as a generated default so the author
+// knows where the number came from.
+func TestWebserviceConfig_ApplyPolicy_MaxCPU_AgainstIntrinsicDefault(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	err = enforceable.ApplyPolicy(&stubPolicy{maxCPU: "50m"})
+	if err == nil {
+		t.Fatal("expected error when the intrinsic default CPU request exceeds the enforced maximum")
+	}
+	if !strings.Contains(err.Error(), "generated default") {
+		t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
+	}
+}
+
+func TestWebserviceConfig_ApplyPolicy_MaxMemory_AgainstIntrinsicDefault(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	err = enforceable.ApplyPolicy(&stubPolicy{maxMemory: "64Mi"})
+	if err == nil {
+		t.Fatal("expected error when the intrinsic default memory request exceeds the enforced maximum")
+	}
+	if !strings.Contains(err.Error(), "generated default") {
+		t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
+	}
+}
+
+// TestWebserviceConfig_ApplyPolicy_MaxCPU_AuthoredBeatsIntrinsic proves
+// precedence survives the fix: an authored value under the cap must not be
+// flagged, even though the intrinsic default (which never applies here)
+// would itself have exceeded it.
+func TestWebserviceConfig_ApplyPolicy_MaxCPU_AuthoredBeatsIntrinsic(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"resources": map[string]any{
+				"requests": map[string]any{
+					"cpu": "10m",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	p := &stubPolicy{defaultCPURequest: "200m", maxCPU: "50m"}
+	if err := enforceable.ApplyPolicy(p); err != nil {
+		t.Errorf("expected no error: authored 10m beats the 200m policy default and is under the 50m max, got %v", err)
+	}
+}
+
+// TestWebserviceConfig_ApplyPolicy_MaxCPU_PolicyDefaultEnforced proves a
+// policy default (the middle tier) is still enforced, and — since it is not
+// the intrinsic handler default — the error does NOT carry the "generated
+// default" marker.
+func TestWebserviceConfig_ApplyPolicy_MaxCPU_PolicyDefaultEnforced(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	p := &stubPolicy{defaultCPURequest: "200m", maxCPU: "50m"}
+	err = enforceable.ApplyPolicy(p)
+	if err == nil {
+		t.Fatal("expected error: the 200m policy default exceeds the 50m max")
+	}
+	if strings.Contains(err.Error(), "generated default") {
+		t.Errorf("policy default should not be marked as a generated default, got %q", err.Error())
+	}
+}
+
+// TestWebserviceConfig_ApplyPolicy_MaxMemory_DerivedLimit proves the derived
+// memory limit tier is reachable through the effective-value check — here it
+// never gets that far because the memory request (checked first, matching
+// the pre-fix ordering) already exceeds the max.
+func TestWebserviceConfig_ApplyPolicy_MaxMemory_DerivedLimit(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	p := &stubPolicy{defaultMemoryRequest: "256Mi", maxMemory: "128Mi"}
+	err = enforceable.ApplyPolicy(p)
+	if err == nil {
+		t.Fatal("expected error: the 256Mi policy-defaulted memory request exceeds the 128Mi max")
+	}
+	if !strings.Contains(err.Error(), "memory request") {
+		t.Errorf("expected the memory request check to fail first, got %q", err.Error())
+	}
+}
+
+// TestWebserviceConfig_ApplyPolicy_MaxResources_OutputUnchanged proves the
+// fix is read-only: a config that passes policy still generates the exact
+// same intrinsic-default Resources it did before launcher#251.
+func TestWebserviceConfig_ApplyPolicy_MaxResources_OutputUnchanged(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{maxCPU: "1", maxMemory: "1Gi"}); err != nil {
+		t.Fatalf("ApplyPolicy: %v", err)
+	}
+
+	app := stack.NewApplication("app", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var dep *appsv1.Deployment
+	for _, obj := range objects {
+		if d, ok := (*obj).(*appsv1.Deployment); ok {
+			dep = d
+			break
+		}
+	}
+	if dep == nil {
+		t.Fatal("Deployment not found in output")
+	}
+
+	res := dep.Spec.Template.Spec.Containers[0].Resources
+	wantCPURequest := resource.MustParse("100m")
+	wantMemRequest := resource.MustParse("128Mi")
+	wantMemLimit := resource.MustParse("128Mi")
+	if got := res.Requests[corev1.ResourceCPU]; got.Cmp(wantCPURequest) != 0 {
+		t.Errorf("cpu request = %v, want %v", got.String(), wantCPURequest.String())
+	}
+	if got := res.Requests[corev1.ResourceMemory]; got.Cmp(wantMemRequest) != 0 {
+		t.Errorf("memory request = %v, want %v", got.String(), wantMemRequest.String())
+	}
+	if got := res.Limits[corev1.ResourceMemory]; got.Cmp(wantMemLimit) != 0 {
+		t.Errorf("memory limit = %v, want %v", got.String(), wantMemLimit.String())
 	}
 }

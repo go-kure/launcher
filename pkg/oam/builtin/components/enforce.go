@@ -146,6 +146,47 @@ func quantityString(rl corev1.ResourceList, name corev1.ResourceName) string {
 	return ""
 }
 
+// enforceMaxResources rejects a config whose *effective* cpu/memory requests or
+// limits exceed the policy maxima. "Effective" is what Generate will emit:
+// authored values, then the policy defaults ApplyPolicy just applied, then this
+// package's intrinsic fallbacks (buildResourceRequirements — 100m cpu request,
+// 128Mi memory request, memory limit mirroring the memory request). Enforcing
+// against res directly let an omitted value ship above the cap, since the
+// intrinsic fallback is injected after ApplyPolicy runs (launcher#251).
+//
+// Read-only: buildResourceRequirements deep-copies its maps, so the caller's
+// Resources are untouched and generated output is unchanged.
+func enforceMaxResources(res ResourceRequirements, maxCPU, maxMemory string) error {
+	eff := buildResourceRequirements(res)
+
+	checks := []struct {
+		effective corev1.ResourceList
+		authored  corev1.ResourceList
+		name      corev1.ResourceName
+		max       string
+		label     string
+	}{
+		{eff.Requests, res.Requests, corev1.ResourceCPU, maxCPU, "cpu request"},
+		{eff.Limits, res.Limits, corev1.ResourceCPU, maxCPU, "cpu limit"},
+		{eff.Requests, res.Requests, corev1.ResourceMemory, maxMemory, "memory request"},
+		{eff.Limits, res.Limits, corev1.ResourceMemory, maxMemory, "memory limit"},
+	}
+	for _, c := range checks {
+		effVal := quantityString(c.effective, c.name)
+		label := c.label
+		// Absent from the authored/policy-defaulted value but present in the
+		// effective one: this package's intrinsic fallback produced it, and
+		// the author has no idea where the number came from.
+		if effVal != "" && quantityString(c.authored, c.name) == "" {
+			label += " (generated default)"
+		}
+		if err := enforceMaxResource(effVal, c.max, label); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // applyDefaultQuantity sets (*rl)[name] = dflt when rl has no entry for name
 // (the author left this specific resource name unmentioned — map-key presence
 // is ResourceRequirements' equivalent of the old explicitResourceFlags bool,

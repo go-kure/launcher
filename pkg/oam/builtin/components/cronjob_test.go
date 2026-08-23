@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -680,5 +681,44 @@ func TestCronjobHandler_PVC_NamespacedByComponent(t *testing.T) {
 	}
 	if !sawMount {
 		t.Fatal("expected container to mount the \"data\" volume, unqualified")
+	}
+}
+
+// TestCronjobConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault is
+// cronjob's sibling of the two webservice
+// TestWebserviceConfig_ApplyPolicy_Max{CPU,Memory}_AgainstIntrinsicDefault
+// cases (launcher#251) — proving enforceMaxResources is actually wired into
+// CronjobConfig.ApplyPolicy, not just added to enforce.go.
+func TestCronjobConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testing.T) {
+	cases := []struct {
+		name   string
+		policy stubPolicy
+	}{
+		{"cpu", stubPolicy{maxCPU: "50m"}},
+		{"memory", stubPolicy{maxMemory: "64Mi"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &components.CronjobHandler{}
+			cfg, err := h.ToApplicationConfig(&oam.Component{
+				Name: "job",
+				Type: "cronjob",
+				Properties: map[string]any{
+					"image":    "ghcr.io/org/job:v1.0.0",
+					"schedule": "0 2 * * *",
+				},
+			}, "default")
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			enforceable := cfg.(oam.Enforceable)
+			err = enforceable.ApplyPolicy(&tc.policy)
+			if err == nil {
+				t.Fatal("expected error when the intrinsic default exceeds the enforced maximum")
+			}
+			if !strings.Contains(err.Error(), "generated default") {
+				t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
+			}
+		})
 	}
 }
