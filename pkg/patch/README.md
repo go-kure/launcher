@@ -4,6 +4,14 @@
 
 The `patch` package provides a JSONPath-based system for declaratively modifying Kubernetes resources. It supports both TOML and YAML patch file formats with structure-preserving modifications and variable substitution.
 
+## Scope and Status
+
+`pkg/patch` is a supported, standalone library. It is **not** invoked by `kurel build` — the OAM
+pipeline stays typed and closed (author-declared `${var}` parameters plus registered trait
+handlers), and no implicit patch step is planned. It is the designated implementation for
+explicit, user-invoked patching (e.g. interactive patch mode), used directly by callers that want
+to modify Kubernetes resources outside the kurel build path.
+
 ## Overview
 
 Patches allow you to modify Kubernetes manifests without rewriting them. The system uses JSONPath expressions to target specific fields and applies changes while preserving the original YAML structure (comments, ordering, formatting).
@@ -170,5 +178,5 @@ SMP patches are applied before field-level patches. See [DESIGN.md](https://gith
 
 ## Related Packages
 
-- [pkg/oam](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) - Uses patches in the kurel package/build pipeline
+- [pkg/oam](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) - the `kurel build` pipeline; independent of this package (see Scope and Status above)
 - [kure pkg/io](https://pkg.go.dev/github.com/go-kure/kure/pkg/io) - YAML parsing for patch targets
