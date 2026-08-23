@@ -82,6 +82,11 @@ jobs:
             - 'cmd/**'
             - 'scripts/**'
             - '.github/workflows/**'
+            - '.github/actions/**'
+            - '**.json'
+            - '**.yml'
+            - '**.yaml'
+            - '**.toml'
 
   # =============================================================================
   # Stage 1: Fast Validation
@@ -629,15 +634,21 @@ jobs:
     # Shared org action; always scans --full-tree so a PR and the merge queue see
     # identical results (go-kure/.github → docs/standards.md, scan-parity MUST rule).
     - name: Check for downstream references
-      uses: go-kure/.github/.github/actions/check-forbidden-terms@16cb56abeb01d7995a15ab8873814ba96c494d7e # main
+      uses: go-kure/.github/.github/actions/check-forbidden-terms@d27eb622102c1d02552d238d993bb533ddb23f94 # main
 
+    # Pinned to the SAME commit as the action above, not to 'main': the gate only
+    # scans what that pinned SHA's script can see, so diffing the vendored copy
+    # against a moving main would go red the instant canonical drifts further,
+    # before the pin catches up — that's what reddened main on 2026-08-22. Bumping
+    # the action pin above and this ref are one deliberate act, not two.
+    #
     # The release script (scripts/release.sh) still calls the vendored copy of the
     # guard; keep it byte-identical to the canonical so the release preflight can't rot.
     - name: Verify vendored guard matches canonical
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         repository: go-kure/.github
-        ref: main
+        ref: d27eb622102c1d02552d238d993bb533ddb23f94
         path: .tmp/go-kure-dot-github
     - name: Diff vendored guard vs canonical
       run: diff -u .tmp/go-kure-dot-github/scripts/check-forbidden-terms.sh site/scripts/check-forbidden-terms.sh
