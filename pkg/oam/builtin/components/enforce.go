@@ -157,6 +157,9 @@ func quantityString(rl corev1.ResourceList, name corev1.ResourceName) string {
 // Read-only: buildResourceRequirements deep-copies its maps, so the caller's
 // Resources are untouched and generated output is unchanged.
 func enforceMaxResources(res ResourceRequirements, maxCPU, maxMemory string) error {
+	if maxCPU == "" && maxMemory == "" {
+		return nil
+	}
 	eff := buildResourceRequirements(res)
 
 	checks := []struct {

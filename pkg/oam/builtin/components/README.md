@@ -590,7 +590,7 @@ not inspect them at all — neither their resources nor their images are
 checked against `enforceMaxResources`/`enforceAllowedRegistries`. This is a
 wider gap than launcher#251 covers (authored init/sidecar values are
 unenforced too, not just defaults); see the tracked follow-up issue
-(TODO(main-agent): fill in follow-up issue number).
+(launcher#312).
 
 ## Per-type highlights
 

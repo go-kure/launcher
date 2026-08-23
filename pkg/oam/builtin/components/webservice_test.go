@@ -1256,4 +1256,13 @@ func TestWebserviceConfig_ApplyPolicy_MaxResources_OutputUnchanged(t *testing.T)
 	if got := res.Limits[corev1.ResourceMemory]; got.Cmp(wantMemLimit) != 0 {
 		t.Errorf("memory limit = %v, want %v", got.String(), wantMemLimit.String())
 	}
+	if cpuLimit, ok := res.Limits[corev1.ResourceCPU]; ok {
+		t.Errorf("cpu limit = %v, want absent", cpuLimit.String())
+	}
+	if len(res.Requests) != 2 {
+		t.Errorf("len(Requests) = %d, want 2 (cpu, memory): %v", len(res.Requests), res.Requests)
+	}
+	if len(res.Limits) != 1 {
+		t.Errorf("len(Limits) = %d, want 1 (memory): %v", len(res.Limits), res.Limits)
+	}
 }
