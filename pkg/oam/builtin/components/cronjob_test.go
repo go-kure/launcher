@@ -512,6 +512,43 @@ func TestCronjobConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
 	}
 }
 
+// TestCronjobConfig_ApplyPolicy_CapabilityAddDenied is cronjob's sibling of
+// TestWebserviceConfig_ApplyPolicy_CapabilityAddDenied (go-kure/launcher#305)
+// — the same shared ApplyPolicy gap, same shared enforceContainerCapabilities
+// fix. Also asserts against the real oam.NoopPolicy that capabilities.add
+// passes with no policy configured — the mirror image of NoopPolicy's
+// default-deny for privileged/hostPath, and the assertion that encodes this
+// field's default-allow decision.
+func TestCronjobConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+			"securityContext": map[string]any{
+				"capabilities": map[string]any{
+					"add": []any{"NET_ADMIN"},
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
+		t.Error("expected error when capabilities.add includes a forbidden capability")
+	}
+	// oam.NoopPolicy is default-allow for container capabilities (unlike its
+	// default-deny for privileged/hostPath) — confirm the real NoopPolicy
+	// does not reject an authored capability with no policy configured.
+	if err := enforceable.ApplyPolicy(&oam.NoopPolicy{}); err != nil {
+		t.Errorf("expected no error from the real NoopPolicy default-allow for container capabilities, got %v", err)
+	}
+}
+
 func TestCronjobHandler_WithVolumes_EmptyDir(t *testing.T) {
 	h := &components.CronjobHandler{}
 	component := &oam.Component{

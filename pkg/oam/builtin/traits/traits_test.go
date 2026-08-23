@@ -1107,27 +1107,29 @@ type stubPVCPolicy struct {
 	defaultStorageSize string
 }
 
-func (p *stubPVCPolicy) MaxReplicas() *int32              { return nil }
-func (p *stubPVCPolicy) MaxCPU() string                   { return "" }
-func (p *stubPVCPolicy) MaxMemory() string                { return "" }
-func (p *stubPVCPolicy) MaxStorageSize() string           { return p.maxStorageSize }
-func (p *stubPVCPolicy) AllowedRegistries() []string      { return nil }
-func (p *stubPVCPolicy) DefaultReplicas() *int32          { return nil }
-func (p *stubPVCPolicy) DefaultCPURequest() string        { return "" }
-func (p *stubPVCPolicy) DefaultMemoryRequest() string     { return "" }
-func (p *stubPVCPolicy) DefaultCPULimit() string          { return "" }
-func (p *stubPVCPolicy) DefaultMemoryLimit() string       { return "" }
-func (p *stubPVCPolicy) DefaultStorageSize() string       { return p.defaultStorageSize }
-func (p *stubPVCPolicy) DefaultScalerMinReplicas() *int32 { return nil }
-func (p *stubPVCPolicy) DefaultScalerMaxReplicas() *int32 { return nil }
-func (p *stubPVCPolicy) AllowHostNetwork() bool           { return false }
-func (p *stubPVCPolicy) AllowPrivileged() bool            { return false }
-func (p *stubPVCPolicy) AllowHostPID() bool               { return false }
-func (p *stubPVCPolicy) AllowHostIPC() bool               { return false }
-func (p *stubPVCPolicy) AllowHostPathVolumes() bool       { return false }
-func (p *stubPVCPolicy) AllowedCapabilities() []string    { return nil }
-func (p *stubPVCPolicy) ForbiddenCapabilities() []string  { return nil }
-func (p *stubPVCPolicy) RequiredCapabilities() []string   { return nil }
+func (p *stubPVCPolicy) MaxReplicas() *int32                      { return nil }
+func (p *stubPVCPolicy) MaxCPU() string                           { return "" }
+func (p *stubPVCPolicy) MaxMemory() string                        { return "" }
+func (p *stubPVCPolicy) MaxStorageSize() string                   { return p.maxStorageSize }
+func (p *stubPVCPolicy) AllowedRegistries() []string              { return nil }
+func (p *stubPVCPolicy) DefaultReplicas() *int32                  { return nil }
+func (p *stubPVCPolicy) DefaultCPURequest() string                { return "" }
+func (p *stubPVCPolicy) DefaultMemoryRequest() string             { return "" }
+func (p *stubPVCPolicy) DefaultCPULimit() string                  { return "" }
+func (p *stubPVCPolicy) DefaultMemoryLimit() string               { return "" }
+func (p *stubPVCPolicy) DefaultStorageSize() string               { return p.defaultStorageSize }
+func (p *stubPVCPolicy) DefaultScalerMinReplicas() *int32         { return nil }
+func (p *stubPVCPolicy) DefaultScalerMaxReplicas() *int32         { return nil }
+func (p *stubPVCPolicy) AllowHostNetwork() bool                   { return false }
+func (p *stubPVCPolicy) AllowPrivileged() bool                    { return false }
+func (p *stubPVCPolicy) AllowHostPID() bool                       { return false }
+func (p *stubPVCPolicy) AllowHostIPC() bool                       { return false }
+func (p *stubPVCPolicy) AllowHostPathVolumes() bool               { return false }
+func (p *stubPVCPolicy) AllowedCapabilities() []string            { return nil }
+func (p *stubPVCPolicy) ForbiddenCapabilities() []string          { return nil }
+func (p *stubPVCPolicy) RequiredCapabilities() []string           { return nil }
+func (p *stubPVCPolicy) AllowedContainerCapabilities() []string   { return nil }
+func (p *stubPVCPolicy) ForbiddenContainerCapabilities() []string { return nil }
 
 // stubScalerPolicy implements oam.Policy for scaler trait tests, embedding
 // NoopPolicy so only the scaler-relevant accessors need overriding.

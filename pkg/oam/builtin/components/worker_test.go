@@ -285,6 +285,33 @@ func TestWorkerConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
 	}
 }
 
+// TestWorkerConfig_ApplyPolicy_CapabilityAddDenied is worker's sibling of
+// TestWebserviceConfig_ApplyPolicy_CapabilityAddDenied (go-kure/launcher#305)
+// — the same shared ApplyPolicy gap, same shared enforceContainerCapabilities
+// fix.
+func TestWorkerConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
+	h := &components.WorkerHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "app",
+		Type: "worker",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"securityContext": map[string]any{
+				"capabilities": map[string]any{
+					"add": []any{"NET_ADMIN"},
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
+		t.Error("expected error when capabilities.add includes a forbidden capability")
+	}
+}
+
 // TestWorkerConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault is
 // worker's sibling of the two webservice
 // TestWebserviceConfig_ApplyPolicy_Max{CPU,Memory}_AgainstIntrinsicDefault

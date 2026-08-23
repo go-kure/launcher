@@ -3,7 +3,7 @@ package oam
 // Policy provides environment-level constraints and defaults for OAM component
 // and trait handlers. Handlers call its methods; they must not type-assert.
 //
-// The 21 typed accessor methods correspond to every piece of data that handlers
+// The 23 typed accessor methods correspond to every piece of data that handlers
 // currently access via the downstream runtime's *api.EnvironmentPolicy. See the finalized design
 // in docs/oam/options-policy-interface.md (Option A).
 //
@@ -40,6 +40,14 @@ type Policy interface {
 	AllowedCapabilities() []string
 	ForbiddenCapabilities() []string
 	RequiredCapabilities() []string
+
+	// Container capability constraints — Linux capabilities on a container's
+	// securityContext.capabilities.add, NOT the OAM trait-type strings the three
+	// methods above gate. Default-allow, mirroring AllowedRegistries: nil or empty
+	// Allowed means no restriction (any capability may be added); nil or empty
+	// Forbidden means no forbids. Forbidden wins when both are set and overlap.
+	AllowedContainerCapabilities() []string
+	ForbiddenContainerCapabilities() []string
 }
 
 // Enforceable is implemented by component and trait ApplicationConfig types that
@@ -51,32 +59,36 @@ type Enforceable interface {
 }
 
 // NoopPolicy satisfies Policy with zero values:
-// no enforced limits, no defaults applied, security-sensitive features denied by default.
+// no enforced limits, no defaults applied, security-sensitive boolean flags denied by default.
 // Security flags are plain bool; false means denied — this is intentional default-deny
 // behaviour when no policy document is provided, not a "permit everything" stance.
+// The two container-capability accessors are the exception: they are default-allow like
+// AllowedRegistries — nil leaves capabilities unconstrained absent an explicit Forbidden list.
 type NoopPolicy struct{}
 
 // compile-time interface check
 var _ Policy = (*NoopPolicy)(nil)
 
-func (*NoopPolicy) MaxReplicas() *int32              { return nil }
-func (*NoopPolicy) MaxCPU() string                   { return "" }
-func (*NoopPolicy) MaxMemory() string                { return "" }
-func (*NoopPolicy) MaxStorageSize() string           { return "" }
-func (*NoopPolicy) AllowedRegistries() []string      { return nil }
-func (*NoopPolicy) DefaultReplicas() *int32          { return nil }
-func (*NoopPolicy) DefaultCPURequest() string        { return "" }
-func (*NoopPolicy) DefaultMemoryRequest() string     { return "" }
-func (*NoopPolicy) DefaultCPULimit() string          { return "" }
-func (*NoopPolicy) DefaultMemoryLimit() string       { return "" }
-func (*NoopPolicy) DefaultStorageSize() string       { return "" }
-func (*NoopPolicy) DefaultScalerMinReplicas() *int32 { return nil }
-func (*NoopPolicy) DefaultScalerMaxReplicas() *int32 { return nil }
-func (*NoopPolicy) AllowHostNetwork() bool           { return false }
-func (*NoopPolicy) AllowPrivileged() bool            { return false }
-func (*NoopPolicy) AllowHostPID() bool               { return false }
-func (*NoopPolicy) AllowHostIPC() bool               { return false }
-func (*NoopPolicy) AllowHostPathVolumes() bool       { return false }
-func (*NoopPolicy) AllowedCapabilities() []string    { return nil }
-func (*NoopPolicy) ForbiddenCapabilities() []string  { return nil }
-func (*NoopPolicy) RequiredCapabilities() []string   { return nil }
+func (*NoopPolicy) MaxReplicas() *int32                      { return nil }
+func (*NoopPolicy) MaxCPU() string                           { return "" }
+func (*NoopPolicy) MaxMemory() string                        { return "" }
+func (*NoopPolicy) MaxStorageSize() string                   { return "" }
+func (*NoopPolicy) AllowedRegistries() []string              { return nil }
+func (*NoopPolicy) DefaultReplicas() *int32                  { return nil }
+func (*NoopPolicy) DefaultCPURequest() string                { return "" }
+func (*NoopPolicy) DefaultMemoryRequest() string             { return "" }
+func (*NoopPolicy) DefaultCPULimit() string                  { return "" }
+func (*NoopPolicy) DefaultMemoryLimit() string               { return "" }
+func (*NoopPolicy) DefaultStorageSize() string               { return "" }
+func (*NoopPolicy) DefaultScalerMinReplicas() *int32         { return nil }
+func (*NoopPolicy) DefaultScalerMaxReplicas() *int32         { return nil }
+func (*NoopPolicy) AllowHostNetwork() bool                   { return false }
+func (*NoopPolicy) AllowPrivileged() bool                    { return false }
+func (*NoopPolicy) AllowHostPID() bool                       { return false }
+func (*NoopPolicy) AllowHostIPC() bool                       { return false }
+func (*NoopPolicy) AllowHostPathVolumes() bool               { return false }
+func (*NoopPolicy) AllowedCapabilities() []string            { return nil }
+func (*NoopPolicy) ForbiddenCapabilities() []string          { return nil }
+func (*NoopPolicy) RequiredCapabilities() []string           { return nil }
+func (*NoopPolicy) AllowedContainerCapabilities() []string   { return nil }
+func (*NoopPolicy) ForbiddenContainerCapabilities() []string { return nil }

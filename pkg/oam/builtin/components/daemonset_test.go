@@ -552,6 +552,33 @@ func TestDaemonsetConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
 	}
 }
 
+// TestDaemonsetConfig_ApplyPolicy_CapabilityAddDenied is daemonset's sibling
+// of TestWebserviceConfig_ApplyPolicy_CapabilityAddDenied
+// (go-kure/launcher#305) — the same shared ApplyPolicy gap, same shared
+// enforceContainerCapabilities fix.
+func TestDaemonsetConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
+	h := &components.DaemonsetHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "agent",
+		Type: "daemonset",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/agent:v1.0.0",
+			"securityContext": map[string]any{
+				"capabilities": map[string]any{
+					"add": []any{"NET_ADMIN"},
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
+		t.Error("expected error when capabilities.add includes a forbidden capability")
+	}
+}
+
 // TestDaemonsetConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault is
 // daemonset's sibling of the two webservice
 // TestWebserviceConfig_ApplyPolicy_Max{CPU,Memory}_AgainstIntrinsicDefault

@@ -232,7 +232,7 @@ PR #58 closed issues #36 (package spec), #37 (ClusterProfile), #38 (policy inter
 | Parser strictness | Strict — unknown fields are a build error | `design-gvk.md` |
 | ClusterProfile format | `cluster.yaml` carries `rendering` only; no `parameters` | `design-cluster-profile.md` |
 | Parameter syntax | **Option A** — `${var}` placeholders; typed schema in `kurel.yaml` | `options-param-syntax.md` |
-| Policy interface | **Option A** — typed accessor interface (~19 methods) | `options-policy-interface.md` |
+| Policy interface | **Option A** — typed accessor interface (23 methods) | `options-policy-interface.md` |
 | Package composition | **Deferred to Phase 2** — no optional sections in Phase 1 | `options-package-composition.md` |
 
 ### 9.1 Later Design Decisions
@@ -262,6 +262,10 @@ type Policy interface {
     DefaultMemoryRequest() string
     DefaultCPULimit() string
     DefaultMemoryLimit() string
+    // Workload-shape defaults — nil or empty string means leave the OAM value as-is.
+    DefaultStorageSize() string
+    DefaultScalerMinReplicas() *int32
+    DefaultScalerMaxReplicas() *int32
     // Security flags — false is the zero value (default-deny).
     AllowHostNetwork() bool
     AllowPrivileged() bool
@@ -272,10 +276,16 @@ type Policy interface {
     AllowedCapabilities() []string
     ForbiddenCapabilities() []string
     RequiredCapabilities() []string
+    // Container capability constraints — Linux capabilities on a container's
+    // securityContext.capabilities.add, NOT the OAM trait-type strings above.
+    // Default-allow, mirroring AllowedRegistries: nil/empty Allowed means no
+    // restriction; nil/empty Forbidden means no forbids; forbidden wins on overlap.
+    AllowedContainerCapabilities() []string
+    ForbiddenContainerCapabilities() []string
 }
 ```
 
-`NoopPolicy` is the default when no policy document is supplied: no enforced limits, no defaults applied, security-sensitive booleans default-deny (false). Downstream consumers implement `Policy` (typically via their own `EnvironmentPolicy` type) to add enforcement. See `docs/oam/options-policy-interface.md` for the full design rationale.
+`NoopPolicy` is the default when no policy document is supplied: no enforced limits, no defaults applied, security-sensitive boolean flags default-deny (false) — except the two container-capability accessors, which are default-allow (nil means unconstrained, go-kure/launcher#305). Downstream consumers implement `Policy` (typically via their own `EnvironmentPolicy` type) to add enforcement. See `docs/oam/options-policy-interface.md` for the full design rationale.
 
 ---
 

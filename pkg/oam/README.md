@@ -270,9 +270,18 @@ into the lowering-rule identity recorded on `Origin.Rule` (see Lowering above), 
 per-environment **enforced limits** (`MaxReplicas`, `MaxCPU`, `MaxMemory`, `MaxStorageSize`,
 `AllowedRegistries`), **defaults** (`DefaultReplicas`, the CPU/memory request/limit defaults,
 and the workload-shape defaults `DefaultStorageSize`, `DefaultScalerMinReplicas`,
-`DefaultScalerMaxReplicas`), security flags, and capability constraints. Handlers that
-implement `Enforceable` receive it via `ApplyPolicy`; `NoopPolicy` supplies zero values when
-no policy is set (so `ApplyPolicy` is always called with a non-nil value at runtime).
+`DefaultScalerMaxReplicas`), security flags, and two distinct capability-constraint families:
+`AllowedCapabilities`/`ForbiddenCapabilities`/`RequiredCapabilities` gate **OAM trait-type**
+strings (e.g. "ingress", "autoscaling"), while `AllowedContainerCapabilities`/
+`ForbiddenContainerCapabilities` gate Linux capabilities on a container's
+`securityContext.capabilities.add` (e.g. "NET_ADMIN"). Both families share the same nil/empty
+constraint-list convention under `NoopPolicy` — no `Allowed`/`Forbidden`/`Required` entries means
+unconstrained — but only the boolean security flags (`AllowPrivileged`, `AllowHostPathVolumes`,
+etc.) are default-deny; a container capability appearing in both an explicit `Allowed` list and
+the `Forbidden` list is rejected, since forbidden always wins, and a nil/empty
+`Allowed`/`Forbidden` list means no restriction/no forbids respectively. Handlers that implement
+`Enforceable` receive it via `ApplyPolicy`; `NoopPolicy` supplies zero values when no policy is
+set (so `ApplyPolicy` is always called with a non-nil value at runtime).
 
 Handlers apply values with the precedence **authored > policy default > handler default**,
 then enforce the limits on the resulting effective value — for cpu/memory this explicitly

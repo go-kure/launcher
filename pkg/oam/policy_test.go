@@ -71,4 +71,10 @@ func TestNoopPolicy_ZeroValues(t *testing.T) {
 	if got := p.RequiredCapabilities(); got != nil {
 		t.Errorf("RequiredCapabilities() = %v, want nil", got)
 	}
+	if got := p.AllowedContainerCapabilities(); got != nil {
+		t.Errorf("AllowedContainerCapabilities() = %v, want nil", got)
+	}
+	if got := p.ForbiddenContainerCapabilities(); got != nil {
+		t.Errorf("ForbiddenContainerCapabilities() = %v, want nil", got)
+	}
 }

@@ -15,42 +15,46 @@ import (
 
 // stubPolicy implements oam.Policy for testing.
 type stubPolicy struct {
-	maxReplicas          *int32
-	defaultReplicas      *int32
-	allowedRegistries    []string
-	maxCPU               string
-	maxMemory            string
-	maxStorageSize       string
-	defaultCPURequest    string
-	defaultMemoryRequest string
-	defaultCPULimit      string
-	defaultMemoryLimit   string
-	defaultStorageSize   string
-	allowPrivileged      bool
-	allowHostPathVols    bool
+	maxReplicas            *int32
+	defaultReplicas        *int32
+	allowedRegistries      []string
+	maxCPU                 string
+	maxMemory              string
+	maxStorageSize         string
+	defaultCPURequest      string
+	defaultMemoryRequest   string
+	defaultCPULimit        string
+	defaultMemoryLimit     string
+	defaultStorageSize     string
+	allowPrivileged        bool
+	allowHostPathVols      bool
+	allowedContainerCaps   []string
+	forbiddenContainerCaps []string
 }
 
-func (s *stubPolicy) MaxReplicas() *int32              { return s.maxReplicas }
-func (s *stubPolicy) MaxCPU() string                   { return s.maxCPU }
-func (s *stubPolicy) MaxMemory() string                { return s.maxMemory }
-func (s *stubPolicy) MaxStorageSize() string           { return s.maxStorageSize }
-func (s *stubPolicy) AllowedRegistries() []string      { return s.allowedRegistries }
-func (s *stubPolicy) DefaultReplicas() *int32          { return s.defaultReplicas }
-func (s *stubPolicy) DefaultCPURequest() string        { return s.defaultCPURequest }
-func (s *stubPolicy) DefaultMemoryRequest() string     { return s.defaultMemoryRequest }
-func (s *stubPolicy) DefaultCPULimit() string          { return s.defaultCPULimit }
-func (s *stubPolicy) DefaultMemoryLimit() string       { return s.defaultMemoryLimit }
-func (s *stubPolicy) DefaultStorageSize() string       { return s.defaultStorageSize }
-func (s *stubPolicy) DefaultScalerMinReplicas() *int32 { return nil }
-func (s *stubPolicy) DefaultScalerMaxReplicas() *int32 { return nil }
-func (s *stubPolicy) AllowHostNetwork() bool           { return false }
-func (s *stubPolicy) AllowPrivileged() bool            { return s.allowPrivileged }
-func (s *stubPolicy) AllowHostPID() bool               { return false }
-func (s *stubPolicy) AllowHostIPC() bool               { return false }
-func (s *stubPolicy) AllowHostPathVolumes() bool       { return s.allowHostPathVols }
-func (s *stubPolicy) AllowedCapabilities() []string    { return nil }
-func (s *stubPolicy) ForbiddenCapabilities() []string  { return nil }
-func (s *stubPolicy) RequiredCapabilities() []string   { return nil }
+func (s *stubPolicy) MaxReplicas() *int32                      { return s.maxReplicas }
+func (s *stubPolicy) MaxCPU() string                           { return s.maxCPU }
+func (s *stubPolicy) MaxMemory() string                        { return s.maxMemory }
+func (s *stubPolicy) MaxStorageSize() string                   { return s.maxStorageSize }
+func (s *stubPolicy) AllowedRegistries() []string              { return s.allowedRegistries }
+func (s *stubPolicy) DefaultReplicas() *int32                  { return s.defaultReplicas }
+func (s *stubPolicy) DefaultCPURequest() string                { return s.defaultCPURequest }
+func (s *stubPolicy) DefaultMemoryRequest() string             { return s.defaultMemoryRequest }
+func (s *stubPolicy) DefaultCPULimit() string                  { return s.defaultCPULimit }
+func (s *stubPolicy) DefaultMemoryLimit() string               { return s.defaultMemoryLimit }
+func (s *stubPolicy) DefaultStorageSize() string               { return s.defaultStorageSize }
+func (s *stubPolicy) DefaultScalerMinReplicas() *int32         { return nil }
+func (s *stubPolicy) DefaultScalerMaxReplicas() *int32         { return nil }
+func (s *stubPolicy) AllowHostNetwork() bool                   { return false }
+func (s *stubPolicy) AllowPrivileged() bool                    { return s.allowPrivileged }
+func (s *stubPolicy) AllowHostPID() bool                       { return false }
+func (s *stubPolicy) AllowHostIPC() bool                       { return false }
+func (s *stubPolicy) AllowHostPathVolumes() bool               { return s.allowHostPathVols }
+func (s *stubPolicy) AllowedCapabilities() []string            { return nil }
+func (s *stubPolicy) ForbiddenCapabilities() []string          { return nil }
+func (s *stubPolicy) RequiredCapabilities() []string           { return nil }
+func (s *stubPolicy) AllowedContainerCapabilities() []string   { return s.allowedContainerCaps }
+func (s *stubPolicy) ForbiddenContainerCapabilities() []string { return s.forbiddenContainerCaps }
 
 var _ oam.Policy = (*stubPolicy)(nil)
 
@@ -1055,6 +1059,39 @@ func TestWebserviceConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
 	}
 	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: true}); err != nil {
 		t.Errorf("expected no error when policy allows hostPath volumes, got %v", err)
+	}
+}
+
+// TestWebserviceConfig_ApplyPolicy_CapabilityAddDenied regression-tests
+// go-kure/launcher#305: ApplyPolicy never checked an authored
+// securityContext.capabilities.add entry against
+// oam.Policy.ForbiddenContainerCapabilities(), so a forbidden Linux
+// capability could be added with nothing rejecting it.
+func TestWebserviceConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"securityContext": map[string]any{
+				"capabilities": map[string]any{
+					"add": []any{"NET_ADMIN"},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
+		t.Error("expected error when capabilities.add includes a forbidden capability")
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under the default-allow NoopPolicy-equivalent stub, got %v", err)
 	}
 }
 

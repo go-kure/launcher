@@ -359,13 +359,23 @@ that capability as privilege-escalated regardless of the field's own value,
 so the combination promises hardening the runtime cannot honor; the
 unprefixed conventional form `SYS_ADMIN` is not rejected, matching real
 admission's own exact-string scope (it checks only `CAP_SYS_ADMIN`,
-literally). No environment-policy
-enforcement hook exists for these two fields — `oam.Policy` separately
-declares `AllowedCapabilities`/`ForbiddenCapabilities`/`RequiredCapabilities`,
-but those gate OAM trait-type usage (e.g. "ingress"), not container Linux
-capability strings (e.g. "NET_ADMIN"); see `enforce.go`'s `enforcePrivileged`
-doc comment for the naming-collision detail. Enforcing these would need a new
-`Policy` method, which is out of scope here), `seccompProfile` (rejected outright if authored with
+literally). `add` is checked against the environment policy's
+`AllowedContainerCapabilities`/`ForbiddenContainerCapabilities` accessor pair
+(`enforceContainerCapabilities` in `enforce.go`) — a separate pair from
+`oam.Policy`'s `AllowedCapabilities`/`ForbiddenCapabilities`/
+`RequiredCapabilities`, which gate OAM trait-type usage (e.g. "ingress"), not
+container Linux capability strings (e.g. "NET_ADMIN"); see `enforce.go`'s
+`enforcePrivileged` doc comment for the naming-collision detail.
+Default-allow, forbidden-list-first semantics: a nil/empty `Allowed` list
+means no restriction and a nil/empty `Forbidden` list means no forbids, but a
+capability present in both is rejected — forbidden always wins. `drop` is
+never checked against policy — dropping a capability is strictly hardening.
+Both the authored value and every policy-list entry are normalised
+(upper-cased, `CAP_` prefix stripped) before comparison, so `NET_ADMIN`,
+`CAP_NET_ADMIN` and `net_admin` are treated as the same capability on both
+sides; a normalised `ALL` entry is rejected whenever `Forbidden` is non-empty,
+even if `"ALL"` is not itself listed, since it necessarily grants every
+forbidden capability), `seccompProfile` (rejected outright if authored with
 a non-object value, e.g. `seccompProfile: RuntimeDefault`, instead of silently skipping the field
 and dropping the requested sandboxing entirely; a key other than
 `type`/`localhostProfile` in the object, e.g. a misspelled `locahost`, is
