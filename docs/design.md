@@ -187,7 +187,7 @@ Launcher does **not** use the following kure packages. This is by design, not an
 | Platform customization | Via values + conditional templates | Via platform profile (trait implementation resolution) |
 | Output | Manifest apply to cluster | Static manifests → GitOps delivery |
 | Cluster runtime component | Tiller (Helm 2) / none (Helm 3) | None — compile-time only |
-| Composability | Helm subcharts | OAM composition + patches |
+| Composability | Helm subcharts | OAM package composition; standalone post-generation patching (`pkg/patch`) is a separate, opt-in step |
 
 ---
 
@@ -240,7 +240,7 @@ PR #58 closed issues #36 (package spec), #37 (ClusterProfile), #38 (policy inter
 | Concern | Decision | Document |
 |---|---|---|
 | Capability rendering schema | Typed Go struct per handler + reflection-derived JSON Schema; `ValidateAndApplyDefaults` interface; custom `CapabilityDefinition` document kind deferred to Phase 2/3 | `design-capability-schema.md` |
-| `pkg/patch` disposition | **Keep** as a supported, standalone library for post-generation resource modification (JSONPath ops, TOML/YAML patch dialects, strategic-merge patch, conflict detection). Deliberately not part of the `kurel build` pipeline — the OAM path stays typed and closed (parameters + trait handlers only). Designated implementation for interactive patch mode (#18); not a conditional-composition mechanism (#39 does not depend on it) | `pkg/patch/README.md` |
+| `pkg/patch` disposition | **Keep** as a supported, standalone library for post-generation resource modification (JSONPath ops, TOML/YAML patch dialects, strategic-merge patch, conflict detection). Deliberately not part of the `kurel build` pipeline — the OAM path stays typed and closed (parameters plus registered component and trait handlers only). Designated implementation for interactive patch mode (go-kure/launcher#18); not a conditional-composition mechanism (go-kure/launcher#39 does not depend on it) | `pkg/patch/README.md` |
 
 ---
 
