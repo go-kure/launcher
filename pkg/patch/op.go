@@ -8,7 +8,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/go-kure/kure/pkg/errors"
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // PatchOp represents a single patch operation to apply to an object.

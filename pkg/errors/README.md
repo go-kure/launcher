@@ -19,6 +19,10 @@ shapes:
 `File`, `Line`, `Column`, and the wrapped cause (`NewParseError(...)`), and supports
 `errors.Unwrap`.
 
+`PatchError` is returned when a patch operation (`pkg/patch`) fails to apply. It carries
+`Operation`, `Path`, `ResourceName`, `Reason`, and the wrapped `Cause`
+(`NewPatchError(operation, path, resourceName, reason, cause)`), and supports `errors.Unwrap`.
+
 ```go
 import "github.com/go-kure/launcher/pkg/errors"
 
@@ -49,6 +53,7 @@ unconditionally.
 |--------|---------|
 | `ValidationError`, `NewValidationError` | Semantic constraint violations (enum or custom). |
 | `ParseError`, `NewParseError` | YAML parse failures with location. |
+| `PatchError`, `NewPatchError` | Patch operations (`pkg/patch`) that fail to apply. |
 | `New`, `Errorf` | Create plain/formatted errors. |
 | `Wrap`, `Wrapf` | Wrap an error with context (nil-safe). |
 | `Is`, `As` | `errors.Is`/`errors.As` passthroughs for inspection. |
