@@ -4,6 +4,8 @@ import (
 	stderrors "errors"
 	"strings"
 	"testing"
+
+	"github.com/go-kure/kure/pkg/stack"
 )
 
 // TestLower_EmptyRegistry_ReturnsSamePointer is the bit-identity proof for the
@@ -857,6 +859,101 @@ func TestLower_StrictCapabilities_MissingDefinitionRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no CapabilityDefinition found for custom trait") {
 		t.Fatalf("expected a missing-CapabilityDefinition error, got: %v", err)
+	}
+}
+
+// --- Pipeline: PolicyResult.ConsumedCapabilities, lowering path (#290) ---
+
+// consumedCapNoopIngressHandler is a trivial no-op TraitHandler for "ingress" —
+// capAwareTraitLoweringRule.LowerTrait unconditionally emits a terminal
+// {Type: "ingress"} trait, so applyTraits needs a registered handler for it or
+// TransformWithPolicy fails with "no handler for trait type" before ever
+// returning a PolicyResult.
+type consumedCapNoopIngressHandler struct{}
+
+func (h *consumedCapNoopIngressHandler) CanHandle(t string) bool { return t == "ingress" }
+func (h *consumedCapNoopIngressHandler) Apply(_ *Trait, _ *stack.Application, _ *stack.Bundle) error {
+	return nil
+}
+
+// TestConsumedCapabilities_LoweringPath proves ctx.consumedCapabilities is
+// genuinely shared across both resolveCapability call sites: the pre-lowering
+// "needs-cap" trait is resolved inside lowerDocumentBody, not a private copy.
+func TestConsumedCapabilities_LoweringPath(t *testing.T) {
+	traitRule := capAwareTraitLoweringRuleWithVAD{capAwareTraitLoweringRule{typ: "needs-cap"}}
+
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"ingress": &consumedCapNoopIngressHandler{}},
+	)
+	tr.RegisterTraitLowering(traitRule)
+
+	comp := Component{
+		Name:   "web",
+		Type:   "webservice",
+		Traits: []Trait{{Type: "needs-cap", Properties: map[string]any{}}},
+	}
+	app := makeApp("myapp", comp)
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+
+	caps := map[string]CapabilityBinding{
+		"needs-cap": {Rendering: map[string]any{"key": "value"}},
+		"ingress":   {Rendering: map[string]any{"host": "example.com"}},
+	}
+
+	_, result, err := tr.TransformWithPolicy(app, TransformContext{Capabilities: caps})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, k := range result.ConsumedCapabilities {
+		if k == "needs-cap" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected %q in ConsumedCapabilities, got %v", "needs-cap", result.ConsumedCapabilities)
+	}
+}
+
+// TestConsumedCapabilities_LoweringPath_SealedNotDoubleCounted is the
+// sealed-trait companion to TestConsumedCapabilities_LoweringPath: the terminal
+// "ingress" trait carries sealed = true, so applyTraits must skip
+// resolveCapability for it even though a matching "ingress" capability exists —
+// guards against applyTraits' !trait.sealed check regressing into
+// double-invoking resolveCapability.
+func TestConsumedCapabilities_LoweringPath_SealedNotDoubleCounted(t *testing.T) {
+	traitRule := capAwareTraitLoweringRuleWithVAD{capAwareTraitLoweringRule{typ: "needs-cap"}}
+
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"ingress": &consumedCapNoopIngressHandler{}},
+	)
+	tr.RegisterTraitLowering(traitRule)
+
+	comp := Component{
+		Name:   "web",
+		Type:   "webservice",
+		Traits: []Trait{{Type: "needs-cap", Properties: map[string]any{}}},
+	}
+	app := makeApp("myapp", comp)
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+
+	caps := map[string]CapabilityBinding{
+		"needs-cap": {Rendering: map[string]any{"key": "value"}},
+		"ingress":   {Rendering: map[string]any{"host": "example.com"}},
+	}
+
+	_, result, err := tr.TransformWithPolicy(app, TransformContext{Capabilities: caps})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, k := range result.ConsumedCapabilities {
+		if k == "ingress" {
+			t.Errorf(`expected sealed "ingress" trait to NOT be recorded, got %v`, result.ConsumedCapabilities)
+		}
 	}
 }
 
