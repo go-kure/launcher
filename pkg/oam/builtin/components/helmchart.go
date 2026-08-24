@@ -974,8 +974,10 @@ func (c *HelmchartConfig) emitsValuesConfigMap() bool {
 // contain only when emitsValuesConfigMap is true (the values ConfigMap);
 // every other case this config is ever wrapped for — delivery: template,
 // whose AugmentLayout (augmentLayoutTemplate) only repartitions Generate's
-// own flat union into hook-ordered children, step 5's "keep the flat union"
-// — is a safe skip for a consumer that never constructs or walks a
+// own flat union into hook-ordered children, preserving the flat-output
+// invariant that Generate's returned union already contains everything
+// AugmentLayout would otherwise add — is a safe skip for a consumer that
+// never constructs or walks a
 // layout.ManifestLayout (e.g. pkg/cmd/kurel's build guard).
 func (c *augmentingHelmchartConfig) GenerateCoversAugmentLayout() bool {
 	return !c.emitsValuesConfigMap()

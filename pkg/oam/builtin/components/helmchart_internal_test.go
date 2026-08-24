@@ -671,6 +671,42 @@ metadata:
 	}
 }
 
+// TestGenerate_MultiEventHookPicksEarliestByPriorityNotPosition covers a
+// distinct branch a codex-lens confirmation pass of this fix identified as
+// untested by every other multi-event test: those all list their tokens in
+// ascending priority order already ("pre-install,pre-upgrade"), so a naive
+// implementation that simply picked the FIRST recognized token (rather than
+// the earliest by kure's own hookPhaseOrder priority) would pass every one
+// of them. "pre-upgrade,pre-install" (tokens in descending priority order)
+// distinguishes the two: it must still resolve to the pre-install group.
+func TestGenerate_MultiEventHookPicksEarliestByPriorityNotPosition(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multi
+  annotations:
+    helm.sh/hook: pre-upgrade,pre-install
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+`)
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	})
+
+	if err := cfg.ensureRendered(); err != nil {
+		t.Fatalf("ensureRendered: %v", err)
+	}
+	if len(cfg.hookGroups) != 2 {
+		t.Fatalf("expected 2 hook groups, got %d", len(cfg.hookGroups))
+	}
+	if got := cfg.hookGroups[0].Phase; got != "pre-install" {
+		t.Errorf("hookGroups[0].Phase = %q, want %q (earliest by priority, not by listed position)", got, "pre-install")
+	}
+}
+
 // TestGenerate_MultiEventHookDropsExcludedTokenKeepsEarliestPhase covers a
 // multi-value annotation mixing a recognized ordered phase with an excluded
 // one ("pre-install,pre-delete"): the excluded token must not suppress the
@@ -771,6 +807,18 @@ metadata:
 	if got := u.GetAnnotations()["helm.sh/hook"]; got != "crd-install,some-custom-hook" {
 		t.Errorf("multi's helm.sh/hook annotation = %q, want unchanged %q", got, "crd-install,some-custom-hook")
 	}
+	// Pin the grouping key itself, not just execution order and the emitted
+	// annotation: a broken normalizer could rewrite the grouping key (e.g. to
+	// just "crd-install", dropping "some-custom-hook") while still leaving
+	// the emitted object's own annotation untouched and this object sorting
+	// last purely by chance of the two orderings comparing equal here — the
+	// Phase assertion is the one check that would catch that.
+	if len(cfg.hookGroups) != 2 {
+		t.Fatalf("expected 2 hook groups, got %d", len(cfg.hookGroups))
+	}
+	if got := cfg.hookGroups[1].Phase; got != "crd-install,some-custom-hook" {
+		t.Errorf("hookGroups[1].Phase = %q, want unchanged %q (grouping key for an all-custom annotation must not be rewritten)", got, "crd-install,some-custom-hook")
+	}
 }
 
 // TestGenerate_MultiEventHookDropsExcludedTokenAmongCustomHooks covers a
@@ -847,6 +895,15 @@ metadata:
 	}
 	if total != 1 {
 		t.Fatalf("expected the comma-only-hook object to survive (not all tokens excluded — there were no tokens at all), got %d resources across %d groups", total, len(cfg.hookGroups))
+	}
+	// Pin the grouping key itself: a broken normalizer could rewrite "," to
+	// "" (or some other value) while still leaving the object present, which
+	// the resource-count check above alone would not catch.
+	if len(cfg.hookGroups) != 1 {
+		t.Fatalf("expected 1 hook group, got %d", len(cfg.hookGroups))
+	}
+	if got := cfg.hookGroups[0].Phase; got != "," {
+		t.Errorf("hookGroups[0].Phase = %q, want unchanged %q (a degenerate annotation must not be rewritten)", got, ",")
 	}
 }
 
