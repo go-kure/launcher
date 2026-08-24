@@ -24,7 +24,7 @@ Reference.
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). |
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
-| `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits. |
+| `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below; `podFailurePolicy` not yet projected). |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
@@ -626,6 +626,14 @@ loop. Errors name the authored list position and container, e.g.
 `initContainers[0] "init": image "docker.io/x/y:v1" is not from an allowed
 registry [...]`.
 
+`cronjob`'s `backoffLimit`/`completions`/`parallelism`/`activeDeadlineSeconds`/
+`ttlSecondsAfterFinished`/`completionMode` properties (see "Per-type highlights"
+below) are parsed and applied by a dedicated `JobSpecConfig`/`parseJobSpec`/
+`applyJobSpec` (`common.go`), factored out separately from the fields above
+because `batchv1.CronJob.Spec.JobTemplate.Spec` and a bare `batchv1.Job.Spec`
+are the same `batchv1.JobSpec` type — the future `job` component (#279) reuses
+this trio verbatim rather than duplicating it.
+
 ## Per-type highlights
 
 - **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice).
@@ -640,9 +648,42 @@ registry [...]`.
   `pvc.storageClass`), `accessModes`, `mountPath`), `serviceName` (headless).
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`); `port`
   optionally adds a Service. No `sidecars` schema key (init containers only).
-- **cronjob** — `schedule` (5-field cron), `restartPolicy` (default `OnFailure`),
+- **cronjob** — `schedule` accepts a standard 5-field cron expression (e.g.
+  `0 2 * * *`; not 6-field — a seconds field is rejected), one of the fixed
+  `@`-descriptors (`@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
+  `@midnight`, `@hourly`; `@reboot` is rejected, meaningless for a CronJob),
+  or `@every <duration>` (e.g. `@every 1h30m`, validated via Go's
+  `time.ParseDuration` — a malformed duration is rejected, not merely
+  regex-matched). `restartPolicy` (default `OnFailure`),
   `successfulJobsHistoryLimit`/`failedJobsHistoryLimit`. No `sidecars` schema
   key (init containers only).
+  CronJobSpec-level: `concurrencyPolicy` (`Allow`|`Forbid`|`Replace`; the API's
+  own default is `Allow`, but this is only ever written when authored —
+  `ConcurrencyPolicy` has no `omitempty`, so writing it unconditionally would
+  add the key to every generated CronJob), `suspend`, `startingDeadlineSeconds`
+  (`>= 0`), `timeZone` (a real IANA zone name, e.g. `Europe/Brussels`; an
+  authored empty string is rejected outright, `Local` is rejected
+  case-insensitively even though Go's own `time.LoadLocation("Local")`
+  succeeds — Kubernetes' CronJob validation rejects it as server-dependent —
+  and any other value is checked via `time.LoadLocation`, which this binary
+  resolves from an embedded IANA database rather than the host's zoneinfo).
+  JobSpec-level (projected onto `spec.jobTemplate.spec`, shared with the
+  future `job` component — see "Common config" above): `backoffLimit`,
+  `completions`, `parallelism` (`<= 100000` when `completionMode` is
+  `Indexed`), `activeDeadlineSeconds` (must be a **positive** integer — `0` is
+  rejected, not just negative values), `ttlSecondsAfterFinished`,
+  `completionMode` (`NonIndexed`|`Indexed`; `Indexed` requires `completions`
+  to also be authored). Every optional field above is presence-gated: omitting
+  it never adds a key to the generated output, even where the corresponding
+  Kubernetes default (e.g. `concurrencyPolicy: Allow`) would otherwise appear
+  to have been authored.
+  Known limitation: the plain 5-field `schedule` form accepts any 5
+  whitespace-separated tokens with no per-field semantic check (e.g.
+  `99 99 99 99 99` builds successfully here and is only rejected later, by
+  Kubernetes' own API server) — this is deliberate, not an oversight: tightening
+  it would reject documents that build successfully today, which is a breaking
+  change under this project's additive-compatibility rule (see
+  `docs/oam/design-gvk.md`). `podFailurePolicy` is not yet projected (#279).
 - **helmchart** — `chart`, `version`, `delivery` (`native`|`template`), `source`
   (inline `url` or `{name,kind}` ref), `values`/`valuesFrom`, `valuesMode`
   (`inline` default | `configMap`), `driftDetection`, `install.crds`/`upgrade.crds`.
