@@ -330,7 +330,7 @@ func TestTransformer_RegisterPolicy_PanicsIfClaimedByPolicyLowering(t *testing.T
 
 func TestResolveCapability_NoCapabilities(t *testing.T) {
 	trait := Trait{Type: "expose", Properties: map[string]any{"port": 80}}
-	got := resolveCapability(trait, nil)
+	got, _, _ := resolveCapability(trait, nil)
 	if got.Properties["port"] != 80 {
 		t.Errorf("expected port 80, got %v", got.Properties["port"])
 	}
@@ -345,7 +345,7 @@ func TestResolveCapability_MergesRendering(t *testing.T) {
 	}
 	// OAM inline value takes precedence.
 	trait := Trait{Type: "ingress", Properties: map[string]any{"host": "override.com"}}
-	got := resolveCapability(trait, caps)
+	got, _, _ := resolveCapability(trait, caps)
 	if got.Properties["host"] != "override.com" {
 		t.Errorf("expected OAM value to win: got %v", got.Properties["host"])
 	}
@@ -540,6 +540,190 @@ func TestTransformWithPolicy_ReturnsPolicyResult(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("expected non-nil PolicyResult")
+	}
+}
+
+// --- Pipeline: PolicyResult.ConsumedCapabilities (#290) ---
+
+func TestConsumedCapabilities_DispatchPath(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"ingress": &capAwarePipelineHandler{typ: "ingress"}},
+	)
+	comp := Component{
+		Name:   "web",
+		Type:   "webservice",
+		Traits: []Trait{{Type: "ingress", Properties: map[string]any{}}},
+	}
+	app := makeApp("myapp", comp)
+	ctx := TransformContext{
+		Capabilities: map[string]CapabilityBinding{
+			"ingress": {Rendering: map[string]any{"host": "example.com"}},
+		},
+	}
+	_, result, err := tr.TransformWithPolicy(app, ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := result.ConsumedCapabilities; len(got) != 1 || got[0] != "ingress" {
+		t.Errorf("expected ConsumedCapabilities = [ingress], got %v", got)
+	}
+}
+
+func TestConsumedCapabilities_ScopedKey(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"ingress": &capAwarePipelineHandler{typ: "ingress"}},
+	)
+	comp := Component{
+		Name:   "web",
+		Type:   "webservice",
+		Traits: []Trait{{Type: "ingress", Properties: map[string]any{"scope": "internal"}}},
+	}
+	app := makeApp("myapp", comp)
+	ctx := TransformContext{
+		Capabilities: map[string]CapabilityBinding{
+			// Both keys present simultaneously: proves scoped-before-bare precedence,
+			// not just presence (a scoped-only map couldn't distinguish the two).
+			"ingress.internal": {Rendering: map[string]any{"host": "internal.example.com"}},
+			"ingress":          {Rendering: map[string]any{"host": "example.com"}},
+		},
+	}
+	_, result, err := tr.TransformWithPolicy(app, ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := result.ConsumedCapabilities; len(got) != 1 || got[0] != "ingress.internal" {
+		t.Errorf("expected ConsumedCapabilities = [ingress.internal], got %v", got)
+	}
+}
+
+func TestConsumedCapabilities_EmptyRendering_StillCounted(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"ingress": &capAwarePipelineHandler{typ: "ingress"}},
+	)
+	comp := Component{
+		Name:   "web",
+		Type:   "webservice",
+		Traits: []Trait{{Type: "ingress", Properties: map[string]any{}}},
+	}
+	app := makeApp("myapp", comp)
+	ctx := TransformContext{
+		Capabilities: map[string]CapabilityBinding{
+			"ingress": {}, // no Rendering: match, not merge, still counts
+		},
+	}
+	_, result, err := tr.TransformWithPolicy(app, ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := result.ConsumedCapabilities; len(got) != 1 || got[0] != "ingress" {
+		t.Errorf("expected ConsumedCapabilities = [ingress], got %v", got)
+	}
+}
+
+func TestConsumedCapabilities_NoMatch_NotReported(t *testing.T) {
+	// stubTraitHandler, not CapabilityAware: applyTraits never early-returns
+	// ErrMissingCapability, so a clean "no match, no error" result is reachable.
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"expose": &stubTraitHandler{typ: "expose"}},
+	)
+	comp := Component{
+		Name:   "web",
+		Type:   "webservice",
+		Traits: []Trait{{Type: "expose", Properties: map[string]any{}}},
+	}
+	app := makeApp("myapp", comp)
+	ctx := TransformContext{
+		Capabilities: map[string]CapabilityBinding{
+			"other": {Rendering: map[string]any{"x": "y"}},
+		},
+	}
+	_, result, err := tr.TransformWithPolicy(app, ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.ConsumedCapabilities) != 0 {
+		t.Errorf("expected no consumed capabilities, got %v", result.ConsumedCapabilities)
+	}
+}
+
+func TestConsumedCapabilities_Deduped(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"ingress": &capAwarePipelineHandler{typ: "ingress"}},
+	)
+	comp1 := Component{Name: "web1", Type: "webservice", Traits: []Trait{{Type: "ingress", Properties: map[string]any{}}}}
+	comp2 := Component{Name: "web2", Type: "webservice", Traits: []Trait{{Type: "ingress", Properties: map[string]any{}}}}
+	app := makeApp("myapp", comp1, comp2)
+	ctx := TransformContext{
+		Capabilities: map[string]CapabilityBinding{
+			"ingress": {Rendering: map[string]any{"host": "example.com"}},
+		},
+	}
+	_, result, err := tr.TransformWithPolicy(app, ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := result.ConsumedCapabilities; len(got) != 1 || got[0] != "ingress" {
+		t.Errorf("expected deduped ConsumedCapabilities = [ingress], got %v", got)
+	}
+}
+
+func TestConsumedCapabilities_Sorted(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{
+			"zeta":  &capAwarePipelineHandler{typ: "zeta"},
+			"alpha": &capAwarePipelineHandler{typ: "alpha"},
+			"mid":   &capAwarePipelineHandler{typ: "mid"},
+		},
+	)
+	comp1 := Component{Name: "c1", Type: "webservice", Traits: []Trait{{Type: "zeta", Properties: map[string]any{}}}}
+	comp2 := Component{Name: "c2", Type: "webservice", Traits: []Trait{{Type: "alpha", Properties: map[string]any{}}}}
+	comp3 := Component{Name: "c3", Type: "webservice", Traits: []Trait{{Type: "mid", Properties: map[string]any{}}}}
+	app := makeApp("myapp", comp1, comp2, comp3)
+	ctx := TransformContext{
+		Capabilities: map[string]CapabilityBinding{
+			"zeta":  {Rendering: map[string]any{"x": "1"}},
+			"alpha": {Rendering: map[string]any{"x": "1"}},
+			"mid":   {Rendering: map[string]any{"x": "1"}},
+		},
+	}
+	_, result, err := tr.TransformWithPolicy(app, ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"alpha", "mid", "zeta"}
+	got := result.ConsumedCapabilities
+	if len(got) != len(want) {
+		t.Fatalf("expected %d keys, got %d: %v", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("expected sorted ConsumedCapabilities %v, got %v", want, got)
+			break
+		}
+	}
+}
+
+func TestConsumedCapabilities_EmptyCapabilities_NoPanic(t *testing.T) {
+	// stubTraitHandler, ctx.Capabilities unset: exercises resolveCapability's
+	// len(capabilities) == 0 early return through the full pipeline.
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"expose": &stubTraitHandler{typ: "expose"}},
+	)
+	comp := Component{Name: "web", Type: "webservice", Traits: []Trait{{Type: "expose", Properties: map[string]any{}}}}
+	app := makeApp("myapp", comp)
+	_, result, err := tr.TransformWithPolicy(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.ConsumedCapabilities) != 0 {
+		t.Errorf("expected no consumed capabilities, got %v", result.ConsumedCapabilities)
 	}
 }
 

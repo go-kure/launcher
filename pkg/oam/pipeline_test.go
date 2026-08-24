@@ -22,6 +22,9 @@ func TestNewPolicyResult_Defaults(t *testing.T) {
 	if r.ReconciliationSettings != nil {
 		t.Errorf("ReconciliationSettings should be nil, got %v", r.ReconciliationSettings)
 	}
+	if r.ConsumedCapabilities != nil {
+		t.Errorf("ConsumedCapabilities should be nil, got %v", r.ConsumedCapabilities)
+	}
 }
 
 func TestPolicyResult_HasDependencies(t *testing.T) {
