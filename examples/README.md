@@ -12,6 +12,13 @@ bin/kurel build examples/01-webservice-minimal.yaml \
   --profile examples/cluster-profiles/minimal.yaml
 ```
 
+Most of these examples are schema-validated in CI (`make validate-manifests`), which builds each
+one and checks the generated manifests against [fluxcd/flux-schema](https://github.com/fluxcd/flux-schema)'s
+`default` (embedded) and `ecosystem` (schemas.fluxoperator.dev) catalogs.
+`custom-capability/app.yaml` is excluded from this — see
+["Why this example cannot be run with `kurel build`"](#why-this-example-cannot-be-run-with-kurel-build)
+below.
+
 ## Application examples
 
 | # | File | Components | Traits | Profile |
@@ -34,8 +41,11 @@ bin/kurel build examples/01-webservice-minimal.yaml \
 
 **Profile compatibility notes:**
 - Examples 03–04, 06, 08 also work with `gateway-certmanager-aws.yaml`
-- Example 14 also works with `nginx-certmanager-vault.yaml`
-- Examples 01, 05, 07, 09–13, 15 work with any profile
+- Example 14's table-listed profile above (`gateway-certmanager-aws.yaml`) currently fails to
+  build (lowered `httproute` rejects field `tls`); use `nginx-certmanager-vault.yaml` instead
+- Examples 01, 05, 07, 09–11, 13, 15 work with any profile
+- Example 12 currently fails to build with any profile (`volume "host-proc": mountPath is
+  required`) — a pre-existing issue, not fixed by `make validate-manifests`, which excludes it
 
 ## Cluster profiles
 

@@ -2,7 +2,7 @@
 
 This document provides an overview of all GitHub Actions workflows used in the launcher project.
 
-**Last Updated:** 2026-08-19
+**Last Updated:** 2026-08-24
 
 ---
 
@@ -76,6 +76,8 @@ concurrency:
            │ cross-platform  │  ← linux amd64/arm64 matrix build
            └─────────────────┘
 
+validate-manifests  ← kurel build + flux-schema validate (non-blocking, not in `build`'s gate)
+
 PR-only jobs (parallel, non-blocking):
 ┌─────────────────┐  ┌────────────┐
 │ analyze-changes │  │ docs-build │
@@ -99,6 +101,7 @@ temporary branch — the merged result — before the PR is allowed to land.
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) |
 | `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
+| `validate-manifests` | `validate-manifests` | 10 min | changes | `kurel build` + `flux schema validate` against the `default` (embedded) and `ecosystem` (schemas.fluxoperator.dev) catalogs for a representative `examples/*.yaml` subset; `continue-on-error: true`, not in `build`'s gate (go-kure/launcher#292) |
 | `analyze-changes` | `Analyze Changes` | 5 min | — | Changed files summary, breaking change warning for pkg/ (PR only) |
 
 ### Cross-Platform Matrix
@@ -126,6 +129,13 @@ Runs on main and `release/*` branches only (not PRs):
 - **Doc-sync checks** — `docs-build` (Layers 1/2) and `doc-gate` (Layer 3) run the canonical
   `check-doc-sync`, `check-links` and `check-doc-gate` actions from `go-kure/.github`; launcher no
   longer vendors its own copies under `site/scripts/`
+- **Manifest schema validation** — `validate-manifests` builds a representative subset of
+  `examples/*.yaml` via `kurel build` and validates the output against
+  [fluxcd/flux-schema](https://github.com/fluxcd/flux-schema)'s `default` (embedded) catalog plus
+  its `ecosystem` catalog (fetched from schemas.fluxoperator.dev — network access required)
+  (`make validate-manifests`, same command locally). `continue-on-error: true` for its first cycle
+  and excluded from `build`'s aggregation gate and `DEVELOPMENT.md`'s required-checks list —
+  promoting it to required is a deliberate follow-up (go-kure/launcher#292)
 - **Path filtering** — `dorny/paths-filter` skips jobs when unrelated files change
 - **Diff-based lint** — on PRs, lint only checks new/changed lines (`--new-from-rev`)
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages

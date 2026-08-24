@@ -11,6 +11,9 @@ hugo = "0.165.0"
 # Docs tooling: docs-map driver (yq) and rendered-site link checker (lychee)
 yq = "4.53.6"
 lychee = "0.24.2"
+# flux CLI, for the `flux schema validate` plugin used by `make validate-manifests`
+# (site/scripts/validate-manifests.sh installs/pins the `schema` plugin itself)
+flux2 = "2.9.4"
 
 [env]
 GOBIN = "{{config_root}}/.bin"
