@@ -353,11 +353,19 @@ check-tool-versions: ## Verify golangci-lint pin parity (Makefile/ci.yml/docs) a
 sync-tool-versions: ## Sync golangci-lint pins (Makefile/ci.yml/docs) from mise.toml
 	sh scripts/sync-tool-versions.sh
 
+.PHONY: check-govulncheck-docs
+check-govulncheck-docs: ## Verify govulncheck version parity (docs/github-workflows.md) against ci.yml
+	sh scripts/check-govulncheck-docs.sh
+
+.PHONY: sync-govulncheck-docs
+sync-govulncheck-docs: ## Sync govulncheck doc mentions (docs/github-workflows.md) from ci.yml
+	sh scripts/sync-govulncheck-docs.sh
+
 .PHONY: check
-check: lint vet test-short check-kure-dep-sync check-tool-versions ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins)
+check: lint vet test-short check-kure-dep-sync check-tool-versions check-govulncheck-docs ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins)
 
 .PHONY: precommit
-precommit: fmt tidy lint test check-kure-dep-sync ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync)
+precommit: fmt tidy lint test check-kure-dep-sync check-tool-versions check-govulncheck-docs ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync, tool pins)
 
 .PHONY: ci
 ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln check-kure-dep-sync ## Run comprehensive CI pipeline
