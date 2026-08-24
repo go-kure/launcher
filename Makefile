@@ -109,6 +109,10 @@ build-kurel: $(BUILD_DIR) ## Build the kurel executable
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
 
+.PHONY: validate-manifests
+validate-manifests: build-kurel ## Build example manifests and validate against flux-schema
+	@bash site/scripts/validate-manifests.sh
+
 # =============================================================================
 # Testing
 # =============================================================================

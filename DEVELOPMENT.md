@@ -104,6 +104,20 @@ make test-coverage
 make build
 ```
 
+### Validating example manifests against flux-schema
+
+```bash
+# Build examples/*.yaml and validate the output against fluxcd/flux-schema's
+# default (embedded) catalog plus its ecosystem catalog (fetched from
+# schemas.fluxoperator.dev — network access required). Requires the `flux` CLI
+# (mise-managed, see mise.toml) — the script installs/upgrades the `schema` plugin itself.
+make validate-manifests
+```
+
+This runs in CI as the non-required `validate-manifests` job (see
+`docs/github-workflows.md`) — not yet in the required-checks list below while it
+completes its first non-blocking cycle (go-kure/launcher#292).
+
 ### 4. Testing
 
 ```bash
@@ -225,6 +239,7 @@ guard's shared-direct set.
 
 ### Building
 - `build` / `build-kurel` - Build kurel executable
+- `validate-manifests` - Build example manifests and validate against flux-schema
 
 ### Testing
 - `test` - Run all tests
