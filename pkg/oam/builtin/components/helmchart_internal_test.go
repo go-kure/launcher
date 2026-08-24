@@ -40,12 +40,15 @@ data:
 		},
 	}
 
-	objects, err := cfg.generateTemplate()
-	if err != nil {
-		t.Fatalf("generateTemplate: %v", err)
+	if err := cfg.ensureRendered(); err != nil {
+		t.Fatalf("ensureRendered: %v", err)
 	}
-	if len(objects) != 2 {
-		t.Fatalf("expected 2 objects, got %d", len(objects))
+	var count int
+	for _, g := range cfg.hookGroups {
+		count += len(g.Resources)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 objects, got %d", count)
 	}
 }
 
@@ -76,12 +79,15 @@ data:
 		},
 	}
 
-	objects, err := cfg.generateTemplate()
-	if err != nil {
-		t.Fatalf("generateTemplate: %v", err)
+	if err := cfg.ensureRendered(); err != nil {
+		t.Fatalf("ensureRendered: %v", err)
 	}
-	if len(objects) != 1 {
-		t.Fatalf("expected 1 object, got %d", len(objects))
+	var count int
+	for _, g := range cfg.hookGroups {
+		count += len(g.Resources)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 object, got %d", count)
 	}
 }
 

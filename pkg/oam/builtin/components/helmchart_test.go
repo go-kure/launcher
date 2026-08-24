@@ -539,16 +539,19 @@ func TestHelmchartHandler_DeliveryTemplate_HandlerDefaultConfigMapFallsBackInlin
 	}
 	// Template delivery never calls buildHelmRelease (no HelmRelease is
 	// generated at all), so the forced-inline resolution has no HelmRelease
-	// field to inspect; what's externally observable is that it did not
-	// error, and — per the D2 invariant — that it did not get wrapped as a
-	// LayoutAugmenter (PR2's template branch isn't implemented, so a
-	// configMap-flavored gate here would relocate the flat bundle for no
-	// benefit, the exact regression wrapIfHelmchartAugmenter's own doc
-	// comment warns against).
-	if _, ok := cfg.(interface {
-		AugmentLayout(*layout.ManifestLayout) error
-	}); ok {
-		t.Fatal("template-delivery config with inherited handler default must not be a LayoutAugmenter")
+	// field to inspect. This PR wraps every delivery: template config as a
+	// LayoutAugmenter (step 7), so what pins the :287 fallback actually firing
+	// is no longer "not a LayoutAugmenter" — it is
+	// GenerateCoversAugmentLayout() == true: proof that Generate's own flat
+	// output already covers this config's AugmentLayout (nothing needs a
+	// values ConfigMap because the fallback resolved ValuesMode to inline),
+	// not just that wrapping didn't occur for some unrelated reason.
+	cov, ok := cfg.(interface{ GenerateCoversAugmentLayout() bool })
+	if !ok {
+		t.Fatal("template-delivery config does not implement GenerateCoversAugmentLayout")
+	}
+	if !cov.GenerateCoversAugmentLayout() {
+		t.Error("GenerateCoversAugmentLayout() = false, want true (inherited handler default resolved to inline, so AugmentLayout adds nothing)")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -307,28 +308,34 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 }
 
 // wrapIfHelmchartAugmenter returns cfg wrapped in augmentingHelmchartConfig
-// only when AugmentLayout would actually do something: today that's
-// valuesMode: configMap with at least one value to externalize. kure's layout
+// whenever AugmentLayout would do anything at all: valuesMode: configMap with
+// at least one value to externalize (emitsValuesConfigMap), or delivery:
+// template (its AugmentLayout — augmentLayoutTemplate — repartitions the
+// rendered chart into hook-ordered child layouts; a no-op when there is at
+// most one hook group, but that is only knowable after the network render
+// inside Generate, too late for this config-construction-time wrap — see the
+// package doc / README for the resulting on-disk-path caveat). kure's layout
 // walker type-asserts layout.LayoutAugmenter by PRESENCE
 // (pkg/stack/layout/walker.go) to decide whether an app gets its own
 // flat-bundle sub-layout or merges into its parent's — a structural decision,
 // not a side effect with a safe no-op default. So *HelmchartConfig itself
-// must stay free of the AugmentLayout method (a hook-free, inline-values
-// config must not satisfy the interface), and the wrapper is applied
+// must stay free of the AugmentLayout method (a config that needs neither
+// branch must not satisfy the interface), and the wrapper is applied
 // conditionally here rather than unconditionally. See also
 // traits.wrapIfAugmenter, which forwards this presence through trait
 // decorators generically.
 //
-// delivery: template does NOT gate this yet: AugmentLayout's Helm
-// hook-group repartitioning for template delivery is PR2's work, not
-// implemented in this PR. Wrapping a template-delivery config now would make
-// it satisfy LayoutAugmenter with an effectively no-op AugmentLayout, which
-// still triggers the walker's presence-based flat-bundle relocation for zero
-// benefit. A future PR should add `|| cfg.Delivery == "template"` back to the
-// condition below in the same change that implements the template branch in
-// AugmentLayout — not before.
+// Both wrapped cases satisfy layout.LayoutAugmenter identically, but differ
+// in whether Generate's own output is already a complete superset of what
+// AugmentLayout adds: delivery: template's AugmentLayout only repartitions
+// Generate's flat union (nothing new), while valuesMode: configMap's adds a
+// values ConfigMap Generate never emits itself. pkg/cmd/kurel's build guard
+// (rejectLayoutAugmenters), which never constructs or walks a
+// layout.ManifestLayout, consults GenerateCoversAugmentLayout below to tell
+// the two apart — a config for which skipping AugmentLayout loses nothing is
+// let through; one for which it would (the fail-closed default) is rejected.
 func wrapIfHelmchartAugmenter(cfg *HelmchartConfig) stack.ApplicationConfig {
-	if cfg.ValuesMode == "configMap" && len(cfg.Values) > 0 {
+	if cfg.emitsValuesConfigMap() || cfg.Delivery == "template" {
 		return &augmentingHelmchartConfig{cfg}
 	}
 	return cfg
@@ -375,9 +382,22 @@ type HelmchartConfig struct {
 	// renderChart is the function used to render Helm charts in template delivery mode.
 	// Defaults to helm.RenderChart; injectable for testing. Variadic opts matches
 	// kure's RenderChart signature (kure v0.2.0-beta.10+, helm.RenderOption) so that
-	// helm.RenderChart itself satisfies this field without a wrapper; generateTemplate
+	// helm.RenderChart itself satisfies this field without a wrapper; ensureRendered
 	// does not pass any opts yet (see its doc comment).
 	renderChart func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error)
+
+	// hookGroups caches the rendered chart's manifests, split by Helm hook phase
+	// and weight (via helm.SplitByHookWeight), for delivery: template. Populated
+	// by ensureRendered on first call; nil until then (and always nil for
+	// delivery: native, which never calls ensureRendered). Not goroutine-safe —
+	// concurrent Generate/AugmentLayout calls on the same *HelmchartConfig race
+	// on rendered/hookGroups (crane's identical cache isn't goroutine-safe
+	// either).
+	hookGroups []helm.HookGroup
+	// rendered reports whether ensureRendered has already populated hookGroups,
+	// so that Generate followed by AugmentLayout (kure's layout walker's usual
+	// call order) renders the chart over the network exactly once.
+	rendered bool
 
 	// fluxNS overrides the namespace for emitted Flux control-plane CRs
 	// (HelmRelease, HelmRepository, OCIRepository). Set by postProcessFluxNamespace
@@ -440,7 +460,23 @@ func (c *HelmchartConfig) EmitsAutoHealthCheck() bool {
 // For delivery: native (default), emits a source CR (Form A only) and a HelmRelease.
 func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	if c.Delivery == "template" {
-		return c.generateTemplate()
+		if err := c.ensureRendered(); err != nil {
+			return nil, err
+		}
+		// Flatten hookGroups in execution order. This is the union AugmentLayout's
+		// template branch (augmentLayoutTemplate) later repartitions into child
+		// layouts for a layout-walking consumer — Generate itself always returns
+		// the flat set, which is what keeps kurel build (which never walks a
+		// layout.ManifestLayout) and every validator unaffected, and is the
+		// premise GenerateCoversAugmentLayout's guard opt-out rests on.
+		var objects []*client.Object
+		for _, g := range c.hookGroups {
+			for _, obj := range g.Resources {
+				o := obj
+				objects = append(objects, &o)
+			}
+		}
+		return objects, nil
 	}
 
 	var objects []*client.Object
@@ -524,8 +560,14 @@ func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, er
 	return objects, nil
 }
 
-// generateTemplate renders the chart client-side via helm.RenderChart and returns the
-// resulting Kubernetes manifests as individual objects.
+// ensureRendered renders the chart client-side via renderChart on first call
+// (for delivery: template only), parses the result into Helm-hook-partitioned
+// groups via parseChartManifests, and caches them in hookGroups. Subsequent
+// calls are no-ops — rendered guards re-render — so a config used through
+// both Generate (which flattens hookGroups into its returned union) and
+// AugmentLayout (augmentLayoutTemplate, which repartitions the same groups
+// into child layouts) — kure's layout walker's usual call order — renders
+// the chart over the network exactly once.
 //
 // Known limitation: this call passes no release-identity opts, so kure renders with
 // its defaults, .Release.Name = "release" and .Release.Namespace = "default" (kure
@@ -535,7 +577,10 @@ func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, er
 // behavior for a chart that needs .Release.Name/.Release.Namespace. kure now exposes
 // helm.WithReleaseName/helm.WithNamespace (kure v0.2.0-beta.10+); wiring them through and
 // relaxing that validation is a follow-up, not attempted here.
-func (c *HelmchartConfig) generateTemplate() ([]*client.Object, error) {
+func (c *HelmchartConfig) ensureRendered() error {
+	if c.rendered {
+		return nil
+	}
 	renderFn := c.renderChart
 	if renderFn == nil {
 		renderFn = helm.RenderChart
@@ -546,18 +591,80 @@ func (c *HelmchartConfig) generateTemplate() ([]*client.Object, error) {
 	}
 	raw, err := renderFn(chartURL, c.Version, c.Values)
 	if err != nil {
-		return nil, errors.Wrapf(err, "helmchart %q: rendering chart", c.Name)
+		return errors.Wrapf(err, "helmchart %q: rendering chart", c.Name)
 	}
-	return decodeKubeManifests(raw)
+	groups, err := parseChartManifests(raw)
+	if err != nil {
+		return err
+	}
+	c.hookGroups = groups
+	c.rendered = true
+	return nil
+}
+
+// parseChartManifests decodes multi-doc YAML produced by renderChart and
+// splits it into Helm hook-phase-and-weight groups via kure's
+// helm.SplitByHookWeight.
+func parseChartManifests(raw []byte) ([]helm.HookGroup, error) {
+	objs, err := decodeKubeManifests(raw)
+	if err != nil {
+		return nil, err
+	}
+	return helm.SplitByHookWeight(objs), nil
+}
+
+// hookGroupDir returns a DNS-1123-safe directory-name segment for a
+// HookGroup: Phase == "" (main / non-hook resources) maps to "main"; any
+// other phase is slugified — lowercased, runs of characters outside
+// [a-z0-9-] collapsed to a single "-", leading/trailing "-" trimmed,
+// truncated to 40 characters and re-trimmed (the cut can expose a new
+// trailing "-"), "unknown" if the result is empty.
+//
+// Deviates from crane's hookGroupDir (returns the phase verbatim): kure's
+// SplitByHookWeight puts a comma-separated or otherwise malformed
+// helm.sh/hook annotation into one opaque phase string (kure hooks.go) that
+// becomes both a path segment and a literal Kustomization object name via
+// kure's createKustomizationForLayout, which validates neither
+// (pkg/stack/fluxcd/resource_generator.go). Unsanitized, a phase like
+// "pre-install,post-install" breaks path safety and DNS-1123 validity, and
+// Helm imposes no length limit on the annotation. Fixed here rather than
+// inherited — see augmentLayoutTemplate's doc comment for the write-time
+// hazard this avoids.
+func hookGroupDir(g helm.HookGroup) string {
+	if g.Phase == "" {
+		return "main"
+	}
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(g.Phase) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+			continue
+		}
+		if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	const maxSlugLen = 40
+	if len(slug) > maxSlugLen {
+		slug = strings.TrimRight(slug[:maxSlugLen], "-")
+	}
+	if slug == "" {
+		return "unknown"
+	}
+	return slug
 }
 
 // decodeKubeManifests decodes multi-doc YAML from RenderChart into Kubernetes objects.
 // Real YAML parse errors are returned immediately.
 // Non-map and empty documents are skipped defensively (kure filters NOTES.txt upstream).
 // Mapping documents without apiVersion/kind are an error (broken chart manifest).
-func decodeKubeManifests(raw []byte) ([]*client.Object, error) {
+func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	var objects []*client.Object
+	var objects []client.Object
 	for {
 		var rawDoc any
 		if err := dec.Decode(&rawDoc); err != nil {
@@ -573,9 +680,7 @@ func decodeKubeManifests(raw []byte) ([]*client.Object, error) {
 		if doc["apiVersion"] == nil || doc["kind"] == nil {
 			return nil, errors.Errorf("rendered document is missing apiVersion or kind: %v", doc)
 		}
-		u := &unstructured.Unstructured{Object: doc}
-		obj := client.Object(u)
-		objects = append(objects, &obj)
+		objects = append(objects, &unstructured.Unstructured{Object: doc})
 	}
 	return objects, nil
 }
@@ -612,18 +717,15 @@ func (c *HelmchartConfig) buildHelmRelease() *helmv2.HelmRelease {
 	// generated ref is itself a valuesFrom entry added here, before the
 	// user's own c.ValuesFrom loop — so user entries, appearing later in
 	// spec.valuesFrom, win over the generated ref on overlapping keys.
-	if len(c.Values) > 0 {
-		switch c.ValuesMode {
-		case "configMap":
-			fluxcd.AddHelmReleaseValuesFrom(hr, helmv2.ValuesReference{
-				Kind:      "ConfigMap",
-				Name:      valuesConfigMapName(c.Name),
-				ValuesKey: "values.yaml",
-			})
-		default: // "inline"
-			// error ignored: only fails on JSON marshal failure, which can't happen with map[string]any
-			_ = fluxcd.SetHelmReleaseValuesFromMap(hr, c.Values)
-		}
+	if c.emitsValuesConfigMap() {
+		fluxcd.AddHelmReleaseValuesFrom(hr, helmv2.ValuesReference{
+			Kind:      "ConfigMap",
+			Name:      valuesConfigMapName(c.Name),
+			ValuesKey: "values.yaml",
+		})
+	} else if len(c.Values) > 0 { // "inline" (or "configMap" with nothing to externalize)
+		// error ignored: only fails on JSON marshal failure, which can't happen with map[string]any
+		_ = fluxcd.SetHelmReleaseValuesFromMap(hr, c.Values)
 	}
 	for _, vf := range c.ValuesFrom {
 		fluxcd.AddHelmReleaseValuesFrom(hr, vf)
@@ -655,46 +757,184 @@ type augmentingHelmchartConfig struct {
 }
 
 // AugmentLayout attaches the resources this config's Generate output alone
-// cannot express. Today: native delivery under valuesMode: configMap emits
-// the values.yaml ConfigMap that buildHelmRelease's generated valuesFrom
-// entry references. (Template delivery's hook-group repartitioning is a
-// follow-up PR; wrapIfHelmchartAugmenter does not yet gate on delivery:
-// template — see that function's doc comment — so this method is not called
-// for template delivery until that PR both implements the branch here and
-// restores the gate.)
+// cannot express: native delivery under valuesMode: configMap emits the
+// values.yaml ConfigMap that buildHelmRelease's generated valuesFrom entry
+// references (emitsValuesConfigMap branch); delivery: template repartitions
+// the rendered chart into hook-ordered child layouts (augmentLayoutTemplate).
+// wrapIfHelmchartAugmenter only wraps a config for which one of these two
+// branches actually does something, so exactly one of them ever fires for a
+// given instance.
 func (c *augmentingHelmchartConfig) AugmentLayout(ml *layout.ManifestLayout) error {
-	if c.ValuesMode == "configMap" && len(c.Values) > 0 {
-		b, err := yaml.Marshal(c.Values)
-		if err != nil {
-			return errors.Wrapf(err, "helmchart %q: marshaling values for configMap valuesMode", c.Name)
+	if c.Delivery == "template" {
+		return c.augmentLayoutTemplate(ml)
+	}
+	if !c.emitsValuesConfigMap() {
+		return nil
+	}
+	b, err := yaml.Marshal(c.Values)
+	if err != nil {
+		return errors.Wrapf(err, "helmchart %q: marshaling values for configMap valuesMode", c.Name)
+	}
+	// A literal, statically-named ConfigMap — not ml.ExtraFiles or
+	// ml.ConfigMapGenerators (kustomize's configMapGenerator hash-suffixes
+	// the emitted name, and kustomize's builtin name-reference table has
+	// no HelmRelease entry, so that suffix is never rewritten into
+	// HelmRelease.spec.valuesFrom[].name). A literal resource has no
+	// suffix to go stale, so the ValuesReference set up in
+	// buildHelmRelease always resolves.
+	//
+	// Namespace is mandatory, not cosmetic: Flux's ValuesReference has no
+	// namespace field of its own and resolves only within the referring
+	// HelmRelease's own namespace, so an unset namespace here would
+	// silently break resolution whenever SetFluxNamespace is used.
+	//
+	// Built via kubernetes.CreateConfigMap (this repo's established
+	// constructor, pkg/oam/builtin/traits/configmap.go) rather than a bare
+	// &corev1.ConfigMap{} literal: the literal form leaves TypeMeta zero-
+	// valued, and json.Marshal's `omitempty` on TypeMeta's fields then
+	// drops apiVersion/kind from the serialized manifest entirely — both
+	// kubectl apply and kustomize build reject the result, and the
+	// on-disk filename derivation (which reads the GVK's Kind) breaks
+	// too. CreateConfigMap stamps TypeMeta plus common labels/annotations
+	// consistently with every other ConfigMap this codebase emits.
+	cm := kubernetes.CreateConfigMap(valuesConfigMapName(c.Name), c.fluxNamespace())
+	kubernetes.AddConfigMapDataMap(cm, map[string]string{"values.yaml": string(b)})
+	ml.Resources = append(ml.Resources, cm)
+	return nil
+}
+
+// emitsValuesConfigMap reports whether this config's AugmentLayout emits the
+// values ConfigMap that buildHelmRelease's generated valuesFrom entry
+// references: valuesMode: configMap with at least one value to externalize.
+// Extracted so wrapIfHelmchartAugmenter, buildHelmRelease, and AugmentLayout
+// share one predicate instead of three copies that could drift. Deliberately
+// checks the resource-adding condition itself, not Delivery: Delivery ==
+// "template" and !emitsValuesConfigMap() are equivalent today (see
+// ToApplicationConfig's template-specific validation above — an explicit
+// valuesMode: configMap under delivery: template is a hard error, and an
+// inherited handler default is silently rewritten to inline), but only the
+// predicate form stays fail-closed if that rejection ever loosens.
+func (c *HelmchartConfig) emitsValuesConfigMap() bool {
+	return c.ValuesMode == "configMap" && len(c.Values) > 0
+}
+
+// GenerateCoversAugmentLayout implements oam.LayoutAugmentationCoverage.
+// AugmentLayout adds a resource Generate's own output does not already
+// contain only when emitsValuesConfigMap is true (the values ConfigMap);
+// every other case this config is ever wrapped for — delivery: template,
+// whose AugmentLayout (augmentLayoutTemplate) only repartitions Generate's
+// own flat union into hook-ordered children, step 5's "keep the flat union"
+// — is a safe skip for a consumer that never constructs or walks a
+// layout.ManifestLayout (e.g. pkg/cmd/kurel's build guard).
+func (c *augmentingHelmchartConfig) GenerateCoversAugmentLayout() bool {
+	return !c.emitsValuesConfigMap()
+}
+
+var _ oam.LayoutAugmentationCoverage = (*augmentingHelmchartConfig)(nil)
+
+// augmentLayoutTemplate handles the AugmentLayout path for delivery:
+// template. With at most one hook group, ml.Resources already carries the
+// flat union Generate returned and no children are needed. With multiple
+// groups, that union is partitioned: ml.Resources is cleared and each group
+// becomes a child ManifestLayout written to a numbered sub-directory in
+// execution order, chained via DependsOn so kure's FluxCD integrator (in
+// FluxIntegratedPerLayout placement) waits for each hook group to reconcile
+// healthy before the next.
+//
+// Children inherit the parent's Mode/FluxPlacement/FileNaming/FilePer — but
+// deliberately NOT ApplicationFileMode, left AppFileUnset on every child
+// regardless of the parent's own value. kure's walker sets only three of the
+// five layout-rule fields on the layout it hands the augmenter; crane's
+// identical augmenter copies all five verbatim, carrying the same latent
+// dangling-reference risk this deviation avoids (fixing crane's copy is out
+// of this repo's scope). kure's parent-side kustomization writer decides how
+// to reference a child from the child's own literal ApplicationFileMode
+// field alone, never resolved through a Config fallback: AppFileSingle makes
+// it emit a bare "<child.Name>.yaml" sibling-file reference, correct only
+// when the child writes its single file into the SAME directory as the
+// parent's own kustomization.yaml — true for kure's ordinary same-directory
+// children, false here, where the child's own recursive WriteToDisk call
+// places that file one directory deeper
+// (".../<parent>/<dirName>/<dirName>.yaml"), leaving the parent's
+// kustomization.yaml pointing at a file that was never written — a missing
+// resources: entry, breaking kubectl kustomize/Flux at that layout. Leaving
+// the child's field AppFileUnset instead sends the parent down the
+// directory-reference branch for any placement other than
+// FluxIntegratedPerLayout (which instead references a Flux Kustomization
+// YAML filename); either way, the child's own recursive write — whatever
+// ApplicationFileMode it resolves to via its own Config fallback — then
+// writes its own self-consistent kustomization.yaml one level down, which
+// the parent's reference correctly reaches. The child's FullRepoPath()
+// returns the composed namespace unchanged — kure's suffix-dedup
+// (namespace already ending in the child's own name) fires by design here,
+// the mechanism not a hazard.
+//
+// Residual gap, documented not fixed: two DIFFERENT Applications with a
+// same-named component still collide (component names are unique only
+// within one Application, but every emitted Kustomization CR shares one
+// controller namespace) — crane's identical augmenter admits the same gap;
+// inherited here, newly exposed by this repo's own template-delivery
+// support. Out of scope; see the components README.
+func (c *HelmchartConfig) augmentLayoutTemplate(ml *layout.ManifestLayout) error {
+	if err := c.ensureRendered(); err != nil {
+		return err
+	}
+	if len(c.hookGroups) <= 1 {
+		return nil
+	}
+	ml.Resources = nil
+	parentPath := ml.FullRepoPath()
+	var prevName string
+	for i, g := range c.hookGroups {
+		dirName := hookGroupChildName(ml.Name, i, g)
+		child := &layout.ManifestLayout{
+			Name:          dirName,
+			Namespace:     parentPath + "/" + dirName,
+			Resources:     append([]client.Object(nil), g.Resources...),
+			Mode:          ml.Mode,
+			FluxPlacement: ml.FluxPlacement,
+			FileNaming:    ml.FileNaming,
+			FilePer:       ml.FilePer,
+			// ApplicationFileMode intentionally omitted (left AppFileUnset) — see the doc comment above.
 		}
-		// A literal, statically-named ConfigMap — not ml.ExtraFiles or
-		// ml.ConfigMapGenerators (kustomize's configMapGenerator hash-suffixes
-		// the emitted name, and kustomize's builtin name-reference table has
-		// no HelmRelease entry, so that suffix is never rewritten into
-		// HelmRelease.spec.valuesFrom[].name). A literal resource has no
-		// suffix to go stale, so the ValuesReference set up in
-		// buildHelmRelease always resolves.
-		//
-		// Namespace is mandatory, not cosmetic: Flux's ValuesReference has no
-		// namespace field of its own and resolves only within the referring
-		// HelmRelease's own namespace, so an unset namespace here would
-		// silently break resolution whenever SetFluxNamespace is used.
-		//
-		// Built via kubernetes.CreateConfigMap (this repo's established
-		// constructor, pkg/oam/builtin/traits/configmap.go) rather than a bare
-		// &corev1.ConfigMap{} literal: the literal form leaves TypeMeta zero-
-		// valued, and json.Marshal's `omitempty` on TypeMeta's fields then
-		// drops apiVersion/kind from the serialized manifest entirely — both
-		// kubectl apply and kustomize build reject the result, and the
-		// on-disk filename derivation (which reads the GVK's Kind) breaks
-		// too. CreateConfigMap stamps TypeMeta plus common labels/annotations
-		// consistently with every other ConfigMap this codebase emits.
-		cm := kubernetes.CreateConfigMap(valuesConfigMapName(c.Name), c.fluxNamespace())
-		kubernetes.AddConfigMapDataMap(cm, map[string]string{"values.yaml": string(b)})
-		ml.Resources = append(ml.Resources, cm)
+		if i > 0 {
+			child.DependsOn = []string{prevName}
+		}
+		ml.Children = append(ml.Children, child)
+		prevName = dirName
 	}
 	return nil
+}
+
+// hookGroupChildName computes augmentLayoutTemplate's dirName for hook group
+// i: "<ml.Name>-<%02d>-<hookGroupDir(g)>". ml.Name is a validated DNS-1123
+// subdomain up to 253 characters (pkg/oam/validate.go,
+// k8s.io/apimachinery/pkg/util/validation.DNS1123SubdomainMaxLength), so the
+// composed name can exceed 253 even with hookGroupDir's own 40-character slug
+// cap — additional to that slug-only cap. Truncating the composed string from
+// the right is wrong: near a 253-char ml.Name, the fixed numeric+phase suffix
+// would be cut away entirely and every group would yield the identical
+// dirName — a deterministic collision. So the PREFIX (ml.Name) is capped
+// instead, following PR1's valuesConfigMapName precedent: reserve room for a
+// short sha256 hash of the full ml.Name so two different long ml.Names are
+// vanishingly unlikely to truncate to the same prefix (the same probabilistic
+// guarantee as that precedent, not an absolute one).
+func hookGroupChildName(mlName string, i int, g helm.HookGroup) string {
+	suffix := fmt.Sprintf("-%02d-%s", i, hookGroupDir(g)) // %02d is a minimum width, not a cap
+	const maxLen = 253
+	if len(mlName)+len(suffix) <= maxLen {
+		return mlName + suffix
+	}
+	maxPrefix := maxLen - len(suffix)
+	const hashLen = 8
+	sum := sha256.Sum256([]byte(mlName))
+	hash := hex.EncodeToString(sum[:])[:hashLen]
+	prefixLen := maxPrefix - hashLen - 1 // -1 for the "-" joining prefix and hash
+	if prefixLen < 0 {
+		prefixLen = 0
+	}
+	prefix := strings.TrimRight(mlName[:prefixLen], "-.")
+	return prefix + "-" + hash + suffix
 }
 
 // valuesConfigMapName returns the name for the values ConfigMap referenced by
