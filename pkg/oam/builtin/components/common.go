@@ -185,25 +185,27 @@ type ProbeConfig struct {
 
 // InitContainerConfig represents a parsed init container from OAM.
 type InitContainerConfig struct {
-	Name         string
-	Image        string
-	Command      []string
-	Args         []string
-	Env          []corev1.EnvVar
-	Resources    ResourceRequirements
-	VolumeMounts []corev1.VolumeMount
+	Name            string
+	Image           string
+	Command         []string
+	Args            []string
+	Env             []corev1.EnvVar
+	Resources       ResourceRequirements
+	VolumeMounts    []corev1.VolumeMount
+	SecurityContext *corev1.SecurityContext
 }
 
 // SidecarContainerConfig holds the parsed OAM fields for a sidecar container.
 type SidecarContainerConfig struct {
-	Name         string
-	Image        string
-	Command      []string
-	Args         []string
-	Env          []corev1.EnvVar
-	Resources    ResourceRequirements
-	VolumeMounts []corev1.VolumeMount
-	Ports        []corev1.ContainerPort
+	Name            string
+	Image           string
+	Command         []string
+	Args            []string
+	Env             []corev1.EnvVar
+	Resources       ResourceRequirements
+	VolumeMounts    []corev1.VolumeMount
+	Ports           []corev1.ContainerPort
+	SecurityContext *corev1.SecurityContext
 }
 
 // AffinityConfig holds parsed affinity/anti-affinity configuration from OAM properties.
@@ -2382,6 +2384,11 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 			return nil, err
 		}
 		ic.VolumeMounts = mounts
+		sc, err := parseSecurityContext(m)
+		if err != nil {
+			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
+		}
+		ic.SecurityContext = sc
 		out = append(out, ic)
 	}
 	return out, nil
@@ -2456,6 +2463,11 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 				sc.Ports = append(sc.Ports, cp)
 			}
 		}
+		parsedSC, err := parseSecurityContext(m)
+		if err != nil {
+			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
+		}
+		sc.SecurityContext = parsedSC
 		out = append(out, sc)
 	}
 	return out, nil
@@ -2740,6 +2752,9 @@ func buildAffinity(cfg AffinityConfig, selectorLabels map[string]string) *corev1
 func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 	container := kubernetes.CreateContainer(ic.Name, ic.Image, ic.Command, ic.Args)
 	kubernetes.SetContainerResources(container, buildResourceRequirements(ic.Resources))
+	if ic.SecurityContext != nil {
+		kubernetes.SetContainerSecurityContext(container, *ic.SecurityContext)
+	}
 	for _, env := range ic.Env {
 		kubernetes.AddContainerEnv(container, env)
 	}
@@ -2752,6 +2767,9 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error) {
 	container := kubernetes.CreateContainer(sc.Name, sc.Image, sc.Command, sc.Args)
 	kubernetes.SetContainerResources(container, buildResourceRequirements(sc.Resources))
+	if sc.SecurityContext != nil {
+		kubernetes.SetContainerSecurityContext(container, *sc.SecurityContext)
+	}
 	for _, p := range sc.Ports {
 		kubernetes.AddContainerPort(container, p)
 	}

@@ -528,7 +528,10 @@ must be a boolean and `volumeMounts[].subPath` must be a string when
 present — same presence-then-type-check shape as `volumes.readOnly` above;
 `volumeMounts[].mountPath` must also be unique within that entry's own
 mount list, the identical rule as `volumes`' duplicate-mountPath check
-above, since each `initContainers`/`sidecars` entry is its own container),
+above, since each `initContainers`/`sidecars` entry is its own container;
+each entry also accepts its own `securityContext`, the identical field set
+and validation as the main container's own `securityContext` described
+below — see that prose for the field list rather than restating it here),
 and `affinity`.
 
 `securityContext.privileged: true` is rejected unless the environment policy's
@@ -536,7 +539,9 @@ and `affinity`.
 `securityContext.capabilities.add` is separately enforced against
 `AllowedContainerCapabilities()`/`ForbiddenContainerCapabilities()` (see above,
 `enforce.go`'s `enforceContainerCapabilities`); every other `securityContext`
-field still has no policy hook.
+field still has no policy hook. Both checks cover the main container and
+every `initContainers`/`sidecars` entry (go-kure/launcher#312's shared
+`enforceExtraContainer` helper), not just the main container.
 
 A `volumes` entry sourced from `hostPath` is rejected unless the environment
 policy's `AllowHostPathVolumes()` allows it (`enforce.go`'s
@@ -552,8 +557,15 @@ non-nil, which opts it out of the `security-context` trait's nil-only
 backfill for every *other* `SecurityContext` field too. If a component uses
 both, the trait's `Generate()` pass runs later and unconditionally overwrites
 `container.SecurityContext` — the trait always wins when both are applied to
-the same component. Use the trait for a safe, complete PSA-consistent
-default; use this property for raw, partial, full-fidelity authoring.
+the same component. This applies to a component-authored `initContainers`/
+`sidecars` entry's own `securityContext` too, not just the main container's:
+the trait's `applyToPodSpec` (`pkg/oam/builtin/traits/security_context.go`)
+overwrites `SecurityContext` on every entry of both `podSpec.Containers`
+(which includes rendered sidecars) and `podSpec.InitContainers`, so it wins
+over an init container's or sidecar's own authored value the same way it
+wins over the main container's. Use the trait for a safe, complete
+PSA-consistent default; use this property for raw, partial, full-fidelity
+authoring.
 
 `env`, `envFrom`, `resources`, `lifecycle`, `securityContext`, `workingDir`, and
 `probes` are each schema fragments parameterized by a `reserved bool` (mirroring
@@ -600,14 +612,19 @@ into `kurecnpg.ResourceOptions` behind a `!= ""` guard and never calls
 `buildResourceRequirements`, so it has no intrinsic tier for its existing
 direct-form checks to diverge from.
 
-**Known gap, not covered by this enforcement:** init containers and sidecars
-receive the same intrinsic defaults (`common.go`'s `buildResourceRequirements`
-call sites at the init-container and sidecar builders) but `ApplyPolicy` does
-not inspect them at all — neither their resources nor their images are
-checked against `enforceMaxResources`/`enforceAllowedRegistries`. This is a
-wider gap than launcher#251 covers (authored init/sidecar values are
-unenforced too, not just defaults); see the tracked follow-up issue
-(launcher#312).
+Init containers and sidecars receive the same intrinsic defaults
+(`common.go`'s `buildResourceRequirements` call sites at the init-container
+and sidecar builders), and `ApplyPolicy` enforces them too (go-kure/launcher#312):
+each entry's resources, image registry, `securityContext.privileged`, and
+`securityContext.capabilities.add` are checked against the same policy
+methods the main container uses, via the shared `enforceExtraContainer`
+helper (`enforce.go`). All five kind components enforce their
+`initContainers`; only `webservice`, `worker`, and `statefulset` have a
+`sidecars` schema key at all (`cronjob`/`daemonset` have no sidecars support,
+per "Per-type highlights" below) so only those three enforce a sidecars
+loop. Errors name the authored list position and container, e.g.
+`initContainers[0] "init": image "docker.io/x/y:v1" is not from an allowed
+registry [...]`.
 
 ## Per-type highlights
 
@@ -622,9 +639,10 @@ unenforced too, not just defaults); see the tracked follow-up issue
   (a present-but-non-string value is rejected outright, same as `volumes`'
   `pvc.storageClass`), `accessModes`, `mountPath`), `serviceName` (headless).
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`); `port`
-  optionally adds a Service.
+  optionally adds a Service. No `sidecars` schema key (init containers only).
 - **cronjob** — `schedule` (5-field cron), `restartPolicy` (default `OnFailure`),
-  `successfulJobsHistoryLimit`/`failedJobsHistoryLimit`.
+  `successfulJobsHistoryLimit`/`failedJobsHistoryLimit`. No `sidecars` schema
+  key (init containers only).
 - **helmchart** — `chart`, `version`, `delivery` (`native`|`template`), `source`
   (inline `url` or `{name,kind}` ref), `values`/`valuesFrom`, `driftDetection`,
   `install.crds`/`upgrade.crds`. Known limitation: `delivery: template` rejects

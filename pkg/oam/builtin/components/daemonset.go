@@ -188,6 +188,12 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
 		return err
 	}
+	for i, ic := range c.InitContainers {
+		if err := enforceExtraContainer("initContainers", i, ic.Name, ic.Image,
+			ic.Resources, ic.SecurityContext, p); err != nil {
+			return err
+		}
+	}
 	for _, pvc := range c.PVCs {
 		if err := enforceMaxStorageSize(pvc.Size, p.MaxStorageSize()); err != nil {
 			return err
