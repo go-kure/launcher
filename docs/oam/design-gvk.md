@@ -35,7 +35,7 @@ These documents form one coherent API family. They are not split across groups o
 versions because they belong to the same ownership and lifecycle domain:
 `Application` is what to run, `Package` is how it is packaged, `ClusterProfile` is how
 the target platform resolves capabilities for it, and `CapabilityDefinition` declares the
-rendering schema for a custom (non-builtin) trait or component type.
+rendering schema for a custom (non-builtin) trait type.
 
 ### Example document headers
 
