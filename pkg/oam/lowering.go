@@ -1028,19 +1028,22 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// (transform.go). Every capability-processing step below is skipped
 			// entirely for a sealed trait; its Properties are final.
 			resolvedTrait := trait
+			matched := false
+			matchedKey := ""
 			if !trait.sealed {
+				// Capability rendering is merged in before the rule runs (D5 input 3),
+				// the same merge applyTraits performs for a dispatchable handler — so a
+				// TraitLoweringRule sees the identical "rendering as defaults, inline
+				// wins" view a TraitHandler would.
+				resolvedTrait, matchedKey, matched = resolveCapability(trait, ctx.Capabilities)
+
 				// CapabilityAware is engine-enforced here exactly as applyTraits
 				// enforces it for a dispatchable TraitHandler: a lowering rule that
 				// needs a ClusterProfile capability and finds none fails with
 				// ErrMissingCapability, since the rule itself never runs through
 				// applyTraits.
-				if aware, ok := rule.(CapabilityAware); ok && aware.CapabilityRequired() {
-					key := buildCapabilityKey(trait)
-					_, foundScoped := ctx.Capabilities[key]
-					_, foundBare := ctx.Capabilities[trait.Type]
-					if !foundScoped && !foundBare {
-						return false, steps, errors.Wrapf(ErrMissingCapability, "%s: capability %q not found in ClusterProfile", traitOrigin, key)
-					}
+				if aware, ok := rule.(CapabilityAware); ok && aware.CapabilityRequired() && !matched {
+					return false, steps, errors.Wrapf(ErrMissingCapability, "%s: capability %q not found in ClusterProfile", traitOrigin, buildCapabilityKey(trait))
 				}
 				// For a custom (non-built-in) trait type whose capability rendering
 				// resolved in the profile, warn or (under SetStrictCapabilities) error
@@ -1049,19 +1052,14 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				// TraitLoweringRule never runs through applyTraits, so without this it
 				// silently bypasses strict mode entirely for a lowering-rule-consumed
 				// capability (round-7 Codex finding, lowering.go).
-				if !t.builtinTraitTypes[trait.Type] {
-					key := buildCapabilityKey(trait)
-					_, foundScoped := ctx.Capabilities[key]
-					_, foundBare := ctx.Capabilities[trait.Type]
-					if foundScoped || foundBare {
-						if _, hasDef := t.capabilityDefs[trait.Type]; !hasDef {
-							msg := fmt.Sprintf("no CapabilityDefinition found for custom trait %q", trait.Type)
-							if t.strictCapabilities {
-								return false, steps, errors.Errorf("%s: %s", traitOrigin, msg)
-							}
-							if t.warnHandler != nil {
-								t.warnHandler(msg)
-							}
+				if !t.builtinTraitTypes[trait.Type] && matched {
+					if _, hasDef := t.capabilityDefs[trait.Type]; !hasDef {
+						msg := fmt.Sprintf("no CapabilityDefinition found for custom trait %q", trait.Type)
+						if t.strictCapabilities {
+							return false, steps, errors.Errorf("%s: %s", traitOrigin, msg)
+						}
+						if t.warnHandler != nil {
+							t.warnHandler(msg)
 						}
 					}
 				}
@@ -1069,17 +1067,17 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				// capability rendering is merged in. applyTraits (transform.go, for a
 				// dispatchable handler) and createApplications (transform.go, for a
 				// component handler) perform the same check at their own merge points,
-				// alongside honoring Trait.sealed in applyTraits.
+				// alongside honoring Trait.sealed in applyTraits. Checked against
+				// trait.Properties (the pre-merge original), not resolvedTrait.
 				if p, ok := rule.(PropertySchemaProvider); ok {
 					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
 						return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 					}
 				}
-				// Capability rendering is merged in before the rule runs (D5 input 3),
-				// the same merge applyTraits performs for a dispatchable handler — so a
-				// TraitLoweringRule sees the identical "rendering as defaults, inline
-				// wins" view a TraitHandler would.
-				resolvedTrait = resolveCapability(trait, ctx.Capabilities)
+
+				if matched && ctx.consumedCapabilities != nil {
+					ctx.consumedCapabilities[matchedKey] = struct{}{}
+				}
 			}
 			lctx := LoweringContext{Document: doc, Component: &comp, Capabilities: ctx.Capabilities, Origin: traitOrigin, Namer: namer}
 			result, err := rule.LowerTrait(&resolvedTrait, lctx)

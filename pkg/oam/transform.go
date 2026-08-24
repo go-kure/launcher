@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -55,6 +56,13 @@ type TransformContext struct {
 	// ports) and the sources allowed to reach it. Non-authorable, like EgressPeers. nil on the
 	// kurel path, where endpoint-ingress synthesis is a no-op.
 	IngressPeers map[string][]netpol.IngressPeer
+	// consumedCapabilities accumulates keys traits actually resolved against
+	// Capabilities (#290) — populated by resolveCapability's call sites, read back
+	// into PolicyResult.ConsumedCapabilities at the end of TransformWithPolicy.
+	// Internal only: nil on a caller-constructed ctx; TransformWithPolicy inits it.
+	// Reference type, so every by-value ctx copy through the pipeline shares one
+	// map — same sharing pattern Capabilities/EgressPeers already rely on.
+	consumedCapabilities map[string]struct{}
 }
 
 // fluxNamespaceSettable is implemented by ApplicationConfig types that emit
@@ -470,6 +478,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	if ctx.Policy == nil {
 		ctx.Policy = &NoopPolicy{}
 	}
+	ctx.consumedCapabilities = make(map[string]struct{})
 
 	// Validate + normalize the platform domain (and the optional full-key override) once,
 	// fail-fast before building anything. ComponentLabelKey takes precedence over Domain,
@@ -588,6 +597,15 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	}
 	synthesizeEndpointIngressNetworkPolicies(cluster, componentMap, ctx.IngressPeers)
 	postProcessFluxNamespace(cluster, ctx.FluxNamespace)
+
+	if len(ctx.consumedCapabilities) > 0 {
+		keys := make([]string, 0, len(ctx.consumedCapabilities))
+		for k := range ctx.consumedCapabilities {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		policyResult.ConsumedCapabilities = keys
+	}
 
 	return cluster, policyResult, nil
 }
@@ -828,41 +846,37 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 			// here (a fifth input). So every capability-processing step below is
 			// skipped entirely for a sealed trait; the trait's Properties are final.
 			resolved := trait
+			matched := false
+			matchedKey := ""
 			if !trait.sealed {
-				if aware, ok := handler.(CapabilityAware); ok && aware.CapabilityRequired() {
-					key := buildCapabilityKey(trait)
-					_, foundScoped := ctx.Capabilities[key]
-					_, foundBare := ctx.Capabilities[trait.Type]
-					if !foundScoped && !foundBare {
-						return &TransformError{
-							Message: fmt.Sprintf("component %q trait %q: capability %q not found in ClusterProfile",
-								entry.component.Name, trait.Type, key),
-							Cause: ErrMissingCapability,
-						}
+				resolved, matchedKey, matched = resolveCapability(trait, ctx.Capabilities)
+
+				if aware, ok := handler.(CapabilityAware); ok && aware.CapabilityRequired() && !matched {
+					return &TransformError{
+						Message: fmt.Sprintf("component %q trait %q: capability %q not found in ClusterProfile",
+							entry.component.Name, trait.Type, buildCapabilityKey(trait)),
+						Cause: ErrMissingCapability,
 					}
 				}
 
 				// For custom (non-built-in) traits whose capability rendering resolved in the
 				// profile, warn or error when no CapabilityDefinition was loaded for the type.
-				if !t.builtinTraitTypes[trait.Type] {
-					key := buildCapabilityKey(trait)
-					_, foundScoped := ctx.Capabilities[key]
-					_, foundBare := ctx.Capabilities[trait.Type]
-					if foundScoped || foundBare {
-						if _, hasDef := t.capabilityDefs[trait.Type]; !hasDef {
-							msg := fmt.Sprintf("no CapabilityDefinition found for custom trait %q", trait.Type)
-							if t.strictCapabilities {
-								return &TransformError{Message: msg}
-							}
-							if t.warnHandler != nil {
-								t.warnHandler(msg)
-							}
+				if !t.builtinTraitTypes[trait.Type] && matched {
+					if _, hasDef := t.capabilityDefs[trait.Type]; !hasDef {
+						msg := fmt.Sprintf("no CapabilityDefinition found for custom trait %q", trait.Type)
+						if t.strictCapabilities {
+							return &TransformError{Message: msg}
+						}
+						if t.warnHandler != nil {
+							t.warnHandler(msg)
 						}
 					}
 				}
 
 				// D3: an authored value for a platform-reserved property is rejected
-				// before capability rendering is merged in.
+				// before capability rendering is merged in. Checked against trait.Properties
+				// (the pre-merge original) — resolveCapability's merged rendering must stay
+				// invisible to this check.
 				if p, ok := handler.(PropertySchemaProvider); ok {
 					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
 						return &TransformError{
@@ -872,7 +886,9 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 					}
 				}
 
-				resolved = resolveCapability(trait, ctx.Capabilities)
+				if matched && ctx.consumedCapabilities != nil {
+					ctx.consumedCapabilities[matchedKey] = struct{}{}
+				}
 			}
 			prevLen := len(bundle.Applications)
 			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {
@@ -918,21 +934,26 @@ func deduplicateSourceRefs(entries []componentEntry) {
 	}
 }
 
-// resolveCapability merges capability rendering values into trait properties.
-// Rendering values act as platform-provided defaults; OAM inline values take precedence.
-// Key resolution: tries the scoped key ("<type>.<scope>"), then falls back to the bare
-// "<type>" key. Returns the original trait unchanged when no matching capability exists.
-func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) Trait {
+// resolveCapability merges capability rendering into trait properties (rendering as
+// defaults, OAM inline values win). Tries the scoped key, falls back to the bare
+// type key. Returns (trait, "", false) on no match; otherwise (possibly merged
+// trait, matched key, true) — a match with empty Rendering still counts as consumed.
+func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (Trait, string, bool) {
 	if len(capabilities) == 0 {
-		return trait
+		return trait, "", false
 	}
 	key := buildCapabilityKey(trait)
 	cap, ok := capabilities[key]
+	matchedKey := key
 	if !ok {
 		cap, ok = capabilities[trait.Type]
+		matchedKey = trait.Type
 	}
-	if !ok || len(cap.Rendering) == 0 {
-		return trait
+	if !ok {
+		return trait, "", false
+	}
+	if len(cap.Rendering) == 0 {
+		return trait, matchedKey, true
 	}
 
 	rendering, err := deepCopyMap(cap.Rendering)
@@ -946,7 +967,7 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) T
 
 	result := trait
 	result.Properties = merged
-	return result
+	return result, matchedKey, true
 }
 
 // buildCapabilityKey returns "<type>.<scope>" when the trait carries a non-empty
