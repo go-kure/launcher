@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  labels:
+    app: cleanup
+  name: cleanup
+  namespace: default
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    metadata:
+      labels:
+        app: cleanup
+    spec:
+      activeDeadlineSeconds: 600
+      backoffLimit: 4
+      completionMode: Indexed
+      completions: 3
+      parallelism: 2
+      template:
+        metadata:
+          labels:
+            app: cleanup
+        spec:
+          containers:
+          - image: ghcr.io/example/cleanup:v1.0.0
+            imagePullPolicy: IfNotPresent
+            name: cleanup
+            resources:
+              limits:
+                memory: 128Mi
+              requests:
+                cpu: 100m
+                memory: 128Mi
+          restartPolicy: OnFailure
+          serviceAccountName: cleanup
+      ttlSecondsAfterFinished: 3600
+  schedule: '@every 1h30m'
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  suspend: false
+  timeZone: Europe/Brussels
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: cleanup
+  name: cleanup
+  namespace: default
