@@ -87,7 +87,7 @@ make tools
 # Format code
 make fmt
 
-# Run quick checks (lint, vet, short tests)
+# Run quick checks (lint, vet, short tests, kure dep sync, tool pins)
 make check
 
 # Run all tests
@@ -172,6 +172,8 @@ This will:
 - Tidy modules
 - Run linters
 - Run all tests
+- Check kure dependency sync
+- Check tool-version pins (golangci-lint, govulncheck) stay consistent across Makefile, CI and docs
 
 ## CI/CD Pipeline
 
