@@ -47,24 +47,31 @@ check() {
 }
 
 # Makefile: GOLANGCI_LINT_VERSION := v2.13.1
-# Exactly one match required — head -1 of a duplicate assignment would let a
-# stray second line win silently while this checker reports the first.
-mk_count="$(grep -cE '^GOLANGCI_LINT_VERSION := v' Makefile || true)"
+# Exactly one match required, over ANY spacing around ":=" — a second
+# assignment in a different spacing (e.g. "GOLANGCI_LINT_VERSION:=v9.9.9")
+# would still silently win under GNU Make's last-assignment-wins semantics
+# for ":=" even though the canonical-spacing-only pattern couldn't see it.
+mk_count="$(grep -cE '^GOLANGCI_LINT_VERSION[[:space:]]*:=[[:space:]]*v' Makefile || true)"
 if [ "$mk_count" -ne 1 ]; then
 	echo "✗ Makefile: expected exactly 1 GOLANGCI_LINT_VERSION assignment, found $mk_count"
 	ERRORS=$((ERRORS + 1))
 else
-	mk_val="$(grep -E '^GOLANGCI_LINT_VERSION := v' Makefile | sed -E 's/^GOLANGCI_LINT_VERSION := v//')"
+	mk_val="$(grep -E '^GOLANGCI_LINT_VERSION[[:space:]]*:=[[:space:]]*v' Makefile | sed -E 's/^GOLANGCI_LINT_VERSION[[:space:]]*:=[[:space:]]*v//')"
 	check "Makefile" "Makefile" "$mk_val"
 fi
 
 # .github/workflows/ci.yml: GOLANGCI_LINT_VERSION: 'v2.13.1'
-ci_count="$(grep -cE "^[[:space:]]*GOLANGCI_LINT_VERSION: 'v" .github/workflows/ci.yml || true)"
+# Exactly one match required, over ANY indentation and ANY quote style
+# (single/double/none) — a workflow-level single-quoted pin plus a
+# differently-quoted or differently-indented job-level env override of the
+# same var would both go undetected by a canonical-form-only pattern, while
+# GitHub Actions would actually resolve the job-level one for that job.
+ci_count="$(grep -cE '^[[:space:]]*GOLANGCI_LINT_VERSION:[[:space:]]*.?v[0-9.]+.?[[:space:]]*$' .github/workflows/ci.yml || true)"
 if [ "$ci_count" -ne 1 ]; then
 	echo "✗ ci.yml: expected exactly 1 GOLANGCI_LINT_VERSION assignment, found $ci_count"
 	ERRORS=$((ERRORS + 1))
 else
-	ci_val="$(grep -E "^[[:space:]]*GOLANGCI_LINT_VERSION: 'v" .github/workflows/ci.yml | sed -E "s/.*: 'v([^']*)'.*/\\1/")"
+	ci_val="$(grep -E '^[[:space:]]*GOLANGCI_LINT_VERSION:' .github/workflows/ci.yml | sed -E 's/^[^:]+:[[:space:]]*//' | tr -d "\"'" | sed -E 's/^v//')"
 	check "ci.yml" ".github/workflows/ci.yml" "$ci_val"
 fi
 
