@@ -76,6 +76,16 @@ rejects any Application whose name fails `validation.IsDNS1123Subdomain` (see th
 section) before `build` ever reaches the write step, so the filename can't carry a
 `/` or `..` path-traversal segment.
 
+`build` collects objects directly from the transform result
+(`collectFromNode`/`collectFromBundle`) — it never constructs or walks a kure
+`layout.ManifestLayout`. A component whose config implements the optional
+`layout.LayoutAugmenter` interface (e.g. the `helmchart` component with
+`valuesMode: configMap`, which needs a values `ConfigMap` emitted alongside
+it — see the
+[Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
+helmchart section) fails the build outright, naming the component, rather than
+silently producing manifests with a dangling reference.
+
 ## Global flags
 
 Available on all commands (defined in [`pkg/cmd/shared/options`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/cmd/shared/options)):
