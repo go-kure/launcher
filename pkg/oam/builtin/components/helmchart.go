@@ -676,18 +676,30 @@ var excludedHookPhases = map[string]bool{
 // kure's own logic and are returned unchanged (same pointer as obj — callers
 // use pointer identity to detect whether a copy was made).
 //
-// For a comma-separated annotation, each token is classified against
-// excludedHookPhases and hookPhaseOrder:
-//   - every token excluded -> rewritten to a single excluded literal ("test")
-//     so kure's own exclusion logic (hooks.go:49) drops the object, instead
-//     of it falling into the mis-sorted unknown bucket.
-//   - at least one token is a recognized ordered phase -> rewritten to the
-//     earliest such token by kure's own priority; any excluded or
-//     unrecognized tokens mixed in are dropped (they contribute no valid
-//     ordering).
-//   - every token is an unrecognized custom hook name -> left unchanged.
-//     There is no defined ordering priority among custom names, and kure's
-//     existing unknown-bucket fallback is not wrong for this case.
+// For a comma-separated annotation, every excluded-phase token
+// (excludedHookPhases) is first dropped from consideration — an excluded
+// token must never influence the grouping decision for an object that is
+// otherwise emitted, exactly as it never would if it were the object's only
+// hook value. What remains after dropping excluded tokens is then
+// classified:
+//   - nothing remains (every token was excluded) -> rewritten to a single
+//     excluded literal ("test") so kure's own exclusion logic (hooks.go:49)
+//     drops the object, instead of it falling into the mis-sorted unknown
+//     bucket.
+//   - at least one surviving token is a recognized ordered phase
+//     (hookPhaseOrder) -> rewritten to the earliest such token by kure's own
+//     priority; any unrecognized tokens mixed in are dropped too (they
+//     contribute no valid ordering).
+//   - every surviving token is an unrecognized custom hook name, and at
+//     least one excluded token was dropped to reach that state -> rewritten
+//     to just the surviving tokens (comma-joined, original relative order)
+//     so the dropped excluded token cannot affect the unknown-bucket
+//     grouping key or hookGroupDir's slug.
+//   - every original token was already an unrecognized custom hook name (no
+//     excluded token was ever present) -> left unchanged verbatim. There is
+//     no defined ordering priority among custom names, and kure's existing
+//     unknown-bucket fallback is not wrong for this case — rewriting would
+//     only reorder or reformat it for no behavioral reason.
 func normalizeHookAnnotationForGrouping(obj client.Object) client.Object {
 	ann := obj.GetAnnotations()
 	hook := ann["helm.sh/hook"]
@@ -695,15 +707,20 @@ func normalizeHookAnnotationForGrouping(obj client.Object) client.Object {
 		return obj
 	}
 
-	allExcluded := true
+	anyExcluded := false
+	var remaining []string
 	bestPhase := ""
 	bestOrder := -1
 	for _, tok := range strings.Split(hook, ",") {
 		tok = strings.TrimSpace(tok)
-		if tok == "" || excludedHookPhases[tok] {
+		if tok == "" {
 			continue
 		}
-		allExcluded = false
+		if excludedHookPhases[tok] {
+			anyExcluded = true
+			continue
+		}
+		remaining = append(remaining, tok)
 		if order, ok := hookPhaseOrder[tok]; ok && (bestOrder == -1 || order < bestOrder) {
 			bestOrder = order
 			bestPhase = tok
@@ -711,10 +728,12 @@ func normalizeHookAnnotationForGrouping(obj client.Object) client.Object {
 	}
 
 	switch {
-	case allExcluded:
+	case len(remaining) == 0:
 		return cloneWithHookAnnotation(obj, ann, "test")
 	case bestOrder != -1:
 		return cloneWithHookAnnotation(obj, ann, bestPhase)
+	case anyExcluded:
+		return cloneWithHookAnnotation(obj, ann, strings.Join(remaining, ","))
 	default:
 		return obj
 	}
