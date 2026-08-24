@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"maps"
 	"strings"
 	"time"
 
@@ -605,12 +606,133 @@ func (c *HelmchartConfig) ensureRendered() error {
 // parseChartManifests decodes multi-doc YAML produced by renderChart and
 // splits it into Helm hook-phase-and-weight groups via kure's
 // helm.SplitByHookWeight.
+//
+// kure's SplitByHookWeight documents (pkg/stack/helm/hooks.go:35-36) that a
+// comma-separated helm.sh/hook annotation (e.g. "pre-install,pre-upgrade") is
+// treated as one opaque phase string and sorted into the alphabetical
+// "unknown" bucket, which its own phaseOrder (hooks.go:60-75) places *after*
+// post-upgrade — inverting the ordering guarantee for exactly the kind of
+// resource that annotation exists to order. Likewise a multi-value annotation
+// whose tokens are all members of kure's excludedHookPhases (hooks.go:20-26,
+// exact-string matched) is never excluded either, for the same reason. Both
+// are corrected here, before objects reach SplitByHookWeight, via a grouping-
+// only object copy (normalizeHookAnnotationForGrouping) — the original
+// objects, with their original unmodified annotations, are what land in
+// HookGroup.Resources and therefore in emitted output.
 func parseChartManifests(raw []byte) ([]helm.HookGroup, error) {
 	objs, err := decodeKubeManifests(raw)
 	if err != nil {
 		return nil, err
 	}
-	return helm.SplitByHookWeight(objs), nil
+
+	groupingObjs := make([]client.Object, len(objs))
+	origByGroupingObj := make(map[client.Object]client.Object, len(objs))
+	for i, obj := range objs {
+		normalized := normalizeHookAnnotationForGrouping(obj)
+		groupingObjs[i] = normalized
+		if normalized != obj {
+			origByGroupingObj[normalized] = obj
+		}
+	}
+
+	groups := helm.SplitByHookWeight(groupingObjs)
+	for gi := range groups {
+		for ri, r := range groups[gi].Resources {
+			if orig, ok := origByGroupingObj[r]; ok {
+				groups[gi].Resources[ri] = orig
+			}
+		}
+	}
+	return groups, nil
+}
+
+// hookPhaseOrder mirrors kure's own phaseOrder priority for the four ordered
+// Helm lifecycle phases (kure pkg/stack/helm/hooks.go:60-75) that participate
+// in FluxCD Kustomization ordering. "" (main/non-hook) is deliberately
+// excluded — a comma-separated annotation is by definition non-empty.
+var hookPhaseOrder = map[string]int{
+	"pre-install":  0,
+	"pre-upgrade":  1,
+	"post-install": 2,
+	"post-upgrade": 3,
+}
+
+// excludedHookPhases mirrors kure's own unexported excludedHookPhases set
+// (kure pkg/stack/helm/hooks.go:20-26) — phases with no FluxCD GitOps
+// lifecycle equivalent, which SplitByHookWeight drops from its output. Kept
+// as a local copy since kure's map is unexported and this package must not
+// edit the pinned dependency.
+var excludedHookPhases = map[string]bool{
+	"pre-delete":    true,
+	"post-delete":   true,
+	"pre-rollback":  true,
+	"post-rollback": true,
+	"test":          true,
+}
+
+// normalizeHookAnnotationForGrouping returns a client.Object suitable for
+// handing to kure's helm.SplitByHookWeight for grouping-key determination.
+// Single-value and empty helm.sh/hook annotations are already correct under
+// kure's own logic and are returned unchanged (same pointer as obj — callers
+// use pointer identity to detect whether a copy was made).
+//
+// For a comma-separated annotation, each token is classified against
+// excludedHookPhases and hookPhaseOrder:
+//   - every token excluded -> rewritten to a single excluded literal ("test")
+//     so kure's own exclusion logic (hooks.go:49) drops the object, instead
+//     of it falling into the mis-sorted unknown bucket.
+//   - at least one token is a recognized ordered phase -> rewritten to the
+//     earliest such token by kure's own priority; any excluded or
+//     unrecognized tokens mixed in are dropped (they contribute no valid
+//     ordering).
+//   - every token is an unrecognized custom hook name -> left unchanged.
+//     There is no defined ordering priority among custom names, and kure's
+//     existing unknown-bucket fallback is not wrong for this case.
+func normalizeHookAnnotationForGrouping(obj client.Object) client.Object {
+	ann := obj.GetAnnotations()
+	hook := ann["helm.sh/hook"]
+	if hook == "" || !strings.Contains(hook, ",") {
+		return obj
+	}
+
+	allExcluded := true
+	bestPhase := ""
+	bestOrder := -1
+	for _, tok := range strings.Split(hook, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" || excludedHookPhases[tok] {
+			continue
+		}
+		allExcluded = false
+		if order, ok := hookPhaseOrder[tok]; ok && (bestOrder == -1 || order < bestOrder) {
+			bestOrder = order
+			bestPhase = tok
+		}
+	}
+
+	switch {
+	case allExcluded:
+		return cloneWithHookAnnotation(obj, ann, "test")
+	case bestOrder != -1:
+		return cloneWithHookAnnotation(obj, ann, bestPhase)
+	default:
+		return obj
+	}
+}
+
+// cloneWithHookAnnotation returns a copy of obj with its helm.sh/hook
+// annotation rewritten to newHook, leaving obj itself — and its original
+// annotations map — untouched. The copy exists only to steer kure's
+// helm.SplitByHookWeight to the correct group; parseChartManifests swaps it
+// back out for the original object before returning, so the rewritten
+// annotation never reaches emitted output.
+func cloneWithHookAnnotation(obj client.Object, ann map[string]string, newHook string) client.Object {
+	cp, _ := obj.DeepCopyObject().(client.Object)
+	newAnn := make(map[string]string, len(ann))
+	maps.Copy(newAnn, ann)
+	newAnn["helm.sh/hook"] = newHook
+	cp.SetAnnotations(newAnn)
+	return cp
 }
 
 // hookGroupDir returns a DNS-1123-safe directory-name segment for a
