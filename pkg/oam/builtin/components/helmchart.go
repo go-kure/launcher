@@ -930,10 +930,7 @@ func hookGroupChildName(mlName string, i int, g helm.HookGroup) string {
 	const hashLen = 8
 	sum := sha256.Sum256([]byte(mlName))
 	hash := hex.EncodeToString(sum[:])[:hashLen]
-	prefixLen := maxPrefix - hashLen - 1 // -1 for the "-" joining prefix and hash
-	if prefixLen < 0 {
-		prefixLen = 0
-	}
+	prefixLen := max(maxPrefix-hashLen-1, 0) // -1 for the "-" joining prefix and hash
 	prefix := strings.TrimRight(mlName[:prefixLen], "-.")
 	return prefix + "-" + hash + suffix
 }

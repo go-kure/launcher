@@ -715,8 +715,10 @@ registry [...]`.
   For a layout-walking consumer (the `layout.LayoutAugmenter` path, same mechanism as the
   `valuesMode: configMap` relocation above), more than one hook group makes `AugmentLayout` clear
   the component's flat `Resources` and replace them with one child `ManifestLayout` per group,
-  named `<component>-NN-<phase-slug>` and chained via `DependsOn` so the phases reconcile in Helm's
-  own order; a single-group chart's `AugmentLayout` is a no-op. Every `delivery: template`
+  named `<component>-NN-<phase-slug>` and chained via `DependsOn` so the phases reconcile in the
+  order kure's `helm.SplitByHookWeight` synthesizes from Helm's hook phases — a combined
+  install/upgrade ordering for GitOps reconciliation, not Helm's own per-operation execution order
+  (kure `pkg/stack/helm/hooks.go:28-36`); a single-group chart's `AugmentLayout` is a no-op. Every `delivery: template`
   component becomes a `LayoutAugmenter` regardless of hook-group count — including a hook-free
   chart, since the wrap decision happens at config-construction time, before the network render
   that would reveal there is only one group — so even a hook-free templated chart now gets its own

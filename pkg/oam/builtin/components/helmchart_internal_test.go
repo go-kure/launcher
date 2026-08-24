@@ -476,7 +476,7 @@ metadata:
 			t.Fatalf("read %s: %v", kf, err)
 		}
 		kdir := filepath.Dir(kf)
-		for _, line := range strings.Split(string(data), "\n") {
+		for line := range strings.SplitSeq(string(data), "\n") {
 			m := resourceLine.FindStringSubmatch(line)
 			if m == nil {
 				continue
