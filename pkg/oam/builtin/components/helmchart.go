@@ -11,7 +11,9 @@ import (
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/helm"
+	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,7 +23,13 @@ import (
 )
 
 // HelmchartHandler handles OAM helmchart components.
-type HelmchartHandler struct{}
+type HelmchartHandler struct {
+	// ValuesMode sets the registration-time default for the valuesMode
+	// property (inline or configMap) when a component does not set it
+	// explicitly. Empty means "inline". Lets a downstream platform flip the
+	// whole fleet's default without editing every OAM document.
+	ValuesMode string
+}
 
 // CanHandle returns true for helmchart component type.
 func (h *HelmchartHandler) CanHandle(componentType string) bool {
@@ -35,6 +43,16 @@ func (h *HelmchartHandler) PropertySchema() map[string]oam.PropertySchema {
 	openObject := func(desc string) oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: desc}
 	}
+	// valuesModeDefault mirrors the resolution order ToApplicationConfig uses
+	// when the component itself does not set valuesMode: the handler's
+	// registration-time default, else "inline". Computed here (not a static
+	// "inline") so schema consumers that materialize defaults for absent
+	// properties (e.g. applyDefinitionSchema) report the effective default,
+	// not a value that ignores h.ValuesMode.
+	valuesModeDefault := h.ValuesMode
+	if valuesModeDefault == "" {
+		valuesModeDefault = "inline"
+	}
 	return map[string]oam.PropertySchema{
 		"chart":           {Type: oam.PropertyTypeString, Description: "Chart name within a HelmRepository source."},
 		"version":         {Type: oam.PropertyTypeString, Description: "Chart version to install."},
@@ -44,6 +62,7 @@ func (h *HelmchartHandler) PropertySchema() map[string]oam.PropertySchema {
 		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Namespace into which the HelmRelease installs resources."},
 		"source":          {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true, Description: "Chart source: an inline url, or a reference (name/kind) to an existing source CR."},
 		"values":          openObject("Helm values tree passed to the release."),
+		"valuesMode":      {Type: oam.PropertyTypeString, Default: valuesModeDefault, Enum: []any{"inline", "configMap"}, Description: "How Helm values are delivered: inline sets HelmRelease.spec.values directly, configMap externalizes them into a referenced ConfigMap. Not supported under delivery: template."},
 		"driftDetection":  openObject("Flux drift detection settings (mode: enabled, warn, or disabled)."),
 		"install":         openObject("Helm install options (e.g. crds: Skip, Create, or CreateReplace)."),
 		"upgrade":         openObject("Helm upgrade options (e.g. crds: Skip, Create, or CreateReplace)."),
@@ -143,6 +162,23 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, errors.Errorf("helmchart: unsupported delivery %q; supported values: native, template", cfg.Delivery)
 	}
 
+	// Resolve valuesMode: component property → handler registration-time
+	// default (h.ValuesMode) → "inline". Mirrors PropertySchema's computed
+	// Default above so the resolved value and the reported default agree.
+	cfg.ValuesMode, _ = props["valuesMode"].(string)
+	if cfg.ValuesMode == "" {
+		cfg.ValuesMode = h.ValuesMode
+	}
+	if cfg.ValuesMode == "" {
+		cfg.ValuesMode = "inline"
+	}
+	switch cfg.ValuesMode {
+	case "inline", "configMap":
+		// ok
+	default:
+		return nil, errors.Errorf("helmchart: unsupported valuesMode %q; supported values: inline, configMap", cfg.ValuesMode)
+	}
+
 	// Parse source block
 	src, ok := props["source"].(map[string]any)
 	if !ok {
@@ -222,6 +258,9 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 		if len(cfg.ValuesFrom) > 0 {
 			return nil, errors.New("helmchart: delivery: template does not support valuesFrom (cluster-side values are not resolvable at build time)")
 		}
+		if cfg.ValuesMode == "configMap" {
+			return nil, errors.New("helmchart: delivery: template does not support valuesMode: configMap (values are baked into the client-side render at build time, not resolved from a cluster-side ConfigMap)")
+		}
 		if cfg.ReleaseName != "" {
 			return nil, errors.New("helmchart: delivery: template does not support releaseName")
 		}
@@ -239,7 +278,26 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 		}
 	}
 
-	return cfg, nil
+	return wrapIfHelmchartAugmenter(cfg), nil
+}
+
+// wrapIfHelmchartAugmenter returns cfg wrapped in augmentingHelmchartConfig
+// only when AugmentLayout would actually do something: delivery: template
+// (Helm hook-group repartitioning, added in a follow-up PR) or valuesMode:
+// configMap with at least one value to externalize. kure's layout walker
+// type-asserts layout.LayoutAugmenter by PRESENCE (pkg/stack/layout/walker.go)
+// to decide whether an app gets its own flat-bundle sub-layout or merges into
+// its parent's — a structural decision, not a side effect with a safe no-op
+// default. So *HelmchartConfig itself must stay free of the AugmentLayout
+// method (a hook-free, inline-values config must not satisfy the interface),
+// and the wrapper is applied conditionally here rather than unconditionally.
+// See also traits.wrapIfAugmenter, which forwards this presence through trait
+// decorators generically.
+func wrapIfHelmchartAugmenter(cfg *HelmchartConfig) stack.ApplicationConfig {
+	if cfg.Delivery == "template" || (cfg.ValuesMode == "configMap" && len(cfg.Values) > 0) {
+		return &augmentingHelmchartConfig{cfg}
+	}
+	return cfg
 }
 
 // HelmchartConfig implements stack.ApplicationConfig for helmchart components.
@@ -249,6 +307,13 @@ type HelmchartConfig struct {
 	Chart     string
 	Version   string
 	Delivery  string
+
+	// ValuesMode selects how Values reaches the HelmRelease: "inline" sets
+	// spec.values directly (default, today's behaviour), "configMap"
+	// externalizes Values into a referenced ConfigMap via valuesFrom.
+	// Resolved by ToApplicationConfig (component property → handler default
+	// → "inline"); always one of those two values once set.
+	ValuesMode string
 
 	// Form A: inline source — URL is set, launcher creates the source CR.
 	SourceURL  string
@@ -502,9 +567,29 @@ func (c *HelmchartConfig) buildHelmRelease() *helmv2.HelmRelease {
 	if c.UpgradeCRDs != "" {
 		fluxcd.SetHelmReleaseUpgradeCRDs(hr, helmv2.CRDsPolicy(c.UpgradeCRDs))
 	}
+	// Confirmed merge order (helm-controller's internal/controller/helmrelease_controller.go
+	// calls chartutil.ChartValuesFromReferences(ctx, ..., obj.GetValues(), obj.Spec.ValuesFrom...),
+	// github.com/fluxcd/pkg/chartutil: valuesFrom entries are merged in list
+	// order into a working set, then spec.values is merged on top last
+	// (chartutil.MergeMaps(result, values) — the second argument's scalars
+	// win on conflict). So: under "inline" mode, spec.values is set and wins
+	// over any user valuesFrom entry (c.ValuesFrom below) on overlapping
+	// keys. Under "configMap" mode, spec.values stays empty and the
+	// generated ref is itself a valuesFrom entry added here, before the
+	// user's own c.ValuesFrom loop — so user entries, appearing later in
+	// spec.valuesFrom, win over the generated ref on overlapping keys.
 	if len(c.Values) > 0 {
-		// error ignored: only fails on JSON marshal failure, which can't happen with map[string]any
-		_ = fluxcd.SetHelmReleaseValuesFromMap(hr, c.Values)
+		switch c.ValuesMode {
+		case "configMap":
+			fluxcd.AddHelmReleaseValuesFrom(hr, helmv2.ValuesReference{
+				Kind:      "ConfigMap",
+				Name:      valuesConfigMapName(c.Name),
+				ValuesKey: "values.yaml",
+			})
+		default: // "inline"
+			// error ignored: only fails on JSON marshal failure, which can't happen with map[string]any
+			_ = fluxcd.SetHelmReleaseValuesFromMap(hr, c.Values)
+		}
 	}
 	for _, vf := range c.ValuesFrom {
 		fluxcd.AddHelmReleaseValuesFrom(hr, vf)
@@ -522,4 +607,63 @@ func effectiveInterval(interval string) string {
 func parseDuration(s string) metav1.Duration {
 	d, _ := time.ParseDuration(s)
 	return metav1.Duration{Duration: d}
+}
+
+// augmentingHelmchartConfig wraps *HelmchartConfig to add AugmentLayout
+// without *HelmchartConfig itself satisfying layout.LayoutAugmenter. See
+// wrapIfHelmchartAugmenter for why the method must live on a separate,
+// conditionally-applied type rather than directly on *HelmchartConfig.
+// Embedding a pointer promotes the full *HelmchartConfig method set, so
+// every existing consumer (all of which go through interfaces, never a
+// concrete *HelmchartConfig type assertion) keeps working unchanged.
+type augmentingHelmchartConfig struct {
+	*HelmchartConfig
+}
+
+// AugmentLayout attaches the resources this config's Generate output alone
+// cannot express. Today: native delivery under valuesMode: configMap emits
+// the values.yaml ConfigMap that buildHelmRelease's generated valuesFrom
+// entry references. (Template delivery's hook-group repartitioning is a
+// follow-up PR; wrapIfHelmchartAugmenter already gates on delivery: template
+// so this method is called for that case too, once implemented.)
+func (c *augmentingHelmchartConfig) AugmentLayout(ml *layout.ManifestLayout) error {
+	if c.ValuesMode == "configMap" && len(c.Values) > 0 {
+		b, err := yaml.Marshal(c.Values)
+		if err != nil {
+			return errors.Wrapf(err, "helmchart %q: marshaling values for configMap valuesMode", c.Name)
+		}
+		// A literal, statically-named ConfigMap — not ml.ExtraFiles or
+		// ml.ConfigMapGenerators (kustomize's configMapGenerator hash-suffixes
+		// the emitted name, and kustomize's builtin name-reference table has
+		// no HelmRelease entry, so that suffix is never rewritten into
+		// HelmRelease.spec.valuesFrom[].name). A literal resource has no
+		// suffix to go stale, so the ValuesReference set up in
+		// buildHelmRelease always resolves.
+		//
+		// Namespace is mandatory, not cosmetic: Flux's ValuesReference has no
+		// namespace field of its own and resolves only within the referring
+		// HelmRelease's own namespace, so an unset namespace here would
+		// silently break resolution whenever SetFluxNamespace is used.
+		ml.Resources = append(ml.Resources, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      valuesConfigMapName(c.Name),
+				Namespace: c.fluxNamespace(),
+			},
+			Data: map[string]string{"values.yaml": string(b)},
+		})
+	}
+	return nil
+}
+
+// valuesConfigMapName returns the name for the values ConfigMap referenced by
+// both buildHelmRelease's ValuesReference and AugmentLayout's literal
+// resource — the same helper for both call sites so they cannot diverge.
+func valuesConfigMapName(name string) string {
+	const suffix = "-values"
+	maxPrefix := 253 - len(suffix) // 246
+	if len(name) > maxPrefix {
+		name = name[:maxPrefix]
+		name = strings.TrimRight(name, "-.")
+	}
+	return name + suffix
 }
