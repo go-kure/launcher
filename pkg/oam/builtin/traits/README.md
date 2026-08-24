@@ -186,6 +186,32 @@ See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/
 for the full config-field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
 for the interfaces, and `examples/` for runnable applications.
 
+## Decorator forwarding for layout-augmenting components
+
+A component config that also implements kure's `layout.LayoutAugmenter` (e.g. `helmchart` under
+`valuesMode: configMap` or `delivery: template`) can carry any trait. `wrapIfAugmenter`
+(`decorator.go`) is the shared construction-site helper every trait decorator calls: if the
+wrapped inner config implements `layout.LayoutAugmenter`, it returns an `augmentingDecorator`
+wrapping the trait-specific decorator instead of the plain one, so the wrapper itself also
+satisfies `layout.LayoutAugmenter` and forwards `AugmentLayout` straight through to the inner
+config. Without this forward, kure's layout walker — which keys a structural decision off
+`layout.LayoutAugmenter`'s mere *presence* on the concrete config it walks — would never see the
+capability on a decorated (trait-carrying) config, silently losing the augmenter's layout-level
+effect (the values `ConfigMap`, or the hook-group repartitioning) the moment any trait is added.
+
+`augmentingDecorator` also forwards `oam.LayoutAugmentationCoverage`'s
+`GenerateCoversAugmentLayout() bool` — the interface `kurel build`'s guard consults before
+rejecting a `LayoutAugmenter` config it cannot walk (see the [OAM model
+README](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)). Unlike the `AugmentLayout`
+forward, this one is **unconditional**: it type-asserts the inner augmenter to
+`oam.LayoutAugmentationCoverage` and returns `false` if that assertion fails, rather than omitting
+the method. `AugmentLayout`'s forward is conditional because kure's walker treats the method's
+*presence* as a structural signal; `GenerateCoversAugmentLayout`'s presence carries no such
+meaning, and the guard already treats "method absent" and "method returns `false`" identically —
+so a conditional forward here would only reintroduce the exact silent-loss failure mode the method
+exists to prevent, this time for any trait-decorated `delivery: template` component (e.g. one
+carrying `prune-protection`), which would otherwise be wrongly rejected by `kurel build`.
+
 ## Component attribution
 
 Every trait sub-app config exposes the OAM component it was emitted for via
