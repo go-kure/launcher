@@ -268,10 +268,11 @@ func TestWrapIfAugmenter_AllConstructionSites(t *testing.T) {
 	})
 
 	// The following three subtests guard augmentingDecorator's unconditional
-	// GenerateCoversAugmentLayout forward (step 8): unlike AugmentLayout's own
-	// forward, this one must come through regardless of what the inner
-	// augmenter reports, so pkg/cmd/kurel's build guard sees the same answer
-	// through a decorator as it would through the bare inner config.
+	// GenerateCoversAugmentLayout forward (coverage forwarding): unlike
+	// AugmentLayout's own forward, this one must come through regardless of
+	// what the inner augmenter reports, so pkg/cmd/kurel's build guard sees
+	// the same answer through a decorator as it would through the bare inner
+	// config.
 	assertCoverage := func(t *testing.T, cfg stack.ApplicationConfig, want bool) {
 		t.Helper()
 		cov, ok := cfg.(interface{ GenerateCoversAugmentLayout() bool })
