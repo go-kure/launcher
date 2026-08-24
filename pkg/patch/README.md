@@ -186,7 +186,8 @@ what keeps the quadratic cost unnoticeable in practice.
 
 ## Error Handling
 
-Patch application and resolution failures are returned as
+Individual patch *operation* failures (`op.go` — `replace`, `delete`, `insert`, and the other
+per-line ops applied to a document) and patch-target resolution failures are returned as
 [`*errors.PatchError`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/errors#PatchError)
 (`github.com/go-kure/launcher/pkg/errors`), carrying the failed operation, target path, resource
 name, and the underlying cause where one exists:
@@ -197,6 +198,12 @@ if errors.As(err, &pe) {
     // inspect pe.Operation, pe.Path, pe.ResourceName, pe.Reason
 }
 ```
+
+Strategic-merge-patch application (`ApplyStrategicMergePatch` and its `applyJSONMergePatch`/
+`applyTypedSMP` helpers in `strategic.go`) and the document-set write path (`set.go` — file I/O,
+patch loading, output writing) do not go through `NewPatchError`; their failures are plain wrapped
+errors (`errors.Wrap`/`fmt.Errorf`), so `errors.As(err, &pe)` will not match them. Do not assume
+every error out of this package is a `*errors.PatchError` — check the call path.
 
 ## Related Packages
 
