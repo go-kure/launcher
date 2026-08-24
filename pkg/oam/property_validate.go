@@ -285,7 +285,7 @@ func isNullValue(value any) bool {
 		return true
 	}
 	switch rv := reflect.ValueOf(value); rv.Kind() {
-	case reflect.Map, reflect.Slice, reflect.Ptr, reflect.Chan, reflect.Func, reflect.Interface:
+	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Chan, reflect.Func, reflect.Interface:
 		return rv.IsNil()
 	default:
 		return false

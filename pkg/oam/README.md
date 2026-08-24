@@ -239,6 +239,12 @@ in-process enforcement of what `HandlerSchemas()` only publishes for authored
 documents; an authored document's own property shape is still validated only by
 `ValidateAndApplyDefaults`/handler-specific logic, not by this path.
 
+`validateProperties`'s null check (`isNullValue`) treats a typed-nil pointer,
+slice, or map — not just a bare `nil` interface — as JSON `null`: a Go type
+assertion alone can't tell an uninitialized slice/map apart from a validly-typed
+empty collection, even though both serialize the same way, so a lowering rule
+that emits an unset (rather than empty) collection field is still caught.
+
 ## Contract metadata
 
 Handlers and lowering rules may implement `ContractDescriber` (`ContractMetadata()

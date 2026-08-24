@@ -58,6 +58,9 @@ func DetectSMPConflicts(
 
 	for i := range patches {
 		for j := i + 1; j < len(patches); j++ {
+			//nolint:gosec // G602: gosec's range analysis loses the j < len(patches)
+			// bound from the loop header; both i and j are provably in [0, len(patches))
+			// here, so patches[i]/patches[j] cannot go out of range.
 			hasConflict, err := detectPairConflict(patches[i], patches[j], schema)
 			if err != nil {
 				return nil, fmt.Errorf("conflict detection failed between patch %d and %d: %w", i, j, err)
