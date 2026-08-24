@@ -1303,3 +1303,475 @@ func TestWebserviceConfig_ApplyPolicy_MaxResources_OutputUnchanged(t *testing.T)
 		t.Errorf("len(Limits) = %d, want 1 (memory): %v", len(res.Limits), res.Limits)
 	}
 }
+
+// The eight tests below (go-kure/launcher#312) regression-test ApplyPolicy
+// walking c.InitContainers/c.Sidecars: before this fix, an init container or
+// sidecar's own resources and image registry were parsed but never checked
+// against the environment policy, and its `securityContext` (privileged
+// flag, capabilities — go-kure/launcher#316) was not parsed at all, so an
+// authored value that would be rejected on the main container sailed through
+// unenforced on a non-main one. Every test authors the main container's own
+// `resources` explicitly within policy-conformant bounds so the main
+// container's own enforceMaxResources check does not trip first and mask the
+// init/sidecar check under test.
+
+func TestWebserviceConfig_ApplyPolicy_InitContainerResourcesDenied(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/app:v1",
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"initContainers": []any{
+				map[string]any{
+					"name":  "init",
+					"image": "ghcr.io/org/init:v1",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	err = enforceable.ApplyPolicy(&stubPolicy{maxCPU: "50m"})
+	if err == nil {
+		t.Fatal("expected error when the init container's intrinsic default CPU request exceeds the enforced maximum")
+	}
+	if !strings.Contains(err.Error(), "initContainers[0]") {
+		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "generated default") {
+		t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under a permissive policy, got %v", err)
+	}
+}
+
+func TestWebserviceConfig_ApplyPolicy_InitContainerRegistryDenied(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/app:v1",
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"initContainers": []any{
+				map[string]any{
+					"name":  "init",
+					"image": "docker.io/x/y:v1",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	err = enforceable.ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}})
+	if err == nil {
+		t.Fatal("expected error when the init container's image is not from an allowed registry")
+	}
+	if !strings.Contains(err.Error(), "initContainers[0]") {
+		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under a permissive policy, got %v", err)
+	}
+}
+
+func TestWebserviceConfig_ApplyPolicy_InitContainerPrivilegedDenied(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/app:v1",
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"initContainers": []any{
+				map[string]any{
+					"name":            "init",
+					"image":           "ghcr.io/org/init:v1",
+					"securityContext": map[string]any{"privileged": true},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
+		t.Error("expected error when the init container is privileged and policy disallows it")
+	} else if !strings.Contains(err.Error(), "initContainers[0]") {
+		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
+		t.Errorf("expected no error when policy allows privileged, got %v", err)
+	}
+}
+
+func TestWebserviceConfig_ApplyPolicy_InitContainerCapabilitiesDenied(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/app:v1",
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"initContainers": []any{
+				map[string]any{
+					"name":  "init",
+					"image": "ghcr.io/org/init:v1",
+					"securityContext": map[string]any{
+						"capabilities": map[string]any{"add": []any{"NET_ADMIN"}},
+					},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
+		t.Error("expected error when the init container adds a forbidden capability")
+	} else if !strings.Contains(err.Error(), "initContainers[0]") {
+		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under the default-allow NoopPolicy-equivalent stub, got %v", err)
+	}
+}
+
+func TestWebserviceConfig_ApplyPolicy_SidecarResourcesDenied(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/app:v1",
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"sidecars": []any{
+				map[string]any{
+					"name":  "sidecar",
+					"image": "ghcr.io/org/sidecar:v1",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	err = enforceable.ApplyPolicy(&stubPolicy{maxCPU: "50m"})
+	if err == nil {
+		t.Fatal("expected error when the sidecar's intrinsic default CPU request exceeds the enforced maximum")
+	}
+	if !strings.Contains(err.Error(), "sidecars[0]") {
+		t.Errorf("expected error to name sidecars[0], got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "generated default") {
+		t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under a permissive policy, got %v", err)
+	}
+}
+
+func TestWebserviceConfig_ApplyPolicy_SidecarRegistryDenied(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/app:v1",
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"sidecars": []any{
+				map[string]any{
+					"name":  "sidecar",
+					"image": "docker.io/x/y:v1",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	err = enforceable.ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}})
+	if err == nil {
+		t.Fatal("expected error when the sidecar's image is not from an allowed registry")
+	}
+	if !strings.Contains(err.Error(), "sidecars[0]") {
+		t.Errorf("expected error to name sidecars[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under a permissive policy, got %v", err)
+	}
+}
+
+func TestWebserviceConfig_ApplyPolicy_SidecarPrivilegedDenied(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/app:v1",
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"sidecars": []any{
+				map[string]any{
+					"name":            "sidecar",
+					"image":           "ghcr.io/org/sidecar:v1",
+					"securityContext": map[string]any{"privileged": true},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
+		t.Error("expected error when the sidecar is privileged and policy disallows it")
+	} else if !strings.Contains(err.Error(), "sidecars[0]") {
+		t.Errorf("expected error to name sidecars[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
+		t.Errorf("expected no error when policy allows privileged, got %v", err)
+	}
+}
+
+func TestWebserviceConfig_ApplyPolicy_SidecarCapabilitiesDenied(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/app:v1",
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"sidecars": []any{
+				map[string]any{
+					"name":  "sidecar",
+					"image": "ghcr.io/org/sidecar:v1",
+					"securityContext": map[string]any{
+						"capabilities": map[string]any{"add": []any{"NET_ADMIN"}},
+					},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
+		t.Error("expected error when the sidecar adds a forbidden capability")
+	} else if !strings.Contains(err.Error(), "sidecars[0]") {
+		t.Errorf("expected error to name sidecars[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under the default-allow NoopPolicy-equivalent stub, got %v", err)
+	}
+}
+
+// TestWebserviceHandler_InitContainerSecurityContext_RoundTrip and
+// TestWebserviceHandler_SidecarSecurityContext_RoundTrip (go-kure/launcher#316)
+// regression-test parseInitContainers/parseSidecars actually reading an
+// authored `securityContext` and buildInitContainer/buildSidecarContainer
+// rendering it onto the corev1.Container — before this fix, the key was
+// silently discarded (no rejectUnknownKeys call on the init/sidecar item
+// map) and nothing was ever set on the built container.
+func TestWebserviceHandler_InitContainerSecurityContext_RoundTrip(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"initContainers": []any{
+				map[string]any{
+					"name":  "init",
+					"image": "ghcr.io/org/init:v1",
+					"securityContext": map[string]any{
+						"runAsNonRoot": true,
+						"privileged":   false,
+					},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if dep, ok := (*obj).(*appsv1.Deployment); ok {
+			ics := dep.Spec.Template.Spec.InitContainers
+			if len(ics) != 1 {
+				t.Fatalf("expected 1 init container, got %d", len(ics))
+			}
+			sc := ics[0].SecurityContext
+			if sc == nil {
+				t.Fatal("expected init container securityContext to be set")
+			}
+			if sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+				t.Error("expected runAsNonRoot=true on the init container")
+			}
+			return
+		}
+	}
+	t.Error("Deployment not found in output")
+}
+
+func TestWebserviceHandler_SidecarSecurityContext_RoundTrip(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"sidecars": []any{
+				map[string]any{
+					"name":  "sidecar",
+					"image": "ghcr.io/org/sidecar:v1",
+					"securityContext": map[string]any{
+						"runAsNonRoot": true,
+						"privileged":   false,
+					},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if dep, ok := (*obj).(*appsv1.Deployment); ok {
+			containers := dep.Spec.Template.Spec.Containers
+			var sidecar *corev1.Container
+			for i := range containers {
+				if containers[i].Name == "sidecar" {
+					sidecar = &containers[i]
+				}
+			}
+			if sidecar == nil {
+				t.Fatal("sidecar container not found")
+			}
+			sc := sidecar.SecurityContext
+			if sc == nil {
+				t.Fatal("expected sidecar securityContext to be set")
+			}
+			if sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+				t.Error("expected runAsNonRoot=true on the sidecar")
+			}
+			return
+		}
+	}
+	t.Error("Deployment not found in output")
+}
+
+// TestWebserviceHandler_InitContainerSecurityContext_ParseErrorPropagation
+// regression-tests that a malformed init container securityContext fails
+// ToApplicationConfig with an initContainers[0]-prefixed error, proving the
+// parser error path (not just the happy path) is wired through
+// parseInitContainers.
+func TestWebserviceHandler_InitContainerSecurityContext_ParseErrorPropagation(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"initContainers": []any{
+				map[string]any{
+					"name":  "init",
+					"image": "ghcr.io/org/init:v1",
+					"securityContext": map[string]any{
+						"privileged":               true,
+						"allowPrivilegeEscalation": false,
+					},
+				},
+			},
+		},
+	}
+	_, err := h.ToApplicationConfig(component, "default")
+	if err == nil {
+		t.Fatal("expected error for contradictory privileged/allowPrivilegeEscalation on an init container")
+	}
+	if !strings.Contains(err.Error(), "initContainers[0]") {
+		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
+	}
+}
+
+// TestWebserviceHandler_InitContainerSecurityContext_AbsentIsNoop regression-
+// tests that an init container authoring no securityContext at all renders a
+// corev1.Container whose SecurityContext stays nil, rather than some
+// zero-value struct.
+func TestWebserviceHandler_InitContainerSecurityContext_AbsentIsNoop(t *testing.T) {
+	h := &components.WebserviceHandler{}
+	component := &oam.Component{
+		Name: "app",
+		Type: "webservice",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"initContainers": []any{
+				map[string]any{
+					"name":  "init",
+					"image": "ghcr.io/org/init:v1",
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("app", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, obj := range objects {
+		if dep, ok := (*obj).(*appsv1.Deployment); ok {
+			ics := dep.Spec.Template.Spec.InitContainers
+			if len(ics) != 1 {
+				t.Fatalf("expected 1 init container, got %d", len(ics))
+			}
+			if ics[0].SecurityContext != nil {
+				t.Errorf("expected nil SecurityContext for an init container authoring none, got %+v", ics[0].SecurityContext)
+			}
+			return
+		}
+	}
+	t.Error("Deployment not found in output")
+}

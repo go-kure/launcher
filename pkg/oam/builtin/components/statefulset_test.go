@@ -453,3 +453,278 @@ func TestStatefulsetConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *t
 		})
 	}
 }
+
+// The eight tests below are statefulset's siblings of the
+// TestWebserviceConfig_ApplyPolicy_InitContainer*/Sidecar* tests
+// (go-kure/launcher#312) — same shared ApplyPolicy gap, same
+// enforceExtraContainer fix.
+
+func TestStatefulsetConfig_ApplyPolicy_InitContainerResourcesDenied(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	component := &oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/postgres:v15",
+			"port":      5432,
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"initContainers": []any{
+				map[string]any{"name": "init", "image": "ghcr.io/org/init:v1"},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	err = enforceable.ApplyPolicy(&stubPolicy{maxCPU: "50m"})
+	if err == nil {
+		t.Fatal("expected error when the init container's intrinsic default CPU request exceeds the enforced maximum")
+	}
+	if !strings.Contains(err.Error(), "initContainers[0]") {
+		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "generated default") {
+		t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under a permissive policy, got %v", err)
+	}
+}
+
+func TestStatefulsetConfig_ApplyPolicy_InitContainerRegistryDenied(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	component := &oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/postgres:v15",
+			"port":      5432,
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"initContainers": []any{
+				map[string]any{"name": "init", "image": "docker.io/x/y:v1"},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	err = enforceable.ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}})
+	if err == nil {
+		t.Fatal("expected error when the init container's image is not from an allowed registry")
+	}
+	if !strings.Contains(err.Error(), "initContainers[0]") {
+		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under a permissive policy, got %v", err)
+	}
+}
+
+func TestStatefulsetConfig_ApplyPolicy_InitContainerPrivilegedDenied(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	component := &oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/postgres:v15",
+			"port":      5432,
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"initContainers": []any{
+				map[string]any{
+					"name": "init", "image": "ghcr.io/org/init:v1",
+					"securityContext": map[string]any{"privileged": true},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
+		t.Error("expected error when the init container is privileged and policy disallows it")
+	} else if !strings.Contains(err.Error(), "initContainers[0]") {
+		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
+		t.Errorf("expected no error when policy allows privileged, got %v", err)
+	}
+}
+
+func TestStatefulsetConfig_ApplyPolicy_InitContainerCapabilitiesDenied(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	component := &oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/postgres:v15",
+			"port":      5432,
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"initContainers": []any{
+				map[string]any{
+					"name": "init", "image": "ghcr.io/org/init:v1",
+					"securityContext": map[string]any{
+						"capabilities": map[string]any{"add": []any{"NET_ADMIN"}},
+					},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
+		t.Error("expected error when the init container adds a forbidden capability")
+	} else if !strings.Contains(err.Error(), "initContainers[0]") {
+		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under the default-allow NoopPolicy-equivalent stub, got %v", err)
+	}
+}
+
+func TestStatefulsetConfig_ApplyPolicy_SidecarResourcesDenied(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	component := &oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/postgres:v15",
+			"port":      5432,
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"sidecars": []any{
+				map[string]any{"name": "sidecar", "image": "ghcr.io/org/sidecar:v1"},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	err = enforceable.ApplyPolicy(&stubPolicy{maxCPU: "50m"})
+	if err == nil {
+		t.Fatal("expected error when the sidecar's intrinsic default CPU request exceeds the enforced maximum")
+	}
+	if !strings.Contains(err.Error(), "sidecars[0]") {
+		t.Errorf("expected error to name sidecars[0], got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "generated default") {
+		t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under a permissive policy, got %v", err)
+	}
+}
+
+func TestStatefulsetConfig_ApplyPolicy_SidecarRegistryDenied(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	component := &oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/postgres:v15",
+			"port":      5432,
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"sidecars": []any{
+				map[string]any{"name": "sidecar", "image": "docker.io/x/y:v1"},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	err = enforceable.ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}})
+	if err == nil {
+		t.Fatal("expected error when the sidecar's image is not from an allowed registry")
+	}
+	if !strings.Contains(err.Error(), "sidecars[0]") {
+		t.Errorf("expected error to name sidecars[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under a permissive policy, got %v", err)
+	}
+}
+
+func TestStatefulsetConfig_ApplyPolicy_SidecarPrivilegedDenied(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	component := &oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/postgres:v15",
+			"port":      5432,
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"sidecars": []any{
+				map[string]any{
+					"name": "sidecar", "image": "ghcr.io/org/sidecar:v1",
+					"securityContext": map[string]any{"privileged": true},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
+		t.Error("expected error when the sidecar is privileged and policy disallows it")
+	} else if !strings.Contains(err.Error(), "sidecars[0]") {
+		t.Errorf("expected error to name sidecars[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
+		t.Errorf("expected no error when policy allows privileged, got %v", err)
+	}
+}
+
+func TestStatefulsetConfig_ApplyPolicy_SidecarCapabilitiesDenied(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	component := &oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image":     "ghcr.io/org/postgres:v15",
+			"port":      5432,
+			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
+			"sidecars": []any{
+				map[string]any{
+					"name": "sidecar", "image": "ghcr.io/org/sidecar:v1",
+					"securityContext": map[string]any{
+						"capabilities": map[string]any{"add": []any{"NET_ADMIN"}},
+					},
+				},
+			},
+		},
+	}
+	cfg, err := h.ToApplicationConfig(component, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	enforceable := cfg.(oam.Enforceable)
+
+	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
+		t.Error("expected error when the sidecar adds a forbidden capability")
+	} else if !strings.Contains(err.Error(), "sidecars[0]") {
+		t.Errorf("expected error to name sidecars[0], got %q", err.Error())
+	}
+	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
+		t.Errorf("expected no error under the default-allow NoopPolicy-equivalent stub, got %v", err)
+	}
+}

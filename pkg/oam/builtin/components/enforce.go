@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 func enforceMaxReplicas(current int32, max *int32) error {
@@ -125,6 +126,27 @@ func enforceHostPathVolumes(volumes []corev1.Volume, allowed bool) error {
 		if v.HostPath != nil {
 			return errors.Errorf("volume %q: hostPath volumes are not allowed by environment policy", v.Name)
 		}
+	}
+	return nil
+}
+
+// enforceExtraContainer checks one non-main container (an init container or
+// sidecar) against the same four policy gates the main container gets.
+// Errors are prefixed with the authored list position and name so the
+// failing entry is identifiable.
+func enforceExtraContainer(kind string, i int, name, image string,
+	res ResourceRequirements, sc *corev1.SecurityContext, p oam.Policy) error {
+	if err := enforceMaxResources(res, p.MaxCPU(), p.MaxMemory()); err != nil {
+		return errors.Wrapf(err, "%s[%d] %q", kind, i, name)
+	}
+	if err := enforceAllowedRegistries(image, p.AllowedRegistries()); err != nil {
+		return errors.Wrapf(err, "%s[%d] %q", kind, i, name)
+	}
+	if err := enforcePrivileged(sc, p.AllowPrivileged()); err != nil {
+		return errors.Wrapf(err, "%s[%d] %q", kind, i, name)
+	}
+	if err := enforceContainerCapabilities(sc, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
+		return errors.Wrapf(err, "%s[%d] %q", kind, i, name)
 	}
 	return nil
 }

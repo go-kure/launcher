@@ -320,8 +320,9 @@ func schemaContainers() oam.PropertySchema {
 			AdditionalProperties: true,
 			Description:          "A single container definition.",
 			Properties: map[string]oam.PropertySchema{
-				"name":  {Type: oam.PropertyTypeString, Required: true, Description: "Container name."},
-				"image": {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference."},
+				"name":            {Type: oam.PropertyTypeString, Required: true, Description: "Container name."},
+				"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference."},
+				"securityContext": schemaSecurityContext(false),
 			},
 		},
 	}
