@@ -79,12 +79,19 @@ section) before `build` ever reaches the write step, so the filename can't carry
 `build` collects objects directly from the transform result
 (`collectFromNode`/`collectFromBundle`) — it never constructs or walks a kure
 `layout.ManifestLayout`. A component whose config implements the optional
-`layout.LayoutAugmenter` interface (e.g. the `helmchart` component with
-`valuesMode: configMap`, which needs a values `ConfigMap` emitted alongside
-it — see the
+`layout.LayoutAugmenter` interface fails the build outright, naming the
+component, **unless** it also implements `oam.LayoutAugmentationCoverage` and
+its `GenerateCoversAugmentLayout()` returns `true` — meaning its plain
+`Generate` output is already a complete superset of whatever `AugmentLayout`
+would otherwise add, so skipping the layout walk loses nothing. The `helmchart`
+component with `valuesMode: configMap` (which needs a values `ConfigMap`
+emitted alongside it) does not opt in and still fails the build; `delivery:
+template` (which only repartitions `Generate`'s own flat output into hook-group
+child layouts, adding no resources) does opt in and builds normally — see the
 [Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
-helmchart section) fails the build outright, naming the component, rather than
-silently producing manifests with a dangling reference.
+helmchart section for both. Any other `LayoutAugmenter` that doesn't implement
+`oam.LayoutAugmentationCoverage` at all still fails closed, the same as before
+this opt-out existed.
 
 ## Global flags
 

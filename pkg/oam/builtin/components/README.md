@@ -696,7 +696,44 @@ registry [...]`.
   validation error) rather than applying them — the client-side render always uses
   kure's defaults (`.Release.Name`/`.Release.Namespace` = `release`/`default`), and
   there is no way today to override release identity for a templated chart.
-  `delivery: native` is unaffected.
+  `delivery: native` is unaffected. Known limitation, over-broad wording fixed: this list is the
+  set of properties `delivery: template` rejects when **explicitly** authored — an inherited
+  handler default (e.g. `valuesMode` with no property-level `configMap`) falls back to `inline`
+  rather than erroring (`pkg/oam/builtin/components/helmchart.go:279-287`); same over-broad-wording
+  class `go-kure/launcher#319`'s confirm round already fixed elsewhere.
+
+  **`delivery: template` output is partitioned by Helm hook group.** Every rendered manifest
+  carrying a `helm.sh/hook` annotation (or a standalone `helm.sh/hook-weight`) is grouped by
+  `(phase, weight)` via kure's `helm.SplitByHookWeight`, then emitted in hook-execution order —
+  `pre-install, pre-upgrade, main, post-install, post-upgrade, <unknown, alphabetical>` — instead of
+  raw chart-render order; a chart with no hook annotations at all yields one group and
+  byte-identical output (a correctness fix, not a behavior change, for the unannotated case).
+  `pre-delete`/`post-delete`/`pre-rollback`/`post-rollback`/`test` objects are dropped outright
+  (kure does not surface them as static manifests) — mostly a bug fix, since a `test` Pod rendered
+  as a static GitOps object would otherwise be reconciled on every apply, but it is silent data
+  loss for a chart that relies on one of those hooks; `pkg/oam` has no logging channel to flag it.
+  For a layout-walking consumer (the `layout.LayoutAugmenter` path, same mechanism as the
+  `valuesMode: configMap` relocation above), more than one hook group makes `AugmentLayout` clear
+  the component's flat `Resources` and replace them with one child `ManifestLayout` per group,
+  named `<component>-NN-<phase-slug>` and chained via `DependsOn` so the phases reconcile in Helm's
+  own order; a single-group chart's `AugmentLayout` is a no-op. Every `delivery: template`
+  component becomes a `LayoutAugmenter` regardless of hook-group count — including a hook-free
+  chart, since the wrap decision happens at config-construction time, before the network render
+  that would reveal there is only one group — so even a hook-free templated chart now gets its own
+  sub-layout directory under a layout-walking consumer, for no behavioural benefit; this mirrors
+  `valuesMode: configMap`'s relocation caveat above (same mechanism, different trigger). Known
+  limitation: the child directory name's DNS-1123 truncation (mirroring `valuesConfigMapName`'s own
+  `sha256`-prefixed truncation above) makes same-name collisions vanishingly unlikely *within* one
+  Application, but two different Applications with a same-named component still collide — component
+  names are unique only within one Application (`pkg/oam/validate.go:129-133`), while emitted
+  Kustomization CRs for hook-group children share one controller namespace; a pre-existing gap
+  (inherited from crane's reference implementation) that this partitioning newly exposes, not one
+  it introduces. `kurel build`'s flat output **accepts** `delivery: template` — its `Generate`
+  output is already the same flat union `AugmentLayout` would otherwise repartition, so nothing is
+  lost by skipping the layout walk — while still rejecting `valuesMode: configMap` when it would
+  actually emit a values `ConfigMap` (`emitsValuesConfigMap()`: `configMap` mode with non-empty
+  `values`), same qualification as the over-broad-wording fix above, not an unconditional rejection
+  of every `LayoutAugmenter`.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
