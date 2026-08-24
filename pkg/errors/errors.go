@@ -62,6 +62,45 @@ func NewParseError(kind, file string, line, col int, cause error) *ParseError {
 	return &ParseError{Kind: kind, File: file, Line: line, Column: col, Wrapped: cause}
 }
 
+// PatchError is returned when a patch operation fails to apply.
+type PatchError struct {
+	Operation    string // the patch operation, e.g. "replace", "delete", "resolve"
+	Path         string // the target path within the resource, if any
+	ResourceName string // the resource the patch targeted, if known
+	Reason       string // human-readable reason for the failure
+	Cause        error
+}
+
+func (e *PatchError) Error() string {
+	msg := fmt.Sprintf("patch %q failed", e.Operation)
+	if e.ResourceName != "" {
+		msg += fmt.Sprintf(" on %q", e.ResourceName)
+	}
+	if e.Path != "" {
+		msg += fmt.Sprintf(" at %q", e.Path)
+	}
+	if e.Reason != "" {
+		msg += fmt.Sprintf(": %s", e.Reason)
+	}
+	if e.Cause != nil {
+		msg += fmt.Sprintf(": %v", e.Cause)
+	}
+	return msg
+}
+
+func (e *PatchError) Unwrap() error { return e.Cause }
+
+// NewPatchError creates a PatchError describing a failed patch operation.
+func NewPatchError(operation, path, resourceName, reason string, cause error) *PatchError {
+	return &PatchError{
+		Operation:    operation,
+		Path:         path,
+		ResourceName: resourceName,
+		Reason:       reason,
+		Cause:        cause,
+	}
+}
+
 // New returns a new error with the given message.
 func New(msg string) error { return errors.New(msg) }
 

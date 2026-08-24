@@ -7,7 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 
-	"github.com/go-kure/kure/pkg/errors"
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // StrategicPatch represents a partial YAML document for deep merge

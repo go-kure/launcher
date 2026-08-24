@@ -184,7 +184,22 @@ number of patches targeting one resource) rather than sampling, so it stays
 accurate; a resource's authored patch list is expected to stay small, which is
 what keeps the quadratic cost unnoticeable in practice.
 
+## Error Handling
+
+Patch application and resolution failures are returned as
+[`*errors.PatchError`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/errors#PatchError)
+(`github.com/go-kure/launcher/pkg/errors`), carrying the failed operation, target path, resource
+name, and the underlying cause where one exists:
+
+```go
+var pe *errors.PatchError
+if errors.As(err, &pe) {
+    // inspect pe.Operation, pe.Path, pe.ResourceName, pe.Reason
+}
+```
+
 ## Related Packages
 
 - [pkg/oam](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) - the `kurel build` pipeline; independent of this package (see Scope and Status above)
+- [pkg/errors](https://pkg.go.dev/github.com/go-kure/launcher/pkg/errors) - structured error types, including `PatchError`
 - [kure pkg/io](https://pkg.go.dev/github.com/go-kure/kure/pkg/io) - YAML parsing for patch targets
