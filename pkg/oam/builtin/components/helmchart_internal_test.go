@@ -1,13 +1,19 @@
 package components
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestHelmchartConfig_GenerateTemplate_HTTP(t *testing.T) {
@@ -221,6 +227,386 @@ func TestValuesConfigMapName_TruncationPreservesUniqueness(t *testing.T) {
 		}
 		if errs := validation.IsDNS1123Subdomain(got); len(errs) != 0 {
 			t.Errorf("IsDNS1123Subdomain(%q) = %v, want no errors", got, errs)
+		}
+	}
+}
+
+// helmchartTemplateFixture returns a *HelmchartConfig configured for
+// delivery: template with the given renderChart stub — the shared shape used
+// by every white-box template-delivery test below.
+func helmchartTemplateFixture(renderChart func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error)) *HelmchartConfig {
+	return &HelmchartConfig{
+		Name:        "myapp",
+		Namespace:   "default",
+		Delivery:    "template",
+		Chart:       "myapp",
+		SourceURL:   "https://charts.example.com",
+		SourceKind:  "HelmRepository",
+		renderChart: renderChart,
+	}
+}
+
+func TestEnsureRendered_CachesRender(t *testing.T) {
+	calls := 0
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		calls++
+		return []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"), nil
+	})
+
+	if _, err := cfg.Generate(nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if err := cfg.augmentLayoutTemplate(&layout.ManifestLayout{Name: "myapp", Namespace: "default/myapp"}); err != nil {
+		t.Fatalf("augmentLayoutTemplate: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("renderChart called %d times, want 1 (Generate then AugmentLayout must render exactly once)", calls)
+	}
+}
+
+func TestGenerate_FlattensHookGroupsInExecutionOrder(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: post
+  annotations:
+    helm.sh/hook: post-install
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pre
+  annotations:
+    helm.sh/hook: pre-install
+`)
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	})
+
+	objects, err := cfg.Generate(nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 3 {
+		t.Fatalf("expected 3 objects, got %d", len(objects))
+	}
+	var names []string
+	for _, o := range objects {
+		u, ok := (*o).(*unstructured.Unstructured)
+		if !ok {
+			t.Fatalf("object = %T, want *unstructured.Unstructured", *o)
+		}
+		names = append(names, u.GetName())
+	}
+	want := []string{"pre", "main", "post"}
+	for i, n := range want {
+		if names[i] != n {
+			t.Errorf("execution order = %v, want %v", names, want)
+			break
+		}
+	}
+}
+
+func TestAugmentLayoutTemplate_SingleGroup_NoChildren(t *testing.T) {
+	raw := []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n")
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	})
+
+	ml := &layout.ManifestLayout{Name: "myapp", Namespace: "default/myapp"}
+	if err := cfg.augmentLayoutTemplate(ml); err != nil {
+		t.Fatalf("augmentLayoutTemplate: %v", err)
+	}
+	if len(ml.Children) != 0 {
+		t.Errorf("ml.Children has %d entries, want 0 (a single hook group is a no-op)", len(ml.Children))
+	}
+}
+
+func TestAugmentLayoutTemplate_MultiGroup_PartitionsAndChains(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pre
+  annotations:
+    helm.sh/hook: pre-install
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: post
+  annotations:
+    helm.sh/hook: post-install
+`)
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	})
+
+	ml := &layout.ManifestLayout{
+		Name:                "myapp",
+		Namespace:           "team/myapp", // kure's walker always sets Namespace ending in Name (walker.go:492)
+		Resources:           []client.Object{&unstructured.Unstructured{}},
+		Mode:                layout.KustomizationExplicit,
+		FluxPlacement:       layout.FluxIntegratedPerLayout,
+		FileNaming:          layout.FileNamingKindName,
+		FilePer:             layout.FilePerKind,
+		ApplicationFileMode: layout.AppFileSingle, // must NOT propagate to children
+	}
+	if err := cfg.augmentLayoutTemplate(ml); err != nil {
+		t.Fatalf("augmentLayoutTemplate: %v", err)
+	}
+	if ml.Resources != nil {
+		t.Errorf("ml.Resources = %v, want nil after partitioning", ml.Resources)
+	}
+	if len(ml.Children) != 3 {
+		t.Fatalf("ml.Children has %d entries, want 3", len(ml.Children))
+	}
+
+	wantNames := []string{"myapp-00-pre-install", "myapp-01-main", "myapp-02-post-install"}
+	var prevName string
+	for i, child := range ml.Children {
+		if child.Name != wantNames[i] {
+			t.Errorf("Children[%d].Name = %q, want %q", i, child.Name, wantNames[i])
+		}
+		wantNS := ml.FullRepoPath() + "/" + wantNames[i]
+		if child.Namespace != wantNS {
+			t.Errorf("Children[%d].Namespace = %q, want %q", i, child.Namespace, wantNS)
+		}
+		if child.Mode != ml.Mode {
+			t.Errorf("Children[%d].Mode = %v, want %v", i, child.Mode, ml.Mode)
+		}
+		if child.FluxPlacement != ml.FluxPlacement {
+			t.Errorf("Children[%d].FluxPlacement = %v, want %v", i, child.FluxPlacement, ml.FluxPlacement)
+		}
+		if child.FileNaming != ml.FileNaming {
+			t.Errorf("Children[%d].FileNaming = %v, want %v", i, child.FileNaming, ml.FileNaming)
+		}
+		if child.FilePer != ml.FilePer {
+			t.Errorf("Children[%d].FilePer = %v, want %v", i, child.FilePer, ml.FilePer)
+		}
+		if child.ApplicationFileMode != layout.AppFileUnset {
+			t.Errorf("Children[%d].ApplicationFileMode = %v, want AppFileUnset (must not inherit ml's AppFileSingle)", i, child.ApplicationFileMode)
+		}
+		if i == 0 {
+			if len(child.DependsOn) != 0 {
+				t.Errorf("Children[0].DependsOn = %v, want empty", child.DependsOn)
+			}
+		} else if len(child.DependsOn) != 1 || child.DependsOn[0] != prevName {
+			t.Errorf("Children[%d].DependsOn = %v, want [%q]", i, child.DependsOn, prevName)
+		}
+		prevName = child.Name
+	}
+}
+
+// TestAugmentLayoutTemplate_ChildKustomizationReferencesResolveOnDisk exercises
+// the actual kure disk-writer, not just the in-memory ml/Children shape —
+// AppFileSingle on the pre-AugmentLayout parent is the exact value whose
+// verbatim inheritance into a child (crane's copy-all-five-fields approach)
+// produces a dangling kustomization.yaml resources: entry (see
+// augmentLayoutTemplate's doc comment). Pinning it specifically matters:
+// kure's own fallback default is AppFilePerResource, not AppFileSingle, so a
+// zero-valued fixture would take the same code path either way and this test
+// would pass regardless of whether the fix is present.
+func TestAugmentLayoutTemplate_ChildKustomizationReferencesResolveOnDisk(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pre
+  annotations:
+    helm.sh/hook: pre-install
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: post
+  annotations:
+    helm.sh/hook: post-install
+`)
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	})
+
+	ml := &layout.ManifestLayout{
+		Name:                "myapp",
+		Namespace:           "team/myapp",
+		ApplicationFileMode: layout.AppFileSingle,
+	}
+	if err := cfg.augmentLayoutTemplate(ml); err != nil {
+		t.Fatalf("augmentLayoutTemplate: %v", err)
+	}
+	if len(ml.Children) < 2 {
+		t.Fatalf("test setup: expected multiple hook groups to produce children, got %d", len(ml.Children))
+	}
+
+	dir := t.TempDir()
+	if err := ml.WriteToDisk(dir); err != nil {
+		t.Fatalf("WriteToDisk: %v", err)
+	}
+
+	var kustFiles []string
+	if err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !info.IsDir() && info.Name() == "kustomization.yaml" {
+			kustFiles = append(kustFiles, path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(kustFiles) == 0 {
+		t.Fatal("no kustomization.yaml was written")
+	}
+
+	resourceLine := regexp.MustCompile(`^  - (.+)$`)
+	for _, kf := range kustFiles {
+		data, err := os.ReadFile(kf)
+		if err != nil {
+			t.Fatalf("read %s: %v", kf, err)
+		}
+		kdir := filepath.Dir(kf)
+		for _, line := range strings.Split(string(data), "\n") {
+			m := resourceLine.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
+			ref := filepath.Join(kdir, m[1])
+			if _, err := os.Stat(ref); err != nil {
+				t.Errorf("%s: resources entry %q does not resolve on disk (%v)", kf, m[1], err)
+			}
+		}
+	}
+}
+
+func TestExcludedHookPhasesAreDropped(t *testing.T) {
+	excludedPhases := []string{"pre-delete", "post-delete", "pre-rollback", "post-rollback", "test"}
+	var raw strings.Builder
+	for i, phase := range excludedPhases {
+		if i > 0 {
+			raw.WriteString("---\n")
+		}
+		fmt.Fprintf(&raw, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: %s-pod\n  annotations:\n    helm.sh/hook: %s\n", phase, phase)
+	}
+	raw.WriteString("---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: kept\n")
+
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return []byte(raw.String()), nil
+	})
+
+	objects, err := cfg.Generate(nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("expected 1 surviving object (the 5 excluded-phase objects dropped), got %d", len(objects))
+	}
+	u, ok := (*objects[0]).(*unstructured.Unstructured)
+	if !ok {
+		t.Fatalf("objects[0] = %T, want *unstructured.Unstructured", *objects[0])
+	}
+	if u.GetName() != "kept" {
+		t.Errorf("surviving object name = %q, want %q", u.GetName(), "kept")
+	}
+}
+
+func TestHookGroupDir_EmptyPhaseIsMain(t *testing.T) {
+	if got := hookGroupDir(helm.HookGroup{Phase: ""}); got != "main" {
+		t.Errorf("hookGroupDir(empty phase) = %q, want %q", got, "main")
+	}
+}
+
+func TestHookGroupDir_SanitizesUnsafePhase(t *testing.T) {
+	cases := []struct{ phase, want string }{
+		{"pre-install,post-install", "pre-install-post-install"},
+		{"PRE-INSTALL", "pre-install"},
+		{"weird/phase", "weird-phase"},
+		{"../../etc", "etc"},
+	}
+	for _, c := range cases {
+		if got := hookGroupDir(helm.HookGroup{Phase: c.phase}); got != c.want {
+			t.Errorf("hookGroupDir(%q) = %q, want %q", c.phase, got, c.want)
+		}
+	}
+}
+
+func TestHookGroupDir_TruncatesLongPhase(t *testing.T) {
+	long := strings.Repeat("a", 80)
+	got := hookGroupDir(helm.HookGroup{Phase: long})
+	if len(got) > 40 {
+		t.Errorf("len(hookGroupDir(80-char phase)) = %d, want <= 40", len(got))
+	}
+	if got != strings.Repeat("a", 40) {
+		t.Errorf("hookGroupDir(80-char phase) = %q, want 40 a's", got)
+	}
+}
+
+// TestAugmentLayoutTemplate_ChildNameStaysWithinDNS1123Limit exercises
+// hookGroupChildName directly with near-253-char ml.Names (validate.go's
+// DNS-1123 subdomain max), including one whose truncation boundary lands
+// right after a '.', and pins both the within-name and cross-name uniqueness
+// guarantees hookGroupChildName's doc comment claims.
+func TestAugmentLayoutTemplate_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
+	groups := []helm.HookGroup{
+		{Phase: "pre-install"},
+		{Phase: strings.Repeat("x", 80)}, // slugs+truncates to 40 x's via hookGroupDir
+	}
+
+	// mlNameA's truncation boundary (prefixLen=229 for group 0's suffix
+	// "-00-pre-install", len 15: maxPrefix=253-15=238, prefixLen=238-8-1=229)
+	// lands right after a literal '.': mlNameA[:229] ends in ".", exercising
+	// the TrimRight(name, "-.") cleanup mirrored from valuesConfigMapName.
+	mlNameA := strings.Repeat("a", 228) + "." + strings.Repeat("b", 24)
+	if len(mlNameA) != 253 {
+		t.Fatalf("test setup: len(mlNameA) = %d, want 253", len(mlNameA))
+	}
+	if mlNameA[228] != '.' {
+		t.Fatalf("test setup: mlNameA[228] = %q, want '.'", mlNameA[228])
+	}
+
+	namesA := make([]string, len(groups))
+	for i, g := range groups {
+		dn := hookGroupChildName(mlNameA, i, g)
+		if len(dn) > 253 {
+			t.Errorf("group %d: len(%q) = %d, want <= 253", i, dn, len(dn))
+		}
+		if errs := validation.IsDNS1123Subdomain(dn); len(errs) != 0 {
+			t.Errorf("group %d: IsDNS1123Subdomain(%q) = %v, want no errors", i, dn, errs)
+		}
+		if strings.HasSuffix(dn, ".") || strings.HasSuffix(dn, "-") {
+			t.Errorf("group %d: %q has a dangling '-'/'.' artifact from truncation", i, dn)
+		}
+		namesA[i] = dn
+	}
+	if namesA[0] == namesA[1] {
+		t.Fatalf("hookGroupChildName collided across groups for one ml.Name: both produced %q", namesA[0])
+	}
+
+	// A second near-253-char ml.Name sharing mlNameA's truncated prefix must
+	// still yield a distinct dirName set — the sha256 prefix, not just the
+	// group index, is what prevents cross-name collision (mirrors
+	// TestValuesConfigMapName_TruncationPreservesUniqueness).
+	mlNameB := strings.Repeat("a", 228) + "." + strings.Repeat("c", 24)
+	if len(mlNameB) != 253 {
+		t.Fatalf("test setup: len(mlNameB) = %d, want 253", len(mlNameB))
+	}
+	if mlNameA == mlNameB {
+		t.Fatal("test setup: mlNameA and mlNameB must differ")
+	}
+	for i, g := range groups {
+		dnA := hookGroupChildName(mlNameA, i, g)
+		dnB := hookGroupChildName(mlNameB, i, g)
+		if dnA == dnB {
+			t.Errorf("group %d: hookGroupChildName collided across ml.Names: mlNameA=%q mlNameB=%q both produced %q", i, mlNameA, mlNameB, dnA)
 		}
 	}
 }

@@ -1,7 +1,14 @@
 package components_test
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"sort"
 	"testing"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
@@ -10,6 +17,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -1183,5 +1191,208 @@ func TestHelmchartConfig_ValuesModeConfigMap_PreservesOptionalInterfaces(t *test
 	}
 	if _, ok := cfg.(interface{ EmitsAutoHealthCheck() bool }); !ok {
 		t.Error("wrapped config lost autoHealthCheckEmitter (EmitsAutoHealthCheck)")
+	}
+}
+
+func TestTemplateDelivery_IsLayoutAugmenter(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "myapp",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":    "myapp",
+			"delivery": "template",
+			"source":   map[string]any{"url": "https://charts.example.com"},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	if _, ok := cfg.(interface {
+		AugmentLayout(*layout.ManifestLayout) error
+	}); !ok {
+		t.Fatal("template-delivery config does not implement LayoutAugmenter")
+	}
+}
+
+func TestTemplateDelivery_GenerateCoversAugmentLayout(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "myapp",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":    "myapp",
+			"delivery": "template",
+			"source":   map[string]any{"url": "https://charts.example.com"},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	cov, ok := cfg.(interface{ GenerateCoversAugmentLayout() bool })
+	if !ok {
+		t.Fatal("template-delivery config does not implement GenerateCoversAugmentLayout")
+	}
+	if !cov.GenerateCoversAugmentLayout() {
+		t.Error("GenerateCoversAugmentLayout() = false, want true for delivery: template (AugmentLayout only repartitions Generate's own flat union)")
+	}
+}
+
+func TestConfigMapMode_GenerateDoesNotCoverAugmentLayout(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":      "kube-prometheus-stack",
+			"valuesMode": "configMap",
+			"values":     map[string]any{"replicaCount": 2},
+			"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	cov, ok := cfg.(interface{ GenerateCoversAugmentLayout() bool })
+	if !ok {
+		t.Fatal("configMap-mode config does not implement GenerateCoversAugmentLayout")
+	}
+	if cov.GenerateCoversAugmentLayout() {
+		t.Error("GenerateCoversAugmentLayout() = true, want false for valuesMode: configMap (AugmentLayout adds a ConfigMap Generate never emits)")
+	}
+}
+
+// buildMinimalChartTar packages a minimal Helm chart (Chart.yaml plus the
+// given extra files) as a gzipped tar. Duplicated locally from
+// pkg/cmd/kurel/build_test.go's identically-named helper: different package,
+// no shared test-helper package to import it from.
+func buildMinimalChartTar(t *testing.T, name, version string, extraFiles map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	files := map[string]string{
+		name + "/Chart.yaml": fmt.Sprintf("apiVersion: v2\nname: %s\nversion: %s\n", name, version),
+	}
+	for k, v := range extraFiles {
+		files[k] = v
+	}
+	for path, content := range files {
+		hdr := &tar.Header{Name: path, Mode: 0o600, Size: int64(len(content))}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("tar header: %v", err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatalf("tar write: %v", err)
+		}
+	}
+	tw.Close()
+	gz.Close()
+	return buf.Bytes()
+}
+
+// startMinimalHelmChartServer serves a minimal chart (name/version, with the
+// given template files under templates/) over HTTP — the same fetch path
+// pkg/cmd/kurel/build_test.go's TestBuildCommand_HelmchartTemplateDelivery
+// exercises — and returns the server's base URL. Closed via t.Cleanup.
+func startMinimalHelmChartServer(t *testing.T, name, version string, templateFiles map[string]string) string {
+	t.Helper()
+	chartFiles := make(map[string]string, len(templateFiles))
+	for path, content := range templateFiles {
+		chartFiles[name+"/templates/"+path] = content
+	}
+	chartBuf := buildMinimalChartTar(t, name, version, chartFiles)
+	tgzName := name + "-" + version + ".tgz"
+
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.yaml":
+			fmt.Fprintf(w, "apiVersion: v1\nentries:\n  %s:\n  - name: %s\n    version: %s\n    urls:\n      - %s\ngenerated: \"2024-01-01T00:00:00Z\"\n",
+				name, name, version, srvURL+"/"+tgzName)
+		case "/" + tgzName:
+			_, _ = w.Write(chartBuf)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	return srvURL
+}
+
+func objectKey(o client.Object) string {
+	return o.GetObjectKind().GroupVersionKind().Kind + "/" + o.GetName()
+}
+
+// TestTemplateDelivery_GenerateCoversAugmentLayout_Premise directly proves the
+// claim GenerateCoversAugmentLayout() == true encodes for delivery: template:
+// the flattened union of ml.Resources plus every ml.Children[*].Resources
+// after AugmentLayout equals Generate()'s own output, as a set. No existing
+// test asserts this exact invariant — helmchart_internal_test.go's configMap-
+// mode analog never calls Generate or compares a flattened union. If a later
+// change ever makes the template branch add a resource Generate doesn't
+// already return, this is what catches the coverage claim going stale.
+func TestTemplateDelivery_GenerateCoversAugmentLayout_Premise(t *testing.T) {
+	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", map[string]string{
+		"pre.yaml":  "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: pre\n  annotations:\n    helm.sh/hook: pre-install\ndata:\n  key: value\n",
+		"main.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: main\ndata:\n  key: value\n",
+		"post.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: post\n  annotations:\n    helm.sh/hook: post-install\ndata:\n  key: value\n",
+	})
+
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "myapp",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":    "testchart",
+			"version":  "0.1.0",
+			"delivery": "template",
+			"source":   map[string]any{"url": srvURL},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+
+	app := stack.NewApplication("myapp", "default", cfg)
+	generated, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	aug, ok := cfg.(interface {
+		AugmentLayout(*layout.ManifestLayout) error
+	})
+	if !ok {
+		t.Fatal("template-delivery config does not implement LayoutAugmenter")
+	}
+	ml := &layout.ManifestLayout{Name: "myapp", Namespace: "default/myapp"}
+	if err := aug.AugmentLayout(ml); err != nil {
+		t.Fatalf("AugmentLayout: %v", err)
+	}
+	if len(ml.Children) != 3 {
+		t.Fatalf("expected 3 hook-group children, got %d", len(ml.Children))
+	}
+
+	genKeys := make([]string, 0, len(generated))
+	for _, o := range generated {
+		genKeys = append(genKeys, objectKey(*o))
+	}
+
+	var augmentedResources []client.Object
+	augmentedResources = append(augmentedResources, ml.Resources...)
+	for _, child := range ml.Children {
+		augmentedResources = append(augmentedResources, child.Resources...)
+	}
+	augKeys := make([]string, 0, len(augmentedResources))
+	for _, o := range augmentedResources {
+		augKeys = append(augKeys, objectKey(o))
+	}
+
+	sort.Strings(genKeys)
+	sort.Strings(augKeys)
+	if !reflect.DeepEqual(genKeys, augKeys) {
+		t.Errorf("flattened AugmentLayout output = %v, want equal (as a set) to Generate's output %v", augKeys, genKeys)
 	}
 }
