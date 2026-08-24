@@ -1,6 +1,17 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>go-kure/.github//renovate/shared"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "govulncheck pin in ci.yml's env: block — invisible to the github-actions manager, which only reads uses: refs, not env: values.",
+      "managerFilePatterns": [".github/workflows/ci.yml"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+GOVULNCHECK_VERSION: '(?<currentValue>v[\\d.]+)'"
+      ],
+      "datasourceTemplate": "{{{datasource}}}"
+    }
+  ],
   "packageRules": [
     {
       "description": "Direct deps shared with the imported kure are never proposed here: launcher must not lead the kure release it imports (MVS pulls launcher up automatically, so only the 'ahead' direction needs control — see AGENTS.md § 'Shared dependencies with kure'). CI enforces this via site/scripts/check-kure-dep-sync.sh; this list mirrors that guard's current shared-direct set and must be updated together with go.mod changes that add or drop a shared direct dep — a dep missing here is still caught by the CI guard, just as a red PR instead of never being proposed. Correct sequence for these: land the kure bump, cut a kure release, bump the go-kure/kure require, take the shared dep together.",
@@ -23,6 +34,20 @@
         "sigs.k8s.io/gateway-api",
         "sigs.k8s.io/yaml"
       ]
+    },
+    {
+      "description": "Regenerate the golangci-lint pins in Makefile/ci.yml/docs from mise.toml on the bot's own branch after any gomod or mise bump — mise.toml is the only copy Renovate's mise datasource actually updates; the rest are plain strings a human (or this task) must keep in step. The script is a no-op when nothing derived changes, so matching both managers is safe.",
+      "matchManagers": ["gomod", "mise"],
+      "postUpgradeTasks": {
+        "commands": ["sh scripts/sync-tool-versions.sh"],
+        "fileFilters": [
+          "Makefile",
+          ".github/workflows/ci.yml",
+          "docs/github-workflows.md",
+          "DEVELOPMENT.md"
+        ],
+        "executionMode": "branch"
+      }
     }
   ]
 }

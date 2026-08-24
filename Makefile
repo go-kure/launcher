@@ -345,8 +345,16 @@ check-kure-dep-sync: ## Guard: launcher must not newly lead imported kure on sha
 	cd site/scripts/kuredepsync && GOWORK=off go mod tidy && git diff --exit-code go.mod go.sum && GOWORK=off go vet ./... && GOWORK=off go test ./...
 	bash site/scripts/check-kure-dep-sync.sh --base origin/main
 
+.PHONY: check-tool-versions
+check-tool-versions: ## Verify golangci-lint pin parity (Makefile/ci.yml/docs) against mise.toml
+	sh scripts/check-tool-versions.sh
+
+.PHONY: sync-tool-versions
+sync-tool-versions: ## Sync golangci-lint pins (Makefile/ci.yml/docs) from mise.toml
+	sh scripts/sync-tool-versions.sh
+
 .PHONY: check
-check: lint vet test-short check-kure-dep-sync ## Quick code quality check (lint, vet, short tests, kure dep sync)
+check: lint vet test-short check-kure-dep-sync check-tool-versions ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins)
 
 .PHONY: precommit
 precommit: fmt tidy lint test check-kure-dep-sync ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync)
