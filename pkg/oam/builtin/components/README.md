@@ -700,7 +700,7 @@ registry [...]`.
   set of properties `delivery: template` rejects when **explicitly** authored — an inherited
   handler default (e.g. `valuesMode` with no property-level `configMap`) falls back to `inline`
   rather than erroring (`pkg/oam/builtin/components/helmchart.go:281-289`); same over-broad-wording
-  class `go-kure/launcher#319`'s confirm round already fixed elsewhere.
+  class `go-kure/launcher#319` already fixed elsewhere in this file.
 
   **`delivery: template` output is partitioned by Helm hook group.** Every rendered manifest
   carrying a `helm.sh/hook` annotation (or a standalone `helm.sh/hook-weight`) is grouped by

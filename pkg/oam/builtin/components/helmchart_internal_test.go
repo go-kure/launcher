@@ -672,9 +672,9 @@ metadata:
 }
 
 // TestGenerate_MultiEventHookPicksEarliestByPriorityNotPosition covers a
-// distinct branch a codex-lens confirmation pass of this fix identified as
-// untested by every other multi-event test: those all list their tokens in
-// ascending priority order already ("pre-install,pre-upgrade"), so a naive
+// distinct branch untested by every other multi-event test: those all list
+// their tokens in ascending priority order already
+// ("pre-install,pre-upgrade"), so a naive
 // implementation that simply picked the FIRST recognized token (rather than
 // the earliest by kure's own hookPhaseOrder priority) would pass every one
 // of them. "pre-upgrade,pre-install" (tokens in descending priority order)
@@ -822,7 +822,7 @@ metadata:
 }
 
 // TestGenerate_MultiEventHookDropsExcludedTokenAmongCustomHooks covers a
-// branch a codex-lens pass of this fix identified as unhandled: a
+// branch not handled by an earlier version of this fix: a
 // multi-value annotation mixing an excluded phase with an unrecognized
 // custom hook name ("test,crd-install") has no recognized ordered phase
 // among its tokens, so it does not take the earliest-phase branch — but it
