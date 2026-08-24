@@ -43,9 +43,17 @@ run = "make check"
 description = "Guard: launcher must not newly lead imported kure on shared direct deps"
 run = "make check-kure-dep-sync"
 
+[tasks.check-tool-versions]
+description = "Verify golangci-lint pin parity (Makefile/ci.yml/docs) against mise.toml"
+run = "make check-tool-versions"
+
+[tasks.sync-tool-versions]
+description = "Sync golangci-lint pins (Makefile/ci.yml/docs) from mise.toml"
+run = "make sync-tool-versions"
+
 [tasks.verify]
-description = "Run all checks (tidy, lint, test, kure dep sync)"
-depends = ["tidy", "lint", "test", "check-kure-dep-sync"]
+description = "Run all checks (tidy, lint, test, kure dep sync, tool pins)"
+depends = ["tidy", "lint", "test", "check-kure-dep-sync", "check-tool-versions"]
 
 [tasks.changelog]
 description = "Generate changelog from git history"
