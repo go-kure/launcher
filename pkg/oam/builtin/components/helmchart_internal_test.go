@@ -612,3 +612,248 @@ func TestAugmentLayoutTemplate_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
 		}
 	}
 }
+
+// generateNames runs Generate and returns the resulting objects' names in
+// order, failing the test on any error or non-unstructured object.
+func generateNames(t *testing.T, cfg *HelmchartConfig) []string {
+	t.Helper()
+	objects, err := cfg.Generate(nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	names := make([]string, len(objects))
+	for i, o := range objects {
+		u, ok := (*o).(*unstructured.Unstructured)
+		if !ok {
+			t.Fatalf("objects[%d] = %T, want *unstructured.Unstructured", i, *o)
+		}
+		names[i] = u.GetName()
+	}
+	return names
+}
+
+// TestGenerate_MultiEventHookOrdersByEarliestPhase pins the fix for the
+// defect kure's SplitByHookWeight documents but does not itself correct
+// (kure pkg/stack/helm/hooks.go:35-36): a comma-separated helm.sh/hook
+// annotation ("pre-install,pre-upgrade") must land in the pre-install-ordered
+// group, not kure's alphabetical "unknown" bucket (which sorts after
+// post-upgrade — the opposite of what the annotation requests).
+func TestGenerate_MultiEventHookOrdersByEarliestPhase(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multi
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: post
+  annotations:
+    helm.sh/hook: post-install
+`)
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	})
+
+	got := generateNames(t, cfg)
+	want := []string{"multi", "main", "post"}
+	for i := range want {
+		if i >= len(got) || got[i] != want[i] {
+			t.Fatalf("execution order = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestGenerate_MultiEventHookDropsExcludedTokenKeepsEarliestPhase covers a
+// multi-value annotation mixing a recognized ordered phase with an excluded
+// one ("pre-install,pre-delete"): the excluded token must not suppress the
+// whole object, and the object must still land in the pre-install group.
+func TestGenerate_MultiEventHookDropsExcludedTokenKeepsEarliestPhase(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multi
+  annotations:
+    helm.sh/hook: pre-install,pre-delete
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+`)
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	})
+
+	got := generateNames(t, cfg)
+	want := []string{"multi", "main"}
+	for i := range want {
+		if i >= len(got) || got[i] != want[i] {
+			t.Fatalf("execution order = %v, want %v (multi must survive, ordered ahead of main)", got, want)
+		}
+	}
+}
+
+// TestGenerate_MultiEventHookAllExcludedIsDropped covers a multi-value
+// annotation whose tokens are entirely excluded phases ("test,pre-delete"):
+// kure's exact-string-match excludedHookPhases lookup (hooks.go:20-26,49)
+// never excludes the combined string, so without normalization this object
+// would wrongly survive into the mis-sorted unknown bucket instead of being
+// dropped, same as a single excluded phase is today.
+func TestGenerate_MultiEventHookAllExcludedIsDropped(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multi
+  annotations:
+    helm.sh/hook: test,pre-delete
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kept
+`)
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	})
+
+	got := generateNames(t, cfg)
+	want := []string{"kept"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("expected only the non-hook object to survive, got %v", got)
+	}
+}
+
+// TestGenerate_MultiEventCustomHooksStayUnknown proves the fix does not
+// overcorrect: a multi-value annotation made entirely of unrecognized custom
+// hook names ("crd-install,some-custom-hook" — no member of the excluded or
+// four-ordered sets) has no defined ordering priority among its tokens, so it
+// must be left exactly as kure's own unknown-bucket fallback already handles
+// it — sorted alphabetically after post-upgrade, annotation untouched.
+func TestGenerate_MultiEventCustomHooksStayUnknown(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multi
+  annotations:
+    helm.sh/hook: crd-install,some-custom-hook
+`)
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	})
+
+	objects, err := cfg.Generate(nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 2 {
+		t.Fatalf("expected 2 objects, got %d", len(objects))
+	}
+	u, ok := (*objects[1]).(*unstructured.Unstructured)
+	if !ok {
+		t.Fatalf("objects[1] = %T, want *unstructured.Unstructured", *objects[1])
+	}
+	if u.GetName() != "multi" {
+		t.Fatalf("execution order: objects[1].Name = %q, want %q (unrecognized custom hook must sort last, unchanged)", u.GetName(), "multi")
+	}
+	if got := u.GetAnnotations()["helm.sh/hook"]; got != "crd-install,some-custom-hook" {
+		t.Errorf("multi's helm.sh/hook annotation = %q, want unchanged %q", got, "crd-install,some-custom-hook")
+	}
+}
+
+// TestAugmentLayoutTemplate_MultiEventHookAnnotationUnchangedInOutput is the
+// test called for by the fix's own hazard: the grouping-key rewrite
+// (normalizeHookAnnotationForGrouping) must never leak into the object that
+// ends up in emitted output. Exercises both Generate (flattened union) and
+// AugmentLayout's template branch (augmentLayoutTemplate, repartitioned into
+// child layouts) — a no-op implementation that simply left the multi-event
+// annotation untouched would satisfy the "annotation unchanged" half of this
+// test but fail its "correct group placement" half, and a broken
+// implementation that mutated the object in place would fail the reverse —
+// only a correct fix (copy-for-grouping, restore-original-for-output)
+// satisfies both halves at once.
+func TestAugmentLayoutTemplate_MultiEventHookAnnotationUnchangedInOutput(t *testing.T) {
+	const wantHook = "pre-install,pre-upgrade"
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multi
+  annotations:
+    helm.sh/hook: ` + wantHook + `
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: post
+  annotations:
+    helm.sh/hook: post-install
+`)
+	renderChart := func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	}
+
+	// Generate path: correct placement (first) and unchanged annotation.
+	genCfg := helmchartTemplateFixture(renderChart)
+	objects, err := genCfg.Generate(nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(objects) != 3 {
+		t.Fatalf("expected 3 objects, got %d", len(objects))
+	}
+	u, ok := (*objects[0]).(*unstructured.Unstructured)
+	if !ok {
+		t.Fatalf("objects[0] = %T, want *unstructured.Unstructured", *objects[0])
+	}
+	if u.GetName() != "multi" {
+		t.Fatalf("Generate execution order: objects[0].Name = %q, want %q (earliest-phase placement)", u.GetName(), "multi")
+	}
+	if got := u.GetAnnotations()["helm.sh/hook"]; got != wantHook {
+		t.Errorf("Generate: multi's helm.sh/hook annotation = %q, want unchanged %q", got, wantHook)
+	}
+
+	// AugmentLayout path: correct child group placement (dirName derived from
+	// the earliest phase, "pre-install") and unchanged annotation on the
+	// resource inside that child.
+	augCfg := helmchartTemplateFixture(renderChart)
+	ml := &layout.ManifestLayout{Name: "myapp", Namespace: "default/myapp"}
+	if err := augCfg.augmentLayoutTemplate(ml); err != nil {
+		t.Fatalf("augmentLayoutTemplate: %v", err)
+	}
+	if len(ml.Children) != 3 {
+		t.Fatalf("ml.Children has %d entries, want 3", len(ml.Children))
+	}
+	if ml.Children[0].Name != "myapp-00-pre-install" {
+		t.Fatalf("Children[0].Name = %q, want %q (multi's group keyed by its earliest phase)", ml.Children[0].Name, "myapp-00-pre-install")
+	}
+	if len(ml.Children[0].Resources) != 1 {
+		t.Fatalf("Children[0].Resources has %d entries, want 1", len(ml.Children[0].Resources))
+	}
+	child, ok := ml.Children[0].Resources[0].(*unstructured.Unstructured)
+	if !ok {
+		t.Fatalf("Children[0].Resources[0] = %T, want *unstructured.Unstructured", ml.Children[0].Resources[0])
+	}
+	if child.GetName() != "multi" {
+		t.Fatalf("Children[0].Resources[0].Name = %q, want %q", child.GetName(), "multi")
+	}
+	if got := child.GetAnnotations()["helm.sh/hook"]; got != wantHook {
+		t.Errorf("AugmentLayout: multi's helm.sh/hook annotation = %q, want unchanged %q", got, wantHook)
+	}
+}
