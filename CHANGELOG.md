@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [Unreleased]
+
+### Added
+
+- Externalize helmchart values via configMap valuesMode
+
 ## [0.1.0-alpha.21] - 2026-08-21
 
 ### Added

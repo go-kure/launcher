@@ -644,14 +644,28 @@ registry [...]`.
   `successfulJobsHistoryLimit`/`failedJobsHistoryLimit`. No `sidecars` schema
   key (init containers only).
 - **helmchart** — `chart`, `version`, `delivery` (`native`|`template`), `source`
-  (inline `url` or `{name,kind}` ref), `values`/`valuesFrom`, `driftDetection`,
-  `install.crds`/`upgrade.crds`. Known limitation: `delivery: template` rejects
-  `releaseName`/`targetNamespace`/`valuesFrom`/`interval`/`driftDetection`/
-  `install.crds`/`upgrade.crds` outright (compile-time validation error) rather than
-  applying them — the client-side render always uses kure's defaults
-  (`.Release.Name`/`.Release.Namespace` = `release`/`default`), and there is no way
-  today to override release identity for a templated chart. `delivery: native`
-  is unaffected.
+  (inline `url` or `{name,kind}` ref), `values`/`valuesFrom`, `valuesMode`
+  (`inline` default | `configMap`), `driftDetection`, `install.crds`/`upgrade.crds`.
+  `valuesMode: configMap` externalizes `values` into a literal `ConfigMap` resource
+  — not a kustomize `configMapGenerator` (its hash-suffixed name has no HelmRelease
+  entry in kustomize's built-in name-reference table to rewrite) — referenced from
+  the `HelmRelease` via `spec.valuesFrom`. Emitting that `ConfigMap` requires a
+  consumer that walks kure's `ManifestLayout` (the `layout.LayoutAugmenter` path);
+  `kurel build`'s own flat output (`pkg/cmd/kurel/build.go`) never walks the layout,
+  so `valuesMode: configMap` leaves the emitted `HelmRelease` referencing a
+  `ConfigMap` that is not itself in that output — only `inline` (the default)
+  produces useful output from `kurel build` today. When both the generated
+  `configMap` values reference and a user-supplied `valuesFrom` entry are present,
+  the user's entry wins on overlapping keys (Flux merges `spec.valuesFrom` in list
+  order, and the generated reference is added before the user's own entries);
+  under `inline` mode, `spec.values` is merged last and always wins over any
+  `valuesFrom` entry on overlapping keys. Known limitation: `delivery: template`
+  rejects `releaseName`/`targetNamespace`/`valuesFrom`/`valuesMode: configMap`/
+  `interval`/`driftDetection`/`install.crds`/`upgrade.crds` outright (compile-time
+  validation error) rather than applying them — the client-side render always uses
+  kure's defaults (`.Release.Name`/`.Release.Namespace` = `release`/`default`), and
+  there is no way today to override release identity for a templated chart.
+  `delivery: native` is unaffected.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
