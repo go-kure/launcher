@@ -199,11 +199,17 @@ if errors.As(err, &pe) {
 }
 ```
 
-Strategic-merge-patch application (`ApplyStrategicMergePatch` and its `applyJSONMergePatch`/
-`applyTypedSMP` helpers in `strategic.go`) and the document-set write path (`set.go` — file I/O,
-patch loading, output writing) do not go through `NewPatchError`; their failures are plain wrapped
-errors (`errors.Wrap`/`fmt.Errorf`), so `errors.As(err, &pe)` will not match them. Do not assume
-every error out of this package is a `*errors.PatchError` — check the call path.
+`errors.As(err, &pe)` also matches failures from `PatchableAppSet.Resolve()`'s target-lookup check
+and `ResourceWithPatches.Apply()` (both build on the same `NewPatchError` calls above) even where a
+caller in `set.go` wraps them again with `fmt.Errorf("...: %w", err)` — `%w` preserves the chain.
+
+Two call paths never produce a `*errors.PatchError`, so `errors.As(err, &pe)` will not match them:
+direct use of `ApplyStrategicMergePatch` (and its `applyJSONMergePatch`/`applyTypedSMP` helpers in
+`strategic.go`), and the YAML-structure-preserving document mutation helpers
+(`YAMLDocument.ApplyPatchesToDocument` / `ApplyStrategicPatchesToDocument` in `yaml_preserve.go`,
+reached via `PatchableAppSet.WriteToFile`'s per-document apply loop, and
+`UpdateDocumentFromResource`). Those return plain wrapped errors (`errors.Wrap`/`fmt.Errorf`). Do
+not assume every error out of this package is a `*errors.PatchError` — check the call path.
 
 ## Related Packages
 
