@@ -699,7 +699,7 @@ registry [...]`.
   `delivery: native` is unaffected. Known limitation, over-broad wording fixed: this list is the
   set of properties `delivery: template` rejects when **explicitly** authored — an inherited
   handler default (e.g. `valuesMode` with no property-level `configMap`) falls back to `inline`
-  rather than erroring (`pkg/oam/builtin/components/helmchart.go:279-287`); same over-broad-wording
+  rather than erroring (`pkg/oam/builtin/components/helmchart.go:281-289`); same over-broad-wording
   class `go-kure/launcher#319`'s confirm round already fixed elsewhere.
 
   **`delivery: template` output is partitioned by Helm hook group.** Every rendered manifest
@@ -732,7 +732,7 @@ registry [...]`.
   limitation: the child directory name's DNS-1123 truncation (mirroring `valuesConfigMapName`'s own
   `sha256`-prefixed truncation above) makes same-name collisions vanishingly unlikely *within* one
   Application, but two different Applications with a same-named component still collide — component
-  names are unique only within one Application (`pkg/oam/validate.go:129-133`), while emitted
+  names are unique only within one Application (`pkg/oam/validate.go:186-189`), while emitted
   Kustomization CRs for hook-group children share one controller namespace; a pre-existing gap
   (inherited from a downstream consumer's reference implementation) that this partitioning newly exposes, not one
   it introduces. `kurel build`'s flat output **accepts** `delivery: template` — its `Generate`

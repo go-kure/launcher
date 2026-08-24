@@ -700,6 +700,13 @@ var excludedHookPhases = map[string]bool{
 //     no defined ordering priority among custom names, and kure's existing
 //     unknown-bucket fallback is not wrong for this case — rewriting would
 //     only reorder or reformat it for no behavioral reason.
+//   - a degenerate annotation with no non-empty token at all (e.g. "," or
+//     " , ") -> left unchanged verbatim, same as the previous case. "no
+//     non-empty token was ever excluded" is a different condition from
+//     "every non-empty token was excluded" — only the latter drops the
+//     object; kure's own (pre-normalization) handling of such a literal
+//     string is to treat it as one opaque unknown-phase string, not to
+//     exclude or drop it, and this function must not change that.
 func normalizeHookAnnotationForGrouping(obj client.Object) client.Object {
 	ann := obj.GetAnnotations()
 	hook := ann["helm.sh/hook"]
@@ -707,6 +714,7 @@ func normalizeHookAnnotationForGrouping(obj client.Object) client.Object {
 		return obj
 	}
 
+	sawToken := false
 	anyExcluded := false
 	var remaining []string
 	bestPhase := ""
@@ -716,6 +724,7 @@ func normalizeHookAnnotationForGrouping(obj client.Object) client.Object {
 		if tok == "" {
 			continue
 		}
+		sawToken = true
 		if excludedHookPhases[tok] {
 			anyExcluded = true
 			continue
@@ -728,7 +737,7 @@ func normalizeHookAnnotationForGrouping(obj client.Object) client.Object {
 	}
 
 	switch {
-	case len(remaining) == 0:
+	case sawToken && len(remaining) == 0:
 		return cloneWithHookAnnotation(obj, ann, "test")
 	case bestOrder != -1:
 		return cloneWithHookAnnotation(obj, ann, bestPhase)
@@ -1067,10 +1076,11 @@ func (c *HelmchartConfig) augmentLayoutTemplate(ml *layout.ManifestLayout) error
 // the right is wrong: near a 253-char ml.Name, the fixed numeric+phase suffix
 // would be cut away entirely and every group would yield the identical
 // dirName — a deterministic collision. So the PREFIX (ml.Name) is capped
-// instead, following PR1's valuesConfigMapName precedent: reserve room for a
-// short sha256 hash of the full ml.Name so two different long ml.Names are
-// vanishingly unlikely to truncate to the same prefix (the same probabilistic
-// guarantee as that precedent, not an absolute one).
+// instead, following the same truncation approach as valuesConfigMapName
+// below: reserve room for a short sha256 hash of the full ml.Name so two
+// different long ml.Names are vanishingly unlikely to truncate to the same
+// prefix (the same probabilistic guarantee as that approach, not an
+// absolute one).
 func hookGroupChildName(mlName string, i int, g helm.HookGroup) string {
 	suffix := fmt.Sprintf("-%02d-%s", i, hookGroupDir(g)) // %02d is a minimum width, not a cap
 	const maxLen = 253

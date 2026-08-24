@@ -817,6 +817,39 @@ metadata:
 	}
 }
 
+// TestGenerate_CommaOnlyHookAnnotationIsNotDropped covers a degenerate
+// annotation with no actual token content at all ("," — every split token is
+// empty after trimming). Before this multi-event fix existed, kure's
+// SplitByHookWeight would have treated the literal string "," as one opaque
+// unknown-phase string — not excluded (excludedHookPhases has no "," entry)
+// and not dropped. normalizeHookAnnotationForGrouping must reach the same
+// outcome: "no non-empty token was ever excluded" is a different condition
+// from "every non-empty token was excluded", and only the latter should
+// route to the drop-via-"test" branch.
+func TestGenerate_CommaOnlyHookAnnotationIsNotDropped(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multi
+  annotations:
+    helm.sh/hook: ","
+`)
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	})
+
+	if err := cfg.ensureRendered(); err != nil {
+		t.Fatalf("ensureRendered: %v", err)
+	}
+	var total int
+	for _, g := range cfg.hookGroups {
+		total += len(g.Resources)
+	}
+	if total != 1 {
+		t.Fatalf("expected the comma-only-hook object to survive (not all tokens excluded — there were no tokens at all), got %d resources across %d groups", total, len(cfg.hookGroups))
+	}
+}
+
 // TestAugmentLayoutTemplate_MultiEventHookAnnotationUnchangedInOutput is the
 // test called for by the fix's own hazard: the grouping-key rewrite
 // (normalizeHookAnnotationForGrouping) must never leak into the object that
