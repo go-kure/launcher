@@ -1,16 +1,6 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [Unreleased]
-
-### Document Format
-
-- Externalize helmchart values via configMap valuesMode
-
-### Fixed
-
-- `kurel build` now rejects a component needing layout-level resources (e.g. a helmchart component with `valuesMode: configMap`) instead of silently emitting a manifest with a dangling reference
-
 ## [0.1.0-alpha.21] - 2026-08-21
 
 ### Added
