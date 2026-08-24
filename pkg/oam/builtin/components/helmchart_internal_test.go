@@ -410,8 +410,9 @@ metadata:
 // TestAugmentLayoutTemplate_ChildKustomizationReferencesResolveOnDisk exercises
 // the actual kure disk-writer, not just the in-memory ml/Children shape —
 // AppFileSingle on the pre-AugmentLayout parent is the exact value whose
-// verbatim inheritance into a child (crane's copy-all-five-fields approach)
-// produces a dangling kustomization.yaml resources: entry (see
+// verbatim inheritance into a child (a downstream consumer's
+// copy-all-five-fields approach) produces a dangling kustomization.yaml
+// resources: entry (see
 // augmentLayoutTemplate's doc comment). Pinning it specifically matters:
 // kure's own fallback default is AppFilePerResource, not AppFileSingle, so a
 // zero-valued fixture would take the same code path either way and this test
