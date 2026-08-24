@@ -187,3 +187,32 @@ func TestValuesConfigMapName_TruncatesLongComponentName(t *testing.T) {
 		t.Errorf("HelmRelease ValuesFrom[0].Name = %q, want %q (direct helper call)", hr.Spec.ValuesFrom[0].Name, gotDot)
 	}
 }
+
+// TestValuesConfigMapName_TruncationPreservesUniqueness pins that two distinct
+// valid component names (each within validate.go's 253-char DNS-1123 max)
+// sharing the same first 246 characters still produce distinct ConfigMap
+// names. Component names are unique only in full (validate.go's
+// duplicate-name check), so a plain 246-char truncation would map both to the
+// identical name — silently sharing, and one clobbering, the other's values
+// ConfigMap.
+func TestValuesConfigMapName_TruncationPreservesUniqueness(t *testing.T) {
+	shared := strings.Repeat("a", 246)
+	nameA := shared + strings.Repeat("b", 7) // 253 chars total
+	nameB := shared + strings.Repeat("c", 7) // 253 chars total, same 246-char prefix
+	if nameA == nameB {
+		t.Fatal("test setup: nameA and nameB must differ")
+	}
+	gotA := valuesConfigMapName(nameA)
+	gotB := valuesConfigMapName(nameB)
+	if gotA == gotB {
+		t.Fatalf("valuesConfigMapName collided: nameA=%q nameB=%q both produced %q", nameA, nameB, gotA)
+	}
+	for _, got := range []string{gotA, gotB} {
+		if len(got) > 253 {
+			t.Errorf("len(%q) = %d, want <= 253", got, len(got))
+		}
+		if errs := validation.IsDNS1123Subdomain(got); len(errs) != 0 {
+			t.Errorf("IsDNS1123Subdomain(%q) = %v, want no errors", got, errs)
+		}
+	}
+}

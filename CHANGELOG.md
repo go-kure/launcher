@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
-### Added
+### Document Format
 
 - Externalize helmchart values via configMap valuesMode
 

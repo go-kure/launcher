@@ -2,6 +2,8 @@ package components
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"strings"
 	"time"
@@ -170,6 +172,16 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 	// rejection below must fire only on an explicit request; a fleet-wide
 	// handler default of "configMap" must not break every template-delivery
 	// component that never mentioned valuesMode.
+	//
+	// This depends on props arriving exactly as the document author wrote it:
+	// PropertySchema.Default (schema.go) is documentation for schema
+	// consumers, e.g. a downstream validator or doc generator — nothing in
+	// this package's own call path (ToApplicationConfig's only caller here is
+	// Transformer, transform.go:626, via the unmodified component.Properties)
+	// pre-populates an absent property from it before invoking the handler.
+	// A caller that DOES materialize schema defaults into props ahead of this
+	// call would make valuesModeExplicit see an inherited default as
+	// authored, silently defeating the template-delivery fallback below.
 	cfg.ValuesMode, _ = props["valuesMode"].(string)
 	valuesModeExplicit := cfg.ValuesMode != ""
 	if cfg.ValuesMode == "" {
@@ -691,9 +703,22 @@ func (c *augmentingHelmchartConfig) AugmentLayout(ml *layout.ManifestLayout) err
 func valuesConfigMapName(name string) string {
 	const suffix = "-values"
 	maxPrefix := 253 - len(suffix) // 246
-	if len(name) > maxPrefix {
-		name = name[:maxPrefix]
-		name = strings.TrimRight(name, "-.")
+	if len(name) <= maxPrefix {
+		return name + suffix
 	}
-	return name + suffix
+	// A plain truncation to maxPrefix characters would map any two distinct
+	// valid component names (up to 253 chars — validate.go's DNS-1123
+	// subdomain max) that share the same first maxPrefix characters to the
+	// identical ConfigMap name. Full-name uniqueness (validate.go's
+	// duplicate-component-name check) does not protect against this — it
+	// compares full names, not truncated prefixes — so two such components
+	// in one Application would silently share (and one clobber) the other's
+	// values ConfigMap. Reserve room for a short content hash of the full
+	// name so a truncated name stays unique to the name it came from.
+	const hashLen = 8
+	sum := sha256.Sum256([]byte(name))
+	hash := hex.EncodeToString(sum[:])[:hashLen]
+	prefixLen := maxPrefix - hashLen - 1 // -1 for the "-" joining prefix and hash
+	prefix := strings.TrimRight(name[:prefixLen], "-.")
+	return prefix + "-" + hash + suffix
 }
