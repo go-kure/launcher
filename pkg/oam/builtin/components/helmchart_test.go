@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -1274,9 +1275,7 @@ func buildMinimalChartTar(t *testing.T, name, version string, extraFiles map[str
 	files := map[string]string{
 		name + "/Chart.yaml": fmt.Sprintf("apiVersion: v2\nname: %s\nversion: %s\n", name, version),
 	}
-	for k, v := range extraFiles {
-		files[k] = v
-	}
+	maps.Copy(files, extraFiles)
 	for path, content := range files {
 		hdr := &tar.Header{Name: path, Mode: 0o600, Size: int64(len(content))}
 		if err := tw.WriteHeader(hdr); err != nil {
