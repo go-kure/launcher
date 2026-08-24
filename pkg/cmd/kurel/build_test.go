@@ -772,3 +772,40 @@ spec:
 		t.Errorf("NOTES.txt content must not appear in output, got:\n%s", got)
 	}
 }
+
+func TestBuildCommand_HelmchartValuesModeConfigMap_Rejected(t *testing.T) {
+	appYAML := `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: metrics
+      type: helmchart
+      properties:
+        chart: kube-prometheus-stack
+        valuesMode: configMap
+        source:
+          url: https://prometheus-community.github.io/helm-charts
+        values:
+          replicaCount: 2
+`
+
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", appYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected build to fail for a component needing layout-level resources, got success, output:\n%s", out.String())
+	}
+	if !strings.Contains(err.Error(), "metrics") || !strings.Contains(err.Error(), "layout") {
+		t.Errorf("error should name the component and explain the layout gap, got: %v", err)
+	}
+}

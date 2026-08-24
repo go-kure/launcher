@@ -12,6 +12,7 @@ import (
 
 	kio "github.com/go-kure/kure/pkg/io"
 	"github.com/go-kure/kure/pkg/stack"
+	"github.com/go-kure/kure/pkg/stack/layout"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -168,6 +169,10 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		return errors.Wrap(err, "transforming application")
 	}
 
+	if err := rejectLayoutAugmenters(cluster.Node); err != nil {
+		return err
+	}
+
 	objects, err := collectFromNode(cluster.Node)
 	if err != nil {
 		return errors.Wrap(err, "generating manifests")
@@ -301,6 +306,55 @@ func newBuiltinTransformer() *oam.Transformer {
 		t.RegisterBuiltinTraitLowering(r)
 	}
 	return t
+}
+
+// rejectLayoutAugmenters walks the transform result and fails loudly if any
+// component's config implements layout.LayoutAugmenter (e.g. a helmchart
+// component with valuesMode: configMap, which needs a generated values
+// ConfigMap emitted alongside it). collectFromNode/collectFromBundle below
+// never construct or walk a layout.ManifestLayout, so an augmenter's
+// resources are otherwise silently dropped — leaving, for the configMap
+// case, a HelmRelease whose valuesFrom reference points at a ConfigMap that
+// was never generated.
+func rejectLayoutAugmenters(node *stack.Node) error {
+	if node == nil {
+		return nil
+	}
+	if node.Bundle != nil {
+		if err := rejectLayoutAugmentersInBundle(node.Bundle); err != nil {
+			return err
+		}
+	}
+	for _, child := range node.Children {
+		if err := rejectLayoutAugmenters(child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rejectLayoutAugmentersInBundle mirrors collectFromBundle's umbrella/leaf
+// traversal so every Application this build would actually generate is checked.
+func rejectLayoutAugmentersInBundle(bundle *stack.Bundle) error {
+	if bundle == nil {
+		return nil
+	}
+	if bundle.IsUmbrella() {
+		for _, child := range bundle.Children {
+			if err := rejectLayoutAugmentersInBundle(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, app := range bundle.Applications {
+		if _, ok := app.Config.(layout.LayoutAugmenter); ok {
+			return errors.Errorf(
+				"kurel build: component %q needs layout-level resources (e.g. a helmchart valuesMode: configMap values ConfigMap) that this build path cannot generate — kurel build does not walk a layout.ManifestLayout, so those resources would be silently missing from the output; use a build path that does, or switch the component to a mode that does not need one",
+				app.Name)
+		}
+	}
+	return nil
 }
 
 // collectFromNode walks the node tree and collects all generated client.Objects

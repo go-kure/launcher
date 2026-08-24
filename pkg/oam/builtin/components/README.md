@@ -652,9 +652,24 @@ registry [...]`.
   the `HelmRelease` via `spec.valuesFrom`. Emitting that `ConfigMap` requires a
   consumer that walks kure's `ManifestLayout` (the `layout.LayoutAugmenter` path);
   `kurel build`'s own flat output (`pkg/cmd/kurel/build.go`) never walks the layout,
-  so `valuesMode: configMap` leaves the emitted `HelmRelease` referencing a
-  `ConfigMap` that is not itself in that output — only `inline` (the default)
-  produces useful output from `kurel build` today. When both the generated
+  so it rejects `valuesMode: configMap` outright at build time (naming the
+  component) rather than emit a `HelmRelease` referencing a `ConfigMap` that
+  isn't in the output — use `inline` (the default) with `kurel build`, or a
+  consumer that walks the layout. Known limitation: the generated `ConfigMap`'s
+  name (`<component>-values`) is not checked against a user-authored `configmap`
+  trait's own `name` property — a component whose `configmap` trait happens to
+  produce that exact name collides silently (`pkg/oam/validate.go` has no
+  cross-trait resource-name uniqueness check at all, for any trait pair, so this
+  is one instance of a pre-existing gap, not one this component introduces).
+  Known limitation: the `prune-protection` trait only annotates resources
+  returned from a wrapped config's `Generate` (`pkg/oam/builtin/traits/pruneprotection.go`)
+  — layout-added resources such as this `ConfigMap` are not covered, because the
+  generic `layout.LayoutAugmenter` forwarding (`pkg/oam/builtin/traits/decorator.go`)
+  calls straight through to the wrapped augmenter and bypasses every other
+  decorator, including `prune-protection`'s own. Combining `prune-protection`
+  with `valuesMode: configMap` today does not protect the values `ConfigMap`
+  from pruning; this is a gap in the shared trait-decorator framework, not
+  specific to `helmchart` — tracked in go-kure/launcher#324. When both the generated
   `configMap` values reference and a user-supplied `valuesFrom` entry are present,
   the user's entry wins on overlapping keys (Flux merges `spec.valuesFrom` in list
   order, and the generated reference is added before the user's own entries);
