@@ -650,12 +650,21 @@ registry [...]`.
   — not a kustomize `configMapGenerator` (its hash-suffixed name has no HelmRelease
   entry in kustomize's built-in name-reference table to rewrite) — referenced from
   the `HelmRelease` via `spec.valuesFrom`. Emitting that `ConfigMap` requires a
-  consumer that walks kure's `ManifestLayout` (the `layout.LayoutAugmenter` path);
+  consumer that walks kure's `ManifestLayout` (the `layout.LayoutAugmenter` path). A
+  layout-walking consumer keys a structural decision off that interface's mere
+  presence, not just its side effect (`pkg/stack/layout/walker.go`): switching an
+  existing component from `inline` to `configMap` (with non-empty `values`) moves
+  its `HelmRelease` and source CR out of the parent bundle's flat resource set and
+  into their own per-app sub-layout directory with its own `kustomization.yaml` — a
+  visible output-path change in a GitOps repo, not an internal detail.
   `kurel build`'s own flat output (`pkg/cmd/kurel/build.go`) never walks the layout,
-  so it rejects `valuesMode: configMap` outright at build time (naming the
-  component) rather than emit a `HelmRelease` referencing a `ConfigMap` that
-  isn't in the output — use `inline` (the default) with `kurel build`, or a
-  consumer that walks the layout. Known limitation: the generated `ConfigMap`'s
+  so it rejects `valuesMode: configMap` at build time (naming the component)
+  when the component has non-empty `values` — with no `values` to externalize
+  there is nothing to emit, so the config is not wrapped as a `LayoutAugmenter`
+  and `kurel build` accepts it — rather than emit a `HelmRelease` referencing a
+  `ConfigMap` that isn't in the output. Use `inline` (the default) with
+  `kurel build` for a component that does have `values`, or a consumer that
+  walks the layout. Known limitation: the generated `ConfigMap`'s
   name (`<component>-values`) is not checked against a user-authored `configmap`
   trait's own `name` property — a component whose `configmap` trait happens to
   produce that exact name collides silently (`pkg/oam/validate.go` has no
