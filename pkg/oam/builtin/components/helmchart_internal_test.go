@@ -532,6 +532,7 @@ func TestHookGroupDir_SanitizesUnsafePhase(t *testing.T) {
 		{"PRE-INSTALL", "pre-install"},
 		{"weird/phase", "weird-phase"},
 		{"../../etc", "etc"},
+		{"!!!", "unknown"}, // punctuation-only phase strips to an empty slug — pins the "unknown" fallback
 	}
 	for _, c := range cases {
 		if got := hookGroupDir(helm.HookGroup{Phase: c.phase}); got != c.want {

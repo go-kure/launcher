@@ -836,7 +836,17 @@ var _ oam.LayoutAugmentationCoverage = (*augmentingHelmchartConfig)(nil)
 // augmentLayoutTemplate handles the AugmentLayout path for delivery:
 // template. With at most one hook group, ml.Resources already carries the
 // flat union Generate returned and no children are needed. With multiple
-// groups, that union is partitioned: ml.Resources is cleared and each group
+// groups, that union is partitioned: ml.Resources is cleared and rebuilt
+// solely from c.hookGroups (the same cached render Generate flattened), so
+// this relies on ml.Resources containing exactly that render's objects when
+// AugmentLayout runs — true today because every trait decorator in this repo
+// (traits/decorator.go's decoratorBase-embedding types) only mutates the
+// objects its inner Generate returns in place and never appends a new one; a
+// trait's own additional resources (e.g. a ConfigMap or Secret) are emitted
+// as a separate stack.Application and never merged into this Application's
+// ml.Resources (see traits/pruneprotection.go's "narrow scope" doc comment
+// for the same convention stated explicitly). A future decorator that broke
+// this convention would have its addition silently dropped here. Each group
 // becomes a child ManifestLayout written to a numbered sub-directory in
 // execution order, chained via DependsOn so kure's FluxCD integrator (in
 // FluxIntegratedPerLayout placement) waits for each hook group to reconcile

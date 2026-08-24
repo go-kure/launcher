@@ -1303,12 +1303,16 @@ func startMinimalHelmChartServer(t *testing.T, name, version string, templateFil
 	chartBuf := buildMinimalChartTar(t, name, version, chartFiles)
 	tgzName := name + "-" + version + ".tgz"
 
-	var srvURL string
+	// Derive the chart URL from the request itself (r.Host), not a captured
+	// server-URL variable — the handler runs on a goroutine the server starts
+	// before NewServer returns, so a variable assigned by the caller after
+	// NewServer returns would be read/written across goroutines with no
+	// synchronization between them.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/index.yaml":
-			fmt.Fprintf(w, "apiVersion: v1\nentries:\n  %s:\n  - name: %s\n    version: %s\n    urls:\n      - %s\ngenerated: \"2024-01-01T00:00:00Z\"\n",
-				name, name, version, srvURL+"/"+tgzName)
+			fmt.Fprintf(w, "apiVersion: v1\nentries:\n  %s:\n  - name: %s\n    version: %s\n    urls:\n      - http://%s/%s\ngenerated: \"2024-01-01T00:00:00Z\"\n",
+				name, name, version, r.Host, tgzName)
 		case "/" + tgzName:
 			_, _ = w.Write(chartBuf)
 		default:
@@ -1316,8 +1320,7 @@ func startMinimalHelmChartServer(t *testing.T, name, version string, templateFil
 		}
 	}))
 	t.Cleanup(srv.Close)
-	srvURL = srv.URL
-	return srvURL
+	return srv.URL
 }
 
 func objectKey(o client.Object) string {
@@ -1374,9 +1377,14 @@ func TestTemplateDelivery_GenerateCoversAugmentLayout_Premise(t *testing.T) {
 		t.Fatalf("expected 3 hook-group children, got %d", len(ml.Children))
 	}
 
-	genKeys := make([]string, 0, len(generated))
+	// Compare by full object equality, not just Kind/Name — the coverage claim
+	// GenerateCoversAugmentLayout()==true means Generate's flat output is a
+	// complete SUBSTITUTE for the layout-walked output, so two same-named
+	// objects with a different Namespace, annotations, or spec must fail this
+	// test even though objectKey alone would call them equal.
+	genObjs := make(map[string]client.Object, len(generated))
 	for _, o := range generated {
-		genKeys = append(genKeys, objectKey(*o))
+		genObjs[objectKey(*o)] = *o
 	}
 
 	var augmentedResources []client.Object
@@ -1384,14 +1392,27 @@ func TestTemplateDelivery_GenerateCoversAugmentLayout_Premise(t *testing.T) {
 	for _, child := range ml.Children {
 		augmentedResources = append(augmentedResources, child.Resources...)
 	}
-	augKeys := make([]string, 0, len(augmentedResources))
+	augObjs := make(map[string]client.Object, len(augmentedResources))
 	for _, o := range augmentedResources {
-		augKeys = append(augKeys, objectKey(o))
+		augObjs[objectKey(o)] = o
 	}
 
+	genKeys := make([]string, 0, len(genObjs))
+	for k := range genObjs {
+		genKeys = append(genKeys, k)
+	}
+	augKeys := make([]string, 0, len(augObjs))
+	for k := range augObjs {
+		augKeys = append(augKeys, k)
+	}
 	sort.Strings(genKeys)
 	sort.Strings(augKeys)
 	if !reflect.DeepEqual(genKeys, augKeys) {
-		t.Errorf("flattened AugmentLayout output = %v, want equal (as a set) to Generate's output %v", augKeys, genKeys)
+		t.Fatalf("flattened AugmentLayout output = %v, want equal (as a set) to Generate's output %v", augKeys, genKeys)
+	}
+	for _, k := range genKeys {
+		if !reflect.DeepEqual(genObjs[k], augObjs[k]) {
+			t.Errorf("object %s differs between Generate and AugmentLayout output:\n  Generate:      %#v\n  AugmentLayout: %#v", k, genObjs[k], augObjs[k])
+		}
 	}
 }
