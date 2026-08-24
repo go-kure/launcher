@@ -309,13 +309,18 @@ func newBuiltinTransformer() *oam.Transformer {
 }
 
 // rejectLayoutAugmenters walks the transform result and fails loudly if any
-// component's config implements layout.LayoutAugmenter (e.g. a helmchart
-// component with valuesMode: configMap, which needs a generated values
-// ConfigMap emitted alongside it). collectFromNode/collectFromBundle below
-// never construct or walk a layout.ManifestLayout, so an augmenter's
+// component's config implements layout.LayoutAugmenter without also
+// implementing oam.LayoutAugmentationCoverage returning true (e.g. a
+// helmchart component with valuesMode: configMap, which needs a generated
+// values ConfigMap emitted alongside it). collectFromNode/collectFromBundle
+// below never construct or walk a layout.ManifestLayout, so an augmenter's
 // resources are otherwise silently dropped — leaving, for the configMap
 // case, a HelmRelease whose valuesFrom reference points at a ConfigMap that
-// was never generated.
+// was never generated. Fail-closed default: a LayoutAugmenter that does not
+// also implement LayoutAugmentationCoverage, or implements it but returns
+// false, is rejected — only an explicit true (asserting that Generate's own
+// output already covers everything AugmentLayout would add, e.g. a helmchart
+// component with delivery: template) is let through.
 func rejectLayoutAugmenters(node *stack.Node) error {
 	if node == nil {
 		return nil
@@ -348,11 +353,15 @@ func rejectLayoutAugmentersInBundle(bundle *stack.Bundle) error {
 		return nil
 	}
 	for _, app := range bundle.Applications {
-		if _, ok := app.Config.(layout.LayoutAugmenter); ok {
-			return errors.Errorf(
-				"kurel build: component %q needs layout-level resources (e.g. a helmchart valuesMode: configMap values ConfigMap) that this build path cannot generate — kurel build does not walk a layout.ManifestLayout, so those resources would be silently missing from the output; use a build path that does, or switch the component to a mode that does not need one",
-				app.Name)
+		if _, ok := app.Config.(layout.LayoutAugmenter); !ok {
+			continue
 		}
+		if cov, ok := app.Config.(oam.LayoutAugmentationCoverage); ok && cov.GenerateCoversAugmentLayout() {
+			continue
+		}
+		return errors.Errorf(
+			"kurel build: component %q needs layout-level resources (e.g. a helmchart valuesMode: configMap values ConfigMap) that this build path cannot generate — kurel build does not walk a layout.ManifestLayout, so those resources would be silently missing from the output; switch the component to a mode that does not need one",
+			app.Name)
 	}
 	return nil
 }

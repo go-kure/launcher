@@ -6,6 +6,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // fluxNamespaceSettable mirrors oam.fluxNamespaceSettable locally because
@@ -146,6 +147,25 @@ type augmentingDecorator struct {
 func (a augmentingDecorator) AugmentLayout(l *layout.ManifestLayout) error {
 	return a.augmenter.AugmentLayout(l)
 }
+
+// GenerateCoversAugmentLayout forwards to the inner augmenter's
+// oam.LayoutAugmentationCoverage, false if it doesn't implement one. Unlike
+// AugmentLayout above, this forward is UNCONDITIONAL: its presence carries no
+// structural meaning to kure's layout walker (unlike LayoutAugmenter's
+// presence, which augmentingDecorator's own construction already gates via
+// wrapIfAugmenter below), and pkg/cmd/kurel's build guard already treats
+// "absent" and "false" identically, so decorating an inner that doesn't
+// implement it is exactly as fail-closed as not implementing this method at
+// all. Defined directly on augmentingDecorator rather than as a sixth
+// decoratorBase forward: that would also require adding it to decoratedConfig
+// (the embedding hazard decoratedConfig's own doc comment describes) and
+// would grant a meaningless method to every non-augmenting decorator.
+func (a augmentingDecorator) GenerateCoversAugmentLayout() bool {
+	cov, ok := a.augmenter.(oam.LayoutAugmentationCoverage)
+	return ok && cov.GenerateCoversAugmentLayout()
+}
+
+var _ oam.LayoutAugmentationCoverage = augmentingDecorator{}
 
 // wrapIfAugmenter returns outer unchanged when inner does not implement
 // layout.LayoutAugmenter, or an augmentingDecorator embedding outer (so outer's
