@@ -548,9 +548,9 @@ func TestHelmchartHandler_DeliveryTemplate_HandlerDefaultConfigMapFallsBackInlin
 	}
 	// Template delivery never calls buildHelmRelease (no HelmRelease is
 	// generated at all), so the forced-inline resolution has no HelmRelease
-	// field to inspect. This PR wraps every delivery: template config as a
-	// LayoutAugmenter (step 7), so what pins the :287 fallback actually firing
-	// is no longer "not a LayoutAugmenter" — it is
+	// field to inspect. Every delivery: template config is wrapped as a
+	// LayoutAugmenter, so what pins the helmchart.go:289 inline fallback
+	// actually firing is no longer "not a LayoutAugmenter" — it is
 	// GenerateCoversAugmentLayout() == true: proof that Generate's own flat
 	// output already covers this config's AugmentLayout (nothing needs a
 	// values ConfigMap because the fallback resolved ValuesMode to inline),
