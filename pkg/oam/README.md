@@ -127,6 +127,15 @@ carrying its own authored fields still belongs to the raw lowering entry point.
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. |
 
+`PolicyResult.ConsumedCapabilities` is the sorted, deduped set of capability keys this
+app's traits actually resolved against `ctx.Capabilities` during the transform — a real
+`ClusterProfile` match, not every syntactically possible key a trait could name. Populated
+only by `TransformWithPolicy` (nil on the plain `Transform` path, which discards
+`PolicyResult` entirely); a downstream consumer that needs this signal must call
+`TransformWithPolicy`. It replaces a downstream consumer's own interim, purely syntactic
+candidate-key derivation with the authoritative one launcher's own resolution already
+computes internally.
+
 ## Lowering
 
 Some documents, components, traits, and policies are authored in a higher-level
