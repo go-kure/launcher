@@ -1,11 +1,15 @@
 package components_test
 
 import (
+	"reflect"
 	"testing"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/stack"
+	"github.com/go-kure/kure/pkg/stack/layout"
+	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -491,6 +495,25 @@ func TestHelmchartHandler_DeliveryTemplate_InstallCRDsRejected(t *testing.T) {
 	}
 }
 
+func TestHelmchartHandler_DeliveryTemplate_ValuesModeConfigMapRejected(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":      "kube-prometheus-stack",
+			"delivery":   "template",
+			"valuesMode": "configMap",
+			"source": map[string]any{
+				"url": "https://prometheus-community.github.io/helm-charts",
+			},
+		},
+	}, "monitoring")
+	if err == nil {
+		t.Fatal("expected error: template delivery does not support valuesMode: configMap")
+	}
+}
+
 func TestHelmchartGetSourceKey_TemplateReturnsEmpty(t *testing.T) {
 	h := &components.HelmchartHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
@@ -756,5 +779,362 @@ func TestHelmchartConfig_EmitsAutoHealthCheck(t *testing.T) {
 	})
 	if emitter(template) {
 		t.Error("template delivery emits no HelmRelease, so must veto the auto health check")
+	}
+}
+
+func TestHelmchartHandler_ValuesModeInline_KeepsInlineValues(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":      "kube-prometheus-stack",
+			"valuesMode": "inline",
+			"values":     map[string]any{"replicaCount": 3},
+			"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+
+	app := stack.NewApplication("metrics", "monitoring", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	hr, ok := (*objects[1]).(*helmv2.HelmRelease)
+	if !ok {
+		t.Fatalf("expected HelmRelease at objects[1], got %T", *objects[1])
+	}
+	if hr.Spec.Values == nil {
+		t.Fatal("Spec.Values is nil, want inline values set (unchanged pre-Task-1 behavior)")
+	}
+	if len(hr.Spec.ValuesFrom) != 0 {
+		t.Errorf("Spec.ValuesFrom = %v, want empty under inline mode", hr.Spec.ValuesFrom)
+	}
+}
+
+func TestHelmchartHandler_ValuesModeConfigMap_EmitsValuesFromRef(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":      "kube-prometheus-stack",
+			"valuesMode": "configMap",
+			"values":     map[string]any{"replicaCount": 3},
+			"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+			"valuesFrom": []any{
+				map[string]any{"kind": "ConfigMap", "name": "user-supplied"},
+			},
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+
+	app := stack.NewApplication("metrics", "monitoring", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	hr, ok := (*objects[1]).(*helmv2.HelmRelease)
+	if !ok {
+		t.Fatalf("expected HelmRelease at objects[1], got %T", *objects[1])
+	}
+
+	if hr.Spec.Values != nil {
+		t.Errorf("Spec.Values = %v, want nil under configMap mode", hr.Spec.Values)
+	}
+	if len(hr.Spec.ValuesFrom) != 2 {
+		t.Fatalf("Spec.ValuesFrom has %d entries, want 2 (generated ref + user entry)", len(hr.Spec.ValuesFrom))
+	}
+	// D1 ordering: the generated values-ConfigMap ref comes first, so a
+	// user-supplied valuesFrom entry (merged by Flux in list order, then
+	// overridden further by nothing since Values is unset) wins on any
+	// overlapping key.
+	if hr.Spec.ValuesFrom[0].Kind != "ConfigMap" || hr.Spec.ValuesFrom[0].Name != "metrics-values" {
+		t.Errorf("ValuesFrom[0] = %+v, want the generated values ConfigMap ref (kind ConfigMap, name metrics-values)", hr.Spec.ValuesFrom[0])
+	}
+	if hr.Spec.ValuesFrom[0].ValuesKey != "values.yaml" {
+		t.Errorf("ValuesFrom[0].ValuesKey = %q, want values.yaml", hr.Spec.ValuesFrom[0].ValuesKey)
+	}
+	if hr.Spec.ValuesFrom[1].Name != "user-supplied" {
+		t.Errorf("ValuesFrom[1].Name = %q, want user-supplied (user entry must land after the generated ref)", hr.Spec.ValuesFrom[1].Name)
+	}
+}
+
+func TestHelmchartHandler_ValuesModeInvalid_Rejected(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":      "kube-prometheus-stack",
+			"valuesMode": "bogus",
+			"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+		},
+	}, "monitoring")
+	if err == nil {
+		t.Fatal("expected error for unrecognized valuesMode")
+	}
+}
+
+func TestHelmchartHandler_ValuesMode_HandlerDefault(t *testing.T) {
+	h := &components.HelmchartHandler{ValuesMode: "configMap"}
+
+	// No valuesMode property set: the handler's registration-time default
+	// externalizes values into a ConfigMap.
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":  "kube-prometheus-stack",
+			"values": map[string]any{"replicaCount": 3},
+			"source": map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("metrics", "monitoring", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	hr, ok := (*objects[1]).(*helmv2.HelmRelease)
+	if !ok {
+		t.Fatalf("expected HelmRelease at objects[1], got %T", *objects[1])
+	}
+	if hr.Spec.Values != nil {
+		t.Error("Spec.Values must be nil when the handler default externalizes values")
+	}
+	if len(hr.Spec.ValuesFrom) != 1 {
+		t.Fatalf("Spec.ValuesFrom has %d entries, want 1 (handler default configMap)", len(hr.Spec.ValuesFrom))
+	}
+
+	// A component-level valuesMode: inline overrides the handler default
+	// back to inline.
+	cfg2, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics2",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":      "kube-prometheus-stack",
+			"valuesMode": "inline",
+			"values":     map[string]any{"replicaCount": 3},
+			"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app2 := stack.NewApplication("metrics2", "monitoring", cfg2)
+	objects2, err := cfg2.Generate(app2)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	hr2, ok := (*objects2[1]).(*helmv2.HelmRelease)
+	if !ok {
+		t.Fatalf("expected HelmRelease at objects2[1], got %T", *objects2[1])
+	}
+	if hr2.Spec.Values == nil {
+		t.Error("Spec.Values must be set when the component overrides the handler default back to inline")
+	}
+	if len(hr2.Spec.ValuesFrom) != 0 {
+		t.Errorf("Spec.ValuesFrom = %v, want empty when the component overrides to inline", hr2.Spec.ValuesFrom)
+	}
+}
+
+func TestHelmchartConfig_ValuesModeConfigMap_AugmentsLayout(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	mk := func(name string) stack.ApplicationConfig {
+		cfg, err := h.ToApplicationConfig(&oam.Component{
+			Name: name,
+			Type: "helmchart",
+			Properties: map[string]any{
+				"chart":      "kube-prometheus-stack",
+				"valuesMode": "configMap",
+				"values":     map[string]any{"replicaCount": 3, "image": map[string]any{"tag": "v1.2.3"}},
+				"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+			},
+		}, "monitoring")
+		if err != nil {
+			t.Fatalf("ToApplicationConfig: %v", err)
+		}
+		return cfg
+	}
+
+	cfg := mk("metrics")
+	aug, ok := cfg.(interface {
+		AugmentLayout(*layout.ManifestLayout) error
+	})
+	if !ok {
+		t.Fatal("configMap-mode config with non-empty Values does not implement LayoutAugmenter")
+	}
+
+	ml := &layout.ManifestLayout{}
+	if err := aug.AugmentLayout(ml); err != nil {
+		t.Fatalf("AugmentLayout: %v", err)
+	}
+	if len(ml.Resources) != 1 {
+		t.Fatalf("ml.Resources has %d entries, want exactly 1", len(ml.Resources))
+	}
+	cm, ok := ml.Resources[0].(*corev1.ConfigMap)
+	if !ok {
+		t.Fatalf("ml.Resources[0] = %T, want *corev1.ConfigMap", ml.Resources[0])
+	}
+	if len(ml.ExtraFiles) != 0 {
+		t.Errorf("ml.ExtraFiles has %d entries, want 0", len(ml.ExtraFiles))
+	}
+	if len(ml.ConfigMapGenerators) != 0 {
+		t.Errorf("ml.ConfigMapGenerators has %d entries, want 0", len(ml.ConfigMapGenerators))
+	}
+
+	// The ConfigMap's name must be exactly what the shared valuesConfigMapName
+	// helper (unexported, so not directly callable from this external test
+	// package) produces. Rather than hardcode that name, cross-check it
+	// against buildHelmRelease's independent use of the same helper: both
+	// call sites derive the name from c.Name, so if they ever diverge this
+	// assertion catches it without needing to know the naming scheme itself.
+	// TestValuesConfigMapName_TruncatesLongComponentName (internal test)
+	// separately pins the helper's own behavior directly, including
+	// truncation.
+	app := stack.NewApplication("metrics", "monitoring", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	hr, ok := (*objects[1]).(*helmv2.HelmRelease)
+	if !ok {
+		t.Fatalf("expected HelmRelease at objects[1], got %T", *objects[1])
+	}
+	if len(hr.Spec.ValuesFrom) == 0 {
+		t.Fatal("HelmRelease has no ValuesFrom entries")
+	}
+	if cm.Name != hr.Spec.ValuesFrom[0].Name {
+		t.Errorf("ConfigMap name %q != HelmRelease ValuesFrom[0].Name %q", cm.Name, hr.Spec.ValuesFrom[0].Name)
+	}
+
+	// Round-trip the expected values through the same yaml package so the
+	// comparison isn't sensitive to yaml's own literal-to-Go-type decoding
+	// choices (e.g. int vs int64).
+	wantValues := map[string]any{"replicaCount": 3, "image": map[string]any{"tag": "v1.2.3"}}
+	wantBytes, err := yaml.Marshal(wantValues)
+	if err != nil {
+		t.Fatalf("yaml.Marshal(wantValues): %v", err)
+	}
+	var wantRoundTrip map[string]any
+	if err := yaml.Unmarshal(wantBytes, &wantRoundTrip); err != nil {
+		t.Fatalf("yaml.Unmarshal(wantBytes): %v", err)
+	}
+	var gotValues map[string]any
+	if err := yaml.Unmarshal([]byte(cm.Data["values.yaml"]), &gotValues); err != nil {
+		t.Fatalf("yaml.Unmarshal(ConfigMap values.yaml): %v", err)
+	}
+	if !reflect.DeepEqual(gotValues, wantRoundTrip) {
+		t.Errorf("ConfigMap values.yaml = %#v, want %#v", gotValues, wantRoundTrip)
+	}
+
+	// SetFluxNamespace must re-stamp the emitted ConfigMap's namespace too —
+	// Flux's ValuesReference has no namespace field of its own and resolves
+	// only within the referring HelmRelease's own namespace.
+	cfg2 := mk("metrics-ns")
+	setter, ok := cfg2.(interface{ SetFluxNamespace(string) })
+	if !ok {
+		t.Fatal("configMap-mode config does not implement SetFluxNamespace")
+	}
+	setter.SetFluxNamespace("custom-flux")
+	aug2, ok := cfg2.(interface {
+		AugmentLayout(*layout.ManifestLayout) error
+	})
+	if !ok {
+		t.Fatal("configMap-mode config with non-empty Values does not implement LayoutAugmenter")
+	}
+	ml2 := &layout.ManifestLayout{}
+	if err := aug2.AugmentLayout(ml2); err != nil {
+		t.Fatalf("AugmentLayout: %v", err)
+	}
+	if len(ml2.Resources) != 1 {
+		t.Fatalf("ml2.Resources has %d entries, want exactly 1", len(ml2.Resources))
+	}
+	cm2, ok := ml2.Resources[0].(*corev1.ConfigMap)
+	if !ok {
+		t.Fatalf("ml2.Resources[0] = %T, want *corev1.ConfigMap", ml2.Resources[0])
+	}
+	if cm2.Namespace != "custom-flux" {
+		t.Errorf("ConfigMap namespace = %q, want custom-flux", cm2.Namespace)
+	}
+}
+
+func TestHelmchartConfig_InlineValues_IsNotLayoutAugmenter(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	mk := func(props map[string]any) stack.ApplicationConfig {
+		cfg, err := h.ToApplicationConfig(&oam.Component{Name: "metrics", Type: "helmchart", Properties: props}, "monitoring")
+		if err != nil {
+			t.Fatalf("ToApplicationConfig: %v", err)
+		}
+		return cfg
+	}
+
+	// Default (inline) mode.
+	inlineDefault := mk(map[string]any{
+		"chart":  "kube-prometheus-stack",
+		"values": map[string]any{"replicaCount": 3},
+		"source": map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+	})
+	if _, ok := interface{}(inlineDefault).(interface {
+		AugmentLayout(*layout.ManifestLayout) error
+	}); ok {
+		t.Error("default (inline) config must not satisfy LayoutAugmenter")
+	}
+
+	// configMap mode with zero Values: nothing to externalize, so still a
+	// no-op augmenter and must not be wrapped either.
+	configMapNoValues := mk(map[string]any{
+		"chart":      "kube-prometheus-stack",
+		"valuesMode": "configMap",
+		"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+	})
+	if _, ok := interface{}(configMapNoValues).(interface {
+		AugmentLayout(*layout.ManifestLayout) error
+	}); ok {
+		t.Error("configMap-mode config with zero Values must not satisfy LayoutAugmenter")
+	}
+}
+
+func TestHelmchartConfig_ValuesModeConfigMap_PreservesOptionalInterfaces(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":      "kube-prometheus-stack",
+			"valuesMode": "configMap",
+			"values":     map[string]any{"replicaCount": 2},
+			"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+
+	// Confirm this config is actually wrapped by augmentingHelmchartConfig —
+	// otherwise this test would trivially pass by testing the unwrapped
+	// *HelmchartConfig instead of the wrapper it's meant to guard.
+	if _, ok := cfg.(interface {
+		AugmentLayout(*layout.ManifestLayout) error
+	}); !ok {
+		t.Fatal("expected configMap-mode config with non-empty Values to be wrapped (satisfy LayoutAugmenter)")
+	}
+
+	if _, ok := cfg.(oam.SourceDeduplicatable); !ok {
+		t.Error("wrapped config lost SourceDeduplicatable (GetSourceKey/GetSourceRefName/SuppressSourceGeneration)")
+	}
+	if _, ok := cfg.(interface{ SetFluxNamespace(string) }); !ok {
+		t.Error("wrapped config lost fluxNamespaceSettable (SetFluxNamespace)")
+	}
+	if _, ok := cfg.(interface{ EmitsAutoHealthCheck() bool }); !ok {
+		t.Error("wrapped config lost autoHealthCheckEmitter (EmitsAutoHealthCheck)")
 	}
 }

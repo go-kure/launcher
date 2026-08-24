@@ -1,9 +1,13 @@
 package components
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack/helm"
+	"github.com/go-kure/kure/pkg/stack/layout"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 func TestHelmchartConfig_GenerateTemplate_HTTP(t *testing.T) {
@@ -103,5 +107,83 @@ func TestDecodeKubeManifests_SkipsNonMapDoc(t *testing.T) {
 	}
 	if len(objects) != 1 {
 		t.Fatalf("expected 1 object (scalar doc skipped), got %d", len(objects))
+	}
+}
+
+func TestValuesConfigMapName_TruncatesLongComponentName(t *testing.T) {
+	// Case 1: a long name with no '.' anywhere near the 246-char truncation
+	// boundary.
+	plain := strings.Repeat("a", 253)
+	gotPlain := valuesConfigMapName(plain)
+	if len(gotPlain) > 253 {
+		t.Errorf("plain: len(%q) = %d, want <= 253", gotPlain, len(gotPlain))
+	}
+	if errs := validation.IsDNS1123Subdomain(gotPlain); len(errs) != 0 {
+		t.Errorf("plain: IsDNS1123Subdomain(%q) = %v, want no errors", gotPlain, errs)
+	}
+	if !strings.HasSuffix(gotPlain, "-values") {
+		t.Errorf("plain: %q does not end in -values", gotPlain)
+	}
+
+	// Case 2: the 246-char truncation boundary lands immediately after a
+	// literal '.' — dotBoundary[245] == '.', so dotBoundary[:246] ends in
+	// ".", exercising the TrimRight(name, "-.") cleanup that prevents a
+	// dangling '.' from being left at the end of the truncated prefix.
+	dotBoundary := strings.Repeat("a", 245) + "." + strings.Repeat("b", 7)
+	if dotBoundary[245] != '.' {
+		t.Fatalf("test setup: dotBoundary[245] = %q, want '.'", dotBoundary[245])
+	}
+	gotDot := valuesConfigMapName(dotBoundary)
+	if len(gotDot) > 253 {
+		t.Errorf("dotBoundary: len(%q) = %d, want <= 253", gotDot, len(gotDot))
+	}
+	if errs := validation.IsDNS1123Subdomain(gotDot); len(errs) != 0 {
+		t.Errorf("dotBoundary: IsDNS1123Subdomain(%q) = %v, want no errors", gotDot, errs)
+	}
+	if strings.HasPrefix(gotDot, ".") || strings.Contains(gotDot, "..") {
+		t.Errorf("dotBoundary: %q has a dangling '.' artifact from truncation", gotDot)
+	}
+
+	// Build a real configMap-mode config with the dot-boundary name and
+	// non-empty Values: the ConfigMap name (from AugmentLayout) and the
+	// HelmRelease's generated valuesFrom ref (from buildHelmRelease) must
+	// both be byte-identical to each other and to the direct helper call
+	// above — the same helper backs both call sites (see valuesConfigMapName's
+	// doc comment).
+	cfg := &HelmchartConfig{
+		Name:       dotBoundary,
+		Namespace:  "default",
+		ValuesMode: "configMap",
+		Values:     map[string]any{"replicaCount": 1},
+	}
+	wrapped := wrapIfHelmchartAugmenter(cfg)
+	aug, ok := wrapped.(interface {
+		AugmentLayout(*layout.ManifestLayout) error
+	})
+	if !ok {
+		t.Fatal("configMap-mode config with non-empty Values does not implement LayoutAugmenter")
+	}
+	ml := &layout.ManifestLayout{}
+	if err := aug.AugmentLayout(ml); err != nil {
+		t.Fatalf("AugmentLayout: %v", err)
+	}
+	if len(ml.Resources) != 1 {
+		t.Fatalf("ml.Resources has %d entries, want 1", len(ml.Resources))
+	}
+	cm, ok := ml.Resources[0].(*corev1.ConfigMap)
+	if !ok {
+		t.Fatalf("ml.Resources[0] = %T, want *corev1.ConfigMap", ml.Resources[0])
+	}
+
+	hr := cfg.buildHelmRelease()
+	if len(hr.Spec.ValuesFrom) == 0 {
+		t.Fatal("buildHelmRelease produced no ValuesFrom entries")
+	}
+
+	if cm.Name != gotDot {
+		t.Errorf("ConfigMap name = %q, want %q (direct helper call)", cm.Name, gotDot)
+	}
+	if hr.Spec.ValuesFrom[0].Name != gotDot {
+		t.Errorf("HelmRelease ValuesFrom[0].Name = %q, want %q (direct helper call)", hr.Spec.ValuesFrom[0].Name, gotDot)
 	}
 }
