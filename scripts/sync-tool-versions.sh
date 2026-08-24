@@ -27,3 +27,11 @@ sed -i -E "s/^- Golangci-lint Version: \`v[0-9.]+\`\$/- Golangci-lint Version: \
 sed -i -E "s/^- golangci-lint [0-9.]+ \(managed by mise\)\$/- golangci-lint $MISE_VAL (managed by mise)/" DEVELOPMENT.md
 
 echo "Synced golangci-lint pins to $MISE_VAL (Makefile, ci.yml, docs/github-workflows.md, DEVELOPMENT.md)"
+
+# sed exits 0 even when a pattern matched zero lines (format drift, a renamed
+# line) — self-verify by re-running the checker rather than trusting sed's
+# silent-success-on-no-match behavior.
+if ! sh "$ROOT/scripts/check-tool-versions.sh"; then
+	echo "Error: sync ran but a pin still does not match $MISE ($MISE_VAL) — a target file's format probably drifted from what this script's sed patterns expect. Fix scripts/sync-tool-versions.sh and scripts/check-tool-versions.sh together." >&2
+	exit 1
+fi

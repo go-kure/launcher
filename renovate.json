@@ -7,7 +7,7 @@
       "description": "govulncheck pin in ci.yml's env: block — invisible to the github-actions manager, which only reads uses: refs, not env: values.",
       "managerFilePatterns": [".github/workflows/ci.yml"],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+GOVULNCHECK_VERSION: '(?<currentValue>v[\\d.]+)'"
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+GOVULNCHECK_VERSION: ['\"]?(?<currentValue>v[\\d.]+)['\"]?"
       ],
       "datasourceTemplate": "{{{datasource}}}"
     }

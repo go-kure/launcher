@@ -47,12 +47,26 @@ check() {
 }
 
 # Makefile: GOLANGCI_LINT_VERSION := v2.13.1
-mk_val="$(grep -E '^GOLANGCI_LINT_VERSION := v' Makefile | head -1 | sed -E 's/^GOLANGCI_LINT_VERSION := v//')"
-check "Makefile" "Makefile" "$mk_val"
+# Exactly one match required — head -1 of a duplicate assignment would let a
+# stray second line win silently while this checker reports the first.
+mk_count="$(grep -cE '^GOLANGCI_LINT_VERSION := v' Makefile || true)"
+if [ "$mk_count" -ne 1 ]; then
+	echo "✗ Makefile: expected exactly 1 GOLANGCI_LINT_VERSION assignment, found $mk_count"
+	ERRORS=$((ERRORS + 1))
+else
+	mk_val="$(grep -E '^GOLANGCI_LINT_VERSION := v' Makefile | sed -E 's/^GOLANGCI_LINT_VERSION := v//')"
+	check "Makefile" "Makefile" "$mk_val"
+fi
 
 # .github/workflows/ci.yml: GOLANGCI_LINT_VERSION: 'v2.13.1'
-ci_val="$(grep -E "^[[:space:]]*GOLANGCI_LINT_VERSION: 'v" .github/workflows/ci.yml | head -1 | sed -E "s/.*: 'v([^']*)'.*/\\1/")"
-check "ci.yml" ".github/workflows/ci.yml" "$ci_val"
+ci_count="$(grep -cE "^[[:space:]]*GOLANGCI_LINT_VERSION: 'v" .github/workflows/ci.yml || true)"
+if [ "$ci_count" -ne 1 ]; then
+	echo "✗ ci.yml: expected exactly 1 GOLANGCI_LINT_VERSION assignment, found $ci_count"
+	ERRORS=$((ERRORS + 1))
+else
+	ci_val="$(grep -E "^[[:space:]]*GOLANGCI_LINT_VERSION: 'v" .github/workflows/ci.yml | sed -E "s/.*: 'v([^']*)'.*/\\1/")"
+	check "ci.yml" ".github/workflows/ci.yml" "$ci_val"
+fi
 
 # docs/github-workflows.md: - Golangci-lint Version: `v2.13.1`
 # Exactly one match required — a renamed/deleted line must fail, not silently
