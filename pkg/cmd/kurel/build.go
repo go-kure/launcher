@@ -355,7 +355,11 @@ func writeOutputDir(dir, appName string, data []byte) error {
 	//nolint:gosec // G304: gosec's taint analysis flags appName as attacker-controlled,
 	// but oam.validateWithExtraTypes rejects any Metadata.Name that fails
 	// validation.IsDNS1123Subdomain before parsing succeeds, so it can never contain
-	// '/' or '..'. dir is a user-supplied --output flag, expected for a build CLI.
+	// '/' or '..'. dir is intentionally unrestricted: it is the --output flag the
+	// invoking operator passed directly on their own command line (same trust
+	// boundary as the process itself, like `go build -o`), not attacker-supplied
+	// input crossing a privilege boundary, so the CLI Safety standard's
+	// path-escape rule does not apply to it.
 	if err := os.WriteFile(outPath, data, 0644); err != nil {
 		return errors.Wrapf(err, "writing output file %q", outPath)
 	}
