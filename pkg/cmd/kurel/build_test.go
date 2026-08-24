@@ -13,6 +13,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-kure/kure/pkg/stack"
+	"github.com/go-kure/kure/pkg/stack/layout"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -714,8 +718,13 @@ func helmIndexYAML(name, version, url string) string {
 func TestBuildCommand_HelmchartTemplateDelivery(t *testing.T) {
 	// NOTES.txt content renders as a YAML mapping — without kure alpha.8's NOTES.txt filter,
 	// decodeKubeManifests would return "missing apiVersion or kind" on this chart.
+	// The pre-install-annotated manifest exercises SplitByHookWeight end to
+	// end through a real build: it proves the guard opt-out
+	// (GenerateCoversAugmentLayout) works for a delivery: template component
+	// whose chart actually has multiple hook groups, not just a hook-free one.
 	chartFiles := map[string]string{
 		"testchart/templates/cm.yaml":   "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test-cm\ndata:\n  key: value\n",
+		"testchart/templates/hook.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: pre-install-cm\n  annotations:\n    helm.sh/hook: pre-install\ndata:\n  key: value\n",
 		"testchart/templates/NOTES.txt": "chart: testchart\nversion: 0.1.0\n",
 	}
 	chartBuf := buildMinimalChartTar(t, "testchart", "0.1.0", chartFiles)
@@ -765,8 +774,11 @@ spec:
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "kind: ConfigMap") {
-		t.Errorf("expected ConfigMap in output, got:\n%s", got)
+	if !strings.Contains(got, "name: test-cm") {
+		t.Errorf("expected the hook-free ConfigMap in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "name: pre-install-cm") {
+		t.Errorf("expected the pre-install-hook ConfigMap in output too (flat union, not dropped by partitioning), got:\n%s", got)
 	}
 	if strings.Contains(got, "chart: testchart") {
 		t.Errorf("NOTES.txt content must not appear in output, got:\n%s", got)
@@ -808,4 +820,122 @@ spec:
 	if !strings.Contains(err.Error(), "metrics") || !strings.Contains(err.Error(), "layout") {
 		t.Errorf("error should name the component and explain the layout gap, got: %v", err)
 	}
+}
+
+// TestBuildCommand_HelmchartTemplateDelivery_WithPruneProtectionTrait is the
+// decorator-forwarding path no existing test covers (grep prune-protection
+// build_test.go hits only schema-listing comments; the plain e2e above
+// declares no traits). Without traits/decorator.go's unconditional
+// GenerateCoversAugmentLayout forward on augmentingDecorator, this fails
+// (the decorated config would report false, and rejectLayoutAugmenters
+// would reject it); with it, it passes — this is the one test that catches
+// the exact bug the unconditional-forward design exists to prevent.
+func TestBuildCommand_HelmchartTemplateDelivery_WithPruneProtectionTrait(t *testing.T) {
+	chartFiles := map[string]string{
+		"testchart/templates/cm.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test-cm\ndata:\n  key: value\n",
+	}
+	chartBuf := buildMinimalChartTar(t, "testchart", "0.1.0", chartFiles)
+
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.yaml":
+			fmt.Fprint(w, helmIndexYAML("testchart", "0.1.0", srvURL+"/testchart-0.1.0.tgz"))
+		case "/testchart-0.1.0.tgz":
+			w.Write(chartBuf)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	appYAML := fmt.Sprintf(`apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: testapp
+      type: helmchart
+      properties:
+        chart: testchart
+        version: "0.1.0"
+        delivery: template
+        source:
+          url: %s
+      traits:
+        - type: prune-protection
+`, srvURL)
+
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", appYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("build failed: %v\noutput: %s", err, out.String())
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "name: test-cm") {
+		t.Errorf("expected ConfigMap in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "kustomize.toolkit.fluxcd.io/prune") || !strings.Contains(got, "disabled") {
+		t.Errorf("expected the prune-protection annotation in output, got:\n%s", got)
+	}
+}
+
+// augmenterOnlyStub implements layout.LayoutAugmenter but not
+// oam.LayoutAugmentationCoverage — the fail-closed proof for every augmenter
+// this repo doesn't yet know the coverage of, independent of helmchart.
+type augmenterOnlyStub struct{}
+
+func (augmenterOnlyStub) Generate(*stack.Application) ([]*client.Object, error) { return nil, nil }
+func (augmenterOnlyStub) AugmentLayout(*layout.ManifestLayout) error            { return nil }
+
+// augmenterCoverageFalseStub implements both layout.LayoutAugmenter and
+// oam.LayoutAugmentationCoverage, but the latter reports false — a sibling
+// case to augmenterOnlyStub that must also be rejected.
+type augmenterCoverageFalseStub struct{ augmenterOnlyStub }
+
+func (augmenterCoverageFalseStub) GenerateCoversAugmentLayout() bool { return false }
+
+// TestRejectLayoutAugmenters_FailsClosedForUnknownAugmenter calls
+// rejectLayoutAugmenters directly on hand-built stack.Node/stack.Bundle
+// fixtures — nothing covers this today (grep -rn rejectLayoutAugmenters
+// *_test.go returns nothing before this test). Independent of helmchart: it
+// pins the fail-closed default for any future LayoutAugmenter this guard
+// doesn't yet know the coverage of.
+func TestRejectLayoutAugmenters_FailsClosedForUnknownAugmenter(t *testing.T) {
+	t.Run("NoCoverageInterface", func(t *testing.T) {
+		node := &stack.Node{
+			Bundle: &stack.Bundle{
+				Applications: []*stack.Application{
+					{Name: "app-no-coverage", Config: augmenterOnlyStub{}},
+				},
+			},
+		}
+		if err := rejectLayoutAugmenters(node); err == nil {
+			t.Fatal("expected rejection for a LayoutAugmenter that does not implement LayoutAugmentationCoverage")
+		}
+	})
+
+	t.Run("CoverageReturnsFalse", func(t *testing.T) {
+		node := &stack.Node{
+			Bundle: &stack.Bundle{
+				Applications: []*stack.Application{
+					{Name: "app-coverage-false", Config: augmenterCoverageFalseStub{}},
+				},
+			},
+		}
+		if err := rejectLayoutAugmenters(node); err == nil {
+			t.Fatal("expected rejection for a LayoutAugmenter whose GenerateCoversAugmentLayout returns false")
+		}
+	})
 }
