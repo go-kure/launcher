@@ -218,6 +218,30 @@ in one pass — applies uniformly across all handler input types. The specific i
 methods for component and trait property validation (as distinct from capability rendering)
 are follow-on design work, not specified here.
 
+### 2.7 Consumed-capability surfacing
+
+`resolveCapability` (`pkg/oam/transform.go`) is the one place a trait's capability key is
+actually resolved against `ctx.Capabilities` — a real `ClusterProfile` match, as opposed to
+every syntactically possible key a trait could name. `TransformWithPolicy` records every key
+it resolves into `PolicyResult.ConsumedCapabilities` (sorted, deduped): the authoritative
+signal a downstream consumer can use for capability-dependent ordering, replacing an interim
+derivation that had to guess from trait syntax alone.
+
+A match counts on key resolution alone, not on whether the capability had any non-empty
+`Rendering` payload — a capability declared in the profile with no rendering values is still
+a real dependency the app requires to exist. Both of `resolveCapability`'s call sites record
+a match: `applyTraits` (the dispatch path, for a directly-dispatched `TraitHandler`) and
+`lowerDocumentBody` (the lowering path, for a trait consumed inside a `TraitLoweringRule`
+before it settles into its terminal type). A trait is resolved at most once per pipeline run
+regardless of `sealed` re-dispatch through the fixpoint: both call sites already guard their
+capability-processing step on `!trait.sealed`, since a sealed trait was emitted by an earlier
+lowering round that already merged its own rendering — the same guard that prevents a
+double-merge prevents a double-count for free.
+
+`ConsumedCapabilities` is populated only by `TransformWithPolicy`, never by the plain
+`Transform` entry point, which discards `PolicyResult` — see the `pkg/oam/README.md`
+"Transform & extension" section for the field's shape.
+
 ---
 
 ## 3. Custom Capability Schema
