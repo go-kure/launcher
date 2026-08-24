@@ -66,12 +66,17 @@ fi
 # differently-quoted or differently-indented job-level env override of the
 # same var would both go undetected by a canonical-form-only pattern, while
 # GitHub Actions would actually resolve the job-level one for that job.
-ci_count="$(grep -cE '^[[:space:]]*GOLANGCI_LINT_VERSION:[[:space:]]*.?v[0-9.]+.?[[:space:]]*$' .github/workflows/ci.yml || true)"
+CI_PATTERN='^[[:space:]]*GOLANGCI_LINT_VERSION:[[:space:]]*.?v[0-9.]+.?[[:space:]]*$'
+ci_count="$(grep -cE "$CI_PATTERN" .github/workflows/ci.yml || true)"
 if [ "$ci_count" -ne 1 ]; then
 	echo "✗ ci.yml: expected exactly 1 GOLANGCI_LINT_VERSION assignment, found $ci_count"
 	ERRORS=$((ERRORS + 1))
 else
-	ci_val="$(grep -E '^[[:space:]]*GOLANGCI_LINT_VERSION:' .github/workflows/ci.yml | sed -E 's/^[^:]+:[[:space:]]*//' | tr -d "\"'" | sed -E 's/^v//')"
+	# Reuse the exact same pattern used for the count above (as the Makefile,
+	# docs and DEVELOPMENT.md branches already do) — a looser extraction
+	# pattern here could pull in a second line the strict count pattern
+	# doesn't count, turning ci_val into a multi-line value.
+	ci_val="$(grep -E "$CI_PATTERN" .github/workflows/ci.yml | sed -E 's/^[^:]+:[[:space:]]*//' | tr -d "\"'" | sed -E 's/^v//')"
 	check "ci.yml" ".github/workflows/ci.yml" "$ci_val"
 fi
 
