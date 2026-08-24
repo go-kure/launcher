@@ -773,6 +773,50 @@ metadata:
 	}
 }
 
+// TestGenerate_MultiEventHookDropsExcludedTokenAmongCustomHooks covers a
+// branch a codex-lens pass of this fix identified as unhandled: a
+// multi-value annotation mixing an excluded phase with an unrecognized
+// custom hook name ("test,crd-install") has no recognized ordered phase
+// among its tokens, so it does not take the earliest-phase branch — but it
+// is not "every token unrecognized" either (one token, "test", IS a member
+// of excludedHookPhases), so it must not take the leave-unchanged branch
+// either. The excluded token must be dropped from the grouping key, leaving
+// just "crd-install" — an excluded phase must never influence the unknown-
+// bucket grouping decision for an object that survives (is not entirely
+// excluded).
+func TestGenerate_MultiEventHookDropsExcludedTokenAmongCustomHooks(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multi
+  annotations:
+    helm.sh/hook: test,crd-install
+`)
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return raw, nil
+	})
+
+	if err := cfg.ensureRendered(); err != nil {
+		t.Fatalf("ensureRendered: %v", err)
+	}
+	if len(cfg.hookGroups) != 1 {
+		t.Fatalf("expected 1 hook group (multi survives, not all tokens excluded), got %d", len(cfg.hookGroups))
+	}
+	if got := cfg.hookGroups[0].Phase; got != "crd-install" {
+		t.Errorf("hookGroups[0].Phase = %q, want %q (excluded token \"test\" dropped from grouping key)", got, "crd-install")
+	}
+	if len(cfg.hookGroups[0].Resources) != 1 {
+		t.Fatalf("hookGroups[0].Resources has %d entries, want 1", len(cfg.hookGroups[0].Resources))
+	}
+	u, ok := cfg.hookGroups[0].Resources[0].(*unstructured.Unstructured)
+	if !ok {
+		t.Fatalf("hookGroups[0].Resources[0] = %T, want *unstructured.Unstructured", cfg.hookGroups[0].Resources[0])
+	}
+	if got := u.GetAnnotations()["helm.sh/hook"]; got != "test,crd-install" {
+		t.Errorf("emitted object's helm.sh/hook annotation = %q, want unchanged %q", got, "test,crd-install")
+	}
+}
+
 // TestAugmentLayoutTemplate_MultiEventHookAnnotationUnchangedInOutput is the
 // test called for by the fix's own hazard: the grouping-key rewrite
 // (normalizeHookAnnotationForGrouping) must never leak into the object that
