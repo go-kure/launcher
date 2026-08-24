@@ -51,9 +51,17 @@ run = "make check-tool-versions"
 description = "Sync golangci-lint pins (Makefile/ci.yml/docs) from mise.toml"
 run = "make sync-tool-versions"
 
+[tasks.check-govulncheck-docs]
+description = "Verify govulncheck version parity (docs/github-workflows.md) against ci.yml"
+run = "make check-govulncheck-docs"
+
+[tasks.sync-govulncheck-docs]
+description = "Sync govulncheck doc mentions (docs/github-workflows.md) from ci.yml"
+run = "make sync-govulncheck-docs"
+
 [tasks.verify]
 description = "Run all checks (tidy, lint, test, kure dep sync, tool pins)"
-depends = ["tidy", "lint", "test", "check-kure-dep-sync", "check-tool-versions"]
+depends = ["tidy", "lint", "test", "check-kure-dep-sync", "check-tool-versions", "check-govulncheck-docs"]
 
 [tasks.changelog]
 description = "Generate changelog from git history"
