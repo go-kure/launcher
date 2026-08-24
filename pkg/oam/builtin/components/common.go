@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/google/go-containerregistry/pkg/name"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -2629,6 +2630,134 @@ func parseHistoryLimit(field string, v any) (int32, error) {
 		return int32(n), nil
 	default:
 		return 0, errors.Errorf("%s: must be an integer, got %T", field, v)
+	}
+}
+
+// JobSpecConfig carries the batchv1.JobSpec fields shared by a cronjob's jobTemplate
+// and (later) the job component (#279 PR 6) — the same batchv1.JobSpec type in both
+// positions. Every field is a pointer, and every one of these
+// batchv1.JobSpec fields IS tagged `omitempty` in the pinned k8s.io/api — but
+// `omitempty` on a pointer field only suppresses a NIL pointer; a non-nil pointer to
+// the Go zero value (e.g. a *int32 pointing at 0) still marshals. So writing an
+// unconditional non-nil pointer here (rather than leaving the field nil when
+// unauthored) would still add a key like `backoffLimit: 0` to every generated
+// CronJob that no author asked for.
+type JobSpecConfig struct {
+	BackoffLimit            *int32
+	Completions             *int32
+	Parallelism             *int32
+	ActiveDeadlineSeconds   *int64
+	TTLSecondsAfterFinished *int32
+	CompletionMode          *batchv1.CompletionMode
+}
+
+// parseJobSpec extracts the optional batchv1.JobSpec-level properties shared by
+// cronjob's jobTemplate (and, later, the job component — #279 PR 6). Every field is
+// presence-gated (see JobSpecConfig's doc comment) via parseInt32Field/parseInt64Field,
+// with an explicit negative-value guard per numeric field (matching
+// parseHistoryLimit above). Beyond the per-field bounds, two cross-field checks catch
+// what Kubernetes' own API server would otherwise reject at apply time: a Job with
+// completionMode Indexed requires completions to be set, and its parallelism (if
+// authored) must not exceed 100000.
+func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
+	var cfg JobSpecConfig
+
+	if v, present, err := parseInt32Field(props, "backoffLimit", "backoffLimit"); err != nil {
+		return cfg, err
+	} else if present {
+		if v < 0 {
+			return cfg, errors.Errorf("backoffLimit: must be >= 0, got %d", v)
+		}
+		cfg.BackoffLimit = &v
+	}
+
+	if v, present, err := parseInt32Field(props, "completions", "completions"); err != nil {
+		return cfg, err
+	} else if present {
+		if v < 0 {
+			return cfg, errors.Errorf("completions: must be >= 0, got %d", v)
+		}
+		cfg.Completions = &v
+	}
+
+	if v, present, err := parseInt32Field(props, "parallelism", "parallelism"); err != nil {
+		return cfg, err
+	} else if present {
+		if v < 0 {
+			return cfg, errors.Errorf("parallelism: must be >= 0, got %d", v)
+		}
+		cfg.Parallelism = &v
+	}
+
+	if v, present, err := parseInt64Field(props, "activeDeadlineSeconds", "activeDeadlineSeconds"); err != nil {
+		return cfg, err
+	} else if present {
+		// Kubernetes requires a positive integer here, not merely non-negative:
+		// k8s.io/api/batch/v1 JobSpec.ActiveDeadlineSeconds doc says "value must
+		// be positive integer" — 0 is invalid, unlike the >= 0 fields above.
+		if v <= 0 {
+			return cfg, errors.Errorf("activeDeadlineSeconds: must be a positive integer, got %d", v)
+		}
+		cfg.ActiveDeadlineSeconds = &v
+	}
+
+	if v, present, err := parseInt32Field(props, "ttlSecondsAfterFinished", "ttlSecondsAfterFinished"); err != nil {
+		return cfg, err
+	} else if present {
+		if v < 0 {
+			return cfg, errors.Errorf("ttlSecondsAfterFinished: must be >= 0, got %d", v)
+		}
+		cfg.TTLSecondsAfterFinished = &v
+	}
+
+	if raw, present := props["completionMode"]; present {
+		s, ok := raw.(string)
+		if !ok {
+			return cfg, errors.Errorf("completionMode: must be a string, got %T", raw)
+		}
+		switch batchv1.CompletionMode(s) {
+		case batchv1.NonIndexedCompletion, batchv1.IndexedCompletion:
+			mode := batchv1.CompletionMode(s)
+			cfg.CompletionMode = &mode
+		default:
+			return cfg, errors.Errorf("completionMode: invalid value %q, must be %q or %q", s, batchv1.NonIndexedCompletion, batchv1.IndexedCompletion)
+		}
+	}
+
+	if cfg.CompletionMode != nil && *cfg.CompletionMode == batchv1.IndexedCompletion {
+		if cfg.Completions == nil {
+			return cfg, errors.New("completionMode: Indexed requires completions to be set")
+		}
+		if cfg.Parallelism != nil && *cfg.Parallelism > 100000 {
+			return cfg, errors.Errorf("parallelism: must be <= 100000 when completionMode is Indexed, got %d", *cfg.Parallelism)
+		}
+	}
+
+	return cfg, nil
+}
+
+// applyJobSpec writes cfg's presence-gated fields onto spec — a cronjob's
+// spec.jobTemplate.spec today, or (once #279 PR 6 lands) a job component's spec
+// directly; both are the same batchv1.JobSpec type. Fields left nil in cfg are left
+// untouched on spec, so an unauthored property never appears in generated output.
+func applyJobSpec(spec *batchv1.JobSpec, cfg JobSpecConfig) {
+	if cfg.BackoffLimit != nil {
+		spec.BackoffLimit = cfg.BackoffLimit
+	}
+	if cfg.Completions != nil {
+		spec.Completions = cfg.Completions
+	}
+	if cfg.Parallelism != nil {
+		spec.Parallelism = cfg.Parallelism
+	}
+	if cfg.ActiveDeadlineSeconds != nil {
+		spec.ActiveDeadlineSeconds = cfg.ActiveDeadlineSeconds
+	}
+	if cfg.TTLSecondsAfterFinished != nil {
+		spec.TTLSecondsAfterFinished = cfg.TTLSecondsAfterFinished
+	}
+	if cfg.CompletionMode != nil {
+		spec.CompletionMode = cfg.CompletionMode
 	}
 }
 

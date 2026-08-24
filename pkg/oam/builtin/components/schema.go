@@ -360,6 +360,65 @@ func schemaTolerations() oam.PropertySchema {
 	}
 }
 
+// schemaJobSpec describes the batchv1.JobSpec property fragments shared by the
+// cronjob handler's jobTemplate today and (later) the job component (#279 PR 6) —
+// see parseJobSpec/applyJobSpec in common.go. A map, not per-field accessors (unlike
+// this file's usual style), precisely because job and cronjob must expose an
+// identical set — per-field accessors would let them drift.
+//
+// reserved is explicit per this package's D3 convention (see schemaEnv's doc
+// comment above); every call site in this package passes false today.
+func schemaJobSpec(reserved bool) map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"backoffLimit":            {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Number of retries before marking the job as failed."},
+		"completions":             {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Desired number of successfully finished pods the job should be run with."},
+		"parallelism":             {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Maximum number of pods the job should run concurrently. Must be <= 100000 when completionMode is \"Indexed\"."},
+		"activeDeadlineSeconds":   {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Duration in seconds the job may be active before it is terminated. Must be a positive integer."},
+		"ttlSecondsAfterFinished": {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Seconds after the job finishes before it (and its pods) is automatically deleted."},
+		"completionMode":          {Type: oam.PropertyTypeString, PlatformReserved: reserved, Enum: []any{"NonIndexed", "Indexed"}, Description: "How pod completions are tracked. \"Indexed\" requires completions to also be set."},
+	}
+}
+
+// schemaCronJobConcurrencyPolicy describes the CronJobSpec-level `concurrencyPolicy`
+// property (see the cronjob handler's ToApplicationConfig/createCronJob).
+// batchv1.CronJobSpec.ConcurrencyPolicy is `omitempty`, but "Allow" is the API's own
+// default when the field is left unset entirely — the parser only calls
+// SetCronJobConcurrencyPolicy when authored, so the Default documented here is
+// descriptive of the API's behavior, not something the parser applies itself.
+func schemaCronJobConcurrencyPolicy() oam.PropertySchema {
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeString,
+		Default:     "Allow",
+		Enum:        []any{"Allow", "Forbid", "Replace"},
+		Description: "How to treat concurrent executions of this CronJob. Not written to output unless authored — the CronJob API's own default is \"Allow\".",
+	}
+}
+
+// schemaCronJobSuspend describes the CronJobSpec-level `suspend` property.
+func schemaCronJobSuspend() oam.PropertySchema {
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeBoolean,
+		Description: "Suspend subsequent executions of this CronJob. Not written to output unless authored.",
+	}
+}
+
+// schemaCronJobStartingDeadlineSeconds describes the CronJobSpec-level
+// `startingDeadlineSeconds` property.
+func schemaCronJobStartingDeadlineSeconds() oam.PropertySchema {
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeInteger,
+		Description: "Deadline in seconds for starting a job if it misses its scheduled time, for any reason. Must be >= 0.",
+	}
+}
+
+// schemaCronJobTimeZone describes the CronJobSpec-level `timeZone` property.
+func schemaCronJobTimeZone() oam.PropertySchema {
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeString,
+		Description: "IANA time zone name (e.g. \"Europe/Brussels\") the schedule is interpreted in. Must be a real zone name — an empty string and \"Local\" (case-insensitive) are rejected.",
+	}
+}
+
 // schemaVolumeClaimTemplates describes the shared `volumeClaimTemplates` property
 // (see parseVolumeClaimTemplates).
 func schemaVolumeClaimTemplates() oam.PropertySchema {

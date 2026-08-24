@@ -1,7 +1,16 @@
 package components
 
 import (
+	"maps"
 	"regexp"
+	"strings"
+	"time"
+
+	// Embeds the IANA zoneinfo database into this binary (including kurel,
+	// which ships CGO_ENABLED=0 per .goreleaser.yml:20), so the timeZone
+	// validation below is host-independent rather than relying on system
+	// zoneinfo being present at runtime.
+	_ "time/tzdata"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
@@ -16,6 +25,49 @@ import (
 // cronScheduleRe matches a standard 5-field cron expression (no special @syntax).
 var cronScheduleRe = regexp.MustCompile(`^(\S+\s+){4}\S+$`)
 
+// cronDescriptorSchedules is the fixed set of "@"-prefixed schedule descriptors
+// Kubernetes CronJob accepts (robfig/cron's ParseStandard), excluding @reboot
+// (meaningless for a CronJob — there is no host to reboot) and @every, which
+// takes a duration argument and is validated separately in validateCronSchedule.
+var cronDescriptorSchedules = map[string]bool{
+	"@yearly":   true,
+	"@annually": true,
+	"@monthly":  true,
+	"@weekly":   true,
+	"@daily":    true,
+	"@midnight": true,
+	"@hourly":   true,
+}
+
+// validateCronSchedule accepts the standard 5-field cron form (cronScheduleRe,
+// unchanged from before this function existed — see the round-7 finding below for
+// why it is not tightened further), one of the fixed @-descriptor schedules above,
+// or "@every <duration>" with the duration validated via time.ParseDuration (not
+// merely regex-matched: a bare-suffix regex would let "@every nope" through,
+// producing a schedule Kubernetes' own CronJob controller rejects at apply time).
+//
+// Round-7 finding (see plan-279-cronjob-jobspec.md "What this does NOT solve"):
+// the plain 5-field branch deliberately still accepts any 5 whitespace-separated
+// tokens with no per-field semantic check (e.g. "99 99 99 99 99" builds
+// successfully) — tightening it was drafted and reverted because the current regex
+// already accepts such strings today, so rejecting them here would be a breaking
+// change under this design's additive-compatibility test, not an additive one.
+func validateCronSchedule(schedule string) error {
+	if cronScheduleRe.MatchString(schedule) {
+		return nil
+	}
+	if cronDescriptorSchedules[schedule] {
+		return nil
+	}
+	if suffix, ok := strings.CutPrefix(schedule, "@every "); ok {
+		if _, err := time.ParseDuration(suffix); err != nil {
+			return errors.Errorf("invalid cron schedule %q: invalid @every duration: %v", schedule, err)
+		}
+		return nil
+	}
+	return errors.Errorf("invalid cron schedule %q: must be a 5-field cron expression (e.g. \"0 2 * * *\"), an @-descriptor (@yearly, @annually, @monthly, @weekly, @daily, @midnight, @hourly), or \"@every <duration>\" (e.g. \"@every 1h30m\")", schedule)
+}
+
 // CronjobHandler handles OAM cronjob components.
 type CronjobHandler struct{}
 
@@ -26,9 +78,9 @@ func (h *CronjobHandler) CanHandle(componentType string) bool {
 
 // PropertySchema declares the cronjob component's user-facing properties.
 func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	m := map[string]oam.PropertySchema{
 		"image":                      {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the job container."},
-		"schedule":                   {Type: oam.PropertyTypeString, Required: true, Description: "Cron schedule in standard 5-field format (e.g. \"0 2 * * *\")."},
+		"schedule":                   {Type: oam.PropertyTypeString, Required: true, Description: "Cron schedule: a standard 5-field cron expression (e.g. \"0 2 * * *\"), an @-descriptor (@yearly, @annually, @monthly, @weekly, @daily, @midnight, @hourly), or \"@every <duration>\" (e.g. \"@every 1h30m\")."},
 		"restartPolicy":              {Type: oam.PropertyTypeString, Default: "OnFailure", Enum: []any{"Never", "OnFailure"}, Description: "Pod restart policy for the job's containers."},
 		"successfulJobsHistoryLimit": {Type: oam.PropertyTypeInteger, Default: 3, Description: "Number of successful finished jobs to retain."},
 		"failedJobsHistoryLimit":     {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of failed finished jobs to retain."},
@@ -43,7 +95,13 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"workingDir":                 schemaWorkingDir(false),
 		"volumes":                    schemaVolumes(),
 		"initContainers":             schemaContainers(),
+		"concurrencyPolicy":          schemaCronJobConcurrencyPolicy(),
+		"suspend":                    schemaCronJobSuspend(),
+		"startingDeadlineSeconds":    schemaCronJobStartingDeadlineSeconds(),
+		"timeZone":                   schemaCronJobTimeZone(),
 	}
+	maps.Copy(m, schemaJobSpec(false))
+	return m
 }
 
 // ToApplicationConfig converts an OAM cronjob component to a CronjobConfig.
@@ -68,8 +126,8 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	if !ok {
 		return nil, errors.New("required property 'schedule' missing or not a string")
 	}
-	if !cronScheduleRe.MatchString(schedule) {
-		return nil, errors.Errorf("invalid cron schedule %q: must be a 5-field cron expression (e.g. \"0 2 * * *\")", schedule)
+	if err := validateCronSchedule(schedule); err != nil {
+		return nil, err
 	}
 	config.Schedule = schedule
 
@@ -102,6 +160,64 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		}
 		config.FailedJobsHistoryLimit = limit
 	}
+
+	if v, present, err := parseStringField(props, "concurrencyPolicy", "concurrencyPolicy"); err != nil {
+		return nil, err
+	} else if present {
+		switch batchv1.ConcurrencyPolicy(v) {
+		case batchv1.AllowConcurrent, batchv1.ForbidConcurrent, batchv1.ReplaceConcurrent:
+			cp := batchv1.ConcurrencyPolicy(v)
+			config.ConcurrencyPolicy = &cp
+		default:
+			return nil, errors.Errorf("concurrencyPolicy: invalid value %q, must be %q, %q, or %q", v, batchv1.AllowConcurrent, batchv1.ForbidConcurrent, batchv1.ReplaceConcurrent)
+		}
+	}
+
+	if suspend, err := parseBoolField(props, "suspend", "suspend"); err != nil {
+		return nil, err
+	} else if suspend != nil {
+		config.Suspend = suspend
+	}
+
+	if v, present, err := parseInt64Field(props, "startingDeadlineSeconds", "startingDeadlineSeconds"); err != nil {
+		return nil, err
+	} else if present {
+		if v < 0 {
+			return nil, errors.Errorf("startingDeadlineSeconds: must be >= 0, got %d", v)
+		}
+		config.StartingDeadlineSeconds = &v
+	}
+
+	// timeZone cannot reuse parseStringField: that helper treats an authored ""
+	// the same as omission (ok=false, no error), but timeZone must reject an
+	// authored "" outright — time.LoadLocation("") itself returns UTC with no
+	// error, which would silently accept a value the author almost certainly
+	// didn't intend. "Local" is rejected case-insensitively before calling
+	// time.LoadLocation for the same reason: LoadLocation("Local") succeeds
+	// (it returns the process's own local zone), but Kubernetes' own CronJob
+	// validation explicitly rejects "Local" as server-dependent.
+	if raw, present := props["timeZone"]; present {
+		tz, ok := raw.(string)
+		if !ok {
+			return nil, errors.Errorf("timeZone: must be a string, got %T", raw)
+		}
+		if tz == "" {
+			return nil, errors.New("timeZone: must not be an empty string; omit the property instead")
+		}
+		if strings.EqualFold(tz, "Local") {
+			return nil, errors.Errorf("timeZone: %q is not a valid IANA time zone name (Kubernetes rejects \"Local\" as server-dependent)", tz)
+		}
+		if _, err := time.LoadLocation(tz); err != nil {
+			return nil, errors.Errorf("timeZone: %q is not a valid IANA time zone name: %v", tz, err)
+		}
+		config.TimeZone = &tz
+	}
+
+	jobSpec, err := parseJobSpec(props)
+	if err != nil {
+		return nil, err
+	}
+	config.JobSpec = jobSpec
 
 	env, err := parseEnv(props)
 	if err != nil {
@@ -172,19 +288,34 @@ type CronjobConfig struct {
 	RestartPolicy              corev1.RestartPolicy
 	SuccessfulJobsHistoryLimit int32
 	FailedJobsHistoryLimit     int32
-	Env                        []corev1.EnvVar
-	EnvFrom                    []corev1.EnvFromSource
-	Resources                  ResourceRequirements
-	Command                    []string
-	Args                       []string
-	Probes                     ProbeConfig
-	Lifecycle                  *corev1.Lifecycle
-	SecurityContext            *corev1.SecurityContext
-	WorkingDir                 string
-	Volumes                    []corev1.Volume
-	VolumeMounts               []corev1.VolumeMount
-	InitContainers             []InitContainerConfig
-	PVCs                       []PVCConfig
+	// ConcurrencyPolicy, Suspend, StartingDeadlineSeconds, and TimeZone are all
+	// presence-gated pointers. Every corresponding batchv1.CronJobSpec field IS
+	// tagged `omitempty`, but that only suppresses a nil pointer (Suspend,
+	// StartingDeadlineSeconds, TimeZone) or the Go zero value on a non-pointer
+	// scalar (ConcurrencyPolicy's underlying string type) — none of that
+	// protects against createCronJob calling a kure setter unconditionally,
+	// since every one of those setters writes a non-nil/non-zero value
+	// regardless of whether the author authored it. A bare (non-presence-gated)
+	// value here would add a key to every generated CronJob that no author
+	// asked for. See the plan's CronJobSpec-level field table.
+	ConcurrencyPolicy       *batchv1.ConcurrencyPolicy
+	Suspend                 *bool
+	StartingDeadlineSeconds *int64
+	TimeZone                *string
+	JobSpec                 JobSpecConfig
+	Env                     []corev1.EnvVar
+	EnvFrom                 []corev1.EnvFromSource
+	Resources               ResourceRequirements
+	Command                 []string
+	Args                    []string
+	Probes                  ProbeConfig
+	Lifecycle               *corev1.Lifecycle
+	SecurityContext         *corev1.SecurityContext
+	WorkingDir              string
+	Volumes                 []corev1.Volume
+	VolumeMounts            []corev1.VolumeMount
+	InitContainers          []InitContainerConfig
+	PVCs                    []PVCConfig
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -301,6 +432,19 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	kubernetes.SetCronJobSuccessfulJobsHistoryLimit(cj, c.SuccessfulJobsHistoryLimit)
 	kubernetes.SetCronJobFailedJobsHistoryLimit(cj, c.FailedJobsHistoryLimit)
 	kubernetes.SetCronJobServiceAccountName(cj, app.Name)
+	if c.ConcurrencyPolicy != nil {
+		kubernetes.SetCronJobConcurrencyPolicy(cj, *c.ConcurrencyPolicy)
+	}
+	if c.Suspend != nil {
+		kubernetes.SetCronJobSuspend(cj, *c.Suspend)
+	}
+	if c.StartingDeadlineSeconds != nil {
+		kubernetes.SetCronJobStartingDeadlineSeconds(cj, *c.StartingDeadlineSeconds)
+	}
+	if c.TimeZone != nil {
+		kubernetes.SetCronJobTimeZone(cj, c.TimeZone)
+	}
+	applyJobSpec(&cj.Spec.JobTemplate.Spec, c.JobSpec)
 	// Init containers added before the main container so declaration order is
 	// preserved in spec.template.spec.initContainers.
 	for _, ic := range c.InitContainers {
