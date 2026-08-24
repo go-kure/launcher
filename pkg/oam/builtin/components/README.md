@@ -727,7 +727,7 @@ registry [...]`.
   Application, but two different Applications with a same-named component still collide — component
   names are unique only within one Application (`pkg/oam/validate.go:129-133`), while emitted
   Kustomization CRs for hook-group children share one controller namespace; a pre-existing gap
-  (inherited from crane's reference implementation) that this partitioning newly exposes, not one
+  (inherited from a downstream consumer's reference implementation) that this partitioning newly exposes, not one
   it introduces. `kurel build`'s flat output **accepts** `delivery: template` — its `Generate`
   output is already the same flat union `AugmentLayout` would otherwise repartition, so nothing is
   lost by skipping the layout walk — while still rejecting `valuesMode: configMap` when it would

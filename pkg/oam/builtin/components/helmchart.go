@@ -391,8 +391,8 @@ type HelmchartConfig struct {
 	// by ensureRendered on first call; nil until then (and always nil for
 	// delivery: native, which never calls ensureRendered). Not goroutine-safe —
 	// concurrent Generate/AugmentLayout calls on the same *HelmchartConfig race
-	// on rendered/hookGroups (crane's identical cache isn't goroutine-safe
-	// either).
+	// on rendered/hookGroups (an identical cache in a downstream consumer's
+	// analogous handler isn't goroutine-safe either).
 	hookGroups []helm.HookGroup
 	// rendered reports whether ensureRendered has already populated hookGroups,
 	// so that Generate followed by AugmentLayout (kure's layout walker's usual
@@ -620,7 +620,8 @@ func parseChartManifests(raw []byte) ([]helm.HookGroup, error) {
 // truncated to 40 characters and re-trimmed (the cut can expose a new
 // trailing "-"), "unknown" if the result is empty.
 //
-// Deviates from crane's hookGroupDir (returns the phase verbatim): kure's
+// Deviates from a downstream consumer's analogous helper, which returns the
+// phase verbatim: kure's
 // SplitByHookWeight puts a comma-separated or otherwise malformed
 // helm.sh/hook annotation into one opaque phase string (kure hooks.go) that
 // becomes both a path segment and a literal Kustomization object name via
@@ -844,10 +845,10 @@ var _ oam.LayoutAugmentationCoverage = (*augmentingHelmchartConfig)(nil)
 // Children inherit the parent's Mode/FluxPlacement/FileNaming/FilePer — but
 // deliberately NOT ApplicationFileMode, left AppFileUnset on every child
 // regardless of the parent's own value. kure's walker sets only three of the
-// five layout-rule fields on the layout it hands the augmenter; crane's
-// identical augmenter copies all five verbatim, carrying the same latent
-// dangling-reference risk this deviation avoids (fixing crane's copy is out
-// of this repo's scope). kure's parent-side kustomization writer decides how
+// five layout-rule fields on the layout it hands the augmenter; a downstream
+// consumer's identical augmenter copies all five verbatim, carrying the same
+// latent dangling-reference risk this deviation avoids (fixing that other
+// copy is out of this repo's scope). kure's parent-side kustomization writer decides how
 // to reference a child from the child's own literal ApplicationFileMode
 // field alone, never resolved through a Config fallback: AppFileSingle makes
 // it emit a bare "<child.Name>.yaml" sibling-file reference, correct only
@@ -872,9 +873,9 @@ var _ oam.LayoutAugmentationCoverage = (*augmentingHelmchartConfig)(nil)
 // Residual gap, documented not fixed: two DIFFERENT Applications with a
 // same-named component still collide (component names are unique only
 // within one Application, but every emitted Kustomization CR shares one
-// controller namespace) — crane's identical augmenter admits the same gap;
-// inherited here, newly exposed by this repo's own template-delivery
-// support. Out of scope; see the components README.
+// controller namespace) — a downstream consumer's identical augmenter
+// admits the same gap; inherited here, newly exposed by this repo's own
+// template-delivery support. Out of scope; see the components README.
 func (c *HelmchartConfig) augmentLayoutTemplate(ml *layout.ManifestLayout) error {
 	if err := c.ensureRendered(); err != nil {
 		return err
