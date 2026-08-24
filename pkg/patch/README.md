@@ -179,6 +179,11 @@ SMP patches are applied before field-level patches. See [DESIGN.md](https://gith
 | `DetectSMPConflicts(patches, lookup, gvk)` | Check pairwise conflicts among patches |
 | `ResolveWithConflictCheck()` | Resolve patches with conflict detection |
 
+`DetectSMPConflicts` compares every patch pair exactly once (`O(n²)` in the
+number of patches targeting one resource) rather than sampling, so it stays
+accurate; a resource's authored patch list is expected to stay small, which is
+what keeps the quadratic cost unnoticeable in practice.
+
 ## Related Packages
 
 - [pkg/oam](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) - the `kurel build` pipeline; independent of this package (see Scope and Status above)

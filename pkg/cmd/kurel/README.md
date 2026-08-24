@@ -69,6 +69,13 @@ and precedence rules.
 | `--capability-def` | Additional `CapabilityDefinition` file (repeatable). |
 | `--strict-capabilities` | Error (instead of warn) on unvalidated custom capabilities. |
 
+With `--output`, the written file is named `<app.Metadata.Name>.yaml` inside that
+directory. `Metadata.Name` is safe to use unescaped here because parsing already
+rejects any Application whose name fails `validation.IsDNS1123Subdomain` (see the
+[OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s Parsing
+section) before `build` ever reaches the write step, so the filename can't carry a
+`/` or `..` path-traversal segment.
+
 ## Global flags
 
 Available on all commands (defined in [`pkg/cmd/shared/options`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/cmd/shared/options)):

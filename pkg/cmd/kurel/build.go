@@ -352,6 +352,10 @@ func writeOutputDir(dir, appName string, data []byte) error {
 		return errors.Wrapf(err, "creating output directory %q", dir)
 	}
 	outPath := filepath.Join(dir, appName+".yaml")
+	//nolint:gosec // G703: gosec's taint analysis flags appName as attacker-controlled,
+	// but oam.validateWithExtraTypes rejects any Metadata.Name that fails
+	// validation.IsDNS1123Subdomain before parsing succeeds, so it can never contain
+	// '/' or '..'. dir is a user-supplied --output flag, expected for a build CLI.
 	if err := os.WriteFile(outPath, data, 0644); err != nil {
 		return errors.Wrapf(err, "writing output file %q", outPath)
 	}
