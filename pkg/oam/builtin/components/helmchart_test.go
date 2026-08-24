@@ -984,6 +984,12 @@ func TestHelmchartConfig_ValuesModeConfigMap_AugmentsLayout(t *testing.T) {
 	if !ok {
 		t.Fatalf("ml.Resources[0] = %T, want *corev1.ConfigMap", ml.Resources[0])
 	}
+	// The emitted ConfigMap must carry TypeMeta: a zero-value TypeMeta's
+	// apiVersion/kind fields are `omitempty` and json.Marshal drops them
+	// entirely, producing a manifest kubectl apply/kustomize build reject.
+	if cm.APIVersion != "v1" || cm.Kind != "ConfigMap" {
+		t.Errorf("ConfigMap TypeMeta = {APIVersion: %q, Kind: %q}, want {APIVersion: \"v1\", Kind: \"ConfigMap\"}", cm.APIVersion, cm.Kind)
+	}
 	if len(ml.ExtraFiles) != 0 {
 		t.Errorf("ml.ExtraFiles has %d entries, want 0", len(ml.ExtraFiles))
 	}

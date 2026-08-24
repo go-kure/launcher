@@ -8,12 +8,12 @@ import (
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -282,19 +282,28 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 }
 
 // wrapIfHelmchartAugmenter returns cfg wrapped in augmentingHelmchartConfig
-// only when AugmentLayout would actually do something: delivery: template
-// (Helm hook-group repartitioning, added in a follow-up PR) or valuesMode:
-// configMap with at least one value to externalize. kure's layout walker
-// type-asserts layout.LayoutAugmenter by PRESENCE (pkg/stack/layout/walker.go)
-// to decide whether an app gets its own flat-bundle sub-layout or merges into
-// its parent's — a structural decision, not a side effect with a safe no-op
-// default. So *HelmchartConfig itself must stay free of the AugmentLayout
-// method (a hook-free, inline-values config must not satisfy the interface),
-// and the wrapper is applied conditionally here rather than unconditionally.
-// See also traits.wrapIfAugmenter, which forwards this presence through trait
+// only when AugmentLayout would actually do something: today that's
+// valuesMode: configMap with at least one value to externalize. kure's layout
+// walker type-asserts layout.LayoutAugmenter by PRESENCE
+// (pkg/stack/layout/walker.go) to decide whether an app gets its own
+// flat-bundle sub-layout or merges into its parent's — a structural decision,
+// not a side effect with a safe no-op default. So *HelmchartConfig itself
+// must stay free of the AugmentLayout method (a hook-free, inline-values
+// config must not satisfy the interface), and the wrapper is applied
+// conditionally here rather than unconditionally. See also
+// traits.wrapIfAugmenter, which forwards this presence through trait
 // decorators generically.
+//
+// delivery: template does NOT gate this yet: AugmentLayout's Helm
+// hook-group repartitioning for template delivery is PR2's work, not
+// implemented in this PR. Wrapping a template-delivery config now would make
+// it satisfy LayoutAugmenter with an effectively no-op AugmentLayout, which
+// still triggers the walker's presence-based flat-bundle relocation for zero
+// benefit. A future PR should add `|| cfg.Delivery == "template"` back to the
+// condition below in the same change that implements the template branch in
+// AugmentLayout — not before.
 func wrapIfHelmchartAugmenter(cfg *HelmchartConfig) stack.ApplicationConfig {
-	if cfg.Delivery == "template" || (cfg.ValuesMode == "configMap" && len(cfg.Values) > 0) {
+	if cfg.ValuesMode == "configMap" && len(cfg.Values) > 0 {
 		return &augmentingHelmchartConfig{cfg}
 	}
 	return cfg
@@ -624,8 +633,10 @@ type augmentingHelmchartConfig struct {
 // cannot express. Today: native delivery under valuesMode: configMap emits
 // the values.yaml ConfigMap that buildHelmRelease's generated valuesFrom
 // entry references. (Template delivery's hook-group repartitioning is a
-// follow-up PR; wrapIfHelmchartAugmenter already gates on delivery: template
-// so this method is called for that case too, once implemented.)
+// follow-up PR; wrapIfHelmchartAugmenter does not yet gate on delivery:
+// template — see that function's doc comment — so this method is not called
+// for template delivery until that PR both implements the branch here and
+// restores the gate.)
 func (c *augmentingHelmchartConfig) AugmentLayout(ml *layout.ManifestLayout) error {
 	if c.ValuesMode == "configMap" && len(c.Values) > 0 {
 		b, err := yaml.Marshal(c.Values)
@@ -644,13 +655,19 @@ func (c *augmentingHelmchartConfig) AugmentLayout(ml *layout.ManifestLayout) err
 		// namespace field of its own and resolves only within the referring
 		// HelmRelease's own namespace, so an unset namespace here would
 		// silently break resolution whenever SetFluxNamespace is used.
-		ml.Resources = append(ml.Resources, &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      valuesConfigMapName(c.Name),
-				Namespace: c.fluxNamespace(),
-			},
-			Data: map[string]string{"values.yaml": string(b)},
-		})
+		//
+		// Built via kubernetes.CreateConfigMap (this repo's established
+		// constructor, pkg/oam/builtin/traits/configmap.go) rather than a bare
+		// &corev1.ConfigMap{} literal: the literal form leaves TypeMeta zero-
+		// valued, and json.Marshal's `omitempty` on TypeMeta's fields then
+		// drops apiVersion/kind from the serialized manifest entirely — both
+		// kubectl apply and kustomize build reject the result, and the
+		// on-disk filename derivation (which reads the GVK's Kind) breaks
+		// too. CreateConfigMap stamps TypeMeta plus common labels/annotations
+		// consistently with every other ConfigMap this codebase emits.
+		cm := kubernetes.CreateConfigMap(valuesConfigMapName(c.Name), c.fluxNamespace())
+		kubernetes.AddConfigMapDataMap(cm, map[string]string{"values.yaml": string(b)})
+		ml.Resources = append(ml.Resources, cm)
 	}
 	return nil
 }
