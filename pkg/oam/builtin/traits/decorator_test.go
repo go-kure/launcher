@@ -9,6 +9,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -199,6 +200,71 @@ func TestWrapIfAugmenter_AllConstructionSites(t *testing.T) {
 			t.Fatalf("Apply: %v", err)
 		}
 		assertForwards(t, app.Config, &called)
+	})
+
+	// NewConfigMapDecorator/RealHelmchart* below is the end-to-end proof that
+	// presence-based forwarding fires for a production component (a real
+	// valuesMode: configMap helmchart config), not just augmenterStub. See
+	// TestConfigMapDecorator_ForwardsLayoutAugmenter above for the stub-based
+	// coverage of this same construction site.
+	t.Run("NewConfigMapDecorator/RealHelmchartConfigMapValues", func(t *testing.T) {
+		h := &components.HelmchartHandler{}
+		cfg, err := h.ToApplicationConfig(&oam.Component{
+			Name: "metrics",
+			Type: "helmchart",
+			Properties: map[string]any{
+				"chart":      "kube-prometheus-stack",
+				"valuesMode": "configMap",
+				"values":     map[string]any{"replicaCount": 3},
+				"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+			},
+		}, "monitoring")
+		if err != nil {
+			t.Fatalf("ToApplicationConfig: %v", err)
+		}
+
+		dec := traits.NewConfigMapDecorator(cfg, "c", "/etc/c")
+		aug, ok := dec.(interface {
+			AugmentLayout(l *layout.ManifestLayout) error
+		})
+		if !ok {
+			t.Fatal("decorator wrapping a real configMap-mode helmchart config does not implement LayoutAugmenter")
+		}
+		ml := &layout.ManifestLayout{}
+		if err := aug.AugmentLayout(ml); err != nil {
+			t.Fatalf("AugmentLayout: %v", err)
+		}
+		if len(ml.Resources) != 1 {
+			t.Errorf("ml.Resources has %d entries, want 1 (the generated values ConfigMap)", len(ml.Resources))
+		}
+	})
+
+	// RealHelmchartInlineDoesNotWrap mirrors the negative guard in
+	// TestConfigMapDecorator_DoesNotClaimLayoutAugmenter_WhenInnerDoesNot,
+	// but with a real inline-mode helmchart config instead of nakedStub: the
+	// regression this guards against would silently relocate every
+	// flat-bundle helmchart app into per-app sub-layout placement.
+	t.Run("NewConfigMapDecorator/RealHelmchartInlineDoesNotWrap", func(t *testing.T) {
+		h := &components.HelmchartHandler{}
+		cfg, err := h.ToApplicationConfig(&oam.Component{
+			Name: "metrics",
+			Type: "helmchart",
+			Properties: map[string]any{
+				"chart":  "kube-prometheus-stack",
+				"values": map[string]any{"replicaCount": 3},
+				"source": map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+			},
+		}, "monitoring")
+		if err != nil {
+			t.Fatalf("ToApplicationConfig: %v", err)
+		}
+
+		dec := traits.NewConfigMapDecorator(cfg, "c", "/etc/c")
+		if _, ok := dec.(interface {
+			AugmentLayout(l *layout.ManifestLayout) error
+		}); ok {
+			t.Fatal("decorator wrapping an inline-mode (no-op augmenter) helmchart config must not implement LayoutAugmenter")
+		}
 	})
 }
 
