@@ -84,7 +84,7 @@ func enforceMaxStorageSize(current, max string) error {
 // otherwise open: an author could set privileged:true with nothing checking it.
 // The pod-level fields (hostNetwork/hostPID/hostIPC — not part of this
 // container-level property at all) have no existing Policy hook and none is
-// added here; see the launcher#278 ledger. Of securityContext.capabilities,
+// added here; see the go-kure/launcher#278 ledger. Of securityContext.capabilities,
 // Add is enforced separately (enforceContainerCapabilities below); Drop is
 // intentionally never checked against policy — dropping a capability is
 // strictly hardening and can never violate one.
