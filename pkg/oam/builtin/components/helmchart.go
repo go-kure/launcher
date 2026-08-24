@@ -165,7 +165,13 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 	// Resolve valuesMode: component property → handler registration-time
 	// default (h.ValuesMode) → "inline". Mirrors PropertySchema's computed
 	// Default above so the resolved value and the reported default agree.
+	// valuesModeExplicit tracks whether the component itself set the
+	// property, as opposed to inheriting h.ValuesMode — the template-delivery
+	// rejection below must fire only on an explicit request; a fleet-wide
+	// handler default of "configMap" must not break every template-delivery
+	// component that never mentioned valuesMode.
 	cfg.ValuesMode, _ = props["valuesMode"].(string)
+	valuesModeExplicit := cfg.ValuesMode != ""
 	if cfg.ValuesMode == "" {
 		cfg.ValuesMode = h.ValuesMode
 	}
@@ -259,7 +265,14 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 			return nil, errors.New("helmchart: delivery: template does not support valuesFrom (cluster-side values are not resolvable at build time)")
 		}
 		if cfg.ValuesMode == "configMap" {
-			return nil, errors.New("helmchart: delivery: template does not support valuesMode: configMap (values are baked into the client-side render at build time, not resolved from a cluster-side ConfigMap)")
+			if valuesModeExplicit {
+				return nil, errors.New("helmchart: delivery: template does not support valuesMode: configMap (values are baked into the client-side render at build time, not resolved from a cluster-side ConfigMap)")
+			}
+			// Inherited from the handler's fleet-wide default, not requested
+			// by this component — template delivery has no configMap mode to
+			// honor, so fall back to inline rather than rejecting every
+			// template-delivery component under a configMap-default handler.
+			cfg.ValuesMode = "inline"
 		}
 		if cfg.ReleaseName != "" {
 			return nil, errors.New("helmchart: delivery: template does not support releaseName")

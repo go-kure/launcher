@@ -514,6 +514,44 @@ func TestHelmchartHandler_DeliveryTemplate_ValuesModeConfigMapRejected(t *testin
 	}
 }
 
+// TestHelmchartHandler_DeliveryTemplate_HandlerDefaultConfigMapFallsBackInline
+// pins that a fleet-wide handler default of valuesMode: configMap does NOT
+// reject a template-delivery component that never set valuesMode itself —
+// only an explicit component-level "configMap" does (the test above). A
+// handler default is opt-out infrastructure, not a per-component request;
+// template delivery has no configMap mode to honor, so it silently resolves
+// to inline instead of breaking every template chart under such a handler.
+func TestHelmchartHandler_DeliveryTemplate_HandlerDefaultConfigMapFallsBackInline(t *testing.T) {
+	h := &components.HelmchartHandler{ValuesMode: "configMap"}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":    "kube-prometheus-stack",
+			"delivery": "template",
+			"source": map[string]any{
+				"url": "https://prometheus-community.github.io/helm-charts",
+			},
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: unexpected error with inherited handler default: %v", err)
+	}
+	// Template delivery never calls buildHelmRelease (no HelmRelease is
+	// generated at all), so the forced-inline resolution has no HelmRelease
+	// field to inspect; what's externally observable is that it did not
+	// error, and — per the D2 invariant — that it did not get wrapped as a
+	// LayoutAugmenter (PR2's template branch isn't implemented, so a
+	// configMap-flavored gate here would relocate the flat bundle for no
+	// benefit, the exact regression wrapIfHelmchartAugmenter's own doc
+	// comment warns against).
+	if _, ok := cfg.(interface {
+		AugmentLayout(*layout.ManifestLayout) error
+	}); ok {
+		t.Fatal("template-delivery config with inherited handler default must not be a LayoutAugmenter")
+	}
+}
+
 func TestHelmchartGetSourceKey_TemplateReturnsEmpty(t *testing.T) {
 	h := &components.HelmchartHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
