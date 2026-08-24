@@ -125,13 +125,15 @@ func TestValuesConfigMapName_TruncatesLongComponentName(t *testing.T) {
 		t.Errorf("plain: %q does not end in -values", gotPlain)
 	}
 
-	// Case 2: the 246-char truncation boundary lands immediately after a
-	// literal '.' — dotBoundary[245] == '.', so dotBoundary[:246] ends in
-	// ".", exercising the TrimRight(name, "-.") cleanup that prevents a
-	// dangling '.' from being left at the end of the truncated prefix.
-	dotBoundary := strings.Repeat("a", 245) + "." + strings.Repeat("b", 7)
-	if dotBoundary[245] != '.' {
-		t.Fatalf("test setup: dotBoundary[245] = %q, want '.'", dotBoundary[245])
+	// Case 2: the actual truncation boundary (prefixLen = maxPrefix(246) -
+	// hashLen(8) - 1 = 237, not 246 — the hash suffix eats into maxPrefix)
+	// lands immediately after a literal '.' — dotBoundary[236] == '.', so
+	// dotBoundary[:237] ends in ".", exercising the TrimRight(name, "-.")
+	// cleanup that prevents a dangling '.' from being left at the end of the
+	// truncated prefix.
+	dotBoundary := strings.Repeat("a", 236) + "." + strings.Repeat("b", 16)
+	if dotBoundary[236] != '.' {
+		t.Fatalf("test setup: dotBoundary[236] = %q, want '.'", dotBoundary[236])
 	}
 	gotDot := valuesConfigMapName(dotBoundary)
 	if len(gotDot) > 253 {
