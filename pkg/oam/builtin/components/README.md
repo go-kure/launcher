@@ -659,7 +659,14 @@ registry [...]`.
   the user's entry wins on overlapping keys (Flux merges `spec.valuesFrom` in list
   order, and the generated reference is added before the user's own entries);
   under `inline` mode, `spec.values` is merged last and always wins over any
-  `valuesFrom` entry on overlapping keys. Known limitation: `delivery: template`
+  `valuesFrom` entry on overlapping keys. Known limitation: a values-only edit
+  under `valuesMode: configMap` changes only the generated `ConfigMap`'s data —
+  the `HelmRelease` itself (which carries only the stable ConfigMap name and
+  key) is untouched, so whether that change is picked up promptly depends on
+  the installed `helm-controller`'s own watch behavior for referenced
+  `valuesFrom` objects, which this repo does not control or vendor. If
+  reconciliation does not pick it up immediately, trigger one explicitly:
+  `flux reconcile helmrelease <name>`. Known limitation: `delivery: template`
   rejects `releaseName`/`targetNamespace`/`valuesFrom`/`valuesMode: configMap`/
   `interval`/`driftDetection`/`install.crds`/`upgrade.crds` outright (compile-time
   validation error) rather than applying them — the client-side render always uses
