@@ -65,8 +65,12 @@ fi
 # locally-installed plugin would otherwise silently pass a presence-only check and
 # validate against different catalog rules than CI.
 ensure_schema_plugin() {
+  if ! command -v flux >/dev/null; then
+    echo "ERROR: flux CLI not found — install via mise (see mise.toml)" >&2
+    exit 1
+  fi
   local installed
-  installed="$(flux plugin list 2>/dev/null | awk -F'\t' '$1 ~ /^schema[[:space:]]*$/ {gsub(/[[:space:]]+$/, "", $2); print $2}')"
+  installed="$(flux plugin list | awk -F'\t' '$1 ~ /^schema[[:space:]]*$/ {gsub(/[[:space:]]+$/, "", $2); print $2}')"
   if [[ "$installed" != "$SCHEMA_PLUGIN_VERSION" ]]; then
     echo "Installing flux-schema plugin ${SCHEMA_PLUGIN_VERSION} (found: ${installed:-none})..."
     flux plugin install "schema@${SCHEMA_PLUGIN_VERSION}"
