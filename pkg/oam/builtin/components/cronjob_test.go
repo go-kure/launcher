@@ -1,16 +1,32 @@
 package components_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
+
+// findCronJob returns the *batchv1.CronJob from objs, failing the test if none
+// is present. Shared by the JobSpecConfig / CronJobSpec-level projection tests
+// below to avoid repeating the same objects loop for each one.
+func findCronJob(t *testing.T, objs []*client.Object) *batchv1.CronJob {
+	t.Helper()
+	for _, obj := range objs {
+		if cj, ok := (*obj).(*batchv1.CronJob); ok {
+			return cj
+		}
+	}
+	t.Fatal("CronJob not found")
+	return nil
+}
 
 func TestCronjobHandler_CanHandle(t *testing.T) {
 	h := &components.CronjobHandler{}
@@ -50,18 +66,50 @@ func TestCronjobHandler_RequiredSchedule_Missing(t *testing.T) {
 	}
 }
 
-func TestCronjobHandler_InvalidSchedule(t *testing.T) {
-	h := &components.CronjobHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "@daily",
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for non-standard cron schedule")
+// TestCronjobHandler_Schedule_Table covers the widened schedule grammar
+// (validateCronSchedule, cronjob.go): the pre-existing 5-field form (still
+// accepted, including the two nonsensical-but-syntactically-5-field cases the
+// plan's "What this does NOT solve" section discloses as a deliberate, not
+// tightened, gap — see plan-279-cronjob-jobspec.md), the fixed @-descriptor
+// set, and "@every <duration>" with the duration validated via
+// time.ParseDuration rather than a bare-suffix regex.
+func TestCronjobHandler_Schedule_Table(t *testing.T) {
+	cases := []struct {
+		name      string
+		schedule  string
+		wantError bool
+	}{
+		{"5field_standard", "0 2 * * *", false},
+		{"5field_nonsensical_out_of_range_still_accepted", "99 99 99 99 99", false},
+		{"5field_nonsensical_tokens_still_accepted", "nope nope nope nope nope", false},
+		{"descriptor_daily", "@daily", false},
+		{"descriptor_hourly", "@hourly", false},
+		{"descriptor_yearly", "@yearly", false},
+		{"every_valid_duration", "@every 1h30m", false},
+		{"reboot_rejected", "@reboot", true},
+		{"6field_rejected", "0 0 2 * * *", true},
+		{"garbage_rejected", "not a schedule", true},
+		{"empty_rejected", "", true},
+		{"every_malformed_duration_rejected", "@every nope", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &components.CronjobHandler{}
+			_, err := h.ToApplicationConfig(&oam.Component{
+				Name: "job",
+				Type: "cronjob",
+				Properties: map[string]any{
+					"image":    "ghcr.io/org/job:v1.0.0",
+					"schedule": tc.schedule,
+				},
+			}, "default")
+			if tc.wantError && err == nil {
+				t.Fatalf("schedule %q: expected error, got nil", tc.schedule)
+			}
+			if !tc.wantError && err != nil {
+				t.Fatalf("schedule %q: expected no error, got %v", tc.schedule, err)
+			}
+		})
 	}
 }
 
@@ -898,5 +946,326 @@ func TestCronjobConfig_ApplyPolicy_InitContainerCapabilitiesDenied(t *testing.T)
 	}
 	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
 		t.Errorf("expected no error under the default-allow NoopPolicy-equivalent stub, got %v", err)
+	}
+}
+
+// --- go-kure/launcher#279 PR 1: CronJobSpec/JobSpec completion ---
+
+func TestCronjobHandler_ConcurrencyPolicy_Projected(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":             "ghcr.io/org/job:v1.0.0",
+			"schedule":          "0 2 * * *",
+			"concurrencyPolicy": "Forbid",
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("job", "default", cfg)
+	objs, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	cj := findCronJob(t, objs)
+	if cj.Spec.ConcurrencyPolicy != batchv1.ForbidConcurrent {
+		t.Errorf("ConcurrencyPolicy = %q, want %q", cj.Spec.ConcurrencyPolicy, batchv1.ForbidConcurrent)
+	}
+}
+
+func TestCronjobHandler_Suspend_Projected(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+			"suspend":  true,
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("job", "default", cfg)
+	objs, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	cj := findCronJob(t, objs)
+	if cj.Spec.Suspend == nil || !*cj.Spec.Suspend {
+		t.Errorf("Suspend = %v, want true", cj.Spec.Suspend)
+	}
+}
+
+func TestCronjobHandler_StartingDeadlineSeconds_Projected(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":                   "ghcr.io/org/job:v1.0.0",
+			"schedule":                "0 2 * * *",
+			"startingDeadlineSeconds": 120,
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("job", "default", cfg)
+	objs, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	cj := findCronJob(t, objs)
+	if cj.Spec.StartingDeadlineSeconds == nil || *cj.Spec.StartingDeadlineSeconds != 120 {
+		t.Errorf("StartingDeadlineSeconds = %v, want 120", cj.Spec.StartingDeadlineSeconds)
+	}
+}
+
+func TestCronjobHandler_TimeZone_Projected(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+			"timeZone": "Europe/Brussels",
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("job", "default", cfg)
+	objs, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	cj := findCronJob(t, objs)
+	if cj.Spec.TimeZone == nil || *cj.Spec.TimeZone != "Europe/Brussels" {
+		t.Errorf("TimeZone = %v, want \"Europe/Brussels\"", cj.Spec.TimeZone)
+	}
+}
+
+// TestCronjobHandler_JobSpec_Projected asserts all six JobSpec fields
+// individually (rather than diffing the whole batchv1.JobSpec, which also
+// carries Template and would need a much larger literal) — per the plan's
+// oracle guidance, deleting any one of applyJobSpec's six assignments must
+// fail this test, so each field gets its own explicit assertion.
+func TestCronjobHandler_JobSpec_Projected(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":                   "ghcr.io/org/job:v1.0.0",
+			"schedule":                "0 2 * * *",
+			"backoffLimit":            4,
+			"completions":             3,
+			"parallelism":             2,
+			"activeDeadlineSeconds":   600,
+			"ttlSecondsAfterFinished": 3600,
+			"completionMode":          "Indexed",
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("job", "default", cfg)
+	objs, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	spec := findCronJob(t, objs).Spec.JobTemplate.Spec
+	if spec.BackoffLimit == nil || *spec.BackoffLimit != 4 {
+		t.Errorf("BackoffLimit = %v, want 4", spec.BackoffLimit)
+	}
+	if spec.Completions == nil || *spec.Completions != 3 {
+		t.Errorf("Completions = %v, want 3", spec.Completions)
+	}
+	if spec.Parallelism == nil || *spec.Parallelism != 2 {
+		t.Errorf("Parallelism = %v, want 2", spec.Parallelism)
+	}
+	if spec.ActiveDeadlineSeconds == nil || *spec.ActiveDeadlineSeconds != 600 {
+		t.Errorf("ActiveDeadlineSeconds = %v, want 600", spec.ActiveDeadlineSeconds)
+	}
+	if spec.TTLSecondsAfterFinished == nil || *spec.TTLSecondsAfterFinished != 3600 {
+		t.Errorf("TTLSecondsAfterFinished = %v, want 3600", spec.TTLSecondsAfterFinished)
+	}
+	if spec.CompletionMode == nil || *spec.CompletionMode != batchv1.IndexedCompletion {
+		t.Errorf("CompletionMode = %v, want %q", spec.CompletionMode, batchv1.IndexedCompletion)
+	}
+}
+
+// TestCronjobHandler_OptionalSpecFields_Unset_NotEmitted protects against the
+// "suspend: false"-on-every-CronJob regression class: every optional field
+// below must stay nil/empty when unauthored. Oracle: temporarily make one
+// guarded setter in createCronJob unconditional and confirm this test fails.
+func TestCronjobHandler_OptionalSpecFields_Unset_NotEmitted(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("job", "default", cfg)
+	objs, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	cj := findCronJob(t, objs)
+	if cj.Spec.Suspend != nil {
+		t.Errorf("Suspend = %v, want nil", cj.Spec.Suspend)
+	}
+	if cj.Spec.StartingDeadlineSeconds != nil {
+		t.Errorf("StartingDeadlineSeconds = %v, want nil", cj.Spec.StartingDeadlineSeconds)
+	}
+	if cj.Spec.TimeZone != nil {
+		t.Errorf("TimeZone = %v, want nil", cj.Spec.TimeZone)
+	}
+	if cj.Spec.ConcurrencyPolicy != "" {
+		t.Errorf("ConcurrencyPolicy = %q, want empty", cj.Spec.ConcurrencyPolicy)
+	}
+	spec := cj.Spec.JobTemplate.Spec
+	if spec.BackoffLimit != nil {
+		t.Errorf("BackoffLimit = %v, want nil", spec.BackoffLimit)
+	}
+	if spec.Completions != nil {
+		t.Errorf("Completions = %v, want nil", spec.Completions)
+	}
+	if spec.Parallelism != nil {
+		t.Errorf("Parallelism = %v, want nil", spec.Parallelism)
+	}
+	if spec.ActiveDeadlineSeconds != nil {
+		t.Errorf("ActiveDeadlineSeconds = %v, want nil", spec.ActiveDeadlineSeconds)
+	}
+	if spec.TTLSecondsAfterFinished != nil {
+		t.Errorf("TTLSecondsAfterFinished = %v, want nil", spec.TTLSecondsAfterFinished)
+	}
+	if spec.CompletionMode != nil {
+		t.Errorf("CompletionMode = %v, want nil", spec.CompletionMode)
+	}
+}
+
+// TestCronjobHandler_CronSpecAndJobSpec_Rejections covers the per-field bound
+// checks and the cross-field/boundary cases the per-field checks alone would
+// not catch (activeDeadlineSeconds==0, completionMode Indexed without
+// completions, completionMode Indexed with parallelism > 100000) plus the
+// timeZone guards (empty string, non-IANA name, case-insensitive "Local").
+// Each case asserts the field name appears in the error (strings.Contains),
+// not just err != nil, so a case rejected for the wrong reason still fails.
+func TestCronjobHandler_CronSpecAndJobSpec_Rejections(t *testing.T) {
+	cases := []struct {
+		name       string
+		props      map[string]any
+		wantSubstr string
+	}{
+		{"backoffLimit_negative", map[string]any{"backoffLimit": -1}, "backoffLimit"},
+		{"completions_negative", map[string]any{"completions": -1}, "completions"},
+		{"parallelism_negative", map[string]any{"parallelism": -1}, "parallelism"},
+		{"activeDeadlineSeconds_zero_rejected", map[string]any{"activeDeadlineSeconds": 0}, "activeDeadlineSeconds"},
+		{"activeDeadlineSeconds_negative", map[string]any{"activeDeadlineSeconds": -5}, "activeDeadlineSeconds"},
+		{"ttlSecondsAfterFinished_negative", map[string]any{"ttlSecondsAfterFinished": -1}, "ttlSecondsAfterFinished"},
+		{"completionMode_invalid_enum", map[string]any{"completionMode": "Bogus"}, "completionMode"},
+		{"completionMode_indexed_without_completions", map[string]any{"completionMode": "Indexed"}, "completionMode"},
+		{"completionMode_indexed_parallelism_over_max", map[string]any{"completionMode": "Indexed", "completions": 1, "parallelism": 100001}, "parallelism"},
+		{"concurrencyPolicy_invalid_enum", map[string]any{"concurrencyPolicy": "Bogus"}, "concurrencyPolicy"},
+		{"suspend_non_bool", map[string]any{"suspend": "yes"}, "suspend"},
+		{"startingDeadlineSeconds_negative", map[string]any{"startingDeadlineSeconds": -1}, "startingDeadlineSeconds"},
+		{"timeZone_empty_string_rejected", map[string]any{"timeZone": ""}, "timeZone"},
+		{"timeZone_not_a_real_zone_rejected", map[string]any{"timeZone": "Not/AZone"}, "timeZone"},
+		{"timeZone_local_rejected", map[string]any{"timeZone": "Local"}, "timeZone"},
+		{"timeZone_local_lowercase_rejected", map[string]any{"timeZone": "local"}, "timeZone"},
+		{"timeZone_non_string_rejected", map[string]any{"timeZone": 5}, "timeZone"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := map[string]any{
+				"image":    "ghcr.io/org/job:v1.0.0",
+				"schedule": "0 2 * * *",
+			}
+			for k, v := range tc.props {
+				props[k] = v
+			}
+			h := &components.CronjobHandler{}
+			_, err := h.ToApplicationConfig(&oam.Component{
+				Name: "job", Type: "cronjob", Properties: props,
+			}, "default")
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Errorf("expected error to contain %q, got %q", tc.wantSubstr, err.Error())
+			}
+		})
+	}
+}
+
+// TestCronjobHandler_PropertySchema_JobSpecAndCronSpecKeys_Present is the
+// round-7 schema-shape completeness gate (see plan-279-cronjob-jobspec.md
+// "Tests" item 5): PropertySchema() is a published contract for an
+// out-of-process validator (property_validate.go:15) that none of the tests
+// above exercise directly, so a forgotten maps.Copy call or a mistyped
+// Enum/Default would pass every other test in this file silently. Asserts the
+// full map's cardinality (26 = the 16 pre-existing keys plus the 10 this PR
+// adds) so an omitted key is caught, and each of the 10 new keys'
+// Type/Enum/Default/Description against a literal so a mistyped one is too.
+// Oracle: delete one key from schemaJobSpec (or its maps.Copy call in
+// PropertySchema()) and confirm this test fails.
+func TestCronjobHandler_PropertySchema_JobSpecAndCronSpecKeys_Present(t *testing.T) {
+	h := &components.CronjobHandler{}
+	schema := h.PropertySchema()
+
+	const wantTotalKeys = 26
+	if len(schema) != wantTotalKeys {
+		t.Fatalf("PropertySchema() returned %d keys, want %d", len(schema), wantTotalKeys)
+	}
+
+	type want struct {
+		typ  oam.PropertyType
+		enum []any
+		def  any
+	}
+	cases := map[string]want{
+		"concurrencyPolicy":       {typ: oam.PropertyTypeString, enum: []any{"Allow", "Forbid", "Replace"}, def: "Allow"},
+		"suspend":                 {typ: oam.PropertyTypeBoolean},
+		"startingDeadlineSeconds": {typ: oam.PropertyTypeInteger},
+		"timeZone":                {typ: oam.PropertyTypeString},
+		"backoffLimit":            {typ: oam.PropertyTypeInteger},
+		"completions":             {typ: oam.PropertyTypeInteger},
+		"parallelism":             {typ: oam.PropertyTypeInteger},
+		"activeDeadlineSeconds":   {typ: oam.PropertyTypeInteger},
+		"ttlSecondsAfterFinished": {typ: oam.PropertyTypeInteger},
+		"completionMode":          {typ: oam.PropertyTypeString, enum: []any{"NonIndexed", "Indexed"}},
+	}
+
+	for key, w := range cases {
+		node, ok := schema[key]
+		if !ok {
+			t.Errorf("PropertySchema() missing key %q", key)
+			continue
+		}
+		if node.Type != w.typ {
+			t.Errorf("%s: Type = %q, want %q", key, node.Type, w.typ)
+		}
+		if node.Description == "" {
+			t.Errorf("%s: Description is empty", key)
+		}
+		if len(w.enum) > 0 && !slices.Equal(node.Enum, w.enum) {
+			t.Errorf("%s: Enum = %v, want %v", key, node.Enum, w.enum)
+		}
+		if w.def != nil && node.Default != w.def {
+			t.Errorf("%s: Default = %v, want %v", key, node.Default, w.def)
+		}
 	}
 }
