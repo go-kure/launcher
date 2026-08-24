@@ -99,6 +99,9 @@ type EnvironmentPolicy struct {
     Security     SecurityPolicy         // AllowHostNetwork, AllowPrivileged, AllowHostPID, AllowHostIPC, AllowHostPathVolumes
     Placement    *PlacementRules        // optional
     Capabilities *CapabilityConstraints // Allowed, Forbidden, Required
+    // OAM trait-type capabilities (Capabilities above), not Linux container
+    // capabilities — see the accessor pair below.
+    ContainerCapabilities *ContainerCapabilityConstraints // Allowed, Forbidden
 }
 ```
 
