@@ -532,8 +532,11 @@ above, since each `initContainers`/`sidecars` entry is its own container),
 and `affinity`.
 
 `securityContext.privileged: true` is rejected unless the environment policy's
-`AllowPrivileged()` allows it — the one `securityContext` field enforced today
-(`enforce.go`'s `enforcePrivileged`); the others have no policy hook yet.
+`AllowPrivileged()` allows it (`enforce.go`'s `enforcePrivileged`).
+`securityContext.capabilities.add` is separately enforced against
+`AllowedContainerCapabilities()`/`ForbiddenContainerCapabilities()` (see above,
+`enforce.go`'s `enforceContainerCapabilities`); every other `securityContext`
+field still has no policy hook.
 
 A `volumes` entry sourced from `hostPath` is rejected unless the environment
 policy's `AllowHostPathVolumes()` allows it (`enforce.go`'s
