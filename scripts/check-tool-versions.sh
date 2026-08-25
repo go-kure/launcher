@@ -23,15 +23,18 @@ cd "$ROOT"
 MISE="mise.toml"
 # Exactly one match required, same discipline as the Makefile/ci.yml checks below, and
 # tolerant of ANY spacing around "=" (TOML permits "golangci-lint=", "golangci-lint =", etc.)
-# for the same reason those checks are: a duplicate key in a spacing this pattern couldn't see
-# would be invisible to the count while still being invalid TOML mise can't parse at all.
-MISE_PATTERN='^golangci-lint[[:space:]]*=[[:space:]]*"'
+# and either TOML quote style ("..." or '...', both valid literal/basic strings) -- a duplicate
+# key in a spacing or quoting this pattern couldn't see would be invisible to the count while
+# still being invalid TOML mise can't parse at all.
+MISE_PATTERN='^golangci-lint[[:space:]]*=[[:space:]]*["'\'']'
 mise_count="$(grep -cE "$MISE_PATTERN" "$MISE" || true)"
 if [ "$mise_count" -ne 1 ]; then
 	echo "✗ $MISE: expected exactly 1 golangci-lint [tools] entry, found $mise_count"
 	exit 1
 fi
-MISE_VAL="$(grep -E "$MISE_PATTERN" "$MISE" | cut -d'"' -f2)"
+# Strip the leading key/quote, then everything from the closing quote (whichever style opened
+# it) onward -- cut -d'"' can't do this once the quote character itself varies.
+MISE_VAL="$(grep -E "$MISE_PATTERN" "$MISE" | sed -E "s/^golangci-lint[[:space:]]*=[[:space:]]*[\"']//; s/[\"'].*//")"
 if [ -z "$MISE_VAL" ]; then
 	echo "✗ golangci-lint: not found in $MISE [tools]"
 	exit 1
