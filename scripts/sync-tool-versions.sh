@@ -14,7 +14,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 MISE="mise.toml"
-MISE_VAL="$(grep -E '^golangci-lint = "' "$MISE" | head -1 | cut -d'"' -f2)"
+# Same pattern check-tool-versions.sh's MISE_PATTERN accepts (any "=" spacing, either TOML
+# quote style) -- a narrower extraction here than the checker's count/match means a validly
+# formatted variant the checker accepts still leaves this script finding nothing to sync.
+MISE_PATTERN='^golangci-lint[[:space:]]*=[[:space:]]*["'\'']'
+MISE_VAL="$(grep -E "$MISE_PATTERN" "$MISE" | head -1 | sed -E "s/^golangci-lint[[:space:]]*=[[:space:]]*[\"']//; s/[\"'].*//")"
 if [ -z "$MISE_VAL" ]; then
 	echo "Error: golangci-lint not found in $MISE [tools]"
 	exit 1
