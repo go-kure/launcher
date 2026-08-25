@@ -21,7 +21,15 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 MISE="mise.toml"
-MISE_VAL="$(grep -E '^golangci-lint = "' "$MISE" | head -1 | cut -d'"' -f2)"
+# Exactly one match required, same discipline as the Makefile/ci.yml checks below — a
+# duplicate `golangci-lint = "..."` key is invalid TOML (mise cannot parse it at all), but
+# `head -1` would silently accept the first one and report parity anyway.
+mise_count="$(grep -cE '^golangci-lint = "' "$MISE" || true)"
+if [ "$mise_count" -ne 1 ]; then
+	echo "✗ $MISE: expected exactly 1 golangci-lint [tools] entry, found $mise_count"
+	exit 1
+fi
+MISE_VAL="$(grep -E '^golangci-lint = "' "$MISE" | cut -d'"' -f2)"
 if [ -z "$MISE_VAL" ]; then
 	echo "✗ golangci-lint: not found in $MISE [tools]"
 	exit 1
