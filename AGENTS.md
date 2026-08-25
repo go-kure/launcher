@@ -316,7 +316,7 @@ map and run `bash site/scripts/gen-docs-tables.sh`.
 
 1. **Import Errors**: Check `go.mod` for correct versions
 2. **Test Failures**: Ensure all required fields are set in constructors
-3. **golangci-lint version mismatch**: If lint fails with "Go language version used to build golangci-lint is lower than the targeted Go version", update the golangci-lint version in both `mise.toml` and `Makefile`. When bumping Go, always check that golangci-lint is built with a compatible Go version.
+3. **golangci-lint version mismatch**: If lint fails with "Go language version used to build golangci-lint is lower than the targeted Go version", bump the version in `mise.toml` and run `scripts/sync-tool-versions.sh` to propagate it to `Makefile`, `.github/workflows/ci.yml`, `docs/github-workflows.md` and `DEVELOPMENT.md` — `scripts/check-tool-versions.sh` (run during `precommit`) requires all five to match. When bumping Go, always check that golangci-lint is built with a compatible Go version.
 4. **Stale GOPATH binaries shadowing mise**: The `lint` target prepends `GOPATH/bin` to PATH so the golangci-lint version it just verified or reinstalled against `GOLANGCI_LINT_VERSION` is always the one that runs, even when a differently-versioned binary (e.g. mise-managed) is earlier on `PATH`. If you see unexpected tool versions elsewhere, check `which <tool>` vs `mise which <tool>`.
 
 ### Debugging Tips

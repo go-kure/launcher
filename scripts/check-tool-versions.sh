@@ -76,7 +76,7 @@ else
 	# docs and DEVELOPMENT.md branches already do) — a looser extraction
 	# pattern here could pull in a second line the strict count pattern
 	# doesn't count, turning ci_val into a multi-line value.
-	ci_val="$(grep -E "$CI_PATTERN" .github/workflows/ci.yml | sed -E 's/^[^:]+:[[:space:]]*//' | tr -d "\"'" | sed -E 's/^v//')"
+	ci_val="$(grep -E "$CI_PATTERN" .github/workflows/ci.yml | sed -E 's/^[^:]+:[[:space:]]*//' | tr -d "\"'" | sed -E 's/^v//; s/[[:space:]]+$//')"
 	check "ci.yml" ".github/workflows/ci.yml" "$ci_val"
 fi
 
