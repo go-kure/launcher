@@ -875,7 +875,7 @@ jobs:
       run: make deps
 
     - name: Install Flux CLI + schema plugin
-      uses: fluxcd/flux2/action@ed8c5f2c24d57715d08423d3c1a7b0554ceb030e # v2.9.4
+      uses: fluxcd/flux2/action@889be9d6cc8afa8ed639e1e1ba4ab678e3b38d8c # v2.9.4
       with:
         # Omitting `version:` resolves to the action's own "latest stable" at
         # workflow-run time (action.yml), not the SHA-pinned action's own
