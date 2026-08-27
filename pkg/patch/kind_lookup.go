@@ -1,3 +1,5 @@
+// Package patch implements strategic-merge-style patching of Kubernetes
+// manifests.
 package patch
 
 import (
