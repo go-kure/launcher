@@ -36,8 +36,6 @@ func (s *SchemeKindLookup) LookupKind(gvk schema.GroupVersionKind) (runtime.Obje
 // DefaultKindLookup returns a KindLookup backed by pkg/kubernetes.Scheme,
 // which has all core Kubernetes and registered CRD types.
 func DefaultKindLookup() (KindLookup, error) {
-	if err := kubernetes.RegisterSchemes(); err != nil {
-		return nil, err
-	}
+	kubernetes.RegisterSchemes()
 	return NewSchemeKindLookup(kubernetes.Scheme), nil
 }
