@@ -108,7 +108,7 @@ jobs:
       run: echo "$HOME/bin" >> $GITHUB_PATH
 
     - name: Validate docs map (code↔docs sync)
-      uses: go-kure/.github/.github/actions/check-doc-sync@cb7db3637c3e7a5cddf7d2599d11faef3be74465 # main
+      uses: go-kure/.github/.github/actions/check-doc-sync@eddce0baebbfbaf54b01dcfa9f624d23bbe055f4 # main
 
     - name: Inject front matter
       run: bash site/scripts/inject-frontmatter.sh
