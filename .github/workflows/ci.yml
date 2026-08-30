@@ -276,6 +276,22 @@ jobs:
     - name: Check action pins
       uses: go-kure/.github/.github/actions/check-action-pins@cb7db3637c3e7a5cddf7d2599d11faef3be74465 # main
 
+  pin-impact:
+    name: pin-impact
+    runs-on: autops-kube-kure
+    timeout-minutes: 3
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        fetch-depth: 0
+    - name: Render and gate on go-kure/.github pin impact
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        BASE_REF: ${{ github.base_ref }}
+      run: ./scripts/check-pin-impact.sh --base-ref "origin/$BASE_REF" | tee -a "$GITHUB_STEP_SUMMARY"
+
   # =============================================================================
   # Stage 2: Tests and Security (parallel with lint)
   # =============================================================================
@@ -914,7 +930,7 @@ jobs:
     name: build
     runs-on: autops-kube-kure
     timeout-minutes: 1
-    needs: [validate, test, build-binaries, docs-build, coverage-check, doc-gate, action-pins, security]
+    needs: [validate, test, build-binaries, docs-build, coverage-check, doc-gate, action-pins, security, pin-impact]
     if: always()
     steps:
     - name: Check build results
@@ -927,7 +943,8 @@ jobs:
         dg="${{ needs.doc-gate.result }}"
         ap="${{ needs.action-pins.result }}"
         sc="${{ needs.security.result }}"
-        for result in "$vl" "$tt" "$bb" "$db" "$cc" "$dg" "$ap" "$sc"; do
+        pi="${{ needs.pin-impact.result }}"
+        for result in "$vl" "$tt" "$bb" "$db" "$cc" "$dg" "$ap" "$sc" "$pi"; do
           if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
             echo "Required job failed or was cancelled (result: $result)"
             exit 1
