@@ -79,9 +79,9 @@ concurrency:
 validate-manifests  ← kurel build + flux-schema validate (non-blocking, not in `build`'s gate)
 
 PR-only jobs (parallel, non-blocking):
-┌─────────────────┐  ┌────────────┐
-│ analyze-changes │  │ docs-build │
-└─────────────────┘  └────────────┘
+┌─────────────────┐  ┌────────────┐  ┌─────────────┐
+│ analyze-changes │  │ docs-build │  │ pin-impact  │  ← still feeds `build`
+└─────────────────┘  └────────────┘  └─────────────┘
 ```
 
 On `merge_group` events (merge queue), `lint`/`test`/`build` run against the queue's
@@ -99,7 +99,8 @@ temporary branch — the merged result — before the PR is allowed to land.
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) |
-| `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security | Aggregation gate |
+| `pin-impact` | `pin-impact` | 3 min | — | Renders and gates on the real impact of a `go-kure/.github` pin bump: resolves each referenced action's `scripts/*.sh` (and their `source`d siblings), intersects against the compare diff, fails if a consumed path changed (PR only, go-kure/launcher#358) |
+| `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
 | `validate-manifests` | `validate-manifests` | 10 min | changes | `kurel build` + `flux schema validate` against the `default` (embedded) and `ecosystem` (schemas.fluxoperator.dev) catalogs for a representative `examples/*.yaml` subset; `continue-on-error: true`, not in `build`'s gate (go-kure/launcher#292) |
 | `analyze-changes` | `Analyze Changes` | 5 min | — | Changed files summary, breaking change warning for pkg/ (PR only) |
@@ -136,6 +137,13 @@ Runs on main and `release/*` branches only (not PRs):
   (`make validate-manifests`, same command locally). `continue-on-error: true` for its first cycle
   and excluded from `build`'s aggregation gate and `DEVELOPMENT.md`'s required-checks list —
   promoting it to required is a deliberate follow-up (go-kure/launcher#292)
+- **Pin-impact gate** — `pin-impact` (PR only) renders the real impact of a `go-kure/.github` pin
+  bump before merge: which actions it touches, which `scripts/*.sh` each resolves to (one level of
+  `source` included), intersected against the bump's actual diff. Fails closed on anything it can't
+  confidently resolve — an unrecognized `action.yml` shape (a nested `uses:` step, a `run:` step
+  with no `scripts/*.sh` reference) or an unrecognized `source` expression — rather than
+  under-reporting. Ported from `go-kure/kure` (go-kure/kure#729) after go-kure/launcher#358 turned
+  up the identical blind spot here
 - **Path filtering** — `dorny/paths-filter` skips jobs when unrelated files change
 - **Diff-based lint** — on PRs, lint only checks new/changed lines (`--new-from-rev`)
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages
