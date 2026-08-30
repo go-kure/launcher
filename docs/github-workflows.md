@@ -140,10 +140,13 @@ Runs on main and `release/*` branches only (not PRs):
 - **Pin-impact gate** — `pin-impact` (PR only) renders the real impact of a `go-kure/.github` pin
   bump before merge: which actions it touches, which `scripts/*.sh` each resolves to (one level of
   `source` included), intersected against the bump's actual diff. Fails closed on anything it can't
-  confidently resolve — an unrecognized `action.yml` shape (a nested `uses:` step, a `run:` step
-  with no `scripts/*.sh` reference) or an unrecognized `source` expression — rather than
-  under-reporting. Ported from `go-kure/kure` (go-kure/kure#729) after go-kure/launcher#358 turned
-  up the identical blind spot here
+  confidently resolve — an unrecognized `action.yml` shape (a nested `uses:` step, more than one
+  `run:` step, a `run:` step with no `scripts/*.sh` reference), an unrecognized or dot-segment
+  `source` expression, or a non-ahead compare — rather than under-reporting. A maintainer who has
+  reviewed a real hit and judged it safe adds the `pin-impact-ack` label to merge anyway — same
+  convention as `check-doc-gate`'s `docs-skip` label; there is no other override. Ported from
+  `go-kure/kure` (go-kure/kure#729) after go-kure/launcher#358 turned up the identical blind spot
+  here
 - **Path filtering** — `dorny/paths-filter` skips jobs when unrelated files change
 - **Diff-based lint** — on PRs, lint only checks new/changed lines (`--new-from-rev`)
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages
