@@ -59,7 +59,6 @@ for f in .github/workflows/*.yml .github/workflows/*.yaml; do
 	[ -e "$f" ] || continue
 	sed -i -E "s/^([[:space:]]*)GO_VERSION: '[^']*'/\1GO_VERSION: '$GO_VER'/" "$f"
 	sed -i "s/go-version: '[^']*'/go-version: '$GO_VER'/" "$f"
-	sed -i "s/go-version: \${{ env.GO_VERSION }}/go-version: \${{ env.GO_VERSION }}/" "$f"
 done
 # This repo is three Go modules, not one (site/ and site/scripts/kuredepsync
 # each have their own go.mod, currently on the same directive as root by
@@ -72,7 +71,12 @@ done
 # e.g.), either missing the real directive or corrupting an unrelated line.
 for gomod in go.mod site/go.mod site/scripts/kuredepsync/go.mod; do
 	[ -f "$gomod" ] || { echo "Error: $gomod not found"; exit 1; }
-	sed -i -E "s/^go [0-9]+(\.[0-9]+)*\$/go $GO_VER/" "$gomod"
+	sed -i -E "s/^go [^[:space:]]+/go $GO_VER/" "$gomod"
+	GOMOD_VER="$(grep -E '^go ' "$gomod" | head -1 | awk '{print $2}')"
+	if [ "$GOMOD_VER" != "$GO_VER" ]; then
+		echo "Error: $gomod's go directive reads '$GOMOD_VER' after sync, expected $GO_VER"
+		exit 1
+	fi
 done
 
 # validate_gomod() also hard-fails if README.md's shields.io Go badge doesn't
