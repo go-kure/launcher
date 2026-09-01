@@ -78,6 +78,11 @@ jobs:
             - '.github/workflows/**'
             - 'site/scripts/check-kure-dep-sync.sh'
             - 'site/scripts/kuredepsync/**'
+            # check-go-version walks all three modules, not just root go.mod --
+            # a PR touching only a nested module's go.mod must not be able to
+            # skip it (the top-level 'go.mod' entry above only matches root).
+            - 'site/go.mod'
+            - 'site/scripts/kuredepsync/go.mod'
             # The version-consistency check in `validate` reads all of these; a
             # metadata-only PR (or a README badge edit) must not be able to skip it.
             - 'versions.yaml'
@@ -85,6 +90,7 @@ jobs:
             - 'scripts/sync-versions.sh'
             - 'scripts/sync-go-version.sh'
             - 'README.md'
+            - 'AGENTS.md'
             # validate-manifests builds these via `kurel build` and schema-validates
             # the output — a PR touching only these must not be able to skip it.
             - 'examples/**'
