@@ -4,7 +4,6 @@
 # Go version (mise.toml is authoritative for tooling; go.mod must match this)
 go:
   current: "1.26.6"
-
 # Deliberately empty: every infrastructure dependency launcher imports is a
 # direct dep shared with the imported kure, whose version policy is kure-led —
 # the ceiling rule is enforced by site/scripts/check-kure-dep-sync.sh and the

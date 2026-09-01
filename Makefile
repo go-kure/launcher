@@ -280,13 +280,20 @@ check-go-version: ## Verify Go version consistency across all files
 			fi; \
 		fi; \
 	done; \
-	GOMOD_VER=$$(sed -n '3p' go.mod | awk '{print $$2}'); \
-	if [ "$$GOMOD_VER" != "$$GO_VER" ]; then \
-		echo "$(COLOR_RED)✗ go.mod has go $$GOMOD_VER (expected $$GO_VER)$(COLOR_RESET)"; \
-		ERRORS=$$((ERRORS + 1)); \
-	else \
-		echo "$(COLOR_GREEN)✓ go.mod$(COLOR_RESET)"; \
-	fi; \
+	for gomod in go.mod site/go.mod site/scripts/kuredepsync/go.mod; do \
+		if [ ! -f "$$gomod" ]; then \
+			echo "$(COLOR_RED)✗ $$gomod not found$(COLOR_RESET)"; \
+			ERRORS=$$((ERRORS + 1)); \
+			continue; \
+		fi; \
+		GOMOD_VER=$$(grep -E '^go [0-9]+(\.[0-9]+)*$$' "$$gomod" | awk '{print $$2}'); \
+		if [ "$$GOMOD_VER" != "$$GO_VER" ]; then \
+			echo "$(COLOR_RED)✗ $$gomod has go $$GOMOD_VER (expected $$GO_VER)$(COLOR_RESET)"; \
+			ERRORS=$$((ERRORS + 1)); \
+		else \
+			echo "$(COLOR_GREEN)✓ $$gomod$(COLOR_RESET)"; \
+		fi; \
+	done; \
 	if [ $$ERRORS -eq 0 ]; then \
 		echo "$(COLOR_GREEN)All files have consistent Go version $$GO_VER$(COLOR_RESET)"; \
 	else \
