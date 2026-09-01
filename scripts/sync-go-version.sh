@@ -60,7 +60,11 @@ for f in .github/workflows/*.yml .github/workflows/*.yaml; do
 	sed -i "s/go-version: '[^']*'/go-version: '$GO_VER'/" "$f"
 	sed -i "s/go-version: \${{ env.GO_VERSION }}/go-version: \${{ env.GO_VERSION }}/" "$f"
 done
-sed -i "3s/go .*/go $GO_VER/" go.mod
+# Anchored on the directive's own text, not hardcoded to line 3: a
+# line-number sed silently rewrites whatever happens to sit there if go.mod's
+# layout ever shifts (an inserted comment or blank line above `go`, e.g.),
+# either missing the real directive or corrupting an unrelated line.
+sed -i -E "s/^go [0-9]+(\.[0-9]+)*\$/go $GO_VER/" go.mod
 
 # validate_gomod() also hard-fails if README.md's shields.io Go badge doesn't
 # match go.mod (scripts/sync-versions.sh) -- a check kure does not have.
