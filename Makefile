@@ -287,7 +287,7 @@ check-go-version: ## Verify Go version consistency across all files
 			ERRORS=$$((ERRORS + 1)); \
 			continue; \
 		fi; \
-		GOMOD_VER=$$(grep -E '^go [0-9]+(\.[0-9]+)*$$' "$$gomod" | awk '{print $$2}'); \
+		GOMOD_VER=$$(grep -E '^go ' "$$gomod" | head -1 | awk '{print $$2}'); \
 		if [ "$$GOMOD_VER" != "$$GO_VER" ]; then \
 			echo "$(COLOR_RED)✗ $$gomod has go $$GOMOD_VER (expected $$GO_VER)$(COLOR_RESET)"; \
 			ERRORS=$$((ERRORS + 1)); \
@@ -295,6 +295,18 @@ check-go-version: ## Verify Go version consistency across all files
 			echo "$(COLOR_GREEN)✓ $$gomod$(COLOR_RESET)"; \
 		fi; \
 	done; \
+	if [ -f AGENTS.md ]; then \
+		AGENTS_VER=$$(grep -E '^- \*\*Language\*\*: Go [0-9]+\.[0-9]+(\.[0-9]+)?$$' AGENTS.md | sed -E 's/^- \*\*Language\*\*: Go //'); \
+		if [ -z "$$AGENTS_VER" ]; then \
+			echo "$(COLOR_RED)✗ AGENTS.md has no matching '- **Language**: Go X.Y.Z' line$(COLOR_RESET)"; \
+			ERRORS=$$((ERRORS + 1)); \
+		elif [ "$$AGENTS_VER" != "$$GO_VER" ]; then \
+			echo "$(COLOR_RED)✗ AGENTS.md has Go $$AGENTS_VER (expected $$GO_VER)$(COLOR_RESET)"; \
+			ERRORS=$$((ERRORS + 1)); \
+		else \
+			echo "$(COLOR_GREEN)✓ AGENTS.md$(COLOR_RESET)"; \
+		fi; \
+	fi; \
 	if [ $$ERRORS -eq 0 ]; then \
 		echo "$(COLOR_GREEN)All files have consistent Go version $$GO_VER$(COLOR_RESET)"; \
 	else \

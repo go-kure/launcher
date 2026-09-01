@@ -2,12 +2,19 @@
 # sync-go-version.sh — propagate the mise.toml [tools].go version into every
 # module's go.mod (root, site/, site/scripts/kuredepsync/), every
 # .github/workflows/*.yml(.yaml) GO_VERSION/go-version mirror, versions.yaml's
-# go.current, the README.md shields.io Go badge, and DEVELOPMENT.md's
-# "Go X.Y.Z (managed by mise)" prerequisite line. Ported
+# go.current, the README.md shields.io Go badge, AGENTS.md's Language line,
+# and DEVELOPMENT.md's "Go X.Y.Z (managed by mise)" prerequisite line. Ported
 # verbatim from the Makefile's sync-go-version recipe (same sed patterns, same
 # order) so Renovate's postUpgradeTasks can call it directly — postUpgradeTasks
 # runs plain commands, not make targets, matching the convention already used
 # for sync-tool-versions.sh in this repo.
+#
+# Every rewrite below is temp-file + mv, not `sed -i`: this script declares
+# itself #!/bin/sh (portable POSIX), but BSD/macOS sed's `-i` takes the backup
+# suffix as its next argument, so plain `-i` (or `-i -E`, which parses `-E` as
+# that suffix) leaves a stray backup file and, for the `-E` case, silently
+# runs as a literal BRE that matches nothing — sync-tool-versions.sh already
+# documents and avoids this exact trap the same way.
 #
 # Run scripts/../Makefile's check-go-version afterwards (or 'make check-go-version'),
 # and ./scripts/sync-versions.sh check (validate_gomod compares go.mod against
@@ -21,6 +28,7 @@ cd "$ROOT"
 MISE="mise.toml"
 VERSIONS="versions.yaml"
 README="README.md"
+AGENTS="AGENTS.md"
 DEVELOPMENT="DEVELOPMENT.md"
 
 if [ ! -f "$MISE" ]; then
@@ -57,8 +65,8 @@ yq -i ".go.current = \"$GO_VER\"" "$VERSIONS"
 # set -eu can't silently skip go.mod.
 for f in .github/workflows/*.yml .github/workflows/*.yaml; do
 	[ -e "$f" ] || continue
-	sed -i -E "s/^([[:space:]]*)GO_VERSION: '[^']*'/\1GO_VERSION: '$GO_VER'/" "$f"
-	sed -i "s/go-version: '[^']*'/go-version: '$GO_VER'/" "$f"
+	sed -E "s/^([[:space:]]*)GO_VERSION: '[^']*'/\1GO_VERSION: '$GO_VER'/" "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+	sed "s/go-version: '[^']*'/go-version: '$GO_VER'/" "$f" > "$f.tmp" && mv "$f.tmp" "$f"
 done
 # This repo is three Go modules, not one (site/ and site/scripts/kuredepsync
 # each have their own go.mod, currently on the same directive as root by
@@ -71,7 +79,7 @@ done
 # e.g.), either missing the real directive or corrupting an unrelated line.
 for gomod in go.mod site/go.mod site/scripts/kuredepsync/go.mod; do
 	[ -f "$gomod" ] || { echo "Error: $gomod not found"; exit 1; }
-	sed -i -E "s/^go [^[:space:]]+/go $GO_VER/" "$gomod"
+	sed -E "s/^go [^[:space:]]+/go $GO_VER/" "$gomod" > "$gomod.tmp" && mv "$gomod.tmp" "$gomod"
 	GOMOD_VER="$(grep -E '^go ' "$gomod" | head -1 | awk '{print $2}')"
 	if [ "$GOMOD_VER" != "$GO_VER" ]; then
 		echo "Error: $gomod's go directive reads '$GOMOD_VER' after sync, expected $GO_VER"
@@ -86,7 +94,18 @@ if [ ! -f "$README" ]; then
 	echo "Error: $README not found"
 	exit 1
 fi
-sed -i -E "s#(img\.shields\.io/badge/go-)[0-9]+\.[0-9]+(\.[0-9]+)?(-blue)#\1$GO_VER\3#" "$README"
+sed -E "s#(img\.shields\.io/badge/go-)[0-9]+\.[0-9]+(\.[0-9]+)?(-blue)#\1$GO_VER\3#" "$README" > "$README.tmp" && mv "$README.tmp" "$README"
+
+# AGENTS.md's "Language" line is read by agents (Claude, Codex, etc.) as the
+# live tech-stack version, not just humans -- unlike DEVELOPMENT.md below it
+# has no "courtesy, uncheckable" carve-out: a stale entry actively misinforms
+# every agent session working in this repo. Was already drifted (1.26.2 vs
+# mise.toml's then-current 1.26.6) before this script covered it.
+if [ ! -f "$AGENTS" ]; then
+	echo "Error: $AGENTS not found"
+	exit 1
+fi
+sed -E "s/^(- \*\*Language\*\*: Go )[0-9]+\.[0-9]+(\.[0-9]+)?\$/\1$GO_VER/" "$AGENTS" > "$AGENTS.tmp" && mv "$AGENTS.tmp" "$AGENTS"
 
 # Courtesy sync, not CI-gated: nothing currently checks this line (unlike the
 # golangci-lint line directly below it in the same file, which
@@ -96,7 +115,7 @@ sed -i -E "s#(img\.shields\.io/badge/go-)[0-9]+\.[0-9]+(\.[0-9]+)?(-blue)#\1$GO_
 # gomod/mise packageRule's fileFilters for the golangci-lint line, so no
 # renovate.json change is needed to cover this addition too.
 if [ -f "$DEVELOPMENT" ]; then
-	sed -i -E "s/^- Go [0-9]+\.[0-9]+(\.[0-9]+)? \(managed by mise\)\$/- Go $GO_VER (managed by mise)/" "$DEVELOPMENT"
+	sed -E "s/^- Go [0-9]+\.[0-9]+(\.[0-9]+)? \(managed by mise\)\$/- Go $GO_VER (managed by mise)/" "$DEVELOPMENT" > "$DEVELOPMENT.tmp" && mv "$DEVELOPMENT.tmp" "$DEVELOPMENT"
 fi
 
 echo "Go version synced to $GO_VER"
