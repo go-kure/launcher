@@ -67,6 +67,10 @@ jobs:
       id: hugo-version
       run: |
         HUGO_VER=$(grep '^hugo = ' mise.toml | sed 's/hugo = "\(.*\)"/\1/')
+        if [ -z "$HUGO_VER" ]; then
+          echo "::error::Failed to parse Hugo version from mise.toml"
+          exit 1
+        fi
         echo "version=$HUGO_VER" >> $GITHUB_OUTPUT
 
     - name: Install Hugo CLI
@@ -87,19 +91,29 @@ jobs:
         go-version: ${{ steps.go-version.outputs.version }}
         check-latest: true
 
+    - name: Read yq version from mise.toml
+      id: yq-version
+      run: |
+        YQ_VER=$(grep '^yq = ' mise.toml | sed 's/yq = "\(.*\)"/\1/')
+        if [ -z "$YQ_VER" ]; then
+          echo "::error::Failed to parse yq version from mise.toml"
+          exit 1
+        fi
+        echo "version=$YQ_VER" >> $GITHUB_OUTPUT
+
     - name: Cache yq
       id: yq-cache
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/bin/yq
-        key: yq-4.44.6-linux-amd64
+        key: yq-${{ steps.yq-version.outputs.version }}-linux-amd64
 
     - name: Install yq
       if: steps.yq-cache.outputs.cache-hit != 'true'
       run: |
         mkdir -p ~/bin
         curl -fsSL -o ~/bin/yq \
-          https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_amd64
+          https://github.com/mikefarah/yq/releases/download/v${{ steps.yq-version.outputs.version }}/yq_linux_amd64
         chmod +x ~/bin/yq
         echo "$HOME/bin" >> $GITHUB_PATH
 

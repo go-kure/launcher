@@ -28,8 +28,10 @@ cd "$REPO_ROOT"
 
 KUREL_BIN="${KUREL_BIN:-bin/kurel}"
 
-# Must match the `plugins: schema@<version>` pin in .github/workflows/ci.yml's
-# validate-manifests job — keep both in sync by hand on any re-pin.
+# The sole pin site for the flux-schema plugin (ci.yml's validate-manifests job
+# used to pre-warm the same version via a `plugins: schema@<version>` input;
+# that was deleted as redundant — ensure_schema_plugin() below already installs
+# on mismatch). Tracked by the flux-schema-plugin customManager in renovate.json.
 SCHEMA_PLUGIN_VERSION="0.12.1"
 
 # app.yaml -> cluster-profile pairs (examples/README.md's "Application examples"
