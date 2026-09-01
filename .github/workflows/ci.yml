@@ -83,6 +83,7 @@ jobs:
             - 'versions.yaml'
             - 'docs/compatibility.md'
             - 'scripts/sync-versions.sh'
+            - 'scripts/sync-go-version.sh'
             - 'README.md'
             # validate-manifests builds these via `kurel build` and schema-validates
             # the output — a PR touching only these must not be able to skip it.
