@@ -1,7 +1,7 @@
 # launcher
 
 [![CI](https://github.com/go-kure/launcher/actions/workflows/ci.yml/badge.svg)](https://github.com/go-kure/launcher/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/badge/go-1.26.6-blue)](go.mod)
+[![Go Version](https://img.shields.io/badge/go-1.26.7-blue)](go.mod)
 
 OAM-native package manager for Kubernetes.
 
