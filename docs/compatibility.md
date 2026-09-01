@@ -11,5 +11,5 @@ Launcher maintains two version concepts for each dependency:
 
 ## Go Version
 
-**Current:** Go 1.26.6
+**Current:** Go 1.26.7
 
