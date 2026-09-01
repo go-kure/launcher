@@ -116,6 +116,8 @@ Runs on main and `release/*` branches only (not PRs):
 ### Configuration
 
 - Go Version: read from `mise.toml` (single source of truth)
+- yq / lychee / Flux CLI versions: read from `mise.toml` at run time, same pattern as Go — no
+  hand-copied literal exists in any workflow to fall out of sync
 - Golangci-lint Version: `v2.13.2`
 - govulncheck Version: `v1.7.0` (pinned via the `GOVULNCHECK_VERSION` workflow env)
 - Coverage Threshold: `80%`
@@ -182,7 +184,7 @@ Runs on main and `release/*` branches only (not PRs):
 ### How It Works
 
 1. Determines version parameters (dev for push to main, explicit slot for manual dispatch)
-2. Reads Hugo and Go versions from `mise.toml`
+2. Reads Hugo, Go and yq versions from `mise.toml`
 3. Runs `scripts/gen-versions-toml.sh` to generate versioned Hugo config overlay
 4. Builds the Hugo site targeting `https://www.gokure.dev/launcher/<slot>/`
 5. If `set_latest=true`, also builds at `https://www.gokure.dev/launcher/`
@@ -382,6 +384,29 @@ GO_VER=$(grep '^go = ' mise.toml | sed 's/go = "\(.*\)"/\1/')
 ```
 
 `mise.toml` is the single source of truth (kept in sync via `make check-go-version`).
+
+### yq, lychee and Flux CLI Versions
+
+Same pattern as Go: a `Read <tool> version from mise.toml` step greps the value and hard-fails if
+empty, every downstream step (cache key, install URL, or the flux2 action's `version:` input)
+references `steps.<tool>-version.outputs.version`, and no hand-copied literal exists anywhere else
+in the workflow files to fall out of sync. For example:
+
+```bash
+YQ_VER=$(grep '^yq = ' mise.toml | sed 's/yq = "\(.*\)"/\1/')
+if [ -z "$YQ_VER" ]; then
+  echo "::error::Failed to parse yq version from mise.toml"
+  exit 1
+fi
+```
+
+This replaced three hardcoded `yq-4.44.6` cache-key/install pairs (in `ci.yml`'s `validate`,
+`docs-build` and `doc-gate` jobs) plus a fourth in `deploy-docs.yml`, a hardcoded `lychee-0.24.2`
+pair in `docs-build`, and a hardcoded `version: 2.9.4` on the `validate-manifests` job's Flux CLI
+install step. The flux-schema plugin (`flux plugin install schema@<version>`) is a separate pin,
+tracked only in `site/scripts/validate-manifests.sh`'s `SCHEMA_PLUGIN_VERSION` — a Renovate
+customManager in `renovate.json` proposes its bumps; nothing in `mise.toml` covers it, since it is
+a Flux plugin, not the Flux CLI itself.
 
 ### Caching
 

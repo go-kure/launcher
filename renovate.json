@@ -10,9 +10,25 @@
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+GOVULNCHECK_VERSION: ['\"]?(?<currentValue>v[\\d.]+)['\"]?"
       ],
       "datasourceTemplate": "{{{datasource}}}"
+    },
+    {
+      "customType": "regex",
+      "description": "flux-schema plugin pin in validate-manifests.sh. Nothing else proposes bumps to it: it is independent of the mise-managed flux2 CLI (a `flux plugin`, versioned separately by fluxcd/flux-schema's own releases), and ci.yml no longer carries a duplicate to key off.",
+      "managerFilePatterns": ["site/scripts/validate-manifests.sh"],
+      "matchStrings": [
+        "SCHEMA_PLUGIN_VERSION=\"(?<currentValue>[\\d.]+)\""
+      ],
+      "depNameTemplate": "flux-schema-plugin",
+      "packageNameTemplate": "fluxcd/flux-schema",
+      "datasourceTemplate": "github-releases"
     }
   ],
   "packageRules": [
+    {
+      "description": "fluxcd/flux-schema tags its GitHub releases with a leading v (e.g. v0.12.1); extractVersion strips it before comparing against SCHEMA_PLUGIN_VERSION's bare-number form. extractVersion is illegal inside a customManager itself (Renovate ignores it there), so it must live in a separate packageRule matched on the same synthetic depName.",
+      "matchDepNames": ["flux-schema-plugin"],
+      "extractVersion": "^v(?<version>.*)$"
+    },
     {
       "description": "Direct deps shared with the imported kure are never proposed here: launcher must not lead the kure release it imports (MVS pulls launcher up automatically, so only the 'ahead' direction needs control — see AGENTS.md § 'Shared dependencies with kure'). CI enforces this via site/scripts/check-kure-dep-sync.sh; this list mirrors that guard's current shared-direct set and must be updated together with go.mod changes that add or drop a shared direct dep — a dep missing here is still caught by the CI guard, just as a red PR instead of never being proposed. Correct sequence for these: land the kure bump, cut a kure release, bump the go-kure/kure require, take the shared dep together.",
       "enabled": false,
