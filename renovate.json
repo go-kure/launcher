@@ -52,7 +52,7 @@
       ]
     },
     {
-      "description": "Keep go.mod's go directive, versions.yaml's go.current and README.md's shields.io badge in sync with mise.toml's go pin (sync-go-version.sh, checked by make check-go-version and by sync-versions.sh check's validate_gomod respectively), and regenerate the golangci-lint pins in Makefile/ci.yml/docs (sync-tool-versions.sh), on the bot's own branch after any gomod or mise bump. mise.toml is the only copy Renovate's mise datasource actually updates; the rest are plain strings a human (or this task) must keep in step. A mise-only Go bump previously left go.mod, versions.yaml and README.md all behind with no postUpgradeTasks command to fix any of them, and CI's validate job fails on drift for any of these (go-kure/kure#734, the same defect class here). Both scripts are no-ops when nothing derived changes, so matching both managers is safe.",
+      "description": "Keep every module's go.mod go directive (root, site/, site/scripts/kuredepsync/), versions.yaml's go.current and README.md's shields.io badge in sync with mise.toml's go pin (sync-go-version.sh, checked by make check-go-version and by sync-versions.sh check's validate_gomod respectively), and regenerate the golangci-lint pins in Makefile/ci.yml/docs (sync-tool-versions.sh), on the bot's own branch after any gomod or mise bump. mise.toml is the only copy Renovate's mise datasource actually updates; the rest are plain strings a human (or this task) must keep in step. A mise-only Go bump previously left go.mod, versions.yaml and README.md all behind with no postUpgradeTasks command to fix any of them, and CI's validate job fails on drift for any of these (go-kure/kure#734, the same defect class here); the two nested modules had no check at all, so their drift would have been invisible rather than merely red. Both scripts are no-ops when nothing derived changes, so matching both managers is safe.",
       "matchManagers": ["gomod", "mise"],
       "postUpgradeTasks": {
         "commands": [
@@ -65,6 +65,8 @@
           "docs/github-workflows.md",
           "DEVELOPMENT.md",
           "go.mod",
+          "site/go.mod",
+          "site/scripts/kuredepsync/go.mod",
           "versions.yaml",
           "README.md"
         ],

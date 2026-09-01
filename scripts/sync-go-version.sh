@@ -1,8 +1,9 @@
 #!/bin/sh
-# sync-go-version.sh — propagate the mise.toml [tools].go version into go.mod,
-# every .github/workflows/*.yml(.yaml) GO_VERSION/go-version mirror,
-# versions.yaml's go.current, the README.md shields.io Go badge, and
-# DEVELOPMENT.md's "Go X.Y.Z (managed by mise)" prerequisite line. Ported
+# sync-go-version.sh — propagate the mise.toml [tools].go version into every
+# module's go.mod (root, site/, site/scripts/kuredepsync/), every
+# .github/workflows/*.yml(.yaml) GO_VERSION/go-version mirror, versions.yaml's
+# go.current, the README.md shields.io Go badge, and DEVELOPMENT.md's
+# "Go X.Y.Z (managed by mise)" prerequisite line. Ported
 # verbatim from the Makefile's sync-go-version recipe (same sed patterns, same
 # order) so Renovate's postUpgradeTasks can call it directly — postUpgradeTasks
 # runs plain commands, not make targets, matching the convention already used
@@ -60,11 +61,19 @@ for f in .github/workflows/*.yml .github/workflows/*.yaml; do
 	sed -i "s/go-version: '[^']*'/go-version: '$GO_VER'/" "$f"
 	sed -i "s/go-version: \${{ env.GO_VERSION }}/go-version: \${{ env.GO_VERSION }}/" "$f"
 done
+# This repo is three Go modules, not one (site/ and site/scripts/kuredepsync
+# each have their own go.mod, currently on the same directive as root by
+# coincidence, not by anything that keeps them that way) -- syncing only the
+# root would leave the other two on the old pin the moment a bump actually
+# happens, mixed-version module metadata with no check anywhere to catch it.
 # Anchored on the directive's own text, not hardcoded to line 3: a
-# line-number sed silently rewrites whatever happens to sit there if go.mod's
-# layout ever shifts (an inserted comment or blank line above `go`, e.g.),
-# either missing the real directive or corrupting an unrelated line.
-sed -i -E "s/^go [0-9]+(\.[0-9]+)*\$/go $GO_VER/" go.mod
+# line-number sed silently rewrites whatever happens to sit there if a
+# go.mod's layout ever shifts (an inserted comment or blank line above `go`,
+# e.g.), either missing the real directive or corrupting an unrelated line.
+for gomod in go.mod site/go.mod site/scripts/kuredepsync/go.mod; do
+	[ -f "$gomod" ] || { echo "Error: $gomod not found"; exit 1; }
+	sed -i -E "s/^go [0-9]+(\.[0-9]+)*\$/go $GO_VER/" "$gomod"
+done
 
 # validate_gomod() also hard-fails if README.md's shields.io Go badge doesn't
 # match go.mod (scripts/sync-versions.sh) -- a check kure does not have.
