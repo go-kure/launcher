@@ -383,7 +383,15 @@ All jobs read `go-version` from `mise.toml` dynamically:
 GO_VER=$(grep '^go = ' mise.toml | sed 's/go = "\(.*\)"/\1/')
 ```
 
-`mise.toml` is the single source of truth (kept in sync via `make check-go-version`).
+`mise.toml` is the single source of truth. CI jobs need no sync — they read it at run time. Four
+other places carry their own copy and do need syncing: every module's `go.mod` (root, `site/`,
+`site/scripts/kuredepsync/`), `versions.yaml`'s `go.current`, the README.md shields.io badge, and
+DEVELOPMENT.md's "Go X.Y.Z (managed by mise)" prerequisite line. `scripts/sync-go-version.sh`
+propagates a `mise.toml` change into all of them in one pass — `make sync-go-version` runs it
+locally, and it also runs as a Renovate `postUpgradeTasks` command so a bot-proposed mise bump
+lands with every copy already in sync. `make check-go-version` verifies every module's `go.mod` against `mise.toml`;
+`./scripts/sync-versions.sh check` separately verifies the root `go.mod` against `versions.yaml`'s
+`go.current` and the README badge against `go.mod`.
 
 ### yq, lychee and Flux CLI Versions
 
