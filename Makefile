@@ -295,7 +295,10 @@ check-go-version: ## Verify Go version consistency across all files
 			echo "$(COLOR_GREEN)✓ $$gomod$(COLOR_RESET)"; \
 		fi; \
 	done; \
-	if [ -f AGENTS.md ]; then \
+	if [ ! -f AGENTS.md ]; then \
+		echo "$(COLOR_RED)✗ AGENTS.md not found$(COLOR_RESET)"; \
+		ERRORS=$$((ERRORS + 1)); \
+	else \
 		AGENTS_VER=$$(grep -E '^- \*\*Language\*\*: Go [0-9]+\.[0-9]+(\.[0-9]+)?$$' AGENTS.md | sed -E 's/^- \*\*Language\*\*: Go //'); \
 		if [ -z "$$AGENTS_VER" ]; then \
 			echo "$(COLOR_RED)✗ AGENTS.md has no matching '- **Language**: Go X.Y.Z' line$(COLOR_RESET)"; \
