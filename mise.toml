@@ -2,7 +2,7 @@
 # Use exact versions for reproducibility across environments
 go = "1.26.7"
 golangci-lint = "2.13.2"
-git-cliff = "2.13.1"
+git-cliff = "2.14.1"
 goreleaser = "2.18.0"
 # Required for GoReleaser SBOM generation and signing
 syft = "1.51.1"
