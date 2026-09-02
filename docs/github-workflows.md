@@ -148,7 +148,11 @@ Runs on main and `release/*` branches only (not PRs):
   reviewed a real hit and judged it safe adds the `pin-impact-ack` label to merge anyway — same
   convention as `check-doc-gate`'s `docs-skip` label; there is no other override. Ported from
   `go-kure/kure` (go-kure/kure#729) after go-kure/launcher#358 turned up the identical blind spot
-  here
+  here. **Rerun gotcha:** re-running a stale/failed run (`gh run rerun`, or the Actions UI) replays
+  that run's *original* triggering event rather than picking up a label added since — this silently
+  strips a freshly-added `pin-impact-ack` again before the gate re-checks it, even though nothing
+  was pushed. Re-add the label instead of rerunning the stale run; full writeup in
+  `go-kure/.github`'s `docs/standards.md` § "Pin-impact-ack"
 - **Path filtering** — `dorny/paths-filter` skips jobs when unrelated files change
 - **Diff-based lint** — on PRs, lint only checks new/changed lines (`--new-from-rev`)
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages
