@@ -152,9 +152,12 @@ Runs on main and `release/*` branches only (not PRs):
   `synchronize` or `reopened`; re-running a stale/failed run of one of *those* (`gh run rerun`, or
   the Actions UI) replays that same original action and silently strips a freshly-added
   `pin-impact-ack` again before the gate re-checks it, even though nothing was pushed. A rerun of an
-  `opened`/`labeled`/`unlabeled`-triggered run is unaffected — `strip-ack` skips it either way. Add
-  (or re-add) the label rather than rerunning; full writeup in `go-kure/.github`'s
-  `docs/standards.md` § "Pin-impact-ack"
+  `opened`/`labeled`/`unlabeled`-triggered run is unaffected — `strip-ack` skips it either way.
+  **Scoped to same-repo PRs:** `strip-ack`'s `if:` also requires the PR's head repo to equal this
+  repo, so it never runs at all on a fork PR — but that's moot, since the gate separately forces
+  `PIN_IMPACT_ACK=false` unconditionally on forks; a fork PR has no acknowledgment path regardless
+  of labels. Add (or re-add) the label rather than rerunning, on a same-repo PR; full writeup in
+  `go-kure/.github`'s `docs/standards.md` § "Pin-impact-ack"
 - **Path filtering** — `dorny/paths-filter` skips jobs when unrelated files change
 - **Diff-based lint** — on PRs, lint only checks new/changed lines (`--new-from-rev`)
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages
