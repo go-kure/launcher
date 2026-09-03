@@ -1167,6 +1167,18 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 // ServiceAccount named after the component. Traits that bind RBAC to the
 // workload's identity (the rbac trait) read this through the
 // oam.ServiceAccountNamer interface each kind config implements.
+//
+// componentName is the kind config's own Name, which is the same string as the
+// stack.Application's name and therefore the same account Generate emits: each
+// handler's ToApplicationConfig sets config.Name from component.Name, and
+// transformComponents builds the Application with stack.NewApplication(
+// component.Name, …) (pkg/oam/transform.go:662) from that same component. The
+// generated account (createServiceAccount(app.Name, …)) and the pod's
+// serviceAccountName (buildPodSpec's DefaultServiceAccountName: app.Name)
+// therefore agree with this fallback. A hand-built config whose Name differs
+// from the Application it is placed in breaks that invariant — the interface
+// method takes no *stack.Application, so it cannot re-derive the name — which
+// is why no supported path constructs one.
 func effectiveServiceAccountName(cfg PodSpecConfig, componentName string) string {
 	if cfg.ServiceAccountName != "" {
 		return cfg.ServiceAccountName
