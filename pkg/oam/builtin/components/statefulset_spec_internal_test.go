@@ -211,7 +211,24 @@ func TestParseStatefulSetSpec_Errors(t *testing.T) {
 		{
 			"maxUnavailable malformed percentage",
 			map[string]any{"updateStrategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": map[string]any{"maxUnavailable": " 50%"}}},
-			"invalid percentage",
+			"string value must be a percentage",
+		},
+		// strconv.Atoi accepted a leading sign, so these three parsed cleanly
+		// and were carried through to a document upstream's ^[0-9]+%$ rejects.
+		{
+			"maxUnavailable signed percentage",
+			map[string]any{"updateStrategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": map[string]any{"maxUnavailable": "+50%"}}},
+			"string value must be a percentage",
+		},
+		{
+			"maxUnavailable negative percentage",
+			map[string]any{"updateStrategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": map[string]any{"maxUnavailable": "-50%"}}},
+			"string value must be a percentage",
+		},
+		{
+			"maxUnavailable overflowing percentage",
+			map[string]any{"updateStrategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": map[string]any{"maxUnavailable": "99999999999999999999%"}}},
+			"percentage must be between 1% and 100%",
 		},
 		{
 			"maxUnavailable wrong type",

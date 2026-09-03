@@ -51,9 +51,15 @@ func TestStatefulSetSpec_ReachesSpec(t *testing.T) {
 		t.Errorf("UpdateStrategy.Type = %q, want RollingUpdate", spec.UpdateStrategy.Type)
 	}
 	ru := spec.UpdateStrategy.RollingUpdate
-	if ru == nil || ru.Partition == nil || *ru.Partition != 2 {
-		t.Errorf("UpdateStrategy.RollingUpdate.Partition = %v, want 2", ru)
-	} else if ru.MaxUnavailable == nil || *ru.MaxUnavailable != intstr.FromString("50%") {
+	if ru == nil {
+		t.Fatal("UpdateStrategy.RollingUpdate = nil, want partition 2 and maxUnavailable 50%")
+	}
+	if ru.Partition == nil || *ru.Partition != 2 {
+		t.Errorf("UpdateStrategy.RollingUpdate.Partition = %v, want 2", ru.Partition)
+	}
+	// A separate if, not an else-if chained onto Partition: chained, a wrong
+	// Partition left MaxUnavailable unasserted entirely.
+	if ru.MaxUnavailable == nil || *ru.MaxUnavailable != intstr.FromString("50%") {
 		t.Errorf("UpdateStrategy.RollingUpdate.MaxUnavailable = %v, want 50%%", ru.MaxUnavailable)
 	}
 	if spec.RevisionHistoryLimit == nil || *spec.RevisionHistoryLimit != 7 {
