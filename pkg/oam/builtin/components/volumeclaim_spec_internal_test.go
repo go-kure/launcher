@@ -306,6 +306,29 @@ func TestParseVolumeClaimTemplates_SpecErrors(t *testing.T) {
 			with(map[string]any{"selector": map[string]any{}}),
 			"empty selector",
 		},
+		// A nil test let these three through: parseLabelMap returns a non-nil
+		// empty map, so `matchLabels: {}` produced the match-everything
+		// selector the guard above exists to refuse.
+		{
+			"selector empty matchLabels",
+			with(map[string]any{"selector": map[string]any{"matchLabels": map[string]any{}}}),
+			"empty selector",
+		},
+		{
+			"selector empty matchExpressions",
+			with(map[string]any{"selector": map[string]any{"matchExpressions": []any{}}}),
+			"empty selector",
+		},
+		{
+			"selector both empty",
+			with(map[string]any{"selector": map[string]any{"matchLabels": map[string]any{}, "matchExpressions": []any{}}}),
+			"empty selector",
+		},
+		{
+			"storageClass invalid name",
+			with(map[string]any{"storageClass": "Fast_Class"}),
+			"invalid storageClass",
+		},
 		{
 			"selector unknown key",
 			with(map[string]any{"selector": map[string]any{"matchFields": []any{}}}),
@@ -394,5 +417,36 @@ func TestVolumeClaimTemplate_RejectedKeyOrderIsDeterministic(t *testing.T) {
 		if err.Error() != first {
 			t.Fatalf("run %d: error = %q, want the same message as run 0 (%q)", i, err.Error(), first)
 		}
+	}
+}
+
+// TestParseVolumeClaimTemplates_NotAList: a present-but-not-a-list value used
+// to be indistinguishable from an absent key, so `volumeClaimTemplates: {}`
+// built a StatefulSet with no claim templates and reported nothing.
+func TestParseVolumeClaimTemplates_NotAList(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  any
+	}{
+		{"object", map[string]any{"name": "data"}},
+		{"string", "data"},
+		{"number", 3},
+		{"null", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseVolumeClaimTemplates(map[string]any{"volumeClaimTemplates": tc.val})
+			if err == nil {
+				t.Fatalf("parseVolumeClaimTemplates(%T) = %v, want an error", tc.val, got)
+			}
+			if !strings.Contains(err.Error(), "must be a list") {
+				t.Errorf("error = %q, want it to name the type mismatch", err)
+			}
+		})
+	}
+
+	// An absent key is still absent, not an error.
+	got, err := parseVolumeClaimTemplates(map[string]any{})
+	if err != nil || got != nil {
+		t.Errorf("absent volumeClaimTemplates = (%v, %v), want (nil, nil)", got, err)
 	}
 }

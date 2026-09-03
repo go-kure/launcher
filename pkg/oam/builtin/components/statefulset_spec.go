@@ -37,8 +37,6 @@ var statefulSetSpecPropertyKeys = []string{
 	"persistentVolumeClaimRetentionPolicy", "ordinals",
 }
 
-// statefulSetSpecRejectedKeys are StatefulSetSpec fields an author may not set;
-// each maps to the error explaining why.
 // The nested key sets each parser below accepts, declared here rather than
 // inline at the rejectUnknownKeys call so the schema fragment can be pinned to
 // them (TestStatefulSetSpecSchemaMatchesParser walks both). An inline literal
@@ -51,6 +49,8 @@ var (
 	statefulSetRollingUpdateKeys  = []string{"partition", "maxUnavailable"}
 )
 
+// statefulSetSpecRejectedKeys are StatefulSetSpec fields an author may not set;
+// each maps to the error explaining why.
 var statefulSetSpecRejectedKeys = map[string]string{
 	"selector": "selector: not authorable; the StatefulSet selector is builder-managed (app: <component>), must equal the generated template labels and is immutable once created",
 }

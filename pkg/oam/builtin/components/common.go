@@ -2999,11 +2999,37 @@ type VolumeClaimTemplate struct {
 	Spec VolumeClaimSpecConfig
 }
 
+// effectiveStorageRequest returns the entry's requested storage in whichever
+// spelling authored it. Policy enforcement must not read Size directly: an
+// entry using the long resources.requests.storage spelling leaves Size empty,
+// and enforceMaxResource treats an empty current value as "nothing to check",
+// so reading Size alone let any MaxStorageSize limit be bypassed by choosing
+// the other spelling.
+func (v VolumeClaimTemplate) effectiveStorageRequest() string {
+	if v.Size != "" {
+		return v.Size
+	}
+	if v.Spec.Resources != nil {
+		if q, ok := v.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
+			return q.String()
+		}
+	}
+	return ""
+}
+
 // parseVolumeClaimTemplates parses volumeClaimTemplates from OAM properties.
 func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, error) {
-	vctList, ok := props["volumeClaimTemplates"].([]any)
-	if !ok {
+	raw, present := props["volumeClaimTemplates"]
+	if !present {
 		return nil, nil
+	}
+	// Presence and type are two questions: a single type assertion answered
+	// both with "absent", so `volumeClaimTemplates: {}` or a stray scalar built
+	// a StatefulSet with no claim templates and said nothing — the same silent
+	// drop the closed key set below exists to end.
+	vctList, ok := raw.([]any)
+	if !ok {
+		return nil, errors.Errorf("volumeClaimTemplates: must be a list, got %T", raw)
 	}
 	var vcts []VolumeClaimTemplate
 	for _, v := range vctList {
@@ -3043,6 +3069,16 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		storageClass, _, err := parseStringField(m, "storageClass", fmt.Sprintf("volumeClaimTemplate %q: storageClass", vct.Name))
 		if err != nil {
 			return nil, err
+		}
+		// ValidateClassName (NameIsDNSSubdomain), which
+		// ValidatePersistentVolumeClaimSpec runs on every non-empty
+		// storageClassName. parseStorageClassField applies it on the
+		// `volumes[].pvc` path; this one had only the string-type check, so an
+		// invalid class name built a claim the apiserver then rejected.
+		if storageClass != "" {
+			if errs := validation.IsDNS1123Subdomain(storageClass); len(errs) > 0 {
+				return nil, errors.Errorf("volumeClaimTemplate %q: invalid storageClass %q: %s", vct.Name, storageClass, strings.Join(errs, "; "))
+			}
 		}
 		vct.StorageClass = storageClass
 		vct.Size, _ = m["size"].(string)

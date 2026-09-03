@@ -279,7 +279,7 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 		}
 	}
 	for _, vct := range c.VolumeClaimTemplates {
-		if err := enforceMaxStorageSize(vct.Size, p.MaxStorageSize()); err != nil {
+		if err := enforceMaxStorageSize(vct.effectiveStorageRequest(), p.MaxStorageSize()); err != nil {
 			return err
 		}
 	}
