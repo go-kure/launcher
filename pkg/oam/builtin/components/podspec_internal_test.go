@@ -129,11 +129,12 @@ func TestParsePodSpec_RoundTrip(t *testing.T) {
 		"nodeSelector":                  map[string]any{"kubernetes.io/os": "linux", "tier": "batch"},
 		"serviceAccountName":            "custom-sa",
 		"automountServiceAccountToken":  true,
-		"nodeName":                      "node-a",
-		"hostNetwork":                   false,
-		"hostPID":                       true,
-		"hostIPC":                       true,
-		"shareProcessNamespace":         false,
+		// nodeName is checked separately below: admission forbids it together
+		// with schedulingGates, which this fixture also authors.
+		"hostNetwork":           false,
+		"hostPID":               true,
+		"hostIPC":               true,
+		"shareProcessNamespace": false,
 		"podSecurityContext": map[string]any{
 			"runAsUser":                1000,
 			"runAsGroup":               3000,
@@ -179,9 +180,12 @@ func TestParsePodSpec_RoundTrip(t *testing.T) {
 		"schedulingGroup":  map[string]any{"podGroupName": "batch-group"},
 	}
 	for _, k := range podSpecPropertyKeys {
-		if _, ok := props[k]; !ok {
+		if _, ok := props[k]; !ok && k != "nodeName" {
 			t.Fatalf("round-trip fixture lacks key %q", k)
 		}
+	}
+	if pinned, err := parsePodSpec(map[string]any{"nodeName": "node-a"}, false); err != nil || pinned.NodeName != "node-a" {
+		t.Fatalf("nodeName round-trip = %q, %v; want node-a", pinned.NodeName, err)
 	}
 
 	cfg, err := parsePodSpec(props, true)
@@ -202,7 +206,6 @@ func TestParsePodSpec_RoundTrip(t *testing.T) {
 	check("NodeSelector", ps.NodeSelector, map[string]string{"kubernetes.io/os": "linux", "tier": "batch"})
 	check("ServiceAccountName", ps.ServiceAccountName, "custom-sa")
 	check("AutomountServiceAccountToken", ps.AutomountServiceAccountToken, boolp(true))
-	check("NodeName", ps.NodeName, "node-a")
 	check("HostNetwork", ps.HostNetwork, false)
 	check("HostPID", ps.HostPID, true)
 	check("HostIPC", ps.HostIPC, true)
@@ -350,6 +353,10 @@ func TestParsePodSpec_Errors(t *testing.T) {
 		{"preemptionPolicy enum", map[string]any{"preemptionPolicy": "Always"}, false, "preemptionPolicy: invalid value"},
 		{"os enum", map[string]any{"os": map[string]any{"name": "darwin"}}, false, "os.name: invalid value"},
 		{"os unknown key", map[string]any{"os": map[string]any{"name": "linux", "version": "6"}}, false, "version"},
+		{"os name missing", map[string]any{"os": map[string]any{}}, false, "os.name: required"},
+		{"os name not string", map[string]any{"os": map[string]any{"name": 123}}, false, "os.name"},
+		{"nodeName with schedulingGates", map[string]any{"nodeName": "n1", "schedulingGates": []any{map[string]any{"name": "g"}}}, false, "nodeName: cannot be set together with schedulingGates"},
+		{"several rejected keys report the first alphabetically", map[string]any{"serviceAccount": "x", "priority": 1, "overhead": map[string]any{}}, true, "overhead: not authorable"},
 		{"schedulingGates duplicate", map[string]any{"schedulingGates": []any{map[string]any{"name": "g"}, map[string]any{"name": "g"}}}, false, "duplicate scheduling gate"},
 		{"resourceClaims duplicate", map[string]any{"resourceClaims": []any{map[string]any{"name": "c", "resourceClaimName": "x"}, map[string]any{"name": "c", "resourceClaimName": "y"}}}, false, "duplicate resource claim"},
 		{"resourceClaims neither source", map[string]any{"resourceClaims": []any{map[string]any{"name": "c"}}}, false, "exactly one of resourceClaimName or resourceClaimTemplateName"},

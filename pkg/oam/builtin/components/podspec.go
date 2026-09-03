@@ -94,9 +94,16 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 	var cfg PodSpecConfig
 	ps := &cfg.PodSpec
 
-	for key, msg := range podSpecRejectedKeys {
+	// Sorted so the reported error is stable when several rejected keys are
+	// authored at once (map iteration order is randomised).
+	rejected := make([]string, 0, len(podSpecRejectedKeys))
+	for key := range podSpecRejectedKeys {
+		rejected = append(rejected, key)
+	}
+	slices.Sort(rejected)
+	for _, key := range rejected {
 		if _, present := props[key]; present {
-			return PodSpecConfig{}, errors.New(msg)
+			return PodSpecConfig{}, errors.New(podSpecRejectedKeys[key])
 		}
 	}
 	if !jobPods {
@@ -323,7 +330,13 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 		if err := rejectUnknownKeys(raw, []string{"name"}, "os"); err != nil {
 			return PodSpecConfig{}, err
 		}
-		name, _ := raw["name"].(string)
+		name, present, err := parseStringField(raw, "name", "os.name")
+		if err != nil {
+			return PodSpecConfig{}, err
+		}
+		if !present {
+			return PodSpecConfig{}, errors.New("os.name: required")
+		}
 		switch corev1.OSName(name) {
 		case corev1.Linux, corev1.Windows:
 			ps.OS = &corev1.PodOS{Name: corev1.OSName(name)}
@@ -350,6 +363,11 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 			}
 			seen[name] = true
 			ps.SchedulingGates = append(ps.SchedulingGates, corev1.PodSchedulingGate{Name: name})
+		}
+		// validatePodSpec: "nodeName: cannot be set until all schedulingGates
+		// have been cleared" — a gated pod has not been scheduled yet.
+		if ps.NodeName != "" && len(ps.SchedulingGates) > 0 {
+			return PodSpecConfig{}, errors.New("nodeName: cannot be set together with schedulingGates; a gated pod is not scheduled until every gate is cleared")
 		}
 	}
 	if list, present, err := parseObjectList(props, "resourceClaims"); err != nil {

@@ -51,7 +51,6 @@ spec:
       hostname: api-0
       imagePullSecrets:
       - name: regcred
-      nodeName: node-a
       nodeSelector:
         kubernetes.io/os: linux
         tier: web

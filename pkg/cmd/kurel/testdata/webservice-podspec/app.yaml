@@ -28,7 +28,8 @@ spec:
         nodeSelector:
           kubernetes.io/os: linux
           tier: web
-        nodeName: node-a
+        # nodeName is deliberately absent: admission forbids it while any
+        # schedulingGates entry is present (see below).
         hostname: api-0
         subdomain: api
         setHostnameAsFQDN: true
