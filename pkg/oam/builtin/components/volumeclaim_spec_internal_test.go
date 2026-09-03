@@ -44,6 +44,8 @@ func TestVolumeClaimTemplateSchemaMatchesParser(t *testing.T) {
 
 	// Nested levels: the top-level comparison above says nothing about them.
 	assertKeysAt(t, *item, "resources", volumeClaimResourcesKeys)
+	assertKeysAt(t, *item, "resources.requests", volumeClaimStorageKeys)
+	assertKeysAt(t, *item, "resources.limits", volumeClaimStorageKeys)
 	assertKeysAt(t, *item, "selector", volumeClaimSelectorKeys)
 	assertKeysAt(t, *item, "selector.matchExpressions.[]", volumeClaimSelectorExprKeys)
 	assertKeysAt(t, *item, "dataSourceRef", volumeClaimDataSourceRefKeys)
@@ -448,5 +450,34 @@ func TestParseVolumeClaimTemplates_NotAList(t *testing.T) {
 	got, err := parseVolumeClaimTemplates(map[string]any{})
 	if err != nil || got != nil {
 		t.Errorf("absent volumeClaimTemplates = (%v, %v), want (nil, nil)", got, err)
+	}
+}
+
+// TestParseStorageResourceList_RejectionOrderIsDeterministic: same class as the
+// rejected-key scan above. A resources list authoring two non-storage names
+// must always report the same one; without the sort the message varies run to
+// run, and a test asserting one of them passes by luck.
+func TestParseStorageResourceList_RejectionOrderIsDeterministic(t *testing.T) {
+	entry := map[string]any{
+		"name": "data", "size": "10Gi", "mountPath": "/data",
+		"resources": map[string]any{"limits": map[string]any{"cpu": "1", "memory": "1Gi"}},
+	}
+	_, err := parseVolumeClaimTemplates(vctProps(entry))
+	if err == nil {
+		t.Fatal("parseVolumeClaimTemplates succeeded, want a non-storage resource error")
+	}
+	first := err.Error()
+	// Sorted order puts cpu before memory, whatever the map does.
+	if !strings.Contains(first, `"cpu"`) {
+		t.Errorf("error = %q, want the sorted-first offending key (cpu)", first)
+	}
+	for i := range 50 {
+		_, err := parseVolumeClaimTemplates(vctProps(entry))
+		if err == nil {
+			t.Fatalf("run %d: succeeded, want an error", i)
+		}
+		if err.Error() != first {
+			t.Fatalf("run %d: error = %q, want the same message as run 0 (%q)", i, err.Error(), first)
+		}
 	}
 }
