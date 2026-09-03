@@ -378,12 +378,19 @@ implementation. All three are answered by the shipped code:
   decoded or re-serialized. Pass-through `Application` identities are pre-reserved
   against generated child names only for groups some rule claims (plus
   `SupportedAPIVersion`); an `Application` under an unclaimed group is a foreign
-  resource, not a collidable identity. A settled document may carry
-  `SupportedAPIVersion` or any group a registered raw rule claims (`validateSettled`
-  validates it under `SupportedAPIVersion` otherwise unchanged); a rule emitting into an
-  unclaimed group fails with a `LoweringError` against the authored document. The
-  in-transform path is unaffected: it gates on `SupportedAPIVersion` before any rule
-  runs and never consults this registry.
+  resource, not a collidable identity. Every other identity in the pass stays
+  group-blind on purpose — `rawDocKey` and the `NameAllocator` key on
+  `(namespace, [kind,] name)` — because one call yields one output slice for one
+  consumer, in which a triple names one resource whatever group it was authored under.
+  Each raw seed carries the one group its rule claims (`loweringDoc.apiVersion`),
+  inherited by every descendant; a settled document may carry `SupportedAPIVersion` or
+  that group (`validateSettled` validates it under `SupportedAPIVersion` otherwise
+  unchanged), and a rule emitting into any other group — unclaimed, or claimed by a
+  different rule — fails with a `LoweringError` against the authored document, whose
+  chain names the raw step as `rawdocument/<apiVersion>/<kind>`. The in-transform path
+  is unaffected: it gates on `SupportedAPIVersion` before any rule runs, never consults
+  this registry, and its seed carries no allowed group, so a `DocumentLoweringRule`
+  emitting a raw-claimed group during `Transform` is rejected exactly as before.
 
 ## What this does not resolve
 

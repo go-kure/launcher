@@ -279,3 +279,110 @@ func TestLowerRaws_PassThroughInClaimedGroupIsPreReserved(t *testing.T) {
 		t.Fatalf("expected 2 output documents, got %d", len(out))
 	}
 }
+
+// groupEmittingDocRule is an in-transform DocumentLoweringRule that stamps a chosen
+// apiVersion on the one Application it emits — the shape an unrelated rule would
+// need to leak a raw-claimed group into the in-transform path.
+type groupEmittingDocRule struct {
+	kind       string
+	apiVersion string
+}
+
+func (r groupEmittingDocRule) Kind() string { return r.kind }
+
+func (r groupEmittingDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Documents: []Application{{
+		APIVersion: r.apiVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name + "-lowered"},
+		Spec:       ApplicationSpec{Components: doc.Spec.Components},
+	}}}, nil
+}
+
+// TestLower_InTransformRuleCannotSettleUnderRawClaimedGroup pins the raw-only scope of
+// the hook: registering a raw rule for a consumer group on a Transformer must not
+// widen what the in-transform path accepts. A DocumentLoweringRule dispatched from
+// lower() that emits that same group is rejected exactly as it was before any raw
+// rule existed, because the allowed group travels with each lowering seed and the
+// in-transform seed carries none.
+func TestLower_InTransformRuleCannotSettleUnderRawClaimedGroup(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(versionedRawRule{
+		testRawRule: testRawRule{kind: "WebApplication"},
+		apiVersion:  consumerGroup,
+	})
+	tr.RegisterDocumentLowering(groupEmittingDocRule{kind: "Intent", apiVersion: consumerGroup})
+
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Intent",
+		Metadata:   Metadata{Name: "shop"},
+		Spec: ApplicationSpec{
+			Components: []Component{{Name: "web", Type: "webservice", Properties: map[string]any{"image": "nginx:1.27"}}},
+		},
+	}
+	_, err := tr.lower(app, TransformContext{})
+	if err == nil {
+		t.Fatal("expected the in-transform path to reject a document settled under a group only a raw rule claims")
+	}
+	if !strings.Contains(err.Error(), `unsupported apiVersion "`+consumerGroup+`"`) {
+		t.Errorf("expected an unsupported-apiVersion error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "RawDocumentLoweringRule") {
+		t.Errorf("the in-transform error must not offer a raw-claimed group as acceptable, got: %v", err)
+	}
+}
+
+// TestLowerRaws_RuleMayNotSettleUnderAnotherRulesGroup pins the per-seed scope on the
+// raw side: a rule claiming group A may settle under A or SupportedAPIVersion, never
+// under group B just because another rule on the same Transformer claims B. The
+// failure's chain records the raw step under its full "<apiVersion>/<kind>"
+// identity, so the two same-kind rules stay distinguishable in provenance.
+func TestLowerRaws_RuleMayNotSettleUnderAnotherRulesGroup(t *testing.T) {
+	const otherGroup = "other.example.com/v1alpha1"
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(versionedRawRule{
+		testRawRule:    testRawRule{kind: "WebApplication"},
+		apiVersion:     consumerGroup,
+		emitAPIVersion: otherGroup,
+	})
+	tr.RegisterRawDocumentLowering(versionedRawRule{
+		testRawRule: testRawRule{kind: "WebApplication"},
+		apiVersion:  otherGroup,
+	})
+
+	_, err := tr.LowerRaws([]json.RawMessage{rawWebApplicationIn(consumerGroup, "shop")}, TransformContext{})
+	if err == nil {
+		t.Fatal("expected a rule to be refused settling under another rule's group")
+	}
+	if !strings.Contains(err.Error(), `unsupported apiVersion "`+otherGroup+`"`) || !strings.Contains(err.Error(), `"`+consumerGroup+`"`) {
+		t.Errorf("expected the error to name the emitted group and the claiming rule's own group, got: %v", err)
+	}
+	var lerr *LoweringError
+	if !stderrors.As(err, &lerr) {
+		t.Fatalf("expected a *LoweringError, got %T: %v", err, err)
+	}
+	if len(lerr.Chain) != 1 || lerr.Chain[0].Rule != "rawdocument/"+consumerGroup+"/WebApplication" {
+		t.Errorf("expected the chain to record the raw step under its (apiVersion, kind) identity, got: %+v", lerr.Chain)
+	}
+}
+
+// TestLowerRaws_SameIdentityInTwoGroupsIsADuplicate pins the identity model as
+// group-blind on purpose (see rawDocKey): one LowerRaws call yields one output slice,
+// in which (namespace, kind, name) names one resource regardless of the group each
+// input was authored under, so the same triple under two claimed groups is a
+// duplicate rather than two independent dispatches.
+func TestLowerRaws_SameIdentityInTwoGroupsIsADuplicate(t *testing.T) {
+	const otherGroup = "other.example.com/v1alpha1"
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(versionedRawRule{testRawRule: testRawRule{kind: "WebApplication"}, apiVersion: consumerGroup})
+	tr.RegisterRawDocumentLowering(versionedRawRule{testRawRule: testRawRule{kind: "WebApplication"}, apiVersion: otherGroup})
+
+	_, err := tr.LowerRaws([]json.RawMessage{rawWebApplicationIn(consumerGroup, "shop"), rawWebApplicationIn(otherGroup, "shop")}, TransformContext{})
+	if err == nil {
+		t.Fatal("expected the same (namespace, kind, name) under two claimed groups to be rejected as a duplicate")
+	}
+	if !strings.Contains(err.Error(), "duplicate authored document") {
+		t.Errorf("expected a duplicate-document error, got: %v", err)
+	}
+}

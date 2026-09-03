@@ -140,9 +140,12 @@ func (o Origin) String() string {
 // already used there before Origin.Rule existed, distinguishing a
 // RawDocumentLoweringRule from an ordinary DocumentLoweringRule — even though both
 // validate their LoweringResult against PositionDocument (the tree slot the two rule
-// kinds occupy is identical; only the provenance label differs). Every other call
-// site passes string(PositionX), so Origin.Rule and LoweringStep.Rule stay in
-// lockstep by construction.
+// kinds occupy is identical; only the provenance label differs). That call site
+// passes "<apiVersion>/<kind>" as typeName, since the raw registry is keyed on the
+// pair and two raw rules may claim one kind under different groups; a kind alone
+// would not name the rule that fired. Every other call site passes
+// string(PositionX) and a bare type name, so Origin.Rule and LoweringStep.Rule stay
+// in lockstep by construction.
 //
 // rule is `any` rather than one of the five lowering-rule interfaces
 // (DocumentLoweringRule, RawDocumentLoweringRule, ComponentLoweringRule,
@@ -509,7 +512,10 @@ func (t *Transformer) rawRuleClaimsKind(kind string) bool {
 
 // rawClaimedGroups is the set of apiVersions LowerRaws treats as its own: every
 // group a registered raw rule claims, plus SupportedAPIVersion always — the group
-// this package's own parser accepts and the one a rule emits into by default.
+// this package's own parser accepts and the one a rule emits into by default. Used
+// only to decide which pass-through Application identities LowerRaws pre-reserves;
+// settled-document validation deliberately does NOT consult it (see
+// loweringDoc.apiVersion).
 func (t *Transformer) rawClaimedGroups() map[string]bool {
 	groups := map[string]bool{SupportedAPIVersion: true}
 	for key := range t.rawDocLoweringRules {
@@ -692,6 +698,15 @@ type loweringDoc struct {
 	// unique per raw input, whereas two raw inputs could share an Origin
 	// (same authored name and kind).
 	slot int
+	// apiVersion is the ONE API group, besides SupportedAPIVersion, this document
+	// may settle under: the group its raw seed's RawDocumentLoweringRule claims
+	// (rawRuleAPIVersion), inherited verbatim by every descendant. Empty on the
+	// in-transform path, which is single-group by construction. Carried per
+	// document rather than read from the transformer's raw registry so a
+	// DocumentLoweringRule dispatched during Transform can never settle under a
+	// group that merely happens to be registered on the same Transformer for the
+	// raw entry point (see validateSettled).
+	apiVersion string
 }
 
 // runLowering is the ONE fixpoint implementation in this package. Both entry points
@@ -755,13 +770,13 @@ func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext, preR
 				changed = true
 			}
 			for _, doc := range expanded {
-				next = append(next, loweringDoc{doc: doc, origin: d.origin, slot: d.slot})
+				next = append(next, loweringDoc{doc: doc, origin: d.origin, slot: d.slot, apiVersion: d.apiVersion})
 			}
 		}
 		cur = next
 		if !changed {
 			for _, d := range cur {
-				if err := t.validateSettled(d.doc); err != nil {
+				if err := t.validateSettled(d.doc, d.apiVersion); err != nil {
 					return nil, &LoweringError{Origin: d.origin, Chain: chain, Cause: err}
 				}
 			}
@@ -784,7 +799,11 @@ func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext, preR
 // every registered ComponentHandler type for the identical reason customTraitTypes
 // exists on the trait side (see the loop below) — a registered component handler is
 // a terminal type whether or not a CapabilityDefinition matches it.
-func (t *Transformer) validateSettled(doc *Application) error {
+//
+// allowedAPIVersion is the one API group besides SupportedAPIVersion doc may settle
+// under (loweringDoc.apiVersion): the group its raw seed's rule claims, or "" on the
+// in-transform path.
+func (t *Transformer) validateSettled(doc *Application, allowedAPIVersion string) error {
 	customTraitTypes := make(map[string]bool, len(t.capabilityDefs)+len(t.traitHandlers))
 	for name := range t.capabilityDefs {
 		customTraitTypes[name] = true
@@ -819,14 +838,22 @@ func (t *Transformer) validateSettled(doc *Application) error {
 	// owns that group is the one parsing LowerRaws' output, and it would reject
 	// SupportedAPIVersion exactly as this package rejects the consumer's group.
 	// validateWithExtraTypes enforces SupportedAPIVersion because it also serves
-	// authored input; for a settled document accept any group this transformer
-	// claims, validating a shallow copy under SupportedAPIVersion so every other
-	// check runs unchanged. The in-transform path never reaches this branch: its
-	// documents were parsed under SupportedAPIVersion before any rule ran.
+	// authored input; for a settled document accept that ONE group as well,
+	// validating a shallow copy under SupportedAPIVersion so every other check
+	// runs unchanged. The allowed group travels with the document
+	// (loweringDoc.apiVersion), never from t.rawDocLoweringRules: the in-transform
+	// path passes "" and so stays exactly as strict as before — a
+	// DocumentLoweringRule dispatched during Transform that emits a foreign group
+	// is rejected here even when a raw rule for that group is registered on the
+	// same Transformer, and a raw rule claiming group G may settle only under G
+	// or SupportedAPIVersion, never under some other rule's group.
 	if doc.APIVersion != SupportedAPIVersion {
-		if !t.rawClaimedGroups()[doc.APIVersion] {
-			return oamValidationError("apiVersion", fmt.Sprintf("unsupported apiVersion %q on lowered document, expected %q or an apiVersion a registered RawDocumentLoweringRule claims",
-				doc.APIVersion, SupportedAPIVersion))
+		if allowedAPIVersion == "" || doc.APIVersion != allowedAPIVersion {
+			want := fmt.Sprintf("expected %q", SupportedAPIVersion)
+			if allowedAPIVersion != "" {
+				want = fmt.Sprintf("expected %q or %q (the group the claiming RawDocumentLoweringRule declares)", SupportedAPIVersion, allowedAPIVersion)
+			}
+			return oamValidationError("apiVersion", fmt.Sprintf("unsupported apiVersion %q on lowered document, %s", doc.APIVersion, want))
 		}
 		normalized := *doc
 		normalized.APIVersion = SupportedAPIVersion

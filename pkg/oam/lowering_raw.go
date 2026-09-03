@@ -30,6 +30,14 @@ type documentEnvelope struct {
 // two raw inputs sharing a name and kind but authored in different namespaces are
 // distinct Kubernetes-adjacent resources that must both be claimed and lowered, not
 // collapsed into one "duplicate" by a key that cannot tell them apart.
+//
+// It deliberately has NO apiVersion component either, and neither does any other
+// identity in this pass (NameAllocator keys on (namespace, name); pre-reservation
+// likewise): one LowerRaws call produces one output slice for one consumer, and
+// within it a (namespace, kind, name) triple names one resource whatever group each
+// input was authored under. Two same-named inputs of one kind in two claimed groups
+// are therefore a duplicate, not two dispatches — the conservative reading, since
+// their rules' generated children would otherwise share (namespace, name) too.
 type rawDocKey struct {
 	namespace string
 	kind      string
@@ -189,6 +197,9 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 			// lctx — exactly as the kind probe supplies dispatch before decoding.
 			origin: origin,
 			slot:   i,
+			// The group this seed and every document descending from it may
+			// settle under besides SupportedAPIVersion — see loweringDoc.apiVersion.
+			apiVersion: rawRuleAPIVersion(rule),
 		})
 	}
 	if len(seed) == 0 {
@@ -259,7 +270,10 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 	// Origin.Rule existed — the two provenance surfaces must agree on which rule
 	// produced a raw-entered document, not just on which POSITION-shaped
 	// LoweringResult it returned (both are validated as PositionDocument regardless).
-	ruleID := loweringRuleIdentity("rawdocument", d.origin.DocumentKind, d.rule)
+	// The type name is the registry pair "<apiVersion>/<kind>", not the kind alone:
+	// two raw rules may claim one kind under different groups, and the kind by itself
+	// would then not say which rule fired.
+	ruleID := loweringRuleIdentity("rawdocument", d.apiVersion+"/"+d.origin.DocumentKind, d.rule)
 	emitted := make([]*Application, len(result.Documents))
 	names := make([]string, len(result.Documents))
 	for i := range result.Documents {
