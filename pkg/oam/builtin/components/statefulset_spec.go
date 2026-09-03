@@ -38,6 +38,18 @@ var statefulSetSpecPropertyKeys = []string{
 
 // statefulSetSpecRejectedKeys are StatefulSetSpec fields an author may not set;
 // each maps to the error explaining why.
+// The nested key sets each parser below accepts, declared here rather than
+// inline at the rejectUnknownKeys call so the schema fragment can be pinned to
+// them (TestStatefulSetSpecSchemaMatchesParser walks both). An inline literal
+// drifts silently: a key added to the schema and not to the parser, or the
+// reverse, reads as correct at both halves.
+var (
+	statefulSetPVCRetentionKeys   = []string{"whenDeleted", "whenScaled"}
+	statefulSetOrdinalsKeys       = []string{"start"}
+	statefulSetUpdateStrategyKeys = []string{"type", "rollingUpdate"}
+	statefulSetRollingUpdateKeys  = []string{"partition", "maxUnavailable"}
+)
+
 var statefulSetSpecRejectedKeys = map[string]string{
 	"selector": "selector: not authorable; the StatefulSet selector is builder-managed (app: <component>), must equal the generated template labels and is immutable once created",
 }
@@ -103,7 +115,7 @@ func parseStatefulSetSpec(props map[string]any) (StatefulSetSpecConfig, error) {
 	if raw, present, err := parseObjectField(props, "persistentVolumeClaimRetentionPolicy", "persistentVolumeClaimRetentionPolicy"); err != nil {
 		return StatefulSetSpecConfig{}, err
 	} else if present {
-		if err := rejectUnknownKeys(raw, []string{"whenDeleted", "whenScaled"}, "persistentVolumeClaimRetentionPolicy"); err != nil {
+		if err := rejectUnknownKeys(raw, statefulSetPVCRetentionKeys, "persistentVolumeClaimRetentionPolicy"); err != nil {
 			return StatefulSetSpecConfig{}, err
 		}
 		policy := &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{}
@@ -133,7 +145,7 @@ func parseStatefulSetSpec(props map[string]any) (StatefulSetSpecConfig, error) {
 	if raw, present, err := parseObjectField(props, "ordinals", "ordinals"); err != nil {
 		return StatefulSetSpecConfig{}, err
 	} else if present {
-		if err := rejectUnknownKeys(raw, []string{"start"}, "ordinals"); err != nil {
+		if err := rejectUnknownKeys(raw, statefulSetOrdinalsKeys, "ordinals"); err != nil {
 			return StatefulSetSpecConfig{}, err
 		}
 		start, present, err := parseInt32Field(raw, "start", "ordinals.start")
@@ -157,7 +169,7 @@ func parseStatefulSetSpec(props map[string]any) (StatefulSetSpecConfig, error) {
 // (ValidateStatefulSetSpec: updateStrategy.type required); `rollingUpdate` is
 // only allowed under RollingUpdate.
 func parseStatefulSetUpdateStrategy(raw map[string]any) (*appsv1.StatefulSetUpdateStrategy, error) {
-	if err := rejectUnknownKeys(raw, []string{"type", "rollingUpdate"}, "updateStrategy"); err != nil {
+	if err := rejectUnknownKeys(raw, statefulSetUpdateStrategyKeys, "updateStrategy"); err != nil {
 		return nil, err
 	}
 	typ, present, err := parseStringField(raw, "type", "updateStrategy.type")
@@ -185,7 +197,7 @@ func parseStatefulSetUpdateStrategy(raw map[string]any) (*appsv1.StatefulSetUpda
 	if us.Type != appsv1.RollingUpdateStatefulSetStrategyType {
 		return nil, errors.Errorf("updateStrategy.rollingUpdate: only allowed for updateStrategy.type %s", appsv1.RollingUpdateStatefulSetStrategyType)
 	}
-	if err := rejectUnknownKeys(ru, []string{"partition", "maxUnavailable"}, "updateStrategy.rollingUpdate"); err != nil {
+	if err := rejectUnknownKeys(ru, statefulSetRollingUpdateKeys, "updateStrategy.rollingUpdate"); err != nil {
 		return nil, err
 	}
 	us.RollingUpdate = &appsv1.RollingUpdateStatefulSetStrategy{}
@@ -283,8 +295,14 @@ func schemaStatefulSetSpec() map[string]oam.PropertySchema {
 					Type:        oam.PropertyTypeObject,
 					Description: "RollingUpdate parameters; only allowed when type is RollingUpdate.",
 					Properties: map[string]oam.PropertySchema{
-						"partition":      {Type: oam.PropertyTypeInteger, Description: "Ordinal below which pods are left untouched by a rolling update (canary partitioning). Must be >= 0; the API default is 0."},
-						"maxUnavailable": {Type: oam.PropertyTypeString, Description: `Maximum pods unavailable during the update: a positive integer or a percentage string such as "25%" (never 0, at most 100%). The API default is 1.`},
+						"partition": {Type: oam.PropertyTypeInteger, Description: "Ordinal below which pods are left untouched by a rolling update (canary partitioning). Must be >= 0; the API default is 0."},
+						// Declared `string` because PropertyType carries no int-or-string
+						// member, and adding one would emit a type token the downstream
+						// schema consumer's validator does not understand (PropertyType's
+						// doc comment, pkg/oam/schema.go). The parser accepts both forms;
+						// the Description says so, because the declared type alone
+						// understates what is accepted. Tracked in go-kure/launcher#383.
+						"maxUnavailable": {Type: oam.PropertyTypeString, Description: `Maximum pods unavailable during the update: a percentage string such as "25%" (at most 100%), or a positive integer such as 2. The API default is 1; 0 is never valid. Declared as a string because this schema vocabulary has no int-or-string type — an integer is accepted and carried through as an integer, not converted to a string.`},
 					},
 				},
 			},

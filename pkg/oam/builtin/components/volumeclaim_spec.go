@@ -42,9 +42,21 @@ var volumeClaimTemplatePropertyKeys = []string{
 // `dataSource` is the superseded spelling of `dataSourceRef`. The apiserver
 // mirrors the two whenever the reference is one it understands, so authoring
 // both is a way to write the same thing twice and disagree with yourself.
+// The nested key sets each parser below accepts, declared here rather than
+// inline at the rejectUnknownKeys call so the schema fragment can be pinned to
+// them (TestVolumeClaimTemplateSchemaMatchesParser walks both). An inline
+// literal drifts silently: a key added to the schema and not to the parser, or
+// the reverse, reads as correct at both halves.
+var (
+	volumeClaimResourcesKeys     = []string{"requests", "limits"}
+	volumeClaimSelectorKeys      = []string{"matchLabels", "matchExpressions"}
+	volumeClaimSelectorExprKeys  = []string{"key", "operator", "values"}
+	volumeClaimDataSourceRefKeys = []string{"apiGroup", "kind", "name", "namespace"}
+)
+
 var volumeClaimTemplateRejectedKeys = map[string]string{
 	"volumeName":  "pre-binding a claim template to a named PersistentVolume would point every replica at the same volume; omit it and let the provisioner bind each ordinal",
-	"dataSource":  "superseded by dataSourceRef, which the apiserver mirrors back into dataSource; author dataSourceRef instead",
+	"dataSource":  "superseded by dataSourceRef, which the apiserver mirrors back into dataSource when dataSourceRef sets no namespace (and requires dataSource to stay empty when it does); author dataSourceRef instead",
 	"volumeMount": "not a claim-spec field; use mountPath",
 }
 
@@ -77,7 +89,7 @@ func parseVolumeClaimSpec(m map[string]any, label string, sizeAuthored bool) (Vo
 	if raw, present, err := parseObjectField(m, "resources", label+".resources"); err != nil {
 		return VolumeClaimSpecConfig{}, err
 	} else if present {
-		if err := rejectUnknownKeys(raw, []string{"requests", "limits"}, label+".resources"); err != nil {
+		if err := rejectUnknownKeys(raw, volumeClaimResourcesKeys, label+".resources"); err != nil {
 			return VolumeClaimSpecConfig{}, err
 		}
 		rr := &corev1.VolumeResourceRequirements{}
@@ -116,8 +128,20 @@ func parseVolumeClaimSpec(m map[string]any, label string, sizeAuthored bool) (Vo
 		return VolumeClaimSpecConfig{}, err
 	} else if present {
 		mode := corev1.PersistentVolumeMode(v)
-		if mode != corev1.PersistentVolumeFilesystem && mode != corev1.PersistentVolumeBlock {
-			return VolumeClaimSpecConfig{}, errors.Errorf("%s.volumeMode: invalid value %q, want Filesystem or Block", label, v)
+		// Block is a valid PersistentVolumeMode that this handler cannot render.
+		// Every volumeClaimTemplates entry requires a `mountPath`
+		// (parseVolumeClaimTemplates) and the statefulset kind turns each one
+		// into a filesystem corev1.VolumeMount unconditionally; a Block volume
+		// must instead be consumed through `volumeDevices`/`devicePath`, which
+		// this handler does not emit. The two objects are validated separately,
+		// so nothing rejects the pair: the StatefulSet and its claims are
+		// created and the pods then fail at mount time. Rejecting here reports
+		// it at build time instead. Raw block support is go-kure/launcher#385.
+		if mode == corev1.PersistentVolumeBlock {
+			return VolumeClaimSpecConfig{}, errors.Errorf("%s.volumeMode: Block is not supported — this kind mounts every claim template at its `mountPath` as a filesystem, and a Block volume must be consumed through volumeDevices/devicePath instead. Omit volumeMode or set Filesystem", label)
+		}
+		if mode != corev1.PersistentVolumeFilesystem {
+			return VolumeClaimSpecConfig{}, errors.Errorf("%s.volumeMode: invalid value %q, want Filesystem", label, v)
 		}
 		c.VolumeMode = &mode
 	}
@@ -145,15 +169,22 @@ func parseVolumeClaimSpec(m map[string]any, label string, sizeAuthored bool) (Vo
 	return c, nil
 }
 
-// parseStorageResourceList parses a claim's requests/limits map. A claim
-// measures exactly one resource: ValidatePersistentVolumeClaimSpec requires
-// `storage` in requests and rejects any other standard resource name, so an
-// entry such as `cpu` is a mistake to report rather than a value to carry.
+// parseStorageResourceList parses a claim's requests/limits map, accepting only
+// `storage`.
+//
+// That is stricter than the apiserver, deliberately.
+// ValidatePersistentVolumeClaimSpec requires `storage` in requests
+// (k8s-validation.go's field.Required on requests[storage]) but never iterates
+// the rest of the map, so an authored `cpu` reaches the API unread and is
+// silently carried on the object forever. A claim measures storage and nothing
+// else, so any other resource name is an authoring mistake worth reporting
+// rather than a value worth carrying. This rejection is launcher's, not the
+// API's.
 func parseStorageResourceList(m map[string]any, label string) (corev1.ResourceList, error) {
 	var rl corev1.ResourceList
 	for k, v := range m {
 		if corev1.ResourceName(k) != corev1.ResourceStorage {
-			return nil, errors.Errorf("%s: %q is not a claim resource; a PersistentVolumeClaim measures only storage", label, k)
+			return nil, errors.Errorf("%s: %q is not a claim resource; a PersistentVolumeClaim measures only storage. The apiserver would ignore it rather than reject it; launcher reports it because a claim carrying an unread resource request is an authoring mistake", label, k)
 		}
 		s, ok := decodedQuantityString(v)
 		if !ok {
@@ -163,8 +194,13 @@ func parseStorageResourceList(m map[string]any, label string) (corev1.ResourceLi
 		if err != nil {
 			return nil, errors.Errorf("%s.%s: invalid quantity %q: %w", label, k, s, err)
 		}
-		if q.Sign() < 0 {
-			return nil, errors.Errorf("%s.%s: quantity must not be negative, got %q", label, k, s)
+		// ValidatePositiveQuantityValue rejects Cmp <= 0, and
+		// ValidatePersistentVolumeClaimSpec applies it to requests[storage] —
+		// zero is as invalid as negative, so both are rejected here rather than
+		// building a claim that fails at admission. The same rule is applied to
+		// the short `size` spelling in parseVolumeClaimTemplates.
+		if q.Sign() <= 0 {
+			return nil, errors.Errorf("%s.%s: quantity must be positive, got %q", label, k, s)
 		}
 		if rl == nil {
 			rl = corev1.ResourceList{}
@@ -178,7 +214,7 @@ func parseStorageResourceList(m map[string]any, label string) (corev1.ResourceLi
 // matchExpressions form, with the operator's arity checked the way
 // metav1validation.ValidateLabelSelector does.
 func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector, error) {
-	if err := rejectUnknownKeys(raw, []string{"matchLabels", "matchExpressions"}, label); err != nil {
+	if err := rejectUnknownKeys(raw, volumeClaimSelectorKeys, label); err != nil {
 		return nil, err
 	}
 	sel := &metav1.LabelSelector{}
@@ -198,7 +234,7 @@ func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector
 	if present {
 		for i, item := range list {
 			itemLabel := indexedLabel(label+".matchExpressions", i)
-			if err := rejectUnknownKeys(item, []string{"key", "operator", "values"}, itemLabel); err != nil {
+			if err := rejectUnknownKeys(item, volumeClaimSelectorExprKeys, itemLabel); err != nil {
 				return nil, err
 			}
 			key, err := requireQualifiedName(item, "key", itemLabel)
@@ -235,8 +271,13 @@ func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector
 			})
 		}
 	}
+	// Stricter than the apiserver, deliberately: ValidateLabelSelector accepts
+	// an empty selector and treats it as matching everything, which is
+	// indistinguishable from omitting the key. An author who wrote `selector`
+	// meant to narrow binding, so an empty one is reported rather than dropped.
+	// This rejection is launcher's, not the API's.
 	if sel.MatchLabels == nil && sel.MatchExpressions == nil {
-		return nil, errors.Errorf("%s: at least one of matchLabels or matchExpressions is required", label)
+		return nil, errors.Errorf("%s: empty selector — set matchLabels or matchExpressions, or omit the key. The apiserver would accept an empty selector as matching every volume; launcher reports it because it is never what an author who wrote `selector` meant", label)
 	}
 	return sel, nil
 }
@@ -252,8 +293,14 @@ func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector
 // and is honoured only on a cluster with cross-namespace volume data sources
 // enabled and a matching ReferenceGrant; without one the claim stays pending
 // rather than failing, which the schema description states.
+//
+// The `namespace` rule matches upstream even for an explicit `namespace: ""`,
+// which upstream skips because it validates only a non-empty namespace: this
+// package's parseStringField collapses an empty string to "absent" for every
+// string field, so the empty case never reaches IsDNS1123Label here either.
+// The two agree without a special case.
 func parseDataSourceRef(raw map[string]any, label string) (*corev1.TypedObjectReference, error) {
-	if err := rejectUnknownKeys(raw, []string{"apiGroup", "kind", "name", "namespace"}, label); err != nil {
+	if err := rejectUnknownKeys(raw, volumeClaimDataSourceRefKeys, label); err != nil {
 		return nil, err
 	}
 	ref := &corev1.TypedObjectReference{}
@@ -366,10 +413,10 @@ func schemaVolumeClaimSpec() map[string]oam.PropertySchema {
 				"limits":   {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Upper bound on storage; honoured only by provisioners that implement it."},
 			},
 		},
-		"volumeMode": {Type: oam.PropertyTypeString, Enum: []any{"Filesystem", "Block"}, Description: "Whether the volume is mounted as a filesystem (the API default) or handed to the container as a raw block device."},
+		"volumeMode": {Type: oam.PropertyTypeString, Enum: []any{"Filesystem"}, Description: "How the volume is consumed. Only Filesystem is accepted: this kind mounts every claim template at its `mountPath`, and the API's other mode, Block, must be consumed through volumeDevices/devicePath, which this kind does not emit (go-kure/launcher#385)."},
 		"dataSourceRef": {
 			Type:        oam.PropertyTypeObject,
-			Description: "Object to populate the volume from — a VolumeSnapshot, another PVC, or a custom populator. The apiserver mirrors this into the superseded `dataSource` field, which is why that one is not authorable here.",
+			Description: "Object to populate the volume from — a VolumeSnapshot, another PVC, or a custom populator. When no `namespace` is set the apiserver mirrors this into the superseded `dataSource` field, which is why that one is not authorable here; when a `namespace` is set it does not mirror, and `dataSource` must stay empty.",
 			Properties: map[string]oam.PropertySchema{
 				"apiGroup":  {Type: oam.PropertyTypeString, Description: "API group of the referent, a DNS-1123 subdomain. Omitted or empty names the core group, which pins kind to PersistentVolumeClaim — the core group holds no other populator."},
 				"kind":      {Type: oam.PropertyTypeString, Required: true, Description: "Kind of the referent, e.g. VolumeSnapshot. A Kind is a CamelCase identifier, so upstream applies no format rule beyond non-empty; only the core-group pairing above constrains it."},

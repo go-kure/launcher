@@ -732,51 +732,11 @@ this trio verbatim rather than duplicating it.
   the container port and the Service port), letting a downstream platform synthesize generic
   app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
   Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
-- **statefulset** — `volumeClaimTemplates` (`name`, `size` — a `resource.Quantity`
-  rejected if negative, same as `volumes`' `pvc.size` above — `storageClass`
-  (a present-but-non-string value is rejected outright, same as `volumes`'
-  `pvc.storageClass`), `accessModes`, `mountPath`), `serviceName` (headless).
-  A `volumeClaimTemplates` entry now projects the whole
-  `corev1.PersistentVolumeClaimSpec`. Of its nine fields, three were already
-  reachable (`accessModes`, `storageClass`, and `size` as a shorthand for
-  `resources.requests.storage`); five are added: `selector`
-  (`matchLabels`/`matchExpressions`, with the operator arity rule — `In`/`NotIn`
-  need at least one value, `Exists`/`DoesNotExist` none), `resources`
-  (`requests`/`limits`, `storage` the only accepted resource name),
-  `volumeMode` (`Filesystem`|`Block`), `dataSourceRef`
-  (`apiGroup`/`kind`/`name`/`namespace`) and `volumeAttributesClassName`. The
-  ninth, `volumeName`, is rejected rather than projected: pre-binding a claim
-  *template* to one named PersistentVolume would point every replica at the same
-  volume. `dataSource` is rejected too — the apiserver mirrors `dataSourceRef`
-  back into it, so it is authored through `dataSourceRef` alone. Each projected
-  field is written only when authored, and `apply` *merges* `resources.requests`
-  onto what the constructor already wrote, so `size` survives when only `limits`
-  is authored; no existing output moves.
-  Of the five pre-existing keys only `size` changed meaning: it is now the short
-  spelling of `resources.requests.storage` and is no longer unconditionally
-  required — either spelling satisfies the requirement, and authoring both is an
-  error. `name`, `mountPath`, `storageClass` and `accessModes` keep their
-  meaning. All five now sit inside a closed key set, so a typo in an entry is
-  reported instead of being silently dropped.
-  `dataSourceRef` mirrors upstream `validateDataSourceRef` exactly: `kind` and
-  `name` are required non-empty with no format rule (a Kind is a CamelCase
-  identifier, not a DNS name), `apiGroup` must be a DNS-1123 subdomain when
-  non-empty, an omitted or empty `apiGroup` pins `kind` to
-  `PersistentVolumeClaim` (the core group holds no other populator), and
-  `namespace` is validated as a DNS-1123 *label* (`ValidateNamespaceName`), not
-  a subdomain.
-  StatefulSetSpec-level: `podManagementPolicy` (`OrderedReady`|`Parallel`),
-  `updateStrategy{type, rollingUpdate{partition, maxUnavailable}}`,
-  `revisionHistoryLimit` (`>= 0`), `minReadySeconds` (`>= 0`),
-  `persistentVolumeClaimRetentionPolicy{whenDeleted, whenScaled}` (each
-  `Retain`|`Delete`) and `ordinals{start}` (`>= 0`). Each is written only when
-  authored, so an unauthored StatefulSet keeps exactly what kure's
-  `CreateStatefulSet` put in the spec — `OrderedReady` and an empty
-  `updateStrategy` — and no existing output moves. `rollingUpdate` is rejected
-  under `type: OnDelete`, mirroring `ValidateStatefulSetSpec`, and
-  `maxUnavailable` takes a positive integer or a 1–100% string. `selector` is
-  rejected rather than ignored: the builder derives it from the component name,
-  and a StatefulSet's selector is immutable after creation.
+- **statefulset** — `serviceName` (headless) and `volumeClaimTemplates`
+  (`name`, `mountPath`, `size`, `storageClass`, `accessModes`, plus the rest of
+  `corev1.PersistentVolumeClaimSpec`). The StatefulSetSpec-level and
+  claim-template field sets are classified in "StatefulSet-level and
+  claim-template properties" below.
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`); `port`
   optionally adds a Service. No `sidecars` schema key (init containers only).
   DaemonSetSpec-level (go-kure/launcher#340, `daemonset_spec.go`): `updateStrategy`,
@@ -1010,6 +970,50 @@ this trio verbatim rather than duplicating it.
   consumers can attribute the emitted resource to its owning OAM component.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
   (`apiVersion`/`kind`/`scope`) for unknown kinds.
+
+## StatefulSet-level and claim-template properties
+
+The `statefulset` kind projects the whole `appsv1.StatefulSetSpec` field set it
+owns, and each `volumeClaimTemplates` entry projects the whole
+`corev1.PersistentVolumeClaimSpec`. Every field below is written only when
+authored, so an unauthored StatefulSet keeps exactly what kure's
+`CreateStatefulSet` put in the spec — `OrderedReady` and an empty
+`updateStrategy` — and no existing output moves. The claim entry's five
+pre-existing keys (`name`, `mountPath`, `size`, `storageClass`, `accessModes`)
+now sit inside a closed key set, so a typo in an entry is reported instead of
+being silently dropped.
+
+Columns match the pod-level table above: **additive** means no document that
+built before builds differently now; **behavior-changing** means an existing
+document's meaning or acceptance moved.
+
+| Property | Type | Effect | Kind |
+|----------|------|--------|------|
+| `podManagementPolicy` | enum | `OrderedReady` (the constructor's own value) or `Parallel`. | additive |
+| `updateStrategy{type, rollingUpdate{partition, maxUnavailable}}` | object | `type` is `RollingUpdate` or `OnDelete`; `rollingUpdate` is rejected under `OnDelete`, mirroring `ValidateStatefulSetSpec`. `partition` is `>= 0`. `maxUnavailable` takes a positive integer or a 1–100% string — the schema publishes it as a string because launcher's `PropertyType` set has no int-or-string leaf, but an authored integer is accepted and carried through as an integer, not converted (go-kure/launcher#383). | additive |
+| `revisionHistoryLimit` | int ≥ 0 | Retained controller revisions. | additive |
+| `minReadySeconds` | int ≥ 0 | Readiness settling time before a pod counts as available. | additive |
+| `persistentVolumeClaimRetentionPolicy{whenDeleted, whenScaled}` | object | Each is `Retain` or `Delete`. | additive |
+| `ordinals{start}` | object | `start` shifts the replica ordinal range and is required once `ordinals` is authored; `>= 0`. | additive |
+| `selector` (claim) | object | `matchLabels`/`matchExpressions`, with the operator arity rule — `In`/`NotIn` need at least one value, `Exists`/`DoesNotExist` none. An entirely empty `selector` is rejected: the apiserver would accept it as matching every volume, which is never what an author who wrote the key meant. | additive |
+| `resources{requests,limits}` (claim) | object | `storage` is the only accepted resource name — `ValidatePersistentVolumeClaimSpec` reads `requests[storage]` and nothing else, so any other name would be silently ignored. Quantities must be positive. `apply` *merges* `requests` onto what the constructor already wrote, so `size` survives when only `limits` is authored. `requests.storage` is the long spelling of `size`; authoring both is an error. | additive |
+| `volumeMode` (claim) | enum | Only `Filesystem` is accepted. The API's other mode, `Block`, is rejected at parse time: every claim entry requires a `mountPath` and this kind renders it as a filesystem `volumeMount`, while a block volume must be consumed through `volumeDevices`/`devicePath`. The claim and the pod template are validated as separate objects, so the apiserver would accept the mismatched pair and the pods would then fail at kubelet mount time. Raw block support is go-kure/launcher#385. | additive |
+| `dataSourceRef{apiGroup,kind,name,namespace}` (claim) | object | Mirrors upstream `validateDataSourceRef`: `kind` and `name` are required non-empty with no format rule (a Kind is a CamelCase identifier, not a DNS name), `apiGroup` must be a DNS-1123 subdomain when non-empty, an omitted or empty `apiGroup` pins `kind` to `PersistentVolumeClaim` (the core group holds no other populator), and `namespace`, when set, is a DNS-1123 *label* (`ValidateNamespaceName`), not a subdomain. | additive |
+| `volumeAttributesClassName` (claim) | string | DNS-1123 subdomain naming a `VolumeAttributesClass`. | additive |
+| `size` (claim) | quantity | **Behavior-changing.** `size` is now the short spelling of `resources.requests.storage` rather than a key of its own, and it is no longer unconditionally required — either spelling satisfies the requirement, and authoring both is an error. It must also now be **positive**: `0` was accepted before and is rejected now, matching upstream's `ValidatePositiveQuantityValue` on `requests[storage]`. (The `volumes[].pvc.size` surface on the other kinds still accepts `0`; that is tracked separately as go-kure/launcher#384.) | behavior-changing |
+
+Deliberately **not** accepted — each is rejected with an error naming the
+reason rather than silently ignored:
+
+- `spec.selector` (StatefulSet-level) — the builder derives it from the
+  component name, and a StatefulSet's selector is immutable after creation.
+- `volumeName` (claim) — pre-binding a claim *template* to one named
+  PersistentVolume would point every replica at the same volume.
+- `dataSource` (claim) — when `dataSourceRef` carries no `namespace` the
+  apiserver mirrors it into the superseded `dataSource` field, so authoring
+  both is redundant; when it does carry a `namespace` the apiserver does not
+  mirror, and `dataSource` must stay empty. Either way the field is authored
+  through `dataSourceRef` alone.
 
 ## Extending
 

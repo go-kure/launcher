@@ -41,6 +41,46 @@ func TestVolumeClaimTemplateSchemaMatchesParser(t *testing.T) {
 			t.Errorf("schema publishes rejected key %q", k)
 		}
 	}
+
+	// Nested levels: the top-level comparison above says nothing about them.
+	assertKeysAt(t, *item, "resources", volumeClaimResourcesKeys)
+	assertKeysAt(t, *item, "selector", volumeClaimSelectorKeys)
+	assertKeysAt(t, *item, "selector.matchExpressions.[]", volumeClaimSelectorExprKeys)
+	assertKeysAt(t, *item, "dataSourceRef", volumeClaimDataSourceRefKeys)
+}
+
+// assertKeysAt pins the Properties key set of the schema reached by walking
+// `path` (dot-separated; the step "[]" descends into Items) to want — the same
+// slice the parser hands rejectUnknownKeys at that level. Without this, a
+// nested key published but never parsed, or parsed but never published, leaves
+// both halves internally consistent and every other test green.
+func assertKeysAt(t *testing.T, root oam.PropertySchema, path string, want []string) {
+	t.Helper()
+	cur := root
+	for _, step := range strings.Split(path, ".") {
+		if step == "[]" {
+			if cur.Items == nil {
+				t.Fatalf("%s: no Items to descend into", path)
+			}
+			cur = *cur.Items
+			continue
+		}
+		next, ok := cur.Properties[step]
+		if !ok {
+			t.Fatalf("%s: schema has no property %q", path, step)
+		}
+		cur = next
+	}
+	got := make([]string, 0, len(cur.Properties))
+	for k := range cur.Properties {
+		got = append(got, k)
+	}
+	slices.Sort(got)
+	w := slices.Clone(want)
+	slices.Sort(w)
+	if !slices.Equal(got, w) {
+		t.Errorf("%s: schema keys = %v, parser accepts %v", path, got, w)
+	}
 }
 
 // TestVolumeClaimTemplateSchema_EveryKeyDescribed walks the fragment: every
@@ -76,7 +116,7 @@ func TestParseVolumeClaimTemplates_SpecRoundTrip(t *testing.T) {
 			},
 		},
 		"resources":  map[string]any{"limits": map[string]any{"storage": "20Gi"}},
-		"volumeMode": "Block",
+		"volumeMode": "Filesystem",
 		"dataSourceRef": map[string]any{
 			"apiGroup":  "snapshot.storage.k8s.io",
 			"kind":      "VolumeSnapshot",
@@ -115,8 +155,8 @@ func TestParseVolumeClaimTemplates_SpecRoundTrip(t *testing.T) {
 	if spec.Resources.Requests != nil {
 		t.Errorf("Resources.Requests = %v, want nil (size carries it)", spec.Resources.Requests)
 	}
-	if spec.VolumeMode == nil || *spec.VolumeMode != corev1.PersistentVolumeBlock {
-		t.Errorf("VolumeMode = %v, want Block", spec.VolumeMode)
+	if spec.VolumeMode == nil || *spec.VolumeMode != corev1.PersistentVolumeFilesystem {
+		t.Errorf("VolumeMode = %v, want Filesystem", spec.VolumeMode)
 	}
 	ref := spec.DataSourceRef
 	if ref == nil || ref.Kind != "VolumeSnapshot" || ref.Name != "seed" ||
@@ -232,13 +272,39 @@ func TestParseVolumeClaimTemplates_SpecErrors(t *testing.T) {
 		{
 			"negative storage limit",
 			with(map[string]any{"resources": map[string]any{"limits": map[string]any{"storage": "-1Gi"}}}),
-			"must not be negative",
+			"quantity must be positive",
+		},
+		{
+			"zero storage limit",
+			with(map[string]any{"resources": map[string]any{"limits": map[string]any{"storage": "0"}}}),
+			"quantity must be positive",
+		},
+		{
+			"zero storage in the long request spelling",
+			map[string]any{"name": "data", "mountPath": "/data", "resources": map[string]any{"requests": map[string]any{"storage": "0"}}},
+			"quantity must be positive",
+		},
+		{
+			"negative storage in the long request spelling",
+			map[string]any{"name": "data", "mountPath": "/data", "resources": map[string]any{"requests": map[string]any{"storage": "-1Gi"}}},
+			"quantity must be positive",
+		},
+		{
+			"zero size in the short spelling",
+			map[string]any{"name": "data", "mountPath": "/data", "size": "0"},
+			"size must be positive",
+		},
+		{
+			"negative size in the short spelling",
+			map[string]any{"name": "data", "mountPath": "/data", "size": "-1Gi"},
+			"size must be positive",
 		},
 		{"volumeMode enum", with(map[string]any{"volumeMode": "Raw"}), "volumeMode: invalid value"},
+		{"volumeMode Block rejected", with(map[string]any{"volumeMode": "Block"}), "Block is not supported"},
 		{
 			"selector empty",
 			with(map[string]any{"selector": map[string]any{}}),
-			"at least one of matchLabels or matchExpressions",
+			"empty selector",
 		},
 		{
 			"selector unknown key",
@@ -297,5 +363,36 @@ func TestParseVolumeClaimTemplates_SpecErrors(t *testing.T) {
 				t.Errorf("error = %q, want it to contain %q", err.Error(), tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestVolumeClaimTemplate_RejectedKeyOrderIsDeterministic: an entry authoring
+// several rejected keys at once must always name the same one. The loop reads
+// volumeClaimTemplateRejectedKeys, whose map iteration order is randomised, so
+// without an explicit sort the reported key varies run to run — and a test that
+// asserts one message passes or fails by luck.
+func TestVolumeClaimTemplate_RejectedKeyOrderIsDeterministic(t *testing.T) {
+	entry := map[string]any{
+		"name": "data", "size": "10Gi", "mountPath": "/data",
+		"volumeName": "pv-0",
+		"dataSource": map[string]any{},
+	}
+	_, err := parseVolumeClaimTemplates(vctProps(entry))
+	if err == nil {
+		t.Fatal("parseVolumeClaimTemplates succeeded, want a rejected-key error")
+	}
+	first := err.Error()
+	// Sorted order puts dataSource before volumeName, whatever the map does.
+	if !strings.Contains(first, "dataSource") {
+		t.Errorf("error = %q, want the sorted-first rejected key (dataSource)", first)
+	}
+	for i := range 50 {
+		_, err := parseVolumeClaimTemplates(vctProps(entry))
+		if err == nil {
+			t.Fatalf("run %d: succeeded, want an error", i)
+		}
+		if err.Error() != first {
+			t.Fatalf("run %d: error = %q, want the same message as run 0 (%q)", i, err.Error(), first)
+		}
 	}
 }

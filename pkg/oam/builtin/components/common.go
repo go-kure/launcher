@@ -3017,9 +3017,17 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		// Closed key set, added with the claim-spec projection: an unrecognized
 		// key used to be dropped silently, so a misspelled `storageClassName`
 		// built with the cluster default class and said nothing.
-		for k, why := range volumeClaimTemplateRejectedKeys {
+		// Sorted, like parsePodSpec's equivalent loop: map iteration order is
+		// randomised, so an entry authoring two rejected keys at once would
+		// otherwise report a different one run to run.
+		rejected := make([]string, 0, len(volumeClaimTemplateRejectedKeys))
+		for k := range volumeClaimTemplateRejectedKeys {
+			rejected = append(rejected, k)
+		}
+		slices.Sort(rejected)
+		for _, k := range rejected {
 			if _, present := m[k]; present {
-				return nil, errors.Errorf("%s: %s: not authorable — %s", entryLabel, k, why)
+				return nil, errors.Errorf("%s: %s: not authorable — %s", entryLabel, k, volumeClaimTemplateRejectedKeys[k])
 			}
 		}
 		if err := rejectUnknownKeys(m, volumeClaimTemplatePropertyKeys, entryLabel); err != nil {
@@ -3072,8 +3080,11 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 			if err != nil {
 				return nil, errors.Errorf("volumeClaimTemplate %q: invalid size %q: %w", vct.Name, vct.Size, err)
 			}
-			if qty.Sign() < 0 {
-				return nil, errors.Errorf("volumeClaimTemplate %q: size must not be negative, got %q", vct.Name, vct.Size)
+			// Symmetric with the long resources.requests.storage spelling in
+			// parseStorageResourceList: upstream ValidatePositiveQuantityValue
+			// rejects Cmp <= 0, so zero is as invalid as negative.
+			if qty.Sign() <= 0 {
+				return nil, errors.Errorf("volumeClaimTemplate %q: size must be positive, got %q", vct.Name, vct.Size)
 			}
 		}
 		vcts = append(vcts, vct)
