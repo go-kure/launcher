@@ -278,8 +278,10 @@ func TestLowerRaws_SettledDocumentMustBeInAClaimedGroup(t *testing.T) {
 
 // TestLowerRaws_PassThroughInClaimedGroupIsPreReserved extends the pass-through
 // identity reservation to a consumer group: an Application authored under a group a
-// registered rule claims blocks a generated child of the same name, while the same
-// Application under a group no rule claims is a foreign resource and does not.
+// registered rule claims blocks a generated child of the same name — at the claimed
+// version and at any other version of that group, since the pass's identity model
+// is version-blind — while the same Application under a group no rule claims is a
+// foreign resource and does not.
 func TestLowerRaws_PassThroughInClaimedGroupIsPreReserved(t *testing.T) {
 	newTransformer := func() *Transformer {
 		tr := NewTransformer(nil, nil)
@@ -293,12 +295,14 @@ func TestLowerRaws_PassThroughInClaimedGroupIsPreReserved(t *testing.T) {
 		return json.RawMessage(`{"apiVersion":"` + group + `","kind":"Application","metadata":{"name":"shop-1"},"spec":{"components":[{"name":"web","type":"webservice","properties":{"image":"nginx"}}]}}`)
 	}
 
-	_, err := newTransformer().LowerRaws([]json.RawMessage{passThrough(consumerGroup), rawWebApplicationIn(consumerGroup, "shop")}, TransformContext{})
-	if err == nil {
-		t.Fatal("expected a generated-name collision against the claimed-group pass-through Application")
-	}
-	if !strings.Contains(err.Error(), "shop-1") {
-		t.Errorf("expected the error to name the colliding identity %q, got: %v", "shop-1", err)
+	for _, group := range []string{consumerGroup, "consumer.example.com/v1beta1"} {
+		_, err := newTransformer().LowerRaws([]json.RawMessage{passThrough(group), rawWebApplicationIn(consumerGroup, "shop")}, TransformContext{})
+		if err == nil {
+			t.Fatalf("expected a generated-name collision against the pass-through Application at %s (a claimed group)", group)
+		}
+		if !strings.Contains(err.Error(), "shop-1") {
+			t.Errorf("expected the error for %s to name the colliding identity %q, got: %v", group, "shop-1", err)
+		}
 	}
 
 	out, err := newTransformer().LowerRaws([]json.RawMessage{passThrough("unrelated.example.com/v1"), rawWebApplicationIn(consumerGroup, "shop")}, TransformContext{})

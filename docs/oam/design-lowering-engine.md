@@ -378,9 +378,11 @@ implementation. All three are answered by the shipped code:
   via the lenient `documentEnvelope` probe (`lowering_raw.go`) — to look up the pair; an
   input whose pair matches no registered rule passes through byte-identical, never
   decoded or re-serialized. Pass-through `Application` identities are pre-reserved
-  against generated child names only for groups some rule claims (plus
-  `SupportedAPIVersion`); an `Application` under an unclaimed group is a foreign
-  resource, not a collidable identity. Every other identity in the pass stays
+  against generated child names only for API groups some rule claims (plus
+  `SupportedAPIVersion`'s group) — compared by group, not by full `group/version`, so
+  an `Application` at another version of a claimed group is still reserved; an
+  `Application` under an unclaimed group is a foreign resource, not a collidable
+  identity. Every other identity in the pass stays
   group-blind on purpose — `rawDocKey` and the `NameAllocator` key on
   `(namespace, [kind,] name)` — because one call yields one output slice for one
   consumer, in which a triple names one resource whatever group it was authored under.
