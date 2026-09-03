@@ -209,10 +209,11 @@ func TestRegisterRawDocumentLowering_APIVersionGuards(t *testing.T) {
 }
 
 // TestLowerRaws_SettledDocumentMustBeInAClaimedGroup pins the settled-document
-// apiVersion rule: a lowered document may carry SupportedAPIVersion or the group of
-// any registered raw rule, and nothing else — a rule emitting into a group no rule
-// claims is a rule bug, reported against the authored document, not a document the
-// caller's parser is left to reject.
+// apiVersion rule: a lowered document may carry SupportedAPIVersion or the one group
+// its own raw rule was matched under, and nothing else — a rule emitting into any
+// other group is a rule bug, reported against the authored document, not a document
+// the caller's parser is left to reject. (The other-rule's-group case is
+// TestLowerRaws_RuleMayNotSettleUnderAnotherRulesGroup.)
 func TestLowerRaws_SettledDocumentMustBeInAClaimedGroup(t *testing.T) {
 	t.Run("emitting SupportedAPIVersion from a consumer-group rule is accepted", func(t *testing.T) {
 		tr := NewTransformer(nil, nil)
@@ -364,6 +365,49 @@ func TestLowerRaws_RuleMayNotSettleUnderAnotherRulesGroup(t *testing.T) {
 	}
 	if len(lerr.Chain) != 1 || lerr.Chain[0].Rule != "rawdocument/"+consumerGroup+"/WebApplication" {
 		t.Errorf("expected the chain to record the raw step under its (apiVersion, kind) identity, got: %+v", lerr.Chain)
+	}
+}
+
+// driftingRawRule answers APIVersion() with whatever its pointer currently holds,
+// standing in for a stateful rule that reports one group at registration and
+// another later.
+type driftingRawRule struct {
+	testRawRule
+	group *string
+}
+
+func (r *driftingRawRule) APIVersion() string { return *r.group }
+
+func (r *driftingRawRule) LowerDocument(doc any, lctx LoweringContext) (LoweringResult, error) {
+	result, err := r.testRawRule.LowerDocument(doc, lctx)
+	if err != nil {
+		return result, err
+	}
+	for i := range result.Documents {
+		result.Documents[i].APIVersion = *r.group
+	}
+	return result, nil
+}
+
+// TestLowerRaws_SeedGroupIsTheMatchedRegistryKeyNotTheHookReEvaluated pins that
+// the group a seed may settle under is the registry pair that dispatched it, never
+// a fresh call to APIVersion(): a rule registered under group A whose hook later
+// says B still dispatches for A (the registry is fixed at registration) and is
+// refused when it then emits B.
+func TestLowerRaws_SeedGroupIsTheMatchedRegistryKeyNotTheHookReEvaluated(t *testing.T) {
+	const otherGroup = "other.example.com/v1alpha1"
+	group := consumerGroup
+	rule := &driftingRawRule{testRawRule: testRawRule{kind: "WebApplication"}, group: &group}
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(rule)
+	group = otherGroup // the hook now answers a group the rule never registered under
+
+	_, err := tr.LowerRaws([]json.RawMessage{rawWebApplicationIn(consumerGroup, "shop")}, TransformContext{})
+	if err == nil {
+		t.Fatal("expected a rule whose hook drifted after registration to be refused settling under the drifted group")
+	}
+	if !strings.Contains(err.Error(), `unsupported apiVersion "`+otherGroup+`"`) || !strings.Contains(err.Error(), `"`+consumerGroup+`"`) {
+		t.Errorf("expected the error to name the drifted group and the registered group, got: %v", err)
 	}
 }
 
