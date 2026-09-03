@@ -1226,7 +1226,9 @@ func TestCronjobHandler_PropertySchema_JobSpecAndCronSpecKeys_Present(t *testing
 	h := &components.CronjobHandler{}
 	schema := h.PropertySchema()
 
-	const wantTotalKeys = 26
+	// 26 cronjob-own keys plus the 31 shared pod-level keys from schemaPodSpec
+	// (podActiveDeadlineSeconds included: cronjob pods are Job pods).
+	const wantTotalKeys = 57
 	if len(schema) != wantTotalKeys {
 		t.Fatalf("PropertySchema() returned %d keys, want %d", len(schema), wantTotalKeys)
 	}

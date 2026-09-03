@@ -101,6 +101,7 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"timeZone":                   schemaCronJobTimeZone(),
 	}
 	maps.Copy(m, schemaJobSpec(false))
+	maps.Copy(m, schemaPodSpec(false, true))
 	return m
 }
 
@@ -276,6 +277,12 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	}
 	config.InitContainers = initContainers
 
+	podSpec, err := parsePodSpec(props, true)
+	if err != nil {
+		return nil, err
+	}
+	config.PodSpec = podSpec
+
 	return config, nil
 }
 
@@ -316,6 +323,18 @@ type CronjobConfig struct {
 	VolumeMounts            []corev1.VolumeMount
 	InitContainers          []InitContainerConfig
 	PVCs                    []PVCConfig
+	// PodSpec holds the shared pod-level properties (see parsePodSpec). Parsed
+	// with jobPods=true, so `podActiveDeadlineSeconds` (the pod's own
+	// deadline) is accepted alongside the job-level `activeDeadlineSeconds`
+	// from schemaJobSpec — two different fields, two different keys.
+	PodSpec PodSpecConfig
+}
+
+// ServiceAccountName implements oam.ServiceAccountNamer: the authored
+// serviceAccountName, else the per-component ServiceAccount named after the
+// component.
+func (c *CronjobConfig) ServiceAccountName() string {
+	return effectiveServiceAccountName(c.PodSpec, c.Name)
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -350,6 +369,9 @@ func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforceHostPathVolumes(c.Volumes, p.AllowHostPathVolumes()); err != nil {
 		return err
 	}
+	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {
+		return err
+	}
 	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
 		return err
 	}
@@ -369,6 +391,7 @@ func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
 }
 
 // Generate creates a Kubernetes CronJob, ServiceAccount, and any declared PVCs.
+// The ServiceAccount is omitted when serviceAccountName was authored.
 func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}
 	var err error
@@ -380,11 +403,13 @@ func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, erro
 	if err != nil {
 		return nil, err
 	}
-	sa := createServiceAccount(app.Name, app.Namespace, labels)
 
 	obj := client.Object(cronjob)
-	saObj := client.Object(sa)
-	objects := []*client.Object{&obj, &saObj}
+	objects := []*client.Object{&obj}
+	if generatesServiceAccount(c.PodSpec) {
+		saObj := client.Object(createServiceAccount(app.Name, app.Namespace, labels))
+		objects = append(objects, &saObj)
+	}
 
 	for _, pvc := range c.PVCs {
 		p, err := BuildPVC(pvc, app.Namespace, labels)
@@ -401,37 +426,28 @@ func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, erro
 func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob, error) {
 	labels := map[string]string{"app": app.Name}
 
-	container := kubernetes.CreateContainer(app.Name, c.Image, c.Command, c.Args)
-	kubernetes.SetContainerResources(container, buildResourceRequirements(c.Resources))
-	for _, env := range c.Env {
-		kubernetes.AddContainerEnv(container, env)
-	}
-	for _, ef := range c.EnvFrom {
-		kubernetes.AddContainerEnvFrom(container, ef)
-	}
-	if c.WorkingDir != "" {
-		kubernetes.SetContainerWorkingDir(container, c.WorkingDir)
-	}
-	if c.Lifecycle != nil {
-		kubernetes.SetContainerLifecycle(container, c.Lifecycle)
-	}
-	if c.SecurityContext != nil {
-		kubernetes.SetContainerSecurityContext(container, *c.SecurityContext)
-	}
-	for _, m := range c.VolumeMounts {
-		kubernetes.AddContainerVolumeMount(container, m)
-	}
-	applyProbes(container, c.Probes)
+	// No Ports: cronjob exposes no port property (see parseProbes' namedPortsAllowed=false above).
+	container := buildMainContainer(app.Name, mainContainerInput{
+		Image:           c.Image,
+		Command:         c.Command,
+		Args:            c.Args,
+		Resources:       c.Resources,
+		Env:             c.Env,
+		EnvFrom:         c.EnvFrom,
+		Probes:          c.Probes,
+		WorkingDir:      c.WorkingDir,
+		Lifecycle:       c.Lifecycle,
+		SecurityContext: c.SecurityContext,
+		VolumeMounts:    c.VolumeMounts,
+	})
 
 	cj := kubernetes.CreateCronJob(app.Name, app.Namespace, c.Schedule)
 	cj.Labels = labels
 	cj.Annotations = nil
 	cj.Spec.JobTemplate.Labels = labels
 	cj.Spec.JobTemplate.Spec.Template.Labels = labels
-	cj.Spec.JobTemplate.Spec.Template.Spec.RestartPolicy = c.RestartPolicy
 	kubernetes.SetCronJobSuccessfulJobsHistoryLimit(cj, c.SuccessfulJobsHistoryLimit)
 	kubernetes.SetCronJobFailedJobsHistoryLimit(cj, c.FailedJobsHistoryLimit)
-	kubernetes.SetCronJobServiceAccountName(cj, app.Name)
 	if c.ConcurrencyPolicy != nil {
 		kubernetes.SetCronJobConcurrencyPolicy(cj, *c.ConcurrencyPolicy)
 	}
@@ -445,25 +461,22 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 		kubernetes.SetCronJobTimeZone(cj, c.TimeZone)
 	}
 	applyJobSpec(&cj.Spec.JobTemplate.Spec, c.JobSpec)
-	// Init containers added before the main container so declaration order is
-	// preserved in spec.template.spec.initContainers.
-	for _, ic := range c.InitContainers {
-		initContainer, err := buildInitContainer(ic)
-		if err != nil {
-			return nil, err
-		}
-		if err := kubernetes.AddCronJobInitContainer(cj, initContainer); err != nil {
-			return nil, errors.Wrapf(err, "add init container %q", ic.Name)
-		}
+
+	// Replaces the whole pod spec, including the RestartPolicy: Never that
+	// kure's CreateCronJob pre-fills — c.RestartPolicy is always set (default
+	// OnFailure), so the authored/defaulted value wins as before.
+	podSpec, err := buildPodSpec(podSpecInput{
+		Config:                    c.PodSpec,
+		DefaultServiceAccountName: app.Name,
+		MainContainer:             container,
+		InitContainers:            c.InitContainers,
+		Volumes:                   c.Volumes,
+		RestartPolicy:             c.RestartPolicy,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if err := kubernetes.AddCronJobContainer(cj, container); err != nil {
-		return nil, errors.Wrapf(err, "add container %q", c.Name)
-	}
-	for i := range c.Volumes {
-		if err := kubernetes.AddCronJobVolume(cj, &c.Volumes[i]); err != nil {
-			return nil, errors.Wrapf(err, "add volume %q", c.Volumes[i].Name)
-		}
-	}
+	cj.Spec.JobTemplate.Spec.Template.Spec = podSpec
 
 	return cj, nil
 }

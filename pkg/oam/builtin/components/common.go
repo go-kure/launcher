@@ -1910,127 +1910,30 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		}
 	}
 	if v, present := raw["seccompProfile"]; present {
-		spRaw, ok := v.(map[string]any)
-		if !ok {
-			return nil, errors.Errorf("securityContext.seccompProfile: must be an object, got %T", v)
-		}
-		if err := rejectUnknownKeys(spRaw, []string{"type", "localhostProfile"}, "securityContext.seccompProfile"); err != nil {
+		sp, err := parseSeccompProfile(v, "securityContext.seccompProfile")
+		if err != nil {
 			return nil, err
 		}
-		typ, _ := spRaw["type"].(string)
-		switch corev1.SeccompProfileType(typ) {
-		case corev1.SeccompProfileTypeRuntimeDefault, corev1.SeccompProfileTypeUnconfined:
-			// parseStringField, not a bare type assertion: a present-but-non-string
-			// localhostProfile (e.g. a number) must be rejected here too, not
-			// silently treated as absent while the mutually-exclusive type is
-			// accepted as if localhostProfile had never been authored.
-			if _, present, err := parseStringField(spRaw, "localhostProfile", "securityContext.seccompProfile.localhostProfile"); err != nil {
-				return nil, err
-			} else if present {
-				return nil, errors.Errorf("securityContext.seccompProfile: localhostProfile is only valid when type is Localhost, got type %q", typ)
-			}
-			sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileType(typ)}
-			set = true
-		case corev1.SeccompProfileTypeLocalhost:
-			profile, ok := spRaw["localhostProfile"].(string)
-			if !ok || profile == "" {
-				return nil, errors.Errorf("securityContext.seccompProfile: localhostProfile is required when type is %q", typ)
-			}
-			// corev1.SeccompProfile.LocalhostProfile's field doc comment: "Must be
-			// a descending path, relative to the kubelet's configured seccomp
-			// profile location."
-			if err := validateRelativePath("securityContext.seccompProfile.localhostProfile", profile); err != nil {
-				return nil, err
-			}
-			sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeLocalhost, LocalhostProfile: &profile}
-			set = true
-		case "":
-			// Real admission's validateSeccompProfileType returns
-			// field.Required "type is required when seccompProfile is set" —
-			// an empty type is only reachable here because the author wrote a
-			// seccompProfile object at all (the outer `if spRaw, ok := ...`
-			// already gated on that), so treating it as a silent no-op would
-			// drop an authored profile (e.g. a localhostProfile with a typo'd
-			// or missing type key) without telling the author their intent
-			// was discarded.
-			return nil, errors.Errorf("securityContext.seccompProfile: type is required when seccompProfile is set")
-		default:
-			return nil, errors.Errorf("securityContext.seccompProfile: invalid type %q, must be Localhost, RuntimeDefault, or Unconfined", typ)
-		}
+		sc.SeccompProfile = sp
+		set = true
 	}
 	if v, present := raw["seLinuxOptions"]; present {
-		seRaw, ok := v.(map[string]any)
-		if !ok {
-			return nil, errors.Errorf("securityContext.seLinuxOptions: must be an object, got %T", v)
-		}
-		if err := rejectUnknownKeys(seRaw, []string{"user", "role", "type", "level"}, "securityContext.seLinuxOptions"); err != nil {
+		se, err := parseSELinuxOptions(v, "securityContext.seLinuxOptions")
+		if err != nil {
 			return nil, err
 		}
-		se := &corev1.SELinuxOptions{}
-		anySet := false
-		if v, present, err := parseStringField(seRaw, "user", "securityContext.seLinuxOptions.user"); err != nil {
-			return nil, err
-		} else if present {
-			se.User = v
-			anySet = true
-		}
-		if v, present, err := parseStringField(seRaw, "role", "securityContext.seLinuxOptions.role"); err != nil {
-			return nil, err
-		} else if present {
-			se.Role = v
-			anySet = true
-		}
-		if v, present, err := parseStringField(seRaw, "type", "securityContext.seLinuxOptions.type"); err != nil {
-			return nil, err
-		} else if present {
-			se.Type = v
-			anySet = true
-		}
-		if v, present, err := parseStringField(seRaw, "level", "securityContext.seLinuxOptions.level"); err != nil {
-			return nil, err
-		} else if present {
-			se.Level = v
-			anySet = true
-		}
-		if anySet {
+		if se != nil {
 			sc.SELinuxOptions = se
 			set = true
 		}
 	}
 	if v, present := raw["appArmorProfile"]; present {
-		apRaw, ok := v.(map[string]any)
-		if !ok {
-			return nil, errors.Errorf("securityContext.appArmorProfile: must be an object, got %T", v)
-		}
-		if err := rejectUnknownKeys(apRaw, []string{"type", "localhostProfile"}, "securityContext.appArmorProfile"); err != nil {
+		ap, err := parseAppArmorProfile(v, "securityContext.appArmorProfile")
+		if err != nil {
 			return nil, err
 		}
-		typ, _ := apRaw["type"].(string)
-		switch corev1.AppArmorProfileType(typ) {
-		case corev1.AppArmorProfileTypeRuntimeDefault, corev1.AppArmorProfileTypeUnconfined:
-			// Same parseStringField fix as seccompProfile's identical branch above.
-			if _, present, err := parseStringField(apRaw, "localhostProfile", "securityContext.appArmorProfile.localhostProfile"); err != nil {
-				return nil, err
-			} else if present {
-				return nil, errors.Errorf("securityContext.appArmorProfile: localhostProfile is only valid when type is Localhost, got type %q", typ)
-			}
-			sc.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileType(typ)}
-			set = true
-		case corev1.AppArmorProfileTypeLocalhost:
-			profile, ok := apRaw["localhostProfile"].(string)
-			if !ok || profile == "" {
-				return nil, errors.Errorf("securityContext.appArmorProfile: localhostProfile is required when type is %q", typ)
-			}
-			sc.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeLocalhost, LocalhostProfile: &profile}
-			set = true
-		case "":
-			// Mirrors ValidateAppArmorProfileField's own field.Required "type
-			// is required when appArmorProfile is set" — same reasoning as
-			// the seccompProfile case above.
-			return nil, errors.Errorf("securityContext.appArmorProfile: type is required when appArmorProfile is set")
-		default:
-			return nil, errors.Errorf("securityContext.appArmorProfile: invalid type %q, must be Localhost, RuntimeDefault, or Unconfined", typ)
-		}
+		sc.AppArmorProfile = ap
+		set = true
 	}
 	if pm, present, err := parseStringField(raw, "procMount", "securityContext.procMount"); err != nil {
 		return nil, err
@@ -2049,6 +1952,129 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		return nil, nil
 	}
 	return sc, nil
+}
+
+// parseSeccompProfile decodes a seccompProfile object shared by the container
+// securityContext and the pod-level podSecurityContext. label is the dotted
+// path used in error messages (e.g. "securityContext.seccompProfile").
+func parseSeccompProfile(v any, label string) (*corev1.SeccompProfile, error) {
+	spRaw, ok := v.(map[string]any)
+	if !ok {
+		return nil, errors.Errorf("%s: must be an object, got %T", label, v)
+	}
+	if err := rejectUnknownKeys(spRaw, []string{"type", "localhostProfile"}, label); err != nil {
+		return nil, err
+	}
+	typ, _ := spRaw["type"].(string)
+	switch corev1.SeccompProfileType(typ) {
+	case corev1.SeccompProfileTypeRuntimeDefault, corev1.SeccompProfileTypeUnconfined:
+		// parseStringField, not a bare type assertion: a present-but-non-string
+		// localhostProfile (e.g. a number) must be rejected here too, not
+		// silently treated as absent while the mutually-exclusive type is
+		// accepted as if localhostProfile had never been authored.
+		if _, present, err := parseStringField(spRaw, "localhostProfile", label+".localhostProfile"); err != nil {
+			return nil, err
+		} else if present {
+			return nil, errors.Errorf("%s: localhostProfile is only valid when type is Localhost, got type %q", label, typ)
+		}
+		return &corev1.SeccompProfile{Type: corev1.SeccompProfileType(typ)}, nil
+	case corev1.SeccompProfileTypeLocalhost:
+		profile, ok := spRaw["localhostProfile"].(string)
+		if !ok || profile == "" {
+			return nil, errors.Errorf("%s: localhostProfile is required when type is %q", label, typ)
+		}
+		// corev1.SeccompProfile.LocalhostProfile's field doc comment: "Must be
+		// a descending path, relative to the kubelet's configured seccomp
+		// profile location."
+		if err := validateRelativePath(label+".localhostProfile", profile); err != nil {
+			return nil, err
+		}
+		return &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeLocalhost, LocalhostProfile: &profile}, nil
+	case "":
+		// Real admission's validateSeccompProfileType returns
+		// field.Required "type is required when seccompProfile is set" —
+		// an empty type is only reachable here because the author wrote a
+		// seccompProfile object at all, so treating it as a silent no-op would
+		// drop an authored profile (e.g. a localhostProfile with a typo'd
+		// or missing type key) without telling the author their intent
+		// was discarded.
+		return nil, errors.Errorf("%s: type is required when seccompProfile is set", label)
+	default:
+		return nil, errors.Errorf("%s: invalid type %q, must be Localhost, RuntimeDefault, or Unconfined", label, typ)
+	}
+}
+
+// parseSELinuxOptions decodes a seLinuxOptions object. It returns nil (no
+// error) when the object is present but every field is empty, so callers can
+// keep "nothing authored" out of the rendered output.
+func parseSELinuxOptions(v any, label string) (*corev1.SELinuxOptions, error) {
+	seRaw, ok := v.(map[string]any)
+	if !ok {
+		return nil, errors.Errorf("%s: must be an object, got %T", label, v)
+	}
+	if err := rejectUnknownKeys(seRaw, []string{"user", "role", "type", "level"}, label); err != nil {
+		return nil, err
+	}
+	se := &corev1.SELinuxOptions{}
+	anySet := false
+	for _, f := range []struct {
+		key string
+		dst *string
+	}{
+		{"user", &se.User},
+		{"role", &se.Role},
+		{"type", &se.Type},
+		{"level", &se.Level},
+	} {
+		v, present, err := parseStringField(seRaw, f.key, label+"."+f.key)
+		if err != nil {
+			return nil, err
+		}
+		if present {
+			*f.dst = v
+			anySet = true
+		}
+	}
+	if !anySet {
+		return nil, nil
+	}
+	return se, nil
+}
+
+// parseAppArmorProfile decodes an appArmorProfile object; see parseSeccompProfile
+// for the shared validation rationale.
+func parseAppArmorProfile(v any, label string) (*corev1.AppArmorProfile, error) {
+	apRaw, ok := v.(map[string]any)
+	if !ok {
+		return nil, errors.Errorf("%s: must be an object, got %T", label, v)
+	}
+	if err := rejectUnknownKeys(apRaw, []string{"type", "localhostProfile"}, label); err != nil {
+		return nil, err
+	}
+	typ, _ := apRaw["type"].(string)
+	switch corev1.AppArmorProfileType(typ) {
+	case corev1.AppArmorProfileTypeRuntimeDefault, corev1.AppArmorProfileTypeUnconfined:
+		// Same parseStringField fix as seccompProfile's identical branch.
+		if _, present, err := parseStringField(apRaw, "localhostProfile", label+".localhostProfile"); err != nil {
+			return nil, err
+		} else if present {
+			return nil, errors.Errorf("%s: localhostProfile is only valid when type is Localhost, got type %q", label, typ)
+		}
+		return &corev1.AppArmorProfile{Type: corev1.AppArmorProfileType(typ)}, nil
+	case corev1.AppArmorProfileTypeLocalhost:
+		profile, ok := apRaw["localhostProfile"].(string)
+		if !ok || profile == "" {
+			return nil, errors.Errorf("%s: localhostProfile is required when type is %q", label, typ)
+		}
+		return &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeLocalhost, LocalhostProfile: &profile}, nil
+	case "":
+		// Mirrors ValidateAppArmorProfileField's own field.Required "type
+		// is required when appArmorProfile is set" — same reasoning as
+		// the seccompProfile case.
+		return nil, errors.Errorf("%s: type is required when appArmorProfile is set", label)
+	default:
+		return nil, errors.Errorf("%s: invalid type %q, must be Localhost, RuntimeDefault, or Unconfined", label, typ)
+	}
 }
 
 func parseVolumes(props map[string]any) (ParsedVolumes, error) {

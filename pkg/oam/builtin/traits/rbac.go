@@ -80,11 +80,23 @@ func (h *RBACHandler) parseProperties(props map[string]any, app *stack.Applicati
 		clusterWide = v
 	}
 
+	// The binding subject is the ServiceAccount the component's pods actually
+	// run as: an authored serviceAccountName when the component set one (see
+	// oam.ServiceAccountNamer), else the per-component account named after
+	// the component.
+	serviceAccountName := app.Name
+	if namer, ok := app.Config.(oam.ServiceAccountNamer); ok {
+		if name := namer.ServiceAccountName(); name != "" {
+			serviceAccountName = name
+		}
+	}
+
 	return &rbacTraitConfig{
-		componentName: app.Name,
-		Namespace:     app.Namespace,
-		Rules:         rules,
-		ClusterWide:   clusterWide,
+		componentName:      app.Name,
+		serviceAccountName: serviceAccountName,
+		Namespace:          app.Namespace,
+		Rules:              rules,
+		ClusterWide:        clusterWide,
 	}, nil
 }
 
@@ -138,14 +150,27 @@ type rbacRule struct {
 
 type rbacTraitConfig struct {
 	componentName string
-	Namespace     string
-	Rules         []rbacRule
-	ClusterWide   bool
+	// serviceAccountName is the RoleBinding/ClusterRoleBinding subject; the
+	// Role/RoleBinding objects themselves stay named after the component.
+	serviceAccountName string
+	Namespace          string
+	Rules              []rbacRule
+	ClusterWide        bool
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource
 // provenance attribution.
 func (c *rbacTraitConfig) ComponentName() string { return c.componentName }
+
+// subjectName is the ServiceAccount the bindings grant to; a config built
+// directly (tests, older callers) without serviceAccountName falls back to the
+// component name, the pre-launcher#342 behaviour.
+func (c *rbacTraitConfig) subjectName() string {
+	if c.serviceAccountName != "" {
+		return c.serviceAccountName
+	}
+	return c.componentName
+}
 
 func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": c.componentName}
@@ -171,7 +196,7 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 	})
 	kubernetes.AddRoleBindingSubject(rb, rbacv1.Subject{
 		Kind:      rbacv1.ServiceAccountKind,
-		Name:      c.componentName,
+		Name:      c.subjectName(),
 		Namespace: c.Namespace,
 	})
 
@@ -204,7 +229,7 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 	})
 	kubernetes.AddClusterRoleBindingSubject(crb, rbacv1.Subject{
 		Kind:      rbacv1.ServiceAccountKind,
-		Name:      c.componentName,
+		Name:      c.subjectName(),
 		Namespace: c.Namespace,
 	})
 

@@ -1,6 +1,8 @@
 package components
 
 import (
+	"maps"
+
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
@@ -40,7 +42,7 @@ func (h *WebserviceHandler) Endpoints(component *oam.Component) ([]netpol.Endpoi
 
 // PropertySchema declares the webservice component's user-facing properties.
 func (h *WebserviceHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	m := map[string]oam.PropertySchema{
 		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
 		"port":            {Type: oam.PropertyTypeInteger, Default: 80, Description: "Container port exposed by the Deployment and its ClusterIP Service."},
 		"replicas":        {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of Deployment pod replicas."},
@@ -59,6 +61,8 @@ func (h *WebserviceHandler) PropertySchema() map[string]oam.PropertySchema {
 		"sidecars":        schemaContainers(),
 		"affinity":        schemaAffinity(),
 	}
+	maps.Copy(m, schemaPodSpec(false, false))
+	return m
 }
 
 // ToApplicationConfig converts an OAM webservice component to a WebserviceConfig.
@@ -162,6 +166,12 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.Sidecars = sidecars
 
+	podSpec, err := parsePodSpec(props, false)
+	if err != nil {
+		return nil, err
+	}
+	config.PodSpec = podSpec
+
 	return config, nil
 }
 
@@ -188,7 +198,16 @@ type WebserviceConfig struct {
 	Sidecars               []SidecarContainerConfig
 	TopologySpreadDisabled bool
 	Affinity               AffinityConfig
-	explicitReplicas       bool
+	// PodSpec holds the shared pod-level properties (see parsePodSpec).
+	PodSpec          PodSpecConfig
+	explicitReplicas bool
+}
+
+// ServiceAccountName implements oam.ServiceAccountNamer: the authored
+// serviceAccountName, else the per-component ServiceAccount named after the
+// component.
+func (c *WebserviceConfig) ServiceAccountName() string {
+	return effectiveServiceAccountName(c.PodSpec, c.Name)
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -227,6 +246,9 @@ func (c *WebserviceConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforceHostPathVolumes(c.Volumes, p.AllowHostPathVolumes()); err != nil {
 		return err
 	}
+	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {
+		return err
+	}
 	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
 		return err
 	}
@@ -255,6 +277,8 @@ func (c *WebserviceConfig) ApplyPolicy(p oam.Policy) error {
 func (c *WebserviceConfig) ServicePort() int32 { return c.Port }
 
 // Generate creates Kubernetes Deployment, Service, and ServiceAccount resources.
+// The ServiceAccount is omitted when serviceAccountName was authored (the pod
+// then runs as that pre-existing account).
 func (c *WebserviceConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}
 	var err error
@@ -267,13 +291,15 @@ func (c *WebserviceConfig) Generate(app *stack.Application) ([]*client.Object, e
 		return nil, err
 	}
 	service := c.createService(app)
-	sa := createServiceAccount(app.Name, app.Namespace, labels)
 
 	depObj := client.Object(deployment)
 	svcObj := client.Object(service)
-	saObj := client.Object(sa)
 
-	objects := []*client.Object{&depObj, &svcObj, &saObj}
+	objects := []*client.Object{&depObj, &svcObj}
+	if generatesServiceAccount(c.PodSpec) {
+		saObj := client.Object(createServiceAccount(app.Name, app.Namespace, labels))
+		objects = append(objects, &saObj)
+	}
 	for _, pvc := range c.PVCs {
 		p, err := BuildPVC(pvc, app.Namespace, labels)
 		if err != nil {
@@ -289,32 +315,22 @@ func (c *WebserviceConfig) Generate(app *stack.Application) ([]*client.Object, e
 func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
 	labels := map[string]string{"app": app.Name}
 
-	container := kubernetes.CreateContainer(app.Name, c.Image, c.Command, c.Args)
-	kubernetes.SetContainerResources(container, buildResourceRequirements(c.Resources))
-	kubernetes.AddContainerPort(container, corev1.ContainerPort{
-		Name:          "http",
-		ContainerPort: c.Port,
-		Protocol:      corev1.ProtocolTCP,
+	container := buildMainContainer(app.Name, mainContainerInput{
+		Image:     c.Image,
+		Command:   c.Command,
+		Args:      c.Args,
+		Resources: c.Resources,
+		// Unconditional: config.Port defaults to 80, and parseProbes/parseLifecycle
+		// were told a named "http" port always exists.
+		Ports:           []corev1.ContainerPort{{Name: "http", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}},
+		Env:             c.Env,
+		EnvFrom:         c.EnvFrom,
+		Probes:          c.Probes,
+		WorkingDir:      c.WorkingDir,
+		Lifecycle:       c.Lifecycle,
+		SecurityContext: c.SecurityContext,
+		VolumeMounts:    c.VolumeMounts,
 	})
-	for _, env := range c.Env {
-		kubernetes.AddContainerEnv(container, env)
-	}
-	for _, ef := range c.EnvFrom {
-		kubernetes.AddContainerEnvFrom(container, ef)
-	}
-	applyProbes(container, c.Probes)
-	if c.WorkingDir != "" {
-		kubernetes.SetContainerWorkingDir(container, c.WorkingDir)
-	}
-	if c.Lifecycle != nil {
-		kubernetes.SetContainerLifecycle(container, c.Lifecycle)
-	}
-	if c.SecurityContext != nil {
-		kubernetes.SetContainerSecurityContext(container, *c.SecurityContext)
-	}
-	for _, m := range c.VolumeMounts {
-		kubernetes.AddContainerVolumeMount(container, m)
-	}
 
 	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
 	dep.Labels = labels
@@ -327,46 +343,25 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 		}
 		kubernetes.SetDeploymentStrategy(dep, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
 	}
-	kubernetes.SetDeploymentServiceAccountName(dep, app.Name)
+
+	var tscs []corev1.TopologySpreadConstraint
 	if !c.TopologySpreadDisabled {
-		for _, tsc := range buildTopologySpreadConstraints(c.Replicas, map[string]string{"app": app.Name}) {
-			if err := kubernetes.AddDeploymentTopologySpreadConstraints(dep, &tsc); err != nil {
-				return nil, errors.Wrapf(err, "add topology spread constraint")
-			}
-		}
+		tscs = buildTopologySpreadConstraints(c.Replicas, labels)
 	}
-	// Init containers must be added before the main container so they
-	// appear first in spec.template.spec.initContainers; kube preserves
-	// declaration order on the pod spec and kustomize build output stays stable.
-	for _, ic := range c.InitContainers {
-		initContainer, err := buildInitContainer(ic)
-		if err != nil {
-			return nil, err
-		}
-		if err := kubernetes.AddDeploymentInitContainer(dep, initContainer); err != nil {
-			return nil, errors.Wrapf(err, "add init container %q", ic.Name)
-		}
+	podSpec, err := buildPodSpec(podSpecInput{
+		Config:                    c.PodSpec,
+		DefaultServiceAccountName: app.Name,
+		MainContainer:             container,
+		InitContainers:            c.InitContainers,
+		Sidecars:                  c.Sidecars,
+		Volumes:                   c.Volumes,
+		TopologySpreadConstraints: tscs,
+		Affinity:                  buildAffinity(c.Affinity, labels),
+	})
+	if err != nil {
+		return nil, err
 	}
-	if err := kubernetes.AddDeploymentContainer(dep, container); err != nil {
-		return nil, errors.Wrapf(err, "add container %q", c.Name)
-	}
-	for _, sc := range c.Sidecars {
-		sidecarContainer, err := buildSidecarContainer(sc)
-		if err != nil {
-			return nil, err
-		}
-		if err := kubernetes.AddDeploymentContainer(dep, sidecarContainer); err != nil {
-			return nil, errors.Wrapf(err, "add sidecar container %q", sc.Name)
-		}
-	}
-	for i := range c.Volumes {
-		if err := kubernetes.AddDeploymentVolume(dep, &c.Volumes[i]); err != nil {
-			return nil, errors.Wrapf(err, "add volume %q", c.Volumes[i].Name)
-		}
-	}
-	if aff := buildAffinity(c.Affinity, map[string]string{"app": app.Name}); aff != nil {
-		kubernetes.SetDeploymentAffinity(dep, aff)
-	}
+	dep.Spec.Template.Spec = podSpec
 
 	return dep, nil
 }

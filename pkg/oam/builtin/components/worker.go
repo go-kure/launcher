@@ -1,6 +1,8 @@
 package components
 
 import (
+	"maps"
+
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
@@ -22,7 +24,7 @@ func (h *WorkerHandler) CanHandle(componentType string) bool {
 // PropertySchema declares the worker component's user-facing properties. Like
 // webservice minus `port` (worker emits no Service).
 func (h *WorkerHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	m := map[string]oam.PropertySchema{
 		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
 		"replicas":        {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of Deployment pod replicas."},
 		"topologySpread":  {Type: oam.PropertyTypeBoolean, Default: true, Description: "Whether default topology spread constraints are applied across nodes."},
@@ -40,6 +42,8 @@ func (h *WorkerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"sidecars":        schemaContainers(),
 		"affinity":        schemaAffinity(),
 	}
+	maps.Copy(m, schemaPodSpec(false, false))
+	return m
 }
 
 // ToApplicationConfig converts an OAM worker component to a WorkerConfig.
@@ -134,6 +138,12 @@ func (h *WorkerHandler) ToApplicationConfig(component *oam.Component, namespace 
 	}
 	config.Sidecars = sidecars
 
+	podSpec, err := parsePodSpec(props, false)
+	if err != nil {
+		return nil, err
+	}
+	config.PodSpec = podSpec
+
 	return config, nil
 }
 
@@ -159,7 +169,16 @@ type WorkerConfig struct {
 	Sidecars               []SidecarContainerConfig
 	TopologySpreadDisabled bool
 	Affinity               AffinityConfig
-	explicitReplicas       bool
+	// PodSpec holds the shared pod-level properties (see parsePodSpec).
+	PodSpec          PodSpecConfig
+	explicitReplicas bool
+}
+
+// ServiceAccountName implements oam.ServiceAccountNamer: the authored
+// serviceAccountName, else the per-component ServiceAccount named after the
+// component.
+func (c *WorkerConfig) ServiceAccountName() string {
+	return effectiveServiceAccountName(c.PodSpec, c.Name)
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -198,6 +217,9 @@ func (c *WorkerConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforceHostPathVolumes(c.Volumes, p.AllowHostPathVolumes()); err != nil {
 		return err
 	}
+	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {
+		return err
+	}
 	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
 		return err
 	}
@@ -223,6 +245,7 @@ func (c *WorkerConfig) ApplyPolicy(p oam.Policy) error {
 }
 
 // Generate creates a Kubernetes Deployment and ServiceAccount (no Service).
+// The ServiceAccount is omitted when serviceAccountName was authored.
 func (c *WorkerConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}
 	var err error
@@ -234,12 +257,14 @@ func (c *WorkerConfig) Generate(app *stack.Application) ([]*client.Object, error
 	if err != nil {
 		return nil, err
 	}
-	sa := createServiceAccount(app.Name, app.Namespace, labels)
 
 	depObj := client.Object(deployment)
-	saObj := client.Object(sa)
 
-	objects := []*client.Object{&depObj, &saObj}
+	objects := []*client.Object{&depObj}
+	if generatesServiceAccount(c.PodSpec) {
+		saObj := client.Object(createServiceAccount(app.Name, app.Namespace, labels))
+		objects = append(objects, &saObj)
+	}
 	for _, pvc := range c.PVCs {
 		p, err := BuildPVC(pvc, app.Namespace, labels)
 		if err != nil {
@@ -255,27 +280,20 @@ func (c *WorkerConfig) Generate(app *stack.Application) ([]*client.Object, error
 func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
 	labels := map[string]string{"app": app.Name}
 
-	container := kubernetes.CreateContainer(app.Name, c.Image, c.Command, c.Args)
-	kubernetes.SetContainerResources(container, buildResourceRequirements(c.Resources))
-	for _, env := range c.Env {
-		kubernetes.AddContainerEnv(container, env)
-	}
-	for _, ef := range c.EnvFrom {
-		kubernetes.AddContainerEnvFrom(container, ef)
-	}
-	applyProbes(container, c.Probes)
-	if c.WorkingDir != "" {
-		kubernetes.SetContainerWorkingDir(container, c.WorkingDir)
-	}
-	if c.Lifecycle != nil {
-		kubernetes.SetContainerLifecycle(container, c.Lifecycle)
-	}
-	if c.SecurityContext != nil {
-		kubernetes.SetContainerSecurityContext(container, *c.SecurityContext)
-	}
-	for _, m := range c.VolumeMounts {
-		kubernetes.AddContainerVolumeMount(container, m)
-	}
+	// No Ports: worker exposes no port property (see parseProbes' namedPortsAllowed=false above).
+	container := buildMainContainer(app.Name, mainContainerInput{
+		Image:           c.Image,
+		Command:         c.Command,
+		Args:            c.Args,
+		Resources:       c.Resources,
+		Env:             c.Env,
+		EnvFrom:         c.EnvFrom,
+		Probes:          c.Probes,
+		WorkingDir:      c.WorkingDir,
+		Lifecycle:       c.Lifecycle,
+		SecurityContext: c.SecurityContext,
+		VolumeMounts:    c.VolumeMounts,
+	})
 
 	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
 	dep.Labels = labels
@@ -288,43 +306,25 @@ func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deploym
 		}
 		kubernetes.SetDeploymentStrategy(dep, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
 	}
-	kubernetes.SetDeploymentServiceAccountName(dep, app.Name)
+
+	var tscs []corev1.TopologySpreadConstraint
 	if !c.TopologySpreadDisabled {
-		for _, tsc := range buildTopologySpreadConstraints(c.Replicas, map[string]string{"app": app.Name}) {
-			if err := kubernetes.AddDeploymentTopologySpreadConstraints(dep, &tsc); err != nil {
-				return nil, errors.Wrapf(err, "add topology spread constraint")
-			}
-		}
+		tscs = buildTopologySpreadConstraints(c.Replicas, labels)
 	}
-	for _, ic := range c.InitContainers {
-		initContainer, err := buildInitContainer(ic)
-		if err != nil {
-			return nil, err
-		}
-		if err := kubernetes.AddDeploymentInitContainer(dep, initContainer); err != nil {
-			return nil, errors.Wrapf(err, "add init container %q", ic.Name)
-		}
+	podSpec, err := buildPodSpec(podSpecInput{
+		Config:                    c.PodSpec,
+		DefaultServiceAccountName: app.Name,
+		MainContainer:             container,
+		InitContainers:            c.InitContainers,
+		Sidecars:                  c.Sidecars,
+		Volumes:                   c.Volumes,
+		TopologySpreadConstraints: tscs,
+		Affinity:                  buildAffinity(c.Affinity, labels),
+	})
+	if err != nil {
+		return nil, err
 	}
-	if err := kubernetes.AddDeploymentContainer(dep, container); err != nil {
-		return nil, errors.Wrapf(err, "add container %q", c.Name)
-	}
-	for _, sc := range c.Sidecars {
-		sidecarContainer, err := buildSidecarContainer(sc)
-		if err != nil {
-			return nil, err
-		}
-		if err := kubernetes.AddDeploymentContainer(dep, sidecarContainer); err != nil {
-			return nil, errors.Wrapf(err, "add sidecar container %q", sc.Name)
-		}
-	}
-	for i := range c.Volumes {
-		if err := kubernetes.AddDeploymentVolume(dep, &c.Volumes[i]); err != nil {
-			return nil, errors.Wrapf(err, "add volume %q", c.Volumes[i].Name)
-		}
-	}
-	if aff := buildAffinity(c.Affinity, map[string]string{"app": app.Name}); aff != nil {
-		kubernetes.SetDeploymentAffinity(dep, aff)
-	}
+	dep.Spec.Template.Spec = podSpec
 
 	return dep, nil
 }

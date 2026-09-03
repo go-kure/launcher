@@ -1,0 +1,81 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        port: 8080
+        # Pod-level properties (go-kure/launcher#342). serviceAccountName is
+        # authored, so no per-component ServiceAccount is generated.
+        serviceAccountName: shared-api-sa
+        automountServiceAccountToken: false
+        terminationGracePeriodSeconds: 45
+        dnsPolicy: None
+        dnsConfig:
+          nameservers:
+            - 10.96.0.10
+          searches:
+            - svc.cluster.local
+          options:
+            - name: ndots
+              value: "2"
+            - name: edns0
+        nodeSelector:
+          kubernetes.io/os: linux
+          tier: web
+        nodeName: node-a
+        hostname: api-0
+        subdomain: api
+        setHostnameAsFQDN: true
+        schedulerName: custom-scheduler
+        priorityClassName: high-priority
+        preemptionPolicy: Never
+        runtimeClassName: gvisor
+        enableServiceLinks: false
+        hostUsers: false
+        shareProcessNamespace: true
+        os:
+          name: linux
+        imagePullSecrets:
+          - name: regcred
+        hostAliases:
+          - ip: 10.0.0.5
+            hostnames:
+              - db.local
+              - cache.local
+        readinessGates:
+          - conditionType: example.com/ready
+        schedulingGates:
+          - name: example.com/quota
+        resourceClaims:
+          - name: gpu
+            resourceClaimName: shared-gpu
+          - name: scratch
+            resourceClaimTemplateName: scratch-template
+        podResources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            memory: 2Gi
+            hugepages-2Mi: 100Mi
+        podSecurityContext:
+          runAsUser: 1000
+          runAsGroup: 3000
+          runAsNonRoot: true
+          fsGroup: 2000
+          fsGroupChangePolicy: OnRootMismatch
+          supplementalGroups:
+            - 4000
+          supplementalGroupsPolicy: Strict
+          seccompProfile:
+            type: RuntimeDefault
+          seLinuxChangePolicy: Recursive
+          sysctls:
+            - name: net.core.somaxconn
+              value: "1024"

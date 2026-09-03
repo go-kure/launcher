@@ -311,3 +311,24 @@ func applyDefaultQuantity(rl *corev1.ResourceList, name corev1.ResourceName, dfl
 	(*rl)[name] = q
 	return nil
 }
+
+// enforceHostNamespaces rejects an authored hostNetwork / hostPID / hostIPC when
+// the environment policy does not allow that host namespace. Same reused-not-new
+// rationale as enforcePrivileged and enforceHostPathVolumes above: the three
+// oam.Policy accessors pre-date the shared pod-level schema (go-kure/launcher#342)
+// and had nothing to call them because no component could author those fields.
+// Each is default-deny, including under NoopPolicy. Sharing the node's network,
+// PID or IPC namespace is a container-isolation bypass, so an unenforced denial
+// here would be a real gap.
+func enforceHostNamespaces(cfg PodSpecConfig, p oam.Policy) error {
+	if cfg.HostNetwork && !p.AllowHostNetwork() {
+		return errors.New("hostNetwork is not allowed by environment policy")
+	}
+	if cfg.HostPID && !p.AllowHostPID() {
+		return errors.New("hostPID is not allowed by environment policy")
+	}
+	if cfg.HostIPC && !p.AllowHostIPC() {
+		return errors.New("hostIPC is not allowed by environment policy")
+	}
+	return nil
+}

@@ -1,0 +1,25 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-cronjob
+  namespace: default
+spec:
+  components:
+    - name: cleanup
+      type: cronjob
+      properties:
+        image: ghcr.io/example/cleanup:v1.0.0
+        schedule: "0 * * * *"
+        # Job-level deadline (JobSpec) and pod-level deadline (PodSpec) are
+        # distinct fields; only Job pods may carry the pod-level one
+        # (go-kure/launcher#342).
+        activeDeadlineSeconds: 900
+        podActiveDeadlineSeconds: 600
+        terminationGracePeriodSeconds: 10
+        hostnameOverride: cleanup.batch.example
+        schedulingGroup:
+          podGroupName: nightly-batch
+        podSecurityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
