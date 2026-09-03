@@ -172,7 +172,9 @@ func (c *securityContextConfig) Generate(app *stack.Application) ([]*client.Obje
 	}
 	for _, objPtr := range objects {
 		if podSpec := extractPodSpecSC(*objPtr); podSpec != nil {
-			c.spec.applyToPodSpec(podSpec)
+			if err := c.spec.applyToPodSpec(podSpec); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return objects, nil
@@ -181,21 +183,77 @@ func (c *securityContextConfig) Generate(app *stack.Application) ([]*client.Obje
 // applyToPodSpec sets SecurityContext fields on the pod and all containers
 // (including init containers). Non-nil contexts are set so that the downstream runtime's
 // securityContextMutator (which only fires when SecurityContext is nil) skips them.
-func (s *securityContextSpec) applyToPodSpec(podSpec *corev1.PodSpec) {
-	podSC := s.buildPodSecurityContext()
-	podSpec.SecurityContext = podSC
+//
+// A pod that declares `os.name: windows` (go-kure/launcher#342's pod-level
+// `os` property) gets the Windows-legal subset instead: the API rejects a
+// Windows pod carrying seccompProfile, capabilities, allowPrivilegeEscalation,
+// readOnlyRootFilesystem, runAsUser/runAsGroup or fsGroup, so writing the
+// restricted Linux profile here would emit a workload Kubernetes refuses —
+// the component-side OS validation cannot see it, because it runs before this
+// decorator. Upstream Pod Security Admission takes the same route, skipping
+// the Linux-only controls for Windows pods. An override the author set
+// explicitly that Windows forbids is an error rather than a silent drop.
+func (s *securityContextSpec) applyToPodSpec(podSpec *corev1.PodSpec) error {
+	windows := podSpec.OS != nil && podSpec.OS.Name == corev1.Windows
+	if windows {
+		if err := s.rejectWindowsIllegalOverrides(); err != nil {
+			return err
+		}
+	}
 
-	containerSC := s.buildContainerSecurityContext()
+	podSpec.SecurityContext = s.buildPodSecurityContext(windows)
+
+	containerSC := s.buildContainerSecurityContext(windows)
 	for i := range podSpec.Containers {
 		podSpec.Containers[i].SecurityContext = containerSC
 	}
 	for i := range podSpec.InitContainers {
 		podSpec.InitContainers[i].SecurityContext = containerSC
 	}
+	return nil
+}
+
+// boolPtrSC returns a pointer to b. Local to this file because the traits
+// package has no shared pointer helper.
+func boolPtrSC(b bool) *bool { return &b }
+
+// rejectWindowsIllegalOverrides errors when the trait carries an explicit
+// override that a Windows pod may not set. runAsNonRoot is the one override
+// Windows accepts, so it is absent from this list.
+func (s *securityContextSpec) rejectWindowsIllegalOverrides() error {
+	for _, f := range []struct {
+		set  bool
+		name string
+	}{
+		{s.AllowPrivilegeEscalation != nil, "allowPrivilegeEscalation"},
+		{s.ReadOnlyRootFilesystem != nil, "readOnlyRootFilesystem"},
+		{s.RunAsUser != nil, "runAsUser"},
+		{s.RunAsGroup != nil, "runAsGroup"},
+		{s.FsGroup != nil, "fsGroup"},
+	} {
+		if f.set {
+			return errors.Errorf("security-context: %s cannot be set on a component with os.name: windows; Kubernetes rejects that field on a Windows pod", f.name)
+		}
+	}
+	return nil
 }
 
 // buildPodSecurityContext returns the pod-level security context for the spec.
-func (s *securityContextSpec) buildPodSecurityContext() *corev1.PodSecurityContext {
+// windows selects the Windows-legal subset: of everything the Linux profiles
+// set, only runAsNonRoot is accepted on a Windows pod (seccompProfile,
+// fsGroup, runAsUser and runAsGroup are all rejected), and the context is
+// still non-nil so the downstream mutator leaves it alone.
+func (s *securityContextSpec) buildPodSecurityContext(windows bool) *corev1.PodSecurityContext {
+	if windows {
+		sc := &corev1.PodSecurityContext{}
+		if s.PSALevel == kubernetes.PSARestricted {
+			sc.RunAsNonRoot = boolPtrSC(true)
+		}
+		if s.RunAsNonRoot != nil {
+			sc.RunAsNonRoot = s.RunAsNonRoot
+		}
+		return sc
+	}
 	switch s.PSALevel {
 	case kubernetes.PSARestricted:
 		sc := kubernetes.RestrictedPodSecurityContext()
@@ -231,7 +289,21 @@ func (s *securityContextSpec) buildPodSecurityContext() *corev1.PodSecurityConte
 }
 
 // buildContainerSecurityContext returns the container-level security context for the spec.
-func (s *securityContextSpec) buildContainerSecurityContext() *corev1.SecurityContext {
+// windows selects the Windows-legal subset, for the reason given on
+// applyToPodSpec: capabilities, seccompProfile, allowPrivilegeEscalation and
+// readOnlyRootFilesystem are all rejected on a Windows pod's containers, so
+// runAsNonRoot is all that survives from the restricted profile.
+func (s *securityContextSpec) buildContainerSecurityContext(windows bool) *corev1.SecurityContext {
+	if windows {
+		sc := &corev1.SecurityContext{}
+		if s.PSALevel == kubernetes.PSARestricted {
+			sc.RunAsNonRoot = boolPtrSC(true)
+		}
+		if s.RunAsNonRoot != nil {
+			sc.RunAsNonRoot = s.RunAsNonRoot
+		}
+		return sc
+	}
 	switch s.PSALevel {
 	case kubernetes.PSARestricted:
 		sc := kubernetes.RestrictedSecurityContext()
