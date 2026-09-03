@@ -256,7 +256,7 @@ func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, er
 	}
 
 	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(app.Name, app.Namespace, labels))
+		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, labels))
 		objects = append(objects, &saObj)
 	}
 
@@ -316,7 +316,7 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:                    c.PodSpec,
-		DefaultServiceAccountName: app.Name,
+		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),
 		MainContainer:             container,
 		InitContainers:            c.InitContainers,
 		Volumes:                   c.Volumes,

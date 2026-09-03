@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // This file is the shared pod/container builder every container-workload kind
@@ -1279,22 +1280,47 @@ func validateEffectiveRunAsUser(ps *corev1.PodSpec) error {
 // workload's identity (the rbac trait) read this through the
 // oam.ServiceAccountNamer interface each kind config implements.
 //
-// componentName is the kind config's own Name, which is the same string as the
-// stack.Application's name and therefore the same account Generate emits: each
-// handler's ToApplicationConfig sets config.Name from component.Name, and
-// transformComponents builds the Application with stack.NewApplication(
-// component.Name, …) (pkg/oam/transform.go:662) from that same component. The
-// generated account (createServiceAccount(app.Name, …)) and the pod's
-// serviceAccountName (buildPodSpec's DefaultServiceAccountName: app.Name)
-// therefore agree with this fallback. A hand-built config whose Name differs
-// from the Application it is placed in breaks that invariant — the interface
-// method takes no *stack.Application, so it cannot re-derive the name — which
-// is why no supported path constructs one.
+// componentName is the kind config's own Name, set by each handler's
+// ToApplicationConfig from component.Name. On every supported path that is the
+// same string as the stack.Application's name, because transformComponents
+// builds the Application with stack.NewApplication(component.Name, …)
+// (pkg/oam/transform.go:662) from that same component — but that is an
+// invariant of the call site, not of the types, so the generation path does not
+// re-derive the name from app.Name alongside it. It resolves through
+// generationServiceAccountName below, which calls the same
+// oam.ServiceAccountNamer method the rbac trait reads, keeping the account a
+// RoleBinding names and the account the pods run as one value even for a
+// hand-built config whose Name differs from the Application it is placed in.
 func effectiveServiceAccountName(cfg PodSpecConfig, componentName string) string {
 	if cfg.ServiceAccountName != "" {
 		return cfg.ServiceAccountName
 	}
 	return componentName
+}
+
+// generationServiceAccountName resolves, on the generation path, the
+// ServiceAccount a kind's pods run as — and the name of the per-component
+// account the kind emits.
+//
+// It asks the same oam.ServiceAccountNamer implementation the rbac trait reads,
+// applying that interface's own ""-means-fall-back-to-the-component-name
+// convention (documented on decoratorBase.ServiceAccountName, and implemented
+// identically in the rbac trait's binding subject at traits/rbac.go). Deriving
+// both from one method is what keeps the account a RoleBinding names and the
+// account the pods actually run as a single value: reading `app.Name` here
+// while the namer reads the config's own Name left the two free to drift, and
+// nothing but the comment above enforced that they could not.
+//
+// The Application name stands in only when the namer reports "" — a config
+// built directly rather than through ToApplicationConfig carries no Name, which
+// tests do (traits/external_secret_test.go). On every supported path the config
+// name and the Application name are the same string, so this returns exactly
+// what it returned before and no generated output moves.
+func generationServiceAccountName(namer oam.ServiceAccountNamer, appName string) string {
+	if name := namer.ServiceAccountName(); name != "" {
+		return name
+	}
+	return appName
 }
 
 // generatesServiceAccount reports whether the kind handler should emit its

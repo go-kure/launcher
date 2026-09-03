@@ -591,13 +591,24 @@ the generated ServiceAccount carries. The `rbac` trait
 subject to that name, so binding follows the authored account; the Role and
 binding objects keep their component-derived names.
 
-The unauthored fallback is the kind config's own `Name`, which is the same
-string as the `stack.Application`'s name and therefore the same account
-`Generate` emits: each handler's `ToApplicationConfig` sets it from
-`component.Name`, and the transform builds the Application from that same
-component name. The generated ServiceAccount, the pod's `serviceAccountName`
-and this fallback are all that one name, and the shared kind test asserts the
-three agree on every kind.
+The unauthored fallback is the kind config's own `Name`, set by each handler's
+`ToApplicationConfig` from `component.Name`. On every supported path that is
+the same string as the `stack.Application`'s name, because the transform builds
+the Application from that same component — but that agreement is an invariant
+of the call site, not of the types, so `Generate` does not re-derive the name
+from `app.Name` alongside it. Both the generated ServiceAccount's name and the
+pod's `serviceAccountName` are resolved by asking the `oam.ServiceAccountNamer`
+implementation itself (`generationServiceAccountName` in `podspec.go`), which
+is the same method the `rbac` trait reads. The account a RoleBinding names and
+the account the pods run as are therefore one value by construction, and cannot
+drift apart if the two names ever differ. The shared kind test asserts the three
+agree on every kind, including against a deliberately mismatched Application
+name.
+
+A config built directly rather than through `ToApplicationConfig` carries no
+`Name`; its namer then returns `""` — the "fall back to the component name"
+convention `decoratorBase.ServiceAccountName` documents and the `rbac` trait
+implements — and the Application's own name stands in.
 
 `securityContext.privileged: true` is rejected unless the environment policy's
 `AllowPrivileged()` allows it (`enforce.go`'s `enforcePrivileged`).
