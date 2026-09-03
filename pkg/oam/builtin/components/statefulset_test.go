@@ -728,3 +728,66 @@ func TestStatefulsetConfig_ApplyPolicy_SidecarCapabilitiesDenied(t *testing.T) {
 		t.Errorf("expected no error under the default-allow NoopPolicy-equivalent stub, got %v", err)
 	}
 }
+
+// TestStatefulsetConfig_ApplyPolicy_MaxStorageSize covers both spellings of the
+// requested size. Enforcement read VolumeClaimTemplate.Size directly, which the
+// long resources.requests.storage spelling leaves empty, and enforceMaxResource
+// treats an empty current value as nothing to check — so authoring the long
+// spelling bypassed MaxStorageSize entirely.
+func TestStatefulsetConfig_ApplyPolicy_MaxStorageSize(t *testing.T) {
+	entry := func(extra map[string]any) map[string]any {
+		m := map[string]any{"name": "data", "mountPath": "/data"}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
+	cases := []struct {
+		name    string
+		vct     map[string]any
+		wantErr bool
+	}{
+		{"short spelling over the limit", entry(map[string]any{"size": "20Gi"}), true},
+		{"short spelling under the limit", entry(map[string]any{"size": "1Gi"}), false},
+		{
+			"long spelling over the limit",
+			entry(map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "20Gi"}}}),
+			true,
+		},
+		{
+			"long spelling under the limit",
+			entry(map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "1Gi"}}}),
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &components.StatefulsetHandler{}
+			component := &oam.Component{
+				Name: "app",
+				Type: "statefulset",
+				Properties: map[string]any{
+					"image":                "ghcr.io/org/app:v1",
+					"serviceName":          "app",
+					"volumeClaimTemplates": []any{tc.vct},
+				},
+			}
+			cfg, err := h.ToApplicationConfig(component, "default")
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			p := &stubPolicy{}
+			p.maxStorageSize = "5Gi"
+			err = cfg.(oam.Enforceable).ApplyPolicy(p)
+			if tc.wantErr && err == nil {
+				t.Fatal("ApplyPolicy succeeded, want the enforced maximum to reject it")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("ApplyPolicy: %v", err)
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), "exceeds enforced maximum") {
+				t.Errorf("error = %q, want it to name the enforced maximum", err)
+			}
+		})
+	}
+}

@@ -1009,6 +1009,8 @@ reason rather than silently ignored:
   component name, and a StatefulSet's selector is immutable after creation.
 - `volumeName` (claim) — pre-binding a claim *template* to one named
   PersistentVolume would point every replica at the same volume.
+- `volumeMount` (claim) — not a claim-spec field at all; the container mount
+  is authored as `mountPath` on the same entry.
 - `dataSource` (claim) — when `dataSourceRef` carries no `namespace` the
   apiserver mirrors it into the superseded `dataSource` field, so authoring
   both is redundant; when it does carry a `namespace` the apiserver does not

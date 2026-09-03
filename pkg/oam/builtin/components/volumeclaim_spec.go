@@ -32,16 +32,6 @@ var volumeClaimTemplatePropertyKeys = []string{
 	"selector", "resources", "volumeMode", "dataSourceRef", "volumeAttributesClassName",
 }
 
-// volumeClaimTemplateRejectedKeys names the claim-spec fields that are refused
-// with an explanation rather than silently ignored.
-//
-// `volumeName` pre-binds a claim to one named PersistentVolume. In a *template*
-// that is never what an author wants: every replica's claim would name the same
-// PV, so at most one ordinal could ever bind.
-//
-// `dataSource` is the superseded spelling of `dataSourceRef`. The apiserver
-// mirrors the two whenever the reference is one it understands, so authoring
-// both is a way to write the same thing twice and disagree with yourself.
 // The nested key sets each parser below accepts, declared here rather than
 // inline at the rejectUnknownKeys call so the schema fragment can be pinned to
 // them (TestVolumeClaimTemplateSchemaMatchesParser walks both). An inline
@@ -54,6 +44,21 @@ var (
 	volumeClaimDataSourceRefKeys = []string{"apiGroup", "kind", "name", "namespace"}
 )
 
+// volumeClaimTemplateRejectedKeys names the claim-spec fields that are refused
+// with an explanation rather than silently ignored.
+//
+// `volumeName` pre-binds a claim to one named PersistentVolume. In a *template*
+// that is never what an author wants: every replica's claim would name the same
+// PV, so at most one ordinal could ever bind.
+//
+// `dataSource` is the superseded spelling of `dataSourceRef`. When
+// `dataSourceRef` sets no namespace the apiserver mirrors the two, so
+// authoring both is a way to write the same thing twice and disagree with
+// yourself; when it does set one the apiserver does not mirror, and
+// `dataSource` must stay empty.
+//
+// `volumeMount` is not a claim-spec field at all; the container mount is
+// authored as `mountPath` on the same entry.
 var volumeClaimTemplateRejectedKeys = map[string]string{
 	"volumeName":  "pre-binding a claim template to a named PersistentVolume would point every replica at the same volume; omit it and let the provisioner bind each ordinal",
 	"dataSource":  "superseded by dataSourceRef, which the apiserver mirrors back into dataSource when dataSourceRef sets no namespace (and requires dataSource to stay empty when it does); author dataSourceRef instead",
@@ -194,11 +199,16 @@ func parseStorageResourceList(m map[string]any, label string) (corev1.ResourceLi
 		if err != nil {
 			return nil, errors.Errorf("%s.%s: invalid quantity %q: %w", label, k, s, err)
 		}
-		// ValidatePositiveQuantityValue rejects Cmp <= 0, and
-		// ValidatePersistentVolumeClaimSpec applies it to requests[storage] —
-		// zero is as invalid as negative, so both are rejected here rather than
-		// building a claim that fails at admission. The same rule is applied to
-		// the short `size` spelling in parseVolumeClaimTemplates.
+		// Non-positive is rejected on both lists, for two different reasons.
+		// On requests[storage] this mirrors the API:
+		// ValidatePersistentVolumeClaimSpec runs ValidatePositiveQuantityValue
+		// on it, so zero is as invalid as negative and the claim would fail at
+		// admission. On limits the rejection is launcher's own —
+		// ValidatePersistentVolumeClaimSpec never reads Limits at all, so the
+		// apiserver would accept `limits: {storage: 0}`; launcher reports it
+		// because a claim capped at zero is an authoring mistake, not a
+		// document anyone means to write. The short `size` spelling gets the
+		// requests rule in parseVolumeClaimTemplates.
 		if q.Sign() <= 0 {
 			return nil, errors.Errorf("%s.%s: quantity must be positive, got %q", label, k, s)
 		}
@@ -276,7 +286,13 @@ func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector
 	// indistinguishable from omitting the key. An author who wrote `selector`
 	// meant to narrow binding, so an empty one is reported rather than dropped.
 	// This rejection is launcher's, not the API's.
-	if sel.MatchLabels == nil && sel.MatchExpressions == nil {
+	// len, not nil: parseLabelMap returns a non-nil empty map for
+	// `matchLabels: {}`, and an empty `matchExpressions: []` list parses to a
+	// nil slice, so a nil test let `selector: {matchLabels: {}}` through as the
+	// match-everything selector this guard exists to refuse. Upstream's own
+	// LabelSelectorAsSelector reads len(MatchLabels)+len(MatchExpressions)==0
+	// and returns labels.Everything() (apimachinery meta/v1/helpers.go).
+	if len(sel.MatchLabels) == 0 && len(sel.MatchExpressions) == 0 {
 		return nil, errors.Errorf("%s: empty selector — set matchLabels or matchExpressions, or omit the key. The apiserver would accept an empty selector as matching every volume; launcher reports it because it is never what an author who wrote `selector` meant", label)
 	}
 	return sel, nil
