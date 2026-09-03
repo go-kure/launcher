@@ -562,7 +562,7 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|
-| `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account and the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). | additive when unset |
+| `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account and the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). The generated account carries `automountServiceAccountToken: false`; an authored account is owned elsewhere and its own setting governs, so authors who want the pod not to mount a token set the pod-level `automountServiceAccountToken: false` explicitly — the handler does not inject it. | additive when unset |
 | `automountServiceAccountToken` | bool | Pod-level token automount override. | additive |
 | `terminationGracePeriodSeconds` | int ≥ 0 | Grace period before SIGKILL. | additive |
 | `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it. | additive |

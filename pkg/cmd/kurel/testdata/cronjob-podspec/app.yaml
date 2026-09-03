@@ -16,6 +16,7 @@ spec:
         activeDeadlineSeconds: 900
         podActiveDeadlineSeconds: 600
         terminationGracePeriodSeconds: 10
+        nodeName: batch-node-a
         hostnameOverride: cleanup.batch.example
         schedulingGroup:
           podGroupName: nightly-batch

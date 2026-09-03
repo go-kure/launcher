@@ -30,6 +30,7 @@ spec:
                 cpu: 100m
                 memory: 128Mi
           hostnameOverride: cleanup.batch.example
+          nodeName: batch-node-a
           restartPolicy: OnFailure
           schedulingGroup:
             podGroupName: nightly-batch
