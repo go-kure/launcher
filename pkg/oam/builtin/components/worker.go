@@ -268,7 +268,7 @@ func (c *WorkerConfig) Generate(app *stack.Application) ([]*client.Object, error
 
 	objects := []*client.Object{&depObj}
 	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(app.Name, app.Namespace, labels))
+		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, labels))
 		objects = append(objects, &saObj)
 	}
 	for _, pvc := range c.PVCs {
@@ -319,7 +319,7 @@ func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deploym
 	}
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:                    c.PodSpec,
-		DefaultServiceAccountName: app.Name,
+		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),
 		MainContainer:             container,
 		InitContainers:            c.InitContainers,
 		Sidecars:                  c.Sidecars,

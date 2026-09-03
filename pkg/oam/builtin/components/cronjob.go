@@ -413,7 +413,7 @@ func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, erro
 	obj := client.Object(cronjob)
 	objects := []*client.Object{&obj}
 	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(app.Name, app.Namespace, labels))
+		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, labels))
 		objects = append(objects, &saObj)
 	}
 
@@ -473,7 +473,7 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	// OnFailure), so the authored/defaulted value wins as before.
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:                    c.PodSpec,
-		DefaultServiceAccountName: app.Name,
+		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),
 		MainContainer:             container,
 		InitContainers:            c.InitContainers,
 		Volumes:                   c.Volumes,

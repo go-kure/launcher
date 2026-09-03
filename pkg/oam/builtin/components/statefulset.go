@@ -303,7 +303,7 @@ func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, 
 
 	objects := []*client.Object{&stsObj, &svcObj}
 	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(app.Name, app.Namespace, labels))
+		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, labels))
 		objects = append(objects, &saObj)
 	}
 	for _, pvc := range c.PVCs {
@@ -354,7 +354,7 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:                    c.PodSpec,
-		DefaultServiceAccountName: app.Name,
+		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),
 		MainContainer:             container,
 		InitContainers:            c.InitContainers,
 		Sidecars:                  c.Sidecars,
