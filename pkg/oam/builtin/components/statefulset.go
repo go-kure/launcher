@@ -46,6 +46,7 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"affinity":             schemaAffinity(),
 	}
 	maps.Copy(m, schemaPodSpec(false, false))
+	maps.Copy(m, schemaStatefulSetSpec())
 	return m
 }
 
@@ -164,6 +165,12 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.PodSpec = podSpec
 
+	stsSpec, err := parseStatefulSetSpec(props)
+	if err != nil {
+		return nil, err
+	}
+	config.StatefulSetSpec = stsSpec
+
 	return config, nil
 }
 
@@ -192,7 +199,11 @@ type StatefulsetConfig struct {
 	Sidecars             []SidecarContainerConfig
 	Affinity             AffinityConfig
 	// PodSpec holds the shared pod-level properties (see parsePodSpec).
-	PodSpec          PodSpecConfig
+	PodSpec PodSpecConfig
+	// StatefulSetSpec holds the StatefulSetSpec-level properties that are
+	// neither the pod template nor the claim templates (see
+	// parseStatefulSetSpec).
+	StatefulSetSpec  StatefulSetSpecConfig
 	explicitReplicas bool
 }
 
@@ -348,6 +359,7 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	sts.Spec.Template.Labels = appLabels(app.Name)
 	kubernetes.SetStatefulSetReplicas(sts, c.Replicas)
 	kubernetes.SetStatefulSetServiceName(sts, c.ServiceName)
+	c.StatefulSetSpec.apply(sts)
 
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:                    c.PodSpec,

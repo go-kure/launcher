@@ -736,6 +736,18 @@ this trio verbatim rather than duplicating it.
   rejected if negative, same as `volumes`' `pvc.size` above — `storageClass`
   (a present-but-non-string value is rejected outright, same as `volumes`'
   `pvc.storageClass`), `accessModes`, `mountPath`), `serviceName` (headless).
+  StatefulSetSpec-level: `podManagementPolicy` (`OrderedReady`|`Parallel`),
+  `updateStrategy{type, rollingUpdate{partition, maxUnavailable}}`,
+  `revisionHistoryLimit` (`>= 0`), `minReadySeconds` (`>= 0`),
+  `persistentVolumeClaimRetentionPolicy{whenDeleted, whenScaled}` (each
+  `Retain`|`Delete`) and `ordinals{start}` (`>= 0`). Each is written only when
+  authored, so an unauthored StatefulSet keeps exactly what kure's
+  `CreateStatefulSet` put in the spec — `OrderedReady` and an empty
+  `updateStrategy` — and no existing output moves. `rollingUpdate` is rejected
+  under `type: OnDelete`, mirroring `ValidateStatefulSetSpec`, and
+  `maxUnavailable` takes a positive integer or a 1–100% string. `selector` is
+  rejected rather than ignored: the builder derives it from the component name,
+  and a StatefulSet's selector is immutable after creation.
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`); `port`
   optionally adds a Service. No `sidecars` schema key (init containers only).
   DaemonSetSpec-level (go-kure/launcher#340, `daemonset_spec.go`): `updateStrategy`,

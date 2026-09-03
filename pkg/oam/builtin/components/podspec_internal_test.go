@@ -100,7 +100,7 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 	}{
 		{"webservice", (&WebserviceHandler{}).PropertySchema(), 17, nil, false},
 		{"worker", (&WorkerHandler{}).PropertySchema(), 16, nil, false},
-		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 18, nil, false},
+		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 18, statefulSetSpecPropertyKeys, false},
 		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 14, daemonSetSpecPropertyKeys, false},
 		{"cronjob", (&CronjobHandler{}).PropertySchema(), 26, nil, true},
 	}
