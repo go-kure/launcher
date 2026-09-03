@@ -88,6 +88,9 @@ func TestExposeRule_Gateway_HostnamesAndRules(t *testing.T) {
 		t.Fatalf("Apply: %v", err)
 	}
 	route := httprouteFromBundle(t, bundle)
+	if len(route.Spec.Hostnames) != 1 || string(route.Spec.Hostnames[0]) != "shop.example.com" {
+		t.Errorf("hostnames = %v, want [shop.example.com] preserved alongside authored rules", route.Spec.Hostnames)
+	}
 	if len(route.Spec.Rules) != 1 || len(route.Spec.Rules[0].Matches) != 1 {
 		t.Fatalf("rules = %+v, want the single authored rule", route.Spec.Rules)
 	}
