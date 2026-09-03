@@ -745,7 +745,7 @@ this trio verbatim rather than duplicating it.
 
   | Property | Type | Effect | Compatibility |
   |----------|------|--------|---------------|
-  | `updateStrategy` | object | `type` (**required**, `RollingUpdate`\|`OnDelete`) and `rollingUpdate` (`maxUnavailable`, `maxSurge`), which is only accepted under `type: RollingUpdate`. `type: RollingUpdate` alone is accepted — the apiserver defaults the `rollingUpdate` object that upstream validation then requires. | additive |
+  | `updateStrategy` | object | `type` (**required**, `RollingUpdate`\|`OnDelete`) and `rollingUpdate` (`maxUnavailable`, `maxSurge`), only accepted under `type: RollingUpdate`. `type: RollingUpdate` alone is accepted — the apiserver defaults the `rollingUpdate` object that upstream validation then requires. | additive |
   | `minReadySeconds` | int ≥ 0 | Seconds a new pod must stay ready before it counts as available. | additive |
   | `revisionHistoryLimit` | int ≥ 0 | Superseded ControllerRevisions kept for rollback. | additive |
   | `selector` | — | **Rejected outright**, not silently dropped: the selector is builder-managed (`app: <component>`), must equal the generated template labels, and is immutable once created. | **Behavior-changing** |
@@ -765,6 +765,20 @@ this trio verbatim rather than duplicating it.
   defaulted `maxUnavailable: 1` makes both non-zero), and using surge means
   writing `maxUnavailable: 0` alongside it. The error names which half was
   defaulted, since that is the half absent from the author's YAML.
+
+  **Two rules here are deliberately stricter than upstream**, and both reject a
+  document the apiserver would accept and then ignore — the failure mode this
+  projection exists to remove. `updateStrategy.type` is required, where the API
+  defaults it to `RollingUpdate` and so accepts a bare `updateStrategy: {}`; and
+  `updateStrategy.rollingUpdate` is refused under `type: OnDelete`, where
+  `ValidateDaemonSetUpdateStrategy`'s `OnDelete` branch is empty and the field is
+  simply never read. Both are still *additive*: `updateStrategy` is a new
+  property, so no document that built before this change can carry either shape.
+  In the other direction the parser is laxer in exactly one place — upstream
+  requires a non-nil `rollingUpdate` under `RollingUpdate`, but apiserver
+  defaulting satisfies that, not the author, so `type: RollingUpdate` alone is
+  accepted (the same reasoning the statefulset kind applies to its own optional
+  `rollingUpdate`).
 
   Every accepted property is presence-gated: a document authoring none of them
   produces byte-identical output to before, because `DaemonSetSpecConfig.apply`

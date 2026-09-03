@@ -66,6 +66,74 @@ func TestDaemonSetSpecSchemaMatchesParser(t *testing.T) {
 
 	assertKeysAt(t, s, "updateStrategy", daemonSetUpdateStrategyKeys)
 	assertKeysAt(t, s, "updateStrategy.rollingUpdate", daemonSetRollingUpdateKeys)
+
+	// Pinning the key SETS leaves the per-key contract unpinned: dropping
+	// Required from updateStrategy.type would publish a schema saying the key
+	// is optional while the parser still demands it, and the key-set checks
+	// above would stay green.
+	typ := s["updateStrategy"].Properties["type"]
+	if !typ.Required {
+		t.Error("updateStrategy.type.Required = false, want true — the parser demands it")
+	}
+	wantEnum := []any{
+		string(appsv1.RollingUpdateDaemonSetStrategyType),
+		string(appsv1.OnDeleteDaemonSetStrategyType),
+	}
+	if !slices.Equal(typ.Enum, wantEnum) {
+		t.Errorf("updateStrategy.type.Enum = %v, want %v", typ.Enum, wantEnum)
+	}
+	// Nothing else in the fragment is required; a Required leaf the parser does
+	// not enforce rejects documents the parser accepts.
+	if s["minReadySeconds"].Required || s["revisionHistoryLimit"].Required ||
+		s["updateStrategy"].Required || s["updateStrategy"].Properties["rollingUpdate"].Required {
+		t.Error("a property outside updateStrategy.type is marked Required; the parser enforces none of them")
+	}
+}
+
+// TestParseDaemonSetSpec_StrategyWithoutRollingUpdate covers both accept paths
+// that leave `rollingUpdate` out entirely. `type: RollingUpdate` alone is the
+// one place this parser is deliberately laxer than
+// ValidateDaemonSetUpdateStrategy, which requires a non-nil rollingUpdate there
+// — a requirement apiserver defaulting satisfies, not the author.
+func TestParseDaemonSetSpec_StrategyWithoutRollingUpdate(t *testing.T) {
+	for _, typ := range []appsv1.DaemonSetUpdateStrategyType{
+		appsv1.RollingUpdateDaemonSetStrategyType,
+		appsv1.OnDeleteDaemonSetStrategyType,
+	} {
+		cfg, err := parseDaemonSetSpec(map[string]any{
+			"updateStrategy": map[string]any{"type": string(typ)},
+		})
+		if err != nil {
+			t.Fatalf("type %s: parseDaemonSetSpec: %v", typ, err)
+		}
+		if cfg.UpdateStrategy == nil || cfg.UpdateStrategy.Type != typ {
+			t.Fatalf("type %s: UpdateStrategy = %+v", typ, cfg.UpdateStrategy)
+		}
+		// Left nil so the apiserver fills it, rather than written as an empty
+		// object that would appear in the generated manifest as authored.
+		if cfg.UpdateStrategy.RollingUpdate != nil {
+			t.Errorf("type %s: RollingUpdate = %+v, want nil", typ, cfg.UpdateStrategy.RollingUpdate)
+		}
+	}
+}
+
+// TestParseDaemonSetSpec_IntegerFormIsUncapped: the 100 ceiling is
+// IsNotMoreThan100Percent, which inspects percentages only. An integer knob is
+// a pod count, so 150 is a legal document even though "150%" is not.
+func TestParseDaemonSetSpec_IntegerFormIsUncapped(t *testing.T) {
+	cfg, err := parseDaemonSetSpec(map[string]any{
+		"updateStrategy": map[string]any{
+			"type":          "RollingUpdate",
+			"rollingUpdate": map[string]any{"maxUnavailable": 150},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseDaemonSetSpec: %v", err)
+	}
+	mu := cfg.UpdateStrategy.RollingUpdate.MaxUnavailable
+	if mu == nil || *mu != intstr.FromInt32(150) {
+		t.Errorf("MaxUnavailable = %v, want the integer 150", mu)
+	}
 }
 
 // TestDaemonSetSpecSchema_EveryKeyDescribed: an undescribed property reaches the

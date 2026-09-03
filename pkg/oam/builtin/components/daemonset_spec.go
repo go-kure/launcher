@@ -50,9 +50,23 @@ var daemonSetSpecRejectedKeys = map[string]string{
 
 // parseDaemonSetSpec reads the DaemonSetSpec-level properties. Validation
 // mirrors apps/v1 ValidateDaemonSetSpec where it is deterministic from the
-// document alone: the updateStrategy enum, rollingUpdate only under
-// RollingUpdate, non-negative minReadySeconds and revisionHistoryLimit, and the
-// int-or-percent rules on the two rolling-update knobs.
+// document alone: the updateStrategy enum, non-negative minReadySeconds and
+// revisionHistoryLimit, and the int-or-percent rules on the two rolling-update
+// knobs.
+//
+// It is deliberately STRICTER than upstream in exactly two places, both of
+// which reject a document upstream would accept and then ignore — the failure
+// mode this projection exists to remove:
+//
+//   - updateStrategy.type is required. Upstream defaults it to RollingUpdate,
+//     so `updateStrategy: {}` is legal there; here it would be an object whose
+//     meaning lives entirely in apiserver defaulting.
+//   - updateStrategy.rollingUpdate is refused under type: OnDelete.
+//     ValidateDaemonSetUpdateStrategy's OnDelete branch is empty, so upstream
+//     accepts the field and never reads it.
+//
+// Both are additive: `updateStrategy` is a new property, so no document that
+// built before this change can carry either shape.
 func parseDaemonSetSpec(props map[string]any) (DaemonSetSpecConfig, error) {
 	var cfg DaemonSetSpecConfig
 
@@ -98,11 +112,12 @@ func parseDaemonSetSpec(props map[string]any) (DaemonSetSpecConfig, error) {
 	return cfg, nil
 }
 
-// parseDaemonSetUpdateStrategy decodes `updateStrategy`. `type` is required so
-// the authored object is never an empty `{}`, whose meaning would depend
-// entirely on apiserver defaulting; `rollingUpdate` is only allowed under
-// RollingUpdate.
+// parseDaemonSetUpdateStrategy decodes `updateStrategy`, applying the two
+// deliberate strictnesses documented on parseDaemonSetSpec: `type` is required,
+// and `rollingUpdate` is refused under OnDelete rather than accepted and
+// ignored the way ValidateDaemonSetUpdateStrategy's empty OnDelete branch does.
 //
+// In the other direction it is deliberately LAXER in one place:
 // ValidateDaemonSetUpdateStrategy requires a non-nil rollingUpdate under
 // RollingUpdate, but that requirement is satisfied by apiserver defaulting
 // rather than by the author, so `type: RollingUpdate` alone is accepted here —
@@ -269,11 +284,11 @@ func schemaDaemonSetSpec() map[string]oam.PropertySchema {
 					Type:        oam.PropertyTypeString,
 					Required:    true,
 					Enum:        []any{string(appsv1.RollingUpdateDaemonSetStrategyType), string(appsv1.OnDeleteDaemonSetStrategyType)},
-					Description: "RollingUpdate replaces pods node by node; OnDelete only recreates pods that are deleted manually.",
+					Description: "RollingUpdate replaces pods node by node; OnDelete only recreates pods that are deleted manually. Required whenever updateStrategy is authored at all — the API would default it to RollingUpdate, but an updateStrategy object whose only meaning comes from defaulting is not worth writing.",
 				},
 				"rollingUpdate": {
 					Type:        oam.PropertyTypeObject,
-					Description: "RollingUpdate parameters; only allowed when type is RollingUpdate. Exactly one of maxUnavailable and maxSurge must be non-zero, counting the API defaults for whichever is left out (maxUnavailable 1, maxSurge 0) — so a non-zero maxSurge requires maxUnavailable: 0 alongside it.",
+					Description: "RollingUpdate parameters. Only allowed when type is RollingUpdate: the API accepts this object under OnDelete and then never reads it, which is refused here rather than silently dropped. May be omitted under RollingUpdate, leaving the API defaults. Exactly one of maxUnavailable and maxSurge must be non-zero, counting the API defaults for whichever is left out (maxUnavailable 1, maxSurge 0) — so a non-zero maxSurge requires maxUnavailable: 0 alongside it.",
 					Properties: map[string]oam.PropertySchema{
 						// Both are declared `string` because PropertyType carries
 						// no int-or-string member, and adding one would emit a
