@@ -194,6 +194,31 @@ func TestParseVolumeClaimTemplates_LongSizeSpelling(t *testing.T) {
 	}
 }
 
+// TestParseVolumeClaimTemplates_EmptySizeIsNotAuthored pins the consequence of
+// reading `size` through parseStringField, which reports present=false for an
+// empty string: `size: ""` is not an authored size, so pairing it with the long
+// spelling is accepted rather than rejected as authoring both. Deriving
+// sizeAuthored from raw key presence instead would make this an error, and
+// nothing else in the suite would notice.
+func TestParseVolumeClaimTemplates_EmptySizeIsNotAuthored(t *testing.T) {
+	vcts, err := parseVolumeClaimTemplates(vctProps(map[string]any{
+		"name":      "data",
+		"mountPath": "/var/lib/data",
+		"size":      "",
+		"resources": map[string]any{"requests": map[string]any{"storage": "5Gi"}},
+	}))
+	if err != nil {
+		t.Fatalf("parseVolumeClaimTemplates: %v", err)
+	}
+	if vcts[0].Size != "" {
+		t.Errorf("Size = %q, want empty", vcts[0].Size)
+	}
+	got := vcts[0].Spec.Resources.Requests[corev1.ResourceStorage]
+	if got.Cmp(resource.MustParse("5Gi")) != 0 {
+		t.Errorf("requests.storage = %v, want 5Gi", &got)
+	}
+}
+
 // TestParseVolumeClaimTemplates_UnauthoredSpecIsZero: an entry using none of the
 // projected keys parses to the zero spec, so apply cannot move its output.
 func TestParseVolumeClaimTemplates_UnauthoredSpecIsZero(t *testing.T) {
@@ -375,6 +400,14 @@ func TestParseVolumeClaimTemplates_SpecErrors(t *testing.T) {
 			"dataSourceRef core group with a foreign kind",
 			with(map[string]any{"dataSourceRef": map[string]any{"kind": "VolumeSnapshot", "name": "seed"}}),
 			"kind must be PersistentVolumeClaim when apiGroup names the core group",
+		},
+		{
+			// The DNS-1123 check on a non-empty apiGroup, mirroring upstream
+			// validateDataSourceRef. The valid-group and core-group cases both
+			// pass this check, so nothing failed when it was removed.
+			"dataSourceRef invalid apiGroup",
+			with(map[string]any{"dataSourceRef": map[string]any{"apiGroup": "Not_Valid", "kind": "VolumeSnapshot", "name": "seed"}}),
+			"dataSourceRef.apiGroup: invalid group",
 		},
 		{
 			"dataSourceRef bad namespace",
