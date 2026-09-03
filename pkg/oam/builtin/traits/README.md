@@ -52,7 +52,7 @@ preflight reject every valid use of the trait.
 | `certificate` | cert-manager Certificate | `secretName`, `dnsNames[]`, `duration`, `renewBefore`, `privateKey` (`algorithm`/`size`/`encoding`/`rotationPolicy`) (issuer from ClusterProfile) |
 | `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide`. The binding subject is the component's effective ServiceAccount via `oam.ServiceAccountNamer` (an authored `serviceAccountName`, else the per-component account); Role/binding object names stay component-derived. |
 | `external-secret` | ESO ExternalSecret (+ optional envFrom / volume mount) | `secretName`, `data[]`/`dataFrom[]`, `refreshInterval`, `envFrom`, `mountPath` (store from ClusterProfile or `provider`) |
-| `security-context` | (modifies PodSpec) | `psaLevel` (`restricted`\|`baseline`\|`privileged`), optional: `runAsNonRoot`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`, `runAsGroup`, `fsGroup` |
+| `security-context` | (modifies PodSpec) | `psaLevel` (`restricted`\|`baseline`\|`privileged`), optional: `runAsNonRoot`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`, `runAsGroup`, `fsGroup`. On a pod whose component set `os.name: windows` only the Windows-legal subset is written (see below). |
 
 ### Storage
 | `type` | Produces | Key properties |
@@ -186,6 +186,23 @@ See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/
 for the full config-field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
 for the interfaces, and `examples/` for runnable applications.
 
+## The security-context trait on a Windows pod
+
+`security-context` writes its profile at `Generate` time, after the component
+has already produced the pod template, so it is the last writer of every
+`SecurityContext` in the pod. When that template declares `os.name: windows`
+(the pod-level `os` property on any workload kind), Kubernetes rejects a pod
+carrying `seccompProfile`, `capabilities`, `allowPrivilegeEscalation`,
+`readOnlyRootFilesystem`, `runAsUser`, `runAsGroup` or `fsGroup`, so the trait
+writes only what Windows accepts: a non-nil pod and container context carrying
+`runAsNonRoot` alone. The context stays non-nil so a downstream nil-only
+backfill still skips it. The component's own `os` validation cannot cover this
+— it runs before the decorator — and upstream Pod Security Admission skips the
+same Linux-only controls for Windows pods. An override the author set
+*explicitly* that Windows forbids is an error rather than a silent drop, so a
+Windows workload asking for `fsGroup` fails at `Generate` instead of emitting a
+manifest the API server refuses.
+
 ## Decorator forwarding for layout-augmenting components
 
 A component config that also implements kure's `layout.LayoutAugmenter` (e.g. `helmchart` under
@@ -198,6 +215,17 @@ config. Without this forward, kure's layout walker — which keys a structural d
 `layout.LayoutAugmenter`'s mere *presence* on the concrete config it walks — would never see the
 capability on a decorated (trait-carrying) config, silently losing the augmenter's layout-level
 effect (the values `ConfigMap`, or the hook-group repartitioning) the moment any trait is added.
+
+Every trait decorator also embeds `decoratorBase`, which forwards the optional
+interfaces a component config may implement — `stack.Validator`,
+`fluxNamespaceSettable`, `autoHealthCheckEmitter`, `servicePortProvider`,
+`serviceBackendNamer` and `oam.ServiceAccountNamer` — so a decorated config
+keeps answering them. The `ServiceAccountNamer` forward is what keeps the
+`rbac` row above true once a second trait is present: without it a workload
+that authored `serviceAccountName` would stop reporting its account as soon as
+any trait wrapped it, and `rbac` would silently bind the per-component name
+instead. A config that implements none of them gets the zero answer (`nil`,
+`0`, `""`), which every reader treats as "not set".
 
 `augmentingDecorator` also forwards `oam.LayoutAugmentationCoverage`'s
 `GenerateCoversAugmentLayout() bool` — the interface `kurel build`'s guard consults before
