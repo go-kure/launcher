@@ -357,6 +357,15 @@ func TestParsePodSpec_Errors(t *testing.T) {
 		{"podResources ephemeral-storage", map[string]any{"podResources": map[string]any{"requests": map[string]any{"ephemeral-storage": "1Gi"}}}, false, "pod-level resources support only cpu, memory, and hugepages"},
 		{"podResources extended resource", map[string]any{"podResources": map[string]any{"limits": map[string]any{"nvidia.com/gpu": "1"}}}, false, "pod-level resources support only cpu, memory, and hugepages"},
 		{"podResources bad quantity", map[string]any{"podResources": map[string]any{"limits": map[string]any{"cpu": "lots"}}}, false, "invalid podResources configuration"},
+		{"podResources unknown key", map[string]any{"podResources": map[string]any{"requestz": map[string]any{"cpu": "1"}}}, false, "requestz"},
+		{"podResources requests not object", map[string]any{"podResources": map[string]any{"requests": "1"}}, false, "podResources.requests: must be an object"},
+		{"os windows with hostPID", map[string]any{"os": map[string]any{"name": "windows"}, "hostPID": true}, false, "os.name windows: hostPID must be unset"},
+		{"os windows with hostUsers false", map[string]any{"os": map[string]any{"name": "windows"}, "hostUsers": false}, false, "os.name windows: hostUsers must be unset"},
+		{"os windows with shareProcessNamespace", map[string]any{"os": map[string]any{"name": "windows"}, "shareProcessNamespace": false}, false, "os.name windows: shareProcessNamespace must be unset"},
+		{"os windows with podResources", map[string]any{"os": map[string]any{"name": "windows"}, "podResources": map[string]any{"requests": map[string]any{"cpu": "1"}}}, false, "os.name windows: podResources must be unset"},
+		{"os windows with fsGroup", map[string]any{"os": map[string]any{"name": "windows"}, "podSecurityContext": map[string]any{"fsGroup": 1}}, false, "os.name windows: podSecurityContext.fsGroup must be unset"},
+		{"os windows with seccompProfile", map[string]any{"os": map[string]any{"name": "windows"}, "podSecurityContext": map[string]any{"seccompProfile": map[string]any{"type": "RuntimeDefault"}}}, false, "os.name windows: podSecurityContext.seccompProfile must be unset"},
+		{"os linux with windowsOptions", map[string]any{"os": map[string]any{"name": "linux"}, "podSecurityContext": map[string]any{"windowsOptions": map[string]any{"runAsUserName": "ContainerUser"}}}, false, "os.name linux: podSecurityContext.windowsOptions must be unset"},
 		{"hostnameOverride with hostNetwork", map[string]any{"hostnameOverride": "h.example", "hostNetwork": true}, false, "cannot be set when hostNetwork is true"},
 		{"hostnameOverride with setHostnameAsFQDN", map[string]any{"hostnameOverride": "h.example", "setHostnameAsFQDN": true}, false, "cannot be set when setHostnameAsFQDN is true"},
 		{"hostnameOverride too long", map[string]any{"hostnameOverride": strings.Repeat("a", 65)}, false, "at most 64 characters"},
@@ -445,6 +454,42 @@ func TestBuildPodSpec_LayersOnAuthoredFields(t *testing.T) {
 	}
 	if _, err := buildPodSpec(podSpecInput{DefaultServiceAccountName: "api"}); err == nil {
 		t.Error("buildPodSpec without a main container succeeded, want error")
+	}
+}
+
+// TestBuildPodSpec_ContainerOSFields: the container-level half of the
+// PodSpec.OS contract is checked once the containers are assembled.
+func TestBuildPodSpec_ContainerOSFields(t *testing.T) {
+	cases := []struct {
+		name    string
+		os      string
+		sc      *corev1.SecurityContext
+		wantErr string
+	}{
+		{"windows with privileged", "windows", &corev1.SecurityContext{Privileged: boolp(true)}, "os.name windows: containers[0].securityContext.privileged must be unset"},
+		{"windows with capabilities", "windows", &corev1.SecurityContext{Capabilities: &corev1.Capabilities{}}, "os.name windows: containers[0].securityContext.capabilities must be unset"},
+		{"linux with windowsOptions", "linux", &corev1.SecurityContext{WindowsOptions: &corev1.WindowsSecurityContextOptions{}}, "os.name linux: containers[0].securityContext.windowsOptions must be unset"},
+		{"windows with windowsOptions ok", "windows", &corev1.SecurityContext{WindowsOptions: &corev1.WindowsSecurityContextOptions{}}, ""},
+		{"linux with privileged ok", "linux", &corev1.SecurityContext{Privileged: boolp(true)}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := parsePodSpec(map[string]any{"os": map[string]any{"name": tc.os}}, false)
+			if err != nil {
+				t.Fatalf("parsePodSpec: %v", err)
+			}
+			main := buildMainContainer("api", mainContainerInput{Image: "ghcr.io/org/api:v1", SecurityContext: tc.sc})
+			_, err = buildPodSpec(podSpecInput{Config: cfg, DefaultServiceAccountName: "api", MainContainer: main})
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("buildPodSpec: unexpected error %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("buildPodSpec error = %v, want containing %q", err, tc.wantErr)
+			}
+		})
 	}
 }
 

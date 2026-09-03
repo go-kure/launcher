@@ -307,6 +307,16 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 		}
 	}
 	podResources := schemaResources(reserved)
+	// The requests/limits maps stay open (their keys are resource names, e.g.
+	// hugepages-2Mi), but the container-level descriptions advertise
+	// ephemeral-storage and extended resources, which parsePodSpec rejects at
+	// pod level — override them so the schema promises only what parses.
+	podResources.Properties["requests"] = oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true,
+		Description: "Minimum pod-level resources guaranteed to the pod as a whole. Only cpu, memory and hugepages-<size> keys are accepted; ephemeral-storage and extended resources are rejected.",
+		Properties:  podResources.Properties["requests"].Properties}
+	podResources.Properties["limits"] = oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true,
+		Description: "Maximum pod-level resources the pod as a whole may use. Only cpu, memory and hugepages-<size> keys are accepted; ephemeral-storage and extended resources are rejected.",
+		Properties:  podResources.Properties["limits"].Properties}
 	podResources.Description = "Pod-level compute resources shared by all containers (corev1.PodSpec.resources). Only cpu, memory and hugepages-<size> are valid here; requires the cluster's PodLevelResources feature gate. Distinct from the container-level `resources` property."
 
 	m := map[string]oam.PropertySchema{

@@ -373,6 +373,19 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 	if raw, present, err := parseObjectField(props, "podResources", "podResources"); err != nil {
 		return PodSpecConfig{}, err
 	} else if present {
+		// parseResources only type-asserts requests/limits, so close the object
+		// here: a typo'd key or a non-object requests/limits value must fail,
+		// not silently emit no pod-level resources.
+		if err := rejectUnknownKeys(raw, []string{"requests", "limits"}, "podResources"); err != nil {
+			return PodSpecConfig{}, err
+		}
+		for _, k := range []string{"requests", "limits"} {
+			if v, ok := raw[k]; ok {
+				if _, isObj := v.(map[string]any); !isObj {
+					return PodSpecConfig{}, errors.Errorf("podResources.%s: must be an object, got %T", k, v)
+				}
+			}
+		}
 		rr, err := parseResources(raw)
 		if err != nil {
 			return PodSpecConfig{}, errors.Wrap(err, "invalid podResources configuration")
@@ -421,7 +434,109 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 		ps.SchedulingGroup = &corev1.PodSchedulingGroup{PodGroupName: &name}
 	}
 
+	if err := validatePodOSFields(ps); err != nil {
+		return PodSpecConfig{}, err
+	}
+
 	return cfg, nil
+}
+
+// validatePodOSFields mirrors the pod-level half of corev1.PodSpec.OS's
+// contract (k8s.io/api core/v1 types.go, PodSpec.OS doc comment; enforced by
+// validateLinux/validateWindows in k8s.io/kubernetes pkg/apis/core/validation):
+// with os.name windows the Linux-only pod fields must be unset, with os.name
+// linux securityContext.windowsOptions must be unset. Container-level fields
+// are checked by validateContainerOSFields once the containers are assembled
+// in buildPodSpec. No os → no constraint.
+func validatePodOSFields(ps *corev1.PodSpec) error {
+	if ps.OS == nil {
+		return nil
+	}
+	sc := ps.SecurityContext
+	switch ps.OS.Name {
+	case corev1.Linux:
+		if sc != nil && sc.WindowsOptions != nil {
+			return errors.New("os.name linux: podSecurityContext.windowsOptions must be unset")
+		}
+	case corev1.Windows:
+		set := []struct {
+			key string
+			set bool
+		}{
+			{"hostPID", ps.HostPID},
+			{"hostIPC", ps.HostIPC},
+			{"hostUsers", ps.HostUsers != nil},
+			{"shareProcessNamespace", ps.ShareProcessNamespace != nil},
+			{"podResources", ps.Resources != nil},
+			{"podSecurityContext.appArmorProfile", sc != nil && sc.AppArmorProfile != nil},
+			{"podSecurityContext.seLinuxOptions", sc != nil && sc.SELinuxOptions != nil},
+			{"podSecurityContext.seccompProfile", sc != nil && sc.SeccompProfile != nil},
+			{"podSecurityContext.fsGroup", sc != nil && sc.FSGroup != nil},
+			{"podSecurityContext.fsGroupChangePolicy", sc != nil && sc.FSGroupChangePolicy != nil},
+			{"podSecurityContext.sysctls", sc != nil && len(sc.Sysctls) > 0},
+			{"podSecurityContext.runAsUser", sc != nil && sc.RunAsUser != nil},
+			{"podSecurityContext.runAsGroup", sc != nil && sc.RunAsGroup != nil},
+			{"podSecurityContext.supplementalGroups", sc != nil && sc.SupplementalGroups != nil},
+			{"podSecurityContext.supplementalGroupsPolicy", sc != nil && sc.SupplementalGroupsPolicy != nil},
+			{"podSecurityContext.seLinuxChangePolicy", sc != nil && sc.SELinuxChangePolicy != nil},
+		}
+		for _, f := range set {
+			if f.set {
+				return errors.Errorf("os.name windows: %s must be unset", f.key)
+			}
+		}
+	}
+	return nil
+}
+
+// validateContainerOSFields is the container-level half of the PodSpec.OS
+// contract (see validatePodOSFields), applied to every init, main and sidecar
+// container once buildPodSpec has assembled them.
+func validateContainerOSFields(ps *corev1.PodSpec) error {
+	if ps.OS == nil {
+		return nil
+	}
+	check := func(list string, containers []corev1.Container) error {
+		for i, c := range containers {
+			sc := c.SecurityContext
+			if sc == nil {
+				continue
+			}
+			label := indexedLabel(list, i) + ".securityContext"
+			switch ps.OS.Name {
+			case corev1.Linux:
+				if sc.WindowsOptions != nil {
+					return errors.Errorf("os.name linux: %s.windowsOptions must be unset", label)
+				}
+			case corev1.Windows:
+				set := []struct {
+					key string
+					set bool
+				}{
+					{"appArmorProfile", sc.AppArmorProfile != nil},
+					{"seLinuxOptions", sc.SELinuxOptions != nil},
+					{"seccompProfile", sc.SeccompProfile != nil},
+					{"capabilities", sc.Capabilities != nil},
+					{"readOnlyRootFilesystem", sc.ReadOnlyRootFilesystem != nil},
+					{"privileged", sc.Privileged != nil},
+					{"allowPrivilegeEscalation", sc.AllowPrivilegeEscalation != nil},
+					{"procMount", sc.ProcMount != nil},
+					{"runAsUser", sc.RunAsUser != nil},
+					{"runAsGroup", sc.RunAsGroup != nil},
+				}
+				for _, f := range set {
+					if f.set {
+						return errors.Errorf("os.name windows: %s.%s must be unset", label, f.key)
+					}
+				}
+			}
+		}
+		return nil
+	}
+	if err := check("initContainers", ps.InitContainers); err != nil {
+		return err
+	}
+	return check("containers", ps.Containers)
 }
 
 // parseObjectList reads an optional array-of-objects property: absent is
@@ -897,12 +1012,12 @@ type mainContainerInput struct {
 
 // buildMainContainer builds the main container of every workload kind.
 //
-// launcher#361: this is the one remaining kubernetes.CreateContainer call in
+// go-kure/launcher#361: this is the one remaining kubernetes.CreateContainer call in
 // the workload family (buildInitContainer/buildSidecarContainer share the same
 // constructor). It stays until the kure builder-contract release-1 adoption
 // swaps it for a corev1.Container literal, because the constructor still
 // injects `imagePullPolicy: IfNotPresent` and placeholder resources into the
-// goldens — recording that delta belongs to launcher#361, not here.
+// goldens — recording that delta belongs to go-kure/launcher#361, not here.
 func buildMainContainer(name string, in mainContainerInput) *corev1.Container {
 	container := kubernetes.CreateContainer(name, in.Image, in.Command, in.Args)
 	container.Resources = buildResourceRequirements(in.Resources)
@@ -981,6 +1096,9 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 	}
 	if ps.ServiceAccountName == "" {
 		ps.ServiceAccountName = in.DefaultServiceAccountName
+	}
+	if err := validateContainerOSFields(&ps); err != nil {
+		return corev1.PodSpec{}, err
 	}
 	return ps, nil
 }
