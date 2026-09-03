@@ -452,7 +452,7 @@ func (t *Transformer) RegisterDocumentLowering(r DocumentLoweringRule) {
 	if kind == terminalDocumentKind {
 		panic("oam: document lowering rule may not claim the terminal kind " + terminalDocumentKind)
 	}
-	if _, exists := t.rawDocLoweringRules[kind]; exists {
+	if t.rawRuleClaimsKind(kind) {
 		panic("oam: kind " + kind + " is already registered via RegisterRawDocumentLowering; a kind may be claimed by at most one registrar")
 	}
 	if _, exists := t.docLoweringRules[kind]; exists {
@@ -461,8 +461,70 @@ func (t *Transformer) RegisterDocumentLowering(r DocumentLoweringRule) {
 	t.docLoweringRules[kind] = r
 }
 
-// RegisterRawDocumentLowering registers a raw-entry document rule. Same four guards,
-// in the other direction.
+// RawDocumentAPIVersioner is the optional hook a RawDocumentLoweringRule implements
+// when the documents it claims are authored under an apiVersion other than
+// SupportedAPIVersion — the case of a consumer that owns its own API group and hands
+// LowerRaws documents declared under it. A rule that does not implement it claims
+// SupportedAPIVersion, so every rule written before this hook existed keeps its
+// exact dispatch. LowerRaws dispatches on the full (apiVersion, kind) pair: a
+// document sharing a registered kind string under an apiVersion no rule claims still
+// passes through byte-identical, exactly as before.
+//
+// The hook is deliberately raw-entry only. The in-transform path decodes through
+// ParseWithExtraTypes, which gates on SupportedAPIVersion before any rule can run
+// (validate.go), so a DocumentLoweringRule never sees another group's document and
+// has nothing to declare.
+type RawDocumentAPIVersioner interface {
+	APIVersion() string
+}
+
+// rawDocRuleKey is the raw-rule registry key: the (apiVersion, kind) pair a
+// RawDocumentLoweringRule claims. See RawDocumentAPIVersioner.
+type rawDocRuleKey struct {
+	apiVersion string
+	kind       string
+}
+
+// rawRuleAPIVersion is the apiVersion r claims: its RawDocumentAPIVersioner value
+// when it implements the hook, SupportedAPIVersion otherwise.
+func rawRuleAPIVersion(r RawDocumentLoweringRule) string {
+	if v, ok := r.(RawDocumentAPIVersioner); ok {
+		return v.APIVersion()
+	}
+	return SupportedAPIVersion
+}
+
+// rawRuleClaimsKind reports whether a registered raw rule, under any apiVersion,
+// claims kind. The cross-registrar guard is kind-wide on purpose: a kind string is
+// claimed by at most one registrar regardless of group, so the two rule flavours can
+// never disagree about what the same kind means.
+func (t *Transformer) rawRuleClaimsKind(kind string) bool {
+	for key := range t.rawDocLoweringRules {
+		if key.kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// rawClaimedGroups is the set of apiVersions LowerRaws treats as its own: every
+// group a registered raw rule claims, plus SupportedAPIVersion always — the group
+// this package's own parser accepts and the one a rule emits into by default.
+func (t *Transformer) rawClaimedGroups() map[string]bool {
+	groups := map[string]bool{SupportedAPIVersion: true}
+	for key := range t.rawDocLoweringRules {
+		groups[key.apiVersion] = true
+	}
+	return groups
+}
+
+// RegisterRawDocumentLowering registers a raw-entry document rule under the
+// (apiVersion, kind) pair it claims — SupportedAPIVersion unless the rule implements
+// RawDocumentAPIVersioner. Same four guards as RegisterDocumentLowering, in the other
+// direction, plus two of its own: an implemented APIVersion may not be empty, and one
+// pair may be registered once. Two rules claiming the same kind under different
+// apiVersions are distinct registrations; the cross-registrar guard against
+// RegisterDocumentLowering stays kind-wide (see rawRuleClaimsKind).
 func (t *Transformer) RegisterRawDocumentLowering(r RawDocumentLoweringRule) {
 	kind := r.Kind()
 	if kind == "" {
@@ -471,13 +533,18 @@ func (t *Transformer) RegisterRawDocumentLowering(r RawDocumentLoweringRule) {
 	if kind == terminalDocumentKind {
 		panic("oam: raw document lowering rule may not claim the terminal kind " + terminalDocumentKind)
 	}
+	apiVersion := rawRuleAPIVersion(r)
+	if apiVersion == "" {
+		panic("oam: raw document lowering rule for kind " + kind + " may not claim an empty apiVersion")
+	}
 	if _, exists := t.docLoweringRules[kind]; exists {
 		panic("oam: kind " + kind + " is already registered via RegisterDocumentLowering; a kind may be claimed by at most one registrar")
 	}
-	if _, exists := t.rawDocLoweringRules[kind]; exists {
-		panic("oam: raw document lowering rule already registered for kind " + kind)
+	key := rawDocRuleKey{apiVersion: apiVersion, kind: kind}
+	if _, exists := t.rawDocLoweringRules[key]; exists {
+		panic("oam: raw document lowering rule already registered for kind " + kind + " under apiVersion " + apiVersion)
 	}
-	t.rawDocLoweringRules[kind] = r
+	t.rawDocLoweringRules[key] = r
 }
 
 // RegisterComponentLowering registers a component-position lowering rule. Panics if
@@ -746,6 +813,24 @@ func (t *Transformer) validateSettled(doc *Application) error {
 	customComponentTypes := make(map[string]bool, len(t.componentHandlers))
 	for name := range t.componentHandlers {
 		customComponentTypes[name] = true
+	}
+	// A raw-entered document legitimately settles under the API group its
+	// RawDocumentLoweringRule claims (RawDocumentAPIVersioner): the consumer that
+	// owns that group is the one parsing LowerRaws' output, and it would reject
+	// SupportedAPIVersion exactly as this package rejects the consumer's group.
+	// validateWithExtraTypes enforces SupportedAPIVersion because it also serves
+	// authored input; for a settled document accept any group this transformer
+	// claims, validating a shallow copy under SupportedAPIVersion so every other
+	// check runs unchanged. The in-transform path never reaches this branch: its
+	// documents were parsed under SupportedAPIVersion before any rule ran.
+	if doc.APIVersion != SupportedAPIVersion {
+		if !t.rawClaimedGroups()[doc.APIVersion] {
+			return oamValidationError("apiVersion", fmt.Sprintf("unsupported apiVersion %q on lowered document, expected %q or an apiVersion a registered RawDocumentLoweringRule claims",
+				doc.APIVersion, SupportedAPIVersion))
+		}
+		normalized := *doc
+		normalized.APIVersion = SupportedAPIVersion
+		doc = &normalized
 	}
 	return validateWithExtraTypes(doc, customTraitTypes, customComponentTypes, LowerableTypes{})
 }

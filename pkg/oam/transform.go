@@ -112,8 +112,11 @@ type Transformer struct {
 	// (lowering_raw.go). Deliberately a second map rather than an entry in
 	// docLoweringRules: the two rule flavours have different LowerDocument
 	// signatures, are reachable from different entry points, and a kind may be
-	// claimed by at most one of them.
-	rawDocLoweringRules map[string]RawDocumentLoweringRule
+	// claimed by at most one of them. Keyed on the (apiVersion, kind) pair a rule
+	// claims — see RawDocumentAPIVersioner (lowering.go) — because a raw-entered
+	// document may be authored under a consumer's own API group, which the
+	// in-transform path (single-group by construction) never sees.
+	rawDocLoweringRules map[rawDocRuleKey]RawDocumentLoweringRule
 }
 
 // NewTransformer creates a Transformer pre-loaded with component and trait handlers.
@@ -134,7 +137,7 @@ func NewTransformer(componentHandlers map[string]ComponentHandler, traitHandlers
 		componentLoweringRules: make(map[string]ComponentLoweringRule),
 		traitLoweringRules:     make(map[string]TraitLoweringRule),
 		policyLoweringRules:    make(map[string]PolicyLoweringRule),
-		rawDocLoweringRules:    make(map[string]RawDocumentLoweringRule),
+		rawDocLoweringRules:    make(map[rawDocRuleKey]RawDocumentLoweringRule),
 	}
 	for typeName, h := range componentHandlers {
 		t.RegisterComponent(typeName, h)

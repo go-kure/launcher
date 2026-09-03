@@ -84,6 +84,7 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 	// generate a child document sharing a pass-through's exact (namespace, name), and
 	// LowerRaws would return both, an undetected duplicate identity.
 	var preReserved []reservedIdentity
+	groups := t.rawClaimedGroups()
 	for i, raw := range raws {
 		var env documentEnvelope
 		if err := yaml.Unmarshal(raw, &env); err != nil {
@@ -93,19 +94,16 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		}
 		// Dispatch on the full (apiVersion, kind) pair, not kind alone: an
 		// unrelated resource that happens to share a registered kind string under
-		// a different apiVersion must be preserved byte-for-byte, not claimed and
-		// mis-lowered (or failed) by a decoder that was never meant for it. This
-		// package supports exactly one apiVersion end to end — the in-transform
-		// path enforces the identical single-group gate before a document ever
-		// reaches lowering (validate.go, checked before the kind allowlist) — so
-		// gating on SupportedAPIVersion here, rather than adding a per-rule
-		// apiVersion to RawDocumentLoweringRule, matches that existing invariant
-		// instead of introducing multi-group registration this package has no
-		// other use for.
-		if env.APIVersion != SupportedAPIVersion {
-			continue // pass-through: different apiVersion, not this pass's business
-		}
-		rule, ok := t.rawDocLoweringRules[env.Kind]
+		// an apiVersion no rule claims must be preserved byte-for-byte, not claimed
+		// and mis-lowered (or failed) by a decoder that was never meant for it. A
+		// rule claims SupportedAPIVersion unless it implements
+		// RawDocumentAPIVersioner (lowering.go) — the hook a consumer that owns its
+		// own API group uses so that its documents are claimed here instead of
+		// silently passing through and then failing in that consumer's own parser.
+		// The in-transform path stays single-group: it gates on SupportedAPIVersion
+		// before a document ever reaches lowering (validate.go), and nothing there
+		// consults this registry.
+		rule, ok := t.rawDocLoweringRules[rawDocRuleKey{apiVersion: env.APIVersion, kind: env.Kind}]
 		if !ok {
 			// Pass-through: never decoded, never re-serialized — but a pass-through
 			// Application's identity still has to be visible to collision detection
@@ -118,10 +116,13 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 			// sharing a name with an Application) is not a real identity collision
 			// and must not be pre-reserved, or it would collide with that
 			// Application's own legitimate reservation despite naming a distinct
-			// resource. An empty or malformed name is not this pass's error to
-			// reject (env.Kind isn't even a lowerable kind here), so only register
-			// a usable name.
-			if env.Kind == terminalDocumentKind && env.Metadata.Name != "" {
+			// resource. Restricted likewise to the groups this pass claims
+			// (rawClaimedGroups): an Application under an apiVersion no rule
+			// claims is a foreign resource sharing a kind string, not an identity
+			// a rule's generated child could collide with. An empty or malformed
+			// name is not this pass's error to reject (env.Kind isn't even a
+			// lowerable kind here), so only register a usable name.
+			if env.Kind == terminalDocumentKind && env.Metadata.Name != "" && groups[env.APIVersion] {
 				preReserved = append(preReserved, reservedIdentity{
 					name:   env.Metadata.Name,
 					origin: Origin{Document: env.Metadata.Name, DocumentKind: env.Kind, Namespace: env.Metadata.Namespace},

@@ -362,15 +362,28 @@ implementation. All three are answered by the shipped code:
   mirrors the `sealed` guard's constraint on entry point 1 (D5 above): an emitted
   element does not re-enter the resolution mechanism it came from.
 - **What is the exact registration and dispatch shape for `RawDocumentLoweringRule`?**
-  A lookup keyed on sniffed `kind`, mirroring the pattern `loweringPositionRules` uses
-  for positions. Registration is `t.rawDocLoweringRules map[string]RawDocumentLoweringRule`
-  (`transform.go:108`, populated by `RegisterRawDocumentLowering`, `lowering.go:295-307`,
-  with the same duplicate/cross-registrar collision guards `RegisterDocumentLowering`
-  has in the other direction). Dispatch decodes just enough of each raw input — kind and
-  `metadata.name`, via the lenient `documentEnvelope` probe (`lowering_raw.go:18-23`) —
-  to look up `t.rawDocLoweringRules[env.Kind]` (`lowering_raw.go:57`); an input whose
-  kind matches no registered rule passes through byte-identical, never decoded or
-  re-serialized.
+  A lookup keyed on the sniffed `(apiVersion, kind)` pair. Registration is
+  `t.rawDocLoweringRules map[rawDocRuleKey]RawDocumentLoweringRule` (`transform.go`,
+  populated by `RegisterRawDocumentLowering` in `lowering.go`, with the same
+  duplicate/cross-registrar collision guards `RegisterDocumentLowering` has in the other
+  direction — the cross-registrar guard stays kind-wide, so one kind string is claimed by
+  at most one registrar regardless of group). A rule claims `SupportedAPIVersion` unless
+  it implements the optional `RawDocumentAPIVersioner` hook (`APIVersion() string`); a
+  consumer that owns its own API group implements it so `LowerRaws` claims that group's
+  documents instead of silently passing them through to the consumer's own parser, which
+  would reject them (the gap the original single-group gate left open). Dispatch decodes
+  just enough of each raw input — `apiVersion`, `kind` and `metadata.name`/`namespace`,
+  via the lenient `documentEnvelope` probe (`lowering_raw.go`) — to look up the pair; an
+  input whose pair matches no registered rule passes through byte-identical, never
+  decoded or re-serialized. Pass-through `Application` identities are pre-reserved
+  against generated child names only for groups some rule claims (plus
+  `SupportedAPIVersion`); an `Application` under an unclaimed group is a foreign
+  resource, not a collidable identity. A settled document may carry
+  `SupportedAPIVersion` or any group a registered raw rule claims (`validateSettled`
+  validates it under `SupportedAPIVersion` otherwise unchanged); a rule emitting into an
+  unclaimed group fails with a `LoweringError` against the authored document. The
+  in-transform path is unaffected: it gates on `SupportedAPIVersion` before any rule
+  runs and never consults this registry.
 
 ## What this does not resolve
 
