@@ -516,18 +516,31 @@ func (t *Transformer) rawRuleClaimsKind(kind string) bool {
 	return false
 }
 
-// rawClaimedGroups is the set of apiVersions LowerRaws treats as its own: every
-// group a registered raw rule claims, plus SupportedAPIVersion always — the group
-// this package's own parser accepts and the one a rule emits into by default. Used
-// only to decide which pass-through Application identities LowerRaws pre-reserves;
-// settled-document validation deliberately does NOT consult it (see
-// loweringDoc.apiVersion).
+// rawClaimedGroups is the set of API groups LowerRaws treats as its own: the group
+// of every apiVersion a registered raw rule claims, plus SupportedAPIVersion's group
+// always — the one this package's own parser accepts and the one a rule emits into
+// by default. Keyed by group, not by the full apiVersion (apiGroup): the identity
+// model of the raw pass is version-blind, so an Application authored at another
+// version of a claimed group names the same collidable resource as one at the
+// claimed version. Used only to decide which pass-through Application identities
+// LowerRaws pre-reserves; settled-document validation deliberately does NOT consult
+// it (see loweringDoc.apiVersion).
 func (t *Transformer) rawClaimedGroups() map[string]bool {
-	groups := map[string]bool{SupportedAPIVersion: true}
+	groups := map[string]bool{apiGroup(SupportedAPIVersion): true}
 	for key := range t.rawDocLoweringRules {
-		groups[key.apiVersion] = true
+		groups[apiGroup(key.apiVersion)] = true
 	}
 	return groups
+}
+
+// apiGroup is the group half of a Kubernetes-style "group/version" apiVersion. A
+// bare version with no group segment (the core group, "v1") maps to "".
+func apiGroup(apiVersion string) string {
+	group, _, found := strings.Cut(apiVersion, "/")
+	if !found {
+		return ""
+	}
+	return group
 }
 
 // RegisterRawDocumentLowering registers a raw-entry document rule under the

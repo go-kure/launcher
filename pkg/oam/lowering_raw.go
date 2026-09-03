@@ -125,13 +125,15 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 			// sharing a name with an Application) is not a real identity collision
 			// and must not be pre-reserved, or it would collide with that
 			// Application's own legitimate reservation despite naming a distinct
-			// resource. Restricted likewise to the groups this pass claims
-			// (rawClaimedGroups): an Application under an apiVersion no rule
-			// claims is a foreign resource sharing a kind string, not an identity
-			// a rule's generated child could collide with. An empty or malformed
-			// name is not this pass's error to reject (env.Kind isn't even a
-			// lowerable kind here), so only register a usable name.
-			if env.Kind == terminalDocumentKind && env.Metadata.Name != "" && groups[env.APIVersion] {
+			// resource. Restricted likewise to the API groups this pass claims
+			// (rawClaimedGroups — the group, not the full apiVersion, since
+			// identity here is version-blind like every other key in the pass):
+			// an Application under a group no rule claims is a foreign resource
+			// sharing a kind string, not an identity a rule's generated child
+			// could collide with. An empty or malformed name is not this pass's
+			// error to reject (env.Kind isn't even a lowerable kind here), so
+			// only register a usable name.
+			if env.Kind == terminalDocumentKind && env.Metadata.Name != "" && groups[apiGroup(env.APIVersion)] {
 				preReserved = append(preReserved, reservedIdentity{
 					name:   env.Metadata.Name,
 					origin: Origin{Document: env.Metadata.Name, DocumentKind: env.Kind, Namespace: env.Metadata.Namespace},
