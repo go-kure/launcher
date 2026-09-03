@@ -30,6 +30,13 @@ func TestStatefulSetSpecSchemaMatchesParser(t *testing.T) {
 			t.Errorf("schemaStatefulSetSpec publishes rejected key %q", k)
 		}
 	}
+
+	// Nested levels: the top-level comparison above says nothing about them.
+	root := oam.PropertySchema{Type: oam.PropertyTypeObject, Properties: schemaStatefulSetSpec()}
+	assertKeysAt(t, root, "persistentVolumeClaimRetentionPolicy", statefulSetPVCRetentionKeys)
+	assertKeysAt(t, root, "ordinals", statefulSetOrdinalsKeys)
+	assertKeysAt(t, root, "updateStrategy", statefulSetUpdateStrategyKeys)
+	assertKeysAt(t, root, "updateStrategy.rollingUpdate", statefulSetRollingUpdateKeys)
 }
 
 // TestStatefulSetSpecSchema_EveryKeyDescribed walks the fragment recursively:
