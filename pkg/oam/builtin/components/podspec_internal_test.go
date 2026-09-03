@@ -83,20 +83,26 @@ func TestPodSpecSchema_ReservedFlagPropagates(t *testing.T) {
 // TestPodSpecSchema_NoCollisionWithHandlerKeys guards the maps.Copy in each
 // handler's PropertySchema: a pod-level key that also exists among a
 // handler's own keys would silently overwrite it, so the merged size must be
-// exactly own + pod-level.
+// exactly own + pod-level + kind-level.
 func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 	nonJobPodKeys := len(podSpecPropertyKeys) - len(podSpecJobOnlyKeys)
 	cases := []struct {
 		name    string
 		schema  map[string]oam.PropertySchema
 		ownKeys int
-		jobPods bool
+		// specKeys is the handler's kind-level fragment (schemaDaemonSetSpec
+		// and friends), merged by the same maps.Copy. Held as the parser's own
+		// key list rather than a literal so adding a kind-level property does
+		// not require editing a magic number here — which would turn this
+		// collision guard into a number the author reconciles by bumping.
+		specKeys []string
+		jobPods  bool
 	}{
-		{"webservice", (&WebserviceHandler{}).PropertySchema(), 17, false},
-		{"worker", (&WorkerHandler{}).PropertySchema(), 16, false},
-		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 18, false},
-		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 14, false},
-		{"cronjob", (&CronjobHandler{}).PropertySchema(), 26, true},
+		{"webservice", (&WebserviceHandler{}).PropertySchema(), 17, nil, false},
+		{"worker", (&WorkerHandler{}).PropertySchema(), 16, nil, false},
+		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 18, nil, false},
+		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 14, daemonSetSpecPropertyKeys, false},
+		{"cronjob", (&CronjobHandler{}).PropertySchema(), 26, nil, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,13 +110,18 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 			if tc.jobPods {
 				podKeys = len(podSpecPropertyKeys)
 			}
-			if got, want := len(tc.schema), tc.ownKeys+podKeys; got != want {
-				t.Fatalf("PropertySchema() has %d keys, want %d (%d own + %d pod-level); a smaller count means a key collision", got, want, tc.ownKeys, podKeys)
+			if got, want := len(tc.schema), tc.ownKeys+podKeys+len(tc.specKeys); got != want {
+				t.Fatalf("PropertySchema() has %d keys, want %d (%d own + %d pod-level + %d kind-level); a smaller count means a key collision", got, want, tc.ownKeys, podKeys, len(tc.specKeys))
 			}
 			for _, k := range podSpecPropertyKeys {
 				jobOnly := slices.Contains(podSpecJobOnlyKeys, k)
 				if _, ok := tc.schema[k]; !ok && (tc.jobPods || !jobOnly) {
 					t.Errorf("PropertySchema() lacks pod-level key %q", k)
+				}
+			}
+			for _, k := range tc.specKeys {
+				if _, ok := tc.schema[k]; !ok {
+					t.Errorf("PropertySchema() lacks kind-level key %q", k)
 				}
 			}
 		})
