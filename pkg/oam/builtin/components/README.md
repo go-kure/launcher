@@ -736,6 +736,35 @@ this trio verbatim rather than duplicating it.
   rejected if negative, same as `volumes`' `pvc.size` above — `storageClass`
   (a present-but-non-string value is rejected outright, same as `volumes`'
   `pvc.storageClass`), `accessModes`, `mountPath`), `serviceName` (headless).
+  A `volumeClaimTemplates` entry now projects the whole
+  `corev1.PersistentVolumeClaimSpec`. Of its nine fields, three were already
+  reachable (`accessModes`, `storageClass`, and `size` as a shorthand for
+  `resources.requests.storage`); five are added: `selector`
+  (`matchLabels`/`matchExpressions`, with the operator arity rule — `In`/`NotIn`
+  need at least one value, `Exists`/`DoesNotExist` none), `resources`
+  (`requests`/`limits`, `storage` the only accepted resource name),
+  `volumeMode` (`Filesystem`|`Block`), `dataSourceRef`
+  (`apiGroup`/`kind`/`name`/`namespace`) and `volumeAttributesClassName`. The
+  ninth, `volumeName`, is rejected rather than projected: pre-binding a claim
+  *template* to one named PersistentVolume would point every replica at the same
+  volume. `dataSource` is rejected too — the apiserver mirrors `dataSourceRef`
+  back into it, so it is authored through `dataSourceRef` alone. Each projected
+  field is written only when authored, and `apply` *merges* `resources.requests`
+  onto what the constructor already wrote, so `size` survives when only `limits`
+  is authored; no existing output moves.
+  Of the five pre-existing keys only `size` changed meaning: it is now the short
+  spelling of `resources.requests.storage` and is no longer unconditionally
+  required — either spelling satisfies the requirement, and authoring both is an
+  error. `name`, `mountPath`, `storageClass` and `accessModes` keep their
+  meaning. All five now sit inside a closed key set, so a typo in an entry is
+  reported instead of being silently dropped.
+  `dataSourceRef` mirrors upstream `validateDataSourceRef` exactly: `kind` and
+  `name` are required non-empty with no format rule (a Kind is a CamelCase
+  identifier, not a DNS name), `apiGroup` must be a DNS-1123 subdomain when
+  non-empty, an omitted or empty `apiGroup` pins `kind` to
+  `PersistentVolumeClaim` (the core group holds no other populator), and
+  `namespace` is validated as a DNS-1123 *label* (`ValidateNamespaceName`), not
+  a subdomain.
   StatefulSetSpec-level: `podManagementPolicy` (`OrderedReady`|`Parallel`),
   `updateStrategy{type, rollingUpdate{partition, maxUnavailable}}`,
   `revisionHistoryLimit` (`>= 0`), `minReadySeconds` (`>= 0`),

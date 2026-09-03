@@ -2993,6 +2993,10 @@ type VolumeClaimTemplate struct {
 	Size         string
 	AccessModes  []string
 	MountPath    string
+	// Spec carries the rest of the corev1.PersistentVolumeClaimSpec
+	// projection (volumeclaim_spec.go); the five fields above predate it and
+	// keep their own shorthand spellings.
+	Spec VolumeClaimSpecConfig
 }
 
 // parseVolumeClaimTemplates parses volumeClaimTemplates from OAM properties.
@@ -3009,6 +3013,18 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		}
 		vct := VolumeClaimTemplate{}
 		vct.Name, _ = m["name"].(string)
+		entryLabel := fmt.Sprintf("volumeClaimTemplate %q", vct.Name)
+		// Closed key set, added with the claim-spec projection: an unrecognized
+		// key used to be dropped silently, so a misspelled `storageClassName`
+		// built with the cluster default class and said nothing.
+		for k, why := range volumeClaimTemplateRejectedKeys {
+			if _, present := m[k]; present {
+				return nil, errors.Errorf("%s: %s: not authorable — %s", entryLabel, k, why)
+			}
+		}
+		if err := rejectUnknownKeys(m, volumeClaimTemplatePropertyKeys, entryLabel); err != nil {
+			return nil, err
+		}
 		// parseStringField, not a bare assertion: same silent-acceptance gap
 		// as the `volumes` pvc case above — a present-but-non-string
 		// storageClass (e.g. a number) previously read as absent and built
@@ -3031,18 +3047,34 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		if vct.Name == "" {
 			return nil, errors.New("volumeClaimTemplate entry missing required field 'name'")
 		}
-		if vct.Size == "" {
-			return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'size'", vct.Name)
-		}
 		if vct.MountPath == "" {
 			return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'mountPath'", vct.Name)
 		}
-		qty, err := resource.ParseQuantity(vct.Size)
+		_, sizeAuthored := m["size"]
+		spec, err := parseVolumeClaimSpec(m, entryLabel, sizeAuthored)
 		if err != nil {
-			return nil, errors.Errorf("volumeClaimTemplate %q: invalid size %q: %w", vct.Name, vct.Size, err)
+			return nil, err
 		}
-		if qty.Sign() < 0 {
-			return nil, errors.Errorf("volumeClaimTemplate %q: size must not be negative, got %q", vct.Name, vct.Size)
+		vct.Spec = spec
+		// A requested size is still mandatory, but the claim-spec projection
+		// gives it a second, longer spelling. Either satisfies the requirement;
+		// parseVolumeClaimSpec has already rejected authoring both.
+		if vct.Size == "" {
+			var authored bool
+			if spec.Resources != nil {
+				_, authored = spec.Resources.Requests[corev1.ResourceStorage]
+			}
+			if !authored {
+				return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'size' (or resources.requests.storage)", vct.Name)
+			}
+		} else {
+			qty, err := resource.ParseQuantity(vct.Size)
+			if err != nil {
+				return nil, errors.Errorf("volumeClaimTemplate %q: invalid size %q: %w", vct.Name, vct.Size, err)
+			}
+			if qty.Sign() < 0 {
+				return nil, errors.Errorf("volumeClaimTemplate %q: size must not be negative, got %q", vct.Name, vct.Size)
+			}
 		}
 		vcts = append(vcts, vct)
 	}

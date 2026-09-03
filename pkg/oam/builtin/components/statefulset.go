@@ -383,11 +383,20 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 		if len(accessModes) == 0 {
 			accessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 		}
+		// vct.Size is empty exactly when the author used the long spelling,
+		// resources.requests.storage, which vct.Spec.apply writes in a moment;
+		// the parser guarantees one of the two is present, and MustParse would
+		// panic on "".
+		var request resource.Quantity
+		if vct.Size != "" {
+			request = resource.MustParse(vct.Size)
+		}
 		pvc := kubernetes.CreateVolumeClaimTemplate(vct.Name, kubernetes.VolumeClaimTemplateOptions{
 			StorageClassName: vct.StorageClass,
 			AccessModes:      accessModes,
-			StorageRequest:   resource.MustParse(vct.Size),
+			StorageRequest:   request,
 		})
+		vct.Spec.apply(&pvc)
 		kubernetes.AddStatefulSetVolumeClaimTemplate(sts, pvc)
 	}
 
