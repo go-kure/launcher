@@ -591,6 +591,14 @@ the generated ServiceAccount carries. The `rbac` trait
 subject to that name, so binding follows the authored account; the Role and
 binding objects keep their component-derived names.
 
+The unauthored fallback is the kind config's own `Name`, which is the same
+string as the `stack.Application`'s name and therefore the same account
+`Generate` emits: each handler's `ToApplicationConfig` sets it from
+`component.Name`, and the transform builds the Application from that same
+component name. The generated ServiceAccount, the pod's `serviceAccountName`
+and this fallback are all that one name, and the shared kind test asserts the
+three agree on every kind.
+
 `securityContext.privileged: true` is rejected unless the environment policy's
 `AllowPrivileged()` allows it (`enforce.go`'s `enforcePrivileged`).
 `securityContext.capabilities.add` is separately enforced against
