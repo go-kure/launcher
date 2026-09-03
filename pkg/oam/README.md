@@ -4,7 +4,10 @@
 
 Package `oam` is launcher's core: the OAM data model, YAML parser, semantic
 validator, and the transform pipeline that turns an `Application` + `ClusterProfile`
-into Kubernetes manifests. All documents use `apiVersion: launcher.gokure.dev/v1alpha1`.
+into Kubernetes manifests. Every document this package parses uses
+`apiVersion: launcher.gokure.dev/v1alpha1` (`SupportedAPIVersion`); the one exception is
+the raw-document lowering seam, where a `RawDocumentLoweringRule` may claim a kind under a
+consumer-owned group via `RawDocumentAPIVersioner` (see "Lowering entry points" below).
 
 ## Document kinds
 

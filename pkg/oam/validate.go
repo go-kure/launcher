@@ -12,7 +12,11 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 )
 
-// SupportedAPIVersion is the only accepted apiVersion for Application documents.
+// SupportedAPIVersion is the only apiVersion this package's parser and validator
+// accept for the documents it decodes itself. The raw-document lowering seam is the
+// one place another group is admitted: a RawDocumentLoweringRule may claim a kind
+// under the group it declares via RawDocumentAPIVersioner (lowering.go), and a
+// document raw-entered under that group may settle under it (validateSettled).
 const SupportedAPIVersion = "launcher.gokure.dev/v1alpha1"
 
 // validComponentTypes is the Phase 2 set. Updated when Phase 2 handlers land.
