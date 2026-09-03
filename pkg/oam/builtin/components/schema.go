@@ -1,6 +1,10 @@
 package components
 
-import "github.com/go-kure/launcher/pkg/oam"
+import (
+	"maps"
+
+	"github.com/go-kure/launcher/pkg/oam"
+)
 
 // This file holds PropertySchema fragments shared by the container-workload
 // component handlers (webservice/worker/cronjob/daemonset/statefulset). Each
@@ -623,19 +627,21 @@ func schemaCronJobTimeZone() oam.PropertySchema {
 // schemaVolumeClaimTemplates describes the shared `volumeClaimTemplates` property
 // (see parseVolumeClaimTemplates).
 func schemaVolumeClaimTemplates() oam.PropertySchema {
+	props := map[string]oam.PropertySchema{
+		"name":         {Type: oam.PropertyTypeString, Required: true, Description: "Claim name (also used as the mount name)."},
+		"size":         {Type: oam.PropertyTypeString, Description: `Requested storage size (e.g. "10Gi"). Shorthand for resources.requests.storage; exactly one of the two is required.`},
+		"mountPath":    {Type: oam.PropertyTypeString, Required: true, Description: "Path where the claim is mounted in the container. Not a claim-spec field — it drives the container's VolumeMount."},
+		"storageClass": {Type: oam.PropertyTypeString, Description: "StorageClass used to provision the volume. Omitted means the cluster's default class."},
+		"accessModes":  {Type: oam.PropertyTypeArray, Description: "Requested access modes for the volume.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: accessModesEnum(), Description: "A single access mode."}},
+	}
+	maps.Copy(props, schemaVolumeClaimSpec())
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeArray,
 		Description: "PersistentVolumeClaim templates provisioned per replica.",
 		Items: &oam.PropertySchema{
 			Type:        oam.PropertyTypeObject,
-			Description: "A single volume claim template.",
-			Properties: map[string]oam.PropertySchema{
-				"name":         {Type: oam.PropertyTypeString, Required: true, Description: "Claim name (also used as the mount name)."},
-				"size":         {Type: oam.PropertyTypeString, Required: true, Description: `Requested storage size (e.g. "10Gi").`},
-				"mountPath":    {Type: oam.PropertyTypeString, Required: true, Description: "Path where the claim is mounted in the container."},
-				"storageClass": {Type: oam.PropertyTypeString, Description: "StorageClass used to provision the volume."},
-				"accessModes":  {Type: oam.PropertyTypeArray, Description: "Requested access modes for the volume.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: accessModesEnum(), Description: "A single access mode."}},
-			},
+			Description: "A single volume claim template: the corev1.PersistentVolumeClaimSpec fields, plus mountPath.",
+			Properties:  props,
 		},
 	}
 }
