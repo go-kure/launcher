@@ -135,8 +135,11 @@ func TestParseVolumeClaimTemplates_SpecRoundTrip(t *testing.T) {
 	}
 	spec := vcts[0].Spec
 
-	if spec.Selector == nil || spec.Selector.MatchLabels["tier"] != "fast" {
-		t.Errorf("Selector.MatchLabels = %v, want tier=fast", spec.Selector)
+	if spec.Selector == nil {
+		t.Fatal("Selector is nil")
+	}
+	if spec.Selector.MatchLabels["tier"] != "fast" {
+		t.Errorf("Selector.MatchLabels = %v, want tier=fast", spec.Selector.MatchLabels)
 	}
 	if got := len(spec.Selector.MatchExpressions); got != 2 {
 		t.Fatalf("MatchExpressions has %d entries, want 2", got)
@@ -254,6 +257,12 @@ func TestParseVolumeClaimTemplates_SpecErrors(t *testing.T) {
 		wantErr string
 	}{
 		{"unknown key", with(map[string]any{"storageClassName": "fast"}), `unrecognized key "storageClassName"`},
+		// The three required string leaves went through bare type assertions,
+		// so a YAML number read as absent and surfaced as the requiredness
+		// error for a field the author did write.
+		{"non-string name", with(map[string]any{"name": 123}), "volumeClaimTemplate: name: must be a string, got int"},
+		{"non-string size", with(map[string]any{"size": 1e10}), "size: must be a string, got float64"},
+		{"non-string mountPath", with(map[string]any{"mountPath": 7}), "mountPath: must be a string, got int"},
 		{"volumeName rejected", with(map[string]any{"volumeName": "pv-0"}), "volumeName: not authorable"},
 		{"dataSource rejected", with(map[string]any{"dataSource": map[string]any{}}), "dataSource: not authorable"},
 		{

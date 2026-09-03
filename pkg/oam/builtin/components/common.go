@@ -3038,7 +3038,18 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 			return nil, errors.New("volumeClaimTemplates: each entry must be a mapping")
 		}
 		vct := VolumeClaimTemplate{}
-		vct.Name, _ = m["name"].(string)
+		// parseStringField, not a bare assertion, for every string leaf here:
+		// a present-but-non-string value (YAML reads `size: 10e9` and
+		// `name: 123` as float64/int, not string) read as absent and then
+		// surfaced as the requiredness error below — "missing required field
+		// 'size' (or resources.requests.storage)" for a field the author did
+		// write, with no hint that the type was the problem. Same silent-drop
+		// class as storageClass below.
+		name, _, err := parseStringField(m, "name", "volumeClaimTemplate: name")
+		if err != nil {
+			return nil, err
+		}
+		vct.Name = name
 		entryLabel := fmt.Sprintf("volumeClaimTemplate %q", vct.Name)
 		// Closed key set, added with the claim-spec projection: an unrecognized
 		// key used to be dropped silently, so a misspelled `storageClassName`
@@ -3081,8 +3092,16 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 			}
 		}
 		vct.StorageClass = storageClass
-		vct.Size, _ = m["size"].(string)
-		vct.MountPath, _ = m["mountPath"].(string)
+		size, sizeAuthored, err := parseStringField(m, "size", entryLabel+": size")
+		if err != nil {
+			return nil, err
+		}
+		vct.Size = size
+		mountPath, _, err := parseStringField(m, "mountPath", entryLabel+": mountPath")
+		if err != nil {
+			return nil, err
+		}
+		vct.MountPath = mountPath
 		accessModes, err := parseAccessModes(m)
 		if err != nil {
 			return nil, errors.Wrapf(err, "volumeClaimTemplate %q", vct.Name)
@@ -3094,7 +3113,10 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		if vct.MountPath == "" {
 			return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'mountPath'", vct.Name)
 		}
-		_, sizeAuthored := m["size"]
+		// sizeAuthored comes from parseStringField's `present`, which is false
+		// for an empty string (common.go, parseStringField): `size: ""` is not
+		// an authored size, so it must not trip the both-spellings rejection
+		// in parseVolumeClaimSpec.
 		spec, err := parseVolumeClaimSpec(m, entryLabel, sizeAuthored)
 		if err != nil {
 			return nil, err
