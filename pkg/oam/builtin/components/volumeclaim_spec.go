@@ -2,6 +2,7 @@ package components
 
 import (
 	"maps"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -39,6 +40,7 @@ var volumeClaimTemplatePropertyKeys = []string{
 // the reverse, reads as correct at both halves.
 var (
 	volumeClaimResourcesKeys     = []string{"requests", "limits"}
+	volumeClaimStorageKeys       = []string{"storage"}
 	volumeClaimSelectorKeys      = []string{"matchLabels", "matchExpressions"}
 	volumeClaimSelectorExprKeys  = []string{"key", "operator", "values"}
 	volumeClaimDataSourceRefKeys = []string{"apiGroup", "kind", "name", "namespace"}
@@ -187,8 +189,21 @@ func parseVolumeClaimSpec(m map[string]any, label string, sizeAuthored bool) (Vo
 // API's.
 func parseStorageResourceList(m map[string]any, label string) (corev1.ResourceList, error) {
 	var rl corev1.ResourceList
-	for k, v := range m {
-		if corev1.ResourceName(k) != corev1.ResourceStorage {
+	// Sorted, for the same reason the rejected-key scan in
+	// parseVolumeClaimTemplates is: map iteration order is randomised, so a
+	// list authoring two invalid resource names would otherwise name a
+	// different one run to run. The shared rejectUnknownKeys has the same
+	// defect and is deliberately left alone here — it is used by every handler
+	// in the package, so changing its messages does not belong in a change
+	// scoped to this kind (go-kure/launcher#386).
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		v := m[k]
+		if !slices.Contains(volumeClaimStorageKeys, k) {
 			return nil, errors.Errorf("%s: %q is not a claim resource; a PersistentVolumeClaim measures only storage. The apiserver would ignore it rather than reject it; launcher reports it because a claim carrying an unread resource request is an authoring mistake", label, k)
 		}
 		s, ok := decodedQuantityString(v)
@@ -425,8 +440,21 @@ func schemaVolumeClaimSpec() map[string]oam.PropertySchema {
 			Type:        oam.PropertyTypeObject,
 			Description: "Storage the claim asks for. A claim measures only `storage`; any other resource name is rejected. requests.storage is the long form of `size` — author one or the other, not both.",
 			Properties: map[string]oam.PropertySchema{
-				"requests": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: `Minimum storage, e.g. {"storage": "10Gi"}.`},
-				"limits":   {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Upper bound on storage; honoured only by provisioners that implement it."},
+				// Closed, unlike the container and pod-level resource lists
+				// (schemaResources, schema.go): their keys are an open space of
+				// resource names (hugepages-<size>, extended resources), while a
+				// claim measures exactly one thing. An open object here would let
+				// a schema consumer accept `requests: {cpu: "1"}` that
+				// parseStorageResourceList then rejects.
+				//
+				// `storage` itself carries no declared Type, for the reason
+				// schemaResources gives for cpu/memory: the parser takes either a
+				// quantity string or a bare number (decodedQuantityString), and
+				// PropertySchema has no string-or-number union, so declaring
+				// PropertyTypeString would reject the numeric form the parser
+				// accepts.
+				"requests": {Type: oam.PropertyTypeObject, Description: `Minimum storage, e.g. {"storage": "10Gi"}.`, Properties: schemaClaimStorage("Storage the claim asks for. The long spelling of `size` — author one or the other, not both. Must be positive.")},
+				"limits":   {Type: oam.PropertyTypeObject, Description: "Upper bound on storage; honoured only by provisioners that implement it.", Properties: schemaClaimStorage("Upper bound on the volume's size. Must be positive — launcher rejects a non-positive limit as an authoring mistake, though the apiserver never reads this field.")},
 			},
 		},
 		"volumeMode": {Type: oam.PropertyTypeString, Enum: []any{"Filesystem"}, Description: "How the volume is consumed. Only Filesystem is accepted: this kind mounts every claim template at its `mountPath`, and the API's other mode, Block, must be consumed through volumeDevices/devicePath, which this kind does not emit (go-kure/launcher#385)."},
@@ -441,5 +469,13 @@ func schemaVolumeClaimSpec() map[string]oam.PropertySchema {
 			},
 		},
 		"volumeAttributesClassName": {Type: oam.PropertyTypeString, Description: "VolumeAttributesClass applied to the volume, carrying provisioner-specific mutable attributes. Requires the cluster to have that feature enabled."},
+	}
+}
+
+// schemaClaimStorage returns the single-key property map a claim's requests and
+// limits each publish, built fresh per call so the two share no map state.
+func schemaClaimStorage(desc string) map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"storage": {Description: desc},
 	}
 }
