@@ -167,8 +167,11 @@ func TestParsePodSpec_RoundTrip(t *testing.T) {
 		"preemptionPolicy":   "Never",
 		"setHostnameAsFQDN":  false,
 		"os":                 map[string]any{"name": "linux"},
-		"hostUsers":          false,
-		"schedulingGates":    []any{map[string]any{"name": "example.com/quota"}},
+		// hostUsers must be true here: the fixture also authors hostPID/hostIPC,
+		// and validateHostUsers forbids those when the host user namespace is
+		// disabled. The false case is pinned separately below.
+		"hostUsers":       true,
+		"schedulingGates": []any{map[string]any{"name": "example.com/quota"}},
 		"resourceClaims": []any{
 			map[string]any{"name": "gpu", "resourceClaimName": "shared-gpu"},
 			map[string]any{"name": "scratch", "resourceClaimTemplateName": "scratch-template"},
@@ -187,6 +190,14 @@ func TestParsePodSpec_RoundTrip(t *testing.T) {
 	}
 	if pinned, err := parsePodSpec(map[string]any{"nodeName": "node-a"}, false); err != nil || pinned.NodeName != "node-a" {
 		t.Fatalf("nodeName round-trip = %q, %v; want node-a", pinned.NodeName, err)
+	}
+	// hostUsers: false round-trips on its own — it is only the combination with
+	// hostPID/hostIPC that validateHostUsers forbids. hostNetwork stays
+	// authorable alongside it: upstream forbids that pair only on a cluster
+	// without user-namespace host-network support.
+	if pinned, err := parsePodSpec(map[string]any{"hostUsers": false, "hostNetwork": true}, false); err != nil ||
+		pinned.HostUsers == nil || *pinned.HostUsers || !pinned.HostNetwork {
+		t.Fatalf("hostUsers round-trip = %v/%v, %v; want false/true", pinned.HostUsers, pinned.HostNetwork, err)
 	}
 
 	cfg, err := parsePodSpec(props, true)
@@ -263,7 +274,7 @@ func TestParsePodSpec_RoundTrip(t *testing.T) {
 	}
 	check("SetHostnameAsFQDN", ps.SetHostnameAsFQDN, boolp(false))
 	check("OS", ps.OS, &corev1.PodOS{Name: corev1.Linux})
-	check("HostUsers", ps.HostUsers, boolp(false))
+	check("HostUsers", ps.HostUsers, boolp(true))
 	check("SchedulingGates", ps.SchedulingGates, []corev1.PodSchedulingGate{{Name: "example.com/quota"}})
 	if got := len(ps.ResourceClaims); got != 2 {
 		t.Fatalf("ResourceClaims has %d entries, want 2", got)
@@ -338,7 +349,26 @@ func TestParsePodSpec_Errors(t *testing.T) {
 		{"hostNetwork not bool", map[string]any{"hostNetwork": "yes"}, false, "hostNetwork: must be a boolean"},
 		{"shareProcessNamespace with hostPID", map[string]any{"shareProcessNamespace": true, "hostPID": true}, false, "shareProcessNamespace and hostPID cannot both be true"},
 		{"podSecurityContext unknown key", map[string]any{"podSecurityContext": map[string]any{"privileged": true}}, false, `podSecurityContext: unrecognized key "privileged"`},
-		{"podSecurityContext runAsUser 0 with runAsNonRoot", map[string]any{"podSecurityContext": map[string]any{"runAsUser": 0, "runAsNonRoot": true}}, false, "runAsUser must not be 0"},
+		{"hostPID with hostUsers false", map[string]any{"hostUsers": false, "hostPID": true}, false, "hostPID: must not be true when hostUsers is false"},
+		{"hostIPC with hostUsers false", map[string]any{"hostUsers": false, "hostIPC": true}, false, "hostIPC: must not be true when hostUsers is false"},
+		{
+			"hostProcess without hostNetwork",
+			map[string]any{"podSecurityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
+			false,
+			"hostNetwork must be true when hostProcess is true",
+		},
+		{
+			"hostAlias zone-scoped IPv6",
+			map[string]any{"hostAliases": []any{map[string]any{"ip": "fe80::1%eth0", "hostnames": []any{"db.local"}}}},
+			false,
+			"zone-scoped address is not accepted",
+		},
+		{
+			"nameserver zone-scoped IPv6",
+			map[string]any{"dnsConfig": map[string]any{"nameservers": []any{"fe80::1%eth0"}}},
+			false,
+			"zone-scoped address is not accepted",
+		},
 		{"podSecurityContext negative fsGroup", map[string]any{"podSecurityContext": map[string]any{"fsGroup": -1}}, false, "must not be negative"},
 		{"imagePullSecrets missing name", map[string]any{"imagePullSecrets": []any{map[string]any{}}}, false, "imagePullSecrets[0].name: required"},
 		{"imagePullSecrets not array", map[string]any{"imagePullSecrets": "regcred"}, false, "must be an array"},

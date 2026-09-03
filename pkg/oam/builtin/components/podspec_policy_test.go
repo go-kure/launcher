@@ -70,12 +70,25 @@ func TestWorkloadKinds_ApplyPolicy_PodResourcesEnforced(t *testing.T) {
 	}
 }
 
+// hostNetworkOK is stubPolicy with the hostNetwork gate open. A HostProcess pod
+// must set hostNetwork to be admission-valid, and hostNetwork is itself
+// policy-gated, so without this the hostNetwork denial would be the only thing
+// a hostProcess test could ever observe.
+type hostNetworkOK struct{ *stubPolicy }
+
+func (hostNetworkOK) AllowHostNetwork() bool { return true }
+
 // TestWorkloadKinds_ApplyPolicy_HostProcessDenied: a HostProcess pod runs with
 // the node's own privileges, so podSecurityContext.windowsOptions.hostProcess
 // is gated behind the same AllowPrivileged switch as
 // securityContext.privileged, on every kind. NoopPolicy is default-deny.
 func TestWorkloadKinds_ApplyPolicy_HostProcessDenied(t *testing.T) {
+	// hostNetwork is required alongside hostProcess: validateWindowsHostProcessPod
+	// rejects a HostProcess pod without it, and parsePodSpec mirrors that, so the
+	// document has to be admission-valid before the policy gate can be the thing
+	// under test.
 	hostProcess := map[string]any{
+		"hostNetwork": true,
 		"podSecurityContext": map[string]any{
 			"windowsOptions": map[string]any{"hostProcess": true},
 		},
@@ -89,14 +102,18 @@ func TestWorkloadKinds_ApplyPolicy_HostProcessDenied(t *testing.T) {
 	for _, k := range workloadKinds {
 		t.Run(k.name, func(t *testing.T) {
 			cfg := objects2Config(t, k.handler, k.name, withProps(k.props, hostProcess)).(oam.Enforceable)
-			if err := cfg.ApplyPolicy(&stubPolicy{}); err == nil || !strings.Contains(err.Error(), want) {
+			if err := cfg.ApplyPolicy(&hostNetworkOK{&stubPolicy{}}); err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("ApplyPolicy error = %v, want containing %q", err, want)
 			}
-			if err := cfg.ApplyPolicy(&oam.NoopPolicy{}); err == nil || !strings.Contains(err.Error(), want) {
-				t.Fatalf("ApplyPolicy(NoopPolicy) error = %v, want containing %q", err, want)
+			// NoopPolicy is default-deny, and a HostProcess pod necessarily also
+			// sets hostNetwork, so it is stopped at whichever of the two gates
+			// runs first; asserting on the specific message here would only pin
+			// the enforcement order.
+			if err := cfg.ApplyPolicy(&oam.NoopPolicy{}); err == nil {
+				t.Fatal("ApplyPolicy(NoopPolicy) succeeded, want a denial")
 			}
 			allowed := objects2Config(t, k.handler, k.name, withProps(k.props, hostProcess)).(oam.Enforceable)
-			if err := allowed.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
+			if err := allowed.ApplyPolicy(&hostNetworkOK{&stubPolicy{allowPrivileged: true}}); err != nil {
 				t.Fatalf("ApplyPolicy with allowPrivileged: unexpected error %v", err)
 			}
 			off := objects2Config(t, k.handler, k.name, withProps(k.props, notHostProcess)).(oam.Enforceable)

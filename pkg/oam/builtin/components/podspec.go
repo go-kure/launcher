@@ -462,8 +462,48 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 	if err := validatePodOSFields(ps); err != nil {
 		return PodSpecConfig{}, err
 	}
+	if err := validatePodNamespaceFields(ps); err != nil {
+		return PodSpecConfig{}, err
+	}
 
 	return cfg, nil
+}
+
+// validatePodNamespaceFields mirrors the pod-level cross-field rules that tie
+// the host namespaces to `hostUsers` and to Windows HostProcess mode.
+//
+// validateHostUsers (k8s.io/kubernetes pkg/apis/core/validation) forbids
+// hostPID and hostIPC outright when hostUsers is false, and forbids
+// hostNetwork only when the cluster lacks user-namespace host-network support
+// (opts.AllowUserNamespacesHostNetworkSupport). hostNetwork therefore stays
+// authorable alongside hostUsers: false — whether it is accepted is a property
+// of the target cluster, not of the document — while the two unconditional
+// combinations are rejected here.
+//
+// validateWindowsHostProcessPod requires hostNetwork on any pod that has
+// HostProcess containers. A container with no windowsOptions.hostProcess of
+// its own inherits the pod-level value, so setting the pod-level flag alone
+// makes every generated container a HostProcess container.
+func validatePodNamespaceFields(ps *corev1.PodSpec) error {
+	if ps.HostUsers != nil && !*ps.HostUsers {
+		for _, f := range []struct {
+			key string
+			set bool
+		}{
+			{"hostPID", ps.HostPID},
+			{"hostIPC", ps.HostIPC},
+		} {
+			if f.set {
+				return errors.Errorf("%s: must not be true when hostUsers is false", f.key)
+			}
+		}
+	}
+	sc := ps.SecurityContext
+	if sc != nil && sc.WindowsOptions != nil && sc.WindowsOptions.HostProcess != nil &&
+		*sc.WindowsOptions.HostProcess && !ps.HostNetwork {
+		return errors.New("podSecurityContext.windowsOptions.hostProcess: hostNetwork must be true when hostProcess is true")
+	}
+	return nil
 }
 
 // validatePodOSFields mirrors the pod-level half of corev1.PodSpec.OS's
@@ -688,6 +728,31 @@ func parseLabelMap(raw map[string]any, label string) (map[string]string, error) 
 
 // parseHostAlias parses one `hostAliases` entry (validateHostAliases: a valid
 // IP plus at least one DNS-1123 subdomain hostname).
+// validatePodIP validates a bare IP literal in a pod-level field (a host-alias
+// address, a DNS nameserver).
+//
+// Kubernetes validates both with IsValidIPForLegacyField, which parses through
+// netutils.ParseIPSloppy — a net.ParseIP wrapper with no notion of an IPv6 zone
+// (k8s.io/apimachinery pkg/util/validation/ip.go parseIP). netip.ParseAddr, by
+// contrast, accepts a scoped address such as "fe80::1%eth0" and preserves the
+// zone, so the value would reach the cluster and be rejected at admission.
+// Requiring an empty Zone closes that gap.
+//
+// An IPv4-mapped IPv6 literal ("::ffff:1.2.3.4") is deliberately still
+// accepted: upstream rejects it only under strict validation, and merely warns
+// when the StrictIPCIDRValidation gate is off, so whether it is legal is a
+// property of the target cluster.
+func validatePodIP(value, label string) error {
+	addr, err := netip.ParseAddr(value)
+	if err != nil {
+		return errors.Errorf("%s: invalid IP address %q", label, value)
+	}
+	if addr.Zone() != "" {
+		return errors.Errorf("%s: invalid IP address %q: a zone-scoped address is not accepted in a pod IP field", label, value)
+	}
+	return nil
+}
+
 func parseHostAlias(m map[string]any, label string) (corev1.HostAlias, error) {
 	if err := rejectUnknownKeys(m, []string{"ip", "hostnames"}, label); err != nil {
 		return corev1.HostAlias{}, err
@@ -699,8 +764,8 @@ func parseHostAlias(m map[string]any, label string) (corev1.HostAlias, error) {
 	if !present {
 		return corev1.HostAlias{}, errors.Errorf("%s.ip: required", label)
 	}
-	if _, err := netip.ParseAddr(ip); err != nil {
-		return corev1.HostAlias{}, errors.Errorf("%s.ip: invalid IP address %q", label, ip)
+	if err := validatePodIP(ip, label+".ip"); err != nil {
+		return corev1.HostAlias{}, err
 	}
 	hostnames, present, err := parseStringList(m, "hostnames", label+".hostnames")
 	if err != nil {
@@ -732,8 +797,8 @@ func parsePodDNSConfig(raw map[string]any, label string) (*corev1.PodDNSConfig, 
 			return nil, errors.Errorf("%s.nameservers: at most 3 nameservers are allowed, got %d", label, len(ns))
 		}
 		for i, s := range ns {
-			if _, err := netip.ParseAddr(s); err != nil {
-				return nil, errors.Errorf("%s: invalid IP address %q", indexedLabel(label+".nameservers", i), s)
+			if err := validatePodIP(s, indexedLabel(label+".nameservers", i)); err != nil {
+				return nil, err
 			}
 		}
 		dc.Nameservers = ns
@@ -872,10 +937,11 @@ func parsePodSecurityContext(raw map[string]any, label string) (*corev1.PodSecur
 		sc.RunAsNonRoot = v
 		set = true
 	}
-	// Same kubelet-time contradiction the container-level parser rejects.
-	if sc.RunAsUser != nil && *sc.RunAsUser == 0 && sc.RunAsNonRoot != nil && *sc.RunAsNonRoot {
-		return nil, errors.Errorf("%s: runAsUser must not be 0 when runAsNonRoot is true", label)
-	}
+	// The runAsUser-0/runAsNonRoot contradiction is deliberately NOT rejected
+	// here: a container-level runAsUser overrides the pod-level value, so
+	// pod-level {runAsUser: 0, runAsNonRoot: true} is a valid document when
+	// every container names a non-root UID of its own. validateEffectiveRunAsUser
+	// makes the call in buildPodSpec, once the containers are assembled.
 	if v, present := raw["supplementalGroups"]; present {
 		arr, ok := v.([]any)
 		if !ok {
@@ -1159,7 +1225,52 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 	if err := validateContainerOSFields(&ps); err != nil {
 		return corev1.PodSpec{}, err
 	}
+	if err := validateEffectiveRunAsUser(&ps); err != nil {
+		return corev1.PodSpec{}, err
+	}
 	return ps, nil
+}
+
+// validateEffectiveRunAsUser rejects the runAsUser-0/runAsNonRoot contradiction
+// on each container's *effective* settings rather than on the pod-level object
+// alone.
+//
+// The kubelet resolves both fields per container — a container-level value
+// wins, an unset one inherits the pod-level value — and refuses to start a
+// container whose effective UID is 0 while runAsNonRoot is true. Checking the
+// pod-level object at parse time would reject
+// `podSecurityContext: {runAsUser: 0, runAsNonRoot: true}` even when every
+// container names a non-root UID, which the schema explicitly permits; checking
+// the pair here catches the mixed cases the per-object parsers cannot see,
+// including a container-level runAsUser: 0 under a pod-level runAsNonRoot.
+func validateEffectiveRunAsUser(ps *corev1.PodSpec) error {
+	var podUser *int64
+	var podNonRoot *bool
+	if ps.SecurityContext != nil {
+		podUser = ps.SecurityContext.RunAsUser
+		podNonRoot = ps.SecurityContext.RunAsNonRoot
+	}
+	check := func(list string, containers []corev1.Container) error {
+		for i, c := range containers {
+			user, nonRoot := podUser, podNonRoot
+			if c.SecurityContext != nil {
+				if c.SecurityContext.RunAsUser != nil {
+					user = c.SecurityContext.RunAsUser
+				}
+				if c.SecurityContext.RunAsNonRoot != nil {
+					nonRoot = c.SecurityContext.RunAsNonRoot
+				}
+			}
+			if user != nil && *user == 0 && nonRoot != nil && *nonRoot {
+				return errors.Errorf("%s: effective runAsUser must not be 0 when runAsNonRoot is true", indexedLabel(list, i))
+			}
+		}
+		return nil
+	}
+	if err := check("initContainers", ps.InitContainers); err != nil {
+		return err
+	}
+	return check("containers", ps.Containers)
 }
 
 // effectiveServiceAccountName returns the ServiceAccount a workload's pods run
