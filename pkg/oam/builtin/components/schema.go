@@ -4,12 +4,15 @@ import "github.com/go-kure/launcher/pkg/oam"
 
 // This file holds PropertySchema fragments shared by the container-workload
 // component handlers (webservice/worker/cronjob/daemonset/statefulset). Each
-// fragment mirrors a shared parser in common.go (parseEnv, parseResources, …).
-// Deeply nested or K8s-adjacent shapes are intentionally kept shallow/open
-// (AdditionalProperties) rather than modeled field-by-field — the constrained
-// PropertySchema vocabulary describes the user-facing surface, not every nested
-// object. Each accessor returns a fresh value so consumers can't mutate shared
-// state.
+// fragment mirrors a shared parser in common.go / podspec.go (parseEnv,
+// parseResources, parsePodSpec, …). The target is full corev1 fidelity: a
+// nested shape is modeled field-by-field, with a Description on every key,
+// wherever its parser is strict (env, envFrom, resources, securityContext, the
+// pod-level fragment). The objects still declared open (AdditionalProperties —
+// probes, lifecycle handlers, volume type-specific keys, initContainers/sidecars
+// item extras) are a known gap awaiting their own strict parsers, not a design
+// choice to stay shallow. Each accessor returns a fresh value so consumers can't
+// mutate shared state.
 
 func accessModesEnum() []any {
 	return []any{"ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"}
@@ -128,11 +131,12 @@ func schemaEnvFrom(reserved bool) oam.PropertySchema {
 // deliberately not projected: the pinned k8s.io/api@v0.36.3 type carries
 // `+featureGate=DynamicResourceAllocation` on that field (unlike procMount, whose
 // alpha rationale proved false — see parseSecurityContext), and a Claims entry
-// only means anything paired with a PodSpec.ResourceClaims entry, a pod-level
-// construct this component schema does not model at all yet. Adding a `claims`
-// property here without that pod-level wiring would validate but silently
-// produce an invalid corev1 object. Left for a follow-up once pod-level
-// resourceClaims support is designed.
+// only means anything paired with a PodSpec.ResourceClaims entry. The pod-level
+// `resourceClaims` property now exists (schemaPodSpec), so the remaining work is
+// the container side: a `claims` entry must name a declared pod-level claim, a
+// cross-field check parseResources has no access to today. Left for a
+// follow-up rather than validating a shape that can silently produce an
+// invalid corev1 object.
 // reserved is a required argument (D3); see schemaEnv's doc comment above.
 func schemaResources(reserved bool) oam.PropertySchema {
 	// requests and limits each get their own map so the returned schema shares no
@@ -214,35 +218,222 @@ func schemaSecurityContext(reserved bool) oam.PropertySchema {
 					"drop": {Type: oam.PropertyTypeArray, Description: "Capabilities to drop (e.g. \"ALL\").", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single capability name."}},
 				},
 			},
-			"seccompProfile": {
-				Type:        oam.PropertyTypeObject,
-				Description: "Seccomp options for the container.",
-				Properties: map[string]oam.PropertySchema{
-					"type":             {Type: oam.PropertyTypeString, Enum: []any{"Localhost", "RuntimeDefault", "Unconfined"}, Description: "Which kind of seccomp profile to apply."},
-					"localhostProfile": {Type: oam.PropertyTypeString, Description: "Profile file path relative to the kubelet's seccomp root; required (and only valid) when type is \"Localhost\"."},
-				},
-			},
-			"seLinuxOptions": {
-				Type:        oam.PropertyTypeObject,
-				Description: "SELinux context to apply to the container.",
-				Properties: map[string]oam.PropertySchema{
-					"user":  {Type: oam.PropertyTypeString, Description: "SELinux user label."},
-					"role":  {Type: oam.PropertyTypeString, Description: "SELinux role label."},
-					"type":  {Type: oam.PropertyTypeString, Description: "SELinux type label."},
-					"level": {Type: oam.PropertyTypeString, Description: "SELinux level label."},
-				},
-			},
-			"appArmorProfile": {
-				Type:        oam.PropertyTypeObject,
-				Description: "AppArmor options for the container.",
-				Properties: map[string]oam.PropertySchema{
-					"type":             {Type: oam.PropertyTypeString, Enum: []any{"Localhost", "RuntimeDefault", "Unconfined"}, Description: "Which kind of AppArmor profile to apply."},
-					"localhostProfile": {Type: oam.PropertyTypeString, Description: "Profile loaded on the node; required (and only valid) when type is \"Localhost\"."},
-				},
-			},
-			"procMount": {Type: oam.PropertyTypeString, Enum: []any{"Default", "Unmasked"}, Description: "Procfs mount behavior for the container (Linux-only)."},
+			"seccompProfile":  schemaSeccompProfile("the container"),
+			"seLinuxOptions":  schemaSELinuxOptions("the container"),
+			"appArmorProfile": schemaAppArmorProfile("the container"),
+			"procMount":       {Type: oam.PropertyTypeString, Enum: []any{"Default", "Unmasked"}, Description: "Procfs mount behavior for the container (Linux-only)."},
 		},
 	}
+}
+
+// schemaSeccompProfile / schemaSELinuxOptions / schemaAppArmorProfile describe
+// the three security sub-objects shared verbatim by the container-level
+// securityContext and the pod-level podSecurityContext (see parseSeccompProfile
+// and friends in common.go). scope is the noun the description applies to
+// ("the container" / "all containers in the pod").
+func schemaSeccompProfile(scope string) oam.PropertySchema {
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeObject,
+		Description: "Seccomp options for " + scope + ".",
+		Properties: map[string]oam.PropertySchema{
+			"type":             {Type: oam.PropertyTypeString, Enum: []any{"Localhost", "RuntimeDefault", "Unconfined"}, Description: "Which kind of seccomp profile to apply."},
+			"localhostProfile": {Type: oam.PropertyTypeString, Description: "Profile file path relative to the kubelet's seccomp root; required (and only valid) when type is \"Localhost\"."},
+		},
+	}
+}
+
+func schemaSELinuxOptions(scope string) oam.PropertySchema {
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeObject,
+		Description: "SELinux context to apply to " + scope + ".",
+		Properties: map[string]oam.PropertySchema{
+			"user":  {Type: oam.PropertyTypeString, Description: "SELinux user label."},
+			"role":  {Type: oam.PropertyTypeString, Description: "SELinux role label."},
+			"type":  {Type: oam.PropertyTypeString, Description: "SELinux type label."},
+			"level": {Type: oam.PropertyTypeString, Description: "SELinux level label."},
+		},
+	}
+}
+
+func schemaAppArmorProfile(scope string) oam.PropertySchema {
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeObject,
+		Description: "AppArmor options for " + scope + ".",
+		Properties: map[string]oam.PropertySchema{
+			"type":             {Type: oam.PropertyTypeString, Enum: []any{"Localhost", "RuntimeDefault", "Unconfined"}, Description: "Which kind of AppArmor profile to apply."},
+			"localhostProfile": {Type: oam.PropertyTypeString, Description: "Profile loaded on the node; required (and only valid) when type is \"Localhost\"."},
+		},
+	}
+}
+
+// schemaPodSpec describes the pod-level properties shared by every container
+// workload kind (see parsePodSpec in podspec.go). A map, like schemaJobSpec,
+// because all five kinds must expose the identical set — TestPodSpecSchema
+// pins its key set to podSpecPropertyKeys. Every key, nested or not, carries a
+// Description; enum-valued fields declare their Enum so schema validation
+// rejects a bad value before the parser does.
+//
+// Fields corev1.PodSpec has that are deliberately absent here, and why
+// parsePodSpec rejects them if authored: `ephemeralContainers` (only settable
+// through a running pod's ephemeralcontainers subresource), `priority` and
+// `overhead` (populated by the Priority / RuntimeClass admission controllers
+// from priorityClassName / runtimeClassName; authoring them is rejected by
+// admission), `serviceAccount` (deprecated alias of serviceAccountName).
+//
+// jobPods selects whether podSpecJobOnlyKeys (podActiveDeadlineSeconds) are
+// published: apps/v1 forbids activeDeadlineSeconds on Deployment, StatefulSet
+// and DaemonSet pod templates, so only cronjob passes true.
+//
+// reserved is a required argument (D3); see schemaEnv's doc comment above.
+func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
+	str := func(desc string) oam.PropertySchema {
+		return oam.PropertySchema{Type: oam.PropertyTypeString, PlatformReserved: reserved, Description: desc}
+	}
+	boolean := func(desc string) oam.PropertySchema {
+		return oam.PropertySchema{Type: oam.PropertyTypeBoolean, PlatformReserved: reserved, Description: desc}
+	}
+	integer := func(desc string) oam.PropertySchema {
+		return oam.PropertySchema{Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: desc}
+	}
+	nameList := func(desc, itemDesc string) oam.PropertySchema {
+		return oam.PropertySchema{
+			Type: oam.PropertyTypeArray, PlatformReserved: reserved, Description: desc,
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject, Description: itemDesc,
+				Properties: map[string]oam.PropertySchema{
+					"name": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the referenced object."},
+				},
+			},
+		}
+	}
+	podResources := schemaResources(reserved)
+	podResources.Description = "Pod-level compute resources shared by all containers (corev1.PodSpec.resources). Only cpu, memory and hugepages-<size> are valid here; requires the cluster's PodLevelResources feature gate. Distinct from the container-level `resources` property."
+
+	m := map[string]oam.PropertySchema{
+		"terminationGracePeriodSeconds": integer("Seconds the pod is given to terminate gracefully after a delete request. Must be >= 0; the API default is 30."),
+		"dnsPolicy": {Type: oam.PropertyTypeString, PlatformReserved: reserved, Enum: []any{"ClusterFirstWithHostNet", "ClusterFirst", "Default", "None"},
+			Description: "DNS policy for the pod. \"None\" requires dnsConfig.nameservers; use \"ClusterFirstWithHostNet\" together with hostNetwork to keep cluster DNS."},
+		"nodeSelector":                 {Type: oam.PropertyTypeObject, PlatformReserved: reserved, AdditionalProperties: true, Description: "Node labels the pod must match to be scheduled (label key to label value)."},
+		"serviceAccountName":           str("Name of an existing ServiceAccount the pod runs as. When set, the component's own per-component ServiceAccount is NOT generated, and identity-binding traits (rbac) target this account instead."),
+		"automountServiceAccountToken": boolean("Whether the ServiceAccount token is mounted into the pod's containers."),
+		"nodeName":                     str("Bind the pod to this specific node, bypassing the scheduler."),
+		"hostNetwork":                  boolean("Use the node's network namespace. Subject to the environment policy's AllowHostNetwork flag."),
+		"hostPID":                      boolean("Use the node's PID namespace. Subject to the environment policy's AllowHostPID flag; mutually exclusive with shareProcessNamespace."),
+		"hostIPC":                      boolean("Use the node's IPC namespace. Subject to the environment policy's AllowHostIPC flag."),
+		"shareProcessNamespace":        boolean("Share a single process namespace between all containers in the pod. Mutually exclusive with hostPID."),
+		"podSecurityContext": {
+			Type: oam.PropertyTypeObject, PlatformReserved: reserved,
+			Description: "Pod-level security context (corev1.PodSecurityContext) applying to all containers. Distinct from the container-level `securityContext` property, which takes precedence for its own fields.",
+			Properties: map[string]oam.PropertySchema{
+				"seLinuxOptions": schemaSELinuxOptions("all containers in the pod"),
+				"windowsOptions": {
+					Type: oam.PropertyTypeObject, Description: "Windows-specific options applied to all containers (ignored on Linux).",
+					Properties: map[string]oam.PropertySchema{
+						"gmsaCredentialSpecName": {Type: oam.PropertyTypeString, Description: "Name of the GMSA credential spec to use."},
+						"gmsaCredentialSpec":     {Type: oam.PropertyTypeString, Description: "Inline GMSA credential spec contents (normally populated by the GMSA admission webhook)."},
+						"runAsUserName":          {Type: oam.PropertyTypeString, Description: "Windows user name to run the container entrypoint as."},
+						"hostProcess":            {Type: oam.PropertyTypeBoolean, Description: "Run the containers as Windows HostProcess containers."},
+					},
+				},
+				"runAsUser":                {Type: oam.PropertyTypeInteger, Description: "UID to run each container's entrypoint as; a container-level runAsUser takes precedence."},
+				"runAsGroup":               {Type: oam.PropertyTypeInteger, Description: "Primary GID for each container's entrypoint; a container-level runAsGroup takes precedence."},
+				"runAsNonRoot":             {Type: oam.PropertyTypeBoolean, Description: "Whether the containers must run as a non-root user."},
+				"supplementalGroups":       {Type: oam.PropertyTypeArray, Description: "Additional GIDs applied to the first process in each container.", Items: &oam.PropertySchema{Type: oam.PropertyTypeInteger, Description: "A single supplemental group ID."}},
+				"supplementalGroupsPolicy": {Type: oam.PropertyTypeString, Enum: []any{"Merge", "Strict"}, Description: "How supplementalGroups combine with the container image's own group memberships."},
+				"fsGroup":                  {Type: oam.PropertyTypeInteger, Description: "Supplemental group that owns volumes supporting ownership management."},
+				"sysctls": {
+					Type: oam.PropertyTypeArray, Description: "Namespaced kernel parameters to set for the pod.",
+					Items: &oam.PropertySchema{
+						Type: oam.PropertyTypeObject, Description: "A single sysctl.",
+						Properties: map[string]oam.PropertySchema{
+							"name":  {Type: oam.PropertyTypeString, Required: true, Description: "Sysctl name (e.g. \"net.core.somaxconn\")."},
+							"value": {Type: oam.PropertyTypeString, Required: true, Description: "Sysctl value."},
+						},
+					},
+				},
+				"fsGroupChangePolicy": {Type: oam.PropertyTypeString, Enum: []any{"OnRootMismatch", "Always"}, Description: "When to change ownership/permissions of a volume to match fsGroup."},
+				"seccompProfile":      schemaSeccompProfile("all containers in the pod"),
+				"appArmorProfile":     schemaAppArmorProfile("all containers in the pod"),
+				"seLinuxChangePolicy": {Type: oam.PropertyTypeString, Enum: []any{"MountOption", "Recursive"}, Description: "How the SELinux label is applied to the pod's volumes."},
+			},
+		},
+		"imagePullSecrets": nameList("Secrets in the component's namespace holding registry credentials for pulling the pod's images.", "A reference to one image-pull Secret."),
+		"hostname":         str("Hostname of the pod (a DNS-1123 label). Defaults to the pod's own name."),
+		"subdomain":        str("Subdomain of the pod (a DNS-1123 label), giving the FQDN <hostname>.<subdomain>.<namespace>.svc.<cluster domain>."),
+		"schedulerName":    str("Name of the scheduler that dispatches this pod; defaults to the default scheduler."),
+		"hostAliases": {
+			Type: oam.PropertyTypeArray, PlatformReserved: reserved, Description: "Extra /etc/hosts entries injected into the pod.",
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject, Description: "One IP with the hostnames that resolve to it.",
+				Properties: map[string]oam.PropertySchema{
+					"ip":        {Type: oam.PropertyTypeString, Required: true, Description: "IP address of the host file entry."},
+					"hostnames": {Type: oam.PropertyTypeArray, Required: true, Description: "Hostnames resolving to the IP; at least one.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single hostname (DNS-1123 subdomain)."}},
+				},
+			},
+		},
+		"priorityClassName": str("Name of the PriorityClass the pod is scheduled with. The pod's numeric priority is derived from it by admission — `priority` itself is not authorable."),
+		"dnsConfig": {
+			Type: oam.PropertyTypeObject, PlatformReserved: reserved, Description: "DNS parameters merged into the pod's resolver configuration according to dnsPolicy.",
+			Properties: map[string]oam.PropertySchema{
+				"nameservers": {Type: oam.PropertyTypeArray, Description: "DNS server IP addresses (at most 3).", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single nameserver IP."}},
+				"searches":    {Type: oam.PropertyTypeArray, Description: "DNS search domains (at most 32).", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single search domain."}},
+				"options": {
+					Type: oam.PropertyTypeArray, Description: "Resolver options.",
+					Items: &oam.PropertySchema{
+						Type: oam.PropertyTypeObject, Description: "A single resolver option.",
+						Properties: map[string]oam.PropertySchema{
+							"name":  {Type: oam.PropertyTypeString, Required: true, Description: "Option name (e.g. \"ndots\")."},
+							"value": {Type: oam.PropertyTypeString, Description: "Option value; omit for flag-style options."},
+						},
+					},
+				},
+			},
+		},
+		"readinessGates": {
+			Type: oam.PropertyTypeArray, PlatformReserved: reserved, Description: "Extra pod conditions that must be True before the pod counts as ready.",
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject, Description: "A single readiness gate.",
+				Properties: map[string]oam.PropertySchema{
+					"conditionType": {Type: oam.PropertyTypeString, Required: true, Description: "Pod condition type (a qualified name) that must be True."},
+				},
+			},
+		},
+		"runtimeClassName":   str("Name of the RuntimeClass the pod runs under. Pod overhead is derived from it by admission — `overhead` itself is not authorable."),
+		"enableServiceLinks": boolean("Whether information about services is injected into the pod's environment as Docker-style links. The API default is true."),
+		"preemptionPolicy":   {Type: oam.PropertyTypeString, PlatformReserved: reserved, Enum: []any{"PreemptLowerPriority", "Never"}, Description: "Whether the pod may preempt lower-priority pods. The API default is PreemptLowerPriority."},
+		"setHostnameAsFQDN":  boolean("Set the pod's hostname to its fully qualified domain name. Mutually exclusive with hostnameOverride."),
+		"os": {
+			Type: oam.PropertyTypeObject, PlatformReserved: reserved, Description: "Operating system of the pod's containers.",
+			Properties: map[string]oam.PropertySchema{
+				"name": {Type: oam.PropertyTypeString, Required: true, Enum: []any{"linux", "windows"}, Description: "OS name."},
+			},
+		},
+		"hostUsers":       boolean("Use the host's user namespace (true, the default) or a new user namespace for the pod (false)."),
+		"schedulingGates": nameList("Named gates that must all be removed before the scheduler considers the pod (gate names must be unique).", "A single scheduling gate."),
+		"resourceClaims": {
+			Type: oam.PropertyTypeArray, PlatformReserved: reserved, Description: "Dynamic Resource Allocation claims made available to the pod's containers (names must be unique).",
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject, Description: "A single pod resource claim; exactly one of resourceClaimName or resourceClaimTemplateName must be set.",
+				Properties: map[string]oam.PropertySchema{
+					"name":                      {Type: oam.PropertyTypeString, Required: true, Description: "Claim name containers refer to (a DNS-1123 label)."},
+					"resourceClaimName":         {Type: oam.PropertyTypeString, Description: "Name of an existing ResourceClaim in the pod's namespace."},
+					"resourceClaimTemplateName": {Type: oam.PropertyTypeString, Description: "Name of a ResourceClaimTemplate a claim is created from per pod."},
+				},
+			},
+		},
+		"podResources":     podResources,
+		"hostnameOverride": str("Fully overrides the pod's hostname (a DNS-1123 subdomain of at most 64 characters). Mutually exclusive with hostNetwork and setHostnameAsFQDN; requires the cluster's HostnameOverride feature gate."),
+		"schedulingGroup": {
+			Type: oam.PropertyTypeObject, PlatformReserved: reserved, Description: "Gang-scheduling group the pod belongs to (requires the cluster's scheduling-group support).",
+			Properties: map[string]oam.PropertySchema{
+				"podGroupName": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the PodGroup this pod is scheduled together with."},
+			},
+		},
+	}
+	if jobPods {
+		m["podActiveDeadlineSeconds"] = integer("Seconds the pod itself may be active before the system terminates it (corev1.PodSpec.activeDeadlineSeconds; distinct from the job-level activeDeadlineSeconds). Must be between 1 and 2147483647. Only Job pods may set it.")
+	}
+	return m
 }
 
 // schemaWorkingDir describes the shared `workingDir` property (see the

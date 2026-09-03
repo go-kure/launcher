@@ -98,6 +98,17 @@ type ComponentNamed interface {
 	ComponentName() string
 }
 
+// ServiceAccountNamer is an optional interface for component ApplicationConfig
+// types whose pods run as a ServiceAccount. It returns the effective name: the
+// authored `serviceAccountName` when the component set one, else the
+// per-component ServiceAccount the handler generates (named after the
+// component). Traits that bind RBAC or other identity to the workload (the rbac
+// trait's RoleBinding subject) read this instead of assuming the component name,
+// so an authored serviceAccountName is honoured end to end.
+type ServiceAccountNamer interface {
+	ServiceAccountName() string
+}
+
 // LayoutAugmentationCoverage is an optional interface for ApplicationConfig
 // types that also implement kure's layout.LayoutAugmenter. It answers, for a
 // consumer that never constructs or walks a layout.ManifestLayout (e.g.

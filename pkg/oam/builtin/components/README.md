@@ -9,10 +9,15 @@ registered with the transformer in `pkg/cmd/kurel` (`newBuiltinTransformer`), ea
 mapping a component `type` string to a handler implementing `CanHandle` +
 `ToApplicationConfig`. Every built-in component handler also implements
 `oam.PropertySchemaProvider` (`PropertySchema()`), declaring a constrained schema for its
-user-facing properties so the downstream runtime can validate them before invocation. Deeply nested or
-K8s-adjacent shapes are kept shallow/open (`additionalProperties`) rather than modeled
-field-by-field; escape-hatch fields (e.g. `passthrough.object`, `manifests`/`crd` inline
-content) stay open by design. Every property (including nested object fields and array item
+user-facing properties so the downstream runtime can validate them before invocation. Nested
+Kubernetes shapes are modeled field-by-field at full fidelity — closed objects, enums where the
+API has them, and the same value validation real admission applies (ADR-036 L1: one PodSpec/
+Container projection shared by every kind). Only genuine escape-hatch fields (`passthrough.object`,
+`manifests`/`crd` inline content) and key→value maps whose keys are data (`nodeSelector`,
+`resources.requests`/`limits`) stay open by design; the remaining open objects (`probes`,
+`lifecycle`, `volumes`, `initContainers`/`sidecars` entries, `affinity`) are a known gap, not
+the target shape. Every property
+(including nested object fields and array item
 schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler API
 Reference.
 
@@ -31,6 +36,9 @@ Reference.
 | `passthrough` | any (verbatim) | Emit an arbitrary object as-declared (`clusterScoped` opt). |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. |
+
+The five workload kinds emit their per-component ServiceAccount only when the
+component does not author `serviceAccountName` (see "Pod-level properties" below).
 
 ## Common config
 
@@ -533,6 +541,51 @@ each entry also accepts its own `securityContext`, the identical field set
 and validation as the main container's own `securityContext` described
 below — see that prose for the field list rather than restating it here),
 and `affinity`.
+
+### Pod-level properties
+
+The five kind components also share one pod-level property surface
+(go-kure/launcher#342, ADR-036 L1), parsed by `parsePodSpec` (`podspec.go`)
+straight into a `corev1.PodSpec` and rendered by the shared `buildPodSpec`,
+which every kind assigns to its pod template. Property names are the
+`corev1.PodSpec` JSON names, except three that carry a `pod` prefix because
+the bare name is already a property at some kind: `podSecurityContext`
+(container `securityContext` exists everywhere), `podResources` (container
+`resources`), and `podActiveDeadlineSeconds` (cronjob's job-level
+`activeDeadlineSeconds`). Each accepted value is validated the way real
+admission validates it when that check is deterministic from the document
+alone (DNS-1123 names, enums, IP literals, duplicate names, the cross-field
+exclusions listed below); checks needing cluster state (host ports under
+`hostNetwork`, feature gates, RuntimeClass existence) are left to the cluster.
+
+| Property | Type | Effect | Kind |
+|----------|------|--------|------|
+| `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account and the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). | additive when unset |
+| `automountServiceAccountToken` | bool | Pod-level token automount override. | additive |
+| `terminationGracePeriodSeconds` | int ≥ 0 | Grace period before SIGKILL. | additive |
+| `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it. | additive |
+| `dnsPolicy`, `dnsConfig` | enum, object | `ClusterFirstWithHostNet`/`ClusterFirst`/`Default`/`None`; `dnsConfig` = `nameservers` (≤3 IPs), `searches` (≤32), `options[]{name,value}`. `None` requires at least one nameserver. | additive |
+| `nodeSelector`, `nodeName`, `schedulerName`, `priorityClassName`, `preemptionPolicy`, `runtimeClassName`, `schedulingGates[]{name}`, `schedulingGroup{podGroupName}` | scheduling | Placement fields; gate names must be unique. | additive |
+| `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all five kinds; `NoopPolicy` denies all three). | additive |
+| `shareProcessNamespace` | bool | Mutually exclusive with `hostPID: true`. | additive |
+| `hostname`, `subdomain`, `setHostnameAsFQDN`, `hostnameOverride`, `hostAliases[]{ip,hostnames}` | naming | `hostname`/`subdomain` are DNS-1123 labels; `hostnameOverride` is a ≤64-char subdomain and cannot combine with `hostNetwork` or `setHostnameAsFQDN`. | additive |
+| `podSecurityContext` | object | The full `corev1.PodSecurityContext` field set (`runAsUser`/`runAsGroup`/`runAsNonRoot`/`fsGroup`/`fsGroupChangePolicy`/`supplementalGroups`/`supplementalGroupsPolicy`/`sysctls`/`seLinuxOptions`/`seLinuxChangePolicy`/`seccompProfile`/`appArmorProfile`/`windowsOptions`), closed and validated like the container `securityContext`. No policy hook yet. | additive |
+| `imagePullSecrets[]{name}`, `enableServiceLinks`, `os{name}`, `hostUsers`, `readinessGates[]{conditionType}`, `resourceClaims[]{name, resourceClaimName \| resourceClaimTemplateName}`, `podResources{requests,limits}` | misc | `podResources` accepts only `cpu`, `memory` and `hugepages-<size>` (pod-level resources have no ephemeral-storage or extended resources); claim names must be unique and name exactly one source. | additive |
+
+Deliberately **not** accepted — each is rejected with an error naming the
+reason rather than silently ignored: `ephemeralContainers` (added to a running
+pod through its `ephemeralcontainers` subresource, never on a template),
+`priority` and `overhead` (the Priority and RuntimeClass admission
+controllers, on by default, reject pods that set them and derive them from
+`priorityClassName`/`runtimeClassName`), and `serviceAccount` (deprecated alias
+of `serviceAccountName`).
+
+Every kind config implements `oam.ServiceAccountNamer` (`pkg/oam/handler.go`),
+returning the authored `serviceAccountName` or, when unset, the component name
+the generated ServiceAccount carries. The `rbac` trait
+(`pkg/oam/builtin/traits/rbac.go`) binds its RoleBinding/ClusterRoleBinding
+subject to that name, so binding follows the authored account; the Role and
+binding objects keep their component-derived names.
 
 `securityContext.privileged: true` is rejected unless the environment policy's
 `AllowPrivileged()` allows it (`enforce.go`'s `enforcePrivileged`).

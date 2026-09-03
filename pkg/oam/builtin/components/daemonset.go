@@ -1,6 +1,8 @@
 package components
 
 import (
+	"maps"
+
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
@@ -22,7 +24,7 @@ func (h *DaemonsetHandler) CanHandle(componentType string) bool {
 
 // PropertySchema declares the daemonset component's user-facing properties.
 func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	m := map[string]oam.PropertySchema{
 		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
 		"port":            {Type: oam.PropertyTypeInteger, Description: "Container port to expose; when set, a ClusterIP Service is generated."},
 		"env":             schemaEnv(false),
@@ -38,6 +40,8 @@ func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"volumes":         schemaVolumes(),
 		"initContainers":  schemaContainers(),
 	}
+	maps.Copy(m, schemaPodSpec(false, false))
+	return m
 }
 
 // ToApplicationConfig converts an OAM daemonset component to a DaemonsetConfig.
@@ -124,6 +128,12 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 	}
 	config.InitContainers = initContainers
 
+	podSpec, err := parsePodSpec(props, false)
+	if err != nil {
+		return nil, err
+	}
+	config.PodSpec = podSpec
+
 	return config, nil
 }
 
@@ -147,6 +157,15 @@ type DaemonsetConfig struct {
 	VolumeMounts    []corev1.VolumeMount
 	InitContainers  []InitContainerConfig
 	PVCs            []PVCConfig
+	// PodSpec holds the shared pod-level properties (see parsePodSpec).
+	PodSpec PodSpecConfig
+}
+
+// ServiceAccountName implements oam.ServiceAccountNamer: the authored
+// serviceAccountName, else the per-component ServiceAccount named after the
+// component.
+func (c *DaemonsetConfig) ServiceAccountName() string {
+	return effectiveServiceAccountName(c.PodSpec, c.Name)
 }
 
 // ServicePort implements servicePortProvider, making DaemonsetConfig usable as an
@@ -185,6 +204,9 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforceHostPathVolumes(c.Volumes, p.AllowHostPathVolumes()); err != nil {
 		return err
 	}
+	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {
+		return err
+	}
 	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
 		return err
 	}
@@ -204,7 +226,8 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 }
 
 // Generate creates a Kubernetes DaemonSet, optional Service, and ServiceAccount.
-// A Service is generated when Port > 0.
+// A Service is generated when Port > 0. The ServiceAccount is omitted when
+// serviceAccountName was authored.
 func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}
 	var err error
@@ -226,9 +249,10 @@ func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, er
 		objects = append(objects, &svcObj)
 	}
 
-	sa := createServiceAccount(app.Name, app.Namespace, labels)
-	saObj := client.Object(sa)
-	objects = append(objects, &saObj)
+	if generatesServiceAccount(c.PodSpec) {
+		saObj := client.Object(createServiceAccount(app.Name, app.Namespace, labels))
+		objects = append(objects, &saObj)
+	}
 
 	for _, pvc := range c.PVCs {
 		p, err := BuildPVC(pvc, app.Namespace, labels)
@@ -260,64 +284,42 @@ func (c *DaemonsetConfig) createService(app *stack.Application) *corev1.Service 
 func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.DaemonSet, error) {
 	labels := map[string]string{"app": app.Name}
 
-	container := kubernetes.CreateContainer(app.Name, c.Image, c.Command, c.Args)
-	kubernetes.SetContainerResources(container, buildResourceRequirements(c.Resources))
-	for _, env := range c.Env {
-		kubernetes.AddContainerEnv(container, env)
-	}
-	for _, ef := range c.EnvFrom {
-		kubernetes.AddContainerEnvFrom(container, ef)
-	}
-	applyProbes(container, c.Probes)
+	var ports []corev1.ContainerPort
 	if c.Port > 0 {
-		kubernetes.AddContainerPort(container, corev1.ContainerPort{
-			Name:          "http",
-			ContainerPort: c.Port,
-			Protocol:      corev1.ProtocolTCP,
-		})
+		ports = []corev1.ContainerPort{{Name: "http", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
 	}
-	if c.WorkingDir != "" {
-		kubernetes.SetContainerWorkingDir(container, c.WorkingDir)
-	}
-	if c.Lifecycle != nil {
-		kubernetes.SetContainerLifecycle(container, c.Lifecycle)
-	}
-	if c.SecurityContext != nil {
-		kubernetes.SetContainerSecurityContext(container, *c.SecurityContext)
-	}
-	for _, m := range c.VolumeMounts {
-		kubernetes.AddContainerVolumeMount(container, m)
-	}
+	container := buildMainContainer(app.Name, mainContainerInput{
+		Image:           c.Image,
+		Command:         c.Command,
+		Args:            c.Args,
+		Resources:       c.Resources,
+		Ports:           ports,
+		Env:             c.Env,
+		EnvFrom:         c.EnvFrom,
+		Probes:          c.Probes,
+		WorkingDir:      c.WorkingDir,
+		Lifecycle:       c.Lifecycle,
+		SecurityContext: c.SecurityContext,
+		VolumeMounts:    c.VolumeMounts,
+	})
 
 	ds := kubernetes.CreateDaemonSet(app.Name, app.Namespace)
 	ds.Labels = labels
 	ds.Annotations = nil
 	ds.Spec.Template.Labels = labels
-	kubernetes.SetDaemonSetServiceAccountName(ds, app.Name)
-	// Init containers added before the main container so declaration order is
-	// preserved in spec.template.spec.initContainers.
-	for _, ic := range c.InitContainers {
-		initContainer, err := buildInitContainer(ic)
-		if err != nil {
-			return nil, err
-		}
-		if err := kubernetes.AddDaemonSetInitContainer(ds, initContainer); err != nil {
-			return nil, errors.Wrapf(err, "add init container %q", ic.Name)
-		}
+
+	podSpec, err := buildPodSpec(podSpecInput{
+		Config:                    c.PodSpec,
+		DefaultServiceAccountName: app.Name,
+		MainContainer:             container,
+		InitContainers:            c.InitContainers,
+		Volumes:                   c.Volumes,
+		Tolerations:               c.Tolerations,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if err := kubernetes.AddDaemonSetContainer(ds, container); err != nil {
-		return nil, errors.Wrapf(err, "add container %q", c.Name)
-	}
-	for i := range c.Tolerations {
-		if err := kubernetes.AddDaemonSetToleration(ds, &c.Tolerations[i]); err != nil {
-			return nil, errors.Wrapf(err, "add toleration %d", i)
-		}
-	}
-	for i := range c.Volumes {
-		if err := kubernetes.AddDaemonSetVolume(ds, &c.Volumes[i]); err != nil {
-			return nil, errors.Wrapf(err, "add volume %q", c.Volumes[i].Name)
-		}
-	}
+	ds.Spec.Template.Spec = podSpec
 
 	return ds, nil
 }

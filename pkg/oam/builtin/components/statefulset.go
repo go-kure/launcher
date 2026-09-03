@@ -1,6 +1,8 @@
 package components
 
 import (
+	"maps"
+
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
@@ -23,7 +25,7 @@ func (h *StatefulsetHandler) CanHandle(componentType string) bool {
 
 // PropertySchema declares the statefulset component's user-facing properties.
 func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	m := map[string]oam.PropertySchema{
 		"image":                {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
 		"replicas":             {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of StatefulSet pod replicas."},
 		"port":                 {Type: oam.PropertyTypeInteger, Description: "Container port to expose via the headless Service."},
@@ -43,6 +45,8 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"sidecars":             schemaContainers(),
 		"affinity":             schemaAffinity(),
 	}
+	maps.Copy(m, schemaPodSpec(false, false))
+	return m
 }
 
 // ToApplicationConfig converts an OAM statefulset component to a StatefulsetConfig.
@@ -154,6 +158,12 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.Sidecars = sidecars
 
+	podSpec, err := parsePodSpec(props, false)
+	if err != nil {
+		return nil, err
+	}
+	config.PodSpec = podSpec
+
 	return config, nil
 }
 
@@ -181,7 +191,16 @@ type StatefulsetConfig struct {
 	InitContainers       []InitContainerConfig
 	Sidecars             []SidecarContainerConfig
 	Affinity             AffinityConfig
-	explicitReplicas     bool
+	// PodSpec holds the shared pod-level properties (see parsePodSpec).
+	PodSpec          PodSpecConfig
+	explicitReplicas bool
+}
+
+// ServiceAccountName implements oam.ServiceAccountNamer: the authored
+// serviceAccountName, else the per-component ServiceAccount named after the
+// component.
+func (c *StatefulsetConfig) ServiceAccountName() string {
+	return effectiveServiceAccountName(c.PodSpec, c.Name)
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -217,6 +236,9 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 		return err
 	}
 	if err := enforceHostPathVolumes(c.Volumes, p.AllowHostPathVolumes()); err != nil {
+		return err
+	}
+	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {
 		return err
 	}
 	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
@@ -255,6 +277,7 @@ func (c *StatefulsetConfig) ServicePort() int32 { return c.Port }
 func (c *StatefulsetConfig) BackendServiceName() string { return c.ServiceName }
 
 // Generate creates Kubernetes StatefulSet, headless Service, ServiceAccount, and any standalone PVCs.
+// The ServiceAccount is omitted when serviceAccountName was authored.
 func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	labels := map[string]string{"app": app.Name}
 	var err error
@@ -268,13 +291,15 @@ func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, 
 		return nil, err
 	}
 	svc := c.createHeadlessService(app)
-	sa := createServiceAccount(app.Name, app.Namespace, labels)
 
 	stsObj := client.Object(sts)
 	svcObj := client.Object(svc)
-	saObj := client.Object(sa)
 
-	objects := []*client.Object{&stsObj, &svcObj, &saObj}
+	objects := []*client.Object{&stsObj, &svcObj}
+	if generatesServiceAccount(c.PodSpec) {
+		saObj := client.Object(createServiceAccount(app.Name, app.Namespace, labels))
+		objects = append(objects, &saObj)
+	}
 	for _, pvc := range c.PVCs {
 		p, err := BuildPVC(pvc, app.Namespace, labels)
 		if err != nil {
@@ -289,40 +314,30 @@ func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, 
 func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.StatefulSet, error) {
 	labels := map[string]string{"app": app.Name}
 
-	container := kubernetes.CreateContainer(app.Name, c.Image, c.Command, c.Args)
-	kubernetes.SetContainerResources(container, buildResourceRequirements(c.Resources))
-	if c.Port > 0 {
-		kubernetes.AddContainerPort(container, corev1.ContainerPort{
-			Name:          "tcp",
-			ContainerPort: c.Port,
-			Protocol:      corev1.ProtocolTCP,
-		})
-	}
-	for _, env := range c.Env {
-		kubernetes.AddContainerEnv(container, env)
-	}
-	for _, ef := range c.EnvFrom {
-		kubernetes.AddContainerEnvFrom(container, ef)
-	}
+	// Claim-template mounts precede the authored volume mounts, as before.
+	mounts := make([]corev1.VolumeMount, 0, len(c.VolumeClaimTemplates)+len(c.VolumeMounts))
 	for _, vct := range c.VolumeClaimTemplates {
-		kubernetes.AddContainerVolumeMount(container, corev1.VolumeMount{
-			Name:      vct.Name,
-			MountPath: vct.MountPath,
-		})
+		mounts = append(mounts, corev1.VolumeMount{Name: vct.Name, MountPath: vct.MountPath})
 	}
-	for _, m := range c.VolumeMounts {
-		kubernetes.AddContainerVolumeMount(container, m)
+	mounts = append(mounts, c.VolumeMounts...)
+	var ports []corev1.ContainerPort
+	if c.Port > 0 {
+		ports = []corev1.ContainerPort{{Name: "tcp", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
 	}
-	applyProbes(container, c.Probes)
-	if c.WorkingDir != "" {
-		kubernetes.SetContainerWorkingDir(container, c.WorkingDir)
-	}
-	if c.Lifecycle != nil {
-		kubernetes.SetContainerLifecycle(container, c.Lifecycle)
-	}
-	if c.SecurityContext != nil {
-		kubernetes.SetContainerSecurityContext(container, *c.SecurityContext)
-	}
+	container := buildMainContainer(app.Name, mainContainerInput{
+		Image:           c.Image,
+		Command:         c.Command,
+		Args:            c.Args,
+		Resources:       c.Resources,
+		Ports:           ports,
+		Env:             c.Env,
+		EnvFrom:         c.EnvFrom,
+		Probes:          c.Probes,
+		WorkingDir:      c.WorkingDir,
+		Lifecycle:       c.Lifecycle,
+		SecurityContext: c.SecurityContext,
+		VolumeMounts:    mounts,
+	})
 
 	sts := kubernetes.CreateStatefulSet(app.Name, app.Namespace)
 	sts.Labels = labels
@@ -330,33 +345,20 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	sts.Spec.Template.Labels = labels
 	kubernetes.SetStatefulSetReplicas(sts, c.Replicas)
 	kubernetes.SetStatefulSetServiceName(sts, c.ServiceName)
-	kubernetes.SetStatefulSetServiceAccountName(sts, app.Name)
 
-	for _, ic := range c.InitContainers {
-		initContainer, err := buildInitContainer(ic)
-		if err != nil {
-			return nil, err
-		}
-		if err := kubernetes.AddStatefulSetInitContainer(sts, initContainer); err != nil {
-			return nil, errors.Wrapf(err, "add init container %q", ic.Name)
-		}
+	podSpec, err := buildPodSpec(podSpecInput{
+		Config:                    c.PodSpec,
+		DefaultServiceAccountName: app.Name,
+		MainContainer:             container,
+		InitContainers:            c.InitContainers,
+		Sidecars:                  c.Sidecars,
+		Volumes:                   c.Volumes,
+		Affinity:                  buildAffinity(c.Affinity, labels),
+	})
+	if err != nil {
+		return nil, err
 	}
-	if err := kubernetes.AddStatefulSetContainer(sts, container); err != nil {
-		return nil, errors.Wrapf(err, "add container %q", c.Name)
-	}
-	for _, sc := range c.Sidecars {
-		sidecarContainer, err := buildSidecarContainer(sc)
-		if err != nil {
-			return nil, err
-		}
-		if err := kubernetes.AddStatefulSetContainer(sts, sidecarContainer); err != nil {
-			return nil, errors.Wrapf(err, "add sidecar container %q", sc.Name)
-		}
-	}
-
-	if aff := buildAffinity(c.Affinity, map[string]string{"app": app.Name}); aff != nil {
-		kubernetes.SetStatefulSetAffinity(sts, aff)
-	}
+	sts.Spec.Template.Spec = podSpec
 
 	for _, vct := range c.VolumeClaimTemplates {
 		accessModes := make([]corev1.PersistentVolumeAccessMode, 0, len(vct.AccessModes))
@@ -372,11 +374,6 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 			StorageRequest:   resource.MustParse(vct.Size),
 		})
 		kubernetes.AddStatefulSetVolumeClaimTemplate(sts, pvc)
-	}
-	for i := range c.Volumes {
-		if err := kubernetes.AddStatefulSetVolume(sts, &c.Volumes[i]); err != nil {
-			return nil, errors.Wrapf(err, "add volume %q", c.Volumes[i].Name)
-		}
 	}
 
 	return sts, nil
