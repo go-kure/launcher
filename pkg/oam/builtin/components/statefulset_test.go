@@ -1,12 +1,14 @@
 package components_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -113,6 +115,142 @@ func TestStatefulsetHandler_VolumeClaimTemplates(t *testing.T) {
 	}
 	if len(sts.Spec.VolumeClaimTemplates) != 1 {
 		t.Errorf("expected 1 VCT, got %d", len(sts.Spec.VolumeClaimTemplates))
+	}
+}
+
+// TestStatefulsetHandler_GeneratedClaimSpec walks the whole path — properties,
+// ToApplicationConfig, Generate — and asserts the PersistentVolumeClaimSpec
+// that actually lands in the StatefulSet. Every other claim test in this
+// package stops at the parser or calls VolumeClaimSpecConfig.apply directly, so
+// nothing covered the two lines in createStatefulSet that carry the projection
+// into the output: the resource.MustParse of the short `size` spelling, and the
+// vct.Spec.apply that writes everything else. Deleting either left the suite
+// green.
+//
+// Two entries, one per storage spelling, because they reach the generated claim
+// by different routes: `size` through kure's CreateVolumeClaimTemplate options,
+// `resources.requests.storage` through apply's merge.
+func TestStatefulsetHandler_GeneratedClaimSpec(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image": "ghcr.io/org/postgres:v15",
+			"volumeClaimTemplates": []any{
+				map[string]any{
+					"name":         "data",
+					"mountPath":    "/var/lib/data",
+					"storageClass": "fast",
+					"accessModes":  []any{"ReadWriteOncePod"},
+					"resources": map[string]any{
+						"requests": map[string]any{"storage": "10Gi"},
+						"limits":   map[string]any{"storage": "20Gi"},
+					},
+					"selector": map[string]any{
+						"matchLabels": map[string]any{"tier": "fast"},
+					},
+					"volumeMode": "Filesystem",
+					"dataSourceRef": map[string]any{
+						"apiGroup": "snapshot.storage.k8s.io",
+						"kind":     "VolumeSnapshot",
+						"name":     "seed",
+					},
+					"volumeAttributesClassName": "gold",
+				},
+				map[string]any{
+					"name":      "wal",
+					"mountPath": "/var/lib/wal",
+					"size":      "5Gi",
+				},
+			},
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+
+	app := stack.NewApplication("db", "default", cfg)
+	objects, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var sts *appsv1.StatefulSet
+	for _, obj := range objects {
+		if s, ok := (*obj).(*appsv1.StatefulSet); ok {
+			sts = s
+		}
+	}
+	if sts == nil {
+		t.Fatal("expected StatefulSet in output")
+	}
+	if len(sts.Spec.VolumeClaimTemplates) != 2 {
+		t.Fatalf("got %d claim templates, want 2", len(sts.Spec.VolumeClaimTemplates))
+	}
+
+	// Entry 0: the long spelling plus every field the projection adds.
+	data := sts.Spec.VolumeClaimTemplates[0]
+	if data.Name != "data" {
+		t.Errorf("templates[0].Name = %q, want %q", data.Name, "data")
+	}
+	if got := data.Spec.Resources.Requests[corev1.ResourceStorage]; got.Cmp(resource.MustParse("10Gi")) != 0 {
+		t.Errorf("data requests.storage = %v, want 10Gi", &got)
+	}
+	if got := data.Spec.Resources.Limits[corev1.ResourceStorage]; got.Cmp(resource.MustParse("20Gi")) != 0 {
+		t.Errorf("data limits.storage = %v, want 20Gi", &got)
+	}
+	if data.Spec.StorageClassName == nil || *data.Spec.StorageClassName != "fast" {
+		t.Errorf("data storageClassName = %v, want fast", data.Spec.StorageClassName)
+	}
+	if !slices.Equal(data.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod}) {
+		t.Errorf("data accessModes = %v, want [ReadWriteOncePod]", data.Spec.AccessModes)
+	}
+	if data.Spec.Selector == nil {
+		t.Fatal("data selector is nil")
+	}
+	if data.Spec.Selector.MatchLabels["tier"] != "fast" {
+		t.Errorf("data selector.matchLabels = %v, want tier=fast", data.Spec.Selector.MatchLabels)
+	}
+	if data.Spec.VolumeMode == nil || *data.Spec.VolumeMode != corev1.PersistentVolumeFilesystem {
+		t.Errorf("data volumeMode = %v, want Filesystem", data.Spec.VolumeMode)
+	}
+	if data.Spec.DataSourceRef == nil {
+		t.Fatal("data dataSourceRef is nil")
+	}
+	if data.Spec.DataSourceRef.Kind != "VolumeSnapshot" || data.Spec.DataSourceRef.Name != "seed" {
+		t.Errorf("data dataSourceRef = %+v, want VolumeSnapshot/seed", data.Spec.DataSourceRef)
+	}
+	if data.Spec.DataSourceRef.APIGroup == nil || *data.Spec.DataSourceRef.APIGroup != "snapshot.storage.k8s.io" {
+		t.Errorf("data dataSourceRef.apiGroup = %v, want snapshot.storage.k8s.io", data.Spec.DataSourceRef.APIGroup)
+	}
+	// launcher never mirrors dataSourceRef into the legacy dataSource field:
+	// the apiserver does that itself, and only when namespace is unspecified
+	// (k8s.io/api core/v1 types.go, PersistentVolumeClaimSpec).
+	if data.Spec.DataSource != nil {
+		t.Errorf("data dataSource = %+v, want nil — mirroring is the apiserver's job", data.Spec.DataSource)
+	}
+	if data.Spec.VolumeAttributesClassName == nil || *data.Spec.VolumeAttributesClassName != "gold" {
+		t.Errorf("data volumeAttributesClassName = %v, want gold", data.Spec.VolumeAttributesClassName)
+	}
+
+	// Entry 1: the short spelling reaches the generated claim, and the
+	// unauthored claim-spec fields stay at their kure defaults.
+	wal := sts.Spec.VolumeClaimTemplates[1]
+	if wal.Name != "wal" {
+		t.Errorf("templates[1].Name = %q, want %q", wal.Name, "wal")
+	}
+	if got := wal.Spec.Resources.Requests[corev1.ResourceStorage]; got.Cmp(resource.MustParse("5Gi")) != 0 {
+		t.Errorf("wal requests.storage = %v, want 5Gi", &got)
+	}
+	if wal.Spec.Selector != nil {
+		t.Errorf("wal selector = %v, want nil", wal.Spec.Selector)
+	}
+	if wal.Spec.VolumeMode != nil {
+		t.Errorf("wal volumeMode = %v, want nil", wal.Spec.VolumeMode)
+	}
+	if !slices.Equal(wal.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}) {
+		t.Errorf("wal accessModes = %v, want the [ReadWriteOnce] default", wal.Spec.AccessModes)
 	}
 }
 
