@@ -242,8 +242,23 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 				}
 			}
 		}
-		if err := validateHostnames(hostnameList(props), wildcard, componentName); err != nil {
+		gatewayHostnames := hostnameList(props)
+		if err := validateHostnames(gatewayHostnames, wildcard, componentName); err != nil {
 			return oam.LoweringResult{}, err
+		}
+		// hostnames shorthand, gateway half: when hostnames is set and rules is not,
+		// synthesize a catch-all rule. HTTPRouteHandler declares rules required, so
+		// without this the shorthand emits an httproute trait that cannot validate.
+		// Two deliberate differences from the ingress branch above: hostnames is KEPT,
+		// because it is a native HTTPRoute field the handler consumes rather than
+		// something folded into the rules; and one rule covers every hostname, since a
+		// route matches its hostnames at the route level, not per rule. The rule needs
+		// no keys — HTTPRouteHandler defaults a rule with no matches to match-all and
+		// one with no backendRefs to the component's own service and port.
+		if len(gatewayHostnames) > 0 {
+			if _, hasRules := props["rules"]; !hasRules {
+				props["rules"] = []any{map[string]any{}}
+			}
 		}
 		gatewayName, _ := props["gatewayName"].(string)
 		gatewayNamespace, _ := props["gatewayNamespace"].(string)

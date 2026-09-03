@@ -92,10 +92,13 @@ not the app — chooses the implementation:
   each naming its own cert secret. Both paths
   validate user hostnames against the `allowedHostnameWildcard` capability field (empty ⇒
   no validation); a violation is a `ValidationError`.
-  On the ingress path a bare `hostnames: [...]` shorthand is accepted: when `rules` is
-  absent it expands to one rule per host with `path: /` + the component service port
-  (supply `rules` for finer control; both together keep `rules` for routing while all
-  hosts are still wildcard-validated). Platform-default `ssl-redirect` / `force-ssl-redirect`
+  Both paths accept a bare `hostnames: [...]` shorthand when `rules` is absent, each
+  expanding it the way its own controller expects: ingress gets one rule per host with
+  `path: /` + the component service port and drops `hostnames`; gateway gets a single
+  catch-all rule backed by the component service and keeps `hostnames` on the route,
+  which is where a Gateway API route matches them (supply `rules` for finer control;
+  both together keep `rules` for routing while all hosts are still
+  wildcard-validated). Platform-default `ssl-redirect` / `force-ssl-redirect`
   come from the `sslRedirect` / `forceSslRedirect` capability fields (author-overridable via
   the same inline properties; the typed value wins over a raw same-key annotation).
   External-auth (oauth2-proxy): authoring `allowedGroups: [...]` on an ingress expose emits the
