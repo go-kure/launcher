@@ -44,9 +44,10 @@ type rawDocKey struct {
 	name      string
 }
 
-// LowerRaws lowers every raw document whose kind has a registered
-// RawDocumentLoweringRule, and returns every other input byte-identical at its
-// original position. It is the entry point a consumer calls BEFORE its own parse
+// LowerRaws lowers every raw document whose (apiVersion, kind) pair has a
+// registered RawDocumentLoweringRule — SupportedAPIVersion unless the rule
+// implements RawDocumentAPIVersioner — and returns every other input, a registered
+// kind under an unclaimed group included, byte-identical at its original position. It is the entry point a consumer calls BEFORE its own parse
 // fan-out, which is the only placement that works for a kind the consumer's parser
 // would reject: such a document carries authored fields ApplicationSpec has no home
 // for, so a strict decode into *Application fails long before any rule could run.

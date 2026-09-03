@@ -699,8 +699,10 @@ type loweringDoc struct {
 	// (same authored name and kind).
 	slot int
 	// apiVersion is the ONE API group, besides SupportedAPIVersion, this document
-	// may settle under: the group its raw seed's RawDocumentLoweringRule claims
-	// (rawRuleAPIVersion), inherited verbatim by every descendant. Empty on the
+	// may settle under: the registry key its raw seed was dispatched under (the
+	// envelope's apiVersion, never a re-evaluation of the rule's hook — that is
+	// evaluated exactly once, at registration), inherited verbatim by every
+	// descendant. Empty on the
 	// in-transform path, which is single-group by construction. Carried per
 	// document rather than read from the transformer's raw registry so a
 	// DocumentLoweringRule dispatched during Transform can never settle under a
