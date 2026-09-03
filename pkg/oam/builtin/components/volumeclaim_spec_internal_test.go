@@ -282,6 +282,27 @@ func TestParseVolumeClaimTemplates_SpecErrors(t *testing.T) {
 		wantErr string
 	}{
 		{"unknown key", with(map[string]any{"storageClassName": "fast"}), `unrecognized key "storageClassName"`},
+		// The parity test proves the schema and the key slices agree; it does
+		// not prove the parsers actually call rejectUnknownKeys with them. Each
+		// nested closed object needs its own case, or the guard can be deleted
+		// and the silent drop it exists to end comes back unobserved.
+		{
+			"unknown key in resources",
+			with(map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "5Gi"}, "claims": []any{}}}),
+			`unrecognized key "claims"`,
+		},
+		{
+			"unknown key in a matchExpressions entry",
+			with(map[string]any{"selector": map[string]any{"matchExpressions": []any{
+				map[string]any{"key": "zone", "operator": "Exists", "scope": "cluster"},
+			}}}),
+			`unrecognized key "scope"`,
+		},
+		{
+			"unknown key in dataSourceRef",
+			with(map[string]any{"dataSourceRef": map[string]any{"apiGroup": "snapshot.storage.k8s.io", "kind": "VolumeSnapshot", "name": "seed", "uid": "abc"}}),
+			`unrecognized key "uid"`,
+		},
 		// The three required string leaves went through bare type assertions,
 		// so a YAML number read as absent and surfaced as the requiredness
 		// error for a field the author did write.
