@@ -7,6 +7,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -224,15 +225,17 @@ func parseStatefulSetUpdateStrategy(raw map[string]any) (*appsv1.StatefulSetUpda
 // int-or-percent, not 0, not above 100%).
 func parseMaxUnavailable(v any, label string) (intstr.IntOrString, error) {
 	if s, ok := v.(string); ok {
-		pct, found := strings.CutSuffix(s, "%")
-		if !found {
+		// IsValidPercent is upstream's own form check (^[0-9]+%$), used here
+		// rather than a CutSuffix/Atoi pair: Atoi accepts a leading sign, so
+		// "+50%" parsed cleanly and was carried through to a document
+		// validateRollingUpdateStatefulSet then rejects at admission.
+		if errs := validation.IsValidPercent(s); len(errs) > 0 {
 			return intstr.IntOrString{}, errors.Errorf("%s: string value must be a percentage such as \"25%%\", got %q", label, s)
 		}
-		n, err := strconv.Atoi(pct)
-		if err != nil || strings.TrimSpace(pct) != pct {
-			return intstr.IntOrString{}, errors.Errorf("%s: invalid percentage %q", label, s)
-		}
-		if n < 1 || n > 100 {
+		// The form check leaves only digits, so the sole ParseUint failure is
+		// an overflowing one — which is out of range anyway.
+		n, err := strconv.ParseUint(strings.TrimSuffix(s, "%"), 10, 32)
+		if err != nil || n < 1 || n > 100 {
 			return intstr.IntOrString{}, errors.Errorf("%s: percentage must be between 1%% and 100%%, got %q", label, s)
 		}
 		return intstr.FromString(s), nil
