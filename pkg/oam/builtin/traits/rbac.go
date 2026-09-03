@@ -164,7 +164,7 @@ func (c *rbacTraitConfig) ComponentName() string { return c.componentName }
 
 // subjectName is the ServiceAccount the bindings grant to; a config built
 // directly (tests, older callers) without serviceAccountName falls back to the
-// component name, the pre-launcher#342 behaviour.
+// component name, the behaviour before go-kure/launcher#342.
 func (c *rbacTraitConfig) subjectName() string {
 	if c.serviceAccountName != "" {
 		return c.serviceAccountName

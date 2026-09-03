@@ -555,7 +555,9 @@ the bare name is already a property at some kind: `podSecurityContext`
 `activeDeadlineSeconds`). Each accepted value is validated the way real
 admission validates it when that check is deterministic from the document
 alone (DNS-1123 names, enums, IP literals, duplicate names, the cross-field
-exclusions listed below); checks needing cluster state (host ports under
+exclusions listed below, and the `os.name` contract: a `windows` pod may not
+set the Linux-only pod and container fields, a `linux` pod may not set
+`windowsOptions`); checks needing cluster state (host ports under
 `hostNetwork`, feature gates, RuntimeClass existence) are left to the cluster.
 
 | Property | Type | Effect | Kind |
