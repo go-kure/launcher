@@ -249,6 +249,12 @@ func (c *WebserviceConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {
 		return err
 	}
+	if err := enforcePodResources(c.PodSpec, p.MaxCPU(), p.MaxMemory()); err != nil {
+		return err
+	}
+	if err := enforcePodHostProcess(c.PodSpec, p.AllowPrivileged()); err != nil {
+		return err
+	}
 	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
 		return err
 	}

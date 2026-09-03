@@ -326,7 +326,7 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 		"nodeSelector":                 {Type: oam.PropertyTypeObject, PlatformReserved: reserved, AdditionalProperties: true, Description: "Node labels the pod must match to be scheduled (label key to label value)."},
 		"serviceAccountName":           str("Name of an existing ServiceAccount the pod runs as. When set, the component's own per-component ServiceAccount is NOT generated, and identity-binding traits (rbac) target this account instead."),
 		"automountServiceAccountToken": boolean("Whether the ServiceAccount token is mounted into the pod's containers."),
-		"nodeName":                     str("Bind the pod to this specific node, bypassing the scheduler."),
+		"nodeName":                     str("Bind the pod to this specific node, bypassing the scheduler. Must be a valid DNS-1123 subdomain."),
 		"hostNetwork":                  boolean("Use the node's network namespace. Subject to the environment policy's AllowHostNetwork flag."),
 		"hostPID":                      boolean("Use the node's PID namespace. Subject to the environment policy's AllowHostPID flag; mutually exclusive with shareProcessNamespace."),
 		"hostIPC":                      boolean("Use the node's IPC namespace. Subject to the environment policy's AllowHostIPC flag."),
@@ -342,7 +342,7 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 						"gmsaCredentialSpecName": {Type: oam.PropertyTypeString, Description: "Name of the GMSA credential spec to use."},
 						"gmsaCredentialSpec":     {Type: oam.PropertyTypeString, Description: "Inline GMSA credential spec contents (normally populated by the GMSA admission webhook)."},
 						"runAsUserName":          {Type: oam.PropertyTypeString, Description: "Windows user name to run the container entrypoint as."},
-						"hostProcess":            {Type: oam.PropertyTypeBoolean, Description: "Run the containers as Windows HostProcess containers."},
+						"hostProcess":            {Type: oam.PropertyTypeBoolean, Description: "Run the containers as Windows HostProcess containers. Policy-gated: true is rejected unless the environment policy allows privileged workloads."},
 					},
 				},
 				"runAsUser":                {Type: oam.PropertyTypeInteger, Description: "UID to run each container's entrypoint as; a container-level runAsUser takes precedence."},
@@ -356,7 +356,7 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 					Items: &oam.PropertySchema{
 						Type: oam.PropertyTypeObject, Description: "A single sysctl.",
 						Properties: map[string]oam.PropertySchema{
-							"name":  {Type: oam.PropertyTypeString, Required: true, Description: "Sysctl name (e.g. \"net.core.somaxconn\")."},
+							"name":  {Type: oam.PropertyTypeString, Required: true, Description: "Sysctl name (e.g. \"net.core.somaxconn\"): at most 253 characters of dot- or slash-separated lowercase alphanumeric segments, unique within the list."},
 							"value": {Type: oam.PropertyTypeString, Required: true, Description: "Sysctl value."},
 						},
 					},
@@ -386,7 +386,7 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 			Type: oam.PropertyTypeObject, PlatformReserved: reserved, Description: "DNS parameters merged into the pod's resolver configuration according to dnsPolicy.",
 			Properties: map[string]oam.PropertySchema{
 				"nameservers": {Type: oam.PropertyTypeArray, Description: "DNS server IP addresses (at most 3).", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single nameserver IP."}},
-				"searches":    {Type: oam.PropertyTypeArray, Description: "DNS search domains (at most 32).", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single search domain."}},
+				"searches":    {Type: oam.PropertyTypeArray, Description: "DNS search domains: at most 32 entries, and at most 2048 characters once joined with the separating spaces.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single search domain."}},
 				"options": {
 					Type: oam.PropertyTypeArray, Description: "Resolver options.",
 					Items: &oam.PropertySchema{
