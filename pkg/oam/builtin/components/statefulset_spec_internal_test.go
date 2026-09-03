@@ -199,6 +199,16 @@ func TestParseStatefulSetSpec_Errors(t *testing.T) {
 			"maxUnavailable: must be >= 1",
 		},
 		{
+			// The lower bound of the percentage range, distinct from the
+			// integer `maxUnavailable: 0` case above: that one is caught by the
+			// int branch, this one by the `n < 1` half of the percent branch,
+			// which nothing else exercised. Upstream
+			// validateRollingUpdateStatefulSet rejects zero the same way.
+			"maxUnavailable zero percent",
+			map[string]any{"updateStrategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": map[string]any{"maxUnavailable": "0%"}}},
+			"percentage must be between 1% and 100%",
+		},
+		{
 			"maxUnavailable over 100 percent",
 			map[string]any{"updateStrategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": map[string]any{"maxUnavailable": "150%"}}},
 			"percentage must be between 1% and 100%",
