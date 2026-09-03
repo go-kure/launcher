@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"math"
 	"reflect"
 	"slices"
@@ -379,6 +380,13 @@ func TestParsePodSpec_Errors(t *testing.T) {
 		{"hostnameOverride uppercase", map[string]any{"hostnameOverride": "Host.Example"}, false, "hostnameOverride: invalid value"},
 		{"schedulingGroup unknown key", map[string]any{"schedulingGroup": map[string]any{"name": "g"}}, false, `schedulingGroup: unrecognized key "name"`},
 		{"schedulingGroup missing podGroupName", map[string]any{"schedulingGroup": map[string]any{}}, false, "schedulingGroup.podGroupName: required"},
+		{"nodeName not a DNS subdomain", map[string]any{"nodeName": "Node_1"}, false, `nodeName: invalid name "Node_1"`},
+		{"nodeName too long", map[string]any{"nodeName": strings.Repeat("a", 254)}, false, "nodeName: invalid name"},
+		{"dnsConfig too many searches", map[string]any{"dnsConfig": map[string]any{"searches": manySearches(33, "a")}}, false, "at most 32 search paths"},
+		{"dnsConfig searches over the 2048-character list limit", map[string]any{"dnsConfig": map[string]any{"searches": manySearches(32, strings.Repeat("b", 60))}}, false, "at most 2048 characters"},
+		{"sysctls invalid name", map[string]any{"podSecurityContext": map[string]any{"sysctls": []any{map[string]any{"name": "Net.Core.Somaxconn", "value": "1024"}}}}, false, `invalid sysctl name "Net.Core.Somaxconn"`},
+		{"sysctls name too long", map[string]any{"podSecurityContext": map[string]any{"sysctls": []any{map[string]any{"name": strings.Repeat("a", 254), "value": "1"}}}}, false, "invalid sysctl name"},
+		{"sysctls duplicate name", map[string]any{"podSecurityContext": map[string]any{"sysctls": []any{map[string]any{"name": "net.core.somaxconn", "value": "1024"}, map[string]any{"name": "net.core.somaxconn", "value": "2048"}}}}, false, `duplicate sysctl "net.core.somaxconn"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -391,6 +399,18 @@ func TestParsePodSpec_Errors(t *testing.T) {
 			}
 		})
 	}
+}
+
+// manySearches builds n distinct, individually valid DNS-1123 subdomain search
+// paths prefixed with base. With a long base the aggregate list exceeds
+// MaxDNSSearchListChars (2048) while every entry stays valid on its own, which
+// is the only way to reach the joined-length check.
+func manySearches(n int, base string) []any {
+	out := make([]any, 0, n)
+	for i := range n {
+		out = append(out, fmt.Sprintf("%s%d.example.com", base, i))
+	}
+	return out
 }
 
 // TestParsePodSpec_HostnameOverrideAllowed: the exclusivity checks must not

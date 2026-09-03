@@ -177,10 +177,12 @@ without the other — but when both are present the request still must not
 request-vs-limit comparison for every resource name, not just the
 non-overcommitable set. No policy
 default/max hook exists for names other than cpu/memory
-today; `claims` (Dynamic Resource Allocation) is deliberately not covered —
-genuinely feature-gated in the pinned `k8s.io/api` version and meaningless
-without pod-level `PodSpec.ResourceClaims` wiring this schema doesn't have
-yet, see `parseResources`'s doc comment), `command`/`args` (each element must
+today; the container-level `claims` list (Dynamic Resource Allocation) is
+deliberately not covered — it only *references* pod-level claims by name, and
+the pod-level `resourceClaims` property that declares them is now accepted
+(see Pod-level properties below, go-kure/launcher#342), so what remains
+missing is the container-side reference list alone, tracked with the rest of
+DRA support, see `parseResources`'s doc comment), `command`/`args` (each element must
 be a string — **note:** unlike every other array field in this schema,
 `command`/`args` still silently drop a non-string element rather than
 rejecting it; `lifecycle.{postStart,preStop}.exec.command` below was fixed to
@@ -566,13 +568,13 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 | `automountServiceAccountToken` | bool | Pod-level token automount override. | additive |
 | `terminationGracePeriodSeconds` | int ≥ 0 | Grace period before SIGKILL. | additive |
 | `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it. | additive |
-| `dnsPolicy`, `dnsConfig` | enum, object | `ClusterFirstWithHostNet`/`ClusterFirst`/`Default`/`None`; `dnsConfig` = `nameservers` (≤3 IPs), `searches` (≤32), `options[]{name,value}`. `None` requires at least one nameserver. | additive |
-| `nodeSelector`, `nodeName`, `schedulerName`, `priorityClassName`, `preemptionPolicy`, `runtimeClassName`, `schedulingGates[]{name}`, `schedulingGroup{podGroupName}` | scheduling | Placement fields; gate names must be unique. | additive |
+| `dnsPolicy`, `dnsConfig` | enum, object | `ClusterFirstWithHostNet`/`ClusterFirst`/`Default`/`None`; `dnsConfig` = `nameservers` (≤3 IPs), `searches` (≤32 entries whose joined length, separators included, is ≤2048 characters — the `resolv.conf` search-line limit, so 32 individually valid domains can still be refused), `options[]{name,value}`. `None` requires at least one nameserver. | additive |
+| `nodeSelector`, `nodeName`, `schedulerName`, `priorityClassName`, `preemptionPolicy`, `runtimeClassName`, `schedulingGates[]{name}`, `schedulingGroup{podGroupName}` | scheduling | Placement fields; gate names must be unique. `nodeName` is a DNS-1123 subdomain (a Node is an ordinary object, so an invalid value is refused at admission, not merely unmatched). | additive |
 | `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all five kinds; `NoopPolicy` denies all three). | additive |
 | `shareProcessNamespace` | bool | Mutually exclusive with `hostPID: true`. | additive |
 | `hostname`, `subdomain`, `setHostnameAsFQDN`, `hostnameOverride`, `hostAliases[]{ip,hostnames}` | naming | `hostname`/`subdomain` are DNS-1123 labels; `hostnameOverride` is a ≤64-char subdomain and cannot combine with `hostNetwork` or `setHostnameAsFQDN`. | additive |
-| `podSecurityContext` | object | The full `corev1.PodSecurityContext` field set (`runAsUser`/`runAsGroup`/`runAsNonRoot`/`fsGroup`/`fsGroupChangePolicy`/`supplementalGroups`/`supplementalGroupsPolicy`/`sysctls`/`seLinuxOptions`/`seLinuxChangePolicy`/`seccompProfile`/`appArmorProfile`/`windowsOptions`), closed and validated like the container `securityContext`. No policy hook yet. | additive |
-| `imagePullSecrets[]{name}`, `enableServiceLinks`, `os{name}`, `hostUsers`, `readinessGates[]{conditionType}`, `resourceClaims[]{name, resourceClaimName \| resourceClaimTemplateName}`, `podResources{requests,limits}` | misc | `podResources` accepts only `cpu`, `memory` and `hugepages-<size>` (pod-level resources have no ephemeral-storage or extended resources); claim names must be unique and name exactly one source. | additive |
+| `podSecurityContext` | object | The full `corev1.PodSecurityContext` field set (`runAsUser`/`runAsGroup`/`runAsNonRoot`/`fsGroup`/`fsGroupChangePolicy`/`supplementalGroups`/`supplementalGroupsPolicy`/`sysctls`/`seLinuxOptions`/`seLinuxChangePolicy`/`seccompProfile`/`appArmorProfile`/`windowsOptions`), closed and validated like the container `securityContext`. `sysctls[].name` must match the sysctl grammar (≤253 characters of dot- or slash-separated lowercase alphanumeric segments) and be unique within the list. **Partly policy-gated**: `windowsOptions.hostProcess: true` is rejected unless `AllowPrivileged()` allows it (a HostProcess pod runs with the node's own privileges, and upstream forces every container in it to be HostProcess too); every other field has no policy hook. | additive |
+| `imagePullSecrets[]{name}`, `enableServiceLinks`, `os{name}`, `hostUsers`, `readinessGates[]{conditionType}`, `resourceClaims[]{name, resourceClaimName \| resourceClaimTemplateName}`, `podResources{requests,limits}` | misc | `podResources` accepts only `cpu`, `memory` and `hugepages-<size>` (pod-level resources have no ephemeral-storage or extended resources); claim names must be unique and name exactly one source. **`podResources` is policy-gated**: its cpu and memory requests and limits are checked against `MaxCPU()`/`MaxMemory()`, the same budget the container `resources` are checked against. | additive |
 
 Deliberately **not** accepted — each is rejected with an error naming the
 reason rather than silently ignored: `ephemeralContainers` (added to a running
@@ -597,6 +599,20 @@ binding objects keep their component-derived names.
 field still has no policy hook. Both checks cover the main container and
 every `initContainers`/`sidecars` entry (go-kure/launcher#312's shared
 `enforceExtraContainer` helper), not just the main container.
+
+The pod-level surface carries two policy checks of its own, both called from
+all five kinds' `ApplyPolicy` next to `enforceHostNamespaces`:
+`enforcePodResources` measures `podResources`' cpu and memory requests and
+limits against `MaxCPU()`/`MaxMemory()` — without it an author could keep the
+container under the maximum and put the oversized request on the pod, which
+the scheduler charges against the node identically — and
+`enforcePodHostProcess` rejects `podSecurityContext.windowsOptions.hostProcess:
+true` unless `AllowPrivileged()` allows it, the Windows spelling of
+`securityContext.privileged` (`enforcePrivileged` checks the container-level
+`windowsOptions.hostProcess` too, so the two spellings share one switch). An
+unset `MaxCPU`/`MaxMemory` leaves pod-level resources unconstrained: pod-level
+resources are written only when authored, so there is no generated default to
+fall back on.
 
 A `volumes` entry sourced from `hostPath` is rejected unless the environment
 policy's `AllowHostPathVolumes()` allows it (`enforce.go`'s

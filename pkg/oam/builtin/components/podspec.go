@@ -3,6 +3,7 @@ package components
 import (
 	"math"
 	"net/netip"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -166,6 +167,12 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 	if v, present, err := parseStringField(props, "nodeName", "nodeName"); err != nil {
 		return PodSpecConfig{}, err
 	} else if present {
+		// ValidatePodSpec runs NameIsDNSSubdomain over spec.nodeName: a Node is
+		// an ordinary Kubernetes object, so an invalid value is rejected at
+		// admission rather than merely failing to match a node.
+		if errs := validation.IsDNS1123Subdomain(v); len(errs) > 0 {
+			return PodSpecConfig{}, errors.Errorf("nodeName: invalid name %q: %s", v, strings.Join(errs, "; "))
+		}
 		ps.NodeName = v
 	}
 	// hostNetwork/hostPID/hostIPC are plain bools on corev1.PodSpec (false is
@@ -606,6 +613,21 @@ func indexedLabel(label string, i int) string {
 	return label + "[" + strconv.Itoa(i) + "]"
 }
 
+// sysctlNameRe mirrors the API's SysctlContainSlashFmt: dot- or
+// slash-separated segments of lowercase alphanumerics, each segment allowing
+// interior dashes and underscores. k8s.io/api does not export the pattern, so
+// it is restated here rather than depending on k8s.io/kubernetes.
+var sysctlNameRe = regexp.MustCompile(`^([a-z0-9]([-_a-z0-9]*[a-z0-9])?[./])*[a-z0-9]([-_a-z0-9]*[a-z0-9])?$`)
+
+// isValidSysctlName mirrors validation.IsValidSysctlName: at most
+// SysctlMaxLength (253) characters and matching the sysctl name grammar.
+func isValidSysctlName(name string) bool {
+	if len(name) > 253 {
+		return false
+	}
+	return sysctlNameRe.MatchString(name)
+}
+
 // requireDNS1123Subdomain reads a required string field and validates it as a
 // DNS-1123 subdomain (the object-name rule every Kubernetes name follows).
 func requireDNS1123Subdomain(raw map[string]any, key, label string) (string, error) {
@@ -721,6 +743,13 @@ func parsePodDNSConfig(raw map[string]any, label string) (*corev1.PodDNSConfig, 
 	} else if present {
 		if len(searches) > 32 {
 			return nil, errors.Errorf("%s.searches: at most 32 search paths are allowed, got %d", label, len(searches))
+		}
+		// validateDNSConfig also caps the whole list: the resolv.conf search
+		// line is at most MaxDNSSearchListChars (2048) characters including
+		// the spaces between entries, so 32 individually valid domains can
+		// still be rejected at admission.
+		if total := len(strings.Join(searches, " ")); total > 2048 {
+			return nil, errors.Errorf("%s.searches: the search list must be at most 2048 characters including separating spaces, got %d", label, total)
 		}
 		for i, s := range searches {
 			if errs := validation.IsDNS1123Subdomain(strings.TrimSuffix(s, ".")); len(errs) > 0 {
@@ -905,6 +934,7 @@ func parsePodSecurityContext(raw map[string]any, label string) (*corev1.PodSecur
 	if list, present, err := parseObjectList(raw, "sysctls"); err != nil {
 		return nil, errors.Errorf("%s.%w", label, err)
 	} else if present {
+		seenSysctls := map[string]bool{}
 		for i, m := range list {
 			sysLabel := indexedLabel(label+".sysctls", i)
 			if err := rejectUnknownKeys(m, []string{"name", "value"}, sysLabel); err != nil {
@@ -917,6 +947,17 @@ func parsePodSecurityContext(raw map[string]any, label string) (*corev1.PodSecur
 			if !present {
 				return nil, errors.Errorf("%s.name: required", sysLabel)
 			}
+			// validateSysctls: the name must match the kernel-parameter
+			// grammar (dot- or slash-separated lowercase segments, at most
+			// 253 characters) and must not repeat within one
+			// PodSecurityContext.
+			if !isValidSysctlName(name) {
+				return nil, errors.Errorf("%s.name: invalid sysctl name %q: must be at most 253 characters of dot- or slash-separated lowercase alphanumeric segments (e.g. net.core.somaxconn)", sysLabel, name)
+			}
+			if seenSysctls[name] {
+				return nil, errors.Errorf("%s.name: duplicate sysctl %q", sysLabel, name)
+			}
+			seenSysctls[name] = true
 			value, ok := m["value"].(string)
 			if !ok {
 				return nil, errors.Errorf("%s.value: required and must be a string", sysLabel)

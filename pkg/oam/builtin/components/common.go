@@ -767,9 +767,10 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 // buildResourceRequirements/kubernetes.SetResourceRequestCPU etc.).
 //
 // Deliberately NOT covered: corev1.ResourceRequirements.Claims (Dynamic
-// Resource Allocation) — see schemaResources' doc comment for the rationale
-// (genuinely feature-gated in the pinned k8s.io/api version, and meaningless
-// without pod-level PodSpec.ResourceClaims wiring this component doesn't have).
+// Resource Allocation) — see schemaResources' doc comment for the rationale.
+// The pod-level PodSpec.ResourceClaims half of DRA is accepted since
+// go-kure/launcher#342 (parsePodSpec's `resourceClaims`); this container-side
+// list, which only references those claims by name, still is not.
 func parseResources(resources map[string]any) (ResourceRequirements, error) {
 	var req ResourceRequirements
 	if requests, ok := resources["requests"].(map[string]any); ok {

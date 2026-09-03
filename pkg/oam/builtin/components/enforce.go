@@ -103,11 +103,45 @@ func enforceMaxStorageSize(current, max string) error {
 // enforceContainerCapabilities below, against the dedicated
 // AllowedContainerCapabilities/ForbiddenContainerCapabilities accessor pair
 // (go-kure/launcher#305).
+// It also covers windowsOptions.hostProcess, which is the Windows equivalent of
+// privileged: a HostProcess container runs directly on the host with the
+// node's own privileges (upstream requires the pod-level and container-level
+// values to agree and forbids mixing HostProcess and non-HostProcess
+// containers), so gating it behind AllowPrivileged keeps one policy switch for
+// one privilege level rather than letting the Windows spelling through
+// unchecked. The container-level field is not authorable today (parseSecurityContext
+// has no windowsOptions key, see common.go) — the check is here so the spelling
+// cannot arrive unchecked when it becomes authorable.
 func enforcePrivileged(sc *corev1.SecurityContext, allowed bool) error {
-	if sc == nil || sc.Privileged == nil || !*sc.Privileged || allowed {
+	if sc == nil || allowed {
 		return nil
 	}
-	return errors.New("securityContext.privileged is not allowed by environment policy")
+	if sc.Privileged != nil && *sc.Privileged {
+		return errors.New("securityContext.privileged is not allowed by environment policy")
+	}
+	if wo := sc.WindowsOptions; wo != nil && wo.HostProcess != nil && *wo.HostProcess {
+		return errors.New("securityContext.windowsOptions.hostProcess is not allowed by environment policy")
+	}
+	return nil
+}
+
+// enforcePodHostProcess is the pod-level half of the HostProcess gate above.
+// podSecurityContext.windowsOptions.hostProcess is authorable (see
+// parseWindowsOptions in podspec.go) and, per upstream validateWindows, it
+// decides the privilege level of every container in the pod: a pod marked
+// HostProcess may contain only HostProcess containers, which run with the
+// node's privileges. Without this check the pod-level spelling would bypass
+// AllowPrivileged entirely, since enforcePrivileged only ever sees container
+// security contexts.
+func enforcePodHostProcess(cfg PodSpecConfig, allowed bool) error {
+	if allowed || cfg.SecurityContext == nil {
+		return nil
+	}
+	wo := cfg.SecurityContext.WindowsOptions
+	if wo != nil && wo.HostProcess != nil && *wo.HostProcess {
+		return errors.New("podSecurityContext.windowsOptions.hostProcess is not allowed by environment policy")
+	}
+	return nil
 }
 
 // enforceHostPathVolumes rejects an authored hostPath volume when the
@@ -320,6 +354,37 @@ func applyDefaultQuantity(rl *corev1.ResourceList, name corev1.ResourceName, dfl
 // Each is default-deny, including under NoopPolicy. Sharing the node's network,
 // PID or IPC namespace is a container-isolation bypass, so an unenforced denial
 // here would be a real gap.
+// enforcePodResources applies the policy's MaxCPU/MaxMemory to the pod-level
+// `podResources` budget (PodSpec.Resources), the sibling of the per-container
+// check enforceMaxResources performs. Without it an author could keep the main
+// container under the maximum and put an arbitrarily large request or limit on
+// the pod itself, which the scheduler charges against the node exactly the same
+// way. Unlike the container check there is no intrinsic default to fall back on:
+// pod-level resources are written only when authored, so an unset budget is
+// simply unconstrained and no "(generated default)" label can apply.
+func enforcePodResources(cfg PodSpecConfig, maxCPU, maxMemory string) error {
+	if cfg.Resources == nil || (maxCPU == "" && maxMemory == "") {
+		return nil
+	}
+	checks := []struct {
+		list  corev1.ResourceList
+		name  corev1.ResourceName
+		max   string
+		label string
+	}{
+		{cfg.Resources.Requests, corev1.ResourceCPU, maxCPU, "podResources cpu request"},
+		{cfg.Resources.Limits, corev1.ResourceCPU, maxCPU, "podResources cpu limit"},
+		{cfg.Resources.Requests, corev1.ResourceMemory, maxMemory, "podResources memory request"},
+		{cfg.Resources.Limits, corev1.ResourceMemory, maxMemory, "podResources memory limit"},
+	}
+	for _, c := range checks {
+		if err := enforceMaxResource(quantityString(c.list, c.name), c.max, c.label); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func enforceHostNamespaces(cfg PodSpecConfig, p oam.Policy) error {
 	if cfg.HostNetwork && !p.AllowHostNetwork() {
 		return errors.New("hostNetwork is not allowed by environment policy")
