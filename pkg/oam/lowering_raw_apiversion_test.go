@@ -34,7 +34,36 @@ type versionedRawRule struct {
 	emitAPIVersion string
 }
 
-func (r versionedRawRule) APIVersion() string { return r.apiVersion }
+func (r versionedRawRule) RawDocumentAPIVersion() string { return r.apiVersion }
+
+// accessorRawRule carries a plain APIVersion() string accessor — the shape an
+// embedded document type or a Kubernetes-style envelope gives a rule for reasons
+// unrelated to the hook — and must NOT be treated as opting in.
+type accessorRawRule struct {
+	testRawRule
+}
+
+func (accessorRawRule) APIVersion() string { return "some.other.group/v1" }
+
+// TestLowerRaws_PlainAPIVersionAccessorIsNotTheHook pins the hook's spelling: a
+// rule whose only apiVersion-shaped method is APIVersion() keeps claiming
+// SupportedAPIVersion (its documents are still decoded), and its accessor's value
+// claims nothing. Structural satisfaction of a generic method name must not re-key
+// an existing rule (PR review, go-kure/launcher#379).
+func TestLowerRaws_PlainAPIVersionAccessorIsNotTheHook(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterRawDocumentLowering(accessorRawRule{testRawRule{kind: "Widget"}})
+	if got := rawRuleAPIVersion(accessorRawRule{testRawRule{kind: "Widget"}}); got != SupportedAPIVersion {
+		t.Fatalf("rawRuleAPIVersion = %q, want SupportedAPIVersion: a plain APIVersion() accessor opted the rule in", got)
+	}
+	var (
+		_ RawDocumentLoweringRule          = accessorRawRule{}
+		_ interface{ APIVersion() string } = accessorRawRule{}
+	)
+	if _, ok := any(accessorRawRule{}).(RawDocumentAPIVersioner); ok {
+		t.Fatal("accessorRawRule satisfies RawDocumentAPIVersioner through APIVersion(); the hook method must be uniquely named")
+	}
+}
 
 func (r versionedRawRule) LowerDocument(doc any, lctx LoweringContext) (LoweringResult, error) {
 	result, err := r.testRawRule.LowerDocument(doc, lctx)
@@ -368,7 +397,7 @@ func TestLowerRaws_RuleMayNotSettleUnderAnotherRulesGroup(t *testing.T) {
 	}
 }
 
-// driftingRawRule answers APIVersion() with whatever its pointer currently holds,
+// driftingRawRule answers RawDocumentAPIVersion() with whatever its pointer currently holds,
 // standing in for a stateful rule that reports one group at registration and
 // another later.
 type driftingRawRule struct {
@@ -376,7 +405,7 @@ type driftingRawRule struct {
 	group *string
 }
 
-func (r *driftingRawRule) APIVersion() string { return *r.group }
+func (r *driftingRawRule) RawDocumentAPIVersion() string { return *r.group }
 
 func (r *driftingRawRule) LowerDocument(doc any, lctx LoweringContext) (LoweringResult, error) {
 	result, err := r.testRawRule.LowerDocument(doc, lctx)
@@ -391,7 +420,7 @@ func (r *driftingRawRule) LowerDocument(doc any, lctx LoweringContext) (Lowering
 
 // TestLowerRaws_SeedGroupIsTheMatchedRegistryKeyNotTheHookReEvaluated pins that
 // the group a seed may settle under is the registry pair that dispatched it, never
-// a fresh call to APIVersion(): a rule registered under group A whose hook later
+// a fresh call to RawDocumentAPIVersion(): a rule registered under group A whose hook later
 // says B still dispatches for A (the registry is fixed at registration) and is
 // refused when it then emits B.
 func TestLowerRaws_SeedGroupIsTheMatchedRegistryKeyNotTheHookReEvaluated(t *testing.T) {

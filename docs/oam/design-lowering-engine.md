@@ -368,7 +368,9 @@ implementation. All three are answered by the shipped code:
   duplicate/cross-registrar collision guards `RegisterDocumentLowering` has in the other
   direction — the cross-registrar guard stays kind-wide, so one kind string is claimed by
   at most one registrar regardless of group). A rule claims `SupportedAPIVersion` unless
-  it implements the optional `RawDocumentAPIVersioner` hook (`APIVersion() string`); a
+  it implements the optional `RawDocumentAPIVersioner` hook (`RawDocumentAPIVersion() string`
+  — named for the hook, not the value, so a rule's unrelated `APIVersion()` accessor cannot
+  opt it in structurally); a
   consumer that owns its own API group implements it so `LowerRaws` claims that group's
   documents instead of silently passing them through to the consumer's own parser, which
   would reject them (the gap the original single-group gate left open). Dispatch decodes
