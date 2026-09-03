@@ -201,7 +201,7 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 			// The group this seed and every document descending from it may
 			// settle under besides SupportedAPIVersion — see loweringDoc.apiVersion.
 			// This is the registry key that matched (env.APIVersion), NOT a second
-			// call to the rule's APIVersion() hook: a stateful rule could answer
+			// call to the rule's RawDocumentAPIVersion() hook: a stateful rule could answer
 			// differently now than at registration and thereby authorize a group
 			// it never registered under.
 			apiVersion: env.APIVersion,

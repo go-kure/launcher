@@ -477,8 +477,14 @@ func (t *Transformer) RegisterDocumentLowering(r DocumentLoweringRule) {
 // ParseWithExtraTypes, which gates on SupportedAPIVersion before any rule can run
 // (validate.go), so a DocumentLoweringRule never sees another group's document and
 // has nothing to declare.
+//
+// The method is named for the hook, not the value: Go interfaces are satisfied
+// structurally, so a plain APIVersion() string — a common accessor a rule may carry
+// for unrelated reasons (an embedded document type, a Kubernetes-style envelope) —
+// would silently opt an existing rule into the hook and re-key it away from
+// SupportedAPIVersion. Only a method spelled RawDocumentAPIVersion is an opt-in.
 type RawDocumentAPIVersioner interface {
-	APIVersion() string
+	RawDocumentAPIVersion() string
 }
 
 // rawDocRuleKey is the raw-rule registry key: the (apiVersion, kind) pair a
@@ -492,7 +498,7 @@ type rawDocRuleKey struct {
 // when it implements the hook, SupportedAPIVersion otherwise.
 func rawRuleAPIVersion(r RawDocumentLoweringRule) string {
 	if v, ok := r.(RawDocumentAPIVersioner); ok {
-		return v.APIVersion()
+		return v.RawDocumentAPIVersion()
 	}
 	return SupportedAPIVersion
 }
