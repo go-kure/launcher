@@ -738,6 +738,41 @@ this trio verbatim rather than duplicating it.
   `pvc.storageClass`), `accessModes`, `mountPath`), `serviceName` (headless).
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`); `port`
   optionally adds a Service. No `sidecars` schema key (init containers only).
+  DaemonSetSpec-level (go-kure/launcher#340, `daemonset_spec.go`): `updateStrategy`,
+  `minReadySeconds`, `revisionHistoryLimit`. `appsv1.DaemonSetSpec` has five
+  fields; `template` is the pod projection above and `selector` is
+  builder-managed, which leaves these three.
+
+  | Property | Type | Effect | Compatibility |
+  |----------|------|--------|---------------|
+  | `updateStrategy` | object | `type` (**required**, `RollingUpdate`\|`OnDelete`) and `rollingUpdate` (`maxUnavailable`, `maxSurge`), which is only accepted under `type: RollingUpdate`. `type: RollingUpdate` alone is accepted — the apiserver defaults the `rollingUpdate` object that upstream validation then requires. | additive |
+  | `minReadySeconds` | int ≥ 0 | Seconds a new pod must stay ready before it counts as available. | additive |
+  | `revisionHistoryLimit` | int ≥ 0 | Superseded ControllerRevisions kept for rollback. | additive |
+  | `selector` | — | **Rejected outright**, not silently dropped: the selector is builder-managed (`app: <component>`), must equal the generated template labels, and is immutable once created. | **Behavior-changing** |
+
+  `maxUnavailable` and `maxSurge` each accept a non-negative integer or a `"N%"`
+  string with N ≤ 100 (the integer form is a pod count and is deliberately
+  uncapped, matching upstream's `IsNotMoreThan100Percent`, which inspects only
+  percentages). A leading sign (`"+50%"`) is rejected — upstream's own
+  `IsValidPercent` form check is used rather than a `TrimSuffix`/`Atoi` pair,
+  which would accept it. Unlike the statefulset kind, whose `maxUnavailable`
+  "cannot be 0", either DaemonSet knob may be zero on its own; it is the
+  **pair** that must have exactly one non-zero member. That rule is enforced
+  against the *effective* pair, counting the API defaults for whichever half the
+  document leaves out — `maxUnavailable` 1, `maxSurge` 0
+  (`k8s.io/api/apps/v1/types.go`, the `RollingUpdateDaemonSet` field docs). So
+  `maxSurge: 2` on its own is rejected here rather than at apply time (the
+  defaulted `maxUnavailable: 1` makes both non-zero), and using surge means
+  writing `maxUnavailable: 0` alongside it. The error names which half was
+  defaulted, since that is the half absent from the author's YAML.
+
+  Every accepted property is presence-gated: a document authoring none of them
+  produces byte-identical output to before, because `DaemonSetSpecConfig.apply`
+  writes only the fields that were authored. The one behavior change is
+  `selector`: authored-document validation checks type names and identity, not
+  property shape (`pkg/oam/property_validate.go:22-27`), so a `selector:` on a
+  daemonset used to be silently ignored and now fails the build. That is the
+  point — a silently dropped selector reads as applied.
 - **cronjob** — `schedule` accepts a standard 5-field cron expression (e.g.
   `0 2 * * *`; not 6-field — a seconds field is rejected), one of the fixed
   `@`-descriptors (`@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,

@@ -41,6 +41,7 @@ func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"initContainers":  schemaContainers(),
 	}
 	maps.Copy(m, schemaPodSpec(false, false))
+	maps.Copy(m, schemaDaemonSetSpec())
 	return m
 }
 
@@ -134,6 +135,12 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 	}
 	config.PodSpec = podSpec
 
+	dsSpec, err := parseDaemonSetSpec(props)
+	if err != nil {
+		return nil, err
+	}
+	config.DaemonSetSpec = dsSpec
+
 	return config, nil
 }
 
@@ -159,6 +166,10 @@ type DaemonsetConfig struct {
 	PVCs            []PVCConfig
 	// PodSpec holds the shared pod-level properties (see parsePodSpec).
 	PodSpec PodSpecConfig
+	// DaemonSetSpec holds the DaemonSetSpec-level properties that are neither
+	// the pod template nor the builder-managed selector (see
+	// parseDaemonSetSpec).
+	DaemonSetSpec DaemonSetSpecConfig
 }
 
 // ServiceAccountName implements oam.ServiceAccountNamer: the authored
@@ -326,6 +337,7 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 		return nil, err
 	}
 	ds.Spec.Template.Spec = podSpec
+	c.DaemonSetSpec.apply(ds)
 
 	return ds, nil
 }
