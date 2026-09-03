@@ -342,12 +342,12 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 						"gmsaCredentialSpecName": {Type: oam.PropertyTypeString, Description: "Name of the GMSA credential spec to use."},
 						"gmsaCredentialSpec":     {Type: oam.PropertyTypeString, Description: "Inline GMSA credential spec contents (normally populated by the GMSA admission webhook)."},
 						"runAsUserName":          {Type: oam.PropertyTypeString, Description: "Windows user name to run the container entrypoint as."},
-						"hostProcess":            {Type: oam.PropertyTypeBoolean, Description: "Run the containers as Windows HostProcess containers. Policy-gated: true is rejected unless the environment policy allows privileged workloads."},
+						"hostProcess":            {Type: oam.PropertyTypeBoolean, Description: "Run the containers as Windows HostProcess containers; every container with no hostProcess of its own inherits this value. Requires hostNetwork: true. Policy-gated: true is rejected unless the environment policy allows privileged workloads."},
 					},
 				},
 				"runAsUser":                {Type: oam.PropertyTypeInteger, Description: "UID to run each container's entrypoint as; a container-level runAsUser takes precedence."},
 				"runAsGroup":               {Type: oam.PropertyTypeInteger, Description: "Primary GID for each container's entrypoint; a container-level runAsGroup takes precedence."},
-				"runAsNonRoot":             {Type: oam.PropertyTypeBoolean, Description: "Whether the containers must run as a non-root user."},
+				"runAsNonRoot":             {Type: oam.PropertyTypeBoolean, Description: "Whether the containers must run as a non-root user. Judged per container against its effective runAsUser, so a pod-level runAsUser of 0 is only rejected for containers that do not override it."},
 				"supplementalGroups":       {Type: oam.PropertyTypeArray, Description: "Additional GIDs applied to the first process in each container.", Items: &oam.PropertySchema{Type: oam.PropertyTypeInteger, Description: "A single supplemental group ID."}},
 				"supplementalGroupsPolicy": {Type: oam.PropertyTypeString, Enum: []any{"Merge", "Strict"}, Description: "How supplementalGroups combine with the container image's own group memberships."},
 				"fsGroup":                  {Type: oam.PropertyTypeInteger, Description: "Supplemental group that owns volumes supporting ownership management."},
@@ -370,13 +370,13 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 		"imagePullSecrets": nameList("Secrets in the component's namespace holding registry credentials for pulling the pod's images.", "A reference to one image-pull Secret."),
 		"hostname":         str("Hostname of the pod (a DNS-1123 label). Defaults to the pod's own name."),
 		"subdomain":        str("Subdomain of the pod (a DNS-1123 label), giving the FQDN <hostname>.<subdomain>.<namespace>.svc.<cluster domain>."),
-		"schedulerName":    str("Name of the scheduler that dispatches this pod; defaults to the default scheduler."),
+		"schedulerName":    str("Name of the scheduler that dispatches this pod; defaults to the default scheduler. Kubernetes does not constrain its form, so it is stored as authored — unlike nodeName and priorityClassName, which name API objects and are validated as DNS-1123 subdomains."),
 		"hostAliases": {
 			Type: oam.PropertyTypeArray, PlatformReserved: reserved, Description: "Extra /etc/hosts entries injected into the pod.",
 			Items: &oam.PropertySchema{
 				Type: oam.PropertyTypeObject, Description: "One IP with the hostnames that resolve to it.",
 				Properties: map[string]oam.PropertySchema{
-					"ip":        {Type: oam.PropertyTypeString, Required: true, Description: "IP address of the host file entry."},
+					"ip":        {Type: oam.PropertyTypeString, Required: true, Description: "IP address of the host file entry. A plain IPv4 or IPv6 literal: a zone-scoped address such as fe80::1%eth0 is rejected, as it is at admission."},
 					"hostnames": {Type: oam.PropertyTypeArray, Required: true, Description: "Hostnames resolving to the IP; at least one.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single hostname (DNS-1123 subdomain)."}},
 				},
 			},
@@ -385,7 +385,7 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 		"dnsConfig": {
 			Type: oam.PropertyTypeObject, PlatformReserved: reserved, Description: "DNS parameters merged into the pod's resolver configuration according to dnsPolicy.",
 			Properties: map[string]oam.PropertySchema{
-				"nameservers": {Type: oam.PropertyTypeArray, Description: "DNS server IP addresses (at most 3).", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single nameserver IP."}},
+				"nameservers": {Type: oam.PropertyTypeArray, Description: "DNS server IP addresses (at most 3).", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single nameserver IP: a plain IPv4 or IPv6 literal, never a zone-scoped address."}},
 				"searches":    {Type: oam.PropertyTypeArray, Description: "DNS search domains: at most 32 entries, and at most 2048 characters once joined with the separating spaces.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A single search domain."}},
 				"options": {
 					Type: oam.PropertyTypeArray, Description: "Resolver options.",
@@ -418,7 +418,7 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 				"name": {Type: oam.PropertyTypeString, Required: true, Enum: []any{"linux", "windows"}, Description: "OS name."},
 			},
 		},
-		"hostUsers":       boolean("Use the host's user namespace (true, the default) or a new user namespace for the pod (false)."),
+		"hostUsers":       boolean("Use the host's user namespace (true, the default) or a new user namespace for the pod (false). false is incompatible with hostPID and hostIPC; whether it may be combined with hostNetwork depends on the cluster."),
 		"schedulingGates": nameList("Named gates that must all be removed before the scheduler considers the pod (gate names must be unique).", "A single scheduling gate."),
 		"resourceClaims": {
 			Type: oam.PropertyTypeArray, PlatformReserved: reserved, Description: "Dynamic Resource Allocation claims made available to the pod's containers (names must be unique).",
