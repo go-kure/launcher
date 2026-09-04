@@ -74,7 +74,21 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 		Namespace: namespace,
 	}
 
-	props := component.Properties
+	// Null as omission, applied to this kind's whole top-level surface rather
+	// than to the one field a review named: pkg/oam's property validator reads
+	// an explicit null under an optional property as absent
+	// (property_validate.go), while every typed helper answers "present?" with
+	// a bare map lookup, so the nil reaches its type check and comes back as a
+	// type error. `replicas: null`, `workingDir: null` and every other optional
+	// property here would otherwise be refused by the parser after the
+	// published schema accepted them.
+	//
+	// parseDeploymentSpec is deliberately given the AUTHORED map below, not
+	// this copy: it refuses the keys that must not appear at all (`selector`,
+	// `template`) before applying the same stripping itself, and that order is
+	// what makes `selector: null` earn its explanatory refusal instead of
+	// silently vanishing.
+	props := withoutExplicitNulls(component.Properties)
 
 	image, ok := props["image"].(string)
 	if !ok {
@@ -177,7 +191,8 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.PodSpec = podSpec
 
-	depSpec, err := parseDeploymentSpec(props)
+	// The authored map, not the null-stripped copy — see the comment on props.
+	depSpec, err := parseDeploymentSpec(component.Properties)
 	if err != nil {
 		return nil, err
 	}

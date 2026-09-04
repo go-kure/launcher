@@ -540,3 +540,90 @@ func TestDeploymentHandler_PropertySchemaComposition(t *testing.T) {
 		}
 	}
 }
+
+// TestDeploymentHandler_TopLevelNullIsOmission pins null-as-absence across this
+// kind's whole published top-level surface rather than the one field a review
+// named. pkg/oam's property validator reads an explicit null under an optional
+// property as absent, so each of these documents is schema-valid; the typed
+// parse helpers answer "present?" with a bare map lookup, so without the strip
+// the nil reaches a type check and the component fails during conversion after
+// the schema accepted it.
+//
+// The case list is derived from PropertySchema rather than written out, so a
+// property added later is covered without anyone remembering to add it here.
+func TestDeploymentHandler_TopLevelNullIsOmission(t *testing.T) {
+	h := &components.DeploymentHandler{}
+	schema := h.PropertySchema()
+
+	optional := make([]string, 0, len(schema))
+	for key, ps := range schema {
+		if !ps.Required {
+			optional = append(optional, key)
+		}
+	}
+	if len(optional) < 10 {
+		t.Fatalf("PropertySchema yielded only %d optional properties, want the kind's full surface — the derivation above is broken", len(optional))
+	}
+
+	for _, key := range optional {
+		t.Run(key, func(t *testing.T) {
+			_, err := h.ToApplicationConfig(&oam.Component{
+				Name:       "app",
+				Type:       "deployment",
+				Properties: map[string]any{"image": "nginx:1.27", key: nil},
+			}, "default")
+			if err != nil {
+				t.Fatalf("%s: null was refused: %v", key, err)
+			}
+		})
+	}
+
+	t.Run("every optional property null at once", func(t *testing.T) {
+		props := map[string]any{"image": "nginx:1.27"}
+		for _, key := range optional {
+			props[key] = nil
+		}
+		dep, _ := generateDeployment(t, "app", props)
+		if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 1 {
+			t.Errorf("Spec.Replicas = %v, want the unauthored default 1 — `replicas: null` must read as absent, not as an authored value", dep.Spec.Replicas)
+		}
+	})
+
+	// A typed nil is what a Go-constructed lowering rule produces when it
+	// assigns a nil map or slice into an `any`. It is not `== nil`, so it needs
+	// the reflection arm the property validator also uses.
+	t.Run("typed nil", func(t *testing.T) {
+		props := map[string]any{
+			"image":           "nginx:1.27",
+			"env":             []any(nil),
+			"resources":       map[string]any(nil),
+			"securityContext": map[string]any(nil),
+			"volumes":         []any(nil),
+		}
+		if _, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: "deployment", Properties: props}, "default"); err != nil {
+			t.Fatalf("typed nils were refused: %v", err)
+		}
+	})
+
+	// The stripping must not reach the keys that may not appear at all: those
+	// are refused before it runs, so naming one — even as a null — still earns
+	// the explanatory refusal. Passing the stripped copy into
+	// parseDeploymentSpec would make this silent, and every parser-level test
+	// would stay green.
+	t.Run("a rejected key named as null is still rejected", func(t *testing.T) {
+		for _, key := range []string{"selector", "template"} {
+			_, err := h.ToApplicationConfig(&oam.Component{
+				Name:       "app",
+				Type:       "deployment",
+				Properties: map[string]any{"image": "nginx:1.27", key: nil},
+			}, "default")
+			if err == nil {
+				t.Errorf("%s: null was accepted, want the not-authorable refusal", key)
+				continue
+			}
+			if !strings.Contains(err.Error(), "not authorable") {
+				t.Errorf("%s: null produced %q, want the not-authorable refusal", key, err.Error())
+			}
+		}
+	})
+}
