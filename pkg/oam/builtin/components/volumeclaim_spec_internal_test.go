@@ -523,7 +523,6 @@ func TestParseVolumeClaimTemplates_NotAList(t *testing.T) {
 		{"object", map[string]any{"name": "data"}},
 		{"string", "data"},
 		{"number", 3},
-		{"null", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := parseVolumeClaimTemplates(map[string]any{"volumeClaimTemplates": tc.val})
@@ -540,6 +539,17 @@ func TestParseVolumeClaimTemplates_NotAList(t *testing.T) {
 	got, err := parseVolumeClaimTemplates(map[string]any{})
 	if err != nil || got != nil {
 		t.Errorf("absent volumeClaimTemplates = (%v, %v), want (nil, nil)", got, err)
+	}
+
+	// So is an explicit null. `volumeClaimTemplates:` with no value decodes to
+	// a nil entry, the schema keeps the key optional, and pkg/oam's own
+	// requiredness check reads a nil as absent — so a document written that way
+	// is valid v1alpha1 and stays valid. This case is the reason the type check
+	// above cannot be a bare "present means it must be a list": it would turn a
+	// building document into a rejected one.
+	got, err = parseVolumeClaimTemplates(map[string]any{"volumeClaimTemplates": nil})
+	if err != nil || got != nil {
+		t.Errorf("null volumeClaimTemplates = (%v, %v), want (nil, nil)", got, err)
 	}
 }
 

@@ -3020,7 +3020,15 @@ func (v VolumeClaimTemplate) effectiveStorageRequest() string {
 // parseVolumeClaimTemplates parses volumeClaimTemplates from OAM properties.
 func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, error) {
 	raw, present := props["volumeClaimTemplates"]
-	if !present {
+	// An explicit null is absence, not a present-but-wrong type.
+	// `volumeClaimTemplates:` with no value decodes to a nil entry, the schema
+	// keeps the key optional, and the property validator already reads a nil as
+	// absent when deciding requiredness (`isNullValue`,
+	// pkg/oam/property_validate.go) — so such a document is valid v1alpha1
+	// today and has to stay valid. The type check below exists to catch a value
+	// the author wrote and got wrong; a null is a value the author did not
+	// write at all.
+	if !present || raw == nil {
 		return nil, nil
 	}
 	// Presence and type are two questions: a single type assertion answered
