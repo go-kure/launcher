@@ -1047,6 +1047,7 @@ func detectCycles(deps map[string][]string) error {
 var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"webservice":  {"apps/v1", "Deployment"},
 	"worker":      {"apps/v1", "Deployment"},
+	"deployment":  {"apps/v1", "Deployment"},
 	"statefulset": {"apps/v1", "StatefulSet"},
 	"daemonset":   {"apps/v1", "DaemonSet"},
 	"helmchart":   {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},

@@ -23,6 +23,7 @@ const SupportedAPIVersion = "launcher.gokure.dev/v1alpha1"
 var validComponentTypes = map[string]bool{
 	"webservice":  true,
 	"worker":      true,
+	"deployment":  true,
 	"postgresql":  true,
 	"cronjob":     true,
 	"helmchart":   true,

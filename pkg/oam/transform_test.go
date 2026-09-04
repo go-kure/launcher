@@ -1483,3 +1483,24 @@ func TestApplyAutoHealthChecks_OCIEmptyFluxNamespaceUsesAppNamespace(t *testing.
 		t.Fatalf("expected Kustomization check in app namespace 'demo', got %+v", hc)
 	}
 }
+
+// TestApplyAutoHealthChecks_DeploymentKindRegistered pins the kind-named
+// "deployment" component into componentHealthCheckGVK (#343). The
+// webservice/worker cases above say nothing about it: the map is keyed by OAM
+// component type, not by the emitted GVK, so a type missing from it is skipped
+// silently — the bundle simply carries one health check fewer and every other
+// test stays green.
+func TestApplyAutoHealthChecks_DeploymentKindRegistered(t *testing.T) {
+	app := stack.NewApplication("api", "demo", &plainHCConfig{})
+	cluster := leafClusterWith(app)
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "deployment"), nil, "flux-system")
+
+	hc := cluster.Node.Bundle.HealthChecks
+	if len(hc) != 1 {
+		t.Fatalf("expected 1 health check for a deployment component, got %d: %+v", len(hc), hc)
+	}
+	if hc[0].APIVersion != "apps/v1" || hc[0].Kind != "Deployment" || hc[0].Name != "api" || hc[0].Namespace != "demo" {
+		t.Errorf("got %s %s %q in %q, want apps/v1 Deployment %q in %q",
+			hc[0].APIVersion, hc[0].Kind, hc[0].Name, hc[0].Namespace, "api", "demo")
+	}
+}

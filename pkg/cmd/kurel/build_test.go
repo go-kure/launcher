@@ -382,6 +382,39 @@ func TestNewBuiltinTransformer_Registered(t *testing.T) {
 	}
 }
 
+// TestBuiltinComponentHandlers_AcceptedByParser closes the gap that let the
+// "deployment" type ship registered-but-unusable (#343): registering a handler
+// in builtinComponentHandlers() does NOT admit its type name through the
+// parser. oam.Parse* validates c.Type against pkg/oam's own validComponentTypes
+// allowlist, and rejects the document before any handler is consulted; the
+// transformer's LowerableTypes() does not widen it either, because a terminal
+// handler-backed type is not a lowerable one. Every other test in this file
+// calls the handler directly and so cannot see it.
+//
+// This drives the same entry point build.go does (build.go:134), on the
+// smallest document each type can appear in — properties are deliberately
+// omitted, since Parse* performs identity validation only and property schemas
+// are applied later, at emission.
+func TestBuiltinComponentHandlers_AcceptedByParser(t *testing.T) {
+	transformer := newBuiltinTransformer()
+	for name := range builtinComponentHandlers() {
+		t.Run(name, func(t *testing.T) {
+			doc := fmt.Sprintf(`apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: parity
+spec:
+  components:
+    - name: c1
+      type: %s
+`, name)
+			if _, err := oam.ParseWithExtraTypes([]byte(doc), nil, transformer.LowerableTypes()); err != nil {
+				t.Errorf("component type %q is registered as a built-in handler but the parser rejects it: %v", name, err)
+			}
+		})
+	}
+}
+
 // TestBuiltinComponentHandlers_RegisteredTypes pins the set of component type
 // strings the CLI dispatches. The schema-parity and description tests below
 // iterate this map, so they say nothing about which entries it contains: a
