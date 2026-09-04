@@ -206,6 +206,18 @@ func parseStorageResourceList(m map[string]any, label string) (corev1.ResourceLi
 		if !slices.Contains(volumeClaimStorageKeys, k) {
 			return nil, errors.Errorf("%s: %q is not a claim resource; a PersistentVolumeClaim measures only storage. The apiserver would ignore it rather than reject it; launcher reports it because a claim carrying an unread resource request is an authoring mistake", label, k)
 		}
+		// Null as omission, deliberately AFTER the unknown-name check and not
+		// before it: `cpu: null` is still an author naming a resource a claim
+		// cannot carry, and the explanation above is more useful there than
+		// silence. `storage: null` is different — the property validator reads
+		// a null under an optional property as absent, so the document is
+		// schema-valid and must reach the requiredness error ("missing
+		// required field 'size' (or resources.requests.storage)") rather than a
+		// type error rendering the nil. Same rule, and the same ordering, as
+		// every other optional read on this branch.
+		if isExplicitNull(v) {
+			continue
+		}
 		s, ok := decodedQuantityString(v)
 		if !ok {
 			return nil, errors.Errorf("%s.%s: quantity must be a string or number, got %T", label, k, v)

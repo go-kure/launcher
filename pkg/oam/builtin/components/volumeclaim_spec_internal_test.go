@@ -581,6 +581,12 @@ func TestParseVolumeClaimSpec_NullIsOmission(t *testing.T) {
 		{"dataSourceRef.namespace", map[string]any{"dataSourceRef": map[string]any{
 			"kind": "PersistentVolumeClaim", "name": "src", "namespace": nil,
 		}}},
+		{"resources.requests.storage", map[string]any{"resources": map[string]any{
+			"requests": map[string]any{"storage": nil},
+		}}},
+		{"resources.limits.storage", map[string]any{"resources": map[string]any{
+			"limits": map[string]any{"storage": nil},
+		}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := map[string]any{"name": "data", "mountPath": "/data", "size": "1Gi"}
@@ -660,6 +666,77 @@ func TestParseVolumeClaimSpec_NullIsOmission(t *testing.T) {
 		}
 		if _, err := parseVolumeClaimTemplates(vctProps(nested)); err != nil {
 			t.Errorf("parseVolumeClaimTemplates(typed nil matchExpressions) error = %v, want it read as omitted", err)
+		}
+	})
+
+	// The long spelling of the storage request is the one place a null lands on
+	// a value that is required once neither spelling is authored. It must
+	// surface as the requiredness error naming both spellings, never as the
+	// quantity type error.
+	t.Run("resources.requests.storage null with no size is the requiredness error", func(t *testing.T) {
+		_, err := parseVolumeClaimTemplates(vctProps(map[string]any{
+			"name":      "data",
+			"mountPath": "/data",
+			"resources": map[string]any{"requests": map[string]any{"storage": nil}},
+		}))
+		if err == nil {
+			t.Fatal("expected the missing-size requiredness error")
+		}
+		if !strings.Contains(err.Error(), "missing required field 'size'") {
+			t.Errorf("error = %q, want the requiredness error naming both spellings", err.Error())
+		}
+		if strings.Contains(err.Error(), "<nil>") {
+			t.Errorf("error = %q, want no type error naming <nil>", err.Error())
+		}
+	})
+
+	// Null-as-absence is a rule about optional PROPERTIES. A resource name a
+	// claim cannot carry is not one, so naming it — even as a null — still
+	// earns the explanation. This pins the ordering inside the loop: moving the
+	// null skip above the unknown-name check would silently accept `cpu: null`.
+	t.Run("a rejected resource name authored as null is still rejected", func(t *testing.T) {
+		_, err := parseVolumeClaimTemplates(vctProps(map[string]any{
+			"name":      "data",
+			"mountPath": "/data",
+			"size":      "1Gi",
+			"resources": map[string]any{"requests": map[string]any{"cpu": nil}},
+		}))
+		if err == nil {
+			t.Fatal("expected `cpu: null` to be refused as a non-claim resource")
+		}
+		if !strings.Contains(err.Error(), "is not a claim resource") {
+			t.Errorf("error = %q, want the not-a-claim-resource refusal", err.Error())
+		}
+	})
+
+	// volumeAttributesClassName is deliberately NOT given storageClass's
+	// empty-string treatment, and this pins the reasoning so the difference is
+	// not read as an oversight. For storageClassName, nil and "" mean different
+	// things — use the cluster default class, versus request no class at all —
+	// which is why parseStorageClassField carries an explicitEmpty flag. For
+	// volumeAttributesClassName on a CLAIM the API says the opposite: "An empty
+	// string or nil value indicates that no VolumeAttributesClass will be
+	// applied to the claim" (k8s.io/api@v0.36.3 core/v1/types.go, the
+	// PersistentVolumeClaimSpec field doc), and
+	// ValidatePersistentVolumeClaimSpec only class-name-checks a value that is
+	// both non-nil and non-empty. So collapsing "" to absence produces the
+	// identical claim semantics, and encoding a distinction the API does not
+	// make would put a literal `volumeAttributesClassName: ""` in the manifest
+	// for no behavioural gain. (The "empty value is not allowed" wording is on
+	// PersistentVolumeSpec — the PV, not the claim.)
+	t.Run("volumeAttributesClassName empty string reads as absent", func(t *testing.T) {
+		got, err := parseVolumeClaimTemplates(vctProps(map[string]any{
+			"name":                      "data",
+			"mountPath":                 "/data",
+			"size":                      "1Gi",
+			"volumeAttributesClassName": "",
+		}))
+		if err != nil {
+			t.Fatalf("volumeAttributesClassName: \"\" was refused: %v", err)
+		}
+		if got[0].Spec.VolumeAttributesClassName != nil {
+			t.Errorf("VolumeAttributesClassName = %q, want nil — \"\" and nil mean the same thing on a claim",
+				*got[0].Spec.VolumeAttributesClassName)
 		}
 	})
 }
