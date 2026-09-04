@@ -287,15 +287,6 @@ func parseDeploymentStrategy(raw map[string]any) (*appsv1.DeploymentStrategy, er
 	return s, nil
 }
 
-// parseDeploymentIntOrPercent reads one of the two rolling-update knobs,
-// mirroring ValidatePositiveIntOrPercent: a non-negative integer, or a "N%"
-// string. capPercent additionally applies IsNotMoreThan100Percent, which
-// upstream runs on maxUnavailable and not on maxSurge.
-//
-// This deliberately does not reuse the DaemonSet kind's parseDaemonSetIntOrPercent:
-// that one caps both knobs, because ValidateRollingUpdateDaemonSet calls
-// IsNotMoreThan100Percent on both. Sharing one helper would silently import
-// the wrong ceiling into whichever kind lost the argument.
 // withoutExplicitNulls returns a copy of raw with every key whose value is an
 // explicit null removed, so the typed parse helpers read `field: null` as
 // omission instead of as a present-but-wrong type.
@@ -346,6 +337,15 @@ func isExplicitNull(value any) bool {
 	}
 }
 
+// parseDeploymentIntOrPercent reads one of the two rolling-update knobs,
+// mirroring ValidatePositiveIntOrPercent: a non-negative integer, or a "N%"
+// string. capPercent additionally applies IsNotMoreThan100Percent, which
+// upstream runs on maxUnavailable and not on maxSurge.
+//
+// This deliberately does not reuse the DaemonSet kind's parseDaemonSetIntOrPercent:
+// that one caps both knobs, because ValidateRollingUpdateDaemonSet calls
+// IsNotMoreThan100Percent on both. Sharing one helper would silently import
+// the wrong ceiling into whichever kind lost the argument.
 func parseDeploymentIntOrPercent(raw map[string]any, key, label string, capPercent bool) (intstr.IntOrString, bool, error) {
 	v, present := raw[key]
 	if !present {
