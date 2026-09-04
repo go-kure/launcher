@@ -298,6 +298,33 @@ func TestParseVolumeClaimTemplates_SpecErrors(t *testing.T) {
 			}}}),
 			`unrecognized key "scope"`,
 		},
+		// ValidateLabelSelectorRequirement runs IsValidLabelValue over every
+		// value on a newly created claim template, so a space in a value is a
+		// document the apiserver refuses; matchLabels was already guarded by
+		// parseLabelMap and matchExpressions was not.
+		{
+			"invalid label value in a matchExpressions entry",
+			with(map[string]any{"selector": map[string]any{"matchExpressions": []any{
+				map[string]any{"key": "zone", "operator": "In", "values": []any{"bad value"}},
+			}}}),
+			`invalid label value "bad value"`,
+		},
+		// A storage limit below the request is inert upstream —
+		// ValidatePersistentVolumeClaimSpec reads Requests[storage] only — so
+		// this parser is the only place the contradiction can be reported.
+		{
+			"storage limit below the size shorthand",
+			with(map[string]any{"resources": map[string]any{"limits": map[string]any{"storage": "5Gi"}}}),
+			"resources.limits.storage (5Gi) is below the requested storage (10Gi)",
+		},
+		{
+			"storage limit below the long request spelling",
+			map[string]any{"name": "data", "mountPath": "/data", "resources": map[string]any{
+				"requests": map[string]any{"storage": "10Gi"},
+				"limits":   map[string]any{"storage": "5Gi"},
+			}},
+			"resources.limits.storage (5Gi) is below the requested storage (10Gi)",
+		},
 		{
 			"unknown key in dataSourceRef",
 			with(map[string]any{"dataSourceRef": map[string]any{"apiGroup": "snapshot.storage.k8s.io", "kind": "VolumeSnapshot", "name": "seed", "uid": "abc"}}),

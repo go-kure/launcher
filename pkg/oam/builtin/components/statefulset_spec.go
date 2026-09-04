@@ -165,34 +165,47 @@ func parseStatefulSetSpec(props map[string]any) (StatefulSetSpecConfig, error) {
 	return cfg, nil
 }
 
-// parseStatefulSetUpdateStrategy decodes `updateStrategy`. `type` is required
-// so the authored object is never an empty `{}`, which the API would reject
-// (ValidateStatefulSetSpec: updateStrategy.type required); `rollingUpdate` is
+// parseStatefulSetUpdateStrategy decodes `updateStrategy`. `rollingUpdate` is
 // only allowed under RollingUpdate.
+//
+// `type` is required only when it is the object's sole content: an authored
+// `updateStrategy: {}` writes nothing, so its entire meaning would come from
+// the apiserver's defaulting rather than from the document, and
+// ValidateStatefulSetSpec rejects an empty Type outright once defaulting is
+// out of the picture. When `rollingUpdate` is authored the type is inferred as
+// RollingUpdate instead of demanded: that is both what the apiserver defaults
+// to and the only type that reads the field at all (this parser refuses
+// `rollingUpdate` under OnDelete two statements below), so requiring the
+// author to restate it rejects a document upstream accepts and acts on
+// exactly as written.
 func parseStatefulSetUpdateStrategy(raw map[string]any) (*appsv1.StatefulSetUpdateStrategy, error) {
 	if err := rejectUnknownKeys(raw, statefulSetUpdateStrategyKeys, "updateStrategy"); err != nil {
 		return nil, err
 	}
-	typ, present, err := parseStringField(raw, "type", "updateStrategy.type")
+	typ, typeAuthored, err := parseStringField(raw, "type", "updateStrategy.type")
 	if err != nil {
 		return nil, err
 	}
-	if !present {
-		return nil, errors.New("updateStrategy.type: required")
+	ru, ruAuthored, err := parseObjectField(raw, "rollingUpdate", "updateStrategy.rollingUpdate")
+	if err != nil {
+		return nil, err
 	}
 	us := &appsv1.StatefulSetUpdateStrategy{}
-	switch appsv1.StatefulSetUpdateStrategyType(typ) {
-	case appsv1.RollingUpdateStatefulSetStrategyType, appsv1.OnDeleteStatefulSetStrategyType:
-		us.Type = appsv1.StatefulSetUpdateStrategyType(typ)
+	switch {
+	case typeAuthored:
+		switch appsv1.StatefulSetUpdateStrategyType(typ) {
+		case appsv1.RollingUpdateStatefulSetStrategyType, appsv1.OnDeleteStatefulSetStrategyType:
+			us.Type = appsv1.StatefulSetUpdateStrategyType(typ)
+		default:
+			return nil, errors.Errorf("updateStrategy.type: invalid value %q, must be %s or %s", typ, appsv1.RollingUpdateStatefulSetStrategyType, appsv1.OnDeleteStatefulSetStrategyType)
+		}
+	case ruAuthored:
+		us.Type = appsv1.RollingUpdateStatefulSetStrategyType
 	default:
-		return nil, errors.Errorf("updateStrategy.type: invalid value %q, must be %s or %s", typ, appsv1.RollingUpdateStatefulSetStrategyType, appsv1.OnDeleteStatefulSetStrategyType)
+		return nil, errors.New("updateStrategy.type: required")
 	}
 
-	ru, present, err := parseObjectField(raw, "rollingUpdate", "updateStrategy.rollingUpdate")
-	if err != nil {
-		return nil, err
-	}
-	if !present {
+	if !ruAuthored {
 		return us, nil
 	}
 	if us.Type != appsv1.RollingUpdateStatefulSetStrategyType {
@@ -288,24 +301,35 @@ func schemaStatefulSetSpec() map[string]oam.PropertySchema {
 			Type:        oam.PropertyTypeObject,
 			Description: "How pods are replaced when the pod template changes. Unset leaves the API default (RollingUpdate).",
 			Properties: map[string]oam.PropertySchema{
+				// Not Required: the parser demands `type` only for an otherwise
+				// empty `updateStrategy: {}` and infers RollingUpdate when
+				// `rollingUpdate` is authored (parseStatefulSetUpdateStrategy).
+				// PropertySchema has no conditional requiredness, and declaring
+				// Required here would make a schema-validating consumer reject
+				// `updateStrategy: {rollingUpdate: {partition: 3}}` before the
+				// parser ever sees it. The parser is the enforcement point.
 				"type": {
 					Type:        oam.PropertyTypeString,
-					Required:    true,
 					Enum:        []any{string(appsv1.RollingUpdateStatefulSetStrategyType), string(appsv1.OnDeleteStatefulSetStrategyType)},
-					Description: "RollingUpdate replaces pods in reverse ordinal order; OnDelete only recreates pods that are deleted manually.",
+					Description: "RollingUpdate replaces pods in reverse ordinal order; OnDelete only recreates pods that are deleted manually. Required unless rollingUpdate is authored, in which case RollingUpdate is inferred; an otherwise empty updateStrategy object must name it.",
 				},
 				"rollingUpdate": {
 					Type:        oam.PropertyTypeObject,
 					Description: "RollingUpdate parameters; only allowed when type is RollingUpdate.",
 					Properties: map[string]oam.PropertySchema{
 						"partition": {Type: oam.PropertyTypeInteger, Description: "Ordinal below which pods are left untouched by a rolling update (canary partitioning). Must be >= 0; the API default is 0."},
-						// Declared `string` because PropertyType carries no int-or-string
-						// member, and adding one would emit a type token the downstream
-						// schema consumer's validator does not understand (PropertyType's
-						// doc comment, pkg/oam/schema.go). The parser accepts both forms;
-						// the Description says so, because the declared type alone
-						// understates what is accepted. Tracked in go-kure/launcher#383.
-						"maxUnavailable": {Type: oam.PropertyTypeString, Description: `Maximum pods unavailable during the update: a percentage string such as "25%" (at most 100%), or a positive integer such as 2. The API default is 1; 0 is never valid. Declared as a string because this schema vocabulary has no int-or-string type — an integer is accepted and carried through as an integer, not converted to a string.`},
+						// No declared Type, mirroring schemaResources' cpu/memory
+						// quantities (schema.go:148-155). PropertyType carries no
+						// int-or-string member (pkg/oam/schema.go), and declaring
+						// `string` here does not merely understate the accepted set —
+						// validatePropertyValue rejects a non-string outright
+						// (pkg/oam/property_validate.go:118-121), so `maxUnavailable: 2`
+						// could never reach parseMaxUnavailable's integer branch through
+						// a schema-validating consumer. Type "" skips the check
+						// (property_validate.go:114-117) and leaves both forms reachable;
+						// the Description carries the constraint instead. Tracked in
+						// go-kure/launcher#383.
+						"maxUnavailable": {Description: `Maximum pods unavailable during the update: a percentage string such as "25%" (at most 100%), or a positive integer such as 2. The API default is 1; 0 is never valid. No declared type because this schema vocabulary has no int-or-string union — an integer is accepted and carried through as an integer, not converted to a string.`},
 					},
 				},
 			},

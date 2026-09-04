@@ -235,6 +235,37 @@ func parseStorageResourceList(m map[string]any, label string) (corev1.ResourceLi
 	return rl, nil
 }
 
+// checkClaimStorageLimit rejects a `resources.limits.storage` below the entry's
+// effective storage request. The request is read through
+// effectiveStorageRequest, so the `size` shorthand and the long
+// `resources.requests.storage` spelling are treated alike — the same reason
+// policy enforcement uses it rather than reading Size.
+//
+// The request has already been parsed as a quantity by the caller, so the
+// ParseQuantity failure below is unreachable; it is reported rather than
+// swallowed.
+func checkClaimStorageLimit(vct VolumeClaimTemplate, label string) error {
+	if vct.Spec.Resources == nil {
+		return nil
+	}
+	limit, ok := vct.Spec.Resources.Limits[corev1.ResourceStorage]
+	if !ok {
+		return nil
+	}
+	req := vct.effectiveStorageRequest()
+	if req == "" {
+		return nil
+	}
+	request, err := resource.ParseQuantity(req)
+	if err != nil {
+		return errors.Errorf("%s: invalid storage request %q: %w", label, req, err)
+	}
+	if request.Cmp(limit) > 0 {
+		return errors.Errorf("%s: resources.limits.storage (%s) is below the requested storage (%s); a claim cannot request more than its limit", label, limit.String(), request.String())
+	}
+	return nil
+}
+
 // parseLabelSelector parses a metav1.LabelSelector: matchLabels plus the
 // matchExpressions form, with the operator's arity checked the way
 // metav1validation.ValidateLabelSelector does.
@@ -276,6 +307,20 @@ func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector
 			values, _, err := parseStringList(item, "values", itemLabel+".values")
 			if err != nil {
 				return nil, err
+			}
+			// ValidateLabelSelectorRequirement runs IsValidLabelValue over every
+			// value unless AllowInvalidLabelValueInSelector is set
+			// (apimachinery pkg/apis/meta/v1/validation/validation.go:93-98), and
+			// a newly created claim template never sets it
+			// (ValidationOptionsForPersistentVolumeClaimTemplate: false, threaded
+			// into ValidateLabelSelector by ValidatePersistentVolumeClaimSpec).
+			// Without this check a value such as "bad value" parsed cleanly and
+			// produced a StatefulSet the apiserver rejects — the same class
+			// parseLabelMap already closes on matchLabels (podspec.go:722-724).
+			for i, v := range values {
+				if errs := validation.IsValidLabelValue(v); len(errs) > 0 {
+					return nil, errors.Errorf("%s: invalid label value %q: %s", indexedLabel(itemLabel+".values", i), v, strings.Join(errs, "; "))
+				}
 			}
 			switch metav1.LabelSelectorOperator(op) {
 			case metav1.LabelSelectorOpIn, metav1.LabelSelectorOpNotIn:
@@ -418,7 +463,7 @@ func schemaVolumeClaimSpec() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"selector": {
 			Type:        oam.PropertyTypeObject,
-			Description: "Label query over the PersistentVolumes eligible to back this claim. Narrows binding to pre-provisioned volumes; it has no effect on a dynamically provisioned one.",
+			Description: "Label query over the PersistentVolumes eligible to back this claim. Authoring it opts the claim out of dynamic provisioning entirely: a claim with a non-empty selector is never provisioned from its StorageClass and stays Pending until a pre-provisioned PV matches. Use it only when binding to volumes that already exist.",
 			Properties: map[string]oam.PropertySchema{
 				"matchLabels": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Labels a volume must carry, all of them."},
 				"matchExpressions": {
