@@ -1058,7 +1058,7 @@ this trio verbatim rather than duplicating it.
   (`kurecnpg.ResourceOptions`, an external `go-kure/kure` type) has no fields
   for other resource names, so any other name authored under `requests`/
   `limits` (e.g. `ephemeral-storage`, `nvidia.com/gpu`) is rejected with an
-  explicit error rather than silently dropped; the other 5 workload kinds
+  explicit error rather than silently dropped; the other six workload kinds
   forward every resource name directly onto the real `corev1.Container` and
   have no such restriction.
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
