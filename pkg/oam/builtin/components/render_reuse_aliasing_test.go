@@ -212,6 +212,20 @@ func TestDeployment_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing
 		if !ok {
 			t.Fatalf("first object is %T, want *appsv1.Deployment", *objects[0])
 		}
+		// Checked rather than dereferenced blind: every one of these is a
+		// pointer the handler is supposed to have written, so a regression that
+		// leaves one unset is exactly what this test exists to catch. Writing
+		// through it would panic and take the whole test binary down with it,
+		// reporting a crash where a named failure belongs.
+		if dep.Spec.Strategy.RollingUpdate == nil {
+			t.Fatal("first render has no strategy.rollingUpdate — nothing to alias, so this test cannot prove anything")
+		}
+		if dep.Spec.RevisionHistoryLimit == nil {
+			t.Fatal("first render has no revisionHistoryLimit — nothing to alias, so this test cannot prove anything")
+		}
+		if dep.Spec.ProgressDeadlineSeconds == nil {
+			t.Fatal("first render has no progressDeadlineSeconds — nothing to alias, so this test cannot prove anything")
+		}
 		dep.Spec.Strategy.RollingUpdate.MaxUnavailable = nil
 		*dep.Spec.RevisionHistoryLimit = 99
 		*dep.Spec.ProgressDeadlineSeconds = 42
@@ -227,8 +241,14 @@ func TestDeployment_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing
 	if got := dep.Spec.Strategy.RollingUpdate.MaxUnavailable.StrVal; got != "25%" {
 		t.Errorf("strategy.rollingUpdate.maxUnavailable = %q, want \"25%%\"", got)
 	}
+	if dep.Spec.RevisionHistoryLimit == nil {
+		t.Fatal("revisionHistoryLimit is gone — the first render's edit leaked back into the config")
+	}
 	if got := *dep.Spec.RevisionHistoryLimit; got != 4 {
 		t.Errorf("revisionHistoryLimit = %d, want 4", got)
+	}
+	if dep.Spec.ProgressDeadlineSeconds == nil {
+		t.Fatal("progressDeadlineSeconds is gone — the first render's edit leaked back into the config")
 	}
 	if got := *dep.Spec.ProgressDeadlineSeconds; got != 700 {
 		t.Errorf("progressDeadlineSeconds = %d, want 700", got)
