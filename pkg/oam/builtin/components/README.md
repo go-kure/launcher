@@ -770,6 +770,19 @@ so one shareable claim does not excuse a second `ReadWriteOnce`-only one on the
 same component. `ReadWriteOncePod` never appears beside another mode — the API
 forbids the combination and the parser rejects it — so it is always constraining.
 
+That guard is one helper shared with `webservice` and `worker`, so reading the
+whole set **changes what those two kinds build** for a pre-existing document
+whose claim declares `[ReadWriteOnce, ReadWriteMany]`: `replicas: 2` used to be
+a build error and now succeeds, and a single-replica document used to ship
+`strategy.type: Recreate` and now ships no strategy at all, leaving the
+apiserver's `RollingUpdate` default to apply. This is the one place in this
+change where an existing document's output moves. It is deliberate and
+one-directional — the correction only accepts documents that were being
+refused, and only stops forcing a strategy the author never wrote — and it is
+not scoped to the new kind, because scoping it would leave `webservice` and
+`worker` refusing volumes Kubernetes shares happily. Both halves are pinned per
+kind (`rwx_shared_helper_test.go`).
+
 ## Policy defaults & enforcement ordering
 
 A container's effective cpu/memory requests and limits are assembled in three
