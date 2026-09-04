@@ -512,6 +512,96 @@ func TestVolumeClaimTemplate_RejectedKeyOrderIsDeterministic(t *testing.T) {
 	}
 }
 
+// TestParseVolumeClaimSpec_NullIsOmission is the claim-level half of
+// TestParseStatefulSetSpec_NullIsOmission: every optional field this change adds
+// under a claim entry, authored as an explicit null. A lowering rule may emit
+// one, pkg/oam's emission validation accepts it, so the parser must read it as
+// omission rather than answering "must be an object/string, got <nil>" — which
+// would let a component satisfy the published schema and then fail conversion.
+func TestParseVolumeClaimSpec_NullIsOmission(t *testing.T) {
+	// Every optional leaf at once. `size` carries a real value because the
+	// entry needs one spelling of the storage request to be authored.
+	entry := map[string]any{
+		"name":                      "data",
+		"mountPath":                 "/data",
+		"size":                      "1Gi",
+		"selector":                  nil,
+		"resources":                 nil,
+		"volumeMode":                nil,
+		"dataSourceRef":             nil,
+		"volumeAttributesClassName": nil,
+	}
+	got, err := parseVolumeClaimTemplates(vctProps(entry))
+	if err != nil {
+		t.Fatalf("parseVolumeClaimTemplates(optional leaves null) error = %v, want them read as omitted", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d claim templates, want 1", len(got))
+	}
+	spec := got[0].Spec
+	if spec.Selector != nil {
+		t.Errorf("Selector = %v, want nil", spec.Selector)
+	}
+	if spec.VolumeMode != nil {
+		t.Errorf("VolumeMode = %v, want nil", spec.VolumeMode)
+	}
+	if spec.DataSourceRef != nil {
+		t.Errorf("DataSourceRef = %v, want nil", spec.DataSourceRef)
+	}
+	if spec.VolumeAttributesClassName != nil {
+		t.Errorf("VolumeAttributesClassName = %v, want nil", spec.VolumeAttributesClassName)
+	}
+
+	// Nested leaves, each under an authored parent — the case the whole-object
+	// nulls above cannot reach.
+	for _, tc := range []struct {
+		name  string
+		entry map[string]any
+	}{
+		{"resources.requests", map[string]any{"resources": map[string]any{"requests": nil}}},
+		{"resources.limits", map[string]any{"resources": map[string]any{"limits": nil}}},
+		{"selector.matchLabels", map[string]any{"selector": map[string]any{
+			"matchLabels": nil,
+			"matchExpressions": []any{map[string]any{
+				"key": "app", "operator": "Exists",
+			}},
+		}}},
+		{"dataSourceRef.apiGroup", map[string]any{"dataSourceRef": map[string]any{
+			"apiGroup": nil, "kind": "PersistentVolumeClaim", "name": "src",
+		}}},
+		{"dataSourceRef.namespace", map[string]any{"dataSourceRef": map[string]any{
+			"kind": "PersistentVolumeClaim", "name": "src", "namespace": nil,
+		}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := map[string]any{"name": "data", "mountPath": "/data", "size": "1Gi"}
+			for k, v := range tc.entry {
+				e[k] = v
+			}
+			if _, err := parseVolumeClaimTemplates(vctProps(e)); err != nil {
+				t.Fatalf("parseVolumeClaimTemplates(%s: null) error = %v, want it read as omitted", tc.name, err)
+			}
+		})
+	}
+
+	// The three entry-level string leaves this change routes through the
+	// checked path. They are required, so a null must surface as the
+	// requiredness error — never as a type error naming <nil>.
+	for _, key := range []string{"name", "size", "mountPath"} {
+		t.Run(key+" null is required, not a type error", func(t *testing.T) {
+			e := map[string]any{"name": "data", "mountPath": "/data", "size": "1Gi"}
+			e[key] = nil
+			_, err := parseVolumeClaimTemplates(vctProps(e))
+			if err == nil {
+				t.Fatalf("parseVolumeClaimTemplates(%s: null) = nil error, want the requiredness error", key)
+			}
+			if strings.Contains(err.Error(), "<nil>") {
+				t.Errorf("error = %q, want no type error naming <nil>", err.Error())
+			}
+		})
+	}
+}
+
 // TestParseVolumeClaimTemplates_NotAList: a present-but-not-a-list value used
 // to be indistinguishable from an absent key, so `volumeClaimTemplates: {}`
 // built a StatefulSet with no claim templates and reported nothing.

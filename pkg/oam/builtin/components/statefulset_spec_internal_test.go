@@ -121,6 +121,146 @@ func TestParseStatefulSetSpec_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestParseStatefulSetSpec_NullIsOmission covers every optional field this
+// change adds at the StatefulSet level. A lowering rule may emit a nil for any
+// of them: pkg/oam's emission validation accepts that (validatePropertyValue
+// returns early for a null under an optional property), so a component can
+// satisfy the published schema and still reach this parser with a nil. If the
+// parser answered "must be an object/string/integer, got <nil>", that component
+// would pass validation and then fail conversion.
+//
+// The property under test is therefore narrow and uniform: a null must never
+// produce a TYPE error. For the plainly optional fields it must parse clean and
+// leave the field unset; for a field that is required once its parent is
+// authored, the null must surface as the requiredness error instead — which is
+// what an author who wrote nothing there should be told.
+func TestParseStatefulSetSpec_NullIsOmission(t *testing.T) {
+	t.Run("optional fields parse clean and stay unset", func(t *testing.T) {
+		cfg, err := parseStatefulSetSpec(map[string]any{
+			"podManagementPolicy":                  nil,
+			"updateStrategy":                       nil,
+			"revisionHistoryLimit":                 nil,
+			"minReadySeconds":                      nil,
+			"persistentVolumeClaimRetentionPolicy": nil,
+			"ordinals":                             nil,
+		})
+		if err != nil {
+			t.Fatalf("parseStatefulSetSpec(all null) error = %v, want them read as omitted", err)
+		}
+		if cfg.PodManagementPolicy != "" {
+			t.Errorf("PodManagementPolicy = %q, want empty", cfg.PodManagementPolicy)
+		}
+		if cfg.UpdateStrategy != nil {
+			t.Errorf("UpdateStrategy = %v, want nil", cfg.UpdateStrategy)
+		}
+		if cfg.RevisionHistoryLimit != nil {
+			t.Errorf("RevisionHistoryLimit = %v, want nil", cfg.RevisionHistoryLimit)
+		}
+		if cfg.MinReadySeconds != nil {
+			t.Errorf("MinReadySeconds = %v, want nil", cfg.MinReadySeconds)
+		}
+		if cfg.PersistentVolumeClaimRetentionPolicy != nil {
+			t.Errorf("PersistentVolumeClaimRetentionPolicy = %v, want nil", cfg.PersistentVolumeClaimRetentionPolicy)
+		}
+		if cfg.Ordinals != nil {
+			t.Errorf("Ordinals = %v, want nil", cfg.Ordinals)
+		}
+	})
+
+	// Nested leaves, one per parser call site, each authored as null under a
+	// parent that IS authored — the case a whole-object null above cannot reach.
+	for _, tc := range []struct {
+		name  string
+		props map[string]any
+		want  string // "" = must parse clean
+	}{
+		{
+			// A null type with nothing to infer from leaves the strategy with
+			// no type at all, so the requiredness error is the right answer —
+			// and it is the one an author who wrote nothing there needs.
+			"updateStrategy.type alone",
+			map[string]any{"updateStrategy": map[string]any{"type": nil}},
+			"updateStrategy.type: required",
+		},
+		{
+			// The same null, but now rollingUpdate is authored, so the type is
+			// inferred exactly as it would be had the key been absent. This is
+			// the case that proves the null reached the inference branch rather
+			// than a type check.
+			"updateStrategy.type with rollingUpdate authored",
+			map[string]any{"updateStrategy": map[string]any{
+				"type":          nil,
+				"rollingUpdate": map[string]any{"partition": 2},
+			}},
+			"",
+		},
+		{
+			"updateStrategy.rollingUpdate",
+			map[string]any{"updateStrategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": nil}},
+			"",
+		},
+		{
+			"updateStrategy.rollingUpdate.partition",
+			map[string]any{"updateStrategy": map[string]any{
+				"type":          "RollingUpdate",
+				"rollingUpdate": map[string]any{"partition": nil},
+			}},
+			"",
+		},
+		{
+			"persistentVolumeClaimRetentionPolicy.whenDeleted",
+			map[string]any{"persistentVolumeClaimRetentionPolicy": map[string]any{"whenDeleted": nil}},
+			"",
+		},
+		{
+			"persistentVolumeClaimRetentionPolicy.whenScaled",
+			map[string]any{"persistentVolumeClaimRetentionPolicy": map[string]any{"whenScaled": nil}},
+			"",
+		},
+		{
+			// start is required once ordinals is authored, so the null must
+			// reach the requiredness error and not the type check.
+			"ordinals.start",
+			map[string]any{"ordinals": map[string]any{"start": nil}},
+			"ordinals.start: required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseStatefulSetSpec(tc.props)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("parseStatefulSetSpec(%s: null) error = %v, want it read as omitted", tc.name, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("parseStatefulSetSpec(%s: null) = nil error, want %q", tc.name, tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tc.want)
+			}
+		})
+	}
+
+	// The guard that makes the two cases above distinguishable: whatever the
+	// parser says about a null, it must never be the "got <nil>" type error.
+	for _, props := range []map[string]any{
+		{"podManagementPolicy": nil},
+		{"updateStrategy": nil},
+		{"revisionHistoryLimit": nil},
+		{"minReadySeconds": nil},
+		{"persistentVolumeClaimRetentionPolicy": nil},
+		{"ordinals": nil},
+		{"updateStrategy": map[string]any{"type": nil}},
+		{"updateStrategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": nil}},
+		{"ordinals": map[string]any{"start": nil}},
+	} {
+		if _, err := parseStatefulSetSpec(props); err != nil && strings.Contains(err.Error(), "<nil>") {
+			t.Errorf("parseStatefulSetSpec(%v) error = %q, want no type error naming <nil>", props, err)
+		}
+	}
+}
+
 // TestParseStatefulSetSpec_IntegerMaxUnavailable: the int-or-string field also
 // accepts a plain positive integer.
 func TestParseStatefulSetSpec_IntegerMaxUnavailable(t *testing.T) {

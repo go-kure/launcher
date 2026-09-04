@@ -83,7 +83,7 @@ type VolumeClaimSpecConfig struct {
 func parseVolumeClaimSpec(m map[string]any, label string, sizeAuthored bool) (VolumeClaimSpecConfig, error) {
 	var c VolumeClaimSpecConfig
 
-	if raw, present, err := parseObjectField(m, "selector", label+".selector"); err != nil {
+	if raw, present, err := optionalObject(m, "selector", label+".selector"); err != nil {
 		return VolumeClaimSpecConfig{}, err
 	} else if present {
 		sel, err := parseLabelSelector(raw, label+".selector")
@@ -93,7 +93,7 @@ func parseVolumeClaimSpec(m map[string]any, label string, sizeAuthored bool) (Vo
 		c.Selector = sel
 	}
 
-	if raw, present, err := parseObjectField(m, "resources", label+".resources"); err != nil {
+	if raw, present, err := optionalObject(m, "resources", label+".resources"); err != nil {
 		return VolumeClaimSpecConfig{}, err
 	} else if present {
 		if err := rejectUnknownKeys(raw, volumeClaimResourcesKeys, label+".resources"); err != nil {
@@ -107,7 +107,7 @@ func parseVolumeClaimSpec(m map[string]any, label string, sizeAuthored bool) (Vo
 			{"requests", &rr.Requests},
 			{"limits", &rr.Limits},
 		} {
-			sub, present, err := parseObjectField(raw, f.key, label+".resources."+f.key)
+			sub, present, err := optionalObject(raw, f.key, label+".resources."+f.key)
 			if err != nil {
 				return VolumeClaimSpecConfig{}, err
 			}
@@ -131,7 +131,7 @@ func parseVolumeClaimSpec(m map[string]any, label string, sizeAuthored bool) (Vo
 		c.Resources = rr
 	}
 
-	if v, present, err := parseStringField(m, "volumeMode", label+".volumeMode"); err != nil {
+	if v, present, err := optionalString(m, "volumeMode", label+".volumeMode"); err != nil {
 		return VolumeClaimSpecConfig{}, err
 	} else if present {
 		mode := corev1.PersistentVolumeMode(v)
@@ -153,7 +153,7 @@ func parseVolumeClaimSpec(m map[string]any, label string, sizeAuthored bool) (Vo
 		c.VolumeMode = &mode
 	}
 
-	if raw, present, err := parseObjectField(m, "dataSourceRef", label+".dataSourceRef"); err != nil {
+	if raw, present, err := optionalObject(m, "dataSourceRef", label+".dataSourceRef"); err != nil {
 		return VolumeClaimSpecConfig{}, err
 	} else if present {
 		ref, err := parseDataSourceRef(raw, label+".dataSourceRef")
@@ -163,7 +163,7 @@ func parseVolumeClaimSpec(m map[string]any, label string, sizeAuthored bool) (Vo
 		c.DataSourceRef = ref
 	}
 
-	if v, present, err := parseStringField(m, "volumeAttributesClassName", label+".volumeAttributesClassName"); err != nil {
+	if v, present, err := optionalString(m, "volumeAttributesClassName", label+".volumeAttributesClassName"); err != nil {
 		return VolumeClaimSpecConfig{}, err
 	} else if present {
 		if errs := validation.IsDNS1123Subdomain(v); len(errs) > 0 {
@@ -274,7 +274,7 @@ func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector
 		return nil, err
 	}
 	sel := &metav1.LabelSelector{}
-	if m, present, err := parseObjectField(raw, "matchLabels", label+".matchLabels"); err != nil {
+	if m, present, err := optionalObject(raw, "matchLabels", label+".matchLabels"); err != nil {
 		return nil, err
 	} else if present {
 		labels, err := parseLabelMap(m, label+".matchLabels")
@@ -297,7 +297,7 @@ func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector
 			if err != nil {
 				return nil, err
 			}
-			op, present, err := parseStringField(item, "operator", itemLabel+".operator")
+			op, present, err := optionalString(item, "operator", itemLabel+".operator")
 			if err != nil {
 				return nil, err
 			}
@@ -387,7 +387,7 @@ func parseDataSourceRef(raw map[string]any, label string) (*corev1.TypedObjectRe
 		{"kind", &ref.Kind},
 		{"name", &ref.Name},
 	} {
-		v, present, err := parseStringField(raw, f.key, label+"."+f.key)
+		v, present, err := optionalString(raw, f.key, label+"."+f.key)
 		if err != nil {
 			return nil, err
 		}
@@ -397,7 +397,7 @@ func parseDataSourceRef(raw map[string]any, label string) (*corev1.TypedObjectRe
 		*f.dst = v
 	}
 
-	apiGroup, present, err := parseStringField(raw, "apiGroup", label+".apiGroup")
+	apiGroup, present, err := optionalString(raw, "apiGroup", label+".apiGroup")
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +414,7 @@ func parseDataSourceRef(raw map[string]any, label string) (*corev1.TypedObjectRe
 		return nil, errors.Errorf("%s: kind must be PersistentVolumeClaim when apiGroup names the core group, got %q", label, ref.Kind)
 	}
 
-	if v, present, err := parseStringField(raw, "namespace", label+".namespace"); err != nil {
+	if v, present, err := optionalString(raw, "namespace", label+".namespace"); err != nil {
 		return nil, err
 	} else if present {
 		if errs := validation.IsDNS1123Label(v); len(errs) > 0 {
