@@ -459,6 +459,126 @@ func TestParseDeploymentSpec_Errors(t *testing.T) {
 	}
 }
 
+// TestParseDeploymentSpec_NullIsOmission pins null-as-absence across every
+// optional field this kind adds. A lowering rule may emit an unset optional as
+// an explicit null; pkg/oam's property validator accepts that (a null under an
+// optional property constrains nothing, and reads as absent for requiredness),
+// so a component can satisfy the published schema and must not then fail during
+// handler conversion.
+func TestParseDeploymentSpec_NullIsOmission(t *testing.T) {
+	t.Run("every optional field null", func(t *testing.T) {
+		cfg, err := parseDeploymentSpec(map[string]any{
+			"strategy":                nil,
+			"minReadySeconds":         nil,
+			"revisionHistoryLimit":    nil,
+			"paused":                  nil,
+			"progressDeadlineSeconds": nil,
+		})
+		if err != nil {
+			t.Fatalf("parseDeploymentSpec: %v", err)
+		}
+		if cfg.Strategy != nil || cfg.MinReadySeconds != nil || cfg.RevisionHistoryLimit != nil ||
+			cfg.Paused != nil || cfg.ProgressDeadlineSeconds != nil {
+			t.Errorf("an all-null document produced %+v, want every field unset", cfg)
+		}
+	})
+
+	// A typed nil is what a Go-constructed lowering rule produces when it
+	// assigns a nil map or slice into an `any`. It is not `== nil`, so it needs
+	// the reflection arm the property validator also uses; without it the
+	// authored-vs-emitted disagreement survives in this narrower shape.
+	t.Run("typed nil map", func(t *testing.T) {
+		cfg, err := parseDeploymentSpec(map[string]any{"strategy": map[string]any(nil)})
+		if err != nil {
+			t.Fatalf("parseDeploymentSpec with a typed nil strategy: %v", err)
+		}
+		if cfg.Strategy != nil {
+			t.Errorf("Strategy = %+v, want nil", cfg.Strategy)
+		}
+	})
+
+	t.Run("rollingUpdate null leaves the API defaults", func(t *testing.T) {
+		cfg, err := parseDeploymentSpec(map[string]any{
+			"strategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": nil},
+		})
+		if err != nil {
+			t.Fatalf("parseDeploymentSpec: %v", err)
+		}
+		if cfg.Strategy == nil || cfg.Strategy.Type != appsv1.RollingUpdateDeploymentStrategyType {
+			t.Fatalf("Strategy = %+v, want type RollingUpdate", cfg.Strategy)
+		}
+		if cfg.Strategy.RollingUpdate != nil {
+			t.Errorf("Strategy.RollingUpdate = %+v, want nil so the API defaults apply", cfg.Strategy.RollingUpdate)
+		}
+	})
+
+	t.Run("both knobs null", func(t *testing.T) {
+		cfg, err := parseDeploymentSpec(map[string]any{
+			"strategy": map[string]any{
+				"type":          "RollingUpdate",
+				"rollingUpdate": map[string]any{"maxSurge": nil, "maxUnavailable": nil},
+			},
+		})
+		if err != nil {
+			t.Fatalf("parseDeploymentSpec: %v", err)
+		}
+		ru := cfg.Strategy.RollingUpdate
+		if ru == nil {
+			t.Fatal("Strategy.RollingUpdate is nil, want the authored (if empty) object")
+		}
+		if ru.MaxSurge != nil || ru.MaxUnavailable != nil {
+			t.Errorf("RollingUpdate = %+v, want both knobs unset — a null must not read as an authored zero, which would trip the both-zero rule", ru)
+		}
+	})
+
+	// Where a null lands on a field that is required once its parent is
+	// authored, it must surface as the requiredness error, not a type error.
+	// This kind requires strategy.type unconditionally, so there is no
+	// inference case here as there is on the statefulset kind.
+	t.Run("strategy.type null is the requiredness error", func(t *testing.T) {
+		_, err := parseDeploymentSpec(map[string]any{
+			"strategy": map[string]any{"type": nil, "rollingUpdate": map[string]any{"maxSurge": 1}},
+		})
+		if err == nil {
+			t.Fatal("expected strategy.type to be reported as required")
+		}
+		if !strings.Contains(err.Error(), "strategy.type: required") {
+			t.Errorf("error = %q, want it to name strategy.type as required", err.Error())
+		}
+	})
+
+	// A forbidden key is not an optional property, so naming it — even as a
+	// null — still earns the explanatory refusal rather than silence.
+	t.Run("a rejected key named as null is still rejected", func(t *testing.T) {
+		for key := range deploymentSpecRejectedKeys {
+			_, err := parseDeploymentSpec(map[string]any{key: nil})
+			if err == nil {
+				t.Errorf("%s: null, want the not-authorable refusal, got nil", key)
+			}
+		}
+	})
+
+	// No error produced along any of these paths may render the nil itself:
+	// "got <nil>" is the signature of a null that reached a type check.
+	t.Run("no error renders the nil", func(t *testing.T) {
+		docs := []map[string]any{
+			{"strategy": nil},
+			{"minReadySeconds": nil},
+			{"revisionHistoryLimit": nil},
+			{"paused": nil},
+			{"progressDeadlineSeconds": nil},
+			{"strategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": nil}},
+			{"strategy": map[string]any{"type": nil}},
+			{"strategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": map[string]any{"maxSurge": nil}}},
+		}
+		for i, doc := range docs {
+			if _, err := parseDeploymentSpec(doc); err != nil && strings.Contains(err.Error(), "<nil>") {
+				t.Errorf("docs[%d] = %v produced %q, which renders the nil", i, doc, err.Error())
+			}
+		}
+	})
+}
+
 // TestIntOrPercentIsZero pins the percentage branch. intstr.IntValue() returns 0
 // for any string it cannot Atoi, "25%" included, so without that branch every
 // percentage would read as zero and the both-zero rule would fire on documents
