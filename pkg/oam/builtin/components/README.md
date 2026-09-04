@@ -29,6 +29,7 @@ Reference.
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). |
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
+| `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: everything `worker` has plus the rest of `DeploymentSpec`. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below; `podFailurePolicy` not yet projected). |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
@@ -37,12 +38,13 @@ Reference.
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. |
 
-The five workload kinds emit their per-component ServiceAccount only when the
+The six workload kinds emit their per-component ServiceAccount only when the
 component does not author `serviceAccountName` (see "Pod-level properties" below).
 
 ## Common config
 
-Most workload types (`webservice`, `worker`, `statefulset`, `daemonset`, `cronjob`)
+Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
+`daemonset`, `cronjob`)
 share these fields, projected directly onto real `corev1` types (same
 structural pattern as `ProbeConfig` holding `*corev1.Probe`) rather than a
 hand-rolled parallel schema: `image` (validated — no untagged/`latest`), `env`
@@ -436,7 +438,7 @@ doc comment states only that the container runtime's default applies when
 unset, and real admission enforces no path shape for it, so this schema does
 not invent a stricter constraint upstream itself does not have; a
 present-but-non-string value, e.g. `workingDir: 123`, is rejected rather than
-silently treated as absent, in all five kind handlers — this is a type check,
+silently treated as absent, in all six kind handlers — this is a type check,
 distinct from the content-validation question the previous paragraph answers),
 `volumes` (the `volumes` property itself, if authored, must be an array — a
 present-but-non-array value, e.g. `volumes: {name: data}`, is rejected
@@ -546,7 +548,7 @@ and `affinity`.
 
 ### Pod-level properties
 
-The five kind components also share one pod-level property surface
+The six kind components also share one pod-level property surface
 (go-kure/launcher#342, ADR-036 L1), parsed by `parsePodSpec` (`podspec.go`)
 straight into a `corev1.PodSpec` and rendered by the shared `buildPodSpec`,
 which every kind assigns to its pod template. Property names are the
@@ -570,7 +572,7 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 | `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it. | additive |
 | `dnsPolicy`, `dnsConfig` | enum, object | `ClusterFirstWithHostNet`/`ClusterFirst`/`Default`/`None`; `dnsConfig` = `nameservers` (≤3 plain IPv4/IPv6 literals — a zone-scoped address such as `fe80::1%eth0` is rejected, matching upstream's `net.ParseIP`-based check, which has no notion of a zone), `searches` (≤32 entries whose joined length, separators included, is ≤2048 characters — the `resolv.conf` search-line limit, so 32 individually valid domains can still be refused), `options[]{name,value}`. `None` requires at least one nameserver. | additive |
 | `nodeSelector`, `nodeName`, `schedulerName`, `priorityClassName`, `preemptionPolicy`, `runtimeClassName`, `schedulingGates[]{name}`, `schedulingGroup{podGroupName}` | scheduling | Placement fields; gate names must be unique. `nodeName` is a DNS-1123 subdomain (a Node is an ordinary object, so an invalid value is refused at admission, not merely unmatched). `schedulerName` is deliberately *not* validated: upstream constrains its form nowhere, so an arbitrary string is a legal document and rejecting one here would refuse work a cluster accepts. | additive |
-| `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all five kinds; `NoopPolicy` denies all three). | additive |
+| `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all six kinds; `NoopPolicy` denies all three). | additive |
 | `shareProcessNamespace` | bool | Mutually exclusive with `hostPID: true`. | additive |
 | `hostname`, `subdomain`, `setHostnameAsFQDN`, `hostnameOverride`, `hostAliases[]{ip,hostnames}` | naming | `hostname`/`subdomain` are DNS-1123 labels; `hostnameOverride` is a ≤64-char subdomain and cannot combine with `hostNetwork` or `setHostnameAsFQDN`. `hostAliases[].ip` is a plain IPv4/IPv6 literal, zone suffixes rejected as for `dnsConfig.nameservers`. | additive |
 | `podSecurityContext` | object | The full `corev1.PodSecurityContext` field set (`runAsUser`/`runAsGroup`/`runAsNonRoot`/`fsGroup`/`fsGroupChangePolicy`/`supplementalGroups`/`supplementalGroupsPolicy`/`sysctls`/`seLinuxOptions`/`seLinuxChangePolicy`/`seccompProfile`/`appArmorProfile`/`windowsOptions`), closed and validated like the container `securityContext`. `sysctls[].name` must match the sysctl grammar (≤253 characters of dot- or slash-separated lowercase alphanumeric segments) and be unique within the list. `windowsOptions.hostProcess: true` additionally requires `hostNetwork: true`, which upstream demands of any pod containing HostProcess containers. The `runAsUser: 0` / `runAsNonRoot: true` contradiction is judged per container on the *effective* values once the containers are assembled, not on this object alone — a container-level `runAsUser` overrides the pod-level one, so the pair is a valid document when every container names a non-root UID, and the deferred check also catches a container-level `runAsUser: 0` under a pod-level `runAsNonRoot`. **Partly policy-gated**: `windowsOptions.hostProcess: true` is rejected unless `AllowPrivileged()` allows it (a HostProcess pod runs with the node's own privileges, and upstream forces every container in it to be HostProcess too); every other field has no policy hook. | additive |
@@ -620,7 +622,7 @@ every `initContainers`/`sidecars` entry (go-kure/launcher#312's shared
 `enforceExtraContainer` helper), not just the main container.
 
 The pod-level surface carries two policy checks of its own, both called from
-all five kinds' `ApplyPolicy` next to `enforceHostNamespaces`:
+all six kinds' `ApplyPolicy` next to `enforceHostNamespaces`:
 `enforcePodResources` measures `podResources`' cpu and memory requests and
 limits against `MaxCPU()`/`MaxMemory()` — without it an author could keep the
 container under the maximum and put the oversized request on the pod, which
@@ -637,7 +639,7 @@ A `volumes` entry sourced from `hostPath` is rejected unless the environment
 policy's `AllowHostPathVolumes()` allows it (`enforce.go`'s
 `enforceHostPathVolumes`, the same reused-mechanism shape as
 `enforcePrivileged` above); like `enforcePrivileged`, it is called from all
-five kind components' `ApplyPolicy`, not just one — a hostPath volume mounts
+six kind components' `ApplyPolicy`, not just one — a hostPath volume mounts
 an arbitrary path from the node's own filesystem into the Pod, so an
 unenforced policy denial here is a container-escape-adjacent gap, not merely
 a style one.
@@ -664,6 +666,52 @@ every built-in call site passes `false` today. Deciding which of these fields
 should be platform-reserved (rejecting any authored value via
 `PropertySchema.PlatformReserved`/`enforcePlatformReserved`) is a consumer-side
 policy choice, not something this shared schema hardcodes.
+
+### Deployment-level properties (`deployment` kind)
+
+The `deployment` component is the kind-named projection of `appsv1.Deployment`
+(go-kure/launcher#343, ADR-036 L1), sitting alongside the two role-named kinds
+that produce the same Kubernetes kind: `webservice` (Deployment + Service) and
+`worker` (Deployment, no Service). Everything above — the container-level
+surface and the pod-level surface — applies to it unchanged; what it adds is
+the rest of `DeploymentSpec`, parsed by `parseDeploymentSpec`
+(`deployment_spec.go`) into real `appsv1` types and written by its `apply` onto
+the built object.
+
+The three kinds are not layered and one is not a superset of the others.
+`deployment` deliberately publishes **no `port`** (and so emits no Service),
+**no `affinity` shorthand** and **no default topology-spread constraint** —
+none of those is a `DeploymentSpec` field, and a kind named after the API kind
+should project the API kind rather than launcher's opinions about it. A
+workload that wants a Service uses `webservice`, or an `expose`/`ingress`/
+`httproute` trait over a `deployment`. This is the reversible direction: adding
+a property later is additive, removing one is breaking.
+
+| Property | Type | Effect | Compatibility |
+|----------|------|--------|---------------|
+| `strategy` | object | `type` (**required when `strategy` is authored**) is `Recreate` or `RollingUpdate`; `rollingUpdate` may only accompany `RollingUpdate`, matching `ValidateDeploymentStrategy`, which marks it Forbidden under `Recreate`. Omitting `strategy` entirely writes nothing, leaving apiserver defaulting to supply `RollingUpdate` with 25%/25%. | additive |
+| `strategy.rollingUpdate.maxUnavailable` | int ≥ 0 or percentage string | Same form `ValidatePositiveIntOrPercent` accepts: a non-negative integer, or a `^[0-9]+%$` string — so `+50%` is rejected, as upstream rejects it. Capped at 100%, matching the `IsNotMoreThan100Percent` call upstream makes on this field. | additive |
+| `strategy.rollingUpdate.maxSurge` | int ≥ 0 or percentage string | Same form, **not** capped at 100%: `ValidateRollingUpdateDeployment` calls `IsNotMoreThan100Percent` on `maxUnavailable` only, so a surge above 100% is a legal Deployment and is accepted here. This is one of two places the Deployment contract differs from the DaemonSet one, which is why the two parsers are separate functions rather than one shared helper. | additive |
+| `strategy.rollingUpdate` (both knobs zero) | — | Rejected: `ValidateRollingUpdateDeployment` refuses `maxUnavailable: 0` together with `maxSurge: 0`, a pair that can make no progress. It rejects **only** that pair — unlike the DaemonSet rule, which also rejects both being non-zero. `SetDefaults_Deployment` guards each field with its own `== nil` check, so authoring one knob does not suppress the other's 25% default and a lone authored zero is always legal. | additive |
+| `minReadySeconds` | int ≥ 0 | Seconds a new pod must be ready before it counts as available. | additive |
+| `revisionHistoryLimit` | int ≥ 0 | Old ReplicaSets retained. `0` is meaningful (retain none) and distinguishable from unset. | additive |
+| `paused` | bool | Pauses rollouts of the Deployment. | additive |
+| `progressDeadlineSeconds` | int ≥ 0 | Must be **greater than** the effective `minReadySeconds`, the cross-field rule `ValidateDeploymentSpec` applies. The error names whether that value was authored or is the API default 0, since `progressDeadlineSeconds: 0` is rejected by a rule about a field the document may never mention. | additive |
+| `selector`, `template` | — | Not authorable, and rejected with a message saying so rather than silently ignored. The selector is builder-managed (`app: <component>`) and immutable once the object exists; the pod template is projected from the component's own container and pod-level properties. | additive |
+
+Every field above is presence-gated: a document that authors none of them
+produces the same object the builder produced before, so the apiserver's own
+defaults still apply rather than being frozen into the manifest.
+
+**Non-RWX volumes.** A `ReadWriteOnce` (or `ReadWriteOncePod`) claim cannot be
+held by an outgoing and an incoming pod at once, so the handler requires
+`replicas: 1` and forces `strategy.type: Recreate`. Kubernetes rejects neither
+combination — the second pod simply hangs unschedulable or stuck attaching — so
+this is a build-time guard, not a mirror of an apiserver rule. Where `worker`
+substitutes `Recreate` silently (it has no `strategy` property to contradict),
+`deployment` **rejects** an authored `strategy.type: RollingUpdate` in that
+situation instead of overwriting it, so a document never ships a strategy its
+author did not write.
 
 ## Policy defaults & enforcement ordering
 
@@ -694,9 +742,9 @@ came from the intrinsic tier specifically (absent from the authored/policy-
 defaulted value, present only after the intrinsic fallback), the error names
 it as a "generated default" so the mismatch isn't mysterious.
 
-This three-tier effective-value enforcement applies to the five kind
+This three-tier effective-value enforcement applies to the six kind
 components that call `buildResourceRequirements` on their main container
-(`webservice`, `worker`, `cronjob`, `statefulset`, `daemonset`).
+(`webservice`, `worker`, `deployment`, `cronjob`, `statefulset`, `daemonset`).
 **`postgresql` is exempt**: `createCluster` forwards `c.Resources` straight
 into `kurecnpg.ResourceOptions` behind a `!= ""` guard and never calls
 `buildResourceRequirements`, so it has no intrinsic tier for its existing
@@ -708,8 +756,9 @@ and sidecar builders), and `ApplyPolicy` enforces them too (go-kure/launcher#312
 each entry's resources, image registry, `securityContext.privileged`, and
 `securityContext.capabilities.add` are checked against the same policy
 methods the main container uses, via the shared `enforceExtraContainer`
-helper (`enforce.go`). All five kind components enforce their
-`initContainers`; only `webservice`, `worker`, and `statefulset` have a
+helper (`enforce.go`). All six kind components enforce their
+`initContainers`; only `webservice`, `worker`, `deployment`, and
+`statefulset` have a
 `sidecars` schema key at all (`cronjob`/`daemonset` have no sidecars support,
 per "Per-type highlights" below) so only those three enforce a sidecars
 loop. Errors name the authored list position and container, e.g.
@@ -732,6 +781,11 @@ this trio verbatim rather than duplicating it.
   the container port and the Service port), letting a downstream platform synthesize generic
   app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
   Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
+- **deployment** — the kind-named Deployment (see "Deployment-level
+  properties" above): `worker`'s surface plus `strategy`, `minReadySeconds`,
+  `revisionHistoryLimit`, `paused` and `progressDeadlineSeconds`. No `port`,
+  no `affinity` shorthand, no default topology spread; declares no endpoint
+  and emits no Service.
 - **statefulset** — `serviceName` (headless) and `volumeClaimTemplates`
   (`name`, `mountPath`, `size`, `storageClass`, `accessModes`, plus the rest of
   `corev1.PersistentVolumeClaimSpec`). The StatefulSetSpec-level and

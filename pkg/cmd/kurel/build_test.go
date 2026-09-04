@@ -382,6 +382,31 @@ func TestNewBuiltinTransformer_Registered(t *testing.T) {
 	}
 }
 
+// TestBuiltinComponentHandlers_RegisteredTypes pins the set of component type
+// strings the CLI dispatches. The schema-parity and description tests below
+// iterate this map, so they say nothing about which entries it contains: a
+// handler dropped from the registry leaves them iterating one fewer entry and
+// still green, while every document using that type stops building. Each name
+// is also the user-facing contract published in the component docs, so a
+// rename is a document-format change, not an internal one.
+func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
+	want := []string{
+		"crd", "cronjob", "daemonset", "deployment", "helmchart", "manifests",
+		"oci", "passthrough", "postgresql", "statefulset", "webservice", "worker",
+	}
+	got := make([]string, 0, len(builtinComponentHandlers()))
+	for name, h := range builtinComponentHandlers() {
+		got = append(got, name)
+		if !h.CanHandle(name) {
+			t.Errorf("handler registered under %q does not report CanHandle(%q)", name, name)
+		}
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("builtinComponentHandlers() registers %v, want %v", got, want)
+	}
+}
+
 // TestNewBuiltinTransformer_HandlerSchemaParity asserts that every registered
 // built-in component and trait handler exposes a PropertySchema (via the optional
 // oam.PropertySchemaProvider interface). It iterates the registration maps

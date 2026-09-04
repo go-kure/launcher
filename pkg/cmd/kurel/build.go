@@ -240,6 +240,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 	return map[string]oam.ComponentHandler{
 		"webservice":  &components.WebserviceHandler{},
 		"worker":      &components.WorkerHandler{},
+		"deployment":  &components.DeploymentHandler{},
 		"cronjob":     &components.CronjobHandler{},
 		"daemonset":   &components.DaemonsetHandler{},
 		"statefulset": &components.StatefulsetHandler{},

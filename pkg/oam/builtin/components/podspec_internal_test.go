@@ -103,6 +103,7 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 18, statefulSetSpecPropertyKeys, false},
 		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 14, daemonSetSpecPropertyKeys, false},
 		{"cronjob", (&CronjobHandler{}).PropertySchema(), 26, nil, true},
+		{"deployment", (&DeploymentHandler{}).PropertySchema(), 14, deploymentSpecPropertyKeys, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

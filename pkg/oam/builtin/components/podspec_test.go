@@ -14,7 +14,7 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// workloadKinds enumerates the five kinds that share the pod-level property
+// workloadKinds enumerates the six kinds that share the pod-level property
 // surface, with the minimum properties each needs to generate.
 var workloadKinds = []struct {
 	name    string
@@ -26,6 +26,7 @@ var workloadKinds = []struct {
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}},
+	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 }
 
 func withProps(base map[string]any, extra map[string]any) map[string]any {

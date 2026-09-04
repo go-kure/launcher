@@ -272,7 +272,7 @@ func schemaAppArmorProfile(scope string) oam.PropertySchema {
 
 // schemaPodSpec describes the pod-level properties shared by every container
 // workload kind (see parsePodSpec in podspec.go). A map, like schemaJobSpec,
-// because all five kinds must expose the identical set — TestPodSpecSchema
+// because all six kinds must expose the identical set — TestPodSpecSchema
 // pins its key set to podSpecPropertyKeys. Every key, nested or not, carries a
 // Description; enum-valued fields declare their Enum so schema validation
 // rejects a bad value before the parser does.
