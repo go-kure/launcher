@@ -304,8 +304,85 @@ func TestDeploymentHandler_NonRWXRejectsMultipleReplicas(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for replicas=2 alongside a non-RWX PVC")
 	}
-	if !strings.Contains(err.Error(), "requires replicas=1") {
+	if !strings.Contains(err.Error(), "at most one replica") {
 		t.Errorf("error = %q, want it to name the replica constraint", err.Error())
+	}
+}
+
+// TestDeploymentHandler_ReplicasIsValidated pins this kind's checked reading of
+// `replicas`. The shared parseReplicas helper the other kinds use runs the value
+// through toInt32 and falls back to the default when that fails, so a string
+// silently becomes 1 and a negative reaches the apiserver; deployment refuses
+// both at build time instead.
+func TestDeploymentHandler_ReplicasIsValidated(t *testing.T) {
+	cases := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"string", "3", "replicas: must be an integer, got string"},
+		{"boolean", true, "replicas: must be an integer, got bool"},
+		{"negative", -1, "replicas: must be >= 0, got -1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &components.DeploymentHandler{}
+			_, err := h.ToApplicationConfig(&oam.Component{
+				Name: "app",
+				Type: "deployment",
+				Properties: map[string]any{
+					"image":    "nginx:1.27",
+					"replicas": tc.value,
+				},
+			}, "default")
+			if err == nil {
+				t.Fatalf("ToApplicationConfig(replicas: %v) = nil error, want one containing %q", tc.value, tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
+// TestDeploymentHandler_ReplicasRoundTrip covers the accepting side of the
+// guard above, including the unauthored default, so a parser that rejected
+// every replicas value could not pass.
+func TestDeploymentHandler_ReplicasRoundTrip(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]any
+		want  int32
+	}{
+		{"unauthored defaults to 1", map[string]any{}, 1},
+		{"authored", map[string]any{"replicas": 3}, 3},
+		{"scale to zero", map[string]any{"replicas": 0}, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := map[string]any{"image": "nginx:1.27"}
+			for k, v := range tc.props {
+				props[k] = v
+			}
+			dep, _ := generateDeployment(t, "app", props)
+			if dep.Spec.Replicas == nil {
+				t.Fatal("Spec.Replicas = nil, want a value")
+			}
+			if *dep.Spec.Replicas != tc.want {
+				t.Errorf("Spec.Replicas = %d, want %d", *dep.Spec.Replicas, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeploymentHandler_NonRWXAllowsZeroReplicas pins the "at most one" reading
+// of the guard: scale-to-zero holds the ReadWriteOnce claim in no pod at all,
+// so it is legal. Without this, tightening the guard to "exactly one" would
+// leave the suite green.
+func TestDeploymentHandler_NonRWXAllowsZeroReplicas(t *testing.T) {
+	cfg := deploymentConfig(t, "app", nonRWXVolumeProps(map[string]any{"replicas": 0}))
+	if _, err := cfg.Generate(stack.NewApplication("app", "default", cfg)); err != nil {
+		t.Fatalf("Generate() error = %v, want replicas=0 accepted alongside a non-RWX PVC", err)
 	}
 }
 

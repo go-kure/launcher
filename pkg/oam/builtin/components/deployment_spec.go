@@ -117,34 +117,69 @@ func parseDeploymentSpec(props map[string]any) (DeploymentSpecConfig, error) {
 		if v < 0 {
 			return DeploymentSpecConfig{}, errors.Errorf("progressDeadlineSeconds: must be >= 0, got %d", v)
 		}
-		// ValidateDeploymentSpec compares progressDeadlineSeconds against the
-		// EFFECTIVE minReadySeconds, which is 0 when the document leaves it
-		// out (DeploymentSpec.MinReadySeconds is a plain int32, not a
-		// pointer, so there is no unset state at the API). Checking the same
-		// effective value here turns an apply-time rejection into a build-time
-		// one, and makes `progressDeadlineSeconds: 0` alone an error rather
-		// than a document that looks accepted.
-		var minReady int32
-		if cfg.MinReadySeconds != nil {
-			minReady = *cfg.MinReadySeconds
-		}
-		if v <= minReady {
-			return DeploymentSpecConfig{}, errors.Errorf("progressDeadlineSeconds: must be greater than minReadySeconds (%s), got %d", describeMinReadySeconds(cfg.MinReadySeconds), v)
-		}
 		cfg.ProgressDeadlineSeconds = &v
+	}
+
+	// ValidateDeploymentSpec compares the two as EFFECTIVE values, and BOTH
+	// halves have an API default the document may be leaving it to:
+	// DeploymentSpec.MinReadySeconds is a plain int32, so an omitted one is 0
+	// with no unset state at the API, and ProgressDeadlineSeconds is a pointer
+	// the apiserver defaults to 600 (k8s.io/api/apps/v1/types.go, the
+	// ProgressDeadlineSeconds field doc: "Defaults to 600s.").
+	//
+	// Comparing the effective pair turns an apply-time rejection into a
+	// build-time one in both directions, which is why this check sits outside
+	// the `present` branch above rather than inside it. `progressDeadlineSeconds: 0`
+	// alone is an error against the defaulted minReadySeconds 0, and
+	// `minReadySeconds: 600` alone is equally an error — against the defaulted
+	// deadline 600 — even though that document mentions no deadline at all.
+	// Checking only the authored half would accept the second and let the
+	// apiserver refuse it later.
+	if effectiveProgressDeadlineSeconds(cfg.ProgressDeadlineSeconds) <= effectiveMinReadySeconds(cfg.MinReadySeconds) {
+		return DeploymentSpecConfig{}, errors.Errorf(
+			"progressDeadlineSeconds (%s) must be greater than minReadySeconds (%s)",
+			describeProgressDeadlineSeconds(cfg.ProgressDeadlineSeconds),
+			describeMinReadySeconds(cfg.MinReadySeconds))
 	}
 
 	return cfg, nil
 }
 
-// describeMinReadySeconds renders the other half of the
-// progressDeadlineSeconds comparison, saying explicitly when the value came
-// from the API default rather than from the document. An unauthored
-// minReadySeconds is the half the author cannot see in their own YAML, and
-// naming it is the difference between "why is this rejected" and a fix.
+// defaultProgressDeadlineSeconds is what the apiserver writes when the document
+// omits progressDeadlineSeconds — see the field doc quoted above. Named rather
+// than inlined because it is upstream's number, not launcher's, and a reader
+// checking it needs to know which.
+const defaultProgressDeadlineSeconds = 600
+
+func effectiveMinReadySeconds(v *int32) int32 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
+func effectiveProgressDeadlineSeconds(v *int32) int32 {
+	if v == nil {
+		return defaultProgressDeadlineSeconds
+	}
+	return *v
+}
+
+// describeMinReadySeconds and describeProgressDeadlineSeconds render the two
+// halves of the comparison, saying explicitly when a value came from the API
+// default rather than from the document. An unauthored half is the one the
+// author cannot see in their own YAML, and naming it is the difference between
+// "why is this rejected" and a fix.
 func describeMinReadySeconds(v *int32) string {
 	if v == nil {
 		return "unset, so the API default 0 applies"
+	}
+	return "authored as " + strconv.FormatInt(int64(*v), 10)
+}
+
+func describeProgressDeadlineSeconds(v *int32) string {
+	if v == nil {
+		return "unset, so the API default " + strconv.Itoa(defaultProgressDeadlineSeconds) + " applies"
 	}
 	return "authored as " + strconv.FormatInt(int64(*v), 10)
 }
@@ -351,7 +386,7 @@ func schemaDeploymentSpec() map[string]oam.PropertySchema {
 		},
 		"minReadySeconds": {
 			Type:        oam.PropertyTypeInteger,
-			Description: "Seconds a new pod must be ready without any container crashing before it counts as available. Must be >= 0; the API default is 0.",
+			Description: "Seconds a new pod must be ready without any container crashing before it counts as available. Must be >= 0; the API default is 0. Must stay below the effective progressDeadlineSeconds, whose own API default is 600.",
 		},
 		"revisionHistoryLimit": {
 			Type:        oam.PropertyTypeInteger,
@@ -363,7 +398,7 @@ func schemaDeploymentSpec() map[string]oam.PropertySchema {
 		},
 		"progressDeadlineSeconds": {
 			Type:        oam.PropertyTypeInteger,
-			Description: "Seconds the deployment may make no progress before it is marked failed with ProgressDeadlineExceeded. Must be >= 0 and strictly greater than the effective minReadySeconds; the API default is 600.",
+			Description: "Seconds the deployment may make no progress before it is marked failed with ProgressDeadlineExceeded. Must be >= 0 and strictly greater than the effective minReadySeconds. The API default is 600, and that default takes part in the comparison: authoring minReadySeconds >= 600 without also raising this is refused, because the apiserver would refuse the defaulted pair.",
 		},
 	}
 }

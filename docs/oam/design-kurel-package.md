@@ -112,7 +112,7 @@ Ported from the downstream runtime. Each type maps to a `ComponentHandler` imple
 |---|---|
 | `webservice` | Long-running HTTP service: Deployment + Service |
 | `worker` | Long-running background worker: Deployment (no Service) |
-| `deployment` | Kind-named Deployment: the `worker` surface plus the rest of `DeploymentSpec` (`strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused`, `progressDeadlineSeconds`). No `port` and no Service — use `webservice`, or an `expose`/`ingress`/`httproute` trait over it. |
+| `deployment` | Kind-named Deployment: the shared container-level and pod-level surface plus the rest of `DeploymentSpec` (`strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused`, `progressDeadlineSeconds`). Not a superset of `worker`, which publishes `topologySpread` and an `affinity` shorthand that `deployment` does not. No `port` and no Service — use `webservice`, or an `expose`/`ingress`/`httproute` trait over it. |
 | `cronjob` | Scheduled task: CronJob |
 | `postgresql` | PostgreSQL instance (CNPG) |
 | `helmchart` | FluxCD HelmRelease for third-party charts. Supports inline source creation (`source.url`) and reference to existing source CRs (`source.name`). Multiple components sharing the same source key share a single source CR (first component wins). For HelmRepository the key is the URL; for OCIRepository the key is URL+version, so two OCI components with the same URL but different versions each get their own source CR. |

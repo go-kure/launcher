@@ -257,6 +257,30 @@ func TestParseDeploymentSpec_MaxSurgeIsNotCappedAt100(t *testing.T) {
 	}
 }
 
+// TestParseDeploymentSpec_MinReadySecondsBoundary pins both sides of the
+// defaulted-deadline comparison at the boundary. 599 is accepted because the
+// API default 600 still exceeds it; 600 is not, and the rejection is covered in
+// the error table. Without the accepting half a guard that simply refused every
+// authored minReadySeconds would leave the suite green.
+func TestParseDeploymentSpec_MinReadySecondsBoundary(t *testing.T) {
+	cfg, err := parseDeploymentSpec(map[string]any{"minReadySeconds": 599})
+	if err != nil {
+		t.Fatalf("parseDeploymentSpec(minReadySeconds: 599) error = %v, want it accepted below the API default 600", err)
+	}
+	if cfg.MinReadySeconds == nil || *cfg.MinReadySeconds != 599 {
+		t.Errorf("MinReadySeconds = %v, want 599", cfg.MinReadySeconds)
+	}
+	if cfg.ProgressDeadlineSeconds != nil {
+		t.Errorf("ProgressDeadlineSeconds = %v, want nil: the default is upstream's to supply, not launcher's to write", cfg.ProgressDeadlineSeconds)
+	}
+
+	// The same minReadySeconds becomes legal once the deadline is raised with
+	// it, which is what makes the rule a comparison rather than a ceiling.
+	if _, err := parseDeploymentSpec(map[string]any{"minReadySeconds": 900, "progressDeadlineSeconds": 901}); err != nil {
+		t.Errorf("parseDeploymentSpec(minReadySeconds: 900, progressDeadlineSeconds: 901) error = %v, want it accepted", err)
+	}
+}
+
 // TestParseDeploymentSpec_Errors covers every rejection the parser makes.
 func TestParseDeploymentSpec_Errors(t *testing.T) {
 	cases := []struct {
@@ -374,6 +398,52 @@ func TestParseDeploymentSpec_Errors(t *testing.T) {
 			"progressDeadlineSeconds not above the authored minReadySeconds",
 			map[string]any{"minReadySeconds": 30, "progressDeadlineSeconds": 30},
 			"must be greater than minReadySeconds (authored as 30)",
+		},
+		{
+			// The document mentions no deadline at all, so the failing
+			// comparison is against the API default the apiserver will supply.
+			// The message has to say so or the author cannot see the conflict.
+			"authored minReadySeconds meets the defaulted deadline",
+			map[string]any{"minReadySeconds": 600},
+			"progressDeadlineSeconds (unset, so the API default 600 applies) must be greater than minReadySeconds (authored as 600)",
+		},
+		{
+			"authored minReadySeconds above the defaulted deadline",
+			map[string]any{"minReadySeconds": 900},
+			"progressDeadlineSeconds (unset, so the API default 600 applies) must be greater than minReadySeconds (authored as 900)",
+		},
+		{
+			"strategy is not an object",
+			map[string]any{"strategy": "RollingUpdate"},
+			"strategy: must be an object, got string",
+		},
+		{
+			"rollingUpdate is not an object",
+			map[string]any{"strategy": map[string]any{
+				"type":          "RollingUpdate",
+				"rollingUpdate": "25%",
+			}},
+			"strategy.rollingUpdate: must be an object, got string",
+		},
+		{
+			"strategy.type is not a string",
+			map[string]any{"strategy": map[string]any{"type": 1}},
+			"strategy.type: must be a string",
+		},
+		{
+			"minReadySeconds is not an integer",
+			map[string]any{"minReadySeconds": "30"},
+			"minReadySeconds: must be an integer, got string",
+		},
+		{
+			"revisionHistoryLimit is not an integer",
+			map[string]any{"revisionHistoryLimit": "10"},
+			"revisionHistoryLimit: must be an integer, got string",
+		},
+		{
+			"progressDeadlineSeconds is not an integer",
+			map[string]any{"progressDeadlineSeconds": "600"},
+			"progressDeadlineSeconds: must be an integer, got string",
 		},
 	}
 	for _, tc := range cases {

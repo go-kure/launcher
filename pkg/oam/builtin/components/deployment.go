@@ -74,8 +74,28 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.Image = image
 
-	config.Replicas = parseReplicas(props, 1)
-	config.explicitReplicas = hasExplicitReplicas(props)
+	// Not parseReplicas/hasExplicitReplicas, which the other kinds use: that
+	// pair runs the value through toInt32 and falls back to the default when
+	// the conversion fails, so `replicas: "3"` silently becomes 1 and
+	// `replicas: -1` is carried through to a Deployment the apiserver then
+	// refuses (ValidateDeploymentSpec runs ValidateNonnegativeField on
+	// Replicas). This kind reads it as a checked, presence-aware field
+	// instead. The divergence is deliberate and one-directional — deployment
+	// refuses documents the older kinds accept, never the reverse — because
+	// tightening the shared helper would change what those kinds already
+	// build. Tracked for them separately in go-kure/launcher#393.
+	replicas, replicasAuthored, err := parseInt32Field(props, "replicas", "replicas")
+	if err != nil {
+		return nil, err
+	}
+	if replicasAuthored && replicas < 0 {
+		return nil, errors.Errorf("replicas: must be >= 0, got %d", replicas)
+	}
+	config.Replicas = 1
+	if replicasAuthored {
+		config.Replicas = replicas
+	}
+	config.explicitReplicas = replicasAuthored
 
 	env, err := parseEnv(props)
 	if err != nil {
@@ -355,6 +375,9 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 // Deployment: at most one pod may hold it, and a rolling update must not try
 // to start a replacement pod while the old one still has it mounted.
 //
+// "At most one" is the rule, not "exactly one": `replicas: 0` is a deliberate
+// scale-to-zero and holds the claim in no pod at all, so it is left alone.
+//
 // Kubernetes does not reject either combination — the Deployment is created
 // and the second pod simply hangs unschedulable or stuck attaching — so this
 // is a build-time guard rather than a mirror of an apiserver rule. A
@@ -367,7 +390,7 @@ func (c *DeploymentConfig) applyNonRWXConstraint(dep *appsv1.Deployment, name st
 		return nil
 	}
 	if c.Replicas > 1 {
-		return errors.Errorf("deployment %q: non-RWX PVC requires replicas=1, got %d", name, c.Replicas)
+		return errors.Errorf("deployment %q: a non-RWX PVC allows at most one replica, got %d", name, c.Replicas)
 	}
 	if s := c.DeploymentSpec.Strategy; s != nil && s.Type != appsv1.RecreateDeploymentStrategyType {
 		return errors.Errorf("deployment %q: strategy.type must be %s when a non-RWX PVC is attached, got %s; a rolling update would start the replacement pod before the old one released the volume", name, appsv1.RecreateDeploymentStrategyType, s.Type)
