@@ -339,8 +339,11 @@ func isExplicitNull(value any) bool {
 
 // parseDeploymentIntOrPercent reads one of the two rolling-update knobs,
 // mirroring ValidatePositiveIntOrPercent: a non-negative integer, or a "N%"
-// string. capPercent additionally applies IsNotMoreThan100Percent, which
-// upstream runs on maxUnavailable and not on maxSurge.
+// string whose digits the rollout controller's own conversion can read back.
+// capPercent additionally applies IsNotMoreThan100Percent, which upstream runs
+// on maxUnavailable and not on maxSurge — the representability check applies to
+// both, since a percentage nothing can convert is unusable whether or not it
+// has a ceiling.
 //
 // This deliberately does not reuse the DaemonSet kind's parseDaemonSetIntOrPercent:
 // that one caps both knobs, because ValidateRollingUpdateDaemonSet calls
@@ -359,13 +362,22 @@ func parseDeploymentIntOrPercent(raw map[string]any, key, label string, capPerce
 		if errs := validation.IsValidPercent(s); len(errs) > 0 {
 			return intstr.IntOrString{}, false, errors.Errorf("%s: string value must be a percentage such as \"25%%\", got %q", label, s)
 		}
-		if capPercent {
-			// The form check leaves only digits, so the sole ParseUint
-			// failure is an overflowing one — which is above 100 anyway.
-			n, err := strconv.ParseUint(strings.TrimSuffix(s, "%"), 10, 32)
-			if err != nil || n > 100 {
-				return intstr.IntOrString{}, false, errors.Errorf("%s: percentage must not be greater than 100%%, got %q", label, s)
-			}
+		// The form check leaves only digits, so the sole Atoi failure is an
+		// overflowing one. Checked for BOTH knobs, not just the capped one:
+		// maxSurge has no ceiling, but a percentage nothing can convert is not
+		// a number the rollout can act on either — intstr carries the string
+		// verbatim and ResolveFenceposts is the first thing to look at it, long
+		// after this component is out of the message. strconv.Atoi is
+		// deliberately the very conversion it performs there
+		// (getIntOrPercentValueSafely, apimachinery intstr.go:252), so the
+		// boundary refused here is exactly the boundary the controller hits —
+		// no strictness beyond it. The 100% cap stays on maxUnavailable alone.
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "%"))
+		if err != nil {
+			return intstr.IntOrString{}, false, errors.Errorf("%s: percentage is too large to be represented, got %q", label, s)
+		}
+		if capPercent && n > 100 {
+			return intstr.IntOrString{}, false, errors.Errorf("%s: percentage must not be greater than 100%%, got %q", label, s)
 		}
 		return intstr.FromString(s), true, nil
 	}

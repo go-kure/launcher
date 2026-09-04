@@ -257,6 +257,72 @@ func TestParseDeploymentSpec_MaxSurgeIsNotCappedAt100(t *testing.T) {
 	}
 }
 
+// TestParseDeploymentSpec_PercentageMustBeRepresentable covers the other half of
+// that asymmetry. Uncapped is not unbounded: IsValidPercent's ^[0-9]+%$ accepts
+// any run of digits, so a percentage no strconv.Atoi can read back passes the
+// form check and is carried into the object verbatim, where the rollout
+// controller's own conversion is the first thing to see it — long after this
+// component is out of the message. The ceiling stays on maxUnavailable alone;
+// the representability check applies to both, at exactly the boundary
+// getIntOrPercentValueSafely hits, so nothing upstream accepts is refused.
+func TestParseDeploymentSpec_PercentageMustBeRepresentable(t *testing.T) {
+	const overlong = "999999999999999999999999999%"
+
+	for _, key := range []string{"maxSurge", "maxUnavailable"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := parseDeploymentSpec(map[string]any{
+				"strategy": map[string]any{
+					"type":          "RollingUpdate",
+					"rollingUpdate": map[string]any{key: overlong},
+				},
+			})
+			if err == nil {
+				t.Fatalf("%s: %s was accepted, want it refused as unrepresentable", key, overlong)
+			}
+			if !strings.Contains(err.Error(), "too large to be represented") {
+				t.Errorf("%s: error = %q, want it to name the value as unrepresentable", key, err.Error())
+			}
+			if !strings.Contains(err.Error(), "strategy.rollingUpdate."+key) {
+				t.Errorf("%s: error = %q, want it to name the field", key, err.Error())
+			}
+		})
+	}
+
+	// The accepting side, so a helper that refused every percentage could not
+	// pass: a very large but convertible value, on the uncapped knob.
+	t.Run("a large representable percentage is accepted", func(t *testing.T) {
+		cfg, err := parseDeploymentSpec(map[string]any{
+			"strategy": map[string]any{
+				"type":          "RollingUpdate",
+				"rollingUpdate": map[string]any{"maxSurge": "4294967295%"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("maxSurge 4294967295%%: %v, want it accepted", err)
+		}
+		if got := *cfg.Strategy.RollingUpdate.MaxSurge; got != intstr.FromString("4294967295%") {
+			t.Errorf("MaxSurge = %v, want the authored string", got)
+		}
+	})
+
+	// And the ceiling is still the ceiling, with its own message: a 101%
+	// maxUnavailable is representable and refused for a different reason.
+	t.Run("the 100% ceiling still applies to maxUnavailable", func(t *testing.T) {
+		_, err := parseDeploymentSpec(map[string]any{
+			"strategy": map[string]any{
+				"type":          "RollingUpdate",
+				"rollingUpdate": map[string]any{"maxUnavailable": "101%"},
+			},
+		})
+		if err == nil {
+			t.Fatal("maxUnavailable 101% was accepted, want the ceiling refusal")
+		}
+		if !strings.Contains(err.Error(), "must not be greater than 100%") {
+			t.Errorf("error = %q, want the ceiling message, not the representability one", err.Error())
+		}
+	})
+}
+
 // TestParseDeploymentSpec_MinReadySecondsBoundary pins both sides of the
 // defaulted-deadline comparison at the boundary. 599 is accepted because the
 // API default 600 still exceeds it; 600 is not, and the rejection is covered in
