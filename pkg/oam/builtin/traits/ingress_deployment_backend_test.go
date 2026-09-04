@@ -96,6 +96,9 @@ func TestIngressHandler_Apply_DeploymentExplicitBackendRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
+	if len(objs) != 1 {
+		t.Fatalf("expected 1 generated object, got %d", len(objs))
+	}
 	ing, ok := (*objs[0]).(*networkingv1.Ingress)
 	if !ok {
 		t.Fatalf("expected *networkingv1.Ingress, got %T", *objs[0])

@@ -1485,7 +1485,8 @@ func TestApplyAutoHealthChecks_OCIEmptyFluxNamespaceUsesAppNamespace(t *testing.
 }
 
 // TestApplyAutoHealthChecks_DeploymentKindRegistered pins the kind-named
-// "deployment" component into componentHealthCheckGVK (#343). The
+// "deployment" component into componentHealthCheckGVK
+// (go-kure/launcher#343). The
 // webservice/worker cases above say nothing about it: the map is keyed by OAM
 // component type, not by the emitted GVK, so a type missing from it is skipped
 // silently — the bundle simply carries one health check fewer and every other

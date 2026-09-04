@@ -143,9 +143,16 @@ func TestDeploymentHandler_LabelMapsAreNotShared(t *testing.T) {
 		{"serviceaccount.metadata.labels", sa.Labels},
 		{"pvc.metadata.labels", pvc.Labels},
 	}
+	// t.Fatalf, not t.Errorf: the aliasing loop below writes into every one of
+	// these maps, and a nil map there panics with "assignment to entry in nil
+	// map" — aborting the binary instead of reporting the failure this loop
+	// already detected.
 	for _, c := range consumers {
+		if c.m == nil {
+			t.Fatalf("%s has no label map", c.name)
+		}
 		if c.m["app"] != "app" {
-			t.Errorf("%s = %v, want app=app", c.name, c.m)
+			t.Fatalf("%s = %v, want app=app", c.name, c.m)
 		}
 	}
 
@@ -519,8 +526,9 @@ func TestDeploymentHandler_PropertySchemaComposition(t *testing.T) {
 			t.Errorf("PropertySchema is missing %q", k)
 		}
 	}
-	// The omissions are as much a decision as the inclusions (#343): no port,
-	// so no Service; no affinity shorthand; no default topology spread.
+	// The omissions are as much a decision as the inclusions
+	// (go-kure/launcher#343): no port, so no Service; no affinity shorthand; no
+	// default topology spread.
 	for _, k := range []string{"port", "affinity"} {
 		if _, ok := s[k]; ok {
 			t.Errorf("PropertySchema declares %q, which this kind deliberately does not accept", k)

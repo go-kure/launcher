@@ -383,13 +383,13 @@ func TestNewBuiltinTransformer_Registered(t *testing.T) {
 }
 
 // TestBuiltinComponentHandlers_AcceptedByParser closes the gap that let the
-// "deployment" type ship registered-but-unusable (#343): registering a handler
-// in builtinComponentHandlers() does NOT admit its type name through the
-// parser. oam.Parse* validates c.Type against pkg/oam's own validComponentTypes
-// allowlist, and rejects the document before any handler is consulted; the
-// transformer's LowerableTypes() does not widen it either, because a terminal
-// handler-backed type is not a lowerable one. Every other test in this file
-// calls the handler directly and so cannot see it.
+// "deployment" type ship registered-but-unusable (go-kure/launcher#343):
+// registering a handler in builtinComponentHandlers() does NOT admit its type
+// name through the parser. oam.Parse* validates c.Type against pkg/oam's own
+// validComponentTypes allowlist, and rejects the document before any handler is
+// consulted; the transformer's LowerableTypes() does not widen it either,
+// because a terminal handler-backed type is not a lowerable one. Every other
+// test in this file calls the handler directly and so cannot see it.
 //
 // This drives the same entry point build.go does (build.go:134), on the
 // smallest document each type can appear in — properties are deliberately

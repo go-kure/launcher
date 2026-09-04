@@ -338,7 +338,7 @@ This monolithic layout is owned by launcher and is designed, but not yet generat
 - Validates the OAM parser → handler → kure pipeline end-to-end
 
 **Phase 2: Built-in handlers** (#32)
-- Component handlers: webservice, worker, deployment, postgresql, cronjob, helmchart, daemonset, statefulset (#48, #343)
+- Component handlers: webservice, worker, deployment, postgresql, cronjob, helmchart, daemonset, statefulset (go-kure/launcher#48, go-kure/launcher#343)
 - Trait handlers — workload set: expose, certificate, external-secret, pvc, scaler (#49)
 - Trait handlers — network/infra set: ingress, httproute, configmap, networkpolicy, cilium-networkpolicy, volsync (#50)
 - Generic `passthrough` component — emits arbitrary CRDs / non-standard objects with no per-type Go handler (#105)
