@@ -1,6 +1,7 @@
 package components
 
 import (
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,7 +15,9 @@ import (
 )
 
 // DeploymentSpecConfig holds the DeploymentSpec-level properties of the
-// deployment component (go-kure/launcher#343, ADR-036 L1). appsv1.DeploymentSpec
+// deployment component (go-kure/launcher#343; ADR-036 L1, the stratified-levels
+// decision: one PodSpec/Container projection shared by every kind, with
+// kind-named components projecting their own API kind). appsv1.DeploymentSpec
 // has eight fields; Replicas is the component's own `replicas` property,
 // Selector is builder-managed and Template is the pod projection
 // (parsePodSpec), which leaves the five here. Each is nil when not authored so
@@ -76,6 +79,12 @@ func parseDeploymentSpec(props map[string]any) (DeploymentSpecConfig, error) {
 			return DeploymentSpecConfig{}, errors.New(deploymentSpecRejectedKeys[key])
 		}
 	}
+
+	// Deliberately after the rejected-key loop, not before: `selector: null` is
+	// an author naming a key that must not appear at all, and the explanatory
+	// refusal is more useful there than silence. Null-as-absence is a rule about
+	// OPTIONAL properties, which the rejected keys are not.
+	props = withoutExplicitNulls(props)
 
 	if raw, present, err := parseObjectField(props, "strategy", "strategy"); err != nil {
 		return DeploymentSpecConfig{}, err
@@ -200,6 +209,11 @@ func parseDeploymentStrategy(raw map[string]any) (*appsv1.DeploymentStrategy, er
 	if err := rejectUnknownKeys(raw, deploymentStrategyKeys, "strategy"); err != nil {
 		return nil, err
 	}
+	// Unknown keys are rejected against the authored map, null-as-absence
+	// applies to what is read out of it. `type: null` therefore surfaces as
+	// "strategy.type: required" rather than as a type error — the same thing an
+	// absent key produces, which is the point.
+	raw = withoutExplicitNulls(raw)
 	typ, present, err := parseStringField(raw, "type", "strategy.type")
 	if err != nil {
 		return nil, err
@@ -228,6 +242,7 @@ func parseDeploymentStrategy(raw map[string]any) (*appsv1.DeploymentStrategy, er
 	if err := rejectUnknownKeys(ru, deploymentRollingUpdateKeys, "strategy.rollingUpdate"); err != nil {
 		return nil, err
 	}
+	ru = withoutExplicitNulls(ru)
 
 	s.RollingUpdate = &appsv1.RollingUpdateDeployment{}
 	// maxUnavailable is capped at 100%, maxSurge is NOT.
@@ -281,6 +296,56 @@ func parseDeploymentStrategy(raw map[string]any) (*appsv1.DeploymentStrategy, er
 // that one caps both knobs, because ValidateRollingUpdateDaemonSet calls
 // IsNotMoreThan100Percent on both. Sharing one helper would silently import
 // the wrong ceiling into whichever kind lost the argument.
+// withoutExplicitNulls returns a copy of raw with every key whose value is an
+// explicit null removed, so the typed parse helpers read `field: null` as
+// omission instead of as a present-but-wrong type.
+//
+// Without it the two halves of the pipeline disagree about the same byte.
+// pkg/oam's property validator treats a null under an optional property as
+// absent — it returns early rather than type-checking it, and reads a null as
+// unset when deciding requiredness (property_validate.go) — while
+// parseObjectField, parseStringField, parseInt32Field, parseBoolField and
+// parseDeploymentIntOrPercent all answer "present?" with a bare map lookup, so
+// the nil reaches their type check and comes back as "must be an object, got
+// <nil>". A lowering rule that emits an unset optional as an explicit null
+// therefore produces a component that satisfies the published schema and then
+// fails during handler conversion.
+//
+// A typed nil (map[string]any(nil) or []any(nil) inside an `any`) is not
+// `== nil`, so the reflection arm mirrors the validator's own isNullValue and
+// the two agree on that shape too.
+//
+// Scoped to this kind's parser rather than folded into the shared helpers:
+// those carry ~20 pre-existing call sites whose behaviour would change with
+// them, which is wider than this change should reach — tracked as
+// go-kure/launcher#394, along with unifying this with the equivalent fix the
+// statefulset kind makes on its own branch.
+func withoutExplicitNulls(raw map[string]any) map[string]any {
+	out := make(map[string]any, len(raw))
+	for k, v := range raw {
+		if isExplicitNull(v) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// isExplicitNull mirrors pkg/oam's isNullValue (property_validate.go), which is
+// unexported there. Kept identical on purpose: the point of this helper is that
+// the parser and the validator classify the same value the same way.
+func isExplicitNull(value any) bool {
+	if value == nil {
+		return true
+	}
+	switch rv := reflect.ValueOf(value); rv.Kind() {
+	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Chan, reflect.Func, reflect.Interface:
+		return rv.IsNil()
+	default:
+		return false
+	}
+}
+
 func parseDeploymentIntOrPercent(raw map[string]any, key, label string, capPercent bool) (intstr.IntOrString, bool, error) {
 	v, present := raw[key]
 	if !present {

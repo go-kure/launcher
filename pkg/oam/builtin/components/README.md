@@ -670,7 +670,9 @@ policy choice, not something this shared schema hardcodes.
 ### Deployment-level properties (`deployment` kind)
 
 The `deployment` component is the kind-named projection of `appsv1.Deployment`
-(go-kure/launcher#343, ADR-036 L1), sitting alongside the two role-named kinds
+(go-kure/launcher#343; ADR-036 L1, the stratified-levels decision: one
+PodSpec/Container projection shared by every kind, with kind-named components
+projecting their own API kind), sitting alongside the two role-named kinds
 that produce the same Kubernetes kind: `webservice` (Deployment + Service) and
 `worker` (Deployment, no Service). Everything above — the container-level
 surface and the pod-level surface — applies to it unchanged; what it adds is
@@ -720,6 +722,7 @@ go-kure/launcher#395.
 | `paused` | bool | Pauses rollouts of the Deployment. | additive |
 | `progressDeadlineSeconds` | int ≥ 0 | Must be **greater than** the effective `minReadySeconds`, the cross-field rule `ValidateDeploymentSpec` applies. Both halves are compared as *effective* values, because both have an API default a document may be leaving it to: `minReadySeconds` defaults to 0 (a non-pointer `int32`, so it has no unset state) and `progressDeadlineSeconds` defaults to 600. So the rule fires in both directions — `progressDeadlineSeconds: 0` alone is rejected against the defaulted 0, and `minReadySeconds: 600` alone is rejected against the defaulted 600 — and the error names, for each half, whether the value was authored or defaulted, since either can be a field the document never mentions. | additive |
 | `selector`, `template` | — | Not authorable, and rejected with a message saying so rather than silently ignored. The selector is builder-managed (`app: <component>`) and immutable once the object exists; the pod template is projected from the component's own container and pod-level properties. | additive |
+| any optional field above, authored as `null` | — | Read as omission, not as a present-but-wrong type — including a typed nil, which is what a Go-constructed lowering rule produces when it assigns a nil map into an `any`. `pkg/oam`'s property validator already treats a null under an optional property as absent, so without this a component could satisfy the published schema and then fail during handler conversion. A `null` on a field that is required once its parent is authored (`strategy.type`) surfaces as the requiredness error, not a type error; `selector`/`template` are not optional properties, so naming either as `null` still earns the refusal above. The shared parse helpers keep their stricter behaviour for now — go-kure/launcher#394. | additive |
 
 Every field above is presence-gated: a document that authors none of them
 produces the same object the builder produced before, so the apiserver's own
