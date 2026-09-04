@@ -3145,6 +3145,18 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 				return nil, errors.Errorf("volumeClaimTemplate %q: size must be positive, got %q", vct.Name, vct.Size)
 			}
 		}
+		// A storage limit below the requested size is a contradiction the
+		// apiserver does not catch. The request <= limit rule lives in
+		// validateResourceRequirements, which takes the *container* shape
+		// (core.ResourceRequirements); a claim carries
+		// core.VolumeResourceRequirements and goes through
+		// ValidatePersistentVolumeClaimSpec, which reads
+		// Resources.Requests[storage] and never looks at Resources.Limits at
+		// all. So the pair is accepted, the limit is inert, and this parser is
+		// the only place it can be reported.
+		if err := checkClaimStorageLimit(vct, entryLabel); err != nil {
+			return nil, err
+		}
 		vcts = append(vcts, vct)
 	}
 	return vcts, nil

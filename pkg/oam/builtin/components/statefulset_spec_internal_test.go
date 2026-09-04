@@ -139,6 +139,58 @@ func TestParseStatefulSetSpec_IntegerMaxUnavailable(t *testing.T) {
 	}
 }
 
+// TestStatefulSetSpecSchema_UpdateStrategyLeavesMatchTheParser guards the two
+// places where a schema declaration would reject a document the parser accepts.
+// PropertySchema is checked before the handler runs, so an over-tight leaf here
+// is not merely cosmetic — it makes the parser's own branch unreachable.
+func TestStatefulSetSpecSchema_UpdateStrategyLeavesMatchTheParser(t *testing.T) {
+	us := schemaStatefulSetSpec()["updateStrategy"]
+
+	// parseMaxUnavailable takes a positive integer as well as a percentage
+	// string, and validatePropertyValue rejects a non-string outright once
+	// Type is PropertyTypeString (pkg/oam/property_validate.go:118-121) —
+	// Type "" is the only declaration that leaves both forms reachable.
+	if mu := us.Properties["rollingUpdate"].Properties["maxUnavailable"]; mu.Type != "" {
+		t.Errorf("updateStrategy.rollingUpdate.maxUnavailable declares Type %q; want it unset so the integer form the parser accepts is not rejected before the handler runs", mu.Type)
+	}
+
+	// parseStatefulSetUpdateStrategy requires `type` only for an otherwise
+	// empty object and infers RollingUpdate when `rollingUpdate` is authored;
+	// PropertySchema has no conditional requiredness, so declaring Required
+	// would reject `updateStrategy: {rollingUpdate: {...}}` outright.
+	if us.Properties["type"].Required {
+		t.Error("updateStrategy.type is declared Required; the parser infers RollingUpdate when rollingUpdate is authored, so a Required declaration rejects a document the parser accepts")
+	}
+}
+
+// TestParseStatefulSetSpec_UpdateStrategyTypeInferred: `rollingUpdate` without
+// `type` is a partition-only strategy the apiserver defaults to RollingUpdate
+// and acts on as written; the bare `updateStrategy: {}` case still requires
+// `type` (TestParseStatefulSetSpec_Errors).
+func TestParseStatefulSetSpec_UpdateStrategyTypeInferred(t *testing.T) {
+	cfg, err := parseStatefulSetSpec(map[string]any{
+		"updateStrategy": map[string]any{
+			"rollingUpdate": map[string]any{"partition": 3},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseStatefulSetSpec: %v", err)
+	}
+	if cfg.UpdateStrategy == nil {
+		t.Fatal("UpdateStrategy is nil")
+	}
+	if cfg.UpdateStrategy.Type != appsv1.RollingUpdateStatefulSetStrategyType {
+		t.Errorf("UpdateStrategy.Type = %q, want %q", cfg.UpdateStrategy.Type, appsv1.RollingUpdateStatefulSetStrategyType)
+	}
+	ru := cfg.UpdateStrategy.RollingUpdate
+	if ru == nil {
+		t.Fatal("UpdateStrategy.RollingUpdate is nil")
+	}
+	if ru.Partition == nil || *ru.Partition != 3 {
+		t.Errorf("Partition = %v, want 3", ru.Partition)
+	}
+}
+
 // TestParseStatefulSetSpec_Empty: nothing authored leaves every field at its
 // zero value, so apply is a no-op and existing output cannot move.
 func TestParseStatefulSetSpec_Empty(t *testing.T) {
