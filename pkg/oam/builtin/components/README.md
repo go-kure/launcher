@@ -29,7 +29,7 @@ Reference.
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). |
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
-| `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: everything `worker` has plus the rest of `DeploymentSpec`. |
+| `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface plus the rest of `DeploymentSpec`. Not a superset of `worker` — see below. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below; `podFailurePolicy` not yet projected). |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
@@ -693,19 +693,31 @@ a property later is additive, removing one is breaking.
 | `strategy.rollingUpdate.maxUnavailable` | int ≥ 0 or percentage string | Same form `ValidatePositiveIntOrPercent` accepts: a non-negative integer, or a `^[0-9]+%$` string — so `+50%` is rejected, as upstream rejects it. Capped at 100%, matching the `IsNotMoreThan100Percent` call upstream makes on this field. | additive |
 | `strategy.rollingUpdate.maxSurge` | int ≥ 0 or percentage string | Same form, **not** capped at 100%: `ValidateRollingUpdateDeployment` calls `IsNotMoreThan100Percent` on `maxUnavailable` only, so a surge above 100% is a legal Deployment and is accepted here. This is one of two places the Deployment contract differs from the DaemonSet one, which is why the two parsers are separate functions rather than one shared helper. | additive |
 | `strategy.rollingUpdate` (both knobs zero) | — | Rejected: `ValidateRollingUpdateDeployment` refuses `maxUnavailable: 0` together with `maxSurge: 0`, a pair that can make no progress. It rejects **only** that pair — unlike the DaemonSet rule, which also rejects both being non-zero. `SetDefaults_Deployment` guards each field with its own `== nil` check, so authoring one knob does not suppress the other's 25% default and a lone authored zero is always legal. | additive |
-| `minReadySeconds` | int ≥ 0 | Seconds a new pod must be ready before it counts as available. | additive |
+| `minReadySeconds` | int ≥ 0 | Seconds a new pod must be ready before it counts as available. Must stay **below** the effective `progressDeadlineSeconds`, whose own API default is 600 — so `minReadySeconds: 600` alone is rejected here, exactly as the apiserver would reject the defaulted pair. | additive |
 | `revisionHistoryLimit` | int ≥ 0 | Old ReplicaSets retained. `0` is meaningful (retain none) and distinguishable from unset. | additive |
 | `paused` | bool | Pauses rollouts of the Deployment. | additive |
-| `progressDeadlineSeconds` | int ≥ 0 | Must be **greater than** the effective `minReadySeconds`, the cross-field rule `ValidateDeploymentSpec` applies. The error names whether that value was authored or is the API default 0, since `progressDeadlineSeconds: 0` is rejected by a rule about a field the document may never mention. | additive |
+| `progressDeadlineSeconds` | int ≥ 0 | Must be **greater than** the effective `minReadySeconds`, the cross-field rule `ValidateDeploymentSpec` applies. Both halves are compared as *effective* values, because both have an API default a document may be leaving it to: `minReadySeconds` defaults to 0 (a non-pointer `int32`, so it has no unset state) and `progressDeadlineSeconds` defaults to 600. So the rule fires in both directions — `progressDeadlineSeconds: 0` alone is rejected against the defaulted 0, and `minReadySeconds: 600` alone is rejected against the defaulted 600 — and the error names, for each half, whether the value was authored or defaulted, since either can be a field the document never mentions. | additive |
 | `selector`, `template` | — | Not authorable, and rejected with a message saying so rather than silently ignored. The selector is builder-managed (`app: <component>`) and immutable once the object exists; the pod template is projected from the component's own container and pod-level properties. | additive |
 
 Every field above is presence-gated: a document that authors none of them
 produces the same object the builder produced before, so the apiserver's own
 defaults still apply rather than being frozen into the manifest.
 
+**`replicas` is validated on this kind.** The other workload kinds read
+`replicas` through a shared helper that falls back to the default whenever the
+value will not convert, so `replicas: "3"` silently becomes 1 and
+`replicas: -1` is carried through to an object the apiserver then refuses
+(`ValidateDeploymentSpec` runs `ValidateNonnegativeField` on it). `deployment`
+rejects both at build time instead: a non-integer and a negative are errors.
+The divergence is deliberate and one-directional — this kind refuses documents
+the older kinds accept, never the reverse — because tightening the shared
+helper would change what those kinds already build; that is tracked
+separately (go-kure/launcher#393).
+
 **Non-RWX volumes.** A `ReadWriteOnce` (or `ReadWriteOncePod`) claim cannot be
-held by an outgoing and an incoming pod at once, so the handler requires
-`replicas: 1` and forces `strategy.type: Recreate`. Kubernetes rejects neither
+held by an outgoing and an incoming pod at once, so the handler allows **at
+most one replica** (`replicas: 0` is a deliberate scale-to-zero and is left
+alone) and forces `strategy.type: Recreate`. Kubernetes rejects neither
 combination — the second pod simply hangs unschedulable or stuck attaching — so
 this is a build-time guard, not a mirror of an apiserver rule. Where `worker`
 substitutes `Recreate` silently (it has no `strategy` property to contradict),
@@ -760,7 +772,7 @@ helper (`enforce.go`). All six kind components enforce their
 `initContainers`; only `webservice`, `worker`, `deployment`, and
 `statefulset` have a
 `sidecars` schema key at all (`cronjob`/`daemonset` have no sidecars support,
-per "Per-type highlights" below) so only those three enforce a sidecars
+per "Per-type highlights" below) so only those four enforce a sidecars
 loop. Errors name the authored list position and container, e.g.
 `initContainers[0] "init": image "docker.io/x/y:v1" is not from an allowed
 registry [...]`.
@@ -782,10 +794,12 @@ this trio verbatim rather than duplicating it.
   app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
   Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
 - **deployment** — the kind-named Deployment (see "Deployment-level
-  properties" above): `worker`'s surface plus `strategy`, `minReadySeconds`,
-  `revisionHistoryLimit`, `paused` and `progressDeadlineSeconds`. No `port`,
-  no `affinity` shorthand, no default topology spread; declares no endpoint
-  and emits no Service.
+  properties" above): the shared container-level and pod-level surface plus
+  `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
+  `progressDeadlineSeconds`. Not `worker` plus extras: `worker` publishes
+  `topologySpread` and the four-key `affinity` shorthand, and `deployment`
+  publishes neither. It also has no `port`, declares no endpoint and emits no
+  Service.
 - **statefulset** — `serviceName` (headless) and `volumeClaimTemplates`
   (`name`, `mountPath`, `size`, `storageClass`, `accessModes`, plus the rest of
   `corev1.PersistentVolumeClaimSpec`). The StatefulSetSpec-level and
