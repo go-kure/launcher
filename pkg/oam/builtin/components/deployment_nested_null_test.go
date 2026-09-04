@@ -20,9 +20,9 @@ import (
 // parseSecurityContext's own rejectUnknownKeys ever sees it, turning a named
 // refusal into silence. The correct fix therefore sits *inside* each nested
 // parser, after its unknown-key rejection — shared code that all six workload
-// kinds run, which is #394's scope and not this kind's to change alone.
+// kinds run, which is go-kure/launcher#394's scope and not this kind's to change alone.
 //
-// When #394 lands, the first case flips from refused to accepted and this test
+// When go-kure/launcher#394 lands, the first case flips from refused to accepted and this test
 // is the thing that says so.
 func TestDeploymentHandler_NestedNullIsStillRefused(t *testing.T) {
 	convert := func(t *testing.T, props map[string]any) error {
@@ -34,7 +34,7 @@ func TestDeploymentHandler_NestedNullIsStillRefused(t *testing.T) {
 		return err
 	}
 
-	t.Run("a null under a known nested key is refused, pending #394", func(t *testing.T) {
+	t.Run("a null under a known nested key is refused, pending go-kure/launcher#394", func(t *testing.T) {
 		err := convert(t, map[string]any{
 			"image":           "nginx:1.27",
 			"securityContext": map[string]any{"runAsUser": nil},
