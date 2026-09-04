@@ -43,20 +43,20 @@ func TestVolumeClaimTemplateSchemaMatchesParser(t *testing.T) {
 	}
 
 	// Nested levels: the top-level comparison above says nothing about them.
-	assertKeysAt(t, *item, "resources", volumeClaimResourcesKeys)
-	assertKeysAt(t, *item, "resources.requests", volumeClaimStorageKeys)
-	assertKeysAt(t, *item, "resources.limits", volumeClaimStorageKeys)
-	assertKeysAt(t, *item, "selector", volumeClaimSelectorKeys)
-	assertKeysAt(t, *item, "selector.matchExpressions.[]", volumeClaimSelectorExprKeys)
-	assertKeysAt(t, *item, "dataSourceRef", volumeClaimDataSourceRefKeys)
+	assertSchemaKeysAt(t, *item, "resources", volumeClaimResourcesKeys)
+	assertSchemaKeysAt(t, *item, "resources.requests", volumeClaimStorageKeys)
+	assertSchemaKeysAt(t, *item, "resources.limits", volumeClaimStorageKeys)
+	assertSchemaKeysAt(t, *item, "selector", volumeClaimSelectorKeys)
+	assertSchemaKeysAt(t, *item, "selector.matchExpressions.[]", volumeClaimSelectorExprKeys)
+	assertSchemaKeysAt(t, *item, "dataSourceRef", volumeClaimDataSourceRefKeys)
 }
 
-// assertKeysAt pins the Properties key set of the schema reached by walking
+// assertSchemaKeysAt pins the Properties key set of the schema reached by walking
 // `path` (dot-separated; the step "[]" descends into Items) to want — the same
 // slice the parser hands rejectUnknownKeys at that level. Without this, a
 // nested key published but never parsed, or parsed but never published, leaves
 // both halves internally consistent and every other test green.
-func assertKeysAt(t *testing.T, root oam.PropertySchema, path string, want []string) {
+func assertSchemaKeysAt(t *testing.T, root oam.PropertySchema, path string, want []string) {
 	t.Helper()
 	cur := root
 	for _, step := range strings.Split(path, ".") {
