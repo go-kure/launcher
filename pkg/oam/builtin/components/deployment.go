@@ -423,7 +423,15 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 // to start a replacement pod while the old one still has it mounted.
 //
 // "At most one" is the rule, not "exactly one": `replicas: 0` is a deliberate
-// scale-to-zero and holds the claim in no pod at all, so it is left alone.
+// scale-to-zero and holds the claim in no pod at all, so the replica count is
+// accepted rather than coerced to 1.
+//
+// That exemption is the count's alone — the strategy half of the guard still
+// applies at zero replicas. Scale-to-zero is a state the document can leave by
+// editing one number, and a `strategy.type: RollingUpdate` that survived the
+// guard while at zero would be wrong the moment the first pod starts, in a
+// later edit that touches nothing this function reads. Forcing `Recreate` onto
+// a Deployment running no pods costs nothing until then.
 //
 // Kubernetes does not reject either combination — the Deployment is created
 // and the second pod simply hangs unschedulable or stuck attaching — so this
