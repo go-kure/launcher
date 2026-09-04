@@ -683,9 +683,31 @@ The three kinds are not layered and one is not a superset of the others.
 **no `affinity` shorthand** and **no default topology-spread constraint** —
 none of those is a `DeploymentSpec` field, and a kind named after the API kind
 should project the API kind rather than launcher's opinions about it. A
-workload that wants a Service uses `webservice`, or an `expose`/`ingress`/
-`httproute` trait over a `deployment`. This is the reversible direction: adding
-a property later is additive, removing one is breaking.
+workload that wants launcher to create its Service uses `webservice`. This is
+the reversible direction: adding a property later is additive, removing one is
+breaking.
+
+**Routing traits on a `deployment` need an explicit Service.** `expose`,
+`ingress` and `httproute` are accepted on this kind — nothing restricts them —
+but they are not self-sufficient here. `expose` lowers into `ingress` or
+`httproute`, and both resolve an *implicit* backend through the component's own
+service port. A `deployment` has no service port and emits no Service, so an
+implicitly-backed route fails the build with a "has no service port" error.
+Route to it by naming the target Service on the trait, with `serviceName` **and**
+`servicePort` (`serviceName` requires `servicePort`; setting `servicePort` alone
+routes to a Service named after the component). That Service must exist
+independently — authored as a `manifests` component, or belonging to another
+component in the package. Nothing in this kind creates it.
+
+**`scaler` is not available on this kind.** It is restricted to `webservice` and
+`worker`, and that restriction is load-bearing rather than a taxonomy detail: an
+HPA scales the Deployment past the replica count the document authored, and the
+non-RWX guard below reads only the authored `replicas`, so the two together
+would silently defeat it. Admitting `scaler` here would require that guard to
+account for the trait's `maxReplicas` first. `webservice` and `worker` do admit
+the trait and carry the same single-replica guard, so on those two kinds the
+interaction is live; it predates this kind and is tracked as
+go-kure/launcher#395.
 
 | Property | Type | Effect | Compatibility |
 |----------|------|--------|---------------|

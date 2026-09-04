@@ -104,8 +104,9 @@ matching `<domain>/component` on every rendered workload and helm-rendered pod �
 | `ParseWithExtraTraitTypes` | Parse allowing additional (custom) trait types. |
 | `ParseWithExtraTypes` | Parse allowing custom trait types **and** a `LowerableTypes` set — the document kinds, component types and trait types claimed by a transformer's registered lowering rules. |
 
-Standalone parsing validates each trait's `type` against the built-in handler set
-(the `security-context` trait is included, matching `SecurityContextHandler`);
+Standalone parsing validates each trait's `type` against this package's own allowlist
+of built-in trait types (the `security-context` trait is included, matching
+`SecurityContextHandler`);
 `ParseWithExtraTraitTypes` widens that allowlist with caller-supplied custom types.
 `ParseWithExtraTypes` widens it further with `Transformer.LowerableTypes()`, so a
 document authored in types that only a lowering rule understands parses ahead of the
@@ -113,6 +114,21 @@ transform that will lower them away. The widening is additive and per position: 
 empty `LowerableTypes` is exactly the strict behaviour, a name claimed for one position
 never admits it at another, and decoding stays strict (`KnownFields(true)`), so a kind
 carrying its own authored fields still belongs to the raw lowering entry point.
+
+**Component `type` is validated against this package's own allowlist, not against
+the caller's handler registry.** The two are independent lists that happen to agree:
+parsing rejects an unknown component type before any handler is consulted, so
+registering a `ComponentHandler` in `pkg/cmd/kurel` does *not* by itself make its type
+name authorable — the name must also be added here. A type registered on one side only
+is registered-but-unusable (every document naming it fails to parse) or
+parseable-but-undispatchable, and in both cases a handler-level test suite stays green.
+`pkg/cmd/kurel`'s `TestBuiltinComponentHandlers_AcceptedByParser` is the guard: it
+parses a minimal document for every registered built-in type through
+`ParseWithExtraTypes`, the same entry point `kurel build` uses. Two other per-type
+registries have the same shape and the same failure mode — `traitComponentRestrictions`
+(which traits a component type accepts) and `componentHealthCheckGVK` (the workload GVK
+a component type's auto health check targets; an unlisted type is skipped silently, so
+its bundle simply carries one health check fewer).
 
 ## Transform & extension
 

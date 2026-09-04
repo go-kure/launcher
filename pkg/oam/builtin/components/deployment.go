@@ -22,8 +22,19 @@ import (
 // progressDeadlineSeconds (go-kure/launcher#343). What it deliberately leaves
 // out is launcher's own opinions: there is no `port` (and so no Service), no
 // default topology-spread constraint and no four-key `affinity` shorthand,
-// none of which are DeploymentSpec fields. A workload wanting a Service uses
-// webservice, or an expose/ingress/httproute trait over one.
+// none of which are DeploymentSpec fields. A workload wanting launcher to
+// create its Service uses webservice.
+//
+// The routing traits (expose, ingress, httproute) are accepted on this kind but
+// are not self-sufficient here, because no Service is emitted. `expose` lowers
+// into `ingress` or `httproute`, and both resolve an implicit backend through
+// the component's own service port — which this kind does not have, so an
+// implicitly-backed route is rejected at build time with a "has no service
+// port" error. On a deployment component they must name the target Service
+// explicitly, with the trait's `serviceName` and `servicePort`, and that
+// Service has to exist independently: authored as a `manifests` component, or
+// belonging to some other component in the package. Nothing in this kind
+// creates it.
 type DeploymentHandler struct{}
 
 // CanHandle returns true for deployment component type.
