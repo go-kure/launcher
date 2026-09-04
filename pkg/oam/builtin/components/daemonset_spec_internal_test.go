@@ -82,12 +82,21 @@ func TestDaemonSetSpecSchemaMatchesParser(t *testing.T) {
 	if !slices.Equal(typ.Enum, wantEnum) {
 		t.Errorf("updateStrategy.type.Enum = %v, want %v", typ.Enum, wantEnum)
 	}
-	// Nothing else in the fragment is required; a Required leaf the parser does
-	// not enforce rejects documents the parser accepts.
-	if s["minReadySeconds"].Required || s["revisionHistoryLimit"].Required ||
-		s["updateStrategy"].Required || s["updateStrategy"].Properties["rollingUpdate"].Required {
-		t.Error("a property outside updateStrategy.type is marked Required; the parser enforces none of them")
+	// updateStrategy.type is the ONLY required leaf anywhere in the fragment.
+	// Walked recursively rather than spelled out: a hand-listed set silently
+	// stops covering a leaf added later, and a Required leaf the parser does not
+	// enforce rejects documents the parser accepts.
+	var walkRequired func(prefix string, m map[string]oam.PropertySchema)
+	walkRequired = func(prefix string, m map[string]oam.PropertySchema) {
+		for k, v := range m {
+			path := prefix + k
+			if v.Required && path != "updateStrategy.type" {
+				t.Errorf("%s is marked Required; the parser enforces requiredness only on updateStrategy.type", path)
+			}
+			walkRequired(path+".", v.Properties)
+		}
 	}
+	walkRequired("", s)
 }
 
 // TestParseDaemonSetSpec_StrategyWithoutRollingUpdate covers both accept paths
