@@ -988,3 +988,21 @@ for the handler interfaces, and `examples/` for runnable applications.
 Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access
 modes, restart policies, etc.) rather than string literals — never re-define values
 that already exist upstream.
+
+Every generated object owns its label maps. `Generate` hands back objects the caller
+owns and routinely edits — stamping ownership, environment or version labels onto the
+workloads it emits — so no two fields and no two objects ever share one
+`map[string]string`. Concretely: the object's `metadata.labels`, the pod template's
+`metadata.labels`, the Service selector and the `labelSelector` of every topology
+spread constraint and pod anti-affinity term are separate maps with equal contents.
+Inside this package `appLabels` and `selectorFrom` (both unexported, `common.go`) are
+what enforce that: call `appLabels` once per assignment rather than hoisting its result
+into a variable used twice, and let `selectorFrom` copy what it is handed rather than
+store it. A custom handler outside this package cannot call either and does not need to
+— the rule is to build a fresh `map[string]string` at each assignment site, and to
+`maps.Clone` any map before storing it in a selector.
+
+This is a correctness rule, not tidiness. A selector that aliases the pod template's
+labels follows the caller's edits, and a topology spread constraint's `labelSelector`
+defines the pod set over which skew is computed — so a version label leaking into it
+makes a rollout spread each version separately instead of spreading the workload.

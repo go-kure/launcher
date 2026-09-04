@@ -285,7 +285,6 @@ func (c *StatefulsetConfig) BackendServiceName() string { return c.ServiceName }
 // Generate creates Kubernetes StatefulSet, headless Service, ServiceAccount, and any standalone PVCs.
 // The ServiceAccount is omitted when serviceAccountName was authored.
 func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	labels := map[string]string{"app": app.Name}
 	var err error
 	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 	if err != nil {
@@ -303,11 +302,11 @@ func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, 
 
 	objects := []*client.Object{&stsObj, &svcObj}
 	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, labels))
+		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
 		objects = append(objects, &saObj)
 	}
 	for _, pvc := range c.PVCs {
-		p, err := BuildPVC(pvc, app.Namespace, labels)
+		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
 		if err != nil {
 			return nil, err
 		}
@@ -318,8 +317,6 @@ func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, 
 }
 
 func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.StatefulSet, error) {
-	labels := map[string]string{"app": app.Name}
-
 	// Claim-template mounts precede the authored volume mounts, as before.
 	mounts := make([]corev1.VolumeMount, 0, len(c.VolumeClaimTemplates)+len(c.VolumeMounts))
 	for _, vct := range c.VolumeClaimTemplates {
@@ -346,9 +343,9 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	})
 
 	sts := kubernetes.CreateStatefulSet(app.Name, app.Namespace)
-	sts.Labels = labels
+	sts.Labels = appLabels(app.Name)
 	sts.Annotations = nil
-	sts.Spec.Template.Labels = labels
+	sts.Spec.Template.Labels = appLabels(app.Name)
 	kubernetes.SetStatefulSetReplicas(sts, c.Replicas)
 	kubernetes.SetStatefulSetServiceName(sts, c.ServiceName)
 
@@ -359,7 +356,7 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 		InitContainers:            c.InitContainers,
 		Sidecars:                  c.Sidecars,
 		Volumes:                   c.Volumes,
-		Affinity:                  buildAffinity(c.Affinity, labels),
+		Affinity:                  buildAffinity(c.Affinity, appLabels(app.Name)),
 	})
 	if err != nil {
 		return nil, err
@@ -386,13 +383,11 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 }
 
 func (c *StatefulsetConfig) createHeadlessService(app *stack.Application) *corev1.Service {
-	labels := map[string]string{"app": app.Name}
-
 	svc := kubernetes.CreateService(c.ServiceName, app.Namespace)
-	svc.Labels = labels
+	svc.Labels = appLabels(app.Name)
 	svc.Annotations = nil
 	kubernetes.SetServiceClusterIP(svc, "None")
-	kubernetes.SetServiceSelector(svc, map[string]string{"app": app.Name})
+	kubernetes.SetServiceSelector(svc, appLabels(app.Name))
 	if c.Port > 0 {
 		kubernetes.AddServicePort(svc, corev1.ServicePort{
 			Name:       "tcp",

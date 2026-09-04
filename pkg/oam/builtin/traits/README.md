@@ -282,3 +282,9 @@ so unknown keys nested inside `endpointSelector` or `icmps` are still dropped si
 Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access
 modes, restart policies, etc.) rather than string literals — never re-define values
 that already exist upstream.
+
+A trait that generates several objects gives each one its own label map, never one map
+shared between them. These maps leave the package on objects the caller owns and edits,
+so a shared map turns a label added to the Role into a label on the RoleBinding, or one
+added to the HPA into a label on the PDB. The same rule and the reason behind it are in
+the [component handlers' README](../components/README.md#conventions).

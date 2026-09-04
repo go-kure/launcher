@@ -246,7 +246,6 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 // A Service is generated when Port > 0. The ServiceAccount is omitted when
 // serviceAccountName was authored.
 func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	labels := map[string]string{"app": app.Name}
 	var err error
 	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 	if err != nil {
@@ -267,12 +266,12 @@ func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, er
 	}
 
 	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, labels))
+		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
 		objects = append(objects, &saObj)
 	}
 
 	for _, pvc := range c.PVCs {
-		p, err := BuildPVC(pvc, app.Namespace, labels)
+		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
 		if err != nil {
 			return nil, err
 		}
@@ -283,12 +282,11 @@ func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, er
 }
 
 func (c *DaemonsetConfig) createService(app *stack.Application) *corev1.Service {
-	labels := map[string]string{"app": app.Name}
 	svc := kubernetes.CreateService(app.Name, app.Namespace)
-	svc.Labels = labels
+	svc.Labels = appLabels(app.Name)
 	svc.Annotations = nil
 	kubernetes.SetServiceType(svc, corev1.ServiceTypeClusterIP)
-	kubernetes.SetServiceSelector(svc, map[string]string{"app": app.Name})
+	kubernetes.SetServiceSelector(svc, appLabels(app.Name))
 	kubernetes.AddServicePort(svc, corev1.ServicePort{
 		Name:       "http",
 		Port:       c.Port,
@@ -299,8 +297,6 @@ func (c *DaemonsetConfig) createService(app *stack.Application) *corev1.Service 
 }
 
 func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.DaemonSet, error) {
-	labels := map[string]string{"app": app.Name}
-
 	var ports []corev1.ContainerPort
 	if c.Port > 0 {
 		ports = []corev1.ContainerPort{{Name: "http", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
@@ -321,9 +317,9 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 	})
 
 	ds := kubernetes.CreateDaemonSet(app.Name, app.Namespace)
-	ds.Labels = labels
+	ds.Labels = appLabels(app.Name)
 	ds.Annotations = nil
-	ds.Spec.Template.Labels = labels
+	ds.Spec.Template.Labels = appLabels(app.Name)
 
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:                    c.PodSpec,

@@ -399,7 +399,6 @@ func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
 // Generate creates a Kubernetes CronJob, ServiceAccount, and any declared PVCs.
 // The ServiceAccount is omitted when serviceAccountName was authored.
 func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	labels := map[string]string{"app": app.Name}
 	var err error
 	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 	if err != nil {
@@ -413,12 +412,12 @@ func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, erro
 	obj := client.Object(cronjob)
 	objects := []*client.Object{&obj}
 	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, labels))
+		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
 		objects = append(objects, &saObj)
 	}
 
 	for _, pvc := range c.PVCs {
-		p, err := BuildPVC(pvc, app.Namespace, labels)
+		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
 		if err != nil {
 			return nil, err
 		}
@@ -430,8 +429,6 @@ func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, erro
 }
 
 func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob, error) {
-	labels := map[string]string{"app": app.Name}
-
 	// No Ports: cronjob exposes no port property (see parseProbes' namedPortsAllowed=false above).
 	container := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
@@ -448,10 +445,10 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	})
 
 	cj := kubernetes.CreateCronJob(app.Name, app.Namespace, c.Schedule)
-	cj.Labels = labels
+	cj.Labels = appLabels(app.Name)
 	cj.Annotations = nil
-	cj.Spec.JobTemplate.Labels = labels
-	cj.Spec.JobTemplate.Spec.Template.Labels = labels
+	cj.Spec.JobTemplate.Labels = appLabels(app.Name)
+	cj.Spec.JobTemplate.Spec.Template.Labels = appLabels(app.Name)
 	kubernetes.SetCronJobSuccessfulJobsHistoryLimit(cj, c.SuccessfulJobsHistoryLimit)
 	kubernetes.SetCronJobFailedJobsHistoryLimit(cj, c.FailedJobsHistoryLimit)
 	if c.ConcurrencyPolicy != nil {
