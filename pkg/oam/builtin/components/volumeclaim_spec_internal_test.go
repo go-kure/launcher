@@ -566,6 +566,15 @@ func TestParseVolumeClaimSpec_NullIsOmission(t *testing.T) {
 				"key": "app", "operator": "Exists",
 			}},
 		}}},
+		{"selector.matchExpressions", map[string]any{"selector": map[string]any{
+			"matchLabels":      map[string]any{"app": "api"},
+			"matchExpressions": nil,
+		}}},
+		{"selector.matchExpressions[].values", map[string]any{"selector": map[string]any{
+			"matchExpressions": []any{map[string]any{
+				"key": "app", "operator": "Exists", "values": nil,
+			}},
+		}}},
 		{"dataSourceRef.apiGroup", map[string]any{"dataSourceRef": map[string]any{
 			"apiGroup": nil, "kind": "PersistentVolumeClaim", "name": "src",
 		}}},
@@ -600,6 +609,59 @@ func TestParseVolumeClaimSpec_NullIsOmission(t *testing.T) {
 			}
 		})
 	}
+
+	// A typed nil is not `== nil`. A lowering rule assembled in Go rather than
+	// decoded from YAML produces exactly this for an unset optional map or
+	// list, and pkg/oam's isNullValue reads it as null, so the parser must too.
+	t.Run("typed nil", func(t *testing.T) {
+		var nilMap map[string]any
+		var nilList []any
+
+		if got, err := parseVolumeClaimTemplates(map[string]any{"volumeClaimTemplates": nilList}); err != nil || got != nil {
+			t.Errorf("parseVolumeClaimTemplates(typed nil list) = (%v, %v), want (nil, nil)", got, err)
+		}
+		// A nil of the wrong nil-able kind is still a null, not a type error:
+		// isNullValue classifies it that way, so the "must be a list" message
+		// must be reserved for a value the author actually wrote.
+		if got, err := parseVolumeClaimTemplates(map[string]any{"volumeClaimTemplates": nilMap}); err != nil || got != nil {
+			t.Errorf("parseVolumeClaimTemplates(typed nil map) = (%v, %v), want (nil, nil)", got, err)
+		}
+
+		e := map[string]any{
+			"name":          "data",
+			"mountPath":     "/data",
+			"size":          "1Gi",
+			"selector":      nilMap,
+			"resources":     nilMap,
+			"dataSourceRef": nilMap,
+		}
+		got, err := parseVolumeClaimTemplates(vctProps(e))
+		if err != nil {
+			t.Fatalf("parseVolumeClaimTemplates(typed nil maps) error = %v, want them read as omitted", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("got %d claim templates, want 1", len(got))
+		}
+		if got[0].Spec.Selector != nil {
+			t.Errorf("Selector = %v, want nil", got[0].Spec.Selector)
+		}
+		if got[0].Spec.DataSourceRef != nil {
+			t.Errorf("DataSourceRef = %v, want nil", got[0].Spec.DataSourceRef)
+		}
+
+		nested := map[string]any{
+			"name":      "data",
+			"mountPath": "/data",
+			"size":      "1Gi",
+			"selector": map[string]any{
+				"matchLabels":      map[string]any{"app": "api"},
+				"matchExpressions": nilList,
+			},
+		}
+		if _, err := parseVolumeClaimTemplates(vctProps(nested)); err != nil {
+			t.Errorf("parseVolumeClaimTemplates(typed nil matchExpressions) error = %v, want it read as omitted", err)
+		}
+	})
 }
 
 // TestParseVolumeClaimTemplates_NotAList: a present-but-not-a-list value used

@@ -208,6 +208,17 @@ func TestParseStatefulSetSpec_NullIsOmission(t *testing.T) {
 			"",
 		},
 		{
+			// parseMaxUnavailable takes an `any`, not a map, so this leaf
+			// cannot go through an optional* wrapper and carries its own
+			// isExplicitNull guard at the call site.
+			"updateStrategy.rollingUpdate.maxUnavailable",
+			map[string]any{"updateStrategy": map[string]any{
+				"type":          "RollingUpdate",
+				"rollingUpdate": map[string]any{"maxUnavailable": nil},
+			}},
+			"",
+		},
+		{
 			"persistentVolumeClaimRetentionPolicy.whenDeleted",
 			map[string]any{"persistentVolumeClaimRetentionPolicy": map[string]any{"whenDeleted": nil}},
 			"",
@@ -253,12 +264,49 @@ func TestParseStatefulSetSpec_NullIsOmission(t *testing.T) {
 		{"ordinals": nil},
 		{"updateStrategy": map[string]any{"type": nil}},
 		{"updateStrategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": nil}},
+		{"updateStrategy": map[string]any{
+			"type":          "RollingUpdate",
+			"rollingUpdate": map[string]any{"maxUnavailable": nil},
+		}},
 		{"ordinals": map[string]any{"start": nil}},
 	} {
 		if _, err := parseStatefulSetSpec(props); err != nil && strings.Contains(err.Error(), "<nil>") {
 			t.Errorf("parseStatefulSetSpec(%v) error = %q, want no type error naming <nil>", props, err)
 		}
 	}
+
+	// A typed nil is not `== nil`. A lowering rule assembled in Go — rather
+	// than decoded from YAML — produces exactly this for an unset optional
+	// map, and pkg/oam's isNullValue reads it as null, so the parser must too.
+	t.Run("typed nil map", func(t *testing.T) {
+		var nilMap map[string]any
+		cfg, err := parseStatefulSetSpec(map[string]any{
+			"updateStrategy":                       nilMap,
+			"persistentVolumeClaimRetentionPolicy": nilMap,
+			"ordinals":                             nilMap,
+		})
+		if err != nil {
+			t.Fatalf("parseStatefulSetSpec(typed nil maps) error = %v, want them read as omitted", err)
+		}
+		if cfg.UpdateStrategy != nil {
+			t.Errorf("UpdateStrategy = %v, want nil", cfg.UpdateStrategy)
+		}
+		if cfg.PersistentVolumeClaimRetentionPolicy != nil {
+			t.Errorf("PersistentVolumeClaimRetentionPolicy = %v, want nil", cfg.PersistentVolumeClaimRetentionPolicy)
+		}
+		if cfg.Ordinals != nil {
+			t.Errorf("Ordinals = %v, want nil", cfg.Ordinals)
+		}
+	})
+
+	t.Run("typed nil under an authored parent", func(t *testing.T) {
+		var nilMap map[string]any
+		if _, err := parseStatefulSetSpec(map[string]any{
+			"updateStrategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": nilMap},
+		}); err != nil {
+			t.Fatalf("parseStatefulSetSpec(typed nil rollingUpdate) error = %v, want it read as omitted", err)
+		}
+	})
 }
 
 // TestParseStatefulSetSpec_IntegerMaxUnavailable: the int-or-string field also

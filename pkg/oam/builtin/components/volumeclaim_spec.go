@@ -283,7 +283,7 @@ func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector
 		}
 		sel.MatchLabels = labels
 	}
-	list, present, err := parseObjectList(raw, "matchExpressions")
+	list, present, err := optionalObjectList(raw, "matchExpressions")
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +304,7 @@ func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector
 			if !present {
 				return nil, errors.Errorf("%s.operator: required", itemLabel)
 			}
-			values, _, err := parseStringList(item, "values", itemLabel+".values")
+			values, _, err := optionalStringList(item, "values", itemLabel+".values")
 			if err != nil {
 				return nil, err
 			}
