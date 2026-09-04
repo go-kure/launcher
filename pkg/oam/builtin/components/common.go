@@ -2391,8 +2391,24 @@ var validAccessModes = map[string]bool{
 	string(corev1.ReadWriteOncePod): true,
 }
 
+// hasNonRWXPVC reports whether any claim in pvcs restricts the workload to a
+// single pod holding it read-write, which is what makes replicas > 1 and a
+// rolling update unsafe for the kinds that consult it.
+//
+// The question is asked of a claim's whole access-mode set, not of each mode in
+// isolation: `accessModes` is a request for a volume that supports *all* of the
+// modes listed, so a claim naming ReadWriteMany alongside ReadWriteOnce binds a
+// volume many pods can mount read-write, and constraining it would refuse a
+// document Kubernetes accepts and serves. ReadWriteOncePod cannot appear next to
+// another mode at all — "cannot be used in combination with other access modes"
+// (k8s.io/api core/v1/types.go:872-874), which parseAccessModes rejects the way
+// the apiserver does — so a set containing it never also contains ReadWriteMany
+// and the ordering of these two checks cannot matter.
 func hasNonRWXPVC(pvcs []PVCConfig) bool {
 	for _, pvc := range pvcs {
+		if slices.Contains(pvc.AccessModes, string(corev1.ReadWriteMany)) {
+			continue
+		}
 		for _, mode := range pvc.AccessModes {
 			if mode == string(corev1.ReadWriteOnce) || mode == string(corev1.ReadWriteOncePod) {
 				return true
