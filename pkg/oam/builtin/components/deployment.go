@@ -375,10 +375,13 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	if err := c.applyNonRWXConstraint(dep, app.Name); err != nil {
 		return nil, err
 	}
-	// The authored strategy is applied after the non-RWX constraint so an
-	// author who wrote `strategy: {type: Recreate}` alongside a non-RWX PVC
-	// ends up with exactly that, and any conflicting authored strategy has
-	// already been rejected above rather than silently overwritten.
+	// The authored strategy is applied after the non-RWX constraint, but the
+	// order is defensive rather than load-bearing: the constraint reads the
+	// config, not the object built so far, and rejects every authored strategy
+	// that is not Recreate — so the only strategy that can still reach this
+	// apply after a non-RWX claim is the Recreate the constraint just wrote.
+	// Keeping the authored value last means a future non-strategy field the
+	// constraint learns to force cannot be silently reverted here.
 	c.DeploymentSpec.apply(dep)
 
 	podSpec, err := buildPodSpec(podSpecInput{

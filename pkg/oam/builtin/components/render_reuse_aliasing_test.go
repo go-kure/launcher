@@ -188,4 +188,51 @@ func TestDaemonset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.
 	}
 }
 
+// TestDeployment_RenderingTwiceIsUnaffectedByEditingTheFirstRender is the same
+// property on the kind added in go-kure/launcher#343. Its apply projects the
+// same two shapes as the others — a strategy whose struct holds a
+// *RollingUpdateDeployment, and bare *int32s (revisionHistoryLimit,
+// progressDeadlineSeconds) — so it needs the same guarantee and the same guard.
+func TestDeployment_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
+	props := map[string]any{
+		"image":                   "ghcr.io/org/app:v1",
+		"revisionHistoryLimit":    4,
+		"progressDeadlineSeconds": 700,
+		"strategy": map[string]any{
+			"type": "RollingUpdate",
+			"rollingUpdate": map[string]any{
+				"maxUnavailable": "25%",
+				"maxSurge":       2,
+			},
+		},
+	}
+
+	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", props, func(objects []*client.Object) {
+		dep, ok := (*objects[0]).(*appsv1.Deployment)
+		if !ok {
+			t.Fatalf("first object is %T, want *appsv1.Deployment", *objects[0])
+		}
+		dep.Spec.Strategy.RollingUpdate.MaxUnavailable = nil
+		*dep.Spec.RevisionHistoryLimit = 99
+		*dep.Spec.ProgressDeadlineSeconds = 42
+	})
+
+	dep, ok := (*second[0]).(*appsv1.Deployment)
+	if !ok {
+		t.Fatalf("second render's first object is %T, want *appsv1.Deployment", *second[0])
+	}
+	if dep.Spec.Strategy.RollingUpdate == nil || dep.Spec.Strategy.RollingUpdate.MaxUnavailable == nil {
+		t.Fatal("strategy.rollingUpdate.maxUnavailable is gone — the first render's edit leaked back into the config")
+	}
+	if got := dep.Spec.Strategy.RollingUpdate.MaxUnavailable.StrVal; got != "25%" {
+		t.Errorf("strategy.rollingUpdate.maxUnavailable = %q, want \"25%%\"", got)
+	}
+	if got := *dep.Spec.RevisionHistoryLimit; got != 4 {
+		t.Errorf("revisionHistoryLimit = %d, want 4", got)
+	}
+	if got := *dep.Spec.ProgressDeadlineSeconds; got != 700 {
+		t.Errorf("progressDeadlineSeconds = %d, want 700", got)
+	}
+}
+
 func ptrInt32(n int32) *int32 { return &n }
