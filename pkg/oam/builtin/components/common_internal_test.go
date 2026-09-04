@@ -4152,3 +4152,85 @@ func TestParseSecurityContext_UnprefixedSysAdminCapability_WithPrivilegeEscalati
 		t.Errorf("Capabilities = %+v, want Add [SYS_ADMIN]", sc.Capabilities)
 	}
 }
+
+// TestOptionalWrappers_NullIsOmission pins the wrappers themselves rather than
+// one caller's view of them: every wrapper must read both an untyped and a
+// typed null as omission, and must still reject a present, wrongly-typed value.
+//
+// The typed-nil half is the one a `v == nil` check gets wrong. Each of these
+// values is a non-nil interface holding a nil, which is what a lowering rule
+// assembled in Go produces for an unset optional; pkg/oam's isNullValue
+// classifies them as null (property_validate.go), so the parser must agree or
+// a component passes emission validation and then fails to convert.
+func TestOptionalWrappers_NullIsOmission(t *testing.T) {
+	var (
+		nilMap   map[string]any
+		nilList  []any
+		nilPtr   *int32
+		nilSlice []string
+	)
+
+	for _, tc := range []struct {
+		name string
+		val  any
+	}{
+		{"untyped nil", nil},
+		{"typed nil map", nilMap},
+		{"typed nil list", nilList},
+		{"typed nil pointer", nilPtr},
+		{"typed nil slice", nilSlice},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := map[string]any{"k": tc.val}
+
+			if v, present, err := optionalString(raw, "k", "k"); err != nil || present || v != "" {
+				t.Errorf("optionalString = (%q, %v, %v), want (\"\", false, nil)", v, present, err)
+			}
+			if v, present, err := optionalObject(raw, "k", "k"); err != nil || present || v != nil {
+				t.Errorf("optionalObject = (%v, %v, %v), want (nil, false, nil)", v, present, err)
+			}
+			if v, present, err := optionalInt32(raw, "k", "k"); err != nil || present || v != 0 {
+				t.Errorf("optionalInt32 = (%d, %v, %v), want (0, false, nil)", v, present, err)
+			}
+			if v, present, err := optionalObjectList(raw, "k"); err != nil || present || v != nil {
+				t.Errorf("optionalObjectList = (%v, %v, %v), want (nil, false, nil)", v, present, err)
+			}
+			if v, present, err := optionalStringList(raw, "k", "k"); err != nil || present || v != nil {
+				t.Errorf("optionalStringList = (%v, %v, %v), want (nil, false, nil)", v, present, err)
+			}
+		})
+	}
+
+	// Null-as-omission must not widen into "any wrong type is absent": a
+	// present, non-null value of the wrong type is still an error naming it.
+	t.Run("a wrongly-typed value is still rejected", func(t *testing.T) {
+		raw := map[string]any{"k": 3}
+		if _, _, err := optionalString(raw, "k", "k"); err == nil {
+			t.Error("optionalString(3) = nil error, want a type error")
+		}
+		if _, _, err := optionalObject(raw, "k", "k"); err == nil {
+			t.Error("optionalObject(3) = nil error, want a type error")
+		}
+		if _, _, err := optionalObjectList(raw, "k"); err == nil {
+			t.Error("optionalObjectList(3) = nil error, want a type error")
+		}
+		if _, _, err := optionalStringList(raw, "k", "k"); err == nil {
+			t.Error("optionalStringList(3) = nil error, want a type error")
+		}
+		if _, _, err := optionalInt32(map[string]any{"k": "x"}, "k", "k"); err == nil {
+			t.Error("optionalInt32(\"x\") = nil error, want a type error")
+		}
+	})
+
+	// A non-nil value of a nil-able kind is authored, not omitted — the
+	// reflection arm must test IsNil, not the kind alone.
+	t.Run("an empty object is authored, not omitted", func(t *testing.T) {
+		raw := map[string]any{"k": map[string]any{}}
+		if v, present, err := optionalObject(raw, "k", "k"); err != nil || !present || v == nil {
+			t.Errorf("optionalObject({}) = (%v, %v, %v), want (an empty map, true, nil)", v, present, err)
+		}
+		if v, present, err := optionalObjectList(map[string]any{"k": []any{}}, "k"); err != nil || !present || v == nil {
+			t.Errorf("optionalObjectList([]) = (%v, %v, %v), want (an empty list, true, nil)", v, present, err)
+		}
+	})
+}

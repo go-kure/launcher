@@ -5,6 +5,7 @@ import (
 	"maps"
 	"math"
 	gopath "path"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -1712,7 +1713,7 @@ func parseObjectField(raw map[string]any, key, label string) (map[string]any, bo
 	return m, true, nil
 }
 
-// The three helpers above answer "present?" with a bare map lookup, so a key
+// The helpers above answer "present?" with a bare map lookup, so a key
 // authored as an explicit null is present with a nil value and fails their type
 // check: `updateStrategy:` with nothing after it becomes
 // "updateStrategy: must be an object, got <nil>".
@@ -1725,7 +1726,7 @@ func parseObjectField(raw map[string]any, key, label string) (map[string]any, bo
 // handler that runs afterwards — the component satisfies the published schema
 // and still fails to convert.
 //
-// The three wrappers below close that gap by reading a null as omission before
+// The wrappers below close that gap by reading a null as omission before
 // delegating. They are deliberately NOT folded into the helpers themselves: the
 // helpers have ~20 pre-existing call sites whose behaviour would change with
 // them, which is a wider blast radius than this change should carry. That is
@@ -1734,9 +1735,30 @@ func parseObjectField(raw map[string]any, key, label string) (map[string]any, bo
 // a wrapped field accepts a null the unwrapped ones still reject, never the
 // reverse.
 
+// isExplicitNull mirrors pkg/oam's isNullValue (property_validate.go), which is
+// unexported there. Kept identical on purpose: the whole point of the wrappers
+// below is that the parser and the validator classify the same value the same
+// way, and a plain `v == nil` does not — a typed nil (map[string]any(nil) or
+// []any(nil) inside an `any`) is a non-nil interface holding a nil value, which
+// is exactly what a Go-constructed lowering rule produces for an unset optional
+// map or slice. The validator recognises that shape as null; without the
+// reflection arm the parser would assert it as an authored empty object and then
+// fail a downstream requiredness or emptiness check.
+func isExplicitNull(value any) bool {
+	if value == nil {
+		return true
+	}
+	switch rv := reflect.ValueOf(value); rv.Kind() {
+	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Chan, reflect.Func, reflect.Interface:
+		return rv.IsNil()
+	default:
+		return false
+	}
+}
+
 // optionalString is parseStringField with an explicit null read as omission.
 func optionalString(raw map[string]any, key, label string) (string, bool, error) {
-	if v, present := raw[key]; present && v == nil {
+	if v, present := raw[key]; present && isExplicitNull(v) {
 		return "", false, nil
 	}
 	return parseStringField(raw, key, label)
@@ -1744,7 +1766,7 @@ func optionalString(raw map[string]any, key, label string) (string, bool, error)
 
 // optionalObject is parseObjectField with an explicit null read as omission.
 func optionalObject(raw map[string]any, key, label string) (map[string]any, bool, error) {
-	if v, present := raw[key]; present && v == nil {
+	if v, present := raw[key]; present && isExplicitNull(v) {
 		return nil, false, nil
 	}
 	return parseObjectField(raw, key, label)
@@ -1752,10 +1774,26 @@ func optionalObject(raw map[string]any, key, label string) (map[string]any, bool
 
 // optionalInt32 is parseInt32Field with an explicit null read as omission.
 func optionalInt32(raw map[string]any, key, label string) (int32, bool, error) {
-	if v, present := raw[key]; present && v == nil {
+	if v, present := raw[key]; present && isExplicitNull(v) {
 		return 0, false, nil
 	}
 	return parseInt32Field(raw, key, label)
+}
+
+// optionalObjectList is parseObjectList with an explicit null read as omission.
+func optionalObjectList(raw map[string]any, key string) ([]map[string]any, bool, error) {
+	if v, present := raw[key]; present && isExplicitNull(v) {
+		return nil, false, nil
+	}
+	return parseObjectList(raw, key)
+}
+
+// optionalStringList is parseStringList with an explicit null read as omission.
+func optionalStringList(raw map[string]any, key, label string) ([]string, bool, error) {
+	if v, present := raw[key]; present && isExplicitNull(v) {
+		return nil, false, nil
+	}
+	return parseStringList(raw, key, label)
 }
 
 // parseStorageClassField parses an optional PVC "storageClass" string,
@@ -3073,8 +3111,10 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 	// pkg/oam/property_validate.go) — so such a document is valid v1alpha1
 	// today and has to stay valid. The type check below exists to catch a value
 	// the author wrote and got wrong; a null is a value the author did not
-	// write at all.
-	if !present || raw == nil {
+	// write at all. isExplicitNull, not `raw == nil`, so a []any(nil) emitted by
+	// a Go-constructed lowering rule is classified the way the validator
+	// classifies it — see the wrapper block above.
+	if !present || isExplicitNull(raw) {
 		return nil, nil
 	}
 	// Presence and type are two questions: a single type assertion answered
@@ -3195,6 +3235,18 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 			// Symmetric with the long resources.requests.storage spelling in
 			// parseStorageResourceList: upstream ValidatePositiveQuantityValue
 			// rejects Cmp <= 0, so zero is as invalid as negative.
+			//
+			// The parent parser rejected only a negative quantity, so `size:
+			// "0"` reaches this line having built successfully before. That is
+			// a deliberate tightening, not an oversight: it is
+			// ValidatePersistentVolumeClaimSpec that runs
+			// ValidatePositiveQuantityValue over requests[storage], so a
+			// zero-sized claim was never admissible — the document built here
+			// and was refused by the apiserver. Failing fast with the field
+			// named beats emitting a manifest that cannot apply. Recorded as
+			// behavior-changing in this package's README, on the precedent of
+			// 6aed090, which tightened init/sidecar container entries the same
+			// way under an unchanged launcher.gokure.dev/v1alpha1.
 			if qty.Sign() <= 0 {
 				return nil, errors.Errorf("volumeClaimTemplate %q: size must be positive, got %q", vct.Name, vct.Size)
 			}

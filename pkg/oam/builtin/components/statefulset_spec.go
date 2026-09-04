@@ -223,7 +223,12 @@ func parseStatefulSetUpdateStrategy(raw map[string]any) (*appsv1.StatefulSetUpda
 		}
 		us.RollingUpdate.Partition = &v
 	}
-	if v, present := ru["maxUnavailable"]; present {
+	// isExplicitNull rather than a bare presence check, for the reason the
+	// optional* wrappers exist (see common.go): this leaf is optional in the
+	// schema, so pkg/oam accepts an explicit null for it, and parseMaxUnavailable
+	// would then reject the nil as a wrong type. It takes an `any` rather than a
+	// map, so it cannot go through a wrapper.
+	if v, present := ru["maxUnavailable"]; present && !isExplicitNull(v) {
 		mu, err := parseMaxUnavailable(v, "updateStrategy.rollingUpdate.maxUnavailable")
 		if err != nil {
 			return nil, err
