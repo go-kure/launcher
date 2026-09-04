@@ -464,7 +464,7 @@ func schemaDeploymentSpec() map[string]oam.PropertySchema {
 		},
 		"paused": {
 			Type:        oam.PropertyTypeBoolean,
-			Description: "Whether the deployment controller stops acting on template changes. A paused Deployment still creates its ReplicaSet but does not roll new pods out, and progress is not estimated while paused. The API default is false.",
+			Description: "Whether the deployment controller stops acting on template changes. Progress is not estimated while paused, which the API's own progressDeadlineSeconds documentation states. Authoring true also suppresses the automatic readiness check this component would otherwise synthesize, since gating on a workload the document told the controller not to roll out is not a health signal. The API default is false.",
 		},
 		"progressDeadlineSeconds": {
 			Type:        oam.PropertyTypeInteger,

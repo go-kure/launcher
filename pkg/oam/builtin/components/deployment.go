@@ -246,8 +246,10 @@ func (c *DeploymentConfig) ServiceAccountName() string {
 // check is skipped and `paused: true` stays a usable way to stage a workload.
 //
 // This is about the emitted object's reachable states, not its existence: the
-// Deployment is still emitted and still reconciled, it simply carries no
-// auto health check. Satisfies pkg/oam.autoHealthCheckEmitter.
+// Deployment is still emitted and still applied by the enclosing Kustomization,
+// it simply carries no auto health check. Nothing here claims what the
+// Deployment controller does with a paused object — only that a readiness gate
+// on it cannot be a health signal. Satisfies pkg/oam.autoHealthCheckEmitter.
 func (c *DeploymentConfig) EmitsAutoHealthCheck() bool {
 	return c.DeploymentSpec.Paused == nil || !*c.DeploymentSpec.Paused
 }
