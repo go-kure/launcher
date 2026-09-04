@@ -253,7 +253,6 @@ func (c *WorkerConfig) ApplyPolicy(p oam.Policy) error {
 // Generate creates a Kubernetes Deployment and ServiceAccount (no Service).
 // The ServiceAccount is omitted when serviceAccountName was authored.
 func (c *WorkerConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	labels := map[string]string{"app": app.Name}
 	var err error
 	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 	if err != nil {
@@ -268,11 +267,11 @@ func (c *WorkerConfig) Generate(app *stack.Application) ([]*client.Object, error
 
 	objects := []*client.Object{&depObj}
 	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, labels))
+		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
 		objects = append(objects, &saObj)
 	}
 	for _, pvc := range c.PVCs {
-		p, err := BuildPVC(pvc, app.Namespace, labels)
+		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
 		if err != nil {
 			return nil, err
 		}
@@ -284,8 +283,6 @@ func (c *WorkerConfig) Generate(app *stack.Application) ([]*client.Object, error
 }
 
 func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
-	labels := map[string]string{"app": app.Name}
-
 	// No Ports: worker exposes no port property (see parseProbes' namedPortsAllowed=false above).
 	container := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
@@ -302,9 +299,9 @@ func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deploym
 	})
 
 	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
-	dep.Labels = labels
+	dep.Labels = appLabels(app.Name)
 	dep.Annotations = nil
-	dep.Spec.Template.Labels = labels
+	dep.Spec.Template.Labels = appLabels(app.Name)
 	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
 	if hasNonRWXPVC(c.PVCs) {
 		if c.Replicas > 1 {
@@ -315,7 +312,7 @@ func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deploym
 
 	var tscs []corev1.TopologySpreadConstraint
 	if !c.TopologySpreadDisabled {
-		tscs = buildTopologySpreadConstraints(c.Replicas, labels)
+		tscs = buildTopologySpreadConstraints(c.Replicas, appLabels(app.Name))
 	}
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:                    c.PodSpec,
@@ -325,7 +322,7 @@ func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deploym
 		Sidecars:                  c.Sidecars,
 		Volumes:                   c.Volumes,
 		TopologySpreadConstraints: tscs,
-		Affinity:                  buildAffinity(c.Affinity, labels),
+		Affinity:                  buildAffinity(c.Affinity, appLabels(app.Name)),
 	})
 	if err != nil {
 		return nil, err

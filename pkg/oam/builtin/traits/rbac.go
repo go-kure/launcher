@@ -173,10 +173,11 @@ func (c *rbacTraitConfig) subjectName() string {
 }
 
 func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	labels := map[string]string{"app": c.componentName}
-
+	// A label map per object, never one map shared between them: these leave
+	// the package on objects a caller owns and edits, and a shared map turns a
+	// label added to the Role into a label on the RoleBinding as well.
 	role := kubernetes.CreateRole(c.componentName, c.Namespace)
-	role.Labels = labels
+	role.Labels = map[string]string{"app": c.componentName}
 	role.Annotations = nil
 	for _, r := range c.Rules {
 		kubernetes.AddRoleRule(role, rbacv1.PolicyRule{
@@ -187,7 +188,7 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 	}
 
 	rb := kubernetes.CreateRoleBinding(c.componentName, c.Namespace)
-	rb.Labels = labels
+	rb.Labels = map[string]string{"app": c.componentName}
 	rb.Annotations = nil
 	kubernetes.SetRoleBindingRoleRef(rb, rbacv1.RoleRef{
 		APIGroup: rbacv1.GroupName,
@@ -209,7 +210,7 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 	}
 
 	cr := kubernetes.CreateClusterRole(c.componentName)
-	cr.Labels = labels
+	cr.Labels = map[string]string{"app": c.componentName}
 	cr.Annotations = nil
 	for _, r := range c.Rules {
 		kubernetes.AddClusterRoleRule(cr, rbacv1.PolicyRule{
@@ -220,7 +221,7 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 	}
 
 	crb := kubernetes.CreateClusterRoleBinding(c.componentName)
-	crb.Labels = labels
+	crb.Labels = map[string]string{"app": c.componentName}
 	crb.Annotations = nil
 	kubernetes.SetClusterRoleBindingRoleRef(crb, rbacv1.RoleRef{
 		APIGroup: rbacv1.GroupName,

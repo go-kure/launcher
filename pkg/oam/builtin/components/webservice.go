@@ -286,7 +286,6 @@ func (c *WebserviceConfig) ServicePort() int32 { return c.Port }
 // The ServiceAccount is omitted when serviceAccountName was authored (the pod
 // then runs as that pre-existing account).
 func (c *WebserviceConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	labels := map[string]string{"app": app.Name}
 	var err error
 	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 	if err != nil {
@@ -303,11 +302,11 @@ func (c *WebserviceConfig) Generate(app *stack.Application) ([]*client.Object, e
 
 	objects := []*client.Object{&depObj, &svcObj}
 	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, labels))
+		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
 		objects = append(objects, &saObj)
 	}
 	for _, pvc := range c.PVCs {
-		p, err := BuildPVC(pvc, app.Namespace, labels)
+		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
 		if err != nil {
 			return nil, err
 		}
@@ -319,8 +318,6 @@ func (c *WebserviceConfig) Generate(app *stack.Application) ([]*client.Object, e
 }
 
 func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
-	labels := map[string]string{"app": app.Name}
-
 	container := buildMainContainer(app.Name, mainContainerInput{
 		Image:     c.Image,
 		Command:   c.Command,
@@ -339,9 +336,9 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	})
 
 	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
-	dep.Labels = labels
+	dep.Labels = appLabels(app.Name)
 	dep.Annotations = nil
-	dep.Spec.Template.Labels = labels
+	dep.Spec.Template.Labels = appLabels(app.Name)
 	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
 	if hasNonRWXPVC(c.PVCs) {
 		if c.Replicas > 1 {
@@ -352,7 +349,7 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 
 	var tscs []corev1.TopologySpreadConstraint
 	if !c.TopologySpreadDisabled {
-		tscs = buildTopologySpreadConstraints(c.Replicas, labels)
+		tscs = buildTopologySpreadConstraints(c.Replicas, appLabels(app.Name))
 	}
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:                    c.PodSpec,
@@ -362,7 +359,7 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 		Sidecars:                  c.Sidecars,
 		Volumes:                   c.Volumes,
 		TopologySpreadConstraints: tscs,
-		Affinity:                  buildAffinity(c.Affinity, labels),
+		Affinity:                  buildAffinity(c.Affinity, appLabels(app.Name)),
 	})
 	if err != nil {
 		return nil, err
@@ -373,13 +370,11 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 }
 
 func (c *WebserviceConfig) createService(app *stack.Application) *corev1.Service {
-	labels := map[string]string{"app": app.Name}
-
 	svc := kubernetes.CreateService(app.Name, app.Namespace)
-	svc.Labels = labels
+	svc.Labels = appLabels(app.Name)
 	svc.Annotations = nil
 	kubernetes.SetServiceType(svc, corev1.ServiceTypeClusterIP)
-	kubernetes.SetServiceSelector(svc, map[string]string{"app": app.Name})
+	kubernetes.SetServiceSelector(svc, appLabels(app.Name))
 	kubernetes.AddServicePort(svc, corev1.ServicePort{
 		Name:       "http",
 		Port:       c.Port,

@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	gopath "path"
 	"slices"
@@ -2834,19 +2835,47 @@ func applyProbes(container *corev1.Container, probes ProbeConfig) {
 	}
 }
 
+// appLabels returns the label set a component's generated resources carry, as a
+// fresh map on every call.
+//
+// The invariant it serves: no two fields of a generated object, and no two
+// generated objects, ever share one label map. These maps leave the package on
+// objects a caller owns and routinely edits — stamping ownership, environment
+// or version labels on the workloads it emits — and a shared map turns one such
+// edit into an edit of everything reachable from it. Call this once per
+// assignment rather than hoisting the result into a variable used twice.
+func appLabels(name string) map[string]string {
+	return map[string]string{"app": name}
+}
+
+// selectorFrom returns a label selector over its own copy of labels.
+//
+// A selector must never alias a label map a caller can reach. The workload
+// kinds build one label map and use it for the object's metadata, the pod
+// template's metadata and the scheduling selectors below; a caller that then
+// stamps its own labels onto the generated pod template — ownership,
+// environment, version — would otherwise silently widen the selectors too, and
+// widening a topology-spread or anti-affinity selector changes which pods the
+// scheduler groups together, not just the emitted YAML.
+func selectorFrom(labels map[string]string) *metav1.LabelSelector {
+	return &metav1.LabelSelector{MatchLabels: maps.Clone(labels)}
+}
+
 // buildTopologySpreadConstraints returns topology spread constraints for
 // Deployments with multiple replicas. Returns nil when replicas <= 1.
 func buildTopologySpreadConstraints(replicas int32, selectorLabels map[string]string) []corev1.TopologySpreadConstraint {
 	if replicas <= 1 {
 		return nil
 	}
-	ls := &metav1.LabelSelector{MatchLabels: selectorLabels}
+	// One selector per constraint rather than one shared pointer: two
+	// constraints sharing a *LabelSelector cannot be edited independently
+	// either.
 	constraints := []corev1.TopologySpreadConstraint{
 		{
 			MaxSkew:           1,
 			TopologyKey:       "kubernetes.io/hostname",
 			WhenUnsatisfiable: corev1.DoNotSchedule,
-			LabelSelector:     ls,
+			LabelSelector:     selectorFrom(selectorLabels),
 		},
 	}
 	if replicas >= 3 {
@@ -2854,7 +2883,7 @@ func buildTopologySpreadConstraints(replicas int32, selectorLabels map[string]st
 			MaxSkew:           1,
 			TopologyKey:       "topology.kubernetes.io/zone",
 			WhenUnsatisfiable: corev1.ScheduleAnyway,
-			LabelSelector:     ls,
+			LabelSelector:     selectorFrom(selectorLabels),
 		})
 	}
 	return constraints
@@ -2867,7 +2896,7 @@ func buildAffinity(cfg AffinityConfig, selectorLabels map[string]string) *corev1
 	affinity := &corev1.Affinity{}
 	if cfg.EnablePodAntiAffinity {
 		term := corev1.PodAffinityTerm{
-			LabelSelector: &metav1.LabelSelector{MatchLabels: selectorLabels},
+			LabelSelector: selectorFrom(selectorLabels),
 			TopologyKey:   cfg.TopologyKey,
 		}
 		if cfg.PodAntiAffinityType == "required" {
@@ -2942,7 +2971,7 @@ func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error)
 // (PSA restricted profile compliance). Clears the default annotation added by the kure builder.
 func createServiceAccount(name, namespace string, labels map[string]string) *corev1.ServiceAccount {
 	sa := kubernetes.CreateServiceAccount(name, namespace)
-	sa.Labels = labels
+	sa.Labels = maps.Clone(labels)
 	sa.Annotations = nil
 	kubernetes.SetServiceAccountAutomountToken(sa, false)
 	return sa
@@ -3028,7 +3057,7 @@ func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev
 	}
 
 	claim := kubernetes.CreatePersistentVolumeClaim(pvc.Name, namespace)
-	claim.Labels = labels
+	claim.Labels = maps.Clone(labels)
 	claim.Annotations = nil
 	claim.Spec.VolumeMode = nil
 	kubernetes.SetPVCResources(claim, corev1.VolumeResourceRequirements{

@@ -203,16 +203,17 @@ func (c *ScalerConfig) Generate(app *stack.Application) ([]*client.Object, error
 		return nil, err
 	}
 
-	labels := map[string]string{"app": c.componentName}
-
 	var resources []*client.Object
 
-	hpa := c.buildHPA(app, labels)
+	// A label map per object, never one map shared between them: these leave
+	// the package on objects a caller owns and edits, and a shared map turns a
+	// label added to the HPA into a label on the PDB as well.
+	hpa := c.buildHPA(app, map[string]string{"app": c.componentName})
 	hpaObj := client.Object(hpa)
 	resources = append(resources, &hpaObj)
 
 	if c.EnablePDB {
-		pdb := c.buildPDB(app, labels)
+		pdb := c.buildPDB(app, map[string]string{"app": c.componentName})
 		pdbObj := client.Object(pdb)
 		resources = append(resources, &pdbObj)
 	}
