@@ -74,12 +74,19 @@ type fluxNamespaceSettable interface {
 }
 
 // autoHealthCheckEmitter is implemented by ApplicationConfig types whose
-// auto health-check (from componentHealthCheckGVK) is only valid when the
-// config actually emits the referenced object. Helmchart returns false for
-// delivery=template (it renders manifests and emits no HelmRelease), so no
-// HelmRelease health check should be synthesized. Decorators that wrap such
-// configs must forward this call (mirroring fluxNamespaceSettable). Configs
-// that do not implement it are assumed to emit their object.
+// auto health-check (from componentHealthCheckGVK) is only meaningful for some
+// of the documents they accept. Two shapes qualify, and both return false:
+//
+//   - the config emits no object for the check to reference. Helmchart returns
+//     false for delivery=template, which renders manifests client-side and
+//     emits no HelmRelease.
+//   - the config emits the object, but the document instructs the workload not
+//     to progress, so a readiness gate on it is not a health signal. Deployment
+//     returns false for paused: true.
+//
+// Decorators that wrap such configs must forward this call (mirroring
+// fluxNamespaceSettable). Configs that do not implement it are assumed to emit
+// an object that can reach a ready state.
 type autoHealthCheckEmitter interface {
 	EmitsAutoHealthCheck() bool
 }

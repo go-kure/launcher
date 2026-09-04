@@ -729,3 +729,37 @@ func TestDeploymentHandler_TopLevelNullIsOmission(t *testing.T) {
 		}
 	})
 }
+
+// TestDeploymentHandler_PausedVetoesAutoHealthCheck covers the interface the
+// transform pipeline consults before synthesizing a readiness check
+// (pkg/oam.autoHealthCheckEmitter). `paused: true` tells the Deployment
+// controller not to roll the workload out, so gating the enclosing
+// Kustomization on it becoming ready would block on the state the document
+// asked for. The Deployment is still emitted; only the auto health check is
+// skipped.
+//
+// The pipeline reaches this method by type assertion, so the assertion below is
+// the load-bearing half: a method whose name or signature drifts stops being
+// seen there without any call site failing to compile.
+func TestDeploymentHandler_PausedVetoesAutoHealthCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		props map[string]any
+		want  bool
+	}{
+		{"paused true vetoes the check", map[string]any{"image": "nginx:1.27", "paused": true}, false},
+		{"paused false keeps it", map[string]any{"image": "nginx:1.27", "paused": false}, true},
+		{"paused unauthored keeps it", map[string]any{"image": "nginx:1.27"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := deploymentConfig(t, "app", tc.props)
+			e, ok := cfg.(interface{ EmitsAutoHealthCheck() bool })
+			if !ok {
+				t.Fatal("DeploymentConfig does not satisfy the autoHealthCheckEmitter shape the transform asserts on")
+			}
+			if got := e.EmitsAutoHealthCheck(); got != tc.want {
+				t.Errorf("EmitsAutoHealthCheck() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

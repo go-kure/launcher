@@ -236,6 +236,22 @@ func (c *DeploymentConfig) ServiceAccountName() string {
 	return effectiveServiceAccountName(c.PodSpec, c.Name)
 }
 
+// EmitsAutoHealthCheck reports whether the synthesized readiness check on this
+// component's Deployment is a health signal. It is not when the document sets
+// `paused: true`: pausing tells the Deployment controller not to roll the
+// workload out, so gating the enclosing Kustomization on that workload becoming
+// ready asks for the one thing the author just said should not happen. Emitting
+// the check anyway has no good outcome — either it blocks reconciliation on a
+// state the document forbids, or it passes without observing anything — so the
+// check is skipped and `paused: true` stays a usable way to stage a workload.
+//
+// This is about the emitted object's reachable states, not its existence: the
+// Deployment is still emitted and still reconciled, it simply carries no
+// auto health check. Satisfies pkg/oam.autoHealthCheckEmitter.
+func (c *DeploymentConfig) EmitsAutoHealthCheck() bool {
+	return c.DeploymentSpec.Paused == nil || !*c.DeploymentSpec.Paused
+}
+
 // ApplyPolicy applies defaults then enforces limits from the policy.
 // Defaults are applied first so that enforced checks run on effective post-default values.
 func (c *DeploymentConfig) ApplyPolicy(p oam.Policy) error {
