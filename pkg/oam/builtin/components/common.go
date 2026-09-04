@@ -18,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -2762,14 +2763,22 @@ func parseHistoryLimit(field string, v any) (int32, error) {
 }
 
 // JobSpecConfig carries the batchv1.JobSpec fields shared by a cronjob's jobTemplate
-// and (later) the job component (#279 PR 6) — the same batchv1.JobSpec type in both
-// positions. Every field is a pointer, and every one of these
+// and the job component (go-kure/launcher#344) — the same batchv1.JobSpec type in
+// both positions. Every field is a pointer, and every one of these
 // batchv1.JobSpec fields IS tagged `omitempty` in the pinned k8s.io/api — but
 // `omitempty` on a pointer field only suppresses a NIL pointer; a non-nil pointer to
 // the Go zero value (e.g. a *int32 pointing at 0) still marshals. So writing an
 // unconditional non-nil pointer here (rather than leaving the field nil when
 // unauthored) would still add a key like `backoffLimit: 0` to every generated
 // CronJob that no author asked for.
+//
+// One batchv1.JobSpec field is deliberately NOT here: Suspend. batchv1 carries a
+// Suspend on JobSpec (types.go:449) and another on CronJobSpec (types.go:751), and
+// the cronjob component already publishes the CronJobSpec one under the key
+// `suspend` (cronjob.go). Sharing a `suspend` key through this struct would write
+// one authored value into two different API fields and overwrite cronjob's own
+// schema entry, so `suspend` stays job-only — published and parsed by the job
+// handler, never by this shared parser. See the README's per-field table.
 type JobSpecConfig struct {
 	BackoffLimit            *int32
 	Completions             *int32
@@ -2777,16 +2786,32 @@ type JobSpecConfig struct {
 	ActiveDeadlineSeconds   *int64
 	TTLSecondsAfterFinished *int32
 	CompletionMode          *batchv1.CompletionMode
+	BackoffLimitPerIndex    *int32
+	MaxFailedIndexes        *int32
+	PodReplacementPolicy    *batchv1.PodReplacementPolicy
+	ManagedBy               *string
+	SuccessPolicy           *batchv1.SuccessPolicy
+}
+
+// jobSpecPropertyKeys lists every JobSpec-level property schemaJobSpec publishes
+// and parseJobSpec reads. TestJobSpecSchemaMatchesParser pins the two to this
+// list, and the per-handler key-collision guard counts the fragment from it
+// rather than from a literal — a number an author reconciles by bumping is not
+// a guard.
+var jobSpecPropertyKeys = []string{
+	"backoffLimit", "completions", "parallelism", "activeDeadlineSeconds",
+	"ttlSecondsAfterFinished", "completionMode", "backoffLimitPerIndex",
+	"maxFailedIndexes", "podReplacementPolicy", "managedBy", "successPolicy",
 }
 
 // parseJobSpec extracts the optional batchv1.JobSpec-level properties shared by
-// cronjob's jobTemplate (and, later, the job component — #279 PR 6). Every field is
+// cronjob's jobTemplate and the job component (go-kure/launcher#344). Every field is
 // presence-gated (see JobSpecConfig's doc comment) via parseInt32Field/parseInt64Field,
 // with an explicit negative-value guard per numeric field (matching
-// parseHistoryLimit above). Beyond the per-field bounds, two cross-field checks catch
-// what Kubernetes' own API server would otherwise reject at apply time: a Job with
-// completionMode Indexed requires completions to be set, and its parallelism (if
-// authored) must not exceed 100000.
+// parseHistoryLimit above). Beyond the per-field bounds, the cross-field checks in
+// parseJobSpecIndexedFields catch what Kubernetes' own API server would otherwise
+// reject at apply time — every one of them ported from ValidateJobSpec in
+// k8s.io/kubernetes/pkg/apis/batch/validation at the pinned k8s.io/api v0.36.3.
 func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 	var cfg JobSpecConfig
 
@@ -2852,41 +2877,374 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		}
 	}
 
-	if cfg.CompletionMode != nil && *cfg.CompletionMode == batchv1.IndexedCompletion {
-		if cfg.Completions == nil {
-			return cfg, errors.New("completionMode: Indexed requires completions to be set")
+	if v, present, err := parseInt32Field(props, "backoffLimitPerIndex", "backoffLimitPerIndex"); err != nil {
+		return cfg, err
+	} else if present {
+		if v < 0 {
+			return cfg, errors.Errorf("backoffLimitPerIndex: must be >= 0, got %d", v)
 		}
-		if cfg.Parallelism != nil && *cfg.Parallelism > 100000 {
-			return cfg, errors.Errorf("parallelism: must be <= 100000 when completionMode is Indexed, got %d", *cfg.Parallelism)
+		cfg.BackoffLimitPerIndex = &v
+	}
+
+	if v, present, err := parseInt32Field(props, "maxFailedIndexes", "maxFailedIndexes"); err != nil {
+		return cfg, err
+	} else if present {
+		if v < 0 {
+			return cfg, errors.Errorf("maxFailedIndexes: must be >= 0, got %d", v)
 		}
+		cfg.MaxFailedIndexes = &v
+	}
+
+	if v, present, err := parseStringField(props, "podReplacementPolicy", "podReplacementPolicy"); err != nil {
+		return cfg, err
+	} else if present {
+		switch batchv1.PodReplacementPolicy(v) {
+		case batchv1.Failed, batchv1.TerminatingOrFailed:
+			p := batchv1.PodReplacementPolicy(v)
+			cfg.PodReplacementPolicy = &p
+		default:
+			return cfg, errors.Errorf("podReplacementPolicy: invalid value %q, must be %q or %q", v, batchv1.Failed, batchv1.TerminatingOrFailed)
+		}
+	}
+
+	// managedBy cannot use parseStringField's present/absent contract alone:
+	// that helper reports an authored "" as absent, and "" is a value
+	// IsDomainPrefixedPath rejects outright rather than one an author can have
+	// meant. Read the raw value so an empty string is refused instead of
+	// silently dropped.
+	if raw, present := props["managedBy"]; present {
+		s, ok := raw.(string)
+		if !ok {
+			return cfg, errors.Errorf("managedBy: must be a string, got %T", raw)
+		}
+		// ValidateJobSpec checks IsDomainPrefixedPath and the 63-character cap
+		// (maxManagedByLength) independently, so both are checked here.
+		if errs := validation.IsDomainPrefixedPath(field.NewPath("managedBy"), s); len(errs) > 0 {
+			return cfg, errors.Errorf("managedBy: must be a domain-prefixed path such as \"example.com/custom-controller\", got %q", s)
+		}
+		if len(s) > maxManagedByLength {
+			return cfg, errors.Errorf("managedBy: must be at most %d characters, got %d", maxManagedByLength, len(s))
+		}
+		cfg.ManagedBy = &s
+	}
+
+	if raw, present, err := parseObjectField(props, "successPolicy", "successPolicy"); err != nil {
+		return cfg, err
+	} else if present {
+		sp, err := parseJobSuccessPolicy(raw)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.SuccessPolicy = sp
+	}
+
+	if err := parseJobSpecIndexedFields(&cfg); err != nil {
+		return cfg, err
 	}
 
 	return cfg, nil
 }
 
+// Limits ported from k8s.io/kubernetes/pkg/apis/batch/validation at the pinned
+// k8s.io/api v0.36.3, named as upstream names them so a future re-check reads
+// against the same identifiers.
+const (
+	maxParallelismForIndexedJob             = 100_000
+	maxFailedIndexesForIndexedJob           = 100_000
+	completionsSoftLimit                    = 100_000
+	parallelismLimitForHighCompletions      = 10_000
+	maxFailedIndexesLimitForHighCompletions = 10_000
+	maxManagedByLength                      = 63
+	maxSuccessPolicyRule                    = 20
+	// maxJobSuccessPolicySucceededIndexesLimit caps the raw succeededIndexes
+	// string, not the number of indexes it denotes.
+	maxJobSuccessPolicySucceededIndexesLimit = 64 * 1024
+)
+
+// parseJobSpecIndexedFields applies the JobSpec cross-field rules that depend on
+// completionMode, all ported from ValidateJobSpec. Three fields —
+// backoffLimitPerIndex, maxFailedIndexes and successPolicy — are meaningful only
+// under completionMode: Indexed and are rejected by the API server otherwise, so
+// they are rejected here rather than carried into a document that fails at apply
+// time. The remaining rules bound the indexed knobs against each other and against
+// completions.
+func parseJobSpecIndexedFields(cfg *JobSpecConfig) error {
+	indexed := cfg.CompletionMode != nil && *cfg.CompletionMode == batchv1.IndexedCompletion
+
+	// Checked before the indexed rules below because upstream checks it
+	// unconditionally: maxFailedIndexes without backoffLimitPerIndex is invalid
+	// in every completion mode.
+	if cfg.MaxFailedIndexes != nil && cfg.BackoffLimitPerIndex == nil {
+		return errors.New("backoffLimitPerIndex: required when maxFailedIndexes is specified")
+	}
+
+	if !indexed {
+		if cfg.BackoffLimitPerIndex != nil {
+			return errors.New("backoffLimitPerIndex: requires completionMode: Indexed")
+		}
+		if cfg.MaxFailedIndexes != nil {
+			return errors.New("maxFailedIndexes: requires completionMode: Indexed")
+		}
+		if cfg.SuccessPolicy != nil {
+			return errors.New("successPolicy: requires completionMode: Indexed")
+		}
+		return nil
+	}
+
+	if cfg.Completions == nil {
+		return errors.New("completionMode: Indexed requires completions to be set")
+	}
+	if cfg.Parallelism != nil && *cfg.Parallelism > maxParallelismForIndexedJob {
+		return errors.Errorf("parallelism: must be <= %d when completionMode is Indexed, got %d", maxParallelismForIndexedJob, *cfg.Parallelism)
+	}
+	if cfg.MaxFailedIndexes != nil {
+		if *cfg.MaxFailedIndexes > *cfg.Completions {
+			return errors.Errorf("maxFailedIndexes: must be <= completions (%d), got %d", *cfg.Completions, *cfg.MaxFailedIndexes)
+		}
+		if *cfg.MaxFailedIndexes > maxFailedIndexesForIndexedJob {
+			return errors.Errorf("maxFailedIndexes: must be <= %d, got %d", maxFailedIndexesForIndexedJob, *cfg.MaxFailedIndexes)
+		}
+	}
+	if *cfg.Completions > completionsSoftLimit && cfg.BackoffLimitPerIndex != nil {
+		if cfg.MaxFailedIndexes == nil {
+			return errors.Errorf("maxFailedIndexes: required when completions is above %d and backoffLimitPerIndex is set", completionsSoftLimit)
+		}
+		if cfg.Parallelism != nil && *cfg.Parallelism > parallelismLimitForHighCompletions {
+			return errors.Errorf("parallelism: must be <= %d when completions is above %d and backoffLimitPerIndex is set, got %d", parallelismLimitForHighCompletions, completionsSoftLimit, *cfg.Parallelism)
+		}
+		if *cfg.MaxFailedIndexes > maxFailedIndexesLimitForHighCompletions {
+			return errors.Errorf("maxFailedIndexes: must be <= %d when completions is above %d and backoffLimitPerIndex is set, got %d", maxFailedIndexesLimitForHighCompletions, completionsSoftLimit, *cfg.MaxFailedIndexes)
+		}
+	}
+	if cfg.SuccessPolicy != nil {
+		if err := validateJobSuccessPolicy(cfg.SuccessPolicy, *cfg.Completions); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// jobSuccessPolicyKeys and jobSuccessPolicyRuleKeys are the nested key sets
+// parseJobSuccessPolicy accepts, declared here so the schema fragment can be
+// pinned to them the way daemonset_spec.go pins its own.
+var (
+	jobSuccessPolicyKeys     = []string{"rules"}
+	jobSuccessPolicyRuleKeys = []string{"succeededIndexes", "succeededCount"}
+)
+
+// parseJobSuccessPolicy decodes `successPolicy` into batchv1.SuccessPolicy. The
+// shape checks live here; the checks that need completions (index bounds, rule
+// counts against the index set) live in validateJobSuccessPolicy, which runs
+// once completionMode and completions are known.
+func parseJobSuccessPolicy(raw map[string]any) (*batchv1.SuccessPolicy, error) {
+	if err := rejectUnknownKeys(raw, jobSuccessPolicyKeys, "successPolicy"); err != nil {
+		return nil, err
+	}
+	rulesRaw, present := raw["rules"]
+	if !present {
+		return nil, errors.New("successPolicy.rules: required")
+	}
+	rules, ok := rulesRaw.([]any)
+	if !ok {
+		return nil, errors.Errorf("successPolicy.rules: must be an array, got %T", rulesRaw)
+	}
+	sp := &batchv1.SuccessPolicy{}
+	for i, entry := range rules {
+		label := fmt.Sprintf("successPolicy.rules[%d]", i)
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("%s: must be an object, got %T", label, entry)
+		}
+		if err := rejectUnknownKeys(obj, jobSuccessPolicyRuleKeys, label); err != nil {
+			return nil, err
+		}
+		var rule batchv1.SuccessPolicyRule
+		// succeededIndexes is read raw for the same reason managedBy is: an
+		// authored "" is a value upstream's own parser rejects (it denotes no
+		// indexes at all), not an omission.
+		if v, present := obj["succeededIndexes"]; present {
+			s, ok := v.(string)
+			if !ok {
+				return nil, errors.Errorf("%s.succeededIndexes: must be a string, got %T", label, v)
+			}
+			rule.SucceededIndexes = &s
+		}
+		if v, present, err := parseInt32Field(obj, "succeededCount", label+".succeededCount"); err != nil {
+			return nil, err
+		} else if present {
+			if v < 0 {
+				return nil, errors.Errorf("%s.succeededCount: must be >= 0, got %d", label, v)
+			}
+			rule.SucceededCount = &v
+		}
+		if rule.SucceededIndexes == nil && rule.SucceededCount == nil {
+			return nil, errors.Errorf("%s: at least one of succeededIndexes or succeededCount must be specified", label)
+		}
+		sp.Rules = append(sp.Rules, rule)
+	}
+	return sp, nil
+}
+
+// validateJobSuccessPolicy ports validateSuccessPolicy/validateSuccessPolicyRule:
+// the rule-count bounds, and the per-rule checks that need completions.
+func validateJobSuccessPolicy(sp *batchv1.SuccessPolicy, completions int32) error {
+	if len(sp.Rules) == 0 {
+		return errors.New("successPolicy.rules: at least one rule must be specified")
+	}
+	if len(sp.Rules) > maxSuccessPolicyRule {
+		return errors.Errorf("successPolicy.rules: must contain at most %d rules, got %d", maxSuccessPolicyRule, len(sp.Rules))
+	}
+	for i, rule := range sp.Rules {
+		label := fmt.Sprintf("successPolicy.rules[%d]", i)
+		var totalIndexes int32
+		if rule.SucceededIndexes != nil {
+			if len(*rule.SucceededIndexes) > maxJobSuccessPolicySucceededIndexesLimit {
+				return errors.Errorf("%s.succeededIndexes: must be at most %d characters, got %d", label, maxJobSuccessPolicySucceededIndexesLimit, len(*rule.SucceededIndexes))
+			}
+			n, err := validateJobIndexesFormat(*rule.SucceededIndexes, completions)
+			if err != nil {
+				return errors.Errorf("%s.succeededIndexes: %v", label, err)
+			}
+			totalIndexes = n
+		}
+		if rule.SucceededCount != nil {
+			if *rule.SucceededCount > completions {
+				return errors.Errorf("%s.succeededCount: must be <= completions (%d), got %d", label, completions, *rule.SucceededCount)
+			}
+			if rule.SucceededIndexes != nil && *rule.SucceededCount > totalIndexes {
+				return errors.Errorf("%s.succeededCount: must be <= the %d indexes named by succeededIndexes, got %d", label, totalIndexes, *rule.SucceededCount)
+			}
+		}
+	}
+	return nil
+}
+
+// validateJobIndexesFormat ports validateIndexesFormat/parseIndexInterval: a
+// comma-separated list of strictly increasing intervals, each a decimal index or
+// a hyphenated pair, every index below completions. It returns how many indexes
+// the string denotes, which the succeededCount bound above is checked against.
+func validateJobIndexesFormat(indexes string, completions int32) (int32, error) {
+	if indexes == "" {
+		return 0, nil
+	}
+	var lastIndex *int32
+	var total int32
+	for _, interval := range strings.Split(indexes, ",") {
+		x, y, err := parseJobIndexInterval(interval, completions)
+		if err != nil {
+			return 0, err
+		}
+		if lastIndex != nil && *lastIndex >= x {
+			return 0, errors.Errorf("intervals must be in increasing order: %d follows %d", x, *lastIndex)
+		}
+		total += y - x + 1
+		last := y
+		lastIndex = &last
+	}
+	return total, nil
+}
+
+// parseJobIndexInterval parses one "N" or "N-M" fragment of a succeededIndexes
+// string, returning its inclusive bounds.
+func parseJobIndexInterval(interval string, completions int32) (int32, int32, error) {
+	parts := strings.Split(interval, "-")
+	if len(parts) > 2 {
+		return 0, 0, errors.Errorf("the fragment %q has more than two parts separated by '-'", interval)
+	}
+	x, err := parseJobIndex(parts[0], completions)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(parts) == 1 {
+		return x, x, nil
+	}
+	y, err := parseJobIndex(parts[1], completions)
+	if err != nil {
+		return 0, 0, err
+	}
+	if x >= y {
+		return 0, 0, errors.Errorf("intervals must be in increasing order: %d follows %d", y, x)
+	}
+	return x, y, nil
+}
+
+// parseJobIndex parses a single index and bounds it against completions, which
+// is where an index outside 0..completions-1 is caught.
+func parseJobIndex(s string, completions int32) (int32, error) {
+	// ParseInt with a 32-bit size, not Atoi: Atoi is int-wide, so on a 64-bit
+	// host an index above math.MaxInt32 would parse cleanly and then overflow
+	// the int32 conversion.
+	n, err := strconv.ParseInt(s, 10, 32)
+	if err != nil {
+		return 0, errors.Errorf("%q is not a decimal index", s)
+	}
+	if n < 0 {
+		return 0, errors.Errorf("index %q must be >= 0", s)
+	}
+	if n >= int64(completions) {
+		return 0, errors.Errorf("index %q must be less than completions (%d)", s, completions)
+	}
+	return int32(n), nil
+}
+
 // applyJobSpec writes cfg's presence-gated fields onto spec — a cronjob's
-// spec.jobTemplate.spec today, or (once #279 PR 6 lands) a job component's spec
-// directly; both are the same batchv1.JobSpec type. Fields left nil in cfg are left
+// spec.jobTemplate.spec, or a job component's spec directly (go-kure/launcher#344);
+// both are the same batchv1.JobSpec type. Fields left nil in cfg are left
 // untouched on spec, so an unauthored property never appears in generated output.
+//
+// Every value is copied, never aliased. A handler config outlives one Generate
+// call — it is reachable from the caller and Generate may run more than once — so
+// assigning cfg's own pointers onto the object would hand a mutable path from the
+// generated Job or CronJob back into the config: a later writer through the object
+// would change what the next Generate emits. SuccessPolicy needs a real DeepCopy
+// rather than a pointer copy because it owns a slice of rules, each with its own
+// pointers.
 func applyJobSpec(spec *batchv1.JobSpec, cfg JobSpecConfig) {
 	if cfg.BackoffLimit != nil {
-		spec.BackoffLimit = cfg.BackoffLimit
+		spec.BackoffLimit = copyPtr(cfg.BackoffLimit)
 	}
 	if cfg.Completions != nil {
-		spec.Completions = cfg.Completions
+		spec.Completions = copyPtr(cfg.Completions)
 	}
 	if cfg.Parallelism != nil {
-		spec.Parallelism = cfg.Parallelism
+		spec.Parallelism = copyPtr(cfg.Parallelism)
 	}
 	if cfg.ActiveDeadlineSeconds != nil {
-		spec.ActiveDeadlineSeconds = cfg.ActiveDeadlineSeconds
+		spec.ActiveDeadlineSeconds = copyPtr(cfg.ActiveDeadlineSeconds)
 	}
 	if cfg.TTLSecondsAfterFinished != nil {
-		spec.TTLSecondsAfterFinished = cfg.TTLSecondsAfterFinished
+		spec.TTLSecondsAfterFinished = copyPtr(cfg.TTLSecondsAfterFinished)
 	}
 	if cfg.CompletionMode != nil {
-		spec.CompletionMode = cfg.CompletionMode
+		spec.CompletionMode = copyPtr(cfg.CompletionMode)
 	}
+	if cfg.BackoffLimitPerIndex != nil {
+		spec.BackoffLimitPerIndex = copyPtr(cfg.BackoffLimitPerIndex)
+	}
+	if cfg.MaxFailedIndexes != nil {
+		spec.MaxFailedIndexes = copyPtr(cfg.MaxFailedIndexes)
+	}
+	if cfg.PodReplacementPolicy != nil {
+		spec.PodReplacementPolicy = copyPtr(cfg.PodReplacementPolicy)
+	}
+	if cfg.ManagedBy != nil {
+		spec.ManagedBy = copyPtr(cfg.ManagedBy)
+	}
+	if cfg.SuccessPolicy != nil {
+		spec.SuccessPolicy = cfg.SuccessPolicy.DeepCopy()
+	}
+}
+
+// copyPtr returns a pointer to a copy of *p, or nil when p is nil. It is for
+// pointers to scalars only — the copy is a plain assignment, so a T holding a
+// slice, map or pointer would still share what it points at. Use DeepCopy for
+// those.
+func copyPtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
 }
 
 // --- Builders ---

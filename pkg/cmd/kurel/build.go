@@ -242,6 +242,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"worker":      &components.WorkerHandler{},
 		"deployment":  &components.DeploymentHandler{},
 		"cronjob":     &components.CronjobHandler{},
+		"job":         &components.JobHandler{},
 		"daemonset":   &components.DaemonsetHandler{},
 		"statefulset": &components.StatefulsetHandler{},
 		"postgresql":  &components.PostgresqlHandler{},

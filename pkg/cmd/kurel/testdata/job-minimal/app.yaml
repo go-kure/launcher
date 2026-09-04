@@ -1,0 +1,11 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-job
+  namespace: default
+spec:
+  components:
+    - name: migrate
+      type: job
+      properties:
+        image: ghcr.io/example/migrate:v1.0.0

@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -252,6 +253,58 @@ func TestDeployment_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing
 	}
 	if got := *dep.Spec.ProgressDeadlineSeconds; got != 700 {
 		t.Errorf("progressDeadlineSeconds = %d, want 700", got)
+	}
+}
+
+// TestJob_RenderingTwiceIsUnaffectedByEditingTheFirstRender is the same property
+// on the kind added in go-kure/launcher#344. applyJobSpec projects ten scalar
+// pointers and one struct pointer whose value owns a slice, so it is the same
+// shape as the others even though nothing it projects is a map.
+// TestApplyJobSpec_CopiesRatherThanAliases checks every field at the pointer
+// level; this one checks the property a consumer actually meets, through the
+// rendering path, the way the statefulset, daemonset and deployment cases do.
+func TestJob_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
+	props := map[string]any{
+		"image":          "ghcr.io/org/app:v1",
+		"backoffLimit":   4,
+		"completionMode": "Indexed",
+		"completions":    6,
+		"successPolicy": map[string]any{
+			"rules": []any{map[string]any{"succeededCount": 3}},
+		},
+	}
+
+	second := renderTwice(t, &components.JobHandler{}, "job", props, func(objects []*client.Object) {
+		job, ok := (*objects[0]).(*batchv1.Job)
+		if !ok {
+			t.Fatalf("first object is %T, want *batchv1.Job", *objects[0])
+		}
+		// Checked rather than dereferenced blind, for the reason spelled out in
+		// the deployment case above: a regression that leaves one of these
+		// unset is what this test exists to catch, and writing through it
+		// would panic instead of failing by name.
+		if job.Spec.BackoffLimit == nil {
+			t.Fatal("first render has no backoffLimit — nothing to alias, so this test cannot prove anything")
+		}
+		if job.Spec.SuccessPolicy == nil || len(job.Spec.SuccessPolicy.Rules) != 1 || job.Spec.SuccessPolicy.Rules[0].SucceededCount == nil {
+			t.Fatal("first render has no successPolicy.rules[0].succeededCount — nothing to alias, so this test cannot prove anything")
+		}
+		*job.Spec.BackoffLimit = 99
+		*job.Spec.SuccessPolicy.Rules[0].SucceededCount = 99
+	})
+
+	job, ok := (*second[0]).(*batchv1.Job)
+	if !ok {
+		t.Fatalf("second render's first object is %T, want *batchv1.Job", *second[0])
+	}
+	if got := *job.Spec.BackoffLimit; got != 4 {
+		t.Errorf("backoffLimit = %d, want 4", got)
+	}
+	if job.Spec.SuccessPolicy == nil || len(job.Spec.SuccessPolicy.Rules) != 1 {
+		t.Fatalf("successPolicy.rules = %v, want one rule", job.Spec.SuccessPolicy)
+	}
+	if got := *job.Spec.SuccessPolicy.Rules[0].SucceededCount; got != 3 {
+		t.Errorf("successPolicy.rules[0].succeededCount = %d, want 3", got)
 	}
 }
 

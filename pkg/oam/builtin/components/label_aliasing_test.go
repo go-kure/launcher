@@ -151,6 +151,10 @@ func collectLabelMaps(objects []*client.Object) []labelMap {
 			addSpecSelector(prefix+".spec.jobTemplate", t.Spec.JobTemplate.Spec.Selector)
 			add(prefix+".spec.jobTemplate.spec.template.labels", t.Spec.JobTemplate.Spec.Template.Labels)
 			addPodSpec(prefix+".spec.jobTemplate.spec.template.spec", &t.Spec.JobTemplate.Spec.Template.Spec)
+		case *batchv1.Job:
+			addSpecSelector(prefix, t.Spec.Selector)
+			add(prefix+".spec.template.labels", t.Spec.Template.Labels)
+			addPodSpec(prefix+".spec.template.spec", &t.Spec.Template.Spec)
 		case *corev1.Service:
 			add(prefix+".spec.selector", t.Spec.Selector)
 		case *corev1.PersistentVolumeClaim:
@@ -317,10 +321,11 @@ func TestWorkloadKinds_StampingPodTemplateLabelsLeavesSelectorsAlone(t *testing.
 					selectors = append(selectors, labelMap{where: lm.where, m: maps.Clone(lm.m)})
 				}
 			}
-			// Every kind but cronjob owns at least its workload's
-			// spec.selector; a cronjob's job template has none, so it
-			// contributes label maps only.
-			if k.name != "cronjob" && len(selectors) == 0 {
+			// Every kind but cronjob and job owns at least its workload's
+			// spec.selector; a cronjob's job template has none, and a job's
+			// own selector is refused at parse time and left to the Job
+			// controller to generate, so both contribute label maps only.
+			if k.name != "cronjob" && k.name != "job" && len(selectors) == 0 {
 				t.Fatalf("%s generated no selector to check", k.name)
 			}
 
@@ -388,6 +393,8 @@ func stampTemplateLabels(t *testing.T, objects []*client.Object, key, value stri
 		case *batchv1.CronJob:
 			merge(&obj.Spec.JobTemplate.Labels)
 			merge(&obj.Spec.JobTemplate.Spec.Template.Labels)
+		case *batchv1.Job:
+			merge(&obj.Spec.Template.Labels)
 		}
 	}
 	if stamped == 0 {

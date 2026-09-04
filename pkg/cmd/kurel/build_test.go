@@ -424,7 +424,7 @@ spec:
 // rename is a document-format change, not an internal one.
 func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 	want := []string{
-		"crd", "cronjob", "daemonset", "deployment", "helmchart", "manifests",
+		"crd", "cronjob", "daemonset", "deployment", "helmchart", "job", "manifests",
 		"oci", "passthrough", "postgresql", "statefulset", "webservice", "worker",
 	}
 	got := make([]string, 0, len(builtinComponentHandlers()))

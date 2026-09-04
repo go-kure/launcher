@@ -1,0 +1,28 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-job
+  namespace: default
+spec:
+  components:
+    - name: migrate
+      type: job
+      properties:
+        image: ghcr.io/example/migrate:v1.0.0
+        restartPolicy: Never
+        suspend: true
+        backoffLimit: 4
+        completions: 6
+        parallelism: 2
+        activeDeadlineSeconds: 600
+        ttlSecondsAfterFinished: 3600
+        completionMode: Indexed
+        backoffLimitPerIndex: 1
+        maxFailedIndexes: 2
+        podReplacementPolicy: TerminatingOrFailed
+        managedBy: example.com/custom-controller
+        successPolicy:
+          rules:
+            - succeededIndexes: "0-3"
+              succeededCount: 3
+            - succeededCount: 5

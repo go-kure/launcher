@@ -111,7 +111,7 @@ func (h *PostgresqlHandler) PropertySchema() map[string]oam.PropertySchema {
 // unsupportedResourceNames returns any resource name in rl other than cpu/memory, sorted for a
 // deterministic error message. The shared `resources` schema (schemaResources) accepts any named
 // resource — e.g. "ephemeral-storage", "nvidia.com/gpu" — for every workload kind, forwarded
-// directly onto a real corev1.Container for the six direct workload kinds. postgresql instead
+// directly onto a real corev1.Container for the seven direct workload kinds. postgresql instead
 // forwards through kurecnpg.ResourceOptions (an external go-kure/kure type), which has fields
 // only for cpu/memory; anything else would otherwise be silently dropped when createCluster
 // builds the CNPG Cluster. Rejecting it here, at parse time, surfaces that loudly instead.

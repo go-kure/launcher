@@ -1001,6 +1001,46 @@ func TestCronjobHandler_Suspend_Projected(t *testing.T) {
 	}
 }
 
+// TestCronjobHandler_SuspendWritesCronJobSpecOnly guards the one deliberate
+// asymmetry between the job and cronjob components. batchv1 carries two
+// distinct Suspend fields — CronJobSpec.Suspend (suspends future executions of
+// the schedule) and JobSpec.Suspend (creates a job with no pods) — and both
+// components publish a key named `suspend`. The cronjob component's is the
+// CronJobSpec one, so it must not reach the job template.
+//
+// Sharing `suspend` through schemaJobSpec/parseJobSpec would be the natural
+// thing to do when the two components' shared surface is next widened, and it
+// would silently write one authored value into two API fields. This test fails
+// the moment that happens; TestSchemaJobSpec_HasNoSuspendKey is its schema-side
+// half, and TestJobHandler_SuspendWritesJobSpec pins the job component's own.
+func TestCronjobHandler_SuspendWritesCronJobSpecOnly(t *testing.T) {
+	h := &components.CronjobHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "job",
+		Type: "cronjob",
+		Properties: map[string]any{
+			"image":    "ghcr.io/org/job:v1.0.0",
+			"schedule": "0 2 * * *",
+			"suspend":  true,
+		},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication("job", "default", cfg)
+	objs, err := cfg.Generate(app)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	cj := findCronJob(t, objs)
+	if cj.Spec.Suspend == nil || !*cj.Spec.Suspend {
+		t.Fatalf("Spec.Suspend = %v, want true", cj.Spec.Suspend)
+	}
+	if got := cj.Spec.JobTemplate.Spec.Suspend; got != nil {
+		t.Errorf("Spec.JobTemplate.Spec.Suspend = %v, want nil — `suspend` on a cronjob is CronJobSpec.Suspend, not JobSpec.Suspend", got)
+	}
+}
+
 func TestCronjobHandler_StartingDeadlineSeconds_Projected(t *testing.T) {
 	h := &components.CronjobHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
@@ -1217,18 +1257,21 @@ func TestCronjobHandler_CronSpecAndJobSpec_Rejections(t *testing.T) {
 // out-of-process validator (property_validate.go:15) that none of the tests
 // above exercise directly, so a forgotten maps.Copy call or a mistyped
 // Enum/Default would pass every other test in this file silently. Asserts the
-// full map's cardinality (26 = the 16 pre-existing keys plus the 10 this PR
-// adds) so an omitted key is caught, and each of the 10 new keys'
-// Type/Enum/Default/Description against a literal so a mistyped one is too.
+// full map's cardinality so an omitted key is caught, and each JobSpec- and
+// CronJobSpec-level key's Type/Enum/Default/Description against a literal so a
+// mistyped one is too.
 // Oracle: delete one key from schemaJobSpec (or its maps.Copy call in
 // PropertySchema()) and confirm this test fails.
 func TestCronjobHandler_PropertySchema_JobSpecAndCronSpecKeys_Present(t *testing.T) {
 	h := &components.CronjobHandler{}
 	schema := h.PropertySchema()
 
-	// 26 cronjob-own keys plus the 31 shared pod-level keys from schemaPodSpec
-	// (podActiveDeadlineSeconds included: cronjob pods are Job pods).
-	const wantTotalKeys = 57
+	// 20 cronjob-own keys, the 11 JobSpec-level keys from schemaJobSpec (six
+	// from the original cronjob work, five added with the job component in
+	// go-kure/launcher#344), and the 31 shared pod-level keys from
+	// schemaPodSpec (podActiveDeadlineSeconds included: cronjob pods are Job
+	// pods).
+	const wantTotalKeys = 62
 	if len(schema) != wantTotalKeys {
 		t.Fatalf("PropertySchema() returned %d keys, want %d", len(schema), wantTotalKeys)
 	}
@@ -1249,6 +1292,11 @@ func TestCronjobHandler_PropertySchema_JobSpecAndCronSpecKeys_Present(t *testing
 		"activeDeadlineSeconds":   {typ: oam.PropertyTypeInteger},
 		"ttlSecondsAfterFinished": {typ: oam.PropertyTypeInteger},
 		"completionMode":          {typ: oam.PropertyTypeString, enum: []any{"NonIndexed", "Indexed"}},
+		"backoffLimitPerIndex":    {typ: oam.PropertyTypeInteger},
+		"maxFailedIndexes":        {typ: oam.PropertyTypeInteger},
+		"podReplacementPolicy":    {typ: oam.PropertyTypeString, enum: []any{"Failed", "TerminatingOrFailed"}},
+		"managedBy":               {typ: oam.PropertyTypeString},
+		"successPolicy":           {typ: oam.PropertyTypeObject},
 	}
 
 	for key, w := range cases {
