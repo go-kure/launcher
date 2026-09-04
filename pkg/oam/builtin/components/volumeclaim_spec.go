@@ -441,9 +441,19 @@ func parseDataSourceRef(raw map[string]any, label string) (*corev1.TypedObjectRe
 // apply writes the projected fields onto a claim template kure's
 // CreateVolumeClaimTemplate has already built. Every field is written only when
 // authored, so an entry using none of them is byte-identical to before.
+//
+// Everything projected here is deep-copied out of the config, never aliased
+// into the generated object. A handler config is reusable — the same one can
+// render more than once — and editing a generated object in place is an
+// expected use, which is exactly what the label-aliasing tests exercise
+// (label_aliasing_test.go). A shared pointer or map would carry such an edit
+// back into the config and into every later render. Copying is the same rule
+// buildResourceRequirements already applies to the container resource maps
+// (common.go:2887-2889); the pointers to scalars are copied by value for the
+// same reason, since a caller can write through them just as easily.
 func (c VolumeClaimSpecConfig) apply(pvc *corev1.PersistentVolumeClaim) {
 	if c.Selector != nil {
-		pvc.Spec.Selector = c.Selector
+		pvc.Spec.Selector = c.Selector.DeepCopy()
 	}
 	if c.Resources != nil {
 		// The constructor already wrote requests.storage from `size`; merge
@@ -452,20 +462,28 @@ func (c VolumeClaimSpecConfig) apply(pvc *corev1.PersistentVolumeClaim) {
 			if pvc.Spec.Resources.Requests == nil {
 				pvc.Spec.Resources.Requests = corev1.ResourceList{}
 			}
-			maps.Copy(pvc.Spec.Resources.Requests, c.Resources.Requests)
+			// The destination map is built fresh per render, so this one
+			// cannot alias at the map level the way Limits does; the copy
+			// guards a Quantity's own internal *inf.Dec, which a caller can
+			// still reach through AsDec(). Unlike the assignments around it,
+			// no test can catch its removal through the rendering path — kept
+			// for the same reason buildResourceRequirements copies.
+			maps.Copy(pvc.Spec.Resources.Requests, c.Resources.Requests.DeepCopy())
 		}
 		if c.Resources.Limits != nil {
-			pvc.Spec.Resources.Limits = c.Resources.Limits
+			pvc.Spec.Resources.Limits = c.Resources.Limits.DeepCopy()
 		}
 	}
 	if c.VolumeMode != nil {
-		pvc.Spec.VolumeMode = c.VolumeMode
+		mode := *c.VolumeMode
+		pvc.Spec.VolumeMode = &mode
 	}
 	if c.DataSourceRef != nil {
-		pvc.Spec.DataSourceRef = c.DataSourceRef
+		pvc.Spec.DataSourceRef = c.DataSourceRef.DeepCopy()
 	}
 	if c.VolumeAttributesClassName != nil {
-		pvc.Spec.VolumeAttributesClassName = c.VolumeAttributesClassName
+		class := *c.VolumeAttributesClassName
+		pvc.Spec.VolumeAttributesClassName = &class
 	}
 }
 

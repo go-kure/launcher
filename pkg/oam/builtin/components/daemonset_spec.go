@@ -260,15 +260,21 @@ func describeRollingUpdateKnob(v intstr.IntOrString, authored bool, apiDefault s
 // apply writes the authored DaemonSetSpec-level fields directly onto the
 // DaemonSet. Unauthored fields keep whatever the constructor set, so output for
 // documents that author none of them does not change.
+// Deep-copied on the way out for the reason spelled out on
+// VolumeClaimSpecConfig.apply. This kind was not named by the review that found
+// the aliasing, but it projects the same two shapes — an update strategy whose
+// struct holds a *RollingUpdateDaemonSet, and a bare *int32 — so it is fixed
+// with the others rather than left as the one site that still aliases.
 func (c DaemonSetSpecConfig) apply(ds *appsv1.DaemonSet) {
 	if c.UpdateStrategy != nil {
-		ds.Spec.UpdateStrategy = *c.UpdateStrategy
+		ds.Spec.UpdateStrategy = *c.UpdateStrategy.DeepCopy()
 	}
 	if c.MinReadySeconds != nil {
 		ds.Spec.MinReadySeconds = *c.MinReadySeconds
 	}
 	if c.RevisionHistoryLimit != nil {
-		ds.Spec.RevisionHistoryLimit = c.RevisionHistoryLimit
+		limit := *c.RevisionHistoryLimit
+		ds.Spec.RevisionHistoryLimit = &limit
 	}
 }
 
