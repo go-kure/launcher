@@ -305,6 +305,105 @@ func TestDeploymentHandler_NonRWXRejectsConflictingStrategy(t *testing.T) {
 	}
 }
 
+// TestDeploymentHandler_RWXCapableClaimIsNotConstrained pins the read of
+// `accessModes` the guard depends on. The field is a request for a volume that
+// supports *every* mode listed, so a claim naming ReadWriteMany alongside
+// ReadWriteOnce binds a volume many pods can mount read-write: constraining it
+// would refuse a document Kubernetes accepts and serves, and force a Recreate
+// rollout on a workload that never needed one. The single-mode case below is
+// the control — without it this test would pass just as well if the guard
+// stopped firing altogether.
+func TestDeploymentHandler_RWXCapableClaimIsNotConstrained(t *testing.T) {
+	rwxProps := func(modes []any, extra map[string]any) map[string]any {
+		props := map[string]any{
+			"image": "ghcr.io/org/app:v1",
+			"volumes": []any{
+				map[string]any{
+					"name":        "data",
+					"type":        "pvc",
+					"mountPath":   "/data",
+					"size":        "1Gi",
+					"accessModes": modes,
+				},
+			},
+		}
+		for k, v := range extra {
+			props[k] = v
+		}
+		return props
+	}
+
+	t.Run("a claim listing ReadWriteMany alongside ReadWriteOnce takes replicas > 1", func(t *testing.T) {
+		dep, _ := generateDeployment(t, "app", rwxProps([]any{"ReadWriteOnce", "ReadWriteMany"}, map[string]any{
+			"replicas": 2,
+		}))
+		if got := *dep.Spec.Replicas; got != 2 {
+			t.Errorf("Replicas = %d, want 2", got)
+		}
+		if dep.Spec.Strategy.Type == appsv1.RecreateDeploymentStrategyType {
+			t.Error("Strategy.Type = Recreate, want the strategy left alone for an RWX-capable claim")
+		}
+	})
+
+	t.Run("an authored RollingUpdate is not a conflict either", func(t *testing.T) {
+		dep, _ := generateDeployment(t, "app", rwxProps([]any{"ReadWriteOnce", "ReadWriteMany"}, map[string]any{
+			"strategy": map[string]any{"type": "RollingUpdate"},
+		}))
+		if dep.Spec.Strategy.Type != appsv1.RollingUpdateDeploymentStrategyType {
+			t.Errorf("Strategy.Type = %q, want RollingUpdate", dep.Spec.Strategy.Type)
+		}
+	})
+
+	t.Run("ReadWriteOnce alone is still constrained", func(t *testing.T) {
+		cfg := deploymentConfig(t, "app", rwxProps([]any{"ReadWriteOnce"}, map[string]any{"replicas": 2}))
+		_, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
+		if err == nil {
+			t.Fatal("expected an error for replicas=2 alongside a ReadWriteOnce-only claim")
+		}
+		if !strings.Contains(err.Error(), "at most one replica") {
+			t.Errorf("error = %q, want it to name the replica constraint", err.Error())
+		}
+	})
+
+	t.Run("one RWX-capable claim does not excuse a second, constrained one", func(t *testing.T) {
+		// The skip is per claim, not a verdict for the workload: a component
+		// mounting a shared claim and a private ReadWriteOnce one is still
+		// pinned to a single pod by the second.
+		props := map[string]any{
+			"image":    "ghcr.io/org/app:v1",
+			"replicas": 2,
+			"volumes": []any{
+				map[string]any{
+					"name": "shared", "type": "pvc", "mountPath": "/shared", "size": "1Gi",
+					"accessModes": []any{"ReadWriteOnce", "ReadWriteMany"},
+				},
+				map[string]any{
+					"name": "private", "type": "pvc", "mountPath": "/private", "size": "1Gi",
+					"accessModes": []any{"ReadWriteOnce"},
+				},
+			},
+		}
+		cfg := deploymentConfig(t, "app", props)
+		_, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
+		if err == nil {
+			t.Fatal("expected an error: the second claim is ReadWriteOnce-only")
+		}
+		if !strings.Contains(err.Error(), "at most one replica") {
+			t.Errorf("error = %q, want it to name the replica constraint", err.Error())
+		}
+	})
+
+	t.Run("ReadWriteOnce with ReadOnlyMany is still constrained", func(t *testing.T) {
+		// ReadOnlyMany lets many pods mount the volume read-only; it does not
+		// make the read-write mount shareable, so the guard still applies.
+		cfg := deploymentConfig(t, "app", rwxProps([]any{"ReadWriteOnce", "ReadOnlyMany"}, map[string]any{"replicas": 2}))
+		_, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
+		if err == nil {
+			t.Fatal("expected an error for replicas=2 alongside a ReadWriteOnce/ReadOnlyMany claim")
+		}
+	})
+}
+
 func TestDeploymentHandler_NonRWXRejectsMultipleReplicas(t *testing.T) {
 	cfg := deploymentConfig(t, "app", nonRWXVolumeProps(map[string]any{"replicas": 2}))
 	_, err := cfg.Generate(stack.NewApplication("app", "default", cfg))

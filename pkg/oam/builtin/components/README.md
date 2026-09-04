@@ -760,6 +760,16 @@ substitutes `Recreate` silently (it has no `strategy` property to contradict),
 situation instead of overwriting it, so a document never ships a strategy its
 author did not write.
 
+The guard reads a claim's **whole** access-mode set, not each mode on its own.
+`accessModes` requests a volume supporting *every* mode listed, so
+`[ReadWriteOnce, ReadWriteMany]` binds a volume many pods can mount read-write
+and is left unconstrained — replicas above one and a rolling update are both
+fine. `[ReadWriteOnce]` or `[ReadWriteOnce, ReadOnlyMany]` still constrain the
+workload: neither makes the read-write mount shareable. The test is per claim,
+so one shareable claim does not excuse a second `ReadWriteOnce`-only one on the
+same component. `ReadWriteOncePod` never appears beside another mode — the API
+forbids the combination and the parser rejects it — so it is always constraining.
+
 ## Policy defaults & enforcement ordering
 
 A container's effective cpu/memory requests and limits are assembled in three
