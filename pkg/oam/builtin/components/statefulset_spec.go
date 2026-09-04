@@ -74,7 +74,7 @@ func parseStatefulSetSpec(props map[string]any) (StatefulSetSpecConfig, error) {
 		}
 	}
 
-	if v, present, err := parseStringField(props, "podManagementPolicy", "podManagementPolicy"); err != nil {
+	if v, present, err := optionalString(props, "podManagementPolicy", "podManagementPolicy"); err != nil {
 		return StatefulSetSpecConfig{}, err
 	} else if present {
 		switch appsv1.PodManagementPolicyType(v) {
@@ -85,7 +85,7 @@ func parseStatefulSetSpec(props map[string]any) (StatefulSetSpecConfig, error) {
 		}
 	}
 
-	if raw, present, err := parseObjectField(props, "updateStrategy", "updateStrategy"); err != nil {
+	if raw, present, err := optionalObject(props, "updateStrategy", "updateStrategy"); err != nil {
 		return StatefulSetSpecConfig{}, err
 	} else if present {
 		us, err := parseStatefulSetUpdateStrategy(raw)
@@ -95,7 +95,7 @@ func parseStatefulSetSpec(props map[string]any) (StatefulSetSpecConfig, error) {
 		cfg.UpdateStrategy = us
 	}
 
-	if v, present, err := parseInt32Field(props, "revisionHistoryLimit", "revisionHistoryLimit"); err != nil {
+	if v, present, err := optionalInt32(props, "revisionHistoryLimit", "revisionHistoryLimit"); err != nil {
 		return StatefulSetSpecConfig{}, err
 	} else if present {
 		if v < 0 {
@@ -104,7 +104,7 @@ func parseStatefulSetSpec(props map[string]any) (StatefulSetSpecConfig, error) {
 		cfg.RevisionHistoryLimit = &v
 	}
 
-	if v, present, err := parseInt32Field(props, "minReadySeconds", "minReadySeconds"); err != nil {
+	if v, present, err := optionalInt32(props, "minReadySeconds", "minReadySeconds"); err != nil {
 		return StatefulSetSpecConfig{}, err
 	} else if present {
 		if v < 0 {
@@ -113,7 +113,7 @@ func parseStatefulSetSpec(props map[string]any) (StatefulSetSpecConfig, error) {
 		cfg.MinReadySeconds = &v
 	}
 
-	if raw, present, err := parseObjectField(props, "persistentVolumeClaimRetentionPolicy", "persistentVolumeClaimRetentionPolicy"); err != nil {
+	if raw, present, err := optionalObject(props, "persistentVolumeClaimRetentionPolicy", "persistentVolumeClaimRetentionPolicy"); err != nil {
 		return StatefulSetSpecConfig{}, err
 	} else if present {
 		if err := rejectUnknownKeys(raw, statefulSetPVCRetentionKeys, "persistentVolumeClaimRetentionPolicy"); err != nil {
@@ -122,7 +122,7 @@ func parseStatefulSetSpec(props map[string]any) (StatefulSetSpecConfig, error) {
 		policy := &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{}
 		for _, key := range []string{"whenDeleted", "whenScaled"} {
 			label := "persistentVolumeClaimRetentionPolicy." + key
-			v, present, err := parseStringField(raw, key, label)
+			v, present, err := optionalString(raw, key, label)
 			if err != nil {
 				return StatefulSetSpecConfig{}, err
 			}
@@ -143,13 +143,13 @@ func parseStatefulSetSpec(props map[string]any) (StatefulSetSpecConfig, error) {
 		cfg.PersistentVolumeClaimRetentionPolicy = policy
 	}
 
-	if raw, present, err := parseObjectField(props, "ordinals", "ordinals"); err != nil {
+	if raw, present, err := optionalObject(props, "ordinals", "ordinals"); err != nil {
 		return StatefulSetSpecConfig{}, err
 	} else if present {
 		if err := rejectUnknownKeys(raw, statefulSetOrdinalsKeys, "ordinals"); err != nil {
 			return StatefulSetSpecConfig{}, err
 		}
-		start, present, err := parseInt32Field(raw, "start", "ordinals.start")
+		start, present, err := optionalInt32(raw, "start", "ordinals.start")
 		if err != nil {
 			return StatefulSetSpecConfig{}, err
 		}
@@ -182,11 +182,11 @@ func parseStatefulSetUpdateStrategy(raw map[string]any) (*appsv1.StatefulSetUpda
 	if err := rejectUnknownKeys(raw, statefulSetUpdateStrategyKeys, "updateStrategy"); err != nil {
 		return nil, err
 	}
-	typ, typeAuthored, err := parseStringField(raw, "type", "updateStrategy.type")
+	typ, typeAuthored, err := optionalString(raw, "type", "updateStrategy.type")
 	if err != nil {
 		return nil, err
 	}
-	ru, ruAuthored, err := parseObjectField(raw, "rollingUpdate", "updateStrategy.rollingUpdate")
+	ru, ruAuthored, err := optionalObject(raw, "rollingUpdate", "updateStrategy.rollingUpdate")
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func parseStatefulSetUpdateStrategy(raw map[string]any) (*appsv1.StatefulSetUpda
 		return nil, err
 	}
 	us.RollingUpdate = &appsv1.RollingUpdateStatefulSetStrategy{}
-	if v, present, err := parseInt32Field(ru, "partition", "updateStrategy.rollingUpdate.partition"); err != nil {
+	if v, present, err := optionalInt32(ru, "partition", "updateStrategy.rollingUpdate.partition"); err != nil {
 		return nil, err
 	} else if present {
 		if v < 0 {

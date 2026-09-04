@@ -1712,6 +1712,52 @@ func parseObjectField(raw map[string]any, key, label string) (map[string]any, bo
 	return m, true, nil
 }
 
+// The three helpers above answer "present?" with a bare map lookup, so a key
+// authored as an explicit null is present with a nil value and fails their type
+// check: `updateStrategy:` with nothing after it becomes
+// "updateStrategy: must be an object, got <nil>".
+//
+// pkg/oam disagrees. validatePropertyValue returns early for a null under an
+// optional property ("a nil under an optional field constrains nothing"), and
+// validateObjectProperties reads a null as *absent* when deciding whether a
+// required property was supplied. So a lowering rule may emit a nil for an
+// optional field, have it pass emission validation, and then be rejected by the
+// handler that runs afterwards — the component satisfies the published schema
+// and still fails to convert.
+//
+// The three wrappers below close that gap by reading a null as omission before
+// delegating. They are deliberately NOT folded into the helpers themselves: the
+// helpers have ~20 pre-existing call sites whose behaviour would change with
+// them, which is a wider blast radius than this change should carry. That is
+// tracked as go-kure/launcher#394; until it lands, only the fields introduced
+// alongside these wrappers use them, and the difference is one-directional —
+// a wrapped field accepts a null the unwrapped ones still reject, never the
+// reverse.
+
+// optionalString is parseStringField with an explicit null read as omission.
+func optionalString(raw map[string]any, key, label string) (string, bool, error) {
+	if v, present := raw[key]; present && v == nil {
+		return "", false, nil
+	}
+	return parseStringField(raw, key, label)
+}
+
+// optionalObject is parseObjectField with an explicit null read as omission.
+func optionalObject(raw map[string]any, key, label string) (map[string]any, bool, error) {
+	if v, present := raw[key]; present && v == nil {
+		return nil, false, nil
+	}
+	return parseObjectField(raw, key, label)
+}
+
+// optionalInt32 is parseInt32Field with an explicit null read as omission.
+func optionalInt32(raw map[string]any, key, label string) (int32, bool, error) {
+	if v, present := raw[key]; present && v == nil {
+		return 0, false, nil
+	}
+	return parseInt32Field(raw, key, label)
+}
+
 // parseStorageClassField parses an optional PVC "storageClass" string,
 // distinguishing an authored empty string ("request no StorageClass") from an
 // absent key ("use the cluster default") — a distinction
@@ -3053,7 +3099,7 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		// 'size' (or resources.requests.storage)" for a field the author did
 		// write, with no hint that the type was the problem. Same silent-drop
 		// class as storageClass below.
-		name, _, err := parseStringField(m, "name", "volumeClaimTemplate: name")
+		name, _, err := optionalString(m, "name", "volumeClaimTemplate: name")
 		if err != nil {
 			return nil, err
 		}
@@ -3100,12 +3146,12 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 			}
 		}
 		vct.StorageClass = storageClass
-		size, sizeAuthored, err := parseStringField(m, "size", entryLabel+": size")
+		size, sizeAuthored, err := optionalString(m, "size", entryLabel+": size")
 		if err != nil {
 			return nil, err
 		}
 		vct.Size = size
-		mountPath, _, err := parseStringField(m, "mountPath", entryLabel+": mountPath")
+		mountPath, _, err := optionalString(m, "mountPath", entryLabel+": mountPath")
 		if err != nil {
 			return nil, err
 		}
