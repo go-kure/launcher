@@ -766,13 +766,15 @@ this trio verbatim rather than duplicating it.
   writing `maxUnavailable: 0` alongside it. The error names which half was
   defaulted, since that is the half absent from the author's YAML.
 
-  **Two rules here are deliberately stricter than upstream**, and both reject a
-  document the apiserver would accept and then ignore — the failure mode this
-  projection exists to remove. `updateStrategy.type` is required, where the API
-  defaults it to `RollingUpdate` and so accepts a bare `updateStrategy: {}`; and
-  `updateStrategy.rollingUpdate` is refused under `type: OnDelete`, where
-  `ValidateDaemonSetUpdateStrategy`'s `OnDelete` branch is empty and the field is
-  simply never read. Both are still *additive*: `updateStrategy` is a new
+  **Two rules here are deliberately stricter than upstream.** The API accepts
+  both shapes; what it does with them differs. `updateStrategy.type` is required
+  here, where the API defaults it to `RollingUpdate` and acts on that — so a bare
+  `updateStrategy: {}` is a legal document whose entire meaning comes from
+  defaulting rather than from anything written. `updateStrategy.rollingUpdate` is
+  refused under `type: OnDelete`, where `ValidateDaemonSetUpdateStrategy`'s
+  `OnDelete` branch is empty and the field is accepted and never read — the
+  silently-ignored knob this projection exists to remove. Both are still
+  *additive*: `updateStrategy` is a new
   property, so no document that built before this change can carry either shape.
   In the other direction the parser is laxer in exactly one place — upstream
   requires a non-nil `rollingUpdate` under `RollingUpdate`, but apiserver

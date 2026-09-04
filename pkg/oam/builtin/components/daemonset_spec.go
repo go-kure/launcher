@@ -54,16 +54,16 @@ var daemonSetSpecRejectedKeys = map[string]string{
 // revisionHistoryLimit, and the int-or-percent rules on the two rolling-update
 // knobs.
 //
-// It is deliberately STRICTER than upstream in exactly two places, both of
-// which reject a document upstream would accept and then ignore — the failure
-// mode this projection exists to remove:
+// It is deliberately STRICTER than upstream in exactly two places. Upstream
+// accepts both shapes; they differ in what it then does with them:
 //
-//   - updateStrategy.type is required. Upstream defaults it to RollingUpdate,
-//     so `updateStrategy: {}` is legal there; here it would be an object whose
-//     meaning lives entirely in apiserver defaulting.
+//   - updateStrategy.type is required. Upstream defaults it to RollingUpdate
+//     and acts on that, so `updateStrategy: {}` is a legal document there whose
+//     entire meaning comes from defaulting rather than from anything written.
 //   - updateStrategy.rollingUpdate is refused under type: OnDelete.
 //     ValidateDaemonSetUpdateStrategy's OnDelete branch is empty, so upstream
-//     accepts the field and never reads it.
+//     accepts the field and never reads it — the silently-ignored knob this
+//     projection exists to remove.
 //
 // Both are additive: `updateStrategy` is a new property, so no document that
 // built before this change can carry either shape.
