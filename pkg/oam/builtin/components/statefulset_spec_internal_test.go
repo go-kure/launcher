@@ -133,6 +133,12 @@ func TestParseStatefulSetSpec_IntegerMaxUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseStatefulSetSpec: %v", err)
 	}
+	if cfg.UpdateStrategy == nil {
+		t.Fatal("UpdateStrategy is nil")
+	}
+	if cfg.UpdateStrategy.RollingUpdate == nil {
+		t.Fatal("UpdateStrategy.RollingUpdate is nil")
+	}
 	got := cfg.UpdateStrategy.RollingUpdate.MaxUnavailable
 	if got == nil || *got != intstr.FromInt32(2) {
 		t.Errorf("MaxUnavailable = %v, want 2", got)
