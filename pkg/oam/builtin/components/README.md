@@ -751,8 +751,13 @@ separately (go-kure/launcher#393).
 
 **Non-RWX volumes.** A `ReadWriteOnce` (or `ReadWriteOncePod`) claim cannot be
 held by an outgoing and an incoming pod at once, so the handler allows **at
-most one replica** (`replicas: 0` is a deliberate scale-to-zero and is left
-alone) and forces `strategy.type: Recreate`. Kubernetes rejects neither
+most one replica** (`replicas: 0` is a deliberate scale-to-zero and is accepted
+rather than coerced to 1) and forces `strategy.type: Recreate`. The
+scale-to-zero exemption covers the replica count only: the strategy is still
+forced, and an authored `RollingUpdate` still refused, at zero replicas —
+scale-to-zero is a state a later edit can leave by changing one number, and a
+`RollingUpdate` that survived the guard while at zero would be wrong the moment
+the first pod starts. Kubernetes rejects neither
 combination — the second pod simply hangs unschedulable or stuck attaching — so
 this is a build-time guard, not a mirror of an apiserver rule. Where `worker`
 substitutes `Recreate` silently (it has no `strategy` property to contradict),

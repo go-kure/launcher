@@ -495,6 +495,39 @@ func TestDeploymentHandler_NonRWXAllowsZeroReplicas(t *testing.T) {
 	}
 }
 
+// TestDeploymentHandler_NonRWXStrategyGuardAppliesAtZeroReplicas pins the other
+// half of the scale-to-zero rule, which the test above deliberately says nothing
+// about: the `replicas: 0` exemption is the replica count's alone, and the
+// strategy half of the guard still runs. Scale-to-zero is a state the document
+// can leave by editing one number, so a RollingUpdate that survived the guard
+// while at zero would be wrong the moment the first pod starts — in a later edit
+// that touches neither the volume nor the strategy.
+//
+// Without this, reading "left alone" as "the whole constraint is skipped" and
+// returning early at zero replicas would leave the suite green.
+func TestDeploymentHandler_NonRWXStrategyGuardAppliesAtZeroReplicas(t *testing.T) {
+	t.Run("an authored RollingUpdate is still rejected", func(t *testing.T) {
+		cfg := deploymentConfig(t, "app", nonRWXVolumeProps(map[string]any{
+			"replicas": 0,
+			"strategy": map[string]any{"type": "RollingUpdate"},
+		}))
+		_, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
+		if err == nil {
+			t.Fatal("Generate() error = nil, want a refusal for RollingUpdate with a non-RWX PVC at replicas: 0")
+		}
+		if !strings.Contains(err.Error(), "strategy.type must be Recreate") {
+			t.Errorf("Generate() error = %v, want the non-RWX strategy refusal", err)
+		}
+	})
+
+	t.Run("an unauthored strategy is still forced to Recreate", func(t *testing.T) {
+		dep, _ := generateDeployment(t, "app", nonRWXVolumeProps(map[string]any{"replicas": 0}))
+		if dep.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
+			t.Errorf("Strategy.Type = %q, want Recreate for a non-RWX PVC at replicas: 0", dep.Spec.Strategy.Type)
+		}
+	})
+}
+
 // TestDeploymentHandler_RWXLeavesStrategyUntouched proves the guard is scoped
 // to non-RWX claims: without it the test above would pass for the wrong reason.
 func TestDeploymentHandler_RWXLeavesStrategyUntouched(t *testing.T) {
