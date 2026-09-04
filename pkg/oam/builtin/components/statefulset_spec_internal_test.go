@@ -33,10 +33,10 @@ func TestStatefulSetSpecSchemaMatchesParser(t *testing.T) {
 
 	// Nested levels: the top-level comparison above says nothing about them.
 	root := oam.PropertySchema{Type: oam.PropertyTypeObject, Properties: schemaStatefulSetSpec()}
-	assertKeysAt(t, root, "persistentVolumeClaimRetentionPolicy", statefulSetPVCRetentionKeys)
-	assertKeysAt(t, root, "ordinals", statefulSetOrdinalsKeys)
-	assertKeysAt(t, root, "updateStrategy", statefulSetUpdateStrategyKeys)
-	assertKeysAt(t, root, "updateStrategy.rollingUpdate", statefulSetRollingUpdateKeys)
+	assertSchemaKeysAt(t, root, "persistentVolumeClaimRetentionPolicy", statefulSetPVCRetentionKeys)
+	assertSchemaKeysAt(t, root, "ordinals", statefulSetOrdinalsKeys)
+	assertSchemaKeysAt(t, root, "updateStrategy", statefulSetUpdateStrategyKeys)
+	assertSchemaKeysAt(t, root, "updateStrategy.rollingUpdate", statefulSetRollingUpdateKeys)
 }
 
 // TestStatefulSetSpecSchema_EveryKeyDescribed walks the fragment recursively:
