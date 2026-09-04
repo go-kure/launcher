@@ -766,6 +766,15 @@ this trio verbatim rather than duplicating it.
   writing `maxUnavailable: 0` alongside it. The error names which half was
   defaulted, since that is the half absent from the author's YAML.
 
+  Both knobs are published with **no declared schema type**, the same treatment
+  `schemaResources` gives cpu/memory quantities. Launcher's `PropertyType` set
+  has no int-or-string union, and declaring `string` would not merely understate
+  what is accepted: property validation rejects a non-string outright, so the
+  integer form the parser accepts could never reach it through a
+  schema-validating consumer. Leaving the type unset skips that check and keeps
+  both forms reachable; the property descriptions carry the constraint instead
+  (go-kure/launcher#383).
+
   **Two rules here are deliberately stricter than upstream.** The API accepts
   both shapes; what it does with them differs. `updateStrategy.type` is required
   here, where the API defaults it to `RollingUpdate` and acts on that — so a bare

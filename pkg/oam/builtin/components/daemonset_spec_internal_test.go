@@ -82,6 +82,18 @@ func TestDaemonSetSpecSchemaMatchesParser(t *testing.T) {
 	if !slices.Equal(typ.Enum, wantEnum) {
 		t.Errorf("updateStrategy.type.Enum = %v, want %v", typ.Enum, wantEnum)
 	}
+	// Neither rolling-update knob may declare a Type. parseDaemonSetIntOrPercent
+	// takes a non-negative integer as well as a percentage string, and
+	// validatePropertyValue rejects a non-string outright once Type is
+	// PropertyTypeString (pkg/oam/property_validate.go:118-121) — so a declared
+	// type does not merely understate what is accepted, it makes the parser's
+	// own integer branch unreachable through a schema-validating consumer.
+	// Type "" is the only declaration that leaves both forms reachable.
+	for _, k := range daemonSetRollingUpdateKeys {
+		if got := s["updateStrategy"].Properties["rollingUpdate"].Properties[k].Type; got != "" {
+			t.Errorf("updateStrategy.rollingUpdate.%s declares Type %q; want it unset so the integer form the parser accepts is not rejected before the handler runs", k, got)
+		}
+	}
 	// updateStrategy.type is the ONLY required leaf anywhere in the fragment.
 	// Walked recursively rather than spelled out: a hand-listed set silently
 	// stops covering a leaf added later, and a Required leaf the parser does not
