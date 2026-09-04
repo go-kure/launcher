@@ -290,15 +290,22 @@ func schemaDaemonSetSpec() map[string]oam.PropertySchema {
 					Type:        oam.PropertyTypeObject,
 					Description: "RollingUpdate parameters. Only allowed when type is RollingUpdate: the API accepts this object under OnDelete and then never reads it, which is refused here rather than silently dropped. May be omitted under RollingUpdate, leaving the API defaults. Exactly one of maxUnavailable and maxSurge must be non-zero, counting the API defaults for whichever is left out (maxUnavailable 1, maxSurge 0) — so a non-zero maxSurge requires maxUnavailable: 0 alongside it.",
 					Properties: map[string]oam.PropertySchema{
-						// Both are declared `string` because PropertyType carries
-						// no int-or-string member, and adding one would emit a
-						// type token the downstream schema consumer's validator
-						// does not understand (PropertyType's doc comment,
-						// pkg/oam/schema.go). The parser accepts both forms; each
-						// Description says so, because the declared type alone
-						// understates what is accepted.
-						"maxUnavailable": {Type: oam.PropertyTypeString, Description: `Maximum pods taken down at once during the update: a percentage string such as "25%" (at most 100%), or a non-negative integer such as 2. The API default is 1. Declared as a string because this schema vocabulary has no int-or-string type — an integer is accepted and carried through as an integer, not converted to a string.`},
-						"maxSurge":       {Type: oam.PropertyTypeString, Description: `Maximum nodes that may run an old and a new pod at once during the update: a percentage string such as "25%" (at most 100%), or a non-negative integer such as 2. The API default is 0, and it may only be non-zero when maxUnavailable is 0. Declared as a string for the same reason as maxUnavailable.`},
+						// Neither declares a Type, mirroring schemaResources'
+						// cpu/memory quantities (schema.go:148-155).
+						// PropertyType carries no int-or-string member
+						// (PropertyType's doc comment, pkg/oam/schema.go), and
+						// declaring `string` does not merely understate the
+						// accepted set — validatePropertyValue rejects a
+						// non-string outright
+						// (pkg/oam/property_validate.go:118-121), so
+						// `maxUnavailable: 2` could never reach
+						// parseDaemonSetIntOrPercent's integer branch through a
+						// schema-validating consumer. Type "" skips the check
+						// (property_validate.go:114-117) and leaves both forms
+						// reachable; each Description carries the constraint.
+						// Tracked in go-kure/launcher#383.
+						"maxUnavailable": {Description: `Maximum pods taken down at once during the update: a percentage string such as "25%" (at most 100%), or a non-negative integer such as 2. The API default is 1. No declared type because this schema vocabulary has no int-or-string union — an integer is accepted and carried through as an integer, not converted to a string.`},
+						"maxSurge":       {Description: `Maximum nodes that may run an old and a new pod at once during the update: a percentage string such as "25%" (at most 100%), or a non-negative integer such as 2. The API default is 0, and it may only be non-zero when maxUnavailable is 0. No declared type, for the same reason as maxUnavailable.`},
 					},
 				},
 			},
