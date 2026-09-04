@@ -287,4 +287,5 @@ A trait that generates several objects gives each one its own label map, never o
 shared between them. These maps leave the package on objects the caller owns and edits,
 so a shared map turns a label added to the Role into a label on the RoleBinding, or one
 added to the HPA into a label on the PDB. The same rule and the reason behind it are in
-the [component handlers' README](../components/README.md#conventions).
+the Conventions section of the component handlers' README
+(`pkg/oam/builtin/components/README.md`).
