@@ -38,7 +38,9 @@ declares a `PropertySchema` for its user-facing properties, so a component/trait
 properties can be validated before dispatch. See
 [Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
 and [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
-for the full catalogue; the `security-context` trait was added in this release.
+for the full catalogue; the `deployment` component — the kind-named projection
+of `appsv1.Deployment`, alongside the role-named `webservice` and `worker` —
+and the `security-context` trait were added in this release.
 
 Because a lowering rule may claim types the parser would otherwise reject, `build`
 constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`
