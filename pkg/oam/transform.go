@@ -1050,7 +1050,7 @@ func detectCycles(deps map[string][]string) error {
 }
 
 // componentHealthCheckGVK maps OAM component types to their primary workload GVK.
-// Types not listed (e.g. cronjob) are skipped — their resources are ephemeral.
+// Types not listed (e.g. cronjob, job) are skipped — their resources are ephemeral.
 var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"webservice":  {"apps/v1", "Deployment"},
 	"worker":      {"apps/v1", "Deployment"},

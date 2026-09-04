@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  labels:
+    app: migrate
+  name: migrate
+  namespace: default
+spec:
+  activeDeadlineSeconds: 600
+  backoffLimit: 4
+  backoffLimitPerIndex: 1
+  completionMode: Indexed
+  completions: 6
+  managedBy: example.com/custom-controller
+  maxFailedIndexes: 2
+  parallelism: 2
+  podReplacementPolicy: TerminatingOrFailed
+  successPolicy:
+    rules:
+    - succeededCount: 3
+      succeededIndexes: 0-3
+    - succeededCount: 5
+  suspend: true
+  template:
+    metadata:
+      labels:
+        app: migrate
+    spec:
+      containers:
+      - image: ghcr.io/example/migrate:v1.0.0
+        imagePullPolicy: IfNotPresent
+        name: migrate
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      restartPolicy: Never
+      serviceAccountName: migrate
+  ttlSecondsAfterFinished: 3600
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: migrate
+  name: migrate
+  namespace: default

@@ -3,11 +3,13 @@ package components
 import (
 	"maps"
 
+	batchv1 "k8s.io/api/batch/v1"
+
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // This file holds PropertySchema fragments shared by the container-workload
-// component handlers (webservice/worker/deployment/cronjob/daemonset/statefulset). Each
+// component handlers (webservice/worker/deployment/cronjob/job/daemonset/statefulset). Each
 // fragment mirrors a shared parser in common.go / podspec.go (parseEnv,
 // parseResources, parsePodSpec, …). The target is full corev1 fidelity: a
 // nested shape is modeled field-by-field, with a Description on every key,
@@ -566,21 +568,62 @@ func schemaTolerations() oam.PropertySchema {
 }
 
 // schemaJobSpec describes the batchv1.JobSpec property fragments shared by the
-// cronjob handler's jobTemplate today and (later) the job component (#279 PR 6) —
+// cronjob handler's jobTemplate and the job component (go-kure/launcher#344) —
 // see parseJobSpec/applyJobSpec in common.go. A map, not per-field accessors (unlike
 // this file's usual style), precisely because job and cronjob must expose an
 // identical set — per-field accessors would let them drift.
+//
+// batchv1.JobSpec.Suspend is deliberately absent: `suspend` is already the
+// cronjob component's key for the CronJobSpec-level Suspend, a different API
+// field, so the job component publishes its own JobSpec-level `suspend` instead
+// of taking it from here. See JobSpecConfig's doc comment.
 //
 // reserved is explicit per this package's D3 convention (see schemaEnv's doc
 // comment above); every call site in this package passes false today.
 func schemaJobSpec(reserved bool) map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"backoffLimit":            {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Number of retries before marking the job as failed."},
+		"backoffLimit":            {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Number of retries before marking the job as failed. The API default is 6, or 2147483647 when backoffLimitPerIndex is set."},
 		"completions":             {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Desired number of successfully finished pods the job should be run with."},
-		"parallelism":             {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Maximum number of pods the job should run concurrently. Must be <= 100000 when completionMode is \"Indexed\"."},
+		"parallelism":             {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Maximum number of pods the job should run concurrently. Must be <= 100000 when completionMode is \"Indexed\", and <= 10000 when completions is above 100000 and backoffLimitPerIndex is set."},
 		"activeDeadlineSeconds":   {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Duration in seconds the job may be active before it is terminated. Must be a positive integer."},
 		"ttlSecondsAfterFinished": {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Seconds after the job finishes before it (and its pods) is automatically deleted."},
 		"completionMode":          {Type: oam.PropertyTypeString, PlatformReserved: reserved, Enum: []any{"NonIndexed", "Indexed"}, Description: "How pod completions are tracked. \"Indexed\" requires completions to also be set."},
+		"backoffLimitPerIndex":    {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Retries allowed within a single index before that index is marked failed. Requires completionMode: Indexed. Kubernetes only acts on per-index backoff when the pod restart policy is Never; it does not reject the other combination, and neither does this parser."},
+		"maxFailedIndexes":        {Type: oam.PropertyTypeInteger, PlatformReserved: reserved, Description: "Failed indexes tolerated before the whole job is marked failed. Requires backoffLimitPerIndex, and so completionMode: Indexed. Must be <= completions and <= 100000, or <= 10000 when completions is above 100000. Required when completions is above 100000 and backoffLimitPerIndex is set."},
+		"podReplacementPolicy":    {Type: oam.PropertyTypeString, PlatformReserved: reserved, Enum: []any{string(batchv1.Failed), string(batchv1.TerminatingOrFailed)}, Description: "When a replacement pod is created: \"Failed\" waits for the previous pod to terminate fully, \"TerminatingOrFailed\" creates one as soon as the previous pod starts terminating."},
+		"managedBy":               {Type: oam.PropertyTypeString, PlatformReserved: reserved, Description: "Controller that reconciles this job instead of the built-in job controller. A domain-prefixed path such as \"example.com/custom-controller\", at most 63 characters. Leaving it unset keeps the built-in controller."},
+		"successPolicy": {
+			Type:             oam.PropertyTypeObject,
+			PlatformReserved: reserved,
+			Description:      "When the job may be declared successful before every index succeeds. Requires completionMode: Indexed. Rules are evaluated in order and the first match wins.",
+			Properties: map[string]oam.PropertySchema{
+				"rules": {
+					Type:        oam.PropertyTypeArray,
+					Required:    true,
+					Description: "Alternative rules for declaring success. At least one and at most 20.",
+					Items: &oam.PropertySchema{
+						Type:        oam.PropertyTypeObject,
+						Description: "A single success rule. At least one of succeededIndexes or succeededCount is required.",
+						Properties: map[string]oam.PropertySchema{
+							"succeededIndexes": {Type: oam.PropertyTypeString, Description: `Indexes that must have succeeded, as increasing comma-separated intervals such as "1,3-5,7". Every index must be below completions.`},
+							"succeededCount":   {Type: oam.PropertyTypeInteger, Description: "Minimum number of succeeded indexes. Must be <= completions, and <= the number of indexes named by succeededIndexes when both are given."},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// schemaJobSuspend describes the JobSpec-level `suspend` property, published by
+// the job component only. batchv1 carries two distinct Suspend fields — one on
+// JobSpec and one on CronJobSpec — and the cronjob component's `suspend` key is
+// already the CronJobSpec one (schemaCronJobSuspend below). Keeping this out of
+// schemaJobSpec is what stops one authored key writing both fields.
+func schemaJobSuspend() oam.PropertySchema {
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeBoolean,
+		Description: "Create the job suspended: no pods are created until it is resumed. Not written to output unless authored.",
 	}
 }
 

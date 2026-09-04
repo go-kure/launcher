@@ -14,7 +14,7 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// workloadKinds enumerates the six kinds that share the pod-level property
+// workloadKinds enumerates the seven kinds that share the pod-level property
 // surface, with the minimum properties each needs to generate.
 var workloadKinds = []struct {
 	name    string
@@ -27,6 +27,7 @@ var workloadKinds = []struct {
 	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}},
 	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
+	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 }
 
 func withProps(base map[string]any, extra map[string]any) map[string]any {
@@ -67,6 +68,8 @@ func podTemplateSpec(t *testing.T, objects []*client.Object) corev1.PodSpec {
 		return w.Spec.Template.Spec
 	case *batchv1.CronJob:
 		return w.Spec.JobTemplate.Spec.Template.Spec
+	case *batchv1.Job:
+		return w.Spec.Template.Spec
 	default:
 		t.Fatalf("first object is %T, want a workload", *objects[0])
 		return corev1.PodSpec{}
@@ -203,14 +206,16 @@ func TestWorkloadKinds_ApplyPolicy_HostNamespacesDenied(t *testing.T) {
 	}
 }
 
-// TestWorkloadKinds_PodActiveDeadlineSeconds: only cronjob (Job pods) accepts
-// and emits the pod-level activeDeadlineSeconds; apps/v1 kinds reject it.
+// TestWorkloadKinds_PodActiveDeadlineSeconds: only the Job-pod kinds (cronjob
+// and job) accept and emit the pod-level activeDeadlineSeconds; apps/v1 kinds
+// reject it.
 func TestWorkloadKinds_PodActiveDeadlineSeconds(t *testing.T) {
+	jobPodKinds := map[string]bool{"cronjob": true, "job": true}
 	for _, k := range workloadKinds {
 		t.Run(k.name, func(t *testing.T) {
 			props := withProps(k.props, map[string]any{"podActiveDeadlineSeconds": 120})
 			cfg, err := k.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: k.name, Properties: props}, "default")
-			if k.name != "cronjob" {
+			if !jobPodKinds[k.name] {
 				if err == nil || !strings.Contains(err.Error(), "only Job pods may set activeDeadlineSeconds") {
 					t.Fatalf("ToApplicationConfig error = %v, want the Job-only rejection", err)
 				}
@@ -231,10 +236,19 @@ func TestWorkloadKinds_PodActiveDeadlineSeconds(t *testing.T) {
 			if ps.ActiveDeadlineSeconds == nil || *ps.ActiveDeadlineSeconds != 120 {
 				t.Errorf("pod ActiveDeadlineSeconds = %v, want 120", ps.ActiveDeadlineSeconds)
 			}
-			// The job-level property keeps its own field.
-			cj := (*objects[0]).(*batchv1.CronJob)
-			if cj.Spec.JobTemplate.Spec.ActiveDeadlineSeconds != nil {
-				t.Errorf("job ActiveDeadlineSeconds = %v, want unset when only the pod-level key is authored", cj.Spec.JobTemplate.Spec.ActiveDeadlineSeconds)
+			// The job-level property keeps its own field: the pod-level key
+			// must not have written through to the JobSpec of either kind.
+			switch w := (*objects[0]).(type) {
+			case *batchv1.CronJob:
+				if w.Spec.JobTemplate.Spec.ActiveDeadlineSeconds != nil {
+					t.Errorf("job ActiveDeadlineSeconds = %v, want unset when only the pod-level key is authored", w.Spec.JobTemplate.Spec.ActiveDeadlineSeconds)
+				}
+			case *batchv1.Job:
+				if w.Spec.ActiveDeadlineSeconds != nil {
+					t.Errorf("job ActiveDeadlineSeconds = %v, want unset when only the pod-level key is authored", w.Spec.ActiveDeadlineSeconds)
+				}
+			default:
+				t.Fatalf("first object is %T, want a Job-pod workload", *objects[0])
 			}
 		})
 	}

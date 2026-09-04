@@ -40,7 +40,9 @@ properties can be validated before dispatch. See
 and [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
 for the full catalogue; the `deployment` component — the kind-named projection
 of `appsv1.Deployment`, alongside the role-named `webservice` and `worker` —
-and the `security-context` trait were added in this release.
+the `job` component — a run-to-completion workload sharing the whole
+JobSpec-level surface with `cronjob`'s job template — and the
+`security-context` trait were added in this release.
 
 Because a lowering rule may claim types the parser would otherwise reject, `build`
 constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`

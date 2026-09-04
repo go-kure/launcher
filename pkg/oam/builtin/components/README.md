@@ -31,6 +31,7 @@ Reference.
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
 | `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface plus the rest of `DeploymentSpec`. Not a superset of `worker` — see below. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below; `podFailurePolicy` not yet projected). |
+| `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below; `podFailurePolicy` not yet projected). |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
@@ -38,13 +39,13 @@ Reference.
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. |
 
-The six workload kinds emit their per-component ServiceAccount only when the
+The seven workload kinds emit their per-component ServiceAccount only when the
 component does not author `serviceAccountName` (see "Pod-level properties" below).
 
 ## Common config
 
 Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
-`daemonset`, `cronjob`)
+`daemonset`, `cronjob`, `job`)
 share these fields, projected directly onto real `corev1` types (same
 structural pattern as `ProbeConfig` holding `*corev1.Probe`) rather than a
 hand-rolled parallel schema: `image` (validated — no untagged/`latest`), `env`
@@ -191,7 +192,7 @@ rejecting it; `lifecycle.{postStart,preStop}.exec.command` below was fixed to
 reject, but the top-level `command`/`args` fix was deliberately left out of
 that change to keep it self-contained to `common.go`'s `parseLifecycleHandler`
 — touching `parseCommand`/`parseArgs` would ripple into all 8 call sites across
-every kind component: the six workload kinds' own main containers, plus
+every kind component: the seven workload kinds' own main containers, plus
 `initContainers` and `sidecars` in `common.go`), `probes`
 (rejected outright if authored with a non-object value, e.g. `probes: true`,
 and likewise for each of its own `readiness`/`liveness`/`startup` keys, e.g.
@@ -570,7 +571,7 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 | `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account and the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). The generated account carries `automountServiceAccountToken: false`; an authored account is owned elsewhere and its own setting governs, so authors who want the pod not to mount a token set the pod-level `automountServiceAccountToken: false` explicitly — the handler does not inject it. | additive when unset |
 | `automountServiceAccountToken` | bool | Pod-level token automount override. | additive |
 | `terminationGracePeriodSeconds` | int ≥ 0 | Grace period before SIGKILL. | additive |
-| `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it. | additive |
+| `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob and job only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it. Distinct from the JobSpec-level `activeDeadlineSeconds` below: this one bounds a single pod, that one the whole job. | additive |
 | `dnsPolicy`, `dnsConfig` | enum, object | `ClusterFirstWithHostNet`/`ClusterFirst`/`Default`/`None`; `dnsConfig` = `nameservers` (≤3 plain IPv4/IPv6 literals — a zone-scoped address such as `fe80::1%eth0` is rejected, matching upstream's `net.ParseIP`-based check, which has no notion of a zone), `searches` (≤32 entries whose joined length, separators included, is ≤2048 characters — the `resolv.conf` search-line limit, so 32 individually valid domains can still be refused), `options[]{name,value}`. `None` requires at least one nameserver. | additive |
 | `nodeSelector`, `nodeName`, `schedulerName`, `priorityClassName`, `preemptionPolicy`, `runtimeClassName`, `schedulingGates[]{name}`, `schedulingGroup{podGroupName}` | scheduling | Placement fields; gate names must be unique. `nodeName` is a DNS-1123 subdomain (a Node is an ordinary object, so an invalid value is refused at admission, not merely unmatched). `schedulerName` is deliberately *not* validated: upstream constrains its form nowhere, so an arbitrary string is a legal document and rejecting one here would refuse work a cluster accepts. | additive |
 | `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all six kinds; `NoopPolicy` denies all three). | additive |
@@ -732,7 +733,7 @@ go-kure/launcher#395.
 | `paused` | bool | Pauses rollouts of the Deployment. `paused: true` additionally suppresses the **auto health check** the transform pipeline would otherwise synthesize for this component: pausing tells the Deployment controller not to roll the workload out, so gating the enclosing Kustomization on that workload becoming ready asks for the one thing the document just said should not happen. The Deployment is still emitted and still applied by the enclosing Kustomization — only the readiness gate on it is skipped, which keeps `paused: true` usable for staging a workload. Nothing here asserts what the Deployment controller does with a paused object; the reason stands either way, since a gate that blocks on a state the document forbids and a gate that passes without observing anything are both useless. Implemented as `DeploymentConfig.EmitsAutoHealthCheck`, the `pkg/oam` seam `helmchart` already uses for `delivery: template`. | additive |
 | `progressDeadlineSeconds` | int ≥ 0 | Must be **greater than** the effective `minReadySeconds`, the cross-field rule `ValidateDeploymentSpec` applies. Both halves are compared as *effective* values, because both have an API default a document may be leaving it to: `minReadySeconds` defaults to 0 (a non-pointer `int32`, so it has no unset state) and `progressDeadlineSeconds` defaults to 600. So the rule fires in both directions — `progressDeadlineSeconds: 0` alone is rejected against the defaulted 0, and `minReadySeconds: 600` alone is rejected against the defaulted 600 — and the error names, for each half, whether the value was authored or defaulted, since either can be a field the document never mentions. | additive |
 | `selector`, `template` | — | Not authorable, and rejected with a message saying so rather than silently ignored. The selector is builder-managed (`app: <component>`) and immutable once the object exists; the pod template is projected from the component's own container and pod-level properties. | additive |
-| any optional property of this kind, authored as `null` | — | Read as omission, not as a present-but-wrong type — including a typed nil, which is what a Go-constructed lowering rule produces when it assigns a nil map into an `any`. `pkg/oam`'s property validator already treats a null under an optional property as absent, so without this a component could satisfy the published schema and then fail during handler conversion. This covers the kind's whole **top-level** surface, not only the `DeploymentSpec` fields above: `replicas: null`, `workingDir: null`, `env: null` and the rest all read as unauthored, so `replicas: null` takes the default 1. A `null` on a field that is required once its parent is authored (`strategy.type`) surfaces as the requiredness error, not a type error; `selector`/`template` are not optional properties, so naming either as `null` still earns the refusal above. It stops at the top level, and deliberately: a null one level down — `securityContext: {runAsUser: null}` — still reaches a shared nested parser's type check and is refused. Making the strip recursive is the wrong fix, because it would remove `securityContext: {bogusKey: null}` from the nested map before `parseSecurityContext`'s own unknown-key rejection ever saw it, turning a named refusal into silence; the correct fix sits *inside* each nested parser, after that rejection, which is shared code all six workload kinds run. That is go-kure/launcher#394's scope, not this kind's to change alone. Both sides of the boundary are pinned in `deployment_nested_null_test.go`. | additive |
+| any optional property of this kind, authored as `null` | — | Read as omission, not as a present-but-wrong type — including a typed nil, which is what a Go-constructed lowering rule produces when it assigns a nil map into an `any`. `pkg/oam`'s property validator already treats a null under an optional property as absent, so without this a component could satisfy the published schema and then fail during handler conversion. This covers the kind's whole **top-level** surface, not only the `DeploymentSpec` fields above: `replicas: null`, `workingDir: null`, `env: null` and the rest all read as unauthored, so `replicas: null` takes the default 1. A `null` on a field that is required once its parent is authored (`strategy.type`) surfaces as the requiredness error, not a type error; `selector`/`template` are not optional properties, so naming either as `null` still earns the refusal above. It stops at the top level, and deliberately: a null one level down — `securityContext: {runAsUser: null}` — still reaches a shared nested parser's type check and is refused. Making the strip recursive is the wrong fix, because it would remove `securityContext: {bogusKey: null}` from the nested map before `parseSecurityContext`'s own unknown-key rejection ever saw it, turning a named refusal into silence; the correct fix sits *inside* each nested parser, after that rejection, which is shared code all seven workload kinds run. That is go-kure/launcher#394's scope, not this kind's to change alone. Both sides of the boundary are pinned in `deployment_nested_null_test.go`. | additive |
 
 Every field above is presence-gated: a document that authors none of them
 produces the same object the builder produced before, so the apiserver's own
@@ -831,22 +832,43 @@ and sidecar builders), and `ApplyPolicy` enforces them too (go-kure/launcher#312
 each entry's resources, image registry, `securityContext.privileged`, and
 `securityContext.capabilities.add` are checked against the same policy
 methods the main container uses, via the shared `enforceExtraContainer`
-helper (`enforce.go`). All six kind components enforce their
+helper (`enforce.go`). All seven kind components enforce their
 `initContainers`; only `webservice`, `worker`, `deployment`, and
 `statefulset` have a
-`sidecars` schema key at all (`cronjob`/`daemonset` have no sidecars support,
+`sidecars` schema key at all (`cronjob`/`daemonset`/`job` have no sidecars support,
 per "Per-type highlights" below) so only those four enforce a sidecars
 loop. Errors name the authored list position and container, e.g.
 `initContainers[0] "init": image "docker.io/x/y:v1" is not from an allowed
 registry [...]`.
 
-`cronjob`'s `backoffLimit`/`completions`/`parallelism`/`activeDeadlineSeconds`/
-`ttlSecondsAfterFinished`/`completionMode` properties (see "Per-type highlights"
-below) are parsed and applied by a dedicated `JobSpecConfig`/`parseJobSpec`/
-`applyJobSpec` (`common.go`), factored out separately from the fields above
-because `batchv1.CronJob.Spec.JobTemplate.Spec` and a bare `batchv1.Job.Spec`
-are the same `batchv1.JobSpec` type — the future `job` component (#279) reuses
-this trio verbatim rather than duplicating it.
+The eleven JobSpec-level properties (see "Per-type highlights" below) are parsed
+and applied by a dedicated `JobSpecConfig`/`parseJobSpec`/`applyJobSpec`
+(`common.go`), factored out separately from the fields above because
+`batchv1.CronJob.Spec.JobTemplate.Spec` and a bare `batchv1.Job.Spec` are the
+same `batchv1.JobSpec` type. `cronjob` projects them onto
+`spec.jobTemplate.spec` and `job` (go-kure/launcher#344) onto its own
+`spec`; both publish the identical key set, pinned by
+`TestJobSpecSchemaMatchesParser` against `jobSpecPropertyKeys`.
+
+**One JobSpec field is deliberately not shared: `suspend`.** `batchv1` carries
+two distinct Suspend fields — `CronJobSpec.Suspend` (stop starting new
+executions of the schedule) and `JobSpec.Suspend` (create the job with no pods)
+— and `cronjob` already published `suspend` for the first of them. Putting a
+`suspend` in the shared fragment would write one authored value into two
+different API fields, and would silently overwrite `cronjob`'s own schema entry,
+since each handler merges the shared fragment with `maps.Copy` *after* its own
+literal map. So `job` publishes and parses its own JobSpec-level `suspend`
+instead, and `cronjob`'s stays CronJobSpec-level with no key for the job-template
+one. Both halves are pinned: `TestSchemaJobSpec_HasNoSuspendKey` on the schema,
+`TestCronjobHandler_SuspendWritesCronJobSpecOnly` and
+`TestJobHandler_SuspendWritesJobSpec` on the generated objects.
+
+`applyJobSpec` copies every value it writes rather than assigning the config's
+own pointers (`copyPtr` for the scalars, `DeepCopy` for `successPolicy`, which
+owns a slice of rules). A handler config outlives one `Generate` call and
+`Generate` may run more than once, so an aliased pointer would leave a mutable
+path from the generated object back into the config — a writer through the
+object would change what the next `Generate` emits.
 
 ## Per-type highlights
 
@@ -962,13 +984,14 @@ this trio verbatim rather than duplicating it.
   succeeds — Kubernetes' CronJob validation rejects it as server-dependent —
   and any other value is checked via `time.LoadLocation`, which this binary
   resolves from an embedded IANA database rather than the host's zoneinfo).
-  JobSpec-level (projected onto `spec.jobTemplate.spec`, shared with the
-  future `job` component — see "Common config" above): `backoffLimit`,
-  `completions`, `parallelism` (`<= 100000` when `completionMode` is
-  `Indexed`), `activeDeadlineSeconds` (must be a **positive** integer — `0` is
-  rejected, not just negative values), `ttlSecondsAfterFinished`,
-  `completionMode` (`NonIndexed`|`Indexed`; `Indexed` requires `completions`
-  to also be authored). Every optional field above is presence-gated: omitting
+  JobSpec-level (projected onto `spec.jobTemplate.spec`, shared with the `job`
+  component — the full table is under **job** below, and the shared trio is
+  described in "Common config" above): `backoffLimit`, `completions`,
+  `parallelism`, `activeDeadlineSeconds`, `ttlSecondsAfterFinished`,
+  `completionMode`, `backoffLimitPerIndex`, `maxFailedIndexes`,
+  `podReplacementPolicy`, `managedBy`, `successPolicy`. `suspend` on a cronjob
+  is the **CronJobSpec** field, not the JobSpec one — see the `suspend` note in
+  "Common config". Every optional field above is presence-gated: omitting
   it never adds a key to the generated output, even where the corresponding
   Kubernetes default (e.g. `concurrencyPolicy: Allow`) would otherwise appear
   to have been authored.
@@ -978,7 +1001,64 @@ this trio verbatim rather than duplicating it.
   Kubernetes' own API server) — this is deliberate, not an oversight: tightening
   it would reject documents that build successfully today, which is a breaking
   change under this project's additive-compatibility rule (see
-  `docs/oam/design-gvk.md`). `podFailurePolicy` is not yet projected (#279).
+  `docs/oam/design-gvk.md`). `podFailurePolicy` is not yet projected
+  (go-kure/launcher#345).
+- **job** (go-kure/launcher#344, `job.go`) — a run-to-completion workload:
+  `image`, `restartPolicy` (default `OnFailure`; the Job API rejects `Always`,
+  which is what pod defaulting would otherwise supply), and the shared container
+  and pod-level surface above. No `port`, so no Service and no named probe
+  ports; no `sidecars` schema key (init containers only), matching `cronjob`.
+  It emits a `Job`, its per-component `ServiceAccount`, and any declared PVCs.
+
+  The eleven JobSpec-level properties are the ones `cronjob` projects onto its
+  job template, projected here onto `spec` directly. Every one is
+  presence-gated, so a document authoring none of them emits no key for them.
+
+  | Property | Type | Effect | Compatibility |
+  |----------|------|--------|---------------|
+  | `backoffLimit` | int ≥ 0 | Retries before the job is marked failed. API default 6, or 2147483647 when `backoffLimitPerIndex` is set. | additive |
+  | `completions` | int ≥ 0 | Successful pods required. Required under `completionMode: Indexed`. | additive |
+  | `parallelism` | int ≥ 0 | Pods running at once. ≤ 100000 under `Indexed`; ≤ 10000 when `completions` > 100000 and `backoffLimitPerIndex` is set. | additive |
+  | `activeDeadlineSeconds` | int > 0 | Seconds the job may run. Must be **positive** — `0` is rejected, not just negatives. Distinct from the pod-level `podActiveDeadlineSeconds`. | additive |
+  | `ttlSecondsAfterFinished` | int ≥ 0 | Seconds after finishing before the job and its pods are deleted. | additive |
+  | `completionMode` | `NonIndexed`\|`Indexed` | How completions are counted. `Indexed` requires `completions`. | additive |
+  | `backoffLimitPerIndex` | int ≥ 0 | Retries within one index. Requires `Indexed`. | additive |
+  | `maxFailedIndexes` | int ≥ 0 | Failed indexes tolerated before the whole job fails. Requires `backoffLimitPerIndex` (and so `Indexed`); ≤ `completions` and ≤ 100000, or ≤ 10000 (and required) when `completions` > 100000. | additive |
+  | `podReplacementPolicy` | `Failed`\|`TerminatingOrFailed` | When a replacement pod is created. | additive |
+  | `managedBy` | string | Controller reconciling this job instead of the built-in one. A domain-prefixed path (`example.com/controller`), ≤ 63 characters. An empty string is rejected rather than treated as unset. | additive |
+  | `successPolicy` | object | `rules[]` (1..20) of `succeededIndexes` (increasing comma-separated intervals, every index < `completions`) and/or `succeededCount` (≤ `completions`, and ≤ the number of indexes named alongside it). Requires `Indexed`. | additive |
+  | `suspend` | bool | **`JobSpec.Suspend`** — create the job with no pods. Not the same field as `cronjob`'s `suspend`; see the `suspend` note in "Common config". | additive |
+  | `selector`, `manualSelector` | — | **Rejected outright**, not silently dropped: the Job selector is generated by the job controller from a unique per-job label, and a hand-written one adopts other jobs' pods. `manualSelector` only has meaning alongside one. | **Behavior-changing** (see below) |
+
+  Every cross-field rule above is ported from `ValidateJobSpec`
+  (`k8s.io/kubernetes/pkg/apis/batch/validation`) at the pinned
+  `k8s.io/api` version, so a document this parser accepts is one the API server
+  accepts too — the rejections move an apply-time failure to build time. One
+  upstream constraint is deliberately **not** enforced: `BackoffLimitPerIndex`'s
+  field doc says per-index backoff only applies when the pod restart policy is
+  `Never`, but `ValidateJobSpec` does not check it and neither does this parser
+  — the schema description carries the constraint instead. Refusing a
+  combination the API server accepts would be this projection inventing a rule,
+  which is a different thing from the daemonset kind's `updateStrategy`
+  strictness, where upstream accepts a field and then provably never reads it.
+
+  `podFailurePolicy` is not published (go-kure/launcher#345 owns it). An
+  undeclared property is refused by schema validation, so authoring it fails
+  rather than being silently dropped.
+
+  The `selector`/`manualSelector` rejection is the same class of change the
+  daemonset kind's `selector` rejection is, and rests on the same reasoning:
+  `docs/oam/design-gvk.md` § Parser Strictness already promises that unknown
+  fields in a launcher-native document are a build error, so neither key was
+  ever part of a valid `launcher.gokure.dev/v1alpha1` job. Here it is not even a
+  tightening — `job` is a new component type, so no document that built before
+  this change can carry either key. The explicit rejection exists only so the
+  message says *why* rather than emitting the generic unknown-key error.
+
+  The generated `Job` carries `app: <component>` as its own labels and its pod
+  template's, drops the `app:` annotation kure's constructor stamps (it
+  duplicates the label and nothing reads it), and leaves `spec.selector` unset
+  for the job controller to fill.
 - **helmchart** — `chart`, `version`, `delivery` (`native`|`template`), `source`
   (inline `url` or `{name,kind}` ref), `values`/`valuesFrom`, `valuesMode`
   (`inline` default | `configMap`), `driftDetection`, `install.crds`/`upgrade.crds`.
@@ -1086,7 +1166,7 @@ this trio verbatim rather than duplicating it.
   (`kurecnpg.ResourceOptions`, an external `go-kure/kure` type) has no fields
   for other resource names, so any other name authored under `requests`/
   `limits` (e.g. `ephemeral-storage`, `nvidia.com/gpu`) is rejected with an
-  explicit error rather than silently dropped; the other six workload kinds
+  explicit error rather than silently dropped; the other seven workload kinds
   forward every resource name directly onto the real `corev1.Container` and
   have no such restriction.
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
@@ -1199,7 +1279,10 @@ the workload level `updateStrategy` (whose struct holds a pointer, so `*c.Update
 alone would not be enough), `revisionHistoryLimit`, `persistentVolumeClaimRetentionPolicy`
 and `ordinals`. The deployment kind projects the same two shapes and follows the same rule:
 `strategy` (holding a `*RollingUpdateDeployment`), `revisionHistoryLimit` and
-`progressDeadlineSeconds`. Without that, editing the first rendered object — the same in-place
+`progressDeadlineSeconds`. `applyJobSpec` follows the same rule for the `job` and `cronjob`
+kinds: its ten scalar pointers go through the generic `copyPtr`, and `successPolicy` — whose
+struct owns a slice of rules — through `DeepCopy`.
+Without that, editing the first rendered object — the same in-place
 customization the label rule above assumes — writes back into the config and reappears in
 every later render, with the symptom surfacing on a different object than the one that was
 edited.
