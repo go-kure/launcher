@@ -1192,7 +1192,9 @@ generated object is deep-copied on the way out: the claim template's `selector`,
 `resources.limits`, `dataSourceRef`, `volumeMode` and `volumeAttributesClassName`, and at
 the workload level `updateStrategy` (whose struct holds a pointer, so `*c.UpdateStrategy`
 alone would not be enough), `revisionHistoryLimit`, `persistentVolumeClaimRetentionPolicy`
-and `ordinals`. Without that, editing the first rendered object — the same in-place
+and `ordinals`. The deployment kind projects the same two shapes and follows the same rule:
+`strategy` (holding a `*RollingUpdateDeployment`), `revisionHistoryLimit` and
+`progressDeadlineSeconds`. Without that, editing the first rendered object — the same in-place
 customization the label rule above assumes — writes back into the config and reappears in
 every later render, with the symptom surfacing on a different object than the one that was
 edited.

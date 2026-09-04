@@ -1,7 +1,6 @@
 package components
 
 import (
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -303,14 +302,17 @@ func parseDeploymentStrategy(raw map[string]any) (*appsv1.DeploymentStrategy, er
 // fails during handler conversion.
 //
 // A typed nil (map[string]any(nil) or []any(nil) inside an `any`) is not
-// `== nil`, so the reflection arm mirrors the validator's own isNullValue and
-// the two agree on that shape too.
+// `== nil`, so isExplicitNull (common.go) mirrors the validator's own
+// isNullValue and the two agree on that shape too.
 //
 // Scoped to this kind's parser rather than folded into the shared helpers:
 // those carry ~20 pre-existing call sites whose behaviour would change with
-// them, which is wider than this change should reach — tracked as
-// go-kure/launcher#394, along with unifying this with the equivalent fix the
-// statefulset kind makes on its own branch.
+// them, which is wider than this change should reach. The statefulset kind
+// answered the same problem per call site instead, with the optionalString /
+// optionalObject / optionalInt32 wrappers in common.go; the two approaches
+// classify a null identically — they share isExplicitNull — and differ only in
+// whether the filtering happens once over the whole map or once per field.
+// Collapsing them onto one mechanism is tracked as go-kure/launcher#394.
 func withoutExplicitNulls(raw map[string]any) map[string]any {
 	out := make(map[string]any, len(raw))
 	for k, v := range raw {
@@ -320,21 +322,6 @@ func withoutExplicitNulls(raw map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
-}
-
-// isExplicitNull mirrors pkg/oam's isNullValue (property_validate.go), which is
-// unexported there. Kept identical on purpose: the point of this helper is that
-// the parser and the validator classify the same value the same way.
-func isExplicitNull(value any) bool {
-	if value == nil {
-		return true
-	}
-	switch rv := reflect.ValueOf(value); rv.Kind() {
-	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Chan, reflect.Func, reflect.Interface:
-		return rv.IsNil()
-	default:
-		return false
-	}
 }
 
 // parseDeploymentIntOrPercent reads one of the two rolling-update knobs,
@@ -409,21 +396,27 @@ func intOrPercentIsZero(v intstr.IntOrString) bool {
 
 // apply writes the authored DeploymentSpec-level fields directly onto the
 // Deployment. Unauthored fields keep whatever the constructor set.
+// Deep-copied on the way out for the reason spelled out on
+// VolumeClaimSpecConfig.apply: this kind projects the same two shapes the
+// others do — a strategy whose struct holds a *RollingUpdateDeployment, so
+// dereferencing alone still shares that block, and two bare *int32.
 func (c DeploymentSpecConfig) apply(dep *appsv1.Deployment) {
 	if c.Strategy != nil {
-		dep.Spec.Strategy = *c.Strategy
+		dep.Spec.Strategy = *c.Strategy.DeepCopy()
 	}
 	if c.MinReadySeconds != nil {
 		dep.Spec.MinReadySeconds = *c.MinReadySeconds
 	}
 	if c.RevisionHistoryLimit != nil {
-		dep.Spec.RevisionHistoryLimit = c.RevisionHistoryLimit
+		limit := *c.RevisionHistoryLimit
+		dep.Spec.RevisionHistoryLimit = &limit
 	}
 	if c.Paused != nil {
 		dep.Spec.Paused = *c.Paused
 	}
 	if c.ProgressDeadlineSeconds != nil {
-		dep.Spec.ProgressDeadlineSeconds = c.ProgressDeadlineSeconds
+		deadline := *c.ProgressDeadlineSeconds
+		dep.Spec.ProgressDeadlineSeconds = &deadline
 	}
 }
 
