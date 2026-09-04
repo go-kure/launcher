@@ -337,6 +337,9 @@ func TestDeploymentHandler_RWXCapableClaimIsNotConstrained(t *testing.T) {
 		dep, _ := generateDeployment(t, "app", rwxProps([]any{"ReadWriteOnce", "ReadWriteMany"}, map[string]any{
 			"replicas": 2,
 		}))
+		if dep.Spec.Replicas == nil {
+			t.Fatal("Spec.Replicas = nil, want a value")
+		}
 		if got := *dep.Spec.Replicas; got != 2 {
 			t.Errorf("Replicas = %d, want 2", got)
 		}
