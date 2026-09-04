@@ -798,6 +798,19 @@ this trio verbatim rather than duplicating it.
   property shape (`pkg/oam/property_validate.go:22-27`), so a `selector:` on a
   daemonset used to be silently ignored and now fails the build. That is the
   point — a silently dropped selector reads as applied.
+
+  It is a behavior change against what the code did, not against what the format
+  promised. `docs/oam/design-gvk.md` § Parser Strictness already states the
+  contract — "Launcher rejects unknown fields in all launcher-native documents.
+  An `app.yaml`, `kurel.yaml`, or `cluster.yaml` with unrecognised keys is a
+  build error" — so a daemonset carrying `selector:` was never a valid
+  `launcher.gokure.dev/v1alpha1` document, and the same-version stability promise
+  ("every document that was **valid** under it remains valid") never covered it.
+  The authored path simply had not implemented that strictness for this key; the
+  rejection implements it, with a message that says why rather than the generic
+  unknown-key error. `6aed090` (`feat(format): enforce policy and support
+  securityContext on init/sidecar containers`) is the in-repo precedent for
+  shipping this class of tightening under an unchanged version string.
 - **cronjob** — `schedule` accepts a standard 5-field cron expression (e.g.
   `0 2 * * *`; not 6-field — a seconds field is rejected), one of the fixed
   `@`-descriptors (`@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
