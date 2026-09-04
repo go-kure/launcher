@@ -272,24 +272,30 @@ func parseMaxUnavailable(v any, label string) (intstr.IntOrString, error) {
 // StatefulSet. Unauthored fields keep whatever the constructor set
 // (podManagementPolicy OrderedReady, an empty updateStrategy), so output for
 // documents that author none of them does not change.
+// Every pointer-bearing field is deep-copied rather than aliased, for the
+// reason spelled out on VolumeClaimSpecConfig.apply: the config is reusable and
+// editing a generated object in place is an expected use, so a shared pointer
+// would leak that edit into the next render. `*c.UpdateStrategy` alone would
+// not be enough — the struct it copies holds a *RollingUpdateStatefulSetStrategy.
 func (c StatefulSetSpecConfig) apply(sts *appsv1.StatefulSet) {
 	if c.PodManagementPolicy != "" {
 		sts.Spec.PodManagementPolicy = c.PodManagementPolicy
 	}
 	if c.UpdateStrategy != nil {
-		sts.Spec.UpdateStrategy = *c.UpdateStrategy
+		sts.Spec.UpdateStrategy = *c.UpdateStrategy.DeepCopy()
 	}
 	if c.RevisionHistoryLimit != nil {
-		sts.Spec.RevisionHistoryLimit = c.RevisionHistoryLimit
+		limit := *c.RevisionHistoryLimit
+		sts.Spec.RevisionHistoryLimit = &limit
 	}
 	if c.MinReadySeconds != nil {
 		sts.Spec.MinReadySeconds = *c.MinReadySeconds
 	}
 	if c.PersistentVolumeClaimRetentionPolicy != nil {
-		sts.Spec.PersistentVolumeClaimRetentionPolicy = c.PersistentVolumeClaimRetentionPolicy
+		sts.Spec.PersistentVolumeClaimRetentionPolicy = c.PersistentVolumeClaimRetentionPolicy.DeepCopy()
 	}
 	if c.Ordinals != nil {
-		sts.Spec.Ordinals = c.Ordinals
+		sts.Spec.Ordinals = c.Ordinals.DeepCopy()
 	}
 }
 

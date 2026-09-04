@@ -1058,3 +1058,15 @@ This is a correctness rule, not tidiness. A selector that aliases the pod templa
 labels follows the caller's edits, and a topology spread constraint's `labelSelector`
 defines the pod set over which skew is computed — so a version label leaking into it
 makes a rollout spread each version separately instead of spreading the workload.
+
+The same rule runs in the other direction: **a generated object never shares a pointer
+or a map with the config that produced it.** A handler config is reusable — the same one
+can be rendered more than once — so every value a `*SpecConfig.apply` projects onto a
+generated object is deep-copied on the way out: the claim template's `selector`,
+`resources.limits`, `dataSourceRef`, `volumeMode` and `volumeAttributesClassName`, and at
+the workload level `updateStrategy` (whose struct holds a pointer, so `*c.UpdateStrategy`
+alone would not be enough), `revisionHistoryLimit`, `persistentVolumeClaimRetentionPolicy`
+and `ordinals`. Without that, editing the first rendered object — the same in-place
+customization the label rule above assumes — writes back into the config and reappears in
+every later render, with the symptom surfacing on a different object than the one that was
+edited.
