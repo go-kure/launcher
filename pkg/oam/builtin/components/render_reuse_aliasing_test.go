@@ -269,8 +269,17 @@ func TestJob_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
 		"backoffLimit":   4,
 		"completionMode": "Indexed",
 		"completions":    6,
+		// Never rather than the OnFailure default, which podFailurePolicy
+		// below requires (go-kure/launcher#345).
+		"restartPolicy": "Never",
 		"successPolicy": map[string]any{
 			"rules": []any{map[string]any{"succeededCount": 3}},
+		},
+		"podFailurePolicy": map[string]any{
+			"rules": []any{map[string]any{
+				"action":      "FailJob",
+				"onExitCodes": map[string]any{"operator": "In", "values": []any{42}},
+			}},
 		},
 	}
 
@@ -289,8 +298,14 @@ func TestJob_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
 		if job.Spec.SuccessPolicy == nil || len(job.Spec.SuccessPolicy.Rules) != 1 || job.Spec.SuccessPolicy.Rules[0].SucceededCount == nil {
 			t.Fatal("first render has no successPolicy.rules[0].succeededCount — nothing to alias, so this test cannot prove anything")
 		}
+		if job.Spec.PodFailurePolicy == nil || len(job.Spec.PodFailurePolicy.Rules) != 1 ||
+			job.Spec.PodFailurePolicy.Rules[0].OnExitCodes == nil ||
+			len(job.Spec.PodFailurePolicy.Rules[0].OnExitCodes.Values) != 1 {
+			t.Fatal("first render has no podFailurePolicy.rules[0].onExitCodes.values — nothing to alias, so this test cannot prove anything")
+		}
 		*job.Spec.BackoffLimit = 99
 		*job.Spec.SuccessPolicy.Rules[0].SucceededCount = 99
+		job.Spec.PodFailurePolicy.Rules[0].OnExitCodes.Values[0] = 99
 	})
 
 	job, ok := (*second[0]).(*batchv1.Job)
@@ -312,6 +327,13 @@ func TestJob_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
 		t.Errorf("successPolicy.rules[0].succeededCount is nil, want 3 — the second render did not reparse it")
 	} else if got := *job.Spec.SuccessPolicy.Rules[0].SucceededCount; got != 3 {
 		t.Errorf("successPolicy.rules[0].succeededCount = %d, want 3", got)
+	}
+	if job.Spec.PodFailurePolicy == nil || len(job.Spec.PodFailurePolicy.Rules) != 1 ||
+		job.Spec.PodFailurePolicy.Rules[0].OnExitCodes == nil {
+		t.Fatalf("podFailurePolicy = %+v, want one onExitCodes rule", job.Spec.PodFailurePolicy)
+	}
+	if got := job.Spec.PodFailurePolicy.Rules[0].OnExitCodes.Values; len(got) != 1 || got[0] != 42 {
+		t.Errorf("podFailurePolicy.rules[0].onExitCodes.values = %v, want [42]", got)
 	}
 }
 

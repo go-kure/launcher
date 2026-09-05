@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -275,10 +276,6 @@ func TestJobHandler_SelectorProperties_Rejected(t *testing.T) {
 		// own properties, so an authored one is not merged, it is discarded.
 		// The deployment kind rejects this key for the same reason.
 		{"template", map[string]any{"spec": map[string]any{}}, "not authorable"},
-		// podFailurePolicy has to be refused explicitly rather than merely left
-		// out of the schema: validateProperties runs on emitted elements only,
-		// never on authored documents, so an unread key is dropped in silence.
-		{"podFailurePolicy", map[string]any{"rules": []any{}}, "go-kure/launcher#345"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {
@@ -291,10 +288,7 @@ func TestJobHandler_SelectorProperties_Rejected(t *testing.T) {
 }
 
 // TestJobHandler_PropertySchema_Keys pins the published contract: every
-// JobSpec-level key is present, `suspend` is the job component's own, and
-// podFailurePolicy is absent — it belongs to go-kure/launcher#345. Absence alone
-// refuses nothing on an authored document; the refusal is jobSpecRejectedKeys,
-// covered by TestJobHandler_SelectorProperties_Rejected.
+// JobSpec-level key is present and `suspend` is the job component's own.
 func TestJobHandler_PropertySchema_Keys(t *testing.T) {
 	schema := (&components.JobHandler{}).PropertySchema()
 
@@ -303,6 +297,7 @@ func TestJobHandler_PropertySchema_Keys(t *testing.T) {
 		"backoffLimit", "completions", "parallelism", "activeDeadlineSeconds",
 		"ttlSecondsAfterFinished", "completionMode", "backoffLimitPerIndex",
 		"maxFailedIndexes", "podReplacementPolicy", "managedBy", "successPolicy",
+		"podFailurePolicy",
 	} {
 		node, ok := schema[key]
 		if !ok {
@@ -312,9 +307,6 @@ func TestJobHandler_PropertySchema_Keys(t *testing.T) {
 		if node.Description == "" {
 			t.Errorf("%s: Description is empty", key)
 		}
-	}
-	if _, ok := schema["podFailurePolicy"]; ok {
-		t.Error("PropertySchema() publishes podFailurePolicy; go-kure/launcher#345 owns it")
 	}
 	if _, ok := schema["selector"]; ok {
 		t.Error("PropertySchema() publishes selector; it is builder-managed")
@@ -713,6 +705,496 @@ func TestJobHandler_SuccessPolicyMemberNullsReadAsOmission(t *testing.T) {
 		}
 		if got.Rules[0].SucceededCount == nil || *got.Rules[0].SucceededCount != 2 {
 			t.Errorf("SucceededCount = %v, want 2", got.Rules[0].SucceededCount)
+		}
+	})
+}
+
+// jobGenerateError builds a job component from props, generates it, and returns
+// the error Generate refused it with — failing the test if either step
+// unexpectedly succeeded. jobError above only exercises ToApplicationConfig, so
+// it cannot see the checks that run against the built pod template.
+func jobGenerateError(t *testing.T, props map[string]any) string {
+	t.Helper()
+	full := map[string]any{"image": "ghcr.io/org/batch:v1.0.0"}
+	for k, v := range props {
+		full[k] = v
+	}
+	cfg, err := (&components.JobHandler{}).ToApplicationConfig(&oam.Component{
+		Name: "batch", Type: "job", Properties: full,
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig refused the document before Generate could: %v", err)
+	}
+	if _, err := cfg.Generate(stack.NewApplication("batch", "default", cfg)); err != nil {
+		return err.Error()
+	}
+	t.Fatal("Generate accepted the document, want a refusal")
+	return ""
+}
+
+// podFailurePolicyProps wraps rules in the surrounding properties every accepted
+// podFailurePolicy document needs: restartPolicy: Never, which upstream requires
+// alongside the field and which this component would otherwise default to
+// OnFailure.
+func podFailurePolicyProps(rules []any, extra map[string]any) map[string]any {
+	props := map[string]any{
+		"restartPolicy":    "Never",
+		"podFailurePolicy": map[string]any{"rules": rules},
+	}
+	for k, v := range extra {
+		props[k] = v
+	}
+	return props
+}
+
+// TestJobHandler_PodFailurePolicy_RoundTrip pins what an accepted policy emits
+// (go-kure/launcher#345): both rule shapes, the containerName scoping, and the
+// per-field values reaching batchv1.PodFailurePolicy unchanged.
+func TestJobHandler_PodFailurePolicy_RoundTrip(t *testing.T) {
+	job, _ := generateJob(t, podFailurePolicyProps([]any{
+		map[string]any{
+			"action": "FailJob",
+			"onExitCodes": map[string]any{
+				"containerName": "batch",
+				"operator":      "In",
+				"values":        []any{1, 42, 137},
+			},
+		},
+		map[string]any{
+			"action": "Ignore",
+			"onPodConditions": []any{
+				map[string]any{"type": "DisruptionTarget", "status": "True"},
+			},
+		},
+	}, nil))
+
+	pfp := job.Spec.PodFailurePolicy
+	if pfp == nil || len(pfp.Rules) != 2 {
+		t.Fatalf("PodFailurePolicy = %+v, want two rules", pfp)
+	}
+
+	first := pfp.Rules[0]
+	if first.Action != batchv1.PodFailurePolicyActionFailJob {
+		t.Errorf("Rules[0].Action = %q, want FailJob", first.Action)
+	}
+	if first.OnExitCodes == nil {
+		t.Fatal("Rules[0].OnExitCodes is nil, want the exit-code requirement")
+	}
+	if first.OnExitCodes.ContainerName == nil || *first.OnExitCodes.ContainerName != "batch" {
+		t.Errorf("Rules[0].OnExitCodes.ContainerName = %v, want \"batch\"", first.OnExitCodes.ContainerName)
+	}
+	if first.OnExitCodes.Operator != batchv1.PodFailurePolicyOnExitCodesOpIn {
+		t.Errorf("Rules[0].OnExitCodes.Operator = %q, want In", first.OnExitCodes.Operator)
+	}
+	if got := first.OnExitCodes.Values; len(got) != 3 || got[0] != 1 || got[1] != 42 || got[2] != 137 {
+		t.Errorf("Rules[0].OnExitCodes.Values = %v, want [1 42 137]", got)
+	}
+	if len(first.OnPodConditions) != 0 {
+		t.Errorf("Rules[0].OnPodConditions = %v, want none", first.OnPodConditions)
+	}
+
+	second := pfp.Rules[1]
+	if second.Action != batchv1.PodFailurePolicyActionIgnore {
+		t.Errorf("Rules[1].Action = %q, want Ignore", second.Action)
+	}
+	if second.OnExitCodes != nil {
+		t.Errorf("Rules[1].OnExitCodes = %+v, want nil", second.OnExitCodes)
+	}
+	if len(second.OnPodConditions) != 1 {
+		t.Fatalf("Rules[1].OnPodConditions = %v, want one pattern", second.OnPodConditions)
+	}
+	if got := second.OnPodConditions[0]; got.Type != corev1.DisruptionTarget || got.Status != corev1.ConditionTrue {
+		t.Errorf("Rules[1].OnPodConditions[0] = %+v, want DisruptionTarget/True", got)
+	}
+
+	// The policy is not written unless authored: an omitempty pointer field
+	// left non-nil unconditionally would add `podFailurePolicy: null` to every
+	// generated Job.
+	plain, _ := generateJob(t, nil)
+	if plain.Spec.PodFailurePolicy != nil {
+		t.Errorf("PodFailurePolicy = %+v on a document that never authored it, want nil", plain.Spec.PodFailurePolicy)
+	}
+}
+
+// TestJobHandler_PodFailurePolicy_EmptyRules pins the one place this parser is
+// deliberately no stricter than upstream. validatePodFailurePolicy has no
+// "at least one rule" check — unlike validateSuccessPolicy, which does — and the
+// field's own doc states only the cap, so there is no documented contract to
+// follow past the API server the way succeededIndexes has one. An empty list is
+// also not inert: a non-nil policy pins podReplacementPolicy and restartPolicy
+// on its own.
+func TestJobHandler_PodFailurePolicy_EmptyRules(t *testing.T) {
+	job, _ := generateJob(t, podFailurePolicyProps([]any{}, nil))
+	pfp := job.Spec.PodFailurePolicy
+	if pfp == nil {
+		t.Fatal("PodFailurePolicy is nil, want an empty-ruled policy")
+	}
+	// Non-nil, not merely empty: batchv1.PodFailurePolicy.Rules carries no
+	// omitempty, so a nil slice would marshal as `rules: null` — a shape the
+	// author did not write.
+	if pfp.Rules == nil {
+		t.Error("PodFailurePolicy.Rules is nil, want an empty slice so it marshals as `rules: []`")
+	}
+	if len(pfp.Rules) != 0 {
+		t.Errorf("PodFailurePolicy.Rules = %v, want none", pfp.Rules)
+	}
+}
+
+// TestJobHandler_PodFailurePolicyValidation_Table walks the podFailurePolicy
+// rules ported from validatePodFailurePolicy / validatePodFailurePolicyRule.
+// Each case is a document Kubernetes' own API server would reject at apply
+// time, refused here at build time instead.
+func TestJobHandler_PodFailurePolicyValidation_Table(t *testing.T) {
+	exitCodes := func(extra map[string]any) []any {
+		req := map[string]any{"operator": "In", "values": []any{1}}
+		for k, v := range extra {
+			req[k] = v
+		}
+		return []any{map[string]any{"action": "FailJob", "onExitCodes": req}}
+	}
+
+	cases := []struct {
+		name       string
+		props      map[string]any
+		wantSubstr string
+	}{
+		{
+			"unknown top-level key",
+			map[string]any{"restartPolicy": "Never", "podFailurePolicy": map[string]any{"rules": []any{}, "bogus": 1}},
+			`podFailurePolicy: unrecognized key "bogus"`,
+		},
+		{
+			"missing rules key",
+			map[string]any{"restartPolicy": "Never", "podFailurePolicy": map[string]any{}},
+			"podFailurePolicy.rules: required",
+		},
+		{
+			"rules not an array",
+			map[string]any{"restartPolicy": "Never", "podFailurePolicy": map[string]any{"rules": map[string]any{}}},
+			"podFailurePolicy.rules: must be an array",
+		},
+		{
+			"rule not an object",
+			podFailurePolicyProps([]any{"FailJob"}, nil),
+			"podFailurePolicy.rules[0]: must be an object",
+		},
+		{
+			"rule with an unknown key",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "bogus": 1}}, nil),
+			`podFailurePolicy.rules[0]: unrecognized key "bogus"`,
+		},
+		{
+			"missing action",
+			podFailurePolicyProps([]any{map[string]any{"onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": "True"}}}}, nil),
+			"podFailurePolicy.rules[0].action: required",
+		},
+		{
+			// "" must be refused rather than defaulted: upstream reports an
+			// empty action as Required, and parseStringField would have
+			// reported it as absent.
+			"empty action",
+			podFailurePolicyProps([]any{map[string]any{"action": ""}}, nil),
+			"podFailurePolicy.rules[0].action: required",
+		},
+		{
+			"non-string action",
+			podFailurePolicyProps([]any{map[string]any{"action": 3}}, nil),
+			"podFailurePolicy.rules[0].action: must be a string",
+		},
+		{
+			"unknown action",
+			podFailurePolicyProps([]any{map[string]any{"action": "Retry"}}, nil),
+			"podFailurePolicy.rules[0].action: invalid value \"Retry\"",
+		},
+		{
+			"rule with neither onExitCodes nor onPodConditions",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob"}}, nil),
+			"exactly one of onExitCodes or onPodConditions is required",
+		},
+		{
+			// An authored empty list counts as neither, here and upstream:
+			// both test len(), not nil-ness.
+			"rule with an empty onPodConditions",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{}}}, nil),
+			"exactly one of onExitCodes or onPodConditions is required",
+		},
+		{
+			"rule with both",
+			podFailurePolicyProps([]any{map[string]any{
+				"action":          "FailJob",
+				"onExitCodes":     map[string]any{"operator": "In", "values": []any{1}},
+				"onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": "True"}},
+			}}, nil),
+			"mutually exclusive",
+		},
+		{
+			"FailIndex without backoffLimitPerIndex",
+			podFailurePolicyProps(
+				[]any{map[string]any{"action": "FailIndex", "onExitCodes": map[string]any{"operator": "In", "values": []any{1}}}},
+				map[string]any{"completionMode": "Indexed", "completions": 4},
+			),
+			"requires backoffLimitPerIndex",
+		},
+		{
+			"podReplacementPolicy other than Failed",
+			podFailurePolicyProps(exitCodes(nil), map[string]any{"podReplacementPolicy": "TerminatingOrFailed"}),
+			`podReplacementPolicy: must be "Failed" when podFailurePolicy is set`,
+		},
+		{
+			"onExitCodes with an unknown key",
+			podFailurePolicyProps(exitCodes(map[string]any{"bogus": 1}), nil),
+			`podFailurePolicy.rules[0].onExitCodes: unrecognized key "bogus"`,
+		},
+		{
+			"missing operator",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onExitCodes": map[string]any{"values": []any{1}}}}, nil),
+			"onExitCodes.operator: required",
+		},
+		{
+			"unknown operator",
+			podFailurePolicyProps(exitCodes(map[string]any{"operator": "OneOf"}), nil),
+			"onExitCodes.operator: invalid value \"OneOf\"",
+		},
+		{
+			// Reported as missing rather than invalid, the same split upstream
+			// makes: field.Required for "", field.NotSupported for the rest.
+			"empty operator",
+			podFailurePolicyProps(exitCodes(map[string]any{"operator": ""}), nil),
+			"onExitCodes.operator: required",
+		},
+		{
+			// "" would read as absent through parseStringField, leaving the
+			// rule scoped to every container instead of the one the author
+			// named — a widening, not a refusal.
+			"empty containerName",
+			podFailurePolicyProps(exitCodes(map[string]any{"containerName": ""}), nil),
+			"onExitCodes.containerName: must not be empty",
+		},
+		{
+			"missing values",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onExitCodes": map[string]any{"operator": "In"}}}, nil),
+			"onExitCodes.values: required",
+		},
+		{
+			"empty values",
+			podFailurePolicyProps(exitCodes(map[string]any{"values": []any{}}), nil),
+			"onExitCodes.values: at least one exit code is required",
+		},
+		{
+			"non-integer value",
+			podFailurePolicyProps(exitCodes(map[string]any{"values": []any{"1"}}), nil),
+			"onExitCodes.values[0]: must be an integer",
+		},
+		{
+			// A container that exits 0 succeeded and is excluded before the
+			// operator is applied, so 0 under In names a requirement nothing
+			// can satisfy. Legal under NotIn, covered below.
+			"zero under the In operator",
+			podFailurePolicyProps(exitCodes(map[string]any{"values": []any{0, 1}}), nil),
+			"0 must not be listed",
+		},
+		{
+			"duplicate values",
+			podFailurePolicyProps(exitCodes(map[string]any{"values": []any{1, 1}}), nil),
+			"duplicate exit code 1",
+		},
+		{
+			"unordered values",
+			podFailurePolicyProps(exitCodes(map[string]any{"values": []any{2, 1}}), nil),
+			"must be in increasing order",
+		},
+		{
+			"onPodConditions not an array",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": map[string]any{}}}, nil),
+			"onPodConditions: must be an array",
+		},
+		{
+			"onPodConditions entry with an unknown key",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": "True", "bogus": 1}}}}, nil),
+			`onPodConditions[0]: unrecognized key "bogus"`,
+		},
+		{
+			"onPodConditions entry missing type",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"status": "True"}}}}, nil),
+			"onPodConditions[0].type: required",
+		},
+		{
+			"onPodConditions entry with a malformed type",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "not a name", "status": "True"}}}}, nil),
+			"is not a qualified name",
+		},
+		{
+			"onPodConditions entry with an empty type",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "", "status": "True"}}}}, nil),
+			"onPodConditions[0].type: required",
+		},
+		{
+			// Nothing in this package defaults status, and upstream — which
+			// runs after API-server defaulting — reports an empty one as
+			// Required, so it is refused here rather than emitted empty.
+			"onPodConditions entry missing status",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "DisruptionTarget"}}}}, nil),
+			"onPodConditions[0].status: required",
+		},
+		{
+			"onPodConditions entry with an unknown status",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": "Maybe"}}}}, nil),
+			"onPodConditions[0].status: invalid value \"Maybe\"",
+		},
+		{
+			"onPodConditions entry with an empty status",
+			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": ""}}}}, nil),
+			"onPodConditions[0].status: required",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if msg := jobError(t, tc.props); !strings.Contains(msg, tc.wantSubstr) {
+				t.Errorf("error = %q, want it to contain %q", msg, tc.wantSubstr)
+			}
+		})
+	}
+}
+
+// TestJobHandler_PodFailurePolicy_Bounds covers the three caps, kept out of the
+// table above because each needs a generated list that would bury its
+// neighbours.
+func TestJobHandler_PodFailurePolicy_Bounds(t *testing.T) {
+	condition := func(i int) any {
+		return map[string]any{"type": fmt.Sprintf("Condition%d", i), "status": "True"}
+	}
+
+	t.Run("more than 20 rules", func(t *testing.T) {
+		rules := make([]any, 21)
+		for i := range rules {
+			rules[i] = map[string]any{"action": "Ignore", "onPodConditions": []any{condition(i)}}
+		}
+		if msg := jobError(t, podFailurePolicyProps(rules, nil)); !strings.Contains(msg, "at most 20 rules") {
+			t.Errorf("error = %q, want the rule-count cap", msg)
+		}
+	})
+
+	t.Run("more than 20 onPodConditions patterns", func(t *testing.T) {
+		patterns := make([]any, 21)
+		for i := range patterns {
+			patterns[i] = condition(i)
+		}
+		props := podFailurePolicyProps([]any{map[string]any{"action": "Ignore", "onPodConditions": patterns}}, nil)
+		if msg := jobError(t, props); !strings.Contains(msg, "at most 20 patterns") {
+			t.Errorf("error = %q, want the pattern-count cap", msg)
+		}
+	})
+
+	t.Run("more than 255 exit codes", func(t *testing.T) {
+		values := make([]any, 256)
+		for i := range values {
+			values[i] = i + 1
+		}
+		props := podFailurePolicyProps([]any{map[string]any{
+			"action":      "FailJob",
+			"onExitCodes": map[string]any{"operator": "In", "values": values},
+		}}, nil)
+		if msg := jobError(t, props); !strings.Contains(msg, "at most 255 exit codes") {
+			t.Errorf("error = %q, want the exit-code cap", msg)
+		}
+	})
+
+	// The same shape one under the cap must build, so the message above is a
+	// refusal of the size, not of the shape.
+	values := make([]any, 255)
+	for i := range values {
+		values[i] = i + 1
+	}
+	job, _ := generateJob(t, podFailurePolicyProps([]any{map[string]any{
+		"action":      "FailJob",
+		"onExitCodes": map[string]any{"operator": "In", "values": values},
+	}}, nil))
+	got := job.Spec.PodFailurePolicy
+	if got == nil || len(got.Rules) != 1 || got.Rules[0].OnExitCodes == nil {
+		t.Fatalf("PodFailurePolicy = %+v, want one onExitCodes rule", got)
+	}
+	if n := len(got.Rules[0].OnExitCodes.Values); n != 255 {
+		t.Errorf("len(Values) = %d, want 255", n)
+	}
+}
+
+// TestJobHandler_PodFailurePolicy_ZeroUnderNotIn is the counterpart to the
+// zero-under-In case in the table: upstream forbids 0 only for the In operator,
+// so refusing it under NotIn would be stricter than the API for no reason.
+func TestJobHandler_PodFailurePolicy_ZeroUnderNotIn(t *testing.T) {
+	job, _ := generateJob(t, podFailurePolicyProps([]any{map[string]any{
+		"action":      "FailJob",
+		"onExitCodes": map[string]any{"operator": "NotIn", "values": []any{0, 1}},
+	}}, nil))
+	got := job.Spec.PodFailurePolicy
+	if got == nil || len(got.Rules) != 1 || got.Rules[0].OnExitCodes == nil {
+		t.Fatalf("PodFailurePolicy = %+v, want one onExitCodes rule", got)
+	}
+	if v := got.Rules[0].OnExitCodes.Values; len(v) != 2 || v[0] != 0 || v[1] != 1 {
+		t.Errorf("Values = %v, want [0 1]", v)
+	}
+}
+
+// TestJobHandler_PodFailurePolicy_TemplateRules covers the two checks that need
+// the built pod template rather than the property map: the restart policy
+// upstream requires alongside a podFailurePolicy, and containerName naming a
+// container the template actually carries. Both run at Generate, against what is
+// emitted — which is why they are unreachable through jobError.
+func TestJobHandler_PodFailurePolicy_TemplateRules(t *testing.T) {
+	rules := []any{map[string]any{
+		"action":      "FailJob",
+		"onExitCodes": map[string]any{"operator": "In", "values": []any{1}},
+	}}
+
+	t.Run("default restartPolicy", func(t *testing.T) {
+		// No restartPolicy authored, so the component's own OnFailure default
+		// lands on the template — a Job the API server refuses.
+		props := map[string]any{"podFailurePolicy": map[string]any{"rules": rules}}
+		msg := jobGenerateError(t, props)
+		if !strings.Contains(msg, `restartPolicy: must be "Never"`) || !strings.Contains(msg, "OnFailure") {
+			t.Errorf("error = %q, want it to name the required Never and the OnFailure it got", msg)
+		}
+	})
+
+	t.Run("authored OnFailure", func(t *testing.T) {
+		props := map[string]any{"restartPolicy": "OnFailure", "podFailurePolicy": map[string]any{"rules": rules}}
+		if msg := jobGenerateError(t, props); !strings.Contains(msg, `restartPolicy: must be "Never"`) {
+			t.Errorf("error = %q, want the restartPolicy refusal", msg)
+		}
+	})
+
+	t.Run("containerName naming no container", func(t *testing.T) {
+		props := podFailurePolicyProps([]any{map[string]any{
+			"action":      "FailJob",
+			"onExitCodes": map[string]any{"containerName": "sidecar", "operator": "In", "values": []any{1}},
+		}}, nil)
+		msg := jobGenerateError(t, props)
+		if !strings.Contains(msg, "names no container in this component") {
+			t.Errorf("error = %q, want the containerName refusal", msg)
+		}
+		// The message lists what is available, so an author can see the name
+		// they meant. "batch" is this component's own container.
+		if !strings.Contains(msg, `"batch"`) {
+			t.Errorf("error = %q, want it to list the container names the template carries", msg)
+		}
+	})
+
+	t.Run("containerName naming an initContainer", func(t *testing.T) {
+		// Init containers count too, upstream and here: the exit-code check
+		// reads .status.initContainerStatuses alongside .status.containerStatuses.
+		props := podFailurePolicyProps([]any{map[string]any{
+			"action":      "FailJob",
+			"onExitCodes": map[string]any{"containerName": "setup", "operator": "In", "values": []any{1}},
+		}}, map[string]any{
+			"initContainers": []any{map[string]any{"name": "setup", "image": "ghcr.io/org/setup:v1.0.0"}},
+		})
+		job, _ := generateJob(t, props)
+		got := job.Spec.PodFailurePolicy
+		if got == nil || len(got.Rules) != 1 || got.Rules[0].OnExitCodes == nil {
+			t.Fatalf("PodFailurePolicy = %+v, want one onExitCodes rule", got)
+		}
+		if name := got.Rules[0].OnExitCodes.ContainerName; name == nil || *name != "setup" {
+			t.Errorf("ContainerName = %v, want \"setup\"", name)
 		}
 	})
 }

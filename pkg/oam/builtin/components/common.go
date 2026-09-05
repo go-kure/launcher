@@ -2791,6 +2791,7 @@ type JobSpecConfig struct {
 	PodReplacementPolicy    *batchv1.PodReplacementPolicy
 	ManagedBy               *string
 	SuccessPolicy           *batchv1.SuccessPolicy
+	PodFailurePolicy        *batchv1.PodFailurePolicy
 }
 
 // jobSpecPropertyKeys lists every JobSpec-level property schemaJobSpec publishes
@@ -2802,6 +2803,7 @@ var jobSpecPropertyKeys = []string{
 	"backoffLimit", "completions", "parallelism", "activeDeadlineSeconds",
 	"ttlSecondsAfterFinished", "completionMode", "backoffLimitPerIndex",
 	"maxFailedIndexes", "podReplacementPolicy", "managedBy", "successPolicy",
+	"podFailurePolicy",
 }
 
 // parseJobSpec extracts the optional batchv1.JobSpec-level properties shared by
@@ -2959,7 +2961,25 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		cfg.SuccessPolicy = sp
 	}
 
+	if raw, present, err := optionalObject(props, "podFailurePolicy", "podFailurePolicy"); err != nil {
+		return cfg, err
+	} else if present {
+		pfp, err := parseJobPodFailurePolicy(raw)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.PodFailurePolicy = pfp
+	}
+
 	if err := parseJobSpecIndexedFields(&cfg); err != nil {
+		return cfg, err
+	}
+
+	// After the indexed rules, not before: a document that sets
+	// backoffLimitPerIndex without completionMode: Indexed and also asks for the
+	// FailIndex action has two problems, and the indexed one is the one to
+	// report — fixing it is what makes the FailIndex rule legal at all.
+	if err := validateJobPodFailurePolicy(&cfg); err != nil {
 		return cfg, err
 	}
 
@@ -2980,6 +3000,10 @@ const (
 	// maxJobSuccessPolicySucceededIndexesLimit caps the raw succeededIndexes
 	// string, not the number of indexes it denotes.
 	maxJobSuccessPolicySucceededIndexesLimit = 64 * 1024
+	// The podFailurePolicy bounds (go-kure/launcher#345), from the same file.
+	maxPodFailurePolicyRules                   = 20
+	maxPodFailurePolicyOnExitCodesValues       = 255
+	maxPodFailurePolicyOnPodConditionsPatterns = 20
 )
 
 // parseJobSpecIndexedFields applies the JobSpec cross-field rules that depend on
@@ -3233,6 +3257,367 @@ func parseJobIndex(s string, completions int32) (int32, error) {
 	return int32(n), nil
 }
 
+// jobPodFailurePolicy* are the nested key sets parseJobPodFailurePolicy
+// accepts, declared here for the same reason jobSuccessPolicyKeys is: the
+// schema fragment is pinned to them, so a key added to one half without the
+// other fails a test rather than becoming a silently unpublished or silently
+// unreadable property.
+var (
+	jobPodFailurePolicyKeys                = []string{"rules"}
+	jobPodFailurePolicyRuleKeys            = []string{"action", "onExitCodes", "onPodConditions"}
+	jobPodFailurePolicyOnExitCodesKeys     = []string{"containerName", "operator", "values"}
+	jobPodFailurePolicyOnPodConditionsKeys = []string{"type", "status"}
+)
+
+// jobPodFailurePolicyActions is the accepted `action` set, in upstream's own
+// sorted order so the error message and supportedPodFailurePolicyActions list
+// the same values in the same order.
+var jobPodFailurePolicyActions = []batchv1.PodFailurePolicyAction{
+	batchv1.PodFailurePolicyActionCount,
+	batchv1.PodFailurePolicyActionFailIndex,
+	batchv1.PodFailurePolicyActionFailJob,
+	batchv1.PodFailurePolicyActionIgnore,
+}
+
+// quotedList renders a value set for an error message as `"a", "b", "c"`.
+func quotedList[T ~string](values []T) string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		out = append(out, fmt.Sprintf("%q", string(v)))
+	}
+	return strings.Join(out, ", ")
+}
+
+// parseJobPodFailurePolicy decodes `podFailurePolicy` into
+// batchv1.PodFailurePolicy (go-kure/launcher#345). Everything checkable from the
+// property map alone lives here and in the two helpers below; the rules that
+// need a sibling JobSpec field live in validateJobPodFailurePolicy, and the two
+// that need the built pod template in validateJobPodFailurePolicyAgainstTemplate.
+// Every rule is ported from validatePodFailurePolicy / validatePodFailurePolicyRule
+// in k8s.io/kubernetes/pkg/apis/batch/validation at the pinned k8s.io/api v0.36.3.
+func parseJobPodFailurePolicy(raw map[string]any) (*batchv1.PodFailurePolicy, error) {
+	if err := rejectUnknownKeys(raw, jobPodFailurePolicyKeys, "podFailurePolicy"); err != nil {
+		return nil, err
+	}
+	rulesRaw, present := raw["rules"]
+	if !present || isExplicitNull(rulesRaw) {
+		return nil, errors.New("podFailurePolicy.rules: required")
+	}
+	rules, ok := rulesRaw.([]any)
+	if !ok {
+		return nil, errors.Errorf("podFailurePolicy.rules: must be an array, got %T", rulesRaw)
+	}
+	if len(rules) > maxPodFailurePolicyRules {
+		return nil, errors.Errorf("podFailurePolicy.rules: must contain at most %d rules, got %d", maxPodFailurePolicyRules, len(rules))
+	}
+	// No lower bound, unlike successPolicy: validatePodFailurePolicy has no
+	// "at least one rule" check and batchv1.PodFailurePolicy.Rules' own field
+	// doc states only the cap, so there is no documented contract to follow
+	// past upstream here the way succeededIndexes and activeDeadlineSeconds
+	// have one. An empty list is not inert either — a non-nil podFailurePolicy
+	// by itself pins podReplacementPolicy to "Failed" and restartPolicy to
+	// "Never" whatever its rules say — so it is accepted and left to mean what
+	// the API says it means.
+	//
+	// Allocated non-nil so an authored `rules: []` round-trips as `rules: []`.
+	// batchv1.PodFailurePolicy.Rules carries no `omitempty`, so a nil slice
+	// would marshal as `rules: null` — a shape no author wrote.
+	pfp := &batchv1.PodFailurePolicy{Rules: make([]batchv1.PodFailurePolicyRule, 0, len(rules))}
+	for i, entry := range rules {
+		label := fmt.Sprintf("podFailurePolicy.rules[%d]", i)
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("%s: must be an object, got %T", label, entry)
+		}
+		if err := rejectUnknownKeys(obj, jobPodFailurePolicyRuleKeys, label); err != nil {
+			return nil, err
+		}
+		rule, err := parseJobPodFailurePolicyRule(obj, label)
+		if err != nil {
+			return nil, err
+		}
+		pfp.Rules = append(pfp.Rules, *rule)
+	}
+	return pfp, nil
+}
+
+// parseJobPodFailurePolicyRule decodes one entry of podFailurePolicy.rules.
+func parseJobPodFailurePolicyRule(obj map[string]any, label string) (*batchv1.PodFailurePolicyRule, error) {
+	var rule batchv1.PodFailurePolicyRule
+
+	// action is read raw rather than through parseStringField for the reason
+	// managedBy is: that helper reports an authored "" as absent, and "" is
+	// exactly what upstream reports as Required rather than a value to default.
+	// Reading raw refuses an empty string, a null and a non-string alike.
+	raw, present := obj["action"]
+	if !present || isExplicitNull(raw) {
+		return nil, errors.Errorf("%s.action: required, must be one of %s", label, quotedList(jobPodFailurePolicyActions))
+	}
+	action, ok := raw.(string)
+	if !ok {
+		return nil, errors.Errorf("%s.action: must be a string, got %T", label, raw)
+	}
+	// An empty string is reported as missing rather than as an invalid value,
+	// matching upstream's own split — field.Required for "", field.NotSupported
+	// for anything else outside the set — because "write an action" is the
+	// actionable message and "invalid value \"\"" is not.
+	if action == "" {
+		return nil, errors.Errorf("%s.action: required, must be one of %s", label, quotedList(jobPodFailurePolicyActions))
+	}
+	if !slices.Contains(jobPodFailurePolicyActions, batchv1.PodFailurePolicyAction(action)) {
+		return nil, errors.Errorf("%s.action: invalid value %q, must be one of %s", label, action, quotedList(jobPodFailurePolicyActions))
+	}
+	rule.Action = batchv1.PodFailurePolicyAction(action)
+
+	if v, present, err := optionalObject(obj, "onExitCodes", label+".onExitCodes"); err != nil {
+		return nil, err
+	} else if present {
+		req, err := parseJobPodFailurePolicyOnExitCodes(v, label+".onExitCodes")
+		if err != nil {
+			return nil, err
+		}
+		rule.OnExitCodes = req
+	}
+
+	if raw, present := obj["onPodConditions"]; present && !isExplicitNull(raw) {
+		patterns, err := parseJobPodFailurePolicyOnPodConditions(raw, label+".onPodConditions")
+		if err != nil {
+			return nil, err
+		}
+		rule.OnPodConditions = patterns
+	}
+
+	// Upstream requires exactly one of the two, in two separate checks: both is
+	// "specifying both OnExitCodes and OnPodConditions is not supported",
+	// neither is "specifying one of OnExitCodes and OnPodConditions is
+	// required". An authored `onPodConditions: []` counts as neither, there and
+	// here — upstream tests len(), not nil-ness.
+	switch {
+	case rule.OnExitCodes != nil && len(rule.OnPodConditions) > 0:
+		return nil, errors.Errorf("%s: onExitCodes and onPodConditions are mutually exclusive; specify exactly one", label)
+	case rule.OnExitCodes == nil && len(rule.OnPodConditions) == 0:
+		return nil, errors.Errorf("%s: exactly one of onExitCodes or onPodConditions is required", label)
+	}
+	return &rule, nil
+}
+
+// parseJobPodFailurePolicyOnExitCodes decodes a rule's `onExitCodes`.
+func parseJobPodFailurePolicyOnExitCodes(obj map[string]any, label string) (*batchv1.PodFailurePolicyOnExitCodesRequirement, error) {
+	if err := rejectUnknownKeys(obj, jobPodFailurePolicyOnExitCodesKeys, label); err != nil {
+		return nil, err
+	}
+	var req batchv1.PodFailurePolicyOnExitCodesRequirement
+
+	// Read raw, again because parseStringField reports an authored "" as
+	// absent: "" names no container any pod template can carry, so leaving it
+	// unset would turn a rule scoped to one container into one that applies to
+	// all of them — a widening the author did not write. Refused instead.
+	if raw, present := obj["containerName"]; present && !isExplicitNull(raw) {
+		s, ok := raw.(string)
+		if !ok {
+			return nil, errors.Errorf("%s.containerName: must be a string, got %T", label, raw)
+		}
+		if s == "" {
+			return nil, errors.Errorf("%s.containerName: must not be empty; omit the key to apply the rule to every container", label)
+		}
+		req.ContainerName = &s
+	}
+
+	// Parsed before values because the In-operator rule below depends on it.
+	raw, present := obj["operator"]
+	if !present || isExplicitNull(raw) {
+		return nil, errors.Errorf("%s.operator: required, must be %q or %q", label, batchv1.PodFailurePolicyOnExitCodesOpIn, batchv1.PodFailurePolicyOnExitCodesOpNotIn)
+	}
+	op, ok := raw.(string)
+	if !ok {
+		return nil, errors.Errorf("%s.operator: must be a string, got %T", label, raw)
+	}
+	// Empty reported as missing rather than invalid, as for action above.
+	if op == "" {
+		return nil, errors.Errorf("%s.operator: required, must be %q or %q", label, batchv1.PodFailurePolicyOnExitCodesOpIn, batchv1.PodFailurePolicyOnExitCodesOpNotIn)
+	}
+	switch batchv1.PodFailurePolicyOnExitCodesOperator(op) {
+	case batchv1.PodFailurePolicyOnExitCodesOpIn, batchv1.PodFailurePolicyOnExitCodesOpNotIn:
+		req.Operator = batchv1.PodFailurePolicyOnExitCodesOperator(op)
+	default:
+		return nil, errors.Errorf("%s.operator: invalid value %q, must be %q or %q", label, op, batchv1.PodFailurePolicyOnExitCodesOpIn, batchv1.PodFailurePolicyOnExitCodesOpNotIn)
+	}
+
+	valuesRaw, present := obj["values"]
+	if !present || isExplicitNull(valuesRaw) {
+		return nil, errors.Errorf("%s.values: required, at least one exit code must be listed", label)
+	}
+	list, ok := valuesRaw.([]any)
+	if !ok {
+		return nil, errors.Errorf("%s.values: must be an array, got %T", label, valuesRaw)
+	}
+	if len(list) == 0 {
+		return nil, errors.Errorf("%s.values: at least one exit code is required", label)
+	}
+	if len(list) > maxPodFailurePolicyOnExitCodesValues {
+		return nil, errors.Errorf("%s.values: must contain at most %d exit codes, got %d", label, maxPodFailurePolicyOnExitCodesValues, len(list))
+	}
+	seen := make(map[int32]bool, len(list))
+	req.Values = make([]int32, 0, len(list))
+	for i, entry := range list {
+		v, ok := toInt32(entry)
+		if !ok {
+			return nil, errors.Errorf("%s.values[%d]: must be an integer, got %T", label, i, entry)
+		}
+		// A container that exits 0 succeeded and is excluded from the check
+		// before any operator is applied (the field doc on
+		// PodFailurePolicyOnExitCodesRequirement), so 0 under "In" names a
+		// requirement nothing can satisfy.
+		if req.Operator == batchv1.PodFailurePolicyOnExitCodesOpIn && v == 0 {
+			return nil, errors.Errorf("%s.values[%d]: 0 must not be listed for the %q operator; a container that exits 0 succeeded and is never matched", label, i, batchv1.PodFailurePolicyOnExitCodesOpIn)
+		}
+		if seen[v] {
+			return nil, errors.Errorf("%s.values[%d]: duplicate exit code %d", label, i, v)
+		}
+		seen[v] = true
+		// Upstream reports unordered and duplicate values separately; with
+		// duplicates already refused above, "non-decreasing" and "strictly
+		// increasing" coincide, so one comparison covers both messages.
+		if i > 0 && req.Values[i-1] > v {
+			return nil, errors.Errorf("%s.values: must be in increasing order; %d follows %d", label, v, req.Values[i-1])
+		}
+		req.Values = append(req.Values, v)
+	}
+	return &req, nil
+}
+
+// parseJobPodFailurePolicyOnPodConditions decodes a rule's `onPodConditions`.
+// It takes the raw value rather than a []map[string]any from optionalObjectList
+// because that helper labels its errors with the bare key, losing the rule index
+// an author needs to find the entry at fault.
+func parseJobPodFailurePolicyOnPodConditions(raw any, label string) ([]batchv1.PodFailurePolicyOnPodConditionsPattern, error) {
+	list, ok := raw.([]any)
+	if !ok {
+		return nil, errors.Errorf("%s: must be an array, got %T", label, raw)
+	}
+	if len(list) > maxPodFailurePolicyOnPodConditionsPatterns {
+		return nil, errors.Errorf("%s: must contain at most %d patterns, got %d", label, maxPodFailurePolicyOnPodConditionsPatterns, len(list))
+	}
+	patterns := make([]batchv1.PodFailurePolicyOnPodConditionsPattern, 0, len(list))
+	for i, entry := range list {
+		entryLabel := fmt.Sprintf("%s[%d]", label, i)
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("%s: must be an object, got %T", entryLabel, entry)
+		}
+		if err := rejectUnknownKeys(obj, jobPodFailurePolicyOnPodConditionsKeys, entryLabel); err != nil {
+			return nil, err
+		}
+		var pattern batchv1.PodFailurePolicyOnPodConditionsPattern
+
+		raw, present := obj["type"]
+		if !present || isExplicitNull(raw) {
+			return nil, errors.Errorf("%s.type: required, the pod condition type to match such as %q", entryLabel, corev1.DisruptionTarget)
+		}
+		t, ok := raw.(string)
+		if !ok {
+			return nil, errors.Errorf("%s.type: must be a string, got %T", entryLabel, raw)
+		}
+		// Empty reported as missing rather than as a malformed qualified name,
+		// for the same reason as action, operator and status.
+		if t == "" {
+			return nil, errors.Errorf("%s.type: required, the pod condition type to match such as %q", entryLabel, corev1.DisruptionTarget)
+		}
+		if errs := validation.IsQualifiedName(t); len(errs) > 0 {
+			return nil, errors.Errorf("%s.type: %q is not a qualified name: %s", entryLabel, t, strings.Join(errs, "; "))
+		}
+		pattern.Type = corev1.PodConditionType(t)
+
+		// batchv1's field doc says status "Defaults to True", but nothing in
+		// this package defaults it and upstream's own validation — which runs
+		// after API-server defaulting — reports an empty status as Required
+		// rather than filling it in. An unauthored status is therefore refused
+		// here instead of emitted empty for admission to reject.
+		raw, present = obj["status"]
+		if !present || isExplicitNull(raw) {
+			return nil, errors.Errorf("%s.status: required, must be %q, %q or %q", entryLabel, corev1.ConditionTrue, corev1.ConditionFalse, corev1.ConditionUnknown)
+		}
+		s, ok := raw.(string)
+		if !ok {
+			return nil, errors.Errorf("%s.status: must be a string, got %T", entryLabel, raw)
+		}
+		// Empty reported as missing rather than invalid, as for action and
+		// operator above — and as upstream reports it.
+		if s == "" {
+			return nil, errors.Errorf("%s.status: required, must be %q, %q or %q", entryLabel, corev1.ConditionTrue, corev1.ConditionFalse, corev1.ConditionUnknown)
+		}
+		switch corev1.ConditionStatus(s) {
+		case corev1.ConditionTrue, corev1.ConditionFalse, corev1.ConditionUnknown:
+			pattern.Status = corev1.ConditionStatus(s)
+		default:
+			return nil, errors.Errorf("%s.status: invalid value %q, must be %q, %q or %q", entryLabel, s, corev1.ConditionTrue, corev1.ConditionFalse, corev1.ConditionUnknown)
+		}
+
+		patterns = append(patterns, pattern)
+	}
+	return patterns, nil
+}
+
+// validateJobPodFailurePolicy applies the podFailurePolicy rules that depend on
+// a sibling JobSpec field rather than on the policy's own shape.
+func validateJobPodFailurePolicy(cfg *JobSpecConfig) error {
+	if cfg.PodFailurePolicy == nil {
+		return nil
+	}
+	// validatePodReplacementPolicy: with a podFailurePolicy set, "Failed" is
+	// the only value upstream accepts. "TerminatingOrFailed" would replace a
+	// pod the moment it starts terminating, before the exit code or pod
+	// condition the policy is written against exists to be judged.
+	if cfg.PodReplacementPolicy != nil && *cfg.PodReplacementPolicy != batchv1.Failed {
+		return errors.Errorf("podReplacementPolicy: must be %q when podFailurePolicy is set, got %q", batchv1.Failed, *cfg.PodReplacementPolicy)
+	}
+	for i, rule := range cfg.PodFailurePolicy.Rules {
+		if rule.Action == batchv1.PodFailurePolicyActionFailIndex && cfg.BackoffLimitPerIndex == nil {
+			return errors.Errorf("podFailurePolicy.rules[%d].action: %q requires backoffLimitPerIndex to be set, which in turn requires completionMode: Indexed", i, batchv1.PodFailurePolicyActionFailIndex)
+		}
+	}
+	return nil
+}
+
+// validateJobPodFailurePolicyAgainstTemplate applies the two podFailurePolicy
+// rules that need the pod template: validateJobSpec's restartPolicy arm, and the
+// containerName half of validatePodFailurePolicy.
+//
+// It runs at emission, against the batchv1.JobSpec actually written — a job's
+// own spec, or a cronjob's spec.jobTemplate.spec — rather than at parse time
+// against the config, because both facts it reads are properties of the built
+// template rather than of any one property: the container names are whatever
+// buildPodSpec assembled (the main container, every init container and every
+// sidecar), and the restart policy is the value that landed on the template. The
+// check then cannot drift from what is emitted, which is the same reason the
+// component-name check in createJob reads app.Name.
+func validateJobPodFailurePolicyAgainstTemplate(spec *batchv1.JobSpec) error {
+	if spec.PodFailurePolicy == nil {
+		return nil
+	}
+	if spec.Template.Spec.RestartPolicy != corev1.RestartPolicyNever {
+		return errors.Errorf("restartPolicy: must be %q when podFailurePolicy is set, got %q; a pod the kubelet restarts in place never reaches the terminal failure the policy is written against",
+			corev1.RestartPolicyNever, spec.Template.Spec.RestartPolicy)
+	}
+	names := make(map[string]bool, len(spec.Template.Spec.Containers)+len(spec.Template.Spec.InitContainers))
+	for _, c := range spec.Template.Spec.Containers {
+		names[c.Name] = true
+	}
+	for _, c := range spec.Template.Spec.InitContainers {
+		names[c.Name] = true
+	}
+	for i, rule := range spec.PodFailurePolicy.Rules {
+		if rule.OnExitCodes == nil || rule.OnExitCodes.ContainerName == nil {
+			continue
+		}
+		if !names[*rule.OnExitCodes.ContainerName] {
+			return errors.Errorf("podFailurePolicy.rules[%d].onExitCodes.containerName: %q names no container in this component; the pod template carries %s",
+				i, *rule.OnExitCodes.ContainerName, quotedList(slices.Sorted(maps.Keys(names))))
+		}
+	}
+	return nil
+}
+
 // applyJobSpec writes cfg's presence-gated fields onto spec — a cronjob's
 // spec.jobTemplate.spec, or a job component's spec directly (go-kure/launcher#344);
 // both are the same batchv1.JobSpec type. Fields left nil in cfg are left
@@ -3278,6 +3663,11 @@ func applyJobSpec(spec *batchv1.JobSpec, cfg JobSpecConfig) {
 	}
 	if cfg.SuccessPolicy != nil {
 		spec.SuccessPolicy = cfg.SuccessPolicy.DeepCopy()
+	}
+	// DeepCopy for the same reason SuccessPolicy needs one: it owns a slice of
+	// rules, each carrying its own pointers and slices.
+	if cfg.PodFailurePolicy != nil {
+		spec.PodFailurePolicy = cfg.PodFailurePolicy.DeepCopy()
 	}
 }
 

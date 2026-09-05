@@ -481,5 +481,12 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	}
 	cj.Spec.JobTemplate.Spec.Template.Spec = podSpec
 
+	// After the template is assigned, for the same reason as in createJob: the
+	// cronjob's jobTemplate.spec is the same batchv1.JobSpec, validated by the
+	// same upstream validateJobSpec (go-kure/launcher#345).
+	if err := validateJobPodFailurePolicyAgainstTemplate(&cj.Spec.JobTemplate.Spec); err != nil {
+		return nil, err
+	}
+
 	return cj, nil
 }

@@ -1266,12 +1266,12 @@ func TestCronjobHandler_PropertySchema_JobSpecAndCronSpecKeys_Present(t *testing
 	h := &components.CronjobHandler{}
 	schema := h.PropertySchema()
 
-	// 20 cronjob-own keys, the 11 JobSpec-level keys from schemaJobSpec (six
+	// 20 cronjob-own keys, the 12 JobSpec-level keys from schemaJobSpec (six
 	// from the original cronjob work, five added with the job component in
-	// go-kure/launcher#344), and the 31 shared pod-level keys from
-	// schemaPodSpec (podActiveDeadlineSeconds included: cronjob pods are Job
-	// pods).
-	const wantTotalKeys = 62
+	// go-kure/launcher#344, podFailurePolicy added in go-kure/launcher#345),
+	// and the 31 shared pod-level keys from schemaPodSpec
+	// (podActiveDeadlineSeconds included: cronjob pods are Job pods).
+	const wantTotalKeys = 63
 	if len(schema) != wantTotalKeys {
 		t.Fatalf("PropertySchema() returned %d keys, want %d", len(schema), wantTotalKeys)
 	}
@@ -1318,4 +1318,112 @@ func TestCronjobHandler_PropertySchema_JobSpecAndCronSpecKeys_Present(t *testing
 			t.Errorf("%s: Default = %v, want %v", key, node.Default, w.def)
 		}
 	}
+}
+
+// cronjobPodFailurePolicy builds a cronjob carrying podFailurePolicy and returns
+// either the generated jobTemplate.spec or the error it was refused with. Both
+// outcomes are returned because the two checks under test sit on opposite sides
+// of Generate: the shape rules run in ToApplicationConfig, the template rules in
+// createCronJob.
+func cronjobPodFailurePolicy(t *testing.T, props map[string]any) (*batchv1.JobSpec, string) {
+	t.Helper()
+	full := map[string]any{
+		"image":    "ghcr.io/org/job:v1.0.0",
+		"schedule": "0 2 * * *",
+	}
+	for k, v := range props {
+		full[k] = v
+	}
+	cfg, err := (&components.CronjobHandler{}).ToApplicationConfig(&oam.Component{
+		Name: "job", Type: "cronjob", Properties: full,
+	}, "default")
+	if err != nil {
+		return nil, err.Error()
+	}
+	objs, err := cfg.Generate(stack.NewApplication("job", "default", cfg))
+	if err != nil {
+		return nil, err.Error()
+	}
+	return &findCronJob(t, objs).Spec.JobTemplate.Spec, ""
+}
+
+// TestCronjobHandler_PodFailurePolicy_Projected pins podFailurePolicy on the
+// cronjob component (go-kure/launcher#345). The key reaches the same
+// batchv1.JobSpec through the same shared parser as on the job component, and
+// upstream validates a cronjob's jobTemplate.spec with the same validateJobSpec
+// — so the same rules apply, including the restartPolicy one.
+//
+// This is a behaviour change for existing documents, not merely an addition:
+// before this, an authored podFailurePolicy on a cronjob was read by nothing and
+// dropped in silence (the accept-and-drop class tracked as
+// go-kure/launcher#408). Such a document now either compiles to a CronJob that
+// carries the policy, or fails the build.
+func TestCronjobHandler_PodFailurePolicy_Projected(t *testing.T) {
+	rules := []any{map[string]any{
+		"action":      "FailJob",
+		"onExitCodes": map[string]any{"operator": "In", "values": []any{1, 2}},
+	}}
+
+	t.Run("projected onto jobTemplate.spec", func(t *testing.T) {
+		spec, msg := cronjobPodFailurePolicy(t, map[string]any{
+			"restartPolicy":    "Never",
+			"podFailurePolicy": map[string]any{"rules": rules},
+		})
+		if msg != "" {
+			t.Fatalf("refused: %s", msg)
+		}
+		pfp := spec.PodFailurePolicy
+		if pfp == nil || len(pfp.Rules) != 1 || pfp.Rules[0].OnExitCodes == nil {
+			t.Fatalf("PodFailurePolicy = %+v, want one onExitCodes rule", pfp)
+		}
+		if pfp.Rules[0].Action != batchv1.PodFailurePolicyActionFailJob {
+			t.Errorf("Action = %q, want FailJob", pfp.Rules[0].Action)
+		}
+		if v := pfp.Rules[0].OnExitCodes.Values; len(v) != 2 || v[0] != 1 || v[1] != 2 {
+			t.Errorf("Values = %v, want [1 2]", v)
+		}
+	})
+
+	t.Run("restartPolicy rule applies to the jobTemplate too", func(t *testing.T) {
+		// No restartPolicy authored, so the cronjob component's own OnFailure
+		// default lands on the template.
+		_, msg := cronjobPodFailurePolicy(t, map[string]any{
+			"podFailurePolicy": map[string]any{"rules": rules},
+		})
+		if !strings.Contains(msg, `restartPolicy: must be "Never"`) {
+			t.Errorf("error = %q, want the restartPolicy refusal", msg)
+		}
+	})
+
+	t.Run("containerName is checked against the cronjob's own container", func(t *testing.T) {
+		_, msg := cronjobPodFailurePolicy(t, map[string]any{
+			"restartPolicy": "Never",
+			"podFailurePolicy": map[string]any{"rules": []any{map[string]any{
+				"action":      "FailJob",
+				"onExitCodes": map[string]any{"containerName": "nope", "operator": "In", "values": []any{1}},
+			}}},
+		})
+		if !strings.Contains(msg, "names no container in this component") {
+			t.Errorf("error = %q, want the containerName refusal", msg)
+		}
+	})
+
+	t.Run("unauthored and explicit null are both left unset", func(t *testing.T) {
+		// The optional* wrappers read an explicit null as omission, so
+		// `podFailurePolicy:` with nothing after it must not become an empty
+		// policy — which would silently pin restartPolicy and
+		// podReplacementPolicy.
+		for name, props := range map[string]map[string]any{
+			"unauthored": nil,
+			"null":       {"podFailurePolicy": nil},
+		} {
+			spec, msg := cronjobPodFailurePolicy(t, props)
+			if msg != "" {
+				t.Fatalf("%s: refused: %s", name, msg)
+			}
+			if spec.PodFailurePolicy != nil {
+				t.Errorf("%s: PodFailurePolicy = %+v, want nil", name, spec.PodFailurePolicy)
+			}
+		}
+	})
 }
