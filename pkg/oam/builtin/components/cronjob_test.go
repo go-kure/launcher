@@ -440,8 +440,8 @@ func TestCronjobHandler_NamedLifecyclePort_Error(t *testing.T) {
 }
 
 // TestCronjobHandler_WorkingDir_NonString_Error covers a bug pattern shared
-// identically across all five kind handlers (cronjob, statefulset, worker,
-// daemonset, webservice): a mistyped workingDir value was previously
+// identically across all seven kind handlers (cronjob, job, statefulset,
+// worker, daemonset, webservice, deployment): a mistyped workingDir value was previously
 // silently treated as absent instead of rejected. Exercised once here since
 // the fix is the same one-line change (routed through parseStringField) in
 // every handler.

@@ -440,7 +440,7 @@ doc comment states only that the container runtime's default applies when
 unset, and real admission enforces no path shape for it, so this schema does
 not invent a stricter constraint upstream itself does not have; a
 present-but-non-string value, e.g. `workingDir: 123`, is rejected rather than
-silently treated as absent, in all six kind handlers — this is a type check,
+silently treated as absent, in all seven kind handlers — this is a type check,
 distinct from the content-validation question the previous paragraph answers),
 `volumes` (the `volumes` property itself, if authored, must be an array — a
 present-but-non-array value, e.g. `volumes: {name: data}`, is rejected
@@ -550,7 +550,7 @@ and `affinity`.
 
 ### Pod-level properties
 
-The six kind components also share one pod-level property surface
+The seven kind components also share one pod-level property surface
 (go-kure/launcher#342, ADR-036 L1), parsed by `parsePodSpec` (`podspec.go`)
 straight into a `corev1.PodSpec` and rendered by the shared `buildPodSpec`,
 which every kind assigns to its pod template. Property names are the
@@ -574,7 +574,7 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 | `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob and job only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it. Distinct from the JobSpec-level `activeDeadlineSeconds` below: this one bounds a single pod, that one the whole job. | additive |
 | `dnsPolicy`, `dnsConfig` | enum, object | `ClusterFirstWithHostNet`/`ClusterFirst`/`Default`/`None`; `dnsConfig` = `nameservers` (≤3 plain IPv4/IPv6 literals — a zone-scoped address such as `fe80::1%eth0` is rejected, matching upstream's `net.ParseIP`-based check, which has no notion of a zone), `searches` (≤32 entries whose joined length, separators included, is ≤2048 characters — the `resolv.conf` search-line limit, so 32 individually valid domains can still be refused), `options[]{name,value}`. `None` requires at least one nameserver. | additive |
 | `nodeSelector`, `nodeName`, `schedulerName`, `priorityClassName`, `preemptionPolicy`, `runtimeClassName`, `schedulingGates[]{name}`, `schedulingGroup{podGroupName}` | scheduling | Placement fields; gate names must be unique. `nodeName` is a DNS-1123 subdomain (a Node is an ordinary object, so an invalid value is refused at admission, not merely unmatched). `schedulerName` is deliberately *not* validated: upstream constrains its form nowhere, so an arbitrary string is a legal document and rejecting one here would refuse work a cluster accepts. | additive |
-| `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all six kinds; `NoopPolicy` denies all three). | additive |
+| `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all seven kinds; `NoopPolicy` denies all three). | additive |
 | `shareProcessNamespace` | bool | Mutually exclusive with `hostPID: true`. | additive |
 | `hostname`, `subdomain`, `setHostnameAsFQDN`, `hostnameOverride`, `hostAliases[]{ip,hostnames}` | naming | `hostname`/`subdomain` are DNS-1123 labels; `hostnameOverride` is a ≤64-char subdomain and cannot combine with `hostNetwork` or `setHostnameAsFQDN`. `hostAliases[].ip` is a plain IPv4/IPv6 literal, zone suffixes rejected as for `dnsConfig.nameservers`. | additive |
 | `podSecurityContext` | object | The full `corev1.PodSecurityContext` field set (`runAsUser`/`runAsGroup`/`runAsNonRoot`/`fsGroup`/`fsGroupChangePolicy`/`supplementalGroups`/`supplementalGroupsPolicy`/`sysctls`/`seLinuxOptions`/`seLinuxChangePolicy`/`seccompProfile`/`appArmorProfile`/`windowsOptions`), closed and validated like the container `securityContext`. `sysctls[].name` must match the sysctl grammar (≤253 characters of dot- or slash-separated lowercase alphanumeric segments) and be unique within the list. `windowsOptions.hostProcess: true` additionally requires `hostNetwork: true`, which upstream demands of any pod containing HostProcess containers. The `runAsUser: 0` / `runAsNonRoot: true` contradiction is judged per container on the *effective* values once the containers are assembled, not on this object alone — a container-level `runAsUser` overrides the pod-level one, so the pair is a valid document when every container names a non-root UID, and the deferred check also catches a container-level `runAsUser: 0` under a pod-level `runAsNonRoot`. **Partly policy-gated**: `windowsOptions.hostProcess: true` is rejected unless `AllowPrivileged()` allows it (a HostProcess pod runs with the node's own privileges, and upstream forces every container in it to be HostProcess too); every other field has no policy hook. | additive |
@@ -624,7 +624,7 @@ every `initContainers`/`sidecars` entry (go-kure/launcher#312's shared
 `enforceExtraContainer` helper), not just the main container.
 
 The pod-level surface carries two policy checks of its own, both called from
-all six kinds' `ApplyPolicy` next to `enforceHostNamespaces`:
+all seven kinds' `ApplyPolicy` next to `enforceHostNamespaces`:
 `enforcePodResources` measures `podResources`' cpu and memory requests and
 limits against `MaxCPU()`/`MaxMemory()` — without it an author could keep the
 container under the maximum and put the oversized request on the pod, which
@@ -641,7 +641,7 @@ A `volumes` entry sourced from `hostPath` is rejected unless the environment
 policy's `AllowHostPathVolumes()` allows it (`enforce.go`'s
 `enforceHostPathVolumes`, the same reused-mechanism shape as
 `enforcePrivileged` above); like `enforcePrivileged`, it is called from all
-six kind components' `ApplyPolicy`, not just one — a hostPath volume mounts
+seven kind components' `ApplyPolicy`, not just one — a hostPath volume mounts
 an arbitrary path from the node's own filesystem into the Pod, so an
 unenforced policy denial here is a container-escape-adjacent gap, not merely
 a style one.
@@ -818,9 +818,10 @@ came from the intrinsic tier specifically (absent from the authored/policy-
 defaulted value, present only after the intrinsic fallback), the error names
 it as a "generated default" so the mismatch isn't mysterious.
 
-This three-tier effective-value enforcement applies to the six kind
+This three-tier effective-value enforcement applies to the seven kind
 components that call `buildResourceRequirements` on their main container
-(`webservice`, `worker`, `deployment`, `cronjob`, `statefulset`, `daemonset`).
+(`webservice`, `worker`, `deployment`, `cronjob`, `job`, `statefulset`,
+`daemonset`).
 **`postgresql` is exempt**: `createCluster` forwards `c.Resources` straight
 into `kurecnpg.ResourceOptions` behind a `!= ""` guard and never calls
 `buildResourceRequirements`, so it has no intrinsic tier for its existing
