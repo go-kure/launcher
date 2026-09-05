@@ -411,14 +411,24 @@ func parsePodAffinityTerm(raw map[string]any, label string) (corev1.PodAffinityT
 	if err != nil {
 		return corev1.PodAffinityTerm{}, err
 	}
-	// Both constraints are from the two fields' own docs: "The same key is
-	// forbidden to exist in both matchLabelKeys and labelSelector. Also,
-	// matchLabelKeys cannot be set when labelSelector isn't set." (and the
-	// mirror wording on mismatchLabelKeys).
-	if err := checkLabelKeysAgainstSelector(matchLabelKeys, term.LabelSelector, "matchLabelKeys", label); err != nil {
+	// The two fields do NOT carry the same pair of rules, despite their docs
+	// reading as mirrors of each other (k8s.io/api@v0.36.3 core/v1/types.go:3987
+	// and :3999 both say "The same key is forbidden to exist in both … and
+	// labelSelector"). Upstream validation enforces the selector-overlap rule for
+	// matchLabelKeys only: ValidateMatchLabelKeysAndMismatchLabelKeys builds its
+	// forbidden-key map from matchLabelKeys alone (pkg/apis/core/validation/
+	// validation.go, release-1.36:8989-8992), so a mismatchLabelKeys key that also
+	// appears in labelSelector is accepted — deliberately, per that function's own
+	// comment at :8983-8985: the key is merged as `NotIn`, so further filtering on
+	// the same key still makes sense. Enforcing the doc's wording here would refuse
+	// a document the apiserver accepts.
+	//
+	// What both fields do share is the nil-selector rule, so that one is checked for
+	// each.
+	if err := checkMatchLabelKeysAgainstSelector(matchLabelKeys, term.LabelSelector, "matchLabelKeys", label); err != nil {
 		return corev1.PodAffinityTerm{}, err
 	}
-	if err := checkLabelKeysAgainstSelector(mismatchLabelKeys, term.LabelSelector, "mismatchLabelKeys", label); err != nil {
+	if err := requireLabelSelector(mismatchLabelKeys, term.LabelSelector, "mismatchLabelKeys", label); err != nil {
 		return corev1.PodAffinityTerm{}, err
 	}
 	term.MatchLabelKeys = matchLabelKeys
@@ -441,19 +451,63 @@ func parseSchedulingSelector(raw map[string]any, key, label string) (*metav1.Lab
 	return parseLabelSelectorOpts(m, label+"."+key, false)
 }
 
-// checkLabelKeysAgainstSelector enforces the two rules matchLabelKeys and
-// mismatchLabelKeys share: they require a labelSelector, and no key of theirs
-// may also appear in that selector's matchLabels.
-func checkLabelKeysAgainstSelector(keys []string, sel *metav1.LabelSelector, field, label string) error {
+// requireLabelSelector enforces the one rule matchLabelKeys and mismatchLabelKeys
+// genuinely share: neither may be set without a labelSelector. Upstream applies it
+// to both through validateLabelKeys (pkg/apis/core/validation/validation.go,
+// release-1.36:9053), which returns Forbidden("must not be specified when
+// labelSelector is not set") for a nil selector on either field.
+//
+// The overlap rule is NOT shared, which is why it is not enforced here — see
+// checkMatchLabelKeysAgainstSelector.
+func requireLabelSelector(keys []string, sel *metav1.LabelSelector, field, label string) error {
 	if len(keys) == 0 {
 		return nil
 	}
 	if sel == nil {
 		return errors.Errorf("%s.%s: cannot be set without labelSelector", label, field)
 	}
+	return nil
+}
+
+// checkMatchLabelKeysAgainstSelector rejects a matchLabelKeys entry whose key is
+// already constrained by the selector — in matchLabels OR in matchExpressions.
+//
+// Scanning matchExpressions as well as matchLabels is what upstream rejects, though
+// no single upstream function says so on its own; both paths this helper serves reach
+// it differently (validation.go line numbers are release-1.36):
+//
+//   - Topology spread with MatchLabelKeysInPodTopologySpreadSelectorMerge off:
+//     ValidateMatchLabelKeysInTopologySpread (:9022) seeds its forbidden set from
+//     labelSelector.MatchLabels AND labelSelector.MatchExpressions[].Key, then rejects
+//     any matchLabelKey in it. Unconditional.
+//   - Topology spread with that gate on (Beta, default true since 1.34), and pod
+//     affinity always (MatchLabelKeysInPodAffinity is GA + LockToDefault since 1.33):
+//     ValidateMatchLabelKeysAndMismatchLabelKeys (:8973) flags a matchExpressions key
+//     only when it was ALREADY in the forbidden set. That reads as permissive in
+//     isolation, but it runs after PrepareForCreate has merged each matchLabelKey into
+//     the selector as its own `In` requirement (registry/core/pod/strategy.go:860-925).
+//     An authored duplicate is therefore the second occurrence of that key and is
+//     rejected — whenever the merge happens, i.e. whenever the pod carries the label.
+//
+// The one configuration that accepts the duplicate is a key naming a label the pod
+// does not carry, where no merge occurs — and there matchLabelKeys selects nothing at
+// all, so refusing it costs no working document and catches the typo it almost always
+// is.
+//
+// Both fields' own docs state the rule against the whole selector rather than against
+// matchLabels: k8s.io/api@v0.36.3 core/v1/types.go:3987 and :4779.
+func checkMatchLabelKeysAgainstSelector(keys []string, sel *metav1.LabelSelector, field, label string) error {
+	if err := requireLabelSelector(keys, sel, field, label); err != nil {
+		return err
+	}
 	for i, k := range keys {
 		if _, clash := sel.MatchLabels[k]; clash {
 			return errors.Errorf("%s: key %q is already constrained by labelSelector.matchLabels; the same key may not appear in both", indexedLabel(label+"."+field, i), k)
+		}
+		for _, req := range sel.MatchExpressions {
+			if req.Key == k {
+				return errors.Errorf("%s: key %q is already constrained by labelSelector.matchExpressions; the same key may not appear in both", indexedLabel(label+"."+field, i), k)
+			}
 		}
 	}
 	return nil
@@ -568,12 +622,14 @@ func parseTopologySpreadConstraints(props map[string]any) ([]corev1.TopologySpre
 
 		// "The same key is forbidden to exist in both MatchLabelKeys and
 		// LabelSelector. MatchLabelKeys cannot be set when LabelSelector isn't
-		// set." Same pair of rules as on a PodAffinityTerm.
+		// set." (k8s.io/api@v0.36.3 core/v1/types.go:4779.) Same rules as
+		// matchLabelKeys on a PodAffinityTerm — a TopologySpreadConstraint has no
+		// mismatchLabelKeys field, so only the one call is needed.
 		matchLabelKeys, _, err := optionalStringList(item, "matchLabelKeys", label+".matchLabelKeys")
 		if err != nil {
 			return nil, err
 		}
-		if err := checkLabelKeysAgainstSelector(matchLabelKeys, tsc.LabelSelector, "matchLabelKeys", label); err != nil {
+		if err := checkMatchLabelKeysAgainstSelector(matchLabelKeys, tsc.LabelSelector, "matchLabelKeys", label); err != nil {
 			return nil, err
 		}
 		tsc.MatchLabelKeys = matchLabelKeys
