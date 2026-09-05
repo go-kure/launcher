@@ -278,10 +278,26 @@ func checkClaimStorageLimit(vct VolumeClaimTemplate, label string) error {
 	return nil
 }
 
-// parseLabelSelector parses a metav1.LabelSelector: matchLabels plus the
+// parseLabelSelector parses a metav1.LabelSelector for a volume claim, where an
+// entirely empty selector is refused (see parseLabelSelectorOpts).
+func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector, error) {
+	return parseLabelSelectorOpts(raw, label, true)
+}
+
+// parseLabelSelectorOpts parses a metav1.LabelSelector: matchLabels plus the
 // matchExpressions form, with the operator's arity checked the way
 // metav1validation.ValidateLabelSelector does.
-func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector, error) {
+//
+// rejectEmpty says whether an entirely empty selector is an error. It is for a
+// volume claim, where match-everything is never what the author meant (see the
+// guard at the end of this function). It is NOT for a PodAffinityTerm or a
+// TopologySpreadConstraint, where `labelSelector: {}` is a meaningful and
+// commonly authored value — upstream reads it as matching every pod in scope
+// (k8s.io/api core/v1 PodAffinityTerm.LabelSelector: "If it's null, this
+// PodAffinityTerm matches with no Pods", i.e. empty and null differ), so
+// refusing it there would reject documents the apiserver accepts and would make
+// the emitted document unable to express a real upstream shape.
+func parseLabelSelectorOpts(raw map[string]any, label string, rejectEmpty bool) (*metav1.LabelSelector, error) {
 	if err := rejectUnknownKeys(raw, volumeClaimSelectorKeys, label); err != nil {
 		return nil, err
 	}
@@ -364,7 +380,7 @@ func parseLabelSelector(raw map[string]any, label string) (*metav1.LabelSelector
 	// match-everything selector this guard exists to refuse. Upstream's own
 	// LabelSelectorAsSelector reads len(MatchLabels)+len(MatchExpressions)==0
 	// and returns labels.Everything() (apimachinery meta/v1/helpers.go).
-	if len(sel.MatchLabels) == 0 && len(sel.MatchExpressions) == 0 {
+	if rejectEmpty && len(sel.MatchLabels) == 0 && len(sel.MatchExpressions) == 0 {
 		return nil, errors.Errorf("%s: empty selector — set matchLabels or matchExpressions, or omit the key. The apiserver would accept an empty selector as matching every volume; launcher reports it because it is never what an author who wrote `selector` meant", label)
 	}
 	return sel, nil
