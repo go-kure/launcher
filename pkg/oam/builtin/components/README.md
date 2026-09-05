@@ -1027,7 +1027,7 @@ object would change what the next `Generate` emits.
   | `completionMode` | `NonIndexed`\|`Indexed` | How completions are counted. `Indexed` requires `completions`. | additive |
   | `backoffLimitPerIndex` | int ≥ 0 | Retries within one index. Requires `Indexed`. | additive |
   | `maxFailedIndexes` | int ≥ 0 | Failed indexes tolerated before the whole job fails. Requires `backoffLimitPerIndex` (and so `Indexed`); ≤ `completions` and ≤ 100000, or ≤ 10000 (and required) when `completions` > 100000. | additive |
-  | `podReplacementPolicy` | `Failed`\|`TerminatingOrFailed` | When a replacement pod is created. | additive |
+  | `podReplacementPolicy` | `Failed`\|`TerminatingOrFailed` | When a replacement pod is created. An empty string is rejected rather than treated as unset, for the same reason as `managedBy` below. | additive |
   | `managedBy` | string | Controller reconciling this job instead of the built-in one. A domain-prefixed path (`example.com/controller`), ≤ 63 characters. An empty string is rejected rather than treated as unset. | additive |
   | `successPolicy` | object | `rules[]` (1..20) of `succeededIndexes` (increasing comma-separated intervals, every index < `completions`) and/or `succeededCount` (≤ `completions`, and ≤ the number of indexes named alongside it). Requires `Indexed`. An empty `succeededIndexes` is rejected rather than treated as unset: it denotes no indexes at all, so it would otherwise satisfy the at-least-one-field rule while naming nothing. | additive |
   | `suspend` | bool | **`JobSpec.Suspend`** — create the job with no pods. Not the same field as `cronjob`'s `suspend`; see the `suspend` note in "Common config". | additive |
@@ -1045,9 +1045,23 @@ object would change what the next `Generate` emits.
   which is a different thing from the daemonset kind's `updateStrategy`
   strictness, where upstream accepts a field and then provably never reads it.
 
-  `podFailurePolicy` is not published (go-kure/launcher#345 owns it). An
-  undeclared property is refused by schema validation, so authoring it fails
-  rather than being silently dropped.
+  Two rejections go the other way — stricter than `ValidateJobSpec`, because the
+  field's own documented contract in `k8s.io/api/batch/v1` is stricter than the
+  validator that is supposed to enforce it. `activeDeadlineSeconds: 0` is refused
+  although the validator only requires non-negative, because the field doc says
+  "value must be positive integer". An empty `successPolicy.rules[].succeededIndexes`
+  is refused although the validator's index parser returns "no indexes, no error"
+  for it, because the field doc says "At least one element is required". Both
+  follow the documented contract rather than the gap in its enforcement; both are
+  called out here because they are the only places a document this parser refuses
+  would in fact have applied.
+
+  `podFailurePolicy` is not published — go-kure/launcher#345 owns it — and is
+  **rejected outright** rather than left undeclared. Leaving it undeclared would
+  refuse nothing: property-schema validation runs on emitted elements, never on
+  authored documents, so an unread key is silently dropped rather than refused.
+  The explicit rejection makes a document authoring it fail loudly instead of
+  building a Job whose failure handling has quietly gone missing.
 
   The `selector`/`manualSelector` rejection is the same class of change the
   daemonset kind's `selector` rejection is, and rests on the same reasoning:

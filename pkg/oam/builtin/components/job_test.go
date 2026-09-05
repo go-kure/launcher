@@ -378,6 +378,21 @@ func TestJobHandler_JobSpecValidation_Table(t *testing.T) {
 			"podReplacementPolicy: invalid value",
 		},
 		{
+			// "" must be refused, not treated as an omission: parseStringField
+			// reports an authored empty string as absent, so reading this key
+			// through it would drop the authored value and emit a Job with no
+			// podReplacementPolicy at all. Upstream's supported set has no
+			// empty member, so the document would not have applied either.
+			"empty podReplacementPolicy",
+			map[string]any{"podReplacementPolicy": ""},
+			"podReplacementPolicy: invalid value",
+		},
+		{
+			"non-string podReplacementPolicy",
+			map[string]any{"podReplacementPolicy": 3},
+			"podReplacementPolicy: must be a string",
+		},
+		{
 			"managedBy without a domain prefix",
 			map[string]any{"managedBy": "controller"},
 			"must be a domain-prefixed path",

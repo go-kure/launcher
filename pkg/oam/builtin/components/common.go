@@ -2848,6 +2848,10 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		// Kubernetes requires a positive integer here, not merely non-negative:
 		// k8s.io/api/batch/v1 JobSpec.ActiveDeadlineSeconds doc says "value must
 		// be positive integer" — 0 is invalid, unlike the >= 0 fields above.
+		// Upstream's ValidateJobSpec only applies ValidateNonnegativeField to
+		// this field, so admission would in fact accept 0; the field's own
+		// documented contract is followed here instead of that gap, the same
+		// choice made for successPolicy's succeededIndexes below.
 		if v <= 0 {
 			return cfg, errors.Errorf("activeDeadlineSeconds: must be a positive integer, got %d", v)
 		}
@@ -2895,9 +2899,18 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		cfg.MaxFailedIndexes = &v
 	}
 
-	if v, present, err := parseStringField(props, "podReplacementPolicy", "podReplacementPolicy"); err != nil {
-		return cfg, err
-	} else if present {
+	// Read raw for the same reason managedBy below is: parseStringField reports
+	// an authored "" as absent (common.go's parseStringField), so routing this
+	// key through it would let `podReplacementPolicy: ""` skip the enum switch
+	// entirely and leave the field nil — the authored value silently dropped
+	// rather than refused, even though upstream's validatePodReplacementPolicy
+	// rejects it (supportedPodReplacementPolicy has no empty member). Reading
+	// raw refuses both an empty string and a non-string.
+	if raw, present := props["podReplacementPolicy"]; present {
+		v, ok := raw.(string)
+		if !ok {
+			return cfg, errors.Errorf("podReplacementPolicy: must be a string, got %T", raw)
+		}
 		switch batchv1.PodReplacementPolicy(v) {
 		case batchv1.Failed, batchv1.TerminatingOrFailed:
 			p := batchv1.PodReplacementPolicy(v)
@@ -3075,6 +3088,15 @@ func parseJobSuccessPolicy(raw map[string]any) (*batchv1.SuccessPolicy, error) {
 		// nothing, and validateJobIndexesFormat("") returns (0, nil) rather than
 		// an error. Refused here so it cannot reach the object as a rule that
 		// can never be satisfied.
+		//
+		// This IS stricter than the API server, deliberately, and on the same
+		// footing as activeDeadlineSeconds above: batchv1's own field contract
+		// says "At least one element is required" (k8s.io/api batch/v1
+		// types.go, SucceededIndexes' doc comment), while upstream's
+		// validateSuccessPolicyRule only reaches validateIndexesFormat when the
+		// pointer is non-nil, and that function returns (0, nil) for an empty
+		// string — so admission fails to enforce the contract its own type
+		// states. Refusing here follows the documented contract, not the gap.
 		if v, present := obj["succeededIndexes"]; present {
 			s, ok := v.(string)
 			if !ok {
