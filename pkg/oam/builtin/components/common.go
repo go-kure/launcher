@@ -3068,13 +3068,20 @@ func parseJobSuccessPolicy(raw map[string]any) (*batchv1.SuccessPolicy, error) {
 			return nil, err
 		}
 		var rule batchv1.SuccessPolicyRule
-		// succeededIndexes is read raw for the same reason managedBy is: an
-		// authored "" is a value upstream's own parser rejects (it denotes no
-		// indexes at all), not an omission.
+		// succeededIndexes is read raw rather than through parseStringField,
+		// which reports an authored "" as absent. That distinction has to be
+		// kept and then acted on: "" denotes no indexes at all, so a rule
+		// carrying it satisfies the "at least one of" check below while naming
+		// nothing, and validateJobIndexesFormat("") returns (0, nil) rather than
+		// an error. Refused here so it cannot reach the object as a rule that
+		// can never be satisfied.
 		if v, present := obj["succeededIndexes"]; present {
 			s, ok := v.(string)
 			if !ok {
 				return nil, errors.Errorf("%s.succeededIndexes: must be a string, got %T", label, v)
+			}
+			if s == "" {
+				return nil, errors.Errorf("%s.succeededIndexes: must not be empty; omit the key to leave it unset", label)
 			}
 			rule.SucceededIndexes = &s
 		}
