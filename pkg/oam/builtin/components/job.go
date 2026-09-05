@@ -94,7 +94,17 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 	config.Image = image
 
 	config.RestartPolicy = corev1.RestartPolicyOnFailure
-	if rp, ok := props["restartPolicy"].(string); ok {
+	// Read raw for the same reason managedBy is, and not through
+	// parseStringField: a bare `props[k].(string)` assertion makes a mistyped
+	// value indistinguishable from an absent key, so `restartPolicy: 3` would
+	// silently build the OnFailure default instead of being refused — but
+	// parseStringField reports an authored "" as absent, and "" is a value the
+	// switch below must reject rather than default. Reading raw refuses both.
+	if raw, present := props["restartPolicy"]; present {
+		rp, ok := raw.(string)
+		if !ok {
+			return nil, errors.Errorf("restartPolicy: must be a string, got %T", raw)
+		}
 		switch rp {
 		case string(corev1.RestartPolicyNever):
 			config.RestartPolicy = corev1.RestartPolicyNever

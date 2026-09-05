@@ -145,6 +145,16 @@ func TestApplyJobSpec_CopiesRatherThanAliases(t *testing.T) {
 	if spec.SuccessPolicy == cfg.SuccessPolicy {
 		t.Fatal("successPolicy: spec aliases the config pointer")
 	}
+	// The aliasing checks above all pass when applyJobSpec wrote nothing — a nil
+	// spec field is never equal to the config's pointer — so the regression this
+	// test targets reaches the dereferences below. Guarded so it fails by name
+	// rather than panicking and taking the package's test binary with it.
+	if spec.BackoffLimit == nil || spec.ManagedBy == nil {
+		t.Fatalf("applyJobSpec left a field unwritten: backoffLimit=%v managedBy=%v", spec.BackoffLimit, spec.ManagedBy)
+	}
+	if spec.SuccessPolicy == nil || len(spec.SuccessPolicy.Rules) != 1 || spec.SuccessPolicy.Rules[0].SucceededCount == nil {
+		t.Fatalf("applyJobSpec did not write successPolicy.rules[0].succeededCount: %+v", spec.SuccessPolicy)
+	}
 	// A pointer copy of a SuccessPolicy would still share the rules slice, so
 	// the nested pointer is checked too — the exact aliasing a shallow copy
 	// leaves behind.

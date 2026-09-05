@@ -147,6 +147,15 @@ func TestJobHandler_RestartPolicy_Never(t *testing.T) {
 	if msg := jobError(t, map[string]any{"restartPolicy": "Always"}); !strings.Contains(msg, "restartPolicy") {
 		t.Errorf("error = %q, want it to name restartPolicy", msg)
 	}
+	// A mistyped or empty value must be refused, not read as an omission that
+	// silently builds the OnFailure default. Both were reachable while this key
+	// was read with a bare type assertion.
+	if msg := jobError(t, map[string]any{"restartPolicy": 3}); !strings.Contains(msg, "restartPolicy: must be a string") {
+		t.Errorf("error = %q, want it to reject a non-string restartPolicy", msg)
+	}
+	if msg := jobError(t, map[string]any{"restartPolicy": ""}); !strings.Contains(msg, "restartPolicy") {
+		t.Errorf("error = %q, want it to reject an empty restartPolicy", msg)
+	}
 }
 
 // TestJobHandler_SuspendWritesJobSpec is the job half of the `suspend` key
@@ -393,6 +402,15 @@ func TestJobHandler_JobSpecValidation_Table(t *testing.T) {
 			"successPolicy rule with neither field",
 			map[string]any{"completionMode": "Indexed", "completions": 5, "successPolicy": map[string]any{"rules": []any{map[string]any{}}}},
 			"at least one of succeededIndexes or succeededCount",
+		},
+		{
+			// "" denotes no indexes at all, so without an explicit refusal it
+			// would satisfy the "at least one of" check above while naming
+			// nothing, and validateJobIndexesFormat("") returns (0, nil) rather
+			// than an error — a rule that can never be satisfied, accepted.
+			"successPolicy rule with an empty succeededIndexes",
+			map[string]any{"completionMode": "Indexed", "completions": 5, "successPolicy": map[string]any{"rules": []any{map[string]any{"succeededIndexes": ""}}}},
+			"succeededIndexes: must not be empty",
 		},
 		{
 			"successPolicy rule with an unknown key",
