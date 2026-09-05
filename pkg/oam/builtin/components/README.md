@@ -669,20 +669,26 @@ should be platform-reserved (rejecting any authored value via
 `PropertySchema.PlatformReserved`/`enforcePlatformReserved`) is a consumer-side
 policy choice, not something this shared schema hardcodes.
 
-### Deployment-level properties (`deployment` kind)
+### Deployment-level properties (`deployment`, `webservice`, `worker`)
 
-The `deployment` component is the kind-named projection of `appsv1.Deployment`
+Three components produce an `appsv1.Deployment`: the kind-named `deployment`
 (go-kure/launcher#343; ADR-036 L1, the stratified-levels decision: one
 PodSpec/Container projection shared by every kind, with kind-named components
-projecting their own API kind), sitting alongside the two role-named kinds
-that produce the same Kubernetes kind: `webservice` (Deployment + Service) and
-`worker` (Deployment, no Service). Everything above — the container-level
-surface and the pod-level surface — applies to it unchanged; what it adds is
-the rest of `DeploymentSpec`, parsed by `parseDeploymentSpec`
-(`deployment_spec.go`) into real `appsv1` types and written by its `apply` onto
-the built object.
+projecting their own API kind), and the two role-named kinds `webservice`
+(Deployment + Service) and `worker` (Deployment, no Service). Everything above
+— the container-level surface and the pod-level surface — applies to all three
+unchanged, and so does the rest of `DeploymentSpec` below: it is parsed by
+`parseDeploymentSpec` (`deployment_spec.go`) into real `appsv1` types and
+written by its `apply` onto the built object, from one fragment all three
+handlers compose (go-kure/launcher#341).
 
-The three kinds are not layered and one is not a superset of the others.
+Sharing the fragment is the point rather than a convenience. These fields are
+properties of the API kind, not of the role a component plays, so a document
+that moves a workload from `webservice` to `deployment` — or the reverse —
+should not lose a `strategy` on the way. Every rule the table below states,
+including the refusals, therefore holds identically on all three.
+
+The three kinds are still not layered, and one is not a superset of the others.
 `deployment` deliberately publishes **no `port`** (and so emits no Service),
 **no `affinity` shorthand** and **no default topology-spread constraint** —
 none of those is a `DeploymentSpec` field, and a kind named after the API kind
@@ -712,7 +718,7 @@ HTTPRoute points where you said — and this is not specific to this kind
 (`worker` behaves identically today), but the two features do not yet compose.
 Tracked as go-kure/launcher#399.
 
-**`scaler` is not available on this kind.** It is restricted to `webservice` and
+**`scaler` is not available on `deployment`.** It is restricted to `webservice` and
 `worker`, and that restriction is load-bearing rather than a taxonomy detail: an
 HPA scales the Deployment past the replica count the document authored, and the
 non-RWX guard below reads only the authored `replicas`, so the two together
@@ -730,16 +736,28 @@ go-kure/launcher#395.
 | `strategy.rollingUpdate` (both knobs zero) | — | Rejected: `ValidateRollingUpdateDeployment` refuses `maxUnavailable: 0` together with `maxSurge: 0`, a pair that can make no progress. It rejects **only** that pair — unlike the DaemonSet rule, which also rejects both being non-zero. `SetDefaults_Deployment` guards each field with its own `== nil` check, so authoring one knob does not suppress the other's 25% default and a lone authored zero is always legal. | additive |
 | `minReadySeconds` | int ≥ 0 | Seconds a new pod must be ready before it counts as available. Must stay **below** the effective `progressDeadlineSeconds`, whose own API default is 600 — so `minReadySeconds: 600` alone is rejected here, exactly as the apiserver would reject the defaulted pair. | additive |
 | `revisionHistoryLimit` | int ≥ 0 | Old ReplicaSets retained. `0` is meaningful (retain none) and distinguishable from unset. | additive |
-| `paused` | bool | Pauses rollouts of the Deployment. `paused: true` additionally suppresses the **auto health check** the transform pipeline would otherwise synthesize for this component: pausing tells the Deployment controller not to roll the workload out, so gating the enclosing Kustomization on that workload becoming ready asks for the one thing the document just said should not happen. The Deployment is still emitted and still applied by the enclosing Kustomization — only the readiness gate on it is skipped, which keeps `paused: true` usable for staging a workload. Nothing here asserts what the Deployment controller does with a paused object; the reason stands either way, since a gate that blocks on a state the document forbids and a gate that passes without observing anything are both useless. Implemented as `DeploymentConfig.EmitsAutoHealthCheck`, the `pkg/oam` seam `helmchart` already uses for `delivery: template`. | additive |
+| `paused` | bool | Pauses rollouts of the Deployment. `paused: true` additionally suppresses the **auto health check** the transform pipeline would otherwise synthesize for this component: pausing tells the Deployment controller not to roll the workload out, so gating the enclosing Kustomization on that workload becoming ready asks for the one thing the document just said should not happen. The Deployment is still emitted and still applied by the enclosing Kustomization — only the readiness gate on it is skipped, which keeps `paused: true` usable for staging a workload. Nothing here asserts what the Deployment controller does with a paused object; the reason stands either way, since a gate that blocks on a state the document forbids and a gate that passes without observing anything are both useless. Implemented as `EmitsAutoHealthCheck` on each of the three configs, the `pkg/oam` seam `helmchart` already uses for `delivery: template`. | additive |
 | `progressDeadlineSeconds` | int ≥ 0 | Must be **greater than** the effective `minReadySeconds`, the cross-field rule `ValidateDeploymentSpec` applies. Both halves are compared as *effective* values, because both have an API default a document may be leaving it to: `minReadySeconds` defaults to 0 (a non-pointer `int32`, so it has no unset state) and `progressDeadlineSeconds` defaults to 600. So the rule fires in both directions — `progressDeadlineSeconds: 0` alone is rejected against the defaulted 0, and `minReadySeconds: 600` alone is rejected against the defaulted 600 — and the error names, for each half, whether the value was authored or defaulted, since either can be a field the document never mentions. | additive |
 | `selector`, `template` | — | Not authorable, and rejected with a message saying so rather than silently ignored. The selector is builder-managed (`app: <component>`) and immutable once the object exists; the pod template is projected from the component's own container and pod-level properties. | additive |
-| any optional property of this kind, authored as `null` | — | Read as omission, not as a present-but-wrong type — including a typed nil, which is what a Go-constructed lowering rule produces when it assigns a nil map into an `any`. `pkg/oam`'s property validator already treats a null under an optional property as absent, so without this a component could satisfy the published schema and then fail during handler conversion. This covers the kind's whole **top-level** surface, not only the `DeploymentSpec` fields above: `replicas: null`, `workingDir: null`, `env: null` and the rest all read as unauthored, so `replicas: null` takes the default 1. A `null` on a field that is required once its parent is authored (`strategy.type`) surfaces as the requiredness error, not a type error; `selector`/`template` are not optional properties, so naming either as `null` still earns the refusal above. It stops at the top level, and deliberately: a null one level down — `securityContext: {runAsUser: null}` — still reaches a shared nested parser's type check and is refused. Making the strip recursive is the wrong fix, because it would remove `securityContext: {bogusKey: null}` from the nested map before `parseSecurityContext`'s own unknown-key rejection ever saw it, turning a named refusal into silence; the correct fix sits *inside* each nested parser, after that rejection, which is shared code all seven workload kinds run. That is go-kure/launcher#394's scope, not this kind's to change alone. Both sides of the boundary are pinned in `deployment_nested_null_test.go`. | additive |
+| any of the five `DeploymentSpec` properties above, authored as `null` (all three kinds); **and, on `deployment` only, any optional property of the kind** | — | Read as omission, not as a present-but-wrong type — including a typed nil, which is what a Go-constructed lowering rule produces when it assigns a nil map into an `any`. `pkg/oam`'s property validator already treats a null under an optional property as absent, so without this a component could satisfy the published schema and then fail during handler conversion. `parseDeploymentSpec` strips nulls itself, so the five fields above behave this way on `webservice` and `worker` too. The wider guarantee is the `deployment` kind's alone: there it covers the kind's whole **top-level** surface, so `replicas: null`, `workingDir: null`, `env: null` and the rest all read as unauthored and `replicas: null` takes the default 1. On the two role kinds a null under any *other* optional property still reaches that property's own type check, which is the pre-existing behaviour go-kure/launcher#394 covers rather than anything go-kure/launcher#341 changed. A `null` on a field that is required once its parent is authored (`strategy.type`) surfaces as the requiredness error, not a type error; `selector`/`template` are not optional properties, so naming either as `null` still earns the refusal above. It stops at the top level, and deliberately: a null one level down — `securityContext: {runAsUser: null}` — still reaches a shared nested parser's type check and is refused. Making the strip recursive is the wrong fix, because it would remove `securityContext: {bogusKey: null}` from the nested map before `parseSecurityContext`'s own unknown-key rejection ever saw it, turning a named refusal into silence; the correct fix sits *inside* each nested parser, after that rejection, which is shared code all seven workload kinds run. That is go-kure/launcher#394's scope, not this kind's to change alone. Both sides of the boundary are pinned in `deployment_nested_null_test.go`. | additive |
 
 Every field above is presence-gated: a document that authors none of them
 produces the same object the builder produced before, so the apiserver's own
 defaults still apply rather than being frozen into the manifest.
 
-**`replicas` is validated on this kind.** The other workload kinds read
+That is also what makes the `webservice`/`worker` half of go-kure/launcher#341
+additive in the table's sense. Those two kinds gained five properties they
+previously refused as unknown, so no existing document can be authoring one,
+and an existing document that authors none of them builds byte-identically.
+The two rules that look like new restrictions are reachable only through the
+new properties: a `strategy` contradicting the non-RWX guard, and the
+`selector`/`template` refusals, all three of which required authoring a key
+these kinds did not accept before. The one visible change to a pre-existing
+document is the wording of the non-RWX replica refusal, now the shared
+message ("a non-RWX PVC allows at most one replica") rather than each kind's
+own; the documents it refuses are exactly the ones it refused before.
+
+**`replicas` is validated on `deployment` only.** The other workload kinds read
 `replicas` through a shared helper that falls back to the default whenever the
 value will not convert, so `replicas: "3"` silently becomes 1 and
 `replicas: -1` is carried through to an object the apiserver then refuses
@@ -760,11 +778,13 @@ scale-to-zero is a state a later edit can leave by changing one number, and a
 `RollingUpdate` that survived the guard while at zero would be wrong the moment
 the first pod starts. Kubernetes rejects neither
 combination — the second pod simply hangs unschedulable or stuck attaching — so
-this is a build-time guard, not a mirror of an apiserver rule. Where `worker`
-substitutes `Recreate` silently (it has no `strategy` property to contradict),
-`deployment` **rejects** an authored `strategy.type: RollingUpdate` in that
-situation instead of overwriting it, so a document never ships a strategy its
-author did not write.
+this is a build-time guard, not a mirror of an apiserver rule. An authored
+`strategy.type: RollingUpdate` in that situation is **rejected** rather than
+overwritten, so a document never ships a strategy its author did not write.
+That refusal reaches `webservice` and `worker` only now that they publish
+`strategy` at all; before go-kure/launcher#341 those two substituted `Recreate`
+silently, because there was no authored value to contradict. All three kinds
+run the one `applyNonRWXConstraint`.
 
 The guard reads a claim's **whole** access-mode set, not each mode on its own.
 `accessModes` requests a volume supporting *every* mode listed, so
@@ -873,19 +893,26 @@ object would change what the next `Generate` emits.
 
 ## Per-type highlights
 
-- **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice).
+- **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
+  plus the full `DeploymentSpec`-level surface they share with `deployment` —
+  `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
+  `progressDeadlineSeconds` (go-kure/launcher#341, see "Deployment-level
+  properties" above). What still separates them from `deployment` is launcher's
+  own opinions, which these two keep: `topologySpread` and the four-key
+  `affinity` shorthand, and on `webservice` the `port` that drives the Service.
   The `webservice` handler implements the optional `oam.EndpointProvider`: it declares its own
   pods (`app: <component-name>`) on the declared `port` (its single `port` property drives both
   the container port and the Service port), letting a downstream platform synthesize generic
   app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
   Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
 - **deployment** — the kind-named Deployment (see "Deployment-level
-  properties" above): the shared container-level and pod-level surface plus
-  `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
-  `progressDeadlineSeconds`. Not `worker` plus extras: `worker` publishes
-  `topologySpread` and the four-key `affinity` shorthand, and `deployment`
-  publishes neither. It also has no `port`, declares no endpoint and emits no
-  Service.
+  properties" above): the shared container-level, pod-level and
+  `DeploymentSpec`-level surface, the last of which it now shares with
+  `webservice` and `worker` rather than owning. What distinguishes it is what
+  it leaves out, not what it adds: no `topologySpread`, no four-key `affinity`
+  shorthand, no `port`; it declares no endpoint and emits no Service. It is not
+  `worker` minus a few things either — it validates `replicas` and reads nulls
+  as omissions across its whole surface, neither of which the role kinds do.
 - **statefulset** — `serviceName` (headless) and `volumeClaimTemplates`
   (`name`, `mountPath`, `size`, `storageClass`, `accessModes`, plus the rest of
   `corev1.PersistentVolumeClaimSpec`). The StatefulSetSpec-level and

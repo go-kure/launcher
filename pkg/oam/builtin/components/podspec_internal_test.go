@@ -98,8 +98,8 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		specKeys []string
 		jobPods  bool
 	}{
-		{"webservice", (&WebserviceHandler{}).PropertySchema(), 17, nil, false},
-		{"worker", (&WorkerHandler{}).PropertySchema(), 16, nil, false},
+		{"webservice", (&WebserviceHandler{}).PropertySchema(), 17, deploymentSpecPropertyKeys, false},
+		{"worker", (&WorkerHandler{}).PropertySchema(), 16, deploymentSpecPropertyKeys, false},
 		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 18, statefulSetSpecPropertyKeys, false},
 		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 14, daemonSetSpecPropertyKeys, false},
 		{"cronjob", (&CronjobHandler{}).PropertySchema(), 20, jobSpecPropertyKeys, true},

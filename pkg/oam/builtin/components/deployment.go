@@ -17,10 +17,13 @@ import (
 //
 // This is the kind-named projection of appsv1.Deployment, alongside the
 // role-named webservice (Deployment + Service) and worker (Deployment, no
-// Service). What it adds over those two is the rest of DeploymentSpec —
-// strategy, minReadySeconds, revisionHistoryLimit, paused and
-// progressDeadlineSeconds (go-kure/launcher#343). What it deliberately leaves
-// out is launcher's own opinions: there is no `port` (and so no Service), no
+// Service). The rest of DeploymentSpec — strategy, minReadySeconds,
+// revisionHistoryLimit, paused and progressDeadlineSeconds — arrived with this
+// kind (go-kure/launcher#343) but is not what distinguishes it: all three
+// kinds compose the same schemaDeploymentSpec fragment since
+// go-kure/launcher#341, because those are properties of the API kind rather
+// than of the role a component plays. What this kind deliberately leaves out
+// is launcher's own opinions: there is no `port` (and so no Service), no
 // default topology-spread constraint and no four-key `affinity` shorthand,
 // none of which are DeploymentSpec fields. A workload wanting launcher to
 // create its Service uses webservice.
@@ -390,7 +393,7 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	dep.Spec.Template.Labels = deploymentComponentLabels(app.Name)
 	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
 
-	if err := c.applyNonRWXConstraint(dep, app.Name); err != nil {
+	if err := applyNonRWXConstraint(dep, app.Name, c.PVCs, c.Replicas, c.DeploymentSpec.Strategy); err != nil {
 		return nil, err
 	}
 	// The authored strategy is applied after the non-RWX constraint, but the
@@ -418,38 +421,6 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	return dep, nil
 }
 
-// applyNonRWXConstraint enforces what a ReadWriteOnce claim implies for a
-// Deployment: at most one pod may hold it, and a rolling update must not try
-// to start a replacement pod while the old one still has it mounted.
-//
-// "At most one" is the rule, not "exactly one": `replicas: 0` is a deliberate
-// scale-to-zero and holds the claim in no pod at all, so the replica count is
-// accepted rather than coerced to 1.
-//
-// That exemption is the count's alone — the strategy half of the guard still
-// applies at zero replicas. Scale-to-zero is a state the document can leave by
-// editing one number, and a `strategy.type: RollingUpdate` that survived the
-// guard while at zero would be wrong the moment the first pod starts, in a
-// later edit that touches nothing this function reads. Forcing `Recreate` onto
-// a Deployment running no pods costs nothing until then.
-//
-// Kubernetes does not reject either combination — the Deployment is created
-// and the second pod simply hangs unschedulable or stuck attaching — so this
-// is a build-time guard rather than a mirror of an apiserver rule. A
-// deliberately authored `strategy` that contradicts it is reported instead of
-// being overwritten, which is the difference between this kind and the worker
-// kind, where the substitution is silent because there is no strategy property
-// to contradict.
-func (c *DeploymentConfig) applyNonRWXConstraint(dep *appsv1.Deployment, name string) error {
-	if !hasNonRWXPVC(c.PVCs) {
-		return nil
-	}
-	if c.Replicas > 1 {
-		return errors.Errorf("deployment %q: a non-RWX PVC allows at most one replica, got %d", name, c.Replicas)
-	}
-	if s := c.DeploymentSpec.Strategy; s != nil && s.Type != appsv1.RecreateDeploymentStrategyType {
-		return errors.Errorf("deployment %q: strategy.type must be %s when a non-RWX PVC is attached, got %s; a rolling update would start the replacement pod before the old one released the volume", name, appsv1.RecreateDeploymentStrategyType, s.Type)
-	}
-	kubernetes.SetDeploymentStrategy(dep, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
-	return nil
-}
+// (applyNonRWXConstraint is shared by every kind that projects a Deployment;
+// it lives in deployment_spec.go alongside the rest of the DeploymentSpec
+// projection.)

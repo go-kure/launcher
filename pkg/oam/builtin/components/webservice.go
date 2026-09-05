@@ -62,6 +62,7 @@ func (h *WebserviceHandler) PropertySchema() map[string]oam.PropertySchema {
 		"affinity":        schemaAffinity(),
 	}
 	maps.Copy(m, schemaPodSpec(false, false))
+	maps.Copy(m, schemaDeploymentSpec())
 	return m
 }
 
@@ -172,6 +173,12 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.PodSpec = podSpec
 
+	depSpec, err := parseDeploymentSpec(props)
+	if err != nil {
+		return nil, err
+	}
+	config.DeploymentSpec = depSpec
+
 	return config, nil
 }
 
@@ -199,8 +206,22 @@ type WebserviceConfig struct {
 	TopologySpreadDisabled bool
 	Affinity               AffinityConfig
 	// PodSpec holds the shared pod-level properties (see parsePodSpec).
-	PodSpec          PodSpecConfig
+	PodSpec PodSpecConfig
+	// DeploymentSpec holds the DeploymentSpec-level properties
+	// (see parseDeploymentSpec), shared with the deployment and worker
+	// kinds — all three project appsv1.Deployment (go-kure/launcher#341).
+	DeploymentSpec   DeploymentSpecConfig
 	explicitReplicas bool
+}
+
+// EmitsAutoHealthCheck implements pkg/oam.autoHealthCheckEmitter: a paused
+// Deployment gets no synthesized readiness gate, for the reason spelled out on
+// DeploymentConfig.EmitsAutoHealthCheck — gating on a workload the document
+// told the controller not to roll out is not a health signal. The object is
+// still emitted and still applied by the enclosing Kustomization, and the
+// component's Service is unaffected.
+func (c *WebserviceConfig) EmitsAutoHealthCheck() bool {
+	return c.DeploymentSpec.Paused == nil || !*c.DeploymentSpec.Paused
 }
 
 // ServiceAccountName implements oam.ServiceAccountNamer: the authored
@@ -340,12 +361,14 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	dep.Annotations = nil
 	dep.Spec.Template.Labels = appLabels(app.Name)
 	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
-	if hasNonRWXPVC(c.PVCs) {
-		if c.Replicas > 1 {
-			return nil, errors.Errorf("deployment %q: non-RWX PVC requires replicas=1, got %d", app.Name, c.Replicas)
-		}
-		kubernetes.SetDeploymentStrategy(dep, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
+	if err := applyNonRWXConstraint(dep, app.Name, c.PVCs, c.Replicas, c.DeploymentSpec.Strategy); err != nil {
+		return nil, err
 	}
+	// After the constraint, for the reason given on DeploymentConfig's call
+	// site: the constraint reads the config rather than the object built so
+	// far, so the only strategy that can still reach this apply after a
+	// non-RWX claim is the Recreate the constraint just wrote.
+	c.DeploymentSpec.apply(dep)
 
 	var tscs []corev1.TopologySpreadConstraint
 	if !c.TopologySpreadDisabled {
