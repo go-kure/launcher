@@ -193,6 +193,45 @@ func TestDeploymentScheduling_EmptyLabelSelectorAccepted(t *testing.T) {
 	}
 }
 
+// TestDeploymentScheduling_MismatchLabelKeysMayOverlapSelector is the control for
+// the asymmetry in parsePodAffinityTerm: matchLabelKeys may not name a key the
+// selector already constrains, mismatchLabelKeys may. It looks like an oversight
+// against the field docs — MismatchLabelKeys' own doc (k8s.io/api@v0.36.3
+// core/v1/types.go:3999) says the key "is forbidden to exist in both
+// mismatchLabelKeys and labelSelector" — so without this test the next reader
+// closes the gap and makes launcher refuse a document the apiserver accepts.
+//
+// Upstream's validation, not its field doc, is the contract:
+// ValidateMatchLabelKeysAndMismatchLabelKeys builds the forbidden-key map from
+// matchLabelKeys alone (pkg/apis/core/validation/validation.go, release-1.36:8989),
+// and :8983 states the reason — a mismatchLabelKey is merged as `NotIn`, so
+// filtering further on the same key is a legitimate thing to want.
+func TestDeploymentScheduling_MismatchLabelKeysMayOverlapSelector(t *testing.T) {
+	dep, _ := generateDeployment(t, "app", map[string]any{
+		"image": "nginx:1.27",
+		"affinity": map[string]any{
+			"podAntiAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": []any{
+					map[string]any{
+						"topologyKey": "kubernetes.io/hostname",
+						"labelSelector": map[string]any{
+							"matchLabels": map[string]any{"tier": "cache"},
+							"matchExpressions": []any{
+								map[string]any{"key": "zone", "operator": "Exists"},
+							},
+						},
+						"mismatchLabelKeys": []any{"tier", "zone"},
+					},
+				},
+			},
+		},
+	})
+	term := dep.Spec.Template.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0]
+	if got := term.MismatchLabelKeys; len(got) != 2 || got[0] != "tier" || got[1] != "zone" {
+		t.Errorf("MismatchLabelKeys = %v, want [tier zone] carried through unchanged", got)
+	}
+}
+
 // TestDeploymentScheduling_TolerationsRoundTrip reuses the pre-existing
 // parseTolerations, so this asserts the wiring rather than the parsing.
 func TestDeploymentScheduling_TolerationsRoundTrip(t *testing.T) {
@@ -345,6 +384,24 @@ func TestDeploymentScheduling_AffinityRejections(t *testing.T) {
 			}},
 			"already constrained by labelSelector.matchLabels",
 		},
+		{
+			// The half the matchLabels-only check missed. Upstream rejects this too:
+			// PrepareForCreate merges each matchLabelKey into the selector as its own
+			// `In` requirement, so the authored expression becomes the second
+			// occurrence of "a" and ValidateMatchLabelKeysAndMismatchLabelKeys flags
+			// it. See checkMatchLabelKeysAgainstSelector for the full citation chain.
+			"matchLabelKeys clashing with labelSelector matchExpressions",
+			map[string]any{"podAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
+					"topologyKey": "kubernetes.io/hostname",
+					"labelSelector": map[string]any{"matchExpressions": []any{
+						map[string]any{"key": "a", "operator": "Exists"},
+					}},
+					"matchLabelKeys": []any{"a"},
+				}},
+			}},
+			"already constrained by labelSelector.matchExpressions",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -395,6 +452,29 @@ func TestDeploymentScheduling_TopologySpreadConstraintRejections(t *testing.T) {
 		{"bad nodeAffinityPolicy", valid(map[string]any{"nodeAffinityPolicy": "Maybe"}), "want Honor or Ignore"},
 		{"bad nodeTaintsPolicy", valid(map[string]any{"nodeTaintsPolicy": "Maybe"}), "want Honor or Ignore"},
 		{"matchLabelKeys without a labelSelector", valid(map[string]any{"matchLabelKeys": []any{"a"}}), "cannot be set without labelSelector"},
+		{
+			"matchLabelKeys clashing with labelSelector matchLabels",
+			valid(map[string]any{
+				"labelSelector":  map[string]any{"matchLabels": map[string]any{"a": "b"}},
+				"matchLabelKeys": []any{"a"},
+			}),
+			"already constrained by labelSelector.matchLabels",
+		},
+		{
+			// Rejected on this path in every upstream configuration, not only after
+			// the PrepareForCreate merge: with
+			// MatchLabelKeysInPodTopologySpreadSelectorMerge off, the legacy
+			// ValidateMatchLabelKeysInTopologySpread seeds its forbidden set from
+			// matchExpressions keys directly and rejects unconditionally.
+			"matchLabelKeys clashing with labelSelector matchExpressions",
+			valid(map[string]any{
+				"labelSelector": map[string]any{"matchExpressions": []any{
+					map[string]any{"key": "a", "operator": "Exists"},
+				}},
+				"matchLabelKeys": []any{"a"},
+			}),
+			"already constrained by labelSelector.matchExpressions",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

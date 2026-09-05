@@ -716,9 +716,18 @@ component: every selector, weight and topology key is authored.
 | `tolerations` | array | The same property `daemonset` already publishes, from the same parser: `key`, `operator` (`Exists`/`Equal`), `value`, `effect`. | additive |
 | `topologySpreadConstraints` | array | `maxSkew` (required, > 0), `topologyKey` (required), `whenUnsatisfiable` (required, `DoNotSchedule`/`ScheduleAnyway`), `labelSelector`, `minDomains` (> 0, and only with `DoNotSchedule`), `nodeAffinityPolicy`/`nodeTaintsPolicy` (`Honor`/`Ignore`), `matchLabelKeys`. The three required fields carry no `omitempty` upstream, so an unset one would emit `maxSkew: 0` / `topologyKey: ""` / `whenUnsatisfiable: ""` rather than an API default — hence required here rather than defaulted. | additive |
 
-Two rules apply to both `affinity` terms and topology-spread constraints:
+One rule applies to both `affinity` terms and topology-spread constraints:
 `matchLabelKeys` (and `mismatchLabelKeys` on a pod affinity term) cannot be set
-without a `labelSelector`, and no key may appear in both.
+without a `labelSelector`.
+
+A second rule applies to `matchLabelKeys` only: none of its keys may already be
+constrained by that `labelSelector`, in either `matchLabels` or
+`matchExpressions`. `mismatchLabelKeys` is deliberately *not* held to it, even
+though its upstream field doc reads as a mirror of `matchLabelKeys`': upstream's
+validation only ever builds its forbidden-key set from `matchLabelKeys`, because
+a `mismatchLabelKeys` entry is merged as a `NotIn` requirement and filtering
+further on the same key is a legitimate thing to want. Enforcing the doc's
+wording would refuse a document the API server accepts.
 
 An **empty** `labelSelector: {}` is accepted here, unlike on a volume claim's
 `selector` where launcher refuses it. Upstream distinguishes the two: a null
