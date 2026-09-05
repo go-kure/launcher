@@ -1050,13 +1050,32 @@ func detectCycles(deps map[string][]string) error {
 }
 
 // componentHealthCheckGVK maps OAM component types to their primary workload GVK.
-// Types not listed (e.g. cronjob, job) are skipped — their resources are ephemeral.
+// Types not listed are skipped.
+//
+// `job` is listed and `cronjob` is not, and the difference is not that one is
+// ephemeral: it is that a Job reaches a terminal state a health check can wait
+// on and a CronJob never does. kstatus reads a Job's `Complete` condition as
+// Current and its `Failed` condition as failed (fluxcd/cli-utils
+// pkg/kstatus/status/core.go, jobConditions), so a Kustomization that depends on
+// a migration job waits for the migration to finish and fails when it fails —
+// which is the whole point of declaring the dependency. A CronJob owns no pods
+// between schedules and has no such condition, so a check on one would wait for
+// something that never arrives.
+//
+// The obvious objection — that a job with ttlSecondsAfterFinished is garbage
+// collected and the health check then names a missing object — does not hold:
+// kustomize-controller extracts jobs carrying a TTL and passes them to the
+// waiter as JobsWithTTL so their disappearance is not a failure
+// (fluxcd/kustomize-controller, checkHealth). The case that does need handling
+// is `suspend: true`, and JobConfig vetoes its own check there via
+// autoHealthCheckEmitter, exactly as deployment does for `paused: true`.
 var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"webservice":  {"apps/v1", "Deployment"},
 	"worker":      {"apps/v1", "Deployment"},
 	"deployment":  {"apps/v1", "Deployment"},
 	"statefulset": {"apps/v1", "StatefulSet"},
 	"daemonset":   {"apps/v1", "DaemonSet"},
+	"job":         {"batch/v1", "Job"},
 	"helmchart":   {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
 	"postgresql":  {"postgresql.cnpg.io/v1", "Cluster"},
 	"oci":         {"kustomize.toolkit.fluxcd.io/v1", "Kustomization"},

@@ -130,14 +130,27 @@ registries have the same shape and the same failure mode — `traitComponentRest
 a component type's auto health check targets; an unlisted type is skipped silently, so
 its bundle simply carries one health check fewer).
 
-**Omission from `componentHealthCheckGVK` is a decision, not an oversight, for the
-run-to-completion kinds.** `cronjob` and `job` are deliberately absent: a health check
-names a workload Flux waits on to become ready, and neither kind has a steady ready
-state to wait for — a Job that has finished is `Complete`, not `Ready`, and a CronJob
-owns no pods at all between schedules. The other unlisted types — `passthrough`, `crd`
-and `manifests` — are absent for a different reason: they emit whatever the document
-carries, so there is no single GVK to name. When adding a component type, decide which
-group it falls in and say so; silence here reads the same either way.
+**Membership in `componentHealthCheckGVK` follows what kstatus can actually read, not
+whether the workload has a steady ready state.** `job` is listed: kstatus's `jobConditions`
+maps a Job's `Complete` condition to `CurrentStatus` and `Failed` to failed, so a Job is a
+terminal signal Flux can wait on even though it never becomes `Ready`. Flux accommodates the
+one shape that looked like a counter-argument — a Job deleted by `ttlSecondsAfterFinished`
+before the wait finishes — by extracting TTL-bearing Jobs up front and passing them as
+`JobsWithTTL` to its wait options.
+
+`cronjob` stays absent, and for a reason that does not generalise to `job`: a CronJob owns
+no pods between schedules and carries no condition that ever reports completion, so there is
+nothing for a health check to read. The other unlisted types — `passthrough`, `crd` and
+`manifests` — are absent for a third reason: they emit whatever the document carries, so
+there is no single GVK to name. When adding a component type, decide which group it falls in
+and say so; silence here reads the same either way.
+
+A listed type can still decline its check per document by implementing
+`EmitsAutoHealthCheck() bool`. `job` uses it for `suspend: true` — a suspended Job creates no
+pods, so it reaches neither `Complete` nor `Failed` and the wait would block for exactly as
+long as the document asks it to stay suspended. This is the same shape as `deployment`'s veto
+for `paused: true`: the document instructs the workload not to progress, so waiting on it is
+not a health signal but a guaranteed timeout.
 
 ## Transform & extension
 

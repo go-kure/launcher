@@ -1505,3 +1505,44 @@ func TestApplyAutoHealthChecks_DeploymentKindRegistered(t *testing.T) {
 			hc[0].APIVersion, hc[0].Kind, hc[0].Name, hc[0].Namespace, "api", "demo")
 	}
 }
+
+// TestApplyAutoHealthChecks_JobKindRegistered pins the "job" component type into
+// componentHealthCheckGVK (go-kure/launcher#344). A Job is a run-to-completion
+// workload, so the check does not wait on a steady ready state — kstatus reads
+// the Complete condition as Current and the Failed condition as failed, which is
+// exactly the terminal signal a health check should gate on.
+//
+// Nothing else can catch a regression here. The map is keyed by OAM component
+// type, so dropping the entry emits one health check fewer and leaves every
+// golden byte-identical: health checks live on the bundle, not in the rendered
+// manifests.
+func TestApplyAutoHealthChecks_JobKindRegistered(t *testing.T) {
+	app := stack.NewApplication("batch", "demo", &plainHCConfig{})
+	cluster := leafClusterWith(app)
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "job"), nil, "flux-system")
+
+	hc := cluster.Node.Bundle.HealthChecks
+	if len(hc) != 1 {
+		t.Fatalf("expected 1 health check for a job component, got %d: %+v", len(hc), hc)
+	}
+	if hc[0].APIVersion != "batch/v1" || hc[0].Kind != "Job" || hc[0].Name != "batch" || hc[0].Namespace != "demo" {
+		t.Errorf("got %s %s %q in %q, want batch/v1 Job %q in %q",
+			hc[0].APIVersion, hc[0].Kind, hc[0].Name, hc[0].Namespace, "batch", "demo")
+	}
+}
+
+// TestApplyAutoHealthChecks_JobVetoHonoured proves the job entry above is still
+// subject to the emitter veto, which is what makes a suspended job safe to
+// register: JobConfig.EmitsAutoHealthCheck reports false for `suspend: true`
+// (components.TestJobHandler_SuspendVetoesAutoHealthCheck pins that half), and
+// this half pins that a false answer from a job-typed component actually
+// suppresses the check rather than being consulted only for helmchart types.
+func TestApplyAutoHealthChecks_JobVetoHonoured(t *testing.T) {
+	app := stack.NewApplication("batch", "demo", &templateHCConfig{})
+	cluster := leafClusterWith(app)
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "job"), nil, "flux-system")
+
+	if hc := cluster.Node.Bundle.HealthChecks; len(hc) != 0 {
+		t.Fatalf("expected no auto health check for a vetoing job component, got %+v", hc)
+	}
+}
