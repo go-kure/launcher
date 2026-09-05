@@ -2881,7 +2881,15 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		}
 	}
 
-	if v, present, err := parseInt32Field(props, "backoffLimitPerIndex", "backoffLimitPerIndex"); err != nil {
+	// The fields below this point are the ones go-kure/launcher#344 introduced,
+	// so they read a null as omission through the optional* wrappers — the
+	// convention statefulset_spec.go's own newly-added fields already follow.
+	// The JobSpec fields ABOVE stay on the bare helpers: they predate the
+	// wrappers, are shared with the cronjob component, and changing them is the
+	// wider migration tracked as go-kure/launcher#394. The difference is
+	// one-directional, as the wrappers' own note says — a wrapped field accepts
+	// a null the unwrapped ones still reject, never the reverse.
+	if v, present, err := optionalInt32(props, "backoffLimitPerIndex", "backoffLimitPerIndex"); err != nil {
 		return cfg, err
 	} else if present {
 		if v < 0 {
@@ -2890,7 +2898,7 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		cfg.BackoffLimitPerIndex = &v
 	}
 
-	if v, present, err := parseInt32Field(props, "maxFailedIndexes", "maxFailedIndexes"); err != nil {
+	if v, present, err := optionalInt32(props, "maxFailedIndexes", "maxFailedIndexes"); err != nil {
 		return cfg, err
 	} else if present {
 		if v < 0 {
@@ -2906,7 +2914,7 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 	// rather than refused, even though upstream's validatePodReplacementPolicy
 	// rejects it (supportedPodReplacementPolicy has no empty member). Reading
 	// raw refuses both an empty string and a non-string.
-	if raw, present := props["podReplacementPolicy"]; present {
+	if raw, present := props["podReplacementPolicy"]; present && !isExplicitNull(raw) {
 		v, ok := raw.(string)
 		if !ok {
 			return cfg, errors.Errorf("podReplacementPolicy: must be a string, got %T", raw)
@@ -2925,7 +2933,7 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 	// IsDomainPrefixedPath rejects outright rather than one an author can have
 	// meant. Read the raw value so an empty string is refused instead of
 	// silently dropped.
-	if raw, present := props["managedBy"]; present {
+	if raw, present := props["managedBy"]; present && !isExplicitNull(raw) {
 		s, ok := raw.(string)
 		if !ok {
 			return cfg, errors.Errorf("managedBy: must be a string, got %T", raw)
@@ -2941,7 +2949,7 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		cfg.ManagedBy = &s
 	}
 
-	if raw, present, err := parseObjectField(props, "successPolicy", "successPolicy"); err != nil {
+	if raw, present, err := optionalObject(props, "successPolicy", "successPolicy"); err != nil {
 		return cfg, err
 	} else if present {
 		sp, err := parseJobSuccessPolicy(raw)
@@ -3097,7 +3105,7 @@ func parseJobSuccessPolicy(raw map[string]any) (*batchv1.SuccessPolicy, error) {
 		// pointer is non-nil, and that function returns (0, nil) for an empty
 		// string — so admission fails to enforce the contract its own type
 		// states. Refusing here follows the documented contract, not the gap.
-		if v, present := obj["succeededIndexes"]; present {
+		if v, present := obj["succeededIndexes"]; present && !isExplicitNull(v) {
 			s, ok := v.(string)
 			if !ok {
 				return nil, errors.Errorf("%s.succeededIndexes: must be a string, got %T", label, v)
@@ -3107,7 +3115,7 @@ func parseJobSuccessPolicy(raw map[string]any) (*batchv1.SuccessPolicy, error) {
 			}
 			rule.SucceededIndexes = &s
 		}
-		if v, present, err := parseInt32Field(obj, "succeededCount", label+".succeededCount"); err != nil {
+		if v, present, err := optionalInt32(obj, "succeededCount", label+".succeededCount"); err != nil {
 			return nil, err
 		} else if present {
 			if v < 0 {

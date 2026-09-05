@@ -505,3 +505,168 @@ func TestJobHandler_HighCompletionsRules(t *testing.T) {
 		t.Errorf("MaxFailedIndexes = %v, want 10000", got)
 	}
 }
+
+// TestJobHandler_CronJobOnlyProperties_Rejected covers the retyped-cronjob case.
+// A job component and a cronjob component differ by exactly these six
+// properties, so changing `type: cronjob` to `type: job` on an existing document
+// leaves every one of them behind. Left undeclared they would each be dropped in
+// silence — validateProperties runs on emitted elements only, never on authored
+// documents — turning a schedule into a Job that runs once, immediately, at
+// apply time. That is the shape this test exists to prevent: not a missing
+// field, but work executed at a time nobody asked for.
+func TestJobHandler_CronJobOnlyProperties_Rejected(t *testing.T) {
+	cases := []struct {
+		key        string
+		value      any
+		wantSubstr string
+	}{
+		{"schedule", "*/5 * * * *", "cronjob component"},
+		{"timeZone", "Europe/Brussels", "cronjob"},
+		{"concurrencyPolicy", "Forbid", "cronjob"},
+		// Each of these three names the job-level property that does the
+		// nearest equivalent job, so the message is a redirection rather than
+		// only a refusal.
+		{"startingDeadlineSeconds", 30, "activeDeadlineSeconds"},
+		{"successfulJobsHistoryLimit", 3, "ttlSecondsAfterFinished"},
+		{"failedJobsHistoryLimit", 1, "ttlSecondsAfterFinished"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			msg := jobError(t, map[string]any{tc.key: tc.value})
+			if !strings.Contains(msg, tc.key) || !strings.Contains(msg, tc.wantSubstr) {
+				t.Errorf("error = %q, want it to name %q and %q", msg, tc.key, tc.wantSubstr)
+			}
+		})
+	}
+}
+
+// TestJobHandler_SuspendVetoesAutoHealthCheck is the job counterpart of
+// deployment's paused veto. A suspended job creates no pods, so it reaches
+// neither Complete nor Failed and a Kustomization waiting on it would block for
+// as long as the document says to stay suspended.
+//
+// The pipeline reaches this method by type assertion, so the assertion below is
+// the load-bearing half: a method whose name or signature drifts stops being
+// seen there without any call site failing to compile.
+func TestJobHandler_SuspendVetoesAutoHealthCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		props map[string]any
+		want  bool
+	}{
+		{"suspend true vetoes the check", map[string]any{"suspend": true}, false},
+		{"suspend false keeps it", map[string]any{"suspend": false}, true},
+		{"suspend unauthored keeps it", map[string]any{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			full := map[string]any{"image": "ghcr.io/org/batch:v1.0.0"}
+			for k, v := range tc.props {
+				full[k] = v
+			}
+			cfg, err := (&components.JobHandler{}).ToApplicationConfig(&oam.Component{
+				Name: "batch", Type: "job", Properties: full,
+			}, "default")
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			e, ok := cfg.(interface{ EmitsAutoHealthCheck() bool })
+			if !ok {
+				t.Fatal("JobConfig does not satisfy the autoHealthCheckEmitter shape the transform asserts on")
+			}
+			if got := e.EmitsAutoHealthCheck(); got != tc.want {
+				t.Errorf("EmitsAutoHealthCheck() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestJobHandler_ExplicitNullReadsAsOmission pins the null handling on the
+// properties go-kure/launcher#344 introduced. `key: null` in YAML is an author
+// writing "leave this unset" — pkg/oam's own validatePropertyValue reads it that
+// way, and the optional* wrappers in common.go exist to make the parsers agree.
+// Without them a null reaches a typed helper and is refused as a type error, so
+// a document that says nothing is rejected while the same document with the key
+// deleted builds.
+//
+// backoffLimitPerIndex and maxFailedIndexes carry the sharper half: both are
+// refused outright unless completionMode is Indexed, so reading a null as a
+// value rather than an omission would make `backoffLimitPerIndex: null` fail
+// with a cross-field message about a field the author explicitly declined to
+// set.
+func TestJobHandler_ExplicitNullReadsAsOmission(t *testing.T) {
+	props := map[string]any{
+		"restartPolicy":        nil,
+		"suspend":              nil,
+		"backoffLimitPerIndex": nil,
+		"maxFailedIndexes":     nil,
+		"podReplacementPolicy": nil,
+		"managedBy":            nil,
+		"successPolicy":        nil,
+	}
+	job, _ := generateJob(t, props)
+
+	if got := job.Spec.Template.Spec.RestartPolicy; got != corev1.RestartPolicyOnFailure {
+		t.Errorf("RestartPolicy = %q, want the OnFailure default a null must not disturb", got)
+	}
+	if got := job.Spec.Suspend; got != nil {
+		t.Errorf("Suspend = %v, want nil", *got)
+	}
+	if got := job.Spec.BackoffLimitPerIndex; got != nil {
+		t.Errorf("BackoffLimitPerIndex = %v, want nil", *got)
+	}
+	if got := job.Spec.MaxFailedIndexes; got != nil {
+		t.Errorf("MaxFailedIndexes = %v, want nil", *got)
+	}
+	if got := job.Spec.PodReplacementPolicy; got != nil {
+		t.Errorf("PodReplacementPolicy = %q, want nil", *got)
+	}
+	if got := job.Spec.ManagedBy; got != nil {
+		t.Errorf("ManagedBy = %q, want nil", *got)
+	}
+	if got := job.Spec.SuccessPolicy; got != nil {
+		t.Errorf("SuccessPolicy = %+v, want nil", got)
+	}
+}
+
+// TestJobHandler_SuccessPolicyMemberNullsReadAsOmission covers the two keys
+// nested inside a successPolicy rule, which the loop above cannot reach: a null
+// at the top level omits the whole policy, so the rule members are only
+// exercised by a policy that is authored. Each rule needs at least one of the
+// two, so the cases are one-sided rather than both-null.
+func TestJobHandler_SuccessPolicyMemberNullsReadAsOmission(t *testing.T) {
+	rule := func(members map[string]any) map[string]any {
+		return map[string]any{
+			"completionMode": "Indexed",
+			"completions":    4,
+			"successPolicy":  map[string]any{"rules": []any{members}},
+		}
+	}
+
+	t.Run("null succeededCount", func(t *testing.T) {
+		job, _ := generateJob(t, rule(map[string]any{"succeededIndexes": "0-1", "succeededCount": nil}))
+		got := job.Spec.SuccessPolicy
+		if got == nil || len(got.Rules) != 1 {
+			t.Fatalf("SuccessPolicy = %+v, want one rule", got)
+		}
+		if got.Rules[0].SucceededCount != nil {
+			t.Errorf("SucceededCount = %v, want nil", *got.Rules[0].SucceededCount)
+		}
+		if got.Rules[0].SucceededIndexes == nil || *got.Rules[0].SucceededIndexes != "0-1" {
+			t.Errorf("SucceededIndexes = %v, want 0-1", got.Rules[0].SucceededIndexes)
+		}
+	})
+
+	t.Run("null succeededIndexes", func(t *testing.T) {
+		job, _ := generateJob(t, rule(map[string]any{"succeededIndexes": nil, "succeededCount": 2}))
+		got := job.Spec.SuccessPolicy
+		if got == nil || len(got.Rules) != 1 {
+			t.Fatalf("SuccessPolicy = %+v, want one rule", got)
+		}
+		if got.Rules[0].SucceededIndexes != nil {
+			t.Errorf("SucceededIndexes = %q, want nil", *got.Rules[0].SucceededIndexes)
+		}
+		if got.Rules[0].SucceededCount == nil || *got.Rules[0].SucceededCount != 2 {
+			t.Errorf("SucceededCount = %v, want 2", got.Rules[0].SucceededCount)
+		}
+	})
+}
