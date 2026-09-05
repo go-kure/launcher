@@ -319,15 +319,20 @@ func TestJobHandler_JobSpecValidation_Table(t *testing.T) {
 		props      map[string]any
 		wantSubstr string
 	}{
+		// Both substrings name their field. An unqualified "requires
+		// completionMode: Indexed" would be satisfied by either arm, so the
+		// maxFailedIndexes case would pass even with no maxFailedIndexes rule at
+		// all — it authors backoffLimitPerIndex too, because maxFailedIndexes
+		// without it is refused earlier by a different rule.
 		{
 			"backoffLimitPerIndex outside Indexed",
 			map[string]any{"backoffLimitPerIndex": 1},
-			"requires completionMode: Indexed",
+			"backoffLimitPerIndex: requires completionMode: Indexed",
 		},
 		{
 			"maxFailedIndexes outside Indexed",
 			map[string]any{"backoffLimitPerIndex": 1, "maxFailedIndexes": 1},
-			"requires completionMode: Indexed",
+			"maxFailedIndexes: requires completionMode: Indexed",
 		},
 		{
 			"successPolicy outside Indexed",
