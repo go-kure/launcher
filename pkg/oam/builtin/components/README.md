@@ -30,8 +30,8 @@ Reference.
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
 | `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface plus the rest of `DeploymentSpec`. Not a superset of `worker` — see below. |
-| `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below; `podFailurePolicy` not yet projected). |
-| `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below; `podFailurePolicy` not yet projected). |
+| `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
+| `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
@@ -865,8 +865,8 @@ one. Both halves are pinned: `TestSchemaJobSpec_HasNoSuspendKey` on the schema,
 `TestJobHandler_SuspendWritesJobSpec` on the generated objects.
 
 `applyJobSpec` copies every value it writes rather than assigning the config's
-own pointers (`copyPtr` for the scalars, `DeepCopy` for `successPolicy`, which
-owns a slice of rules). A handler config outlives one `Generate` call and
+own pointers (`copyPtr` for the scalars, `DeepCopy` for `successPolicy` and
+`podFailurePolicy`, which each own a slice of rules). A handler config outlives one `Generate` call and
 `Generate` may run more than once, so an aliased pointer would leave a mutable
 path from the generated object back into the config — a writer through the
 object would change what the next `Generate` emits.
@@ -990,7 +990,8 @@ object would change what the next `Generate` emits.
   described in "Common config" above): `backoffLimit`, `completions`,
   `parallelism`, `activeDeadlineSeconds`, `ttlSecondsAfterFinished`,
   `completionMode`, `backoffLimitPerIndex`, `maxFailedIndexes`,
-  `podReplacementPolicy`, `managedBy`, `successPolicy`. `suspend` on a cronjob
+  `podReplacementPolicy`, `managedBy`, `successPolicy`, `podFailurePolicy`.
+  `suspend` on a cronjob
   is the **CronJobSpec** field, not the JobSpec one — see the `suspend` note in
   "Common config". Every optional field above is presence-gated: omitting
   it never adds a key to the generated output, even where the corresponding
@@ -1002,8 +1003,7 @@ object would change what the next `Generate` emits.
   Kubernetes' own API server) — this is deliberate, not an oversight: tightening
   it would reject documents that build successfully today, which is a breaking
   change under this project's additive-compatibility rule (see
-  `docs/oam/design-gvk.md`). `podFailurePolicy` is not yet projected
-  (go-kure/launcher#345).
+  `docs/oam/design-gvk.md`).
 - **job** (go-kure/launcher#344, `job.go`) — a run-to-completion workload:
   `image`, `restartPolicy` (default `OnFailure`; the Job API rejects `Always`,
   which is what pod defaulting would otherwise supply, and a present-but-
@@ -1013,7 +1013,7 @@ object would change what the next `Generate` emits.
   ports; no `sidecars` schema key (init containers only), matching `cronjob`.
   It emits a `Job`, its per-component `ServiceAccount`, and any declared PVCs.
 
-  The eleven JobSpec-level properties are the ones `cronjob` projects onto its
+  The twelve JobSpec-level properties are the ones `cronjob` projects onto its
   job template, projected here onto `spec` directly. Every one is
   presence-gated, so a document authoring none of them emits no key for them.
 
@@ -1030,6 +1030,7 @@ object would change what the next `Generate` emits.
   | `podReplacementPolicy` | `Failed`\|`TerminatingOrFailed` | When a replacement pod is created. An empty string is rejected rather than treated as unset, for the same reason as `managedBy` below. | additive |
   | `managedBy` | string | Controller reconciling this job instead of the built-in one. A domain-prefixed path (`example.com/controller`), ≤ 63 characters. An empty string is rejected rather than treated as unset. | additive |
   | `successPolicy` | object | `rules[]` (1..20) of `succeededIndexes` (increasing comma-separated intervals, every index < `completions`) and/or `succeededCount` (≤ `completions`, and ≤ the number of indexes named alongside it). Requires `Indexed`. An empty `succeededIndexes` is rejected rather than treated as unset: it denotes no indexes at all, so it would otherwise satisfy the at-least-one-field rule while naming nothing. | additive |
+  | `podFailurePolicy` | object | `rules[]` (0..20), each with an `action` (`FailJob`\|`FailIndex`\|`Ignore`\|`Count`) and **exactly one** of `onExitCodes` (`operator` `In`\|`NotIn`, `values[]` of 1..255 exit codes in increasing order without duplicates, optional `containerName`) or `onPodConditions[]` (up to 20 `type`/`status` patterns). Requires `restartPolicy: Never`, and pins `podReplacementPolicy` to `Failed` when that is also authored. `FailIndex` additionally requires `backoffLimitPerIndex`. | **Behavior-changing** on `cronjob` (see below); additive on `job` |
   | `suspend` | bool | **`JobSpec.Suspend`** — create the job with no pods. Not the same field as `cronjob`'s `suspend`; see the `suspend` note in "Common config". `suspend: true` additionally suppresses this component's **auto health check** (see below). | additive |
   | `selector`, `manualSelector`, `template` | — | **Rejected outright**, not silently dropped: the Job selector is generated by the job controller from a unique per-job label, and a hand-written one adopts other jobs' pods. `manualSelector` only has meaning alongside one. `template` is replaced wholesale from the component's own container and pod-level properties, so an authored one is discarded rather than merged — the same rejection the deployment kind makes. | **Behavior-changing** (see below) |
   | `schedule`, `timeZone`, `concurrencyPolicy`, `startingDeadlineSeconds`, `successfulJobsHistoryLimit`, `failedJobsHistoryLimit` | — | **Rejected outright**: these are the CronJobSpec-only keys, and they are exactly what a `cronjob` document retyped to `job` leaves behind. Dropping them silently would run at apply time the work a schedule deferred (see below). | additive (no valid `job` document ever carried them) |
@@ -1057,12 +1058,47 @@ object would change what the next `Generate` emits.
   called out here because they are the only places a document this parser refuses
   would in fact have applied.
 
-  `podFailurePolicy` is not published — go-kure/launcher#345 owns it — and is
-  **rejected outright** rather than left undeclared. Leaving it undeclared would
-  refuse nothing: property-schema validation runs on emitted elements, never on
-  authored documents, so an unread key is silently dropped rather than refused.
-  The explicit rejection makes a document authoring it fail loudly instead of
-  building a Job whose failure handling has quietly gone missing.
+  `podFailurePolicy` (go-kure/launcher#345) is published by both `job` and
+  `cronjob`, through the same shared parser as the rest of the table. Its rules
+  are ported from `validatePodFailurePolicy` / `validatePodFailurePolicyRule`,
+  with two exceptions in each direction.
+
+  **Two checks run at emission rather than at parse time**, in
+  `validateJobPodFailurePolicyAgainstTemplate`, because both read the built pod
+  template rather than the property map: upstream requires
+  `restartPolicy: Never` alongside a `podFailurePolicy` (these components
+  default it to `OnFailure`, so a document authoring only the policy is refused
+  with a message naming the restart policy), and `onExitCodes.containerName`
+  must name a container the template actually carries — the component's own
+  container or one of its `initContainers`. Checking the emitted template rather
+  than the config is what keeps the check from drifting from what is written,
+  the same reason the component-name check in `createJob` reads the emitted
+  name.
+
+  **One place this parser is deliberately no stricter than upstream**: an empty
+  `rules` list is accepted. `validatePodFailurePolicy` has no "at least one
+  rule" check — unlike `validateSuccessPolicy`, which does — and
+  `PodFailurePolicy.Rules`' own field doc states only the cap, so unlike
+  `activeDeadlineSeconds` and `succeededIndexes` above there is no documented
+  contract to follow past the validator. An empty list is not inert either: a
+  non-nil policy pins `podReplacementPolicy` and `restartPolicy` whatever its
+  rules say.
+
+  **Compatibility.** On `job` this is additive — the component type is newer
+  than the key. On `cronjob` it is **behavior-changing**, and the reason is
+  worth stating precisely: before this change an authored `podFailurePolicy` on
+  a cronjob was not refused, it was **ignored**. Property-schema validation runs
+  on emitted elements only, never on authored documents, so a key no handler
+  read was dropped in silence. A cronjob document that was already authoring
+  `podFailurePolicy` therefore either compiles to a CronJob that now carries the
+  policy, or stops building — most likely on the `restartPolicy: Never`
+  requirement, since the component defaults to `OnFailure`. Under the additive
+  test in `docs/oam/design-gvk.md` ("every previously valid document remains
+  valid *and* compiles to the same output") that is not additive. The gap that
+  makes this true of *every* property ever added to an existing kind — the
+  authored path never enforcing the Parser Strictness that document promises —
+  belongs to the repo rather than to this change, and is tracked as
+  go-kure/launcher#408.
 
   The `selector`/`manualSelector` rejection is the same class of change the
   daemonset kind's `selector` rejection is, and rests on the same reasoning:
@@ -1075,8 +1111,8 @@ object would change what the next `Generate` emits.
 
   The six CronJobSpec-only keys — `schedule`, `timeZone`, `concurrencyPolicy`,
   `startingDeadlineSeconds`, `successfulJobsHistoryLimit` and
-  `failedJobsHistoryLimit` — are rejected for the same reason `podFailurePolicy`
-  is, but the case they guard is sharper. A `job` component and a `cronjob`
+  `failedJobsHistoryLimit` — are rejected for the same reason `selector` is, but
+  the case they guard is sharper. A `job` component and a `cronjob`
   component differ by exactly these six properties, so retyping an existing
   `cronjob` document to `job` leaves every one of them behind. Left undeclared
   each would be dropped in silence, turning a schedule into a Job that runs
@@ -1383,8 +1419,8 @@ alone would not be enough), `revisionHistoryLimit`, `persistentVolumeClaimRetent
 and `ordinals`. The deployment kind projects the same two shapes and follows the same rule:
 `strategy` (holding a `*RollingUpdateDeployment`), `revisionHistoryLimit` and
 `progressDeadlineSeconds`. `applyJobSpec` follows the same rule for the `job` and `cronjob`
-kinds: its ten scalar pointers go through the generic `copyPtr`, and `successPolicy` — whose
-struct owns a slice of rules — through `DeepCopy`.
+kinds: its ten scalar pointers go through the generic `copyPtr`, and `successPolicy` and
+`podFailurePolicy` — whose structs each own a slice of rules — through `DeepCopy`.
 Without that, editing the first rendered object — the same in-place
 customization the label rule above assumes — writes back into the config and reappears in
 every later render, with the symptom surfacing on a different object than the one that was

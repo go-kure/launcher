@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
+
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // TestJobSpecSchemaMatchesParser pins the published JobSpec-level schema to the
@@ -47,10 +49,47 @@ func TestJobSpecSchemaMatchesParser(t *testing.T) {
 		t.Errorf("successPolicy.rules item keys = %v, want %v", itemKeys, wantRuleKeys)
 	}
 
+	assertKeysAt(t, s, "podFailurePolicy", jobPodFailurePolicyKeys)
+
+	pfpRules := s["podFailurePolicy"].Properties["rules"]
+	if !pfpRules.Required {
+		t.Error("podFailurePolicy.rules.Required = false, want true — parseJobPodFailurePolicy demands it")
+	}
+	if pfpRules.Items == nil {
+		t.Fatal("podFailurePolicy.rules.Items = nil, want the per-rule schema")
+	}
+	assertPropertyKeys(t, pfpRules.Items.Properties, "podFailurePolicy.rules[]", jobPodFailurePolicyRuleKeys)
+	assertPropertyKeys(t, pfpRules.Items.Properties["onExitCodes"].Properties,
+		"podFailurePolicy.rules[].onExitCodes", jobPodFailurePolicyOnExitCodesKeys)
+
+	onPodConditions := pfpRules.Items.Properties["onPodConditions"]
+	if onPodConditions.Items == nil {
+		t.Fatal("podFailurePolicy.rules[].onPodConditions.Items = nil, want the per-pattern schema")
+	}
+	assertPropertyKeys(t, onPodConditions.Items.Properties,
+		"podFailurePolicy.rules[].onPodConditions[]", jobPodFailurePolicyOnPodConditionsKeys)
+
 	for k, node := range s {
 		if node.Description == "" {
 			t.Errorf("schemaJobSpec[%q]: Description is empty", k)
 		}
+	}
+}
+
+// assertPropertyKeys compares a nested schema node's property keys with the key
+// slice its parser rejects against. assertKeysAt above only reaches one level
+// down from schemaJobSpec; podFailurePolicy nests three.
+func assertPropertyKeys(t *testing.T, props map[string]oam.PropertySchema, label string, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(props))
+	for k := range props {
+		got = append(got, k)
+	}
+	slices.Sort(got)
+	expected := slices.Clone(want)
+	slices.Sort(expected)
+	if !slices.Equal(got, expected) {
+		t.Errorf("%s keys = %v, want %v", label, got, expected)
 	}
 }
 
@@ -92,6 +131,7 @@ func TestApplyJobSpec_CopiesRatherThanAliases(t *testing.T) {
 	replacement := batchv1.Failed
 	managedBy := "example.com/controller"
 	count := int32(2)
+	containerName := "batch"
 	cfg := JobSpecConfig{
 		BackoffLimit:            &backoff,
 		Completions:             &completions,
@@ -105,6 +145,16 @@ func TestApplyJobSpec_CopiesRatherThanAliases(t *testing.T) {
 		ManagedBy:               &managedBy,
 		SuccessPolicy: &batchv1.SuccessPolicy{
 			Rules: []batchv1.SuccessPolicyRule{{SucceededCount: &count}},
+		},
+		PodFailurePolicy: &batchv1.PodFailurePolicy{
+			Rules: []batchv1.PodFailurePolicyRule{{
+				Action: batchv1.PodFailurePolicyActionFailJob,
+				OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
+					ContainerName: &containerName,
+					Operator:      batchv1.PodFailurePolicyOnExitCodesOpIn,
+					Values:        []int32{1},
+				},
+			}},
 		},
 	}
 
@@ -145,6 +195,9 @@ func TestApplyJobSpec_CopiesRatherThanAliases(t *testing.T) {
 	if spec.SuccessPolicy == cfg.SuccessPolicy {
 		t.Fatal("successPolicy: spec aliases the config pointer")
 	}
+	if spec.PodFailurePolicy == cfg.PodFailurePolicy {
+		t.Fatal("podFailurePolicy: spec aliases the config pointer")
+	}
 	// The aliasing checks above all pass when applyJobSpec wrote nothing — a nil
 	// spec field is never equal to the config's pointer — so the regression this
 	// test targets reaches the dereferences below. Guarded so it fails by name
@@ -164,6 +217,24 @@ func TestApplyJobSpec_CopiesRatherThanAliases(t *testing.T) {
 	if spec.SuccessPolicy.Rules[0].SucceededCount == cfg.SuccessPolicy.Rules[0].SucceededCount {
 		t.Fatal("successPolicy.rules[0].succeededCount: spec aliases the config pointer")
 	}
+	// The same nested checks for podFailurePolicy, which owns one more level
+	// than successPolicy does: a rules slice, a pointer inside each rule, and a
+	// values slice inside that.
+	if spec.PodFailurePolicy == nil || len(spec.PodFailurePolicy.Rules) != 1 || spec.PodFailurePolicy.Rules[0].OnExitCodes == nil {
+		t.Fatalf("applyJobSpec did not write podFailurePolicy.rules[0].onExitCodes: %+v", spec.PodFailurePolicy)
+	}
+	if &spec.PodFailurePolicy.Rules[0] == &cfg.PodFailurePolicy.Rules[0] {
+		t.Fatal("podFailurePolicy.rules: spec shares the config's rules backing array")
+	}
+	if spec.PodFailurePolicy.Rules[0].OnExitCodes == cfg.PodFailurePolicy.Rules[0].OnExitCodes {
+		t.Fatal("podFailurePolicy.rules[0].onExitCodes: spec aliases the config pointer")
+	}
+	if spec.PodFailurePolicy.Rules[0].OnExitCodes.ContainerName == cfg.PodFailurePolicy.Rules[0].OnExitCodes.ContainerName {
+		t.Fatal("podFailurePolicy.rules[0].onExitCodes.containerName: spec aliases the config pointer")
+	}
+	if &spec.PodFailurePolicy.Rules[0].OnExitCodes.Values[0] == &cfg.PodFailurePolicy.Rules[0].OnExitCodes.Values[0] {
+		t.Fatal("podFailurePolicy.rules[0].onExitCodes.values: spec shares the config's backing array")
+	}
 
 	// The values must still have arrived, and writing through the object must
 	// leave the config as it was.
@@ -174,6 +245,14 @@ func TestApplyJobSpec_CopiesRatherThanAliases(t *testing.T) {
 	*spec.ManagedBy = "example.com/other"
 	*spec.SuccessPolicy.Rules[0].SucceededCount = 99
 	spec.SuccessPolicy.Rules[0].SucceededIndexes = nil
+	*spec.PodFailurePolicy.Rules[0].OnExitCodes.ContainerName = "other"
+	spec.PodFailurePolicy.Rules[0].OnExitCodes.Values[0] = 99
+	if containerName != "batch" {
+		t.Errorf("writing spec.PodFailurePolicy changed the config: got %q, want \"batch\"", containerName)
+	}
+	if got := cfg.PodFailurePolicy.Rules[0].OnExitCodes.Values[0]; got != 1 {
+		t.Errorf("writing spec.PodFailurePolicy changed the config's values: got %d, want 1", got)
+	}
 	if backoff != 3 {
 		t.Errorf("writing spec.BackoffLimit changed the config: got %d, want 3", backoff)
 	}

@@ -4,6 +4,7 @@ import (
 	"maps"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 )
@@ -607,6 +608,66 @@ func schemaJobSpec(reserved bool) map[string]oam.PropertySchema {
 						Properties: map[string]oam.PropertySchema{
 							"succeededIndexes": {Type: oam.PropertyTypeString, Description: `Indexes that must have succeeded, as increasing comma-separated intervals such as "1,3-5,7". Every index must be below completions.`},
 							"succeededCount":   {Type: oam.PropertyTypeInteger, Description: "Minimum number of succeeded indexes. Must be <= completions, and <= the number of indexes named by succeededIndexes when both are given."},
+						},
+					},
+				},
+			},
+		},
+		"podFailurePolicy": {
+			Type:             oam.PropertyTypeObject,
+			PlatformReserved: reserved,
+			Description:      "How a failed pod is handled, instead of always counting towards backoffLimit. Requires restartPolicy: Never, and pins podReplacementPolicy to \"Failed\" when that is also set. Rules are evaluated in order and the first match wins.",
+			Properties: map[string]oam.PropertySchema{
+				"rules": {
+					Type:        oam.PropertyTypeArray,
+					Required:    true,
+					Description: "Rules matched against a pod failure, at most 20. Each needs exactly one of onExitCodes or onPodConditions.",
+					Items: &oam.PropertySchema{
+						Type:        oam.PropertyTypeObject,
+						Description: "A single failure rule. Exactly one of onExitCodes or onPodConditions is required.",
+						Properties: map[string]oam.PropertySchema{
+							"action": {
+								Type:        oam.PropertyTypeString,
+								Required:    true,
+								Enum:        []any{string(batchv1.PodFailurePolicyActionCount), string(batchv1.PodFailurePolicyActionFailIndex), string(batchv1.PodFailurePolicyActionFailJob), string(batchv1.PodFailurePolicyActionIgnore)},
+								Description: "What to do when the rule matches. \"FailJob\" fails the whole job, \"FailIndex\" fails only this index and requires backoffLimitPerIndex, \"Ignore\" does not count the failure towards backoffLimit and replaces the pod, \"Count\" is the default handling.",
+							},
+							"onExitCodes": {
+								Type:        oam.PropertyTypeObject,
+								Description: "Match on container exit codes. Containers that exited 0 are excluded before the operator is applied.",
+								Properties: map[string]oam.PropertySchema{
+									"containerName": {Type: oam.PropertyTypeString, Description: "Restrict the check to this container. Must name the component's own container or one of its initContainers. Omit to check every container."},
+									"operator": {
+										Type:        oam.PropertyTypeString,
+										Required:    true,
+										Enum:        []any{string(batchv1.PodFailurePolicyOnExitCodesOpIn), string(batchv1.PodFailurePolicyOnExitCodesOpNotIn)},
+										Description: "How exit codes are matched against values.",
+									},
+									"values": {
+										Type:        oam.PropertyTypeArray,
+										Required:    true,
+										Description: "Exit codes to match, in increasing order and without duplicates. At least one and at most 255. 0 may not be listed for the \"In\" operator.",
+										Items:       &oam.PropertySchema{Type: oam.PropertyTypeInteger, Description: "A container exit code."},
+									},
+								},
+							},
+							"onPodConditions": {
+								Type:        oam.PropertyTypeArray,
+								Description: "Match on pod conditions. The rule matches when at least one pattern matches an actual pod condition. At most 20 patterns.",
+								Items: &oam.PropertySchema{
+									Type:        oam.PropertyTypeObject,
+									Description: "A pod condition pattern.",
+									Properties: map[string]oam.PropertySchema{
+										"type": {Type: oam.PropertyTypeString, Required: true, Description: "Pod condition type to match, such as \"DisruptionTarget\". Must be a qualified name."},
+										"status": {
+											Type:        oam.PropertyTypeString,
+											Required:    true,
+											Enum:        []any{string(corev1.ConditionTrue), string(corev1.ConditionFalse), string(corev1.ConditionUnknown)},
+											Description: "Pod condition status to match. Required: nothing in this package defaults it, and the API server rejects an empty one.",
+										},
+									},
+								},
+							},
 						},
 					},
 				},
