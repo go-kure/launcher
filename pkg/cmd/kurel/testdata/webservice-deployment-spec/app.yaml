@@ -1,0 +1,35 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    # DeploymentSpec-level properties on the role-named kinds
+    # (go-kure/launcher#341). The same five properties the `deployment` kind
+    # publishes, authored here on webservice and worker to pin that the shared
+    # fragment reaches the built object through each handler's own build path.
+    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        port: 8080
+        minReadySeconds: 10
+        revisionHistoryLimit: 4
+        progressDeadlineSeconds: 700
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxUnavailable: 25%
+            maxSurge: 2
+    - name: batch
+      type: worker
+      properties:
+        image: ghcr.io/example/batch:v1.0.0
+        # paused reaches the object here; its other effect — suppressing the
+        # auto health check this component would otherwise contribute — is not
+        # visible in this fixture, which emits no Kustomization. That half is
+        # covered by TestRoleKinds_PausedVetoesAutoHealthCheck.
+        paused: true
+        strategy:
+          type: Recreate

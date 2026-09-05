@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-kure/kure/pkg/kubernetes"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -418,6 +419,45 @@ func (c DeploymentSpecConfig) apply(dep *appsv1.Deployment) {
 		deadline := *c.ProgressDeadlineSeconds
 		dep.Spec.ProgressDeadlineSeconds = &deadline
 	}
+}
+
+// applyNonRWXConstraint enforces what a ReadWriteOnce claim implies for a
+// Deployment: at most one pod may hold it, and a rolling update must not try
+// to start a replacement pod while the old one still has it mounted.
+//
+// "At most one" is the rule, not "exactly one": `replicas: 0` is a deliberate
+// scale-to-zero and holds the claim in no pod at all, so the replica count is
+// accepted rather than coerced to 1.
+//
+// That exemption is the count's alone — the strategy half of the guard still
+// applies at zero replicas. Scale-to-zero is a state the document can leave by
+// editing one number, and a `strategy.type: RollingUpdate` that survived the
+// guard while at zero would be wrong the moment the first pod starts, in a
+// later edit that touches nothing this function reads. Forcing `Recreate` onto
+// a Deployment running no pods costs nothing until then.
+//
+// Kubernetes does not reject either combination — the Deployment is created
+// and the second pod simply hangs unschedulable or stuck attaching — so this
+// is a build-time guard rather than a mirror of an apiserver rule. A
+// deliberately authored `strategy` that contradicts it is reported instead of
+// being overwritten; that reporting is why every kind projecting a Deployment
+// shares this one function rather than each carrying the substitution inline.
+// The strategy argument is the authored value, so a kind that publishes no
+// `strategy` property passes nil and gets the silent substitution it had
+// before (go-kure/launcher#341 gave webservice and worker the property, so
+// today all three pass a real value).
+func applyNonRWXConstraint(dep *appsv1.Deployment, name string, pvcs []PVCConfig, replicas int32, strategy *appsv1.DeploymentStrategy) error {
+	if !hasNonRWXPVC(pvcs) {
+		return nil
+	}
+	if replicas > 1 {
+		return errors.Errorf("deployment %q: a non-RWX PVC allows at most one replica, got %d", name, replicas)
+	}
+	if strategy != nil && strategy.Type != appsv1.RecreateDeploymentStrategyType {
+		return errors.Errorf("deployment %q: strategy.type must be %s when a non-RWX PVC is attached, got %s; a rolling update would start the replacement pod before the old one released the volume", name, appsv1.RecreateDeploymentStrategyType, strategy.Type)
+	}
+	kubernetes.SetDeploymentStrategy(dep, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
+	return nil
 }
 
 // schemaDeploymentSpec describes the DeploymentSpec-level properties (see
