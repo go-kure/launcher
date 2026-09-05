@@ -510,6 +510,40 @@ func TestJobHandler_HighCompletionsRules(t *testing.T) {
 	}
 }
 
+// TestJobHandler_DottedComponentName_Refused pins the one place the component
+// name's three destinations disagree. `metadata.name` and the `app:` label both
+// accept a dotted name — validateComponent enforces a DNS-1123 *subdomain* — but
+// corev1.Container.Name is a DNS-1123 *label*, which forbids dots. So a valid
+// component name used to build a valid-looking Job the API server refuses at
+// admission, naming a field the author never wrote.
+//
+// This test goes through Generate rather than ToApplicationConfig: the name
+// checked is the one actually emitted, not the one parsed.
+func TestJobHandler_DottedComponentName_Refused(t *testing.T) {
+	cfg, err := (&components.JobHandler{}).ToApplicationConfig(&oam.Component{
+		Name: "batch.worker", Type: "job",
+		Properties: map[string]any{"image": "ghcr.io/org/batch:v1.0.0"},
+	}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	_, err = cfg.Generate(stack.NewApplication("batch.worker", "default", cfg))
+	if err == nil {
+		t.Fatal("Generate accepted the dotted component name 'batch.worker', want a refusal — " +
+			"the emitted container name would be rejected at admission")
+	}
+	for _, want := range []string{"batch.worker", "container name", "DNS-1123 label"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to mention %q", err, want)
+		}
+	}
+
+	// The undotted name must still build, so the refusal is of the dot and not
+	// of every name that reaches this path. generateJob fails the test itself
+	// if Generate refuses "batch".
+	generateJob(t, nil)
+}
+
 // TestJobHandler_CronJobOnlyProperties_Rejected covers the retyped-cronjob case.
 // A job component and a cronjob component differ by exactly these six
 // properties, so changing `type: cronjob` to `type: job` on an existing document

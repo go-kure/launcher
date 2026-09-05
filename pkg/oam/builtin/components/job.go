@@ -3,11 +3,13 @@ package components
 import (
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -384,6 +386,28 @@ func (c *JobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 }
 
 func (c *JobConfig) createJob(app *stack.Application) (*batchv1.Job, error) {
+	// The component name reaches three places with three different rules, and
+	// only the strictest one is checked here. metadata.name and the `app:` label
+	// both accept a dotted name — a DNS-1123 *subdomain*, which is what
+	// validateComponent enforces (pkg/oam/validate.go) — but corev1.Container.Name
+	// is a DNS-1123 *label*, which forbids dots. So `batch.worker` is a valid
+	// component name that builds a Job the API server refuses at admission, with
+	// an error naming a field the author never wrote.
+	//
+	// Checked against app.Name rather than the component name because app.Name is
+	// the value actually emitted; the transform sets it from the component, but
+	// this way the guarantee does not rest on that.
+	//
+	// This is not job-specific — all seven workload handlers pass app.Name to
+	// buildMainContainer unchecked. The other six are go-kure/launcher#407; the
+	// check lands here because this component is the one under review.
+	if errs := validation.IsDNS1123Label(app.Name); len(errs) > 0 {
+		return nil, errors.Errorf("component name %q cannot be a container name: %s; "+
+			"a job's container is named after the component, and a container name is a DNS-1123 label "+
+			"(no dots), stricter than the DNS-1123 subdomain a component name may otherwise be",
+			app.Name, strings.Join(errs, "; "))
+	}
+
 	// No Ports: the job component exposes no port property (see parseProbes'
 	// namedPortsAllowed=false above).
 	container := buildMainContainer(app.Name, mainContainerInput{

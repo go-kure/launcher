@@ -1096,6 +1096,17 @@ object would change what the next `Generate` emits.
   unwrapped ones reject, never the reverse — so no document that builds today
   stops building.
 
+  **The component name must be a DNS-1123 *label*, not merely a subdomain.** A
+  component name is validated as a DNS-1123 subdomain, which permits dots, and
+  that name reaches `metadata.name` and the `app:` label unchanged — both accept
+  it. It also becomes the name of the Job's main container, and a container name
+  is a DNS-1123 label, which forbids dots. `batch.worker` would therefore build a
+  Job the API server rejects at admission, naming a field the author never wrote,
+  so this component refuses the name at generation instead. Nothing that
+  previously produced an applyable manifest is affected — such a document never
+  did. The other workload kinds share the gap and are tracked as
+  go-kure/launcher#407.
+
   **Known limitation — a `job` component is not updatable in place.** A Job's pod
   template is immutable: `ValidateJobSpecUpdate` runs `validatePodTemplateUpdate`
   on every update, and the only carve-out is for scheduling directives on a
