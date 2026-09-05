@@ -2979,11 +2979,20 @@ func parseJobSpecIndexedFields(cfg *JobSpecConfig) error {
 	}
 
 	if !indexed {
-		if cfg.BackoffLimitPerIndex != nil {
-			return errors.New("backoffLimitPerIndex: requires completionMode: Indexed")
-		}
+		// maxFailedIndexes is checked before backoffLimitPerIndex, and the order
+		// is load-bearing rather than stylistic: upstream aggregates every
+		// violation into a field.ErrorList, this parser returns the first, and by
+		// the check above a document reaching here with maxFailedIndexes set has
+		// backoffLimitPerIndex set too. Checking backoffLimitPerIndex first would
+		// therefore make the maxFailedIndexes arm unreachable for every input —
+		// dead code that no test could distinguish from a working rule, since the
+		// sibling message would satisfy any assertion phrased loosely enough to
+		// match both.
 		if cfg.MaxFailedIndexes != nil {
 			return errors.New("maxFailedIndexes: requires completionMode: Indexed")
+		}
+		if cfg.BackoffLimitPerIndex != nil {
+			return errors.New("backoffLimitPerIndex: requires completionMode: Indexed")
 		}
 		if cfg.SuccessPolicy != nil {
 			return errors.New("successPolicy: requires completionMode: Indexed")
