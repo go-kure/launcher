@@ -1,0 +1,20 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-worker
+  namespace: default
+spec:
+  components:
+    - name: backend
+      type: worker
+      properties:
+        image: ghcr.io/example/worker:v1.0.0
+        replicas: 3
+        topologySpread: true
+        affinity:
+          enablePodAntiAffinity: true
+          podAntiAffinityType: required
+          topologyKey: topology.kubernetes.io/zone
+          nodeSelector:
+            node-role.kubernetes.io/worker: "true"
+            kubernetes.io/arch: amd64
