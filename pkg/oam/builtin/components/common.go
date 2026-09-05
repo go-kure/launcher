@@ -400,7 +400,7 @@ func validateRelativePath(label, path string) error {
 // volumeName's own shape (a DNS-1123 label) but never checks it against the
 // component's actual `volumes` list, because parseEnv (and therefore this
 // function, reached through parseValueFrom) runs before parseVolumes in
-// every one of its 7 call sites (5 kind handlers plus parseInitContainers
+// every one of its 9 call sites (7 kind handlers plus parseInitContainers
 // and parseSidecars) and has no access to the parsed volume set. Real
 // admission's validateFileKeyRefVolumes
 // (k8s.io/kubernetes/pkg/apis/core/validation/validation.go, confirmed by
