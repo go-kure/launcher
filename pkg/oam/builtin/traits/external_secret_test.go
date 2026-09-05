@@ -38,6 +38,18 @@ func newCronJobStubConfig(t *testing.T) *components.CronjobConfig {
 	}
 }
 
+// newJobStubConfig builds a real components.JobConfig whose Generate produces a
+// Job with one container. A Job is not a CronJob for this purpose: its PodSpec
+// sits at Spec.Template.Spec, one level up from the CronJob's, so a decorator
+// that handles one does not thereby handle the other.
+func newJobStubConfig(t *testing.T) *components.JobConfig {
+	t.Helper()
+	return &components.JobConfig{
+		Image:         "job:v1",
+		RestartPolicy: corev1.RestartPolicyOnFailure,
+	}
+}
+
 // findDeployment pulls the first *appsv1.Deployment out of a generated object
 // slice, failing the test if none is present.
 func findDeployment(t *testing.T, objs []*client.Object) *appsv1.Deployment {
@@ -66,6 +78,8 @@ func podSpecOf(t *testing.T, objs []*client.Object) *corev1.PodSpec {
 			return &w.Spec.Template.Spec
 		case *batchv1.CronJob:
 			return &w.Spec.JobTemplate.Spec.Template.Spec
+		case *batchv1.Job:
+			return &w.Spec.Template.Spec
 		}
 	}
 	t.Fatalf("no supported workload found in %d objects", len(objs))
@@ -533,9 +547,9 @@ func TestExternalSecret_EnvFrom_AddsSecretRefToDeployment(t *testing.T) {
 	}
 }
 
-// TestExternalSecretDecorator_WorkloadKinds_Matrix covers all four supported
-// workload kinds (Deployment, StatefulSet, DaemonSet, CronJob) crossed with the
-// three consumption modes (envFrom only, mountPath only, both), asserting the
+// TestExternalSecretDecorator_WorkloadKinds_Matrix covers all five supported
+// workload kinds (Deployment, StatefulSet, DaemonSet, Job, CronJob) crossed with
+// the three consumption modes (envFrom only, mountPath only, both), asserting the
 // exact injected objects on the PodSpec each kind exposes.
 func TestExternalSecretDecorator_WorkloadKinds_Matrix(t *testing.T) {
 	kinds := []struct {
@@ -545,6 +559,7 @@ func TestExternalSecretDecorator_WorkloadKinds_Matrix(t *testing.T) {
 		{"Deployment", newWorkerStubConfig(t)},
 		{"StatefulSet", &stubStatefulSetConfig{}},
 		{"DaemonSet", &stubDaemonSetConfig{}},
+		{"Job", newJobStubConfig(t)},
 		{"CronJob", newCronJobStubConfig(t)},
 	}
 	modes := []struct {
@@ -681,7 +696,7 @@ func TestExternalSecret_UnsupportedComponent_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported workload type")
 	}
-	if !strings.Contains(err.Error(), "Deployment, StatefulSet, DaemonSet, or CronJob") {
+	if !strings.Contains(err.Error(), "Deployment, StatefulSet, DaemonSet, Job, or CronJob") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }

@@ -624,7 +624,7 @@ func NewExternalSecretDecorator(inner stack.ApplicationConfig, secretName, mount
 }
 
 // Generate calls the inner config's Generate and injects the Secret into any
-// Deployment, StatefulSet, DaemonSet, or CronJob resource found.
+// Deployment, StatefulSet, DaemonSet, Job, or CronJob resource found.
 func (d *ExternalSecretDecorator) Generate(app *stack.Application) ([]*client.Object, error) {
 	objects, err := d.Inner.Generate(app)
 	if err != nil {
@@ -643,6 +643,8 @@ func (d *ExternalSecretDecorator) Generate(app *stack.Application) ([]*client.Ob
 			podSpec = &w.Spec.Template.Spec
 		case *batchv1.CronJob:
 			podSpec = &w.Spec.JobTemplate.Spec.Template.Spec
+		case *batchv1.Job:
+			podSpec = &w.Spec.Template.Spec
 		default:
 			continue
 		}
@@ -653,7 +655,7 @@ func (d *ExternalSecretDecorator) Generate(app *stack.Application) ([]*client.Ob
 	}
 
 	if !injected {
-		return nil, errors.New("external-secret envFrom/mountPath requires a Deployment, StatefulSet, DaemonSet, or CronJob component; no supported workload resource was found")
+		return nil, errors.New("external-secret envFrom/mountPath requires a Deployment, StatefulSet, DaemonSet, Job, or CronJob component; no supported workload resource was found")
 	}
 	return objects, nil
 }

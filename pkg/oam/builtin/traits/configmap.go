@@ -140,6 +140,8 @@ func (d *ConfigMapDecorator) Generate(app *stack.Application) ([]*client.Object,
 			podSpec = &w.Spec.Template.Spec
 		case *batchv1.CronJob:
 			podSpec = &w.Spec.JobTemplate.Spec.Template.Spec
+		case *batchv1.Job:
+			podSpec = &w.Spec.Template.Spec
 		default:
 			continue
 		}
@@ -167,7 +169,7 @@ func (d *ConfigMapDecorator) Generate(app *stack.Application) ([]*client.Object,
 	}
 
 	if !mounted {
-		return nil, errors.New("configmap mountPath requires a Deployment, StatefulSet, DaemonSet, or CronJob component; no supported workload resource was found")
+		return nil, errors.New("configmap mountPath requires a Deployment, StatefulSet, DaemonSet, Job, or CronJob component; no supported workload resource was found")
 	}
 
 	return objects, nil

@@ -1,11 +1,14 @@
 package traits_test
 
 import (
+	"slices"
 	"testing"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/stack"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -176,6 +179,58 @@ func TestConfigMapDecorator_EmitsAutoHealthCheck_Forwards(t *testing.T) {
 	}
 	if e.EmitsAutoHealthCheck() {
 		t.Error("expected veto (false) forwarded from inner template-delivery config")
+	}
+}
+
+// TestConfigMapDecorator_MountsIntoJobPodKinds pins the two run-to-completion
+// kinds against the decorator's workload switch. Nothing in validation stops a
+// `configmap` trait with a `mountPath` from being authored on a `job` or
+// `cronjob` component — traitComponentRestrictions restricts `scaler` only — so
+// a kind missing from that switch does not degrade, it fails generation outright
+// with the unsupported-workload error. The two are asserted separately because
+// their PodSpecs sit at different depths: a Job's at Spec.Template.Spec, a
+// CronJob's one level further down.
+func TestConfigMapDecorator_MountsIntoJobPodKinds(t *testing.T) {
+	cases := []struct {
+		name  string
+		inner stack.ApplicationConfig
+	}{
+		{"job", &components.JobConfig{Image: "job:v1", RestartPolicy: corev1.RestartPolicyOnFailure}},
+		{"cronjob", &components.CronjobConfig{Image: "job:v1", Schedule: "0 2 * * *"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dec := traits.NewConfigMapDecorator(tc.inner, "cfg", "/etc/cfg")
+			objs, err := dec.Generate(newApp(tc.name, "default"))
+			if err != nil {
+				t.Fatalf("Generate() error = %v, want the configmap mounted", err)
+			}
+			var podSpec *corev1.PodSpec
+			for _, objPtr := range objs {
+				switch w := (*objPtr).(type) {
+				case *batchv1.Job:
+					podSpec = &w.Spec.Template.Spec
+				case *batchv1.CronJob:
+					podSpec = &w.Spec.JobTemplate.Spec.Template.Spec
+				}
+			}
+			if podSpec == nil {
+				t.Fatalf("no Job or CronJob among the %d generated objects", len(objs))
+			}
+			if !slices.ContainsFunc(podSpec.Volumes, func(v corev1.Volume) bool {
+				return v.Name == "cfg" && v.ConfigMap != nil && v.ConfigMap.Name == "cfg"
+			}) {
+				t.Errorf("configmap volume not added: %+v", podSpec.Volumes)
+			}
+			if len(podSpec.Containers) == 0 {
+				t.Fatal("generated pod spec has no containers to mount into")
+			}
+			if !slices.ContainsFunc(podSpec.Containers[0].VolumeMounts, func(m corev1.VolumeMount) bool {
+				return m.Name == "cfg" && m.MountPath == "/etc/cfg"
+			}) {
+				t.Errorf("configmap volume mount not added: %+v", podSpec.Containers[0].VolumeMounts)
+			}
+		})
 	}
 }
 
