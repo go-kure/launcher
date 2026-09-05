@@ -271,6 +271,10 @@ func TestJobHandler_SelectorProperties_Rejected(t *testing.T) {
 	}{
 		{"selector", map[string]any{"matchLabels": map[string]any{"app": "batch"}}, "not authorable"},
 		{"manualSelector", true, "not authorable"},
+		// createJob replaces the pod template wholesale from the component's
+		// own properties, so an authored one is not merged, it is discarded.
+		// The deployment kind rejects this key for the same reason.
+		{"template", map[string]any{"spec": map[string]any{}}, "not authorable"},
 		// podFailurePolicy has to be refused explicitly rather than merely left
 		// out of the schema: validateProperties runs on emitted elements only,
 		// never on authored documents, so an unread key is dropped in silence.
@@ -557,6 +561,14 @@ func TestJobHandler_SuspendVetoesAutoHealthCheck(t *testing.T) {
 		{"suspend true vetoes the check", map[string]any{"suspend": true}, false},
 		{"suspend false keeps it", map[string]any{"suspend": false}, true},
 		{"suspend unauthored keeps it", map[string]any{}, true},
+		// parallelism: 0 reaches the same dead end by a different route — zero
+		// is the maximum pods the job may run, so no completion ever accrues.
+		// Unlike suspension it does not stop the ActiveDeadlineSeconds timer,
+		// so a deadline makes Failed reachable and the check meaningful again.
+		{"zero parallelism vetoes the check", map[string]any{"parallelism": 0}, false},
+		{"zero parallelism with a deadline keeps it", map[string]any{"parallelism": 0, "activeDeadlineSeconds": 60}, true},
+		{"nonzero parallelism keeps it", map[string]any{"parallelism": 1}, true},
+		{"zero parallelism on a suspended job still vetoes", map[string]any{"parallelism": 0, "activeDeadlineSeconds": 60, "suspend": true}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			full := map[string]any{"image": "ghcr.io/org/batch:v1.0.0"}
