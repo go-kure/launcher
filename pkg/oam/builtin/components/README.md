@@ -745,17 +745,34 @@ Every field above is presence-gated: a document that authors none of them
 produces the same object the builder produced before, so the apiserver's own
 defaults still apply rather than being frozen into the manifest.
 
-That is also what makes the `webservice`/`worker` half of go-kure/launcher#341
-additive in the table's sense. Those two kinds gained five properties they
-previously refused as unknown, so no existing document can be authoring one,
-and an existing document that authors none of them builds byte-identically.
-The two rules that look like new restrictions are reachable only through the
-new properties: a `strategy` contradicting the non-RWX guard, and the
-`selector`/`template` refusals, all three of which required authoring a key
-these kinds did not accept before. The one visible change to a pre-existing
-document is the wording of the non-RWX replica refusal, now the shared
-message ("a non-RWX PVC allows at most one replica") rather than each kind's
-own; the documents it refuses are exactly the ones it refused before.
+An existing `webservice` or `worker` document that authors none of the five
+builds byte-identically, and the two rules that look like new restrictions are
+reachable only through them: a `strategy` contradicting the non-RWX guard, and
+the `selector`/`template` refusals. The one visible change to a document
+authoring none of them is the wording of the non-RWX replica refusal, now the
+shared message ("a non-RWX PVC allows at most one replica") rather than each
+kind's own; the documents it refuses are exactly the ones it refused before.
+
+**A document that *was* authoring one of the five keys is a different case, and
+it is not covered by "additive".** These kinds did not previously refuse those
+keys as unknown — they ignored them. A handler reads the properties it knows
+and drops the rest: `validateProperties` is documented as running on *emitted*
+elements only (`pkg/oam/property_validate.go`), and the authored path goes
+through `validate.go`, which checks type names and identity but not property
+shape. So `strategy` on a `webservice` was accepted and silently discarded
+before go-kure/launcher#341, and is honoured after it. Such a document keeps
+building but compiles to a different Deployment, and one authoring a malformed
+value now fails the build where it previously succeeded.
+
+Under the additive test in `docs/oam/design-gvk.md` — every previously valid
+document stays valid *and* compiles to the same output — that is not additive.
+The gap is not this change's: it applies to every property ever added to an
+existing kind, because the authored path has never enforced the Parser
+Strictness that section promises. `docs/oam/design-gvk.md` § Parser Strictness
+states that an unrecognised key is a build error, which is true of the document
+envelope and not of a component's `properties` map. Tracked as
+go-kure/launcher#408, which owns both the doc correction and the question of
+whether the authored path should be made strict.
 
 **`replicas` is validated on `deployment` only.** The other workload kinds read
 `replicas` through a shared helper that falls back to the default whenever the
