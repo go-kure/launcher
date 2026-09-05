@@ -63,7 +63,7 @@ preflight reject every valid use of the trait.
 ### Configuration & scaling
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
-| `configmap` | ConfigMap (+ optional volume mount) | `name`, `data`, `mountPath` |
+| `configmap` | ConfigMap (+ optional volume mount) | `name`, `data`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, Job, or CronJob; any other component fails generation) |
 | `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB` |
 
 ### Operational (FluxCD)
@@ -118,7 +118,7 @@ not the app — chooses the implementation:
 
   The produced Secret is otherwise emit-only — nothing references it unless the trait is told
   to. Set `envFrom: true` and/or `mountPath: <path>` to inject it into the component's workload
-  (Deployment, StatefulSet, DaemonSet, or CronJob): `envFrom` wholesale-injects the Secret into
+  (Deployment, StatefulSet, DaemonSet, Job, or CronJob): `envFrom` wholesale-injects the Secret into
   the first container via `envFrom[].secretRef`, and `mountPath` mounts it as a volume on the
   first container at that path. Both may be set together. `envFrom` cannot be combined with the
   top-level `remoteRef` shorthand: the shorthand derives its single `data[]` entry's `secretKey`

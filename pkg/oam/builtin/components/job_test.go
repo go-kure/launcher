@@ -271,6 +271,10 @@ func TestJobHandler_SelectorProperties_Rejected(t *testing.T) {
 	}{
 		{"selector", map[string]any{"matchLabels": map[string]any{"app": "batch"}}, "not authorable"},
 		{"manualSelector", true, "not authorable"},
+		// podFailurePolicy has to be refused explicitly rather than merely left
+		// out of the schema: validateProperties runs on emitted elements only,
+		// never on authored documents, so an unread key is dropped in silence.
+		{"podFailurePolicy", map[string]any{"rules": []any{}}, "go-kure/launcher#345"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {
@@ -284,9 +288,9 @@ func TestJobHandler_SelectorProperties_Rejected(t *testing.T) {
 
 // TestJobHandler_PropertySchema_Keys pins the published contract: every
 // JobSpec-level key is present, `suspend` is the job component's own, and
-// podFailurePolicy is absent — it belongs to go-kure/launcher#345, and an
-// undeclared property is refused by the schema validator rather than silently
-// dropped.
+// podFailurePolicy is absent — it belongs to go-kure/launcher#345. Absence alone
+// refuses nothing on an authored document; the refusal is jobSpecRejectedKeys,
+// covered by TestJobHandler_SelectorProperties_Rejected.
 func TestJobHandler_PropertySchema_Keys(t *testing.T) {
 	schema := (&components.JobHandler{}).PropertySchema()
 
