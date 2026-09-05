@@ -130,6 +130,15 @@ registries have the same shape and the same failure mode — `traitComponentRest
 a component type's auto health check targets; an unlisted type is skipped silently, so
 its bundle simply carries one health check fewer).
 
+**Omission from `componentHealthCheckGVK` is a decision, not an oversight, for the
+run-to-completion kinds.** `cronjob` and `job` are deliberately absent: a health check
+names a workload Flux waits on to become ready, and neither kind has a steady ready
+state to wait for — a Job that has finished is `Complete`, not `Ready`, and a CronJob
+owns no pods at all between schedules. The other unlisted types — `passthrough`, `crd`
+and `manifests` — are absent for a different reason: they emit whatever the document
+carries, so there is no single GVK to name. When adding a component type, decide which
+group it falls in and say so; silence here reads the same either way.
+
 ## Transform & extension
 
 `NewTransformer(...)` builds a transformer from maps of component/trait handlers;

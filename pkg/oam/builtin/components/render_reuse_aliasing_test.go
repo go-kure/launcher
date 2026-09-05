@@ -297,13 +297,20 @@ func TestJob_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
 	if !ok {
 		t.Fatalf("second render's first object is %T, want *batchv1.Job", *second[0])
 	}
-	if got := *job.Spec.BackoffLimit; got != 4 {
+	// Guarded for the same reason as the mutator above: the regression this test
+	// exists to catch is the second render losing a field, and a bare deref would
+	// report that as a panic rather than as a named failure.
+	if job.Spec.BackoffLimit == nil {
+		t.Fatalf("backoffLimit is nil, want 4 — the second render did not reparse it")
+	} else if got := *job.Spec.BackoffLimit; got != 4 {
 		t.Errorf("backoffLimit = %d, want 4", got)
 	}
 	if job.Spec.SuccessPolicy == nil || len(job.Spec.SuccessPolicy.Rules) != 1 {
 		t.Fatalf("successPolicy.rules = %v, want one rule", job.Spec.SuccessPolicy)
 	}
-	if got := *job.Spec.SuccessPolicy.Rules[0].SucceededCount; got != 3 {
+	if job.Spec.SuccessPolicy.Rules[0].SucceededCount == nil {
+		t.Errorf("successPolicy.rules[0].succeededCount is nil, want 3 — the second render did not reparse it")
+	} else if got := *job.Spec.SuccessPolicy.Rules[0].SucceededCount; got != 3 {
 		t.Errorf("successPolicy.rules[0].succeededCount = %d, want 3", got)
 	}
 }
