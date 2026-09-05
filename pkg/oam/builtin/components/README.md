@@ -15,8 +15,9 @@ API has them, and the same value validation real admission applies (ADR-036 L1: 
 Container projection shared by every kind). Only genuine escape-hatch fields (`passthrough.object`,
 `manifests`/`crd` inline content) and key→value maps whose keys are data (`nodeSelector`,
 `resources.requests`/`limits`) stay open by design; the remaining open objects (`probes`,
-`lifecycle`, `volumes`, `initContainers`/`sidecars` entries, `affinity`) are a known gap, not
-the target shape. Every property
+`lifecycle`, `volumes`, `initContainers`/`sidecars` entries, the four-key `affinity` shorthand)
+are a known gap, not the target shape. The raw `corev1` `affinity` that `deployment` publishes is
+a different schema and is not part of that gap — it is modeled field-by-field. Every property
 (including nested object fields and array item
 schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler API
 Reference.
@@ -29,7 +30,7 @@ Reference.
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). |
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
-| `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface plus the rest of `DeploymentSpec`. Not a superset of `worker` — see below. |
+| `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
@@ -697,6 +698,42 @@ workload that wants launcher to create its Service uses `webservice`. This is
 the reversible direction: adding a property later is additive, removing one is
 breaking.
 
+What `deployment` *does* publish, and the role kinds do not, is the raw
+`corev1` form of the same three scheduling concerns — see "Raw scheduling
+properties" immediately below. The two are not alternatives: the shorthand is
+an opinion, the raw shapes are the API.
+
+#### Raw scheduling properties (`deployment` only)
+
+`deployment` publishes `affinity`, `tolerations` and
+`topologySpreadConstraints` as their plain `corev1` shapes
+(go-kure/launcher#412), parsed by `scheduling.go`. Nothing is inferred from the
+component: every selector, weight and topology key is authored.
+
+| property | type | notes | compat |
+|---|---|---|---|
+| `affinity` | object | `nodeAffinity`, `podAffinity`, `podAntiAffinity`, each with the `requiredDuringSchedulingIgnoredDuringExecution` / `preferredDuringSchedulingIgnoredDuringExecution` arms. Node requirement operators are `In`/`NotIn`/`Exists`/`DoesNotExist`/`Gt`/`Lt`, with upstream's arity rule — `In`/`NotIn` need at least one value, `Exists`/`DoesNotExist` none, `Gt`/`Lt` exactly one integer. `matchExpressions` keys are node label keys (qualified names); `matchFields` keys are field paths such as `metadata.name`, so they are not validated as qualified names. Weights must be 1–100. An `affinity` with no arm set is rejected, as is a node selector term with neither `matchExpressions` nor `matchFields` — upstream documents such a term as matching no nodes, so it can only be a mistake. | additive |
+| `tolerations` | array | The same property `daemonset` already publishes, from the same parser: `key`, `operator` (`Exists`/`Equal`), `value`, `effect`. | additive |
+| `topologySpreadConstraints` | array | `maxSkew` (required, > 0), `topologyKey` (required), `whenUnsatisfiable` (required, `DoNotSchedule`/`ScheduleAnyway`), `labelSelector`, `minDomains` (> 0, and only with `DoNotSchedule`), `nodeAffinityPolicy`/`nodeTaintsPolicy` (`Honor`/`Ignore`), `matchLabelKeys`. The three required fields carry no `omitempty` upstream, so an unset one would emit `maxSkew: 0` / `topologyKey: ""` / `whenUnsatisfiable: ""` rather than an API default — hence required here rather than defaulted. | additive |
+
+Two rules apply to both `affinity` terms and topology-spread constraints:
+`matchLabelKeys` (and `mismatchLabelKeys` on a pod affinity term) cannot be set
+without a `labelSelector`, and no key may appear in both.
+
+An **empty** `labelSelector: {}` is accepted here, unlike on a volume claim's
+`selector` where launcher refuses it. Upstream distinguishes the two: a null
+`labelSelector` on a `PodAffinityTerm` matches no pods, while an empty one
+matches every pod in scope. Refusing the empty form would make a real API shape
+unexpressible.
+
+These three keys live in the `deployment` handler's own property map, above the
+`maps.Copy` calls that merge the shared pod-level and `DeploymentSpec`
+fragments, and they must stay there. `maps.Copy` overwrites the destination, and
+`worker`, `statefulset` and `webservice` each set the four-key `affinity`
+shorthand in their own map and *then* copy the shared pod-level fragment over
+it — so moving a raw `affinity` into that fragment would silently replace the
+shorthand on all three, with no fixture moving to reveal it.
+
 **Routing traits on a `deployment` need an explicit Service.** `expose`,
 `ingress` and `httproute` are accepted on this kind — nothing restricts them —
 but they are not self-sufficient here. `expose` lowers into `ingress` or
@@ -917,6 +954,8 @@ object would change what the next `Generate` emits.
   properties" above). What still separates them from `deployment` is launcher's
   own opinions, which these two keep: `topologySpread` and the four-key
   `affinity` shorthand, and on `webservice` the `port` that drives the Service.
+  Note the shorthand is what they keep — neither publishes the raw `corev1`
+  `affinity`/`topologySpreadConstraints` that `deployment` does.
   The `webservice` handler implements the optional `oam.EndpointProvider`: it declares its own
   pods (`app: <component-name>`) on the declared `port` (its single `port` property drives both
   the container port and the Service port), letting a downstream platform synthesize generic
@@ -925,11 +964,16 @@ object would change what the next `Generate` emits.
 - **deployment** — the kind-named Deployment (see "Deployment-level
   properties" above): the shared container-level, pod-level and
   `DeploymentSpec`-level surface, the last of which it now shares with
-  `webservice` and `worker` rather than owning. What distinguishes it is what
-  it leaves out, not what it adds: no `topologySpread`, no four-key `affinity`
-  shorthand, no `port`; it declares no endpoint and emits no Service. It is not
-  `worker` minus a few things either — it validates `replicas` and reads nulls
-  as omissions across its whole surface, neither of which the role kinds do.
+  `webservice` and `worker` rather than owning. What distinguishes it is mostly
+  what it leaves out: no `topologySpread`, no four-key `affinity` shorthand, no
+  `port`; it declares no endpoint and emits no Service. It is not `worker` minus
+  a few things either — it validates `replicas` and reads nulls as omissions
+  across its whole surface, neither of which the role kinds do. The one thing it
+  adds is the raw `corev1` scheduling surface the role kinds lack: `affinity`,
+  `tolerations` and `topologySpreadConstraints` as the API shapes
+  (go-kure/launcher#412, see "Raw scheduling properties" above). That is the
+  same distinction in the other direction — the role kinds carry the opinion,
+  this kind carries the API.
 - **statefulset** — `serviceName` (headless) and `volumeClaimTemplates`
   (`name`, `mountPath`, `size`, `storageClass`, `accessModes`, plus the rest of
   `corev1.PersistentVolumeClaimSpec`). The StatefulSetSpec-level and

@@ -1,0 +1,47 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-deployment
+  namespace: default
+spec:
+  components:
+    - name: backend
+      type: deployment
+      properties:
+        image: ghcr.io/example/backend:v1.0.0
+        replicas: 3
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: kubernetes.io/arch
+                      operator: In
+                      values:
+                        - amd64
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 40
+                preference:
+                  matchExpressions:
+                    - key: node-role.kubernetes.io/spot
+                      operator: DoesNotExist
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: backend
+        tolerations:
+          - key: dedicated
+            operator: Equal
+            value: batch
+            effect: NoSchedule
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: DoNotSchedule
+            minDomains: 2
+            nodeTaintsPolicy: Honor
+            labelSelector:
+              matchLabels:
+                app: backend
