@@ -292,11 +292,11 @@ it, which is a breaking change by the additive test above — the opposite of wh
 exist to signal. An **optional** counter does pass that test, but buys nothing: a document
 carrying it is rejected by every parser released before the key existed, so no consumer could
 rely on reading it without the coordinated rollout a version-string move already provides.
-(That second direction is forward compatibility, not the additive test, which asks only that
-previously valid documents stay valid.) The CHANGELOG's Document Format category (below)
-serves the at-a-glance-scanning need instead, without touching the wire format. Revisit this
-if a machine consumer ever needs to gate behavior on a format level rather than read a
-changelog.
+(That second direction is forward compatibility, which the additive test does not ask about at
+all: it looks only at how documents that were already valid fare under a newer parser.) The
+CHANGELOG's Document Format category (below) serves the at-a-glance-scanning need instead,
+without touching the wire format. Revisit this if a machine consumer ever needs to gate behavior
+on a format level rather than read a changelog.
 
 **Deprecation procedure.** A field slated for removal is documented as deprecated and continues
 to be accepted for at least one minor release before being dropped. Dropping it is a breaking
