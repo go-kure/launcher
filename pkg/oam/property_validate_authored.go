@@ -119,10 +119,16 @@ func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait) 
 // this file existed and must keep working.
 //
 // The declared type is deliberately string, matching what buildCapabilityKey
-// requires and what those three handlers already declare: a non-string `scope` is
-// silently ignored today, which is precisely the class of silent drop this check
-// exists to eliminate, and rejecting it here makes every trait behave the way expose,
-// ingress and httproute already did.
+// requires and what all three of those handlers already declare in their own schemas
+// (expose_rule.go:144, ingress.go:130, httproute.go:111). What this adds is
+// enforcement of that declaration on the AUTHORED path. A non-string `scope` written
+// on an `ingress` or `httproute` trait was silently ignored before — both read it
+// with a comma-ok assertion (ingress.go:192, httproute.go:154), so a `scope: 3` built
+// clean and resolved the unscoped binding — which is precisely the class of silent
+// drop this check exists to eliminate. Only `expose` was already rejected, and only
+// indirectly: it lowers into `ingress`/`httproute`, so the emitted-path check caught
+// the non-string after lowering (`emitted trait "ingress": properties.scope:
+// expected string, got int`) rather than at the line the author wrote.
 //
 // Measured by grepping every non-test file of pkg/oam ITSELF — the engine, not
 // pkg/oam/builtin/..., whose `Properties["…"]` hits are handlers reading properties
