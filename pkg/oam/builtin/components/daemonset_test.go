@@ -225,6 +225,88 @@ func TestDaemonsetHandler_WithTolerations(t *testing.T) {
 	t.Error("DaemonSet not found")
 }
 
+// TestDaemonsetHandler_SharedTolerationParserReachesDaemonset pins the one part
+// of go-kure/launcher#412 that is NOT additive. parseTolerations and
+// schemaTolerations have exactly two callers — daemonset and deployment — so
+// completing the corev1.Toleration projection for the new kind also changed the
+// old one, and the README's compatibility section says so. This is that claim as
+// an executable oracle rather than prose: without it, no fixture and no test in
+// the repo authors a toleration on daemonset beyond the three-key happy path, so
+// a green suite says nothing about what daemonset now accepts.
+//
+// The split matters and is asserted per rule: tolerationSeconds is a pure gain
+// (previously accepted and dropped), while the three rejections cost daemonset
+// only documents that either did nothing or that the apiserver itself refuses.
+func TestDaemonsetHandler_SharedTolerationParserReachesDaemonset(t *testing.T) {
+	t.Run("tolerationSeconds is now honoured", func(t *testing.T) {
+		ds := generateDaemonSet(t, map[string]any{
+			"image": "ghcr.io/org/agent:v1.0.0",
+			"tolerations": []any{
+				map[string]any{
+					"key":               "node.kubernetes.io/unreachable",
+					"operator":          "Exists",
+					"effect":            "NoExecute",
+					"tolerationSeconds": 300,
+				},
+			},
+		})
+		tols := ds.Spec.Template.Spec.Tolerations
+		if len(tols) != 1 {
+			t.Fatalf("Tolerations = %d, want 1", len(tols))
+		}
+		if tols[0].TolerationSeconds == nil {
+			t.Fatal("daemonset dropped an authored tolerationSeconds")
+		}
+		if got := *tols[0].TolerationSeconds; got != 300 {
+			t.Errorf("TolerationSeconds = %d, want 300", got)
+		}
+	})
+
+	// Each of these is a document daemonset accepted before this work. None of
+	// them was appliable or did any work — see the README table for the per-rule
+	// argument and the upstream citations.
+	rejections := []struct {
+		name       string
+		toleration map[string]any
+		want       string
+	}{
+		{
+			"unrecognised key inside a toleration entry",
+			map[string]any{"key": "dedicated", "operator": "Exists", "tolerationSecond": 30},
+			`unrecognized key "tolerationSecond"`,
+		},
+		{
+			"empty key with a non-Exists operator",
+			map[string]any{"operator": "Equal", "value": "batch", "effect": "NoSchedule"},
+			"must be 'Exists' when key is empty",
+		},
+		{
+			"value under Exists",
+			map[string]any{"key": "dedicated", "operator": "Exists", "value": "batch"},
+			"must be empty when operator is 'Exists'",
+		},
+	}
+	for _, tc := range rejections {
+		t.Run("now rejected: "+tc.name, func(t *testing.T) {
+			h := &components.DaemonsetHandler{}
+			_, err := h.ToApplicationConfig(&oam.Component{
+				Name: "agent",
+				Type: "daemonset",
+				Properties: map[string]any{
+					"image":       "ghcr.io/org/agent:v1.0.0",
+					"tolerations": []any{tc.toleration},
+				},
+			}, "default")
+			if err == nil {
+				t.Fatalf("got nil error, want one containing %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
 func TestDaemonsetConfig_WithPort(t *testing.T) {
 	h := &components.DaemonsetHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{

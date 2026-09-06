@@ -16,7 +16,8 @@ var rawSchedulingKeys = []string{"affinity", "tolerations", "topologySpreadConst
 // guard: the three raw scheduling keys must live in the deployment handler's own
 // literal map and NOT in either fragment it merges. If one ever migrates into
 // schemaPodSpec, this fails here rather than silently changing three other
-// kinds — see TestFragmentCopyWouldClobberShorthand for what that would cost.
+// kinds — see TestDocumentsMapsCopyOverwriteMechanism for why a migrated key
+// would overwrite rather than collide.
 //
 // All four (reserved, jobPods) combinations are walked, not the two production
 // handlers actually pass. Today only jobPods can change the key set (schema.go:451
@@ -93,11 +94,18 @@ func TestOpinionatedKindsKeepAffinityShorthand(t *testing.T) {
 	}
 }
 
-// TestFragmentCopyWouldClobberShorthand is the oracle for the two guards above:
-// it demonstrates the failure they exist to catch actually happens, rather than
-// trusting that maps.Copy behaves as claimed. Without this, both guards could
-// pass against a mechanism that was never a risk.
-func TestFragmentCopyWouldClobberShorthand(t *testing.T) {
+// TestDocumentsMapsCopyOverwriteMechanism documents the maps.Copy behaviour the
+// guards above depend on. It is NOT the regression oracle for them, despite an
+// earlier name that said it was: it constrains no handler and no schema, and it
+// keeps passing under every migration of the three keys into a shared fragment.
+// The oracle is TestSchedulingKeysAbsentFromSharedFragments, which was proven
+// to go red for all three keys across all four schemaPodSpec flag combinations.
+//
+// What this test is for is the "how do you know maps.Copy overwrites?" question
+// the guards' comments assert an answer to. If the standard library ever stopped
+// overwriting, those comments would be wrong and the guards would be defending a
+// risk that does not exist — this fails first and says so.
+func TestDocumentsMapsCopyOverwriteMechanism(t *testing.T) {
 	// Exactly the shape worker.go and friends build: shorthand first, fragment
 	// copied over it.
 	m := map[string]oam.PropertySchema{"affinity": schemaAffinity()}
