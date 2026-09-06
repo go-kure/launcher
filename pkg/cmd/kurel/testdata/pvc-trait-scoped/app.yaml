@@ -1,0 +1,24 @@
+# Regression fixture for go-kure/launcher#408: `scope` is read by the transform
+# engine off EVERY trait (buildCapabilityKey builds "<type>.<scope>"), not by the
+# trait's handler, so it is legal on a trait whose handler declares no such property.
+# The pvc handler declares name/size/storageClassName/accessModes and nothing else;
+# this document must still build, and must resolve the pvc.fast capability binding in
+# cluster.yaml rather than the unscoped pvc one.
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        port: 8080
+      traits:
+        - type: pvc
+          properties:
+            name: shared-data
+            size: 5Gi
+            scope: fast

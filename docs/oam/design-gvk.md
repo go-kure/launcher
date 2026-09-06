@@ -205,6 +205,25 @@ properties therefore have no declared shape, and are not checked.
 type accepts. With no `PropertySchemaProvider` behind it, such a trait's properties are left
 unchecked rather than rejected wholesale.
 
+### `scope` is declared by the engine, not by a handler
+
+Not a carve-out — a property whose schema lives somewhere other than a handler. `scope` selects
+which `ClusterProfile` capability binding a trait resolves against: `buildCapabilityKey`
+(`pkg/oam/transform.go:985-991`) builds the key `"<traitType>.<scope>"` for **every** trait type,
+falling back to the unscoped `"<traitType>"` when no scoped binding is declared. It is therefore
+legal on any trait, including the many whose handlers declare no such property — a `pvc` trait
+selecting a fast storage class is the worked example, and it built correctly long before the
+authored path was checked at all.
+
+`expose`, `ingress` and `httproute` also declare `scope` in their own schemas, but for an
+unrelated purpose (disambiguating sub-application names); that coincidence is why this was
+invisible until authored properties were checked. The authored check merges
+`engineTraitProperties` (`pkg/oam/property_validate_authored.go`) into the trait's schema, with
+the handler's own declaration winning when both describe the key, and without mutating what
+`PropertySchema()` returned — so `HandlerSchemas` continues to advertise only what each handler
+actually declares. The engine type-asserts `scope` to `string`, so the check declares it a string
+and rejects any other type rather than letting it be silently ignored.
+
 ### Required fields are checked at nested levels only
 
 `Required` on a *top-level* authored property is deliberately not enforced at parse time. A
