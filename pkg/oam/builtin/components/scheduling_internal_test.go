@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"maps"
 	"testing"
 
@@ -16,11 +17,25 @@ var rawSchedulingKeys = []string{"affinity", "tolerations", "topologySpreadConst
 // literal map and NOT in either fragment it merges. If one ever migrates into
 // schemaPodSpec, this fails here rather than silently changing three other
 // kinds — see TestFragmentCopyWouldClobberShorthand for what that would cost.
+//
+// All four (reserved, jobPods) combinations are walked, not the two production
+// handlers actually pass. Today only jobPods can change the key set (schema.go:451
+// adds podActiveDeadlineSeconds; reserved only stamps PlatformReserved onto values,
+// and no production call site passes reserved=true at all), so the two extra
+// combinations cannot fail — but nothing structural holds that. `reserved` is a
+// plain bool parameter, and an `if reserved` branch adding a key later is exactly
+// the migration this guard exists to catch. Generating the matrix rather than
+// listing the reachable cases means the guard stays honest without anyone having to
+// re-derive that argument.
 func TestSchedulingKeysAbsentFromSharedFragments(t *testing.T) {
 	fragments := map[string]map[string]oam.PropertySchema{
-		"schemaPodSpec(false, false)": schemaPodSpec(false, false),
-		"schemaPodSpec(false, true)":  schemaPodSpec(false, true),
-		"schemaDeploymentSpec()":      schemaDeploymentSpec(),
+		"schemaDeploymentSpec()": schemaDeploymentSpec(),
+	}
+	for _, reserved := range []bool{false, true} {
+		for _, jobPods := range []bool{false, true} {
+			name := fmt.Sprintf("schemaPodSpec(%t, %t)", reserved, jobPods)
+			fragments[name] = schemaPodSpec(reserved, jobPods)
+		}
 	}
 	for name, fragment := range fragments {
 		for _, key := range rawSchedulingKeys {
