@@ -441,6 +441,45 @@ func TestDeploymentScheduling_TolerationComparisonOperators(t *testing.T) {
 	}
 }
 
+// TestDeploymentScheduling_TolerationNullScalarIsOmission pins null-as-omission
+// one level down, inside a toleration entry. The null cannot be filtered out
+// before it reaches the parser: withoutExplicitNulls (deployment_spec.go) strips
+// only top-level properties, and emission validation accepts a null under any
+// optional field (property_validate.go's validatePropertyValue), so a nested null
+// arrives intact and a direct type assertion on it made a schema-valid document
+// fail conversion.
+//
+// The assertions below are behavioural, not just "no error": a null `key` must
+// leave the entry keyless, which in turn is what makes the operator default to
+// Exists rather than Equal.
+func TestDeploymentScheduling_TolerationNullScalarIsOmission(t *testing.T) {
+	dep, _ := generateDeployment(t, "app", map[string]any{
+		"image": "nginx:1.27",
+		"tolerations": []any{map[string]any{
+			"key":      nil,
+			"operator": nil,
+			"value":    nil,
+			"effect":   "NoSchedule",
+		}},
+	})
+	got := dep.Spec.Template.Spec.Tolerations
+	if len(got) != 1 {
+		t.Fatalf("Tolerations length = %d, want 1", len(got))
+	}
+	if got[0].Key != "" {
+		t.Errorf("Key = %q, want empty — a null key is an omitted key", got[0].Key)
+	}
+	if got[0].Value != "" {
+		t.Errorf("Value = %q, want empty", got[0].Value)
+	}
+	if got[0].Operator != corev1.TolerationOpExists {
+		t.Errorf("Operator = %q, want Exists — the keyless default, reached only if the null key read as absent", got[0].Operator)
+	}
+	if got[0].Effect != corev1.TaintEffectNoSchedule {
+		t.Errorf("Effect = %q, want NoSchedule", got[0].Effect)
+	}
+}
+
 // TestDeploymentScheduling_TolerationRejections covers the cross-field rules
 // that previously let launcher emit a toleration the apiserver refuses, plus
 // the unknown-key rejection that is how tolerationSeconds stayed missing.

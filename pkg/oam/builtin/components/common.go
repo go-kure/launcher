@@ -2761,7 +2761,18 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 		}
 		tol := corev1.Toleration{}
 
-		if raw, exists := m["key"]; exists {
+		// Each scalar below reads an explicit null as omission, this package's
+		// convention, rather than as a type error. The null cannot be filtered out
+		// upstream: withoutExplicitNulls (deployment_spec.go) strips only top-level
+		// properties, and emission validation deliberately accepts a null under any
+		// optional field (property_validate.go's validatePropertyValue). So a null
+		// nested inside a toleration entry arrives here intact, and asserting
+		// directly on it turned a schema-valid document into a conversion failure.
+		//
+		// Only null is treated as omission, not the empty string: parseStringField's
+		// "" == absent rule would additionally turn `operator: ""` from an error into
+		// a silent default, which is a separate change and not this one.
+		if raw, exists := m["key"]; exists && !isExplicitNull(raw) {
 			keyStr, ok := raw.(string)
 			if !ok {
 				return nil, errors.Errorf("toleration[%d].key: must be a string, got %T", i, raw)
@@ -2769,7 +2780,7 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 			tol.Key = keyStr
 		}
 
-		if raw, exists := m["operator"]; exists {
+		if raw, exists := m["operator"]; exists && !isExplicitNull(raw) {
 			opStr, ok := raw.(string)
 			if !ok {
 				return nil, errors.Errorf("toleration[%d].operator: must be a string, got %T", i, raw)
@@ -2797,7 +2808,7 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 			tol.Operator = corev1.TolerationOpEqual
 		}
 
-		if raw, exists := m["value"]; exists {
+		if raw, exists := m["value"]; exists && !isExplicitNull(raw) {
 			valStr, ok := raw.(string)
 			if !ok {
 				return nil, errors.Errorf("toleration[%d].value: must be a string, got %T", i, raw)
@@ -2805,7 +2816,7 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 			tol.Value = valStr
 		}
 
-		if raw, exists := m["effect"]; exists {
+		if raw, exists := m["effect"]; exists && !isExplicitNull(raw) {
 			effStr, ok := raw.(string)
 			if !ok {
 				return nil, errors.Errorf("toleration[%d].effect: must be a string, got %T", i, raw)

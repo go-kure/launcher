@@ -794,6 +794,7 @@ rule, because "additive" on its own would be false:
 | An unrecognised key inside a toleration entry is now an error | **New errors only, and here output really is byte-identical.** A key the parser never read contributed nothing to the emitted object, so every document that still builds emits exactly what it emitted before. | `docs/oam/design-gvk.md` already states that an unrecognised key is a build error; this moves `daemonset` toward the documented contract rather than away from it. Gating it to `deployment` would leave `daemonset` permanently accepting shapes that do no work. |
 | An empty `key` with a non-`Exists` operator is now an error | **New errors only, and only on documents the apiserver would have refused.** Upstream states it as a hard "must" (`k8s.io/api@v0.36.3` `core/v1/types.go:4093`). | Nothing appliable is lost. |
 | `tolerations` authored as a mapping rather than an array is now an error | **New errors only, and output is byte-identical.** The whole property was previously discarded without a word — the parser's `[]any` assertion failed and it returned "absent", so a mistyped block emitted no tolerations at all and the build succeeded. Its two sibling parsers on the adjacent lines (`affinity`, `topologySpreadConstraints`) already rejected the same mistake, so this removes an inconsistency rather than adding a rule. | A silently discarded property is the failure mode this whole projection exists to remove; leaving `daemonset` on the old behaviour would keep the one parser that swallows a typo. |
+| An explicit null on a toleration's `key`, `operator`, `value` or `effect` now reads as omission | **Fewer errors, and output is byte-identical for everything that already built.** Such an entry previously failed conversion with `must be a string, got <nil>`; it now behaves as if the key were absent, which is this package's null-as-omission convention. Only `null` is affected — an empty string is unchanged, so `operator: ""` is still an error rather than a silent default. | The null cannot be filtered before it arrives: `withoutExplicitNulls` strips only top-level properties, and emission validation accepts a null under any optional field, so a lowering rule or an author writing a nested null produced a schema-valid document that could not be converted. Leaving `daemonset` out would keep one kind refusing documents the schema declares valid. |
 | A `value` under `operator: Exists` is now an error | **New errors only, and only on documents the apiserver would have refused** — upstream's `ValidateTolerations` rejects the pair outright, notwithstanding the field doc's softer "should" (the citation, and its second-hand provenance, are at the check itself in `common.go`). | Same: nothing appliable is lost. |
 
 Net, stated without rounding: a `daemonset` document that previously built and
@@ -801,7 +802,9 @@ was accepted by a cluster still builds. Its output is byte-identical **unless it
 authored `tolerationSeconds`**, in which case the field it wrote now appears —
 which is the defect being fixed rather than a regression. What no longer builds
 is a document that was either doing nothing, carrying a malformed value, or
-would have been refused on apply. This is pre-release `v1alpha1`; the change is
+would have been refused on apply. One row goes the other way — a nested explicit
+null in a toleration entry now builds where it previously failed conversion — so
+the table is not uniformly a tightening. This is pre-release `v1alpha1`; the change is
 taken deliberately rather than hidden behind a `deployment`-only option whose
 removal would depend on unrelated work landing.
 
