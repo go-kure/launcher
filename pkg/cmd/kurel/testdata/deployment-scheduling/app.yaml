@@ -36,6 +36,10 @@ spec:
             operator: Equal
             value: batch
             effect: NoSchedule
+          - key: node.kubernetes.io/unreachable
+            operator: Exists
+            effect: NoExecute
+            tolerationSeconds: 300
         topologySpreadConstraints:
           - maxSkew: 1
             topologyKey: topology.kubernetes.io/zone

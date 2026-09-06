@@ -53,6 +53,10 @@ spec:
         key: dedicated
         operator: Equal
         value: batch
+      - effect: NoExecute
+        key: node.kubernetes.io/unreachable
+        operator: Exists
+        tolerationSeconds: 300
       topologySpreadConstraints:
       - labelSelector:
           matchLabels:

@@ -560,9 +560,14 @@ func schemaTolerations() oam.PropertySchema {
 			Description: "A single taint toleration.",
 			Properties: map[string]oam.PropertySchema{
 				"key":      {Type: oam.PropertyTypeString, Description: "Taint key to tolerate."},
-				"operator": {Type: oam.PropertyTypeString, Enum: []any{"Exists", "Equal"}, Description: "How the taint key/value are matched."},
-				"value":    {Type: oam.PropertyTypeString, Description: "Taint value to match when operator is Equal."},
+				"operator": {Type: oam.PropertyTypeString, Enum: []any{"Exists", "Equal", "Lt", "Gt"}, Description: "How the taint key/value are matched. Defaults to Equal, or to Exists when key is empty — an empty key requires Exists. Lt and Gt compare numerically and need the cluster's TaintTolerationComparisonOperators feature gate."},
+				"value":    {Type: oam.PropertyTypeString, Description: "Taint value to match when operator is Equal, Lt or Gt; must be an integer for Lt and Gt, and must be empty for Exists."},
 				"effect":   {Type: oam.PropertyTypeString, Enum: []any{"NoSchedule", "PreferNoSchedule", "NoExecute", ""}, Description: "Taint effect to tolerate (empty matches all effects)."},
+				// Completes the corev1.Toleration projection: without this key
+				// an authored tolerationSeconds parsed to nothing and was
+				// dropped from the emitted pod template, silently turning a
+				// time-bounded NoExecute toleration into an unbounded one.
+				"tolerationSeconds": {Type: oam.PropertyTypeInteger, Description: "Seconds the pod tolerates a NoExecute taint before eviction. Unset means tolerate forever; 0 or negative means evict immediately. Ignored by the cluster for any effect other than NoExecute."},
 			},
 		},
 	}

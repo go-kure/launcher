@@ -774,7 +774,7 @@ component: every selector, weight and topology key is authored.
 | property | type | notes | compat |
 |---|---|---|---|
 | `affinity` | object | `nodeAffinity`, `podAffinity`, `podAntiAffinity`, each with the `requiredDuringSchedulingIgnoredDuringExecution` / `preferredDuringSchedulingIgnoredDuringExecution` arms. Node requirement operators are `In`/`NotIn`/`Exists`/`DoesNotExist`/`Gt`/`Lt`, with upstream's arity rule — `In`/`NotIn` need at least one value, `Exists`/`DoesNotExist` none, `Gt`/`Lt` exactly one integer. `matchExpressions` keys are node label keys (qualified names); `matchFields` keys are field paths such as `metadata.name`, so they are not validated as qualified names. Weights must be 1–100. An `affinity` with no arm set is rejected, as is a node selector term with neither `matchExpressions` nor `matchFields` — upstream documents such a term as matching no nodes, so it can only be a mistake. | additive |
-| `tolerations` | array | The same property `daemonset` already publishes, from the same parser: `key`, `operator` (`Exists`/`Equal`), `value`, `effect`. | additive |
+| `tolerations` | array | The same property `daemonset` already publishes, from the same parser, now covering the complete `corev1.Toleration`: `key`, `operator` (`Exists`/`Equal`/`Lt`/`Gt`), `value`, `effect`, `tolerationSeconds`. `tolerationSeconds` is a pointer upstream, so unset (tolerate forever) and `0` (evict immediately) are different documents. Cross-field rules: an empty `key` requires `Exists` (upstream states it as a "must"); a value under `Exists` is rejected as launcher's own rule, since `Exists` already wildcards the value and an authored one would silently do nothing; `Lt`/`Gt` need an integer `value` and the cluster's `TaintTolerationComparisonOperators` gate. An unrecognised key is reported rather than dropped. | additive |
 | `topologySpreadConstraints` | array | `maxSkew` (required, > 0), `topologyKey` (required), `whenUnsatisfiable` (required, `DoNotSchedule`/`ScheduleAnyway`), `labelSelector`, `minDomains` (> 0, and only with `DoNotSchedule`), `nodeAffinityPolicy`/`nodeTaintsPolicy` (`Honor`/`Ignore`), `matchLabelKeys`. The three required fields carry no `omitempty` upstream, so an unset one would emit `maxSkew: 0` / `topologyKey: ""` / `whenUnsatisfiable: ""` rather than an API default — hence required here rather than defaulted. | additive |
 
 One rule applies to both `affinity` terms and topology-spread constraints:
@@ -1049,7 +1049,7 @@ object would change what the next `Generate` emits.
   `corev1.PersistentVolumeClaimSpec`). The StatefulSetSpec-level and
   claim-template field sets are classified in "StatefulSet-level and
   claim-template properties" below.
-- **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`); `port`
+- **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`/`tolerationSeconds`); `port`
   optionally adds a Service. No `sidecars` schema key (init containers only).
   DaemonSetSpec-level (go-kure/launcher#340, `daemonset_spec.go`): `updateStrategy`,
   `minReadySeconds`, `revisionHistoryLimit`. `appsv1.DaemonSetSpec` has five

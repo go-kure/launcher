@@ -1781,6 +1781,15 @@ func optionalInt32(raw map[string]any, key, label string) (int32, bool, error) {
 	return parseInt32Field(raw, key, label)
 }
 
+// optionalInt64 is parseInt64Field with an explicit null read as omission,
+// mirroring optionalInt32 for the fields whose API type is int64.
+func optionalInt64(raw map[string]any, key, label string) (int64, bool, error) {
+	if v, present := raw[key]; present && isExplicitNull(v) {
+		return 0, false, nil
+	}
+	return parseInt64Field(raw, key, label)
+}
+
 // optionalObjectList is parseObjectList with an explicit null read as omission.
 func optionalObjectList(raw map[string]any, key string) ([]map[string]any, bool, error) {
 	if v, present := raw[key]; present && isExplicitNull(v) {
@@ -2712,6 +2721,14 @@ func parseAffinity(props map[string]any) (AffinityConfig, error) {
 	return cfg, nil
 }
 
+// tolerationKeys is the complete corev1.Toleration field set
+// (k8s.io/api@v0.36.3 core/v1/types.go:4095-4116). Declared rather than left
+// implicit so the projection is checked against the API type instead of against
+// whatever the parser happens to read: an unlisted key is now reported instead
+// of dropped, which is how tolerationSeconds went missing until
+// go-kure/launcher#412 published this property on a second kind.
+var tolerationKeys = []string{"key", "operator", "value", "effect", "tolerationSeconds"}
+
 func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 	tolList, ok := props["tolerations"].([]any)
 	if !ok {
@@ -2722,6 +2739,9 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 		m, ok := t.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("toleration[%d]: must be a mapping", i)
+		}
+		if err := rejectUnknownKeys(m, tolerationKeys, indexedLabel("toleration", i)); err != nil {
+			return nil, err
 		}
 		tol := corev1.Toleration{}
 
@@ -2738,11 +2758,22 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 			if !ok {
 				return nil, errors.Errorf("toleration[%d].operator: must be a string, got %T", i, raw)
 			}
+			// "Valid operators are Exists, Equal, Lt, and Gt. Defaults to
+			// Equal. […] Lt and Gt perform numeric comparisons (requires
+			// feature gate TaintTolerationComparisonOperators)."
+			// (k8s.io/api@v0.36.3 core/v1/types.go:4097-4100.)
+			//
+			// Lt and Gt are accepted even though they are feature-gated: this
+			// package already publishes other gated fields (minDomains,
+			// matchLabelKeys) and leaves the gate to the cluster, and refusing
+			// them here made the operator set of a "raw" projection narrower
+			// than the API's own.
 			switch corev1.TolerationOperator(opStr) {
-			case corev1.TolerationOpExists, corev1.TolerationOpEqual:
+			case corev1.TolerationOpExists, corev1.TolerationOpEqual,
+				corev1.TolerationOpLt, corev1.TolerationOpGt:
 				tol.Operator = corev1.TolerationOperator(opStr)
 			default:
-				return nil, errors.Errorf("toleration[%d].operator: invalid value %q, must be 'Exists' or 'Equal'", i, opStr)
+				return nil, errors.Errorf("toleration[%d].operator: invalid value %q, must be 'Exists', 'Equal', 'Lt' or 'Gt'", i, opStr)
 			}
 		} else if tol.Key == "" {
 			tol.Operator = corev1.TolerationOpExists
@@ -2768,6 +2799,54 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 				tol.Effect = corev1.TaintEffect(effStr)
 			default:
 				return nil, errors.Errorf("toleration[%d].effect: invalid value %q", i, effStr)
+			}
+		}
+
+		// "TolerationSeconds represents the period of time the toleration
+		// (which must be of effect NoExecute, otherwise this field is ignored)
+		// tolerates the taint. By default, it is not set, which means tolerate
+		// the taint forever (do not evict). Zero and negative values will be
+		// treated as 0 (evict immediately) by the system."
+		// (k8s.io/api@v0.36.3 core/v1/types.go:4111-4116.)
+		//
+		// A pointer, so nil (tolerate forever) and 0 (evict immediately) are
+		// different documents — hence optionalInt64's present flag rather than
+		// a zero test. Zero and negative values are passed through: the field
+		// doc gives them a defined meaning, so refusing them would be
+		// launcher's own rejection of a document the apiserver accepts. The
+		// NoExecute precondition is not enforced here for the same reason —
+		// upstream ignores the field rather than rejecting the pod.
+		if seconds, present, err := optionalInt64(m, "tolerationSeconds", indexedLabel("toleration", i)+".tolerationSeconds"); err != nil {
+			return nil, err
+		} else if present {
+			tol.TolerationSeconds = &seconds
+		}
+
+		// The three cross-field rules, each from Toleration's own field docs.
+		// Checked after every field is read because each names two of them.
+		//
+		// "If the key is empty, operator must be Exists; this combination means
+		// to match all values and all keys." (core/v1/types.go:4093.) A hard
+		// "must", so this is the API's rule, not launcher's — an empty key with
+		// Equal matches nothing the apiserver will accept.
+		if tol.Key == "" && tol.Operator != corev1.TolerationOpExists {
+			return nil, errors.Errorf("toleration[%d].operator: must be 'Exists' when key is empty, got %q", i, tol.Operator)
+		}
+		// "If the operator is Exists, the value should be empty, otherwise just
+		// a regular string." (core/v1/types.go:4104.) "Should", not "must", so
+		// this rejection is launcher's own: Exists is a wildcard over the value,
+		// so an authored value under it is matched against nothing and silently
+		// does no work — the same failure this file refuses elsewhere for an
+		// empty affinity and an empty node selector term.
+		if tol.Operator == corev1.TolerationOpExists && tol.Value != "" {
+			return nil, errors.Errorf("toleration[%d].value: must be empty when operator is 'Exists', got %q — Exists already matches every value", i, tol.Value)
+		}
+		// "Lt and Gt perform numeric comparisons" (core/v1/types.go:4100), so
+		// the value has to be one — mirroring the Gt/Lt arity rule the node
+		// selector requirements apply (scheduling.go).
+		if tol.Operator == corev1.TolerationOpLt || tol.Operator == corev1.TolerationOpGt {
+			if _, err := strconv.ParseInt(tol.Value, 10, 64); err != nil {
+				return nil, errors.Errorf("toleration[%d].value: operator %s requires an integer, got %q", i, tol.Operator, tol.Value)
 			}
 		}
 

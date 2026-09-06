@@ -232,6 +232,142 @@ func TestDeploymentScheduling_MismatchLabelKeysMayOverlapSelector(t *testing.T) 
 	}
 }
 
+// TestDeploymentScheduling_TolerationSecondsSurvives is the regression test for
+// the one field the raw toleration projection used to drop. Before this, an
+// authored tolerationSeconds parsed to nothing and vanished from the pod
+// template: the build SUCCEEDED and emitted a toleration with no eviction
+// deadline, silently turning a time-bounded NoExecute toleration into an
+// unbounded one. A pointer test, not a value test — nil (tolerate forever) and
+// 0 (evict immediately) are different documents (k8s.io/api@v0.36.3
+// core/v1/types.go:4111-4116).
+func TestDeploymentScheduling_TolerationSecondsSurvives(t *testing.T) {
+	dep, _ := generateDeployment(t, "app", map[string]any{
+		"image": "nginx:1.27",
+		"tolerations": []any{
+			map[string]any{
+				"key": "node.kubernetes.io/unreachable", "operator": "Exists",
+				"effect": "NoExecute", "tolerationSeconds": 300,
+			},
+			map[string]any{
+				"key": "spot", "operator": "Exists",
+				"effect": "NoExecute", "tolerationSeconds": 0,
+			},
+			map[string]any{"key": "plain", "operator": "Exists", "effect": "NoExecute"},
+		},
+	})
+	tols := dep.Spec.Template.Spec.Tolerations
+	if len(tols) != 3 {
+		t.Fatalf("Tolerations = %d, want 3", len(tols))
+	}
+	if tols[0].TolerationSeconds == nil {
+		t.Fatal("tolerations[0].TolerationSeconds is nil — an authored tolerationSeconds was dropped")
+	}
+	if got := *tols[0].TolerationSeconds; got != 300 {
+		t.Errorf("tolerations[0].TolerationSeconds = %d, want 300", got)
+	}
+	// 0 is authorable and distinct from unset: it means evict immediately.
+	if tols[1].TolerationSeconds == nil {
+		t.Fatal("tolerations[1].TolerationSeconds is nil — an authored 0 was read as unset")
+	}
+	if got := *tols[1].TolerationSeconds; got != 0 {
+		t.Errorf("tolerations[1].TolerationSeconds = %d, want 0", got)
+	}
+	if tols[2].TolerationSeconds != nil {
+		t.Errorf("tolerations[2].TolerationSeconds = %d, want nil for an unauthored field", *tols[2].TolerationSeconds)
+	}
+}
+
+// TestDeploymentScheduling_TolerationComparisonOperators pins the two operators
+// the projection used to refuse outright. Lt and Gt are feature-gated upstream
+// (TaintTolerationComparisonOperators, core/v1/types.go:4100) but are valid API
+// values, and this package leaves other gated fields to the cluster too.
+func TestDeploymentScheduling_TolerationComparisonOperators(t *testing.T) {
+	dep, _ := generateDeployment(t, "app", map[string]any{
+		"image": "nginx:1.27",
+		"tolerations": []any{
+			map[string]any{"key": "capacity", "operator": "Gt", "value": "5"},
+			map[string]any{"key": "capacity", "operator": "Lt", "value": "20"},
+		},
+	})
+	tols := dep.Spec.Template.Spec.Tolerations
+	if len(tols) != 2 {
+		t.Fatalf("Tolerations = %d, want 2", len(tols))
+	}
+	if tols[0].Operator != corev1.TolerationOpGt || tols[0].Value != "5" {
+		t.Errorf("tolerations[0] = %+v, want operator Gt value 5", tols[0])
+	}
+	if tols[1].Operator != corev1.TolerationOpLt || tols[1].Value != "20" {
+		t.Errorf("tolerations[1] = %+v, want operator Lt value 20", tols[1])
+	}
+}
+
+// TestDeploymentScheduling_TolerationRejections covers the cross-field rules
+// that previously let launcher emit a toleration the apiserver refuses, plus
+// the unknown-key rejection that is how tolerationSeconds stayed missing.
+func TestDeploymentScheduling_TolerationRejections(t *testing.T) {
+	cases := []struct {
+		name       string
+		toleration map[string]any
+		want       string
+	}{
+		{
+			"empty key with Equal",
+			map[string]any{"operator": "Equal", "effect": "NoSchedule"},
+			"must be 'Exists' when key is empty",
+		},
+		{
+			// An omitted operator with an empty key defaults to Exists, not
+			// Equal, so this is refused by the value rule rather than the key
+			// rule — either way an authored value that matches nothing is
+			// reported instead of emitted.
+			"empty key with a value and no operator",
+			map[string]any{"value": "batch", "effect": "NoSchedule"},
+			"must be empty when operator is 'Exists'",
+		},
+		{
+			"Exists with a value",
+			map[string]any{"key": "dedicated", "operator": "Exists", "value": "batch"},
+			"must be empty when operator is 'Exists'",
+		},
+		{
+			"Gt with a non-integer value",
+			map[string]any{"key": "capacity", "operator": "Gt", "value": "many"},
+			"requires an integer",
+		},
+		{
+			"Lt with no value",
+			map[string]any{"key": "capacity", "operator": "Lt"},
+			"requires an integer",
+		},
+		{
+			"unknown operator",
+			map[string]any{"key": "dedicated", "operator": "Nope"},
+			"must be 'Exists', 'Equal', 'Lt' or 'Gt'",
+		},
+		{
+			"unknown key",
+			map[string]any{"key": "dedicated", "operator": "Exists", "tolerationSecond": 30},
+			`unrecognized key "tolerationSecond"`,
+		},
+		{
+			"tolerationSeconds is not an integer",
+			map[string]any{"key": "dedicated", "operator": "Exists", "tolerationSeconds": "300"},
+			"must be an integer",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := schedulingError(t, map[string]any{"tolerations": []any{tc.toleration}})
+			if err == nil {
+				t.Fatalf("got nil error, want one containing %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
 // TestDeploymentScheduling_TolerationsRoundTrip reuses the pre-existing
 // parseTolerations, so this asserts the wiring rather than the parsing.
 func TestDeploymentScheduling_TolerationsRoundTrip(t *testing.T) {
