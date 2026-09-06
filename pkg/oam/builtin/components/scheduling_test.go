@@ -834,91 +834,139 @@ func TestDeploymentScheduling_MatchFieldsSchemaMatchesParser(t *testing.T) {
 		t.Error("matchExpressions values is required in the schema, but Exists and DoesNotExist take none — the asymmetry that lets matchFields require it no longer holds")
 	}
 
+	// schemaOps is the operator vocabulary every direction below probes across. The
+	// round-9 form of these invariants hard-coded "In" in two of the three, which
+	// left the arity rule unchecked for the other advertised operator entirely — a
+	// mutant making that rule operator-dependent passed all three subtests and the
+	// whole ./pkg/oam/... suite (F2, round 10). Any direction that fixes an operator
+	// instead of ranging over this is that defect returning.
+	schemaOps := enum(t, fields, "operator")
+	if len(schemaOps) == 0 {
+		t.Fatal("matchFields operator enum is empty; every direction below degenerates to probing nothing")
+	}
+
 	t.Run("operator sets agree", func(t *testing.T) {
-		// The candidate pool is corev1's own NodeSelectorOperator constants
-		// (core/v1/types.go:3820-3825), so it enumerates what the API type can
-		// hold rather than what this test's author remembered. An operator added
-		// upstream and adopted by the parser but not the schema is caught the
-		// moment the vendored constant list grows.
+		// The candidate pool is a MAINTAINED list of corev1's NodeSelectorOperator
+		// constants (core/v1/types.go:3820-3825), copied by hand. It is not derived:
+		// adding an operator upstream and adopting it in the parser leaves this
+		// literal unchanged and this subtest green, so it gives negative coverage
+		// over today's vocabulary, not a tripwire on tomorrow's. The Fatal below is
+		// what keeps it honest in the one direction it can police — a schema that
+		// advertises something the pool cannot reach stops the test rather than
+		// quietly passing.
 		candidates := []string{
 			string(corev1.NodeSelectorOpIn), string(corev1.NodeSelectorOpNotIn),
 			string(corev1.NodeSelectorOpExists), string(corev1.NodeSelectorOpDoesNotExist),
 			string(corev1.NodeSelectorOpGt), string(corev1.NodeSelectorOpLt),
 		}
-		schemaOps := set(enum(t, fields, "operator"))
-		for op := range schemaOps {
+		schemaSet := set(schemaOps)
+		for op := range schemaSet {
 			if !slices.Contains(candidates, op) {
 				t.Fatalf("schema advertises operator %q, which is not a corev1.NodeSelectorOperator constant — the probe pool cannot cover it", op)
 			}
 		}
 		parserOps := map[string]bool{}
 		for _, op := range candidates {
-			// Probe both arities. An operator legitimately taking no values would
-			// otherwise read as rejected because the one-value probe tripped the
-			// arity rule, which would make the two sets disagree for a reason
-			// that is not a schema/parser divergence at all.
-			withValue := matchFieldsError(t, map[string]any{"key": nodeName, "operator": op, "values": []any{"node-1"}})
-			without := matchFieldsError(t, map[string]any{"key": nodeName, "operator": op})
-			if withValue == nil || without == nil {
+			// Acceptance means the SCHEMA-VALID form converts, not that some form
+			// does. `values` is Required, so a one-value entry is exactly what an
+			// emitted entry carrying this operator looks like; the round-9 form
+			// counted either arity and so could not see an operator whose real
+			// arity rule disagreed with the schema.
+			if matchFieldsError(t, map[string]any{"key": nodeName, "operator": op, "values": []any{"node-1"}}) == nil {
 				parserOps[op] = true
 			}
 		}
-		if extra := diff(schemaOps, parserOps); len(extra) > 0 {
-			t.Errorf("schema advertises operators the parser rejects: %v — an emitted entry using one clears emission validation and fails conversion", extra)
+		if extra := diff(schemaSet, parserOps); len(extra) > 0 {
+			t.Errorf("schema advertises operators the parser rejects in the schema-valid form: %v — an emitted entry using one clears emission validation and fails conversion", extra)
 		}
-		if missing := diff(parserOps, schemaOps); len(missing) > 0 {
+		if missing := diff(parserOps, schemaSet); len(missing) > 0 {
 			t.Errorf("parser accepts operators the schema forbids: %v — emission validation rejects what the handler would have converted", missing)
 		}
 	})
 
 	t.Run("requiredness agrees", func(t *testing.T) {
-		valid := map[string]any{"key": nodeName, "operator": "In", "values": []any{"node-1"}}
-		schemaRequired, parserRequired := map[string]bool{}, map[string]bool{}
-		for key, prop := range fields.Properties {
-			if _, ok := valid[key]; !ok {
-				t.Fatalf("schema declares property %q that the probe entry does not set; extend valid before adding a property", key)
-			}
-			if prop.Required {
-				schemaRequired[key] = true
-			}
-			probe := make(map[string]any, len(valid))
-			for k, v := range valid {
-				if k != key {
-					probe[k] = v
+		for _, op := range schemaOps {
+			t.Run(op, func(t *testing.T) {
+				valid := map[string]any{"key": nodeName, "operator": op, "values": []any{"node-1"}}
+				// A witness first: omissions only mean something if the unmodified
+				// entry converts. Without this an entry that fails for an unrelated
+				// reason makes every omission "required" and the subtest passes by
+				// agreeing with a schema that marks all three required.
+				if err := matchFieldsError(t, valid); err != nil {
+					t.Fatalf("the schema-valid entry does not convert: %v", err)
 				}
-			}
-			if matchFieldsError(t, probe) != nil {
-				parserRequired[key] = true
-			}
-		}
-		if extra := diff(parserRequired, schemaRequired); len(extra) > 0 {
-			t.Errorf("parser demands %v but the schema marks them optional — emission validation skips presence checks on non-required keys, so an emitted entry omitting one clears the schema and fails conversion", extra)
-		}
-		if missing := diff(schemaRequired, parserRequired); len(missing) > 0 {
-			t.Errorf("schema marks %v required but the parser accepts the entry without them — the schema refuses documents the handler would have converted", missing)
+				schemaRequired, parserRequired := map[string]bool{}, map[string]bool{}
+				for key, prop := range fields.Properties {
+					if _, ok := valid[key]; !ok {
+						t.Fatalf("schema declares property %q that the probe entry does not set; extend valid before adding a property", key)
+					}
+					if prop.Required {
+						schemaRequired[key] = true
+					}
+					probe := make(map[string]any, len(valid))
+					for k, v := range valid {
+						if k != key {
+							probe[k] = v
+						}
+					}
+					if matchFieldsError(t, probe) != nil {
+						parserRequired[key] = true
+					}
+				}
+				if extra := diff(parserRequired, schemaRequired); len(extra) > 0 {
+					t.Errorf("parser demands %v but the schema marks them optional — emission validation skips presence checks on non-required keys, so an emitted entry omitting one clears the schema and fails conversion", extra)
+				}
+				if missing := diff(schemaRequired, parserRequired); len(missing) > 0 {
+					t.Errorf("schema marks %v required but the parser accepts the entry without them — the schema refuses documents the handler would have converted", missing)
+				}
+			})
 		}
 	})
 
 	t.Run("key sets agree", func(t *testing.T) {
-		// Unlike the operator pool, these candidates are CHOSEN. Upstream
-		// enumerates the accepted key (nodeFieldSelectorValidators, one entry) but
-		// nothing enumerates rejected ones, so this direction is only as good as
-		// the pool and must not be read as "the parser rejects every other key".
-		candidates := []string{nodeName, "spec.nodeName", "metadata.namespace", "metadata.labels", "status.phase"}
+		// Two pools, joined, because they answer different questions and the
+		// round-9 form conflated them (F3, round 10). Every key the SCHEMA
+		// advertises must be probed or the structural direction reports a
+		// divergence it never tested: a mutant that added metadata.uid to schema
+		// and parser together — no divergence at all — failed with "schema
+		// advertises keys the parser rejects: [metadata.uid]", a false claim
+		// pointing at the wrong file. The chosen keys stay for negative coverage.
+		//
+		// Only the schema half is derived. Upstream enumerates the accepted key
+		// (nodeFieldSelectorValidators, one entry) and nothing enumerates rejected
+		// ones, so the negative direction remains only as good as the chosen pool
+		// and must not be read as "the parser rejects every other key".
 		schemaKeys := set(enum(t, fields, "key"))
-		parserKeys := map[string]bool{}
-		for _, key := range candidates {
-			if matchFieldsError(t, map[string]any{"key": key, "operator": "In", "values": []any{"node-1"}}) == nil {
-				parserKeys[key] = true
+		chosen := []string{nodeName, "spec.nodeName", "metadata.namespace", "metadata.labels", "status.phase"}
+		candidates := slices.Clone(chosen)
+		for key := range schemaKeys {
+			if !slices.Contains(candidates, key) {
+				candidates = append(candidates, key)
 			}
 		}
-		// Structural direction: everything the schema advertises must convert.
-		if extra := diff(schemaKeys, parserKeys); len(extra) > 0 {
-			t.Errorf("schema advertises keys the parser rejects: %v", extra)
-		}
-		// Pool-bounded direction: nothing the pool reached beyond the enum converts.
-		if missing := diff(parserKeys, schemaKeys); len(missing) > 0 {
-			t.Errorf("parser accepts keys the schema forbids: %v", missing)
+		slices.Sort(candidates)
+
+		// Ranged over operators for the same reason as requiredness: a key rule
+		// that held for one advertised operator and not the other would otherwise
+		// be invisible.
+		for _, op := range schemaOps {
+			t.Run(op, func(t *testing.T) {
+				parserKeys := map[string]bool{}
+				for _, key := range candidates {
+					if matchFieldsError(t, map[string]any{"key": key, "operator": op, "values": []any{"node-1"}}) == nil {
+						parserKeys[key] = true
+					}
+				}
+				// Structural direction: everything the schema advertises must
+				// convert, and every one of those keys was actually probed above.
+				if extra := diff(schemaKeys, parserKeys); len(extra) > 0 {
+					t.Errorf("schema advertises keys the parser rejects: %v", extra)
+				}
+				// Pool-bounded direction: nothing the pool reached beyond the enum converts.
+				if missing := diff(parserKeys, schemaKeys); len(missing) > 0 {
+					t.Errorf("parser accepts keys the schema forbids: %v", missing)
+				}
+			})
 		}
 	})
 }
