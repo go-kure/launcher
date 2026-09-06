@@ -72,7 +72,8 @@ func (h *DeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 		// own literal map and then copy schemaPodSpec over it — so a raw
 		// `affinity` in the shared fragment would silently replace the
 		// shorthand on all three, with no fixture moving to show it.
-		// TestDeploymentSchemaSchedulingSurvivesFragments pins this ordering.
+		// TestSchedulingKeysAbsentFromSharedFragments and
+		// TestSchedulingKeysSurviveFragmentCopies pin this ordering.
 		"affinity":                  schemaRawAffinity(),
 		"tolerations":               schemaTolerations(),
 		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
