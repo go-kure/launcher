@@ -485,6 +485,16 @@ func TestDeployment_SchedulingShallowMutationPassesEvenWhenAliased(t *testing.T)
 	if !ok {
 		t.Fatalf("second render's first object is %T, want *appsv1.Deployment", *second[0])
 	}
+	// Guarded before indexing, matching the first-render callback above and the
+	// sibling test. The uncaught case is narrow but real: a regression that empties
+	// the SECOND render's tolerations while the first still has them reaches this
+	// line with an empty slice and panics, replacing a named failure with an index-
+	// out-of-range crash. (A regression that empties BOTH renders never gets here —
+	// the callback's own guard fires first, which is why the asymmetry survived
+	// review.)
+	if len(dep.Spec.Template.Spec.Tolerations) == 0 {
+		t.Fatal("second render has no tolerations — the element slice itself was lost, which is a broader regression than this control was written to detect")
+	}
 	if got := dep.Spec.Template.Spec.Tolerations[0].Key; got != "node.kubernetes.io/unreachable" {
 		t.Errorf("tolerations[0].key = %q, want \"node.kubernetes.io/unreachable\" — the element structs are aliased too, "+
 			"so the sharing is broader than the pointer fields TestDeployment_SchedulingRenderingTwiceIsUnaffectedByEditingTheFirstRender guards", got)
