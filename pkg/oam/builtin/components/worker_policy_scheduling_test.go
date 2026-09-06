@@ -70,9 +70,13 @@ func buildWorkerDeployment(t *testing.T, comp *oam.Component, p oam.Policy) *app
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
-	// Asserted rather than assumed: if the config ever stops implementing
-	// Enforceable, ApplyPolicy is skipped and every test in this file quietly
-	// becomes a no-policy test — the exact case the goldens already cover.
+	// Asserted rather than assumed. If the config ever stops implementing
+	// Enforceable, ApplyPolicy is skipped — but not silently: the three tests
+	// that assert a policy-defaulted count would fail anyway. What they would
+	// NOT do is say why; each would report "Replicas = 1, want 3" and send the
+	// reader after the replica logic rather than the type assertion that
+	// actually broke. This names the seam. The tests asserting no policy effect
+	// would go on passing, so the failure would also look narrower than it is.
 	enforceable, ok := cfg.(oam.Enforceable)
 	if !ok {
 		t.Fatalf("worker config does not implement oam.Enforceable; the policy step these tests exist to exercise would be silently skipped")
@@ -87,7 +91,18 @@ func buildWorkerDeployment(t *testing.T, comp *oam.Component, p oam.Policy) *app
 		t.Fatalf("Generate: %v", err)
 	}
 	for _, obj := range objects {
+		// Generate returns []*client.Object — a slice of pointers TO an
+		// interface — so both the pointer and the interface it holds are
+		// separately nil-able. Neither is reachable from the worker path today;
+		// the guards are here so a future one fails as a named assertion rather
+		// than a panic stack, which is the whole point of asserting in a test.
+		if obj == nil {
+			continue
+		}
 		if dep, ok := (*obj).(*appsv1.Deployment); ok {
+			if dep == nil {
+				t.Fatal("the generated objects carry a typed-nil *appsv1.Deployment; every assertion below would panic instead of failing")
+			}
 			return dep
 		}
 	}
@@ -120,9 +135,24 @@ func assertAppSelector(t *testing.T, sel *metav1.LabelSelector, name, where stri
 		t.Errorf("%s: LabelSelector.MatchLabels = %v, want exactly %v", where, sel.MatchLabels, want)
 	}
 	if len(sel.MatchExpressions) != 0 {
-		t.Errorf("%s: LabelSelector.MatchExpressions = %v, want none — the generated pods carry only app=%s and would match nothing",
+		// Not "an expression matches nothing" — `app In [backend]` would match
+		// the same pods. The reason to reject is narrower and firmer: every
+		// scheduling selector in this package comes from selectorFrom, which
+		// sets MatchLabels and nothing else (common.go), so ANY expression here
+		// is unauthored, and an unauthored requirement can only narrow — down to
+		// selecting no pods at all, which silently disarms the constraint.
+		t.Errorf("%s: LabelSelector.MatchExpressions = %v, want none — selectorFrom builds MatchLabels only, so any expression here is unauthored and can only narrow past app=%s",
 			where, sel.MatchExpressions, name)
 	}
+}
+
+// appSelector returns the selector this package builds for a scheduling
+// position, for use as the expected value in a whole-object comparison. It
+// mirrors selectorFrom(appLabels(name)) (common.go) and is deliberately a
+// separate literal rather than a call into the production helper: a test whose
+// expected value is computed by the code under test asserts nothing.
+func appSelector(name string) *metav1.LabelSelector {
+	return &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}}
 }
 
 // TestWorkerTopologySpread_FollowsPolicyDefaultedReplicas pins that the
@@ -168,9 +198,43 @@ func TestWorkerTopologySpread_FollowsPolicyDefaultedReplicas(t *testing.T) {
 			t.Errorf("constraint[%d].MaxSkew = %d, want 1", i, tsc.MaxSkew)
 		}
 		if tsc.LabelSelector == nil {
-			t.Fatalf("constraint[%d].LabelSelector is nil; a constraint with no selector spreads every pod in the namespace", i)
+			// Nothing, not everything: LabelSelectorAsSelector maps a nil
+			// selector to labels.Nothing() and an EMPTY one to
+			// labels.Everything() (apimachinery, meta/v1/helpers.go). So a nil
+			// selector makes the constraint count no pods and spread nothing —
+			// it disarms the constraint rather than widening it.
+			t.Fatalf("constraint[%d].LabelSelector is nil; apimachinery maps nil to labels.Nothing(), so the constraint would count no pods and spread nothing", i)
 		}
 		assertAppSelector(t, tsc.LabelSelector, "backend", fmt.Sprintf("constraint[%d]", i))
+	}
+
+	// The assertions above are a SUBSET of the constraint, and a subset oracle
+	// is the same weakness assertAppSelector exists to avoid one level down.
+	// TopologySpreadConstraint also carries MinDomains,
+	// NodeAffinityPolicy, NodeTaintsPolicy and MatchLabelKeys; a regression
+	// setting any of them leaves every assertion above green while changing
+	// where the scheduler puts the pods. Measured, not assumed: adding
+	// MinDomains: 5 to the hostname constraint in buildTopologySpreadConstraints
+	// (common.go) keeps this entire repository's tests passing.
+	//
+	// So the exact object below is the oracle; the assertions above are the
+	// diagnostic that names which field moved.
+	want := []corev1.TopologySpreadConstraint{
+		{
+			MaxSkew:           1,
+			TopologyKey:       "kubernetes.io/hostname",
+			WhenUnsatisfiable: corev1.DoNotSchedule,
+			LabelSelector:     appSelector("backend"),
+		},
+		{
+			MaxSkew:           1,
+			TopologyKey:       "topology.kubernetes.io/zone",
+			WhenUnsatisfiable: corev1.ScheduleAnyway,
+			LabelSelector:     appSelector("backend"),
+		},
+	}
+	if !reflect.DeepEqual(tscs, want) {
+		t.Errorf("topology spread constraints are not exactly what the opinion should emit at 3 replicas\n  got:  %+v\n  want: %+v", tscs, want)
 	}
 }
 
@@ -293,8 +357,22 @@ func TestWorkerTopologySpread_DisabledStaysDisabledUnderPolicy(t *testing.T) {
 // would leave every named assertion green while changing how the scheduler
 // places the pods. reflect.DeepEqual over *corev1.Affinity covers the fields
 // below, the ones buildAffinity writes on the other branch, and any field added
-// later. The literal assertions are kept alongside it, because two builds that
-// moved identically would still be equal to each other.
+// later.
+//
+// The cross-build comparison alone is only half an oracle, though: two builds
+// that moved IDENTICALLY are still equal to each other. It was tempting to say
+// the literal assertions close that half, and they do not — they are a subset
+// too. Measured, not assumed: adding Namespaces: []string{"other"} to the
+// anti-affinity term in buildAffinity (common.go), which stops anti-affinity
+// considering sibling pods in the workload's own namespace, keeps this entire
+// repository's tests passing; so does adding a MatchFields requirement to the
+// node selector term, which pins the pods to a named node nobody asked for.
+//
+// So this test now carries THREE assertions, and each closes a different hole:
+// tc.want pins what the shorthand must produce (catches an identical move in
+// any field), the cross-build DeepEqual pins that the policy did not move it
+// (catches a divergent move), and tc.assert names which field broke in the
+// failure output (diagnostic only — it proves nothing the first two do not).
 //
 // Both shorthand shapes are exercised, since they take different branches of
 // buildAffinity (common.go): required-vs-preferred anti-affinity, and the
@@ -303,7 +381,12 @@ func TestWorkerAffinity_IndependentOfPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		shorthand func() map[string]any
-		assert    func(t *testing.T, aff *corev1.Affinity, where string)
+		// want is the COMPLETE affinity the shorthand must produce — every
+		// field of corev1.Affinity, not the ones the assertions below happen to
+		// name. Written as a literal rather than built by calling buildAffinity:
+		// an expected value computed by the code under test asserts nothing.
+		want   func() *corev1.Affinity
+		assert func(t *testing.T, aff *corev1.Affinity, where string)
 	}{
 		{
 			name: "required anti-affinity, no node selector",
@@ -312,6 +395,16 @@ func TestWorkerAffinity_IndependentOfPolicy(t *testing.T) {
 					"enablePodAntiAffinity": true,
 					"podAntiAffinityType":   "required",
 					"topologyKey":           "topology.kubernetes.io/zone",
+				}
+			},
+			want: func() *corev1.Affinity {
+				return &corev1.Affinity{
+					PodAntiAffinity: &corev1.PodAntiAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+							LabelSelector: appSelector("backend"),
+							TopologyKey:   "topology.kubernetes.io/zone",
+						}},
+					},
 				}
 			},
 			assert: func(t *testing.T, aff *corev1.Affinity, where string) {
@@ -344,6 +437,31 @@ func TestWorkerAffinity_IndependentOfPolicy(t *testing.T) {
 					"nodeSelector":          map[string]any{"disktype": "ssd"},
 				}
 			},
+			want: func() *corev1.Affinity {
+				return &corev1.Affinity{
+					PodAntiAffinity: &corev1.PodAntiAffinity{
+						PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
+							Weight: 100,
+							PodAffinityTerm: corev1.PodAffinityTerm{
+								LabelSelector: appSelector("backend"),
+								// parseAffinity's default, not authored above.
+								TopologyKey: "kubernetes.io/hostname",
+							},
+						}},
+					},
+					NodeAffinity: &corev1.NodeAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+								MatchExpressions: []corev1.NodeSelectorRequirement{{
+									Key:      "disktype",
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"ssd"},
+								}},
+							}},
+						},
+					},
+				}
+			},
 			assert: func(t *testing.T, aff *corev1.Affinity, where string) {
 				t.Helper()
 				preferred := aff.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution
@@ -365,6 +483,15 @@ func TestWorkerAffinity_IndependentOfPolicy(t *testing.T) {
 				}
 				if aff.NodeAffinity == nil {
 					t.Fatalf("%s: no node affinity emitted for a shorthand nodeSelector", where)
+				}
+				// RequiredDuringScheduling... is a *corev1.NodeSelector, nil-able
+				// independently of NodeAffinity itself. buildAffinity always
+				// populates it in the branch that sets NodeAffinity at all
+				// (common.go), so this is unreachable today — but a regression
+				// moving the shorthand's nodeSelector to the preferred arm would
+				// otherwise panic on .NodeSelectorTerms instead of failing here.
+				if aff.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+					t.Fatalf("%s: node affinity carries no required node selector; the shorthand nodeSelector must land on the required arm", where)
 				}
 				terms := aff.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 				if len(terms) != 1 || len(terms[0].MatchExpressions) != 1 {
@@ -409,6 +536,19 @@ func TestWorkerAffinity_IndependentOfPolicy(t *testing.T) {
 			if !reflect.DeepEqual(affWith, affWithout) {
 				t.Errorf("affinity moved with the policy; it reads no replica count and must not\n  with policy (3 replicas): %+v\n  no policy (1 replica):    %+v",
 					affWith, affWithout)
+			}
+
+			// The other half of the oracle: what the shorthand must produce, in
+			// full. Applied to both builds rather than relying on the comparison
+			// above to carry it across — if that comparison is the thing that
+			// broke, a want-check on one build alone would report only half the
+			// story.
+			want := tc.want()
+			if !reflect.DeepEqual(affWith, want) {
+				t.Errorf("policy build: affinity is not exactly what the shorthand asks for\n  got:  %+v\n  want: %+v", affWith, want)
+			}
+			if !reflect.DeepEqual(affWithout, want) {
+				t.Errorf("no-policy build: affinity is not exactly what the shorthand asks for\n  got:  %+v\n  want: %+v", affWithout, want)
 			}
 
 			tc.assert(t, affWith, "policy defaulting replicas to 3")
