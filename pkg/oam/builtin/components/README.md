@@ -774,8 +774,35 @@ component: every selector, weight and topology key is authored.
 | property | type | notes | compat |
 |---|---|---|---|
 | `affinity` | object | `nodeAffinity`, `podAffinity`, `podAntiAffinity`, each with the `requiredDuringSchedulingIgnoredDuringExecution` / `preferredDuringSchedulingIgnoredDuringExecution` arms. Node requirement operators are `In`/`NotIn`/`Exists`/`DoesNotExist`/`Gt`/`Lt`, with upstream's arity rule — `In`/`NotIn` need at least one value, `Exists`/`DoesNotExist` none, `Gt`/`Lt` exactly one integer. `matchExpressions` keys are node label keys (qualified names); `matchFields` keys are field paths such as `metadata.name`, so they are not validated as qualified names. Weights must be 1–100. An `affinity` with no arm set is rejected, as is a node selector term with neither `matchExpressions` nor `matchFields` — upstream documents such a term as matching no nodes, so it can only be a mistake. | additive |
-| `tolerations` | array | The same property `daemonset` already publishes, from the same parser, now covering the complete `corev1.Toleration`: `key`, `operator` (`Exists`/`Equal`/`Lt`/`Gt`), `value`, `effect`, `tolerationSeconds`. `tolerationSeconds` is a pointer upstream, so unset (tolerate forever) and `0` (evict immediately) are different documents. Cross-field rules: an empty `key` requires `Exists` (upstream states it as a "must"); a value under `Exists` is rejected as launcher's own rule, since `Exists` already wildcards the value and an authored one would silently do nothing; `Lt`/`Gt` need an integer `value` and the cluster's `TaintTolerationComparisonOperators` gate. An unrecognised key is reported rather than dropped. | additive |
+| `tolerations` | array | The same property `daemonset` already publishes, from the same parser, now covering the complete `corev1.Toleration`: `key`, `operator` (`Exists`/`Equal`/`Lt`/`Gt`), `value`, `effect`, `tolerationSeconds`. `tolerationSeconds` is a pointer upstream, so unset (tolerate forever) and `0` (evict immediately) are different documents. Cross-field rules: an empty `key` requires `Exists`; a `value` under `Exists` is refused; `Lt`/`Gt` need a canonical decimal integer `value` (no leading zeros, no plus sign, no `-0` — `Toleration.ToleratesTaint` runs `content.IsDecimalInteger` before parsing and silently matches nothing otherwise) and the cluster's `TaintTolerationComparisonOperators` gate. An unrecognised key is reported rather than dropped. | additive for `deployment`; **narrowing for `daemonset`** — see below |
 | `topologySpreadConstraints` | array | `maxSkew` (required, > 0), `topologyKey` (required), `whenUnsatisfiable` (required, `DoNotSchedule`/`ScheduleAnyway`), `labelSelector`, `minDomains` (> 0, and only with `DoNotSchedule`), `nodeAffinityPolicy`/`nodeTaintsPolicy` (`Honor`/`Ignore`), `matchLabelKeys`. The three required fields carry no `omitempty` upstream, so an unset one would emit `maxSkew: 0` / `topologyKey: ""` / `whenUnsatisfiable: ""` rather than an API default — hence required here rather than defaulted. | additive |
+
+##### What `tolerations` changed for `daemonset`
+
+`affinity` and `topologySpreadConstraints` are new properties on a kind that did
+not have them, so they are additive outright. `tolerations` is not: `deployment`
+reaches it through the *same* `parseTolerations`/`schemaTolerations` pair that
+`daemonset` has always used, and those two kinds are its only callers, so
+completing the projection changed `daemonset` too. Stating that plainly, per
+rule, because "additive" on its own would be false:
+
+| change | effect on `daemonset` | why it is kept rather than gated to `deployment` |
+|---|---|---|
+| A well-formed `tolerationSeconds` is now read | **Additive in capability, and the one change that alters emitted bytes.** The key was previously accepted and silently dropped, so a `daemonset` that already authored it emitted a toleration without an eviction deadline; it now emits the field it asked for. That is a deliberate output change, not a preservation. | It is the fix, not a side effect. |
+| A **malformed** `tolerationSeconds` is now an error | **New errors only.** A non-integer, fractional or out-of-int64-range value was previously ignored along with the rest of the key; it is now type-checked like any other integer property. | The key cannot be both read and unvalidated. A document carrying one was already not getting the deadline it asked for. |
+| `operator: Lt` and `operator: Gt` are now accepted | **Purely additive.** Both were previously refused as invalid operators; they are valid `corev1` values (`core/v1/types.go:4097-4100`). Their `value` must be a canonical decimal integer — no leading zeros, no plus sign, no `-0` — because the scheduler's own matcher silently refuses to match any other form. | A "raw" projection whose operator set is narrower than the API's is the wrong shape for either kind. |
+| An unrecognised key inside a toleration entry is now an error | **New errors only, and here output really is byte-identical.** A key the parser never read contributed nothing to the emitted object, so every document that still builds emits exactly what it emitted before. | `docs/oam/design-gvk.md` already states that an unrecognised key is a build error; this moves `daemonset` toward the documented contract rather than away from it. Gating it to `deployment` would leave `daemonset` permanently accepting shapes that do no work. |
+| An empty `key` with a non-`Exists` operator is now an error | **New errors only, and only on documents the apiserver would have refused.** Upstream states it as a hard "must" (`k8s.io/api@v0.36.3` `core/v1/types.go:4093`). | Nothing appliable is lost. |
+| A `value` under `operator: Exists` is now an error | **New errors only, and only on documents the apiserver would have refused** — upstream's `ValidateTolerations` rejects the pair outright, notwithstanding the field doc's softer "should" (the citation, and its second-hand provenance, are at the check itself in `common.go`). | Same: nothing appliable is lost. |
+
+Net, stated without rounding: a `daemonset` document that previously built and
+was accepted by a cluster still builds. Its output is byte-identical **unless it
+authored `tolerationSeconds`**, in which case the field it wrote now appears —
+which is the defect being fixed rather than a regression. What no longer builds
+is a document that was either doing nothing, carrying a malformed value, or
+would have been refused on apply. This is pre-release `v1alpha1`; the change is
+taken deliberately rather than hidden behind a `deployment`-only option whose
+removal would depend on unrelated work landing.
 
 One rule applies to both `affinity` terms and topology-spread constraints:
 `matchLabelKeys` (and `mismatchLabelKeys` on a pod affinity term) cannot be set
@@ -1049,7 +1076,11 @@ object would change what the next `Generate` emits.
   `corev1.PersistentVolumeClaimSpec`). The StatefulSetSpec-level and
   claim-template field sets are classified in "StatefulSet-level and
   claim-template properties" below.
-- **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`/`tolerationSeconds`); `port`
+- **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`/`tolerationSeconds`;
+  `tolerationSeconds` and the toleration cross-field rules arrived with
+  go-kure/launcher#412 via the shared parser — see "What `tolerations` changed
+  for `daemonset`" above, which is the only place in this work that is not
+  additive); `port`
   optionally adds a Service. No `sidecars` schema key (init containers only).
   DaemonSetSpec-level (go-kure/launcher#340, `daemonset_spec.go`): `updateStrategy`,
   `minReadySeconds`, `revisionHistoryLimit`. `appsv1.DaemonSetSpec` has five

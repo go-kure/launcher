@@ -15,6 +15,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -2729,6 +2730,14 @@ func parseAffinity(props map[string]any) (AffinityConfig, error) {
 // go-kure/launcher#412 published this property on a second kind.
 var tolerationKeys = []string{"key", "operator", "value", "effect", "tolerationSeconds"}
 
+// parseTolerations is SHARED: daemonset (daemonset.go) and deployment
+// (deployment.go) are its only two callers, and schemaTolerations has the same
+// two. Every rejection below therefore lands on both kinds, so completing the
+// projection for go-kure/launcher#412 narrowed what daemonset accepts as well —
+// deliberately, and not additively. What each rule costs daemonset, and why none
+// of them is gated behind a deployment-only option, is set out in
+// README.md's "What `tolerations` changed for `daemonset`". A rejection added
+// here in future changes both kinds; say so there in the same change.
 func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 	tolList, ok := props["tolerations"].([]any)
 	if !ok {
@@ -2813,9 +2822,29 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 		// different documents — hence optionalInt64's present flag rather than
 		// a zero test. Zero and negative values are passed through: the field
 		// doc gives them a defined meaning, so refusing them would be
-		// launcher's own rejection of a document the apiserver accepts. The
-		// NoExecute precondition is not enforced here for the same reason —
-		// upstream ignores the field rather than rejecting the pod.
+		// launcher's own rejection of a document the apiserver accepts.
+		//
+		// The NoExecute precondition is NOT enforced here, and the reason is
+		// weaker than it looks — do not read the omission as settled. An earlier
+		// version of this comment said upstream merely ignores the field rather
+		// than rejecting the pod; the only validation source reachable from this
+		// module's graph says otherwise, rejecting the pair outright with
+		// "effect must be 'NoExecute' when `tolerationSeconds` is set"
+		// (github.com/cloudnative-pg/cloudnative-pg@v1.30.0
+		// internal/webhook/v1/cluster_webhook.go:2207-2212, a near-verbatim copy
+		// of pkg/apis/core/validation/validation.go per its own comment at
+		// :2186-2188). Empty effect counts as "not NoExecute" there, so the rule
+		// would demand an explicit effect.
+		//
+		// It is left unenforced deliberately, not by oversight: adding a
+		// rejection on a parser shared with daemonset (see this function's doc
+		// comment) is a change to two kinds, the evidence above is second-hand
+		// and demonstrably older than the pinned k8s.io/api, and the failure it
+		// would catch is loud rather than silent — the apiserver refuses the
+		// object at apply and names the field. Contrast tolerationSeconds being
+		// dropped, which was silent and is what go-kure/launcher#412 fixed. If a
+		// first-hand citation becomes available, add the check there and to
+		// README.md's daemonset compatibility table in the same change.
 		if seconds, present, err := optionalInt64(m, "tolerationSeconds", indexedLabel("toleration", i)+".tolerationSeconds"); err != nil {
 			return nil, err
 		} else if present {
@@ -2833,18 +2862,53 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 			return nil, errors.Errorf("toleration[%d].operator: must be 'Exists' when key is empty, got %q", i, tol.Operator)
 		}
 		// "If the operator is Exists, the value should be empty, otherwise just
-		// a regular string." (core/v1/types.go:4104.) "Should", not "must", so
-		// this rejection is launcher's own: Exists is a wildcard over the value,
-		// so an authored value under it is matched against nothing and silently
-		// does no work — the same failure this file refuses elsewhere for an
-		// empty affinity and an empty node selector term.
+		// a regular string." (core/v1/types.go:4104.) The field doc says
+		// "should", which reads like launcher's own opinion — it is not.
+		// Upstream's ValidateTolerations rejects the combination outright, with
+		// "value must be empty when `operator` is 'Exists'", so a document this
+		// refuses is one the apiserver would have refused too.
+		//
+		// k8s.io/kubernetes is not in this module's graph, so that function
+		// cannot be cited from a pinned dependency directly. The citation is
+		// second-hand but pinned and readable: a near-verbatim copy of it is
+		// carried by a direct dependency (go.mod:9), at
+		// github.com/cloudnative-pg/cloudnative-pg@v1.30.0
+		// internal/webhook/v1/cluster_webhook.go:2223-2228, whose own doc
+		// comment at :2186-2188 names its source as
+		// pkg/apis/core/validation/validation.go. Read it as evidence for this
+		// one rule and no more — that copy predates the pinned k8s.io/api, since
+		// its default arm still refuses the Lt and Gt operators accepted above.
+		//
+		// Independently of the citation: Exists wildcards the value, so an
+		// authored value under it is matched against nothing and does no work —
+		// the same failure this file refuses for an empty affinity and an empty
+		// node selector term.
 		if tol.Operator == corev1.TolerationOpExists && tol.Value != "" {
 			return nil, errors.Errorf("toleration[%d].value: must be empty when operator is 'Exists', got %q — Exists already matches every value", i, tol.Value)
 		}
 		// "Lt and Gt perform numeric comparisons" (core/v1/types.go:4100), so
 		// the value has to be one — mirroring the Gt/Lt arity rule the node
 		// selector requirements apply (scheduling.go).
+		//
+		// strconv.ParseInt alone is NOT the right check, and this is first-hand
+		// from the pinned dependency rather than inferred. The matcher is
+		// Toleration.ToleratesTaint (k8s.io/api@v0.36.3 core/v1/toleration.go),
+		// whose compareNumericValues (:80-90) runs content.IsDecimalInteger
+		// BEFORE strconv.ParseInt and returns false — no match, no error — when
+		// it fails. IsDecimalInteger demands strict canonical form
+		// (k8s.io/apimachinery@v0.36.3 pkg/api/validate/content/decimal_int.go:
+		// 30-60): no leading zeros, no plus sign, no "-0". ParseInt accepts all
+		// three, so "05", "+5" and "-0" would build here and then tolerate
+		// nothing at all — a silently inert toleration, which is the exact
+		// failure class this file refuses elsewhere.
+		//
+		// Both checks are kept: IsDecimalInteger constrains the syntax and says
+		// nothing about magnitude, so ParseInt still supplies the int64 range
+		// bound the comparison itself needs.
 		if tol.Operator == corev1.TolerationOpLt || tol.Operator == corev1.TolerationOpGt {
+			if msgs := content.IsDecimalInteger(tol.Value); len(msgs) > 0 {
+				return nil, errors.Errorf("toleration[%d].value: operator %s requires an integer in canonical form (no leading zeros, no plus sign, no \"-0\"), got %q — the scheduler's own matcher refuses any other form and the toleration would match nothing", i, tol.Operator, tol.Value)
+			}
 			if _, err := strconv.ParseInt(tol.Value, 10, 64); err != nil {
 				return nil, errors.Errorf("toleration[%d].value: operator %s requires an integer, got %q", i, tol.Operator, tol.Value)
 			}

@@ -65,6 +65,16 @@ func TestDeploymentScheduling_ExplicitNullIsOmission(t *testing.T) {
 // Nothing here is inferred from the component — that is the difference from the
 // four-key shorthand, which fills the selector in from the component's own app
 // label.
+//
+// "Every arm" is meant literally, and so is "asserts": a round-trip test that
+// authors a field without asserting it is indistinguishable from one that does
+// not author it at all, because the assignment can be deleted and the test
+// stays green. Two PodAffinityTerm fields were in exactly that state —
+// namespaceSelector and matchLabelKeys were parsed and assigned
+// (scheduling.go, parsePodAffinityTerm) with no assertion anywhere in the
+// package or in the golden fixture, so both could be silently dropped. That is
+// the same accept-and-drop failure tolerationSeconds had. Every field this test
+// authors must therefore also be read back below.
 func TestDeploymentScheduling_AffinityRoundTrip(t *testing.T) {
 	dep, _ := generateDeployment(t, "app", map[string]any{
 		"image": "nginx:1.27",
@@ -96,9 +106,25 @@ func TestDeploymentScheduling_AffinityRoundTrip(t *testing.T) {
 			"podAffinity": map[string]any{
 				"requiredDuringSchedulingIgnoredDuringExecution": []any{
 					map[string]any{
-						"topologyKey":   "kubernetes.io/hostname",
-						"labelSelector": map[string]any{"matchLabels": map[string]any{"tier": "cache"}},
-						"namespaces":    []any{"other"},
+						"topologyKey":       "kubernetes.io/hostname",
+						"labelSelector":     map[string]any{"matchLabels": map[string]any{"tier": "cache"}},
+						"namespaces":        []any{"other"},
+						"namespaceSelector": map[string]any{"matchLabels": map[string]any{"env": "prod"}},
+						"matchLabelKeys":    []any{"pod-template-hash"},
+					},
+				},
+				// Both arms of podAffinity are authored, not just the required
+				// one: parseRawAffinity assigns them on separate lines
+				// (scheduling.go, the corev1.PodAffinity literal), so a test that
+				// authors only `required` lets the `preferred` assignment be
+				// deleted with the suite still green. Proven by mutation.
+				"preferredDuringSchedulingIgnoredDuringExecution": []any{
+					map[string]any{
+						"weight": 25,
+						"podAffinityTerm": map[string]any{
+							"topologyKey":   "topology.kubernetes.io/region",
+							"labelSelector": map[string]any{"matchLabels": map[string]any{"tier": "web"}},
+						},
 					},
 				},
 			},
@@ -120,28 +146,67 @@ func TestDeploymentScheduling_AffinityRoundTrip(t *testing.T) {
 	if af == nil {
 		t.Fatal("Affinity is nil")
 	}
+	// Each arm is guarded before it is dereferenced. A dropped arm is a
+	// realistic regression here (that is what the ordering guards exist for),
+	// and an unguarded chain would turn it into a nil-pointer panic whose stack
+	// names the test rather than the field that went missing.
+	if af.NodeAffinity == nil {
+		t.Fatal("Affinity.NodeAffinity is nil — the authored nodeAffinity was dropped")
+	}
+	if af.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		t.Fatal("NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution is nil")
+	}
 
 	terms := af.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 	if len(terms) != 1 {
 		t.Fatalf("nodeSelectorTerms = %d, want 1", len(terms))
 	}
-	if got := terms[0].MatchExpressions[0].Key; got != "kubernetes.io/arch" {
-		t.Errorf("matchExpressions[0].Key = %q, want %q", got, "kubernetes.io/arch")
+	if len(terms[0].MatchExpressions) != 1 {
+		t.Fatalf("matchExpressions = %d, want 1", len(terms[0].MatchExpressions))
+	}
+	expr := terms[0].MatchExpressions[0]
+	if expr.Key != "kubernetes.io/arch" {
+		t.Errorf("matchExpressions[0].Key = %q, want %q", expr.Key, "kubernetes.io/arch")
+	}
+	if expr.Operator != corev1.NodeSelectorOpIn {
+		t.Errorf("matchExpressions[0].Operator = %q, want In", expr.Operator)
+	}
+	if got := expr.Values; len(got) != 1 || got[0] != "amd64" {
+		t.Errorf("matchExpressions[0].Values = %v, want [amd64]", got)
 	}
 	// matchFields keys are field paths, not qualified names — a distinction the
 	// parser has to make, since `metadata.name` is not a valid qualified name.
-	if got := terms[0].MatchFields[0].Key; got != "metadata.name" {
-		t.Errorf("matchFields[0].Key = %q, want %q", got, "metadata.name")
+	if len(terms[0].MatchFields) != 1 {
+		t.Fatalf("matchFields = %d, want 1", len(terms[0].MatchFields))
+	}
+	field := terms[0].MatchFields[0]
+	if field.Key != "metadata.name" {
+		t.Errorf("matchFields[0].Key = %q, want %q", field.Key, "metadata.name")
+	}
+	if field.Operator != corev1.NodeSelectorOpIn {
+		t.Errorf("matchFields[0].Operator = %q, want In", field.Operator)
+	}
+	if got := field.Values; len(got) != 1 || got[0] != "node-1" {
+		t.Errorf("matchFields[0].Values = %v, want [node-1]", got)
 	}
 
 	preferred := af.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
 	if len(preferred) != 1 || preferred[0].Weight != 40 {
 		t.Fatalf("nodeAffinity preferred = %+v, want one term of weight 40", preferred)
 	}
+	if len(preferred[0].Preference.MatchExpressions) != 1 {
+		t.Fatalf("preference matchExpressions = %d, want 1", len(preferred[0].Preference.MatchExpressions))
+	}
+	if got := preferred[0].Preference.MatchExpressions[0].Key; got != "disk" {
+		t.Errorf("preference key = %q, want disk", got)
+	}
 	if got := preferred[0].Preference.MatchExpressions[0].Operator; got != corev1.NodeSelectorOpExists {
 		t.Errorf("preference operator = %q, want Exists", got)
 	}
 
+	if af.PodAffinity == nil {
+		t.Fatal("Affinity.PodAffinity is nil — the authored podAffinity was dropped")
+	}
 	podReq := af.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution
 	if len(podReq) != 1 {
 		t.Fatalf("podAffinity required = %d terms, want 1", len(podReq))
@@ -149,19 +214,59 @@ func TestDeploymentScheduling_AffinityRoundTrip(t *testing.T) {
 	if got := podReq[0].TopologyKey; got != "kubernetes.io/hostname" {
 		t.Errorf("podAffinity topologyKey = %q", got)
 	}
+	if podReq[0].LabelSelector == nil {
+		t.Fatal("podAffinity labelSelector is nil")
+	}
 	if got := podReq[0].LabelSelector.MatchLabels["tier"]; got != "cache" {
 		t.Errorf("podAffinity labelSelector.matchLabels[tier] = %q, want cache", got)
 	}
 	if got := podReq[0].Namespaces; len(got) != 1 || got[0] != "other" {
 		t.Errorf("podAffinity namespaces = %v, want [other]", got)
 	}
+	// namespaceSelector and matchLabelKeys are separately nil-able fields of the
+	// same term, and each is assigned by its own line in parsePodAffinityTerm.
+	// Until this round nothing read either one back, so either assignment could
+	// be deleted with the whole suite still green — proven by mutation, both
+	// times.
+	if podReq[0].NamespaceSelector == nil {
+		t.Fatal("podAffinity namespaceSelector is nil — an authored namespaceSelector was dropped")
+	}
+	if got := podReq[0].NamespaceSelector.MatchLabels["env"]; got != "prod" {
+		t.Errorf("podAffinity namespaceSelector.matchLabels[env] = %q, want prod", got)
+	}
+	if got := podReq[0].MatchLabelKeys; len(got) != 1 || got[0] != "pod-template-hash" {
+		t.Errorf("podAffinity matchLabelKeys = %v, want [pod-template-hash]", got)
+	}
 
+	podPref := af.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+	if len(podPref) != 1 || podPref[0].Weight != 25 {
+		t.Fatalf("podAffinity preferred = %+v, want one term of weight 25", podPref)
+	}
+	if got := podPref[0].PodAffinityTerm.TopologyKey; got != "topology.kubernetes.io/region" {
+		t.Errorf("podAffinity preferred topologyKey = %q", got)
+	}
+	if podPref[0].PodAffinityTerm.LabelSelector == nil {
+		t.Fatal("podAffinity preferred labelSelector is nil")
+	}
+	if got := podPref[0].PodAffinityTerm.LabelSelector.MatchLabels["tier"]; got != "web" {
+		t.Errorf("podAffinity preferred labelSelector.matchLabels[tier] = %q, want web", got)
+	}
+
+	if af.PodAntiAffinity == nil {
+		t.Fatal("Affinity.PodAntiAffinity is nil — the authored podAntiAffinity was dropped")
+	}
 	antiPref := af.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution
 	if len(antiPref) != 1 || antiPref[0].Weight != 100 {
 		t.Fatalf("podAntiAffinity preferred = %+v, want one term of weight 100", antiPref)
 	}
 	if got := antiPref[0].PodAffinityTerm.TopologyKey; got != "topology.kubernetes.io/zone" {
 		t.Errorf("podAntiAffinity topologyKey = %q", got)
+	}
+	if antiPref[0].PodAffinityTerm.LabelSelector == nil {
+		t.Fatal("podAntiAffinity labelSelector is nil")
+	}
+	if got := antiPref[0].PodAffinityTerm.LabelSelector.MatchLabels["app"]; got != "app" {
+		t.Errorf("podAntiAffinity labelSelector.matchLabels[app] = %q, want app", got)
 	}
 }
 
@@ -184,7 +289,11 @@ func TestDeploymentScheduling_EmptyLabelSelectorAccepted(t *testing.T) {
 			},
 		},
 	})
-	sel := dep.Spec.Template.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0].LabelSelector
+	af := dep.Spec.Template.Spec.Affinity
+	if af == nil || af.PodAntiAffinity == nil || len(af.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 1 {
+		t.Fatalf("want one podAntiAffinity required term, got affinity %+v", af)
+	}
+	sel := af.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0].LabelSelector
 	if sel == nil {
 		t.Fatal("an authored empty labelSelector parsed to nil, collapsing the upstream empty/null distinction")
 	}
@@ -226,7 +335,11 @@ func TestDeploymentScheduling_MismatchLabelKeysMayOverlapSelector(t *testing.T) 
 			},
 		},
 	})
-	term := dep.Spec.Template.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0]
+	af := dep.Spec.Template.Spec.Affinity
+	if af == nil || af.PodAntiAffinity == nil || len(af.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 1 {
+		t.Fatalf("want one podAntiAffinity required term, got affinity %+v", af)
+	}
+	term := af.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0]
 	if got := term.MismatchLabelKeys; len(got) != 2 || got[0] != "tier" || got[1] != "zone" {
 		t.Errorf("MismatchLabelKeys = %v, want [tier zone] carried through unchanged", got)
 	}
@@ -287,17 +400,28 @@ func TestDeploymentScheduling_TolerationComparisonOperators(t *testing.T) {
 		"tolerations": []any{
 			map[string]any{"key": "capacity", "operator": "Gt", "value": "5"},
 			map[string]any{"key": "capacity", "operator": "Lt", "value": "20"},
+			// A canonical negative and a canonical zero, so the syntax check
+			// added for the leading-zero/plus-sign/"-0" cases cannot quietly
+			// become "reject anything that is not a positive integer".
+			map[string]any{"key": "drift", "operator": "Gt", "value": "-5"},
+			map[string]any{"key": "drift", "operator": "Lt", "value": "0"},
 		},
 	})
 	tols := dep.Spec.Template.Spec.Tolerations
-	if len(tols) != 2 {
-		t.Fatalf("Tolerations = %d, want 2", len(tols))
+	if len(tols) != 4 {
+		t.Fatalf("Tolerations = %d, want 4", len(tols))
 	}
 	if tols[0].Operator != corev1.TolerationOpGt || tols[0].Value != "5" {
 		t.Errorf("tolerations[0] = %+v, want operator Gt value 5", tols[0])
 	}
 	if tols[1].Operator != corev1.TolerationOpLt || tols[1].Value != "20" {
 		t.Errorf("tolerations[1] = %+v, want operator Lt value 20", tols[1])
+	}
+	if tols[2].Value != "-5" {
+		t.Errorf("tolerations[2].Value = %q, want -5 accepted", tols[2].Value)
+	}
+	if tols[3].Value != "0" {
+		t.Errorf("tolerations[3].Value = %q, want 0 accepted", tols[3].Value)
 	}
 }
 
@@ -333,6 +457,27 @@ func TestDeploymentScheduling_TolerationRejections(t *testing.T) {
 			"Gt with a non-integer value",
 			map[string]any{"key": "capacity", "operator": "Gt", "value": "many"},
 			"requires an integer",
+		},
+		// The three forms strconv.ParseInt accepts and the scheduler's own
+		// matcher does not: Toleration.ToleratesTaint runs
+		// content.IsDecimalInteger first and returns "no match" — not an error —
+		// on any of them, so accepting these would emit a toleration that
+		// silently tolerates nothing. See the check in parseTolerations for the
+		// citation chain.
+		{
+			"Gt with a leading zero",
+			map[string]any{"key": "capacity", "operator": "Gt", "value": "05"},
+			"canonical form",
+		},
+		{
+			"Lt with a plus sign",
+			map[string]any{"key": "capacity", "operator": "Lt", "value": "+5"},
+			"canonical form",
+		},
+		{
+			"Gt with negative zero",
+			map[string]any{"key": "capacity", "operator": "Gt", "value": "-0"},
+			"canonical form",
 		},
 		{
 			"Lt with no value",
@@ -385,6 +530,9 @@ func TestDeploymentScheduling_TolerationsRoundTrip(t *testing.T) {
 	if tols[0].Key != "dedicated" || tols[0].Effect != corev1.TaintEffectNoSchedule {
 		t.Errorf("tolerations[0] = %+v", tols[0])
 	}
+	if tols[0].Operator != corev1.TolerationOpEqual || tols[0].Value != "batch" {
+		t.Errorf("tolerations[0] = %+v, want operator Equal value batch", tols[0])
+	}
 	if tols[1].Operator != corev1.TolerationOpExists {
 		t.Errorf("tolerations[1].Operator = %q, want Exists", tols[1].Operator)
 	}
@@ -419,6 +567,15 @@ func TestDeploymentScheduling_TopologySpreadConstraintsRoundTrip(t *testing.T) {
 	if first.MaxSkew != 2 || first.TopologyKey != "topology.kubernetes.io/zone" {
 		t.Errorf("tscs[0] = %+v", first)
 	}
+	if first.WhenUnsatisfiable != corev1.DoNotSchedule {
+		t.Errorf("tscs[0].WhenUnsatisfiable = %q, want DoNotSchedule", first.WhenUnsatisfiable)
+	}
+	if first.LabelSelector == nil {
+		t.Fatal("tscs[0].LabelSelector is nil — an authored labelSelector was dropped")
+	}
+	if got := first.LabelSelector.MatchLabels["app"]; got != "app" {
+		t.Errorf("tscs[0].LabelSelector.MatchLabels[app] = %q, want app", got)
+	}
 	if first.MinDomains == nil || *first.MinDomains != 3 {
 		t.Errorf("tscs[0].MinDomains = %v, want 3", first.MinDomains)
 	}
@@ -434,7 +591,8 @@ func TestDeploymentScheduling_TopologySpreadConstraintsRoundTrip(t *testing.T) {
 	// The second constraint authors none of the optional fields: they must stay
 	// nil rather than being defaulted here, since defaulting them would emit
 	// values the author did not write.
-	if tscs[1].MinDomains != nil || tscs[1].NodeAffinityPolicy != nil || tscs[1].NodeTaintsPolicy != nil || tscs[1].LabelSelector != nil {
+	if tscs[1].MinDomains != nil || tscs[1].NodeAffinityPolicy != nil || tscs[1].NodeTaintsPolicy != nil ||
+		tscs[1].LabelSelector != nil || len(tscs[1].MatchLabelKeys) != 0 {
 		t.Errorf("tscs[1] = %+v, want every optional field unset", tscs[1])
 	}
 }
