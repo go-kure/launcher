@@ -215,7 +215,15 @@ func TestWorkerTopologySpread_FollowsPolicyDefaultedReplicas(t *testing.T) {
 	// setting any of them leaves every assertion above green while changing
 	// where the scheduler puts the pods. Measured, not assumed: adding
 	// MinDomains: 5 to the hostname constraint in buildTopologySpreadConstraints
-	// (common.go) keeps this entire repository's tests passing.
+	// (common.go) leaves every assertion above green, and within this package
+	// only the exact-object comparison below fails.
+	//
+	// Repository-wide it is also caught by TestFixtures/params-scalar, because
+	// buildTopologySpreadConstraints is shared with webservice and that golden
+	// renders the hostname constraint verbatim. That is a golden diff on an
+	// unrelated kind, not an oracle for the worker path — it names no field and
+	// would not survive the fixture being retired, so it is not what this test
+	// relies on.
 	//
 	// So the exact object below is the oracle; the assertions above are the
 	// diagnostic that names which field moved.
@@ -362,11 +370,14 @@ func TestWorkerTopologySpread_DisabledStaysDisabledUnderPolicy(t *testing.T) {
 // The cross-build comparison alone is only half an oracle, though: two builds
 // that moved IDENTICALLY are still equal to each other. It was tempting to say
 // the literal assertions close that half, and they do not — they are a subset
-// too. Measured, not assumed: adding Namespaces: []string{"other"} to the
-// anti-affinity term in buildAffinity (common.go), which stops anti-affinity
-// considering sibling pods in the workload's own namespace, keeps this entire
-// repository's tests passing; so does adding a MatchFields requirement to the
-// node selector term, which pins the pods to a named node nobody asked for.
+// too. Measured, not assumed, and measured against the oracle as it stood
+// BEFORE tc.want below was added — at HEAD both mutations fail, which is the
+// point of the fix, so do not read these as claims about the current tree:
+// adding Namespaces: []string{"other"} to the anti-affinity term in
+// buildAffinity (common.go), which stops anti-affinity considering sibling pods
+// in the workload's own namespace, kept this entire repository's tests passing;
+// so did adding a MatchFields requirement to the node selector term, which pins
+// the pods to a named node nobody asked for.
 //
 // So this test now carries THREE assertions, and each closes a different hole:
 // tc.want pins what the shorthand must produce (catches an identical move in
