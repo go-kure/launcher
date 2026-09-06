@@ -3,6 +3,8 @@ package oam
 import (
 	"strings"
 	"testing"
+
+	"github.com/go-kure/kure/pkg/stack"
 )
 
 // authoredApp builds a one-component Application around the supplied properties and
@@ -183,5 +185,120 @@ func TestValidateAuthoredProperties_WritesNormalizedValuesBack(t *testing.T) {
 
 	if _, ok := props["env"].([]any); !ok {
 		t.Errorf("env = %T, want []any — the normalized value was not written back", props["env"])
+	}
+}
+
+// sharedSchemaTrait returns the SAME schema map on every call, the way a handler
+// caching or returning a package-level map would. schemaTrait builds a fresh map
+// each call, so it cannot detect the engine-property merge writing into a handler's
+// own schema; this one can. Used only by
+// TestValidateAuthoredProperties_EngineScopeDoesNotMutateHandlerSchema.
+type sharedSchemaTrait struct {
+	typ    string
+	schema map[string]PropertySchema
+}
+
+func (h sharedSchemaTrait) CanHandle(t string) bool                               { return t == h.typ }
+func (h sharedSchemaTrait) Apply(*Trait, *stack.Application, *stack.Bundle) error { return nil }
+func (h sharedSchemaTrait) PropertySchema() map[string]PropertySchema             { return h.schema }
+
+// TestValidateAuthoredProperties_EngineScopeIsAcceptedOnAnyTrait is the regression
+// test for the defect this check introduced and then had to fix: `scope` is read by
+// the transform ENGINE off every authored trait (buildCapabilityKey builds
+// "<type>.<scope>" for every trait type), not by the trait's handler, so validating a
+// trait against its handler's schema alone rejected documents that build correctly.
+//
+// The gap was invisible in the existing tests because the only traits exercised with
+// a `scope` (transform_test.go's ingress cases) belong to the three handlers —
+// expose, ingress, httproute — that happen to declare `scope` themselves, for the
+// unrelated purpose of disambiguating sub-application names. Every other trait type
+// was broken. See testdata/pvc-trait-scoped in pkg/cmd/kurel for the end-to-end half:
+// it pins that the SCOPED capability binding is the one that renders.
+func TestValidateAuthoredProperties_EngineScopeIsAcceptedOnAnyTrait(t *testing.T) {
+	// The pvc handler declares size and accessModes, and no `scope`.
+	app := authoredApp("webservice", map[string]any{"image": "nginx"},
+		Trait{Type: "pvc", Properties: map[string]any{"size": "1Gi", "scope": "fast"}})
+	if err := newSchemaTransformer().ValidateAuthoredProperties(app); err != nil {
+		t.Errorf("engine-read `scope` must be accepted on a trait whose handler does not declare it, got: %v", err)
+	}
+
+	// Same for a trait claimed by a lowering rule rather than a terminal handler:
+	// resolveCapability runs in the lowering fixpoint too, so the property is just as
+	// legal there.
+	tr := newSchemaTransformer()
+	tr.RegisterTraitLowering(schemaTraitLoweringRule{typ: "route"})
+	app = authoredApp("webservice", map[string]any{"image": "nginx"},
+		Trait{Type: "route", Properties: map[string]any{"hostnames": []any{"a"}, "scope": "public"}})
+	if err := tr.ValidateAuthoredProperties(app); err != nil {
+		t.Errorf("engine-read `scope` must be accepted on a lowering-rule trait, got: %v", err)
+	}
+
+	// Typed, not merely tolerated. buildCapabilityKey type-asserts to string, so a
+	// non-string `scope` is silently ignored today — the exact class of silent drop
+	// this whole check exists to eliminate.
+	app = authoredApp("webservice", map[string]any{"image": "nginx"},
+		Trait{Type: "pvc", Properties: map[string]any{"size": "1Gi", "scope": 3}})
+	err := tr.ValidateAuthoredProperties(app)
+	if err == nil || !strings.Contains(err.Error(), "expected string, got int") {
+		t.Errorf("a non-string `scope` must be rejected, got: %v", err)
+	}
+
+	// The allowed-list in the rejection message must name it, or the message tells an
+	// author to delete a property that is in fact legal.
+	app = authoredApp("webservice", map[string]any{"image": "nginx"},
+		Trait{Type: "pvc", Properties: map[string]any{"scop": "fast"}})
+	err = tr.ValidateAuthoredProperties(app)
+	if err == nil || !strings.Contains(err.Error(), "allowed: accessModes, scope, size") {
+		t.Errorf("the allowed list must name `scope`, got: %v", err)
+	}
+
+	// Trait position only. Nothing reads a `scope` off a COMPONENT — the two
+	// resolveCapability call sites both take a Trait — so accepting it there would
+	// re-open the silent drop for a property that does nothing.
+	err = tr.ValidateAuthoredProperties(authoredApp("webservice", map[string]any{"image": "nginx", "scope": "fast"}))
+	if err == nil || !strings.Contains(err.Error(), `unsupported field "scope"`) {
+		t.Errorf("`scope` is a trait-level property and must not be accepted on a component, got: %v", err)
+	}
+}
+
+// TestValidateAuthoredProperties_EngineScopeDoesNotMutateHandlerSchema pins the copy
+// in withEngineTraitProperties. PropertySchema() may return a shared or cached map,
+// and writing `scope` into it would leak the addition into HandlerSchemas() and every
+// other consumer of that handler's schema — a `kurel schema`-style listing would then
+// advertise `scope` as a property the handler itself declares.
+func TestValidateAuthoredProperties_EngineScopeDoesNotMutateHandlerSchema(t *testing.T) {
+	shared := map[string]PropertySchema{"size": {Type: PropertyTypeString}}
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": schemaComponent{typ: "webservice"}},
+		map[string]TraitHandler{"pvc": sharedSchemaTrait{typ: "pvc", schema: shared}},
+	)
+
+	app := authoredApp("webservice", map[string]any{"image": "nginx"},
+		Trait{Type: "pvc", Properties: map[string]any{"size": "1Gi", "scope": "fast"}})
+	if err := tr.ValidateAuthoredProperties(app); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, leaked := shared["scope"]; leaked {
+		t.Error("withEngineTraitProperties wrote into the handler's own schema map")
+	}
+}
+
+// TestWithEngineTraitProperties_HandlerDeclarationWins covers the three handlers that
+// declare `scope` themselves (expose, ingress, httproute): their own description and
+// constraints must survive the merge, so the engine default never silently overrides
+// a handler that documented the property for its own purpose.
+func TestWithEngineTraitProperties_HandlerDeclarationWins(t *testing.T) {
+	own := PropertySchema{Type: PropertyTypeString, Description: "the handler's own wording"}
+	in := map[string]PropertySchema{"scope": own}
+
+	out := withEngineTraitProperties(in)
+
+	if out["scope"].Description != own.Description {
+		t.Errorf("scope = %+v, want the handler's own declaration preserved", out["scope"])
+	}
+	// Nothing to add, so the input map is returned as-is rather than copied.
+	if len(out) != len(in) {
+		t.Errorf("len(out) = %d, want %d — no key should have been added", len(out), len(in))
 	}
 }

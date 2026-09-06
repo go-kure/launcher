@@ -1,0 +1,17 @@
+# Two pvc bindings, so the golden proves the SCOPED one was selected: an unscoped
+# fallback that would render slow-csi, and pvc.fast which the app.yaml `scope: fast`
+# selects. A regression that drops `scope` before resolution renders slow-csi and the
+# golden fails loudly, rather than silently rendering the right thing for the wrong
+# reason.
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: test-cluster
+spec:
+  capabilities:
+    pvc:
+      rendering:
+        storageClassName: slow-csi
+    pvc.fast:
+      rendering:
+        storageClassName: fast-csi

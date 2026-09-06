@@ -88,15 +88,87 @@ func (t *Transformer) validateAuthoredComponent(comp *Component) error {
 // validateAuthoredTrait is validateAuthoredComponent for the trait position. The
 // component name is carried into the path because a trait has no name of its own and
 // the same trait type may appear on several components.
+//
+// It differs from the component position in one way: the engine itself reads a
+// property off every authored trait, whatever the handler declares — see
+// engineTraitProperties.
 func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait) error {
 	path := fmt.Sprintf("component %q: trait %q: properties", componentName, trait.Type)
 	if h, ok := t.traitHandlers[trait.Type]; ok {
-		return validateAuthoredAgainst(h, trait.Properties, path)
+		return validateAuthoredTraitAgainst(h, trait.Properties, path)
 	}
 	if rule, ok := t.traitLoweringRules[trait.Type]; ok {
-		return validateAuthoredAgainst(rule, trait.Properties, path)
+		return validateAuthoredTraitAgainst(rule, trait.Properties, path)
 	}
 	return nil
+}
+
+// engineTraitProperties are properties the TRANSFORM ENGINE reads off an authored
+// trait directly, independently of the trait's handler. They are legal on every
+// trait, so the authored check has to accept them even though most handlers do not
+// declare them — otherwise this check rejects documents that build correctly today.
+//
+// `scope` selects which ClusterProfile capability binding the trait resolves
+// against: buildCapabilityKey (transform.go) builds "<type>.<scope>" for EVERY trait
+// type, falling back to the bare type key, and both resolveCapability call sites
+// (applyTraits, and the lowering fixpoint) go through it. Three handlers — expose,
+// ingress and httproute — happen to declare `scope` in their own schema, but for an
+// unrelated reason: they use it to disambiguate sub-application names. That
+// coincidence is why the gap was invisible until the authored path was checked at
+// all. Authoring `scope` on any other trait (`pvc`, `certificate`, …) worked before
+// this file existed and must keep working.
+//
+// The declared type is deliberately string, matching what buildCapabilityKey
+// requires and what those three handlers already declare: a non-string `scope` is
+// silently ignored today, which is precisely the class of silent drop this check
+// exists to eliminate, and rejecting it here makes every trait behave the way expose,
+// ingress and httproute already did.
+//
+// grep for `Properties["` in pkg/oam confirms `scope` is currently the only such
+// property; add to this map rather than special-casing a call site if that changes.
+var engineTraitProperties = map[string]PropertySchema{
+	"scope": {
+		Type:        PropertyTypeString,
+		Description: "Selects the scoped ClusterProfile capability binding \"<traitType>.<scope>\", falling back to the unscoped binding when no scoped one is declared.",
+	},
+}
+
+// validateAuthoredTraitAgainst is validateAuthoredAgainst with engineTraitProperties
+// folded into the handler's schema.
+func validateAuthoredTraitAgainst(handler any, props map[string]any, path string) error {
+	p, ok := handler.(PropertySchemaProvider)
+	if !ok {
+		return nil
+	}
+	return validateAuthoredProperties(withEngineTraitProperties(p.PropertySchema()), props, path)
+}
+
+// withEngineTraitProperties returns schema plus any engine-read property it does not
+// already declare. The handler's own declaration wins when both describe a key, so a
+// handler that documents `scope` for its own purposes (expose, ingress, httproute)
+// keeps its own description and constraints.
+//
+// The handler's map is never mutated — PropertySchema() may return a shared or cached
+// map, and writing into it would leak this addition into HandlerSchemas() and every
+// other consumer.
+func withEngineTraitProperties(schema map[string]PropertySchema) map[string]PropertySchema {
+	undeclared := 0
+	for key := range engineTraitProperties {
+		if _, declared := schema[key]; !declared {
+			undeclared++
+		}
+	}
+	if undeclared == 0 {
+		return schema
+	}
+	out := make(map[string]PropertySchema, len(schema)+undeclared)
+	maps.Copy(out, schema)
+	for key, field := range engineTraitProperties {
+		if _, declared := out[key]; !declared {
+			out[key] = field
+		}
+	}
+	return out
 }
 
 // validateAuthoredAgainst validates props against handler's schema, if handler

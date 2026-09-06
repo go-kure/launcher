@@ -312,6 +312,17 @@ map after this runs, so a required property the platform supplies is legitimatel
 absent from what the author wrote. Nested `Required`, inside an object the author did
 write, still is.
 
+One property is legal on **every** trait regardless of what its handler declares:
+`scope`. It is read by the transform engine rather than by a handler —
+`buildCapabilityKey` builds the `"<traitType>.<scope>"` capability key for every trait
+type, so a `pvc` or `certificate` trait can select a scoped `ClusterProfile` binding
+even though neither handler declares such a property. `expose`, `ingress` and
+`httproute` do declare it, but for an unrelated reason (sub-application naming), and
+their own declaration wins over the engine default. Add to `engineTraitProperties` if
+another engine-read property is ever introduced; the merge never mutates the
+handler's returned schema, so `HandlerSchemas` still advertises only what each handler
+actually declares.
+
 `validateProperties`'s null check (`isNullValue`) treats a typed-nil pointer,
 slice, or map — not just a bare `nil` interface — as JSON `null`: a Go type
 assertion alone can't tell an uninitialized slice/map apart from a validly-typed
