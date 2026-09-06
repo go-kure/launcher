@@ -3,9 +3,11 @@ package components
 import (
 	"slices"
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -63,6 +65,12 @@ var (
 const (
 	requiredArm  = "requiredDuringSchedulingIgnoredDuringExecution"
 	preferredArm = "preferredDuringSchedulingIgnoredDuringExecution"
+
+	// nodeFieldSelectorKey is the only key a node field selector may use. Upstream
+	// spells it metav1.ObjectNameField and registers it as the sole entry of
+	// nodeFieldSelectorValidators (pkg/apis/core/validation/validation.go,
+	// release-1.36:4993-4995).
+	nodeFieldSelectorKey = "metadata.name"
 )
 
 // parseRawAffinity parses the `affinity` property as a plain corev1.Affinity.
@@ -260,6 +268,16 @@ func parseNodeSelectorRequirements(raw map[string]any, key, label string, qualif
 			if !present {
 				return nil, errors.Errorf("%s.key: required", itemLabel)
 			}
+			// Node FIELD selectors are not free-form paths, despite the shared
+			// NodeSelectorRequirement type. ValidateNodeFieldSelectorRequirement
+			// (pkg/apis/core/validation/validation.go, release-1.36:4998-5022) looks
+			// the key up in nodeFieldSelectorValidators (:4993-4995), whose only
+			// entry is metav1.ObjectNameField — "metadata.name". Anything else is
+			// "not a valid field selector key" at admission.
+			if reqKey != nodeFieldSelectorKey {
+				return nil, errors.Errorf("%s.key: invalid value %q, want %q — it is the only node field selector key Kubernetes accepts",
+					itemLabel, reqKey, nodeFieldSelectorKey)
+			}
 		}
 		op, present, err := optionalString(item, "operator", itemLabel+".operator")
 		if err != nil {
@@ -272,29 +290,50 @@ func parseNodeSelectorRequirements(raw map[string]any, key, label string, qualif
 		if err != nil {
 			return nil, err
 		}
-		// Arity rules verbatim from NodeSelectorRequirement.Values' field doc:
-		// "If the operator is In or NotIn, the values array must be non-empty.
-		// If the operator is Exists or DoesNotExist, the values array must be
-		// empty. If the operator is Gt or Lt, the values array must have a
-		// single element, which will be interpreted as an integer."
-		switch corev1.NodeSelectorOperator(op) {
-		case corev1.NodeSelectorOpIn, corev1.NodeSelectorOpNotIn:
-			if len(values) == 0 {
-				return nil, errors.Errorf("%s.values: at least one value is required for operator %s", itemLabel, op)
+		// The two fields share NodeSelectorRequirement but not its rules, so each
+		// gets its own operator/arity check — the same split upstream makes between
+		// validateNodeSelectorRequirement and ValidateNodeFieldSelectorRequirement.
+		// Running the matchExpressions rules on a matchFields entry would emit
+		// advice ("want In, NotIn, Exists, …") that is wrong for the field.
+		if qualifiedKeys {
+			// Arity rules verbatim from NodeSelectorRequirement.Values' field doc:
+			// "If the operator is In or NotIn, the values array must be non-empty.
+			// If the operator is Exists or DoesNotExist, the values array must be
+			// empty. If the operator is Gt or Lt, the values array must have a
+			// single element, which will be interpreted as an integer."
+			switch corev1.NodeSelectorOperator(op) {
+			case corev1.NodeSelectorOpIn, corev1.NodeSelectorOpNotIn:
+				if len(values) == 0 {
+					return nil, errors.Errorf("%s.values: at least one value is required for operator %s", itemLabel, op)
+				}
+			case corev1.NodeSelectorOpExists, corev1.NodeSelectorOpDoesNotExist:
+				if len(values) > 0 {
+					return nil, errors.Errorf("%s.values: must be empty for operator %s", itemLabel, op)
+				}
+			case corev1.NodeSelectorOpGt, corev1.NodeSelectorOpLt:
+				if len(values) != 1 {
+					return nil, errors.Errorf("%s.values: exactly one value is required for operator %s, got %d", itemLabel, op, len(values))
+				}
+				if _, err := strconv.ParseInt(values[0], 10, 64); err != nil {
+					return nil, errors.Errorf("%s.values[0]: operator %s requires an integer, got %q", itemLabel, op, values[0])
+				}
+			default:
+				return nil, errors.Errorf("%s.operator: invalid value %q, want In, NotIn, Exists, DoesNotExist, Gt or Lt", itemLabel, op)
 			}
-		case corev1.NodeSelectorOpExists, corev1.NodeSelectorOpDoesNotExist:
-			if len(values) > 0 {
-				return nil, errors.Errorf("%s.values: must be empty for operator %s", itemLabel, op)
+		} else {
+			// ValidateNodeFieldSelectorRequirement's own switch (validation.go,
+			// release-1.36:5001-5009) accepts only In and NotIn, each with exactly
+			// one value. Exists/DoesNotExist/Gt/Lt fall to its default branch as
+			// "not a valid selector operator", so a matchFields entry the
+			// matchExpressions rules would happily build is refused at admission.
+			switch corev1.NodeSelectorOperator(op) {
+			case corev1.NodeSelectorOpIn, corev1.NodeSelectorOpNotIn:
+				if len(values) != 1 {
+					return nil, errors.Errorf("%s.values: exactly one value is required for operator %s in matchFields, got %d", itemLabel, op, len(values))
+				}
+			default:
+				return nil, errors.Errorf("%s.operator: invalid value %q for matchFields, want In or NotIn — node field selectors accept no other operator", itemLabel, op)
 			}
-		case corev1.NodeSelectorOpGt, corev1.NodeSelectorOpLt:
-			if len(values) != 1 {
-				return nil, errors.Errorf("%s.values: exactly one value is required for operator %s, got %d", itemLabel, op, len(values))
-			}
-			if _, err := strconv.ParseInt(values[0], 10, 64); err != nil {
-				return nil, errors.Errorf("%s.values[0]: operator %s requires an integer, got %q", itemLabel, op, values[0])
-			}
-		default:
-			return nil, errors.Errorf("%s.operator: invalid value %q, want In, NotIn, Exists, DoesNotExist, Gt or Lt", itemLabel, op)
 		}
 		out = append(out, corev1.NodeSelectorRequirement{
 			Key:      reqKey,
@@ -392,6 +431,9 @@ func parsePodAffinityTerm(raw map[string]any, label string) (corev1.PodAffinityT
 	if err != nil {
 		return corev1.PodAffinityTerm{}, err
 	}
+	if err := validateNamespaceNames(namespaces, "namespaces", label); err != nil {
+		return corev1.PodAffinityTerm{}, err
+	}
 	term.Namespaces = namespaces
 
 	// "Empty topologyKey is not allowed" (PodAffinityTerm.TopologyKey), and it
@@ -429,6 +471,16 @@ func parsePodAffinityTerm(raw map[string]any, label string) (corev1.PodAffinityT
 		return corev1.PodAffinityTerm{}, err
 	}
 	if err := requireLabelSelector(mismatchLabelKeys, term.LabelSelector, "mismatchLabelKeys", label); err != nil {
+		return corev1.PodAffinityTerm{}, err
+	}
+	// Both lists are label KEYS, so both get the qualified-name rule regardless of
+	// the selector-overlap asymmetry above. Upstream applies it to each entry of
+	// either field via validateLabelKeys -> ValidateLabelName
+	// (pkg/apis/core/validation/validation.go, release-1.36:9063-9064).
+	if err := validateLabelKeyList(matchLabelKeys, "matchLabelKeys", label); err != nil {
+		return corev1.PodAffinityTerm{}, err
+	}
+	if err := validateLabelKeyList(mismatchLabelKeys, "mismatchLabelKeys", label); err != nil {
 		return corev1.PodAffinityTerm{}, err
 	}
 	term.MatchLabelKeys = matchLabelKeys
@@ -508,6 +560,42 @@ func checkMatchLabelKeysAgainstSelector(keys []string, sel *metav1.LabelSelector
 			if req.Key == k {
 				return errors.Errorf("%s: key %q is already constrained by labelSelector.matchExpressions; the same key may not appear in both", indexedLabel(label+"."+field, i), k)
 			}
+		}
+	}
+	return nil
+}
+
+// validateNamespaceNames rejects a namespace entry the apiserver would refuse.
+// Upstream validates every PodAffinityTerm.Namespaces entry with
+// ValidateNamespaceName (pkg/apis/core/validation/validation.go, release-1.36:
+// 5162-5163), which is apimachinery's NameIsDNSLabel — the same rule
+// IsDNS1123Label applies, already used for namespace-shaped values elsewhere in
+// this package (podspec.go:256).
+//
+// This is the accept-what-upstream-refuses direction, which is why it is enforced
+// here while the matchExpressions label-VALUE check was deliberately declined: there
+// upstream does not validate at all (it gates the analogous check behind
+// AllowInvalidLabelValueInSelector), so refusing would be stricter than the API. Here
+// upstream does validate, so accepting builds a document that is dead on arrival.
+func validateNamespaceNames(names []string, field, label string) error {
+	for i, ns := range names {
+		if errs := validation.IsDNS1123Label(ns); len(errs) > 0 {
+			return errors.Errorf("%s: invalid namespace name %q: %s",
+				indexedLabel(label+"."+field, i), ns, strings.Join(errs, "; "))
+		}
+	}
+	return nil
+}
+
+// validateLabelKeyList applies the qualified-name rule to a list of label keys.
+// Upstream: validateLabelKeys -> unversionedvalidation.ValidateLabelName per entry
+// (validation.go, release-1.36:9063-9064). Mirrors parseLabelMap's key rule
+// (podspec.go:719), so both spellings of "this string is a label key" agree.
+func validateLabelKeyList(keys []string, field, label string) error {
+	for i, k := range keys {
+		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
+			return errors.Errorf("%s: invalid label key %q: %s",
+				indexedLabel(label+"."+field, i), k, strings.Join(errs, "; "))
 		}
 	}
 	return nil
@@ -632,7 +720,27 @@ func parseTopologySpreadConstraints(props map[string]any) ([]corev1.TopologySpre
 		if err := checkMatchLabelKeysAgainstSelector(matchLabelKeys, tsc.LabelSelector, "matchLabelKeys", label); err != nil {
 			return nil, err
 		}
+		// Same label-KEY rule as the PodAffinityTerm lists: upstream runs every
+		// entry through validateLabelKeys -> ValidateLabelName (validation.go,
+		// release-1.36:9063-9064) regardless of which field carries it.
+		if err := validateLabelKeyList(matchLabelKeys, "matchLabelKeys", label); err != nil {
+			return nil, err
+		}
 		tsc.MatchLabelKeys = matchLabelKeys
+
+		// The duplicate rule is on the PAIR, not on topologyKey alone:
+		// ValidateSpreadConstraintNotRepeat (validation.go, release-1.36:8943-8951)
+		// rejects only when BOTH TopologyKey and WhenUnsatisfiable match an earlier
+		// entry. Two constraints on the same topologyKey with different
+		// whenUnsatisfiable values are legal, so a topologyKey-uniqueness check here
+		// would be stricter than the API — the same error that got the
+		// matchExpressions label-value check rejected in an earlier round.
+		for j, prev := range out {
+			if prev.TopologyKey == tsc.TopologyKey && prev.WhenUnsatisfiable == tsc.WhenUnsatisfiable {
+				return nil, errors.Errorf("%s: duplicate constraint {%s, %s}, already declared at %s",
+					label, tsc.TopologyKey, tsc.WhenUnsatisfiable, indexedLabel("topologySpreadConstraints", j))
+			}
+		}
 
 		out = append(out, tsc)
 	}

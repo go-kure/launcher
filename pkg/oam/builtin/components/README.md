@@ -773,9 +773,9 @@ component: every selector, weight and topology key is authored.
 
 | property | type | notes | compat |
 |---|---|---|---|
-| `affinity` | object | `nodeAffinity`, `podAffinity`, `podAntiAffinity`, each with the `requiredDuringSchedulingIgnoredDuringExecution` / `preferredDuringSchedulingIgnoredDuringExecution` arms. Node requirement operators are `In`/`NotIn`/`Exists`/`DoesNotExist`/`Gt`/`Lt`, with upstream's arity rule — `In`/`NotIn` need at least one value, `Exists`/`DoesNotExist` none, `Gt`/`Lt` exactly one integer. `matchExpressions` keys are node label keys (qualified names); `matchFields` keys are field paths such as `metadata.name`, so they are not validated as qualified names. Weights must be 1–100. An `affinity` with no arm set is rejected, as is a node selector term with neither `matchExpressions` nor `matchFields` — upstream documents such a term as matching no nodes, so it can only be a mistake. The published schema marks `nodeSelectorTerms`, and a weighted arm's `preference` and `podAffinityTerm`, as required — the parser already refused each of them being absent, so this changes what schema introspection reports, not what builds. | additive |
+| `affinity` | object | `nodeAffinity`, `podAffinity`, `podAntiAffinity`, each with the `requiredDuringSchedulingIgnoredDuringExecution` / `preferredDuringSchedulingIgnoredDuringExecution` arms. Node requirement operators are `In`/`NotIn`/`Exists`/`DoesNotExist`/`Gt`/`Lt`, with upstream's arity rule — `In`/`NotIn` need at least one value, `Exists`/`DoesNotExist` none, `Gt`/`Lt` exactly one integer. `matchExpressions` keys are node label keys (qualified names). `matchFields` keys are *not* qualified names and are not free-form field paths either: `metadata.name` is the only key Kubernetes accepts, and a field requirement takes only `In` or `NotIn` with exactly one value — the arity rule above belongs to `matchExpressions`, and a `matchFields` entry it would accept can still be refused at admission. Weights must be 1–100. An `affinity` with no arm set is rejected, as is a node selector term with neither `matchExpressions` nor `matchFields` — upstream documents such a term as matching no nodes, so it can only be a mistake. The published schema marks `nodeSelectorTerms`, and a weighted arm's `preference` and `podAffinityTerm`, as required — the parser already refused each of them being absent, so this changes what schema introspection reports, not what builds. | additive |
 | `tolerations` | array | The same property `daemonset` already publishes, from the same parser, now covering the complete `corev1.Toleration`: `key`, `operator` (`Exists`/`Equal`/`Lt`/`Gt`), `value`, `effect`, `tolerationSeconds`. `tolerationSeconds` is a pointer upstream, so unset (tolerate forever) and `0` (evict immediately) are different documents. Cross-field rules: an empty `key` requires `Exists`; a `value` under `Exists` is refused; `Lt`/`Gt` need a canonical decimal integer `value` (no leading zeros, no plus sign, no `-0` — `Toleration.ToleratesTaint` runs `content.IsDecimalInteger` before parsing and silently matches nothing otherwise) and the cluster's `TaintTolerationComparisonOperators` gate. An unrecognised key is reported rather than dropped, and so is `tolerations` authored as something other than an array. | additive for `deployment`; **narrowing for `daemonset`** — see below |
-| `topologySpreadConstraints` | array | `maxSkew` (required, > 0), `topologyKey` (required), `whenUnsatisfiable` (required, `DoNotSchedule`/`ScheduleAnyway`), `labelSelector`, `minDomains` (> 0, and only with `DoNotSchedule`), `nodeAffinityPolicy`/`nodeTaintsPolicy` (`Honor`/`Ignore`), `matchLabelKeys`. The three required fields carry no `omitempty` upstream, so an unset one would emit `maxSkew: 0` / `topologyKey: ""` / `whenUnsatisfiable: ""` rather than an API default — hence required here rather than defaulted. | additive |
+| `topologySpreadConstraints` | array | `maxSkew` (required, > 0), `topologyKey` (required), `whenUnsatisfiable` (required, `DoNotSchedule`/`ScheduleAnyway`), `labelSelector`, `minDomains` (> 0, and only with `DoNotSchedule`), `nodeAffinityPolicy`/`nodeTaintsPolicy` (`Honor`/`Ignore`), `matchLabelKeys`. Two constraints may not repeat the same `(topologyKey, whenUnsatisfiable)` **pair**; sharing a `topologyKey` with different `whenUnsatisfiable` values is legal and stays accepted. The three required fields carry no `omitempty` upstream, so an unset one would emit `maxSkew: 0` / `topologyKey: ""` / `whenUnsatisfiable: ""` rather than an API default — hence required here rather than defaulted. | additive |
 
 ##### What `tolerations` changed for `daemonset`
 
@@ -817,6 +817,17 @@ validation only ever builds its forbidden-key set from `matchLabelKeys`, because
 a `mismatchLabelKeys` entry is merged as a `NotIn` requirement and filtering
 further on the same key is a legitimate thing to want. Enforcing the doc's
 wording would refuse a document the API server accepts.
+
+A third rule applies to the *entries* of both lists, and to a pod affinity term's
+`namespaces`: every `matchLabelKeys` / `mismatchLabelKeys` entry must be a valid
+label key (a qualified name), and every `namespaces` entry a valid DNS-1123
+label. These are shape rules the API server enforces on apply, so a document
+that fails them was never going to reach the cluster — accepting it here only
+moves the failure from build time to admission time. That is the opposite
+direction from the `mismatchLabelKeys` overlap rule declined just above: there,
+upstream does not validate, so enforcing would be *stricter* than the API; here
+it does, so accepting is *looser*. Both errors are worth avoiding and they are
+not in tension.
 
 An **empty** `labelSelector: {}` is accepted here, unlike on a volume claim's
 `selector` where launcher refuses it. Upstream distinguishes the two: a null

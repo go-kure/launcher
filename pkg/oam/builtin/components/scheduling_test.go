@@ -187,8 +187,11 @@ func TestDeploymentScheduling_AffinityRoundTrip(t *testing.T) {
 	if got := expr.Values; len(got) != 1 || got[0] != "amd64" {
 		t.Errorf("matchExpressions[0].Values = %v, want [amd64]", got)
 	}
-	// matchFields keys are field paths, not qualified names — a distinction the
-	// parser has to make, since `metadata.name` is not a valid qualified name.
+	// matchFields keys do not take the qualified-name rule matchExpressions keys
+	// take — they take a narrower one. `metadata.name` is the only key upstream's
+	// nodeFieldSelectorValidators registers, so this is both the happy path and the
+	// only key that has one; the rejections are in
+	// TestDeploymentScheduling_AffinityRejections.
 	if len(terms[0].MatchFields) != 1 {
 		t.Fatalf("matchFields = %d, want 1", len(terms[0].MatchFields))
 	}
@@ -646,6 +649,15 @@ func TestDeploymentScheduling_AffinityRejections(t *testing.T) {
 			},
 		}
 	}
+	nodeFields := func(req map[string]any) map[string]any {
+		return map[string]any{
+			"nodeAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{
+					"nodeSelectorTerms": []any{map[string]any{"matchFields": []any{req}}},
+				},
+			},
+		}
+	}
 	cases := []struct {
 		name     string
 		affinity map[string]any
@@ -732,6 +744,77 @@ func TestDeploymentScheduling_AffinityRejections(t *testing.T) {
 			}},
 			"already constrained by labelSelector.matchExpressions",
 		},
+
+		// Admission parity: everything below builds a document the parser used to
+		// accept and the apiserver then rejects. Each cites the upstream validator
+		// that refuses it, so the rule can be checked rather than trusted.
+
+		{
+			// nodeFieldSelectorValidators has exactly one entry, metav1.ObjectNameField
+			// (validation.go, release-1.36:4993-4995).
+			"matchFields with a key other than metadata.name",
+			nodeFields(map[string]any{"key": "spec.nodeName", "operator": "In", "values": []any{"n1"}}),
+			`invalid value "spec.nodeName", want "metadata.name"`,
+		},
+		{
+			// ValidateNodeFieldSelectorRequirement's switch (validation.go:5001-5009)
+			// has only In and NotIn; Exists falls to its default branch.
+			"matchFields with an operator matchExpressions allows",
+			nodeFields(map[string]any{"key": "metadata.name", "operator": "Exists"}),
+			`invalid value "Exists" for matchFields, want In or NotIn`,
+		},
+		{
+			// Same switch: In and NotIn require len(Values) == 1, not "at least one".
+			"matchFields In with two values",
+			nodeFields(map[string]any{"key": "metadata.name", "operator": "In", "values": []any{"n1", "n2"}}),
+			"exactly one value is required for operator In in matchFields, got 2",
+		},
+		{
+			// Ordering, not just rejection: Gt is valid on matchExpressions, so the
+			// shared rules would have reported it as an arity problem and offered an
+			// operator list that does not apply to this field. The matchFields entry
+			// must be judged by the field-selector rules alone.
+			"matchFields Gt is reported against matchFields, not the shared operator list",
+			nodeFields(map[string]any{"key": "metadata.name", "operator": "Gt", "values": []any{"1"}}),
+			`invalid value "Gt" for matchFields, want In or NotIn`,
+		},
+		{
+			// validatePodAffinityTerm runs every entry through ValidateNamespaceName
+			// (validation.go:5162-5163), which is NameIsDNSLabel.
+			"pod affinity namespaces entry that is not a DNS label",
+			map[string]any{"podAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
+					"topologyKey": "kubernetes.io/hostname",
+					"namespaces":  []any{"Bad NS"},
+				}},
+			}},
+			`invalid namespace name "Bad NS"`,
+		},
+		{
+			// validateLabelKeys -> ValidateLabelName per entry (validation.go:9063-9064).
+			"matchLabelKeys entry that is not a qualified name",
+			map[string]any{"podAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
+					"topologyKey":    "kubernetes.io/hostname",
+					"labelSelector":  map[string]any{"matchLabels": map[string]any{"a": "b"}},
+					"matchLabelKeys": []any{"not a key"},
+				}},
+			}},
+			`invalid label key "not a key"`,
+		},
+		{
+			// Same validator, other list — the selector-overlap asymmetry above does
+			// not extend to the qualified-name rule.
+			"mismatchLabelKeys entry that is not a qualified name",
+			map[string]any{"podAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
+					"topologyKey":       "kubernetes.io/hostname",
+					"labelSelector":     map[string]any{"matchLabels": map[string]any{"a": "b"}},
+					"mismatchLabelKeys": []any{"not a key"},
+				}},
+			}},
+			`invalid label key "not a key"`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -805,6 +888,17 @@ func TestDeploymentScheduling_TopologySpreadConstraintRejections(t *testing.T) {
 			}),
 			"already constrained by labelSelector.matchExpressions",
 		},
+		{
+			// Admission parity, same validator as the PodAffinityTerm lists:
+			// validateLabelKeys -> ValidateLabelName (validation.go,
+			// release-1.36:9063-9064) applies to this field too.
+			"matchLabelKeys entry that is not a qualified name",
+			valid(map[string]any{
+				"labelSelector":  map[string]any{"matchLabels": map[string]any{"a": "b"}},
+				"matchLabelKeys": []any{"not a key"},
+			}),
+			`invalid label key "not a key"`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -817,4 +911,55 @@ func TestDeploymentScheduling_TopologySpreadConstraintRejections(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDeploymentScheduling_TopologySpreadDuplicatePair pins the duplicate rule to
+// the PAIR (topologyKey, whenUnsatisfiable), which is what
+// ValidateSpreadConstraintNotRepeat actually checks (pkg/apis/core/validation/
+// validation.go, release-1.36:8943-8951). The accepted case is the load-bearing
+// half: two constraints sharing a topologyKey with different whenUnsatisfiable
+// values are legal, so a topologyKey-uniqueness check here would be stricter than
+// the API — the same over-reach an earlier round already rejected once.
+func TestDeploymentScheduling_TopologySpreadDuplicatePair(t *testing.T) {
+	constraint := func(action string) map[string]any {
+		return map[string]any{
+			"maxSkew":           1,
+			"topologyKey":       "kubernetes.io/hostname",
+			"whenUnsatisfiable": action,
+		}
+	}
+
+	t.Run("identical pair is rejected", func(t *testing.T) {
+		err := schedulingError(t, map[string]any{"topologySpreadConstraints": []any{
+			constraint("DoNotSchedule"), constraint("DoNotSchedule"),
+		}})
+		if err == nil {
+			t.Fatal("got nil error, want a duplicate-constraint rejection")
+		}
+		want := "duplicate constraint {kubernetes.io/hostname, DoNotSchedule}"
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+		}
+	})
+
+	t.Run("same topologyKey with a different action is accepted", func(t *testing.T) {
+		dep, _ := generateDeployment(t, "app", map[string]any{
+			"image": "nginx:1.27",
+			"topologySpreadConstraints": []any{
+				constraint("DoNotSchedule"), constraint("ScheduleAnyway"),
+			},
+		})
+		got := dep.Spec.Template.Spec.TopologySpreadConstraints
+		if len(got) != 2 {
+			t.Fatalf("TopologySpreadConstraints length = %d, want 2", len(got))
+		}
+		if got[0].WhenUnsatisfiable != corev1.DoNotSchedule || got[1].WhenUnsatisfiable != corev1.ScheduleAnyway {
+			t.Errorf("whenUnsatisfiable = %q, %q; want DoNotSchedule, ScheduleAnyway",
+				got[0].WhenUnsatisfiable, got[1].WhenUnsatisfiable)
+		}
+		if got[0].TopologyKey != got[1].TopologyKey {
+			t.Errorf("topologyKey = %q, %q; want both to be the shared key",
+				got[0].TopologyKey, got[1].TopologyKey)
+		}
+	})
 }
