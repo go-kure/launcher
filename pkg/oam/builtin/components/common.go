@@ -2842,36 +2842,34 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 		// doc gives them a defined meaning, so refusing them would be
 		// launcher's own rejection of a document the apiserver accepts.
 		//
-		// The NoExecute precondition is NOT enforced here, and the reason is
-		// weaker than it looks — do not read the omission as settled. An earlier
-		// version of this comment said upstream merely ignores the field rather
-		// than rejecting the pod; the only validation source reachable from this
-		// module's graph says otherwise, rejecting the pair outright with
-		// "effect must be 'NoExecute' when `tolerationSeconds` is set"
-		// (github.com/cloudnative-pg/cloudnative-pg@v1.30.0
-		// internal/webhook/v1/cluster_webhook.go:2207-2212, a near-verbatim copy
-		// of pkg/apis/core/validation/validation.go per its own comment at
-		// :2186-2188). Empty effect counts as "not NoExecute" there, so the rule
-		// would demand an explicit effect.
-		//
-		// It is left unenforced deliberately, not by oversight: adding a
-		// rejection on a parser shared with daemonset (see this function's doc
-		// comment) is a change to two kinds, the evidence above is second-hand
-		// and demonstrably older than the pinned k8s.io/api, and the failure it
-		// would catch is loud rather than silent — the apiserver refuses the
-		// object at apply and names the field. Contrast tolerationSeconds being
-		// dropped, which was silent and is what go-kure/launcher#412 fixed. If a
-		// first-hand citation becomes available, add the check there and to
-		// README.md's daemonset compatibility table in the same change.
+		// The NoExecute precondition IS enforced, but at the end of the loop with
+		// the other rules that need a second field — see it there for the
+		// citation. It was left out until now on the grounds that the only
+		// evidence was a near-verbatim COPY of upstream's rule carried by a direct
+		// dependency (cloudnative-pg), which is second-hand and demonstrably older
+		// than the pinned k8s.io/api. That comment named the condition for adding
+		// it — a first-hand citation — and the condition is now met.
 		if seconds, present, err := optionalInt64(m, "tolerationSeconds", indexedLabel("toleration", i)+".tolerationSeconds"); err != nil {
 			return nil, err
 		} else if present {
 			tol.TolerationSeconds = &seconds
 		}
 
-		// The three cross-field rules, each from Toleration's own field docs.
-		// Checked after every field is read because each names two of them.
+		// The admission rules that need more than one field, each from
+		// Toleration's own field docs. Checked after every field is read.
 		//
+		// A non-empty key must be a qualified name. Upstream applies
+		// unversionedvalidation.ValidateLabelName to it whenever it is non-empty
+		// (pkg/apis/core/validation/validation.go, release-1.36:4367-4369),
+		// unconditionally and behind no feature gate — the same rule the affinity
+		// and topology-key paths in scheduling.go already apply to their own label
+		// keys. It is stated here rather than at the assignment above because the
+		// empty-key case is legal and is governed by the rule immediately below.
+		if tol.Key != "" {
+			if errs := validation.IsQualifiedName(tol.Key); len(errs) > 0 {
+				return nil, errors.Errorf("toleration[%d].key: invalid label key %q: %s", i, tol.Key, strings.Join(errs, "; "))
+			}
+		}
 		// "If the key is empty, operator must be Exists; this combination means
 		// to match all values and all keys." (core/v1/types.go:4093.) A hard
 		// "must", so this is the API's rule, not launcher's — an empty key with
@@ -2930,6 +2928,37 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 			if _, err := strconv.ParseInt(tol.Value, 10, 64); err != nil {
 				return nil, errors.Errorf("toleration[%d].value: operator %s requires an integer, got %q", i, tol.Operator, tol.Value)
 			}
+		}
+		// Under Equal the value is matched against a taint's value, so it has to
+		// be a legal label value: upstream runs validation.IsValidLabelValue on it
+		// for the Equal and empty-operator arms (validation.go,
+		// release-1.36:4385-4388). Exists is excluded by the rule above (value
+		// must be empty) and Lt/Gt by the rule immediately above (value must be a
+		// decimal integer), so Equal is the only arm left to check. This parser
+		// never leaves Operator empty — the switch above either sets one of the
+		// four operators or rejects — so the empty-operator arm has no counterpart
+		// here.
+		if tol.Operator == corev1.TolerationOpEqual {
+			if errs := validation.IsValidLabelValue(tol.Value); len(errs) > 0 {
+				return nil, errors.Errorf("toleration[%d].value: invalid label value %q: %s", i, tol.Value, strings.Join(errs, "; "))
+			}
+		}
+		// tolerationSeconds requires effect NoExecute. The comment on the
+		// tolerationSeconds read above left this rule unenforced and said why:
+		// the only citation reachable then was a near-verbatim COPY carried by a
+		// direct dependency, which is second-hand and demonstrably older than the
+		// pinned k8s.io/api. It also said what would change that — "if a
+		// first-hand citation becomes available, add the check there and to
+		// README.md's daemonset compatibility table in the same change".
+		//
+		// It is available: ValidateTolerations rejects the pair outright at
+		// pkg/apis/core/validation/validation.go, release-1.36:4377-4380, with
+		// "effect must be 'NoExecute' when `tolerationSeconds` is set". Empty
+		// effect counts as "not NoExecute" there, so the rule demands an explicit
+		// effect rather than treating omission as a wildcard — which is why the
+		// error names both fields instead of only the mismatch.
+		if tol.TolerationSeconds != nil && tol.Effect != corev1.TaintEffectNoExecute {
+			return nil, errors.Errorf("toleration[%d].effect: must be 'NoExecute' when tolerationSeconds is set, got %q — an empty effect does not satisfy the rule, it has to be spelled out", i, tol.Effect)
 		}
 
 		tolerations = append(tolerations, tol)

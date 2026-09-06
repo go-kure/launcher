@@ -331,6 +331,19 @@ func parseNodeSelectorRequirements(raw map[string]any, key, label string, qualif
 				if len(values) != 1 {
 					return nil, errors.Errorf("%s.values: exactly one value is required for operator %s in matchFields, got %d", itemLabel, op, len(values))
 				}
+				// The key check above only proves the key RESOLVES in
+				// nodeFieldSelectorValidators. Resolving is what arms the value
+				// rule: :5011-5019 runs the mapped validator over every entry of
+				// req.Values, and the validator mapped to metadata.name is
+				// ValidateNodeName (:4993-4994) = apimachinery's
+				// NameIsDNSSubdomain. So a syntactically fine key with a value
+				// like "bad value" still fails admission. Arity above has already
+				// forced exactly one value, which is why this indexes [0] rather
+				// than looping as upstream does.
+				if errs := validation.IsDNS1123Subdomain(values[0]); len(errs) > 0 {
+					return nil, errors.Errorf("%s.values[0]: invalid node name %q: %s",
+						itemLabel, values[0], strings.Join(errs, "; "))
+				}
 			default:
 				return nil, errors.Errorf("%s.operator: invalid value %q for matchFields, want In or NotIn — node field selectors accept no other operator", itemLabel, op)
 			}
@@ -847,25 +860,72 @@ func schemaNodeSelectorTerm() oam.PropertySchema {
 			"matchExpressions": {
 				Type:        oam.PropertyTypeArray,
 				Description: "Requirements against node labels.",
-				Items:       ptrSchema(schemaNodeSelectorRequirement("Node label key.")),
+				Items:       ptrSchema(schemaNodeSelectorRequirement()),
 			},
 			"matchFields": {
 				Type:        oam.PropertyTypeArray,
-				Description: "Requirements against node fields, e.g. `metadata.name`.",
-				Items:       ptrSchema(schemaNodeSelectorRequirement("Node field path, e.g. `metadata.name`.")),
+				Description: "Requirements against node fields. `metadata.name` is the only key Kubernetes accepts, with operator In or NotIn and exactly one value.",
+				Items:       ptrSchema(schemaNodeFieldSelectorRequirement()),
 			},
 		},
 	}
 }
 
-func schemaNodeSelectorRequirement(keyDescription string) oam.PropertySchema {
+// schemaNodeSelectorRequirement is matchExpressions' item schema. matchFields has
+// its own, narrower one — see schemaNodeFieldSelectorRequirement for why the two
+// cannot share this despite sharing the NodeSelectorRequirement type.
+func schemaNodeSelectorRequirement() oam.PropertySchema {
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeObject,
 		Description: "A single node requirement.",
 		Properties: map[string]oam.PropertySchema{
-			"key":      {Type: oam.PropertyTypeString, Required: true, Description: keyDescription},
+			"key":      {Type: oam.PropertyTypeString, Required: true, Description: "Node label key."},
 			"operator": {Type: oam.PropertyTypeString, Required: true, Enum: []any{"In", "NotIn", "Exists", "DoesNotExist", "Gt", "Lt"}, Description: "How the key relates to values. In/NotIn need at least one value, Exists/DoesNotExist none, Gt/Lt exactly one integer."},
 			"values":   schemaStringArray(),
+		},
+	}
+}
+
+// schemaNodeFieldSelectorRequirement is matchFields' own item schema, deliberately
+// narrower than schemaNodeSelectorRequirement.
+//
+// The two fields share the NodeSelectorRequirement type but not its rules, and the
+// parser enforces that split (parseNodeSelectorRequirements' qualifiedKeys=false
+// branch): only key `metadata.name`, only operator In or NotIn, exactly one value,
+// and that value a node name. Reusing the generic requirement schema here would
+// leave the schema advertising `Exists`, `DoesNotExist`, `Gt` and `Lt` — and any key
+// at all — as valid for matchFields.
+//
+// That gap is reachable, not theoretical. Emitted properties are validated against
+// this schema before handler conversion, Enum included, recursively through arrays
+// and objects (pkg/oam/property_validate.go:114-175). So a lowering rule emitting
+// `matchFields.operator: Exists` would pass emission validation on the strength of
+// the generic enum and then fail conversion in the parser — schema and parser
+// disagreeing about the same document, which is the defect class this mirrors from
+// the other direction.
+//
+// Arity ("exactly one value") is not expressible in PropertySchema, so it lives in
+// the descriptions and is enforced by the parser alone.
+func schemaNodeFieldSelectorRequirement() oam.PropertySchema {
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeObject,
+		Description: "A single node field requirement.",
+		Properties: map[string]oam.PropertySchema{
+			"key": {
+				Type: oam.PropertyTypeString, Required: true,
+				Enum:        []any{nodeFieldSelectorKey},
+				Description: "Node field path. `" + nodeFieldSelectorKey + "` is the only one Kubernetes accepts.",
+			},
+			"operator": {
+				Type: oam.PropertyTypeString, Required: true,
+				Enum:        []any{"In", "NotIn"},
+				Description: "How the key relates to values. Node field selectors accept In and NotIn only, each with exactly one value.",
+			},
+			"values": {
+				Type:        oam.PropertyTypeArray,
+				Description: "Exactly one node name, validated as a DNS-1123 subdomain.",
+				Items:       &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A node name."},
+			},
 		},
 	}
 }

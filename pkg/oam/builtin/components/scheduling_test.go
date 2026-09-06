@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -563,6 +564,37 @@ func TestDeploymentScheduling_TolerationRejections(t *testing.T) {
 			"requires an integer",
 		},
 		{
+			// ValidateTolerations runs ValidateLabelName over every non-empty key
+			// (validation.go, release-1.36:4367-4369), unconditionally. The empty
+			// key stays legal — that case is the first entry in this table.
+			"non-empty key that is not a qualified name",
+			map[string]any{"key": "bad key", "operator": "Exists"},
+			`invalid label key "bad key"`,
+		},
+		{
+			// Under Equal the value is matched against a taint value, so upstream
+			// applies IsValidLabelValue (validation.go:4385-4388). Exists and
+			// Lt/Gt reach their own rules first, so Equal is the only arm where
+			// this one can fire.
+			"Equal with a value that is not a valid label value",
+			map[string]any{"key": "dedicated", "operator": "Equal", "value": "bad value"},
+			`invalid label value "bad value"`,
+		},
+		{
+			// validation.go:4377-4380. Previously accepted here on a second-hand
+			// citation; enforced now that the rule is readable first-hand. An
+			// empty effect counts as "not NoExecute" upstream, which the next
+			// case pins separately — the two are different documents.
+			"tolerationSeconds with an effect other than NoExecute",
+			map[string]any{"key": "dedicated", "operator": "Exists", "effect": "NoSchedule", "tolerationSeconds": 30},
+			"must be 'NoExecute' when tolerationSeconds is set",
+		},
+		{
+			"tolerationSeconds with no effect at all",
+			map[string]any{"key": "dedicated", "operator": "Exists", "tolerationSeconds": 30},
+			"must be 'NoExecute' when tolerationSeconds is set",
+		},
+		{
 			"unknown operator",
 			map[string]any{"key": "dedicated", "operator": "Nope"},
 			"must be 'Exists', 'Equal', 'Lt' or 'Gt'",
@@ -678,6 +710,102 @@ func TestDeploymentScheduling_TopologySpreadConstraintsRoundTrip(t *testing.T) {
 // TestDeploymentScheduling_AffinityRejections covers the constraints taken from
 // the pinned k8s.io/api field docs, plus the two rejections that are launcher's
 // own (an affinity with no arm set, and an empty node selector term).
+// TestDeploymentScheduling_MatchFieldsSchemaMatchesParser pins the schema to the
+// parser for matchFields, in that direction.
+//
+// The two are separately reachable and the schema is the weaker of the pair:
+// authored properties are not shape-checked at all, but EMITTED ones are validated
+// against this schema — Enum included, recursively — before the handler converts
+// them (pkg/oam/property_validate.go:114-175). So a schema looser than the parser is
+// not merely untidy: it advertises a value to a lowering rule, accepts what the rule
+// emits, and then fails in conversion where the rule's author cannot see it.
+//
+// matchFields reused the generic node-requirement schema until the parser was
+// narrowed to Kubernetes' field-selector rules, which opened exactly that gap. The
+// second half of this test is the load-bearing one — it does not compare the schema
+// against a hand-written list of operators, it takes every operator the SIBLING
+// matchExpressions schema still allows, subtracts those matchFields allows, and
+// requires the parser to reject each remainder. Widening either schema without
+// widening the parser fails here.
+func TestDeploymentScheduling_MatchFieldsSchemaMatchesParser(t *testing.T) {
+	const (
+		requiredArm = "requiredDuringSchedulingIgnoredDuringExecution"
+		nodeName    = "metadata.name"
+	)
+	sub := func(t *testing.T, s oam.PropertySchema, key string) oam.PropertySchema {
+		t.Helper()
+		next, ok := s.Properties[key]
+		if !ok {
+			t.Fatalf("schema has no property %q", key)
+		}
+		return next
+	}
+	items := func(t *testing.T, s oam.PropertySchema) oam.PropertySchema {
+		t.Helper()
+		if s.Items == nil {
+			t.Fatal("array schema has no Items")
+		}
+		return *s.Items
+	}
+	enum := func(t *testing.T, s oam.PropertySchema, key string) []string {
+		t.Helper()
+		var out []string
+		for _, v := range sub(t, s, key).Enum {
+			str, ok := v.(string)
+			if !ok {
+				t.Fatalf("%s enum carries a non-string %T", key, v)
+			}
+			out = append(out, str)
+		}
+		return out
+	}
+
+	root := (&components.DeploymentHandler{}).PropertySchema()
+	affinity, ok := root["affinity"]
+	if !ok {
+		t.Fatal("PropertySchema has no affinity")
+	}
+	term := items(t, sub(t, sub(t, sub(t, affinity, "nodeAffinity"), requiredArm), "nodeSelectorTerms"))
+	fields := items(t, sub(t, term, "matchFields"))
+	exprs := items(t, sub(t, term, "matchExpressions"))
+
+	if got := enum(t, fields, "key"); len(got) != 1 || got[0] != nodeName {
+		t.Errorf("matchFields key enum = %v, want exactly [%s]", got, nodeName)
+	}
+	fieldOps := enum(t, fields, "operator")
+	if len(fieldOps) != 2 || fieldOps[0] != "In" || fieldOps[1] != "NotIn" {
+		t.Errorf("matchFields operator enum = %v, want [In NotIn]", fieldOps)
+	}
+	if len(enum(t, exprs, "key")) != 0 {
+		t.Error("matchExpressions key enum is now constrained; node label keys are free-form, so this test's premise no longer holds")
+	}
+
+	for _, op := range enum(t, exprs, "operator") {
+		if slices.Contains(fieldOps, op) {
+			continue
+		}
+		t.Run("parser rejects "+op, func(t *testing.T) {
+			// One value, which is what In/NotIn need — so an operator that is
+			// accepted cannot be rejected here by arity, and a failure to reject
+			// means the parser really does accept an operator the matchFields
+			// schema forbids.
+			err := schedulingError(t, map[string]any{"affinity": map[string]any{
+				"nodeAffinity": map[string]any{requiredArm: map[string]any{
+					"nodeSelectorTerms": []any{map[string]any{"matchFields": []any{
+						map[string]any{"key": nodeName, "operator": op, "values": []any{"node-1"}},
+					}}},
+				}},
+			}})
+			if err == nil {
+				t.Fatalf("operator %q is absent from the matchFields schema enum but the parser accepted it", op)
+			}
+			if !strings.Contains(err.Error(), "for matchFields") {
+				t.Errorf("operator %q was rejected, but not by the matchFields operator rule: %v", op, err)
+			}
+		})
+	}
+}
+
 func TestDeploymentScheduling_AffinityRejections(t *testing.T) {
 	nodeTerm := func(expr map[string]any) map[string]any {
 		return map[string]any{
@@ -816,6 +944,18 @@ func TestDeploymentScheduling_AffinityRejections(t *testing.T) {
 			"matchFields Gt is reported against matchFields, not the shared operator list",
 			nodeFields(map[string]any{"key": "metadata.name", "operator": "Gt", "values": []any{"1"}}),
 			`invalid value "Gt" for matchFields, want In or NotIn`,
+		},
+		{
+			// The key resolving in nodeFieldSelectorValidators is what ARMS the
+			// value rule rather than ending it: validation.go:5011-5019 runs the
+			// mapped validator over every value, and metadata.name maps to
+			// ValidateNodeName = NameIsDNSSubdomain (:4993-4994). A well-formed key
+			// and operator with a malformed value is therefore still refused at
+			// admission, which is the case this pins — the key/operator checks
+			// added earlier all pass here, so only the value check can reject it.
+			"matchFields value that is not a valid node name",
+			nodeFields(map[string]any{"key": "metadata.name", "operator": "In", "values": []any{"bad value"}}),
+			`invalid node name "bad value"`,
 		},
 		{
 			// validatePodAffinityTerm runs every entry through ValidateNamespaceName
