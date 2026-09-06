@@ -1,11 +1,16 @@
 package components_test
 
 import (
+	"fmt"
+	"maps"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -100,6 +105,26 @@ func topologyKeys(tscs []corev1.TopologySpreadConstraint) []string {
 	return keys
 }
 
+// assertAppSelector asserts sel is EXACTLY the selector this package builds for
+// a scheduling position — selectorFrom(appLabels(name)) (common.go), i.e. the
+// single label app=<name> and no match expressions.
+//
+// Exact, not "contains app=<name>": the generated pods carry only that one
+// label (worker.go, dep.Spec.Template.Labels = appLabels(app.Name)), so a
+// selector that additionally required, say, tier=<name> would select no pods at
+// all — the constraint silently stops constraining anything — while a
+// membership check on app alone still reads green.
+func assertAppSelector(t *testing.T, sel *metav1.LabelSelector, name, where string) {
+	t.Helper()
+	if want := map[string]string{"app": name}; !maps.Equal(sel.MatchLabels, want) {
+		t.Errorf("%s: LabelSelector.MatchLabels = %v, want exactly %v", where, sel.MatchLabels, want)
+	}
+	if len(sel.MatchExpressions) != 0 {
+		t.Errorf("%s: LabelSelector.MatchExpressions = %v, want none — the generated pods carry only app=%s and would match nothing",
+			where, sel.MatchExpressions, name)
+	}
+}
+
 // TestWorkerTopologySpread_FollowsPolicyDefaultedReplicas pins that the
 // topology-spread opinion is evaluated against the policy-defaulted replica
 // count. A document authoring no replicas, under a policy defaulting them to 3,
@@ -145,9 +170,7 @@ func TestWorkerTopologySpread_FollowsPolicyDefaultedReplicas(t *testing.T) {
 		if tsc.LabelSelector == nil {
 			t.Fatalf("constraint[%d].LabelSelector is nil; a constraint with no selector spreads every pod in the namespace", i)
 		}
-		if got := tsc.LabelSelector.MatchLabels["app"]; got != "backend" {
-			t.Errorf("constraint[%d].LabelSelector matches app=%q, want app=backend", i, got)
-		}
+		assertAppSelector(t, tsc.LabelSelector, "backend", fmt.Sprintf("constraint[%d]", i))
 	}
 }
 
@@ -184,23 +207,53 @@ func TestWorkerTopologySpread_NoPolicyMeansNoSpread(t *testing.T) {
 // this case, reading the policy default unconditionally would satisfy the test
 // above while being wrong for every document that sets its own count.
 func TestWorkerTopologySpread_AuthoredReplicasIgnorePolicyDefault(t *testing.T) {
-	comp := workerSchedulingDoc()
-	comp.Properties["replicas"] = 2
+	for _, tc := range []struct {
+		name         string
+		authored     int
+		wantReplicas int32
+		wantKeys     []string
+	}{
+		{
+			name:         "two authored replicas take the hostname tier only",
+			authored:     2,
+			wantReplicas: 2,
+			wantKeys:     []string{"kubernetes.io/hostname"},
+		},
+		{
+			// The boundary, and the only count at which "authored" is
+			// distinguishable from "absent" at all: an unauthored document also
+			// arrives at 1, because that is parseReplicas' fallback (common.go).
+			// So a defaulting rule keyed on the VALUE rather than on
+			// explicitness — `current != 1` substituted for
+			// applyDefaultReplicas' `explicit` (enforce.go) — is invisible to
+			// every other case in this file, yet it would raise a deliberate
+			// single-replica worker to the policy default and hand it spread
+			// constraints the document asked not to have.
+			name:         "one authored replica is explicit, not the intrinsic default",
+			authored:     1,
+			wantReplicas: 1,
+			wantKeys:     nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			comp := workerSchedulingDoc()
+			comp.Properties["replicas"] = tc.authored
 
-	dep := buildWorkerDeployment(t, comp, &stubPolicy{defaultReplicas: int32ptr(9)})
+			dep := buildWorkerDeployment(t, comp, &stubPolicy{defaultReplicas: int32ptr(9)})
 
-	if dep.Spec.Replicas == nil {
-		t.Fatal("Replicas is nil")
-	}
-	if *dep.Spec.Replicas != 2 {
-		t.Fatalf("Replicas = %d, want 2 — an authored count must win over the policy default", *dep.Spec.Replicas)
-	}
-	tscs := dep.Spec.Template.Spec.TopologySpreadConstraints
-	if len(tscs) != 1 {
-		t.Fatalf("got %d topology spread constraints %v, want 1 at two replicas", len(tscs), topologyKeys(tscs))
-	}
-	if got, want := tscs[0].TopologyKey, "kubernetes.io/hostname"; got != want {
-		t.Errorf("constraint[0].TopologyKey = %q, want %q", got, want)
+			if dep.Spec.Replicas == nil {
+				t.Fatal("Replicas is nil")
+			}
+			if *dep.Spec.Replicas != tc.wantReplicas {
+				t.Fatalf("Replicas = %d, want %d — an authored count must win over the policy default (9)",
+					*dep.Spec.Replicas, tc.wantReplicas)
+			}
+			tscs := dep.Spec.Template.Spec.TopologySpreadConstraints
+			if got := topologyKeys(tscs); !slices.Equal(got, tc.wantKeys) {
+				t.Fatalf("topology spread constraint keys = %v, want %v (at %d replicas)",
+					got, tc.wantKeys, tc.wantReplicas)
+			}
+		})
 	}
 }
 
@@ -232,50 +285,134 @@ func TestWorkerTopologySpread_DisabledStaysDisabledUnderPolicy(t *testing.T) {
 // It is here so that "only topology spread depends on the policy" is a measured
 // property of this kind rather than an inference from reading buildAffinity —
 // the same document is built with and without a policy and the two affinities
-// are asserted identical in every field the shorthand controls.
+// are compared WHOLE.
+//
+// Whole, not field-by-field: a subset comparison only refutes the policy moving
+// the fields the subset happens to name, so a regression that (say) appended a
+// preferred anti-affinity term once the effective replica count exceeded one
+// would leave every named assertion green while changing how the scheduler
+// places the pods. reflect.DeepEqual over *corev1.Affinity covers the fields
+// below, the ones buildAffinity writes on the other branch, and any field added
+// later. The literal assertions are kept alongside it, because two builds that
+// moved identically would still be equal to each other.
+//
+// Both shorthand shapes are exercised, since they take different branches of
+// buildAffinity (common.go): required-vs-preferred anti-affinity, and the
+// nodeSelector branch that emits NodeAffinity at all.
 func TestWorkerAffinity_IndependentOfPolicy(t *testing.T) {
-	shorthand := func() map[string]any {
-		return map[string]any{
-			"enablePodAntiAffinity": true,
-			"podAntiAffinityType":   "required",
-			"topologyKey":           "topology.kubernetes.io/zone",
-		}
-	}
-
-	withPolicy := workerSchedulingDoc()
-	withPolicy.Properties["affinity"] = shorthand()
-	withoutPolicy := workerSchedulingDoc()
-	withoutPolicy.Properties["affinity"] = shorthand()
-
-	depWith := buildWorkerDeployment(t, withPolicy, &stubPolicy{defaultReplicas: int32ptr(3)})
-	depWithout := buildWorkerDeployment(t, withoutPolicy, nil)
-
 	for _, tc := range []struct {
-		name string
-		dep  *appsv1.Deployment
+		name      string
+		shorthand func() map[string]any
+		assert    func(t *testing.T, aff *corev1.Affinity, where string)
 	}{
-		{"policy defaulting replicas to 3", depWith},
-		{"no policy", depWithout},
+		{
+			name: "required anti-affinity, no node selector",
+			shorthand: func() map[string]any {
+				return map[string]any{
+					"enablePodAntiAffinity": true,
+					"podAntiAffinityType":   "required",
+					"topologyKey":           "topology.kubernetes.io/zone",
+				}
+			},
+			assert: func(t *testing.T, aff *corev1.Affinity, where string) {
+				t.Helper()
+				required := aff.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+				if len(required) != 1 {
+					t.Fatalf("%s: got %d required anti-affinity terms, want 1", where, len(required))
+				}
+				if got, want := required[0].TopologyKey, "topology.kubernetes.io/zone"; got != want {
+					t.Errorf("%s: TopologyKey = %q, want %q", where, got, want)
+				}
+				if required[0].LabelSelector == nil {
+					t.Fatalf("%s: LabelSelector is nil", where)
+				}
+				assertAppSelector(t, required[0].LabelSelector, "backend", where)
+				if n := len(aff.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution); n != 0 {
+					t.Errorf("%s: got %d preferred anti-affinity terms, want 0 for podAntiAffinityType: required", where, n)
+				}
+				if aff.NodeAffinity != nil {
+					t.Errorf("%s: NodeAffinity emitted without a nodeSelector in the shorthand", where)
+				}
+			},
+		},
+		{
+			name: "preferred anti-affinity with a node selector",
+			shorthand: func() map[string]any {
+				return map[string]any{
+					"enablePodAntiAffinity": true,
+					"podAntiAffinityType":   "preferred",
+					"nodeSelector":          map[string]any{"disktype": "ssd"},
+				}
+			},
+			assert: func(t *testing.T, aff *corev1.Affinity, where string) {
+				t.Helper()
+				preferred := aff.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+				if len(preferred) != 1 {
+					t.Fatalf("%s: got %d preferred anti-affinity terms, want 1", where, len(preferred))
+				}
+				if got, want := preferred[0].Weight, int32(100); got != want {
+					t.Errorf("%s: preferred[0].Weight = %d, want %d", where, got, want)
+				}
+				if got, want := preferred[0].PodAffinityTerm.TopologyKey, "kubernetes.io/hostname"; got != want {
+					t.Errorf("%s: preferred[0].TopologyKey = %q, want %q (parseAffinity's default)", where, got, want)
+				}
+				if preferred[0].PodAffinityTerm.LabelSelector == nil {
+					t.Fatalf("%s: preferred[0].LabelSelector is nil", where)
+				}
+				assertAppSelector(t, preferred[0].PodAffinityTerm.LabelSelector, "backend", where)
+				if n := len(aff.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution); n != 0 {
+					t.Errorf("%s: got %d required anti-affinity terms, want 0 for podAntiAffinityType: preferred", where, n)
+				}
+				if aff.NodeAffinity == nil {
+					t.Fatalf("%s: no node affinity emitted for a shorthand nodeSelector", where)
+				}
+				terms := aff.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+				if len(terms) != 1 || len(terms[0].MatchExpressions) != 1 {
+					t.Fatalf("%s: node selector terms = %+v, want one term carrying one match expression", where, terms)
+				}
+				req := terms[0].MatchExpressions[0]
+				if req.Key != "disktype" || req.Operator != corev1.NodeSelectorOpIn || !slices.Equal(req.Values, []string{"ssd"}) {
+					t.Errorf("%s: node selector requirement = %+v, want disktype In [ssd]", where, req)
+				}
+			},
+		},
 	} {
-		aff := tc.dep.Spec.Template.Spec.Affinity
-		if aff == nil || aff.PodAntiAffinity == nil {
-			t.Fatalf("%s: no pod anti-affinity emitted", tc.name)
-		}
-		required := aff.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
-		if len(required) != 1 {
-			t.Fatalf("%s: got %d required anti-affinity terms, want 1", tc.name, len(required))
-		}
-		if got, want := required[0].TopologyKey, "topology.kubernetes.io/zone"; got != want {
-			t.Errorf("%s: TopologyKey = %q, want %q", tc.name, got, want)
-		}
-		if required[0].LabelSelector == nil {
-			t.Fatalf("%s: LabelSelector is nil", tc.name)
-		}
-		if got := required[0].LabelSelector.MatchLabels["app"]; got != "backend" {
-			t.Errorf("%s: LabelSelector matches app=%q, want app=backend", tc.name, got)
-		}
-		if aff.NodeAffinity != nil {
-			t.Errorf("%s: NodeAffinity emitted without a nodeSelector in the shorthand", tc.name)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			withPolicy := workerSchedulingDoc()
+			withPolicy.Properties["affinity"] = tc.shorthand()
+			withoutPolicy := workerSchedulingDoc()
+			withoutPolicy.Properties["affinity"] = tc.shorthand()
+
+			depWith := buildWorkerDeployment(t, withPolicy, &stubPolicy{defaultReplicas: int32ptr(3)})
+			depWithout := buildWorkerDeployment(t, withoutPolicy, nil)
+
+			// The policy must actually have bitten on one of the two builds.
+			// Without this the invariance below is satisfied trivially by a
+			// policy step that did nothing at all — including one deleted
+			// outright — and the test would assert nothing.
+			if depWith.Spec.Replicas == nil || *depWith.Spec.Replicas != 3 {
+				t.Fatal("policy build: replicas were not defaulted to 3, so the two builds below differ in nothing and the comparison proves nothing")
+			}
+			if depWithout.Spec.Replicas == nil || *depWithout.Spec.Replicas != 1 {
+				t.Fatal("no-policy build: replicas is not 1")
+			}
+
+			affWith := depWith.Spec.Template.Spec.Affinity
+			affWithout := depWithout.Spec.Template.Spec.Affinity
+			if affWith == nil || affWith.PodAntiAffinity == nil {
+				t.Fatal("policy defaulting replicas to 3: no pod anti-affinity emitted")
+			}
+			if affWithout == nil || affWithout.PodAntiAffinity == nil {
+				t.Fatal("no policy: no pod anti-affinity emitted")
+			}
+
+			if !reflect.DeepEqual(affWith, affWithout) {
+				t.Errorf("affinity moved with the policy; it reads no replica count and must not\n  with policy (3 replicas): %+v\n  no policy (1 replica):    %+v",
+					affWith, affWithout)
+			}
+
+			tc.assert(t, affWith, "policy defaulting replicas to 3")
+			tc.assert(t, affWithout, "no policy")
+		})
 	}
 }
