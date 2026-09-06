@@ -338,3 +338,148 @@ func TestJob_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
 }
 
 func ptrInt32(n int32) *int32 { return &n }
+
+// schedulingAliasProps is the shared input for the two scheduling tests below.
+func schedulingAliasProps() map[string]any {
+	return map[string]any{
+		"image": "ghcr.io/org/app:v1",
+		"affinity": map[string]any{
+			"nodeAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{
+					"nodeSelectorTerms": []any{
+						map[string]any{
+							"matchExpressions": []any{
+								map[string]any{
+									"key":      "kubernetes.io/arch",
+									"operator": "In",
+									"values":   []any{"amd64"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		"tolerations": []any{
+			map[string]any{
+				"key":               "node.kubernetes.io/unreachable",
+				"operator":          "Exists",
+				"effect":            "NoExecute",
+				"tolerationSeconds": 300,
+			},
+		},
+		"topologySpreadConstraints": []any{
+			map[string]any{
+				"maxSkew":           1,
+				"topologyKey":       "topology.kubernetes.io/zone",
+				"whenUnsatisfiable": "DoNotSchedule",
+				"labelSelector": map[string]any{
+					"matchLabels": map[string]any{"app": "backend"},
+				},
+			},
+		},
+	}
+}
+
+// TestDeployment_SchedulingRenderingTwiceIsUnaffectedByEditingTheFirstRender is
+// the same property for the raw scheduling values, and it MUST mutate through
+// NESTED pointers rather than top-level element fields.
+//
+// applyPodSpec appends tolerations and topologySpreadConstraints, which copies
+// the ELEMENT STRUCTS. A test that wrote `Tolerations[0].Key = "x"` would touch
+// only the copy and PASS with the aliasing fully intact — that is
+// TestDeployment_SchedulingShallowMutationPassesEvenWhenAliased below, kept as a
+// named negative control. The state actually shared is one level deeper:
+// Toleration.TolerationSeconds (*int64), TopologySpreadConstraint.LabelSelector
+// (*metav1.LabelSelector), and everything under Affinity, which is a single
+// pointer.
+//
+// AXES THIS TEST DOES NOT COVER, so a later reader does not mistake it for
+// exhaustive: it exercises exactly those three fields. Any further pointer-
+// bearing field projected into the PodSpec — and PodSpec.Volumes, which
+// applyPodSpec still appends without copying — needs its own case here. Adding a
+// field to the projection without adding a case leaves it silently unguarded.
+func TestDeployment_SchedulingRenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
+	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", schedulingAliasProps(),
+		func(objects []*client.Object) {
+			dep, ok := (*objects[0]).(*appsv1.Deployment)
+			if !ok {
+				t.Fatalf("first object is %T, want *appsv1.Deployment", *objects[0])
+			}
+			ps := &dep.Spec.Template.Spec
+
+			if ps.Affinity == nil || ps.Affinity.NodeAffinity == nil ||
+				ps.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+				t.Fatal("first render has no required node affinity — nothing to alias, so this test cannot prove anything")
+			}
+			if len(ps.Tolerations) == 0 || ps.Tolerations[0].TolerationSeconds == nil {
+				t.Fatal("first render has no toleration with tolerationSeconds — nothing to alias, so this test cannot prove anything")
+			}
+			if len(ps.TopologySpreadConstraints) == 0 || ps.TopologySpreadConstraints[0].LabelSelector == nil {
+				t.Fatal("first render has no topologySpreadConstraint labelSelector — nothing to alias, so this test cannot prove anything")
+			}
+
+			ps.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = nil
+			*ps.Tolerations[0].TolerationSeconds = 999
+			ps.TopologySpreadConstraints[0].LabelSelector.MatchLabels["app"] = "MUTATED"
+		})
+
+	dep, ok := (*second[0]).(*appsv1.Deployment)
+	if !ok {
+		t.Fatalf("second render's first object is %T, want *appsv1.Deployment", *second[0])
+	}
+	ps := &dep.Spec.Template.Spec
+
+	if ps.Affinity == nil || ps.Affinity.NodeAffinity == nil ||
+		ps.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		t.Error("required node affinity is gone from the second render — the first render's edit leaked back into the config")
+	} else if n := len(ps.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms); n != 1 {
+		t.Errorf("nodeSelectorTerms = %d, want 1 — the first render's edit leaked back into the config", n)
+	}
+
+	if len(ps.Tolerations) == 0 || ps.Tolerations[0].TolerationSeconds == nil {
+		t.Error("tolerations[0].tolerationSeconds is gone from the second render — the first render's edit leaked back into the config")
+	} else if got := *ps.Tolerations[0].TolerationSeconds; got != 300 {
+		t.Errorf("tolerations[0].tolerationSeconds = %d, want 300 — the first render's edit leaked back into the config", got)
+	}
+
+	if len(ps.TopologySpreadConstraints) == 0 || ps.TopologySpreadConstraints[0].LabelSelector == nil {
+		t.Error("topologySpreadConstraints[0].labelSelector is gone from the second render — the first render's edit leaked back into the config")
+	} else if got := ps.TopologySpreadConstraints[0].LabelSelector.MatchLabels["app"]; got != "backend" {
+		t.Errorf("topologySpreadConstraints[0].labelSelector.matchLabels[app] = %q, want \"backend\" — the first render's edit leaked back into the config", got)
+	}
+}
+
+// TestDeployment_SchedulingShallowMutationPassesEvenWhenAliased is a negative
+// control, not a guarantee. It writes a TOP-LEVEL field of an appended element,
+// which touches only the copy — so it passes whether or not the deeper pointers
+// are shared, and it passed against the code that had the bug. It exists so the
+// obvious-looking version of the test above is on record as insufficient, and is
+// named to say so.
+//
+// It is still worth keeping: if it ever FAILS, the element slice itself is
+// aliased and the problem is broader than the pointer fields.
+func TestDeployment_SchedulingShallowMutationPassesEvenWhenAliased(t *testing.T) {
+	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", schedulingAliasProps(),
+		func(objects []*client.Object) {
+			dep, ok := (*objects[0]).(*appsv1.Deployment)
+			if !ok {
+				t.Fatalf("first object is %T, want *appsv1.Deployment", *objects[0])
+			}
+			if len(dep.Spec.Template.Spec.Tolerations) == 0 {
+				t.Fatal("first render has no tolerations — nothing to mutate, so this control cannot prove anything")
+			}
+			dep.Spec.Template.Spec.Tolerations[0].Key = "MUTATED-SHALLOW"
+		})
+
+	dep, ok := (*second[0]).(*appsv1.Deployment)
+	if !ok {
+		t.Fatalf("second render's first object is %T, want *appsv1.Deployment", *second[0])
+	}
+	if got := dep.Spec.Template.Spec.Tolerations[0].Key; got != "node.kubernetes.io/unreachable" {
+		t.Errorf("tolerations[0].key = %q, want \"node.kubernetes.io/unreachable\" — the element structs are aliased too, "+
+			"so the sharing is broader than the pointer fields TestDeployment_SchedulingRenderingTwiceIsUnaffectedByEditingTheFirstRender guards", got)
+	}
+	// Passing here is expected and proves nothing about the pointer fields; the
+	// guarantee lives in the sibling test named above.
+}

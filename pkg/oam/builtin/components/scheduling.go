@@ -679,6 +679,7 @@ func schemaRawAffinity() oam.PropertySchema {
 						Properties: map[string]oam.PropertySchema{
 							"nodeSelectorTerms": {
 								Type:        oam.PropertyTypeArray,
+								Required:    true,
 								Description: "At least one term is required; a pod may schedule where any term matches.",
 								Items:       ptrSchema(schemaNodeSelectorTerm()),
 							},
@@ -692,7 +693,7 @@ func schemaRawAffinity() oam.PropertySchema {
 							Description: "A weighted node selector term.",
 							Properties: map[string]oam.PropertySchema{
 								"weight":     schemaSchedulingWeight(),
-								"preference": schemaNodeSelectorTerm(),
+								"preference": requiredSchema(schemaNodeSelectorTerm()),
 							},
 						},
 					},
@@ -722,7 +723,7 @@ func schemaPodAffinityArms(description string) oam.PropertySchema {
 					Description: "A weighted pod affinity term.",
 					Properties: map[string]oam.PropertySchema{
 						"weight":          schemaSchedulingWeight(),
-						"podAffinityTerm": schemaPodAffinityTerm(),
+						"podAffinityTerm": requiredSchema(schemaPodAffinityTerm()),
 					},
 				},
 			},
@@ -828,3 +829,16 @@ func schemaSchedulingWeight() oam.PropertySchema {
 
 // ptrSchema returns a pointer to a copy of s, for the Items field.
 func ptrSchema(s oam.PropertySchema) *oam.PropertySchema { return &s }
+
+// requiredSchema marks a composed sub-schema required. Needed because the three
+// call sites take their schema from a shared constructor, so `Required: true`
+// cannot be written inline the way it is on the scalar fields in this file.
+//
+// It declares a rejection that already exists rather than adding one: the parser
+// errors on each of these being absent (preference at scheduling.go:156-162,
+// nodeSelectorTerms at :183-190, podAffinityTerm at :349-355). Requiredness is
+// read only from PropertySchema.Required (property_validate.go:54-68), so
+// leaving it unset advertised the field as optional to any external validator
+// while the handler rejected it anyway — and `weight`, its sibling in the same
+// struct literal, has always been Required.
+func requiredSchema(s oam.PropertySchema) oam.PropertySchema { s.Required = true; return s }

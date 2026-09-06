@@ -2738,17 +2738,24 @@ var tolerationKeys = []string{"key", "operator", "value", "effect", "tolerationS
 // of them is gated behind a deployment-only option, is set out in
 // README.md's "What `tolerations` changed for `daemonset`". A rejection added
 // here in future changes both kinds; say so there in the same change.
+// optionalObjectList, not a bare props["tolerations"].([]any) assertion: a
+// comma-ok read cannot tell an ABSENT key from one authored with the wrong
+// container type, and returning (nil, nil) for both silently discarded the
+// second — a `tolerations:` mapping built clean and emitted nothing. That is
+// the same silent-drop class as the tolerationSeconds defect this function's
+// header describes, one level up, and it made the two siblings at the call
+// site (deployment.go:213 parseRawAffinity, :223 parseTopologySpreadConstraints)
+// reject a wrong container type while this one accepted it.
 func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
-	tolList, ok := props["tolerations"].([]any)
-	if !ok {
+	tolList, present, err := optionalObjectList(props, "tolerations")
+	if err != nil {
+		return nil, err
+	}
+	if !present {
 		return nil, nil
 	}
 	tolerations := make([]corev1.Toleration, 0, len(tolList))
-	for i, t := range tolList {
-		m, ok := t.(map[string]any)
-		if !ok {
-			return nil, errors.Errorf("toleration[%d]: must be a mapping", i)
-		}
+	for i, m := range tolList {
 		if err := rejectUnknownKeys(m, tolerationKeys, indexedLabel("toleration", i)); err != nil {
 			return nil, err
 		}
