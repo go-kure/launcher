@@ -182,8 +182,12 @@ are each `map[string]any`, so YAML strictness stops at the envelope and any key 
 successfully. Those maps are instead checked against the handler's own declared
 `PropertySchema` by `Transformer.ValidateAuthoredProperties`, which the build calls immediately
 after parsing (`pkg/cmd/kurel/build.go:149`). An undeclared key is a build error naming the
-allowed fields; a declared key whose value has the wrong type is a build error too, and a value
-the schema can normalise (a quantity, an int-or-string) is normalised in place.
+allowed fields; a declared key whose value has the wrong type is a build error too. An array- or
+object-typed value that validation had to rebuild in order to check it — a typed Go `[]string`
+or `map[string]string` normalised into `[]any`/`map[string]any` — is written back in place, so
+the handler downstream sees the shape that was actually checked. Scalars are never rewritten,
+and a schema that declares no `Type` at all (a quantity, an int-or-string) is checked only
+against its `Enum`, if it has one.
 
 **Ordering is load-bearing.** The authored-properties check runs *after* `ResolveParameters`
 (`pkg/cmd/kurel/build.go:114`). In package mode an authored value may be a `${...}` placeholder,
@@ -222,7 +226,10 @@ invisible until authored properties were checked. The authored check merges
 the handler's own declaration winning when both describe the key, and without mutating what
 `PropertySchema()` returned — so `HandlerSchemas` continues to advertise only what each handler
 actually declares. The engine type-asserts `scope` to `string`, so the check declares it a string
-and rejects any other type rather than letting it be silently ignored.
+and rejects any other non-null type rather than letting it be silently ignored. An explicit
+`scope: null` stays accepted, like any absent optional property (`isNullValue` short-circuits
+ahead of the type switch, `pkg/oam/property_validate.go:108`), and resolves against the unscoped
+binding exactly as omitting the key does.
 
 ### Required fields are checked at nested levels only
 
@@ -280,11 +287,16 @@ bump for every evolution step.
 is not a contract-revision counter that increments on every additive change. Launcher
 deliberately carries **no separate in-document format counter** (no `schemaVersion` field): a
 counter would sit in the document envelope, where Parser Strictness above makes an unrecognised
-key a build error in both directions — a document carrying it fails against a parser that does
-not know it, and a required one fails every existing document that omits it. Either way,
-introducing it is a breaking change — the opposite of what it would exist to signal. The CHANGELOG's Document Format category (below) serves the
-at-a-glance-scanning need instead, without touching the wire format. Revisit this if a machine
-consumer ever needs to gate behavior on a format level rather than read a changelog.
+key a build error. A **required** counter therefore fails every existing document that omits
+it, which is a breaking change by the additive test above — the opposite of what it would
+exist to signal. An **optional** counter does pass that test, but buys nothing: a document
+carrying it is rejected by every parser released before the key existed, so no consumer could
+rely on reading it without the coordinated rollout a version-string move already provides.
+(That second direction is forward compatibility, not the additive test, which asks only that
+previously valid documents stay valid.) The CHANGELOG's Document Format category (below)
+serves the at-a-glance-scanning need instead, without touching the wire format. Revisit this
+if a machine consumer ever needs to gate behavior on a format level rather than read a
+changelog.
 
 **Deprecation procedure.** A field slated for removal is documented as deprecated and continues
 to be accepted for at least one minor release before being dropped. Dropping it is a breaking

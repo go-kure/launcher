@@ -40,9 +40,11 @@ KUREL_BIN="${KUREL_BIN:-bin/kurel}"
 SCHEMA_PLUGIN_VERSION="0.12.1"
 
 # app.yaml -> cluster-profile pairs (examples/README.md's "Application examples"
-# table), skipping the two exclusions noted above. 14-full-stack.yaml uses the
-# alternate nginx-certmanager-vault profile — its table-listed primary
-# (gateway-certmanager-aws) fails to build (unrelated pre-existing issue).
+# table), skipping the two exclusions noted above. 14-full-stack.yaml is validated
+# against the alternate nginx-certmanager-vault profile. Its table-listed primary
+# (gateway-certmanager-aws) builds too, as of go-kure/launcher#408 — the `tls` block
+# the lowered httproute used to reject is gone from the example — so this pairing is
+# now a coverage choice, not a workaround.
 declare -A APP_PROFILE=(
   [01-webservice-minimal.yaml]=minimal
   [02-webservice-with-expose.yaml]=minimal
