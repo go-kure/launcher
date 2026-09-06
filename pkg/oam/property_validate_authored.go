@@ -124,8 +124,11 @@ func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait) 
 // exists to eliminate, and rejecting it here makes every trait behave the way expose,
 // ingress and httproute already did.
 //
-// grep for `Properties["` in pkg/oam confirms `scope` is currently the only such
-// property; add to this map rather than special-casing a call site if that changes.
+// Measured by grepping every non-test file of pkg/oam ITSELF — the engine, not
+// pkg/oam/builtin/..., whose `Properties["…"]` hits are handlers reading properties
+// they declare — for any string-literal index into a property map. transform.go:986
+// is the only one. Add to this map rather than special-casing a call site if that
+// ever changes.
 var engineTraitProperties = map[string]PropertySchema{
 	"scope": {
 		Type:        PropertyTypeString,
