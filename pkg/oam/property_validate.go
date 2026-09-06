@@ -76,29 +76,26 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 			return errors.Errorf("%s: unsupported field %q (allowed: %s)", path, key, declaredFields(schema))
 		}
 		// Normalize an explicit null under an optional declared key to absence, so
-		// the classification this file already makes is what a downstream consumer
-		// actually sees. The Required loop above (and enforcePlatformReserved) both
-		// classify an explicit null as absent; validatePropertyValue used to agree
-		// and return it unchanged, but the write-back below then materialized that
-		// "absent" value as a PRESENT key — and a handler parser answers presence
-		// with a bare map lookup (`v, ok := props[key]`, common.go:1718-1721), so it
-		// saw a key the validator had already decided was not there. Deleting it is
-		// not a new rule; it is the existing rule taking effect.
+		// the classification the Required loop above already makes is what a
+		// downstream consumer actually sees. validatePropertyValue used to agree
+		// that a null was absent and return it unchanged, but the write-back below
+		// then materialized that "absent" value as a PRESENT key — and a handler
+		// parser answers presence with a bare map lookup (`v, ok := props[key]`,
+		// common.go:1718-1721), so it received a key validation had already decided
+		// was not there. Deleting it is not a new rule; it is the existing rule
+		// taking effect.
 		//
 		// Required keys cannot reach here holding a null: the loop above returns
-		// %q is required for exactly that case, which is why the strip needs no
-		// Required test of its own and why the order of these two loops is load
-		// bearing — reversing them would strip a required null out from under its
-		// own check and report a missing key instead of an empty one.
+		// %q is required for exactly that case, which is why this needs no Required
+		// test of its own and why the order of the two loops is load bearing —
+		// reversing them would strip a required null out from under its own check
+		// and report a missing key instead of an empty one.
 		//
-		// PlatformReserved is carved out deliberately, keeping the loud rejection.
-		// A rule emitting `reserved: null` is caught at the next lowering round
-		// (lowering.go:1083); stripping it here would make it merely absent and
-		// nothing would report, turning a correct loud refusal into silence. The
-		// asymmetry with the Required rule is not introduced by this carve-out —
-		// enforcePlatformReserved documents it at :184-188 as deliberate, because
-		// there writing the key at all is the authorship attempt being refused.
-		if isNullValue(props[key]) && !field.PlatformReserved {
+		// No PlatformReserved exception, deliberately. Reservation governs what a
+		// user WROTE, and enforcePlatformReserved (below) only ever runs on authored
+		// input, upstream of this function — so nothing it decides passes through
+		// here and its inverse treatment of an explicit null stays literally true.
+		if isNullValue(props[key]) {
 			delete(props, key)
 			continue
 		}
@@ -133,8 +130,7 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 // original, still-typed value silently surviving unassertable.
 //
 // A null never reaches here as a whole property value: validateObjectProperties
-// strips an optional one and rejects a required one before calling, and the
-// PlatformReserved carve-out keeps its null present only to be refused. The one
+// strips an optional one and rejects a required one before calling. The one
 // remaining way a nil arrives is as an ARRAY ELEMENT, through the per-element
 // recursion below — and it must fail there, because the handler parsers assert
 // concrete element types (parseStringList's item.(string),
@@ -221,6 +217,12 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 // as absent: there, an empty value fails to supply something mandatory; here, writing
 // the key at all is the authorship attempt being refused, and reporting it names the
 // line the user actually wrote instead of silently ignoring it.
+//
+// Emitted-property validation normalizes an explicit null to absence
+// (validateObjectProperties, above) and does NOT exempt reserved keys from that. The
+// two rules do not meet: this one runs only on authored input, upstream of any
+// emission validation, so what it sees is what a user wrote — never a value that has
+// been through the strip.
 //
 // A key the schema does not declare is passed over: it is validateProperties' business,
 // and reporting it here would duplicate that message with a misleading reason.
