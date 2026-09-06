@@ -6,8 +6,13 @@
 #
 # Scope: 14 of the 15 numbered examples/*.yaml + examples/cluster-profiles/*.yaml
 # pairs (go-kure/launcher#292). Two are deliberately excluded, each echoed below:
-#   - 12-daemonset.yaml: fails to build with any profile today (pre-existing bug,
-#     tracked separately) — not something this script is meant to catch.
+#   - 12-daemonset.yaml: mounts a hostPath volume, which is default-deny. `kurel
+#     build` supplies no Policy, transform normalizes that to NoopPolicy
+#     (pkg/oam/transform.go:489), and NoopPolicy.AllowHostPathVolumes() is false
+#     (pkg/oam/policy.go:89), so enforceHostPathVolumes rejects it
+#     (pkg/oam/builtin/components/enforce.go:155). That is by design, not a bug: the
+#     example demonstrates the node-agent shape, and building it needs a policy this
+#     command line cannot supply.
 #   - examples/custom-capability/app.yaml: cannot build without a Go-registered
 #     "redis-sidecar" trait handler; a documented library-extension example, not a
 #     bug (examples/README.md, "Why this example cannot be run with `kurel build`").
@@ -55,7 +60,7 @@ declare -A APP_PROFILE=(
   [15-passthrough-minimal.yaml]=minimal
 )
 
-echo "Skipping 12-daemonset.yaml: fails to build with any profile today (pre-existing bug, not this gate's concern)"
+echo "Skipping 12-daemonset.yaml: mounts a hostPath volume, which is default-deny under NoopPolicy (by design — kurel build supplies no Policy)"
 echo "Skipping examples/custom-capability/app.yaml: no Go-registered handler for its custom trait (documented library-extension example)"
 
 if [[ ! -x "$KUREL_BIN" ]]; then

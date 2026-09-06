@@ -40,12 +40,12 @@ below.
 | 15 | [15-passthrough-minimal.yaml](15-passthrough-minimal.yaml) | passthrough (SparkApplication CRD + cluster-scoped ClusterRole) | — | minimal |
 
 **Profile compatibility notes:**
-- Examples 03–04, 06, 08 also work with `gateway-certmanager-aws.yaml`
-- Example 14's table-listed profile above (`gateway-certmanager-aws.yaml`) currently fails to
-  build (lowered `httproute` rejects field `tls`); use `nginx-certmanager-vault.yaml` instead
+- Examples 03–04, 06, 08 and 14 also work with `gateway-certmanager-aws.yaml`
 - Examples 01, 05, 07, 09–11, 13, 15 work with any profile
-- Example 12 currently fails to build with any profile (`volume "host-proc": mountPath is
-  required`) — a pre-existing issue, not fixed by `make validate-manifests`, which excludes it
+- Example 12 does not build with any profile, by design: it mounts a `hostPath` volume, and
+  `kurel build` supplies no `Policy`, so the default-deny `NoopPolicy` rejects it
+  (`volume "host-proc": hostPath volumes are not allowed by environment policy`). It stays in
+  the corpus as the node-agent shape; `make validate-manifests` excludes it for this reason
 
 ## Cluster profiles
 

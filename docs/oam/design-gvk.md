@@ -166,6 +166,55 @@ time rather than silently ignoring them and producing incorrect output.
 Operators deriving a launcher `cluster.yaml` from a downstream runtime's `ClusterProfile`
 must remove the downstream-specific fields before use. See `design-cluster-profile.md §7`.
 
+### Two levels, two mechanisms
+
+Strictness is enforced at two distinct levels, because an `app.yaml` is not a single strictly
+typed struct all the way down.
+
+**The document envelope** — `apiVersion`, `kind`, `metadata`, `spec`, and every field of a
+component, trait or policy entry other than `properties` — is decoded into Go structs with
+`KnownFields(true)` (`ParseWithExtraTypes`, `pkg/oam/parser.go:99`). A misspelled `replicaz` at
+the component level, or a stray `spec.traits`, fails there.
+
+**Authored `properties` maps** are not covered by that decoder. `Component.Properties`
+(`pkg/oam/types.go:44`), `Trait.Properties` (`:63`) and `ApplicationPolicy.Properties` (`:87`)
+are each `map[string]any`, so YAML strictness stops at the envelope and any key at all decodes
+successfully. Those maps are instead checked against the handler's own declared
+`PropertySchema` by `Transformer.ValidateAuthoredProperties`, which the build calls immediately
+after parsing (`pkg/cmd/kurel/build.go:149`). An undeclared key is a build error naming the
+allowed fields; a declared key whose value has the wrong type is a build error too, and a value
+the schema can normalise (a quantity, an int-or-string) is normalised in place.
+
+**Ordering is load-bearing.** The authored-properties check runs *after* `ResolveParameters`
+(`pkg/cmd/kurel/build.go:114`). In package mode an authored value may be a `${...}` placeholder,
+which is a bare string until substitution; type-checking before substitution would reject a
+document whose integer- or boolean-typed property is supplied by a parameter.
+
+### Two deliberate carve-outs
+
+Neither is an oversight; both are places where launcher has no schema to check against, and
+inventing one would reject documents that are correct today.
+
+**Application policies.** `ApplicationPolicy` is "passed through to the runtime unchanged"
+(`pkg/oam/types.go:83`), and no production code registers a `PolicyHandler` —
+`Transformer.RegisterPolicy` (`pkg/oam/transform.go:295`) has no non-test caller. A policy's
+properties therefore have no declared shape, and are not checked.
+
+**Trait types declared by a `CapabilityDefinition`.** A definition supplied via
+`--capability-def` declares that a trait type *exists*; it does not declare what properties that
+type accepts. With no `PropertySchemaProvider` behind it, such a trait's properties are left
+unchecked rather than rejected wholesale.
+
+### Required fields are checked at nested levels only
+
+`Required` on a *top-level* authored property is deliberately not enforced at parse time. A
+trait's top-level property map is merged with the ClusterProfile's capability rendering after
+parsing (`applyTraits` → `resolveCapability`, `pkg/oam/transform.go:845` and `:951`), so a
+capability-aware trait may legitimately author a document in which the platform, not the
+author, supplies a required property. Enforcing `Required` before that merge would reject it.
+Nested `Required` — inside an object- or array-typed property — *is* enforced, because
+capability rendering merges only at the top level.
+
 ---
 
 ## Document-Format Lifecycle
@@ -185,6 +234,16 @@ version string — no coordination required, no deprecation cycle. Everything el
 or retyped field, a changed default, a changed rendering target — is a breaking change.
 Changing a default is a semantic change; there is no "just tweaking a default."
 
+The additive test only means anything once authored `properties` are actually checked, and
+until go-kure/launcher#408 they were not — an undeclared key decoded into a `map[string]any`
+and was silently dropped. While that held, *every* property ever added to an existing component
+or trait kind was formally breaking, because a document could already have been authoring that
+key to no effect and would start compiling to different output the moment a handler claimed it.
+Closing the gap is itself a one-off exception to the test: a document that authored a key no
+handler declares was accepted before and is a build error now. It never compiled to the output
+its author intended — the key was dropped — so the exception is taken deliberately here, under
+`v1alpha1`, rather than carried forward as a permanent hole in the promise.
+
 **Breaking changes move the version string.** A breaking document-format change requires a new
 `apiVersion` (via graduation to `v1beta1`/`v1`, or otherwise). Nothing that pins
 `launcher.gokure.dev/v1alpha1` should ever observe a breaking change without a version-string
@@ -200,10 +259,11 @@ bump for every evolution step.
 
 **Maturity suffix ≠ contract counter.** The `v1alpha1` suffix states the format's maturity; it
 is not a contract-revision counter that increments on every additive change. Launcher
-deliberately carries **no separate in-document format counter** (no `schemaVersion` field):
-Parser Strictness above makes an unrecognised key a build error, so introducing a required
-counter would itself be a breaking change to every existing document — the opposite of what it
-would exist to signal. The CHANGELOG's Document Format category (below) serves the
+deliberately carries **no separate in-document format counter** (no `schemaVersion` field): a
+counter would sit in the document envelope, where Parser Strictness above makes an unrecognised
+key a build error in both directions — a document carrying it fails against a parser that does
+not know it, and a required one fails every existing document that omits it. Either way,
+introducing it is a breaking change — the opposite of what it would exist to signal. The CHANGELOG's Document Format category (below) serves the
 at-a-glance-scanning need instead, without touching the wire format. Revisit this if a machine
 consumer ever needs to gate behavior on a format level rather than read a changelog.
 
