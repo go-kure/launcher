@@ -346,48 +346,48 @@ func TestValidateProperties_NullUnderRequiredKeyStillFails(t *testing.T) {
 	}
 }
 
-// The PlatformReserved carve-out, asserted as REJECTION rather than as survival.
+// TestNullAndPlatformReserved_DoNotMeet pins the boundary between the two rules,
+// which is the reason the strip needs no PlatformReserved exception. They are
+// asserted SEPARATELY and never composed: enforcePlatformReserved runs on a rule's
+// INPUT (lowering.go:1083, :1206; transform.go:649, :891) and emission validation on
+// its OUTPUT (lowering.go:1104, :1230), so running one after the other would assert a
+// pipeline that does not exist — the mistake this file's scope note at :22-27 warns
+// about.
 //
-// The two functions below are deliberately NOT composed: enforcePlatformReserved
-// runs on a rule's INPUT (lowering.go:1083) and emission validation on its OUTPUT
-// (lowering.go:1104), so a test that ran one after the other would be asserting a
-// pipeline that does not exist — the mistake this file's own scope note at :22-27
-// warns about.
-//
-// On the emitted path the carve-out's whole job is to keep the failure loud. Without
-// it the key would be deleted and validateProperties would return nil, so a rule
-// emitting a reserved null would be silently tolerated; with it the null stays and
-// the type switch refuses it in the round that emitted it. That is one round earlier
-// than the old early return allowed, and the message is a type error rather than a
-// reservation error — a difference worth knowing, but the property that mattered is
-// preserved: nothing about a rule defect becomes silent.
-func TestValidateProperties_NullUnderPlatformReservedKeyIsRejectedNotStripped(t *testing.T) {
+// Reservation is a rule about what a user WROTE, so it keeps treating an explicit
+// null as present; the strip is a rule about what a lowering rule EMITTED, so it
+// treats one as absent. Exempting reserved keys from the strip would not have
+// preserved the authored rule — it would only have handed a reserved null to the type
+// switch, producing a loud rejection with the wrong reason, which is precisely what
+// this file's "would duplicate that message with a misleading reason" note exists to
+// avoid.
+func TestNullAndPlatformReserved_DoNotMeet(t *testing.T) {
 	schema := reservedComponent{typ: "reserved"}.PropertySchema()
-	props := map[string]any{"registry": nil}
-	err := validateProperties(schema, props, "properties")
-	if err == nil {
-		t.Fatal("a reserved null must not be silently stripped; expected a rejection")
-	}
-	if !strings.Contains(err.Error(), "properties.registry") {
-		t.Fatalf("expected the reserved key to be named, got: %v", err)
-	}
-	if _, present := props["registry"]; !present {
-		t.Fatal("the carve-out must leave the key in place for the failing check to see")
-	}
-}
 
-// The authored half, at its own real entry point. enforcePlatformReserved is the one
-// consumer that distinguishes a present null from an absent key, and the strip never
-// runs ahead of it, so its behaviour is unchanged by this commit — pinned here
-// because that independence is the reason the carve-out is safe.
-func TestEnforcePlatformReserved_AuthoredNullStillRefused(t *testing.T) {
-	schema := reservedComponent{typ: "reserved"}.PropertySchema()
-	if err := enforcePlatformReserved(schema, map[string]any{"registry": nil}, "properties"); err == nil {
-		t.Fatal("expected an authored reserved null to be refused")
-	}
-	if err := enforcePlatformReserved(schema, map[string]any{"image": nil}, "properties"); err != nil {
-		t.Fatalf("an unreserved key is not this function's business, got: %v", err)
-	}
+	t.Run("emitted null is stripped, reserved or not", func(t *testing.T) {
+		props := map[string]any{"registry": nil, "image": nil}
+		if err := validateProperties(schema, props, "properties"); err != nil {
+			t.Fatalf("expected acceptance, got: %v", err)
+		}
+		for _, key := range []string{"registry", "image"} {
+			if _, present := props[key]; present {
+				t.Errorf("expected %q to be deleted, still present as %#v", key, props[key])
+			}
+		}
+	})
+
+	t.Run("authored null is still refused", func(t *testing.T) {
+		err := enforcePlatformReserved(schema, map[string]any{"registry": nil}, "properties")
+		if err == nil {
+			t.Fatal("expected an authored reserved null to be refused")
+		}
+		if !stderrors.Is(err, ErrPlatformReserved) {
+			t.Fatalf("expected ErrPlatformReserved, got: %v", err)
+		}
+		if err := enforcePlatformReserved(schema, map[string]any{"image": nil}, "properties"); err != nil {
+			t.Fatalf("an unreserved key is not this function's business, got: %v", err)
+		}
+	})
 }
 
 // TestValidateProperties_NullArrayElementIsRejected is the ruling's other half, and

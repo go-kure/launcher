@@ -344,12 +344,15 @@ same kind of thing:
   so there is nothing to normalise it to, and dropping it would renumber its
   siblings under a schema that may constrain length and order.
 
-Two deliberate limits:
+Two things this deliberately does not do:
 
-- **`PlatformReserved` keys are exempt from the deletion.** A rule emitting a
-  reserved key as null is a rule defect, and deleting the key would make it
-  absent and therefore silent; leaving it in place lets the check that follows
-  refuse it. Turning a correct loud rejection into silence is not a fix.
+- **It makes no exception for `PlatformReserved` keys.** Reservation
+  (`enforcePlatformReserved`) is a rule about what a user *wrote*, and it runs
+  only on authored input, upstream of any emission validation — so the two rules
+  never meet, and reservation keeps treating an explicit null as *present* while
+  the strip treats one as absent. Exempting reserved keys here would not have
+  preserved the authored rule; it would only have handed a reserved null to the
+  type check, producing a loud rejection with the wrong reason.
 - **A key the schema does not declare is untouched**, including inside an object
   that sets `AdditionalProperties`. Nothing describes such a value, so nothing
   here can normalise it, and a null inside an opaque object still reaches the
