@@ -794,32 +794,38 @@ rule, because "additive" on its own would be false:
 | An unrecognised key inside a toleration entry is now an error | **New errors only, and here output really is byte-identical.** A key the parser never read contributed nothing to the emitted object, so every document that still builds emits exactly what it emitted before. | `docs/oam/design-gvk.md` already states that an unrecognised key is a build error; this moves `daemonset` toward the documented contract rather than away from it. Gating it to `deployment` would leave `daemonset` permanently accepting shapes that do no work. |
 | An empty `key` with a non-`Exists` operator is now an error | **New errors only, and only on documents the apiserver would have refused.** Upstream states it as a hard "must" (`k8s.io/api@v0.36.3` `core/v1/types.go:4093`). | Nothing appliable is lost. |
 | `tolerations` authored as a mapping rather than an array is now an error | **New errors only, and output is byte-identical.** The whole property was previously discarded without a word — the parser's `[]any` assertion failed and it returned "absent", so a mistyped block emitted no tolerations at all and the build succeeded. Its two sibling parsers on the adjacent lines (`affinity`, `topologySpreadConstraints`) already rejected the same mistake, so this removes an inconsistency rather than adding a rule. | A silently discarded property is the failure mode this whole projection exists to remove; leaving `daemonset` on the old behaviour would keep the one parser that swallows a typo. |
-| An explicit null on a toleration's `key`, `operator`, `value` or `effect` now reads as omission | **Fewer errors, and output is byte-identical for everything that already built.** Such an entry previously failed conversion with `must be a string, got <nil>`; it now behaves as if the key were absent, which is this package's null-as-omission convention. Only `null` is affected — an empty string is unchanged, so `operator: ""` is still an error rather than a silent default. | The null cannot be filtered before it arrives: `withoutExplicitNulls` strips only top-level properties, and emission validation accepts a null under any optional field, so a lowering rule or an author writing a nested null produced a schema-valid document that could not be converted. Leaving `daemonset` out would keep one kind refusing documents the schema declares valid. |
+| An explicit null on a toleration's `key`, `operator`, `value` or `effect` now reads as omission | **Fewer errors, and output is byte-identical for everything that already built.** Such an entry previously failed conversion with `must be a string, got <nil>`; it now behaves as if the key were absent, which is this package's null-as-omission convention. Only `null` is affected — an empty string is unchanged, so `operator: ""` is still an error rather than a silent default. | The null cannot be filtered before it arrives: `withoutExplicitNulls` strips only top-level properties, so an author writing a nested null reaches the parser with it intact — authored documents are never shape-checked by this package at all (`pkg/oam/property_validate.go:22-27`), which is why the parser has to answer for itself and why these guards stay. A lowering rule's emitted null under an optional declared key is now normalised to absence before conversion (same file, `validateObjectProperties`), so the two paths agree on what a null means rather than one accepting what the other refuses. Leaving `daemonset` out would keep one kind refusing documents the schema declares valid. |
 | A `value` under `operator: Exists` is now an error | **New errors only, and only on documents the apiserver would have refused** — upstream's `ValidateTolerations` rejects the pair outright, notwithstanding the field doc's softer "should" (the citation, and its second-hand provenance, are at the check itself in `common.go`). | Same: nothing appliable is lost. |
 | A non-empty `key` that is not a qualified name is now an error | **New errors only, and only on documents the apiserver would have refused.** `ValidateTolerations` applies `ValidateLabelName` to every non-empty key, unconditionally and behind no feature gate. The empty key is untouched — it remains legal and keeps its own rule. | Nothing appliable is lost, and it is the same rule the affinity and topology-key paths already apply to their own label keys; `daemonset` accepting a malformed key there and not here was an inconsistency, not a policy. |
 | Under `operator: Equal`, a `value` that is not a valid label value is now an error | **New errors only, and only on documents the apiserver would have refused.** The value is matched against a taint's value, so upstream runs `IsValidLabelValue` on it for the `Equal` arm. `Exists` and `Lt`/`Gt` reach their own value rules first, so this fires on `Equal` alone. | Same: nothing appliable is lost. |
 | `tolerationSeconds` without `effect: NoExecute` is now an error | **New errors only, and only on documents the apiserver would have refused.** The pair is rejected outright upstream, and an omitted `effect` does not satisfy the rule — it has to be spelled out. This one was deliberately left unenforced until now, on the stated grounds that the only reachable citation was a second-hand copy carried by a dependency; the comment named a first-hand citation as the condition for adding it, and that condition is now met. | A `tolerationSeconds` on any other effect is inert at best and refused at apply at worst, which is the failure class this projection exists to remove. Leaving it would also contradict the rule's own recorded condition. |
 
-Net, stated by category rather than by a count — a count here has now gone stale
-twice, so this states the rule the rows follow instead of tallying them. A
-`daemonset` document stops building only if it falls into one of three classes:
+Net, stated by cause rather than by a count or a partition. A count here went
+stale twice; the replacement then asserted that the classes were exclusive and
+that exactly one of them contained previously-accepted documents, and both of
+those were wrong too. Three failed summaries of the same table is a sign the
+summary wants a different shape, so this one describes what the rows have in
+common and makes no claim about which row a document lands in. A `daemonset`
+document stops building for one of these reasons, and one document can hit
+several at once:
 
 1. **It was refused on apply anyway.** An empty `key` with a non-`Exists`
    operator, a `value` under `Exists`, a non-qualified non-empty `key`, an
    invalid label value under `Equal`. Nothing appliable is lost.
-2. **It was doing nothing.** An unrecognised key inside an entry, or
-   `tolerations` authored as a mapping rather than an array — both were
-   discarded unread, so the emitted object never carried them.
-3. **It authored `tolerationSeconds` in a form that cannot now be emitted.** A
-   malformed value (non-integer, fractional, out of `int64` range), or a
-   well-formed value with any `effect` other than `NoExecute`.
+2. **Part of it was being discarded unread.** An unrecognised member inside an
+   entry, `tolerations` authored as a mapping rather than an array, or a
+   `tolerationSeconds` the parser never looked at — malformed, or well-formed
+   but carrying an `effect` other than `NoExecute`.
 
-Class 3 is the only one where a document that previously built **and was
-accepted by a cluster** now fails, and both of its cases have the same cause:
-the field was being silently discarded before it reached the cluster, so the
-apiserver never saw what it would have refused. Reading the field, which is the
-fix, is what makes it visible. There is no version of the fix that keeps these
-documents building and also emits what they asked for.
+Reason 2 is the one that matters, and it is not confined to documents that were
+doing nothing: an entry can carry an unread member alongside tolerations that
+worked, and a `tolerations` block authored as a mapping left the rest of the
+workload building and being accepted. So a document rejected under reason 2 may
+well have built **and been accepted by a cluster** before — it simply was not
+getting what it asked for, and the apiserver never saw the part that was
+dropped. Reading those fields, which is the fix, is what makes them visible.
+There is no version of the fix that keeps these documents building and also
+emits what they asked for.
 
 Output is byte-identical for everything that still builds, **unless it authored a
 well-formed `tolerationSeconds` with `effect: NoExecute`**, in which case the

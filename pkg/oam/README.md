@@ -329,6 +329,39 @@ assertion alone can't tell an uninitialized slice/map apart from a validly-typed
 empty collection, even though both serialize the same way, so a lowering rule
 that emits an unset (rather than empty) collection field is still caught.
 
+### What an explicit `null` means on the emitted path
+
+One rule, applied in two places because a key and an array element are not the
+same kind of thing:
+
+- **A declared, optional object key holding a null is DELETED** before its value
+  is checked. `Required` already classifies a null as absent, so materialising it
+  as a present key contradicted the classification the file had already made — and
+  a handler parser decides presence with a bare two-value map lookup, so it saw a
+  key the validator had decided was not there.
+- **A null ARRAY ELEMENT is rejected**, through the ordinary type check with no
+  special case. An element cannot be absent — it is present by being in the list —
+  so there is nothing to normalise it to, and dropping it would renumber its
+  siblings under a schema that may constrain length and order.
+
+Two deliberate limits:
+
+- **`PlatformReserved` keys are exempt from the deletion.** A rule emitting a
+  reserved key as null is a rule defect, and deleting the key would make it
+  absent and therefore silent; leaving it in place lets the check that follows
+  refuse it. Turning a correct loud rejection into silence is not a fix.
+- **A key the schema does not declare is untouched**, including inside an object
+  that sets `AdditionalProperties`. Nothing describes such a value, so nothing
+  here can normalise it, and a null inside an opaque object still reaches the
+  handler parser. This is the same horizon as validation itself.
+
+Scope, because this contract is not settled repository-wide: this fixes the
+**emitted** path only. Authored documents never reach these functions at all
+(see the paragraph above), so a handler's own parser still has to answer for a
+null it is handed directly — which is why the built-in parsers keep their
+explicit-null guards. Aligning the authored path is tracked separately as
+`go-kure/launcher#394` and is not closed by this.
+
 ## Contract metadata
 
 Handlers and lowering rules may implement `ContractDescriber` (`ContractMetadata()

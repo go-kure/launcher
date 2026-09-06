@@ -284,6 +284,182 @@ func TestValidateProperties_DeterministicMessage(t *testing.T) {
 	}
 }
 
+// reservedComponent declares one optional PlatformReserved property, to pin the
+// carve-out in the null normalisation below. No production schema declares a
+// reserved property that is also optional-and-nullable, which is exactly why the
+// behaviour needs a fixture: without one, changing the carve-out breaks nothing.
+type reservedComponent struct{ typ string }
+
+func (h reservedComponent) CanHandle(t string) bool { return t == h.typ }
+func (h reservedComponent) ToApplicationConfig(*Component, string) (stack.ApplicationConfig, error) {
+	return nil, nil
+}
+func (h reservedComponent) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{
+		"registry": {Type: PropertyTypeString, PlatformReserved: true},
+		"image":    {Type: PropertyTypeString},
+	}
+}
+
+// TestValidateProperties_NullUnderOptionalKeyIsStripped is the presence half of the
+// null contract. The assertion is deliberately on the two-value map lookup rather
+// than on the value: a handler parser decides presence with exactly that lookup
+// (builtin/components/common.go:1718-1721), so checking props["x"] == nil would pass
+// against the very defect this closes.
+func TestValidateProperties_NullUnderOptionalKeyIsStripped(t *testing.T) {
+	cases := map[string]any{
+		"untyped nil": nil,
+		"nil slice":   []any(nil),
+		"nil map":     map[string]any(nil),
+	}
+	for name, null := range cases {
+		t.Run(name, func(t *testing.T) {
+			props := map[string]any{"replicas": 2, "strategy": null}
+			if err := validateProperties(richSchema(), props, "properties"); err != nil {
+				t.Fatalf("expected acceptance, got: %v", err)
+			}
+			if _, present := props["strategy"]; present {
+				t.Fatalf("expected the null key to be deleted, still present as %#v", props["strategy"])
+			}
+			if props["replicas"] != 2 {
+				t.Fatalf("a non-null sibling was disturbed: %#v", props["replicas"])
+			}
+		})
+	}
+}
+
+// The loop order in validateObjectProperties is load bearing: the Required check
+// runs before the strip, so a required null keeps reporting the empty value rather
+// than being deleted and then reported as a missing key.
+func TestValidateProperties_NullUnderRequiredKeyStillFails(t *testing.T) {
+	schema := map[string]PropertySchema{"cpu": {Type: PropertyTypeString, Required: true}}
+	props := map[string]any{"cpu": nil}
+	err := validateProperties(schema, props, "properties")
+	if err == nil {
+		t.Fatal("expected a required-field error")
+	}
+	if !strings.Contains(err.Error(), `"cpu" is required`) {
+		t.Fatalf("expected the required message, got: %v", err)
+	}
+	if _, present := props["cpu"]; !present {
+		t.Fatal("a required null must not be stripped out from under its own check")
+	}
+}
+
+// The PlatformReserved carve-out, asserted as REJECTION rather than as survival.
+//
+// The two functions below are deliberately NOT composed: enforcePlatformReserved
+// runs on a rule's INPUT (lowering.go:1083) and emission validation on its OUTPUT
+// (lowering.go:1104), so a test that ran one after the other would be asserting a
+// pipeline that does not exist — the mistake this file's own scope note at :22-27
+// warns about.
+//
+// On the emitted path the carve-out's whole job is to keep the failure loud. Without
+// it the key would be deleted and validateProperties would return nil, so a rule
+// emitting a reserved null would be silently tolerated; with it the null stays and
+// the type switch refuses it in the round that emitted it. That is one round earlier
+// than the old early return allowed, and the message is a type error rather than a
+// reservation error — a difference worth knowing, but the property that mattered is
+// preserved: nothing about a rule defect becomes silent.
+func TestValidateProperties_NullUnderPlatformReservedKeyIsRejectedNotStripped(t *testing.T) {
+	schema := reservedComponent{typ: "reserved"}.PropertySchema()
+	props := map[string]any{"registry": nil}
+	err := validateProperties(schema, props, "properties")
+	if err == nil {
+		t.Fatal("a reserved null must not be silently stripped; expected a rejection")
+	}
+	if !strings.Contains(err.Error(), "properties.registry") {
+		t.Fatalf("expected the reserved key to be named, got: %v", err)
+	}
+	if _, present := props["registry"]; !present {
+		t.Fatal("the carve-out must leave the key in place for the failing check to see")
+	}
+}
+
+// The authored half, at its own real entry point. enforcePlatformReserved is the one
+// consumer that distinguishes a present null from an absent key, and the strip never
+// runs ahead of it, so its behaviour is unchanged by this commit — pinned here
+// because that independence is the reason the carve-out is safe.
+func TestEnforcePlatformReserved_AuthoredNullStillRefused(t *testing.T) {
+	schema := reservedComponent{typ: "reserved"}.PropertySchema()
+	if err := enforcePlatformReserved(schema, map[string]any{"registry": nil}, "properties"); err == nil {
+		t.Fatal("expected an authored reserved null to be refused")
+	}
+	if err := enforcePlatformReserved(schema, map[string]any{"image": nil}, "properties"); err != nil {
+		t.Fatalf("an unreserved key is not this function's business, got: %v", err)
+	}
+}
+
+// TestValidateProperties_NullArrayElementIsRejected is the ruling's other half, and
+// the divergence that prompted it: `values: [null]` cleared emission validation and
+// then failed conversion in the handler parser. Stripping cannot apply to an element
+// — deleting one would renumber its siblings — so it must fail, and it does so
+// through the ordinary type switch rather than an element special case.
+func TestValidateProperties_NullArrayElementIsRejected(t *testing.T) {
+	t.Run("string items", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"values": {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeString}},
+		}
+		err := validateProperties(schema, map[string]any{"values": []any{"node-1", nil}}, "properties")
+		if err == nil {
+			t.Fatal("expected a null element to be rejected")
+		}
+		// The index must be named: a message pointing at `values` alone would send an
+		// author to a list that is itself well formed.
+		if !strings.Contains(err.Error(), "values[1]") || !strings.Contains(err.Error(), "expected string") {
+			t.Fatalf("expected an indexed type error, got: %v", err)
+		}
+	})
+	t.Run("object items", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"env": {Type: PropertyTypeArray, Items: &PropertySchema{
+				Type:       PropertyTypeObject,
+				Properties: map[string]PropertySchema{"name": {Type: PropertyTypeString, Required: true}},
+			}},
+		}
+		err := validateProperties(schema, map[string]any{"env": []any{nil}}, "properties")
+		if err == nil {
+			t.Fatal("expected a null element to be rejected")
+		}
+		if !strings.Contains(err.Error(), "env[0]") || !strings.Contains(err.Error(), "expected object") {
+			t.Fatalf("expected an indexed type error, got: %v", err)
+		}
+	})
+}
+
+// A nested declared object inherits the strip through the object recursion, so the
+// contract does not stop at the top level.
+func TestValidateProperties_NullInsideNestedObjectIsStripped(t *testing.T) {
+	props := map[string]any{"resources": map[string]any{"cpu": "100m", "memory": nil}}
+	if err := validateProperties(richSchema(), props, "properties"); err != nil {
+		t.Fatalf("expected acceptance, got: %v", err)
+	}
+	nested, ok := props["resources"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected the nested object to survive as map[string]any, got %T", props["resources"])
+	}
+	if _, present := nested["memory"]; present {
+		t.Fatal("expected the nested null to be deleted")
+	}
+}
+
+// Disclosed residual, pinned rather than fixed: an undeclared key under
+// AdditionalProperties has no schema to consult, so it is passed over untouched and
+// a null there still reaches a parser. This test exists to make that boundary
+// visible and to fail loudly if someone later widens the strip to undeclared keys
+// without deciding to — the same horizon as validation itself, since an opaque
+// object is precisely the thing this package does not model.
+func TestValidateProperties_NullUnderUndeclaredKeyIsNotStripped(t *testing.T) {
+	props := map[string]any{"labels": map[string]any{"tier": "web", "opaque": nil}}
+	if err := validateProperties(richSchema(), props, "properties"); err != nil {
+		t.Fatalf("expected acceptance, got: %v", err)
+	}
+	nested := props["labels"].(map[string]any)
+	if _, present := nested["opaque"]; !present {
+		t.Fatal("an undeclared null is outside the strip's reach; if this now passes, the scope note in property_validate.go is stale")
+	}
+}
+
 func newSchemaTransformer() *Transformer {
 	tr := NewTransformer(
 		map[string]ComponentHandler{
