@@ -23,6 +23,8 @@ spec:
           cpu: "1000m"
           memory: "512Mi"
     traits:
+    # No `tls` block here: expose's TLS is platform-managed and comes from the
+    # ClusterProfile. See 03-webservice-with-tls.yaml.
     - type: expose
       properties:
         rules:
@@ -30,10 +32,6 @@ spec:
           paths:
           - path: /
             port: 8080
-        tls:
-        - secretName: my-app-tls
-          hosts:
-          - my-app.example.com
     - type: certificate
       properties:
         secretName: my-app-tls

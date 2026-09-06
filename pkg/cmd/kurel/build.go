@@ -136,6 +136,20 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		return errors.Wrapf(err, "parsing application file %q", appPath)
 	}
 
+	// Strictness stops at the envelope without this: ParseWithExtraTypes decodes with
+	// KnownFields(true), but every Properties field is map[string]any, so a component
+	// or trait property no handler declares was accepted and silently dropped
+	// (go-kure/launcher#408).
+	//
+	// It runs HERE, after ResolveParameters above, and the order is load-bearing: a
+	// package-mode document authors `${...}` placeholders that are still bare strings
+	// until parameters are substituted, so checking before that point would fail an
+	// integer- or boolean-typed property on the placeholder's own type. Running after
+	// the parse is what gives it typed components and traits to walk at all.
+	if err := transformer.ValidateAuthoredProperties(app); err != nil {
+		return errors.Wrapf(err, "validating application file %q", appPath)
+	}
+
 	profileData, err := os.ReadFile(opts.profilePath)
 	if err != nil {
 		return errors.Wrapf(err, "reading profile file %q", opts.profilePath)

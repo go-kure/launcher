@@ -11,6 +11,11 @@ spec:
       port: 8080
       replicas: 2
     traits:
+    # expose does not take a `tls` block. Ingress TLS is platform-managed: it is
+    # synthesized only when the ClusterProfile grants the expose capability a
+    # `certManagerClusterIssuer`, and the trait then accepts at most a `secretName`
+    # to override the generated <component>-tls name. The certificate trait below is
+    # the other route — an explicit cert-manager Certificate this document controls.
     - type: expose
       properties:
         rules:
@@ -18,10 +23,6 @@ spec:
           paths:
           - path: /
             port: 8080
-        tls:
-        - secretName: my-app-tls
-          hosts:
-          - my-app.example.com
     - type: certificate
       properties:
         secretName: my-app-tls

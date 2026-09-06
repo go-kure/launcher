@@ -10,7 +10,8 @@ spec:
       image: myregistry/my-stateful-app:v1.0.0
       replicas: 3
       port: 8080
-      storage:
+      volumeClaimTemplates:
+      - name: data
         size: "20Gi"
         storageClass: standard
         mountPath: /data

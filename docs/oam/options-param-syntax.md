@@ -87,6 +87,10 @@ spec:
           cpu: "100m"
           memory: "128Mi"
     traits:
+    # `expose` takes no `tls` block: ingress TLS is platform-managed and is
+    # synthesized only when the ClusterProfile grants the expose capability a
+    # cert-manager cluster-issuer. The `certificate` trait below is the other
+    # route, and is what consumes ${tlsSecret} here.
     - type: expose
       properties:
         rules:
@@ -94,10 +98,6 @@ spec:
           paths:
           - path: /
             port: 8080
-        tls:
-        - secretName: "${tlsSecret}"
-          hosts:
-          - "${domain}"
     - type: certificate
       properties:
         secretName: "${tlsSecret}"

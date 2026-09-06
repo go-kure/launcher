@@ -1,3 +1,7 @@
+# Not buildable with `kurel build` as-is, by design: the hostPath volume below is
+# default-deny. `kurel build` supplies no Policy, so NoopPolicy applies and
+# AllowHostPathVolumes() is false. The example shows the node-agent shape; a host
+# that permits hostPath supplies its own Policy.
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
@@ -15,11 +19,13 @@ spec:
         limits:
           cpu: "200m"
           memory: "128Mi"
+      # A launcher volume entry is flat and carries its own mount: the source is
+      # named by `type` with its fields alongside (`path` here, not nested under a
+      # `hostPath:` block), and `mountPath`/`readOnly` sit on the volume rather than
+      # in a separate component-level `volumeMounts` list.
       volumes:
       - name: host-proc
-        hostPath:
-          path: /proc
-      volumeMounts:
-      - name: host-proc
+        type: hostPath
+        path: /proc
         mountPath: /host/proc
         readOnly: true

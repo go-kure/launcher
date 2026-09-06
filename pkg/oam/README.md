@@ -286,10 +286,31 @@ Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
 component/trait/policy's properties against its TARGET handler's declared schema —
 enforcing `Required`, `Type`, `Enum`, and nested `Properties`/`Items`/
 `AdditionalProperties` — immediately after a lowering rule returns it, so a rule
-cannot silently produce properties its own target handler would reject. This is
-in-process enforcement of what `HandlerSchemas()` only publishes for authored
-documents; an authored document's own property shape is still validated only by
-`ValidateAndApplyDefaults`/handler-specific logic, not by this path.
+cannot silently produce properties its own target handler would reject.
+
+`ValidateAuthoredProperties` (`property_validate_authored.go`) is that check's
+authored-path counterpart, and closes go-kure/launcher#408. Parsing is strict
+(`KnownFields(true)`) only down to the envelope: `Component.Properties`,
+`Trait.Properties` and `ApplicationPolicy.Properties` are each `map[string]any`, so
+before this every handler read the keys it knew and silently dropped the rest — a
+misspelled or stale property built successfully and produced nothing. The check walks
+each authored component and its traits in document order, looks up the same schema
+`validateProperties` would (terminal handler first, then a `ComponentLoweringRule` /
+`TraitLoweringRule` claiming the type), rejects any key the schema does not declare,
+and checks the shape of every key it does. `kurel build` calls it immediately after
+parsing — and, in package mode, necessarily *after* `ResolveParameters`, because a
+`${...}` placeholder is a bare string until substituted.
+
+Three positions are exempt, each because there is no schema to check against rather
+than by oversight: a type no handler and no lowering rule claims (rejected separately
+by the type allowlists and by `validateSettled`); a custom trait type from a
+`CapabilityDefinition`, which declares that the type *exists* but not what properties
+it accepts; and policies, which are documented pass-through and for which launcher
+declares no schema at all. Top-level `Required` is also deliberately not enforced
+here — `ClusterProfile` capability rendering merges into a trait's top-level property
+map after this runs, so a required property the platform supplies is legitimately
+absent from what the author wrote. Nested `Required`, inside an object the author did
+write, still is.
 
 `validateProperties`'s null check (`isNullValue`) treats a typed-nil pointer,
 slice, or map — not just a bare `nil` interface — as JSON `null`: a Go type
