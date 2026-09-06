@@ -802,9 +802,11 @@ was accepted by a cluster still builds. Its output is byte-identical **unless it
 authored `tolerationSeconds`**, in which case the field it wrote now appears —
 which is the defect being fixed rather than a regression. What no longer builds
 is a document that was either doing nothing, carrying a malformed value, or
-would have been refused on apply. One row goes the other way — a nested explicit
-null in a toleration entry now builds where it previously failed conversion — so
-the table is not uniformly a tightening. This is pre-release `v1alpha1`; the change is
+would have been refused on apply. The table is not uniformly a tightening: some
+rows go the other way, accepting or emitting what `daemonset` previously refused
+or dropped — a well-formed `tolerationSeconds`, `operator: Lt`/`Gt`, and a nested
+explicit null in a toleration entry. Read the middle column per row rather than
+assuming a direction. This is pre-release `v1alpha1`; the change is
 taken deliberately rather than hidden behind a `deployment`-only option whose
 removal would depend on unrelated work landing.
 
