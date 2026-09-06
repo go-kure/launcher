@@ -60,16 +60,29 @@ func TestDeploymentScheduling_ExplicitNullIsOmission(t *testing.T) {
 	}
 }
 
-// TestDeploymentScheduling_AffinityRoundTrip authors every arm of
-// corev1.Affinity and asserts each reaches the emitted pod spec unchanged.
+// TestDeploymentScheduling_AffinityRoundTrip authors five of corev1.Affinity's
+// six scheduling arms and asserts each reaches the emitted pod spec unchanged.
 // Nothing here is inferred from the component — that is the difference from the
 // four-key shorthand, which fills the selector in from the component's own app
 // label.
 //
-// "Every arm" is meant literally, and so is "asserts": a round-trip test that
-// authors a field without asserting it is indistinguishable from one that does
-// not author it at all, because the assignment can be deleted and the test
-// stays green. Two PodAffinityTerm fields were in exactly that state —
+// Five, not six, and the count is stated rather than rounded up: the sixth arm,
+// podAntiAffinity's requiredDuringSchedulingIgnoredDuringExecution, is pinned by
+// TestDeploymentScheduling_EmptyLabelSelectorAccepted and by
+// TestDeploymentScheduling_MismatchLabelKeysMayOverlapSelector, both of which
+// build their document on that arm and both of which fail if parseRawAffinity
+// stops assigning it — verified by deleting that assignment. PodAffinityTerm's
+// mismatchLabelKeys is likewise pinned by the second of those, verified the same
+// way. So both of the things this test leaves out are pinned elsewhere; the
+// count is stated here only so a reader checking the claim against the input
+// below does not have to discover the gap for themselves. It is not a claim
+// that every field of every affinity struct is pinned somewhere — that would be
+// the same unverified completeness assertion this comment exists to retract.
+//
+// "Asserts" is meant literally: a round-trip test that authors a field without
+// asserting it is indistinguishable from one that does not author it at all,
+// because the assignment can be deleted and the test stays green. Two
+// PodAffinityTerm fields were in exactly that state —
 // namespaceSelector and matchLabelKeys were parsed and assigned
 // (scheduling.go, parsePodAffinityTerm) with no assertion anywhere in the
 // package or in the golden fixture, so both could be silently dropped. That is
@@ -478,6 +491,29 @@ func TestDeploymentScheduling_TolerationRejections(t *testing.T) {
 			"Gt with negative zero",
 			map[string]any{"key": "capacity", "operator": "Gt", "value": "-0"},
 			"canonical form",
+		},
+		// The other half of the same check, and it needs its own case because
+		// the two halves reject disjoint sets. content.IsDecimalInteger
+		// constrains the SYNTAX and says nothing about magnitude
+		// (k8s.io/apimachinery@v0.36.3 pkg/api/validate/content/decimal_int.go:
+		// 30-61 walks characters and never converts), so 2^63 — canonical in
+		// every respect, just one past int64 — passes it and only
+		// strconv.ParseInt refuses. Without this case the ParseInt arm is
+		// unreachable from any test: the three cases above fail the syntax
+		// check first, and "many" and the missing value do too, so deleting
+		// ParseInt entirely left the whole repository suite green. The failure
+		// it prevents is the same silent one: compareNumericValues parses with
+		// ParseInt after IsDecimalInteger passes and returns false — no match,
+		// no error — on overflow (k8s.io/api@v0.36.3 core/v1/toleration.go:
+		// 87-90), so an out-of-range value would build and tolerate nothing.
+		//
+		// The wanted substring is deliberately the one the canonical-form
+		// message cannot contain: that message reads "requires an integer in
+		// canonical form", so matching on the comma pins which arm fired.
+		{
+			"Gt with a canonical value past int64",
+			map[string]any{"key": "capacity", "operator": "Gt", "value": "9223372036854775808"},
+			`requires an integer, got "9223372036854775808"`,
 		},
 		{
 			"Lt with no value",

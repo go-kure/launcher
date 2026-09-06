@@ -234,9 +234,16 @@ func TestDaemonsetHandler_WithTolerations(t *testing.T) {
 // the repo authors a toleration on daemonset beyond the three-key happy path, so
 // a green suite says nothing about what daemonset now accepts.
 //
-// The split matters and is asserted per rule: tolerationSeconds is a pure gain
-// (previously accepted and dropped), while the three rejections cost daemonset
-// only documents that either did nothing or that the apiserver itself refuses.
+// The split matters and is asserted per rule, and "per rule" means one subtest
+// for each of the six rows of README.md's "What `tolerations` changed for
+// `daemonset`" table, not for the ones that were convenient. Two of them are
+// gains — a well-formed tolerationSeconds is now read, and Lt/Gt are now
+// accepted — and the remaining four are rejections that cost daemonset only
+// documents which either did nothing or which the apiserver itself refuses.
+// The acceptance rows carry their own subtests deliberately: a rejection-only
+// oracle proves the shared parser is reached but not that daemonset still
+// accepts what the table promises it accepts, so a daemonset-only narrowing
+// would pass it.
 func TestDaemonsetHandler_SharedTolerationParserReachesDaemonset(t *testing.T) {
 	t.Run("tolerationSeconds is now honoured", func(t *testing.T) {
 		ds := generateDaemonSet(t, map[string]any{
@@ -262,6 +269,32 @@ func TestDaemonsetHandler_SharedTolerationParserReachesDaemonset(t *testing.T) {
 		}
 	})
 
+	// The second gain row. Lt and Gt were previously refused outright as
+	// unknown operators, so this is the one place the shared parser WIDENED
+	// what daemonset takes. Asserted through the handler rather than inferred
+	// from the deployment tests, which cannot see a daemonset-only narrowing:
+	// a guard added in daemonset.go that refused comparison operators before
+	// delegating would leave every other assertion in this package satisfied.
+	t.Run("Lt and Gt are now accepted", func(t *testing.T) {
+		ds := generateDaemonSet(t, map[string]any{
+			"image": "ghcr.io/org/agent:v1.0.0",
+			"tolerations": []any{
+				map[string]any{"key": "capacity", "operator": "Gt", "value": "5"},
+				map[string]any{"key": "capacity", "operator": "Lt", "value": "20"},
+			},
+		})
+		tols := ds.Spec.Template.Spec.Tolerations
+		if len(tols) != 2 {
+			t.Fatalf("Tolerations = %d, want 2", len(tols))
+		}
+		if tols[0].Operator != corev1.TolerationOpGt || tols[0].Value != "5" {
+			t.Errorf("tolerations[0] = %+v, want operator Gt value 5", tols[0])
+		}
+		if tols[1].Operator != corev1.TolerationOpLt || tols[1].Value != "20" {
+			t.Errorf("tolerations[1] = %+v, want operator Lt value 20", tols[1])
+		}
+	})
+
 	// Each of these is a document daemonset accepted before this work. None of
 	// them was appliable or did any work — see the README table for the per-rule
 	// argument and the upstream citations.
@@ -284,6 +317,15 @@ func TestDaemonsetHandler_SharedTolerationParserReachesDaemonset(t *testing.T) {
 			"value under Exists",
 			map[string]any{"key": "dedicated", "operator": "Exists", "value": "batch"},
 			"must be empty when operator is 'Exists'",
+		},
+		{
+			// The counterpart of the gain above: the key was previously
+			// dropped whatever it held, so a malformed one was ignored along
+			// with the rest. Reading the key and type-checking it are the same
+			// change, and this is the half that costs daemonset a document.
+			"malformed tolerationSeconds",
+			map[string]any{"key": "dedicated", "operator": "Exists", "effect": "NoExecute", "tolerationSeconds": "300"},
+			"must be an integer",
 		},
 	}
 	for _, tc := range rejections {
