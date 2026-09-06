@@ -800,20 +800,32 @@ rule, because "additive" on its own would be false:
 | Under `operator: Equal`, a `value` that is not a valid label value is now an error | **New errors only, and only on documents the apiserver would have refused.** The value is matched against a taint's value, so upstream runs `IsValidLabelValue` on it for the `Equal` arm. `Exists` and `Lt`/`Gt` reach their own value rules first, so this fires on `Equal` alone. | Same: nothing appliable is lost. |
 | `tolerationSeconds` without `effect: NoExecute` is now an error | **New errors only, and only on documents the apiserver would have refused.** The pair is rejected outright upstream, and an omitted `effect` does not satisfy the rule — it has to be spelled out. This one was deliberately left unenforced until now, on the stated grounds that the only reachable citation was a second-hand copy carried by a dependency; the comment named a first-hand citation as the condition for adding it, and that condition is now met. | A `tolerationSeconds` on any other effect is inert at best and refused at apply at worst, which is the failure class this projection exists to remove. Leaving it would also contradict the rule's own recorded condition. |
 
-Net, stated without rounding: a `daemonset` document that previously built and
-was accepted by a cluster still builds, **with one exception, and it comes from
-the dropped field rather than from a new opinion.** Its output is byte-identical
-**unless it authored `tolerationSeconds`**, in which case the field it wrote now
-appears — which is the defect being fixed rather than a regression. What no
-longer builds is a document that was either doing nothing, carrying a malformed
-value, or would have been refused on apply.
+Net, stated by category rather than by a count — a count here has now gone stale
+twice, so this states the rule the rows follow instead of tallying them. A
+`daemonset` document stops building only if it falls into one of three classes:
 
-The exception is `tolerationSeconds` authored with any effect other than
-`NoExecute`. Such a document did build and was accepted, but only because the
-field was being silently discarded before it reached the cluster — the apiserver
-never saw the pair it rejects. Reading the field, which is the fix, is what makes
-the pair visible, and the pair is invalid. There is no version of the fix that
-keeps this document building and also emits what it asked for. The table is not uniformly a tightening: some
+1. **It was refused on apply anyway.** An empty `key` with a non-`Exists`
+   operator, a `value` under `Exists`, a non-qualified non-empty `key`, an
+   invalid label value under `Equal`. Nothing appliable is lost.
+2. **It was doing nothing.** An unrecognised key inside an entry, or
+   `tolerations` authored as a mapping rather than an array — both were
+   discarded unread, so the emitted object never carried them.
+3. **It authored `tolerationSeconds` in a form that cannot now be emitted.** A
+   malformed value (non-integer, fractional, out of `int64` range), or a
+   well-formed value with any `effect` other than `NoExecute`.
+
+Class 3 is the only one where a document that previously built **and was
+accepted by a cluster** now fails, and both of its cases have the same cause:
+the field was being silently discarded before it reached the cluster, so the
+apiserver never saw what it would have refused. Reading the field, which is the
+fix, is what makes it visible. There is no version of the fix that keeps these
+documents building and also emits what they asked for.
+
+Output is byte-identical for everything that still builds, **unless it authored a
+well-formed `tolerationSeconds` with `effect: NoExecute`**, in which case the
+field it wrote now appears — the defect being fixed, not a regression.
+
+The table is not uniformly a tightening: some
 rows go the other way, accepting or emitting what `daemonset` previously refused
 or dropped — a well-formed `tolerationSeconds`, `operator: Lt`/`Gt`, and a nested
 explicit null in a toleration entry. Read the middle column per row rather than

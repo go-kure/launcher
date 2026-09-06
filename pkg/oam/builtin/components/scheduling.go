@@ -904,8 +904,15 @@ func schemaNodeSelectorRequirement() oam.PropertySchema {
 // disagreeing about the same document, which is the defect class this mirrors from
 // the other direction.
 //
-// Arity ("exactly one value") is not expressible in PropertySchema, so it lives in
-// the descriptions and is enforced by the parser alone.
+// PropertySchema can express PRESENCE but not CARDINALITY, and the two must not be
+// conflated: `values` is Required here — every operator matchFields accepts needs
+// it, unlike matchExpressions where Exists and DoesNotExist take none — while
+// "exactly one" is not expressible and lives in the descriptions, enforced by the
+// parser alone. Leaving `values` optional because its arity rule had to go in the
+// parser anyway would reopen the same divergence in a second place: an emitted
+// `{key: metadata.name, operator: In}` with no values would clear emission
+// validation (validateObjectProperties skips presence checks on non-required keys,
+// pkg/oam/property_validate.go:53-66) and then fail conversion below.
 func schemaNodeFieldSelectorRequirement() oam.PropertySchema {
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeObject,
@@ -922,7 +929,7 @@ func schemaNodeFieldSelectorRequirement() oam.PropertySchema {
 				Description: "How the key relates to values. Node field selectors accept In and NotIn only, each with exactly one value.",
 			},
 			"values": {
-				Type:        oam.PropertyTypeArray,
+				Type: oam.PropertyTypeArray, Required: true,
 				Description: "Exactly one node name, validated as a DNS-1123 subdomain.",
 				Items:       &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "A node name."},
 			},

@@ -721,12 +721,37 @@ func TestDeploymentScheduling_TopologySpreadConstraintsRoundTrip(t *testing.T) {
 // emits, and then fails in conversion where the rule's author cannot see it.
 //
 // matchFields reused the generic node-requirement schema until the parser was
-// narrowed to Kubernetes' field-selector rules, which opened exactly that gap. The
-// second half of this test is the load-bearing one — it does not compare the schema
-// against a hand-written list of operators, it takes every operator the SIBLING
-// matchExpressions schema still allows, subtracts those matchFields allows, and
-// requires the parser to reject each remainder. Widening either schema without
-// widening the parser fails here.
+// narrowed to Kubernetes' field-selector rules, which opened exactly that gap.
+//
+// The first version of this test asserted one direction against a hand-written
+// list, and it passed while `values` was optional in the schema and mandatory in
+// the parser — a real divergence it could not observe, because it only encoded the
+// direction being defended. Hand-listing the cases fixes the gap you already know
+// about and leaves the next one exactly as invisible.
+//
+// So this DERIVES both sides and compares them as SETS, subtracting each from the
+// other and requiring both remainders to be empty. Two invariants, each structural:
+//
+//   - Operators. The schema's enum versus the operators the parser actually
+//     converts, probed across every corev1.NodeSelectorOperator constant — upstream's
+//     own enumeration, not a pool this test's author chose, so it cannot omit a
+//     value by not thinking of it. Each candidate is probed both with a value and
+//     without, so an operator is only counted rejected when no arity accepts it.
+//   - Requiredness. Every property the schema DECLARES is probed by omitting it
+//     from an otherwise valid entry: the parser rejecting must agree with the
+//     schema's Required flag, both ways. Adding a property to the schema enters
+//     this loop automatically.
+//
+// A one-sided assertion survives one side moving alone; a set comparison cannot.
+// Adding an operator to the schema without teaching the parser, or teaching the
+// parser one the schema does not advertise, or flipping any Required flag, each
+// fails here by construction rather than by someone having predicted it.
+//
+// The key enum keeps a hand-written candidate pool and is labelled as such at the
+// probe: upstream enumerates the ACCEPTED field key (nodeFieldSelectorValidators
+// has the single entry `metadata.name`) but nothing enumerates rejected ones, so
+// the parser-rejects-what-the-schema-forbids direction rests on chosen inputs. The
+// other direction — every key the schema advertises converts — is structural.
 func TestDeploymentScheduling_MatchFieldsSchemaMatchesParser(t *testing.T) {
 	const (
 		requiredArm = "requiredDuringSchedulingIgnoredDuringExecution"
@@ -760,6 +785,18 @@ func TestDeploymentScheduling_MatchFieldsSchemaMatchesParser(t *testing.T) {
 		return out
 	}
 
+	// matchFieldsError converts a document carrying exactly one matchFields entry
+	// and returns the conversion error, so every case below differs only by the
+	// entry under test rather than by four levels of repeated nesting.
+	matchFieldsError := func(t *testing.T, req map[string]any) error {
+		t.Helper()
+		return schedulingError(t, map[string]any{"affinity": map[string]any{
+			"nodeAffinity": map[string]any{requiredArm: map[string]any{
+				"nodeSelectorTerms": []any{map[string]any{"matchFields": []any{req}}},
+			}},
+		}})
+	}
+
 	root := (&components.DeploymentHandler{}).PropertySchema()
 	affinity, ok := root["affinity"]
 	if !ok {
@@ -769,41 +806,121 @@ func TestDeploymentScheduling_MatchFieldsSchemaMatchesParser(t *testing.T) {
 	fields := items(t, sub(t, term, "matchFields"))
 	exprs := items(t, sub(t, term, "matchExpressions"))
 
-	if got := enum(t, fields, "key"); len(got) != 1 || got[0] != nodeName {
-		t.Errorf("matchFields key enum = %v, want exactly [%s]", got, nodeName)
+	// diff reports what is in a and not in b, so a caller can require both
+	// remainders to be empty rather than asserting one containment and calling the
+	// pair equal.
+	diff := func(a, b map[string]bool) []string {
+		var out []string
+		for k := range a {
+			if !b[k] {
+				out = append(out, k)
+			}
+		}
+		slices.Sort(out)
+		return out
 	}
-	fieldOps := enum(t, fields, "operator")
-	if len(fieldOps) != 2 || fieldOps[0] != "In" || fieldOps[1] != "NotIn" {
-		t.Errorf("matchFields operator enum = %v, want [In NotIn]", fieldOps)
+	set := func(vals []string) map[string]bool {
+		out := make(map[string]bool, len(vals))
+		for _, v := range vals {
+			out[v] = true
+		}
+		return out
 	}
+
 	if len(enum(t, exprs, "key")) != 0 {
 		t.Error("matchExpressions key enum is now constrained; node label keys are free-form, so this test's premise no longer holds")
 	}
-
-	for _, op := range enum(t, exprs, "operator") {
-		if slices.Contains(fieldOps, op) {
-			continue
-		}
-		t.Run("parser rejects "+op, func(t *testing.T) {
-			// One value, which is what In/NotIn need — so an operator that is
-			// accepted cannot be rejected here by arity, and a failure to reject
-			// means the parser really does accept an operator the matchFields
-			// schema forbids.
-			err := schedulingError(t, map[string]any{"affinity": map[string]any{
-				"nodeAffinity": map[string]any{requiredArm: map[string]any{
-					"nodeSelectorTerms": []any{map[string]any{"matchFields": []any{
-						map[string]any{"key": nodeName, "operator": op, "values": []any{"node-1"}},
-					}}},
-				}},
-			}})
-			if err == nil {
-				t.Fatalf("operator %q is absent from the matchFields schema enum but the parser accepted it", op)
-			}
-			if !strings.Contains(err.Error(), "for matchFields") {
-				t.Errorf("operator %q was rejected, but not by the matchFields operator rule: %v", op, err)
-			}
-		})
+	if sub(t, exprs, "values").Required {
+		t.Error("matchExpressions values is required in the schema, but Exists and DoesNotExist take none — the asymmetry that lets matchFields require it no longer holds")
 	}
+
+	t.Run("operator sets agree", func(t *testing.T) {
+		// The candidate pool is corev1's own NodeSelectorOperator constants
+		// (core/v1/types.go:3820-3825), so it enumerates what the API type can
+		// hold rather than what this test's author remembered. An operator added
+		// upstream and adopted by the parser but not the schema is caught the
+		// moment the vendored constant list grows.
+		candidates := []string{
+			string(corev1.NodeSelectorOpIn), string(corev1.NodeSelectorOpNotIn),
+			string(corev1.NodeSelectorOpExists), string(corev1.NodeSelectorOpDoesNotExist),
+			string(corev1.NodeSelectorOpGt), string(corev1.NodeSelectorOpLt),
+		}
+		schemaOps := set(enum(t, fields, "operator"))
+		for op := range schemaOps {
+			if !slices.Contains(candidates, op) {
+				t.Fatalf("schema advertises operator %q, which is not a corev1.NodeSelectorOperator constant — the probe pool cannot cover it", op)
+			}
+		}
+		parserOps := map[string]bool{}
+		for _, op := range candidates {
+			// Probe both arities. An operator legitimately taking no values would
+			// otherwise read as rejected because the one-value probe tripped the
+			// arity rule, which would make the two sets disagree for a reason
+			// that is not a schema/parser divergence at all.
+			withValue := matchFieldsError(t, map[string]any{"key": nodeName, "operator": op, "values": []any{"node-1"}})
+			without := matchFieldsError(t, map[string]any{"key": nodeName, "operator": op})
+			if withValue == nil || without == nil {
+				parserOps[op] = true
+			}
+		}
+		if extra := diff(schemaOps, parserOps); len(extra) > 0 {
+			t.Errorf("schema advertises operators the parser rejects: %v — an emitted entry using one clears emission validation and fails conversion", extra)
+		}
+		if missing := diff(parserOps, schemaOps); len(missing) > 0 {
+			t.Errorf("parser accepts operators the schema forbids: %v — emission validation rejects what the handler would have converted", missing)
+		}
+	})
+
+	t.Run("requiredness agrees", func(t *testing.T) {
+		valid := map[string]any{"key": nodeName, "operator": "In", "values": []any{"node-1"}}
+		schemaRequired, parserRequired := map[string]bool{}, map[string]bool{}
+		for key, prop := range fields.Properties {
+			if _, ok := valid[key]; !ok {
+				t.Fatalf("schema declares property %q that the probe entry does not set; extend valid before adding a property", key)
+			}
+			if prop.Required {
+				schemaRequired[key] = true
+			}
+			probe := make(map[string]any, len(valid))
+			for k, v := range valid {
+				if k != key {
+					probe[k] = v
+				}
+			}
+			if matchFieldsError(t, probe) != nil {
+				parserRequired[key] = true
+			}
+		}
+		if extra := diff(parserRequired, schemaRequired); len(extra) > 0 {
+			t.Errorf("parser demands %v but the schema marks them optional — emission validation skips presence checks on non-required keys, so an emitted entry omitting one clears the schema and fails conversion", extra)
+		}
+		if missing := diff(schemaRequired, parserRequired); len(missing) > 0 {
+			t.Errorf("schema marks %v required but the parser accepts the entry without them — the schema refuses documents the handler would have converted", missing)
+		}
+	})
+
+	t.Run("key sets agree", func(t *testing.T) {
+		// Unlike the operator pool, these candidates are CHOSEN. Upstream
+		// enumerates the accepted key (nodeFieldSelectorValidators, one entry) but
+		// nothing enumerates rejected ones, so this direction is only as good as
+		// the pool and must not be read as "the parser rejects every other key".
+		candidates := []string{nodeName, "spec.nodeName", "metadata.namespace", "metadata.labels", "status.phase"}
+		schemaKeys := set(enum(t, fields, "key"))
+		parserKeys := map[string]bool{}
+		for _, key := range candidates {
+			if matchFieldsError(t, map[string]any{"key": key, "operator": "In", "values": []any{"node-1"}}) == nil {
+				parserKeys[key] = true
+			}
+		}
+		// Structural direction: everything the schema advertises must convert.
+		if extra := diff(schemaKeys, parserKeys); len(extra) > 0 {
+			t.Errorf("schema advertises keys the parser rejects: %v", extra)
+		}
+		// Pool-bounded direction: nothing the pool reached beyond the enum converts.
+		if missing := diff(parserKeys, schemaKeys); len(missing) > 0 {
+			t.Errorf("parser accepts keys the schema forbids: %v", missing)
+		}
+	})
 }
 
 func TestDeploymentScheduling_AffinityRejections(t *testing.T) {
