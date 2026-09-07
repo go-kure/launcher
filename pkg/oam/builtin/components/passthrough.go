@@ -95,10 +95,17 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 	// with no items is not a list at all and must keep compiling. Both directions are
 	// pinned in TestPassthrough_ListShapedObjectIsRejected.
 	//
-	// Residual, disclosed rather than left to be found: IsList requires exactly
-	// []interface{}. The authored path always produces that (yaml.v3 into any), but a
-	// lowering rule assembled in Go could set items to a []map[string]any, which is not
-	// []interface{} and slips past. Same class as go-kure/launcher#428.
+	// Residual, scoped rather than merely disclosed: IsList requires exactly
+	// []interface{}, so a Go-assembled []map[string]any under `items` would slip past.
+	// NO IN-REPO PRODUCER CAN CONSTRUCT THAT TODAY — the authored path decodes through
+	// yaml.v3 into any, which yields []interface{}, and every LowerComponent
+	// implementation in this module is in a _test.go (see also transform.go's note that
+	// no ComponentLoweringRule ships yet). Two events make it live, and the second is
+	// the smaller edit: a production ComponentLoweringRule, OR any trait rule
+	// populating LoweringResult.Components, which PositionTrait already permits
+	// (lowering.go loweringPositionRules) and which the one production rule today,
+	// traits.ExposeRule, does not do. Whoever does either is the trigger. Same class as
+	// go-kure/launcher#428.
 	if (&unstructured.Unstructured{Object: object}).IsList() {
 		return nil, errors.Errorf(
 			"passthrough component %q: 'object' is a list (kind %q with an 'items' array), but passthrough emits a single object verbatim — declare one passthrough component per object",
