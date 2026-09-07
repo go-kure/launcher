@@ -1656,6 +1656,14 @@ Two limits worth knowing before relying on the rule:
   selector matches everything, a nil one matches nothing — so the contract must never
   be read as licence to collapse them.
 
+Both limits meet on one key. `namespaceSelector` is parsed twice in this repository:
+here, for pod affinity, through `optionalObject`, where any null is omission; and in
+the networkpolicy trait through a bare assertion, where a *typed* nil satisfies the
+assertion and yields an empty selector — every namespace, the widest possible answer,
+from the same input this package reads as "not set". Neither file shows the
+disagreement alone. Tracked as `go-kure/launcher#430`; this package's half conforms
+but is not pinned for null, which is a weaker claim than it looks.
+
 ## Conventions
 
 Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access

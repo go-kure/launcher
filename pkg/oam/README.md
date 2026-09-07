@@ -388,6 +388,20 @@ null it is handed directly — which is why the built-in parsers keep their
 explicit-null guards. Aligning the authored path is tracked separately as
 `go-kure/launcher#394` and is not closed by this.
 
+Two further surfaces sit outside the contract and are named here so "the contract
+holds" is not read as "it holds everywhere":
+
+- **Capability rendering** (`checkCapabilityValueType`, `capability.go`) is outside
+  it by the scope sentence, not by the flat/full vocabulary split. It reads a
+  *present* null as a type error where the contract reads it as omission — loud
+  rather than silent, so nothing is wrongly accepted, but the message is wrong for
+  the input. Tracked with the switch's missing `default` arm as
+  `go-kure/launcher#431`.
+- **The networkpolicy peer parser** reads a *typed* nil `namespaceSelector` as an
+  empty selector, which selects every namespace, where the same key parsed for
+  pod affinity reads any null as omission. Unreachable today and pinned by a test
+  so closing it is a deliberate edit; tracked as `go-kure/launcher#430`.
+
 ## Contract metadata
 
 Handlers and lowering rules may implement `ContractDescriber` (`ContractMetadata()
