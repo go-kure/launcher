@@ -21,6 +21,11 @@ import (
 //	    kind: ...
 //	    metadata: { ... }    # optional; name defaults to the component name
 //	    spec: { ... }        # any top-level fields pass through
+//
+// "Object" is singular and is enforced as such: a list-shaped body (an `items`
+// sequence, by apimachinery's own IsList) is rejected in ToApplicationConfig, because
+// Generate emits ONE resource and a list would smuggle N past every per-object rule
+// downstream. Declare one passthrough component per object.
 type PassthroughHandler struct{}
 
 // CanHandle returns true for the passthrough component type.
@@ -32,7 +37,7 @@ func (h *PassthroughHandler) CanHandle(componentType string) bool {
 // escape-hatch body emitted verbatim, so it is an open object (additionalProperties).
 func (h *PassthroughHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"object":        {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true, Description: "The Kubernetes object emitted verbatim (apiVersion, kind, metadata, and any body fields)."},
+		"object":        {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true, Description: "The single Kubernetes object emitted verbatim (apiVersion, kind, metadata, and any body fields); a list is rejected."},
 		"clusterScoped": {Type: oam.PropertyTypeBoolean, Default: false, Description: "Whether the emitted object is cluster-scoped, suppressing namespace stamping."},
 	}
 }
@@ -68,8 +73,36 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 	if apiVersion, ok := object["apiVersion"].(string); !ok || apiVersion == "" {
 		return nil, errors.Errorf("passthrough component %q: object.apiVersion is required and must be a non-empty string", component.Name)
 	}
-	if kind, ok := object["kind"].(string); !ok || kind == "" {
+	kind, ok := object["kind"].(string)
+	if !ok || kind == "" {
 		return nil, errors.Errorf("passthrough component %q: object.kind is required and must be a non-empty string", component.Name)
+	}
+
+	// A List is N objects and this handler's contract is one — the type comment above
+	// and the schema description both say "the Kubernetes object emitted verbatim",
+	// singular, so a list was never inside the contract. Rejecting it here rather than
+	// downstream, because Generate emits the map as a SINGLE unstructured and stamps a
+	// name and a namespace onto it: a list would arrive as one named envelope whose
+	// items never see per-object label mutation, namespace stamping or ownership
+	// checks, while Flux's kustomize unwraps it at apply time into N objects that do
+	// reach the cluster. One envelope bypasses every per-object rule at once, which is
+	// why no single downstream check can catch it.
+	//
+	// Keyed on apimachinery's own predicate, not on the kind name. Unstructured.IsList
+	// is "items is present AND is a []interface{}" (k8s.io/apimachinery v0.36.3), and a
+	// kind check is wrong in BOTH directions: a typed ConfigMapList carries items and
+	// would slip past `kind == "List"`, while a CRD whose kind merely ENDS in "List"
+	// with no items is not a list at all and must keep compiling. Both directions are
+	// pinned in TestPassthrough_ListShapedObjectIsRejected.
+	//
+	// Residual, disclosed rather than left to be found: IsList requires exactly
+	// []interface{}. The authored path always produces that (yaml.v3 into any), but a
+	// lowering rule assembled in Go could set items to a []map[string]any, which is not
+	// []interface{} and slips past. Same class as go-kure/launcher#428.
+	if (&unstructured.Unstructured{Object: object}).IsList() {
+		return nil, errors.Errorf(
+			"passthrough component %q: 'object' is a list (kind %q with an 'items' array), but passthrough emits a single object verbatim — declare one passthrough component per object",
+			component.Name, kind)
 	}
 
 	if rawMeta, ok := object["metadata"]; ok {
