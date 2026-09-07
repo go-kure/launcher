@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -159,6 +160,87 @@ func TestPassthroughHandler_Errors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := h.ToApplicationConfig(passthroughComponent(props), "ns1"); err == nil {
 				t.Errorf("expected error for %q", name)
+			}
+		})
+	}
+}
+
+// TestPassthrough_ListShapedObjectIsRejected pins BOTH directions of the list
+// predicate, because a wrong predicate passes a one-directional suite.
+//
+// Generate emits the authored map as a single unstructured and stamps a name and a
+// namespace onto it, so a list arrives downstream as one NAMED envelope whose items
+// never see per-object label mutation, namespace stamping or ownership checks — while
+// Flux's kustomize unwraps it at apply time into N objects that do reach the cluster.
+//
+// The rejection is keyed on apimachinery's Unstructured.IsList ("items is present AND
+// is a []interface{}"), never on the kind name. The accept cases below are what
+// distinguishes that predicate from `strings.HasSuffix(kind, "List")` or from a bare
+// `items` presence check: without them, the wrong predicate also goes green.
+func TestPassthrough_ListShapedObjectIsRejected(t *testing.T) {
+	h := &components.PassthroughHandler{}
+
+	item := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "a"},
+	}
+
+	rejected := map[string]map[string]any{
+		"core v1 List": {
+			"apiVersion": "v1", "kind": "List",
+			"items": []any{item},
+		},
+		// A typed list carries items and would slip past `kind == "List"`.
+		"typed ConfigMapList": {
+			"apiVersion": "v1", "kind": "ConfigMapList",
+			"items": []any{item},
+		},
+		// Empty is still list-shaped: it unwraps to zero objects rather than to the
+		// one object the contract promises.
+		"empty items": {
+			"apiVersion": "v1", "kind": "List",
+			"items": []any{},
+		},
+	}
+	for name, object := range rejected {
+		t.Run("rejected/"+name, func(t *testing.T) {
+			_, err := h.ToApplicationConfig(passthroughComponent(map[string]any{"object": object}), "ns1")
+			if err == nil {
+				t.Fatal("a list-shaped object was accepted; its items would bypass every per-object rule downstream")
+			}
+			if !strings.Contains(err.Error(), "is a list") {
+				t.Errorf("error %q does not identify the failure as a list; a caller cannot tell it from the apiVersion/kind checks", err)
+			}
+			if kind, _ := object["kind"].(string); !strings.Contains(err.Error(), kind) {
+				t.Errorf("error %q does not name the offending kind %q", err, kind)
+			}
+		})
+	}
+
+	accepted := map[string]map[string]any{
+		// THE CASE THAT MATTERS. A kind ending in "List" with no items is not a list;
+		// a suffix-based predicate would reject it and this test is what says so.
+		"CRD kind ending in List, no items": {
+			"apiVersion": "example.com/v1", "kind": "ShoppingList",
+			"spec": map[string]any{"entries": []any{"milk"}},
+		},
+		// `items` present but not a sequence. IsList is items-IS-A-SLICE, not
+		// items-IS-PRESENT, and a presence check would reject this.
+		"items is an object, not a sequence": {
+			"apiVersion": "example.com/v1", "kind": "Widget",
+			"items": map[string]any{"count": 3},
+		},
+		// A nested items array is not the object's own shape.
+		"items nested under spec": {
+			"apiVersion": "example.com/v1", "kind": "Widget",
+			"spec": map[string]any{"items": []any{item}},
+		},
+	}
+	for name, object := range accepted {
+		t.Run("accepted/"+name, func(t *testing.T) {
+			if _, err := h.ToApplicationConfig(passthroughComponent(map[string]any{"object": object}), "ns1"); err != nil {
+				t.Fatalf("a non-list object was rejected: %v", err)
 			}
 		})
 	}
