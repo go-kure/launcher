@@ -58,7 +58,10 @@ func TestParseNPPeer_NamespaceSelectorPresenceCases(t *testing.T) {
 	})
 
 	t.Run("typed nil diverges from authored null KNOWN", func(t *testing.T) {
-		// KNOWN DIVERGENCE, pinned deliberately rather than fixed here.
+		// KNOWN DIVERGENCE, pinned deliberately rather than fixed here; tracked as
+		// go-kure/launcher#430, which carries the other half of the finding — the same
+		// key read by parseSchedulingSelector (components/scheduling.go:508) through
+		// optionalObject, where a null IS omission.
 		//
 		// map[string]any(nil) is a TYPED nil. It SATISFIES the .(map[string]any)
 		// assertion (ok=true, nil map), falls through the matchLabels lookup, and
@@ -78,7 +81,7 @@ func TestParseNPPeer_NamespaceSelectorPresenceCases(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if peer.NamespaceSelector == nil {
-			t.Skip("typed-nil namespaceSelector now reads as absent — the divergence this test pinned is closed; delete this subtest and fold the case into 'authored null is absent'")
+			t.Skip("typed-nil namespaceSelector now reads as absent — the divergence this test pinned (go-kure/launcher#430) is closed; delete this subtest and fold the case into 'authored null is absent'")
 		}
 		if got := len(peer.NamespaceSelector.MatchLabels); got != 0 {
 			t.Errorf("typed-nil namespaceSelector produced %d matchLabels, want 0", got)

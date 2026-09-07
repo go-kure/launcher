@@ -19,8 +19,8 @@ import (
 // handler cannot accept, and the failure would surface far downstream — or not at
 // all, as a silently missing field.
 //
-// THE NULL CONTRACT, stated once because "null" has seven readers on this branch and
-// each round so far aligned one and left the next round to find the one it had not
+// THE NULL CONTRACT, stated once because "null" has seven readers this contract binds
+// and each round so far aligned one and left the next round to find the one it had not
 // touched:
 //
 //	A value that serializes to JSON null is absent, at every depth, on every path;
@@ -51,7 +51,12 @@ import (
 // sites accept (string/integer/boolean, no enum/nested/items — see flatschema.go).
 // This file covers the full handler vocabulary. The two are kept apart on purpose:
 // merging them would either widen what the flat call sites accept or lose their
-// call-site-specific messages.
+// call-site-specific messages. It is also outside the null contract above, by the
+// scope sentence rather than by the vocabulary split: it reads a PRESENT null as a
+// type error ("expected string, got <nil>") where the contract would read it as
+// omission — loud rather than silent, so nothing is wrongly accepted, but it is a
+// divergence and it is tracked, with the missing switch default, as
+// go-kure/launcher#431.
 
 // validateProperties checks props against schema — a handler's top-level declared
 // property set — enforcing every Required field's presence and every present
