@@ -19,6 +19,26 @@ import (
 // handler cannot accept, and the failure would surface far downstream — or not at
 // all, as a silently missing field.
 //
+// THE NULL CONTRACT, stated once because "null" has seven readers on this branch and
+// each round so far aligned one and left the next round to find the one it had not
+// touched:
+//
+//	A value that serializes to JSON null is absent, at every depth, on every path;
+//	a null is never a member of any Items type, so a null array element is a type
+//	error; reservation is about the KEY being written.
+//
+// Reservation is checked on the authored surface; the component-side checks
+// (transform.go:649, lowering.go:1083) also run on rule-produced components, where a
+// reserved value is wrongly rejected as authored (KNOWN LIMITATION, transform.go:637;
+// see go-kure/launcher#429) and a reserved null has already been stripped.
+//
+// Two boundaries the sentence deliberately does not cross. An empty object is NOT a
+// null and is NOT absent — an empty metav1.LabelSelector selects everything where an
+// absent one selects nothing, so collapsing them would change what a NetworkPolicy
+// admits (builtin/traits/networkpolicy.go). And an UNDECLARED key is outside every
+// rule here: the strip reaches only keys a schema declares, the same horizon
+// validation itself has.
+//
 // Scope note, deliberate: these functions run on EMITTED elements only. Authored
 // documents still pass through validate.go, which checks type names and identity
 // but not property shape. Wiring the authored path through here as well is a
@@ -91,10 +111,19 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 		// reversing them would strip a required null out from under its own check
 		// and report a missing key instead of an empty one.
 		//
-		// No PlatformReserved exception, deliberately. Reservation governs what a
-		// user WROTE, and enforcePlatformReserved (below) only ever runs on authored
-		// input, upstream of this function — so nothing it decides passes through
-		// here and its inverse treatment of an explicit null stays literally true.
+		// No PlatformReserved exception, deliberately. Reservation governs what a user
+		// WROTE, so reporting it names the line an author actually typed.
+		//
+		// On the AUTHORED surface the two rules never meet: enforcePlatformReserved
+		// runs upstream of any emission validation, so what it sees is what a user
+		// wrote. On the COMPONENT surface they do meet, and saying otherwise would be
+		// false — transform.go:649 and lowering.go:1083 run it on comp.Properties, and
+		// the lowering round loop (lowering.go:759) feeds each round's emitted
+		// documents back as the next round's input, so a rule-produced component
+		// reaches that check with its properties already stripped here and a reserved
+		// key set to null is never flagged. Latent rather than live: every
+		// PlatformReserved field declared today is on a trait schema, none on a
+		// component schema. Tracked as go-kure/launcher#429.
 		if isNullValue(props[key]) {
 			delete(props, key)
 			continue
@@ -134,13 +163,20 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 // remaining way a nil arrives is as an ARRAY ELEMENT, through the per-element
 // recursion below — and it must fail there, because the handler parsers assert
 // concrete element types (parseStringList's item.(string),
-// builtin/components/podspec.go:644-646). It does so through the ordinary type
-// switch, with no element special case: isStringValue(nil) is false, asObjectValue(nil)
-// is false, so `values: [null]` under an Items{Type: string} schema reports
-// "expected string, got <nil>" against the parser's "must be a string, got <nil>".
-// An earlier early return here accepted such an element and let it reach a parser
-// that then rejected it — a schema/parser divergence the schema itself could not
-// express.
+// builtin/components/podspec.go:644-646). An earlier early return here accepted such
+// an element and let it reach a parser that then rejected it — a schema/parser
+// divergence the schema itself could not express.
+//
+// The ordinary type switch is NOT sufficient to reject one, which is why the array
+// case guards its elements explicitly rather than relying on the switch. The switch
+// does handle an UNTYPED nil: isStringValue(nil) is false, so `values: [null]` under
+// Items{Type: string} reports "expected string, got <nil>". But a TYPED nil
+// collection satisfies the plain type assertion each coercer tries first —
+// asArrayValue([]any(nil)) and asObjectValue(map[string]any(nil)) both return
+// (nil, true) — and iterating the resulting empty collection rejects nothing, so
+// `items: [null]` under Items{Type: object} passed on exactly that path. The
+// `case "":` branch checks nothing at all, so an untyped Items schema accepted a null
+// element too. Both are why the guard is a guard and not a comment.
 func validatePropertyValue(schema PropertySchema, value any, path string) (any, error) {
 	switch schema.Type {
 	case "":
@@ -169,7 +205,17 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		}
 		if schema.Items != nil {
 			for i, item := range items {
-				normalized, err := validatePropertyValue(*schema.Items, item, fmt.Sprintf("%s[%d]", path, i))
+				elemPath := fmt.Sprintf("%s[%d]", path, i)
+				// A null is never a member of any Items type. An element cannot be
+				// "absent" the way an object key can — it is present by being in the
+				// list, and deleting it would renumber its siblings — so the contract
+				// makes it a type error instead. Guarded here rather than left to the
+				// type switch below because a typed nil survives that switch; see the
+				// doc comment above.
+				if isNullValue(item) {
+					return value, errors.Errorf("%s: null is not a valid array element", elemPath)
+				}
+				normalized, err := validatePropertyValue(*schema.Items, item, elemPath)
 				if err != nil {
 					return value, err
 				}
@@ -200,8 +246,26 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		return value, errors.Errorf("%s: schema declares unsupported property type %q", path, schema.Type)
 	}
 
-	if len(schema.Enum) > 0 && !enumContainsValue(schema.Enum, value) {
-		return value, errors.Errorf("%s: value %v not in allowed set %v", path, value, schema.Enum)
+	if len(schema.Enum) > 0 {
+		// A schema, not a document, is wrong here — same shape as the unsupported-type
+		// failure above, and for the same reason: it fails at the one place that reads
+		// the schema rather than silently mis-comparing forever.
+		//
+		// Enum members are compared against a value this function has already
+		// NORMALIZED — an object's explicit nulls stripped, a typed collection copied
+		// into []any/map[string]any — while the declared members are left exactly as
+		// written. So a member holding a null at any depth can never match a value that
+		// reached this line: Enum{{"x": nil}} stopped matching `{x: null}` the moment
+		// the strip existed. Normalizing members instead would make Enum an eighth
+		// reader of "null" to keep aligned forever; restricting Enum to the scalar
+		// types removes the reader instead, and no built-in schema declares one on a
+		// non-scalar today (asserted by TestBuiltinHandlerSchemaEnumsAreScalar).
+		if schema.Type == PropertyTypeArray || schema.Type == PropertyTypeObject {
+			return value, errors.Errorf("%s: schema declares Enum on non-scalar type %q", path, schema.Type)
+		}
+		if !enumContainsValue(schema.Enum, value) {
+			return value, errors.Errorf("%s: value %v not in allowed set %v", path, value, schema.Enum)
+		}
 	}
 	return value, nil
 }
@@ -219,10 +283,19 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 // line the user actually wrote instead of silently ignoring it.
 //
 // Emitted-property validation normalizes an explicit null to absence
-// (validateObjectProperties, above) and does NOT exempt reserved keys from that. The
-// two rules do not meet: this one runs only on authored input, upstream of any
-// emission validation, so what it sees is what a user wrote — never a value that has
-// been through the strip.
+// (validateObjectProperties, above) and does NOT exempt reserved keys from that.
+//
+// On the AUTHORED surface the two rules do not meet: this runs upstream of any
+// emission validation, so what it sees is what a user wrote. On the COMPONENT surface
+// they do — transform.go:649 and lowering.go:1083 call this on comp.Properties, and
+// the lowering round loop (lowering.go:759) returns each round's emitted documents as
+// the next round's input, so a rule-produced component arrives here already stripped
+// and a reserved null is never flagged. Latent today: all eight PlatformReserved
+// declarations are on trait schemas, none on a component schema — which also means
+// the component-side calls cannot currently fire at all, so their agreement with this
+// rule is vacuous rather than demonstrated. Tracked as go-kure/launcher#429, together
+// with the KNOWN LIMITATION at transform.go:637 that a rule-written reserved value is
+// rejected here as if a user had authored it.
 //
 // A key the schema does not declare is passed over: it is validateProperties' business,
 // and reporting it here would duplicate that message with a misleading reason.
