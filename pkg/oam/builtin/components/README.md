@@ -35,7 +35,7 @@ Reference.
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
-| `passthrough` | any (verbatim) | Emit an arbitrary object as-declared (`clusterScoped` opt). |
+| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. |
 
@@ -1423,6 +1423,16 @@ object would change what the next `Generate` emits.
 - **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
   Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
   consumers can attribute the emitted resource to its owning OAM component.
+  **`object` must be a single object; a list is rejected.** `Generate` emits the map
+  verbatim as one resource and stamps `metadata.name` (defaulting to the component name)
+  and `metadata.namespace` onto it, so a list would arrive downstream as one *named*
+  envelope whose `items` never see per-object label mutation, namespace stamping or
+  ownership checks — while Flux's kustomize unwraps it at apply time into N objects that
+  do reach the cluster. One envelope bypasses every per-object rule at once, which is why
+  the rejection lives here and not in each consumer. Declare one component per object.
+  The check is apimachinery's own `Unstructured.IsList` — `items` present **and** a
+  sequence — never the kind name, so a typed `ConfigMapList` is caught and a CRD whose
+  kind merely *ends* in `List` with no `items` still compiles.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
   (`apiVersion`/`kind`/`scope`) for unknown kinds.
 
