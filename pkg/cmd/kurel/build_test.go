@@ -536,6 +536,63 @@ func sortedSchemaKeys(m map[string]oam.PropertySchema) []string {
 	return keys
 }
 
+// TestBuiltinHandlerSchemaEnumsAreScalar asserts that no built-in handler declares an
+// Enum on an array- or object-typed node, at any depth. It iterates the same three
+// registration maps as the description test above, so it covers exactly the schemas
+// that ship.
+//
+// This is the compile-time half of the rule validatePropertyValue enforces at runtime
+// ("schema declares Enum on non-scalar type"). The runtime guard exists for schemas
+// registered from outside this repo through RegisterComponentLowering and friends; this
+// test exists so a built-in that acquires such an Enum fails here — where the fix is
+// obvious and free — rather than at the first emission that happens to exercise it.
+//
+// Why the rule: Enum members are compared against a value validatePropertyValue has
+// already normalized (explicit nulls stripped, typed collections copied), while the
+// declared members are not, so a member holding a null at any depth can never match.
+// Restricting Enum to scalars removes that mismatch instead of maintaining two
+// representations in step.
+func TestBuiltinHandlerSchemaEnumsAreScalar(t *testing.T) {
+	for name, h := range builtinComponentHandlers() {
+		assertSchemaEnumsScalar(t, "component", name, h)
+	}
+	for name, h := range builtinTraitHandlers() {
+		assertSchemaEnumsScalar(t, "trait", name, h)
+	}
+	for name, r := range builtinTraitLoweringRules() {
+		assertSchemaEnumsScalar(t, "trait", name, r)
+	}
+}
+
+// assertSchemaEnumsScalar walks a handler's top-level PropertySchema entries, mirroring
+// assertSchemaDescribed.
+func assertSchemaEnumsScalar(t *testing.T, kind, name string, h any) {
+	t.Helper()
+	p, ok := h.(oam.PropertySchemaProvider)
+	if !ok {
+		return // TestNewBuiltinTransformer_HandlerSchemaParity already flags this.
+	}
+	schema := p.PropertySchema()
+	for _, k := range sortedSchemaKeys(schema) {
+		assertEnumScalar(t, fmt.Sprintf("%s %s.%s", kind, name, k), schema[k])
+	}
+}
+
+// assertEnumScalar fails if node — or any nested Properties value or Items schema,
+// recursively — declares an Enum on an array or object type.
+func assertEnumScalar(t *testing.T, path string, node oam.PropertySchema) {
+	t.Helper()
+	if len(node.Enum) > 0 && (node.Type == oam.PropertyTypeArray || node.Type == oam.PropertyTypeObject) {
+		t.Errorf("%s: PropertySchema declares Enum on non-scalar type %q — validatePropertyValue rejects this at runtime", path, node.Type)
+	}
+	for _, k := range sortedSchemaKeys(node.Properties) {
+		assertEnumScalar(t, path+"."+k, node.Properties[k])
+	}
+	if node.Items != nil {
+		assertEnumScalar(t, path+"[]", *node.Items)
+	}
+}
+
 // --- Parameter substitution tests ---
 
 const testKurelYAML = `apiVersion: launcher.gokure.dev/v1alpha1

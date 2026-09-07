@@ -331,28 +331,51 @@ that emits an unset (rather than empty) collection field is still caught.
 
 ### What an explicit `null` means on the emitted path
 
-One rule, applied in two places because a key and an array element are not the
-same kind of thing:
+The contract, stated once because "null" has several readers here and aligning
+them one at a time is what made this take six rounds:
+
+> A value that serializes to JSON null is absent, at every depth, on every path;
+> a null is never a member of any `Items` type, so a null array element is a type
+> error; reservation is about the KEY being written.
+
+Applied in two places, because a key and an array element are not the same kind
+of thing:
 
 - **A declared, optional object key holding a null is DELETED** before its value
   is checked. `Required` already classifies a null as absent, so materialising it
   as a present key contradicted the classification the file had already made — and
   a handler parser decides presence with a bare two-value map lookup, so it saw a
   key the validator had decided was not there.
-- **A null ARRAY ELEMENT is rejected**, through the ordinary type check with no
-  special case. An element cannot be absent — it is present by being in the list —
+- **A null ARRAY ELEMENT is rejected**, by an explicit guard rather than by the
+  type check. An element cannot be absent — it is present by being in the list —
   so there is nothing to normalise it to, and dropping it would renumber its
-  siblings under a schema that may constrain length and order.
+  siblings under a schema that may constrain length and order. The guard is
+  necessary rather than decorative: a *typed* nil (`map[string]any(nil)`,
+  `[]any(nil)`, reachable from a rule written in Go) satisfies the plain type
+  assertion the object/array coercers try first, and iterating the resulting empty
+  collection rejects nothing, so the type check alone accepted it. An `Items`
+  schema with no declared type checks nothing at all.
+- **`Enum` may only be declared on a scalar type.** Members are compared against a
+  value that has already been normalised, while the declared members are not, so a
+  member holding a null at any depth could never match. The restriction removes the
+  mismatch instead of keeping two representations in step; it is enforced at
+  validation time and asserted for every built-in schema by a test.
 
 Two things this deliberately does not do:
 
 - **It makes no exception for `PlatformReserved` keys.** Reservation
-  (`enforcePlatformReserved`) is a rule about what a user *wrote*, and it runs
-  only on authored input, upstream of any emission validation — so the two rules
-  never meet, and reservation keeps treating an explicit null as *present* while
-  the strip treats one as absent. Exempting reserved keys here would not have
-  preserved the authored rule; it would only have handed a reserved null to the
-  type check, producing a loud rejection with the wrong reason.
+  (`enforcePlatformReserved`) is a rule about what a user *wrote*. On the authored
+  surface the two rules never meet — it runs upstream of any emission validation —
+  so reservation keeps treating an explicit null as *present* while the strip
+  treats one as absent. Exempting reserved keys here would not have preserved the
+  authored rule; it would only have handed a reserved null to the type check,
+  producing a loud rejection with the wrong reason. On the **component** surface
+  they do meet: the component-side checks also run on rule-produced components,
+  whose properties have already been through the strip, so a rule-emitted reserved
+  key set to null is never flagged. That is latent rather than live — every
+  `PlatformReserved` field declared today is on a trait schema, none on a component
+  schema, which also means those component-side checks cannot currently fire at
+  all. Tracked as `go-kure/launcher#429`.
 - **A key the schema does not declare is untouched**, including inside an object
   that sets `AdditionalProperties`. Nothing describes such a value, so nothing
   here can normalise it, and a null inside an opaque object still reaches the

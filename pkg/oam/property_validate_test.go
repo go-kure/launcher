@@ -396,6 +396,13 @@ func TestNullAndPlatformReserved_DoNotMeet(t *testing.T) {
 // — deleting one would renumber its siblings — so it must fail, and it does so
 // through the ordinary type switch rather than an element special case.
 func TestValidateProperties_NullArrayElementIsRejected(t *testing.T) {
+	// Every case asserts the SAME message, because the guard runs ahead of the type
+	// switch and the reason is the contract, not the declared element type: a null is
+	// never a member of any Items type. The index must be named either way — a message
+	// pointing at `values` alone would send an author to a list that is itself well
+	// formed.
+	const want = "null is not a valid array element"
+
 	t.Run("string items", func(t *testing.T) {
 		schema := map[string]PropertySchema{
 			"values": {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeString}},
@@ -404,10 +411,8 @@ func TestValidateProperties_NullArrayElementIsRejected(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected a null element to be rejected")
 		}
-		// The index must be named: a message pointing at `values` alone would send an
-		// author to a list that is itself well formed.
-		if !strings.Contains(err.Error(), "values[1]") || !strings.Contains(err.Error(), "expected string") {
-			t.Fatalf("expected an indexed type error, got: %v", err)
+		if !strings.Contains(err.Error(), "values[1]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
 		}
 	})
 	t.Run("object items", func(t *testing.T) {
@@ -421,8 +426,98 @@ func TestValidateProperties_NullArrayElementIsRejected(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected a null element to be rejected")
 		}
-		if !strings.Contains(err.Error(), "env[0]") || !strings.Contains(err.Error(), "expected object") {
-			t.Fatalf("expected an indexed type error, got: %v", err)
+		if !strings.Contains(err.Error(), "env[0]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+
+	// The three cases the type switch alone could NOT reject. A typed nil satisfies the
+	// plain type assertion asObjectValue/asArrayValue try first — both return
+	// (nil, true) — and iterating the resulting empty collection rejects nothing, so
+	// each of these was accepted before the guard existed. The untyped-schema case has
+	// no type check at all.
+	t.Run("typed nil map under object items", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"env": {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeObject}},
+		}
+		err := validateProperties(schema, map[string]any{"env": []any{map[string]any(nil)}}, "properties")
+		if err == nil {
+			t.Fatal("a typed nil map passed asObjectValue and was accepted as an element")
+		}
+		if !strings.Contains(err.Error(), "env[0]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+	t.Run("typed nil slice under array items", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"groups": {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeArray}},
+		}
+		err := validateProperties(schema, map[string]any{"groups": []any{[]any(nil)}}, "properties")
+		if err == nil {
+			t.Fatal("a typed nil slice passed asArrayValue and was accepted as an element")
+		}
+		if !strings.Contains(err.Error(), "groups[0]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+	t.Run("untyped items schema", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"anything": {Type: PropertyTypeArray, Items: &PropertySchema{}},
+		}
+		err := validateProperties(schema, map[string]any{"anything": []any{nil}}, "properties")
+		if err == nil {
+			t.Fatal("an untyped Items schema checks nothing, so only the guard can reject a null element")
+		}
+		if !strings.Contains(err.Error(), "anything[0]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+}
+
+// The Enum comparison reads a value this package has already normalized while the
+// declared members stay as written, so a member holding a null at any depth could never
+// match. Enum is restricted to scalars rather than normalizing members, which would have
+// made it a further reader of "null" to keep aligned. Enum on a scalar still works, and
+// an untyped schema still accepts one.
+func TestValidatePropertyValue_EnumOnNonScalarIsRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		typ  PropertyType
+	}{
+		{"object", PropertyTypeObject},
+		{"array", PropertyTypeArray},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := map[string]PropertySchema{
+				"options": {Type: tc.typ, Enum: []any{map[string]any{"x": nil}}},
+			}
+			// Empty collections deliberately: a populated object would be rejected
+			// for its undeclared key by the object recursion before the Enum check
+			// was reached, and the assertion would pass on the wrong error.
+			var value any = map[string]any{}
+			if tc.typ == PropertyTypeArray {
+				value = []any{}
+			}
+			err := validateProperties(schema, map[string]any{"options": value}, "properties")
+			if err == nil {
+				t.Fatal("expected a schema error for Enum on a non-scalar type")
+			}
+			if !strings.Contains(err.Error(), "Enum on non-scalar type") {
+				t.Fatalf("expected the schema-level message, got: %v", err)
+			}
+		})
+	}
+
+	t.Run("scalar enum still enforced", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"mode": {Type: PropertyTypeString, Enum: []any{"a", "b"}},
+		}
+		if err := validateProperties(schema, map[string]any{"mode": "a"}, "properties"); err != nil {
+			t.Fatalf("a valid scalar enum value must still pass: %v", err)
+		}
+		err := validateProperties(schema, map[string]any{"mode": "c"}, "properties")
+		if err == nil || !strings.Contains(err.Error(), "not in allowed set") {
+			t.Fatalf("expected the ordinary enum rejection, got: %v", err)
 		}
 	})
 }

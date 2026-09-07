@@ -1620,6 +1620,42 @@ See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/
 for the full type/field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
 for the handler interfaces, and `examples/` for runnable applications.
 
+## The null contract
+
+Every table above answers "what does an explicit `null` mean here?" one field at a
+time. This is the rule they are all instances of:
+
+> A value that serializes to JSON null is absent, at every depth, on every path; a
+> null is never a member of any `Items` type, so a null array element is a type
+> error; reservation is about the KEY being written.
+
+It is written down because "null" has several readers — the emission validator's
+requiredness check and its optional-key strip, its array-element guard,
+`enforcePlatformReserved`, this package's parsers, and the Kubernetes API itself —
+and each was aligned separately, so each round of review found the reader the last
+round had not touched.
+
+What it means for a handler parser in this package: read a null under an optional
+property as omission, never as a present value of the wrong type. The `optional*`
+helpers in `common.go` (`optionalString`, `optionalObject`, `optionalInt32`,
+`optionalInt64`, `optionalObjectList`, `optionalStringList`) do exactly that and are
+the shortest way to comply. They classify a **typed** nil as null too —
+`map[string]any(nil)` or `[]any(nil)` inside an `any`, which is what a lowering rule
+assembled in Go produces for an unset optional and is not `== nil`.
+
+Two limits worth knowing before relying on the rule:
+
+- **A parser that answers presence with a bare `v, ok := props[key]` does not comply
+  on its own.** It reads a present null as present. Emission validation deletes such
+  keys before conversion, so those parsers agree with the contract today *because of
+  the strip*, not independently of it. Bringing them into line is
+  `go-kure/launcher#423`; the authored path they also sit on is
+  `go-kure/launcher#394`.
+- **An empty object is not a null and is not absent.** `{}` and an absent key mean
+  different things to Kubernetes wherever a `LabelSelector` is involved — an empty
+  selector matches everything, a nil one matches nothing — so the contract must never
+  be read as licence to collapse them.
+
 ## Conventions
 
 Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access
