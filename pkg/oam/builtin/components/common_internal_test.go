@@ -4166,10 +4166,19 @@ func TestParseSecurityContext_UnprefixedSysAdminCapability_WithPrivilegeEscalati
 // These assertions were written against the five optionalX wrappers that used
 // to sit beside these helpers (go-kure/launcher#339, #381). go-kure/launcher#394
 // folded the null handling into the helpers and removed the wrappers, so the
-// same assertions now bind every one of the helpers' ~196 call sites instead of
-// only the fields those two PRs introduced. Not one assertion had to change,
-// which is the evidence that the fold-in widened the surface without moving the
-// contract.
+// same assertions now bind all 162 production call sites of the eight helpers
+// instead of only the fields those two PRs introduced. 129 of those 162 are a
+// behaviour CHANGE; the other 33 went through the wrappers and already behaved
+// this way, so "widened" is the accurate word for 129 of them and "unchanged"
+// for the rest — see the measurement note in common.go, and recompute rather
+// than inherit either number. Not one assertion had to change, which is the
+// evidence that the fold-in widened the surface without moving the contract.
+//
+// These are the HELPER call sites only. The six parsers that read their
+// property with a bare comma-ok — parseEnvFrom, parseProbes, parseLifecycle,
+// parseSecurityContext, parseVolumes, parseAccessModes — are not helper callers
+// and are not bound by anything here; they are covered in
+// common_null_presence_internal_test.go.
 func TestParseFieldHelpers_NullIsOmission(t *testing.T) {
 	var (
 		nilMap   map[string]any
