@@ -135,6 +135,33 @@ not the app — chooses the implementation:
   render time — even when the two volumes have different names, Kubernetes requires every
   `VolumeMount.mountPath` in a container to be unique.
 
+## NetworkPolicy peer selectors: null, empty and absent
+
+In a `networkpolicy` peer (`ingress[].from[]` / `egress[].to[]`), `podSelector`,
+`namespaceSelector` and `ipBlock` are optional objects where **absent and empty are
+opposite answers**, because that is what `networking.k8s.io/v1` means by them: an
+**empty** `namespaceSelector` (`{}`) matches **every** namespace, while an **absent**
+one leaves the peer scoped to the policy's own namespace.
+
+An explicit `null` is **absence**, following the contract `oam.IsNullValue` carries
+(see [`pkg/oam`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)) — so
+`namespaceSelector:` with no value is the same as omitting the key, and never the
+same as `namespaceSelector: {}`:
+
+```yaml
+from:
+  - namespaceSelector:            # null -> absent: the policy's own namespace only
+  - namespaceSelector: {}         # empty -> every namespace
+  - namespaceSelector:            # populated -> namespaces carrying the label
+      matchLabels: {env: prod}
+```
+
+This holds for a **typed** nil too — an uninitialized Go map from a lowering rule
+that constructs peer properties directly, which a plain type assertion would accept
+as an authored empty object and silently widen to every namespace
+(go-kure/launcher#430). A `null` `ipBlock` is likewise absent rather than an
+`ipBlock: 'cidr' is required` error; a **present** `ipBlock` still requires `cidr`.
+
 ## Auto-synthesized NetworkPolicy
 
 Routing traits (`ingress`/`httproute`/`expose`) can surface platform-reserved

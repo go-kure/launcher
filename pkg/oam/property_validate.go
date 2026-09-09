@@ -292,6 +292,23 @@ func isNullValue(value any) bool {
 	}
 }
 
+// IsNullValue reports whether value serializes to JSON/YAML null — the exported
+// form of isNullValue above, and with it the null contract this package enforces:
+// a value that serializes to null is ABSENT, not present-and-empty.
+//
+// It exists because that contract has to hold in packages that cannot see
+// isNullValue. A parser reading an optional property must classify a null with
+// this rather than with `value == nil`: a TYPED nil (map[string]any(nil),
+// []any(nil)) is a non-nil interface holding a nil value, so `== nil` is false
+// and a `.(map[string]any)` assertion on it SUCCEEDS with ok=true and a nil map.
+// The key then reads as an authored empty collection, which for a selector-shaped
+// field is the widest possible value where the same input everywhere else means
+// the narrowest. An uninitialized Go map or slice in a lowering rule produces
+// that shape by construction, with no unusual authoring required.
+func IsNullValue(value any) bool {
+	return isNullValue(value)
+}
+
 // asArrayValue normalises any slice or array value to []any. A string is never an
 // array here even though it is indexable, and neither is a map.
 func asArrayValue(value any) ([]any, bool) {
