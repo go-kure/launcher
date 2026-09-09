@@ -34,7 +34,7 @@ discard a wrongly typed value, leaving whatever default the handler already
 wrote; the shared `parseAffinity`'s four sub-fields
 (`enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType`,
 `nodeSelector`) are the documented example, tracked in
-go-kure/launcher#428. Do not generalize a rejection note from one field to its
+go-kure/launcher#452. Do not generalize a rejection note from one field to its
 neighbours: adjudicate against the parser that actually reads it.
 
 ## Component types
