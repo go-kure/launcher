@@ -7,7 +7,7 @@ goreleaser = "2.18.1"
 # Required for GoReleaser SBOM generation and signing
 syft = "1.51.1"
 cosign = "2.6.5"
-hugo = "0.165.0"
+hugo = "0.166.0"
 # Docs tooling: docs-map driver (yq) and rendered-site link checker (lychee)
 yq = "4.53.6"
 lychee = "0.24.2"
