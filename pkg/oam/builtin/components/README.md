@@ -656,10 +656,28 @@ implements — and the Application's own name stands in.
 `AllowPrivileged()` allows it (`enforce.go`'s `enforcePrivileged`).
 `securityContext.capabilities.add` is separately enforced against
 `AllowedContainerCapabilities()`/`ForbiddenContainerCapabilities()` (see above,
-`enforce.go`'s `enforceContainerCapabilities`); every other `securityContext`
-field still has no policy hook. Both checks cover the main container and
+`enforce.go`'s `enforceContainerCapabilities`). `enforcePrivileged` gates a
+second field besides `privileged`: `securityContext.windowsOptions.hostProcess`
+is rejected under the same `AllowPrivileged()` (`enforce.go:122-124`). That
+branch is **not reachable from an authored document** — `windowsOptions` is not
+in the container `securityContext` key set, so `rejectUnknownKeys`
+(`common.go:1888-1891`) refuses it before any policy check runs — so it is
+defence in depth against a future parser change, not a gate an author can trip
+today. Those three fields are the whole container-level policy surface:
+`enforcePrivileged` and `enforceContainerCapabilities` are the only enforcers
+taking a `*corev1.SecurityContext`, and every policy call outside `enforce.go`
+is a call site of one of them. Both checks cover the main container and
 every `initContainers`/`sidecars` entry (go-kure/launcher#312's shared
 `enforceExtraContainer` helper), not just the main container.
+
+The pod-level `podSecurityContext` has a **separate** hook —
+`enforcePodHostProcess` (`enforce.go:136-145`) rejects
+`podSecurityContext.windowsOptions.hostProcess` under `AllowPrivileged()`. It is
+a different object, not an exception to the container-level list above:
+`PodSpecConfig` embeds `corev1.PodSpec`, so its `SecurityContext` is a
+`*corev1.PodSecurityContext`, which `enforcePrivileged` never sees. Unlike the
+container-level spelling, this one **is** authorable — see the
+`podSecurityContext` row under "Pod-level properties".
 
 The pod-level surface carries two policy checks of its own, both called from
 all seven kinds' `ApplyPolicy` next to `enforceHostNamespaces`:
