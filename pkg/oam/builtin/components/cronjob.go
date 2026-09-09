@@ -237,8 +237,16 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		}
 		config.Resources = r
 	}
-	config.Command = parseCommand(props)
-	config.Args = parseArgs(props)
+	command, err := parseCommand(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Command = command
+	args, err := parseArgs(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Args = args
 	// namedPortsAllowed=false: cronjob exposes no port property at all, so its
 	// main container never declares a ContainerPort for the kubelet to
 	// resolve a named probe/lifecycle port against.

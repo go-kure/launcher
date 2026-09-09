@@ -109,8 +109,16 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 		}
 		config.Resources = r
 	}
-	config.Command = parseCommand(props)
-	config.Args = parseArgs(props)
+	command, err := parseCommand(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Command = command
+	args, err := parseArgs(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Args = args
 	// namedPortsAllowed=true, matchName="http": webservice always attaches a
 	// Name: "http" ContainerPort to the main container (createDeployment,
 	// unconditional — config.Port defaults to 80), so a probe/lifecycle port

@@ -99,8 +99,16 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 		}
 		config.Resources = r
 	}
-	config.Command = parseCommand(props)
-	config.Args = parseArgs(props)
+	command, err := parseCommand(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Command = command
+	args, err := parseArgs(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Args = args
 
 	// namedPortsAllowed mirrors createContainer's own `c.Port > 0` guard: the
 	// main container only gets a Name: "tcp" ContainerPort when a port was
