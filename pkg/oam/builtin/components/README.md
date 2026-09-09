@@ -1643,6 +1643,12 @@ the shortest way to comply. They classify a **typed** nil as null too —
 `map[string]any(nil)` or `[]any(nil)` inside an `any`, which is what a lowering rule
 assembled in Go produces for an unset optional and is not `== nil`.
 
+That family is a transitional shape, not the destination. `go-kure/launcher#394`
+moves the same handling into the shared helpers the wrappers delegate to, which makes
+every one of them an exact no-op forward and removes them — the compliant call then
+becomes the plain `parse*` helper. Read the list above as "these comply today", not as
+"only these can comply".
+
 Two limits worth knowing before relying on the rule:
 
 - **A parser that answers presence with a bare `v, ok := props[key]` does not comply

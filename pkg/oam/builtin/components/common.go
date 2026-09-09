@@ -1782,8 +1782,17 @@ func optionalInt32(raw map[string]any, key, label string) (int32, bool, error) {
 	return parseInt32Field(raw, key, label)
 }
 
-// optionalInt64 is parseInt64Field with an explicit null read as omission,
-// mirroring optionalInt32 for the fields whose API type is int64.
+// optionalInt64 mirrors optionalInt32 for the fields whose API type is int64: it
+// reads an explicit null under an optional key as omission before delegating.
+//
+// Phrased about this wrapper rather than about its callee, deliberately. The rest of
+// the family says "X with an explicit null read as omission", which asserts that plain
+// X does not handle a null — a claim that is true today and that go-kure/launcher#394
+// is in the middle of making false, by folding the handling into the shared helpers
+// and deleting the wrappers that assert it. Until that lands, plain parseInt64Field
+// does not read a null as absence and this wrapper is load-bearing; once it lands,
+// this becomes an exact no-op forward and goes with the rest of the family. Whichever
+// change rebases across that boundary removes all six together, not five.
 func optionalInt64(raw map[string]any, key, label string) (int64, bool, error) {
 	if v, present := raw[key]; present && isExplicitNull(v) {
 		return 0, false, nil
