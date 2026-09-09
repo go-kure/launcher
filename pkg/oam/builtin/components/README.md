@@ -1424,8 +1424,11 @@ object would change what the next `Generate` emits.
   Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
   consumers can attribute the emitted resource to its owning OAM component.
   **`object` must be a single object; a list is rejected.** `Generate` emits the map
-  verbatim as one resource and stamps `metadata.name` (defaulting to the component name)
-  and `metadata.namespace` onto it, so a list would arrive downstream as one *named*
+  verbatim as one resource and fills in metadata it finds missing: `metadata.name`
+  defaults to the component name only when unset or empty, and `metadata.namespace`
+  likewise — an inline namespace the author wrote survives untouched, and
+  `clusterScoped: true` suppresses the namespace default entirely (setting one inline
+  is rejected instead). A list would therefore arrive downstream as one *named*
   envelope whose `items` never see per-object label mutation, namespace stamping or
   ownership checks — while Flux's kustomize unwraps it at apply time into N objects that
   do reach the cluster. One envelope bypasses every per-object rule at once, which is why
@@ -1433,6 +1436,19 @@ object would change what the next `Generate` emits.
   The check is apimachinery's own `Unstructured.IsList` — `items` present **and** a
   sequence — never the kind name, so a typed `ConfigMapList` is caught and a CRD whose
   kind merely *ends* in `List` with no `items` still compiles.
+
+  A second arm catches what `IsList` structurally cannot. It requires `items` to be
+  exactly a `[]interface{}`, so an authored `items: null` — an untyped nil — passed
+  every check and then expanded to **zero** objects at apply time with no error at
+  all; with pruning enabled an empty desired result also removes whatever the previous
+  inventory held. That case is rejected on its own diagnostic ("expands to zero
+  objects"), and it is keyed on a **null** `items` rather than a present one, because a
+  CRD may legitimately carry an object-valued `items` field that must keep compiling.
+
+  The validated object is deep-copied when the config is built, not aliased, so the
+  bytes these checks ran against are the bytes `Generate` emits. Retaining the caller's
+  map made every check above advisory: a programmatic caller could add `items` after
+  `ToApplicationConfig` returned and get exactly the envelope it had just refused.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
   (`apiVersion`/`kind`/`scope`) for unknown kinds.
 

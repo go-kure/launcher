@@ -111,6 +111,24 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 			"passthrough component %q: 'object' is a list (kind %q with an 'items' array), but passthrough emits a single object verbatim — declare one passthrough component per object",
 			component.Name, kind)
 	}
+	// The second arm covers what IsList structurally cannot see, and it is the
+	// silent-drop end of the same bug. IsList wants exactly []interface{}; an
+	// authored `items: null` decodes to an untyped nil, so the envelope passed
+	// every check here and Kustomize expanded it to ZERO objects with no error
+	// (sigs.k8s.io/kustomize/api resource/factory.go's explicit-null branch). Worse
+	// than the N-objects case it sits next to: with pruning enabled an empty
+	// desired result also removes whatever the previous inventory held.
+	//
+	// Narrowed to a NULL items rather than a PRESENT one deliberately. A CRD may
+	// legitimately carry an object-valued `items` field, and a bare presence
+	// predicate rejects it — pinned as accepted/items_is_an_object,_not_a_sequence
+	// and confirmed by mutation, where a presence predicate fails exactly that
+	// subtest and nothing else.
+	if rawItems, hasItems := object["items"]; hasItems && isExplicitNull(rawItems) {
+		return nil, errors.Errorf(
+			"passthrough component %q: object (kind %q) sets 'items' to null, which is an empty list envelope that expands to zero objects at apply time — passthrough emits a single object verbatim, so declare the object itself",
+			component.Name, kind)
+	}
 
 	if rawMeta, ok := object["metadata"]; ok {
 		meta, ok := rawMeta.(map[string]any)
@@ -128,7 +146,14 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 		componentName: component.Name,
 		Namespace:     namespace,
 		ClusterScoped: clusterScoped,
-		Object:        object,
+		// Frozen here, not aliased. Retaining the caller's map left every check
+		// above advisory: a programmatic caller could set object["items"] AFTER
+		// this returns, and Generate copies the map's contents at call time, so the
+		// list this function just refused would be emitted anyway. Copying makes
+		// the bytes that were validated the same bytes that are emitted. Generate
+		// still copies again per call — it stamps metadata and may run more than
+		// once, and that copy protects the source properties, not this invariant.
+		Object: deepCopyMap(object),
 	}, nil
 }
 
