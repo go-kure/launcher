@@ -1352,6 +1352,22 @@ object would change what the next `Generate` emits.
   explicit error rather than silently dropped; the other seven workload kinds
   forward every resource name directly onto the real `corev1.Container` and
   have no such restriction.
+  `affinity` takes the same four keys as the shared `affinity` property
+  (`enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType`,
+  `nodeSelector`) with the same defaults — `kubernetes.io/hostname` and
+  `preferred` — but the handler parses it itself into
+  `kurecnpg.AffinityOptions` instead of calling `parseAffinity`, because CNPG
+  carries its own affinity shape rather than a `corev1.Affinity`. The block
+  and each of its four sub-fields are read with the presence-reporting
+  helpers, so a value authored with the wrong type is rejected by name
+  (`affinity.topologyKey: must be a string, got float64`) rather than
+  discarded while a default reaches the emitted cluster, and
+  `podAntiAffinityType` must be `preferred` or `required` — an explicit empty
+  string is an error here, not a fallback to the default
+  (go-kure/launcher#448). This is narrower than the shared `parseAffinity`,
+  whose own four sub-field reads still discard a wrongly typed value silently
+  (`common.go`, tracked in go-kure/launcher#449); the two are expected to
+  converge on this handler's behaviour, not the other way round.
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
   data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
   platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
