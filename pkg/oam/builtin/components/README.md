@@ -546,7 +546,28 @@ above, since each `initContainers`/`sidecars` entry is its own container;
 each entry also accepts its own `securityContext`, the identical field set
 and validation as the main container's own `securityContext` described
 below — see that prose for the field list rather than restating it here),
-and `affinity`.
+and `affinity` (four keys, parsed by `parseAffinity`: `enablePodAntiAffinity`
+(boolean), `topologyKey` (string, default `kubernetes.io/hostname`),
+`podAntiAffinityType` (string, `preferred`|`required`, default `preferred`)
+and `nodeSelector` (a string→string map). Pod anti-affinity is emitted only on
+an explicit `enablePodAntiAffinity: true`; authoring the block without it just
+supplies the two defaults above, and omitting the block entirely leaves
+`topologyKey`/`podAntiAffinityType` empty rather than defaulted (the defaults
+are applied by `parseAffinity` only once the block is present, unlike the
+`postgresql` handler, which also tracks whether the block was authored at all).
+**The four sub-fields are read with bare type assertions, so a
+sub-field authored with the wrong type is silently discarded and the default
+above is emitted as though the key had never been written** —
+`topologyKey: 123` emits `kubernetes.io/hostname` and says nothing. That is a
+known defect, tracked in go-kure/launcher#452, not the intended contract; the
+`postgresql` component's own affinity block was fixed to reject by name in
+go-kure/launcher#448 and is the shape this one is expected to converge on.
+Two behaviours are *not* defects and should survive that fix:
+`podAntiAffinityType` accepts a well-formed string outside the enum only to
+reject it by name, and an explicitly authored `podAntiAffinityType: ""` is an
+error rather than a fall back to `preferred` — the empty string reaches the
+enum check instead of being read as an absent key. An authored
+`topologyKey: ""`, by contrast, *does* fall back to the default).
 
 ### Pod-level properties
 
