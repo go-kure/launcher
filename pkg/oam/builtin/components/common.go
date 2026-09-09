@@ -251,7 +251,7 @@ type TolerationConfig struct {
 // --- Parsers ---
 
 func parseEnv(props map[string]any) ([]corev1.EnvVar, error) {
-	envList, _, err := optionalObjectList(props, "env")
+	envList, _, err := parseObjectList(props, "env")
 	if err != nil {
 		return nil, err
 	}
@@ -969,7 +969,7 @@ func isFractionalResourceName(name corev1.ResourceName) bool {
 // emits ["ls"].
 
 func parseCommand(props map[string]any) ([]string, error) {
-	command, _, err := optionalStringList(props, "command", "command")
+	command, _, err := parseStringList(props, "command", "command")
 	if err != nil {
 		return nil, err
 	}
@@ -977,7 +977,7 @@ func parseCommand(props map[string]any) ([]string, error) {
 }
 
 func parseArgs(props map[string]any) ([]string, error) {
-	args, _, err := optionalStringList(props, "args", "args")
+	args, _, err := parseStringList(props, "args", "args")
 	if err != nil {
 		return nil, err
 	}
@@ -2516,7 +2516,7 @@ func parseAccessModes(m map[string]any) ([]string, error) {
 }
 
 func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
-	raw, _, err := optionalObjectList(props, "initContainers")
+	raw, _, err := parseObjectList(props, "initContainers")
 	if err != nil {
 		return nil, err
 	}
@@ -2572,7 +2572,7 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 }
 
 func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
-	raw, _, err := optionalObjectList(props, "sidecars")
+	raw, _, err := parseObjectList(props, "sidecars")
 	if err != nil {
 		return nil, err
 	}
@@ -2701,7 +2701,7 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 }
 
 func parseAffinity(props map[string]any) (AffinityConfig, error) {
-	raw, present, err := optionalObject(props, "affinity", "affinity")
+	raw, present, err := parseObjectField(props, "affinity", "affinity")
 	if err != nil {
 		return AffinityConfig{}, err
 	}
