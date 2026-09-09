@@ -1802,9 +1802,32 @@ func optionalStringList(raw map[string]any, key, label string) ([]string, bool, 
 // absent key ("use the cluster default") — a distinction
 // corev1.PersistentVolumeClaimSpec.StorageClassName itself encodes as a
 // *string (nil vs pointer-to-""), which parseStringField's empty-means-absent
-// convention (correct for every other optional string field in this file)
-// would otherwise collapse, silently provisioning through the default class
-// instead of honoring an explicit opt-out.
+// convention would otherwise collapse, silently provisioning through the
+// default class instead of honoring an explicit opt-out.
+//
+// Do not read this helper as the sole place that convention does not fit. Two
+// other optional string fields in this file also need "" to mean something
+// other than absent, and neither is served by this helper:
+//
+//   - volumeClaimTemplate.storageClass has identical semantics but cannot
+//     express them. kure.CreateVolumeClaimTemplate takes a plain string, so
+//     parseVolumeClaimTemplates reads it with parseStringField and discards the
+//     presence flag; an authored "" is indistinguishable from an absent key
+//     until that upstream API changes. See VolumeClaimTemplate's own doc
+//     comment, which records it as a cross-repo gap rather than an oversight.
+//   - affinity.podAntiAffinityType must let an explicit "" reach its enum check
+//     so it is refused by name; parseStringField would report "" as absent and
+//     fall back to the "preferred" default instead. parseAffinity therefore
+//     reads it with a direct type assertion, as does the postgresql handler
+//     (go-kure/launcher#448); go-kure/launcher#452 keeps that shape when it
+//     converts parseAffinity's other sub-fields to the presence-reporting
+//     helpers.
+//
+// The convention is right for the remaining callers because "" and absent
+// genuinely mean the same thing there — httpGet.path defaults to "/",
+// httpGet.host and tcpSocket.host default to the Pod IP, grpc.service ""
+// already means "the overall server". It is a per-field judgement, not a
+// property of the file.
 func parseStorageClassField(raw map[string]any, label string) (value string, explicitEmpty bool, err error) {
 	v, present := raw["storageClass"]
 	if !present {
