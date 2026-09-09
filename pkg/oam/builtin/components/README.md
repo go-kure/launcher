@@ -44,6 +44,19 @@ component does not author `serviceAccountName` (see "Pod-level properties" below
 
 ## Common config
 
+A property authored with the **wrong container type** — a mapping where the
+schema wants a list, a list or scalar where it wants an object — is rejected by
+name, never discarded. `env`, `command`, `args`, `initContainers`, `sidecars`
+and `affinity` were the six exceptions: each read its property with a bare
+comma-ok type assertion and, when that failed, returned the zero value with no
+error, so a mistyped block built cleanly and emitted nothing for the property.
+Nothing in the output said it had been seen. Closed in go-kure/launcher#423 by
+routing all six through the `optionalObject`/`optionalObjectList`/
+`optionalStringList` helpers, which report presence separately from value; the
+sibling parsers on the adjacent call-site lines (`parseRawAffinity`,
+`parseTopologySpreadConstraints`) already behaved this way, so the six were
+inconsistent with properties sitting next to them in the same document.
+
 Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
 `daemonset`, `cronjob`, `job`)
 share these fields, projected directly onto real `corev1` types (same
@@ -185,15 +198,15 @@ deliberately not covered — it only *references* pod-level claims by name, and
 the pod-level `resourceClaims` property that declares them is now accepted
 (see Pod-level properties below, go-kure/launcher#342), so what remains
 missing is the container-side reference list alone, tracked with the rest of
-DRA support, see `parseResources`'s doc comment), `command`/`args` (each element must
-be a string — **note:** unlike every other array field in this schema,
-`command`/`args` still silently drop a non-string element rather than
-rejecting it; `lifecycle.{postStart,preStop}.exec.command` below was fixed to
-reject, but the top-level `command`/`args` fix was deliberately left out of
-that change to keep it self-contained to `common.go`'s `parseLifecycleHandler`
-— touching `parseCommand`/`parseArgs` would ripple into all 8 call sites across
-every kind component: the seven workload kinds' own main containers, plus
-`initContainers` and `sidecars` in `common.go`), `probes`
+DRA support, see `parseResources`'s doc comment), `command`/`args` (must be an
+array, and each element must be a string — both are rejected outright rather
+than silently discarded, matching every other array field in this schema.
+Until go-kure/launcher#423 these two were the exception twice over: a mistyped
+`command: /bin/sh -c true` fell through their comma-ok guard and the container
+built with no command at all, and `command: [ls, 3]` emitted `["ls"]` and said
+nothing about the `3`. Closing it changed their signature to return an error,
+which is why the fix touches all 9 call sites — the seven workload kinds' own
+main containers, plus `initContainers` and `sidecars` in `common.go`), `probes`
 (rejected outright if authored with a non-object value, e.g. `probes: true`,
 and likewise for each of its own `readiness`/`liveness`/`startup` keys, e.g.
 `probes: {liveness: true}` — same two-level presence-then-type-check shape as

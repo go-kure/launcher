@@ -251,35 +251,35 @@ type TolerationConfig struct {
 // --- Parsers ---
 
 func parseEnv(props map[string]any) ([]corev1.EnvVar, error) {
+	envList, _, err := optionalObjectList(props, "env")
+	if err != nil {
+		return nil, err
+	}
 	var envVars []corev1.EnvVar
-	if envList, ok := props["env"].([]any); ok {
-		for _, e := range envList {
-			if envMap, ok := e.(map[string]any); ok {
-				envName, _ := envMap["name"].(string)
-				if envName == "" {
-					continue
-				}
-				value, _ := envMap["value"].(string)
-				vf, hasValueFrom := envMap["valueFrom"].(map[string]any)
-				// Mirrors corev1.EnvVar.ValueFrom's own doc comment: "Cannot be
-				// used if value is not empty." An empty `value: ""` alongside
-				// valueFrom is not rejected (matches upstream validation exactly).
-				if value != "" && hasValueFrom {
-					return nil, errors.Errorf("env %q: value and valueFrom are mutually exclusive (valueFrom cannot be used if value is not empty)", envName)
-				}
-				ev := corev1.EnvVar{Name: envName}
-				if hasValueFrom {
-					src, err := parseEnvVarSource(vf)
-					if err != nil {
-						return nil, errors.Errorf("env %q: %w", envName, err)
-					}
-					ev.ValueFrom = src
-				} else {
-					ev.Value = value
-				}
-				envVars = append(envVars, ev)
-			}
+	for _, envMap := range envList {
+		envName, _ := envMap["name"].(string)
+		if envName == "" {
+			continue
 		}
+		value, _ := envMap["value"].(string)
+		vf, hasValueFrom := envMap["valueFrom"].(map[string]any)
+		// Mirrors corev1.EnvVar.ValueFrom's own doc comment: "Cannot be
+		// used if value is not empty." An empty `value: ""` alongside
+		// valueFrom is not rejected (matches upstream validation exactly).
+		if value != "" && hasValueFrom {
+			return nil, errors.Errorf("env %q: value and valueFrom are mutually exclusive (valueFrom cannot be used if value is not empty)", envName)
+		}
+		ev := corev1.EnvVar{Name: envName}
+		if hasValueFrom {
+			src, err := parseEnvVarSource(vf)
+			if err != nil {
+				return nil, errors.Errorf("env %q: %w", envName, err)
+			}
+			ev.ValueFrom = src
+		} else {
+			ev.Value = value
+		}
+		envVars = append(envVars, ev)
 	}
 	return envVars, nil
 }
@@ -960,28 +960,28 @@ func isFractionalResourceName(name corev1.ResourceName) bool {
 	}
 }
 
-func parseCommand(props map[string]any) []string {
-	var command []string
-	if cmd, ok := props["command"].([]any); ok {
-		for _, c := range cmd {
-			if s, ok := c.(string); ok {
-				command = append(command, s)
-			}
-		}
+// parseCommand and parseArgs return an error rather than a bare slice so that a
+// property authored with the wrong container type — `command: {a: b}` — is
+// reported instead of discarded. Both previously wrapped their body in a
+// comma-ok guard, so a mistyped block fell through it and the container built
+// cleanly having emitted nothing (go-kure/launcher#423). The same helper also
+// rejects a non-string *element*, so `command: [ls, 3]` no longer silently
+// emits ["ls"].
+
+func parseCommand(props map[string]any) ([]string, error) {
+	command, _, err := optionalStringList(props, "command", "command")
+	if err != nil {
+		return nil, err
 	}
-	return command
+	return command, nil
 }
 
-func parseArgs(props map[string]any) []string {
-	var args []string
-	if argList, ok := props["args"].([]any); ok {
-		for _, a := range argList {
-			if s, ok := a.(string); ok {
-				args = append(args, s)
-			}
-		}
+func parseArgs(props map[string]any) ([]string, error) {
+	args, _, err := optionalStringList(props, "args", "args")
+	if err != nil {
+		return nil, err
 	}
-	return args
+	return args, nil
 }
 
 func parseReplicas(props map[string]any, defaultVal int32) int32 {
@@ -2473,16 +2473,12 @@ func parseAccessModes(m map[string]any) ([]string, error) {
 }
 
 func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
-	raw, ok := props["initContainers"].([]any)
-	if !ok {
-		return nil, nil
+	raw, _, err := optionalObjectList(props, "initContainers")
+	if err != nil {
+		return nil, err
 	}
 	var out []InitContainerConfig
-	for i, item := range raw {
-		m, ok := item.(map[string]any)
-		if !ok {
-			return nil, errors.Errorf("initContainers[%d]: expected object, got %T", i, item)
-		}
+	for i, m := range raw {
 		ic := InitContainerConfig{}
 		ic.Name, _ = m["name"].(string)
 		if ic.Name == "" {
@@ -2495,8 +2491,16 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 		if err := ValidateImageRef(ic.Image); err != nil {
 			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
 		}
-		ic.Command = parseCommand(m)
-		ic.Args = parseArgs(m)
+		cmd, err := parseCommand(m)
+		if err != nil {
+			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
+		}
+		ic.Command = cmd
+		args, err := parseArgs(m)
+		if err != nil {
+			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
+		}
+		ic.Args = args
 		env, err := parseEnv(m)
 		if err != nil {
 			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
@@ -2525,16 +2529,12 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 }
 
 func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
-	raw, ok := props["sidecars"].([]any)
-	if !ok {
-		return nil, nil
+	raw, _, err := optionalObjectList(props, "sidecars")
+	if err != nil {
+		return nil, err
 	}
 	var out []SidecarContainerConfig
-	for i, item := range raw {
-		m, ok := item.(map[string]any)
-		if !ok {
-			return nil, errors.Errorf("sidecars[%d]: expected object, got %T", i, item)
-		}
+	for i, m := range raw {
 		sc := SidecarContainerConfig{}
 		sc.Name, _ = m["name"].(string)
 		if sc.Name == "" {
@@ -2547,8 +2547,16 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 		if err := ValidateImageRef(sc.Image); err != nil {
 			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
 		}
-		sc.Command = parseCommand(m)
-		sc.Args = parseArgs(m)
+		cmd, err := parseCommand(m)
+		if err != nil {
+			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
+		}
+		sc.Command = cmd
+		args, err := parseArgs(m)
+		if err != nil {
+			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
+		}
+		sc.Args = args
 		env, err := parseEnv(m)
 		if err != nil {
 			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
@@ -2650,8 +2658,11 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 }
 
 func parseAffinity(props map[string]any) (AffinityConfig, error) {
-	raw, ok := props["affinity"].(map[string]any)
-	if !ok {
+	raw, present, err := optionalObject(props, "affinity", "affinity")
+	if err != nil {
+		return AffinityConfig{}, err
+	}
+	if !present {
 		return AffinityConfig{}, nil
 	}
 	cfg := AffinityConfig{

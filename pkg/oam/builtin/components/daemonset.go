@@ -80,8 +80,16 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		}
 		config.Resources = r
 	}
-	config.Command = parseCommand(props)
-	config.Args = parseArgs(props)
+	command, err := parseCommand(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Command = command
+	args, err := parseArgs(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Args = args
 	if port, ok := toInt32(props["port"]); ok {
 		config.Port = port
 	}

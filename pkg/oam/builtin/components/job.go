@@ -168,8 +168,16 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 		}
 		config.Resources = r
 	}
-	config.Command = parseCommand(props)
-	config.Args = parseArgs(props)
+	command, err := parseCommand(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Command = command
+	args, err := parseArgs(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Args = args
 	// namedPortsAllowed=false for the same reason as cronjob: the job component
 	// exposes no port property, so its main container never declares a
 	// ContainerPort for the kubelet to resolve a named probe/lifecycle port
