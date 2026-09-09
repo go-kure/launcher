@@ -431,6 +431,50 @@ func TestValidateProperties_NullArrayElementIsRejected(t *testing.T) {
 		}
 	})
 
+	// The case the guard's old placement could not reach at all: it sat inside
+	// `if schema.Items != nil`, so an array declared without an element schema
+	// accepted a null element silently and handed a nil inside a []any to the handler
+	// parser. Declaring no Items says nothing about the members; it does not license
+	// the one member no Items type could ever have matched.
+	t.Run("no items schema", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"values": {Type: PropertyTypeArray},
+		}
+		err := validateProperties(schema, map[string]any{"values": []any{"a", nil}}, "properties")
+		if err == nil {
+			t.Fatal("an array with no Items schema still must not accept a null element")
+		}
+		if !strings.Contains(err.Error(), "values[1]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+
+	// Same placement, the typed-nil shape: this one the type switch could not have
+	// caught either, since there is no Items type to switch on.
+	t.Run("no items schema, typed nil element", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"values": {Type: PropertyTypeArray},
+		}
+		err := validateProperties(schema, map[string]any{"values": []any{[]any(nil)}}, "properties")
+		if err == nil {
+			t.Fatal("an array with no Items schema still must not accept a typed nil element")
+		}
+		if !strings.Contains(err.Error(), "values[0]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+
+	// The positive half, so the two subtests above cannot pass by rejecting every
+	// element: an array with no Items schema and no null members is still accepted.
+	t.Run("no items schema, null-free", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"values": {Type: PropertyTypeArray},
+		}
+		if err := validateProperties(schema, map[string]any{"values": []any{"a", 1, map[string]any{"k": "v"}}}, "properties"); err != nil {
+			t.Fatalf("a null-free array with no Items schema must still pass: %v", err)
+		}
+	})
+
 	// The three cases the type switch alone could NOT reject. A typed nil satisfies the
 	// plain type assertion asObjectValue/asArrayValue try first — both return
 	// (nil, true) — and iterating the resulting empty collection rejects nothing, so
@@ -479,7 +523,13 @@ func TestValidateProperties_NullArrayElementIsRejected(t *testing.T) {
 // match. Enum is restricted to scalars rather than normalizing members, which would have
 // made it a further reader of "null" to keep aligned. Enum on a scalar still works, and
 // an untyped schema still accepts one.
-func TestValidatePropertyValue_EnumOnNonScalarIsRejected(t *testing.T) {
+// TestValidatePropertyValue_EnumMemberHoldingNullIsRejected pins the narrowed rule.
+// The check used to refuse EVERY Enum declared on an array or object type, which also
+// refused the null-free compound enums that match perfectly well. PropertySchema is
+// exported, so that landed on out-of-tree handlers as a break in schemas this validator
+// had accepted. Only a member that can never match is refused now — the discriminating
+// case is the null_free subtest below, which the old rule failed.
+func TestValidatePropertyValue_EnumMemberHoldingNullIsRejected(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		typ  PropertyType
@@ -500,13 +550,62 @@ func TestValidatePropertyValue_EnumOnNonScalarIsRejected(t *testing.T) {
 			}
 			err := validateProperties(schema, map[string]any{"options": value}, "properties")
 			if err == nil {
-				t.Fatal("expected a schema error for Enum on a non-scalar type")
+				t.Fatal("expected a schema error for an Enum member holding a null")
 			}
-			if !strings.Contains(err.Error(), "Enum on non-scalar type") {
+			if !strings.Contains(err.Error(), "Enum member 0 holding a null") {
 				t.Fatalf("expected the schema-level message, got: %v", err)
 			}
 		})
 	}
+
+	// The case the old per-type rule got wrong. Nothing in this schema is unmatchable:
+	// the declared member is null-free, and the value equals it after normalization.
+	t.Run("null_free compound enum still matches", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"options": {
+				Type:                 PropertyTypeObject,
+				AdditionalProperties: true,
+				Enum:                 []any{map[string]any{"mode": "fast"}, map[string]any{"mode": "slow"}},
+			},
+		}
+		props := map[string]any{"options": map[string]any{"mode": "fast"}}
+		if err := validateProperties(schema, props, "properties"); err != nil {
+			t.Fatalf("a null-free compound enum must still be usable: %v", err)
+		}
+	})
+
+	// And it must still REJECT a value outside that null-free set, so the subtest
+	// above is not passing because compound enums stopped being enforced.
+	t.Run("null_free compound enum still rejects a non-member", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"options": {
+				Type:                 PropertyTypeObject,
+				AdditionalProperties: true,
+				Enum:                 []any{map[string]any{"mode": "fast"}},
+			},
+		}
+		props := map[string]any{"options": map[string]any{"mode": "sideways"}}
+		err := validateProperties(schema, props, "properties")
+		if err == nil || !strings.Contains(err.Error(), "not in allowed set") {
+			t.Fatalf("expected the ordinary enum rejection, got: %v", err)
+		}
+	})
+
+	// A null nested below the top level of a member is just as unmatchable, and the
+	// walk has to reach it.
+	t.Run("null nested inside a member", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"options": {
+				Type:                 PropertyTypeObject,
+				AdditionalProperties: true,
+				Enum:                 []any{map[string]any{"a": []any{map[string]any{"b": nil}}}},
+			},
+		}
+		err := validateProperties(schema, map[string]any{"options": map[string]any{}}, "properties")
+		if err == nil || !strings.Contains(err.Error(), "Enum member 0 holding a null") {
+			t.Fatalf("expected the nested null to be found, got: %v", err)
+		}
+	})
 
 	t.Run("scalar enum still enforced", func(t *testing.T) {
 		schema := map[string]PropertySchema{

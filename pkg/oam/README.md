@@ -354,12 +354,23 @@ of thing:
   `[]any(nil)`, reachable from a rule written in Go) satisfies the plain type
   assertion the object/array coercers try first, and iterating the resulting empty
   collection rejects nothing, so the type check alone accepted it. An `Items`
-  schema with no declared type checks nothing at all.
-- **`Enum` may only be declared on a scalar type.** Members are compared against a
-  value that has already been normalised, while the declared members are not, so a
-  member holding a null at any depth could never match. The restriction removes the
-  mismatch instead of keeping two representations in step; it is enforced at
-  validation time and asserted for every built-in schema by a test.
+  schema with no declared type checks nothing at all — and so does *no* `Items`
+  schema, which is why the guard runs before the `Items` walk rather than inside
+  it: declaring no element schema says nothing about the members, but it does not
+  license the one member no `Items` type could ever have matched.
+- **An `Enum` member holding a null is rejected**, wherever the null sits in it.
+  Members are compared against a value that has already been normalised, while the
+  declared members are not, so such a member could never match anything that
+  reaches the comparison. Refusing it names the schema defect instead of leaving an
+  `Enum` that silently never matches.
+
+  Refused per *member*, not per schema type. Refusing every `Enum` declared on an
+  array or object type is simpler to state and was the first shape of this rule,
+  but it also refuses the null-free compound enums that match perfectly well —
+  and `PropertySchema` is exported, so a handler outside this repo would have seen
+  a schema this validator used to accept start failing for a reason that does not
+  apply to it. No built-in schema declares an `Enum` on a non-scalar type today;
+  nothing asserts that as a rule, and this check does not depend on it.
 
 Two things this deliberately does not do:
 
