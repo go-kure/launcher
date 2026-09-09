@@ -1,6 +1,7 @@
 package components
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -268,4 +269,89 @@ func TestParseAccessModes_NullIsOmission(t *testing.T) {
 			t.Fatal("parseAccessModes(accessModes: <string>) = nil error, want a type error")
 		}
 	})
+}
+
+// The six parsers below are a DIFFERENT six from the ones above, and they are
+// here because of how they arrived rather than because #394 named them.
+//
+// While this branch was open, main landed its own null fix for env, command,
+// args, initContainers, sidecars and affinity, shaped as five optional*
+// wrappers ("parse*Field with an explicit null read as omission"). This branch
+// had put the same null handling INSIDE parseObjectList/parseStringList/
+// parseObjectField instead, which makes each wrapper an exact no-op forward — a
+// guard that can no longer fire, because its delegate already returns absence
+// for a null. Rebasing dropped the wrappers (they live in a region this branch
+// rewrote) while keeping main's six call sites, so the merged tree referenced
+// five functions that no longer existed. The call sites were re-pointed at the
+// delegates rather than the wrappers being restored.
+//
+// That substitution needed proof, and the inherited suite could not give it: of
+// the six keys, only `env` had a null case at all. A green run therefore said
+// nothing about the other five. These tests are that missing half — with the
+// substitution wrong, five of them go red.
+//
+// Each asserts #394's acceptance criterion directly rather than against a
+// hand-written zero value: parsing `key: null` must produce exactly what parsing
+// a document WITHOUT the key produces. The absent-key result is computed here,
+// so it cannot drift from the parser.
+//
+// The typed-nil-list caveat in this file's opening comment applies here too: on
+// the list-shaped parsers that subtest does not discriminate, because []any(nil)
+// satisfies a .([]any) assertion and yields an empty slice.
+func TestInheritedParsers_NullIsOmission(t *testing.T) {
+	cases := []struct {
+		key   string
+		parse func(map[string]any) (any, error)
+	}{
+		{"env", func(p map[string]any) (any, error) { return parseEnv(p) }},
+		{"command", func(p map[string]any) (any, error) { return parseCommand(p) }},
+		{"args", func(p map[string]any) (any, error) { return parseArgs(p) }},
+		{"initContainers", func(p map[string]any) (any, error) { return parseInitContainers(p) }},
+		{"sidecars", func(p map[string]any) (any, error) { return parseSidecars(p) }},
+		{"affinity", func(p map[string]any) (any, error) { return parseAffinity(p) }},
+	}
+
+	for _, tc := range cases {
+		absent, err := tc.parse(map[string]any{})
+		if err != nil {
+			t.Fatalf("parse(%s absent) = error %v, want nil", tc.key, err)
+		}
+		for _, nv := range nullValues() {
+			t.Run(tc.key+"/"+nv.name, func(t *testing.T) {
+				got, err := tc.parse(map[string]any{tc.key: nv.val})
+				if err != nil {
+					t.Fatalf("parse(%s: null) = error %v, want nil — a null must read as absence, not as a wrong type", tc.key, err)
+				}
+				if !reflect.DeepEqual(got, absent) {
+					t.Errorf("parse(%s: null) = %#v, want the absent-key result %#v", tc.key, got, absent)
+				}
+			})
+		}
+	}
+}
+
+// The other half of #394's acceptance: a present-but-wrong-type value must still
+// error. Without this, deleting the type check outright would leave the table
+// above just as green.
+func TestInheritedParsers_WrongTypeStillErrors(t *testing.T) {
+	cases := []struct {
+		key   string
+		bad   any
+		parse func(map[string]any) (any, error)
+	}{
+		{"env", map[string]any{"name": "X"}, func(p map[string]any) (any, error) { return parseEnv(p) }},
+		{"command", "sh", func(p map[string]any) (any, error) { return parseCommand(p) }},
+		{"args", "-c", func(p map[string]any) (any, error) { return parseArgs(p) }},
+		{"initContainers", map[string]any{"name": "c"}, func(p map[string]any) (any, error) { return parseInitContainers(p) }},
+		{"sidecars", map[string]any{"name": "c"}, func(p map[string]any) (any, error) { return parseSidecars(p) }},
+		{"affinity", []any{"nodeAffinity"}, func(p map[string]any) (any, error) { return parseAffinity(p) }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			if _, err := tc.parse(map[string]any{tc.key: tc.bad}); err == nil {
+				t.Fatalf("parse(%s: %T) = nil error, want a type error", tc.key, tc.bad)
+			}
+		})
+	}
 }
