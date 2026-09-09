@@ -21,6 +21,22 @@ the target shape. Every property
 schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler API
 Reference.
 
+## How to read the wrong-type notes below
+
+This document states wrong-type handling **per field**, and makes no blanket
+guarantee across the package. Where a field says a present-but-wrong-type value
+is rejected, that is a claim about the helper named beside it —
+`parseStringField`, `parseBoolField`, `parseInt32Field`, `parseInt64Field`,
+`parseObjectField`, `parseStringList` — each of which reports presence
+separately from value and returns an error naming the field. Parsers that do
+**not** use those helpers still read with a bare type assertion and silently
+discard a wrongly typed value, leaving whatever default the handler already
+wrote; the shared `parseAffinity`'s four sub-fields
+(`enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType`,
+`nodeSelector`) are the documented example, tracked in
+go-kure/launcher#452. Do not generalize a rejection note from one field to its
+neighbours: adjudicate against the parser that actually reads it.
+
 ## Component types
 
 | `type` | Produces | Summary |
@@ -75,8 +91,8 @@ than being silently ignored), `fieldRef`
 (`apiVersion` must be `v1` if authored — the only field-label conversion
 Kubernetes has ever shipped for the downward API; omitting it also defaults to
 `v1`; a present-but-non-string `apiVersion` (e.g. a bare YAML number) is
-rejected rather than silently treated as absent, same as every other typed
-scalar field in this document; `fieldPath` is validated against the exact set real admission accepts
+rejected rather than silently treated as absent (`parseStringField`);
+`fieldPath` is validated against the exact set real admission accepts
 for an env var fieldRef — `metadata.name`/`metadata.namespace`/`metadata.uid`,
 `spec.nodeName`/`spec.serviceAccountName`, `status.hostIP`/`status.hostIPs`/
 `status.podIP`/`status.podIPs` — plus the `metadata.labels['KEY']`/
@@ -98,7 +114,7 @@ treated as absent: Kubernetes' own zero-value defaulting substitutes 1 for a
 zero divisor, so silently accepting one would change the emitted unit without
 the author asking for it; a present-but-non-string
 divisor (e.g. a bare YAML number) is rejected rather than silently treated as
-absent, same as every other typed scalar field in this document;
+absent (`parseStringField`);
 `containerName`, if authored,
 must be a syntactically valid container name (`ValidateDNS1123Label`) —
 **note:** whether it actually names a container present in the generated pod
@@ -270,8 +286,8 @@ own message, never resolved against a declared container port; a key other
 than `port`/`service` inside a probe `grpc` object (e.g. a misspelled
 `servcie`) is rejected outright too, instead of silently ignored;
 `tcpSocket.host`, if authored, is preserved on the probe — a
-present-but-non-string value (e.g. `host: 123`) is rejected the same as
-every other typed scalar field in this document, instead of silently
+present-but-non-string value (e.g. `host: 123`) is rejected
+(`parseStringField`), instead of silently
 discarded while the probe still dials the Pod IP; when omitted,
 `corev1.TCPSocketAction.Host`'s own doc comment says it then defaults to the
 Pod IP, so no explicit default needs to be authored here — the same
@@ -421,8 +437,8 @@ no `type` key) is rejected rather than silently discarding the whole
 profile; `localhostProfile` is rejected outright when authored alongside
 `type: RuntimeDefault`/`Unconfined` (only meaningful for `type: Localhost`),
 including a present-but-non-string value in that position (e.g.
-`localhostProfile: 123`) — the same present-but-wrong-type rejection as
-every other typed scalar field in this document, not silently treated as
+`localhostProfile: 123`) — the present-but-wrong-type value is rejected
+(`parseStringField`), not silently treated as
 absent while the contradictory type is accepted as authored; when `type` is
 `Localhost`, `localhostProfile` must be
 relative and must not contain a `..` backstep component, matching
@@ -444,10 +460,10 @@ and `seLinuxOptions`, the same unknown-key rejection (only
 same `localhostProfile`
 mutual-exclusivity-with-RuntimeDefault/Unconfined and present-but-non-string
 rejection as `seccompProfile` above), `procMount` (`Default`|`Unmasked`; a present-but-non-string
-value, e.g. `procMount: false`, is rejected rather than silently omitted —
-same as every other typed scalar field in this document; an explicit empty
-string is still treated as absent, not an error, matching `parseStringField`'s
-own convention for every other string field here); `windowsOptions` is
+value, e.g. `procMount: false`, is rejected rather than silently omitted
+(`parseStringField`); an explicit empty
+string is still treated as absent, not an error, which is `parseStringField`'s
+own convention); `windowsOptions` is
 deliberately not covered — this project's own container images are
 Linux-only (distroless base images run under podman), so a Windows-specific
 security context has no target to apply to here, and `procMount` is
