@@ -204,13 +204,13 @@ the pod-level `resourceClaims` property that declares them is now accepted
 missing is the container-side reference list alone, tracked with the rest of
 DRA support, see `parseResources`'s doc comment), `command`/`args` (must be an
 array, and each element must be a string — both are rejected outright rather
-than silently discarded, matching every other array field in this schema.
-Until go-kure/launcher#423 these two were the exception twice over: a mistyped
-`command: /bin/sh -c true` fell through their comma-ok guard and the container
-built with no command at all, and `command: [ls, 3]` emitted `["ls"]` and said
-nothing about the `3`. Closing it changed their signature to return an error,
-which is why the fix touches all 9 call sites — the seven workload kinds' own
-main containers, plus `initContainers` and `sidecars` in `common.go`), `probes`
+than silently discarded. Until go-kure/launcher#423 they were mishandled twice
+over: a mistyped `command: /bin/sh -c true` fell through their comma-ok guard
+and the container built with no command at all, and `command: [ls, 3]` emitted
+`["ls"]` and said nothing about the `3`. Closing it changed their signature to
+return an error, which is why the fix touches all 9 call sites — the seven
+workload kinds' own main containers, plus `initContainers` and `sidecars` in
+`common.go`), `probes`
 (rejected outright if authored with a non-object value, e.g. `probes: true`,
 and likewise for each of its own `readiness`/`liveness`/`startup` keys, e.g.
 `probes: {liveness: true}` — same two-level presence-then-type-check shape as
