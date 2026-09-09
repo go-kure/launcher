@@ -23,7 +23,6 @@ spec:
       properties:
         image: nginx:1.27
         port: 80
-  traits: []
 ```
 
 ## 2. A cluster profile
