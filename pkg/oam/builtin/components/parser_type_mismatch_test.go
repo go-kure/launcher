@@ -65,10 +65,11 @@ func TestParseSidecars_AbsentIsAbsent(t *testing.T) {
 }
 
 func TestParseAffinity_WrongContainerType(t *testing.T) {
-	// A list where the schema wants an object. The sibling parsers on the
-	// adjacent call-site lines (parseRawAffinity, parseTopologySpreadConstraints)
-	// already rejected this shape, so the inconsistency was visible between two
-	// properties sitting next to each other in the same document.
+	// A list where the schema wants an object. Other properties on the same
+	// components already rejected this shape through the optional* helpers —
+	// updateStrategy and ordinals on statefulset, successPolicy and
+	// podFailurePolicy on job and cronjob — so the inconsistency was visible
+	// between properties an author writes beside each other in one document.
 	_, err := parseAffinity(map[string]any{
 		"affinity": []any{map[string]any{"topologyKey": "kubernetes.io/hostname"}},
 	})

@@ -44,18 +44,22 @@ component does not author `serviceAccountName` (see "Pod-level properties" below
 
 ## Common config
 
-A property authored with the **wrong container type** — a mapping where the
-schema wants a list, a list or scalar where it wants an object — is rejected by
-name, never discarded. `env`, `command`, `args`, `initContainers`, `sidecars`
-and `affinity` were the six exceptions: each read its property with a bare
-comma-ok type assertion and, when that failed, returned the zero value with no
-error, so a mistyped block built cleanly and emitted nothing for the property.
-Nothing in the output said it had been seen. Closed in go-kure/launcher#423 by
-routing all six through the `optionalObject`/`optionalObjectList`/
-`optionalStringList` helpers, which report presence separately from value; the
-sibling parsers on the adjacent call-site lines (`parseRawAffinity`,
-`parseTopologySpreadConstraints`) already behaved this way, so the six were
-inconsistent with properties sitting next to them in the same document.
+`env`, `command`, `args`, `initContainers`, `sidecars` and `affinity` each read
+their property with a bare comma-ok type assertion and, when that failed,
+returned the zero value with no error. So a property authored with the **wrong
+container type** — a mapping where the schema wants a list, a list or scalar
+where it wants an object — built cleanly and emitted nothing for the property,
+and nothing in the output said it had been seen. Closed in go-kure/launcher#423
+by routing those six through the `optionalObject`/`optionalObjectList`/
+`optionalStringList` helpers (`common.go`), which report presence separately
+from value, so each of the six now rejects a mistyped value by name instead of
+discarding it. Those helpers were already how several other properties on the
+same components are read — `updateStrategy` and `ordinals` on `statefulset`
+(`statefulset_spec.go`), `successPolicy` and `podFailurePolicy` on `job` and
+`cronjob` (`common.go`) — so the six behaved differently from properties an
+author writes beside them in the same document. This covers those six parsers;
+it is not a claim that every property in this package is read through the
+helpers.
 
 Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
 `daemonset`, `cronjob`, `job`)
@@ -506,7 +510,7 @@ below, since the underlying `go-kure/kure` `CreateVolumeClaimTemplate` helper
 that path builds on only ever sets a non-empty storage class name on the
 generated claim — a cross-repo limitation, out of scope here.
 `pvc.accessModes`, if authored, must be a non-empty array of non-empty
-strings, each one of the three real `corev1.PersistentVolumeAccessMode`
+strings, each one of the four real `corev1.PersistentVolumeAccessMode`
 values — a present-but-non-array value (e.g. a bare string) or a non-string
 element is rejected outright too, instead of silently falling through to the
 `ReadWriteOnce` default while discarding the author's actual list; an
@@ -892,7 +896,7 @@ loop. Errors name the authored list position and container, e.g.
 `initContainers[0] "init": image "docker.io/x/y:v1" is not from an allowed
 registry [...]`.
 
-The eleven JobSpec-level properties (see "Per-type highlights" below) are parsed
+The twelve JobSpec-level properties (see "Per-type highlights" below) are parsed
 and applied by a dedicated `JobSpecConfig`/`parseJobSpec`/`applyJobSpec`
 (`common.go`), factored out separately from the fields above because
 `batchv1.CronJob.Spec.JobTemplate.Spec` and a bare `batchv1.Job.Spec` are the
@@ -1344,7 +1348,7 @@ object would change what the next `Generate` emits.
   limitation: the child directory name's DNS-1123 truncation (mirroring `valuesConfigMapName`'s own
   `sha256`-prefixed truncation above) makes same-name collisions vanishingly unlikely *within* one
   Application, but two different Applications with a same-named component still collide — component
-  names are unique only within one Application (`pkg/oam/validate.go:186-189`), while emitted
+  names are unique only within one Application (`pkg/oam/validate.go:192-195`), while emitted
   Kustomization CRs for hook-group children share one controller namespace; a pre-existing gap
   (inherited from a downstream consumer's reference implementation) that this partitioning newly exposes, not one
   it introduces. `kurel build`'s flat output **accepts** `delivery: template` — its `Generate`
