@@ -1748,12 +1748,20 @@ and each was aligned separately, so each round of review found the reader the la
 round had not touched.
 
 What it means for a handler parser in this package: read a null under an optional
-property as omission, never as a present value of the wrong type. The `optional*`
-helpers in `common.go` (`optionalString`, `optionalObject`, `optionalInt32`,
-`optionalInt64`, `optionalObjectList`, `optionalStringList`) do exactly that and are
-the shortest way to comply. They classify a **typed** nil as null too —
-`map[string]any(nil)` or `[]any(nil)` inside an `any`, which is what a lowering rule
-assembled in Go produces for an unset optional and is not `== nil`.
+property as omission, never as a present value of the wrong type. `authoredValue` —
+the presence primitive `parseStringField`, `parseObjectField`, `parseInt32Field`,
+`parseInt64Field`, `parseObjectList` and `parseStringList` all go through — does
+exactly that, so calling any of them directly already complies. They classify a
+**typed** nil as null too — `map[string]any(nil)` or `[]any(nil)` inside an `any`,
+which is what a lowering rule assembled in Go produces for an unset optional and is
+not `== nil`.
+
+This used to require a separate `optional*` wrapper family (`optionalString`,
+`optionalObject`, `optionalInt32`, `optionalInt64`, `optionalObjectList`,
+`optionalStringList`) layered in front of the plain parsers. `go-kure/launcher#394`
+moved the handling into the shared helpers themselves, which made every wrapper an
+exact no-op forward; they were removed and every caller now uses the `parse*` helper
+directly.
 
 Two limits worth knowing before relying on the rule:
 
