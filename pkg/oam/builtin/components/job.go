@@ -133,10 +133,10 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 		}
 	}
 
-	// An explicit null reads as omission here too — parseBoolField has no
-	// optional* wrapper, so the check is inline rather than in common.go; adding
-	// one for a single call site would be the wider migration
-	// go-kure/launcher#394 owns, not this component's to start.
+	// An explicit null reads as omission here. Since go-kure/launcher#394
+	// parseBoolField does this itself, so the guard below is redundant with it —
+	// kept only because this branch also needs to know whether the key was
+	// authored at all, which the guard answers without a second lookup.
 	if raw, present := props["suspend"]; present && !isExplicitNull(raw) {
 		suspend, err := parseBoolField(props, "suspend", "suspend")
 		if err != nil {

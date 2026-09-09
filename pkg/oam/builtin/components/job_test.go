@@ -621,10 +621,10 @@ func TestJobHandler_SuspendVetoesAutoHealthCheck(t *testing.T) {
 // TestJobHandler_ExplicitNullReadsAsOmission pins the null handling on the
 // properties go-kure/launcher#344 introduced. `key: null` in YAML is an author
 // writing "leave this unset" — pkg/oam's own validatePropertyValue reads it that
-// way, and the optional* wrappers in common.go exist to make the parsers agree.
-// Without them a null reaches a typed helper and is refused as a type error, so
-// a document that says nothing is rejected while the same document with the key
-// deleted builds.
+// way, and the shared field helpers in common.go make the parsers agree
+// (authoredValue, since go-kure/launcher#394). Without that a null reaches a
+// typed helper and is refused as a type error, so a document that says nothing
+// is rejected while the same document with the key deleted builds.
 //
 // backoffLimitPerIndex and maxFailedIndexes carry the sharper half: both are
 // refused outright unless completionMode is Indexed, so reading a null as a
