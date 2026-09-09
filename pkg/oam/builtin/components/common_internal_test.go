@@ -4153,8 +4153,8 @@ func TestParseSecurityContext_UnprefixedSysAdminCapability_WithPrivilegeEscalati
 	}
 }
 
-// TestOptionalWrappers_NullIsOmission pins the wrappers themselves rather than
-// one caller's view of them: every wrapper must read both an untyped and a
+// TestParseFieldHelpers_NullIsOmission pins the helpers themselves rather than
+// one caller's view of them: every helper must read both an untyped and a
 // typed null as omission, and must still reject a present, wrongly-typed value.
 //
 // The typed-nil half is the one a `v == nil` check gets wrong. Each of these
@@ -4162,7 +4162,15 @@ func TestParseSecurityContext_UnprefixedSysAdminCapability_WithPrivilegeEscalati
 // assembled in Go produces for an unset optional; pkg/oam's isNullValue
 // classifies them as null (property_validate.go), so the parser must agree or
 // a component passes emission validation and then fails to convert.
-func TestOptionalWrappers_NullIsOmission(t *testing.T) {
+//
+// These assertions were written against the five optionalX wrappers that used
+// to sit beside these helpers (go-kure/launcher#339, #381). go-kure/launcher#394
+// folded the null handling into the helpers and removed the wrappers, so the
+// same assertions now bind every one of the helpers' ~196 call sites instead of
+// only the fields those two PRs introduced. Not one assertion had to change,
+// which is the evidence that the fold-in widened the surface without moving the
+// contract.
+func TestParseFieldHelpers_NullIsOmission(t *testing.T) {
 	var (
 		nilMap   map[string]any
 		nilList  []any
@@ -4183,20 +4191,20 @@ func TestOptionalWrappers_NullIsOmission(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := map[string]any{"k": tc.val}
 
-			if v, present, err := optionalString(raw, "k", "k"); err != nil || present || v != "" {
-				t.Errorf("optionalString = (%q, %v, %v), want (\"\", false, nil)", v, present, err)
+			if v, present, err := parseStringField(raw, "k", "k"); err != nil || present || v != "" {
+				t.Errorf("parseStringField = (%q, %v, %v), want (\"\", false, nil)", v, present, err)
 			}
-			if v, present, err := optionalObject(raw, "k", "k"); err != nil || present || v != nil {
-				t.Errorf("optionalObject = (%v, %v, %v), want (nil, false, nil)", v, present, err)
+			if v, present, err := parseObjectField(raw, "k", "k"); err != nil || present || v != nil {
+				t.Errorf("parseObjectField = (%v, %v, %v), want (nil, false, nil)", v, present, err)
 			}
-			if v, present, err := optionalInt32(raw, "k", "k"); err != nil || present || v != 0 {
-				t.Errorf("optionalInt32 = (%d, %v, %v), want (0, false, nil)", v, present, err)
+			if v, present, err := parseInt32Field(raw, "k", "k"); err != nil || present || v != 0 {
+				t.Errorf("parseInt32Field = (%d, %v, %v), want (0, false, nil)", v, present, err)
 			}
-			if v, present, err := optionalObjectList(raw, "k"); err != nil || present || v != nil {
-				t.Errorf("optionalObjectList = (%v, %v, %v), want (nil, false, nil)", v, present, err)
+			if v, present, err := parseObjectList(raw, "k"); err != nil || present || v != nil {
+				t.Errorf("parseObjectList = (%v, %v, %v), want (nil, false, nil)", v, present, err)
 			}
-			if v, present, err := optionalStringList(raw, "k", "k"); err != nil || present || v != nil {
-				t.Errorf("optionalStringList = (%v, %v, %v), want (nil, false, nil)", v, present, err)
+			if v, present, err := parseStringList(raw, "k", "k"); err != nil || present || v != nil {
+				t.Errorf("parseStringList = (%v, %v, %v), want (nil, false, nil)", v, present, err)
 			}
 		})
 	}
@@ -4205,20 +4213,20 @@ func TestOptionalWrappers_NullIsOmission(t *testing.T) {
 	// present, non-null value of the wrong type is still an error naming it.
 	t.Run("a wrongly-typed value is still rejected", func(t *testing.T) {
 		raw := map[string]any{"k": 3}
-		if _, _, err := optionalString(raw, "k", "k"); err == nil {
-			t.Error("optionalString(3) = nil error, want a type error")
+		if _, _, err := parseStringField(raw, "k", "k"); err == nil {
+			t.Error("parseStringField(3) = nil error, want a type error")
 		}
-		if _, _, err := optionalObject(raw, "k", "k"); err == nil {
-			t.Error("optionalObject(3) = nil error, want a type error")
+		if _, _, err := parseObjectField(raw, "k", "k"); err == nil {
+			t.Error("parseObjectField(3) = nil error, want a type error")
 		}
-		if _, _, err := optionalObjectList(raw, "k"); err == nil {
-			t.Error("optionalObjectList(3) = nil error, want a type error")
+		if _, _, err := parseObjectList(raw, "k"); err == nil {
+			t.Error("parseObjectList(3) = nil error, want a type error")
 		}
-		if _, _, err := optionalStringList(raw, "k", "k"); err == nil {
-			t.Error("optionalStringList(3) = nil error, want a type error")
+		if _, _, err := parseStringList(raw, "k", "k"); err == nil {
+			t.Error("parseStringList(3) = nil error, want a type error")
 		}
-		if _, _, err := optionalInt32(map[string]any{"k": "x"}, "k", "k"); err == nil {
-			t.Error("optionalInt32(\"x\") = nil error, want a type error")
+		if _, _, err := parseInt32Field(map[string]any{"k": "x"}, "k", "k"); err == nil {
+			t.Error("parseInt32Field(\"x\") = nil error, want a type error")
 		}
 	})
 
@@ -4226,11 +4234,11 @@ func TestOptionalWrappers_NullIsOmission(t *testing.T) {
 	// reflection arm must test IsNil, not the kind alone.
 	t.Run("an empty object is authored, not omitted", func(t *testing.T) {
 		raw := map[string]any{"k": map[string]any{}}
-		if v, present, err := optionalObject(raw, "k", "k"); err != nil || !present || v == nil {
-			t.Errorf("optionalObject({}) = (%v, %v, %v), want (an empty map, true, nil)", v, present, err)
+		if v, present, err := parseObjectField(raw, "k", "k"); err != nil || !present || v == nil {
+			t.Errorf("parseObjectField({}) = (%v, %v, %v), want (an empty map, true, nil)", v, present, err)
 		}
-		if v, present, err := optionalObjectList(map[string]any{"k": []any{}}, "k"); err != nil || !present || v == nil {
-			t.Errorf("optionalObjectList([]) = (%v, %v, %v), want (an empty list, true, nil)", v, present, err)
+		if v, present, err := parseObjectList(map[string]any{"k": []any{}}, "k"); err != nil || !present || v == nil {
+			t.Errorf("parseObjectList([]) = (%v, %v, %v), want (an empty list, true, nil)", v, present, err)
 		}
 	})
 }

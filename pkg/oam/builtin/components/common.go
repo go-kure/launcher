@@ -89,7 +89,7 @@ func toInt32(v any) (int32, bool) {
 // same (value, bool) shape as toInt32 rather than reusing
 // traits.toInt64(v)(int64,error): that sibling package's callers want a
 // descriptive error to wrap, which is exactly what this file's own
-// parseInt32Field/parseInt64Field wrappers below now do too — a present key
+// parseInt32Field/parseInt64Field helpers below now do too — a present key
 // whose value toInt32/toInt64 cannot convert is a malformed-input error, not
 // a silently-ignored absence (a present-but-wrong-type value was previously
 // treated as though the key were absent at every call site in this file;
@@ -1633,15 +1633,44 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 // this component's own Generate() and unconditionally overwrites
 // container.SecurityContext (traits/security_context.go:190) — the trait always
 // wins when both are used together.
+
+// authoredValue answers "did the document supply a value for this key?" — the
+// single presence primitive every optional-field parser in this package goes
+// through, so that "absent" means the same thing at every call site.
+//
+// A key authored with no value (`updateStrategy:`) decodes to a present entry
+// holding nil. That is ABSENCE, not a present value of the wrong type, and the
+// distinction is not cosmetic: pkg/oam's validateObjectProperties reads the
+// same byte as absent when deciding whether a required property was supplied
+// (isNullValue, property_validate.go). A parser answering "must be an object,
+// got <nil>" would let a component satisfy the published schema and then fail
+// to convert — the emission validator and the handler disagreeing about one
+// value. go-kure/launcher#394.
+//
+// The null test is isExplicitNull, not `v == nil`, because a lowering rule
+// assembled in Go produces a TYPED nil for an unset optional map or slice:
+// map[string]any(nil) inside an any is a non-nil interface holding a nil value,
+// so `== nil` is false and a `.(map[string]any)` assertion on it SUCCEEDS with
+// ok=true and a nil map. Without the reflection arm the parser would read that
+// as an authored empty collection — a different value, not merely a missed one.
+func authoredValue(raw map[string]any, key string) (any, bool) {
+	v, present := raw[key]
+	if !present || isExplicitNull(v) {
+		return nil, false
+	}
+	return v, true
+}
+
 // parseBoolField extracts an optional bool from raw[key], erroring if key is
 // present with a non-bool value rather than silently skipping it — a mistyped
 // value (e.g. a quoted `"false"`) must not silently fall back to whatever
 // default applies when the field is left unset while looking like the
 // authored value was honored. label is the dotted field path used in the
 // error message, kept separate from key so nested callers (e.g. envFrom[i])
-// can report a fully-qualified path.
+// can report a fully-qualified path. An explicit null reads as absence, per
+// authoredValue above; a present, non-null, non-bool value still errors.
 func parseBoolField(raw map[string]any, key, label string) (*bool, error) {
-	v, present := raw[key]
+	v, present := authoredValue(raw, key)
 	if !present {
 		return nil, nil
 	}
@@ -1652,9 +1681,10 @@ func parseBoolField(raw map[string]any, key, label string) (*bool, error) {
 	return &b, nil
 }
 
-// parseInt32Field mirrors parseBoolField for toInt32-convertible fields.
+// parseInt32Field mirrors parseBoolField for toInt32-convertible fields,
+// including its null-reads-as-absence contract.
 func parseInt32Field(raw map[string]any, key, label string) (int32, bool, error) {
-	v, present := raw[key]
+	v, present := authoredValue(raw, key)
 	if !present {
 		return 0, false, nil
 	}
@@ -1665,9 +1695,10 @@ func parseInt32Field(raw map[string]any, key, label string) (int32, bool, error)
 	return i, true, nil
 }
 
-// parseInt64Field mirrors parseBoolField for toInt64-convertible fields.
+// parseInt64Field mirrors parseBoolField for toInt64-convertible fields,
+// including its null-reads-as-absence contract.
 func parseInt64Field(raw map[string]any, key, label string) (int64, bool, error) {
-	v, present := raw[key]
+	v, present := authoredValue(raw, key)
 	if !present {
 		return 0, false, nil
 	}
@@ -1683,9 +1714,14 @@ func parseInt64Field(raw map[string]any, key, label string) (int64, bool, error)
 // same as absent (ok=false, no error) — several callers (e.g. seLinuxOptions'
 // four sub-fields) already used "present, non-empty" as their notion of "set"
 // before this helper existed, and an author-supplied "" is a reasonable way to
-// opt back out rather than a malformed value.
+// opt back out rather than a malformed value. An explicit null is likewise
+// absence, per authoredValue above.
+//
+// parseStorageClassField below is the one optional string that must NOT
+// collapse "" into absence, and it reads raw[key] directly rather than
+// delegating here — see its own comment.
 func parseStringField(raw map[string]any, key, label string) (string, bool, error) {
-	v, present := raw[key]
+	v, present := authoredValue(raw, key)
 	if !present {
 		return "", false, nil
 	}
@@ -1701,9 +1737,12 @@ func parseStringField(raw map[string]any, key, label string) (string, bool, erro
 
 // parseObjectField mirrors parseStringField for object-typed fields — used
 // where a bare `v.(map[string]any), ok` type assertion would silently treat
-// a present-but-wrong-type value the same as absent.
+// a present-but-wrong-type value the same as absent. It also treats an
+// explicit null as absence, per authoredValue above, which a bare assertion
+// gets wrong in the OTHER direction for a typed nil: map[string]any(nil)
+// asserts successfully and yields an authored empty object.
 func parseObjectField(raw map[string]any, key, label string) (map[string]any, bool, error) {
-	v, present := raw[key]
+	v, present := authoredValue(raw, key)
 	if !present {
 		return nil, false, nil
 	}
@@ -1714,31 +1753,34 @@ func parseObjectField(raw map[string]any, key, label string) (map[string]any, bo
 	return m, true, nil
 }
 
-// The helpers above answer "present?" with a bare map lookup, so a key
-// authored as an explicit null is present with a nil value and fails their type
-// check: `updateStrategy:` with nothing after it becomes
-// "updateStrategy: must be an object, got <nil>".
+// go-kure/launcher#394 is closed here. Until this change, the helpers above
+// answered "present?" with a bare map lookup, so a key authored as an explicit
+// null was present with a nil value and failed their type check:
+// `updateStrategy:` with nothing after it became "updateStrategy: must be an
+// object, got <nil>". pkg/oam disagreed — validatePropertyValue returns early
+// for a null under an optional property ("a nil under an optional field
+// constrains nothing"), and validateObjectProperties reads a null as *absent*
+// when deciding whether a required property was supplied — so a lowering rule
+// could emit a nil for an optional field, pass emission validation, and then be
+// rejected by the handler that ran afterwards: a component satisfying the
+// published schema and still failing to convert.
 //
-// pkg/oam disagrees. validatePropertyValue returns early for a null under an
-// optional property ("a nil under an optional field constrains nothing"), and
-// validateObjectProperties reads a null as *absent* when deciding whether a
-// required property was supplied. So a lowering rule may emit a nil for an
-// optional field, have it pass emission validation, and then be rejected by the
-// handler that runs afterwards — the component satisfies the published schema
-// and still fails to convert.
+// The gap is now closed at the definition rather than per call site, by routing
+// every helper above through authoredValue. Five optionalX wrappers used to sit
+// here doing that job for the subset of fields introduced by go-kure/launcher#339
+// and #381; they became exact duplicates of the helpers they wrapped and were
+// removed, because a wrapper whose doc says "X with an explicit null read as
+// omission" tells the next reader that plain X does NOT handle null, which is
+// now false. Callers use the helpers directly.
 //
-// The wrappers below close that gap by reading a null as omission before
-// delegating. They are deliberately NOT folded into the helpers themselves: the
-// helpers have ~20 pre-existing call sites whose behaviour would change with
-// them, which is a wider blast radius than this change should carry. That is
-// tracked as go-kure/launcher#394; until it lands, only the fields introduced
-// alongside these wrappers use them, and the difference is one-directional —
-// a wrapped field accepts a null the unwrapped ones still reject, never the
-// reverse.
+// This widened acceptance and narrowed nothing: a value that parsed before still
+// parses to the same result, and a present, non-null, wrong-typed value still
+// earns the same error it always did. That direction is what makes it additive
+// under an unchanged launcher.gokure.dev/v1alpha1 (docs/oam/design-gvk.md).
 
 // isExplicitNull mirrors pkg/oam's isNullValue (property_validate.go), which is
-// unexported there. Kept identical on purpose: the whole point of the wrappers
-// below is that the parser and the validator classify the same value the same
+// unexported there. Kept identical on purpose: the whole point is that the
+// parser and the validator classify the same value the same
 // way, and a plain `v == nil` does not — a typed nil (map[string]any(nil) or
 // []any(nil) inside an `any`) is a non-nil interface holding a nil value, which
 // is exactly what a Go-constructed lowering rule produces for an unset optional
@@ -1755,46 +1797,6 @@ func isExplicitNull(value any) bool {
 	default:
 		return false
 	}
-}
-
-// optionalString is parseStringField with an explicit null read as omission.
-func optionalString(raw map[string]any, key, label string) (string, bool, error) {
-	if v, present := raw[key]; present && isExplicitNull(v) {
-		return "", false, nil
-	}
-	return parseStringField(raw, key, label)
-}
-
-// optionalObject is parseObjectField with an explicit null read as omission.
-func optionalObject(raw map[string]any, key, label string) (map[string]any, bool, error) {
-	if v, present := raw[key]; present && isExplicitNull(v) {
-		return nil, false, nil
-	}
-	return parseObjectField(raw, key, label)
-}
-
-// optionalInt32 is parseInt32Field with an explicit null read as omission.
-func optionalInt32(raw map[string]any, key, label string) (int32, bool, error) {
-	if v, present := raw[key]; present && isExplicitNull(v) {
-		return 0, false, nil
-	}
-	return parseInt32Field(raw, key, label)
-}
-
-// optionalObjectList is parseObjectList with an explicit null read as omission.
-func optionalObjectList(raw map[string]any, key string) ([]map[string]any, bool, error) {
-	if v, present := raw[key]; present && isExplicitNull(v) {
-		return nil, false, nil
-	}
-	return parseObjectList(raw, key)
-}
-
-// optionalStringList is parseStringList with an explicit null read as omission.
-func optionalStringList(raw map[string]any, key, label string) ([]string, bool, error) {
-	if v, present := raw[key]; present && isExplicitNull(v) {
-		return nil, false, nil
-	}
-	return parseStringList(raw, key, label)
 }
 
 // parseStorageClassField parses an optional PVC "storageClass" string,
@@ -1874,7 +1876,7 @@ func rejectUnknownKeys(raw map[string]any, allowed []string, label string) error
 // no dedicated validation function in k8s.io/kubernetes's validation
 // package), so this file does not invent one for a merely-empty entry.
 func parseCapabilityList(raw map[string]any, key, label string) ([]corev1.Capability, error) {
-	v, present := raw[key]
+	v, present := authoredValue(raw, key)
 	if !present {
 		return nil, nil
 	}
@@ -2917,15 +2919,13 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		}
 	}
 
-	// The fields below this point are the ones go-kure/launcher#344 introduced,
-	// so they read a null as omission through the optional* wrappers — the
-	// convention statefulset_spec.go's own newly-added fields already follow.
-	// The JobSpec fields ABOVE stay on the bare helpers: they predate the
-	// wrappers, are shared with the cronjob component, and changing them is the
-	// wider migration tracked as go-kure/launcher#394. The difference is
-	// one-directional, as the wrappers' own note says — a wrapped field accepts
-	// a null the unwrapped ones still reject, never the reverse.
-	if v, present, err := optionalInt32(props, "backoffLimitPerIndex", "backoffLimitPerIndex"); err != nil {
+	// Every field in this function reads a null as omission, above and below
+	// this point alike. The fields below were go-kure/launcher#344's, and got
+	// that behaviour first via the optionalX wrappers; the JobSpec fields ABOVE
+	// are shared with the cronjob component and used to refuse a null, which was
+	// go-kure/launcher#394 — now closed by folding the null handling into the
+	// helpers themselves, so the split this comment used to describe is gone.
+	if v, present, err := parseInt32Field(props, "backoffLimitPerIndex", "backoffLimitPerIndex"); err != nil {
 		return cfg, err
 	} else if present {
 		if v < 0 {
@@ -2934,7 +2934,7 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		cfg.BackoffLimitPerIndex = &v
 	}
 
-	if v, present, err := optionalInt32(props, "maxFailedIndexes", "maxFailedIndexes"); err != nil {
+	if v, present, err := parseInt32Field(props, "maxFailedIndexes", "maxFailedIndexes"); err != nil {
 		return cfg, err
 	} else if present {
 		if v < 0 {
@@ -2985,7 +2985,7 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		cfg.ManagedBy = &s
 	}
 
-	if raw, present, err := optionalObject(props, "successPolicy", "successPolicy"); err != nil {
+	if raw, present, err := parseObjectField(props, "successPolicy", "successPolicy"); err != nil {
 		return cfg, err
 	} else if present {
 		sp, err := parseJobSuccessPolicy(raw)
@@ -2995,7 +2995,7 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		cfg.SuccessPolicy = sp
 	}
 
-	if raw, present, err := optionalObject(props, "podFailurePolicy", "podFailurePolicy"); err != nil {
+	if raw, present, err := parseObjectField(props, "podFailurePolicy", "podFailurePolicy"); err != nil {
 		return cfg, err
 	} else if present {
 		pfp, err := parseJobPodFailurePolicy(raw)
@@ -3173,7 +3173,7 @@ func parseJobSuccessPolicy(raw map[string]any) (*batchv1.SuccessPolicy, error) {
 			}
 			rule.SucceededIndexes = &s
 		}
-		if v, present, err := optionalInt32(obj, "succeededCount", label+".succeededCount"); err != nil {
+		if v, present, err := parseInt32Field(obj, "succeededCount", label+".succeededCount"); err != nil {
 			return nil, err
 		} else if present {
 			if v < 0 {
@@ -3403,7 +3403,7 @@ func parseJobPodFailurePolicyRule(obj map[string]any, label string) (*batchv1.Po
 	}
 	rule.Action = batchv1.PodFailurePolicyAction(action)
 
-	if v, present, err := optionalObject(obj, "onExitCodes", label+".onExitCodes"); err != nil {
+	if v, present, err := parseObjectField(obj, "onExitCodes", label+".onExitCodes"); err != nil {
 		return nil, err
 	} else if present {
 		req, err := parseJobPodFailurePolicyOnExitCodes(v, label+".onExitCodes")
@@ -3521,7 +3521,7 @@ func parseJobPodFailurePolicyOnExitCodes(obj map[string]any, label string) (*bat
 }
 
 // parseJobPodFailurePolicyOnPodConditions decodes a rule's `onPodConditions`.
-// It takes the raw value rather than a []map[string]any from optionalObjectList
+// It takes the raw value rather than a []map[string]any from parseObjectList
 // because that helper labels its errors with the bare key, losing the rule index
 // an author needs to find the entry at fault.
 func parseJobPodFailurePolicyOnPodConditions(raw any, label string) ([]batchv1.PodFailurePolicyOnPodConditionsPattern, error) {
@@ -3983,7 +3983,7 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		// 'size' (or resources.requests.storage)" for a field the author did
 		// write, with no hint that the type was the problem. Same silent-drop
 		// class as storageClass below.
-		name, _, err := optionalString(m, "name", "volumeClaimTemplate: name")
+		name, _, err := parseStringField(m, "name", "volumeClaimTemplate: name")
 		if err != nil {
 			return nil, err
 		}
@@ -4030,12 +4030,12 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 			}
 		}
 		vct.StorageClass = storageClass
-		size, sizeAuthored, err := optionalString(m, "size", entryLabel+": size")
+		size, sizeAuthored, err := parseStringField(m, "size", entryLabel+": size")
 		if err != nil {
 			return nil, err
 		}
 		vct.Size = size
-		mountPath, _, err := optionalString(m, "mountPath", entryLabel+": mountPath")
+		mountPath, _, err := parseStringField(m, "mountPath", entryLabel+": mountPath")
 		if err != nil {
 			return nil, err
 		}

@@ -208,8 +208,8 @@ func TestParseStatefulSetSpec_NullIsOmission(t *testing.T) {
 			"",
 		},
 		{
-			// parseMaxUnavailable takes an `any`, not a map, so this leaf
-			// cannot go through an optional* wrapper and carries its own
+			// parseMaxUnavailable takes an `any`, not a (map, key) pair, so
+			// this leaf cannot route through authoredValue and carries its own
 			// isExplicitNull guard at the call site.
 			"updateStrategy.rollingUpdate.maxUnavailable",
 			map[string]any{"updateStrategy": map[string]any{
