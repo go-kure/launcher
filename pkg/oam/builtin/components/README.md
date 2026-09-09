@@ -666,7 +666,12 @@ defence in depth against a future parser change, not a gate an author can trip
 today. Those three fields are the whole container-level policy surface:
 `enforcePrivileged` and `enforceContainerCapabilities` are the only enforcers
 taking a `*corev1.SecurityContext`, and every policy call outside `enforce.go`
-is a call site of one of them. Both checks cover the main container and
+that touches a container `securityContext` is a call site of one of them. The
+package has other enforcers reached from the same `ApplyPolicy` bodies — the
+pod-level pair described below, plus `enforceHostNamespaces`,
+`enforceHostPathVolumes`, the `enforceMax*` family and
+`enforceAllowedRegistries`/`enforceAllowedURLHosts` — but none of them reads a
+container `securityContext`. Both checks cover the main container and
 every `initContainers`/`sidecars` entry (go-kure/launcher#312's shared
 `enforceExtraContainer` helper), not just the main container.
 
