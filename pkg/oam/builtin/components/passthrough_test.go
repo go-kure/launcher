@@ -244,6 +244,79 @@ func TestPassthrough_ListShapedObjectIsRejected(t *testing.T) {
 			}
 		})
 	}
+
+	// The null arm is separated from the table above because its diagnostic is a
+	// different one on purpose — "expands to zero objects", not "is a list" — and
+	// folding it into the loop would either weaken that loop's message assertion or
+	// assert the wrong sentence here. IsList cannot reach these: it requires
+	// exactly []interface{}, and neither an authored null nor a typed nil map is
+	// one. `[]any(nil)` is deliberately NOT in this table — it satisfies the
+	// .([]interface{}) assertion with ok=true and is already caught by IsList
+	// above, so listing it here would look like coverage while discriminating
+	// nothing.
+	nullItems := map[string]any{
+		"untyped nil, as authored YAML `items:` writes it": nil,
+		"typed nil map": map[string]any(nil),
+	}
+	for name, itemsValue := range nullItems {
+		t.Run("rejected/items authored as null/"+name, func(t *testing.T) {
+			object := map[string]any{"apiVersion": "v1", "kind": "List", "items": itemsValue}
+			_, err := h.ToApplicationConfig(passthroughComponent(map[string]any{"object": object}), "ns1")
+			if err == nil {
+				t.Fatal("an empty list envelope was accepted; Kustomize expands it to zero objects with no error, and under pruning that also removes whatever the previous inventory held")
+			}
+			if !strings.Contains(err.Error(), "zero objects") {
+				t.Errorf("error %q does not say what actually happens; a caller cannot tell this from the apiVersion/kind checks", err)
+			}
+			if !strings.Contains(err.Error(), "List") {
+				t.Errorf("error %q does not name the offending kind", err)
+			}
+		})
+	}
+}
+
+// TestPassthrough_ValidatedObjectIsFrozen pins that the checks in
+// ToApplicationConfig are not merely advisory. The handler used to retain the
+// caller's map, and Generate copies its contents at CALL time — so a programmatic
+// caller could hand in a validated single object, add an `items` array afterwards,
+// and get exactly the list envelope ToApplicationConfig had just refused. No
+// in-repo production caller does this (every LowerComponent implementation in this
+// module is in a _test.go), which is why it is reachable through the public Go API
+// rather than through authored YAML; that makes it a contract this test has to
+// hold, not a scenario the current call graph rules out.
+func TestPassthrough_ValidatedObjectIsFrozen(t *testing.T) {
+	h := &components.PassthroughHandler{}
+
+	object := map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "a"}}
+	cfg, err := h.ToApplicationConfig(passthroughComponent(map[string]any{"object": object}), "ns1")
+	if err != nil {
+		t.Fatalf("a plain ConfigMap was rejected: %v", err)
+	}
+
+	// The mutation the frozen copy exists to defeat.
+	object["kind"] = "List"
+	object["items"] = []any{
+		map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "b"}},
+		map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "c"}},
+	}
+
+	out, err := cfg.Generate(nil)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("Generate emitted %d objects, want 1", len(out))
+	}
+	u, ok := (*out[0]).(*unstructured.Unstructured)
+	if !ok {
+		t.Fatalf("Generate emitted %T, want *unstructured.Unstructured", *out[0])
+	}
+	if got := u.GetKind(); got != "ConfigMap" {
+		t.Errorf("emitted kind = %q, want ConfigMap — the post-validation mutation reached the output", got)
+	}
+	if _, present := u.Object["items"]; present {
+		t.Error("emitted object carries 'items'; the validated bytes and the emitted bytes are not the same bytes")
+	}
 }
 
 func TestPassthrough_TransformWithPolicy(t *testing.T) {
