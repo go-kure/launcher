@@ -18,6 +18,16 @@ import "testing"
 // would silently NARROW every policy that authors `namespaceSelector: {}` on
 // purpose. Without those rows a parser that returned nil for every input would
 // pass this file.
+//
+// CLEANUP OWED, if networkpolicy_internal_test.go is present beside this file.
+// go-kure/launcher#413 adds that file, whose
+// TestParseNPPeer_NamespaceSelectorPresenceCases pinned this divergence as KNOWN
+// while it was open. Its `typed nil diverges from authored null KNOWN` subtest is
+// written to t.Skip once the divergence is closed, so it cannot fail either way —
+// which is also why nothing will ever prompt its removal. Delete that subtest and
+// fold its case into the file's `authored null is absent` subtest; the typed-nil
+// rows here already cover it. The two files are independent otherwise and land in
+// either order.
 
 func TestParseNPPeer_NullSelectorIsAbsent(t *testing.T) {
 	// Both nil shapes must read as absence, and they must agree with each other:
