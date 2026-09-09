@@ -329,6 +329,17 @@ assertion alone can't tell an uninitialized slice/map apart from a validly-typed
 empty collection, even though both serialize the same way, so a lowering rule
 that emits an unset (rather than empty) collection field is still caught.
 
+`IsNullValue` is the exported form of that check, and with it the contract itself:
+**a value that serializes to JSON/YAML `null` is absent, not present-and-empty.**
+It exists for parsers outside this package — handler and trait property readers,
+and out-of-tree lowering rules — that must classify a null the same way the
+validator does. Use it rather than `value == nil`: a typed nil is a non-nil
+interface holding a nil value, so `== nil` is false and a `.(map[string]any)`
+assertion on it succeeds with `ok=true` and a nil map, making the key read as an
+authored empty collection. Where empty and absent mean different things — a
+`metav1.LabelSelector` is the standing example, empty matching everything and nil
+matching nothing — that difference is a behaviour change, not a cosmetic one.
+
 ## Contract metadata
 
 Handlers and lowering rules may implement `ContractDescriber` (`ContractMetadata()
