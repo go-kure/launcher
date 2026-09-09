@@ -656,7 +656,7 @@ func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, err
 // keys as environment variables, mirroring corev1.EnvFromSource directly (same
 // structural pattern as parseEnvVarSource above).
 func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
-	v, present := props["envFrom"]
+	v, present := authoredValue(props, "envFrom")
 	if !present {
 		return nil, nil
 	}
@@ -1015,7 +1015,7 @@ func hasExplicitReplicas(props map[string]any) bool {
 // every named port regardless of name with its own message.
 func parseProbes(props map[string]any, namedPortsAllowed bool, matchName string) (ProbeConfig, error) {
 	var config ProbeConfig
-	v, present := props["probes"]
+	v, present := authoredValue(props, "probes")
 	if !present {
 		return config, nil
 	}
@@ -1031,7 +1031,7 @@ func parseProbes(props map[string]any, namedPortsAllowed bool, matchName string)
 	if err := rejectUnknownKeys(probes, []string{"readiness", "liveness", "startup"}, "probes"); err != nil {
 		return config, err
 	}
-	if v, present := probes["readiness"]; present {
+	if v, present := authoredValue(probes, "readiness"); present {
 		r, ok := v.(map[string]any)
 		if !ok {
 			return config, errors.Errorf("probes.readiness: must be an object, got %T", v)
@@ -1042,7 +1042,7 @@ func parseProbes(props map[string]any, namedPortsAllowed bool, matchName string)
 		}
 		config.Readiness = p
 	}
-	if v, present := probes["liveness"]; present {
+	if v, present := authoredValue(probes, "liveness"); present {
 		l, ok := v.(map[string]any)
 		if !ok {
 			return config, errors.Errorf("probes.liveness: must be an object, got %T", v)
@@ -1053,7 +1053,7 @@ func parseProbes(props map[string]any, namedPortsAllowed bool, matchName string)
 		}
 		config.Liveness = p
 	}
-	if v, present := probes["startup"]; present {
+	if v, present := authoredValue(probes, "startup"); present {
 		s, ok := v.(map[string]any)
 		if !ok {
 			return config, errors.Errorf("probes.startup: must be an object, got %T", v)
@@ -1442,7 +1442,7 @@ func validateNumericPort(port int64) (intstr.IntOrString, error) {
 // against this container's own declared Ports, under this exact name"
 // reasoning applies identically here.
 func parseLifecycle(props map[string]any, namedPortsAllowed bool, matchName string) (*corev1.Lifecycle, error) {
-	v, present := props["lifecycle"]
+	v, present := authoredValue(props, "lifecycle")
 	if !present {
 		return nil, nil
 	}
@@ -1454,7 +1454,7 @@ func parseLifecycle(props map[string]any, namedPortsAllowed bool, matchName stri
 		return nil, err
 	}
 	lc := &corev1.Lifecycle{}
-	if v, present := raw["postStart"]; present {
+	if v, present := authoredValue(raw, "postStart"); present {
 		ps, ok := v.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("lifecycle.postStart: must be an object, got %T", v)
@@ -1465,7 +1465,7 @@ func parseLifecycle(props map[string]any, namedPortsAllowed bool, matchName stri
 		}
 		lc.PostStart = h
 	}
-	if v, present := raw["preStop"]; present {
+	if v, present := authoredValue(raw, "preStop"); present {
 		ps, ok := v.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("lifecycle.preStop: must be an object, got %T", v)
@@ -1753,9 +1753,13 @@ func parseObjectField(raw map[string]any, key, label string) (map[string]any, bo
 	return m, true, nil
 }
 
-// go-kure/launcher#394 is closed here. Until this change, the helpers above
-// answered "present?" with a bare map lookup, so a key authored as an explicit
-// null was present with a nil value and failed their type check:
+// go-kure/launcher#394's null case (shape 1) is closed here; its shapes 2 and 3
+// — named string types, and integer kinds beyond the four toInt32/toInt64
+// switch on — are the same parser-vs-validator disagreement in these same
+// helpers and are NOT fixed here, so that issue stays open. Until this change,
+// the helpers above answered "present?" with a bare map lookup, so a key
+// authored as an explicit null was present with a nil value and failed their
+// type check:
 // `updateStrategy:` with nothing after it became "updateStrategy: must be an
 // object, got <nil>". pkg/oam disagreed — validatePropertyValue returns early
 // for a null under an optional property ("a nil under an optional field
@@ -1766,8 +1770,22 @@ func parseObjectField(raw map[string]any, key, label string) (map[string]any, bo
 // published schema and still failing to convert.
 //
 // The gap is now closed at the definition rather than per call site, by routing
-// every helper above through authoredValue. Five optionalX wrappers used to sit
-// here doing that job for the subset of fields introduced by go-kure/launcher#339
+// every helper above through authoredValue.
+//
+// Blast radius, measured on the pre-change tree rather than estimated: 129
+// production call sites read a null differently after this change (134
+// occurrences of the eight helpers, less the 5 that were the wrappers' own
+// delegation). A further 33 production call sites went through the wrappers and
+// already behaved this way, which is why this file now shows 162 — 129 changed
+// plus 33 unchanged. The superseded comment here said "~20", which was
+// go-kure/launcher#394's count of a DIFFERENT population (sites emitting a
+// literal `must be an ..., got %T` from the bare comma-ok shape); that issue's
+// next sentence says the helper-caller surface is wider than its 20 literal
+// sites, and the number was carried across that line anyway. Recompute per
+// helper with `grep -c`; do not inherit this number either.
+//
+// Five optionalX wrappers used to sit here doing that job for the subset of
+// fields introduced by go-kure/launcher#339
 // and #381; they became exact duplicates of the helpers they wrapped and were
 // removed, because a wrapper whose doc says "X with an explicit null read as
 // omission" tells the next reader that plain X does NOT handle null, which is
@@ -1898,7 +1916,7 @@ func parseCapabilityList(raw map[string]any, key, label string) ([]corev1.Capabi
 }
 
 func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error) {
-	v, present := props["securityContext"]
+	v, present := authoredValue(props, "securityContext")
 	if !present {
 		return nil, nil
 	}
@@ -1982,7 +2000,7 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 	if sc.Privileged != nil && *sc.Privileged && sc.AllowPrivilegeEscalation != nil && !*sc.AllowPrivilegeEscalation {
 		return nil, errors.Errorf("securityContext: allowPrivilegeEscalation must not be false when privileged is true")
 	}
-	if v, present := raw["capabilities"]; present {
+	if v, present := authoredValue(raw, "capabilities"); present {
 		capsRaw, ok := v.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("securityContext.capabilities: must be an object, got %T", v)
@@ -2021,7 +2039,7 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			set = true
 		}
 	}
-	if v, present := raw["seccompProfile"]; present {
+	if v, present := authoredValue(raw, "seccompProfile"); present {
 		sp, err := parseSeccompProfile(v, "securityContext.seccompProfile")
 		if err != nil {
 			return nil, err
@@ -2029,7 +2047,7 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 		sc.SeccompProfile = sp
 		set = true
 	}
-	if v, present := raw["seLinuxOptions"]; present {
+	if v, present := authoredValue(raw, "seLinuxOptions"); present {
 		se, err := parseSELinuxOptions(v, "securityContext.seLinuxOptions")
 		if err != nil {
 			return nil, err
@@ -2039,7 +2057,7 @@ func parseSecurityContext(props map[string]any) (*corev1.SecurityContext, error)
 			set = true
 		}
 	}
-	if v, present := raw["appArmorProfile"]; present {
+	if v, present := authoredValue(raw, "appArmorProfile"); present {
 		ap, err := parseAppArmorProfile(v, "securityContext.appArmorProfile")
 		if err != nil {
 			return nil, err
@@ -2191,7 +2209,7 @@ func parseAppArmorProfile(v any, label string) (*corev1.AppArmorProfile, error) 
 
 func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 	var result ParsedVolumes
-	v, present := props["volumes"]
+	v, present := authoredValue(props, "volumes")
 	if !present {
 		return result, nil
 	}
@@ -2445,7 +2463,7 @@ func hasNonRWXPVC(pvcs []PVCConfig) bool {
 }
 
 func parseAccessModes(m map[string]any) ([]string, error) {
-	v, present := m["accessModes"]
+	v, present := authoredValue(m, "accessModes")
 	if !present {
 		return []string{string(corev1.ReadWriteOnce)}, nil
 	}
