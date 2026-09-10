@@ -1367,7 +1367,13 @@ object would change what the next `Generate` emits.
   (go-kure/launcher#448). Rejection reaches the `nodeSelector` **values**, not
   just its envelope: `nodeSelector: {rack: 3}` is refused by key rather than
   dropped, so a selector cannot silently reach the cluster narrower than
-  authored. An explicit **null** `affinity` is **absence** — no block is
+  authored. When more than one entry is wrong, the **alphabetically first**
+  offending key is the one reported: Go randomises map iteration order, so
+  without an explicit sort the same document names a different key run to run
+  and its diagnostic cannot be reproduced or asserted in a test. The same
+  ordering rule applies to the other three parsers in this package that report
+  a bad map entry by key — `parseResourceList`, `rejectUnknownKeys` and
+  `parseManifestSource`. An explicit **null** `affinity` is **absence** — no block is
   emitted and nothing is enabled — matching what `pkg/oam`'s own property
   validation already does with a null under an optional property; without
   that, `affinity:` with no value validated against the published schema and

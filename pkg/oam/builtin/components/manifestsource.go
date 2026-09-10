@@ -2,8 +2,10 @@ package components
 
 import (
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -45,7 +47,11 @@ type manifestSource struct {
 func parseManifestSource(props map[string]any) (*manifestSource, error) {
 	s := &manifestSource{}
 	count := 0
-	for k, v := range props {
+	// Sorted for the same reason as stringMapStrict in common.go: four of the
+	// arms below return an error naming k, so `{chart: ..., bogus: ...}` would
+	// otherwise report "not yet supported" or "unknown property" at random.
+	for _, k := range slices.Sorted(maps.Keys(props)) {
+		v := props[k]
 		switch k {
 		case "inline":
 			str, ok := v.(string)
