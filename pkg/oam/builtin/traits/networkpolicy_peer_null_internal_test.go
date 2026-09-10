@@ -145,3 +145,34 @@ func TestParseNPPeer_PresentIPBlockStillRequiresCIDR(t *testing.T) {
 		t.Fatal("an ipBlock with no cidr must be rejected; the null handling must not have made it absent")
 	}
 }
+
+func TestParseNPPeer_NullPeerEnvelopeIsRejected(t *testing.T) {
+	// The envelope one level above every test in this file. A typed nil satisfied
+	// the bare `.(map[string]any)` assertion with a nil map, which has no keys —
+	// so the unknown-key loop found nothing to reject, all three selector reads
+	// missed, and the peer was ACCEPTED as an empty one. An untyped nil failed the
+	// same assertion and was rejected. The two nil shapes therefore disagreed at
+	// the envelope while agreeing inside it, which is the divergence the rest of
+	// this file exists to remove.
+	for shape, value := range map[string]any{"untyped nil": nil, "typed nil": map[string]any(nil)} {
+		t.Run(shape, func(t *testing.T) {
+			if _, err := parseNPPeer(value, "from[0]"); err == nil {
+				t.Fatal("a null peer must be rejected, not accepted as an empty peer selecting nothing")
+			}
+		})
+	}
+}
+
+func TestParseNPPeer_PresentEmptyPeerStillParses(t *testing.T) {
+	// The control for the test above, and it is the one that stops the fix from
+	// being "reject anything falsy". An authored `- {}` is a present, empty peer:
+	// distinct from a null, and this parser has always accepted it. If the null
+	// guard were keyed on emptiness rather than on nil-ness, this would break.
+	peer, err := parseNPPeer(map[string]any{}, "from[0]")
+	if err != nil {
+		t.Fatalf("an authored empty peer object must still parse, got: %v", err)
+	}
+	if peer.PodSelector != nil || peer.NamespaceSelector != nil || peer.IPBlock != nil {
+		t.Errorf("an empty peer produced %+v, want all three fields nil", peer)
+	}
+}
