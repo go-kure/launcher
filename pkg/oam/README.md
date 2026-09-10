@@ -326,19 +326,29 @@ actually declares.
 `validateProperties`'s null check (`isNullValue`) treats a typed-nil pointer,
 slice, or map — not just a bare `nil` interface — as JSON `null`: a Go type
 assertion alone can't tell an uninitialized slice/map apart from a validly-typed
-empty collection, even though both serialize the same way, so a lowering rule
-that emits an unset (rather than empty) collection field is still caught.
+empty collection, *although the two serialize differently* — `null` versus
+`[]`/`{}` — so a lowering rule that emits an unset (rather than empty) collection
+field is still caught.
 
 `IsNullValue` is the exported form of that check, and with it the contract itself:
 **a value that serializes to JSON/YAML `null` is absent, not present-and-empty.**
+The predicate is nil-ness, not serialization: it reports true for a bare `nil` and
+for a nil map, slice, pointer, channel or func. Those coincide for every shape a
+decoded document can produce, which is what the contract is about; they part
+company only on values no document round-trips (a nil channel is reported null
+though `encoding/json` cannot marshal it at all).
+
 It exists for parsers outside this package — handler and trait property readers,
 and out-of-tree lowering rules — that must classify a null the same way the
 validator does. Use it rather than `value == nil`: a typed nil is a non-nil
 interface holding a nil value, so `== nil` is false and a `.(map[string]any)`
 assertion on it succeeds with `ok=true` and a nil map, making the key read as an
-authored empty collection. Where empty and absent mean different things — a
-`metav1.LabelSelector` is the standing example, empty matching everything and nil
-matching nothing — that difference is a behaviour change, not a cosmetic one.
+authored empty collection. Where empty and absent mean different things that
+difference is a behaviour change, not a cosmetic one. The standing example is a
+`metav1.LabelSelector` in a `NetworkPolicy` peer: an empty one matches everything,
+while a nil one applies no constraint on that axis — which is *not* the same as
+matching nothing, since what the peer then selects depends on the sibling fields it
+still has (`k8s.io/api` `networking/v1/types.go:199-222`).
 
 ## Contract metadata
 
