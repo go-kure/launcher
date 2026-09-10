@@ -2,6 +2,8 @@ package traits
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
@@ -276,16 +278,49 @@ var validNPPeerKeys = map[string]bool{
 // narrowest reading of one input differed by a Go type no document can express
 // (go-kure/launcher#430).
 //
-// The second return is false for absent, null, and wrong-typed alike. Wrong-typed
-// staying silent preserves this parser's existing behaviour and is deliberately
-// not changed here; it is the same silent-drop class as go-kure/launcher#423.
-func nonNullObject(m map[string]any, key string) (map[string]any, bool) {
+// A wrong-typed value is an ERROR, not a third flavour of absence. Silently
+// discarding it is what made `namespaceSelector: {matchLabels: "prod"}` produce a
+// selector with no labels — an EMPTY selector, which matches every namespace, so a
+// malformed constraint widened the peer to the maximum instead of failing. The
+// peer envelope and the peer key set are both already rejected by name two callers
+// up, and parseMatchLabelsSelector (networkpolicy_auto.go) rejects a wrong-typed
+// podSelector by name for the same shape, so silence here was the odd one out
+// rather than a contract.
+func nonNullObject(m map[string]any, key, path string) (map[string]any, bool, error) {
 	value, present := m[key]
 	if !present || oam.IsNullValue(value) {
-		return nil, false
+		return nil, false, nil
 	}
 	obj, ok := value.(map[string]any)
-	return obj, ok
+	if !ok {
+		return nil, false, errors.Errorf("%s.%s: expected object, got %T", path, key, value)
+	}
+	return obj, true, nil
+}
+
+// parseNPLabelSelector reads one optional selector-shaped key of a peer —
+// podSelector or namespaceSelector — and returns nil when it is absent or null.
+//
+// The nil return is the whole point: a nil *metav1.LabelSelector leaves the peer
+// scoped to the policy's own namespace, while a non-nil empty one matches EVERY
+// namespace, so "absent" must never be represented by an allocated selector
+// (go-kure/launcher#430).
+func parseNPLabelSelector(peerMap map[string]any, key, path string) (*metav1.LabelSelector, error) {
+	raw, present, err := nonNullObject(peerMap, key, path)
+	if err != nil || !present {
+		return nil, err
+	}
+	labels := make(map[string]string)
+	ml, present, err := nonNullObject(raw, "matchLabels", path+"."+key)
+	if err != nil {
+		return nil, err
+	}
+	if present {
+		for _, k := range slices.Sorted(maps.Keys(ml)) {
+			labels[k] = fmt.Sprintf("%v", ml[k])
+		}
+	}
+	return &metav1.LabelSelector{MatchLabels: labels}, nil
 }
 
 func parseNPPeer(raw any, path string) (npPeer, error) {
@@ -316,27 +351,23 @@ func parseNPPeer(raw any, path string) (npPeer, error) {
 
 	var peer npPeer
 
-	if rawPS, ok := nonNullObject(peerMap, "podSelector"); ok {
-		labels := make(map[string]string)
-		if ml, ok := nonNullObject(rawPS, "matchLabels"); ok {
-			for k, v := range ml {
-				labels[k] = fmt.Sprintf("%v", v)
-			}
-		}
-		peer.PodSelector = &metav1.LabelSelector{MatchLabels: labels}
+	podSelector, err := parseNPLabelSelector(peerMap, "podSelector", path)
+	if err != nil {
+		return npPeer{}, err
 	}
+	peer.PodSelector = podSelector
 
-	if rawNS, ok := nonNullObject(peerMap, "namespaceSelector"); ok {
-		labels := make(map[string]string)
-		if ml, ok := nonNullObject(rawNS, "matchLabels"); ok {
-			for k, v := range ml {
-				labels[k] = fmt.Sprintf("%v", v)
-			}
-		}
-		peer.NamespaceSelector = &metav1.LabelSelector{MatchLabels: labels}
+	namespaceSelector, err := parseNPLabelSelector(peerMap, "namespaceSelector", path)
+	if err != nil {
+		return npPeer{}, err
 	}
+	peer.NamespaceSelector = namespaceSelector
 
-	if rawIB, ok := nonNullObject(peerMap, "ipBlock"); ok {
+	rawIB, hasIB, err := nonNullObject(peerMap, "ipBlock", path)
+	if err != nil {
+		return npPeer{}, err
+	}
+	if hasIB {
 		cidr, ok := rawIB["cidr"].(string)
 		if !ok || cidr == "" {
 			return npPeer{}, errors.Errorf("%s.ipBlock: 'cidr' is required", path)
