@@ -120,6 +120,52 @@ func TestParseNPPeer_NullMatchLabelsKeepsSelector(t *testing.T) {
 	}
 }
 
+func TestParseNPPeer_NullLabelValueIsRejected(t *testing.T) {
+	// One depth below every other test here: the VALUE of a matchLabels entry.
+	// The selector is read through the null contract, but the values were then
+	// formatted with %v, which turns a null into the literal string "<nil>" — and
+	// a typed nil map or slice into "map[]" or "[]". Those are not label values;
+	// the document renders and the API server rejects it. Dropping the entry
+	// instead would remove an authored constraint and widen the selector, so this
+	// is an error.
+	for shape, value := range map[string]any{
+		"untyped nil":       nil,
+		"typed nil map":     map[string]any(nil),
+		"typed nil slice":   []any(nil),
+		"typed nil pointer": (*string)(nil),
+	} {
+		t.Run(shape, func(t *testing.T) {
+			peer, err := parseNPPeer(map[string]any{
+				"namespaceSelector": map[string]any{"matchLabels": map[string]any{"env": value}},
+			}, "from[0]")
+			if err == nil {
+				t.Fatalf("a null label value must be rejected, got %+v", peer.NamespaceSelector)
+			}
+			if got, want := err.Error(), `from[0].namespaceSelector.matchLabels: "env" has no value`; got != want {
+				t.Errorf("diagnostic = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestParseNPPeer_NonStringLabelValueStillFormats(t *testing.T) {
+	// The control: only NULL values are rejected. A number or boolean is a
+	// perfectly ordinary label value in a YAML document and must keep its
+	// existing %v rendering.
+	peer, err := parseNPPeer(map[string]any{
+		"podSelector": map[string]any{"matchLabels": map[string]any{"port": 8080, "tls": true}},
+	}, "from[0]")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := peer.PodSelector.MatchLabels["port"]; got != "8080" {
+		t.Errorf("matchLabels[port] = %q, want %q", got, "8080")
+	}
+	if got := peer.PodSelector.MatchLabels["tls"]; got != "true" {
+		t.Errorf("matchLabels[tls] = %q, want %q", got, "true")
+	}
+}
+
 func TestParseNPPeer_MalformedSelectorIsRejectedNotDropped(t *testing.T) {
 	// The third answer a selector read can give, beside "absent" and "present".
 	// A wrong-typed value used to be discarded silently, which for the NESTED case
