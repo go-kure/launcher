@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -536,37 +537,44 @@ func sortedSchemaKeys(m map[string]oam.PropertySchema) []string {
 	return keys
 }
 
-// TestBuiltinHandlerSchemaEnumsAreScalar asserts that no built-in handler declares an
-// Enum on an array- or object-typed node, at any depth. It iterates the same three
+// TestBuiltinHandlerSchemaEnumMembersHoldNoNull asserts that no built-in handler
+// declares an Enum member holding a null, at any depth. It iterates the same three
 // registration maps as the description test above, so it covers exactly the schemas
 // that ship.
 //
-// This is the compile-time half of the rule validatePropertyValue enforces at runtime
-// ("schema declares Enum on non-scalar type"). The runtime guard exists for schemas
-// registered from outside this repo through RegisterComponentLowering and friends; this
-// test exists so a built-in that acquires such an Enum fails here — where the fix is
-// obvious and free — rather than at the first emission that happens to exercise it.
+// This is the static half of the rule validatePropertyValue enforces at runtime
+// ("schema declares Enum member N holding a null, which no validated value can
+// match"). The runtime guard only fires when a document actually validates against the
+// property carrying the Enum, so a defective member on a rarely-exercised nested field
+// can ship unnoticed; this test reads every schema instead of waiting for a value to
+// reach one.
 //
 // Why the rule: Enum members are compared against a value validatePropertyValue has
 // already normalized (explicit nulls stripped, typed collections copied), while the
 // declared members are not, so a member holding a null at any depth can never match.
-// Restricting Enum to scalars removes that mismatch instead of maintaining two
-// representations in step.
-func TestBuiltinHandlerSchemaEnumsAreScalar(t *testing.T) {
+//
+// Keyed per MEMBER, not per schema type, because that is what the validator does: an
+// Enum declared on an array- or object-typed node is legal and keeps matching, as long
+// as no member holds a null. This test previously asserted the per-type rule and said
+// validatePropertyValue rejected it at runtime. It does not — see the Enum arm in
+// pkg/oam/property_validate.go and the matching paragraph in pkg/oam/README.md, which
+// record why the rule was narrowed — so that assertion would eventually have failed a
+// legal schema for a reason that was not true.
+func TestBuiltinHandlerSchemaEnumMembersHoldNoNull(t *testing.T) {
 	for name, h := range builtinComponentHandlers() {
-		assertSchemaEnumsScalar(t, "component", name, h)
+		assertSchemaEnumMembersNonNull(t, "component", name, h)
 	}
 	for name, h := range builtinTraitHandlers() {
-		assertSchemaEnumsScalar(t, "trait", name, h)
+		assertSchemaEnumMembersNonNull(t, "trait", name, h)
 	}
 	for name, r := range builtinTraitLoweringRules() {
-		assertSchemaEnumsScalar(t, "trait", name, r)
+		assertSchemaEnumMembersNonNull(t, "trait", name, r)
 	}
 }
 
-// assertSchemaEnumsScalar walks a handler's top-level PropertySchema entries, mirroring
-// assertSchemaDescribed.
-func assertSchemaEnumsScalar(t *testing.T, kind, name string, h any) {
+// assertSchemaEnumMembersNonNull walks a handler's top-level PropertySchema entries,
+// mirroring assertSchemaDescribed.
+func assertSchemaEnumMembersNonNull(t *testing.T, kind, name string, h any) {
 	t.Helper()
 	p, ok := h.(oam.PropertySchemaProvider)
 	if !ok {
@@ -574,22 +582,83 @@ func assertSchemaEnumsScalar(t *testing.T, kind, name string, h any) {
 	}
 	schema := p.PropertySchema()
 	for _, k := range sortedSchemaKeys(schema) {
-		assertEnumScalar(t, fmt.Sprintf("%s %s.%s", kind, name, k), schema[k])
+		assertEnumMembersNonNull(t, fmt.Sprintf("%s %s.%s", kind, name, k), schema[k])
 	}
 }
 
-// assertEnumScalar fails if node — or any nested Properties value or Items schema,
-// recursively — declares an Enum on an array or object type.
-func assertEnumScalar(t *testing.T, path string, node oam.PropertySchema) {
+// assertEnumMembersNonNull fails if node — or any nested Properties value or Items
+// schema, recursively — declares an Enum member holding a null.
+func assertEnumMembersNonNull(t *testing.T, path string, node oam.PropertySchema) {
 	t.Helper()
-	if len(node.Enum) > 0 && (node.Type == oam.PropertyTypeArray || node.Type == oam.PropertyTypeObject) {
-		t.Errorf("%s: PropertySchema declares Enum on non-scalar type %q — validatePropertyValue rejects this at runtime", path, node.Type)
+	for i, member := range node.Enum {
+		if schemaValueHoldsNull(member, 0) {
+			t.Errorf("%s: PropertySchema declares Enum member %d holding a null — validatePropertyValue rejects it, and no validated value could have matched it", path, i)
+		}
 	}
 	for _, k := range sortedSchemaKeys(node.Properties) {
-		assertEnumScalar(t, path+"."+k, node.Properties[k])
+		assertEnumMembersNonNull(t, path+"."+k, node.Properties[k])
 	}
 	if node.Items != nil {
-		assertEnumScalar(t, path+"[]", *node.Items)
+		assertEnumMembersNonNull(t, path+"[]", *node.Items)
+	}
+}
+
+// schemaEnumMemberMaxDepth mirrors pkg/oam's enumMemberMaxDepth.
+const schemaEnumMemberMaxDepth = 32
+
+// schemaValueHoldsNull mirrors pkg/oam's containsNullValue, which is unexported and in
+// another package: the same nil-kind set, the same walk through slices/arrays and
+// string-keyed maps, and the same treatment of an over-deep member as null-bearing
+// rather than clean.
+//
+// Drift here can only make this test miss a member the validator would reject, never
+// invent one: the runtime arm stays authoritative and pkg/oam's own
+// TestValidatePropertyValue_EnumMemberHoldingNullIsRejected pins it directly.
+func schemaValueHoldsNull(v any, depth int) bool {
+	if schemaValueIsNull(v) {
+		return true
+	}
+	if depth >= schemaEnumMemberMaxDepth {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < rv.Len(); i++ {
+			if schemaValueHoldsNull(rv.Index(i).Interface(), depth+1) {
+				return true
+			}
+		}
+		return false
+	case reflect.Map:
+		// A non-string-keyed map is not an object to the validator, which stops
+		// walking it for the same reason.
+		if rv.Type().Key().Kind() != reflect.String {
+			return false
+		}
+		iter := rv.MapRange()
+		for iter.Next() {
+			if schemaValueHoldsNull(iter.Value().Interface(), depth+1) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// schemaValueIsNull mirrors pkg/oam's isNullValue: an untyped nil, or a typed nil of
+// any kind that can hold one.
+func schemaValueIsNull(v any) bool {
+	if v == nil {
+		return true
+	}
+	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Chan, reflect.Func, reflect.Interface:
+		return rv.IsNil()
+	default:
+		return false
 	}
 }
 
