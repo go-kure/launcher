@@ -162,6 +162,20 @@ as an authored empty object and silently widen to every namespace
 (go-kure/launcher#430). A `null` `ipBlock` is likewise absent rather than an
 `ipBlock: 'cidr' is required` error; a **present** `ipBlock` still requires `cidr`.
 
+The peer **envelope** itself is the one place in this section where a null is an
+**error**, not absence:
+
+```yaml
+from:
+  - {}                            # a present, empty peer: parsed, selectors all absent
+  -                               # null: rejected, `ingress[0].from[1]: expected object`
+```
+
+A peer sits in a list, so "absent" has no meaning for it — dropping the element
+would silently shrink the rule, and an authored `- {}` already expresses the empty
+peer. This is what an untyped `nil` in that position always did; the typed nil now
+agrees with it instead of being accepted as an empty peer selecting nothing.
+
 ## Auto-synthesized NetworkPolicy
 
 Routing traits (`ingress`/`httproute`/`expose`) can surface platform-reserved
