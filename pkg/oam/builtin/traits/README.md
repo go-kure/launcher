@@ -135,7 +135,7 @@ not the app — chooses the implementation:
   render time — even when the two volumes have different names, Kubernetes requires every
   `VolumeMount.mountPath` in a container to be unique.
 
-## NetworkPolicy peer selectors: null, empty and absent
+## NetworkPolicy nulls: null, empty and absent
 
 In a `networkpolicy` peer (`ingress[].from[]` / `egress[].to[]`), `podSelector`,
 `namespaceSelector` and `ipBlock` are optional objects where **absent and empty are
@@ -175,6 +175,28 @@ A peer sits in a list, so "absent" has no meaning for it — dropping the elemen
 would silently shrink the rule, and an authored `- {}` already expresses the empty
 peer. This is what an untyped `nil` in that position always did; the typed nil now
 agrees with it instead of being accepted as an empty peer selecting nothing.
+
+### Null `ingress` / `egress`
+
+The trait's two top-level rule keys are optional individually and **required
+jointly** — `at least one of 'ingress' or 'egress' must be specified`. A null reads
+as absence *before* that requirement is evaluated, so it cannot satisfy it:
+
+```yaml
+ingress:                          # null -> absent, so this document is rejected
+```
+
+```yaml
+ingress:                          # null -> absent; the policy is the egress rules
+egress:
+  - to: [...]
+```
+
+An **authored empty list** is a different value and still satisfies the requirement:
+`ingress: []` means "select this component's pods and permit no ingress", which is a
+default-deny somebody asked for. A null `ingress:` used to produce exactly the same
+policy without anyone asking. A non-null value of the wrong type keeps its own
+`'ingress' must be an array` diagnostic.
 
 ## Auto-synthesized NetworkPolicy
 
