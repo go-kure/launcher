@@ -37,8 +37,11 @@ func TestIsNullValue(t *testing.T) {
 		value any
 		null  bool
 	}{
-		// Null: every shape that serializes to null, or that a Go-constructed
-		// property map can leave unset.
+		// Null: every shape the predicate calls null — a bare nil interface and
+		// each nil-able kind. Most of them are also the shapes that serialize to
+		// null, which is what the contract is about; the channel and func rows are
+		// the two that do not serialize at all, kept because the reflect.Kind
+		// switch names them.
 		{"untyped nil", nil, true},
 		{"nil map", map[string]any(nil), true},
 		{"nil typed map", map[string]string(nil), true},
