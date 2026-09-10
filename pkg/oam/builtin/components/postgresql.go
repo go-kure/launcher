@@ -481,7 +481,19 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	// (go-kure/launcher#448). The defaults and the podAntiAffinityType validation
 	// below match the shared parseAffinity in common.go, which this handler does
 	// not call because postgresql carries its own AffinityConfig shape.
-	affinityRaw, affinityPresent, err := parseObjectField(props, "affinity", "affinity")
+	//
+	// optionalObject, not parseObjectField: the envelope is where the two nil
+	// shapes disagreed, and in opposite directions. An UNTYPED nil (`affinity:`
+	// with no value) failed parseObjectField's assertion and became a hard error
+	// — yet pkg/oam's own validatePropertyValue reads a null under an optional
+	// property as absence and passes it, so that document validates and then
+	// fails to convert. A TYPED nil (an unset map from a Go lowering rule)
+	// satisfied the same assertion with a nil map, reported present, and switched
+	// pod anti-affinity ON with every default — a scheduling constraint nobody
+	// authored, from a value no document can distinguish from the first.
+	// optionalObject reads both as absence, which is the contract the validator
+	// already applies (go-kure/launcher#394 tracks folding this into the helpers).
+	affinityRaw, affinityPresent, err := optionalObject(props, "affinity", "affinity")
 	if err != nil {
 		return nil, err
 	}
@@ -528,7 +540,15 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 			return nil, err
 		}
 		if present {
-			config.AffinityNodeSelector = stringMap(nodeSelector)
+			// stringMapStrict, not stringMap: this block's whole purpose is that a
+			// wrongly-typed sub-field is refused by name rather than discarded, and
+			// a non-string nodeSelector VALUE is exactly that. stringMap dropped it
+			// silently, so the reject-the-envelope check added above sat directly on
+			// top of a silent discard of its own contents.
+			config.AffinityNodeSelector, err = stringMapStrict(nodeSelector, "affinity.nodeSelector")
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 

@@ -1364,7 +1364,17 @@ object would change what the next `Generate` emits.
   discarded while a default reaches the emitted cluster, and
   `podAntiAffinityType` must be `preferred` or `required` — an explicit empty
   string is an error here, not a fallback to the default
-  (go-kure/launcher#448). This is narrower than the shared `parseAffinity`,
+  (go-kure/launcher#448). Rejection reaches the `nodeSelector` **values**, not
+  just its envelope: `nodeSelector: {rack: 3}` is refused by key rather than
+  dropped, so a selector cannot silently reach the cluster narrower than
+  authored. An explicit **null** `affinity` is **absence** — no block is
+  emitted and nothing is enabled — matching what `pkg/oam`'s own property
+  validation already does with a null under an optional property; without
+  that, `affinity:` with no value validated against the published schema and
+  then failed to convert, while the same value built in Go turned pod
+  anti-affinity on with every default. A null *inside* a present block is
+  still a wrong-type error; only the envelope is absence.
+  This is narrower than the shared `parseAffinity`,
   whose own four sub-field reads still discard a wrongly typed value silently
   (`common.go`, tracked in go-kure/launcher#449); the two are expected to
   converge on this handler's behaviour, not the other way round.

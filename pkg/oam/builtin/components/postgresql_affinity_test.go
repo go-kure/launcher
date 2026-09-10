@@ -173,3 +173,100 @@ func TestPostgresqlAffinity_AbsenceAndDefaults(t *testing.T) {
 		}
 	})
 }
+
+// TestPostgresqlAffinity_NullEnvelopeIsAbsent covers the layer above every case in
+// TestPostgresqlAffinity_WrongTypeIsRejected: the affinity key itself authored as a
+// null. The two nil shapes disagreed, and in OPPOSITE directions, which is why neither
+// half of that pair shows up as a plain missing case.
+//
+// An untyped nil — `affinity:` with nothing after it — failed the object assertion and
+// became a hard error, while pkg/oam's own validatePropertyValue reads a null under an
+// optional property as absence and passes it. So that document validated against the
+// published schema and then failed to convert.
+//
+// A typed nil — what a Go lowering rule produces for an unset map — satisfied the same
+// assertion with a nil map and reported PRESENT, switching pod anti-affinity on with
+// every default. That is a scheduling constraint the document never asked for, from a
+// value no document can distinguish from the first one.
+func TestPostgresqlAffinity_NullEnvelopeIsAbsent(t *testing.T) {
+	for shape, value := range map[string]any{
+		"untyped nil": nil,
+		"typed nil":   map[string]any(nil),
+	} {
+		t.Run(shape, func(t *testing.T) {
+			cfg, err := postgresqlConfigFor(t, map[string]any{"affinity": value})
+			if err != nil {
+				t.Fatalf("a null affinity must read as absent, got error: %v", err)
+			}
+			if cfg.AffinityEnabled {
+				t.Error("AffinityEnabled = true for a null affinity; a null must not enable a scheduling constraint")
+			}
+			if cfg.AffinityEnablePodAntiAffinity {
+				t.Error("AffinityEnablePodAntiAffinity = true for a null affinity")
+			}
+			if cfg.AffinityTopologyKey != "" {
+				t.Errorf("AffinityTopologyKey = %q for a null affinity, want empty", cfg.AffinityTopologyKey)
+			}
+		})
+	}
+}
+
+// TestPostgresqlAffinity_NullSubFieldsAreStillRejected is the boundary control for the
+// test above. Reading a null as absence applies to the affinity ENVELOPE, which is what
+// the validator classifies; it is not a licence to accept a null anywhere inside the
+// block. These sub-fields keep their existing wrong-type diagnostics, so the envelope
+// fix cannot be mistaken for "nulls are fine everywhere".
+func TestPostgresqlAffinity_NullSubFieldsAreStillRejected(t *testing.T) {
+	for _, key := range []string{"enablePodAntiAffinity", "topologyKey", "nodeSelector"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := postgresqlConfigFor(t, map[string]any{
+				"affinity": map[string]any{key: nil},
+			})
+			if err == nil {
+				t.Fatalf("a null %s inside a present affinity block must still be rejected", key)
+			}
+		})
+	}
+}
+
+// TestPostgresqlAffinity_NodeSelectorValuesMustBeStrings closes the silent discard the
+// rest of this file exists to remove, one level further down. The block rejected a
+// wrongly-typed nodeSelector CONTAINER by name and then handed its CONTENTS to
+// stringMap, which drops every non-string value without a word — so
+// `nodeSelector: {rack: 3}` reached the emitted cluster as a nodeSelector with no rack
+// constraint, which is the exact failure #448 is about.
+func TestPostgresqlAffinity_NodeSelectorValuesMustBeStrings(t *testing.T) {
+	_, err := postgresqlConfigFor(t, map[string]any{
+		"affinity": map[string]any{
+			"nodeSelector": map[string]any{"zone": "a", "rack": float64(3)},
+		},
+	})
+	if err == nil {
+		t.Fatal("a non-string nodeSelector value must be rejected; it was silently dropped, narrowing the emitted selector")
+	}
+	if !strings.Contains(err.Error(), "affinity.nodeSelector") {
+		t.Errorf("error = %q, want it to name affinity.nodeSelector", err)
+	}
+	if !strings.Contains(err.Error(), "rack") {
+		t.Errorf("error = %q, want it to name the offending key so an author can find it", err)
+	}
+}
+
+// The control for the test above: an all-string nodeSelector must still round-trip
+// every pair. A parser that rejected any multi-key selector would pass the test above.
+func TestPostgresqlAffinity_ValidNodeSelectorRoundTrips(t *testing.T) {
+	cfg, err := postgresqlConfigFor(t, map[string]any{
+		"affinity": map[string]any{
+			"nodeSelector": map[string]any{"zone": "a", "workload-type": "database"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("a valid nodeSelector must parse, got: %v", err)
+	}
+	if got, want := len(cfg.AffinityNodeSelector), 2; got != want {
+		t.Fatalf("AffinityNodeSelector has %d entries, want %d: %#v", got, want, cfg.AffinityNodeSelector)
+	}
+	if cfg.AffinityNodeSelector["zone"] != "a" || cfg.AffinityNodeSelector["workload-type"] != "database" {
+		t.Errorf("AffinityNodeSelector = %#v", cfg.AffinityNodeSelector)
+	}
+}
