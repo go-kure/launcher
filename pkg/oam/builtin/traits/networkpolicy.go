@@ -253,6 +253,20 @@ func nonNullObject(m map[string]any, key string) (map[string]any, bool) {
 }
 
 func parseNPPeer(raw any, path string) (npPeer, error) {
+	// The null check precedes the assertion because a TYPED nil satisfies it with
+	// ok=true and a nil map, which then has no keys: the unknown-key loop finds
+	// nothing to reject, all three selector reads miss, and the peer is accepted as
+	// an empty one. An UNTYPED nil fails the same assertion and is rejected — so
+	// without this, the two nil shapes disagree at the envelope while agreeing
+	// inside it, which is the divergence the selectors below exist to remove. No
+	// document can express the difference between them (go-kure/launcher#430).
+	//
+	// A null peer is an ERROR rather than an absent one: it sits in a list, and
+	// dropping an element silently is the failure class this parser is being moved
+	// away from. That matches what an untyped nil already did.
+	if oam.IsNullValue(raw) {
+		return npPeer{}, errors.Errorf("%s: expected object", path)
+	}
 	peerMap, ok := raw.(map[string]any)
 	if !ok {
 		return npPeer{}, errors.Errorf("%s: expected object", path)
