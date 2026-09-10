@@ -72,15 +72,7 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 		return nil, errors.Errorf("passthrough component %q: 'object' must be a map", component.Name)
 	}
 
-	if apiVersion, ok := object["apiVersion"].(string); !ok || apiVersion == "" {
-		return nil, errors.Errorf("passthrough component %q: object.apiVersion is required and must be a non-empty string", component.Name)
-	}
-	kind, ok := object["kind"].(string)
-	if !ok || kind == "" {
-		return nil, errors.Errorf("passthrough component %q: object.kind is required and must be a non-empty string", component.Name)
-	}
-
-	if err := rejectListEnvelope(component.Name, kind, object); err != nil {
+	if err := validateEmittableObject(component.Name, object); err != nil {
 		return nil, err
 	}
 
@@ -114,8 +106,26 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 	}, nil
 }
 
+// validateEmittableObject holds everything that must be true of the map passthrough
+// is about to emit, so that ToApplicationConfig and Generate cannot disagree about
+// what a valid body is. Splitting it — the constructor checking identity, Generate
+// checking only list shape — is what let `&PassthroughConfig{Object: map[string]any{}}`
+// through: non-nil, so it cleared the nil guard, and carrying no items, so it cleared
+// both list arms, leaving Generate to emit a document consisting of nothing but the
+// metadata it had just stamped on.
+func validateEmittableObject(componentName string, object map[string]any) error {
+	if apiVersion, ok := object["apiVersion"].(string); !ok || apiVersion == "" {
+		return errors.Errorf("passthrough component %q: object.apiVersion is required and must be a non-empty string", componentName)
+	}
+	kind, ok := object["kind"].(string)
+	if !ok || kind == "" {
+		return errors.Errorf("passthrough component %q: object.kind is required and must be a non-empty string", componentName)
+	}
+	return rejectListEnvelope(componentName, kind, object)
+}
+
 // rejectListEnvelope refuses the two list-shaped bodies passthrough cannot honestly
-// emit as one resource. It is called from ToApplicationConfig, and again from
+// emit as one resource. It is reached from ToApplicationConfig, and again from
 // Generate on the map that is actually about to be emitted — see the note on
 // PassthroughConfig.Object for why the second call is not redundant.
 //
@@ -214,8 +224,7 @@ func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, er
 	}
 	obj := deepCopyMap(c.Object)
 
-	kind, _ := obj["kind"].(string)
-	if err := rejectListEnvelope(c.componentName, kind, obj); err != nil {
+	if err := validateEmittableObject(c.componentName, obj); err != nil {
 		return nil, err
 	}
 

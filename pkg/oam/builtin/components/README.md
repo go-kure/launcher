@@ -1462,10 +1462,17 @@ object would change what the next `Generate` emits.
   it was. `Object` is an exported field, so a caller holding the config can assign a
   fresh map over it, and a struct literal or a JSON decode never runs
   `ToApplicationConfig` at all — three routes reaching `Generate` with a body the arms
-  never saw. `Generate` therefore re-runs both arms on the map it is about to emit,
-  and rejects a config that carries no object at all. Checking the bytes being emitted,
-  rather than trusting a check that ran on some earlier map, is what closes those
-  routes.
+  never saw. `Generate` therefore re-runs, on the map it is about to emit, every check
+  that must hold of an emitted body: a non-empty `apiVersion` and `kind`, and both list
+  arms. Checking the bytes being emitted, rather than trusting a check that ran on some
+  earlier map, is what closes those routes.
+
+  Those checks live in one function precisely so the two call sites cannot disagree
+  about what a valid body is. While they were split — the constructor checking identity,
+  `Generate` checking only list shape — a `PassthroughConfig` holding an *empty* map
+  passed both: non-nil, so it cleared the no-object guard, and carrying no `items`, so
+  it cleared both arms, leaving `Generate` to emit a document consisting of nothing but
+  the metadata it had just stamped on.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
   (`apiVersion`/`kind`/`scope`) for unknown kinds.
 
