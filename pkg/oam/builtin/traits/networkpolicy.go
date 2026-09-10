@@ -175,6 +175,20 @@ func (h *NetworkPolicyHandler) parseProperties(props map[string]any, app *stack.
 }
 
 func parseNPIngressRule(raw any, index int) (npIngressRule, error) {
+	// parseNPPeer's envelope guard, one level up and for a sharper reason. A TYPED
+	// nil satisfies the assertion below with a nil map, which has no keys: the
+	// `from` and `ports` reads both miss and the rule is accepted with neither —
+	// and networking.k8s.io/v1 defines a rule with an empty `from` as matching ALL
+	// sources and an empty `ports` as matching ALL ports (k8s.io/api
+	// networking/v1/types.go:112-130), so a null element widened the policy to
+	// allow-all. An UNTYPED nil failed the same assertion and was rejected, so the
+	// two shapes disagreed here exactly as they did at the peer, but in the
+	// fail-OPEN direction. A rule sits in a list, so absence has no meaning for it
+	// and an authored `- {}` already expresses the empty rule
+	// (go-kure/launcher#430).
+	if oam.IsNullValue(raw) {
+		return npIngressRule{}, errors.Errorf("ingress[%d]: expected object", index)
+	}
 	ruleMap, ok := raw.(map[string]any)
 	if !ok {
 		return npIngressRule{}, errors.Errorf("ingress[%d]: expected object", index)
@@ -206,6 +220,10 @@ func parseNPIngressRule(raw any, index int) (npIngressRule, error) {
 }
 
 func parseNPEgressRule(raw any, index int) (npEgressRule, error) {
+	// The egress half of parseNPIngressRule's null guard; see the reasoning there.
+	if oam.IsNullValue(raw) {
+		return npEgressRule{}, errors.Errorf("egress[%d]: expected object", index)
+	}
 	ruleMap, ok := raw.(map[string]any)
 	if !ok {
 		return npEgressRule{}, errors.Errorf("egress[%d]: expected object", index)
@@ -346,6 +364,15 @@ var validNPProtocols = map[string]corev1.Protocol{
 }
 
 func parseNPPort(raw any, path string) (npPort, error) {
+	// The third and last list element in this file, so the null guard is here too
+	// and every element of every list the trait parses now reports the same thing
+	// for a null. Both nil shapes were already REJECTED here — a typed nil reached
+	// the `port` switch with a nil map and failed it — so this changes only the
+	// diagnostic, from a missing-`port` complaint to the accurate "the element
+	// itself is null" (go-kure/launcher#430).
+	if oam.IsNullValue(raw) {
+		return npPort{}, errors.Errorf("%s: expected object", path)
+	}
 	portMap, ok := raw.(map[string]any)
 	if !ok {
 		return npPort{}, errors.Errorf("%s: expected object", path)

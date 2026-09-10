@@ -82,6 +82,65 @@ func TestParseProperties_NullRuleKeyIsAbsentBesideARealOne(t *testing.T) {
 	}
 }
 
+func TestParseProperties_NullRuleElementIsRejected(t *testing.T) {
+	// One level BELOW the keys above and one ABOVE the peers: an element of the
+	// rule list itself. A typed nil satisfied `.(map[string]any)` with a nil map,
+	// whose `from` and `ports` reads then both miss — producing a rule with no
+	// peers and no ports, which networking.k8s.io/v1 defines as matching ALL
+	// sources on ALL ports. An untyped nil failed the same assertion and was
+	// rejected. Same divergence as the peer envelope, one level up, and this one
+	// fails OPEN (go-kure/launcher#430).
+	for _, key := range []string{"ingress", "egress"} {
+		for shape, value := range map[string]any{"untyped nil": nil, "typed nil": map[string]any(nil)} {
+			t.Run(key+"/"+shape, func(t *testing.T) {
+				_, err := npProps(t, map[string]any{key: []any{value}})
+				if err == nil {
+					t.Fatalf("a null '%s' rule element must be rejected; an empty rule matches all sources on all ports", key)
+				}
+				if got, want := err.Error(), key+"[0]: expected object"; got != want {
+					t.Errorf("diagnostic = %q, want %q", got, want)
+				}
+			})
+		}
+	}
+}
+
+func TestParseProperties_NullPortElementIsRejected(t *testing.T) {
+	// The third list this trait parses. Both shapes were already rejected here, so
+	// this pins the DIAGNOSTIC rather than a behaviour change: every list element
+	// in this file now reports "expected object" for a null instead of one of them
+	// complaining about a missing 'port'.
+	for shape, value := range map[string]any{"untyped nil": nil, "typed nil": map[string]any(nil)} {
+		t.Run(shape, func(t *testing.T) {
+			_, err := npProps(t, map[string]any{
+				"ingress": []any{map[string]any{"ports": []any{value}}},
+			})
+			if err == nil {
+				t.Fatal("a null port element must be rejected")
+			}
+			if got, want := err.Error(), "ingress[0].ports[0]: expected object"; got != want {
+				t.Errorf("diagnostic = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestParseProperties_EmptyRuleObjectStillParses(t *testing.T) {
+	// The control for the test above, and the reason the guard is keyed on
+	// nil-ness rather than on emptiness. An authored `- {}` rule is a present,
+	// empty rule — a real, expressible allow-all this parser has always accepted.
+	config, err := npProps(t, map[string]any{"ingress": []any{map[string]any{}}})
+	if err != nil {
+		t.Fatalf("an authored empty ingress rule must still parse, got: %v", err)
+	}
+	if len(config.Ingress) != 1 {
+		t.Fatalf("authored empty rule produced %d rules, want 1", len(config.Ingress))
+	}
+	if config.Ingress[0].From != nil || config.Ingress[0].Ports != nil {
+		t.Errorf("authored empty rule produced %+v, want both fields nil", config.Ingress[0])
+	}
+}
+
 func TestParseProperties_EmptyRuleListStaysPresent(t *testing.T) {
 	// The control, and the reason the fix is keyed on nil-ness rather than on
 	// emptiness. An authored `ingress: []` is a present, empty rule list — a real,
