@@ -283,9 +283,10 @@ var validNPPeerKeys = map[string]bool{
 // selector with no labels — an EMPTY selector, which matches every namespace, so a
 // malformed constraint widened the peer to the maximum instead of failing. The
 // peer envelope and the peer key set are both already rejected by name two callers
-// up, and parseMatchLabelsSelector (networkpolicy_auto.go) rejects a wrong-typed
-// podSelector by name for the same shape, so silence here was the odd one out
-// rather than a contract.
+// up, and the auto-synthesis parser in this same package rejects both halves of
+// the identical shape by name — a wrong-typed podSelector at
+// networkpolicy_auto.go:82-86, a wrong-typed matchLabels at :110-113 — so silence
+// here was the odd one out rather than a contract.
 func nonNullObject(m map[string]any, key, path string) (map[string]any, bool, error) {
 	value, present := m[key]
 	if !present || oam.IsNullValue(value) {
@@ -317,6 +318,16 @@ func parseNPLabelSelector(peerMap map[string]any, key, path string) (*metav1.Lab
 	}
 	if present {
 		for _, k := range slices.Sorted(maps.Keys(ml)) {
+			// The last depth the contract reaches, and %v does not respect it: a
+			// null label VALUE formatted as "<nil>" (or "map[]"/"[]" for a typed
+			// nil map/slice) is not a label value at all, it is a string the API
+			// server rejects — after the document has already rendered. Dropping
+			// the entry instead would remove an authored constraint and WIDEN the
+			// selector, so a null here is an error, like a null list element
+			// (go-kure/launcher#430).
+			if oam.IsNullValue(ml[k]) {
+				return nil, errors.Errorf("%s.%s.matchLabels: %q has no value", path, key, k)
+			}
 			labels[k] = fmt.Sprintf("%v", ml[k])
 		}
 	}
