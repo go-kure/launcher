@@ -287,10 +287,13 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// one — it only answers "is there a null anywhere in this literal".
 		//
 		// The comment this replaces cited TestBuiltinHandlerSchemaEnumsAreScalar as
-		// asserting that no built-in schema declares an Enum on a non-scalar type. No
-		// test by that name exists, here or anywhere in the package, so the claim is
-		// dropped rather than restated: nothing currently asserts that property, and
-		// this arm does not need it to be true.
+		// asserting that no built-in schema declares an Enum on a non-scalar type. That
+		// test existed — in package kurel, not here, which is why a grep of this package
+		// missed it — and it asserted the rule this arm no longer implements. It has
+		// been retargeted to the rule below and renamed
+		// TestBuiltinHandlerSchemaEnumMembersHoldNoNull, walking the schemas that ship
+		// for a member holding a null. Nothing asserts the per-TYPE property any more,
+		// and this arm does not need it to be true.
 		for i, member := range schema.Enum {
 			if containsNullValue(member, 0) {
 				return value, errors.Errorf(

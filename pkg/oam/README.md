@@ -369,8 +369,12 @@ of thing:
   but it also refuses the null-free compound enums that match perfectly well —
   and `PropertySchema` is exported, so a handler outside this repo would have seen
   a schema this validator used to accept start failing for a reason that does not
-  apply to it. No built-in schema declares an `Enum` on a non-scalar type today;
-  nothing asserts that as a rule, and this check does not depend on it.
+  apply to it. No built-in schema declares an `Enum` on a non-scalar type today,
+  but nothing asserts that as a rule and this check does not depend on it. What is
+  asserted is the rule above: `TestBuiltinHandlerSchemaEnumMembersHoldNoNull`
+  (`pkg/cmd/kurel`) walks every schema that ships for a member holding a null,
+  because the runtime arm only fires once a document validates against the property
+  carrying the `Enum`.
 
 Two things this deliberately does not do:
 
