@@ -120,6 +120,51 @@ func TestParseNPPeer_NullMatchLabelsKeepsSelector(t *testing.T) {
 	}
 }
 
+func TestParseNPPeer_MalformedSelectorIsRejectedNotDropped(t *testing.T) {
+	// The third answer a selector read can give, beside "absent" and "present".
+	// A wrong-typed value used to be discarded silently, which for the NESTED case
+	// is the same widening this whole file exists to prevent: a string matchLabels
+	// left the selector allocated with no labels, and an empty selector matches
+	// EVERY namespace. Not a lint: it turns a malformed constraint into the widest
+	// possible one, silently, at render time.
+	for _, tc := range []struct {
+		name  string
+		peer  map[string]any
+		error string
+	}{
+		{
+			name:  "string namespaceSelector",
+			peer:  map[string]any{"namespaceSelector": "prod"},
+			error: "from[0].namespaceSelector: expected object, got string",
+		},
+		{
+			name:  "string podSelector",
+			peer:  map[string]any{"podSelector": "web"},
+			error: "from[0].podSelector: expected object, got string",
+		},
+		{
+			name:  "string matchLabels widens the selector to every namespace",
+			peer:  map[string]any{"namespaceSelector": map[string]any{"matchLabels": "prod"}},
+			error: "from[0].namespaceSelector.matchLabels: expected object, got string",
+		},
+		{
+			name:  "list ipBlock",
+			peer:  map[string]any{"ipBlock": []any{"10.0.0.0/8"}},
+			error: "from[0].ipBlock: expected object, got []interface {}",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			peer, err := parseNPPeer(tc.peer, "from[0]")
+			if err == nil {
+				t.Fatalf("a malformed selector must be rejected, got peer %+v", peer)
+			}
+			if got := err.Error(); got != tc.error {
+				t.Errorf("diagnostic = %q, want %q", got, tc.error)
+			}
+		})
+	}
+}
+
 func TestParseNPPeer_NullIPBlockIsAbsentNotAnError(t *testing.T) {
 	// A typed-nil ipBlock used to satisfy the assertion, reach the required-cidr
 	// check and fail it — so the same "null" was absence when untyped and an
