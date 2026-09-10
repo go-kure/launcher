@@ -176,6 +176,21 @@ func (h *NetworkPolicyHandler) parseProperties(props map[string]any, app *stack.
 	return config, nil
 }
 
+// validNPIngressRuleKeys and validNPEgressRuleKeys are the two rule key sets
+// PropertySchema declares. They are separate maps rather than one shared set
+// because `from` and `to` are direction-specific: an ingress rule carrying `to` is
+// a document that meant something else, and accepting it silently would leave the
+// rule with no source constraint at all.
+var validNPIngressRuleKeys = map[string]bool{
+	"from":  true,
+	"ports": true,
+}
+
+var validNPEgressRuleKeys = map[string]bool{
+	"to":    true,
+	"ports": true,
+}
+
 func parseNPIngressRule(raw any, index int) (npIngressRule, error) {
 	// parseNPPeer's envelope guard, one level up and for a sharper reason. A TYPED
 	// nil satisfies the assertion below with a nil map, which has no keys: the
@@ -197,25 +212,40 @@ func parseNPIngressRule(raw any, index int) (npIngressRule, error) {
 	}
 
 	var rule npIngressRule
+	path := fmt.Sprintf("ingress[%d]", index)
 
-	if rawFrom, ok := ruleMap["from"].([]any); ok {
-		for j, rawPeer := range rawFrom {
-			peer, err := parseNPPeer(rawPeer, fmt.Sprintf("ingress[%d].from[%d]", index, j))
-			if err != nil {
-				return npIngressRule{}, err
-			}
-			rule.From = append(rule.From, peer)
+	// The rule's own key set, closed for the same reason as the peer's and with a
+	// sharper consequence: `from` is the rule's only source constraint, so a
+	// misspelt one used to be dropped in silence and leave a rule that matches ALL
+	// sources. Sorted for a deterministic diagnostic.
+	for _, k := range slices.Sorted(maps.Keys(ruleMap)) {
+		if !validNPIngressRuleKeys[k] {
+			return npIngressRule{}, errors.Errorf("%s: unsupported key %q", path, k)
 		}
 	}
 
-	if rawPorts, ok := ruleMap["ports"].([]any); ok {
-		for j, rawPort := range rawPorts {
-			port, err := parseNPPort(rawPort, fmt.Sprintf("ingress[%d].ports[%d]", index, j))
-			if err != nil {
-				return npIngressRule{}, err
-			}
-			rule.Ports = append(rule.Ports, port)
+	rawFrom, _, err := nonNullArray(ruleMap, "from", path)
+	if err != nil {
+		return npIngressRule{}, err
+	}
+	for j, rawPeer := range rawFrom {
+		peer, err := parseNPPeer(rawPeer, fmt.Sprintf("%s.from[%d]", path, j))
+		if err != nil {
+			return npIngressRule{}, err
 		}
+		rule.From = append(rule.From, peer)
+	}
+
+	rawPorts, _, err := nonNullArray(ruleMap, "ports", path)
+	if err != nil {
+		return npIngressRule{}, err
+	}
+	for j, rawPort := range rawPorts {
+		port, err := parseNPPort(rawPort, fmt.Sprintf("%s.ports[%d]", path, j))
+		if err != nil {
+			return npIngressRule{}, err
+		}
+		rule.Ports = append(rule.Ports, port)
 	}
 
 	return rule, nil
@@ -232,25 +262,38 @@ func parseNPEgressRule(raw any, index int) (npEgressRule, error) {
 	}
 
 	var rule npEgressRule
+	path := fmt.Sprintf("egress[%d]", index)
 
-	if rawTo, ok := ruleMap["to"].([]any); ok {
-		for j, rawPeer := range rawTo {
-			peer, err := parseNPPeer(rawPeer, fmt.Sprintf("egress[%d].to[%d]", index, j))
-			if err != nil {
-				return npEgressRule{}, err
-			}
-			rule.To = append(rule.To, peer)
+	// The egress half of the ingress rule's key set; see the reasoning there. `to`
+	// is this rule's only destination constraint.
+	for _, k := range slices.Sorted(maps.Keys(ruleMap)) {
+		if !validNPEgressRuleKeys[k] {
+			return npEgressRule{}, errors.Errorf("%s: unsupported key %q", path, k)
 		}
 	}
 
-	if rawPorts, ok := ruleMap["ports"].([]any); ok {
-		for j, rawPort := range rawPorts {
-			port, err := parseNPPort(rawPort, fmt.Sprintf("egress[%d].ports[%d]", index, j))
-			if err != nil {
-				return npEgressRule{}, err
-			}
-			rule.Ports = append(rule.Ports, port)
+	rawTo, _, err := nonNullArray(ruleMap, "to", path)
+	if err != nil {
+		return npEgressRule{}, err
+	}
+	for j, rawPeer := range rawTo {
+		peer, err := parseNPPeer(rawPeer, fmt.Sprintf("%s.to[%d]", path, j))
+		if err != nil {
+			return npEgressRule{}, err
 		}
+		rule.To = append(rule.To, peer)
+	}
+
+	rawPorts, _, err := nonNullArray(ruleMap, "ports", path)
+	if err != nil {
+		return npEgressRule{}, err
+	}
+	for j, rawPort := range rawPorts {
+		port, err := parseNPPort(rawPort, fmt.Sprintf("%s.ports[%d]", path, j))
+		if err != nil {
+			return npEgressRule{}, err
+		}
+		rule.Ports = append(rule.Ports, port)
 	}
 
 	return rule, nil
@@ -262,6 +305,15 @@ var validNPPeerKeys = map[string]bool{
 	"ipBlock":           true,
 }
 
+// validNPIPBlockKeys closes the ipBlock object over the two fields
+// networking.k8s.io/v1 gives it (k8s.io/api networking/v1/types.go:182-194), for
+// the same reason validNPPeerKeys closes the peer: `except` is an EXCLUSION, so a
+// misspelt key dropped it and rendered a block WIDER than the document authored.
+var validNPIPBlockKeys = map[string]bool{
+	"cidr":   true,
+	"except": true,
+}
+
 // nonNullObject reads an optional object-valued key, treating an explicit null —
 // untyped (a YAML `key:` with no value) or typed (map[string]any(nil), what an
 // uninitialized Go map in a lowering rule produces) — as an ABSENT key, per the
@@ -271,7 +323,9 @@ var validNPPeerKeys = map[string]bool{
 // assertion with ok=true and a nil map, so the key reads as an authored empty
 // object. For a peer selector that is not a cosmetic difference — an empty
 // metav1.LabelSelector matches EVERY namespace in networking.k8s.io/v1, while a
-// nil one leaves the peer scoped to the policy's own namespace. The other
+// nil one applies no namespace constraint at all, which alongside a podSelector
+// leaves the peer scoped to the policy's own namespace (k8s.io/api
+// networking/v1/types.go:199-222). The other
 // metav1.LabelSelector reader in this repo — parseLabelSelector
 // (components/volumeclaim_spec.go), which takes its `selector` and `matchLabels`
 // through optionalObject — calls the same value absence, so the widest and the
@@ -299,17 +353,89 @@ func nonNullObject(m map[string]any, key, path string) (map[string]any, bool, er
 	return obj, true, nil
 }
 
+// nonNullArray is nonNullObject for a list-valued key: null and absent are the same
+// answer, and a wrong-typed value is an error rather than a third flavour of
+// absence.
+//
+// The error half is the load-bearing one. Every list this parser reads is a
+// CONSTRAINT, so discarding a mistyped one renders something WIDER than the
+// document asked for: a rule whose `from` was dropped matches all sources and one
+// whose `ports` was dropped matches all ports (k8s.io/api networking/v1/types.go
+// :112-130), and an ipBlock whose `except` was dropped keeps the exclusions the
+// author wrote out of the rendered block. A bare `m[key].([]any)` comma-ok gave
+// exactly that: `from: "web"` parsed to a rule with no peers, silently, at render
+// time (go-kure/launcher#430).
+func nonNullArray(m map[string]any, key, path string) ([]any, bool, error) {
+	value, present := m[key]
+	if !present || oam.IsNullValue(value) {
+		return nil, false, nil
+	}
+	arr, ok := value.([]any)
+	if !ok {
+		return nil, false, errors.Errorf("%s.%s: expected array, got %T", path, key, value)
+	}
+	return arr, true, nil
+}
+
+// validNPSelectorKeys is the key set of a peer selector. metav1.LabelSelector has
+// exactly two fields, matchLabels and matchExpressions, and this parser implements
+// the first; the second is listed nowhere, so it is rejected as unsupported rather
+// than accepted and dropped.
+//
+// Rejecting by name is not a lint here, it is the same fail-open the rest of this
+// file closes. An unrecognized key used to leave the selector ALLOCATED with no
+// labels, and a non-nil empty metav1.LabelSelector matches EVERY namespace (or
+// every pod) — so `namespaceSelector: {matchExpressions: [...]}`, a perfectly
+// ordinary Kubernetes selector, widened the peer to the maximum instead of failing.
+// A wrong-TYPED selector was already rejected for exactly that reason
+// (nonNullObject above); an unrecognized KEY took the same silent path.
+// PropertySchema declares this selector closed over matchLabels already, but
+// NetworkPolicyHandler.Apply does not run the schema preflight, so the parser is
+// the only guard on the authored path (go-kure/launcher#430).
+var validNPSelectorKeys = map[string]bool{
+	"matchLabels": true,
+}
+
+// npLabelValue renders one matchLabels value, and reports whether the value is
+// something a label can hold at all.
+//
+// %v renders anything, which is the defect: a map value renders as "map[a:1]" and
+// a slice as "[x y]" — strings no label value may contain, so the document renders
+// and the API server rejects it one layer away from the cause. That is the reason
+// the null guard beside this call already gives, and a null is not the only value
+// it covers. Scalars are unaffected: a YAML/JSON decoder produces string, bool and
+// one of the numeric kinds for an ordinary label value, and each keeps its existing
+// %v rendering (go-kure/launcher#430).
+func npLabelValue(value any) (string, bool) {
+	switch value.(type) {
+	case string, bool,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64:
+		return fmt.Sprintf("%v", value), true
+	default:
+		return "", false
+	}
+}
+
 // parseNPLabelSelector reads one optional selector-shaped key of a peer —
 // podSelector or namespaceSelector — and returns nil when it is absent or null.
 //
-// The nil return is the whole point: a nil *metav1.LabelSelector leaves the peer
-// scoped to the policy's own namespace, while a non-nil empty one matches EVERY
-// namespace, so "absent" must never be represented by an allocated selector
+// The nil return is the whole point: a nil *metav1.LabelSelector does not constrain
+// the peer on that axis, while a non-nil empty one matches EVERY namespace (or
+// every pod), so "absent" must never be represented by an allocated selector
 // (go-kure/launcher#430).
 func parseNPLabelSelector(peerMap map[string]any, key, path string) (*metav1.LabelSelector, error) {
 	raw, present, err := nonNullObject(peerMap, key, path)
 	if err != nil || !present {
 		return nil, err
+	}
+	// Sorted, so a selector carrying two unrecognized keys reports the same one
+	// every run; map iteration order would make the diagnostic a coin flip.
+	for _, k := range slices.Sorted(maps.Keys(raw)) {
+		if !validNPSelectorKeys[k] {
+			return nil, errors.Errorf("%s.%s: unsupported key %q", path, key, k)
+		}
 	}
 	labels := make(map[string]string)
 	ml, present, err := nonNullObject(raw, "matchLabels", path+"."+key)
@@ -328,7 +454,11 @@ func parseNPLabelSelector(peerMap map[string]any, key, path string) (*metav1.Lab
 			if oam.IsNullValue(ml[k]) {
 				return nil, errors.Errorf("%s.%s.matchLabels: %q has no value", path, key, k)
 			}
-			labels[k] = fmt.Sprintf("%v", ml[k])
+			value, ok := npLabelValue(ml[k])
+			if !ok {
+				return nil, errors.Errorf("%s.%s.matchLabels: %q must be a string, number or boolean, got %T", path, key, k, ml[k])
+			}
+			labels[k] = value
 		}
 	}
 	return &metav1.LabelSelector{MatchLabels: labels}, nil
@@ -354,7 +484,9 @@ func parseNPPeer(raw any, path string) (npPeer, error) {
 		return npPeer{}, errors.Errorf("%s: expected object", path)
 	}
 
-	for key := range peerMap {
+	// Sorted, so a peer carrying two unrecognized keys names the same one every
+	// run; map iteration order would make the diagnostic a coin flip.
+	for _, key := range slices.Sorted(maps.Keys(peerMap)) {
 		if !validNPPeerKeys[key] {
 			return npPeer{}, errors.Errorf("%s: unsupported key %q", path, key)
 		}
@@ -379,19 +511,33 @@ func parseNPPeer(raw any, path string) (npPeer, error) {
 		return npPeer{}, err
 	}
 	if hasIB {
-		cidr, ok := rawIB["cidr"].(string)
-		if !ok || cidr == "" {
+		// Sorted, for the same reason as the peer key loop above.
+		for _, key := range slices.Sorted(maps.Keys(rawIB)) {
+			if !validNPIPBlockKeys[key] {
+				return npPeer{}, errors.Errorf("%s.ipBlock: unsupported key %q", path, key)
+			}
+		}
+		rawCIDR, hasCIDR := rawIB["cidr"]
+		cidr, isString := rawCIDR.(string)
+		switch {
+		case !hasCIDR || oam.IsNullValue(rawCIDR) || (isString && cidr == ""):
 			return npPeer{}, errors.Errorf("%s.ipBlock: 'cidr' is required", path)
+		case !isString:
+			// Was folded into the required-cidr message, which reads as "you
+			// forgot it" for a key that is present and mistyped.
+			return npPeer{}, errors.Errorf("%s.ipBlock.cidr: expected string, got %T", path, rawCIDR)
 		}
 		ipBlock := &networkingv1.IPBlock{CIDR: cidr}
-		if rawExcept, ok := rawIB["except"].([]any); ok {
-			for _, e := range rawExcept {
-				s, ok := e.(string)
-				if !ok {
-					return npPeer{}, errors.Errorf("%s.ipBlock.except: expected string values", path)
-				}
-				ipBlock.Except = append(ipBlock.Except, s)
+		rawExcept, _, err := nonNullArray(rawIB, "except", path+".ipBlock")
+		if err != nil {
+			return npPeer{}, err
+		}
+		for _, e := range rawExcept {
+			s, ok := e.(string)
+			if !ok {
+				return npPeer{}, errors.Errorf("%s.ipBlock.except: expected string values", path)
 			}
+			ipBlock.Except = append(ipBlock.Except, s)
 		}
 		peer.IPBlock = ipBlock
 	}

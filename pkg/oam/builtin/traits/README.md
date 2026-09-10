@@ -141,7 +141,15 @@ In a `networkpolicy` peer (`ingress[].from[]` / `egress[].to[]`), `podSelector`,
 `namespaceSelector` and `ipBlock` are optional objects where **absent and empty are
 opposite answers**, because that is what `networking.k8s.io/v1` means by them: an
 **empty** `namespaceSelector` (`{}`) matches **every** namespace, while an **absent**
-one leaves the peer scoped to the policy's own namespace.
+one does not constrain namespaces at all — which, for a peer that *also* sets
+`podSelector`, leaves it scoped to the policy's own namespace (`k8s.io/api`
+`networking/v1/types.go:199-222`).
+
+The "own namespace" reading belongs to that pairing, not to the null on its own. A
+peer with **no** selector and no `ipBlock` is not a narrow peer and it selects
+nothing on purpose: it names no peer at all, and the type's own summary is that
+"only certain combinations of fields are allowed" (`types.go:197-198`). Read a null
+selector as absence first, then ask what the peer has left.
 
 An explicit `null` is **absence**, following the contract `oam.IsNullValue` carries
 (see [`pkg/oam`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)) — so
@@ -150,9 +158,11 @@ same as `namespaceSelector: {}`:
 
 ```yaml
 from:
-  - namespaceSelector:            # null -> absent: the policy's own namespace only
-  - namespaceSelector: {}         # empty -> every namespace
-  - namespaceSelector:            # populated -> namespaces carrying the label
+  - podSelector: {matchLabels: {app: web}}
+    namespaceSelector:            # null -> absent: web pods in the policy's own namespace
+  - podSelector: {matchLabels: {app: web}}
+    namespaceSelector: {}         # empty -> web pods in EVERY namespace
+  - namespaceSelector:            # populated -> every pod in namespaces carrying the label
       matchLabels: {env: prod}
 ```
 
@@ -168,10 +178,31 @@ is rejected as `…: expected object, got string`. Discarding it left the select
 allocated with no labels, and an empty selector matches every namespace, so a
 malformed constraint used to widen the peer to the maximum at render time.
 
-The same applies one depth further down, to a `matchLabels` **value**: `env:` with
-no value is rejected as `…matchLabels: "env" has no value`, rather than rendering
-the literal string `<nil>` into a label the API server then refuses. Non-null
-scalars are unaffected — `port: 8080` is still the label value `"8080"`.
+An **unrecognized key** is the same answer for the same reason, at every object
+depth of the trait: the peer (`podSelector`, `namespaceSelector`, `ipBlock`), the
+selector (`matchLabels`), the `ipBlock` (`cidr`, `except`) and the rule itself
+(`from`/`to`, `ports`). Each is rejected as `…: unsupported key "…"`, naming the
+lexicographically first offender so the diagnostic is the same on every run:
+
+```yaml
+from:
+  - namespaceSelector:
+      matchExpressions: [...]     # rejected: this parser implements matchLabels only
+  - ipBlock: {cidr: 10.0.0.0/8, exclude: [10.1.0.0/16]} # rejected: the key is `except`
+```
+
+`matchExpressions` is the case worth spelling out: it is a real
+`metav1.LabelSelector` field, so a document written against Kubernetes' own schema
+used to parse into a selector with **no** labels — which matches every namespace.
+A constraint this parser cannot honour must fail, never widen.
+
+The same applies one depth further down, to a `matchLabels` **value**. `env:` with
+no value is rejected as `…matchLabels: "env" has no value`, and a **composite**
+value — a mapping or a list — as `…matchLabels: "env" must be a string, number or
+boolean, got …`. Both used to reach `%v` and render `<nil>`, `map[a:1]` or `[x y]`
+into a label the API server then refuses, one layer away from the cause. Scalars
+are unaffected: `port: 8080` is still the label value `"8080"`, and so are booleans
+and every numeric kind a YAML or JSON decoder produces.
 
 The peer **envelope** itself is the one place in this section where a null is an
 **error**, not absence:
@@ -185,7 +216,7 @@ from:
 A peer sits in a list, so "absent" has no meaning for it — dropping the element
 would silently shrink the rule, and an authored `- {}` already expresses the empty
 peer. This is what an untyped `nil` in that position always did; the typed nil now
-agrees with it instead of being accepted as an empty peer selecting nothing.
+agrees with it instead of being accepted as a peer that names no source at all.
 
 The same holds one level up, for an element of the `ingress`/`egress` **rule**
 list, where it matters more: a rule with neither `from`/`to` nor `ports` matches
@@ -197,6 +228,25 @@ ingress:
   - {}                            # a present, empty rule: allow-all, authored on purpose
   -                               # null: rejected, `ingress[0]: expected object`
 ```
+
+A rule's `from`/`to` and `ports` are read the same way, and for the same reason:
+each is a **constraint**, so a mistyped one used to be discarded and leave the
+rule matching everything on that axis. A null is absence (an absent `from` *is*
+the authored allow-all), an authored `[]` is that same value written down, and a
+wrong-typed value is an error:
+
+```yaml
+ingress:
+  - from:                         # null -> absent: this rule allows all sources
+    ports: [{port: 8080}]
+  - from: web                     # rejected: `ingress[0].from: expected array, got string`
+  - frm: [...]                    # rejected: `ingress[0]: unsupported key "frm"`
+```
+
+`ipBlock.except` behaves the same, one level down, and is the clearest case of the
+class: `except` is an **exclusion**, so a dropped one renders a block strictly
+wider than the document authored. A mistyped `cidr` now reports itself as mistyped
+(`…ipBlock.cidr: expected string, got int`) instead of as missing.
 
 ### Null `ingress` / `egress`
 
@@ -216,9 +266,14 @@ egress:
 
 An **authored empty list** is a different value and still satisfies the requirement:
 `ingress: []` means "select this component's pods and permit no ingress", which is a
-default-deny somebody asked for. A null `ingress:` used to produce exactly the same
-policy without anyone asking. A non-null value of the wrong type keeps its own
-`'ingress' must be an array` diagnostic.
+default-deny somebody asked for. A **typed** nil `ingress` — an uninitialized Go
+slice from a lowering rule that builds trait properties directly — used to produce
+exactly that policy without anyone asking, because it satisfied the `[]any`
+assertion with `ok=true` and a nil slice. An **authored** `ingress:` with no value
+never reached that point: it failed the same assertion and reported `'ingress' must
+be an array`, a mistyped-key diagnostic for a key that is absent. The two shapes now
+agree, and a genuinely non-null value of the wrong type keeps that
+`'ingress' must be an array` diagnostic for itself.
 
 ## Auto-synthesized NetworkPolicy
 
