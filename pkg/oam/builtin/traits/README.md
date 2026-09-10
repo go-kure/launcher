@@ -168,6 +168,11 @@ is rejected as `…: expected object, got string`. Discarding it left the select
 allocated with no labels, and an empty selector matches every namespace, so a
 malformed constraint used to widen the peer to the maximum at render time.
 
+The same applies one depth further down, to a `matchLabels` **value**: `env:` with
+no value is rejected as `…matchLabels: "env" has no value`, rather than rendering
+the literal string `<nil>` into a label the API server then refuses. Non-null
+scalars are unaffected — `port: 8080` is still the label value `"8080"`.
+
 The peer **envelope** itself is the one place in this section where a null is an
 **error**, not absence:
 
