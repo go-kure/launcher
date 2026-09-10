@@ -26,8 +26,15 @@ func npProps(t *testing.T, props map[string]any) (*NetworkPolicyConfig, error) {
 }
 
 // Both keys, every time. The two guards are separate statements, so a test that
-// only nulls `ingress` pins only half the fix; each key's subtests were confirmed
-// to fail when that key's guard alone is disabled, and the other key's do not.
+// only nulls `ingress` pins only half the fix.
+//
+// Measured, by deleting one guard at a time and running this package: with the
+// `ingress` guard gone, both ingress subtests of the joint-requirement test below
+// fail and no egress subtest does; the `egress` guard is symmetric. The
+// companion test after it is weaker, and deliberately said so
+// rather than being credited with discrimination it does not have: only its
+// UNTYPED-nil rows fail, because a typed nil still satisfies the `[]any` assertion
+// and ranges to nothing, leaving the same nil config field the guard produces.
 var npNullShapes = map[string]any{"untyped nil": nil, "typed nil": []any(nil)}
 
 func TestParseProperties_NullRuleKeyDoesNotSatisfyTheJointRequirement(t *testing.T) {
@@ -152,6 +159,106 @@ func TestParseProperties_EmptyRuleListStaysPresent(t *testing.T) {
 	}
 	if len(config.Ingress) != 0 {
 		t.Errorf("empty 'ingress' produced %d rules, want 0", len(config.Ingress))
+	}
+}
+
+func TestParseProperties_MistypedPeerOrPortListIsRejected(t *testing.T) {
+	// The rule's two list-valued keys, read with a bare comma-ok until now: a
+	// wrong-typed value was DISCARDED, and both keys are constraints, so the
+	// discard rendered a rule wider than the document authored. A rule with no
+	// `from` matches all sources and one with no `ports` matches all ports
+	// (k8s.io/api networking/v1/types.go:112-130), so `from: "web"` — a plausible
+	// mistake — used to parse into allow-all.
+	for _, tc := range []struct {
+		name  string
+		props map[string]any
+		want  string
+	}{
+		{"string from", map[string]any{"ingress": []any{map[string]any{"from": "web"}}},
+			"ingress[0].from: expected array, got string"},
+		{"object from", map[string]any{"ingress": []any{map[string]any{"from": map[string]any{"podSelector": map[string]any{}}}}},
+			"ingress[0].from: expected array, got map[string]interface {}"},
+		{"string to", map[string]any{"egress": []any{map[string]any{"to": "db"}}},
+			"egress[0].to: expected array, got string"},
+		{"numeric ingress ports", map[string]any{"ingress": []any{map[string]any{"ports": 8080}}},
+			"ingress[0].ports: expected array, got int"},
+		{"numeric egress ports", map[string]any{"egress": []any{map[string]any{"ports": 8080}}},
+			"egress[0].ports: expected array, got int"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config, err := npProps(t, tc.props)
+			if err == nil {
+				t.Fatalf("a mistyped rule list must be rejected, got %+v", config)
+			}
+			if got := err.Error(); got != tc.want {
+				t.Errorf("diagnostic = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseProperties_UnknownRuleKeyIsRejected(t *testing.T) {
+	// The rule key set. `from`/`to` is the rule's only peer constraint, so a
+	// misspelt one was dropped in silence and left a rule matching ALL sources —
+	// the worst instance in this file of the class the key checks close. The
+	// direction keys are deliberately not interchangeable: `to` inside an ingress
+	// rule is a document that meant something else.
+	for _, tc := range []struct {
+		name  string
+		props map[string]any
+		want  string
+	}{
+		{"misspelt from", map[string]any{"ingress": []any{map[string]any{"frm": []any{}}}},
+			`ingress[0]: unsupported key "frm"`},
+		{"egress key in an ingress rule", map[string]any{"ingress": []any{map[string]any{"to": []any{}}}},
+			`ingress[0]: unsupported key "to"`},
+		{"ingress key in an egress rule", map[string]any{"egress": []any{map[string]any{"from": []any{}}}},
+			`egress[0]: unsupported key "from"`},
+		{"misspelt ports beside a real from", map[string]any{"ingress": []any{map[string]any{
+			"from":  []any{map[string]any{"podSelector": map[string]any{}}},
+			"portz": []any{},
+		}}}, `ingress[0]: unsupported key "portz"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config, err := npProps(t, tc.props)
+			if err == nil {
+				t.Fatalf("an unrecognized rule key must be rejected, got %+v", config)
+			}
+			if got := err.Error(); got != tc.want {
+				t.Errorf("diagnostic = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseProperties_NullAndEmptyRuleListsStillParse(t *testing.T) {
+	// The control for the two tests above. Absence of `from`/`ports` is legal and
+	// meaningful — it is exactly the authored allow-all — so the new guards must
+	// reject only the wrong-typed and unrecognized shapes. A null reads as absent
+	// here as it does everywhere else, and an authored empty list is a present
+	// value that must survive.
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{"untyped nil", nil},
+		{"typed nil", []any(nil)},
+		{"authored empty list", []any{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config, err := npProps(t, map[string]any{
+				"ingress": []any{map[string]any{"from": tc.value, "ports": tc.value}},
+			})
+			if err != nil {
+				t.Fatalf("an absent-or-empty from/ports must parse, got: %v", err)
+			}
+			if len(config.Ingress) != 1 {
+				t.Fatalf("produced %d rules, want 1", len(config.Ingress))
+			}
+			if config.Ingress[0].From != nil || config.Ingress[0].Ports != nil {
+				t.Errorf("produced %+v, want both fields nil", config.Ingress[0])
+			}
+		})
 	}
 }
 
