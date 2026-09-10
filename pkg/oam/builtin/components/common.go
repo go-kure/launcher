@@ -163,6 +163,35 @@ func stringMap(m map[string]any) map[string]string {
 	return result
 }
 
+// stringMapStrict is stringMap with the silent discard removed: a value that is
+// not a string is refused by key instead of being dropped.
+//
+// stringMap keeps the lenient behaviour because it has several callers whose
+// contracts have not been reviewed; converting them is a wider blast radius than
+// any one fix should carry. But refusing a wrongly-typed CONTAINER while its
+// wrongly-typed CONTENTS are still discarded is not a coherent contract — a
+// caller that rejects `nodeSelector: "zone-a"` by name and then loses
+// `nodeSelector: {rack: 3}` without a word is checking the envelope and not the
+// payload (go-kure/launcher#448).
+//
+// Keys are reported one at a time and in the caller's label space, so the
+// message names the field an author can actually find. Sorted, like
+// parsePodSpec's rejected-key loop: map iteration order is randomised, so a
+// nodeSelector authoring two wrongly-typed values at once would otherwise name
+// a different one run to run.
+func stringMapStrict(m map[string]any, label string) (map[string]string, error) {
+	result := make(map[string]string, len(m))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		v := m[k]
+		s, ok := v.(string)
+		if !ok {
+			return nil, errors.Errorf("%s[%q]: must be a string, got %T", label, k, v)
+		}
+		result[k] = s
+	}
+	return result, nil
+}
+
 // --- Data types ---
 
 // ResourceRequirements projects the real corev1.ResourceRequirements directly
@@ -912,7 +941,12 @@ func validateHugePageQuantity(name corev1.ResourceName, q resource.Quantity) err
 // absent — matching applyDefaultQuantity's map-key-presence convention.
 func parseResourceList(m map[string]any) (corev1.ResourceList, error) {
 	var rl corev1.ResourceList
-	for k, v := range m {
+	// Sorted for the same reason as stringMapStrict: every rejection below
+	// names k, whether raised here or by validateContainerResourceName /
+	// validateHugePageQuantity, so map iteration order would otherwise decide
+	// which of several bad resource entries an author is told about.
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		v := m[k]
 		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
 			return nil, errors.Errorf("%s: invalid resource name: %s", k, strings.Join(errs, "; "))
 		}
@@ -1848,7 +1882,8 @@ func parseStorageClassField(raw map[string]any, label string) (value string, exp
 	return s, s == "", nil
 }
 
-// rejectUnknownKeys errors on the first key in raw that is not in allowed.
+// rejectUnknownKeys errors on the first key in raw, in sort order, that is not
+// in allowed.
 // A misspelled key (e.g. `probes.live` instead of `probes.liveness`,
 // `lifecycle.postStop` instead of `lifecycle.preStop`) would otherwise match
 // none of the recognized keys and silently produce no probe/hook at all,
@@ -1858,7 +1893,9 @@ func rejectUnknownKeys(raw map[string]any, allowed []string, label string) error
 	for _, k := range allowed {
 		allowedSet[k] = true
 	}
-	for k := range raw {
+	// Sorted for the same reason as stringMapStrict: an object with two typos
+	// would otherwise have a different one named on each run.
+	for _, k := range slices.Sorted(maps.Keys(raw)) {
 		if !allowedSet[k] {
 			return errors.Errorf("%s: unrecognized key %q", label, k)
 		}
