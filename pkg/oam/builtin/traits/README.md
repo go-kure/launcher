@@ -179,10 +179,11 @@ allocated with no labels, and an empty selector matches every namespace, so a
 malformed constraint used to widen the peer to the maximum at render time.
 
 An **unrecognized key** is the same answer for the same reason, at every object
-depth of the trait: the peer (`podSelector`, `namespaceSelector`, `ipBlock`), the
-selector (`matchLabels`), the `ipBlock` (`cidr`, `except`) and the rule itself
-(`from`/`to`, `ports`). Each is rejected as `…: unsupported key "…"`, naming the
-lexicographically first offender so the diagnostic is the same on every run:
+depth this parser reads: the rule (`from`/`to`, `ports`), the peer
+(`podSelector`, `namespaceSelector`, `ipBlock`), the selector (`matchLabels`),
+the `ipBlock` (`cidr`, `except`) and a `ports` item (`port`, `protocol`). Each is
+rejected as `…: unsupported key "…"`, naming the lexicographically first offender
+so the diagnostic is the same on every run:
 
 ```yaml
 from:
@@ -194,7 +195,19 @@ from:
 `matchExpressions` is the case worth spelling out: it is a real
 `metav1.LabelSelector` field, so a document written against Kubernetes' own schema
 used to parse into a selector with **no** labels — which matches every namespace.
-A constraint this parser cannot honour must fail, never widen.
+A constraint this parser cannot honour must fail, never widen. `endPort` on a
+`ports` item is the same case: a real `NetworkPolicyPort` field this parser does
+not implement, which accepted silently would render a single port where a **range**
+was authored.
+
+The trait's own **top-level** property map — `ingress` and `egress` — is closed one
+layer further out, by the engine's schema check rather than by this parser, so a
+typo'd `egres` is reported as `unsupported field "egres"` rather than dropped along
+with the whole direction it carried. `kurel build` runs that check over the
+authored document before transform (`pkg/cmd/kurel/build.go`), and the lowering
+fixpoint runs it over every emitted trait (`pkg/oam/lowering.go`). A consumer that
+calls `NetworkPolicyHandler.Apply` directly, without either, is the gap tracked in
+go-kure/launcher#394.
 
 The same applies one depth further down, to a `matchLabels` **value**. `env:` with
 no value is rejected as `…matchLabels: "env" has no value`, and a **composite**
@@ -226,7 +239,7 @@ policy to allow-all rather than narrowing it.
 ```yaml
 ingress:
   - {}                            # a present, empty rule: allow-all, authored on purpose
-  -                               # null: rejected, `ingress[0]: expected object`
+  -                               # null: rejected, `ingress[1]: expected object`
 ```
 
 A rule's `from`/`to` and `ports` are read the same way, and for the same reason:
@@ -239,14 +252,39 @@ wrong-typed value is an error:
 ingress:
   - from:                         # null -> absent: this rule allows all sources
     ports: [{port: 8080}]
-  - from: web                     # rejected: `ingress[0].from: expected array, got string`
-  - frm: [...]                    # rejected: `ingress[0]: unsupported key "frm"`
+  - from: web                     # rejected: `ingress[1].from: expected array, got string`
+  - frm: [...]                    # rejected: `ingress[2]: unsupported key "frm"`
 ```
+
+Parsing stops at the first rule that fails, so this document reports the
+`ingress[1]` error and never reaches `ingress[2]`; the index in each diagnostic is
+the offending rule's own position in the list it was authored in.
 
 `ipBlock.except` behaves the same, one level down, and is the clearest case of the
 class: `except` is an **exclusion**, so a dropped one renders a block strictly
 wider than the document authored. A mistyped `cidr` now reports itself as mistyped
 (`…ipBlock.cidr: expected string, got int`) instead of as missing.
+
+A `ports` item is the last depth, and the only object here whose key set the
+**schema** cannot close — `port` is an int-or-string union `PropertySchema` has no
+way to express, so the item is declared open and a `protcol` typo used to arrive
+intact. Both of its fields carry the same rule as everything above:
+
+```yaml
+ports:
+  - {port: 53, protocol: [UDP]}   # rejected: `…ports[0].protocol: expected string, got []interface {}`
+  - {port: 53, protcol: UDP}      # rejected: `…ports[1]: unsupported key "protcol"`
+  - {port: 80.9}                  # rejected: `…ports[2]: 'port' must be a whole number, got 80.9`
+  - {port: 4294967376}            # rejected: `…ports[3]: 'port' 4294967376 is out of range (1-65535)`
+```
+
+A wrong-typed `protocol` was **discarded**, and an absent protocol means TCP, so
+`protocol: [UDP]` rendered a policy permitting TCP and denying the UDP the document
+asked for. A numeric `port` went through a bare `int32(…)` conversion, which
+truncates a fractional value and is implementation-defined outside `int32` range:
+`80.9` rendered port 80, and `4294967376` also rendered port 80. A null or absent
+`protocol` still means TCP, every integer kind a decoder or a lowering rule can
+produce is still accepted, and a named port string is untouched.
 
 ### Null `ingress` / `egress`
 
