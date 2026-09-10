@@ -162,6 +162,12 @@ as an authored empty object and silently widen to every namespace
 (go-kure/launcher#430). A `null` `ipBlock` is likewise absent rather than an
 `ipBlock: 'cidr' is required` error; a **present** `ipBlock` still requires `cidr`.
 
+A value of the **wrong type** is the third answer, and it is an error rather than a
+silent drop — `namespaceSelector: prod`, or a `matchLabels` that is not a mapping,
+is rejected as `…: expected object, got string`. Discarding it left the selector
+allocated with no labels, and an empty selector matches every namespace, so a
+malformed constraint used to widen the peer to the maximum at render time.
+
 The peer **envelope** itself is the one place in this section where a null is an
 **error**, not absence:
 
