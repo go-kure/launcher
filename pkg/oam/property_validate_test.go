@@ -284,6 +284,376 @@ func TestValidateProperties_DeterministicMessage(t *testing.T) {
 	}
 }
 
+// reservedComponent declares one optional PlatformReserved property, to pin the
+// carve-out in the null normalisation below. No production schema declares a
+// reserved property that is also optional-and-nullable, which is exactly why the
+// behaviour needs a fixture: without one, changing the carve-out breaks nothing.
+type reservedComponent struct{ typ string }
+
+func (h reservedComponent) CanHandle(t string) bool { return t == h.typ }
+func (h reservedComponent) ToApplicationConfig(*Component, string) (stack.ApplicationConfig, error) {
+	return nil, nil
+}
+func (h reservedComponent) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{
+		"registry": {Type: PropertyTypeString, PlatformReserved: true},
+		"image":    {Type: PropertyTypeString},
+	}
+}
+
+// TestValidateProperties_NullUnderOptionalKeyIsStripped is the presence half of the
+// null contract. The assertion is deliberately on the two-value map lookup rather
+// than on the value: a handler parser decides presence with exactly that lookup
+// (builtin/components/common.go:1718-1721), so checking props["x"] == nil would pass
+// against the very defect this closes.
+func TestValidateProperties_NullUnderOptionalKeyIsStripped(t *testing.T) {
+	cases := map[string]any{
+		"untyped nil": nil,
+		"nil slice":   []any(nil),
+		"nil map":     map[string]any(nil),
+	}
+	for name, null := range cases {
+		t.Run(name, func(t *testing.T) {
+			props := map[string]any{"replicas": 2, "strategy": null}
+			if err := validateProperties(richSchema(), props, "properties"); err != nil {
+				t.Fatalf("expected acceptance, got: %v", err)
+			}
+			if _, present := props["strategy"]; present {
+				t.Fatalf("expected the null key to be deleted, still present as %#v", props["strategy"])
+			}
+			if props["replicas"] != 2 {
+				t.Fatalf("a non-null sibling was disturbed: %#v", props["replicas"])
+			}
+		})
+	}
+}
+
+// The loop order in validateObjectProperties is load bearing: the Required check
+// runs before the strip, so a required null keeps reporting the empty value rather
+// than being deleted and then reported as a missing key.
+func TestValidateProperties_NullUnderRequiredKeyStillFails(t *testing.T) {
+	schema := map[string]PropertySchema{"cpu": {Type: PropertyTypeString, Required: true}}
+	props := map[string]any{"cpu": nil}
+	err := validateProperties(schema, props, "properties")
+	if err == nil {
+		t.Fatal("expected a required-field error")
+	}
+	if !strings.Contains(err.Error(), `"cpu" is required`) {
+		t.Fatalf("expected the required message, got: %v", err)
+	}
+	if _, present := props["cpu"]; !present {
+		t.Fatal("a required null must not be stripped out from under its own check")
+	}
+}
+
+// TestNullAndPlatformReserved_DoNotMeet pins the boundary between the two rules,
+// which is the reason the strip needs no PlatformReserved exception. They are
+// asserted SEPARATELY and never composed: enforcePlatformReserved runs on a rule's
+// INPUT (lowering.go:1083, :1206; transform.go:649, :891) and emission validation on
+// its OUTPUT (lowering.go:1104, :1230), so running one after the other would assert a
+// pipeline that does not exist — the mistake this file's scope note at :22-27 warns
+// about.
+//
+// Reservation is a rule about what a user WROTE, so it keeps treating an explicit
+// null as present; the strip is a rule about what a lowering rule EMITTED, so it
+// treats one as absent. Exempting reserved keys from the strip would not have
+// preserved the authored rule — it would only have handed a reserved null to the type
+// switch, producing a loud rejection with the wrong reason, which is precisely what
+// this file's "would duplicate that message with a misleading reason" note exists to
+// avoid.
+func TestNullAndPlatformReserved_DoNotMeet(t *testing.T) {
+	schema := reservedComponent{typ: "reserved"}.PropertySchema()
+
+	t.Run("emitted null is stripped, reserved or not", func(t *testing.T) {
+		props := map[string]any{"registry": nil, "image": nil}
+		if err := validateProperties(schema, props, "properties"); err != nil {
+			t.Fatalf("expected acceptance, got: %v", err)
+		}
+		for _, key := range []string{"registry", "image"} {
+			if _, present := props[key]; present {
+				t.Errorf("expected %q to be deleted, still present as %#v", key, props[key])
+			}
+		}
+	})
+
+	t.Run("authored null is still refused", func(t *testing.T) {
+		err := enforcePlatformReserved(schema, map[string]any{"registry": nil}, "properties")
+		if err == nil {
+			t.Fatal("expected an authored reserved null to be refused")
+		}
+		if !stderrors.Is(err, ErrPlatformReserved) {
+			t.Fatalf("expected ErrPlatformReserved, got: %v", err)
+		}
+		if err := enforcePlatformReserved(schema, map[string]any{"image": nil}, "properties"); err != nil {
+			t.Fatalf("an unreserved key is not this function's business, got: %v", err)
+		}
+	})
+}
+
+// TestValidateProperties_NullArrayElementIsRejected is the ruling's other half, and
+// the divergence that prompted it: `values: [null]` cleared emission validation and
+// then failed conversion in the handler parser. Stripping cannot apply to an element
+// — deleting one would renumber its siblings — so it must fail, and it does so
+// through the ordinary type switch rather than an element special case.
+func TestValidateProperties_NullArrayElementIsRejected(t *testing.T) {
+	// Every case asserts the SAME message, because the guard runs ahead of the type
+	// switch and the reason is the contract, not the declared element type: a null is
+	// never a member of any Items type. The index must be named either way — a message
+	// pointing at `values` alone would send an author to a list that is itself well
+	// formed.
+	const want = "null is not a valid array element"
+
+	t.Run("string items", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"values": {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeString}},
+		}
+		err := validateProperties(schema, map[string]any{"values": []any{"node-1", nil}}, "properties")
+		if err == nil {
+			t.Fatal("expected a null element to be rejected")
+		}
+		if !strings.Contains(err.Error(), "values[1]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+	t.Run("object items", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"env": {Type: PropertyTypeArray, Items: &PropertySchema{
+				Type:       PropertyTypeObject,
+				Properties: map[string]PropertySchema{"name": {Type: PropertyTypeString, Required: true}},
+			}},
+		}
+		err := validateProperties(schema, map[string]any{"env": []any{nil}}, "properties")
+		if err == nil {
+			t.Fatal("expected a null element to be rejected")
+		}
+		if !strings.Contains(err.Error(), "env[0]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+
+	// The case the guard's old placement could not reach at all: it sat inside
+	// `if schema.Items != nil`, so an array declared without an element schema
+	// accepted a null element silently and handed a nil inside a []any to the handler
+	// parser. Declaring no Items says nothing about the members; it does not license
+	// the one member no Items type could ever have matched.
+	t.Run("no items schema", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"values": {Type: PropertyTypeArray},
+		}
+		err := validateProperties(schema, map[string]any{"values": []any{"a", nil}}, "properties")
+		if err == nil {
+			t.Fatal("an array with no Items schema still must not accept a null element")
+		}
+		if !strings.Contains(err.Error(), "values[1]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+
+	// Same placement, the typed-nil shape: this one the type switch could not have
+	// caught either, since there is no Items type to switch on.
+	t.Run("no items schema, typed nil element", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"values": {Type: PropertyTypeArray},
+		}
+		err := validateProperties(schema, map[string]any{"values": []any{[]any(nil)}}, "properties")
+		if err == nil {
+			t.Fatal("an array with no Items schema still must not accept a typed nil element")
+		}
+		if !strings.Contains(err.Error(), "values[0]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+
+	// The positive half, so the two subtests above cannot pass by rejecting every
+	// element: an array with no Items schema and no null members is still accepted.
+	t.Run("no items schema, null-free", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"values": {Type: PropertyTypeArray},
+		}
+		if err := validateProperties(schema, map[string]any{"values": []any{"a", 1, map[string]any{"k": "v"}}}, "properties"); err != nil {
+			t.Fatalf("a null-free array with no Items schema must still pass: %v", err)
+		}
+	})
+
+	// The three cases the type switch alone could NOT reject. A typed nil satisfies the
+	// plain type assertion asObjectValue/asArrayValue try first — both return
+	// (nil, true) — and iterating the resulting empty collection rejects nothing, so
+	// each of these was accepted before the guard existed. The untyped-schema case has
+	// no type check at all.
+	t.Run("typed nil map under object items", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"env": {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeObject}},
+		}
+		err := validateProperties(schema, map[string]any{"env": []any{map[string]any(nil)}}, "properties")
+		if err == nil {
+			t.Fatal("a typed nil map passed asObjectValue and was accepted as an element")
+		}
+		if !strings.Contains(err.Error(), "env[0]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+	t.Run("typed nil slice under array items", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"groups": {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeArray}},
+		}
+		err := validateProperties(schema, map[string]any{"groups": []any{[]any(nil)}}, "properties")
+		if err == nil {
+			t.Fatal("a typed nil slice passed asArrayValue and was accepted as an element")
+		}
+		if !strings.Contains(err.Error(), "groups[0]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+	t.Run("untyped items schema", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"anything": {Type: PropertyTypeArray, Items: &PropertySchema{}},
+		}
+		err := validateProperties(schema, map[string]any{"anything": []any{nil}}, "properties")
+		if err == nil {
+			t.Fatal("an untyped Items schema checks nothing, so only the guard can reject a null element")
+		}
+		if !strings.Contains(err.Error(), "anything[0]") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected an indexed null-element error, got: %v", err)
+		}
+	})
+}
+
+// The Enum comparison reads a value this package has already normalized while the
+// declared members stay as written, so a member holding a null at any depth could never
+// match. Enum is restricted to scalars rather than normalizing members, which would have
+// made it a further reader of "null" to keep aligned. Enum on a scalar still works, and
+// an untyped schema still accepts one.
+// TestValidatePropertyValue_EnumMemberHoldingNullIsRejected pins the narrowed rule.
+// The check used to refuse EVERY Enum declared on an array or object type, which also
+// refused the null-free compound enums that match perfectly well. PropertySchema is
+// exported, so that landed on out-of-tree handlers as a break in schemas this validator
+// had accepted. Only a member that can never match is refused now — the discriminating
+// case is the null_free subtest below, which the old rule failed.
+func TestValidatePropertyValue_EnumMemberHoldingNullIsRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		typ  PropertyType
+	}{
+		{"object", PropertyTypeObject},
+		{"array", PropertyTypeArray},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := map[string]PropertySchema{
+				"options": {Type: tc.typ, Enum: []any{map[string]any{"x": nil}}},
+			}
+			// Empty collections deliberately: a populated object would be rejected
+			// for its undeclared key by the object recursion before the Enum check
+			// was reached, and the assertion would pass on the wrong error.
+			var value any = map[string]any{}
+			if tc.typ == PropertyTypeArray {
+				value = []any{}
+			}
+			err := validateProperties(schema, map[string]any{"options": value}, "properties")
+			if err == nil {
+				t.Fatal("expected a schema error for an Enum member holding a null")
+			}
+			if !strings.Contains(err.Error(), "Enum member 0 holding a null") {
+				t.Fatalf("expected the schema-level message, got: %v", err)
+			}
+		})
+	}
+
+	// The case the old per-type rule got wrong. Nothing in this schema is unmatchable:
+	// the declared member is null-free, and the value equals it after normalization.
+	t.Run("null_free compound enum still matches", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"options": {
+				Type:                 PropertyTypeObject,
+				AdditionalProperties: true,
+				Enum:                 []any{map[string]any{"mode": "fast"}, map[string]any{"mode": "slow"}},
+			},
+		}
+		props := map[string]any{"options": map[string]any{"mode": "fast"}}
+		if err := validateProperties(schema, props, "properties"); err != nil {
+			t.Fatalf("a null-free compound enum must still be usable: %v", err)
+		}
+	})
+
+	// And it must still REJECT a value outside that null-free set, so the subtest
+	// above is not passing because compound enums stopped being enforced.
+	t.Run("null_free compound enum still rejects a non-member", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"options": {
+				Type:                 PropertyTypeObject,
+				AdditionalProperties: true,
+				Enum:                 []any{map[string]any{"mode": "fast"}},
+			},
+		}
+		props := map[string]any{"options": map[string]any{"mode": "sideways"}}
+		err := validateProperties(schema, props, "properties")
+		if err == nil || !strings.Contains(err.Error(), "not in allowed set") {
+			t.Fatalf("expected the ordinary enum rejection, got: %v", err)
+		}
+	})
+
+	// A null nested below the top level of a member is just as unmatchable, and the
+	// walk has to reach it.
+	t.Run("null nested inside a member", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"options": {
+				Type:                 PropertyTypeObject,
+				AdditionalProperties: true,
+				Enum:                 []any{map[string]any{"a": []any{map[string]any{"b": nil}}}},
+			},
+		}
+		err := validateProperties(schema, map[string]any{"options": map[string]any{}}, "properties")
+		if err == nil || !strings.Contains(err.Error(), "Enum member 0 holding a null") {
+			t.Fatalf("expected the nested null to be found, got: %v", err)
+		}
+	})
+
+	t.Run("scalar enum still enforced", func(t *testing.T) {
+		schema := map[string]PropertySchema{
+			"mode": {Type: PropertyTypeString, Enum: []any{"a", "b"}},
+		}
+		if err := validateProperties(schema, map[string]any{"mode": "a"}, "properties"); err != nil {
+			t.Fatalf("a valid scalar enum value must still pass: %v", err)
+		}
+		err := validateProperties(schema, map[string]any{"mode": "c"}, "properties")
+		if err == nil || !strings.Contains(err.Error(), "not in allowed set") {
+			t.Fatalf("expected the ordinary enum rejection, got: %v", err)
+		}
+	})
+}
+
+// A nested declared object inherits the strip through the object recursion, so the
+// contract does not stop at the top level.
+func TestValidateProperties_NullInsideNestedObjectIsStripped(t *testing.T) {
+	props := map[string]any{"resources": map[string]any{"cpu": "100m", "memory": nil}}
+	if err := validateProperties(richSchema(), props, "properties"); err != nil {
+		t.Fatalf("expected acceptance, got: %v", err)
+	}
+	nested, ok := props["resources"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected the nested object to survive as map[string]any, got %T", props["resources"])
+	}
+	if _, present := nested["memory"]; present {
+		t.Fatal("expected the nested null to be deleted")
+	}
+}
+
+// Disclosed residual, pinned rather than fixed: an undeclared key under
+// AdditionalProperties has no schema to consult, so it is passed over untouched and
+// a null there still reaches a parser. This test exists to make that boundary
+// visible and to fail loudly if someone later widens the strip to undeclared keys
+// without deciding to — the same horizon as validation itself, since an opaque
+// object is precisely the thing this package does not model.
+func TestValidateProperties_NullUnderUndeclaredKeyIsNotStripped(t *testing.T) {
+	props := map[string]any{"labels": map[string]any{"tier": "web", "opaque": nil}}
+	if err := validateProperties(richSchema(), props, "properties"); err != nil {
+		t.Fatalf("expected acceptance, got: %v", err)
+	}
+	nested := props["labels"].(map[string]any)
+	if _, present := nested["opaque"]; !present {
+		t.Fatal("an undeclared null is outside the strip's reach; if this now passes, the scope note in property_validate.go is stale")
+	}
+}
+
 func newSchemaTransformer() *Transformer {
 	tr := NewTransformer(
 		map[string]ComponentHandler{

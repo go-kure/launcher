@@ -64,6 +64,19 @@ func (h *DeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 		"volumes":         schemaVolumes(),
 		"initContainers":  schemaContainers(),
 		"sidecars":        schemaContainers(),
+		// The three raw pod-level scheduling shapes (go-kure/launcher#412).
+		// They MUST stay above the maps.Copy calls below and they must not move
+		// into schemaPodSpec: maps.Copy overwrites the destination's keys, and
+		// worker (worker.go), statefulset (statefulset.go) and webservice
+		// (webservice.go) each set the four-key `affinity` shorthand in their
+		// own literal map and then copy schemaPodSpec over it — so a raw
+		// `affinity` in the shared fragment would silently replace the
+		// shorthand on all three, with no fixture moving to show it.
+		// TestSchedulingKeysAbsentFromSharedFragments and
+		// TestSchedulingKeysSurviveFragmentCopies pin this ordering.
+		"affinity":                  schemaRawAffinity(),
+		"tolerations":               schemaTolerations(),
+		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
 	}
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDeploymentSpec())
@@ -202,6 +215,25 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.PodSpec = podSpec
 
+	// The raw corev1 scheduling shapes, which this kind publishes and the
+	// opinionated kinds do not — see scheduling.go's header for why the raw
+	// shapes and the four-key shorthand are not alternatives.
+	affinity, err := parseRawAffinity(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Affinity = affinity
+	tolerations, err := parseTolerations(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Tolerations = tolerations
+	tscs, err := parseTopologySpreadConstraints(props)
+	if err != nil {
+		return nil, err
+	}
+	config.TopologySpreadConstraints = tscs
+
 	// The authored map, not the null-stripped copy — see the comment on props.
 	depSpec, err := parseDeploymentSpec(component.Properties)
 	if err != nil {
@@ -234,6 +266,13 @@ type DeploymentConfig struct {
 	Sidecars        []SidecarContainerConfig
 	// PodSpec holds the shared pod-level properties (see parsePodSpec).
 	PodSpec PodSpecConfig
+	// Affinity, Tolerations and TopologySpreadConstraints are the raw corev1
+	// scheduling shapes this kind publishes (see scheduling.go). They are
+	// carried as the API types rather than as a launcher config struct
+	// precisely because nothing is inferred from them.
+	Affinity                  *corev1.Affinity
+	Tolerations               []corev1.Toleration
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint
 	// DeploymentSpec holds the DeploymentSpec-level properties
 	// (see parseDeploymentSpec).
 	DeploymentSpec   DeploymentSpecConfig
@@ -420,6 +459,9 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 		InitContainers:            c.InitContainers,
 		Sidecars:                  c.Sidecars,
 		Volumes:                   c.Volumes,
+		Tolerations:               c.Tolerations,
+		TopologySpreadConstraints: c.TopologySpreadConstraints,
+		Affinity:                  c.Affinity,
 	})
 	if err != nil {
 		return nil, err

@@ -15,8 +15,9 @@ API has them, and the same value validation real admission applies (ADR-036 L1: 
 Container projection shared by every kind). Only genuine escape-hatch fields (`passthrough.object`,
 `manifests`/`crd` inline content) and key→value maps whose keys are data (`nodeSelector`,
 `resources.requests`/`limits`) stay open by design; the remaining open objects (`probes`,
-`lifecycle`, `volumes`, `initContainers`/`sidecars` entries, `affinity`) are a known gap, not
-the target shape. Every property
+`lifecycle`, `volumes`, `initContainers`/`sidecars` entries, the four-key `affinity` shorthand)
+are a known gap, not the target shape. The raw `corev1` `affinity` that `deployment` publishes is
+a different schema and is not part of that gap — it is modeled field-by-field. Every property
 (including nested object fields and array item
 schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler API
 Reference.
@@ -29,7 +30,7 @@ Reference.
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). |
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
-| `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface plus the rest of `DeploymentSpec`. Not a superset of `worker` — see below. |
+| `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
@@ -758,6 +759,124 @@ workload that wants launcher to create its Service uses `webservice`. This is
 the reversible direction: adding a property later is additive, removing one is
 breaking.
 
+What `deployment` *does* publish, and the role kinds do not, is the raw
+`corev1` form of the same three scheduling concerns — see "Raw scheduling
+properties" immediately below. The two are not alternatives: the shorthand is
+an opinion, the raw shapes are the API.
+
+#### Raw scheduling properties (`deployment` only)
+
+`deployment` publishes `affinity`, `tolerations` and
+`topologySpreadConstraints` as their plain `corev1` shapes
+(go-kure/launcher#412), parsed by `scheduling.go`. Nothing is inferred from the
+component: every selector, weight and topology key is authored.
+
+| property | type | notes | compat |
+|---|---|---|---|
+| `affinity` | object | `nodeAffinity`, `podAffinity`, `podAntiAffinity`, each with the `requiredDuringSchedulingIgnoredDuringExecution` / `preferredDuringSchedulingIgnoredDuringExecution` arms. Node requirement operators are `In`/`NotIn`/`Exists`/`DoesNotExist`/`Gt`/`Lt`, with upstream's arity rule — `In`/`NotIn` need at least one value, `Exists`/`DoesNotExist` none, `Gt`/`Lt` exactly one integer. `matchExpressions` keys are node label keys (qualified names). `matchFields` keys are *not* qualified names and are not free-form field paths either: `metadata.name` is the only key Kubernetes accepts, and a field requirement takes only `In` or `NotIn` with exactly one value — the arity rule above belongs to `matchExpressions`, and a `matchFields` entry it would accept can still be refused at admission. That single value is a node name and is validated as a DNS-1123 subdomain: the key resolving is what *arms* the value rule upstream rather than ending it, so a well-formed key and operator with a malformed value is still refused. `matchFields` therefore publishes its own item schema rather than sharing `matchExpressions`', with `key` and `operator` enums matching the parser — an emitted property is checked against the schema's enums before conversion, so a looser schema would advertise operators to a lowering rule that the parser then rejects. Weights must be 1–100. An `affinity` with no arm set is rejected, as is a node selector term with neither `matchExpressions` nor `matchFields` — upstream documents such a term as matching no nodes, so it can only be a mistake. The published schema marks `nodeSelectorTerms`, and a weighted arm's `preference` and `podAffinityTerm`, as required — the parser already refused each of them being absent, so this changes what schema introspection reports, not what builds. | additive |
+| `tolerations` | array | The same property `daemonset` already publishes, from the same parser, now covering the complete `corev1.Toleration`: `key`, `operator` (`Exists`/`Equal`/`Lt`/`Gt`), `value`, `effect`, `tolerationSeconds`. `tolerationSeconds` is a pointer upstream, so unset (tolerate forever) and `0` (evict immediately) are different documents. A non-empty `key` must be a qualified name; the empty key stays legal and is governed by the rule below. Cross-field rules: an empty `key` requires `Exists`; a `value` under `Exists` is refused; under `Equal` the `value` must be a valid label value, since it is matched against a taint's; `Lt`/`Gt` need a canonical decimal integer `value` (no leading zeros, no plus sign, no `-0` — `Toleration.ToleratesTaint` runs `content.IsDecimalInteger` before parsing and silently matches nothing otherwise) and the cluster's `TaintTolerationComparisonOperators` gate; `tolerationSeconds` requires `effect: NoExecute` spelled out, an omitted effect not counting as a wildcard for this rule. An unrecognised key is reported rather than dropped, and so is `tolerations` authored as something other than an array. | additive for `deployment`; **narrowing for `daemonset`** — see below |
+| `topologySpreadConstraints` | array | `maxSkew` (required, > 0), `topologyKey` (required), `whenUnsatisfiable` (required, `DoNotSchedule`/`ScheduleAnyway`), `labelSelector`, `minDomains` (> 0, and only with `DoNotSchedule`), `nodeAffinityPolicy`/`nodeTaintsPolicy` (`Honor`/`Ignore`), `matchLabelKeys`. Two constraints may not repeat the same `(topologyKey, whenUnsatisfiable)` **pair**; sharing a `topologyKey` with different `whenUnsatisfiable` values is legal and stays accepted. The three required fields carry no `omitempty` upstream, so an unset one would emit `maxSkew: 0` / `topologyKey: ""` / `whenUnsatisfiable: ""` rather than an API default — hence required here rather than defaulted. | additive |
+
+##### What `tolerations` changed for `daemonset`
+
+`affinity` and `topologySpreadConstraints` are new properties on a kind that did
+not have them, so they are additive outright. `tolerations` is not: `deployment`
+reaches it through the *same* `parseTolerations`/`schemaTolerations` pair that
+`daemonset` has always used, and those two kinds are its only callers, so
+completing the projection changed `daemonset` too. Stating that plainly, per
+rule, because "additive" on its own would be false:
+
+| change | effect on `daemonset` | why it is kept rather than gated to `deployment` |
+|---|---|---|
+| A well-formed `tolerationSeconds` is now read | **Additive in capability, and the one change that alters emitted bytes.** The key was previously accepted and silently dropped, so a `daemonset` that already authored it emitted a toleration without an eviction deadline; it now emits the field it asked for. That is a deliberate output change, not a preservation. | It is the fix, not a side effect. |
+| A **malformed** `tolerationSeconds` is now an error | **New errors only.** A non-integer, fractional or out-of-int64-range value was previously ignored along with the rest of the key; it is now type-checked like any other integer property. | The key cannot be both read and unvalidated. A document carrying one was already not getting the deadline it asked for. |
+| `operator: Lt` and `operator: Gt` are now accepted | **Purely additive.** Both were previously refused as invalid operators; they are valid `corev1` values (`core/v1/types.go:4097-4100`). Their `value` must be a canonical decimal integer — no leading zeros, no plus sign, no `-0` — because the scheduler's own matcher silently refuses to match any other form. | A "raw" projection whose operator set is narrower than the API's is the wrong shape for either kind. |
+| An unrecognised key inside a toleration entry is now an error | **New errors only, and here output really is byte-identical.** A key the parser never read contributed nothing to the emitted object, so every document that still builds emits exactly what it emitted before. | `docs/oam/design-gvk.md` already states that an unrecognised key is a build error; this moves `daemonset` toward the documented contract rather than away from it. Gating it to `deployment` would leave `daemonset` permanently accepting shapes that do no work. |
+| An empty `key` with a non-`Exists` operator is now an error | **New errors only, and only on documents the apiserver would have refused.** Upstream states it as a hard "must" (`k8s.io/api@v0.36.3` `core/v1/types.go:4093`). | Nothing appliable is lost. |
+| `tolerations` authored as a mapping rather than an array is now an error | **New errors only, and output is byte-identical.** The whole property was previously discarded without a word — the parser's `[]any` assertion failed and it returned "absent", so a mistyped block emitted no tolerations at all and the build succeeded. Its two sibling parsers on the adjacent lines (`affinity`, `topologySpreadConstraints`) already rejected the same mistake, so this removes an inconsistency rather than adding a rule. | A silently discarded property is the failure mode this whole projection exists to remove; leaving `daemonset` on the old behaviour would keep the one parser that swallows a typo. |
+| An explicit null on a toleration's `key`, `operator`, `value` or `effect` now reads as omission | **Fewer errors, and output is byte-identical for everything that already built.** Such an entry previously failed conversion with `must be a string, got <nil>`; it now behaves as if the key were absent, which is this package's null-as-omission convention. Only `null` is affected — an empty string is unchanged, so `operator: ""` is still an error rather than a silent default. | The null cannot be filtered before it arrives: `withoutExplicitNulls` strips only top-level properties, so an author writing a nested null reaches the parser with it intact — authored documents are never shape-checked by this package at all (`pkg/oam/property_validate.go:22-27`), which is why the parser has to answer for itself and why these guards stay. A lowering rule's emitted null under an optional declared key is now normalised to absence before conversion (same file, `validateObjectProperties`), so the two paths agree on what a null means rather than one accepting what the other refuses. Leaving `daemonset` out would keep one kind refusing documents the schema declares valid. |
+| A `value` under `operator: Exists` is now an error | **New errors only, and only on documents the apiserver would have refused** — upstream's `ValidateTolerations` rejects the pair outright, notwithstanding the field doc's softer "should" (the citation, and its second-hand provenance, are at the check itself in `common.go`). | Same: nothing appliable is lost. |
+| A non-empty `key` that is not a qualified name is now an error | **New errors only, and only on documents the apiserver would have refused.** `ValidateTolerations` applies `ValidateLabelName` to every non-empty key, unconditionally and behind no feature gate. The empty key is untouched — it remains legal and keeps its own rule. | Nothing appliable is lost, and it is the same rule the affinity and topology-key paths already apply to their own label keys; `daemonset` accepting a malformed key there and not here was an inconsistency, not a policy. |
+| Under `operator: Equal`, a `value` that is not a valid label value is now an error | **New errors only, and only on documents the apiserver would have refused.** The value is matched against a taint's value, so upstream runs `IsValidLabelValue` on it for the `Equal` arm. `Exists` and `Lt`/`Gt` reach their own value rules first, so this fires on `Equal` alone. | Same: nothing appliable is lost. |
+| `tolerationSeconds` without `effect: NoExecute` is now an error | **New errors, and *not* only on documents the apiserver would have refused** — this row is reason 2 below, not reason 1. Upstream rejects the pair outright, and an omitted `effect` does not satisfy the rule (it has to be spelled out), but the apiserver never saw the pair: `tolerationSeconds` was previously dropped along with the rest of the key (first row of this table), so the emitted toleration carried no deadline and applied cleanly. A document hitting this rule may well have built and been accepted by a cluster before. This one was deliberately left unenforced until now, on the stated grounds that the only reachable citation was a second-hand copy carried by a dependency; the comment named a first-hand citation as the condition for adding it, and that condition is now met. | A `tolerationSeconds` on any other effect is inert at best and refused at apply at worst, which is the failure class this projection exists to remove. Leaving it would also contradict the rule's own recorded condition. |
+
+Net, stated by cause rather than by a count or a partition. A count here went
+stale twice; the replacement then asserted that the classes were exclusive and
+that exactly one of them contained previously-accepted documents, and both of
+those were wrong too. Three failed summaries of the same table is a sign the
+summary wants a different shape, so this one describes what the rows have in
+common and makes no claim about which row a document lands in. A `daemonset`
+document stops building for one of these reasons, and one document can hit
+several at once:
+
+1. **It was refused on apply anyway.** An empty `key` with a non-`Exists`
+   operator, a `value` under `Exists`, a non-qualified non-empty `key`, an
+   invalid label value under `Equal`. Nothing appliable is lost.
+2. **Part of it was being discarded unread.** An unrecognised member inside an
+   entry, `tolerations` authored as a mapping rather than an array, or a
+   `tolerationSeconds` the parser never looked at — malformed, or well-formed
+   but carrying an `effect` other than `NoExecute`.
+
+Reason 2 is the one that matters, and it is not confined to documents that were
+doing nothing: an entry can carry an unread member alongside tolerations that
+worked, and a `tolerations` block authored as a mapping left the rest of the
+workload building and being accepted. So a document rejected under reason 2 may
+well have built **and been accepted by a cluster** before — it simply was not
+getting what it asked for, and the apiserver never saw the part that was
+dropped. Reading those fields, which is the fix, is what makes them visible.
+There is no version of the fix that keeps these documents building and also
+emits what they asked for.
+
+Output is byte-identical for everything that still builds, **unless it authored a
+well-formed `tolerationSeconds` with `effect: NoExecute`**, in which case the
+field it wrote now appears — the defect being fixed, not a regression.
+
+The table is not uniformly a tightening: some
+rows go the other way, accepting or emitting what `daemonset` previously refused
+or dropped — a well-formed `tolerationSeconds`, `operator: Lt`/`Gt`, and a nested
+explicit null in a toleration entry. Read the middle column per row rather than
+assuming a direction. This is pre-release `v1alpha1`; the change is
+taken deliberately rather than hidden behind a `deployment`-only option whose
+removal would depend on unrelated work landing.
+
+One rule applies to both `affinity` terms and topology-spread constraints:
+`matchLabelKeys` (and `mismatchLabelKeys` on a pod affinity term) cannot be set
+without a `labelSelector`.
+
+A second rule applies to `matchLabelKeys` only: none of its keys may already be
+constrained by that `labelSelector`, in either `matchLabels` or
+`matchExpressions`. `mismatchLabelKeys` is deliberately *not* held to it, even
+though its upstream field doc reads as a mirror of `matchLabelKeys`': upstream's
+validation only ever builds its forbidden-key set from `matchLabelKeys`, because
+a `mismatchLabelKeys` entry is merged as a `NotIn` requirement and filtering
+further on the same key is a legitimate thing to want. Enforcing the doc's
+wording would refuse a document the API server accepts.
+
+A third rule applies to the *entries* of both lists, and to a pod affinity term's
+`namespaces`: every `matchLabelKeys` / `mismatchLabelKeys` entry must be a valid
+label key (a qualified name), and every `namespaces` entry a valid DNS-1123
+label. These are shape rules the API server enforces on apply, so a document
+that fails them was never going to reach the cluster — accepting it here only
+moves the failure from build time to admission time. That is the opposite
+direction from the `mismatchLabelKeys` overlap rule declined just above: there,
+upstream does not validate, so enforcing would be *stricter* than the API; here
+it does, so accepting is *looser*. Both errors are worth avoiding and they are
+not in tension.
+
+An **empty** `labelSelector: {}` is accepted here, unlike on a volume claim's
+`selector` where launcher refuses it. Upstream distinguishes the two: a null
+`labelSelector` on a `PodAffinityTerm` matches no pods, while an empty one
+matches every pod in scope. Refusing the empty form would make a real API shape
+unexpressible.
+
+These three keys live in the `deployment` handler's own property map, above the
+`maps.Copy` calls that merge the shared pod-level and `DeploymentSpec`
+fragments, and they must stay there. `maps.Copy` overwrites the destination, and
+`worker`, `statefulset` and `webservice` each set the four-key `affinity`
+shorthand in their own map and *then* copy the shared pod-level fragment over
+it — so moving a raw `affinity` into that fragment would silently replace the
+shorthand on all three, with no fixture moving to reveal it.
+
 **Routing traits on a `deployment` need an explicit Service.** `expose`,
 `ingress` and `httproute` are accepted on this kind — nothing restricts them —
 but they are not self-sufficient here. `expose` lowers into `ingress` or
@@ -978,6 +1097,8 @@ object would change what the next `Generate` emits.
   properties" above). What still separates them from `deployment` is launcher's
   own opinions, which these two keep: `topologySpread` and the four-key
   `affinity` shorthand, and on `webservice` the `port` that drives the Service.
+  Note the shorthand is what they keep — neither publishes the raw `corev1`
+  `affinity`/`topologySpreadConstraints` that `deployment` does.
   The `webservice` handler implements the optional `oam.EndpointProvider`: it declares its own
   pods (`app: <component-name>`) on the declared `port` (its single `port` property drives both
   the container port and the Service port), letting a downstream platform synthesize generic
@@ -986,17 +1107,26 @@ object would change what the next `Generate` emits.
 - **deployment** — the kind-named Deployment (see "Deployment-level
   properties" above): the shared container-level, pod-level and
   `DeploymentSpec`-level surface, the last of which it now shares with
-  `webservice` and `worker` rather than owning. What distinguishes it is what
-  it leaves out, not what it adds: no `topologySpread`, no four-key `affinity`
-  shorthand, no `port`; it declares no endpoint and emits no Service. It is not
-  `worker` minus a few things either — it validates `replicas` and reads nulls
-  as omissions across its whole surface, neither of which the role kinds do.
+  `webservice` and `worker` rather than owning. What distinguishes it is mostly
+  what it leaves out: no `topologySpread`, no four-key `affinity` shorthand, no
+  `port`; it declares no endpoint and emits no Service. It is not `worker` minus
+  a few things either — it validates `replicas` and reads nulls as omissions
+  across its whole surface, neither of which the role kinds do. The one thing it
+  adds is the raw `corev1` scheduling surface the role kinds lack: `affinity`,
+  `tolerations` and `topologySpreadConstraints` as the API shapes
+  (go-kure/launcher#412, see "Raw scheduling properties" above). That is the
+  same distinction in the other direction — the role kinds carry the opinion,
+  this kind carries the API.
 - **statefulset** — `serviceName` (headless) and `volumeClaimTemplates`
   (`name`, `mountPath`, `size`, `storageClass`, `accessModes`, plus the rest of
   `corev1.PersistentVolumeClaimSpec`). The StatefulSetSpec-level and
   claim-template field sets are classified in "StatefulSet-level and
   claim-template properties" below.
-- **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`); `port`
+- **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`/`tolerationSeconds`;
+  `tolerationSeconds` and the toleration cross-field rules arrived with
+  go-kure/launcher#412 via the shared parser — see "What `tolerations` changed
+  for `daemonset`" above, which is the only place in this work that is not
+  additive); `port`
   optionally adds a Service. No `sidecars` schema key (init containers only).
   DaemonSetSpec-level (go-kure/launcher#340, `daemonset_spec.go`): `updateStrategy`,
   `minReadySeconds`, `revisionHistoryLimit`. `appsv1.DaemonSetSpec` has five
@@ -1489,6 +1619,68 @@ names the same way every built-in kind does — see `qualifyPVCNames` (unexporte
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
 for the full type/field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
 for the handler interfaces, and `examples/` for runnable applications.
+
+## The null contract
+
+Every table above answers "what does an explicit `null` mean here?" one field at a
+time. This is the rule they are all instances of:
+
+> A value that serializes to JSON null is absent, at every depth, on every path; a
+> null is never a member of any `Items` type, so a null array element is a type
+> error; reservation is about the KEY being written.
+
+It is written down because "null" has several readers — the emission validator's
+requiredness check and its optional-key strip, its array-element guard,
+`enforcePlatformReserved`, this package's parsers, and the Kubernetes API itself —
+and each was aligned separately, so each round of review found the reader the last
+round had not touched.
+
+What it means for a handler parser in this package: read a null under an optional
+property as omission, never as a present value of the wrong type. The `optional*`
+helpers in `common.go` (`optionalString`, `optionalObject`, `optionalInt32`,
+`optionalInt64`, `optionalObjectList`, `optionalStringList`) do exactly that and are
+the shortest way to comply. They classify a **typed** nil as null too —
+`map[string]any(nil)` or `[]any(nil)` inside an `any`, which is what a lowering rule
+assembled in Go produces for an unset optional and is not `== nil`.
+
+That family is a transitional shape, not the destination. `go-kure/launcher#394`
+moves the same handling into the shared helpers the wrappers delegate to, which makes
+every one of them an exact no-op forward and removes them — the compliant call then
+becomes the plain `parse*` helper. Read the list above as "these comply today", not as
+"only these can comply".
+
+Two limits worth knowing before relying on the rule:
+
+- **A parser that answers presence with a bare `v, ok := props[key]` does not comply
+  on its own.** It reads a present null as present. Emission validation deletes such
+  keys before conversion, so those parsers agree with the contract today *because of
+  the strip*, not independently of it. Bringing them into line is
+  `go-kure/launcher#423`; the authored path they also sit on is
+  `go-kure/launcher#394`.
+- **An empty object is not a null and is not absent.** `{}` and an absent key mean
+  different things to Kubernetes wherever a `LabelSelector` is involved, so the
+  contract must never be read as licence to collapse them. What each one *means* is
+  per field, not a property of selectors in general — the two selectors in a single
+  `corev1.PodAffinityTerm` disagree, in upstream's own words:
+
+  | field | null | `{}` |
+  |---|---|---|
+  | `labelSelector` | "matches with no Pods" | matches every pod in scope |
+  | `namespaceSelector` | "this pod's namespace" | "matches all namespaces" |
+
+  So "empty matches everything, nil matches nothing" holds for `labelSelector` and is
+  wrong for `namespaceSelector`, where nil is the *narrowest* answer rather than the
+  emptiest one.
+
+Both limits meet on one key, and it is the second row of that table.
+`namespaceSelector` is parsed twice in this repository: here, for pod affinity,
+through `optionalObject`, where any null is omission — which upstream reads as "this
+pod's namespace"; and in the networkpolicy trait through a bare assertion, where a
+*typed* nil satisfies the assertion and yields an empty selector — all namespaces, the
+widest possible answer. One input, and the two halves land on opposite ends of the
+range rather than merely differing. Neither file shows the disagreement alone. Tracked
+as `go-kure/launcher#430`; this package's half conforms but is not pinned for null,
+which is a weaker claim than it looks.
 
 ## Conventions
 

@@ -329,6 +329,94 @@ assertion alone can't tell an uninitialized slice/map apart from a validly-typed
 empty collection, even though both serialize the same way, so a lowering rule
 that emits an unset (rather than empty) collection field is still caught.
 
+### What an explicit `null` means on the emitted path
+
+The contract, stated once because "null" has several readers here and aligning
+them one at a time is what made this take six rounds:
+
+> A value that serializes to JSON null is absent, at every depth, on every path;
+> a null is never a member of any `Items` type, so a null array element is a type
+> error; reservation is about the KEY being written.
+
+Applied in two places, because a key and an array element are not the same kind
+of thing:
+
+- **A declared, optional object key holding a null is DELETED** before its value
+  is checked. `Required` already classifies a null as absent, so materialising it
+  as a present key contradicted the classification the file had already made — and
+  a handler parser decides presence with a bare two-value map lookup, so it saw a
+  key the validator had decided was not there.
+- **A null ARRAY ELEMENT is rejected**, by an explicit guard rather than by the
+  type check. An element cannot be absent — it is present by being in the list —
+  so there is nothing to normalise it to, and dropping it would renumber its
+  siblings under a schema that may constrain length and order. The guard is
+  necessary rather than decorative: a *typed* nil (`map[string]any(nil)`,
+  `[]any(nil)`, reachable from a rule written in Go) satisfies the plain type
+  assertion the object/array coercers try first, and iterating the resulting empty
+  collection rejects nothing, so the type check alone accepted it. An `Items`
+  schema with no declared type checks nothing at all — and so does *no* `Items`
+  schema, which is why the guard runs before the `Items` walk rather than inside
+  it: declaring no element schema says nothing about the members, but it does not
+  license the one member no `Items` type could ever have matched.
+- **An `Enum` member holding a null is rejected**, wherever the null sits in it.
+  Members are compared against a value that has already been normalised, while the
+  declared members are not, so such a member could never match anything that
+  reaches the comparison. Refusing it names the schema defect instead of leaving an
+  `Enum` that silently never matches.
+
+  Refused per *member*, not per schema type. Refusing every `Enum` declared on an
+  array or object type is simpler to state and was the first shape of this rule,
+  but it also refuses the null-free compound enums that match perfectly well —
+  and `PropertySchema` is exported, so a handler outside this repo would have seen
+  a schema this validator used to accept start failing for a reason that does not
+  apply to it. No built-in schema declares an `Enum` on a non-scalar type today,
+  but nothing asserts that as a rule and this check does not depend on it. What is
+  asserted is the rule above: `TestBuiltinHandlerSchemaEnumMembersHoldNoNull`
+  (`pkg/cmd/kurel`) walks every schema that ships for a member holding a null,
+  because the runtime arm only fires once a document validates against the property
+  carrying the `Enum`.
+
+Two things this deliberately does not do:
+
+- **It makes no exception for `PlatformReserved` keys.** Reservation
+  (`enforcePlatformReserved`) is a rule about what a user *wrote*. On the authored
+  surface the two rules never meet — it runs upstream of any emission validation —
+  so reservation keeps treating an explicit null as *present* while the strip
+  treats one as absent. Exempting reserved keys here would not have preserved the
+  authored rule; it would only have handed a reserved null to the type check,
+  producing a loud rejection with the wrong reason. On the **component** surface
+  they do meet: the component-side checks also run on rule-produced components,
+  whose properties have already been through the strip, so a rule-emitted reserved
+  key set to null is never flagged. That is latent rather than live — every
+  `PlatformReserved` field declared today is on a trait schema, none on a component
+  schema, which also means those component-side checks cannot currently fire at
+  all. Tracked as `go-kure/launcher#429`.
+- **A key the schema does not declare is untouched**, including inside an object
+  that sets `AdditionalProperties`. Nothing describes such a value, so nothing
+  here can normalise it, and a null inside an opaque object still reaches the
+  handler parser. This is the same horizon as validation itself.
+
+Scope, because this contract is not settled repository-wide: this fixes the
+**emitted** path only. Authored documents never reach these functions at all
+(see the paragraph above), so a handler's own parser still has to answer for a
+null it is handed directly — which is why the built-in parsers keep their
+explicit-null guards. Aligning the authored path is tracked separately as
+`go-kure/launcher#394` and is not closed by this.
+
+Two further surfaces sit outside the contract and are named here so "the contract
+holds" is not read as "it holds everywhere":
+
+- **Capability rendering** (`checkCapabilityValueType`, `capability.go`) is outside
+  it by the scope sentence, not by the flat/full vocabulary split. It reads a
+  *present* null as a type error where the contract reads it as omission — loud
+  rather than silent, so nothing is wrongly accepted, but the message is wrong for
+  the input. Tracked with the switch's missing `default` arm as
+  `go-kure/launcher#431`.
+- **The networkpolicy peer parser** reads a *typed* nil `namespaceSelector` as an
+  empty selector, which selects every namespace, where the same key parsed for
+  pod affinity reads any null as omission. Unreachable today and pinned by a test
+  so closing it is a deliberate edit; tracked as `go-kure/launcher#430`.
+
 ## Contract metadata
 
 Handlers and lowering rules may implement `ContractDescriber` (`ContractMetadata()

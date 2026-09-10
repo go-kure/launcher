@@ -225,6 +225,207 @@ func TestDaemonsetHandler_WithTolerations(t *testing.T) {
 	t.Error("DaemonSet not found")
 }
 
+// TestDaemonsetHandler_SharedTolerationParserReachesDaemonset pins the one part
+// of go-kure/launcher#412 that is NOT additive. parseTolerations and
+// schemaTolerations have exactly two callers — daemonset and deployment — so
+// completing the corev1.Toleration projection for the new kind also changed the
+// old one, and the README's compatibility section says so. This is that claim as
+// an executable oracle rather than prose: without it, no fixture and no test in
+// the repo authors a toleration on daemonset beyond the three-key happy path, so
+// a green suite says nothing about what daemonset now accepts.
+//
+// The split matters and is asserted per rule, and "per rule" means one subtest
+// for every row of README.md's "What `tolerations` changed for `daemonset`"
+// table, not for the ones that were convenient. Deliberately no count here: the
+// README's own summary of this table went stale twice on a count and a third
+// time on a partition claim, and a number in this comment is one more copy to
+// drift. Add a row there, add a subtest here, in the same change.
+//
+// Rows that are gains carry their own subtests: a rejection-only
+// oracle proves the shared parser is reached but not that daemonset still
+// accepts what the table promises it accepts, so a daemonset-only narrowing
+// would pass it. The rejection rows are NOT uniformly free — most cost
+// daemonset only documents the apiserver would have refused anyway (README
+// reason 1), but `tolerations` authored as a mapping and a `tolerationSeconds`
+// on any effect other than NoExecute were both being discarded unread, so a
+// document hitting either built and applied cleanly before (reason 2). The
+// oracle proves the shared parser is reached but not that daemonset still
+// accepts what the table promises it accepts, so a daemonset-only narrowing
+// would pass it.
+func TestDaemonsetHandler_SharedTolerationParserReachesDaemonset(t *testing.T) {
+	t.Run("tolerationSeconds is now honoured", func(t *testing.T) {
+		ds := generateDaemonSet(t, map[string]any{
+			"image": "ghcr.io/org/agent:v1.0.0",
+			"tolerations": []any{
+				map[string]any{
+					"key":               "node.kubernetes.io/unreachable",
+					"operator":          "Exists",
+					"effect":            "NoExecute",
+					"tolerationSeconds": 300,
+				},
+			},
+		})
+		tols := ds.Spec.Template.Spec.Tolerations
+		if len(tols) != 1 {
+			t.Fatalf("Tolerations = %d, want 1", len(tols))
+		}
+		if tols[0].TolerationSeconds == nil {
+			t.Fatal("daemonset dropped an authored tolerationSeconds")
+		}
+		if got := *tols[0].TolerationSeconds; got != 300 {
+			t.Errorf("TolerationSeconds = %d, want 300", got)
+		}
+	})
+
+	// The second gain row. Lt and Gt were previously refused outright as
+	// unknown operators, so this is the one place the shared parser WIDENED
+	// what daemonset takes. Asserted through the handler rather than inferred
+	// from the deployment tests, which cannot see a daemonset-only narrowing:
+	// a guard added in daemonset.go that refused comparison operators before
+	// delegating would leave every other assertion in this package satisfied.
+	t.Run("Lt and Gt are now accepted", func(t *testing.T) {
+		ds := generateDaemonSet(t, map[string]any{
+			"image": "ghcr.io/org/agent:v1.0.0",
+			"tolerations": []any{
+				map[string]any{"key": "capacity", "operator": "Gt", "value": "5"},
+				map[string]any{"key": "capacity", "operator": "Lt", "value": "20"},
+			},
+		})
+		tols := ds.Spec.Template.Spec.Tolerations
+		if len(tols) != 2 {
+			t.Fatalf("Tolerations = %d, want 2", len(tols))
+		}
+		if tols[0].Operator != corev1.TolerationOpGt || tols[0].Value != "5" {
+			t.Errorf("tolerations[0] = %+v, want operator Gt value 5", tols[0])
+		}
+		if tols[1].Operator != corev1.TolerationOpLt || tols[1].Value != "20" {
+			t.Errorf("tolerations[1] = %+v, want operator Lt value 20", tols[1])
+		}
+	})
+
+	// The third gain row: an explicit null on a toleration's scalar now reads as
+	// omission rather than failing conversion with "must be a string, got
+	// <nil>". Asserted on daemonset because the null arrives here intact —
+	// withoutExplicitNulls strips only top-level properties — so this is a
+	// document the schema declares valid that the parser used to refuse.
+	t.Run("an explicit null on a scalar reads as omission", func(t *testing.T) {
+		ds := generateDaemonSet(t, map[string]any{
+			"image": "ghcr.io/org/agent:v1.0.0",
+			"tolerations": []any{
+				map[string]any{"key": nil, "operator": "Exists", "value": nil, "effect": nil},
+			},
+		})
+		tols := ds.Spec.Template.Spec.Tolerations
+		if len(tols) != 1 {
+			t.Fatalf("Tolerations = %d, want 1", len(tols))
+		}
+		if tols[0].Key != "" || tols[0].Value != "" || tols[0].Effect != "" {
+			t.Errorf("tolerations[0] = %+v, want the nulled scalars to read as empty", tols[0])
+		}
+		if tols[0].Operator != corev1.TolerationOpExists {
+			t.Errorf("Operator = %q, want Exists", tols[0].Operator)
+		}
+	})
+
+	// The mapping row does not fit the entry-shaped table below: it is the whole
+	// `tolerations` property that carries the wrong container type, not one
+	// entry. This is a reason-2 rejection — the mistyped block was previously
+	// discarded without a word and the workload built and applied without any
+	// tolerations at all.
+	t.Run("now rejected: tolerations authored as a mapping", func(t *testing.T) {
+		h := &components.DaemonsetHandler{}
+		_, err := h.ToApplicationConfig(&oam.Component{
+			Name: "agent",
+			Type: "daemonset",
+			Properties: map[string]any{
+				"image":       "ghcr.io/org/agent:v1.0.0",
+				"tolerations": map[string]any{"key": "dedicated", "operator": "Exists"},
+			},
+		}, "default")
+		if err == nil {
+			t.Fatal("got nil error, want one containing \"must be an array\"")
+		}
+		if !strings.Contains(err.Error(), "tolerations: must be an array") {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), "tolerations: must be an array")
+		}
+	})
+
+	// Each of these is a document daemonset accepted before this work. All but
+	// the last are reason-1 rows — nothing appliable is lost, because the
+	// apiserver refused them anyway. The tolerationSeconds/NoExecute row is
+	// reason 2: the key was never read, so no such pair ever reached a cluster
+	// and the document applied cleanly. See the README table for the per-rule
+	// argument and the upstream citations.
+	rejections := []struct {
+		name       string
+		toleration map[string]any
+		want       string
+	}{
+		{
+			"unrecognised key inside a toleration entry",
+			map[string]any{"key": "dedicated", "operator": "Exists", "tolerationSecond": 30},
+			`unrecognized key "tolerationSecond"`,
+		},
+		{
+			"empty key with a non-Exists operator",
+			map[string]any{"operator": "Equal", "value": "batch", "effect": "NoSchedule"},
+			"must be 'Exists' when key is empty",
+		},
+		{
+			"value under Exists",
+			map[string]any{"key": "dedicated", "operator": "Exists", "value": "batch"},
+			"must be empty when operator is 'Exists'",
+		},
+		{
+			// The counterpart of the gain above: the key was previously
+			// dropped whatever it held, so a malformed one was ignored along
+			// with the rest. Reading the key and type-checking it are the same
+			// change, and this is the half that costs daemonset a document.
+			"malformed tolerationSeconds",
+			map[string]any{"key": "dedicated", "operator": "Exists", "effect": "NoExecute", "tolerationSeconds": "300"},
+			"must be an integer",
+		},
+		{
+			"a non-empty key that is not a qualified name",
+			map[string]any{"key": "not a key!", "operator": "Exists"},
+			`invalid label key "not a key!"`,
+		},
+		{
+			"an invalid label value under Equal",
+			map[string]any{"key": "dedicated", "operator": "Equal", "value": "not a value!"},
+			`invalid label value "not a value!"`,
+		},
+		{
+			// The reason-2 row. The key was previously dropped whatever it
+			// held, so the emitted toleration carried no deadline and the
+			// apiserver accepted it — this costs daemonset a document that
+			// built and applied, unlike every row above it.
+			"tolerationSeconds without effect NoExecute",
+			map[string]any{"key": "dedicated", "operator": "Exists", "effect": "NoSchedule", "tolerationSeconds": 30},
+			"must be 'NoExecute' when tolerationSeconds is set",
+		},
+	}
+	for _, tc := range rejections {
+		t.Run("now rejected: "+tc.name, func(t *testing.T) {
+			h := &components.DaemonsetHandler{}
+			_, err := h.ToApplicationConfig(&oam.Component{
+				Name: "agent",
+				Type: "daemonset",
+				Properties: map[string]any{
+					"image":       "ghcr.io/org/agent:v1.0.0",
+					"tolerations": []any{tc.toleration},
+				},
+			}, "default")
+			if err == nil {
+				t.Fatalf("got nil error, want one containing %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
 func TestDaemonsetConfig_WithPort(t *testing.T) {
 	h := &components.DaemonsetHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{

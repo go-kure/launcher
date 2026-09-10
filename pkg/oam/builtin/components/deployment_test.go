@@ -656,17 +656,31 @@ func TestDeploymentHandler_PropertySchemaComposition(t *testing.T) {
 		"image", "replicas", "probes", "volumes", // own keys
 		"nodeSelector", "hostNetwork", "serviceAccountName", // schemaPodSpec
 		"strategy", "minReadySeconds", "revisionHistoryLimit", "paused", "progressDeadlineSeconds", // schemaDeploymentSpec
+		"affinity", "tolerations", "topologySpreadConstraints", // raw corev1 scheduling shapes
 	} {
 		if _, ok := s[k]; !ok {
 			t.Errorf("PropertySchema is missing %q", k)
 		}
 	}
 	// The omissions are as much a decision as the inclusions
-	// (go-kure/launcher#343): no port, so no Service; no affinity shorthand; no
-	// default topology spread.
-	for _, k := range []string{"port", "affinity"} {
+	// (go-kure/launcher#343): no port, so no Service.
+	for _, k := range []string{"port"} {
 		if _, ok := s[k]; ok {
 			t.Errorf("PropertySchema declares %q, which this kind deliberately does not accept", k)
+		}
+	}
+	// go-kure/launcher#412 published `affinity` here, but as the raw
+	// corev1.Affinity shape — NOT the four-key shorthand webservice/worker/
+	// statefulset carry. That distinction is the whole reason the property is
+	// admissible on this kind at all (#343 excluded the shorthand, not the API
+	// field), so assert which of the two arrived rather than merely that the
+	// key exists.
+	if affinity, ok := s["affinity"]; ok {
+		if _, isRaw := affinity.Properties["nodeAffinity"]; !isRaw {
+			t.Error(`"affinity" does not declare "nodeAffinity" — expected the raw corev1.Affinity shape`)
+		}
+		if _, isShorthand := affinity.Properties["enablePodAntiAffinity"]; isShorthand {
+			t.Error(`"affinity" declares "enablePodAntiAffinity" — this kind must not carry the four-key shorthand`)
 		}
 	}
 	for k, v := range s {
