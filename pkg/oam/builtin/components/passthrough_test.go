@@ -623,6 +623,31 @@ func TestPassthrough_GenerateRevalidatesTheEmittedObject(t *testing.T) {
 		}
 	})
 
+	// The nil guard alone was not enough, and the gap is the one the guard's own
+	// comment claimed to close. An empty map is non-nil, so it cleared the guard, and
+	// it carries no items, so it cleared both list arms — leaving Generate to emit a
+	// document consisting of nothing but the metadata it had just stamped on. Every
+	// check that must hold of the emitted map now lives in one function, so the
+	// constructor and Generate cannot disagree about what a valid body is.
+	for name, object := range map[string]map[string]any{
+		"empty map":         {},
+		"apiVersion only":   {"apiVersion": "v1"},
+		"kind only":         {"kind": "ConfigMap"},
+		"empty kind string": {"apiVersion": "v1", "kind": ""},
+		"non-string kind":   {"apiVersion": "v1", "kind": 17},
+	} {
+		t.Run("body with no identity: "+name, func(t *testing.T) {
+			cfg := &components.PassthroughConfig{Namespace: "ns1", Object: object}
+			_, err := cfg.Generate(nil)
+			if err == nil {
+				t.Fatal("Generate emitted a body carrying no apiVersion/kind")
+			}
+			if !strings.Contains(err.Error(), "is required and must be a non-empty string") {
+				t.Errorf("error = %q, want the required-identity diagnostic", err)
+			}
+		})
+	}
+
 	t.Run("a plain object still generates", func(t *testing.T) {
 		// The control: re-validation must not reject what the constructor accepts,
 		// or every assertion above passes for the wrong reason.
