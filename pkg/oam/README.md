@@ -410,6 +410,15 @@ likewise declares **no default**, not a null one. This holds for a typed nil as 
 as an authored one, which matters precisely because `SetCapabilityDefs` takes
 Go-built definitions.
 
+A **declared default is type-checked against its own declared type**, on the same
+footing as a value the document supplies. Without that, a property was validated
+when the *document* supplied the value and unvalidated when the *schema* did — so a
+Go-built definition declaring `integer` with a `"three"` default injected that string
+into the rendering, past the check that exists to keep it out. Files were never
+exposed to this (`LoadCapabilityDefinitions` checks defaults at load); `SetCapabilityDefs`
+was, being the same bypass the type check above guards. A property declaring **no
+type** still accepts any default, unchanged.
+
 This is a large internal builder surface; the tables above cover the entry points.
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the full
 type reference, the design notes under the Concepts section, and `examples/` for

@@ -170,6 +170,18 @@ func applyDefinitionSchema(rendering map[string]any, def *CapabilityDefinition) 
 				return nil, errors.Errorf("required rendering property %q is missing", propName)
 			}
 			if !isNullValue(propSchema.Default) {
+				// The declared default is type-checked HERE and not only in
+				// LoadCapabilityDefinitions, for the same reason the type switch
+				// below has a default arm: SetCapabilityDefs installs Go-built
+				// definitions wholesale and never runs the loader. Without this,
+				// the same property was validated when the DOCUMENT supplied the
+				// value and unvalidated when the SCHEMA did — so a hand-built
+				// definition declaring "integer" with a "three" default injected
+				// that string into the rendering, past a check that exists to keep
+				// it out (go-kure/launcher#431).
+				if err := checkCapabilityValueType(propSchema.Default, string(propSchema.Type)); err != nil {
+					return nil, errors.Errorf("rendering property %q: declared default: %s", propName, err)
+				}
 				result[propName] = propSchema.Default
 			}
 			continue
@@ -189,8 +201,10 @@ func applyDefinitionSchema(rendering map[string]any, def *CapabilityDefinition) 
 // typeName is the FLAT capability vocabulary (string/integer/boolean — see
 // acceptedPropertyTypes and flatschema.go), not the full handler vocabulary
 // PropertySchema carries. An empty typeName means the property declares no type
-// and every value is accepted; both call sites already skip the call in that case,
-// and the arm below keeps the two agreeing if one ever stops.
+// and every value is accepted. Two of the three call sites guard on that before
+// calling; the declared-default check in applyDefinitionSchema relies on the ""
+// arm below instead, which is why that arm is the contract rather than a
+// belt-and-braces duplicate of the guards.
 //
 // Anything else is an error rather than silent acceptance. From FILES that is
 // unreachable — LoadCapabilityDefinitions rejects a declared type outside

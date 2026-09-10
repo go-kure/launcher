@@ -119,6 +119,63 @@ func TestApplyDefinitionSchema_NonNullValueStillTypeChecked(t *testing.T) {
 	}
 }
 
+func TestApplyDefinitionSchema_DeclaredDefaultIsTypeChecked(t *testing.T) {
+	// The asymmetry this closes: the SAME property was validated when the
+	// DOCUMENT supplied the value and unvalidated when the SCHEMA did. A declared
+	// default is applied to an absent property without ever passing the check the
+	// authored value must pass.
+	//
+	// Unreachable from files — LoadCapabilityDefinitions type-checks defaults at
+	// load. Reachable from Go, via the same bypass the type switch's default arm
+	// exists for: SetCapabilityDefs replaces the definition set wholesale and
+	// never runs the loader. That is why "the loader already checks it" is not a
+	// reason to skip it here.
+	def := capDefWithProps(map[string]PropertySchema{
+		"replicas": {Type: "integer", Default: "three"},
+	})
+
+	_, err := applyDefinitionSchema(map[string]any{}, def)
+	if err == nil {
+		t.Fatal("an integer property took a string default with no error; a hand-built definition can inject a value past the check that exists to keep it out")
+	}
+	if !strings.Contains(err.Error(), "declared default") {
+		t.Errorf("error %q does not identify the DEFAULT as the culprit; an author reading it would look at their document, which is correct", err)
+	}
+}
+
+func TestApplyDefinitionSchema_WellTypedDefaultStillApplies(t *testing.T) {
+	// First control: the check must not have turned every default into an error.
+	def := capDefWithProps(map[string]PropertySchema{
+		"replicas": {Type: "integer", Default: 3},
+	})
+
+	result, err := applyDefinitionSchema(map[string]any{}, def)
+	if err != nil {
+		t.Fatalf("a well-typed default must still apply, got: %v", err)
+	}
+	if result["replicas"] != 3 {
+		t.Errorf("replicas = %#v, want 3", result["replicas"])
+	}
+}
+
+func TestApplyDefinitionSchema_UntypedPropertyAcceptsAnyDefault(t *testing.T) {
+	// Second control, and the one that pins WHY the new call site does not guard
+	// on an empty type the way its two siblings do: it relies on the switch's ""
+	// arm instead. A property declaring no type accepts any value, defaults
+	// included, and this fails if that arm is ever made strict.
+	def := capDefWithProps(map[string]PropertySchema{
+		"anything": {Default: []string{"a", "b"}},
+	})
+
+	result, err := applyDefinitionSchema(map[string]any{}, def)
+	if err != nil {
+		t.Fatalf("an untyped property must accept any default, got: %v", err)
+	}
+	if result["anything"] == nil {
+		t.Error("the default was not applied")
+	}
+}
+
 func TestCheckCapabilityValueType_UnsupportedTypeIsRejected(t *testing.T) {
 	// Before #431 this switch had no default arm and fell off the end returning
 	// nil, so a property declaring any type outside the flat vocabulary accepted
