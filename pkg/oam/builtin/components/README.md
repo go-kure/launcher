@@ -1425,10 +1425,13 @@ object would change what the next `Generate` emits.
   consumers can attribute the emitted resource to its owning OAM component.
   **`object` must be a single object; a list is rejected.** `Generate` emits the map
   verbatim as one resource and fills in metadata it finds missing: `metadata.name`
-  defaults to the component name only when unset or empty, and `metadata.namespace`
-  likewise — an inline namespace the author wrote survives untouched, and
-  `clusterScoped: true` suppresses the namespace default entirely (setting one inline
-  is rejected instead). A list would therefore arrive downstream as one *named*
+  defaults to the component name when it is absent, empty, **or not a string**, and
+  `metadata.namespace` likewise — so an inline *non-empty string* namespace survives
+  untouched, while a non-string one is replaced rather than emitted. `clusterScoped:
+  true` suppresses the namespace default entirely, and rejects an inline namespace —
+  that rejection is also keyed on a non-empty string, so under `clusterScoped` a
+  non-string `namespace` is neither rejected nor defaulted and reaches the output as
+  authored. A list would therefore arrive downstream as one *named*
   envelope whose `items` never see per-object label mutation, namespace stamping or
   ownership checks — while Flux's kustomize unwraps it at apply time into N objects that
   do reach the cluster. One envelope bypasses every per-object rule at once, which is why
@@ -1445,10 +1448,24 @@ object would change what the next `Generate` emits.
   objects"), and it is keyed on a **null** `items` rather than a present one, because a
   CRD may legitimately carry an object-valued `items` field that must keep compiling.
 
-  The validated object is deep-copied when the config is built, not aliased, so the
-  bytes these checks ran against are the bytes `Generate` emits. Retaining the caller's
-  map made every check above advisory: a programmatic caller could add `items` after
-  `ToApplicationConfig` returned and get exactly the envelope it had just refused.
+  The validated object is deep-copied when the config is built, not aliased, so a
+  caller that keeps mutating the map it passed in cannot change what was validated.
+  The copy detaches nested maps and slices whatever their concrete type — the authored
+  path only ever yields `map[string]any` and `[]any`, but a Go-assembled body can hold
+  a `map[string]string` or a `[]string`, and those used to alias straight through. A
+  null survives as a null rather than becoming an empty `{}`/`[]`. Two things it
+  deliberately does not do: it does not chase pointers (a `*Location` inside a
+  `time.Time`, `resource.Quantity`'s `*inf.Dec`), and it does not reject the shapes it
+  cannot fully detach.
+
+  The copy is **not** what makes the rejection binding, and this section used to claim
+  it was. `Object` is an exported field, so a caller holding the config can assign a
+  fresh map over it, and a struct literal or a JSON decode never runs
+  `ToApplicationConfig` at all — three routes reaching `Generate` with a body the arms
+  never saw. `Generate` therefore re-runs both arms on the map it is about to emit,
+  and rejects a config that carries no object at all. Checking the bytes being emitted,
+  rather than trusting a check that ran on some earlier map, is what closes those
+  routes.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
   (`apiVersion`/`kind`/`scope`) for unknown kinds.
 
