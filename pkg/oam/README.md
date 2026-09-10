@@ -324,19 +324,22 @@ handler's returned schema, so `HandlerSchemas` still advertises only what each h
 actually declares.
 
 `validateProperties`'s null check (`isNullValue`) treats a typed-nil pointer,
-slice, or map — not just a bare `nil` interface — as JSON `null`: a Go type
-assertion alone can't tell an uninitialized slice/map apart from a validly-typed
-empty collection, *although the two serialize differently* — `null` versus
-`[]`/`{}` — so a lowering rule that emits an unset (rather than empty) collection
+slice, or map — not just a bare `nil` interface — as `null`: a Go type assertion
+alone can't tell an uninitialized slice/map apart from a validly-typed empty
+collection, so a lowering rule that emits an unset (rather than empty) collection
 field is still caught.
 
 `IsNullValue` is the exported form of that check, and with it the contract itself:
-**a value that serializes to JSON/YAML `null` is absent, not present-and-empty.**
-The predicate is nil-ness, not serialization: it reports true for a bare `nil` and
-for a nil map, slice, pointer, channel or func. Those coincide for every shape a
-decoded document can produce, which is what the contract is about; they part
-company only on values no document round-trips (a nil channel is reported null
-though `encoding/json` cannot marshal it at all).
+**a null value is absent, not present-and-empty.** The predicate is nil-ness, not
+serialization, and that distinction is load-bearing rather than pedantic: whether
+the two shapes serialize differently depends on the ENCODER. `encoding/json` (and
+`sigs.k8s.io/yaml`, which routes through it) writes `null` for a nil map or slice
+and `{}`/`[]` for an allocated empty one, but `gopkg.in/yaml.v3` — the YAML library
+this package parses with — renders both as `{}`/`[]`, because its encoder
+dispatches on `reflect.Kind`. Keying the contract on nil-ness rather than on
+rendered output is what makes it hold under either. The predicate parts company
+with every encoder only on values no document round-trips (a nil channel is
+reported null though `encoding/json` cannot marshal it at all).
 
 It exists for parsers outside this package — handler and trait property readers,
 and out-of-tree lowering rules — that must classify a null the same way the

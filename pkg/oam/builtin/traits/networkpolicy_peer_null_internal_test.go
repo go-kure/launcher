@@ -266,11 +266,16 @@ func TestParseNPPeer_UnknownKeyDiagnosticIsDeterministic(t *testing.T) {
 	// same document disagree.
 	//
 	// The repetition is not the rule — the rule is the exact key asserted below —
-	// it is detection power. An unsorted loop over n keys still names the expected
-	// one with probability 1/n, so a single pass at n=2 misses the defect half the
-	// time; measured, a two-key version of this check caught an unsorted mutant on
-	// 0 of 2 subtests in one run. At n=4 over 20 passes the miss probability is
-	// 4^-20 per site.
+	// it is detection power. A single pass over a small key set is a coin flip: a
+	// two-key version of this check caught an unsorted mutant on 0 of 2 subtests
+	// in one measured run, which is why it was rewritten. Four keys over twenty
+	// passes is what actually discriminates — the same mutation applied to each of
+	// the three sites below was caught by that site's subtest and only by it.
+	//
+	// No closed-form miss probability is claimed here: Go's map iteration is
+	// randomized but NOT uniform over keys at this size, so 1/n is the wrong
+	// model and the honest figure would have to be measured per key set rather
+	// than derived.
 	for _, tc := range []struct {
 		name  string
 		parse func() error
