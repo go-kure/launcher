@@ -163,6 +163,31 @@ func stringMap(m map[string]any) map[string]string {
 	return result
 }
 
+// stringMapStrict is stringMap with the silent discard removed: a value that is
+// not a string is refused by key instead of being dropped.
+//
+// stringMap keeps the lenient behaviour because it has several callers whose
+// contracts have not been reviewed; converting them is a wider blast radius than
+// any one fix should carry. But refusing a wrongly-typed CONTAINER while its
+// wrongly-typed CONTENTS are still discarded is not a coherent contract — a
+// caller that rejects `nodeSelector: "zone-a"` by name and then loses
+// `nodeSelector: {rack: 3}` without a word is checking the envelope and not the
+// payload (go-kure/launcher#448).
+//
+// Keys are reported one at a time and in the caller's label space, so the
+// message names the field an author can actually find.
+func stringMapStrict(m map[string]any, label string) (map[string]string, error) {
+	result := make(map[string]string, len(m))
+	for k, v := range m {
+		s, ok := v.(string)
+		if !ok {
+			return nil, errors.Errorf("%s[%q]: must be a string, got %T", label, k, v)
+		}
+		result[k] = s
+	}
+	return result, nil
+}
+
 // --- Data types ---
 
 // ResourceRequirements projects the real corev1.ResourceRequirements directly
