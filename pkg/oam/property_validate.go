@@ -285,6 +285,10 @@ func isNullValue(value any) bool {
 		return true
 	}
 	switch rv := reflect.ValueOf(value); rv.Kind() {
+	// reflect.Interface is unreachable through this signature — reflect.ValueOf
+	// unwraps the interface, so a nil one has already returned above and a non-nil
+	// one reports the dynamic type's kind. It is listed for completeness against a
+	// future caller that passes a reflect.Value through, not because it fires.
 	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Chan, reflect.Func, reflect.Interface:
 		return rv.IsNil()
 	default:
@@ -292,9 +296,19 @@ func isNullValue(value any) bool {
 	}
 }
 
-// IsNullValue reports whether value serializes to JSON/YAML null — the exported
-// form of isNullValue above, and with it the null contract this package enforces:
-// a value that serializes to null is ABSENT, not present-and-empty.
+// IsNullValue reports whether value is nil — a bare nil interface, or a non-nil
+// interface holding a nil map, slice, pointer, channel or function. It is the
+// exported form of isNullValue above, and with it the null contract this package
+// enforces: a value that is null is ABSENT, not present-and-empty.
+//
+// It is a NIL predicate, not a serialization oracle, and the difference is worth
+// stating because the contract it serves is phrased in serialization terms. The two
+// coincide for the shapes a decoded document produces — a nil map or slice
+// serializes to `null` where an allocated empty one serializes to `{}`/`[]` — and
+// diverge outside them: a nil channel or func is reported null here although
+// encoding/json cannot marshal either at all, and a non-nil value with a custom
+// MarshalJSON that emits `null` is reported not-null. Neither shape survives a
+// round trip through a document, so neither reaches a property map by decoding.
 //
 // It exists because that contract has to hold in packages that cannot see
 // isNullValue. A parser reading an optional property must classify a null with
