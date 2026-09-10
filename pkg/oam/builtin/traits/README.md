@@ -176,6 +176,17 @@ would silently shrink the rule, and an authored `- {}` already expresses the emp
 peer. This is what an untyped `nil` in that position always did; the typed nil now
 agrees with it instead of being accepted as an empty peer selecting nothing.
 
+The same holds one level up, for an element of the `ingress`/`egress` **rule**
+list, where it matters more: a rule with neither `from`/`to` nor `ports` matches
+**all** sources on **all** ports, so a silently-accepted null rule widens the
+policy to allow-all rather than narrowing it.
+
+```yaml
+ingress:
+  - {}                            # a present, empty rule: allow-all, authored on purpose
+  -                               # null: rejected, `ingress[0]: expected object`
+```
+
 ### Null `ingress` / `egress`
 
 The trait's two top-level rule keys are optional individually and **required
