@@ -276,8 +276,9 @@ func isNumberValue(value any) bool {
 // slice, pointer, channel or function — round-9 Codex regression (property_validate.go:63):
 // asArrayValue/asObjectValue's type assertions succeed on a typed nil
 // ([]any(nil), map[string]any(nil)) with ok=true, so a plain `value == nil` check
-// lets one through as a present, validly-typed empty collection even though it
-// serializes to JSON/YAML `null`, not `[]`/`{}`. A rule that assigns an
+// lets one through as a present, validly-typed empty collection even though
+// encoding/json marshals it as `null`, not `[]`/`{}` (see IsNullValue below on
+// why the encoder has to be named). A rule that assigns an
 // uninitialized Go slice or map to a Properties entry hits this by construction,
 // with no unusual authoring required.
 func isNullValue(value any) bool {
@@ -302,13 +303,23 @@ func isNullValue(value any) bool {
 // enforces: a value that is null is ABSENT, not present-and-empty.
 //
 // It is a NIL predicate, not a serialization oracle, and the difference is worth
-// stating because the contract it serves is phrased in serialization terms. The two
-// coincide for the shapes a decoded document produces — a nil map or slice
-// serializes to `null` where an allocated empty one serializes to `{}`/`[]` — and
-// diverge outside them: a nil channel or func is reported null here although
-// encoding/json cannot marshal either at all, and a non-nil value with a custom
-// MarshalJSON that emits `null` is reported not-null. Neither shape survives a
-// round trip through a document, so neither reaches a property map by decoding.
+// stating because the contract it serves is phrased in serialization terms — a
+// phrasing that is ENCODER-SPECIFIC. Under encoding/json, and so under
+// sigs.k8s.io/yaml which routes through it, a nil map or slice marshals to `null`
+// where an allocated empty one marshals to `{}`/`[]`; that is the pairing the
+// contract's wording comes from. gopkg.in/yaml.v3 — this package's own YAML
+// library — does not agree: its encoder dispatches on reflect.Kind and sends a nil
+// map to the mapping emitter and a nil slice to the sequence emitter
+// (gopkg.in/yaml.v3@v3.0.1 encode.go:160-176), rendering `{}` and `[]`, so under
+// that encoder the two shapes are indistinguishable in the output. Nil-ness is
+// what this predicate reports either way, which is precisely why it is the right
+// check: the encoder varies, the value does not.
+//
+// It also diverges from every encoder outside the shapes a decoded document
+// produces: a nil channel or func is reported null here although encoding/json
+// cannot marshal either at all, and a non-nil value with a custom MarshalJSON that
+// emits `null` is reported not-null. Neither shape survives a round trip through a
+// document, so neither reaches a property map by decoding.
 //
 // It exists because that contract has to hold in packages that cannot see
 // isNullValue. A parser reading an optional property must classify a null with

@@ -3,6 +3,7 @@ package traits
 import (
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 
@@ -551,6 +552,94 @@ var validNPProtocols = map[string]corev1.Protocol{
 	"SCTP": corev1.ProtocolSCTP,
 }
 
+// validNPPortKeys closes the port item over the two fields this parser
+// implements. It is the one key set in this file the SCHEMA cannot back up:
+// PropertySchema keeps the port item open (AdditionalProperties, line 64-71)
+// because `port` is an int-or-string union PropertySchema has no way to express,
+// so `protcol: UDP` passes every schema check and reaches here — where, before
+// this set existed, it was dropped and the port rendered TCP. `endPort` is the
+// other name worth rejecting explicitly: it is a real NetworkPolicyPort field
+// (k8s.io/api networking/v1/types.go:171-176) that this parser does not
+// implement, so accepting it silently would render a single port where the
+// document asked for a range — the `matchExpressions` case one list down.
+var validNPPortKeys = map[string]bool{
+	"port":     true,
+	"protocol": true,
+}
+
+// npPortNumber renders a numeric `port` as the int32 the wire type carries
+// (intstr.FromInt32), reporting whether the value was numeric at all so a named
+// port string can still take the other branch.
+//
+// The previous bare `int32(v)` lost two shapes silently, and a port is a
+// constraint like every other value in this trait: one this parser cannot carry
+// EXACTLY is an error, never a different port.
+//
+//   - a fractional float TRUNCATED — `port: 80.9` rendered port 80.
+//   - a value outside int32 was implementation-defined (Go spec, Conversions:
+//     "the behavior is implementation-dependent" when a float overflows the
+//     target). Measured on this host: `port: 4294967376` rendered port 80.
+//
+// The 1-65535 bound is the API server's own (k8s.io/apimachinery
+// pkg/util/validation IsValidPortNum), applied here so the document fails at the
+// line that wrote it rather than at apply time. Every integer kind a YAML/JSON
+// decode or a lowering rule assembling properties in Go can produce is accepted,
+// matching npLabelValue's reach rather than the previous int/float64 pair.
+func npPortNumber(value any, path string) (int32, bool, error) {
+	var n int64
+	switch v := value.(type) {
+	case int:
+		n = int64(v)
+	case int8:
+		n = int64(v)
+	case int16:
+		n = int64(v)
+	case int32:
+		n = int64(v)
+	case int64:
+		n = v
+	case uint:
+		if uint64(v) > math.MaxInt64 {
+			return 0, true, errors.Errorf("%s: 'port' %v is out of range (1-65535)", path, value)
+		}
+		n = int64(v)
+	case uint8:
+		n = int64(v)
+	case uint16:
+		n = int64(v)
+	case uint32:
+		n = int64(v)
+	case uint64:
+		if v > math.MaxInt64 {
+			return 0, true, errors.Errorf("%s: 'port' %v is out of range (1-65535)", path, value)
+		}
+		n = int64(v)
+	case float32:
+		return npPortFromFloat(float64(v), value, path)
+	case float64:
+		return npPortFromFloat(v, value, path)
+	default:
+		return 0, false, nil
+	}
+	if n < 1 || n > 65535 {
+		return 0, true, errors.Errorf("%s: 'port' %v is out of range (1-65535)", path, value)
+	}
+	return int32(n), true, nil
+}
+
+// npPortFromFloat is npPortNumber's float half: a port has to be a whole number,
+// and the range check has to happen in float64 — converting first is the
+// implementation-defined step this exists to avoid.
+func npPortFromFloat(f float64, original any, path string) (int32, bool, error) {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+		return 0, true, errors.Errorf("%s: 'port' must be a whole number, got %v", path, original)
+	}
+	if f < 1 || f > 65535 {
+		return 0, true, errors.Errorf("%s: 'port' %v is out of range (1-65535)", path, original)
+	}
+	return int32(f), true, nil
+}
+
 func parseNPPort(raw any, path string) (npPort, error) {
 	// The third and last list element in this file, so the null guard is here too
 	// and every element of every list the trait parses now reports the same thing
@@ -568,24 +657,49 @@ func parseNPPort(raw any, path string) (npPort, error) {
 
 	var port npPort
 
-	switch v := portMap["port"].(type) {
-	case float64:
-		port.Port = intstr.FromInt32(int32(v)) //nolint:gosec
-	case int:
-		port.Port = intstr.FromInt32(int32(v)) //nolint:gosec
-	case string:
-		if v == "" {
-			return npPort{}, errors.Errorf("%s: 'port' must be a number or named port string", path)
+	// The port item's key set; see validNPPortKeys. Sorted, like every other
+	// unknown-key loop in this file, so a document with two bad keys reports the
+	// same one on every run.
+	for _, k := range slices.Sorted(maps.Keys(portMap)) {
+		if !validNPPortKeys[k] {
+			return npPort{}, errors.Errorf("%s: unsupported key %q", path, k)
 		}
-		port.Port = intstr.FromString(v)
-	default:
-		return npPort{}, errors.Errorf("%s: 'port' must be a number or named port string", path)
 	}
 
+	num, numeric, err := npPortNumber(portMap["port"], path)
+	switch {
+	case err != nil:
+		return npPort{}, err
+	case numeric:
+		port.Port = intstr.FromInt32(num)
+	default:
+		// A null `port` lands here and reports the same thing an absent one
+		// does. NetworkPolicyPort.Port is optional upstream (an absent port
+		// matches all ports on the protocol), but this parser has always
+		// required it, and widening that is a behaviour change this fix does
+		// not make.
+		name, ok := portMap["port"].(string)
+		if !ok || name == "" {
+			return npPort{}, errors.Errorf("%s: 'port' must be a number or named port string", path)
+		}
+		port.Port = intstr.FromString(name)
+	}
+
+	// `protocol` was read through a bare comma-ok assertion, so a non-string —
+	// `protocol: [UDP]`, or a lowering rule that assembled a corev1.Protocol
+	// rather than a string — was DISCARDED and the port rendered TCP, which is
+	// the fail-open shape this trait's whole null/type contract exists to
+	// prevent: a policy that permits a protocol the document did not author and
+	// denies the one it did. A null is absence, as everywhere else here, and
+	// absence is the upstream default of TCP (k8s.io/api
+	// networking/v1/types.go:159-162).
 	port.Protocol = corev1.ProtocolTCP
-	if proto, ok := portMap["protocol"].(string); ok {
-		upper := strings.ToUpper(proto)
-		p, valid := validNPProtocols[upper]
+	if rawProto, present := portMap["protocol"]; present && !oam.IsNullValue(rawProto) {
+		proto, ok := rawProto.(string)
+		if !ok {
+			return npPort{}, errors.Errorf("%s.protocol: expected string, got %T", path, rawProto)
+		}
+		p, valid := validNPProtocols[strings.ToUpper(proto)]
 		if !valid {
 			return npPort{}, errors.Errorf("%s: invalid protocol %q (must be TCP, UDP, or SCTP)", path, proto)
 		}
