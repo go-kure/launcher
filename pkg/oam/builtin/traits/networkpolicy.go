@@ -121,6 +121,24 @@ func (h *NetworkPolicyHandler) parseProperties(props map[string]any, app *stack.
 	rawIngress, hasIngress := props["ingress"]
 	rawEgress, hasEgress := props["egress"]
 
+	// A null reads as absence before the guard below, not after it. Both keys are
+	// optional individually and required jointly, so this is the one guard in the
+	// file a null can satisfy while contributing nothing: a TYPED nil satisfies the
+	// `.([]any)` assertion with ok=true and a nil slice, whose range body never
+	// runs, so `ingress:` with no value used to produce an empty NetworkPolicy that
+	// selects the component's pods and permits nothing -- a default-deny, silently,
+	// from a document that asked for no such thing. An UNTYPED nil failed the same
+	// assertion and reported "'ingress' must be an array", which is the wrong
+	// diagnostic for a key that is absent rather than mistyped. Clearing the flags
+	// makes both shapes absent, so the joint requirement is what actually reports
+	// (go-kure/launcher#430, predicate in go-kure/launcher#465).
+	if hasIngress && oam.IsNullValue(rawIngress) {
+		hasIngress = false
+	}
+	if hasEgress && oam.IsNullValue(rawEgress) {
+		hasEgress = false
+	}
+
 	if !hasIngress && !hasEgress {
 		return nil, errors.New("at least one of 'ingress' or 'egress' must be specified")
 	}
