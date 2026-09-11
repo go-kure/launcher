@@ -290,8 +290,24 @@ object before it uploads anything. Read the **job conclusions** of the publish r
 
 ```bash
 gh run view <run-id> --repo go-kure/launcher --json jobs \
-  --jq '.jobs[] | "\(.name): \(.conclusion)"'
+  --jq '.jobs[] | "\(.name): \(.conclusion) (started \(.startedAt))"'
 ```
+
+> ⚠ **If the run has been re-run, that list mixes attempts.** A re-run of failed jobs carries the
+> jobs it did not re-run into the new attempt unchanged, keeping their original result and
+> timestamps, and the default output does not say which attempt any row came from. Measured on the
+> sibling library repo's `v0.2.0-beta.11` publish run: under attempt 3, `Validate tag and changelog`
+> reports `started 2026-09-10T18:04:11Z` — attempt 1's stamp. No job goes *missing*; the hazard is
+> reading a conclusion that belongs to an attempt you are not looking at. `startedAt` above is what
+> exposes it. Pin the view when it matters:
+>
+> ```bash
+> gh run view <run-id> --repo go-kure/launcher --attempt <n> --json jobs \
+>   --jq '.jobs[] | "\(.name): \(.conclusion) (started \(.startedAt))"'
+> ```
+>
+> The conclusion that decides the branches below is `goreleaser`'s **in the attempt that actually
+> ran it** — the one whose `startedAt` matches that attempt, not a carried-over row.
 
 The job conclusion is the oracle, not the asset count. An asset count cannot tell a complete release
 from one whose `goreleaser` job died right after creating it, and how many assets a *complete*
@@ -309,7 +325,7 @@ gh release view <tag> --repo go-kure/launcher --json assets --jq '.assets[].name
 git show <tag>:.goreleaser.yml
 ```
 
-- **`goreleaser` succeeded** — publication finished and only a follow-up job failed.
+- **`goreleaser` concluded `success`** — publication finished and only a follow-up job failed.
   Do not re-publish; recovery depends on why the follow-up failed:
   - *Transient failure* — `gh run rerun --failed <run-id>`.
   - *The shared workflow itself needs a fix* — `--failed` pins the reusable workflow to the first
@@ -327,9 +343,25 @@ git show <tag>:.goreleaser.yml
     curl -fsS https://proxy.golang.org/github.com/go-kure/launcher/@v/<tag>.info
     ```
 
-- **`goreleaser` failed** — a *partial* publish: the release object exists but the job that owns it
-  did not finish. The tag is correct and must not move; what is wrong is the release object attached
-  to it. Recovery means removing that release object and re-publishing with the table below.
+    > ⚠ **Known limitation — this does not recover a broken `deploy-docs.yml`.** `--ref` selects
+    > both the workflow version *and* the content: `deploy-docs.yml` takes `version_slot`,
+    > `version_label` and `set_latest` only, and its checkout has no `ref:`, so it builds whatever
+    > the event ref points at. If the docs deploy failed because `deploy-docs.yml` or a docs script
+    > **at that tag** is itself faulty, `--ref <tag>` re-runs the faulty version, and omitting
+    > `--ref` builds `main`'s content into the version slot. There is no combination that pairs a
+    > fixed workflow with the tag's content. Closing that needs a checkout-ref input on
+    > `deploy-docs.yml`; until then this bullet only covers a *transient* or *environmental* docs
+    > failure, not a defect baked into the tag.
+
+- **`goreleaser` reached any other terminal conclusion** — `failure`, `cancelled`, `timed_out` or
+  `action_required` all mean the same thing here. Key on "not `success`" rather than matching
+  `failure`: a job cancelled mid-upload concludes `cancelled`, and matching only `failure` would
+  leave that case — the one most likely to strand a half-uploaded artifact set — matching neither
+  branch. (`skipped` cannot occur on this path: a skipped `goreleaser` never created a release, so
+  the "release does not exist" case below applies.) It is a *partial* publish: the release object
+  exists but the job that owns it did not finish. The tag is correct and must not move; what is
+  wrong is the release object attached to it. Recovery means removing that release object and
+  re-publishing with the table below.
 
   **That removal is destructive and is deliberately not given here as a copy-pasteable command.**
   Confirm the `goreleaser` job's conclusion from the command above first, then remove the release
@@ -349,6 +381,14 @@ by branch differently per re-run mode: re-running **all** jobs uses the called w
 specified reference — here `@main`, so it picks up a fix — while re-running **failed jobs or a
 single job** uses the called workflow from the commit SHA of the first attempt, so it does not.
 Re-runs stay available for 30 days after the initial run.
+
+The dispatch row depends on the shared workflow skipping its version-progression check for
+`workflow_dispatch`. That check derives the previous tag as the second entry of
+`git tag --sort=-v:refname`, which assumes the tag being released sorts first — true for a pushed
+tag, false for a re-publish. Without the skip, a dispatch of an older tag fails `validate` as soon
+as **two or more** newer tags exist (with exactly one, position 2 is the tag itself and the check
+passes), and `goreleaser` never runs because it declares `needs: [test, validate]` — breaking the
+dispatch path in precisely the long-lived case it exists for.
 
 The tag itself must never be moved or deleted to force a fresh `push` event.
 
