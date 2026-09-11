@@ -161,11 +161,14 @@ Runs on main and `release/*` branches only (not PRs):
 - **Path filtering** — `dorny/paths-filter` skips jobs when unrelated files change
 - **Diff-based lint** — on PRs, lint only checks new/changed lines (`--new-from-rev`)
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages, guarded by
-  `command -v gcc` like the `make` guard below. The guard is not an optimisation: the runner image
-  already ships a toolchain, so the unguarded form only added a hard dependency on outbound apt
-  reachability, and when the mirror stalls the step produces no output until `timeout-minutes: 25`
-  cancels the job — indistinguishable, from the check list, from a genuinely slow test suite
-  (go-kure/launcher#473)
+  `command -v gcc && command -v make` (both, see below). The guard is not an optimisation: the
+  unguarded form added a hard dependency on outbound apt reachability, and when the mirror stalls
+  the step produces no output until `timeout-minutes: 25` cancels the job — indistinguishable, from
+  the check list, from a genuinely slow test suite (go-kure/launcher#473). The guard must check
+  **`make` as well as `gcc`**: `build-essential` pulls in `make`, and the `test` job runs
+  `make deps` while carrying no `make` guard of its own, so this step is the only thing that
+  guarantees `make` there — a `gcc`-only guard would skip the install on an image with gcc but no
+  make and break `make deps`
 - **Binary artifact** — `kurel` linux/amd64 binary uploaded per run (7-day retention)
 - **Cross-platform artifacts** — 5 binaries uploaded per main push (30-day retention)
 - **Runs on draft PRs** — no draft gate on any job (2026-08-19, GitLab `mr-review` parity — draft

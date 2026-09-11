@@ -420,11 +420,19 @@ jobs:
 
     - name: Install build tools
       # Guarded with `command -v`, like every other apt-get call in this workflow (the `make` and
-      # `jq` installs). build-essential is already on the runner image, so the unguarded form
-      # bought nothing and made the job depend on outbound apt reachability. When the mirror is
-      # unreachable the step produces no output until this job's `timeout-minutes` cancels it --
-      # 25m18s, twice in a row, on run 34591920409, before any Go code compiles. See #473.
-      run: command -v gcc &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends build-essential)
+      # `jq` installs). The unguarded form made the job depend on outbound apt reachability: when
+      # the mirror stalls the step produces no output until this job's `timeout-minutes` cancels
+      # it -- 25m18s, twice in a row, on run 34591920409, before any Go code compiles.
+      # See go-kure/launcher#473.
+      #
+      # BOTH tools are checked, not just gcc. `build-essential` pulls in `make` as a dependency,
+      # and this job calls `make deps` below while carrying no `make` guard of its own -- so
+      # build-essential is the only thing that guarantees make here. A gcc-only guard would skip
+      # the install on an image that has gcc but not make and break `make deps`, which is exactly
+      # the reliance this comment exists to record.
+      run: |
+        { command -v gcc && command -v make; } >/dev/null \
+          || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends build-essential)
 
     - name: Read Go version from mise.toml
       id: go-version
