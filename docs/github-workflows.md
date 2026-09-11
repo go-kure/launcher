@@ -12,7 +12,7 @@ This document provides an overview of all GitHub Actions workflows used in the l
 |----------|------|----------|---------|
 | [CI](#ci-workflow) | `ci.yml` | push, PR, merge_group, schedule, manual | Testing, linting, building, cross-platform binaries |
 | [Deploy Docs](#deploy-docs-workflow) | `deploy-docs.yml` | push to main (docs paths), `workflow_dispatch` | Multi-version docs deployment |
-| [Release](#release-workflow) | `release.yml` | version tags | Release with GoReleaser, SBOM, docs deploy |
+| [Release](#release-workflow) | `release-publish.yml` | version tags, `workflow_dispatch` | Release with GoReleaser, SBOM, docs deploy |
 | [Create Release](#create-release-workflow) | `release-create.yml` | `workflow_dispatch` | Pre-release test gate + tag creation |
 | [PR Review](#pr-review-workflow) | `pr-review.yml` | pull_request, merge_group | Two-pass AI code review via claude-max-proxy |
 | [Claude](#claude-workflow) | `claude.yml` | PR/issue/comment events | @claude AI assistant |
@@ -265,12 +265,28 @@ managed centrally in `go-kure/.github` (`governance/repository-settings-policy.y
 
 ## Release Workflow
 
-**File:** `.github/workflows/release.yml`
-**Reusable source:** `go-kure/.github/.github/workflows/release.yml@main`
+**File:** `.github/workflows/release-publish.yml`
+**Reusable source:** `go-kure/.github/.github/workflows/release-publish.yml@main`
 
 ### Triggers
 
 - Push of version tags: `v*` (triggered by `release-create.yml`)
+- `workflow_dispatch` — manual re-publish of an existing tag
+
+#### Re-publishing a tag after a failed run
+
+A publish run that fails leaves the tag pushed and no release object. The tag must not be moved
+or deleted, and `gh run rerun` does not help: GitHub resolves the shared reusable workflow at the
+*first* dispatch and a re-run replays that resolution, so it cannot pick up a fix landed on
+`go-kure/.github` `main` afterwards. Dispatch against the tag instead:
+
+```bash
+gh workflow run release-publish.yml --repo go-kure/launcher --ref v0.1.0-alpha.21
+```
+
+The `--ref` must be the tag being published — the shared workflow checks out `github.ref`, so
+dispatching from a branch would build that branch rather than the release. The trigger has to be
+present in the workflow file *at that tag*, so this only works for tags cut after it was added.
 
 ### Job Sequence
 
@@ -316,7 +332,7 @@ workflow_dispatch
   → test job (go test -race ./...)
     → release job (needs: test)
       → scripts/release.sh → git-cliff changelog → tag → push
-        → triggers release.yml (via tag push)
+        → triggers release-publish.yml (via tag push)
 ```
 
 ### Requirements
