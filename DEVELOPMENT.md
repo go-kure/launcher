@@ -183,7 +183,7 @@ The project uses GitHub Actions workflows:
 
 - **Triggers**: Push to main/develop, PRs, merge_group (merge queue)
 - **Jobs**: validate (lint), test, security, coverage-check, build, cross-platform, analyze-changes
-- **Runner**: `autops-kube` (self-hosted)
+- **Runner**: `autops-kube-kure` (self-hosted)
 
 ### Release Pipeline (`.github/workflows/release.yml`)
 
