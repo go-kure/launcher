@@ -419,7 +419,12 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
     - name: Install build tools
-      run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends build-essential
+      # Guarded with `command -v`, like every other apt-get call in this workflow (the `make` and
+      # `jq` installs). build-essential is already on the runner image, so the unguarded form
+      # bought nothing and made the job depend on outbound apt reachability. When the mirror is
+      # unreachable the step produces no output until this job's `timeout-minutes` cancels it --
+      # 25m18s, twice in a row, on run 34591920409, before any Go code compiles. See #473.
+      run: command -v gcc &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends build-essential)
 
     - name: Read Go version from mise.toml
       id: go-version
