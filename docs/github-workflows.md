@@ -289,25 +289,38 @@ If the release exists, do **not** conclude the publish succeeded — `goreleaser
 object before it uploads anything. Read the **job conclusions** of the publish run:
 
 ```bash
-gh run view <run-id> --repo go-kure/launcher --json jobs \
-  --jq '.jobs[] | "\(.name): \(.conclusion) (started \(.startedAt))"'
+gh run view <run-id> --repo go-kure/launcher --json attempt,startedAt,jobs \
+  --jq '.startedAt as $a | "attempt \(.attempt) started \($a)",
+        (.jobs[] | "  \(.name): \(.conclusion)"
+                 + (if .startedAt < $a then "   <- CARRIED OVER (started \(.startedAt))" else "" end))'
 ```
 
-> ⚠ **If the run has been re-run, that list mixes attempts.** A re-run of failed jobs carries the
-> jobs it did not re-run into the new attempt unchanged, keeping their original result and
-> timestamps, and the default output does not say which attempt any row came from. Measured on the
-> sibling library repo's `v0.2.0-beta.11` publish run: under attempt 3, `Validate tag and changelog`
-> reports `started 2026-09-10T18:04:11Z` — attempt 1's stamp. No job goes *missing*; the hazard is
-> reading a conclusion that belongs to an attempt you are not looking at. `startedAt` above is what
-> exposes it. Pin the view when it matters:
+Run against the sibling library repo's `v0.2.0-beta.11` publish run that prints:
+
+```
+attempt 3 started 2026-09-11T06:08:55Z
+  release / Test: failure
+  release / Validate tag and changelog: success   <- CARRIED OVER (started 2026-09-10T18:04:11Z)
+  release / goreleaser: skipped
+  release / post-release: skipped
+  release / Deploy versioned docs: skipped
+```
+
+> ⚠ **A re-run makes the job list a mixture of attempts, and the default output does not say so.**
+> `gh run view` reports the latest attempt, and a re-run of failed jobs carries the jobs it did not
+> re-run into that attempt unchanged — original conclusion, original timestamps. Above, `Validate
+> tag and changelog` is listed under attempt 3 while reporting attempt 1's start.
 >
-> ```bash
-> gh run view <run-id> --repo go-kure/launcher --attempt <n> --json jobs \
->   --jq '.jobs[] | "\(.name): \(.conclusion) (started \(.startedAt))"'
-> ```
+> **No job goes missing.** The hazard is the opposite and worse: a missing job sends you looking and
+> you notice, whereas a carried-over row hands you a conclusion from an attempt you are not looking
+> at, and it reads exactly like a current one. Acting on a carried-over `goreleaser: success` means
+> entering the destructive branch below against the wrong run.
 >
-> The conclusion that decides the branches below is `goreleaser`'s **in the attempt that actually
-> ran it** — the one whose `startedAt` matches that attempt, not a carried-over row.
+> The comparison is what the `--jq` above does for you — the run-level `startedAt` is the attempt's
+> own start, so any job starting before it belongs to an earlier attempt. Do not do this by eye; the
+> two timestamps differ by a field the bare `--json jobs` form never prints.
+
+Add `--attempt <n>` to inspect an older attempt; without it the command reports the latest one.
 
 The job conclusion is the oracle, not the asset count. An asset count cannot tell a complete release
 from one whose `goreleaser` job died right after creating it, and how many assets a *complete*
