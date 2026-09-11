@@ -185,10 +185,11 @@ The project uses GitHub Actions workflows:
 - **Jobs**: validate (lint), test, security, coverage-check, build, cross-platform, analyze-changes
 - **Runner**: `autops-kube-kure` (self-hosted)
 
-### Release Pipeline (`.github/workflows/release.yml`)
+### Release Pipeline (`.github/workflows/release-publish.yml`)
 
-- **Triggers**: Version tags (`v*.*.*`)
-- **Jobs**: test, validate (tag + changelog), goreleaser, post-release (proxy refresh)
+- **Triggers**: Version tags (`v*`); `workflow_dispatch` to re-publish an existing tag
+- **Jobs**: guard-tag-ref, then the shared publisher — test, validate (tag + changelog), goreleaser,
+  post-release (proxy refresh), deploy-docs
 - **Produces**: kurel binaries for linux × amd64/arm64 + checksums + SBOM + cosign signature
 
 ### Creating a Release
