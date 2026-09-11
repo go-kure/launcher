@@ -507,8 +507,8 @@ wrapper-local `guard-tag-ref` job refuses a non-tag ref outright rather than ski
 mistaken dispatch fails loudly instead of leaving a green-looking run, and it also refuses a tag
 that already has a release — re-publishing over a live release object is outside the recovery scope
 above, and neither the UI nor the CLI enforces that on its own. That second check needs the release
-to be provably absent: a `404` proceeds, an existing release refuses, and an API error that answers
-neither also refuses, so an undetermined answer never reaches the publisher.
+to be provably absent: a `404` proceeds and an existing release refuses. An API error that answers
+neither is treated as *undetermined* — never as absence — and on a re-publication it refuses too.
 
 The release check runs on **every** path — dispatch, first tag push, and every re-run. What differs
 between them is only what an *undetermined* answer does. On attempt 1 of a tag push it warns and
@@ -615,8 +615,9 @@ in the caller's context, so reusing the name would risk the wrapper holding a gr
 
 ```
 tag push (or workflow_dispatch)
-  → guard-tag-ref (wrapper-local; v* tag required; on dispatch or a re-attempt,
-                   tag must have no release)
+  → guard-tag-ref (wrapper-local; v* tag required; tag must have no release,
+                   checked on every path -- an undetermined answer refuses
+                   except on attempt 1 of a tag push, where it warns)
     → test (go test -race ./...)
       → validate (tag format, CHANGELOG entry, version progression)
         → goreleaser (GoReleaser v2, cosign signing, syft SBOM)
