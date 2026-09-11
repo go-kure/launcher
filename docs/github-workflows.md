@@ -322,6 +322,29 @@ attempt 3 started 2026-09-11T06:08:55Z
 
 Add `--attempt <n>` to inspect an older attempt; without it the command reports the latest one.
 
+> ⛔ **`goreleaser: skipped` in the latest attempt does not mean it never ran.** It declares
+> `needs: [test, validate]`, so *any* re-run whose `test` fails skips it again — while a release
+> object created by an **earlier** attempt is still there. You only reach this section because
+> `gh release view` found a release, so something published it. Find the attempt that did:
+
+```bash
+RUN=<run-id>
+for a in $(seq 1 "$(gh api repos/go-kure/launcher/actions/runs/$RUN --jq '.run_attempt')"); do
+  printf 'attempt %s: ' "$a"
+  gh api "repos/go-kure/launcher/actions/runs/$RUN/attempts/$a/jobs" \
+    --jq '[.jobs[] | select(.name | test("goreleaser"))]
+          | map("\(.conclusion) (started \(.started_at))") | join(", ")'
+done
+```
+
+The branch below is decided by `goreleaser`'s conclusion **in the attempt that ran it** — the first
+one not reporting `skipped`.
+
+`skipped` in *every* attempt while a release exists is a contradiction, and worth stopping on rather
+than forcing into a branch: no run in this record published that release, so it came from somewhere
+else — a hand-created release object, or a different run entirely. Establish where it came from
+before touching it. None of the recovery below applies to a release this workflow did not create.
+
 The job conclusion is the oracle, not the asset count. An asset count cannot tell a complete release
 from one whose `goreleaser` job died right after creating it, and how many assets a *complete*
 release carries is decided by `.goreleaser.yml` **at that tag** — so a previous release is not a
@@ -370,8 +393,8 @@ git show <tag>:.goreleaser.yml
   `action_required` all mean the same thing here. Key on "not `success`" rather than matching
   `failure`: a job cancelled mid-upload concludes `cancelled`, and matching only `failure` would
   leave that case — the one most likely to strand a half-uploaded artifact set — matching neither
-  branch. (`skipped` cannot occur on this path: a skipped `goreleaser` never created a release, so
-  the "release does not exist" case below applies.) It is a *partial* publish: the release object
+  branch. Read that conclusion from the attempt that ran `goreleaser`, per the note above;
+  `skipped` is not a conclusion about publication. It is a *partial* publish: the release object
   exists but the job that owns it did not finish. The tag is correct and must not move; what is
   wrong is the release object attached to it. Recovery means removing that release object and
   re-publishing with the table below.
