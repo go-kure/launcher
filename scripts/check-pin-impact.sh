@@ -7,9 +7,10 @@
 # action consumed) and, in the job that verifies the vendored downstream-
 # reference guard, a `repository: go-kure/.github` / `ref: <sha>` checkout
 # (this repo derives that `ref:` from the `uses:@sha` pin at CI-run time
-# rather than duplicating it — see the "Resolve pinned guard revision" step —
-# but this script still recognizes a literal `ref:` SHA for repos, like
-# go-kure/kure, that pin it by hand). Renovate bumps every `uses:@sha`
+# rather than duplicating it — see the "Resolve pinned guard revision" step;
+# go-kure/kure did the same until go-kure/kure#813 — but this script still
+# recognizes a literal `ref:` SHA, in case a repo ever pins it by hand
+# again). Renovate bumps every `uses:@sha`
 # occurrence to the same new SHA in one PR (renovate.json's github-actions
 # group), and its PR body offers nothing more than a compare link across the
 # WHOLE dot-github repo — most of which (pr-review tooling, label taxonomy,

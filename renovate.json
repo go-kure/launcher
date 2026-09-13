@@ -86,6 +86,16 @@
         "fileFilters": ["docs/github-workflows.md"],
         "executionMode": "branch"
       }
+    },
+    {
+      "description": "Re-vendor site/scripts/check-forbidden-terms.sh whenever the go-kure/.github github-actions dependency bumps (go-kure/launcher#475). No groupName override: this depName already lands in the shared preset's trusted-actions group (go-kure/.github#217) and stays there, so its automerge and grouping follow the preset unchanged — only the vendored copy needs this repo's own upkeep.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["go-kure/.github"],
+      "postUpgradeTasks": {
+        "commands": ["./scripts/vendor-guard.sh"],
+        "fileFilters": ["site/scripts/check-forbidden-terms.sh"],
+        "executionMode": "branch"
+      }
     }
   ]
 }

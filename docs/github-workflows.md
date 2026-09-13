@@ -128,7 +128,14 @@ Runs on main and `release/*` branches only (not PRs):
 - **No-Downstream-References guard** — `docs-build` runs the shared `go-kure/.github`
   `check-forbidden-terms` action, which scans `--full-tree` on **every** event so a PR and the merge
   queue produce identical results (scan parity). A drift-check step keeps the vendored copy that
-  `scripts/release.sh` uses (`site/scripts/check-forbidden-terms.sh`) byte-identical to canonical
+  `scripts/release.sh` uses (`site/scripts/check-forbidden-terms.sh`) byte-identical to canonical,
+  checked out at a ref the `Resolve pinned guard revision` step derives from the guard action's own
+  `uses:@<sha>` pin — never a second, independently-maintained `ref:` literal. `scripts/vendor-guard.sh`
+  re-fetches and re-vendors that same file from the same pin, run as a `renovate.json`
+  `postUpgradeTasks` command whenever the `go-kure/.github` github-actions dependency bumps
+  (go-kure/launcher#475), so the vendored copy and the pin can't drift apart; safe to run by hand
+  too. See `go-kure/.github`'s `docs/standards.md` § "Adopting the trusted Actions lane" for the
+  full mechanism and go-kure/kure#813 for the original migration off a two-pin design
 - **Doc-sync checks** — `docs-build` (Layers 1/2) and `doc-gate` (Layer 3) run the canonical
   `check-doc-sync`, `check-links` and `check-doc-gate` actions from `go-kure/.github`; launcher no
   longer vendors its own copies under `site/scripts/`
