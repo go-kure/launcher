@@ -815,12 +815,32 @@ jobs:
     - name: Resolve pinned guard revision
       id: guardrev
       run: |
-        sha=$(grep -oP 'check-forbidden-terms@\K[0-9a-f]{40}' .github/workflows/ci.yml || true)
-        if [ -z "$sha" ]; then
-          echo "::error::could not extract the check-forbidden-terms action pin from ci.yml — refusing to fall back to an unpinned ref" >&2
+        # Anchored to a `uses:` line so this doesn't also match this step's own
+        # inline text once it's written into ci.yml (grep has no way to exclude
+        # its own file otherwise). `|| true` on the count: under set -e, a
+        # zero-match `grep -c` still prints "0" but exits 1, which would abort
+        # the whole script before the intended error message below ever runs.
+        occurrences=$(grep -cE '^\s*uses:.*check-forbidden-terms@' .github/workflows/ci.yml || true)
+        if [ "$occurrences" -ne 1 ]; then
+          echo "::error::expected exactly one uses:...check-forbidden-terms@<ref> pin in ci.yml, found $occurrences -- refusing to guess which one to track" >&2
           exit 1
         fi
-        echo "sha=$sha" >> "$GITHUB_OUTPUT"
+        # Capture the full non-whitespace token after the @ first, then
+        # validate it as one anchored ^...{40}$ match below -- not
+        # `\K[0-9a-f]{40}` in a single grep, which would silently accept a
+        # 41-character hex run (matching only the first 40) or 40 hex
+        # characters followed by a stray non-hex character (matching the 40
+        # and stopping) with no indication either happened.
+        ref=$(grep -oP '^\s*uses:.*check-forbidden-terms@\K\S+' .github/workflows/ci.yml || true)
+        if [ -z "$ref" ]; then
+          echo "::error::could not extract the check-forbidden-terms action pin from ci.yml -- refusing to fall back to an unpinned ref" >&2
+          exit 1
+        fi
+        if ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::extracted ref '$ref' is not a bare 40-character commit SHA -- refusing to use a truncated or malformed value" >&2
+          exit 1
+        fi
+        echo "sha=$ref" >> "$GITHUB_OUTPUT"
     - name: Verify vendored guard matches canonical
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
