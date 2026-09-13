@@ -37,7 +37,7 @@ KUREL_BIN="${KUREL_BIN:-bin/kurel}"
 # used to pre-warm the same version via a `plugins: schema@<version>` input;
 # that was deleted as redundant — ensure_schema_plugin() below already installs
 # on mismatch). Tracked by the flux-schema-plugin customManager in renovate.json.
-SCHEMA_PLUGIN_VERSION="0.12.1"
+SCHEMA_PLUGIN_VERSION="0.13.0"
 
 # app.yaml -> cluster-profile pairs (examples/README.md's "Application examples"
 # table), skipping the two exclusions noted above. 14-full-stack.yaml is validated
