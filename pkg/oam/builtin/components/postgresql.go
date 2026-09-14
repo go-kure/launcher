@@ -475,21 +475,80 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 		}
 	}
 
-	if affinity, ok := props["affinity"].(map[string]any); ok {
+	// Presence-reporting reads rather than bare comma-ok: an affinity block, or a
+	// sub-field within it, authored with the wrong type is refused by name instead
+	// of being silently discarded while the emitted cluster keeps a default
+	// (go-kure/launcher#448). The defaults and the podAntiAffinityType validation
+	// below match the shared parseAffinity in common.go, which this handler does
+	// not call because postgresql carries its own AffinityConfig shape.
+	//
+	// optionalObject, not parseObjectField: the envelope is where the two nil
+	// shapes disagreed, and in opposite directions. An UNTYPED nil (`affinity:`
+	// with no value) failed parseObjectField's assertion and became a hard error
+	// — yet pkg/oam's own validatePropertyValue reads a null under an optional
+	// property as absence and passes it, so that document validates and then
+	// fails to convert. A TYPED nil (an unset map from a Go lowering rule)
+	// satisfied the same assertion with a nil map, reported present, and switched
+	// pod anti-affinity ON with every default — a scheduling constraint nobody
+	// authored, from a value no document can distinguish from the first.
+	// optionalObject reads both as absence, which is the contract the validator
+	// already applies (go-kure/launcher#394 tracks folding this into the helpers).
+	affinityRaw, affinityPresent, err := optionalObject(props, "affinity", "affinity")
+	if err != nil {
+		return nil, err
+	}
+	if affinityPresent {
 		config.AffinityEnabled = true
 		config.AffinityEnablePodAntiAffinity = true
-		if enabled, ok := affinity["enablePodAntiAffinity"].(bool); ok {
-			config.AffinityEnablePodAntiAffinity = enabled
-		}
 		config.AffinityTopologyKey = "kubernetes.io/hostname"
-		if tk, ok := affinity["topologyKey"].(string); ok {
-			config.AffinityTopologyKey = tk
+		config.AffinityPodAntiAffinityType = "preferred"
+
+		enabled, err := parseBoolField(affinityRaw, "enablePodAntiAffinity", "affinity.enablePodAntiAffinity")
+		if err != nil {
+			return nil, err
 		}
-		if paat, ok := affinity["podAntiAffinityType"].(string); ok {
+		if enabled != nil {
+			config.AffinityEnablePodAntiAffinity = *enabled
+		}
+
+		topologyKey, present, err := parseStringField(affinityRaw, "topologyKey", "affinity.topologyKey")
+		if err != nil {
+			return nil, err
+		}
+		if present {
+			config.AffinityTopologyKey = topologyKey
+		}
+
+		// Deliberately not parseStringField: it reports an explicit empty string as
+		// absent, and an empty podAntiAffinityType has to reach the switch below to
+		// be refused, the way parseAffinity refuses it.
+		if v, ok := affinityRaw["podAntiAffinityType"]; ok {
+			paat, isString := v.(string)
+			if !isString {
+				return nil, errors.Errorf("affinity.podAntiAffinityType: must be a string, got %T", v)
+			}
 			config.AffinityPodAntiAffinityType = paat
 		}
-		if ns, ok := affinity["nodeSelector"].(map[string]any); ok {
-			config.AffinityNodeSelector = stringMap(ns)
+		switch config.AffinityPodAntiAffinityType {
+		case "preferred", "required":
+		default:
+			return nil, errors.Errorf("affinity.podAntiAffinityType: invalid value %q: must be \"preferred\" or \"required\"", config.AffinityPodAntiAffinityType)
+		}
+
+		nodeSelector, present, err := parseObjectField(affinityRaw, "nodeSelector", "affinity.nodeSelector")
+		if err != nil {
+			return nil, err
+		}
+		if present {
+			// stringMapStrict, not stringMap: this block's whole purpose is that a
+			// wrongly-typed sub-field is refused by name rather than discarded, and
+			// a non-string nodeSelector VALUE is exactly that. stringMap dropped it
+			// silently, so the reject-the-envelope check added above sat directly on
+			// top of a silent discard of its own contents.
+			config.AffinityNodeSelector, err = stringMapStrict(nodeSelector, "affinity.nodeSelector")
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 

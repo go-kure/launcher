@@ -1413,6 +1413,38 @@ object would change what the next `Generate` emits.
   explicit error rather than silently dropped; the other seven workload kinds
   forward every resource name directly onto the real `corev1.Container` and
   have no such restriction.
+  `affinity` takes the same four keys as the shared `affinity` property
+  (`enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType`,
+  `nodeSelector`) with the same defaults — `kubernetes.io/hostname` and
+  `preferred` — but the handler parses it itself into
+  `kurecnpg.AffinityOptions` instead of calling `parseAffinity`, because CNPG
+  carries its own affinity shape rather than a `corev1.Affinity`. The block
+  and each of its four sub-fields are read with the presence-reporting
+  helpers, so a value authored with the wrong type is rejected by name
+  (`affinity.topologyKey: must be a string, got float64`) rather than
+  discarded while a default reaches the emitted cluster, and
+  `podAntiAffinityType` must be `preferred` or `required` — an explicit empty
+  string is an error here, not a fallback to the default
+  (go-kure/launcher#448). Rejection reaches the `nodeSelector` **values**, not
+  just its envelope: `nodeSelector: {rack: 3}` is refused by key rather than
+  dropped, so a selector cannot silently reach the cluster narrower than
+  authored. When more than one entry is wrong, the **alphabetically first**
+  offending key is the one reported: Go randomises map iteration order, so
+  without an explicit sort the same document names a different key run to run
+  and its diagnostic cannot be reproduced or asserted in a test. The same
+  ordering rule applies to the other three parsers in this package that report
+  a bad map entry by key — `parseResourceList`, `rejectUnknownKeys` and
+  `parseManifestSource`. An explicit **null** `affinity` is **absence** — no block is
+  emitted and nothing is enabled — matching what `pkg/oam`'s own property
+  validation already does with a null under an optional property; without
+  that, `affinity:` with no value validated against the published schema and
+  then failed to convert, while the same value built in Go turned pod
+  anti-affinity on with every default. A null *inside* a present block is
+  still a wrong-type error; only the envelope is absence.
+  This is narrower than the shared `parseAffinity`,
+  whose own four sub-field reads still discard a wrongly typed value silently
+  (`common.go`, tracked in go-kure/launcher#449); the two are expected to
+  converge on this handler's behaviour, not the other way round.
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
   data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
   platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
