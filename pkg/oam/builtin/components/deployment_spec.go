@@ -306,14 +306,18 @@ func parseDeploymentStrategy(raw map[string]any) (*appsv1.DeploymentStrategy, er
 // `== nil`, so isExplicitNull (common.go) mirrors the validator's own
 // isNullValue and the two agree on that shape too.
 //
-// Scoped to this kind's parser rather than folded into the shared helpers:
-// those carry ~20 pre-existing call sites whose behaviour would change with
-// them, which is wider than this change should reach. The statefulset kind
-// answered the same problem per call site instead, with the optionalString /
-// optionalObject / optionalInt32 wrappers in common.go; the two approaches
-// classify a null identically — they share isExplicitNull — and differ only in
-// whether the filtering happens once over the whole map or once per field.
-// Collapsing them onto one mechanism is tracked as go-kure/launcher#394.
+// go-kure/launcher#394 has since folded null-as-omission into the shared field
+// helpers (authoredValue, common.go), so for every field read through one of
+// them this pre-strip is now redundant — it removes a null the helper would
+// have read as absence anyway, which is the same answer either way.
+//
+// It is kept because it is NOT redundant for the fields read by a bare
+// `props[key]` comma-ok, and because removing it would change one thing that is
+// not this ticket's to change: the strip runs before this kind's top-level
+// unknown-key rejection, so `bogusKey: null` is dropped here rather than
+// refused by name. That is pre-existing behaviour, deliberately left alone —
+// note it is the opposite of the NESTED rule, where the fix sits after
+// rejectUnknownKeys precisely so an unknown key stays named.
 func withoutExplicitNulls(raw map[string]any) map[string]any {
 	out := make(map[string]any, len(raw))
 	for k, v := range raw {

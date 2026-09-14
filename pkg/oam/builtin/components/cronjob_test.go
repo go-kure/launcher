@@ -1409,7 +1409,7 @@ func TestCronjobHandler_PodFailurePolicy_Projected(t *testing.T) {
 	})
 
 	t.Run("unauthored and explicit null are both left unset", func(t *testing.T) {
-		// The optional* wrappers read an explicit null as omission, so
+		// The shared field helpers read an explicit null as omission, so
 		// `podFailurePolicy:` with nothing after it must not become an empty
 		// policy — which would silently pin restartPolicy and
 		// podReplacementPolicy.

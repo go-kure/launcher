@@ -607,9 +607,11 @@ func validateContainerOSFields(ps *corev1.PodSpec) error {
 
 // parseObjectList reads an optional array-of-objects property: absent is
 // (nil, false, nil); a present non-array, or any non-object element, is an
-// error rather than silently skipped.
+// error rather than silently skipped. An explicit null — including the typed
+// []any(nil) a lowering rule produces for an unset optional slice — is absence,
+// per authoredValue in common.go.
 func parseObjectList(props map[string]any, key string) ([]map[string]any, bool, error) {
-	v, present := props[key]
+	v, present := authoredValue(props, key)
 	if !present {
 		return nil, false, nil
 	}
@@ -629,9 +631,9 @@ func parseObjectList(props map[string]any, key string) ([]map[string]any, bool, 
 }
 
 // parseStringList reads an optional array-of-strings field with the same
-// present/absent/wrong-type contract as parseObjectList.
+// present/absent/wrong-type/null contract as parseObjectList.
 func parseStringList(raw map[string]any, key, label string) ([]string, bool, error) {
-	v, present := raw[key]
+	v, present := authoredValue(raw, key)
 	if !present {
 		return nil, false, nil
 	}
