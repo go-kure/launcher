@@ -35,7 +35,7 @@ Reference.
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
-| `passthrough` | any (verbatim) | Emit an arbitrary object as-declared (`clusterScoped` opt). |
+| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. |
 
@@ -1423,6 +1423,56 @@ object would change what the next `Generate` emits.
 - **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
   Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
   consumers can attribute the emitted resource to its owning OAM component.
+  **`object` must be a single object; a list is rejected.** `Generate` emits the map
+  verbatim as one resource and fills in metadata it finds missing: `metadata.name`
+  defaults to the component name when it is absent, empty, **or not a string**, and
+  `metadata.namespace` likewise — so an inline *non-empty string* namespace survives
+  untouched, while a non-string one is replaced rather than emitted. `clusterScoped:
+  true` suppresses the namespace default entirely, and rejects an inline namespace —
+  that rejection is also keyed on a non-empty string, so under `clusterScoped` a
+  non-string `namespace` is neither rejected nor defaulted and reaches the output as
+  authored. A list would therefore arrive downstream as one *named*
+  envelope whose `items` never see per-object label mutation, namespace stamping or
+  ownership checks — while Flux's kustomize unwraps it at apply time into N objects that
+  do reach the cluster. One envelope bypasses every per-object rule at once, which is why
+  the rejection lives here and not in each consumer. Declare one component per object.
+  The check is apimachinery's own `Unstructured.IsList` — `items` present **and** a
+  sequence — never the kind name, so a typed `ConfigMapList` is caught and a CRD whose
+  kind merely *ends* in `List` with no `items` still compiles.
+
+  A second arm catches what `IsList` structurally cannot. It requires `items` to be
+  exactly a `[]interface{}`, so an authored `items: null` — an untyped nil — passed
+  every check and then expanded to **zero** objects at apply time with no error at
+  all; with pruning enabled an empty desired result also removes whatever the previous
+  inventory held. That case is rejected on its own diagnostic ("expands to zero
+  objects"), and it is keyed on a **null** `items` rather than a present one, because a
+  CRD may legitimately carry an object-valued `items` field that must keep compiling.
+
+  The validated object is deep-copied when the config is built, not aliased, so a
+  caller that keeps mutating the map it passed in cannot change what was validated.
+  The copy detaches nested maps and slices whatever their concrete type — the authored
+  path only ever yields `map[string]any` and `[]any`, but a Go-assembled body can hold
+  a `map[string]string` or a `[]string`, and those used to alias straight through. A
+  null survives as a null rather than becoming an empty `{}`/`[]`. Two things it
+  deliberately does not do: it does not chase pointers (a `*Location` inside a
+  `time.Time`, `resource.Quantity`'s `*inf.Dec`), and it does not reject the shapes it
+  cannot fully detach.
+
+  The copy is **not** what makes the rejection binding, and this section used to claim
+  it was. `Object` is an exported field, so a caller holding the config can assign a
+  fresh map over it, and a struct literal or a JSON decode never runs
+  `ToApplicationConfig` at all — three routes reaching `Generate` with a body the arms
+  never saw. `Generate` therefore re-runs, on the map it is about to emit, every check
+  that must hold of an emitted body: a non-empty `apiVersion` and `kind`, and both list
+  arms. Checking the bytes being emitted, rather than trusting a check that ran on some
+  earlier map, is what closes those routes.
+
+  Those checks live in one function precisely so the two call sites cannot disagree
+  about what a valid body is. While they were split — the constructor checking identity,
+  `Generate` checking only list shape — a `PassthroughConfig` holding an *empty* map
+  passed both: non-nil, so it cleared the no-object guard, and carrying no `items`, so
+  it cleared both arms, leaving `Generate` to emit a document consisting of nothing but
+  the metadata it had just stamped on.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
   (`apiVersion`/`kind`/`scope`) for unknown kinds.
 
