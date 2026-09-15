@@ -393,6 +393,32 @@ required platform inputs; the `ClusterProfile` provides them, and
 `CapabilityDefinition` rendering/property schemas validate custom capabilities
 (`--strict-capabilities` turns warnings into errors).
 
+### Capability rendering: types and nulls
+
+A `CapabilityDefinition` rendering property uses the **flat** vocabulary —
+`string`, `integer`, `boolean`, or **no type at all**, which accepts any value.
+`LoadCapabilityDefinitions` rejects anything else at load time, and the value check
+rejects it too, so a definition built in Go and installed with
+`Transformer.SetCapabilityDefs` — which bypasses the loader — cannot silently accept
+every value for a property by declaring a type outside that set.
+
+An explicit `null` on this surface is **absence**, matching the contract the handler
+surface follows: a rendering property present with a null takes its declared default,
+or is reported as required-and-missing, rather than failing as a type error; and the
+null key does not survive into the validated rendering. `default:` with no value
+likewise declares **no default**, not a null one. This holds for a typed nil as well
+as an authored one, which matters precisely because `SetCapabilityDefs` takes
+Go-built definitions.
+
+A **declared default is type-checked against its own declared type**, on the same
+footing as a value the document supplies. Without that, a property was validated
+when the *document* supplied the value and unvalidated when the *schema* did — so a
+Go-built definition declaring `integer` with a `"three"` default injected that string
+into the rendering, past the check that exists to keep it out. Files were never
+exposed to this (`LoadCapabilityDefinitions` checks defaults at load); `SetCapabilityDefs`
+was, being the same bypass the type check above guards. A property declaring **no
+type** still accepts any default, unchanged.
+
 This is a large internal builder surface; the tables above cover the entry points.
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the full
 type reference, the design notes under the Concepts section, and `examples/` for

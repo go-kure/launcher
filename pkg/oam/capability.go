@@ -36,7 +36,9 @@ type kindProbe struct {
 //   - apiVersion must equal "launcher.gokure.dev/v1alpha1"
 //   - metadata.name is required (non-empty)
 //   - spec.rendering.properties entry types: accepted values are "string", "integer", "boolean"
-//   - default value (if set) must be assignable to the declared type
+//     (an omitted type declares no type and accepts any value)
+//   - default value (if set) must be assignable to the declared type; a null default
+//     — `default:` with no value — declares no default rather than a null one
 //
 // Identical definitions (same name + same spec) are deduplicated silently.
 // Conflicting definitions (same name, different spec) return an error naming both files.
@@ -100,7 +102,10 @@ func LoadCapabilityDefinitions(paths []string, definitionsDir string) (map[strin
 					"capability definition file %q: property %q has unsupported type %q (accepted: string, integer, boolean)",
 					filePath, propName, propSchema.Type)
 			}
-			if propSchema.Default != nil {
+			// isNullValue, not `!= nil`: `default:` with no value is "no default",
+			// and a typed nil from a Go-built definition must read the same way
+			// rather than reaching the type check and failing it.
+			if !isNullValue(propSchema.Default) {
 				if err := checkCapabilityValueType(propSchema.Default, string(propSchema.Type)); err != nil {
 					return nil, errors.Errorf(
 						"capability definition file %q: property %q default value: %s",
@@ -130,6 +135,11 @@ func LoadCapabilityDefinitions(paths []string, definitionsDir string) (map[strin
 // applies declared defaults for absent optional properties.
 // Enforces: required fields present; types match declared type; no unknown keys.
 // Returns an updated rendering map (with defaults applied) or an error.
+//
+// A property present with an explicit null counts as ABSENT, not as a null value of
+// the wrong type — the same contract property_validate.go states for the handler
+// surface. It therefore takes the declared default, or is reported as required and
+// missing, and the null key does not survive into the returned map.
 func applyDefinitionSchema(rendering map[string]any, def *CapabilityDefinition) (map[string]any, error) {
 	props := def.Spec.Rendering.Properties
 
@@ -144,11 +154,34 @@ func applyDefinitionSchema(rendering map[string]any, def *CapabilityDefinition) 
 
 	for propName, propSchema := range props {
 		v, present := result[propName]
-		if !present {
+		// A present null is ABSENT, the same contract property_validate.go states
+		// for the handler surface: it takes the default if one is declared, or
+		// reports required-and-missing, rather than reaching the type check and
+		// failing it with "expected string, got <nil>". isNullValue, not `v == nil`,
+		// so a typed nil from a Go-built rendering classifies with the authored one
+		// (go-kure/launcher#431).
+		//
+		// The key is deleted when nothing replaces it, so a caller reading `result`
+		// sees the same absence the check just decided on, rather than a surviving
+		// null that its own presence test would then call present.
+		if !present || isNullValue(v) {
+			delete(result, propName)
 			if propSchema.Required {
 				return nil, errors.Errorf("required rendering property %q is missing", propName)
 			}
-			if propSchema.Default != nil {
+			if !isNullValue(propSchema.Default) {
+				// The declared default is type-checked HERE and not only in
+				// LoadCapabilityDefinitions, for the same reason the type switch
+				// below has a default arm: SetCapabilityDefs installs Go-built
+				// definitions wholesale and never runs the loader. Without this,
+				// the same property was validated when the DOCUMENT supplied the
+				// value and unvalidated when the SCHEMA did — so a hand-built
+				// definition declaring "integer" with a "three" default injected
+				// that string into the rendering, past a check that exists to keep
+				// it out (go-kure/launcher#431).
+				if err := checkCapabilityValueType(propSchema.Default, string(propSchema.Type)); err != nil {
+					return nil, errors.Errorf("rendering property %q: declared default: %s", propName, err)
+				}
 				result[propName] = propSchema.Default
 			}
 			continue
@@ -164,8 +197,26 @@ func applyDefinitionSchema(rendering map[string]any, def *CapabilityDefinition) 
 }
 
 // checkCapabilityValueType returns an error if v is not compatible with typeName.
+//
+// typeName is the FLAT capability vocabulary (string/integer/boolean — see
+// acceptedPropertyTypes and flatschema.go), not the full handler vocabulary
+// PropertySchema carries. An empty typeName means the property declares no type
+// and every value is accepted. Two of the three call sites guard on that before
+// calling; the declared-default check in applyDefinitionSchema relies on the ""
+// arm below instead, which is why that arm is the contract rather than a
+// belt-and-braces duplicate of the guards.
+//
+// Anything else is an error rather than silent acceptance. From FILES that is
+// unreachable — LoadCapabilityDefinitions rejects a declared type outside
+// acceptedPropertyTypes before any rendering is checked. It is reachable from Go:
+// Transformer.SetCapabilityDefs replaces the definition set wholesale and bypasses
+// the loader, so a hand-built CapabilityDefinition carrying any other type string
+// used to fall off the end of this switch and accept EVERY value for that property
+// (go-kure/launcher#431).
 func checkCapabilityValueType(v any, typeName string) error {
 	switch typeName {
+	case "":
+		return nil
 	case "string":
 		if _, ok := v.(string); !ok {
 			return errors.Errorf("expected string, got %T", v)
@@ -185,6 +236,8 @@ func checkCapabilityValueType(v any, typeName string) error {
 		if _, ok := v.(bool); !ok {
 			return errors.Errorf("expected boolean, got %T", v)
 		}
+	default:
+		return errors.Errorf("unsupported property type %q (accepted: string, integer, boolean)", typeName)
 	}
 	return nil
 }
