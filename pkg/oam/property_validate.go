@@ -276,8 +276,9 @@ func isNumberValue(value any) bool {
 // slice, pointer, channel or function — round-9 Codex regression (property_validate.go:63):
 // asArrayValue/asObjectValue's type assertions succeed on a typed nil
 // ([]any(nil), map[string]any(nil)) with ok=true, so a plain `value == nil` check
-// lets one through as a present, validly-typed empty collection even though it
-// serializes to JSON/YAML `null`, not `[]`/`{}`. A rule that assigns an
+// lets one through as a present, validly-typed empty collection even though
+// encoding/json marshals it as `null`, not `[]`/`{}` (see IsNullValue below on
+// why the encoder has to be named). A rule that assigns an
 // uninitialized Go slice or map to a Properties entry hits this by construction,
 // with no unusual authoring required.
 func isNullValue(value any) bool {
@@ -285,11 +286,52 @@ func isNullValue(value any) bool {
 		return true
 	}
 	switch rv := reflect.ValueOf(value); rv.Kind() {
+	// reflect.Interface is unreachable through this signature — reflect.ValueOf
+	// unwraps the interface, so a nil one has already returned above and a non-nil
+	// one reports the dynamic type's kind. It is listed for completeness against a
+	// future caller that passes a reflect.Value through, not because it fires.
 	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Chan, reflect.Func, reflect.Interface:
 		return rv.IsNil()
 	default:
 		return false
 	}
+}
+
+// IsNullValue reports whether value is nil — a bare nil interface, or a non-nil
+// interface holding a nil map, slice, pointer, channel or function. It is the
+// exported form of isNullValue above, and with it the null contract this package
+// enforces: a value that is null is ABSENT, not present-and-empty.
+//
+// It is a NIL predicate, not a serialization oracle, and the difference is worth
+// stating because the contract it serves is phrased in serialization terms — a
+// phrasing that is ENCODER-SPECIFIC. Under encoding/json, and so under
+// sigs.k8s.io/yaml which routes through it, a nil map or slice marshals to `null`
+// where an allocated empty one marshals to `{}`/`[]`; that is the pairing the
+// contract's wording comes from. gopkg.in/yaml.v3 — this package's own YAML
+// library — does not agree: its encoder dispatches on reflect.Kind and sends a nil
+// map to the mapping emitter and a nil slice to the sequence emitter
+// (gopkg.in/yaml.v3@v3.0.1 encode.go:160-176), rendering `{}` and `[]`, so under
+// that encoder the two shapes are indistinguishable in the output. Nil-ness is
+// what this predicate reports either way, which is precisely why it is the right
+// check: the encoder varies, the value does not.
+//
+// It also diverges from every encoder outside the shapes a decoded document
+// produces: a nil channel or func is reported null here although encoding/json
+// cannot marshal either at all, and a non-nil value with a custom MarshalJSON that
+// emits `null` is reported not-null. Neither shape survives a round trip through a
+// document, so neither reaches a property map by decoding.
+//
+// It exists because that contract has to hold in packages that cannot see
+// isNullValue. A parser reading an optional property must classify a null with
+// this rather than with `value == nil`: a TYPED nil (map[string]any(nil),
+// []any(nil)) is a non-nil interface holding a nil value, so `== nil` is false
+// and a `.(map[string]any)` assertion on it SUCCEEDS with ok=true and a nil map.
+// The key then reads as an authored empty collection, which for a selector-shaped
+// field is the widest possible value where the same input everywhere else means
+// the narrowest. An uninitialized Go map or slice in a lowering rule produces
+// that shape by construction, with no unusual authoring required.
+func IsNullValue(value any) bool {
+	return isNullValue(value)
 }
 
 // asArrayValue normalises any slice or array value to []any. A string is never an
