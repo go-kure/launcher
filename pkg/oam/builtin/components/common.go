@@ -15,6 +15,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -1781,6 +1782,24 @@ func optionalInt32(raw map[string]any, key, label string) (int32, bool, error) {
 	return parseInt32Field(raw, key, label)
 }
 
+// optionalInt64 mirrors optionalInt32 for the fields whose API type is int64: it
+// reads an explicit null under an optional key as omission before delegating.
+//
+// Phrased about this wrapper rather than about its callee, deliberately. The rest of
+// the family says "X with an explicit null read as omission", which asserts that plain
+// X does not handle a null — a claim that is true today and that go-kure/launcher#394
+// is in the middle of making false, by folding the handling into the shared helpers
+// and deleting the wrappers that assert it. Until that lands, plain parseInt64Field
+// does not read a null as absence and this wrapper is load-bearing; once it lands,
+// this becomes an exact no-op forward and goes with the rest of the family. Whichever
+// change rebases across that boundary removes all six together, not five.
+func optionalInt64(raw map[string]any, key, label string) (int64, bool, error) {
+	if v, present := raw[key]; present && isExplicitNull(v) {
+		return 0, false, nil
+	}
+	return parseInt64Field(raw, key, label)
+}
+
 // optionalObjectList is parseObjectList with an explicit null read as omission.
 func optionalObjectList(raw map[string]any, key string) ([]map[string]any, bool, error) {
 	if v, present := raw[key]; present && isExplicitNull(v) {
@@ -2712,20 +2731,57 @@ func parseAffinity(props map[string]any) (AffinityConfig, error) {
 	return cfg, nil
 }
 
+// tolerationKeys is the complete corev1.Toleration field set
+// (k8s.io/api@v0.36.3 core/v1/types.go:4095-4116). Declared rather than left
+// implicit so the projection is checked against the API type instead of against
+// whatever the parser happens to read: an unlisted key is now reported instead
+// of dropped, which is how tolerationSeconds went missing until
+// go-kure/launcher#412 published this property on a second kind.
+var tolerationKeys = []string{"key", "operator", "value", "effect", "tolerationSeconds"}
+
+// parseTolerations is SHARED: daemonset (daemonset.go) and deployment
+// (deployment.go) are its only two callers, and schemaTolerations has the same
+// two. Every rejection below therefore lands on both kinds, so completing the
+// projection for go-kure/launcher#412 narrowed what daemonset accepts as well —
+// deliberately, and not additively. What each rule costs daemonset, and why none
+// of them is gated behind a deployment-only option, is set out in
+// README.md's "What `tolerations` changed for `daemonset`". A rejection added
+// here in future changes both kinds; say so there in the same change.
+// optionalObjectList, not a bare props["tolerations"].([]any) assertion: a
+// comma-ok read cannot tell an ABSENT key from one authored with the wrong
+// container type, and returning (nil, nil) for both silently discarded the
+// second — a `tolerations:` mapping built clean and emitted nothing. That is
+// the same silent-drop class as the tolerationSeconds defect this function's
+// header describes, one level up, and it made the two siblings at the call
+// site (deployment.go:213 parseRawAffinity, :223 parseTopologySpreadConstraints)
+// reject a wrong container type while this one accepted it.
 func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
-	tolList, ok := props["tolerations"].([]any)
-	if !ok {
+	tolList, present, err := optionalObjectList(props, "tolerations")
+	if err != nil {
+		return nil, err
+	}
+	if !present {
 		return nil, nil
 	}
 	tolerations := make([]corev1.Toleration, 0, len(tolList))
-	for i, t := range tolList {
-		m, ok := t.(map[string]any)
-		if !ok {
-			return nil, errors.Errorf("toleration[%d]: must be a mapping", i)
+	for i, m := range tolList {
+		if err := rejectUnknownKeys(m, tolerationKeys, indexedLabel("toleration", i)); err != nil {
+			return nil, err
 		}
 		tol := corev1.Toleration{}
 
-		if raw, exists := m["key"]; exists {
+		// Each scalar below reads an explicit null as omission, this package's
+		// convention, rather than as a type error. The null cannot be filtered out
+		// upstream: withoutExplicitNulls (deployment_spec.go) strips only top-level
+		// properties, and emission validation deliberately accepts a null under any
+		// optional field (property_validate.go's validatePropertyValue). So a null
+		// nested inside a toleration entry arrives here intact, and asserting
+		// directly on it turned a schema-valid document into a conversion failure.
+		//
+		// Only null is treated as omission, not the empty string: parseStringField's
+		// "" == absent rule would additionally turn `operator: ""` from an error into
+		// a silent default, which is a separate change and not this one.
+		if raw, exists := m["key"]; exists && !isExplicitNull(raw) {
 			keyStr, ok := raw.(string)
 			if !ok {
 				return nil, errors.Errorf("toleration[%d].key: must be a string, got %T", i, raw)
@@ -2733,16 +2789,27 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 			tol.Key = keyStr
 		}
 
-		if raw, exists := m["operator"]; exists {
+		if raw, exists := m["operator"]; exists && !isExplicitNull(raw) {
 			opStr, ok := raw.(string)
 			if !ok {
 				return nil, errors.Errorf("toleration[%d].operator: must be a string, got %T", i, raw)
 			}
+			// "Valid operators are Exists, Equal, Lt, and Gt. Defaults to
+			// Equal. […] Lt and Gt perform numeric comparisons (requires
+			// feature gate TaintTolerationComparisonOperators)."
+			// (k8s.io/api@v0.36.3 core/v1/types.go:4097-4100.)
+			//
+			// Lt and Gt are accepted even though they are feature-gated: this
+			// package already publishes other gated fields (minDomains,
+			// matchLabelKeys) and leaves the gate to the cluster, and refusing
+			// them here made the operator set of a "raw" projection narrower
+			// than the API's own.
 			switch corev1.TolerationOperator(opStr) {
-			case corev1.TolerationOpExists, corev1.TolerationOpEqual:
+			case corev1.TolerationOpExists, corev1.TolerationOpEqual,
+				corev1.TolerationOpLt, corev1.TolerationOpGt:
 				tol.Operator = corev1.TolerationOperator(opStr)
 			default:
-				return nil, errors.Errorf("toleration[%d].operator: invalid value %q, must be 'Exists' or 'Equal'", i, opStr)
+				return nil, errors.Errorf("toleration[%d].operator: invalid value %q, must be 'Exists', 'Equal', 'Lt' or 'Gt'", i, opStr)
 			}
 		} else if tol.Key == "" {
 			tol.Operator = corev1.TolerationOpExists
@@ -2750,7 +2817,7 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 			tol.Operator = corev1.TolerationOpEqual
 		}
 
-		if raw, exists := m["value"]; exists {
+		if raw, exists := m["value"]; exists && !isExplicitNull(raw) {
 			valStr, ok := raw.(string)
 			if !ok {
 				return nil, errors.Errorf("toleration[%d].value: must be a string, got %T", i, raw)
@@ -2758,7 +2825,7 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 			tol.Value = valStr
 		}
 
-		if raw, exists := m["effect"]; exists {
+		if raw, exists := m["effect"]; exists && !isExplicitNull(raw) {
 			effStr, ok := raw.(string)
 			if !ok {
 				return nil, errors.Errorf("toleration[%d].effect: must be a string, got %T", i, raw)
@@ -2769,6 +2836,138 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 			default:
 				return nil, errors.Errorf("toleration[%d].effect: invalid value %q", i, effStr)
 			}
+		}
+
+		// "TolerationSeconds represents the period of time the toleration
+		// (which must be of effect NoExecute, otherwise this field is ignored)
+		// tolerates the taint. By default, it is not set, which means tolerate
+		// the taint forever (do not evict). Zero and negative values will be
+		// treated as 0 (evict immediately) by the system."
+		// (k8s.io/api@v0.36.3 core/v1/types.go:4111-4116.)
+		//
+		// A pointer, so nil (tolerate forever) and 0 (evict immediately) are
+		// different documents — hence optionalInt64's present flag rather than
+		// a zero test. Zero and negative values are passed through: the field
+		// doc gives them a defined meaning, so refusing them would be
+		// launcher's own rejection of a document the apiserver accepts.
+		//
+		// The NoExecute precondition IS enforced, but at the end of the loop with
+		// the other rules that need a second field — see it there for the
+		// citation. It was left out until now on the grounds that the only
+		// evidence was a near-verbatim COPY of upstream's rule carried by a direct
+		// dependency (cloudnative-pg), which is second-hand and demonstrably older
+		// than the pinned k8s.io/api. That comment named the condition for adding
+		// it — a first-hand citation — and the condition is now met.
+		if seconds, present, err := optionalInt64(m, "tolerationSeconds", indexedLabel("toleration", i)+".tolerationSeconds"); err != nil {
+			return nil, err
+		} else if present {
+			tol.TolerationSeconds = &seconds
+		}
+
+		// The admission rules that need more than one field, each from
+		// Toleration's own field docs. Checked after every field is read.
+		//
+		// A non-empty key must be a qualified name. Upstream applies
+		// unversionedvalidation.ValidateLabelName to it whenever it is non-empty
+		// (pkg/apis/core/validation/validation.go, release-1.36:4367-4369),
+		// unconditionally and behind no feature gate — the same rule the affinity
+		// and topology-key paths in scheduling.go already apply to their own label
+		// keys. It is stated here rather than at the assignment above because the
+		// empty-key case is legal and is governed by the rule immediately below.
+		if tol.Key != "" {
+			if errs := validation.IsQualifiedName(tol.Key); len(errs) > 0 {
+				return nil, errors.Errorf("toleration[%d].key: invalid label key %q: %s", i, tol.Key, strings.Join(errs, "; "))
+			}
+		}
+		// "If the key is empty, operator must be Exists; this combination means
+		// to match all values and all keys." (core/v1/types.go:4093.) A hard
+		// "must", so this is the API's rule, not launcher's — an empty key with
+		// Equal matches nothing the apiserver will accept.
+		if tol.Key == "" && tol.Operator != corev1.TolerationOpExists {
+			return nil, errors.Errorf("toleration[%d].operator: must be 'Exists' when key is empty, got %q", i, tol.Operator)
+		}
+		// "If the operator is Exists, the value should be empty, otherwise just
+		// a regular string." (core/v1/types.go:4104.) The field doc says
+		// "should", which reads like launcher's own opinion — it is not.
+		// Upstream's ValidateTolerations rejects the combination outright, with
+		// "value must be empty when `operator` is 'Exists'", so a document this
+		// refuses is one the apiserver would have refused too.
+		//
+		// k8s.io/kubernetes is not in this module's graph, so that function
+		// cannot be cited from a pinned dependency directly. The citation is
+		// second-hand but pinned and readable: a near-verbatim copy of it is
+		// carried by a direct dependency (go.mod:9), at
+		// github.com/cloudnative-pg/cloudnative-pg@v1.30.0
+		// internal/webhook/v1/cluster_webhook.go:2223-2228, whose own doc
+		// comment at :2186-2188 names its source as
+		// pkg/apis/core/validation/validation.go. Read it as evidence for this
+		// one rule and no more — that copy predates the pinned k8s.io/api, since
+		// its default arm still refuses the Lt and Gt operators accepted above.
+		//
+		// Independently of the citation: Exists wildcards the value, so an
+		// authored value under it is matched against nothing and does no work —
+		// the same failure this file refuses for an empty affinity and an empty
+		// node selector term.
+		if tol.Operator == corev1.TolerationOpExists && tol.Value != "" {
+			return nil, errors.Errorf("toleration[%d].value: must be empty when operator is 'Exists', got %q — Exists already matches every value", i, tol.Value)
+		}
+		// "Lt and Gt perform numeric comparisons" (core/v1/types.go:4100), so
+		// the value has to be one — mirroring the Gt/Lt arity rule the node
+		// selector requirements apply (scheduling.go).
+		//
+		// strconv.ParseInt alone is NOT the right check, and this is first-hand
+		// from the pinned dependency rather than inferred. The matcher is
+		// Toleration.ToleratesTaint (k8s.io/api@v0.36.3 core/v1/toleration.go),
+		// whose compareNumericValues (:80-90) runs content.IsDecimalInteger
+		// BEFORE strconv.ParseInt and returns false — no match, no error — when
+		// it fails. IsDecimalInteger demands strict canonical form
+		// (k8s.io/apimachinery@v0.36.3 pkg/api/validate/content/decimal_int.go:
+		// 30-60): no leading zeros, no plus sign, no "-0". ParseInt accepts all
+		// three, so "05", "+5" and "-0" would build here and then tolerate
+		// nothing at all — a silently inert toleration, which is the exact
+		// failure class this file refuses elsewhere.
+		//
+		// Both checks are kept: IsDecimalInteger constrains the syntax and says
+		// nothing about magnitude, so ParseInt still supplies the int64 range
+		// bound the comparison itself needs.
+		if tol.Operator == corev1.TolerationOpLt || tol.Operator == corev1.TolerationOpGt {
+			if msgs := content.IsDecimalInteger(tol.Value); len(msgs) > 0 {
+				return nil, errors.Errorf("toleration[%d].value: operator %s requires an integer in canonical form (no leading zeros, no plus sign, no \"-0\"), got %q — the scheduler's own matcher refuses any other form and the toleration would match nothing", i, tol.Operator, tol.Value)
+			}
+			if _, err := strconv.ParseInt(tol.Value, 10, 64); err != nil {
+				return nil, errors.Errorf("toleration[%d].value: operator %s requires an integer, got %q", i, tol.Operator, tol.Value)
+			}
+		}
+		// Under Equal the value is matched against a taint's value, so it has to
+		// be a legal label value: upstream runs validation.IsValidLabelValue on it
+		// for the Equal and empty-operator arms (validation.go,
+		// release-1.36:4385-4388). Exists is excluded by the rule above (value
+		// must be empty) and Lt/Gt by the rule immediately above (value must be a
+		// decimal integer), so Equal is the only arm left to check. This parser
+		// never leaves Operator empty — the switch above either sets one of the
+		// four operators or rejects — so the empty-operator arm has no counterpart
+		// here.
+		if tol.Operator == corev1.TolerationOpEqual {
+			if errs := validation.IsValidLabelValue(tol.Value); len(errs) > 0 {
+				return nil, errors.Errorf("toleration[%d].value: invalid label value %q: %s", i, tol.Value, strings.Join(errs, "; "))
+			}
+		}
+		// tolerationSeconds requires effect NoExecute. The comment on the
+		// tolerationSeconds read above left this rule unenforced and said why:
+		// the only citation reachable then was a near-verbatim COPY carried by a
+		// direct dependency, which is second-hand and demonstrably older than the
+		// pinned k8s.io/api. It also said what would change that — "if a
+		// first-hand citation becomes available, add the check there and to
+		// README.md's daemonset compatibility table in the same change".
+		//
+		// It is available: ValidateTolerations rejects the pair outright at
+		// pkg/apis/core/validation/validation.go, release-1.36:4377-4380, with
+		// "effect must be 'NoExecute' when `tolerationSeconds` is set". Empty
+		// effect counts as "not NoExecute" there, so the rule demands an explicit
+		// effect rather than treating omission as a wildcard — which is why the
+		// error names both fields instead of only the mismatch.
+		if tol.TolerationSeconds != nil && tol.Effect != corev1.TaintEffectNoExecute {
+			return nil, errors.Errorf("toleration[%d].effect: must be 'NoExecute' when tolerationSeconds is set, got %q — an empty effect does not satisfy the rule, it has to be spelled out", i, tol.Effect)
 		}
 
 		tolerations = append(tolerations, tol)

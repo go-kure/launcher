@@ -104,7 +104,13 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 14, daemonSetSpecPropertyKeys, false},
 		{"cronjob", (&CronjobHandler{}).PropertySchema(), 20, jobSpecPropertyKeys, true},
 		{"job", (&JobHandler{}).PropertySchema(), 14, jobSpecPropertyKeys, true},
-		{"deployment", (&DeploymentHandler{}).PropertySchema(), 14, deploymentSpecPropertyKeys, false},
+		// 17, not 14: go-kure/launcher#412 added affinity, tolerations and
+		// topologySpreadConstraints as own keys on this kind. Verified a real
+		// own-key increase and not the collision this guard exists to catch —
+		// none of the three appears in podSpecPropertyKeys or
+		// deploymentSpecPropertyKeys, which is exactly why the merged count
+		// rises by three rather than staying flat.
+		{"deployment", (&DeploymentHandler{}).PropertySchema(), 17, deploymentSpecPropertyKeys, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1212,10 +1212,32 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 		ps.Containers = append(ps.Containers, *sidecarContainer)
 	}
 	ps.Volumes = append(ps.Volumes, in.Volumes...)
-	ps.Tolerations = append(ps.Tolerations, in.Tolerations...)
-	ps.TopologySpreadConstraints = append(ps.TopologySpreadConstraints, in.TopologySpreadConstraints...)
+	// DeepCopy, not append-the-elements. The handler config is reusable and
+	// editing a generated object in place is an expected use, so every value
+	// projected out of the config must be a copy — the contract
+	// render_reuse_aliasing_test.go:17-49 states and exercises.
+	//
+	// `append(dst, src...)` is not enough here and the reason is easy to get
+	// backwards: it copies each element STRUCT, so writing Tolerations[0].Key
+	// on a render never reaches the config. What it does not copy is the
+	// pointers those structs carry — Toleration.TolerationSeconds (*int64) and
+	// TopologySpreadConstraint.LabelSelector (*metav1.LabelSelector) stay shared,
+	// so `*Tolerations[0].TolerationSeconds = 999` on the first render is visible
+	// in the second. A probe that mutates a top-level element field therefore
+	// reports clean while the aliasing is fully intact; the committed test
+	// mutates through the nested pointers for exactly that reason, and keeps the
+	// shallow case as a negative control.
+	//
+	// Affinity was the plain form of the same bug: the config's pointer was
+	// assigned verbatim, sharing everything beneath it.
+	for i := range in.Tolerations {
+		ps.Tolerations = append(ps.Tolerations, *in.Tolerations[i].DeepCopy())
+	}
+	for i := range in.TopologySpreadConstraints {
+		ps.TopologySpreadConstraints = append(ps.TopologySpreadConstraints, *in.TopologySpreadConstraints[i].DeepCopy())
+	}
 	if in.Affinity != nil {
-		ps.Affinity = in.Affinity
+		ps.Affinity = in.Affinity.DeepCopy()
 	}
 	if in.RestartPolicy != "" {
 		ps.RestartPolicy = in.RestartPolicy
