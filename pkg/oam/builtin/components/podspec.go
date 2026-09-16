@@ -406,7 +406,7 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 			return PodSpecConfig{}, err
 		}
 		for _, k := range []string{"requests", "limits"} {
-			if v, ok := raw[k]; ok {
+			if v, ok := authoredValue(raw, k); ok {
 				if _, isObj := v.(map[string]any); !isObj {
 					return PodSpecConfig{}, errors.Errorf("podResources.%s: must be an object, got %T", k, v)
 				}
@@ -842,7 +842,7 @@ func parsePodDNSConfig(raw map[string]any, label string) (*corev1.PodDNSConfig, 
 				return nil, errors.Errorf("%s.name: required", optLabel)
 			}
 			opt := corev1.PodDNSConfigOption{Name: name}
-			if v, exists := m["value"]; exists {
+			if v, exists := authoredValue(m, "value"); exists {
 				s, ok := v.(string)
 				if !ok {
 					return nil, errors.Errorf("%s.value: must be a string, got %T", optLabel, v)
@@ -945,7 +945,7 @@ func parsePodSecurityContext(raw map[string]any, label string) (*corev1.PodSecur
 	// pod-level {runAsUser: 0, runAsNonRoot: true} is a valid document when
 	// every container names a non-root UID of its own. validateEffectiveRunAsUser
 	// makes the call in buildPodSpec, once the containers are assembled.
-	if v, present := raw["supplementalGroups"]; present {
+	if v, present := authoredValue(raw, "supplementalGroups"); present {
 		arr, ok := v.([]any)
 		if !ok {
 			return nil, errors.Errorf("%s.supplementalGroups: must be an array, got %T", label, v)
@@ -1035,7 +1035,7 @@ func parsePodSecurityContext(raw map[string]any, label string) (*corev1.PodSecur
 		}
 		set = true
 	}
-	if v, present := raw["seccompProfile"]; present {
+	if v, present := authoredValue(raw, "seccompProfile"); present {
 		sp, err := parseSeccompProfile(v, label+".seccompProfile")
 		if err != nil {
 			return nil, err
@@ -1043,7 +1043,7 @@ func parsePodSecurityContext(raw map[string]any, label string) (*corev1.PodSecur
 		sc.SeccompProfile = sp
 		set = true
 	}
-	if v, present := raw["seLinuxOptions"]; present {
+	if v, present := authoredValue(raw, "seLinuxOptions"); present {
 		se, err := parseSELinuxOptions(v, label+".seLinuxOptions")
 		if err != nil {
 			return nil, err
@@ -1053,7 +1053,7 @@ func parsePodSecurityContext(raw map[string]any, label string) (*corev1.PodSecur
 			set = true
 		}
 	}
-	if v, present := raw["appArmorProfile"]; present {
+	if v, present := authoredValue(raw, "appArmorProfile"); present {
 		ap, err := parseAppArmorProfile(v, label+".appArmorProfile")
 		if err != nil {
 			return nil, err
