@@ -330,6 +330,227 @@ func TestInheritedParsers_NullIsOmission(t *testing.T) {
 	}
 }
 
+// TestParseHTTPHeaders_NullIsOmission closes a gap the sweep to authoredValue
+// missed: parseHTTPHeaders (shared by the probe and lifecycle httpGet
+// handlers) still reads both its own presence and its per-entry "value" via a
+// bare comma-ok lookup, so `httpHeaders: null` was rejected as "must be an
+// array, got <nil>" instead of reading as absence, and a per-entry
+// `value: null` was rejected instead of defaulting to "".
+func TestParseHTTPHeaders_NullIsOmission(t *testing.T) {
+	for _, tc := range nullValues() {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseHTTPHeaders(map[string]any{"httpHeaders": tc.val}, "httpHeaders")
+			if err != nil {
+				t.Fatalf("parseHTTPHeaders(httpHeaders: null) = error %v, want nil", err)
+			}
+			if got != nil {
+				t.Errorf("parseHTTPHeaders(httpHeaders: null) = %v, want nil", got)
+			}
+		})
+	}
+
+	t.Run("entry value null is omission", func(t *testing.T) {
+		got, err := parseHTTPHeaders(map[string]any{"httpHeaders": []any{
+			map[string]any{"name": "X-Test", "value": nil},
+		}}, "httpHeaders")
+		if err != nil {
+			t.Fatalf("parseHTTPHeaders(value: null) = error %v, want nil", err)
+		}
+		if len(got) != 1 || got[0].Value != "" {
+			t.Errorf("parseHTTPHeaders(value: null) = %+v, want one header with Value \"\"", got)
+		}
+	})
+
+	t.Run("wrong type still errors", func(t *testing.T) {
+		_, err := parseHTTPHeaders(map[string]any{"httpHeaders": "x"}, "httpHeaders")
+		if err == nil {
+			t.Fatal("parseHTTPHeaders(httpHeaders: <string>) = nil error, want a type error")
+		}
+	})
+}
+
+// TestParsePodSecurityContext_NullIsOmission closes a gap the sweep missed at
+// the pod level: unlike their container-level parseSecurityContext siblings,
+// supplementalGroups, seccompProfile, seLinuxOptions and appArmorProfile
+// still read their presence via a bare comma-ok lookup, so e.g.
+// `podSecurityContext: {seccompProfile: null}` errored instead of reading as
+// absent, even though the container-level `securityContext.seccompProfile`
+// already handled null correctly.
+func TestParsePodSecurityContext_NullIsOmission(t *testing.T) {
+	for _, tc := range nullValues() {
+		t.Run("supplementalGroups/"+tc.name, func(t *testing.T) {
+			got, err := parsePodSecurityContext(map[string]any{"supplementalGroups": tc.val}, "podSecurityContext")
+			if err != nil {
+				t.Fatalf("parsePodSecurityContext(supplementalGroups: null) = error %v, want nil", err)
+			}
+			if got != nil && got.SupplementalGroups != nil {
+				t.Errorf("SupplementalGroups = %v, want nil", got.SupplementalGroups)
+			}
+		})
+		t.Run("seccompProfile/"+tc.name, func(t *testing.T) {
+			got, err := parsePodSecurityContext(map[string]any{"seccompProfile": tc.val}, "podSecurityContext")
+			if err != nil {
+				t.Fatalf("parsePodSecurityContext(seccompProfile: null) = error %v, want nil", err)
+			}
+			if got != nil && got.SeccompProfile != nil {
+				t.Errorf("SeccompProfile = %+v, want nil", got.SeccompProfile)
+			}
+		})
+		t.Run("seLinuxOptions/"+tc.name, func(t *testing.T) {
+			got, err := parsePodSecurityContext(map[string]any{"seLinuxOptions": tc.val}, "podSecurityContext")
+			if err != nil {
+				t.Fatalf("parsePodSecurityContext(seLinuxOptions: null) = error %v, want nil", err)
+			}
+			if got != nil && got.SELinuxOptions != nil {
+				t.Errorf("SELinuxOptions = %+v, want nil", got.SELinuxOptions)
+			}
+		})
+		t.Run("appArmorProfile/"+tc.name, func(t *testing.T) {
+			got, err := parsePodSecurityContext(map[string]any{"appArmorProfile": tc.val}, "podSecurityContext")
+			if err != nil {
+				t.Fatalf("parsePodSecurityContext(appArmorProfile: null) = error %v, want nil", err)
+			}
+			if got != nil && got.AppArmorProfile != nil {
+				t.Errorf("AppArmorProfile = %+v, want nil", got.AppArmorProfile)
+			}
+		})
+	}
+
+	t.Run("wrong type still errors", func(t *testing.T) {
+		for _, key := range []string{"supplementalGroups", "seccompProfile", "seLinuxOptions", "appArmorProfile"} {
+			t.Run(key, func(t *testing.T) {
+				if _, err := parsePodSecurityContext(map[string]any{key: "x"}, "podSecurityContext"); err == nil {
+					t.Fatalf("parsePodSecurityContext(%s: <string>) = nil error, want a type error", key)
+				}
+			})
+		}
+	})
+}
+
+// TestParsePodSpec_PodResources_NullIsOmission closes a gap in the
+// podResources.requests/limits type guard, which still reads each key via a
+// bare comma-ok lookup ahead of parseResources: `podResources: {requests:
+// null}` errored ("must be an object, got <nil>") instead of reading as an
+// absent requests block.
+func TestParsePodSpec_PodResources_NullIsOmission(t *testing.T) {
+	for _, key := range []string{"requests", "limits"} {
+		for _, tc := range nullValues() {
+			t.Run(key+"/"+tc.name, func(t *testing.T) {
+				cfg, err := parsePodSpec(map[string]any{
+					"podResources": map[string]any{key: tc.val},
+				}, false)
+				if err != nil {
+					t.Fatalf("parsePodSpec(podResources.%s: null) = error %v, want nil", key, err)
+				}
+				if cfg.Resources != nil {
+					t.Errorf("Resources = %+v, want nil", cfg.Resources)
+				}
+			})
+		}
+	}
+
+	t.Run("wrong type still errors", func(t *testing.T) {
+		_, err := parsePodSpec(map[string]any{
+			"podResources": map[string]any{"requests": "x"},
+		}, false)
+		if err == nil {
+			t.Fatal("parsePodSpec(podResources.requests: <string>) = nil error, want a type error")
+		}
+	})
+}
+
+// TestParsePodDNSConfig_OptionValue_NullIsOmission closes a gap in the DNS
+// option value lookup, which still reads via a bare comma-ok lookup:
+// `options: [{name: ndots, value: null}]` errored instead of leaving Value
+// nil, the same result an omitted value key already produces.
+func TestParsePodDNSConfig_OptionValue_NullIsOmission(t *testing.T) {
+	for _, tc := range nullValues() {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parsePodDNSConfig(map[string]any{
+				"options": []any{map[string]any{"name": "ndots", "value": tc.val}},
+			}, "dnsConfig")
+			if err != nil {
+				t.Fatalf("parsePodDNSConfig(options[0].value: null) = error %v, want nil", err)
+			}
+			if len(got.Options) != 1 || got.Options[0].Value != nil {
+				t.Errorf("Options = %+v, want one option with a nil Value", got.Options)
+			}
+		})
+	}
+
+	t.Run("wrong type still errors", func(t *testing.T) {
+		_, err := parsePodDNSConfig(map[string]any{
+			"options": []any{map[string]any{"name": "ndots", "value": 1}},
+		}, "dnsConfig")
+		if err == nil {
+			t.Fatal("parsePodDNSConfig(options[0].value: <int>) = nil error, want a type error")
+		}
+	})
+}
+
+// TestParseStorageClassField_NullIsOmission closes a gap in the PVC
+// storageClass lookup, which still reads via a bare comma-ok lookup:
+// `storageClass: null` errored ("must be a string, got <nil>") instead of
+// producing the same (value="", explicitEmpty=false) result an omitted key
+// produces. explicitEmpty distinguishes an authored "" (request no
+// StorageClass) from absence (use the cluster default), and a null must land
+// on the absence side of that distinction, not the authored side.
+func TestParseStorageClassField_NullIsOmission(t *testing.T) {
+	absentValue, absentExplicit, err := parseStorageClassField(map[string]any{}, "volumes[0]")
+	if err != nil {
+		t.Fatalf("parseStorageClassField(absent) = error %v, want nil", err)
+	}
+	for _, tc := range nullValues() {
+		t.Run(tc.name, func(t *testing.T) {
+			got, explicitEmpty, err := parseStorageClassField(map[string]any{"storageClass": tc.val}, "volumes[0]")
+			if err != nil {
+				t.Fatalf("parseStorageClassField(storageClass: null) = error %v, want nil", err)
+			}
+			if got != absentValue || explicitEmpty != absentExplicit {
+				t.Errorf("parseStorageClassField(storageClass: null) = (%q, %v), want the absent-key result (%q, %v)", got, explicitEmpty, absentValue, absentExplicit)
+			}
+		})
+	}
+
+	t.Run("explicit empty string is still distinguished", func(t *testing.T) {
+		got, explicitEmpty, err := parseStorageClassField(map[string]any{"storageClass": ""}, "volumes[0]")
+		if err != nil {
+			t.Fatalf("parseStorageClassField(storageClass: \"\") = error %v, want nil", err)
+		}
+		if got != "" || !explicitEmpty {
+			t.Errorf("parseStorageClassField(storageClass: \"\") = (%q, %v), want (\"\", true)", got, explicitEmpty)
+		}
+	})
+
+	t.Run("wrong type still errors", func(t *testing.T) {
+		_, _, err := parseStorageClassField(map[string]any{"storageClass": 1}, "volumes[0]")
+		if err == nil {
+			t.Fatal("parseStorageClassField(storageClass: <int>) = nil error, want a type error")
+		}
+	})
+}
+
+// TestParseEnv_ValueFrom_TypedNilMap closes a gap in the valueFrom presence
+// check, which uses a bare type-assertion comma-ok (`envMap["valueFrom"].
+// (map[string]any)`) instead of authoredValue/isExplicitNull. A TYPED nil
+// map[string]any — exactly what a Go-constructed lowering rule produces for
+// an unset optional map, per this file's isExplicitNull doc comment — still
+// satisfies that assertion with ok=true, so it was misread as an authored
+// valueFrom and tripped the mutually-exclusive-fields error even though
+// `value` was also set.
+func TestParseEnv_ValueFrom_TypedNilMap(t *testing.T) {
+	var nilMap map[string]any
+	got, err := parseEnv(map[string]any{"env": []any{
+		map[string]any{"name": "X", "value": "ok", "valueFrom": nilMap},
+	}})
+	if err != nil {
+		t.Fatalf("parseEnv(valueFrom: typed nil map) = error %v, want nil", err)
+	}
+	if len(got) != 1 || got[0].Value != "ok" || got[0].ValueFrom != nil {
+		t.Errorf("parseEnv(valueFrom: typed nil map) = %+v, want one var with Value \"ok\" and nil ValueFrom", got)
+	}
+}
+
 // The other half of #394's acceptance: a present-but-wrong-type value must still
 // error. Without this, deleting the type check outright would leave the table
 // above just as green.

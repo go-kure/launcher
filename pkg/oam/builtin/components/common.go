@@ -262,7 +262,12 @@ func parseEnv(props map[string]any) ([]corev1.EnvVar, error) {
 			continue
 		}
 		value, _ := envMap["value"].(string)
-		vf, hasValueFrom := envMap["valueFrom"].(map[string]any)
+		vfRaw, hasValueFromKey := authoredValue(envMap, "valueFrom")
+		var vf map[string]any
+		hasValueFrom := hasValueFromKey
+		if hasValueFrom {
+			vf, hasValueFrom = vfRaw.(map[string]any)
+		}
 		// Mirrors corev1.EnvVar.ValueFrom's own doc comment: "Cannot be
 		// used if value is not empty." An empty `value: ""` alongside
 		// valueFrom is not rejected (matches upstream validation exactly).
@@ -1335,7 +1340,7 @@ func parseProbe(m map[string]any, kind string, namedPortsAllowed bool, matchName
 // since corev1.HTTPHeader.Value has no meaningful zero-value distinction
 // from an intentionally-empty header value.
 func parseHTTPHeaders(raw map[string]any, key string) ([]corev1.HTTPHeader, error) {
-	v, present := raw[key]
+	v, present := authoredValue(raw, key)
 	if !present {
 		return nil, nil
 	}
@@ -1363,7 +1368,7 @@ func parseHTTPHeaders(raw map[string]any, key string) ([]corev1.HTTPHeader, erro
 			return nil, errors.Errorf("httpHeaders[%d].name: invalid header name %q: %s", i, name, strings.Join(errs, "; "))
 		}
 		value := ""
-		if v, present := hm["value"]; present {
+		if v, present := authoredValue(hm, "value"); present {
 			s, ok := v.(string)
 			if !ok {
 				return nil, errors.Errorf("httpHeaders[%d].value: must be a string, got %T", i, v)
@@ -1849,7 +1854,7 @@ func isExplicitNull(value any) bool {
 // already means "the overall server". It is a per-field judgement, not a
 // property of the file.
 func parseStorageClassField(raw map[string]any, label string) (value string, explicitEmpty bool, err error) {
-	v, present := raw["storageClass"]
+	v, present := authoredValue(raw, "storageClass")
 	if !present {
 		return "", false, nil
 	}
