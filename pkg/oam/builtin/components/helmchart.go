@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -130,6 +131,22 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 		}
 	}
 	if vals, ok := props["values"].(map[string]any); ok {
+		// values is an open object: property validation checks that the key is
+		// a map and stops there, so the contents arrive exactly as yaml.v3
+		// decoded them. yaml.v3 resolves `.nan` and `.inf` to non-finite
+		// float64s, which encoding/json refuses to marshal — and under the
+		// release-1 builder contract the kure setter that inlines this map
+		// (fluxcd.SetHelmReleaseValuesFromMap, called from buildHelmRelease)
+		// panics on a marshal failure instead of returning an error, its own
+		// doc telling a caller whose map can hold such a value to marshal it
+		// first. buildHelmRelease has no error to return; this parse does.
+		// Checked for every valuesMode, not just the inlining one: the mode is
+		// still rewritten after this point (an inherited handler default under
+		// delivery: template becomes inline, see ToApplicationConfig), so
+		// whether a document is accepted must not depend on it.
+		if _, err := json.Marshal(vals); err != nil {
+			return nil, errors.Errorf("helmchart: values is not representable as JSON: %w", err)
+		}
 		cfg.Values = vals
 	}
 	if vfList, ok := props["valuesFrom"].([]any); ok {

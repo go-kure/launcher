@@ -25,8 +25,14 @@ import (
 )
 
 // ValidateImageRef validates a container image reference.
-// It rejects untagged images and images using the :latest tag.
-// Digest references are always accepted.
+// It rejects untagged images and images using the :latest tag, including a
+// digest reference that still carries an explicit :latest tag
+// (`repo:latest@sha256:...`). The digest pins the content, but the tag stays
+// part of the reference and a cluster is free to read it; since this package
+// stopped writing imagePullPolicy itself (go-kure/launcher#361) nothing here
+// overrides how it does. hasExplicitLatestTag already strips the digest before
+// looking for the tag, which only this call site exercises.
+// Digest references are otherwise accepted.
 func ValidateImageRef(image string) error {
 	ref, err := name.ParseReference(image)
 	if err != nil {
@@ -35,6 +41,9 @@ func ValidateImageRef(image string) error {
 
 	switch r := ref.(type) {
 	case name.Digest:
+		if hasExplicitLatestTag(image) {
+			return errors.Errorf("image %q rejected: :latest tag not allowed; use an explicit version tag or digest", image)
+		}
 		return nil
 	case name.Tag:
 		if r.TagStr() != "latest" {

@@ -18,8 +18,12 @@ import (
 // appsv1.StatefulSetSpec that is neither the pod template (parsePodSpec), the
 // claim templates (parseVolumeClaimTemplates), nor the fields the handler
 // already owned (replicas, serviceName). Each field is nil / zero when not
-// authored so apply leaves the constructor's value in place, which keeps
-// existing output byte-identical.
+// authored, so apply leaves it alone and the API server defaults it at
+// admission. Under the release-1 builder contract the constructor injects no
+// defaults (go-kure/launcher#361), so "left alone" now means "left empty":
+// PodManagementPolicy used to arrive pre-filled with OrderedReady and no
+// longer does, which is why three goldens lost that line. The effective policy
+// is unchanged, OrderedReady being the API server's default too.
 type StatefulSetSpecConfig struct {
 	PodManagementPolicy                  appsv1.PodManagementPolicyType
 	UpdateStrategy                       *appsv1.StatefulSetUpdateStrategy
@@ -270,9 +274,12 @@ func parseMaxUnavailable(v any, label string) (intstr.IntOrString, error) {
 }
 
 // apply writes the authored StatefulSetSpec-level fields directly onto the
-// StatefulSet. Unauthored fields keep whatever the constructor set
-// (podManagementPolicy OrderedReady, an empty updateStrategy), so output for
-// documents that author none of them does not change.
+// StatefulSet. Unauthored fields are left as the identity-only constructor
+// returned them, which under the release-1 contract means empty: an
+// unauthored podManagementPolicy is no longer emitted at all (the API server
+// supplies the same OrderedReady at admission), while updateStrategy is a
+// non-pointer struct, so omitempty cannot suppress it and `updateStrategy: {}`
+// is still emitted.
 // Every pointer-bearing field is deep-copied rather than aliased, for the
 // reason spelled out on VolumeClaimSpecConfig.apply: the config is reusable and
 // editing a generated object in place is an expected use, so a shared pointer

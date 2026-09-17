@@ -688,7 +688,7 @@ second field besides `privileged`: `securityContext.windowsOptions.hostProcess`
 is rejected under the same `AllowPrivileged()` (`enforce.go:122-124`). That
 branch is **not reachable from an authored document** — `windowsOptions` is not
 in the container `securityContext` key set, so `rejectUnknownKeys`
-(`common.go:1917`) refuses it before any policy check runs — so it is
+(`common.go:1926`) refuses it before any policy check runs — so it is
 defence in depth against a future parser change, not a gate an author can trip
 today. Those three fields are the whole container-level policy surface:
 `enforcePrivileged` and `enforceContainerCapabilities` are the only enforcers
@@ -1531,7 +1531,7 @@ object would change what the next `Generate` emits.
   `delivery: native` is unaffected. Known limitation, over-broad wording fixed: this list is the
   set of properties `delivery: template` rejects when **explicitly** authored — an inherited
   handler default (e.g. `valuesMode` with no property-level `configMap`) falls back to `inline`
-  rather than erroring (`pkg/oam/builtin/components/helmchart.go:281-289`); same over-broad-wording
+  rather than erroring (`pkg/oam/builtin/components/helmchart.go:298-306`); same over-broad-wording
   class `go-kure/launcher#319` already fixed elsewhere in this file.
 
   **`delivery: template` output is partitioned by Helm hook group.** Every rendered manifest
@@ -1691,9 +1691,13 @@ object would change what the next `Generate` emits.
   non-API-governed scope-table entry — so it also fixes a *bundled* CRD whose
   declared scope is stale, not only a kind nothing else can scope. It is ignored
   for a kind the Kubernetes API itself governs (`isAPIGovernedScope`,
-  `manifests.go`: a `CustomResourceDefinition` document, and any kind whose kure
+  `manifests.go`: a `CustomResourceDefinition` document; any kind whose kure
   scope-table entry comes from `ScopeSourceBuiltin` — i.e. from the generated
-  upstream types); a manifest cannot redefine those. A kind with no override and
+  upstream types; and the handful of cluster-scoped API built-ins kure registers
+  no builder for, which are therefore absent from that table — `PriorityClass`,
+  `APIService` and the two webhook configurations. Those last are detected by
+  asking `manifest.Scope` itself with no CRD context, not by copying kure's
+  list, so kure stays the single answer); a manifest cannot redefine those. A kind with no override and
   no other scope source still fails closed when it carries no
   `metadata.namespace`.
 
@@ -1899,18 +1903,19 @@ template labels compiles and is refused by the apiserver at apply time. `job` an
 `cronjob` are the deliberate exception — the Job controller fills `spec.selector`
 and its matching pod labels itself.
 
-**Two injected defaults are gone from the emitted manifests, with no change in
-effective behaviour.** The constructors used to write `imagePullPolicy:
-IfNotPresent` onto every container and `podManagementPolicy: OrderedReady` onto
-every StatefulSet; neither is emitted now. `OrderedReady` is the apiserver's own
-default for that field. For `imagePullPolicy`, Kubernetes defaults an omitted
-value from the image reference — `Always` when the tag is `latest` or absent,
-`IfNotPresent` otherwise — while `ValidateImageRef` (`common.go`) refuses an
-untagged reference and an explicit `:latest` tag on every main, init and sidecar
-image. So for every image this package accepts *by tag*, the apiserver now
-supplies exactly the value the constructor used to freeze in. (A digest
-reference is accepted by a separate arm of `ValidateImageRef` and is not covered
-by that argument; it is pinned by digest either way.) The `obj.Annotations = nil`
+**Two injected defaults are gone from the emitted manifests.** The constructors
+used to write `imagePullPolicy: IfNotPresent` onto every container and
+`podManagementPolicy: OrderedReady` onto every StatefulSet; neither is emitted
+now. `OrderedReady` is the apiserver's own default for that field, so that one
+is unchanged in effect. For `imagePullPolicy`, Kubernetes defaults an omitted
+value from the image reference and keys that decision on the `latest` tag, so
+what matters here is that no accepted image can carry one: `ValidateImageRef`
+(`common.go`) refuses an untagged reference and an explicit `:latest` tag on
+every main, init and sidecar image — including a digest reference that still
+carries the tag (`repo:latest@sha256:...`), which it rejects for exactly this
+reason. A digest reference with *no* tag is the case this argument does not
+reach, and no golden covers that form; it is pinned by digest either way, and
+this package does not assert what a cluster defaults for it. The `obj.Annotations = nil`
 assignments scattered through the handlers, which existed to strip the `app:`
 annotation the constructors used to stamp, are now no-ops — kept so the field
 stays at a known value regardless of what a future constructor does.

@@ -161,6 +161,25 @@ func TestManifestsHandler_ScopeOverride_IgnoredForKnownScope(t *testing.T) {
 	}
 }
 
+// PriorityClass is cluster-scoped by the Kubernetes API, but kure registers no
+// builder for it, so it is absent from the generated table and
+// KindForAnyVersion does not report it. A Namespaced override must still be
+// ignored: its scope is API-governed exactly like a registered built-in's.
+// TestManifestsHandler_ScopeOverride_Namespaced above is the discriminating
+// half — the same override on an unregistered kind that is NOT in kure's
+// residual cluster-scoped set does stamp the namespace.
+func TestManifestsHandler_ScopeOverride_IgnoredForUnregisteredClusterBuiltin(t *testing.T) {
+	overrides := []any{map[string]any{"apiVersion": "scheduling.k8s.io/v1", "kind": "PriorityClass", "scope": "Namespaced"}}
+	got, err := generateManifestsWithOverrides(t, "app-ns",
+		"apiVersion: scheduling.k8s.io/v1\nkind: PriorityClass\nmetadata:\n  name: high\nvalue: 1000\n", overrides)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(got) != 1 || got[0] != "PriorityClass:" {
+		t.Errorf("a Namespaced override must not stamp a cluster-scoped API built-in, got %v", got)
+	}
+}
+
 func TestManifestsHandler_ScopeOverride_Validation(t *testing.T) {
 	cases := []struct {
 		name      string
