@@ -93,6 +93,18 @@ matching `<domain>/component` on every rendered workload and helm-rendered pod �
 `ComponentLabelKey` to a label its pods do carry (e.g. `"app"`). A caller that injects
 `trafficSources`/`EgressPeers` without either will synthesize a policy that selects nothing.
 
+Every synthesized `NetworkPolicy` carries **no labels and no annotations of its own** —
+only `metadata.name` and `metadata.namespace`, plus the spec. A consumer cannot select
+the synthesized set by label; identify it by the `{comp}-allow-*` name, or by the
+`ComponentNamed` attribution the configs expose. Since go-kure/launcher#361 this is a
+property of the object as constructed rather than a scrub: kure's release-1 builder
+contract (`go-kure/kure` ≥ `v0.2.0-beta.11`) makes `CreateNetworkPolicy` return TypeMeta
+and identity only, so `netpol_synthesis.go`'s `np.Labels = nil` / `np.Annotations = nil`
+lines no longer strip a constructor-stamped `app:` label and annotation — they are kept
+as a guard, not as a fix-up. Everything else on the policy (`spec.podSelector`,
+`spec.policyTypes`, the rules) is written by the synthesizer as a direct field
+assignment; nothing upstream of it supplies a default.
+
 ## Parsing
 
 | Function | Purpose |

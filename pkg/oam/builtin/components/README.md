@@ -528,9 +528,14 @@ opt-out request (Kubernetes distinguishes a nil `StorageClassName` — use the
 cluster default — from a pointer to `""` — request no class) rather than
 being collapsed to "absent" and silently provisioned through the default
 class; this distinction is not available for `volumeClaimTemplates.storageClass`
-below, since the underlying `go-kure/kure` `CreateVolumeClaimTemplate` helper
-that path builds on only ever sets a non-empty storage class name on the
-generated claim — a cross-repo limitation, out of scope here.
+below, whose parser reads the value with `parseStringField` and discards the
+presence flag, so the claim template only ever carries a non-empty class name.
+That used to be a cross-repo limitation — kure's `CreateVolumeClaimTemplate`
+took a plain string — but since go-kure/launcher#361 the claim template is built
+in this package from a `corev1.PersistentVolumeClaim` literal
+(`statefulset.go`), so the gap is now local and fixable here; closing it is a
+behaviour change to the `volumeClaimTemplates` surface and is not part of that
+adoption.
 `pvc.accessModes`, if authored, must be a non-empty array of non-empty
 strings, each one of the four real `corev1.PersistentVolumeAccessMode`
 values — a present-but-non-array value (e.g. a bare string) or a non-string
@@ -683,7 +688,7 @@ second field besides `privileged`: `securityContext.windowsOptions.hostProcess`
 is rejected under the same `AllowPrivileged()` (`enforce.go:122-124`). That
 branch is **not reachable from an authored document** — `windowsOptions` is not
 in the container `securityContext` key set, so `rejectUnknownKeys`
-(`common.go:1888-1891`) refuses it before any policy check runs — so it is
+(`common.go:1917`) refuses it before any policy check runs — so it is
 defence in depth against a future parser change, not a gate an author can trip
 today. Those three fields are the whole container-level policy surface:
 `enforcePrivileged` and `enforceContainerCapabilities` are the only enforcers
@@ -1423,8 +1428,10 @@ object would change what the next `Generate` emits.
   recreates the resource on an immutable-field error, and so re-runs the Job,
   including any in-flight run. **Annotating the component does not put it there.**
   `createJob` clears the generated Job's annotations wholesale (`job.Annotations
-  = nil`, dropping the `app:` annotation kure's constructor stamps), and this
-  component has no annotation passthrough — a component's own annotations are read
+  = nil` — a no-op since go-kure/launcher#361, because kure's `Create<Kind>`
+  constructors now return TypeMeta and identity only and stamp no annotation of
+  their own; the assignment is kept so the field stays empty whatever a future
+  constructor does), and this component has no annotation passthrough — a component's own annotations are read
   only for tier classification. Three paths that do work today:
 
   - Add the annotation with the **`fluxcd-patches` trait**, whose patches are
@@ -1461,9 +1468,13 @@ object would change what the next `Generate` emits.
   unlisted.
 
   The generated `Job` carries `app: <component>` as its own labels and its pod
-  template's, drops the `app:` annotation kure's constructor stamps (it
-  duplicates the label and nothing reads it), and leaves `spec.selector` unset
-  for the job controller to fill.
+  template's, carries no annotations at all, and leaves `spec.selector` unset for
+  the job controller to fill. The empty selector is deliberate and is the one
+  workload kind where it stays that way: the Job controller generates
+  `spec.selector` plus its matching `controller-uid`/`job-name` pod labels
+  server-side, so writing one here would fight it. Deployment, StatefulSet and
+  DaemonSet get no such server-side defaulting and so are written explicitly —
+  see Conventions.
 - **helmchart** — `chart`, `version`, `delivery` (`native`|`template`), `source`
   (inline `url` or `{name,kind}` ref), `values`/`valuesFrom`, `valuesMode`
   (`inline` default | `configMap`), `driftDetection`, `install.crds`/`upgrade.crds`.
@@ -1675,16 +1686,31 @@ object would change what the next `Generate` emits.
   it cleared both arms, leaving `Generate` to emit a document consisting of nothing but
   the metadata it had just stamped on.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
-  (`apiVersion`/`kind`/`scope`) for unknown kinds.
+  (`apiVersion`/`kind`/`scope`), the author's explicit statement of a kind's scope.
+  An override outranks a same-source CRD's declared `spec.scope` and kure's own
+  non-API-governed scope-table entry — so it also fixes a *bundled* CRD whose
+  declared scope is stale, not only a kind nothing else can scope. It is ignored
+  for a kind the Kubernetes API itself governs (`isAPIGovernedScope`,
+  `manifests.go`: a `CustomResourceDefinition` document, and any kind whose kure
+  scope-table entry comes from `ScopeSourceBuiltin` — i.e. from the generated
+  upstream types); a manifest cannot redefine those. A kind with no override and
+  no other scope source still fails closed when it carries no
+  `metadata.namespace`.
 
 ## StatefulSet-level and claim-template properties
 
 The `statefulset` kind projects the whole `appsv1.StatefulSetSpec` field set it
 owns, and each `volumeClaimTemplates` entry projects the whole
 `corev1.PersistentVolumeClaimSpec`. Every field below is written only when
-authored, so an unauthored StatefulSet keeps exactly what kure's
-`CreateStatefulSet` put in the spec — `OrderedReady` and an empty
-`updateStrategy` — and no existing output moves. The claim entry's five
+authored, so an unauthored StatefulSet emits no `podManagementPolicy` at all and
+an empty `updateStrategy: {}` (a non-pointer struct, which `omitempty` does not
+suppress), leaving the apiserver to default both. Until go-kure/launcher#361
+kure's `CreateStatefulSet` wrote `podManagementPolicy: OrderedReady` into the
+object itself; the release-1 builder contract makes that constructor
+identity-only, so the line is gone from the emitted manifest. The *effective*
+policy is unchanged — `OrderedReady` is also the API default — but the manifest
+text moved, which is why three goldens lost a `podManagementPolicy:
+OrderedReady` line. The claim entry's five
 pre-existing keys (`name`, `mountPath`, `size`, `storageClass`, `accessModes`)
 now sit inside a closed key set, so a typo in an entry is reported instead of
 being silently dropped.
@@ -1695,14 +1721,14 @@ document's meaning or acceptance moved.
 
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|
-| `podManagementPolicy` | enum | `OrderedReady` (the constructor's own value) or `Parallel`. | additive |
+| `podManagementPolicy` | enum | `OrderedReady` (also the apiserver's default for an unauthored StatefulSet, so authoring it is a no-op that only pins the value in the manifest) or `Parallel`. | additive |
 | `updateStrategy{type, rollingUpdate{partition, maxUnavailable}}` | object | `type` is `RollingUpdate` or `OnDelete`; `rollingUpdate` is rejected under `OnDelete`, mirroring `ValidateStatefulSetSpec`. `type` is required only for an otherwise empty `updateStrategy: {}`, whose whole meaning would come from apiserver defaulting; when `rollingUpdate` is authored, `RollingUpdate` is inferred, since it is both the API default and the only type that reads the field. `partition` is `>= 0`. `maxUnavailable` takes a positive integer or a 1–100% string; the schema leaf declares **no type**, because launcher's `PropertyType` set has no int-or-string member and declaring `string` would make a schema-validating consumer reject the integer form outright (go-kure/launcher#383). | additive |
 | `revisionHistoryLimit` | int ≥ 0 | Retained controller revisions. | additive |
 | `minReadySeconds` | int ≥ 0 | Readiness settling time before a pod counts as available. | additive |
 | `persistentVolumeClaimRetentionPolicy{whenDeleted, whenScaled}` | object | Each is `Retain` or `Delete`. | additive |
 | `ordinals{start}` | object | `start` shifts the replica ordinal range and is required once `ordinals` is authored; `>= 0`. | additive |
 | `selector` (claim) | object | `matchLabels`/`matchExpressions`, with the operator arity rule — `In`/`NotIn` need at least one value, `Exists`/`DoesNotExist` none — and every `values` entry validated as a label value, the check `ValidateLabelSelectorRequirement` runs on a newly created claim template. An entirely empty `selector` is rejected: the apiserver would accept it as matching every volume, which is never what an author who wrote the key meant. **Authoring a selector opts the claim out of dynamic provisioning**: a claim with a non-empty selector is never provisioned from its `StorageClass` and stays `Pending` until a pre-provisioned PV matches ([Kubernetes: persistent volumes — Selector](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#selector)). | additive |
-| `resources{requests,limits}` (claim) | object | `storage` is the only accepted resource name — `ValidatePersistentVolumeClaimSpec` reads `requests[storage]` and nothing else, so any other name would be silently ignored. Quantities must be positive. `apply` *merges* `requests` onto what the constructor already wrote, so `size` survives when only `limits` is authored. `requests.storage` is the long spelling of `size`; authoring both is an error. | additive |
+| `resources{requests,limits}` (claim) | object | `storage` is the only accepted resource name — `ValidatePersistentVolumeClaimSpec` reads `requests[storage]` and nothing else, so any other name would be silently ignored. Quantities must be positive. `apply` *merges* `requests` onto the claim-template literal `createStatefulSet` already built (`statefulset.go`, which writes `requests.storage` from `size`), so `size` survives when only `limits` is authored. `requests.storage` is the long spelling of `size`; authoring both is an error. | additive |
 | `volumeMode` (claim) | enum | Only `Filesystem` is accepted. The API's other mode, `Block`, is rejected at parse time: every claim entry requires a `mountPath` and this kind renders it as a filesystem `volumeMount`, while a block volume must be consumed through `volumeDevices`/`devicePath`. The claim and the pod template are validated as separate objects, so the apiserver would accept the mismatched pair and the pods would then fail at kubelet mount time. Raw block support is go-kure/launcher#385. | additive |
 | `dataSourceRef{apiGroup,kind,name,namespace}` (claim) | object | Mirrors upstream `validateDataSourceRef`: `kind` and `name` are required non-empty with no format rule (a Kind is a CamelCase identifier, not a DNS name), `apiGroup` must be a DNS-1123 subdomain when non-empty, an omitted or empty `apiGroup` pins `kind` to `PersistentVolumeClaim` (the core group holds no other populator), and `namespace`, when set, is a DNS-1123 *label* (`ValidateNamespaceName`), not a subdomain. | additive |
 | `volumeAttributesClassName` (claim) | string | DNS-1123 subdomain naming a `VolumeAttributesClass`. | additive |
@@ -1851,3 +1877,40 @@ Without that, editing the first rendered object — the same in-place
 customization the label rule above assumes — writes back into the config and reappears in
 every later render, with the symptom surfacing on a different object than the one that was
 edited.
+
+### Every spec field is this package's to write
+
+Since go-kure/launcher#361 this package builds against kure's release-1 builder
+contract (`go-kure/kure` ≥ `v0.2.0-beta.11`). Under it a `Create<Kind>`
+constructor returns an object carrying TypeMeta plus `metadata.name` and
+`metadata.namespace` and **nothing else** — no labels, no annotations, no
+selector, no injected defaults. Everything else is the handler's own literal or
+an explicit field assignment. Two consequences a reader needs:
+
+**`spec.selector` is written explicitly, and must agree with the pod template.**
+Deployment, StatefulSet and DaemonSet all require `spec.selector` and get no
+server-side default for it, so each handler assigns
+`&metav1.LabelSelector{MatchLabels: …}` from the same helper that produced
+`spec.template.metadata.labels` — `deploymentComponentLabels` for `deployment`,
+`appLabels` for `webservice`, `worker`, `statefulset` and `daemonset` (both
+return a fresh `{"app": <component>}` map, per the ownership rule above). This is
+the one field the compiler cannot check: a selector that disagrees with the
+template labels compiles and is refused by the apiserver at apply time. `job` and
+`cronjob` are the deliberate exception — the Job controller fills `spec.selector`
+and its matching pod labels itself.
+
+**Two injected defaults are gone from the emitted manifests, with no change in
+effective behaviour.** The constructors used to write `imagePullPolicy:
+IfNotPresent` onto every container and `podManagementPolicy: OrderedReady` onto
+every StatefulSet; neither is emitted now. `OrderedReady` is the apiserver's own
+default for that field. For `imagePullPolicy`, Kubernetes defaults an omitted
+value from the image reference — `Always` when the tag is `latest` or absent,
+`IfNotPresent` otherwise — while `ValidateImageRef` (`common.go`) refuses an
+untagged reference and an explicit `:latest` tag on every main, init and sidecar
+image. So for every image this package accepts *by tag*, the apiserver now
+supplies exactly the value the constructor used to freeze in. (A digest
+reference is accepted by a separate arm of `ValidateImageRef` and is not covered
+by that argument; it is pinned by digest either way.) The `obj.Annotations = nil`
+assignments scattered through the handlers, which existed to strip the `app:`
+annotation the constructors used to stamp, are now no-ops — kept so the field
+stays at a known value regardless of what a future constructor does.

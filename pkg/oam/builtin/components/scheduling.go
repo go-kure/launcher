@@ -645,7 +645,7 @@ func checkMatchLabelKeysAgainstMismatchLabelKeys(matchLabelKeys, mismatchLabelKe
 // ValidateNamespaceName (pkg/apis/core/validation/validation.go, release-1.36:
 // 5162-5163), which is apimachinery's NameIsDNSLabel — the same rule
 // IsDNS1123Label applies, already used for namespace-shaped values elsewhere in
-// this package (podspec.go:256).
+// this package (podspec.go:255).
 //
 // This is the accept-what-upstream-refuses direction, which is why it is enforced
 // here while the matchExpressions label-VALUE check was deliberately declined: there
@@ -665,7 +665,7 @@ func validateNamespaceNames(names []string, field, label string) error {
 // validateLabelKeyList applies the qualified-name rule to a list of label keys.
 // Upstream: validateLabelKeys -> unversionedvalidation.ValidateLabelName per entry
 // (validation.go, release-1.36:9063-9064). Mirrors parseLabelMap's key rule
-// (podspec.go:719), so both spellings of "this string is a label key" agree.
+// (podspec.go:720), so both spellings of "this string is a label key" agree.
 func validateLabelKeyList(keys []string, field, label string) error {
 	for i, k := range keys {
 		if errs := validation.IsQualifiedName(k); len(errs) > 0 {

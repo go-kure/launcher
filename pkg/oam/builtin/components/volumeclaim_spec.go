@@ -344,7 +344,7 @@ func parseLabelSelectorOpts(raw map[string]any, label string, rejectEmpty bool) 
 			// into ValidateLabelSelector by ValidatePersistentVolumeClaimSpec).
 			// Without this check a value such as "bad value" parsed cleanly and
 			// produced a StatefulSet the apiserver rejects — the same class
-			// parseLabelMap already closes on matchLabels (podspec.go:722-724).
+			// parseLabelMap already closes on matchLabels (podspec.go:723-725).
 			for i, v := range values {
 				if errs := validation.IsValidLabelValue(v); len(errs) > 0 {
 					return nil, errors.Errorf("%s: invalid label value %q: %s", indexedLabel(itemLabel+".values", i), v, strings.Join(errs, "; "))
@@ -454,9 +454,11 @@ func parseDataSourceRef(raw map[string]any, label string) (*corev1.TypedObjectRe
 	return ref, nil
 }
 
-// apply writes the projected fields onto a claim template kure's
-// CreateVolumeClaimTemplate has already built. Every field is written only when
-// authored, so an entry using none of them is byte-identical to before.
+// apply writes the projected fields onto the claim template createStatefulSet
+// has already built (a corev1.PersistentVolumeClaim literal since
+// go-kure/launcher#361; kure's CreateVolumeClaimTemplate before that). Every
+// field is written only when authored, so an entry using none of them is
+// byte-identical to before.
 //
 // Everything projected here is deep-copied out of the config, never aliased
 // into the generated object. A handler config is reusable — the same one can
@@ -465,7 +467,7 @@ func parseDataSourceRef(raw map[string]any, label string) (*corev1.TypedObjectRe
 // (label_aliasing_test.go). A shared pointer or map would carry such an edit
 // back into the config and into every later render. Copying is the same rule
 // buildResourceRequirements already applies to the container resource maps
-// (common.go:2887-2889); the pointers to scalars are copied by value for the
+// (common.go:3974-3976); the pointers to scalars are copied by value for the
 // same reason, since a caller can write through them just as easily.
 func (c VolumeClaimSpecConfig) apply(pvc *corev1.PersistentVolumeClaim) {
 	if c.Selector != nil {

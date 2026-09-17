@@ -21,7 +21,8 @@ func (h *ManifestsHandler) CanHandle(componentType string) bool { return compone
 
 // PropertySchema declares the manifests component's properties. Exactly one of
 // `inline` (raw multi-doc YAML) / `url` is required (enforced in
-// parseManifestSource); `scopeOverrides` supplies scope for unknown kinds.
+// parseManifestSource); `scopeOverrides` states a kind's scope explicitly and
+// outranks every other source except the Kubernetes API's own (isAPIGovernedScope).
 func (h *ManifestsHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"inline": {Type: oam.PropertyTypeString, Description: "Raw multi-document manifest YAML emitted inline (mutually exclusive with url)."},

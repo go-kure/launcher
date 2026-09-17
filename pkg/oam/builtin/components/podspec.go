@@ -21,8 +21,8 @@ import (
 // `corev1.Container` fields directly — the upstream struct is the construction
 // API — and deliberately calls none of kure's per-kind pod-template
 // passthroughs (`Add<Kind>Container`, `Set<Kind>ServiceAccountName`, …), so the
-// workload family is already ahead of the kure builder-contract bump tracked in
-// go-kure/launcher#361.
+// workload family already had the shape kure's release-1 builder contract went
+// on to require (go-kure/launcher#361, adopted).
 
 // PodSpecConfig holds the authored pod-level fields shared by every workload
 // kind. It embeds the real corev1.PodSpec (same structural pattern as

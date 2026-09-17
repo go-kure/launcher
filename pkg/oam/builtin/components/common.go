@@ -1869,12 +1869,12 @@ func isExplicitNull(value any) bool {
 // other optional string fields in this file also need "" to mean something
 // other than absent, and neither is served by this helper:
 //
-//   - volumeClaimTemplate.storageClass has identical semantics but cannot
-//     express them. kure.CreateVolumeClaimTemplate takes a plain string, so
-//     parseVolumeClaimTemplates reads it with parseStringField and discards the
-//     presence flag; an authored "" is indistinguishable from an absent key
-//     until that upstream API changes. See VolumeClaimTemplate's own doc
-//     comment, which records it as a cross-repo gap rather than an oversight.
+//   - volumeClaimTemplate.storageClass has identical semantics but does not
+//     express them: parseVolumeClaimTemplates reads it with parseStringField
+//     and discards the presence flag, so an authored "" is indistinguishable
+//     from an absent key. Blocked upstream until go-kure/launcher#361; now
+//     that createStatefulSet builds the claim template itself, the gap is
+//     local and fixable here. See VolumeClaimTemplate's own doc comment.
 //   - affinity.podAntiAffinityType must let an explicit "" reach its enum check
 //     so it is refused by name; parseStringField would report "" as absent and
 //     fall back to the "preferred" default instead. parseAffinity therefore
@@ -4147,7 +4147,9 @@ func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error)
 }
 
 // createServiceAccount creates a ServiceAccount with automountServiceAccountToken disabled
-// (PSA restricted profile compliance). Clears the default annotation added by the kure builder.
+// (PSA restricted profile compliance). Annotations are cleared unconditionally: kure's
+// release-1 builder contract stamps none (go-kure/launcher#361, so this is now a no-op),
+// but the field stays at a known value whatever a future constructor does.
 func createServiceAccount(name, namespace string, labels map[string]string) *corev1.ServiceAccount {
 	sa := kubernetes.CreateServiceAccount(name, namespace)
 	sa.Labels = maps.Clone(labels)
@@ -4158,14 +4160,15 @@ func createServiceAccount(name, namespace string, labels map[string]string) *cor
 
 // VolumeClaimTemplate represents a PVC template for a StatefulSet.
 // StorageClass has no explicit-empty-string escape here, unlike PVCConfig's
-// StorageClassExplicitEmpty: kure.CreateVolumeClaimTemplate's own
-// VolumeClaimTemplateOptions.StorageClassName is a plain string that the
-// external go-kure/kure dependency itself only ever sets on the generated
-// claim when non-empty — an authored `storageClass: ""` on a StatefulSet's
-// volumeClaimTemplates entry cannot be distinguished from an absent one
-// without a change to that upstream API. Cross-repo, out of scope for this
-// PR (same category as the postgresql resource-name gap noted elsewhere in
-// this package).
+// StorageClassExplicitEmpty: parseVolumeClaimTemplates reads it with
+// parseStringField and discards the presence flag, and createStatefulSet only
+// sets Spec.StorageClassName when the value is non-empty — so an authored
+// `storageClass: ""` on a StatefulSet's volumeClaimTemplates entry cannot be
+// distinguished from an absent one. This was a cross-repo gap while kure's
+// CreateVolumeClaimTemplate owned the construction; since go-kure/launcher#361
+// the claim template is a corev1.PersistentVolumeClaim literal built here, so
+// the gap is now local. Closing it changes the emitted claim for documents
+// that author the empty string and is deliberately not part of that adoption.
 type VolumeClaimTemplate struct {
 	Name         string
 	StorageClass string
