@@ -2,6 +2,7 @@ package components
 
 import (
 	"reflect"
+	"strings"
 
 	"github.com/go-kure/kure/pkg/stack"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -181,10 +182,24 @@ func rejectListEnvelope(componentName, kind string, object map[string]any) error
 	// cases and emit the list diagnostic instead. TestPassthrough_ListShapedObjectIsRejected
 	// asserts on the diagnostic TEXT, not merely on error presence, so that masking
 	// fails the suite rather than passing it.
-	if rawItems, hasItems := object["items"]; hasItems && isExplicitNull(rawItems) {
-		return errors.Errorf(
-			"passthrough component %q: object (kind %q) sets 'items' to null, which is an empty list envelope that expands to zero objects at apply time — passthrough emits a single object verbatim, so declare the object itself",
-			componentName, kind)
+	//
+	// Gated on the kind suffix, unlike the first arm — deliberately, and for the
+	// opposite reason. The first arm is keyed on IsList (not the kind name) because
+	// Kustomize expands ANY node whose `items` is a real sequence, list-suffixed or
+	// not. But Kustomize's own expansion (kustomize/api resource/factory.go,
+	// inlineAnyEmbeddedLists) checks `strings.HasSuffix(kind, "List")` FIRST and never
+	// even looks at `items` otherwise — so an ordinary object of a non-List kind that
+	// happens to carry a field named `items` set to null is never treated as a list
+	// envelope by Kustomize, and rejecting it here would be stricter than the tool
+	// this check exists to match. A CRD's `spec.items` colliding with this top-level
+	// key is the concrete case: without the guard, `{apiVersion: example.com/v1, kind:
+	// Widget, items: null}` fails to compile despite being one ordinary resource.
+	if strings.HasSuffix(kind, "List") {
+		if rawItems, hasItems := object["items"]; hasItems && isExplicitNull(rawItems) {
+			return errors.Errorf(
+				"passthrough component %q: object (kind %q) sets 'items' to null, which is an empty list envelope that expands to zero objects at apply time — passthrough emits a single object verbatim, so declare the object itself",
+				componentName, kind)
+		}
 	}
 	return nil
 }
@@ -282,6 +297,15 @@ func deepCopyMap(m map[string]any) map[string]any {
 //     shape reaching this function today has one. Copying the containers is what the
 //     freeze needs; copying the world is not.
 func deepCopyValue(v any) any {
+	// Checked before the fast paths below, not after: a typed-nil []any matches
+	// `case []any:` in a type switch (it's nil of that dynamic type), and
+	// `make([]any, len(nil))` silently produces a non-nil empty slice — turning a
+	// null into `[]`, the exact collapse this function exists to prevent. The
+	// map fast path (deepCopyMap) already special-cases m == nil on its own, so
+	// this move changes only the slice path's behavior, not the map path's.
+	if isExplicitNull(v) {
+		return v
+	}
 	switch t := v.(type) {
 	case map[string]any:
 		return deepCopyMap(t)
@@ -291,9 +315,6 @@ func deepCopyValue(v any) any {
 			out[i] = deepCopyValue(e)
 		}
 		return out
-	}
-	if isExplicitNull(v) {
-		return v
 	}
 	rv := reflect.ValueOf(v)
 	elem := func(i int) reflect.Value { return copiedValue(rv.Index(i).Interface(), rv.Type().Elem()) }

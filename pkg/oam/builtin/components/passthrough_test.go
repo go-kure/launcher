@@ -237,6 +237,17 @@ func TestPassthrough_ListShapedObjectIsRejected(t *testing.T) {
 			"apiVersion": "example.com/v1", "kind": "Widget",
 			"spec": map[string]any{"items": []any{item}},
 		},
+		// A top-level `items` set to null on a kind that does NOT end in "List".
+		// Kustomize's own list expansion (resource/factory.go,
+		// inlineAnyEmbeddedLists) checks strings.HasSuffix(kind, "List") before it
+		// ever looks at `items`, so this is one ordinary resource to Kustomize —
+		// rejecting it here would be stricter than the tool this check exists to
+		// match. A CRD whose spec happens to define a top-level `items` field is
+		// the concrete collision this guards against.
+		"items authored as null, kind does not end in List": {
+			"apiVersion": "example.com/v1", "kind": "Widget",
+			"items": nil,
+		},
 	}
 	for name, object := range accepted {
 		t.Run("accepted/"+name, func(t *testing.T) {
@@ -254,7 +265,10 @@ func TestPassthrough_ListShapedObjectIsRejected(t *testing.T) {
 	// one. `[]any(nil)` is deliberately NOT in this table — it satisfies the
 	// .([]interface{}) assertion with ok=true and is already caught by IsList
 	// above, so listing it here would look like coverage while discriminating
-	// nothing.
+	// nothing. Every case below uses kind "List", the one case where the arm's
+	// kind-suffix guard does not itself change the outcome — the guard's own
+	// discriminating case ("items authored as null, kind does not end in List")
+	// lives in the accepted table above, not here.
 	nullItems := map[string]any{
 		"untyped nil, as authored YAML `items:` writes it": nil,
 		"typed nil map": map[string]any(nil),
@@ -546,6 +560,51 @@ func TestPassthrough_FrozenCopyKeepsNilsInsideNamedCollections(t *testing.T) {
 	}
 	if s[0] != "x" || s[1] != nil {
 		t.Errorf("emitted s = %#v, want [x <nil>]", s)
+	}
+}
+
+// TestPassthrough_FrozenCopyKeepsNilPlainSlices pins the one shape
+// TestPassthrough_FrozenCopyKeepsNilsInsideNamedCollections does not reach: an
+// untyped []any(nil), the shape the authored YAML path itself produces for a
+// null-valued list field (yaml.v3 decodes a YAML null into a plain interface
+// nil, and a null under a sequence-typed key decodes to []any(nil), not a named
+// slice type). deepCopyValue's fast paths used to run before the null check, and
+// []any(nil) matches the `case []any:` arm of a type switch (nil of that dynamic
+// type) — so `make([]any, len(nil))` silently produced a non-nil empty slice,
+// turning an authored null into `[]` on the way out. The README's "a null
+// survives as a null" claim was false for exactly this shape until this test
+// existed to hold it.
+func TestPassthrough_FrozenCopyKeepsNilPlainSlices(t *testing.T) {
+	object := map[string]any{
+		"apiVersion": "example.com/v1",
+		"kind":       "Widget",
+		"metadata":   map[string]any{"name": "a"},
+		"spec": map[string]any{
+			"values": []any(nil),
+		},
+	}
+
+	u := generatePassthrough(t, map[string]any{"object": object}, "ns1")
+
+	spec, ok := u.Object["spec"].(map[string]any)
+	if !ok {
+		t.Fatalf("emitted spec = %T, want map[string]any", u.Object["spec"])
+	}
+	values, present := spec["values"]
+	if !present {
+		t.Fatal(`emitted spec dropped the "values" key`)
+	}
+	// values != nil would always be true here even on success: a correctly-
+	// preserved null is a typed-nil []any wrapped in an any, and comparing that
+	// interface directly against the untyped nil literal never reports equal —
+	// the standard Go "nil interface vs interface holding nil" trap. Assert on
+	// the concrete slice's nil-ness instead of the interface's.
+	slice, ok := values.([]any)
+	if !ok {
+		t.Fatalf(`emitted spec["values"] = %#v (%T), want a []any (possibly nil)`, values, values)
+	}
+	if slice != nil {
+		t.Errorf(`emitted spec["values"] = %#v, want a nil []any (got a non-nil []any — the null became "[]")`, slice)
 	}
 }
 
