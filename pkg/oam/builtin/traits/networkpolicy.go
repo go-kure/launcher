@@ -62,12 +62,24 @@ func (h *NetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 			},
 		},
 	}
-	// port is an int-or-string union, so the port item is kept open beyond `protocol`.
+	// port carries no declared Type: it accepts a port number or a named-port
+	// string (intstr.IntOrString), and PropertySchema has no string-or-number
+	// union type -- an unset Type skips validatePropertyValue's type check and
+	// leaves both forms reachable, the same idiom `cpu`/`memory` use
+	// (builtin/components/schema.go) and daemonset's `maxUnavailable`/`maxSurge`
+	// (builtin/components/daemonset_spec.go). Declaring `port` explicitly here
+	// (rather than relying on AdditionalProperties, as before go-kure/launcher#440
+	// round 3) lets AdditionalProperties default to false, so the schema layer
+	// itself now rejects a stray key like `protcol` instead of silently admitting
+	// it only for parser-layer validNPPortKeys (below) to catch -- closing the
+	// same kind of gap go-kure/launcher#408 closed for authored properties
+	// generally, under the "one-off exception" design-gvk.md:264-271 already
+	// applies to this trait's other closed key sets.
 	port := oam.PropertySchema{
-		Type:                 oam.PropertyTypeObject,
-		AdditionalProperties: true,
-		Description:          "A port (number or named port) with its protocol.",
+		Type:        oam.PropertyTypeObject,
+		Description: "A port (number or named port) with its protocol.",
 		Properties: map[string]oam.PropertySchema{
+			"port":     {Description: "A port number (1-65535) or a named port string."},
 			"protocol": {Type: oam.PropertyTypeString, Default: "TCP", Enum: []any{"TCP", "UDP", "SCTP"}, Description: "IP protocol for the port (TCP, UDP, or SCTP)."},
 		},
 	}
@@ -563,11 +575,10 @@ var validNPProtocols = map[string]corev1.Protocol{
 }
 
 // validNPPortKeys closes the port item over the two fields this parser
-// implements. It is the one key set in this file the SCHEMA cannot back up:
-// PropertySchema keeps the port item open (AdditionalProperties, line 64-71)
-// because `port` is an int-or-string union PropertySchema has no way to express,
-// so `protcol: UDP` passes every schema check and reaches here — where, before
-// this set existed, it was dropped and the port rendered TCP. `endPort` is the
+// implements. The schema now backs this up too (`port` is declared explicitly,
+// AdditionalProperties defaults to false — go-kure/launcher#440 round 3), so
+// this is defense in depth rather than the sole gate: `protcol: UDP` is
+// rejected at the schema layer before it ever reaches here. `endPort` is the
 // other name worth rejecting explicitly: it is a real NetworkPolicyPort field
 // (k8s.io/api networking/v1/types.go:171-176) that this parser does not
 // implement, so accepting it silently would render a single port where the
