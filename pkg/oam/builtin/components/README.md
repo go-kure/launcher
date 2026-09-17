@@ -67,10 +67,14 @@ returned the zero value with no error. So a property authored with the **wrong
 container type** — a mapping where the schema wants a list, a list or scalar
 where it wants an object — built cleanly and emitted nothing for the property,
 and nothing in the output said it had been seen. Closed in go-kure/launcher#423
-by routing those six through the `optionalObject`/`optionalObjectList`/
-`optionalStringList` helpers (`common.go`), which report presence separately
-from value, so each of the six now rejects a mistyped value by name instead of
-discarding it. Those helpers were already how several other properties on the
+by routing those six through presence-reporting helpers (`common.go`), which
+report presence separately from value, so each of the six now rejects a
+mistyped value by name instead of discarding it. (go-kure/launcher#444 later
+folded the dedicated `optionalObject`/`optionalObjectList`/`optionalStringList`
+wrappers those six originally used into the base `parseObjectField`/
+`parseStringField`/etc. helpers themselves — callers now use the base helpers
+directly, and the null-as-absence behavior applies uniformly rather than only
+through the wrappers.) Those helpers were already how several other properties on the
 same components are read — `updateStrategy` and `ordinals` on `statefulset`
 (`statefulset_spec.go`), `successPolicy` and `podFailurePolicy` on `job` and
 `cronjob` (`common.go`) — so the six behaved differently from properties an

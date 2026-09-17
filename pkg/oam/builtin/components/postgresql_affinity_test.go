@@ -211,19 +211,37 @@ func TestPostgresqlAffinity_NullEnvelopeIsAbsent(t *testing.T) {
 	}
 }
 
-// TestPostgresqlAffinity_NullSubFieldsAreStillRejected is the boundary control for the
-// test above. Reading a null as absence applies to the affinity ENVELOPE, which is what
-// the validator classifies; it is not a licence to accept a null anywhere inside the
-// block. These sub-fields keep their existing wrong-type diagnostics, so the envelope
-// fix cannot be mistaken for "nulls are fine everywhere".
-func TestPostgresqlAffinity_NullSubFieldsAreStillRejected(t *testing.T) {
+// TestPostgresqlAffinity_NullSubFieldsTakeTheirDefault is the boundary control for the
+// test above, updated for go-kure/launcher#444: that PR folded null-as-absence into
+// authoredValue, which parseBoolField/parseStringField/parseObjectField all route
+// through, so a nested null now reads as absence the same way at every level, not just
+// the affinity ENVELOPE — matching TestDeploymentHandler_NestedNull's "a nested null
+// builds identically to omitting the key" for every other kind in this package. A null
+// sub-field here must therefore take the same default an omitted sub-field takes,
+// checked against TestPostgresqlAffinity_AbsenceAndDefaults's "empty block" defaults —
+// not be rejected, which was this test's pre-#444 assertion.
+func TestPostgresqlAffinity_NullSubFieldsTakeTheirDefault(t *testing.T) {
+	empty, err := postgresqlConfigFor(t, map[string]any{"affinity": map[string]any{}})
+	if err != nil {
+		t.Fatalf("ToApplicationConfig (empty block): %v", err)
+	}
+
 	for _, key := range []string{"enablePodAntiAffinity", "topologyKey", "nodeSelector"} {
 		t.Run(key, func(t *testing.T) {
-			_, err := postgresqlConfigFor(t, map[string]any{
+			cfg, err := postgresqlConfigFor(t, map[string]any{
 				"affinity": map[string]any{key: nil},
 			})
-			if err == nil {
-				t.Fatalf("a null %s inside a present affinity block must still be rejected", key)
+			if err != nil {
+				t.Fatalf("a null %s inside a present affinity block must read as absent, got error: %v", key, err)
+			}
+			if got, want := cfg.AffinityEnablePodAntiAffinity, empty.AffinityEnablePodAntiAffinity; got != want {
+				t.Errorf("AffinityEnablePodAntiAffinity = %v, want the empty-block default %v", got, want)
+			}
+			if got, want := cfg.AffinityTopologyKey, empty.AffinityTopologyKey; got != want {
+				t.Errorf("AffinityTopologyKey = %q, want the empty-block default %q", got, want)
+			}
+			if got, want := len(cfg.AffinityNodeSelector), len(empty.AffinityNodeSelector); got != want {
+				t.Errorf("len(AffinityNodeSelector) = %d, want the empty-block default %d", got, want)
 			}
 		})
 	}
