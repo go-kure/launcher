@@ -314,9 +314,19 @@ func TestDeploymentScheduling_PreferredAffinityAllowsInvalidLabelValue(t *testin
 			},
 		},
 	})
-	preferred := dep.Spec.Template.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+	af := dep.Spec.Template.Spec.Affinity
+	if af == nil {
+		t.Fatal("Affinity is nil")
+	}
+	if af.NodeAffinity == nil {
+		t.Fatal("Affinity.NodeAffinity is nil — the authored nodeAffinity was dropped")
+	}
+	preferred := af.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
 	if len(preferred) != 1 {
 		t.Fatalf("preferred = %d terms, want 1", len(preferred))
+	}
+	if len(preferred[0].Preference.MatchExpressions) != 1 {
+		t.Fatalf("preference matchExpressions = %d, want 1", len(preferred[0].Preference.MatchExpressions))
 	}
 	if got := preferred[0].Preference.MatchExpressions[0].Values; len(got) != 1 || got[0] != "bad value" {
 		t.Errorf("preference values = %v, want [bad value] preserved unvalidated", got)
