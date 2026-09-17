@@ -28,12 +28,13 @@ guarantee across the package. Where a field says a present-but-wrong-type value
 is rejected, that is a claim about the helper named beside it —
 `parseStringField`, `parseBoolField`, `parseInt32Field`, `parseInt64Field`,
 `parseObjectField`, `parseStringList` — each of which reports presence
-separately from value and returns an error naming the field. Parsers that do
-**not** use those helpers still read with a bare type assertion and silently
-discard a wrongly typed value, leaving whatever default the handler already
-wrote; the shared `parseAffinity`'s four sub-fields
-(`enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType`,
-`nodeSelector`) are the documented example, tracked in
+separately from value and returns an error naming the field. A parser that
+does not use one of those helpers may still reject a wrong type on its own —
+several do, with their own error — so its behavior is left unspecified here.
+Some fields genuinely do fall through a bare type assertion and silently
+discard a wrongly typed value instead of erroring: the shared
+`parseAffinity`'s four sub-fields (`enablePodAntiAffinity`, `topologyKey`,
+`podAntiAffinityType`, `nodeSelector`) are the documented example, tracked in
 go-kure/launcher#452. Do not generalize a rejection note from one field to its
 neighbours: adjudicate against the parser that actually reads it.
 
