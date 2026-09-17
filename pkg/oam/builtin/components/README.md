@@ -1786,15 +1786,21 @@ Two limits worth knowing before relying on the rule:
   wrong for `namespaceSelector`, where nil is the *narrowest* answer rather than the
   emptiest one.
 
-Both limits meet on one key, and it is the second row of that table.
+Both limits met on one key, and it was the second row of that table.
 `namespaceSelector` is parsed twice in this repository: here, for pod affinity,
-through `optionalObject`, where any null is omission — which upstream reads as "this
-pod's namespace"; and in the networkpolicy trait through a bare assertion, where a
-*typed* nil satisfies the assertion and yields an empty selector — all namespaces, the
-widest possible answer. One input, and the two halves land on opposite ends of the
-range rather than merely differing. Neither file shows the disagreement alone. Tracked
-as `go-kure/launcher#430`; this package's half conforms but is not pinned for null,
-which is a weaker claim than it looks.
+through `parseSchedulingSelector` (`parseObjectField`), where any null is
+omission — which upstream reads as "this pod's namespace"; and in the
+networkpolicy trait, through `parseNPPeer`. A *typed* nil used to satisfy the
+networkpolicy trait's own type assertion and yield an empty selector — all
+namespaces, the widest possible answer — while an untyped nil already read as
+omission there, so one input landed on opposite ends of the range depending on
+which Go nil shape produced it. Both parsers now route their presence check
+through `oam.IsNullValue`'s reflect-based classification, which treats a typed
+nil the same as an untyped one, so the two halves converge: a null
+`namespaceSelector`, however it was constructed, is omission on both paths.
+Fixed as `go-kure/launcher#430`; `networkpolicy_internal_test.go`'s
+`TestParseNPPeer_NamespaceSelectorPresenceCases` pins the typed-nil case
+directly.
 
 ## Conventions
 

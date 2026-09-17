@@ -420,12 +420,20 @@ Two things this deliberately does not do:
   here can normalise it, and a null inside an opaque object still reaches the
   handler parser. This is the same horizon as validation itself.
 
-Scope, because this contract is not settled repository-wide: this fixes the
-**emitted** path only. Authored documents never reach these functions at all
-(see the paragraph above), so a handler's own parser still has to answer for a
-null it is handed directly — which is why the built-in parsers keep their
-explicit-null guards. Aligning the authored path is tracked separately as
-`go-kure/launcher#394` and is not closed by this.
+Scope, because this contract is not settled repository-wide: `ValidateAuthoredProperties`
+(above) *does* reach `validatePropertyValue` — it calls it directly for every
+authored key, with no strip of its own first. That is why
+`validatePropertyValue` carries its own top-level null check
+(`if isNullValue(value) { return value, nil }`) rather than relying entirely on
+`validateObjectProperties`'s strip: on the emitted path the strip runs first and
+the check is usually moot, but on the authored path it is what makes an
+explicit null under an optional field read as absence instead of a type error.
+What the contract does *not* reach is any path that skips both validators
+entirely — a component a lowering rule constructs directly in Go, or a
+built-in parser's own field read (`pkg/oam/builtin/components`) — which is why
+those parsers keep their explicit-null guards regardless. Aligning that
+parser-level layer with this contract is a separate, lower-level concern,
+tracked as `go-kure/launcher#394`, and is not closed by this.
 
 Two further surfaces sit outside the contract and are named here so "the contract
 holds" is not read as "it holds everywhere":

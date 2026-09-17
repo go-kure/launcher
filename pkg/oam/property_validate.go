@@ -163,26 +163,44 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 // sees the same normalized shape validation itself checked, instead of the
 // original, still-typed value silently surviving unassertable.
 //
-// A null never reaches here as a whole property value: validateObjectProperties
-// strips an optional one and rejects a required one before calling. The one
-// remaining way a nil arrives is as an ARRAY ELEMENT, through the per-element
-// recursion below — and it must fail there, because the handler parsers assert
-// concrete element types (parseStringList's item.(string),
-// builtin/components/podspec.go:644-646). An earlier early return here accepted such
-// an element and let it reach a parser that then rejected it — a schema/parser
-// divergence the schema itself could not express.
+// A null reaches here as a whole property value on one path: validateAuthoredProperties
+// (property_validate_authored.go) calls this function directly over every authored
+// key, without the null-strip validateObjectProperties applies to its own callers —
+// that strip is what makes "absent" and "explicit null" the same case for the
+// EMITTED path (D4), but the AUTHORED path never goes through it. The early return
+// below is what makes an optional field's authored null read as "constrains
+// nothing" there too, matching Required's own treatment of it at the caller.
 //
-// The ordinary type switch is NOT sufficient to reject one, which is why the array
-// case guards its elements explicitly rather than relying on the switch. The switch
-// does handle an UNTYPED nil: isStringValue(nil) is false, so `values: [null]` under
-// Items{Type: string} reports "expected string, got <nil>". But a TYPED nil
-// collection satisfies the plain type assertion each coercer tries first —
-// asArrayValue([]any(nil)) and asObjectValue(map[string]any(nil)) both return
-// (nil, true) — and iterating the resulting empty collection rejects nothing, so
-// `items: [null]` under Items{Type: object} passed on exactly that path. The
-// `case "":` branch checks nothing at all, so an untyped Items schema accepted a null
-// element too. Both are why the guard is a guard and not a comment.
+// It must NOT apply to an ARRAY ELEMENT, though: the handler parsers assert
+// concrete element types (parseStringList's item.(string),
+// builtin/components/podspec.go:644-646), so a null element has to fail rather than
+// pass through. That case never reaches this early return — the PropertyTypeArray
+// case below guards each element explicitly, before the recursive call into this
+// function, so a null item is rejected at the array level and this function is
+// never invoked on it. An earlier version of this early return had no such guard
+// and let a null element through to a parser that then rejected it — a
+// schema/parser divergence the schema itself could not express; the array-level
+// guard is what closed that without reopening this one.
+//
+// The ordinary type switch is NOT sufficient to reject a null array element on its
+// own, which is why the array case guards explicitly rather than relying on it. The
+// switch does handle an UNTYPED nil reaching it directly: isStringValue(nil) is
+// false, so `values: [null]` under Items{Type: string} reports "expected string,
+// got <nil>". But a TYPED nil collection satisfies the plain type assertion each
+// coercer tries first — asArrayValue([]any(nil)) and asObjectValue(map[string]any(nil))
+// both return (nil, true) — and iterating the resulting empty collection rejects
+// nothing, so `items: [null]` under Items{Type: object} passed on exactly that
+// path. The `case "":` branch checks nothing at all, so an untyped Items schema
+// accepted a null element too. Both are why the array-level guard is a guard and
+// not a comment.
 func validatePropertyValue(schema PropertySchema, value any, path string) (any, error) {
+	if isNullValue(value) {
+		// Absent/null. Presence is enforced by Required at the caller; a nil under
+		// an optional field constrains nothing. Never reached for an array element
+		// — see the doc comment above.
+		return value, nil
+	}
+
 	switch schema.Type {
 	case "":
 		// No declared type: nothing to check beyond Enum below. Reachable for a
@@ -273,6 +291,19 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// written. So a member holding a null at any depth can never match a value that
 		// reached this line: Enum{{"x": nil}} stopped matching `{x: null}` the moment
 		// the strip existed.
+		//
+		// KNOWN LIMITATION: that premise assumes every key the null sits under gets
+		// stripped, which is false for a key an enclosing schema leaves to
+		// AdditionalProperties: true — validateObjectProperties skips normalization
+		// for such a key entirely, so a real authored value CAN still hold a null
+		// there. containsNullValue does not thread the schema through its walk, so it
+		// cannot tell that key apart from a declared one and rejects the member
+		// anyway, refusing a schema with a genuinely matchable Enum member. Latent: no
+		// built-in schema in this repo declares Enum and AdditionalProperties: true on
+		// the same PropertySchema (verified by inspection of every AdditionalProperties
+		// site against every Enum site), but PropertySchema is exported, so an
+		// external caller could still construct one that hits this. Tracked as
+		// go-kure/launcher#481.
 		//
 		// Refused per MEMBER, not per schema type. Refusing every Enum declared on an
 		// array or object type would be simpler to state, but it also refuses the

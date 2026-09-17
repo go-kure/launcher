@@ -592,7 +592,18 @@ func TestValidatePropertyValue_EnumMemberHoldingNullIsRejected(t *testing.T) {
 	})
 
 	// A null nested below the top level of a member is just as unmatchable, and the
-	// walk has to reach it.
+	// walk has to reach it — PROVIDED the key it sits under is schema-declared, so
+	// the strip that makes the member unmatchable actually applies to it.
+	//
+	// KNOWN LIMITATION, pinned rather than fixed (go-kure/launcher#481): this
+	// schema declares no `Properties` at all, so "a" is itself an
+	// AdditionalProperties key, not a declared one — nothing strips a null under
+	// it, and a document authoring `options: {a: [{b: null}]}` verbatim would
+	// reach the Enum comparison unstripped and could genuinely match this member.
+	// containsNullValue does not thread the schema through its walk to tell that
+	// apart from a declared key's null, so it rejects the schema here regardless.
+	// This test pins the current (over-eager) behaviour rather than the correct
+	// one; closing #481 should invert it for this exact construction.
 	t.Run("null nested inside a member", func(t *testing.T) {
 		schema := map[string]PropertySchema{
 			"options": {
