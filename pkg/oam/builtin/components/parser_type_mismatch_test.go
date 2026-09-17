@@ -161,7 +161,7 @@ func TestParseArgs_AbsentIsAbsent(t *testing.T) {
 // TestParseCommandArgs_NonStringElement covers the second silent drop these two
 // parsers carried: their inner loops appended only the elements that asserted to
 // string, so `command: [ls, 3]` emitted ["ls"] and said nothing about the 3.
-// Routing through optionalStringList makes the element an error too. This is a
+// Routing through parseStringList makes the element an error too. This is a
 // behaviour change for a document that currently relies on the element being
 // ignored — but such a document is already not getting what it authored.
 func TestParseCommandArgs_NonStringElement(t *testing.T) {
@@ -176,7 +176,7 @@ func TestParseCommandArgs_NonStringElement(t *testing.T) {
 // TestParseInitContainersSidecars_NonObjectElement is the matching element-level
 // control for the two object lists. Both already rejected a non-object element
 // before this change, via their own inner assertion; the conversion moved that
-// check into optionalObjectList, so this asserts the behaviour survived the move
+// check into parseObjectList, so this asserts the behaviour survived the move
 // rather than that it is new.
 //
 // It asserts the message, not merely that an error came back. A mutation that
