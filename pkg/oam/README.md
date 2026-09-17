@@ -95,8 +95,11 @@ matching `<domain>/component` on every rendered workload and helm-rendered pod �
 
 Every synthesized `NetworkPolicy` carries **no labels and no annotations of its own** —
 only `metadata.name` and `metadata.namespace`, plus the spec. A consumer cannot select
-the synthesized set by label; identify it by the `{comp}-allow-*` name, or by the
-`ComponentNamed` attribution the configs expose. Since go-kure/launcher#361 this is a
+the synthesized set by label; identify it by the `{comp}-allow-*` name. No attribution
+interface is available either: these configs expose their component as a struct field
+(`ComponentName string`), which is exactly what makes a `ComponentName()` method on the
+same type impossible, and the external-backend policy config carries no component at all —
+so none of them satisfies `ComponentNamed`. Since go-kure/launcher#361 the label absence is a
 property of the object as constructed rather than a scrub: kure's release-1 builder
 contract (`go-kure/kure` ≥ `v0.2.0-beta.11`) makes `CreateNetworkPolicy` return TypeMeta
 and identity only, so `netpol_synthesis.go`'s `np.Labels = nil` / `np.Annotations = nil`

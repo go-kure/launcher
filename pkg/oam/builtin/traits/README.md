@@ -483,8 +483,9 @@ object is therefore set by the trait itself, either as a direct field assignment
 `cm.Labels`) or through the remaining typed sugar kure still exposes for
 appending to a list (`AddRoleRule`, `AddRoleBindingSubject`,
 `AddNetworkPolicyPolicyType`, `AddConfigMapData`, `AddLabel`). Two practical
-consequences: the `Annotations = nil` lines in `configmap`, `networkpolicy` and
-`rbac` no longer strip anything a constructor stamped and are now defensive only;
+consequences: the `Annotations = nil` lines in `configmap`, `networkpolicy`,
+`rbac` and `scaler` (both the HPA and the PDB) no longer strip anything a
+constructor stamped and are now defensive only;
 and a *new* trait that emits a selector-bearing kind must write that selector
 itself, because nothing upstream of it will. `CreateIngress` is the one
 constructor in this package whose signature changed with the contract — it no

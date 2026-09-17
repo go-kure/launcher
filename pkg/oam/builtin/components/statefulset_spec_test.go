@@ -108,7 +108,10 @@ func TestStatefulSetSpec_UnauthoredKeepsConstructorDefaults(t *testing.T) {
 }
 
 // TestStatefulSetSpec_SelectorStaysBuilderManaged: `selector` is rejected as a
-// property rather than ignored, and the constructor's own selector survives.
+// property rather than ignored, and the handler's own selector survives. Since
+// the release-1 builder contract (go-kure/launcher#361) that selector is written
+// by statefulset.go, not by the constructor — the emitted value is unchanged,
+// only its author is.
 func TestStatefulSetSpec_SelectorStaysBuilderManaged(t *testing.T) {
 	err := generateErr(t, &components.StatefulsetHandler{}, "statefulset", map[string]any{
 		"image":    "ghcr.io/org/app:v1",
@@ -120,6 +123,6 @@ func TestStatefulSetSpec_SelectorStaysBuilderManaged(t *testing.T) {
 
 	sts := statefulSetFrom(t, map[string]any{"image": "ghcr.io/org/app:v1"})
 	if sts.Spec.Selector == nil || sts.Spec.Selector.MatchLabels["app"] != "app" {
-		t.Errorf("Selector = %v, want the constructor's app=app", sts.Spec.Selector)
+		t.Errorf("Selector = %v, want the handler's app=app", sts.Spec.Selector)
 	}
 }

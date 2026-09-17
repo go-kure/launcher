@@ -474,9 +474,12 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	}
 	applyJobSpec(&cj.Spec.JobTemplate.Spec, c.JobSpec)
 
-	// Replaces the whole pod spec, including the RestartPolicy: Never that
-	// kure's CreateCronJob pre-fills — c.RestartPolicy is always set (default
-	// OnFailure), so the authored/defaulted value wins as before.
+	// Replaces the whole pod spec. Under the release-1 builder contract
+	// (go-kure/launcher#361) CreateCronJob is identity-only and pre-fills no
+	// RestartPolicy at all, so the emitted value is entirely this handler's:
+	// c.RestartPolicy is always set (default OnFailure), which is what the pod
+	// template carries — unchanged from when the constructor still wrote
+	// `Never` and this assignment overwrote it.
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:                    c.PodSpec,
 		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),

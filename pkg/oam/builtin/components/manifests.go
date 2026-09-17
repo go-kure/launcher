@@ -22,14 +22,16 @@ func (h *ManifestsHandler) CanHandle(componentType string) bool { return compone
 // PropertySchema declares the manifests component's properties. Exactly one of
 // `inline` (raw multi-doc YAML) / `url` is required (enforced in
 // parseManifestSource); `scopeOverrides` states a kind's scope explicitly and
-// outranks every other source except the Kubernetes API's own (isAPIGovernedScope).
+// outranks kure's own table, but not the Kubernetes API's own scoping
+// (isAPIGovernedScope) and not a CRD bundled in the same source, which it may
+// not contradict (stampManifestNamespaces).
 func (h *ManifestsHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"inline": {Type: oam.PropertyTypeString, Description: "Raw multi-document manifest YAML emitted inline (mutually exclusive with url)."},
 		"url":    {Type: oam.PropertyTypeString, Description: "URL of the manifest YAML source (mutually exclusive with inline)."},
 		"scopeOverrides": {
 			Type:        oam.PropertyTypeArray,
-			Description: "Explicit scope entries, taking precedence over a same-source CRD or kure's own guess (not over a kind the Kubernetes API itself scopes).",
+			Description: "Explicit scope entries, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD in this same source is an error).",
 			Items: &oam.PropertySchema{
 				Type:        oam.PropertyTypeObject,
 				Description: "A single scope override for one apiVersion/kind.",
@@ -64,8 +66,9 @@ func (h *ManifestsHandler) ToApplicationConfig(component *oam.Component, namespa
 // so the shared parseManifestSource (which rejects unknown keys, and is also used
 // by the crd component) never sees it. Each entry is {apiVersion, kind, scope}
 // where scope is "Cluster" or "Namespaced"; an override takes effect for any
-// kind except one whose scope the Kubernetes API itself governs — see
-// isAPIGovernedScope.
+// kind except one whose scope the Kubernetes API itself governs (see
+// isAPIGovernedScope) and one a CRD in the same source defines, which it must
+// agree with rather than override (see stampManifestNamespaces).
 func parseScopeOverrides(props map[string]any) (map[schema.GroupVersionKind]manifest.ScopeResult, map[string]any, error) {
 	raw, ok := props["scopeOverrides"]
 	if !ok {
@@ -114,17 +117,31 @@ func parseScopeOverrides(props map[string]any) (map[schema.GroupVersionKind]mani
 // objects are left untouched; an unknown-scope object with no namespace fails
 // closed rather than be guessed.
 //
-// overrides supplies an explicit scope for a kind, taking precedence over a
-// same-source CRD's declared scope and over kure's own non-API-governed
-// table (e.g. a cluster-scoped custom resource — a namespace-less
-// ClusterIssuer — whose CRD is installed out of band rather than bundled in
-// this source, or one where a bundled CRD's declared scope is stale). This
-// preserves scopeOverrides' documented meaning as the author's explicit
-// statement: it must not be silently outvoted by a same-source CRD or a kure
-// built-in guess. It is still ignored for a kind whose scope the Kubernetes
-// API itself governs (isAPIGovernedScope) — a manifest cannot redefine that,
-// override or not — and the fail-closed default for a kind with no override
-// and no other scope source is unchanged.
+// overrides supplies an explicit scope for a kind, taking precedence over
+// kure's own non-API-governed table (e.g. a cluster-scoped custom resource — a
+// namespace-less ClusterIssuer — whose CRD is installed out of band rather than
+// bundled in this source). This preserves scopeOverrides' documented meaning as
+// the author's explicit statement: it must not be silently outvoted by a kure
+// built-in guess. Two things still outrank it, and for the same reason — they
+// describe what the cluster will actually serve, which an override cannot
+// change:
+//
+//   - a kind whose scope the Kubernetes API itself governs (isAPIGovernedScope);
+//     a manifest cannot redefine that, override or not, so such an override is
+//     ignored.
+//   - a CustomResourceDefinition bundled in this same source. It *is* the
+//     definition being applied, so an override that disagrees with it cannot be
+//     honoured by any cluster: emitting either shape would produce a manifest
+//     that lands somewhere the author did not ask for (a Cluster override on a
+//     Namespaced CRD drops the namespace, and the object is then created in
+//     whatever namespace the applying client defaults to). Kure's own
+//     manifest.Scope ranks a same-context CRD above its table for this reason
+//     ("the CRD names the scope the target cluster will actually serve").
+//     Rather than silently discard one of the two statements, a disagreement is
+//     rejected here with both values named.
+//
+// The fail-closed default for a kind with no override and no other scope source
+// is unchanged.
 func stampManifestNamespaces(overrides map[schema.GroupVersionKind]manifest.ScopeResult) func(string, []client.Object) ([]client.Object, error) {
 	return func(namespace string, objs []client.Object) ([]client.Object, error) {
 		if len(objs) == 0 {
@@ -137,9 +154,12 @@ func stampManifestNamespaces(overrides map[schema.GroupVersionKind]manifest.Scop
 			}
 		}
 		for _, o := range objs {
-			scope, ok := overrides[o.GetObjectKind().GroupVersionKind()]
-			if !ok || isAPIGovernedScope(o) {
+			gvk := o.GetObjectKind().GroupVersionKind()
+			scope, overridden := overrides[gvk]
+			if !overridden || isAPIGovernedScope(o) {
 				scope = manifest.Scope(o, crdScopes)
+			} else if declared, defined := crdScopes[gvk.GroupKind()]; defined && crdDeclaredScope(declared) != scope {
+				return nil, errors.Errorf("object %s %q: scopeOverrides says %s but the CustomResourceDefinition for %s in this source declares %s; the bundled CRD defines the scope the cluster will serve, so drop the override or correct the CRD", gvk.Kind, o.GetName(), scopeName(scope), gvk.GroupKind().String(), declared)
 			}
 			switch scope {
 			case manifest.ScopeNamespaced:
@@ -148,7 +168,6 @@ func stampManifestNamespaces(overrides map[schema.GroupVersionKind]manifest.Scop
 				}
 			case manifest.ScopeUnknown:
 				if o.GetNamespace() == "" {
-					gvk := o.GetObjectKind().GroupVersionKind()
 					return nil, errors.Errorf("object %s %q has unknown scope and no metadata.namespace; set an explicit namespace or a scopeOverrides entry (no CRD defining it is present in this source)", gvk.Kind, o.GetName())
 				}
 			case manifest.ScopeCluster:
@@ -157,6 +176,27 @@ func stampManifestNamespaces(overrides map[schema.GroupVersionKind]manifest.Scop
 		}
 		return objs, nil
 	}
+}
+
+// crdDeclaredScope maps a CRD's declared spec.scope onto the ScopeResult an
+// override is expressed in, so the two can be compared. manifest.CRDScope has
+// already applied Kubernetes' own default for an absent spec.scope
+// (NamespaceScoped), so anything that is not ClusterScoped is namespaced.
+func crdDeclaredScope(s apiextv1.ResourceScope) manifest.ScopeResult {
+	if s == apiextv1.ClusterScoped {
+		return manifest.ScopeCluster
+	}
+	return manifest.ScopeNamespaced
+}
+
+// scopeName renders a ScopeResult with the spelling scopeOverrides uses, for
+// error messages that quote the author's own value back at them. Only the two
+// values parseScopeOverrides accepts can reach it.
+func scopeName(s manifest.ScopeResult) string {
+	if s == manifest.ScopeCluster {
+		return "Cluster"
+	}
+	return "Namespaced"
 }
 
 // isAPIGovernedScope reports whether o's scope is fixed by the Kubernetes API

@@ -147,9 +147,50 @@ func TestManifestsHandler_ScopeOverride_Namespaced(t *testing.T) {
 	}
 }
 
+// widgetCRDYAML bundles a *Namespaced* Widget CRD with a Widget in one source,
+// the case where the source itself defines the scope the cluster will serve.
+const widgetCRDYAML = "apiVersion: apiextensions.k8s.io/v1\n" +
+	"kind: CustomResourceDefinition\n" +
+	"metadata:\n  name: widgets.fixtures.example.com\n" +
+	"spec:\n  group: fixtures.example.com\n  scope: Namespaced\n" +
+	"  names:\n    kind: Widget\n    plural: widgets\n" +
+	"---\n" +
+	"apiVersion: fixtures.example.com/v1\nkind: Widget\nmetadata:\n  name: w\n"
+
+// An override may outrank kure's table (the ClusterWidget cases above) but not a
+// CRD in the same source: that CRD is the definition being applied, so honouring
+// a Cluster override against it would emit a namespace-less object the cluster
+// then creates in whatever namespace the applying client defaults to. Neither
+// statement is silently dropped — the disagreement itself is the error.
+func TestManifestsHandler_ScopeOverride_ConflictingSameSourceCRDRejected(t *testing.T) {
+	overrides := []any{map[string]any{"apiVersion": "fixtures.example.com/v1", "kind": "Widget", "scope": "Cluster"}}
+	_, err := generateManifestsWithOverrides(t, "app-ns", widgetCRDYAML, overrides)
+	if err == nil {
+		t.Fatal("a Cluster override contradicting a Namespaced same-source CRD must be rejected")
+	}
+	for _, want := range []string{"scopeOverrides says Cluster", "declares Namespaced"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q must name both scopes (missing %q)", err, want)
+		}
+	}
+}
+
+// The discriminating half of the test above: the rejection keys on the two
+// statements disagreeing, not on a CRD being present at all.
+func TestManifestsHandler_ScopeOverride_AgreeingSameSourceCRDPasses(t *testing.T) {
+	overrides := []any{map[string]any{"apiVersion": "fixtures.example.com/v1", "kind": "Widget", "scope": "Namespaced"}}
+	got, err := generateManifestsWithOverrides(t, "app-ns", widgetCRDYAML, overrides)
+	if err != nil {
+		t.Fatalf("an override agreeing with the same-source CRD must pass: %v", err)
+	}
+	if len(got) != 2 || got[0] != "CustomResourceDefinition:" || got[1] != "Widget:app-ns" {
+		t.Errorf("want [CustomResourceDefinition: Widget:app-ns], got %v", got)
+	}
+}
+
 func TestManifestsHandler_ScopeOverride_IgnoredForKnownScope(t *testing.T) {
-	// Overrides apply only to ScopeUnknown objects: an override on a built-in
-	// namespaced kind must not flip it to cluster-scoped.
+	// An override never reaches a kind the Kubernetes API itself scopes: a
+	// Cluster override on a built-in namespaced kind must not flip it.
 	overrides := []any{map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "scope": "Cluster"}}
 	got, err := generateManifestsWithOverrides(t, "app-ns",
 		"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: d\n", overrides)
