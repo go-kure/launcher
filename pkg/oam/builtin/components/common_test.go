@@ -21,6 +21,28 @@ func TestValidateImageRef_Digest(t *testing.T) {
 	}
 }
 
+// A digest reference carrying an explicit :latest tag is rejected. The digest
+// pins the content, but the tag stays part of the reference and a cluster is
+// free to read it — and since this package stopped writing imagePullPolicy
+// itself (go-kure/launcher#361) nothing here overrides how it does.
+func TestValidateImageRef_LatestTagWithDigest(t *testing.T) {
+	err := components.ValidateImageRef("ghcr.io/org/app:latest@sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abc1")
+	if err == nil {
+		t.Fatal("expected error for a :latest tag carrying a digest")
+	}
+	if !strings.Contains(err.Error(), ":latest") {
+		t.Errorf("error should mention :latest, got: %v", err)
+	}
+}
+
+// The discriminating half of the pair above: the rejection keys on the latest
+// tag, not on a reference carrying both a tag and a digest.
+func TestValidateImageRef_VersionTagWithDigest(t *testing.T) {
+	if err := components.ValidateImageRef("ghcr.io/org/app:v1.0.0@sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abc1"); err != nil {
+		t.Errorf("unexpected error for a version tag carrying a digest: %v", err)
+	}
+}
+
 func TestValidateImageRef_ExplicitLatest(t *testing.T) {
 	err := components.ValidateImageRef("nginx:latest")
 	if err == nil {

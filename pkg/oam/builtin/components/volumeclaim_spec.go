@@ -467,7 +467,7 @@ func parseDataSourceRef(raw map[string]any, label string) (*corev1.TypedObjectRe
 // (label_aliasing_test.go). A shared pointer or map would carry such an edit
 // back into the config and into every later render. Copying is the same rule
 // buildResourceRequirements already applies to the container resource maps
-// (common.go:3974-3976); the pointers to scalars are copied by value for the
+// (common.go:3983-3985); the pointers to scalars are copied by value for the
 // same reason, since a caller can write through them just as easily.
 func (c VolumeClaimSpecConfig) apply(pvc *corev1.PersistentVolumeClaim) {
 	if c.Selector != nil {

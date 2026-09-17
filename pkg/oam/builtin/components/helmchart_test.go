@@ -6,14 +6,17 @@ import (
 	"compress/gzip"
 	"fmt"
 	"maps"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
@@ -38,6 +41,56 @@ func TestHelmchartHandler_IntervalInvalid_Rejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid interval format")
 	}
+}
+
+// `values` is an open object, so its contents reach the handler exactly as
+// yaml.v3 decoded them. yaml.v3 resolves `.nan` to a non-finite float64, which
+// encoding/json refuses — and the kure setter that inlines the map panics on a
+// marshal failure rather than returning an error, so the parse has to refuse it
+// while there is still an error to return.
+func TestHelmchartHandler_NonFiniteValuesRejected(t *testing.T) {
+	var decoded map[string]any
+	if err := yaml.Unmarshal([]byte("threshold: .nan\n"), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Precondition, not an assumption: prove yaml.v3 really produces a NaN here,
+	// so a later yaml.v3 change turning `.nan` into a plain string makes this
+	// test say so instead of passing vacuously.
+	f, ok := decoded["threshold"].(float64)
+	if !ok || !math.IsNaN(f) {
+		t.Fatalf("precondition: yaml.v3 must decode .nan to a NaN float64, got %#v", decoded["threshold"])
+	}
+
+	h := &components.HelmchartHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":  "kube-prometheus-stack",
+			"source": map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+			"values": decoded,
+		},
+	}, "monitoring")
+	if err == nil {
+		t.Fatal("expected an error for values that cannot be represented as JSON")
+	}
+	if !strings.Contains(err.Error(), "JSON") {
+		t.Errorf("error should name the JSON representation problem, got: %v", err)
+	}
+}
+
+// Pins the upstream behaviour the guard above exists for, so the reason is a
+// measurement rather than a chain of three readings (yaml.v3 makes a NaN,
+// encoding/json refuses it, kure panics on that). If a later kure release
+// returns an error again, this is what says so.
+func TestKureHelmValuesSetter_PanicsOnNonFinite(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("SetHelmReleaseValuesFromMap no longer panics on a non-marshalable map; " +
+				"the parse-time guard in helmchart.go may no longer be needed")
+		}
+	}()
+	fluxcd.SetHelmReleaseValuesFromMap(&helmv2.HelmRelease{}, map[string]any{"threshold": math.NaN()})
 }
 
 func TestHelmchartHandler_CanHandle(t *testing.T) {
@@ -549,7 +602,7 @@ func TestHelmchartHandler_DeliveryTemplate_HandlerDefaultConfigMapFallsBackInlin
 	// Template delivery never calls buildHelmRelease (no HelmRelease is
 	// generated at all), so the forced-inline resolution has no HelmRelease
 	// field to inspect. Every delivery: template config is wrapped as a
-	// LayoutAugmenter, so what pins the helmchart.go:289 inline fallback
+	// LayoutAugmenter, so what pins the helmchart.go:306 inline fallback
 	// actually firing is no longer "not a LayoutAugmenter" — it is
 	// GenerateCoversAugmentLayout() == true: proof that Generate's own flat
 	// output already covers this config's AugmentLayout (nothing needs a
