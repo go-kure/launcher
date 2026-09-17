@@ -88,7 +88,10 @@ func TestManifestsHandler_UnknownGVKWithNamespacePasses(t *testing.T) {
 
 // --- scopeOverrides (launcher#141) ---
 
-const clusterIssuerYAML = "apiVersion: cert-manager.io/v1\nkind: ClusterIssuer\nmetadata:\n  name: letsencrypt\n"
+// clusterWidgetYAML is a fictitious cluster-scoped custom resource kind kure
+// will never register — the fixture for "a CRD installed out of band, so its
+// scope can only come from scopeOverrides."
+const clusterWidgetYAML = "apiVersion: fixtures.example.com/v1\nkind: ClusterWidget\nmetadata:\n  name: widget\n"
 
 func generateManifestsWithOverrides(t *testing.T, ns, inline string, overrides any) ([]string, error) {
 	t.Helper()
@@ -114,32 +117,32 @@ func generateManifestsWithOverrides(t *testing.T, ns, inline string, overrides a
 }
 
 func TestManifestsHandler_ScopeOverride_ClusterPasses(t *testing.T) {
-	overrides := []any{map[string]any{"apiVersion": "cert-manager.io/v1", "kind": "ClusterIssuer", "scope": "Cluster"}}
-	got, err := generateManifestsWithOverrides(t, "app-ns", clusterIssuerYAML, overrides)
+	overrides := []any{map[string]any{"apiVersion": "fixtures.example.com/v1", "kind": "ClusterWidget", "scope": "Cluster"}}
+	got, err := generateManifestsWithOverrides(t, "app-ns", clusterWidgetYAML, overrides)
 	if err != nil {
 		t.Fatalf("cluster-scope override should pass: %v", err)
 	}
-	if len(got) != 1 || got[0] != "ClusterIssuer:" {
+	if len(got) != 1 || got[0] != "ClusterWidget:" {
 		t.Errorf("cluster-scoped override must leave the object namespace-less, got %v", got)
 	}
 }
 
 func TestManifestsHandler_ScopeOverride_FailsClosedWithout(t *testing.T) {
-	// The same namespace-less ClusterIssuer still fails closed without an override
+	// The same namespace-less ClusterWidget still fails closed without an override
 	// (the fail-closed default is preserved).
-	_, err := generateManifestsWithOverrides(t, "app-ns", clusterIssuerYAML, nil)
+	_, err := generateManifestsWithOverrides(t, "app-ns", clusterWidgetYAML, nil)
 	if err == nil || !strings.Contains(err.Error(), "namespace") {
-		t.Errorf("namespace-less ClusterIssuer must fail closed without an override, got %v", err)
+		t.Errorf("namespace-less ClusterWidget must fail closed without an override, got %v", err)
 	}
 }
 
 func TestManifestsHandler_ScopeOverride_Namespaced(t *testing.T) {
-	overrides := []any{map[string]any{"apiVersion": "cert-manager.io/v1", "kind": "ClusterIssuer", "scope": "Namespaced"}}
-	got, err := generateManifestsWithOverrides(t, "app-ns", clusterIssuerYAML, overrides)
+	overrides := []any{map[string]any{"apiVersion": "fixtures.example.com/v1", "kind": "ClusterWidget", "scope": "Namespaced"}}
+	got, err := generateManifestsWithOverrides(t, "app-ns", clusterWidgetYAML, overrides)
 	if err != nil {
 		t.Fatalf("namespaced override should pass: %v", err)
 	}
-	if len(got) != 1 || got[0] != "ClusterIssuer:app-ns" {
+	if len(got) != 1 || got[0] != "ClusterWidget:app-ns" {
 		t.Errorf("namespaced override must stamp the app ns, got %v", got)
 	}
 }
@@ -164,15 +167,15 @@ func TestManifestsHandler_ScopeOverride_Validation(t *testing.T) {
 		overrides any
 	}{
 		{"not a list", "nope"},
-		{"entry not an object", []any{"cert-manager.io/v1/ClusterIssuer"}},
-		{"missing kind", []any{map[string]any{"apiVersion": "cert-manager.io/v1", "scope": "Cluster"}}},
-		{"invalid scope", []any{map[string]any{"apiVersion": "cert-manager.io/v1", "kind": "ClusterIssuer", "scope": "Galaxy"}}},
+		{"entry not an object", []any{"fixtures.example.com/v1/ClusterWidget"}},
+		{"missing kind", []any{map[string]any{"apiVersion": "fixtures.example.com/v1", "scope": "Cluster"}}},
+		{"invalid scope", []any{map[string]any{"apiVersion": "fixtures.example.com/v1", "kind": "ClusterWidget", "scope": "Galaxy"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := (&ManifestsHandler{}).ToApplicationConfig(&oam.Component{
 				Name: "m", Type: "manifests",
-				Properties: map[string]any{"inline": clusterIssuerYAML, "scopeOverrides": tc.overrides},
+				Properties: map[string]any{"inline": clusterWidgetYAML, "scopeOverrides": tc.overrides},
 			}, "app-ns")
 			if err == nil {
 				t.Fatalf("expected validation error for %q", tc.name)

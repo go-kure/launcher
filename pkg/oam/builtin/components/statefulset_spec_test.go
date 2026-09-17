@@ -80,13 +80,15 @@ func TestStatefulSetSpec_ReachesSpec(t *testing.T) {
 
 // TestStatefulSetSpec_UnauthoredKeepsConstructorDefaults pins the no-op half of
 // the projection: with none of the six properties authored, the generated spec
-// still carries exactly what kure's CreateStatefulSet put there, so adding this
-// surface cannot move existing output.
+// still carries exactly what kure's CreateStatefulSet leaves unset — nothing,
+// since the builder-contract release-1 constructor is identity-only
+// (go-kure/launcher#361; PodManagementPolicy used to default to OrderedReady
+// here, now left empty for the API server to default at admission).
 func TestStatefulSetSpec_UnauthoredKeepsConstructorDefaults(t *testing.T) {
 	spec := statefulSetFrom(t, map[string]any{"image": "ghcr.io/org/app:v1"}).Spec
 
-	if spec.PodManagementPolicy != appsv1.OrderedReadyPodManagement {
-		t.Errorf("PodManagementPolicy = %q, want the constructor's OrderedReady", spec.PodManagementPolicy)
+	if spec.PodManagementPolicy != "" {
+		t.Errorf("PodManagementPolicy = %q, want empty (constructor is identity-only)", spec.PodManagementPolicy)
 	}
 	if spec.UpdateStrategy.Type != "" || spec.UpdateStrategy.RollingUpdate != nil {
 		t.Errorf("UpdateStrategy = %+v, want the constructor's empty value", spec.UpdateStrategy)

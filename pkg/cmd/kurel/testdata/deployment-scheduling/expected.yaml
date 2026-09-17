@@ -39,7 +39,6 @@ spec:
             topologyKey: kubernetes.io/hostname
       containers:
       - image: ghcr.io/example/backend:v1.0.0
-        imagePullPolicy: IfNotPresent
         name: backend
         resources:
           limits:

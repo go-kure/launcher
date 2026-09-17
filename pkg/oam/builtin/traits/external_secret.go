@@ -7,6 +7,7 @@ import (
 	"time"
 
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/kubernetes/externalsecrets"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
@@ -538,7 +539,7 @@ func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Objec
 			Kind: c.StoreRefKind,
 		},
 	})
-	externalsecrets.AddExternalSecretLabel(es, "app", c.componentName)
+	kubernetes.AddLabel(es, "app", c.componentName)
 	externalsecrets.SetRefreshInterval(es, metav1.Duration{Duration: dur})
 
 	target := esv1.ExternalSecretTarget{Name: c.TargetSecretName}
@@ -554,7 +555,7 @@ func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Objec
 			Data: c.Template.Data,
 		}
 	}
-	externalsecrets.SetTarget(es, target)
+	es.Spec.Target = target
 
 	for _, d := range c.Data {
 		ref := esv1.ExternalSecretDataRemoteRef{Key: d.RemoteRef.Key}

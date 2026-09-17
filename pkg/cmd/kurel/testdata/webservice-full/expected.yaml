@@ -37,7 +37,6 @@ spec:
             name: frontend-secret
             optional: true
         image: ghcr.io/example/frontend:v1.0.0
-        imagePullPolicy: IfNotPresent
         lifecycle:
           postStart:
             exec:

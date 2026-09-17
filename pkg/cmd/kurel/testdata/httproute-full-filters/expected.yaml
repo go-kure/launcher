@@ -18,7 +18,6 @@ spec:
     spec:
       containers:
       - image: myorg/secureapi:v2.0.0
-        imagePullPolicy: IfNotPresent
         name: secureapi
         ports:
         - containerPort: 80

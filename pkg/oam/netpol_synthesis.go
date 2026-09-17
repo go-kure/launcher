@@ -95,10 +95,10 @@ func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client
 	np := kubernetes.CreateNetworkPolicy(c.ComponentName+"-allow-ingress-traffic", app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
-	kubernetes.SetNetworkPolicyPodSelector(np, metav1.LabelSelector{
+	np.Spec.PodSelector = metav1.LabelSelector{
 		MatchLabels: map[string]string{c.podSelectorKey(): c.ComponentName},
-	})
-	kubernetes.SetNetworkPolicyPolicyTypes(np, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress})
+	}
+	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
 
 	appendIngressTrafficRules(np, c.Rules)
 
@@ -163,8 +163,8 @@ func (c *backendIngressAllowPolicyConfig) Generate(app *stack.Application) ([]*c
 	np := kubernetes.CreateNetworkPolicy(c.PolicyName, app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
-	kubernetes.SetNetworkPolicyPodSelector(np, *c.PodSelector)
-	kubernetes.SetNetworkPolicyPolicyTypes(np, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress})
+	np.Spec.PodSelector = *c.PodSelector
+	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
 
 	appendIngressTrafficRules(np, c.Rules)
 
@@ -625,10 +625,10 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 	np := kubernetes.CreateNetworkPolicy(c.ComponentName+"-allow-egress-traffic", app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
-	kubernetes.SetNetworkPolicyPodSelector(np, metav1.LabelSelector{
+	np.Spec.PodSelector = metav1.LabelSelector{
 		MatchLabels: map[string]string{c.podSelectorKey(): c.ComponentName},
-	})
-	kubernetes.SetNetworkPolicyPolicyTypes(np, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress})
+	}
+	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}
 
 	// Protocol is a deliberate TCP constant: the per-peer signal carries no
 	// protocol, and UDP/DNS egress is owned by the downstream runtime's namespace-level
@@ -913,8 +913,8 @@ func (c *componentEndpointIngressPolicyConfig) Generate(app *stack.Application) 
 	np := kubernetes.CreateNetworkPolicy(c.policyName(), app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
-	kubernetes.SetNetworkPolicyPodSelector(np, *c.Endpoint.PodSelector)
-	kubernetes.SetNetworkPolicyPolicyTypes(np, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress})
+	np.Spec.PodSelector = *c.Endpoint.PodSelector
+	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
 
 	proto := corev1.ProtocolTCP
 	for _, r := range rules {

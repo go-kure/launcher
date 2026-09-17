@@ -178,23 +178,23 @@ func (c *OCIConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
 
 	if !c.suppressSource {
 		repo := fluxcd.CreateOCIRepository(c.Name, c.fluxNamespace())
-		fluxcd.SetOCIRepositoryURL(repo, c.URL)
-		fluxcd.SetOCIRepositoryInterval(repo, interval)
+		repo.Spec.URL = c.URL
+		repo.Spec.Interval = interval
 		fluxcd.SetOCIRepositoryReference(repo, ociRef(c.Version))
 		obj := client.Object(repo)
 		objects = append(objects, &obj)
 	}
 
 	kz := fluxcd.CreateKustomization(c.Name, c.fluxNamespace())
-	fluxcd.SetKustomizationInterval(kz, interval)
-	fluxcd.SetKustomizationPath(kz, c.Path)
-	fluxcd.SetKustomizationPrune(kz, c.Prune)
-	fluxcd.SetKustomizationSourceRef(kz, kustv1.CrossNamespaceSourceReference{
+	kz.Spec.Interval = interval
+	kz.Spec.Path = c.Path
+	kz.Spec.Prune = c.Prune
+	kz.Spec.SourceRef = kustv1.CrossNamespaceSourceReference{
 		Kind: "OCIRepository",
 		Name: srcName,
-	})
+	}
 	if c.TargetNamespace != "" {
-		fluxcd.SetKustomizationTargetNamespace(kz, c.TargetNamespace)
+		kz.Spec.TargetNamespace = c.TargetNamespace
 	}
 	obj := client.Object(kz)
 	objects = append(objects, &obj)

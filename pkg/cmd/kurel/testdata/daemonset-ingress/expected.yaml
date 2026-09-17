@@ -16,7 +16,6 @@ spec:
     spec:
       containers:
       - image: ghcr.io/example/agent:v1.0
-        imagePullPolicy: IfNotPresent
         name: agent
         ports:
         - containerPort: 9090
