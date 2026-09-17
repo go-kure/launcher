@@ -57,34 +57,25 @@ func TestParseNPPeer_NamespaceSelectorPresenceCases(t *testing.T) {
 		}
 	})
 
-	t.Run("typed nil diverges from authored null KNOWN", func(t *testing.T) {
-		// KNOWN DIVERGENCE, pinned deliberately rather than fixed here; tracked as
-		// go-kure/launcher#430, which carries the other half of the finding — the same
-		// key read by parseSchedulingSelector (components/scheduling.go:508) through
-		// optionalObject, where a null IS omission.
+	t.Run("typed nil also reads as absent", func(t *testing.T) {
+		// Used to diverge from the untyped-nil case above: map[string]any(nil) is a
+		// TYPED nil, which SATISFIES the .(map[string]any) assertion (ok=true, nil
+		// map) and used to fall through the matchLabels lookup into an empty selector
+		// — ALL namespaces — where the untyped nil above yields absence. Same "null",
+		// opposite scope, decided by a Go type a document cannot express.
 		//
-		// map[string]any(nil) is a TYPED nil. It SATISFIES the .(map[string]any)
-		// assertion (ok=true, nil map), falls through the matchLabels lookup, and
-		// yields an empty selector — ALL namespaces — where the untyped nil above
-		// yields absence. Same "null", opposite scope, decided by a Go type a document
-		// cannot express.
-		//
-		// It is unreachable today: only Go can construct a typed nil, and no production
-		// code emits a networkpolicy trait ("networkpolicy" appears only at CanHandle
-		// and in validate.go's known-type list). This test exists so the divergence is
-		// visible and so closing it is a deliberate edit to this assertion rather than
-		// a silent behaviour change nothing notices.
+		// Fixed by go-kure/launcher#440/isNullValue's reflect-based null
+		// classification, which the same key read by parseSchedulingSelector
+		// (components/scheduling.go:508, through parseObjectField) also relies on.
+		// This is the other half of go-kure/launcher#430, now closed on this path too.
 		peer, err := parseNPPeer(map[string]any{
 			"namespaceSelector": map[string]any(nil),
 		}, "from[0]")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if peer.NamespaceSelector == nil {
-			t.Skip("typed-nil namespaceSelector now reads as absent — the divergence this test pinned (go-kure/launcher#430) is closed; delete this subtest and fold the case into 'authored null is absent'")
-		}
-		if got := len(peer.NamespaceSelector.MatchLabels); got != 0 {
-			t.Errorf("typed-nil namespaceSelector produced %d matchLabels, want 0", got)
+		if peer.NamespaceSelector != nil {
+			t.Errorf("typed-nil namespaceSelector produced %v, want nil", peer.NamespaceSelector)
 		}
 	})
 }

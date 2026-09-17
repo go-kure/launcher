@@ -77,7 +77,7 @@ const (
 // An absent key — or an explicit null, this package's null-as-omission
 // convention — yields nil, so an unauthored document emits no affinity at all.
 func parseRawAffinity(props map[string]any) (*corev1.Affinity, error) {
-	raw, present, err := optionalObject(props, "affinity", "affinity")
+	raw, present, err := parseObjectField(props, "affinity", "affinity")
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func parseRawAffinity(props map[string]any) (*corev1.Affinity, error) {
 	}
 
 	affinity := &corev1.Affinity{}
-	if m, present, err := optionalObject(raw, "nodeAffinity", "affinity.nodeAffinity"); err != nil {
+	if m, present, err := parseObjectField(raw, "nodeAffinity", "affinity.nodeAffinity"); err != nil {
 		return nil, err
 	} else if present {
 		na, err := parseNodeAffinity(m, "affinity.nodeAffinity")
@@ -98,7 +98,7 @@ func parseRawAffinity(props map[string]any) (*corev1.Affinity, error) {
 		}
 		affinity.NodeAffinity = na
 	}
-	if m, present, err := optionalObject(raw, "podAffinity", "affinity.podAffinity"); err != nil {
+	if m, present, err := parseObjectField(raw, "podAffinity", "affinity.podAffinity"); err != nil {
 		return nil, err
 	} else if present {
 		pa, err := parsePodAffinityArms(m, "affinity.podAffinity")
@@ -110,7 +110,7 @@ func parseRawAffinity(props map[string]any) (*corev1.Affinity, error) {
 			PreferredDuringSchedulingIgnoredDuringExecution: pa.preferred,
 		}
 	}
-	if m, present, err := optionalObject(raw, "podAntiAffinity", "affinity.podAntiAffinity"); err != nil {
+	if m, present, err := parseObjectField(raw, "podAntiAffinity", "affinity.podAntiAffinity"); err != nil {
 		return nil, err
 	} else if present {
 		pa, err := parsePodAffinityArms(m, "affinity.podAntiAffinity")
@@ -138,7 +138,7 @@ func parseNodeAffinity(raw map[string]any, label string) (*corev1.NodeAffinity, 
 		return nil, err
 	}
 	na := &corev1.NodeAffinity{}
-	if m, present, err := optionalObject(raw, requiredArm, label+"."+requiredArm); err != nil {
+	if m, present, err := parseObjectField(raw, requiredArm, label+"."+requiredArm); err != nil {
 		return nil, err
 	} else if present {
 		ns, err := parseNodeSelector(m, label+"."+requiredArm)
@@ -147,7 +147,7 @@ func parseNodeAffinity(raw map[string]any, label string) (*corev1.NodeAffinity, 
 		}
 		na.RequiredDuringSchedulingIgnoredDuringExecution = ns
 	}
-	list, present, err := optionalObjectList(raw, preferredArm)
+	list, present, err := parseObjectList(raw, preferredArm)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +161,7 @@ func parseNodeAffinity(raw map[string]any, label string) (*corev1.NodeAffinity, 
 			if err != nil {
 				return nil, err
 			}
-			pref, present, err := optionalObject(item, "preference", itemLabel+".preference")
+			pref, present, err := parseObjectField(item, "preference", itemLabel+".preference")
 			if err != nil {
 				return nil, err
 			}
@@ -188,7 +188,7 @@ func parseNodeSelector(raw map[string]any, label string) (*corev1.NodeSelector, 
 	if err := rejectUnknownKeys(raw, nodeSelectorKeys, label); err != nil {
 		return nil, err
 	}
-	list, present, err := optionalObjectList(raw, "nodeSelectorTerms")
+	list, present, err := parseObjectList(raw, "nodeSelectorTerms")
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +240,7 @@ func parseNodeSelectorTerm(raw map[string]any, label string) (corev1.NodeSelecto
 // qualifiedKeys says whether the requirement key is a Kubernetes qualified name
 // (node labels) or a free-form field path (node fields).
 func parseNodeSelectorRequirements(raw map[string]any, key, label string, qualifiedKeys bool) ([]corev1.NodeSelectorRequirement, error) {
-	list, present, err := optionalObjectList(raw, key)
+	list, present, err := parseObjectList(raw, key)
 	if err != nil {
 		return nil, err
 	}
@@ -279,14 +279,14 @@ func parseNodeSelectorRequirements(raw map[string]any, key, label string, qualif
 					itemLabel, reqKey, nodeFieldSelectorKey)
 			}
 		}
-		op, present, err := optionalString(item, "operator", itemLabel+".operator")
+		op, present, err := parseStringField(item, "operator", itemLabel+".operator")
 		if err != nil {
 			return nil, err
 		}
 		if !present {
 			return nil, errors.Errorf("%s.operator: required", itemLabel)
 		}
-		values, _, err := optionalStringList(item, "values", itemLabel+".values")
+		values, _, err := parseStringList(item, "values", itemLabel+".values")
 		if err != nil {
 			return nil, err
 		}
@@ -370,7 +370,7 @@ func parsePodAffinityArms(raw map[string]any, label string) (podAffinityArms, er
 	}
 	var arms podAffinityArms
 
-	list, present, err := optionalObjectList(raw, requiredArm)
+	list, present, err := parseObjectList(raw, requiredArm)
 	if err != nil {
 		return podAffinityArms{}, err
 	}
@@ -384,7 +384,7 @@ func parsePodAffinityArms(raw map[string]any, label string) (podAffinityArms, er
 		}
 	}
 
-	list, present, err = optionalObjectList(raw, preferredArm)
+	list, present, err = parseObjectList(raw, preferredArm)
 	if err != nil {
 		return podAffinityArms{}, err
 	}
@@ -398,7 +398,7 @@ func parsePodAffinityArms(raw map[string]any, label string) (podAffinityArms, er
 			if err != nil {
 				return podAffinityArms{}, err
 			}
-			inner, present, err := optionalObject(item, "podAffinityTerm", itemLabel+".podAffinityTerm")
+			inner, present, err := parseObjectField(item, "podAffinityTerm", itemLabel+".podAffinityTerm")
 			if err != nil {
 				return podAffinityArms{}, err
 			}
@@ -440,7 +440,7 @@ func parsePodAffinityTerm(raw map[string]any, label string) (corev1.PodAffinityT
 	}
 	term.NamespaceSelector = nsSel
 
-	namespaces, _, err := optionalStringList(raw, "namespaces", label+".namespaces")
+	namespaces, _, err := parseStringList(raw, "namespaces", label+".namespaces")
 	if err != nil {
 		return corev1.PodAffinityTerm{}, err
 	}
@@ -458,11 +458,11 @@ func parsePodAffinityTerm(raw map[string]any, label string) (corev1.PodAffinityT
 	}
 	term.TopologyKey = topologyKey
 
-	matchLabelKeys, _, err := optionalStringList(raw, "matchLabelKeys", label+".matchLabelKeys")
+	matchLabelKeys, _, err := parseStringList(raw, "matchLabelKeys", label+".matchLabelKeys")
 	if err != nil {
 		return corev1.PodAffinityTerm{}, err
 	}
-	mismatchLabelKeys, _, err := optionalStringList(raw, "mismatchLabelKeys", label+".mismatchLabelKeys")
+	mismatchLabelKeys, _, err := parseStringList(raw, "mismatchLabelKeys", label+".mismatchLabelKeys")
 	if err != nil {
 		return corev1.PodAffinityTerm{}, err
 	}
@@ -506,7 +506,7 @@ func parsePodAffinityTerm(raw map[string]any, label string) (corev1.PodAffinityT
 // permitting the empty selector that parseLabelSelector refuses for volume
 // claims — see parseLabelSelectorOpts for why the two differ.
 func parseSchedulingSelector(raw map[string]any, key, label string) (*metav1.LabelSelector, error) {
-	m, present, err := optionalObject(raw, key, label+"."+key)
+	m, present, err := parseObjectField(raw, key, label+"."+key)
 	if err != nil {
 		return nil, err
 	}
@@ -618,7 +618,7 @@ func validateLabelKeyList(keys []string, field, label string) error {
 // carry. Both document the same range: "in the range 1-100"
 // (WeightedPodAffinityTerm.Weight, PreferredSchedulingTerm.Weight).
 func parseSchedulingWeight(raw map[string]any, label string) (int32, error) {
-	weight, present, err := optionalInt32(raw, "weight", label+".weight")
+	weight, present, err := parseInt32Field(raw, "weight", label+".weight")
 	if err != nil {
 		return 0, err
 	}
@@ -635,7 +635,7 @@ func parseSchedulingWeight(raw map[string]any, label string) (int32, error) {
 // property as plain []corev1.TopologySpreadConstraint. An absent key — or an
 // explicit null — yields nil.
 func parseTopologySpreadConstraints(props map[string]any) ([]corev1.TopologySpreadConstraint, error) {
-	list, present, err := optionalObjectList(props, "topologySpreadConstraints")
+	list, present, err := parseObjectList(props, "topologySpreadConstraints")
 	if err != nil {
 		return nil, err
 	}
@@ -654,7 +654,7 @@ func parseTopologySpreadConstraints(props map[string]any) ([]corev1.TopologySpre
 		// Required here rather than defaulted: nothing in this package defaults
 		// it, MaxSkew carries no omitempty, and an unset value would emit
 		// `maxSkew: 0` — the one value the field doc rules out.
-		maxSkew, present, err := optionalInt32(item, "maxSkew", label+".maxSkew")
+		maxSkew, present, err := parseInt32Field(item, "maxSkew", label+".maxSkew")
 		if err != nil {
 			return nil, err
 		}
@@ -676,7 +676,7 @@ func parseTopologySpreadConstraints(props map[string]any) ([]corev1.TopologySpre
 		// "It's a required field", and no omitempty. The doc calls
 		// DoNotSchedule the default, but that default is the apiserver's; an
 		// unset value here would emit `whenUnsatisfiable: ""`, which is not it.
-		action, present, err := optionalString(item, "whenUnsatisfiable", label+".whenUnsatisfiable")
+		action, present, err := parseStringField(item, "whenUnsatisfiable", label+".whenUnsatisfiable")
 		if err != nil {
 			return nil, err
 		}
@@ -698,7 +698,7 @@ func parseTopologySpreadConstraints(props map[string]any) ([]corev1.TopologySpre
 
 		// "Valid values are integers greater than 0. When value is not nil,
 		// WhenUnsatisfiable must be DoNotSchedule."
-		if minDomains, present, err := optionalInt32(item, "minDomains", label+".minDomains"); err != nil {
+		if minDomains, present, err := parseInt32Field(item, "minDomains", label+".minDomains"); err != nil {
 			return nil, err
 		} else if present {
 			if minDomains < 1 {
@@ -726,7 +726,7 @@ func parseTopologySpreadConstraints(props map[string]any) ([]corev1.TopologySpre
 		// set." (k8s.io/api@v0.36.3 core/v1/types.go:4779.) Same rules as
 		// matchLabelKeys on a PodAffinityTerm — a TopologySpreadConstraint has no
 		// mismatchLabelKeys field, so only the one call is needed.
-		matchLabelKeys, _, err := optionalStringList(item, "matchLabelKeys", label+".matchLabelKeys")
+		matchLabelKeys, _, err := parseStringList(item, "matchLabelKeys", label+".matchLabelKeys")
 		if err != nil {
 			return nil, err
 		}
@@ -768,7 +768,7 @@ var nodeInclusionPolicies = []corev1.NodeInclusionPolicy{
 }
 
 func parseNodeInclusionPolicy(raw map[string]any, key, label string) (*corev1.NodeInclusionPolicy, error) {
-	v, present, err := optionalString(raw, key, label+"."+key)
+	v, present, err := parseStringField(raw, key, label+"."+key)
 	if err != nil {
 		return nil, err
 	}
