@@ -592,45 +592,25 @@ var validNPPortKeys = map[string]bool{
 //
 // The 1-65535 bound is the API server's own (k8s.io/apimachinery
 // pkg/util/validation IsValidPortNum), applied here so the document fails at the
-// line that wrote it rather than at apply time. Every builtin integer kind a
-// YAML/JSON decode can produce is accepted, wider reach than the previous
-// int/float64 pair -- but this is still an exact type switch, unlike
-// npLabelValue's reflect.Kind classification: a named integer type (a Go
-// lowering rule's own domain type) is rejected here, since a named type has no
-// established rendering contract the way a scalar label value's %v does.
+// line that wrote it rather than at apply time. Classified by reflect.Kind, like
+// npLabelValue (go-kure/launcher#440 round-2 finding, F36/the bot's matching
+// thread): a named integer or float type from a Go lowering rule renders and
+// converts identically to its builtin counterpart, so it is accepted here too
+// rather than reported as "must be a number or named port string".
 func npPortNumber(value any, path string) (int32, bool, error) {
+	rv := reflect.ValueOf(value)
 	var n int64
-	switch v := value.(type) {
-	case int:
-		n = int64(v)
-	case int8:
-		n = int64(v)
-	case int16:
-		n = int64(v)
-	case int32:
-		n = int64(v)
-	case int64:
-		n = v
-	case uint:
-		if uint64(v) > math.MaxInt64 {
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n = rv.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		u := rv.Uint()
+		if u > math.MaxInt64 {
 			return 0, true, errors.Errorf("%s: 'port' %v is out of range (1-65535)", path, value)
 		}
-		n = int64(v)
-	case uint8:
-		n = int64(v)
-	case uint16:
-		n = int64(v)
-	case uint32:
-		n = int64(v)
-	case uint64:
-		if v > math.MaxInt64 {
-			return 0, true, errors.Errorf("%s: 'port' %v is out of range (1-65535)", path, value)
-		}
-		n = int64(v)
-	case float32:
-		return npPortFromFloat(float64(v), value, path)
-	case float64:
-		return npPortFromFloat(v, value, path)
+		n = int64(u)
+	case reflect.Float32, reflect.Float64:
+		return npPortFromFloat(rv.Float(), value, path)
 	default:
 		return 0, false, nil
 	}
