@@ -1531,7 +1531,7 @@ object would change what the next `Generate` emits.
   `delivery: native` is unaffected. Known limitation, over-broad wording fixed: this list is the
   set of properties `delivery: template` rejects when **explicitly** authored — an inherited
   handler default (e.g. `valuesMode` with no property-level `configMap`) falls back to `inline`
-  rather than erroring (`pkg/oam/builtin/components/helmchart.go:298-306`); same over-broad-wording
+  rather than erroring (`pkg/oam/builtin/components/helmchart.go:300-308`); same over-broad-wording
   class `go-kure/launcher#319` already fixed elsewhere in this file.
 
   **`delivery: template` output is partitioned by Helm hook group.** Every rendered manifest
@@ -1915,7 +1915,23 @@ every main, init and sidecar image — including a digest reference that still
 carries the tag (`repo:latest@sha256:...`), which it rejects for exactly this
 reason. A digest reference with *no* tag is the case this argument does not
 reach, and no golden covers that form; it is pinned by digest either way, and
-this package does not assert what a cluster defaults for it. The `obj.Annotations = nil`
+this package does not assert what a cluster defaults for it. The argument is
+about the *parsed* path, which is where `ValidateImageRef` runs
+(`ToApplicationConfig`): a handler config a library consumer builds directly
+carries whatever image it was given, so `:latest` with no pull policy remains
+reachable that way. That is also the only other path with a delta here — raw
+manifests, `passthrough`, Helm-rendered objects and Flux patches never went
+through the constructors, so nothing was ever injected into them to lose.
+
+A third delta from the same contract change is metadata rather than a default, but
+belongs in the same inventory: under `valuesMode:
+configMap` the generated values ConfigMap used to take an `app` label *and* an
+`app` annotation from the constructor, both valued at the ConfigMap's own name
+(`<component>-values`). It now carries the label only, valued at the component
+name (`<component>`), matching every other object this package emits. A consumer
+selecting that ConfigMap by `app=<component>-values` must be repointed.
+
+The `obj.Annotations = nil`
 assignments scattered through the handlers, which existed to strip the `app:`
 annotation the constructors used to stamp, are now no-ops — kept so the field
 stays at a known value regardless of what a future constructor does.

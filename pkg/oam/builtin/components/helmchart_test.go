@@ -79,6 +79,35 @@ func TestHelmchartHandler_NonFiniteValuesRejected(t *testing.T) {
 	}
 }
 
+// The same value on a config built directly rather than parsed. HelmchartConfig
+// and its Values field are exported, so ToApplicationConfig's parse-time guard is
+// not on this path at all; without Generate's own check the value reaches kure's
+// setter, which panics on the marshal failure and takes the caller's process with
+// it. The recover() is the assertion that matters — an error return is the fix, a
+// panic is the defect.
+func TestHelmchartConfig_NonFiniteValuesRejectedAtGenerate(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Generate must return an error, not panic: %v", r)
+		}
+	}()
+
+	cfg := &components.HelmchartConfig{
+		Name:          "metrics",
+		Chart:         "kube-prometheus-stack",
+		SourceRefName: "prometheus-community",
+		SourceRefKind: "HelmRepository",
+		Values:        map[string]any{"threshold": math.NaN()},
+	}
+	_, err := cfg.Generate(nil)
+	if err == nil {
+		t.Fatal("expected an error for values that cannot be represented as JSON")
+	}
+	if !strings.Contains(err.Error(), "JSON") {
+		t.Errorf("error should name the JSON representation problem, got: %v", err)
+	}
+}
+
 // Pins the upstream behaviour the guard above exists for, so the reason is a
 // measurement rather than a chain of three readings (yaml.v3 makes a NaN,
 // encoding/json refuses it, kure panics on that). If a later kure release
@@ -602,7 +631,7 @@ func TestHelmchartHandler_DeliveryTemplate_HandlerDefaultConfigMapFallsBackInlin
 	// Template delivery never calls buildHelmRelease (no HelmRelease is
 	// generated at all), so the forced-inline resolution has no HelmRelease
 	// field to inspect. Every delivery: template config is wrapped as a
-	// LayoutAugmenter, so what pins the helmchart.go:306 inline fallback
+	// LayoutAugmenter, so what pins the helmchart.go:308 inline fallback
 	// actually firing is no longer "not a LayoutAugmenter" — it is
 	// GenerateCoversAugmentLayout() == true: proof that Generate's own flat
 	// output already covers this config's AugmentLayout (nothing needs a

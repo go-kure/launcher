@@ -143,7 +143,9 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 		// Checked for every valuesMode, not just the inlining one: the mode is
 		// still rewritten after this point (an inherited handler default under
 		// delivery: template becomes inline, see ToApplicationConfig), so
-		// whether a document is accepted must not depend on it.
+		// whether a document is accepted must not depend on it. Generate
+		// re-checks the same thing at the emission boundary, which is what
+		// covers a config built directly rather than parsed.
 		if _, err := json.Marshal(vals); err != nil {
 			return nil, errors.Errorf("helmchart: values is not representable as JSON: %w", err)
 		}
@@ -477,6 +479,21 @@ func (c *HelmchartConfig) EmitsAutoHealthCheck() bool {
 // For delivery: template, renders the chart client-side and returns raw manifests.
 // For delivery: native (default), emits a source CR (Form A only) and a HelmRelease.
 func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	// Re-check at the emission boundary what ToApplicationConfig already checked
+	// at parse time. This type and its Values field are exported, so a config
+	// built directly by a library consumer — never parsed — reaches
+	// buildHelmRelease below, where kure's fluxcd.SetHelmReleaseValuesFromMap
+	// *panics* on a value encoding/json refuses (a non-finite float) instead of
+	// returning an error. Generate has an error to return and is the one entry
+	// point every emission path goes through, so the crash becomes a diagnosable
+	// failure here. Same shape as passthrough's validateEmittableObject, which is
+	// likewise called from both the parse path and Generate for exactly this
+	// reason.
+	if len(c.Values) > 0 {
+		if _, err := json.Marshal(c.Values); err != nil {
+			return nil, errors.Errorf("helmchart %q: values is not representable as JSON: %w", c.Name, err)
+		}
+	}
 	if c.Delivery == "template" {
 		if err := c.ensureRendered(); err != nil {
 			return nil, err
@@ -965,7 +982,10 @@ func (c *augmentingHelmchartConfig) AugmentLayout(ml *layout.ManifestLayout) err
 	// too. Since go-kure/kure's builder-contract-release-1 (beta.11),
 	// CreateConfigMap no longer stamps labels/annotations itself, so they
 	// are set here explicitly — matching every other ConfigMap this
-	// codebase emits (traits/configmap.go).
+	// codebase emits (traits/configmap.go). The emitted metadata is not
+	// identical to beta.10's: the label is the component name rather than
+	// this ConfigMap's own name, and there is no `app` annotation. Both
+	// deltas are inventoried in the package README.
 	cm := kubernetes.CreateConfigMap(valuesConfigMapName(c.Name), c.fluxNamespace())
 	cm.Labels = map[string]string{"app": c.Name}
 	cm.Annotations = nil
