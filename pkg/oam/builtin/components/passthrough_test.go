@@ -564,11 +564,12 @@ func TestPassthrough_FrozenCopyKeepsNilsInsideNamedCollections(t *testing.T) {
 }
 
 // TestPassthrough_FrozenCopyKeepsNilPlainSlices pins the one shape
-// TestPassthrough_FrozenCopyKeepsNilsInsideNamedCollections does not reach: an
-// untyped []any(nil), the shape the authored YAML path itself produces for a
-// null-valued list field (yaml.v3 decodes a YAML null into a plain interface
-// nil, and a null under a sequence-typed key decodes to []any(nil), not a named
-// slice type). deepCopyValue's fast paths used to run before the null check, and
+// TestPassthrough_FrozenCopyKeepsNilsInsideNamedCollections does not reach: a
+// typed-nil []any, supplied programmatically here (not via a YAML decode) but
+// matching what yaml.v3 itself produces for a null-valued list field — it
+// decodes a YAML null into a plain interface nil, and a null under a
+// sequence-typed key decodes to []any(nil), not a named slice type.
+// deepCopyValue's fast paths used to run before the null check, and
 // []any(nil) matches the `case []any:` arm of a type switch (nil of that dynamic
 // type) — so `make([]any, len(nil))` silently produced a non-nil empty slice,
 // turning an authored null into `[]` on the way out. The README's "a null

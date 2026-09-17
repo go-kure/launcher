@@ -184,11 +184,13 @@ func rejectListEnvelope(componentName, kind string, object map[string]any) error
 	// fails the suite rather than passing it.
 	//
 	// Gated on the kind suffix, unlike the first arm — deliberately, and for the
-	// opposite reason. The first arm is keyed on IsList (not the kind name) because
-	// Kustomize expands ANY node whose `items` is a real sequence, list-suffixed or
-	// not. But Kustomize's own expansion (kustomize/api resource/factory.go,
-	// inlineAnyEmbeddedLists) checks `strings.HasSuffix(kind, "List")` FIRST and never
-	// even looks at `items` otherwise — so an ordinary object of a non-List kind that
+	// opposite reason. The first arm is keyed on IsList (apimachinery's own list
+	// predicate), not the kind name — a typed ConfigMapList object is a list
+	// regardless of what its kind happens to be called, so that arm intentionally
+	// never consults the kind suffix at all. Kustomize's own expansion (kustomize/api
+	// resource/factory.go, inlineAnyEmbeddedLists) instead checks
+	// `strings.HasSuffix(kind, "List")` FIRST and never even looks at `items`
+	// otherwise — so an ordinary object of a non-List kind that
 	// happens to carry a field named `items` set to null is never treated as a list
 	// envelope by Kustomize, and rejecting it here would be stricter than the tool
 	// this check exists to match. A CRD's `spec.items` colliding with this top-level
