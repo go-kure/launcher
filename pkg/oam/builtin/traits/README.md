@@ -286,10 +286,11 @@ A wrong-typed `protocol` was **discarded**, and an absent protocol means TCP, so
 asked for. A numeric `port` went through a bare `int32(…)` conversion, which
 truncates a fractional value and is implementation-defined outside `int32` range:
 `80.9` rendered port 80, and `4294967376` also rendered port 80. A null or absent
-`protocol` still means TCP, every integer or float kind a decoder or a lowering
-rule can produce is still accepted (including a named Go numeric type, matching
-`matchLabels`' reach — go-kure/launcher#440 round 2), and a named port string is
-untouched.
+`protocol` still means TCP, and every integer, float, or string kind a decoder
+or a lowering rule can produce is accepted — including a named Go numeric or
+string type, matching `matchLabels`' reach (go-kure/launcher#440 rounds 2-3):
+a named-port string and a `protocol` assembled as a `corev1.Protocol` both
+parse the same as their builtin-typed equivalents.
 
 ### Null `ingress` / `egress`
 

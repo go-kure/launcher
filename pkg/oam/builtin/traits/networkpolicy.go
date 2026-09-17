@@ -631,6 +631,21 @@ func npPortNumber(value any, path string) (int32, bool, error) {
 	return int32(n), true, nil
 }
 
+// npStringValue reads value as a string, accepting a named string type (e.g. a
+// Go lowering rule assembling a corev1.Protocol, or a named port-name type) by
+// reflect.Kind the same way npLabelValue and npPortNumber accept named scalar
+// types (go-kure/launcher#440 round 3, a kure-bot finding on the named-port
+// and protocol sites this parser reads with a bare `.(string)` assertion
+// otherwise). An exact type assertion sees a different dynamic type and
+// misses; a plain string still classifies as reflect.String.
+func npStringValue(value any) (string, bool) {
+	rv := reflect.ValueOf(value)
+	if rv.Kind() != reflect.String {
+		return "", false
+	}
+	return rv.String(), true
+}
+
 // npPortFromFloat is npPortNumber's float half: a port has to be a whole number,
 // and the range check has to happen in float64 — converting first is the
 // implementation-defined step this exists to avoid.
@@ -682,7 +697,7 @@ func parseNPPort(raw any, path string) (npPort, error) {
 		// matches all ports on the protocol), but this parser has always
 		// required it, and widening that is a behaviour change this fix does
 		// not make.
-		name, ok := portMap["port"].(string)
+		name, ok := npStringValue(portMap["port"])
 		if !ok || name == "" {
 			return npPort{}, errors.Errorf("%s: 'port' must be a number or named port string", path)
 		}
@@ -699,7 +714,7 @@ func parseNPPort(raw any, path string) (npPort, error) {
 	// networking/v1/types.go:159-162).
 	port.Protocol = corev1.ProtocolTCP
 	if rawProto, present := portMap["protocol"]; present && !oam.IsNullValue(rawProto) {
-		proto, ok := rawProto.(string)
+		proto, ok := npStringValue(rawProto)
 		if !ok {
 			return npPort{}, errors.Errorf("%s.protocol: expected string, got %T", path, rawProto)
 		}
