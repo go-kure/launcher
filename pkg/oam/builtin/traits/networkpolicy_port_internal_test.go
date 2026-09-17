@@ -188,6 +188,44 @@ func TestParseNPPort_NamedScalarPortStillParses(t *testing.T) {
 	}
 }
 
+// npTestPortName and npTestProtocol give a named-port value and a protocol value
+// each a different dynamic type than the builtin string, for the two tests below.
+type npTestPortName string
+type npTestProtocol string
+
+func TestParseNPPort_NamedScalarPortNameStillParses(t *testing.T) {
+	// A kure-bot review finding on go-kure/launcher#440 round 3
+	// (networkpolicy.go:684): the named-port branch read `portMap["port"]` with a
+	// bare `.(string)` assertion, so a named string type from a Go lowering rule
+	// fell through to "must be a number or named port string", asymmetric with
+	// npPortNumber's own named-scalar reach fixed two commits earlier in this same
+	// round. Fixed by reading it through npStringValue, matching npLabelValue's
+	// and npPortNumber's reflect.Kind classification.
+	port, err := parseNPPort(map[string]any{"port": npTestPortName("http")}, "ingress[0].ports[0]")
+	if err != nil {
+		t.Fatalf("a named string port must still parse, got: %v", err)
+	}
+	if port.Port.StrVal != "http" {
+		t.Errorf("port = %v, want the named port http", port.Port)
+	}
+}
+
+func TestParseNPPort_NamedScalarProtocolStillParses(t *testing.T) {
+	// The `protocol` sibling of the finding above (networkpolicy.go:701): read
+	// through a bare `.(string)` assertion, so a named string type -- the doc
+	// comment on this line already names corev1.Protocol as the realistic
+	// lowering-rule input -- hard-errored with "expected string, got
+	// v1.Protocol" instead of being accepted like every other scalar this file
+	// classifies by reflect.Kind.
+	port, err := parseNPPort(map[string]any{"port": 53, "protocol": npTestProtocol("udp")}, "ingress[0].ports[0]")
+	if err != nil {
+		t.Fatalf("a named string protocol must still parse, got: %v", err)
+	}
+	if port.Protocol != corev1.ProtocolUDP {
+		t.Errorf("protocol = %q, want UDP", port.Protocol)
+	}
+}
+
 func TestParseNPPort_AbsentPortKeyIsRejectedNotPanicked(t *testing.T) {
 	// A GitHub Copilot review thread on go-kure/launcher#440 claimed npPortNumber
 	// calls reflect.ValueOf(value).Kind() on an "invalid reflect.Value" when the
