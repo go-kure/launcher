@@ -188,6 +188,25 @@ func TestParseNPPort_NamedScalarPortStillParses(t *testing.T) {
 	}
 }
 
+func TestParseNPPort_AbsentPortKeyIsRejectedNotPanicked(t *testing.T) {
+	// A GitHub Copilot review thread on go-kure/launcher#440 claimed npPortNumber
+	// calls reflect.ValueOf(value).Kind() on an "invalid reflect.Value" when the
+	// `port` key is absent (portMap["port"] is a bare nil), and that this panics.
+	// It does not: reflect.ValueOf(nil) returns the zero Value, and Value.Kind()
+	// is documented to return Invalid on the zero Value rather than panic -- it
+	// falls through npPortNumber's `default` case to (0, false, nil), and
+	// parseNPPort's own numeric==false branch reports the pre-existing
+	// "must be a number or named port string" error. This test pins that: no
+	// panic, and the same diagnostic an absent port already produced.
+	_, err := parseNPPort(map[string]any{}, "ingress[0].ports[0]")
+	if err == nil {
+		t.Fatal("an absent port key must be rejected, not silently accepted")
+	}
+	if !strings.Contains(err.Error(), "must be a number or named port string") {
+		t.Errorf("diagnostic %q does not match the pre-existing absent-port message", err)
+	}
+}
+
 func TestParseNPPort_UnknownKeyIsRejected(t *testing.T) {
 	// The port item is the one object in this trait whose key set the SCHEMA
 	// cannot close — it is declared AdditionalProperties because `port` is an
