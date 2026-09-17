@@ -403,12 +403,18 @@ rejects it too, so a definition built in Go and installed with
 every value for a property by declaring a type outside that set.
 
 An explicit `null` on this surface is **absence**, matching the contract the handler
-surface follows: a rendering property present with a null takes its declared default,
-or is reported as required-and-missing, rather than failing as a type error; and the
-null key does not survive into the validated rendering. `default:` with no value
-likewise declares **no default**, not a null one. This holds for a typed nil as well
-as an authored one, which matters precisely because `SetCapabilityDefs` takes
-Go-built definitions.
+surface follows, rather than failing as a type error; the null key does not survive
+into the validated rendering. What happens next depends on `required` and `default`,
+checked in that order — `required` always wins, even over a declared default:
+
+- **required** — reported as required-and-missing. A declared default does not
+  rescue it; requiredness is checked first.
+- **optional, with a non-null default** — the declared default is substituted.
+- **optional, with no default** (or `default:` with no value, which likewise
+  declares **no default**, not a null one) — the key stays absent.
+
+This holds for a typed nil as well as an authored one, which matters precisely
+because `SetCapabilityDefs` takes Go-built definitions.
 
 A **declared default is type-checked against its own declared type**, on the same
 footing as a value the document supplies. Without that, a property was validated

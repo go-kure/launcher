@@ -69,6 +69,26 @@ func TestApplyDefinitionSchema_NullOnRequiredReportsMissing(t *testing.T) {
 	}
 }
 
+func TestApplyDefinitionSchema_NullOnRequiredIgnoresDeclaredDefault(t *testing.T) {
+	// Required is checked before default (README "Capability rendering: types and
+	// nulls"): a declared default must not rescue a null on a required property.
+	def := capDefWithProps(map[string]PropertySchema{
+		"timeout": {Type: "integer", Required: true, Default: 30},
+	})
+
+	for shape, value := range nullShapes() {
+		t.Run(shape, func(t *testing.T) {
+			_, err := applyDefinitionSchema(map[string]any{"timeout": value}, def)
+			if err == nil {
+				t.Fatal("a null on a required property must be rejected even when a default is declared")
+			}
+			if !strings.Contains(err.Error(), "is missing") {
+				t.Errorf("error = %q, want it to report the property as missing rather than mistyped", err)
+			}
+		})
+	}
+}
+
 func TestApplyDefinitionSchema_NullWithNoDefaultLeavesTheKeyAbsent(t *testing.T) {
 	// Nothing replaces the null, so the key must not survive: a caller reading the
 	// result would otherwise find the property PRESENT after validation decided it
