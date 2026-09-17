@@ -54,6 +54,18 @@ func TestValidateAuthoredProperties(t *testing.T) {
 			}),
 			wantErr: `unsupported field "memmory"`,
 		},
+		{
+			// This function calls validatePropertyValue directly, for every
+			// authored key, with no strip of its own first (unlike
+			// validateObjectProperties, whose own callers never see a null
+			// property value). validatePropertyValue's own top-level null check
+			// is what makes this pass rather than fail with "expected integer,
+			// got <nil>" — regression test for that early return.
+			name: "authored optional scalar explicit null is accepted, not a type error",
+			app: authoredApp("rich", map[string]any{
+				"replicas": nil,
+			}),
+		},
 
 		// Required: enforced nested, not at the top level. See the doc comment on
 		// validateAuthoredProperties — ClusterProfile capability rendering merges into

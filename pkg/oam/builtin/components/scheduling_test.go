@@ -1076,6 +1076,24 @@ func TestDeploymentScheduling_AffinityRejections(t *testing.T) {
 			}},
 			"already constrained by labelSelector.matchExpressions",
 		},
+		{
+			// The one overlap rule the two fields share unconditionally, independent
+			// of labelSelector: ValidateMatchLabelKeysAndMismatchLabelKeys step 3
+			// (validation.go, release-1.36:9010-9016) rejects a key present in both
+			// lists even with an empty labelSelector, where neither field's own
+			// selector-overlap check (above) would catch it — matchLabelKeys has none
+			// to clash with, and mismatchLabelKeys does not check the selector at all.
+			"matchLabelKeys clashing with mismatchLabelKeys",
+			map[string]any{"podAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
+					"topologyKey":       "kubernetes.io/hostname",
+					"labelSelector":     map[string]any{},
+					"matchLabelKeys":    []any{"app"},
+					"mismatchLabelKeys": []any{"app"},
+				}},
+			}},
+			"exists in both matchLabelKeys and mismatchLabelKeys",
+		},
 
 		// Admission parity: everything below builds a document the parser used to
 		// accept and the apiserver then rejects. Each cites the upstream validator

@@ -486,6 +486,18 @@ func parsePodAffinityTerm(raw map[string]any, label string) (corev1.PodAffinityT
 	if err := requireLabelSelector(mismatchLabelKeys, term.LabelSelector, "mismatchLabelKeys", label); err != nil {
 		return corev1.PodAffinityTerm{}, err
 	}
+	// A third rule the two fields DO share, independent of labelSelector: a key may
+	// not appear in both matchLabelKeys and mismatchLabelKeys — one asks the
+	// apiserver to merge it as `In`, the other as `NotIn`, and both merges target
+	// the same key. Upstream: ValidateMatchLabelKeysAndMismatchLabelKeys step 3
+	// (pkg/apis/core/validation/validation.go, release-1.36:9010-9016), which walks
+	// matchLabelKeys and reports field.Invalid with origin
+	// "duplicatedMismatchLabelKeys" for any key also in mismatchLabelKeys — checked
+	// unconditionally, unlike the labelSelector-overlap rule above which only
+	// applies when a labelSelector is set.
+	if err := checkMatchLabelKeysAgainstMismatchLabelKeys(matchLabelKeys, mismatchLabelKeys, label); err != nil {
+		return corev1.PodAffinityTerm{}, err
+	}
 	// Both lists are label KEYS, so both get the qualified-name rule regardless of
 	// the selector-overlap asymmetry above. Upstream applies it to each entry of
 	// either field via validateLabelKeys -> ValidateLabelName
@@ -573,6 +585,22 @@ func checkMatchLabelKeysAgainstSelector(keys []string, sel *metav1.LabelSelector
 			if req.Key == k {
 				return errors.Errorf("%s: key %q is already constrained by labelSelector.matchExpressions; the same key may not appear in both", indexedLabel(label+"."+field, i), k)
 			}
+		}
+	}
+	return nil
+}
+
+// checkMatchLabelKeysAgainstMismatchLabelKeys rejects a key present in both
+// matchLabelKeys and mismatchLabelKeys — the one overlap rule the two fields share
+// unconditionally, independent of whether a labelSelector is set at all. Upstream:
+// ValidateMatchLabelKeysAndMismatchLabelKeys step 3 (pkg/apis/core/validation/
+// validation.go, release-1.36:9010-9016), which walks matchLabelKeys and reports a
+// field.Invalid with origin "duplicatedMismatchLabelKeys" for any key also present
+// in mismatchLabelKeys.
+func checkMatchLabelKeysAgainstMismatchLabelKeys(matchLabelKeys, mismatchLabelKeys []string, label string) error {
+	for i, k := range matchLabelKeys {
+		if slices.Contains(mismatchLabelKeys, k) {
+			return errors.Errorf("%s: key %q exists in both matchLabelKeys and mismatchLabelKeys", indexedLabel(label+".matchLabelKeys", i), k)
 		}
 	}
 	return nil
