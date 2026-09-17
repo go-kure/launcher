@@ -482,18 +482,20 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	// below match the shared parseAffinity in common.go, which this handler does
 	// not call because postgresql carries its own AffinityConfig shape.
 	//
-	// optionalObject, not parseObjectField: the envelope is where the two nil
-	// shapes disagreed, and in opposite directions. An UNTYPED nil (`affinity:`
-	// with no value) failed parseObjectField's assertion and became a hard error
+	// parseObjectField: the envelope is where the two nil shapes used to
+	// disagree, in opposite directions. An UNTYPED nil (`affinity:` with no
+	// value) used to fail parseObjectField's assertion and become a hard error
 	// — yet pkg/oam's own validatePropertyValue reads a null under an optional
-	// property as absence and passes it, so that document validates and then
-	// fails to convert. A TYPED nil (an unset map from a Go lowering rule)
-	// satisfied the same assertion with a nil map, reported present, and switched
-	// pod anti-affinity ON with every default — a scheduling constraint nobody
-	// authored, from a value no document can distinguish from the first.
-	// optionalObject reads both as absence, which is the contract the validator
-	// already applies (go-kure/launcher#394 tracks folding this into the helpers).
-	affinityRaw, affinityPresent, err := optionalObject(props, "affinity", "affinity")
+	// property as absence and passes it, so that document validated and then
+	// failed to convert. A TYPED nil (an unset map from a Go lowering rule)
+	// satisfied the same assertion with a nil map, reported present, and
+	// switched pod anti-affinity ON with every default — a scheduling
+	// constraint nobody authored, from a value no document can distinguish
+	// from the first. go-kure/launcher#394/#444 folded both null shapes into
+	// authoredValue, which every helper (including parseObjectField) now
+	// routes through, so parseObjectField reads both as absence directly —
+	// the dedicated optionalObject wrapper this call used is removed.
+	affinityRaw, affinityPresent, err := parseObjectField(props, "affinity", "affinity")
 	if err != nil {
 		return nil, err
 	}
