@@ -168,6 +168,26 @@ func TestParseNPPort_ValidPortShapesStillParse(t *testing.T) {
 	})
 }
 
+// npTestPort exists only to give a port value a different dynamic type than the
+// builtin one, for TestParseNPPort_NamedScalarPortStillParses.
+type npTestPort int32
+
+func TestParseNPPort_NamedScalarPortStillParses(t *testing.T) {
+	// go-kure/launcher#440 round-2 finding F36 (and the bot's matching thread at
+	// networkpolicy.go:601): npPortNumber used to classify with an exact type
+	// switch, so a named integer type from a Go lowering rule -- with a different
+	// dynamic type than the builtin one, even though it converts identically --
+	// fell through to "must be a number or named port string". Fixed to classify
+	// by reflect.Kind, matching npLabelValue's reach.
+	port, err := parseNPPort(map[string]any{"port": npTestPort(8080)}, "ingress[0].ports[0]")
+	if err != nil {
+		t.Fatalf("a named integer port must still parse, got: %v", err)
+	}
+	if port.Port.IntValue() != 8080 {
+		t.Errorf("port = %v, want 8080", port.Port)
+	}
+}
+
 func TestParseNPPort_UnknownKeyIsRejected(t *testing.T) {
 	// The port item is the one object in this trait whose key set the SCHEMA
 	// cannot close — it is declared AdditionalProperties because `port` is an
