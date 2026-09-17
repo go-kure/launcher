@@ -173,8 +173,8 @@ func TestParseNPPort_ValidPortShapesStillParse(t *testing.T) {
 type npTestPort int32
 
 func TestParseNPPort_NamedScalarPortStillParses(t *testing.T) {
-	// go-kure/launcher#440 round-2 finding F36 (and the bot's matching thread at
-	// networkpolicy.go:601): npPortNumber used to classify with an exact type
+	// go-kure/launcher#440 round-2 finding F36, named-scalar port numbers (and
+	// the bot's matching thread at networkpolicy.go:601): npPortNumber used to classify with an exact type
 	// switch, so a named integer type from a Go lowering rule -- with a different
 	// dynamic type than the builtin one, even though it converts identically --
 	// fell through to "must be a number or named port string". Fixed to classify

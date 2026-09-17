@@ -69,7 +69,8 @@ func (h *NetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 	// (builtin/components/schema.go) and daemonset's `maxUnavailable`/`maxSurge`
 	// (builtin/components/daemonset_spec.go). Declaring `port` explicitly here
 	// (rather than relying on AdditionalProperties, as before go-kure/launcher#440
-	// round 3) lets AdditionalProperties default to false, so the schema layer
+	// round 3, the port-schema-closure fix) lets AdditionalProperties default to
+	// false, so the schema layer
 	// itself now rejects a stray key like `protcol` instead of silently admitting
 	// it only for parser-layer validNPPortKeys (below) to catch -- closing the
 	// same kind of gap go-kure/launcher#408 closed for authored properties
@@ -422,7 +423,8 @@ var validNPSelectorKeys = map[string]bool{
 // %v rendering (go-kure/launcher#430).
 //
 // Classified by reflect.Kind, not by an exact type switch (go-kure/launcher#440
-// round-2 regression, F33): this map's values are not limited to what a YAML/JSON
+// round-2 finding F33, named-scalar label values): this map's values are not
+// limited to what a YAML/JSON
 // decoder produces. RegisterTraitLowering lets Go code assemble the same
 // map[string]any programmatically, and a named type whose underlying kind is a
 // scalar — `type Environment string; Environment("prod")` — has a different
@@ -576,8 +578,9 @@ var validNPProtocols = map[string]corev1.Protocol{
 
 // validNPPortKeys closes the port item over the two fields this parser
 // implements. The schema now backs this up too (`port` is declared explicitly,
-// AdditionalProperties defaults to false — go-kure/launcher#440 round 3), so
-// this is defense in depth rather than the sole gate: `protcol: UDP` is
+// AdditionalProperties defaults to false — go-kure/launcher#440 round 3, the
+// port-schema-closure fix), so this is defense in depth rather than the sole
+// gate: `protcol: UDP` is
 // rejected at the schema layer before it ever reaches here. `endPort` is the
 // other name worth rejecting explicitly: it is a real NetworkPolicyPort field
 // (k8s.io/api networking/v1/types.go:171-176) that this parser does not
@@ -604,10 +607,11 @@ var validNPPortKeys = map[string]bool{
 // The 1-65535 bound is the API server's own (k8s.io/apimachinery
 // pkg/util/validation IsValidPortNum), applied here so the document fails at the
 // line that wrote it rather than at apply time. Classified by reflect.Kind, like
-// npLabelValue (go-kure/launcher#440 round-2 finding, F36/the bot's matching
-// thread): a named integer or float type from a Go lowering rule renders and
-// converts identically to its builtin counterpart, so it is accepted here too
-// rather than reported as "must be a number or named port string".
+// npLabelValue (go-kure/launcher#440 round-2 finding F36, named-scalar port
+// numbers, and the bot's matching thread): a named integer or float type
+// from a Go lowering rule renders and converts identically to its builtin
+// counterpart, so it is accepted here too rather than reported as "must be a
+// number or named port string".
 func npPortNumber(value any, path string) (int32, bool, error) {
 	rv := reflect.ValueOf(value)
 	var n int64
