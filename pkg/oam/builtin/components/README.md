@@ -957,23 +957,28 @@ kind's own; the documents it refuses are exactly the ones it refused before.
 **A document that *was* authoring one of the five keys is a different case, and
 it is not covered by "additive".** These kinds did not previously refuse those
 keys as unknown — they ignored them. A handler reads the properties it knows
-and drops the rest: `validateProperties` is documented as running on *emitted*
-elements only (`pkg/oam/property_validate.go`), and the authored path goes
-through `validate.go`, which checks type names and identity but not property
-shape. So `strategy` on a `webservice` was accepted and silently discarded
-before go-kure/launcher#341, and is honoured after it. Such a document keeps
-building but compiles to a different Deployment, and one authoring a malformed
-value now fails the build where it previously succeeded.
+and drops the rest, and at the time this paragraph was first written the
+authored path had no shape check of its own: `validateProperties` runs on
+*emitted* elements only (`pkg/oam/property_validate.go`), and `validate.go`
+checks type names and identity but not property shape. So `strategy` on a
+`webservice` was accepted and silently discarded before go-kure/launcher#341,
+and is honoured after it. Such a document kept building but compiled to a
+different Deployment, and one authoring a malformed value now fails the build
+where it previously succeeded.
 
 Under the additive test in `docs/oam/design-gvk.md` — every previously valid
-document stays valid *and* compiles to the same output — that is not additive.
-The gap is not this change's: it applies to every property ever added to an
-existing kind, because the authored path has never enforced the Parser
-Strictness that section promises. `docs/oam/design-gvk.md` § Parser Strictness
-states that an unrecognised key is a build error, which is true of the document
-envelope and not of a component's `properties` map. Tracked as
-go-kure/launcher#408, which owns both the doc correction and the question of
-whether the authored path should be made strict.
+document stays valid *and* compiles to the same output — that was not
+additive. The gap was not this change's: it applied to every property ever
+added to an existing kind, because the authored path did not enforce the
+Parser Strictness that section promises. `docs/oam/design-gvk.md` § Parser
+Strictness states that an unrecognised key is a build error, which was true of
+the document envelope and not of a component's `properties` map. **Since
+go-kure/launcher#408 (closed), it is true of both:** `kurel build` now calls
+`ValidateAuthoredProperties` (`pkg/cmd/kurel/build.go:149`, after parameter
+resolution so a package-mode `${...}` placeholder is not checked against its
+own bare-string type), which walks declared keys and shapes on the authored
+document itself. An authored `strategy` malformed enough to fail that check now
+fails there, before the handler ever sees it.
 
 **`replicas` is validated on `deployment` only.** The other workload kinds read
 `replicas` through a shared helper that falls back to the default whenever the
@@ -1205,10 +1210,12 @@ object would change what the next `Generate` emits.
   Every accepted property is presence-gated: a document authoring none of them
   produces byte-identical output to before, because `DaemonSetSpecConfig.apply`
   writes only the fields that were authored. The one behavior change is
-  `selector`: authored-document validation checks type names and identity, not
-  property shape (`pkg/oam/property_validate.go:22-27`), so a `selector:` on a
-  daemonset used to be silently ignored and now fails the build. That is the
-  point — a silently dropped selector reads as applied.
+  `selector`: a `selector:` on a daemonset used to be silently ignored — before
+  go-kure/launcher#408 (closed), authored-document validation checked type
+  names and identity, not property shape — and now fails the build, both
+  because `daemonset` does not declare the key and because `ValidateAuthoredProperties`
+  (`pkg/cmd/kurel/build.go:149`) now rejects an undeclared authored key on its
+  own. That is the point — a silently dropped selector reads as applied.
 
   It is a behavior change against what the code did, not against what the format
   promised. `docs/oam/design-gvk.md` § Parser Strictness already states the
@@ -1343,18 +1350,20 @@ object would change what the next `Generate` emits.
   **Compatibility.** On `job` this is additive — the component type is newer
   than the key. On `cronjob` it is **behavior-changing**, and the reason is
   worth stating precisely: before this change an authored `podFailurePolicy` on
-  a cronjob was not refused, it was **ignored**. Property-schema validation runs
-  on emitted elements only, never on authored documents, so a key no handler
-  read was dropped in silence. A cronjob document that was already authoring
-  `podFailurePolicy` therefore either compiles to a CronJob that now carries the
-  policy, or stops building — most likely on the `restartPolicy: Never`
-  requirement, since the component defaults to `OnFailure`. Under the additive
-  test in `docs/oam/design-gvk.md` ("every previously valid document remains
-  valid *and* compiles to the same output") that is not additive. The gap that
-  makes this true of *every* property ever added to an existing kind — the
-  authored path never enforcing the Parser Strictness that document promises —
-  belongs to the repo rather than to this change, and is tracked as
-  go-kure/launcher#408.
+  a cronjob was not refused, it was **ignored**. At the time, property-schema
+  validation ran on emitted elements only, never on authored documents, so a
+  key no handler read was dropped in silence. A cronjob document that was
+  already authoring `podFailurePolicy` therefore either compiles to a CronJob
+  that now carries the policy, or stops building — most likely on the
+  `restartPolicy: Never` requirement, since the component defaults to
+  `OnFailure`. Under the additive test in `docs/oam/design-gvk.md` ("every
+  previously valid document remains valid *and* compiles to the same output")
+  that was not additive. The gap that made this true of *every* property ever
+  added to an existing kind — the authored path not enforcing the Parser
+  Strictness that document promises — belonged to the repo rather than to this
+  change, and is fixed as go-kure/launcher#408 (closed): `kurel build` now
+  calls `ValidateAuthoredProperties` (`pkg/cmd/kurel/build.go:149`), which
+  checks declared keys and shapes on the authored document directly.
 
   The `selector`/`manualSelector` rejection is the same class of change the
   daemonset kind's `selector` rejection is, and rests on the same reasoning:
