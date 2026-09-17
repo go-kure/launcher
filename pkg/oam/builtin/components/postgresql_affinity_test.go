@@ -226,7 +226,7 @@ func TestPostgresqlAffinity_NullSubFieldsTakeTheirDefault(t *testing.T) {
 		t.Fatalf("ToApplicationConfig (empty block): %v", err)
 	}
 
-	for _, key := range []string{"enablePodAntiAffinity", "topologyKey", "nodeSelector"} {
+	for _, key := range []string{"enablePodAntiAffinity", "topologyKey", "nodeSelector", "podAntiAffinityType"} {
 		t.Run(key, func(t *testing.T) {
 			cfg, err := postgresqlConfigFor(t, map[string]any{
 				"affinity": map[string]any{key: nil},
@@ -240,10 +240,31 @@ func TestPostgresqlAffinity_NullSubFieldsTakeTheirDefault(t *testing.T) {
 			if got, want := cfg.AffinityTopologyKey, empty.AffinityTopologyKey; got != want {
 				t.Errorf("AffinityTopologyKey = %q, want the empty-block default %q", got, want)
 			}
+			if got, want := cfg.AffinityPodAntiAffinityType, empty.AffinityPodAntiAffinityType; got != want {
+				t.Errorf("AffinityPodAntiAffinityType = %q, want the empty-block default %q", got, want)
+			}
 			if got, want := len(cfg.AffinityNodeSelector), len(empty.AffinityNodeSelector); got != want {
 				t.Errorf("len(AffinityNodeSelector) = %d, want the empty-block default %d", got, want)
 			}
 		})
+	}
+}
+
+// TestPostgresqlAffinity_NullPodAntiAffinityTypeIsNotEmptyString is the discriminator
+// for the podAntiAffinityType case above: it must not be conflated with the "explicitly
+// empty string" case, which stays an error (TestPostgresqlAffinity_WrongTypeIsRejected's
+// "podAntiAffinityType explicitly empty"). A null and an empty string are different
+// values and must produce different outcomes — this asserts the null case succeeds
+// where the empty-string case fails, on the same field.
+func TestPostgresqlAffinity_NullPodAntiAffinityTypeIsNotEmptyString(t *testing.T) {
+	_, nullErr := postgresqlConfigFor(t, map[string]any{"affinity": map[string]any{"podAntiAffinityType": nil}})
+	if nullErr != nil {
+		t.Errorf("a null podAntiAffinityType must read as absent, got error: %v", nullErr)
+	}
+
+	_, emptyErr := postgresqlConfigFor(t, map[string]any{"affinity": map[string]any{"podAntiAffinityType": ""}})
+	if emptyErr == nil {
+		t.Error("an explicitly empty podAntiAffinityType must still be rejected by the enum check")
 	}
 }
 

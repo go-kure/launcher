@@ -523,8 +523,13 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 
 		// Deliberately not parseStringField: it reports an explicit empty string as
 		// absent, and an empty podAntiAffinityType has to reach the switch below to
-		// be refused, the way parseAffinity refuses it.
-		if v, ok := affinityRaw["podAntiAffinityType"]; ok {
+		// be refused, the way parseAffinity refuses it. authoredValue, not a bare
+		// map lookup: the raw lookup reports `podAntiAffinityType: null` as
+		// present with a nil value, which then failed the string assertion —
+		// treating a null sub-field as a type error, contradicting the nested-null-
+		// is-absence contract #444 established for every other sub-field in this
+		// block (and every other kind in the package).
+		if v, present := authoredValue(affinityRaw, "podAntiAffinityType"); present {
 			paat, isString := v.(string)
 			if !isString {
 				return nil, errors.Errorf("affinity.podAntiAffinityType: must be a string, got %T", v)

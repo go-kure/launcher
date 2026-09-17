@@ -1461,8 +1461,11 @@ object would change what the next `Generate` emits.
   validation already does with a null under an optional property; without
   that, `affinity:` with no value validated against the published schema and
   then failed to convert, while the same value built in Go turned pod
-  anti-affinity on with every default. A null *inside* a present block is
-  still a wrong-type error; only the envelope is absence.
+  anti-affinity on with every default. A null on a sub-field *inside* a
+  present block is also absence — it takes the same default an omitted
+  sub-field takes (go-kure/launcher#444 established this nested-null contract
+  for every kind in the package); a non-null wrong-typed sub-field, and an
+  explicitly empty `podAntiAffinityType`, remain errors.
   This is narrower than the shared `parseAffinity`,
   whose own four sub-field reads still discard a wrongly typed value silently
   (`common.go`, tracked in go-kure/launcher#449); the two are expected to
