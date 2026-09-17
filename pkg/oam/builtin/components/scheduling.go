@@ -168,7 +168,14 @@ func parseNodeAffinity(raw map[string]any, label string) (*corev1.NodeAffinity, 
 			if !present {
 				return nil, errors.Errorf("%s.preference: required", itemLabel)
 			}
-			term, err := parseNodeSelectorTerm(pref, itemLabel+".preference")
+			// Preferred affinity is scored, not gated — an unschedulable-looking
+			// value still counts if it's the best fit available. Upstream never
+			// validates label VALUES here: ValidatePreferredSchedulingTerms
+			// (validation.go, release-1.36:5141-5153) calls ValidateNodeSelectorTerm
+			// with allowInvalidLabelValueInRequiredNodeAffinity forced true, with the
+			// comment "we always allow invalid label-value for preferred affinity as
+			// they can succeed when cluster has only one node."
+			term, err := parseNodeSelectorTerm(pref, itemLabel+".preference", false)
 			if err != nil {
 				return nil, err
 			}
@@ -199,7 +206,16 @@ func parseNodeSelector(raw map[string]any, label string) (*corev1.NodeSelector, 
 	}
 	ns := &corev1.NodeSelector{}
 	for i, item := range list {
-		term, err := parseNodeSelectorTerm(item, indexedLabel(label+".nodeSelectorTerms", i))
+		// Required affinity is a hard gate the apiserver enforces at admission
+		// (create), so an invalid label value here is not a maybe-someday
+		// problem — it is a manifest kubectl apply will reject. Upstream:
+		// ValidateNodeSelector -> ValidateNodeSelectorTerm with
+		// opts.AllowInvalidLabelValueInRequiredNodeAffinity, which defaults false
+		// on create (validation.go, release-1.36:1945) and is only forced true as
+		// an update-time exception for objects that already carried the invalid
+		// value (:1953, helper.HasInvalidLabelValueInNodeSelectorTerms) — a
+		// carve-out that does not apply to a manifest launcher is building fresh.
+		term, err := parseNodeSelectorTerm(item, indexedLabel(label+".nodeSelectorTerms", i), true)
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +224,11 @@ func parseNodeSelector(raw map[string]any, label string) (*corev1.NodeSelector, 
 	return ns, nil
 }
 
-func parseNodeSelectorTerm(raw map[string]any, label string) (corev1.NodeSelectorTerm, error) {
+// requireValidLabelValues is true only on the required-affinity path (see the
+// call sites' comments) — matchFields is unaffected either way, since upstream
+// validates its values unconditionally regardless of required/preferred
+// (ValidateNodeFieldSelectorRequirement takes no such flag at all).
+func parseNodeSelectorTerm(raw map[string]any, label string, requireValidLabelValues bool) (corev1.NodeSelectorTerm, error) {
 	if err := rejectUnknownKeys(raw, nodeSelectorTermKeys, label); err != nil {
 		return corev1.NodeSelectorTerm{}, err
 	}
@@ -217,12 +237,12 @@ func parseNodeSelectorTerm(raw map[string]any, label string) (corev1.NodeSelecto
 	// matchFields selects on node FIELDS (`metadata.name`), which are field
 	// paths and not qualified names — hence the different key rule for the two,
 	// despite both being NodeSelectorRequirement.
-	exprs, err := parseNodeSelectorRequirements(raw, "matchExpressions", label, true)
+	exprs, err := parseNodeSelectorRequirements(raw, "matchExpressions", label, true, requireValidLabelValues)
 	if err != nil {
 		return corev1.NodeSelectorTerm{}, err
 	}
 	term.MatchExpressions = exprs
-	fields, err := parseNodeSelectorRequirements(raw, "matchFields", label, false)
+	fields, err := parseNodeSelectorRequirements(raw, "matchFields", label, false, false)
 	if err != nil {
 		return corev1.NodeSelectorTerm{}, err
 	}
@@ -239,7 +259,7 @@ func parseNodeSelectorTerm(raw map[string]any, label string) (corev1.NodeSelecto
 // parseNodeSelectorRequirements parses a matchExpressions/matchFields list.
 // qualifiedKeys says whether the requirement key is a Kubernetes qualified name
 // (node labels) or a free-form field path (node fields).
-func parseNodeSelectorRequirements(raw map[string]any, key, label string, qualifiedKeys bool) ([]corev1.NodeSelectorRequirement, error) {
+func parseNodeSelectorRequirements(raw map[string]any, key, label string, qualifiedKeys, requireValidLabelValues bool) ([]corev1.NodeSelectorRequirement, error) {
 	list, present, err := parseObjectList(raw, key)
 	if err != nil {
 		return nil, err
@@ -319,6 +339,20 @@ func parseNodeSelectorRequirements(raw map[string]any, key, label string, qualif
 				}
 			default:
 				return nil, errors.Errorf("%s.operator: invalid value %q, want In, NotIn, Exists, DoesNotExist, Gt or Lt", itemLabel, op)
+			}
+			// Upstream validates every value against IsValidLabelValue right
+			// after this arity switch, unconditionally on operator — not just
+			// In/NotIn (validation.go, release-1.36:4982-4988). Gt/Lt values are
+			// already forced to a single parsed integer above, which is always a
+			// valid label value too, so this never re-rejects what the switch
+			// already accepted; Exists/DoesNotExist leave values empty, so the
+			// loop is a no-op there.
+			if requireValidLabelValues {
+				for vi, v := range values {
+					if errs := validation.IsValidLabelValue(v); len(errs) > 0 {
+						return nil, errors.Errorf("%s.values[%d]: invalid value %q: %s", itemLabel, vi, v, strings.Join(errs, "; "))
+					}
+				}
 			}
 		} else {
 			// ValidateNodeFieldSelectorRequirement's own switch (validation.go,

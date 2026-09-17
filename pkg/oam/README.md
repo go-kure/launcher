@@ -435,7 +435,7 @@ those parsers keep their explicit-null guards regardless. Aligning that
 parser-level layer with this contract is a separate, lower-level concern,
 tracked as `go-kure/launcher#394`, and is not closed by this.
 
-Two further surfaces sit outside the contract and are named here so "the contract
+One further surface sits outside the contract and is named here so "the contract
 holds" is not read as "it holds everywhere":
 
 - **Capability rendering** (`checkCapabilityValueType`, `capability.go`) is outside
@@ -444,10 +444,12 @@ holds" is not read as "it holds everywhere":
   rather than silent, so nothing is wrongly accepted, but the message is wrong for
   the input. Tracked with the switch's missing `default` arm as
   `go-kure/launcher#431`.
-- **The networkpolicy peer parser** reads a *typed* nil `namespaceSelector` as an
-  empty selector, which selects every namespace, where the same key parsed for
-  pod affinity reads any null as omission. Unreachable today and pinned by a test
-  so closing it is a deliberate edit; tracked as `go-kure/launcher#430`.
+
+(A second surface used to be named here: the networkpolicy peer parser reading
+a *typed* nil `namespaceSelector` differently from an untyped one. Fixed as
+`go-kure/launcher#430` — both parsers now route their presence check through
+`oam.IsNullValue`'s reflect-based classification, so a typed nil reads as
+omission on every path that reaches it, the same as an untyped one.)
 
 ## Contract metadata
 

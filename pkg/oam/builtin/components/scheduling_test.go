@@ -287,6 +287,42 @@ func TestDeploymentScheduling_AffinityRoundTrip(t *testing.T) {
 	}
 }
 
+// TestDeploymentScheduling_PreferredAffinityAllowsInvalidLabelValue is the
+// mirror of TestDeploymentScheduling_AffinityRejections' "required node
+// affinity rejects an invalid label value" case: the identical value must be
+// ACCEPTED on the preferred arm. Upstream never validates label values there —
+// ValidatePreferredSchedulingTerms (validation.go, release-1.36:5141-5153)
+// calls ValidateNodeSelectorTerm with allowInvalidLabelValueInRequiredNodeAffinity
+// forced true, "we always allow invalid label-value for preferred affinity as
+// they can succeed when cluster has only one node." A parser that validated
+// both arms alike would reject a manifest the apiserver itself admits.
+func TestDeploymentScheduling_PreferredAffinityAllowsInvalidLabelValue(t *testing.T) {
+	dep, _ := generateDeployment(t, "app", map[string]any{
+		"image": "nginx:1.27",
+		"affinity": map[string]any{
+			"nodeAffinity": map[string]any{
+				"preferredDuringSchedulingIgnoredDuringExecution": []any{
+					map[string]any{
+						"weight": 40,
+						"preference": map[string]any{
+							"matchExpressions": []any{
+								map[string]any{"key": "k", "operator": "In", "values": []any{"bad value"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	preferred := dep.Spec.Template.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+	if len(preferred) != 1 {
+		t.Fatalf("preferred = %d terms, want 1", len(preferred))
+	}
+	if got := preferred[0].Preference.MatchExpressions[0].Values; len(got) != 1 || got[0] != "bad value" {
+		t.Errorf("preference values = %v, want [bad value] preserved unvalidated", got)
+	}
+}
+
 // TestDeploymentScheduling_EmptyLabelSelectorAccepted pins the one place this
 // parser deliberately diverges from parseLabelSelector's volume-claim rule.
 // Upstream distinguishes a null labelSelector (matches no pods) from an empty
@@ -1018,6 +1054,19 @@ func TestDeploymentScheduling_AffinityRejections(t *testing.T) {
 		{"Gt with two values", nodeTerm(map[string]any{"key": "k", "operator": "Gt", "values": []any{"1", "2"}}), "exactly one value is required for operator Gt"},
 		{"Gt with a non-integer", nodeTerm(map[string]any{"key": "k", "operator": "Gt", "values": []any{"big"}}), `operator Gt requires an integer, got "big"`},
 		{"unknown operator", nodeTerm(map[string]any{"key": "k", "operator": "Matches", "values": []any{"v"}}), `invalid value "Matches"`},
+		{
+			// Required node affinity is a hard admission gate, so a value the
+			// apiserver would reject (a space is not a valid label-value
+			// character) must be caught here, not surface as a kubectl-apply
+			// failure. Upstream: ValidateNodeSelectorRequirement's IsValidLabelValue
+			// loop, validation.go release-1.36:4982-4988 — see scheduling.go's
+			// requireValidLabelValues plumbing. Preferred affinity's mirror case
+			// is TestDeploymentScheduling_PreferredAffinityAllowsInvalidLabelValue
+			// below: upstream accepts the identical value there.
+			"required node affinity rejects an invalid label value",
+			nodeTerm(map[string]any{"key": "k", "operator": "In", "values": []any{"bad value"}}),
+			`values[0]: invalid value "bad value"`,
+		},
 		{
 			"weight out of range",
 			map[string]any{"nodeAffinity": map[string]any{
