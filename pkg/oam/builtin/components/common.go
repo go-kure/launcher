@@ -802,7 +802,7 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 // corev1.Container.Resources.{Requests,Limits} round-trips through the
 // Kubernetes API. Returns an error if any authored quantity string fails to
 // parse (validation that previously happened later, at build time, in
-// buildResourceRequirements/kubernetes.SetResourceRequestCPU etc.).
+// buildResourceRequirements).
 //
 // Deliberately NOT covered: corev1.ResourceRequirements.Claims (Dynamic
 // Resource Allocation) — see schemaResources' doc comment for the rationale.
@@ -4104,8 +4104,13 @@ func buildAffinity(cfg AffinityConfig, selectorLabels map[string]string) *corev1
 }
 
 func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
-	container := kubernetes.CreateContainer(ic.Name, ic.Image, ic.Command, ic.Args)
-	kubernetes.SetContainerResources(container, buildResourceRequirements(ic.Resources))
+	container := &corev1.Container{
+		Name:    ic.Name,
+		Image:   ic.Image,
+		Command: ic.Command,
+		Args:    ic.Args,
+	}
+	container.Resources = buildResourceRequirements(ic.Resources)
 	if ic.SecurityContext != nil {
 		kubernetes.SetContainerSecurityContext(container, *ic.SecurityContext)
 	}
@@ -4119,8 +4124,13 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 }
 
 func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error) {
-	container := kubernetes.CreateContainer(sc.Name, sc.Image, sc.Command, sc.Args)
-	kubernetes.SetContainerResources(container, buildResourceRequirements(sc.Resources))
+	container := &corev1.Container{
+		Name:    sc.Name,
+		Image:   sc.Image,
+		Command: sc.Command,
+		Args:    sc.Args,
+	}
+	container.Resources = buildResourceRequirements(sc.Resources)
 	if sc.SecurityContext != nil {
 		kubernetes.SetContainerSecurityContext(container, *sc.SecurityContext)
 	}
@@ -4364,9 +4374,9 @@ func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev
 	claim.Labels = maps.Clone(labels)
 	claim.Annotations = nil
 	claim.Spec.VolumeMode = nil
-	kubernetes.SetPVCResources(claim, corev1.VolumeResourceRequirements{
+	claim.Spec.Resources = corev1.VolumeResourceRequirements{
 		Requests: corev1.ResourceList{corev1.ResourceStorage: qty},
-	})
+	}
 	for _, m := range pvc.AccessModes {
 		kubernetes.AddPVCAccessMode(claim, corev1.PersistentVolumeAccessMode(m))
 	}

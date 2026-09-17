@@ -21,7 +21,6 @@ spec:
         - secretRef:
             name: api-credentials
         image: ghcr.io/example/api:v1.0.0
-        imagePullPolicy: IfNotPresent
         name: api
         ports:
         - containerPort: 8080

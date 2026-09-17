@@ -494,14 +494,14 @@ func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, er
 			switch c.SourceKind {
 			case "HelmRepository":
 				repo := fluxcd.CreateHelmRepository(c.Name, c.fluxNamespace())
-				fluxcd.SetHelmRepositoryURL(repo, c.SourceURL)
-				fluxcd.SetHelmRepositoryInterval(repo, interval)
+				repo.Spec.URL = c.SourceURL
+				repo.Spec.Interval = interval
 				obj := client.Object(repo)
 				objects = append(objects, &obj)
 			case "OCIRepository":
 				repo := fluxcd.CreateOCIRepository(c.Name, c.fluxNamespace())
-				fluxcd.SetOCIRepositoryURL(repo, c.SourceURL)
-				fluxcd.SetOCIRepositoryInterval(repo, interval)
+				repo.Spec.URL = c.SourceURL
+				repo.Spec.Interval = interval
 				if c.Version != "" {
 					fluxcd.SetOCIRepositoryReference(repo, &sourcev1.OCIRepositoryRef{Tag: c.Version})
 				}
@@ -840,13 +840,13 @@ func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 func (c *HelmchartConfig) buildHelmRelease() *helmv2.HelmRelease {
 	interval := parseDuration(effectiveInterval(c.Interval))
 	hr := fluxcd.CreateHelmRelease(c.Name, c.fluxNamespace())
-	fluxcd.SetHelmReleaseInterval(hr, interval)
+	hr.Spec.Interval = interval
 
 	if c.ReleaseName != "" {
-		fluxcd.SetHelmReleaseReleaseName(hr, c.ReleaseName)
+		hr.Spec.ReleaseName = c.ReleaseName
 	}
 	if c.TargetNamespace != "" {
-		fluxcd.SetHelmReleaseTargetNamespace(hr, c.TargetNamespace)
+		hr.Spec.TargetNamespace = c.TargetNamespace
 	}
 	if c.DriftMode != "" {
 		fluxcd.SetHelmReleaseDriftDetection(hr, fluxcd.CreateDriftDetection(helmv2.DriftDetectionMode(c.DriftMode)))
@@ -875,8 +875,7 @@ func (c *HelmchartConfig) buildHelmRelease() *helmv2.HelmRelease {
 			ValuesKey: "values.yaml",
 		})
 	} else if len(c.Values) > 0 { // "inline" (or "configMap" with nothing to externalize)
-		// error ignored: only fails on JSON marshal failure, which can't happen with map[string]any
-		_ = fluxcd.SetHelmReleaseValuesFromMap(hr, c.Values)
+		fluxcd.SetHelmReleaseValuesFromMap(hr, c.Values)
 	}
 	for _, vf := range c.ValuesFrom {
 		fluxcd.AddHelmReleaseValuesFrom(hr, vf)
@@ -946,10 +945,14 @@ func (c *augmentingHelmchartConfig) AugmentLayout(ml *layout.ManifestLayout) err
 	// drops apiVersion/kind from the serialized manifest entirely — both
 	// kubectl apply and kustomize build reject the result, and the
 	// on-disk filename derivation (which reads the GVK's Kind) breaks
-	// too. CreateConfigMap stamps TypeMeta plus common labels/annotations
-	// consistently with every other ConfigMap this codebase emits.
+	// too. Since go-kure/kure's builder-contract-release-1 (beta.11),
+	// CreateConfigMap no longer stamps labels/annotations itself, so they
+	// are set here explicitly — matching every other ConfigMap this
+	// codebase emits (traits/configmap.go).
 	cm := kubernetes.CreateConfigMap(valuesConfigMapName(c.Name), c.fluxNamespace())
-	kubernetes.AddConfigMapDataMap(cm, map[string]string{"values.yaml": string(b)})
+	cm.Labels = map[string]string{"app": c.Name}
+	cm.Annotations = nil
+	kubernetes.AddConfigMapData(cm, "values.yaml", string(b))
 	ml.Resources = append(ml.Resources, cm)
 	return nil
 }

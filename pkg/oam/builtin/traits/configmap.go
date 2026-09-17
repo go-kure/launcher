@@ -92,10 +92,10 @@ func (c *ConfigMapConfig) ComponentName() string { return c.componentName }
 // Generate creates a Kubernetes ConfigMap resource.
 func (c *ConfigMapConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	cm := kubernetes.CreateConfigMap(app.Name, app.Namespace)
-	kubernetes.SetConfigMapLabels(cm, map[string]string{"app": c.componentName})
+	cm.Labels = map[string]string{"app": c.componentName}
 	cm.Annotations = nil
-	if len(c.Data) > 0 {
-		kubernetes.AddConfigMapDataMap(cm, c.Data)
+	for k, v := range c.Data {
+		kubernetes.AddConfigMapData(cm, k, v)
 	}
 
 	obj := client.Object(cm)

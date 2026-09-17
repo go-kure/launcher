@@ -445,15 +445,15 @@ func (c *IngressConfig) Generate(app *stack.Application) ([]*client.Object, erro
 		"app": c.componentName,
 	}
 
-	ingress := kubernetes.CreateIngress(app.Name, app.Namespace, c.IngressClassName)
+	ingress := kubernetes.CreateIngress(app.Name, app.Namespace)
 	ingress.Labels = labels
 	ingress.Annotations = c.Annotations
-	if c.IngressClassName == "" {
-		ingress.Spec.IngressClassName = nil
+	if c.IngressClassName != "" {
+		kubernetes.SetIngressClassName(ingress, c.IngressClassName)
 	}
 
 	for _, rule := range c.Rules {
-		ingressRule := kubernetes.CreateIngressRule(rule.Host)
+		ingressRule := &networkingv1.IngressRule{Host: rule.Host}
 		for _, p := range rule.Paths {
 			pathType := toPathType(p.PathType)
 			var servicePort networkingv1.ServiceBackendPort

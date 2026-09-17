@@ -452,7 +452,8 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 		VolumeMounts:    c.VolumeMounts,
 	})
 
-	cj := kubernetes.CreateCronJob(app.Name, app.Namespace, c.Schedule)
+	cj := kubernetes.CreateCronJob(app.Name, app.Namespace)
+	cj.Spec.Schedule = c.Schedule
 	cj.Labels = appLabels(app.Name)
 	cj.Annotations = nil
 	cj.Spec.JobTemplate.Labels = appLabels(app.Name)
@@ -460,7 +461,7 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	kubernetes.SetCronJobSuccessfulJobsHistoryLimit(cj, c.SuccessfulJobsHistoryLimit)
 	kubernetes.SetCronJobFailedJobsHistoryLimit(cj, c.FailedJobsHistoryLimit)
 	if c.ConcurrencyPolicy != nil {
-		kubernetes.SetCronJobConcurrencyPolicy(cj, *c.ConcurrencyPolicy)
+		cj.Spec.ConcurrencyPolicy = *c.ConcurrencyPolicy
 	}
 	if c.Suspend != nil {
 		kubernetes.SetCronJobSuspend(cj, *c.Suspend)

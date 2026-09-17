@@ -368,6 +368,7 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	dep.Labels = appLabels(app.Name)
 	dep.Annotations = nil
 	dep.Spec.Template.Labels = appLabels(app.Name)
+	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: appLabels(app.Name)}
 	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
 	if err := applyNonRWXConstraint(dep, app.Name, c.PVCs, c.Replicas, c.DeploymentSpec.Strategy); err != nil {
 		return nil, err
@@ -404,8 +405,8 @@ func (c *WebserviceConfig) createService(app *stack.Application) *corev1.Service
 	svc := kubernetes.CreateService(app.Name, app.Namespace)
 	svc.Labels = appLabels(app.Name)
 	svc.Annotations = nil
-	kubernetes.SetServiceType(svc, corev1.ServiceTypeClusterIP)
-	kubernetes.SetServiceSelector(svc, appLabels(app.Name))
+	svc.Spec.Type = corev1.ServiceTypeClusterIP
+	svc.Spec.Selector = appLabels(app.Name)
 	kubernetes.AddServicePort(svc, corev1.ServicePort{
 		Name:       "http",
 		Port:       c.Port,

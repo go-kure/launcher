@@ -7,6 +7,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -293,8 +294,8 @@ func (c *DaemonsetConfig) createService(app *stack.Application) *corev1.Service 
 	svc := kubernetes.CreateService(app.Name, app.Namespace)
 	svc.Labels = appLabels(app.Name)
 	svc.Annotations = nil
-	kubernetes.SetServiceType(svc, corev1.ServiceTypeClusterIP)
-	kubernetes.SetServiceSelector(svc, appLabels(app.Name))
+	svc.Spec.Type = corev1.ServiceTypeClusterIP
+	svc.Spec.Selector = appLabels(app.Name)
 	kubernetes.AddServicePort(svc, corev1.ServicePort{
 		Name:       "http",
 		Port:       c.Port,
@@ -327,6 +328,11 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 	ds := kubernetes.CreateDaemonSet(app.Name, app.Namespace)
 	ds.Labels = appLabels(app.Name)
 	ds.Annotations = nil
+	// kure's constructor no longer injects spec.selector (removed default,
+	// go-kure/kure builder-contract-release-1.md) — required by the API
+	// server with no server-side default, so it must match the template
+	// labels explicitly.
+	ds.Spec.Selector = &metav1.LabelSelector{MatchLabels: appLabels(app.Name)}
 	ds.Spec.Template.Labels = appLabels(app.Name)
 
 	podSpec, err := buildPodSpec(podSpecInput{

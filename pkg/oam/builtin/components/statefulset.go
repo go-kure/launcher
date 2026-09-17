@@ -8,6 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -365,8 +366,9 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	sts.Labels = appLabels(app.Name)
 	sts.Annotations = nil
 	sts.Spec.Template.Labels = appLabels(app.Name)
+	sts.Spec.Selector = &metav1.LabelSelector{MatchLabels: appLabels(app.Name)}
 	kubernetes.SetStatefulSetReplicas(sts, c.Replicas)
-	kubernetes.SetStatefulSetServiceName(sts, c.ServiceName)
+	sts.Spec.ServiceName = c.ServiceName
 	c.StatefulSetSpec.apply(sts)
 
 	podSpec, err := buildPodSpec(podSpecInput{
@@ -399,11 +401,18 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 		if vct.Size != "" {
 			request = resource.MustParse(vct.Size)
 		}
-		pvc := kubernetes.CreateVolumeClaimTemplate(vct.Name, kubernetes.VolumeClaimTemplateOptions{
-			StorageClassName: vct.StorageClass,
-			AccessModes:      accessModes,
-			StorageRequest:   request,
-		})
+		pvc := corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: vct.Name},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: accessModes,
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: request},
+				},
+			},
+		}
+		if vct.StorageClass != "" {
+			pvc.Spec.StorageClassName = &vct.StorageClass
+		}
 		vct.Spec.apply(&pvc)
 		kubernetes.AddStatefulSetVolumeClaimTemplate(sts, pvc)
 	}
@@ -415,8 +424,8 @@ func (c *StatefulsetConfig) createHeadlessService(app *stack.Application) *corev
 	svc := kubernetes.CreateService(c.ServiceName, app.Namespace)
 	svc.Labels = appLabels(app.Name)
 	svc.Annotations = nil
-	kubernetes.SetServiceClusterIP(svc, "None")
-	kubernetes.SetServiceSelector(svc, appLabels(app.Name))
+	svc.Spec.ClusterIP = "None"
+	svc.Spec.Selector = appLabels(app.Name)
 	if c.Port > 0 {
 		kubernetes.AddServicePort(svc, corev1.ServicePort{
 			Name:       "tcp",

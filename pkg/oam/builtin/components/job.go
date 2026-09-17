@@ -427,11 +427,10 @@ func (c *JobConfig) createJob(app *stack.Application) (*batchv1.Job, error) {
 	})
 
 	job := kubernetes.CreateJob(app.Name, app.Namespace)
-	// CreateJob stamps `app: <name>` as both labels and annotations; the
-	// annotation is dropped here for the same reason the other kinds drop it —
-	// it duplicates the label and no consumer reads it. Spec.Selector is left
-	// as CreateJob leaves it, unset: the job controller generates the selector
-	// from its own unique label, which is why `selector` is refused above.
+	// CreateJob is identity-only (go-kure/launcher#361); labels/annotations
+	// are stamped explicitly below instead. Spec.Selector is left unset: the
+	// job controller generates the selector from its own unique label, which
+	// is why `selector` is refused above.
 	job.Labels = appLabels(app.Name)
 	job.Annotations = nil
 	job.Spec.Template.Labels = appLabels(app.Name)

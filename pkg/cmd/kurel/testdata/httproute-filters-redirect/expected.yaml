@@ -18,7 +18,6 @@ spec:
     spec:
       containers:
       - image: shlinkio/shlink:4.3
-        imagePullPolicy: IfNotPresent
         name: shlink
         ports:
         - containerPort: 80

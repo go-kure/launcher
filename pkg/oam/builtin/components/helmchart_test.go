@@ -1123,6 +1123,54 @@ func TestHelmchartConfig_ValuesModeConfigMap_AugmentsLayout(t *testing.T) {
 	}
 }
 
+// TestHelmchartConfig_ValuesModeConfigMap_CarriesAppLabel pins the values
+// ConfigMap's labels/annotations. go-kure/kure's builder-contract release-1
+// (beta.11) made kubernetes.CreateConfigMap identity-only — it no longer
+// stamps `app: <name>` itself — so AugmentLayout now sets cm.Labels/
+// cm.Annotations explicitly (helmchart.go, matching traits/configmap.go's
+// established pattern). Nothing previously asserted this, so the drift would
+// have shipped silently (go-kure/launcher#361).
+func TestHelmchartConfig_ValuesModeConfigMap_CarriesAppLabel(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "metrics",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":      "kube-prometheus-stack",
+			"valuesMode": "configMap",
+			"values":     map[string]any{"replicaCount": 3},
+			"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	aug, ok := cfg.(interface {
+		AugmentLayout(*layout.ManifestLayout) error
+	})
+	if !ok {
+		t.Fatal("configMap-mode config with non-empty Values does not implement LayoutAugmenter")
+	}
+	ml := &layout.ManifestLayout{}
+	if err := aug.AugmentLayout(ml); err != nil {
+		t.Fatalf("AugmentLayout: %v", err)
+	}
+	if len(ml.Resources) != 1 {
+		t.Fatalf("ml.Resources has %d entries, want exactly 1", len(ml.Resources))
+	}
+	cm, ok := ml.Resources[0].(*corev1.ConfigMap)
+	if !ok {
+		t.Fatalf("ml.Resources[0] = %T, want *corev1.ConfigMap", ml.Resources[0])
+	}
+	wantLabels := map[string]string{"app": "metrics"}
+	if !reflect.DeepEqual(cm.Labels, wantLabels) {
+		t.Errorf("ConfigMap labels = %#v, want %#v", cm.Labels, wantLabels)
+	}
+	if cm.Annotations != nil {
+		t.Errorf("ConfigMap annotations = %#v, want nil", cm.Annotations)
+	}
+}
+
 func TestHelmchartConfig_InlineValues_IsNotLayoutAugmenter(t *testing.T) {
 	h := &components.HelmchartHandler{}
 	mk := func(props map[string]any) stack.ApplicationConfig {

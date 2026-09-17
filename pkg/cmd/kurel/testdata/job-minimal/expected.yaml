@@ -13,7 +13,6 @@ spec:
     spec:
       containers:
       - image: ghcr.io/example/migrate:v1.0.0
-        imagePullPolicy: IfNotPresent
         name: migrate
         resources:
           limits:

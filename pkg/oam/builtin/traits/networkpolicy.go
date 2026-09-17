@@ -769,9 +769,9 @@ func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object
 	np := kubernetes.CreateNetworkPolicy(c.componentName+"-allow", app.Namespace)
 	np.Labels = map[string]string{"app": c.componentName}
 	np.Annotations = nil
-	kubernetes.SetNetworkPolicyPodSelector(np, metav1.LabelSelector{
+	np.Spec.PodSelector = metav1.LabelSelector{
 		MatchLabels: map[string]string{"app": c.componentName},
-	})
+	}
 
 	if len(c.Ingress) > 0 {
 		kubernetes.AddNetworkPolicyPolicyType(np, networkingv1.PolicyTypeIngress)

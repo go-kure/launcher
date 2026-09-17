@@ -7,6 +7,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -330,6 +331,7 @@ func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deploym
 	dep.Labels = appLabels(app.Name)
 	dep.Annotations = nil
 	dep.Spec.Template.Labels = appLabels(app.Name)
+	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: appLabels(app.Name)}
 	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
 	if err := applyNonRWXConstraint(dep, app.Name, c.PVCs, c.Replicas, c.DeploymentSpec.Strategy); err != nil {
 		return nil, err

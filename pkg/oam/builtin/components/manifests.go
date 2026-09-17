@@ -1,6 +1,7 @@
 package components
 
 import (
+	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/manifest"
 	"github.com/go-kure/kure/pkg/stack"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -27,7 +28,7 @@ func (h *ManifestsHandler) PropertySchema() map[string]oam.PropertySchema {
 		"url":    {Type: oam.PropertyTypeString, Description: "URL of the manifest YAML source (mutually exclusive with inline)."},
 		"scopeOverrides": {
 			Type:        oam.PropertyTypeArray,
-			Description: "Explicit scope entries for kinds whose scope is otherwise unknown.",
+			Description: "Explicit scope entries, taking precedence over a same-source CRD or kure's own guess (not over a kind the Kubernetes API itself scopes).",
 			Items: &oam.PropertySchema{
 				Type:        oam.PropertyTypeObject,
 				Description: "A single scope override for one apiVersion/kind.",
@@ -61,9 +62,9 @@ func (h *ManifestsHandler) ToApplicationConfig(component *oam.Component, namespa
 // the parsed overrides plus the remaining properties. It splits the property out
 // so the shared parseManifestSource (which rejects unknown keys, and is also used
 // by the crd component) never sees it. Each entry is {apiVersion, kind, scope}
-// where scope is "Cluster" or "Namespaced"; an override only takes effect for a
-// kind whose scope is otherwise unknown (no built-in mapping and no CRD in the
-// same source).
+// where scope is "Cluster" or "Namespaced"; an override takes effect for any
+// kind except one whose scope the Kubernetes API itself governs — see
+// isAPIGovernedScope.
 func parseScopeOverrides(props map[string]any) (map[schema.GroupVersionKind]manifest.ScopeResult, map[string]any, error) {
 	raw, ok := props["scopeOverrides"]
 	if !ok {
@@ -112,12 +113,17 @@ func parseScopeOverrides(props map[string]any) (map[schema.GroupVersionKind]mani
 // objects are left untouched; an unknown-scope object with no namespace fails
 // closed rather than be guessed.
 //
-// overrides supplies an explicit scope for kinds whose scope is otherwise unknown
-// — e.g. a cluster-scoped custom resource (a namespace-less ClusterIssuer) whose
-// CRD is installed out of band rather than bundled in this source. Overrides are
-// consulted only for ScopeUnknown objects, so they can never silently contradict
-// a known built-in or same-source-CRD scope; the fail-closed default is preserved
-// for unknown kinds with no override.
+// overrides supplies an explicit scope for a kind, taking precedence over a
+// same-source CRD's declared scope and over kure's own non-API-governed
+// table (e.g. a cluster-scoped custom resource — a namespace-less
+// ClusterIssuer — whose CRD is installed out of band rather than bundled in
+// this source, or one where a bundled CRD's declared scope is stale). This
+// preserves scopeOverrides' documented meaning as the author's explicit
+// statement: it must not be silently outvoted by a same-source CRD or a kure
+// built-in guess. It is still ignored for a kind whose scope the Kubernetes
+// API itself governs (isAPIGovernedScope) — a manifest cannot redefine that,
+// override or not — and the fail-closed default for a kind with no override
+// and no other scope source is unchanged.
 func stampManifestNamespaces(overrides map[schema.GroupVersionKind]manifest.ScopeResult) func(string, []client.Object) ([]client.Object, error) {
 	return func(namespace string, objs []client.Object) ([]client.Object, error) {
 		if len(objs) == 0 {
@@ -130,11 +136,9 @@ func stampManifestNamespaces(overrides map[schema.GroupVersionKind]manifest.Scop
 			}
 		}
 		for _, o := range objs {
-			scope := manifest.Scope(o, crdScopes)
-			if scope == manifest.ScopeUnknown {
-				if ov, ok := overrides[o.GetObjectKind().GroupVersionKind()]; ok {
-					scope = ov
-				}
+			scope, ok := overrides[o.GetObjectKind().GroupVersionKind()]
+			if !ok || isAPIGovernedScope(o) {
+				scope = manifest.Scope(o, crdScopes)
 			}
 			switch scope {
 			case manifest.ScopeNamespaced:
@@ -152,4 +156,20 @@ func stampManifestNamespaces(overrides map[schema.GroupVersionKind]manifest.Scop
 		}
 		return objs, nil
 	}
+}
+
+// isAPIGovernedScope reports whether o's scope is fixed by the Kubernetes API
+// itself, not by any manifest or table: a CustomResourceDefinition document is
+// always cluster-scoped, and a kind kure's table sources from
+// kubernetes.ScopeSourceBuiltin has its scope defined by the generated
+// upstream types, not by kure's own guess. Both are non-negotiable — a
+// scopeOverrides entry naming one of these kinds is ignored, matching the
+// same reasoning manifest.Scope itself documents for ScopeSourceBuiltin.
+func isAPIGovernedScope(o client.Object) bool {
+	if manifest.IsCRD(o) {
+		return true
+	}
+	gvk := o.GetObjectKind().GroupVersionKind()
+	k, registered := kubernetes.KindForAnyVersion(gvk.GroupVersion().String(), gvk.Kind)
+	return registered && k.ScopeSource == kubernetes.ScopeSourceBuiltin
 }

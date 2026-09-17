@@ -18,7 +18,6 @@ spec:
     spec:
       containers:
       - image: myorg/slowapi:v1.0.0
-        imagePullPolicy: IfNotPresent
         name: slowapi
         ports:
         - containerPort: 80

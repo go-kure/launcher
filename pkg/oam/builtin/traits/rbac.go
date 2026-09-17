@@ -190,11 +190,11 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 	rb := kubernetes.CreateRoleBinding(c.componentName, c.Namespace)
 	rb.Labels = map[string]string{"app": c.componentName}
 	rb.Annotations = nil
-	kubernetes.SetRoleBindingRoleRef(rb, rbacv1.RoleRef{
+	rb.RoleRef = rbacv1.RoleRef{
 		APIGroup: rbacv1.GroupName,
 		Kind:     "Role",
 		Name:     c.componentName,
-	})
+	}
 	kubernetes.AddRoleBindingSubject(rb, rbacv1.Subject{
 		Kind:      rbacv1.ServiceAccountKind,
 		Name:      c.subjectName(),
@@ -223,11 +223,11 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 	crb := kubernetes.CreateClusterRoleBinding(c.componentName)
 	crb.Labels = map[string]string{"app": c.componentName}
 	crb.Annotations = nil
-	kubernetes.SetClusterRoleBindingRoleRef(crb, rbacv1.RoleRef{
+	crb.RoleRef = rbacv1.RoleRef{
 		APIGroup: rbacv1.GroupName,
 		Kind:     "ClusterRole",
 		Name:     c.componentName,
-	})
+	}
 	kubernetes.AddClusterRoleBindingSubject(crb, rbacv1.Subject{
 		Kind:      rbacv1.ServiceAccountKind,
 		Name:      c.subjectName(),

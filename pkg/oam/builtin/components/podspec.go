@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-kure/kure/pkg/kubernetes"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 
@@ -1140,14 +1139,19 @@ type mainContainerInput struct {
 
 // buildMainContainer builds the main container of every workload kind.
 //
-// go-kure/launcher#361: this is the one remaining kubernetes.CreateContainer call in
-// the workload family (buildInitContainer/buildSidecarContainer share the same
-// constructor). It stays until the kure builder-contract release-1 adoption
-// swaps it for a corev1.Container literal, because the constructor still
-// injects `imagePullPolicy: IfNotPresent` and placeholder resources into the
-// goldens — recording that delta belongs to go-kure/launcher#361, not here.
+// go-kure/launcher#361: kubernetes.CreateContainer used to inject
+// `imagePullPolicy: IfNotPresent` and placeholder resources; the kure
+// builder-contract release-1 constructor is identity-only, so this now builds
+// the literal directly. Resources is set unconditionally right below, so the
+// fabricated defaults are dropped rather than replicated (approved delta,
+// go-kure/launcher#361).
 func buildMainContainer(name string, in mainContainerInput) *corev1.Container {
-	container := kubernetes.CreateContainer(name, in.Image, in.Command, in.Args)
+	container := &corev1.Container{
+		Name:    name,
+		Image:   in.Image,
+		Command: in.Command,
+		Args:    in.Args,
+	}
 	container.Resources = buildResourceRequirements(in.Resources)
 	container.Ports = append(container.Ports, in.Ports...)
 	container.Env = append(container.Env, in.Env...)

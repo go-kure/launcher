@@ -6,7 +6,6 @@ metadata:
   name: db
   namespace: default
 spec:
-  podManagementPolicy: OrderedReady
   replicas: 1
   selector:
     matchLabels:
@@ -19,7 +18,6 @@ spec:
     spec:
       containers:
       - image: ghcr.io/example/postgres:v15.0
-        imagePullPolicy: IfNotPresent
         name: db
         ports:
         - containerPort: 5432

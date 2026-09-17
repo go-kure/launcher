@@ -7,6 +7,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -437,6 +438,11 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
 	dep.Labels = deploymentComponentLabels(app.Name)
 	dep.Annotations = nil
+	// kure's constructor no longer injects spec.selector (removed default,
+	// go-kure/kure builder-contract-release-1.md) — required by the API
+	// server with no server-side default, so it must match the template
+	// labels explicitly.
+	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: deploymentComponentLabels(app.Name)}
 	dep.Spec.Template.Labels = deploymentComponentLabels(app.Name)
 	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
 
