@@ -435,21 +435,21 @@ those parsers keep their explicit-null guards regardless. Aligning that
 parser-level layer with this contract is a separate, lower-level concern,
 tracked as `go-kure/launcher#394`, and is not closed by this.
 
-One further surface sits outside the contract and is named here so "the contract
-holds" is not read as "it holds everywhere":
+Two surfaces used to be named here as sitting outside the contract; both are now
+fixed, so the note is historical rather than a live caveat:
 
-- **Capability rendering** (`checkCapabilityValueType`, `capability.go`) is outside
-  it by the scope sentence, not by the flat/full vocabulary split. It reads a
-  *present* null as a type error where the contract reads it as omission — loud
-  rather than silent, so nothing is wrongly accepted, but the message is wrong for
-  the input. Tracked with the switch's missing `default` arm as
+- **Capability rendering** (`checkCapabilityValueType`, `capability.go`) is still
+  outside the contract by the scope sentence — it is a parallel implementation,
+  not a call-through to `validatePropertyValue` — but it now agrees with the
+  contract's own behaviour: a present null reads as absence, matching the handler
+  surface, and the type switch has a `default` arm. See "Capability rendering:
+  types and nulls" below for the current, authoritative description. Fixed as
   `go-kure/launcher#431`.
-
-(A second surface used to be named here: the networkpolicy peer parser reading
-a *typed* nil `namespaceSelector` differently from an untyped one. Fixed as
-`go-kure/launcher#430` — both parsers now route their presence check through
-`oam.IsNullValue`'s reflect-based classification, so a typed nil reads as
-omission on every path that reaches it, the same as an untyped one.)
+- **The networkpolicy peer parser** used to read a *typed* nil `namespaceSelector`
+  differently from an untyped one. Fixed as `go-kure/launcher#430` — both parsers
+  now route their presence check through `oam.IsNullValue`'s reflect-based
+  classification, so a typed nil reads as omission on every path that reaches it,
+  the same as an untyped one.
 
 ## Contract metadata
 
