@@ -43,6 +43,29 @@ func TestCRDHandler_RejectsNonCRDInline(t *testing.T) {
 	}
 }
 
+// A CustomResourceDefinition document is always cluster-scoped; an authored
+// metadata.namespace must be rejected here for the same reason
+// TestManifestsHandler_ClusterScopedWithAuthoredNamespaceRejected rejects it on
+// the sibling manifests component — the Kubernetes API forbids a namespace on
+// a cluster-scoped object, so passing it through defers the failure to apply
+// time. TestCRDHandler_InlineCRDPasses above is the discriminating half: the
+// same CRD with no authored namespace passes.
+func TestCRDHandler_RejectsAuthoredNamespace(t *testing.T) {
+	h := &CRDHandler{}
+	inline := "apiVersion: apiextensions.k8s.io/v1\n" +
+		"kind: CustomResourceDefinition\n" +
+		"metadata:\n  name: widgets.example.com\n  namespace: stray\n" +
+		"spec:\n  group: example.com\n  scope: Namespaced\n" +
+		"  names:\n    kind: Widget\n    plural: widgets\n"
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "widget-crds", Type: "crd",
+		Properties: map[string]any{"inline": inline},
+	}, "widgets")
+	if err == nil || !strings.Contains(err.Error(), "stray") {
+		t.Errorf("want rejection naming the offending namespace, got %v", err)
+	}
+}
+
 func TestCRDHandler_URLHostPolicyDenied(t *testing.T) {
 	h := &CRDHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{

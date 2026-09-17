@@ -1699,7 +1699,10 @@ object would change what the next `Generate` emits.
   asking `manifest.Scope` itself with no CRD context, not by copying kure's
   list, so kure stays the single answer); a manifest cannot redefine those. A kind with no override and
   no other scope source still fails closed when it carries no
-  `metadata.namespace`.
+  `metadata.namespace`. Conversely, a cluster-scoped object (either component,
+  any scope source) that authors `metadata.namespace` is rejected rather than
+  emitted as-is — the Kubernetes API forbids a namespace on a cluster-scoped
+  object, so letting it through would only defer the failure to apply time.
 
 ## StatefulSet-level and claim-template properties
 

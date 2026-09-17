@@ -221,6 +221,45 @@ func TestManifestsHandler_ScopeOverride_IgnoredForUnregisteredClusterBuiltin(t *
 	}
 }
 
+// A cluster-scoped object whose own YAML authors metadata.namespace must be
+// rejected, not silently emitted: the Kubernetes API validates cluster-scoped
+// objects with apimachinery's ValidateObjectMetaAccessor, which forbids a
+// non-empty namespace on that kind ("not allowed on this type") — so passing
+// the authored namespace through would only defer the failure to apply time
+// with a less legible error. TestManifestsHandler_ClusterScopedUntouched above
+// is the discriminating half: the same kind with no authored namespace passes.
+func TestManifestsHandler_ClusterScopedWithAuthoredNamespaceRejected(t *testing.T) {
+	_, err := generateManifests(t, "app-ns",
+		"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: foo\n  namespace: stray\n")
+	if err == nil {
+		t.Fatal("a cluster-scoped object authoring metadata.namespace must be rejected")
+	}
+	for _, want := range []string{"Cluster", "stray"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q must name the scope and the offending namespace (missing %q)", err, want)
+		}
+	}
+}
+
+// Same rejection, reached via a scopeOverrides-declared Cluster scope rather
+// than a built-in one — proves the fix sits in the shared post-determination
+// switch, not only on the manifest.Scope-derived path.
+// TestManifestsHandler_ScopeOverride_ClusterPasses above is the discriminating
+// half: the same override with no authored namespace passes.
+func TestManifestsHandler_ScopeOverride_ClusterWithAuthoredNamespaceRejected(t *testing.T) {
+	overrides := []any{map[string]any{"apiVersion": "fixtures.example.com/v1", "kind": "ClusterWidget", "scope": "Cluster"}}
+	inline := "apiVersion: fixtures.example.com/v1\nkind: ClusterWidget\nmetadata:\n  name: widget\n  namespace: stray\n"
+	_, err := generateManifestsWithOverrides(t, "app-ns", inline, overrides)
+	if err == nil {
+		t.Fatal("a Cluster override on an object authoring metadata.namespace must be rejected")
+	}
+	for _, want := range []string{"Cluster", "stray"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q must name the scope and the offending namespace (missing %q)", err, want)
+		}
+	}
+}
+
 func TestManifestsHandler_ScopeOverride_Validation(t *testing.T) {
 	cases := []struct {
 		name      string
