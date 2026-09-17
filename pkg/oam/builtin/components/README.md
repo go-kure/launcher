@@ -1687,9 +1687,15 @@ object would change what the next `Generate` emits.
   the metadata it had just stamped on.
 - **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
   (`apiVersion`/`kind`/`scope`), the author's explicit statement of a kind's scope.
-  An override outranks a same-source CRD's declared `spec.scope` and kure's own
-  non-API-governed scope-table entry — so it also fixes a *bundled* CRD whose
-  declared scope is stale, not only a kind nothing else can scope. It is ignored
+  An override outranks kure's own non-API-governed scope-table entry — a kind
+  nothing else can scope, e.g. a cluster-scoped custom resource whose CRD is
+  installed out of band. It does **not** outrank a `CustomResourceDefinition`
+  bundled in the same source: that CRD is the definition being applied, so it
+  must agree with the override rather than be overridden by it — a disagreement
+  is rejected (`manifests.go`'s `stampManifestNamespaces`, an error naming both
+  the override's and the CRD's declared scope); an agreeing override still
+  applies, and a kind with no same-source CRD falls back to the non-API-governed
+  case above. It is also ignored
   for a kind the Kubernetes API itself governs (`isAPIGovernedScope`,
   `manifests.go`: a `CustomResourceDefinition` document; any kind whose kure
   scope-table entry comes from `ScopeSourceBuiltin` — i.e. from the generated
