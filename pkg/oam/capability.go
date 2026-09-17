@@ -201,10 +201,11 @@ func applyDefinitionSchema(rendering map[string]any, def *CapabilityDefinition) 
 // typeName is the FLAT capability vocabulary (string/integer/boolean — see
 // acceptedPropertyTypes and flatschema.go), not the full handler vocabulary
 // PropertySchema carries. An empty typeName means the property declares no type
-// and every value is accepted. Two of the three call sites guard on that before
-// calling; the declared-default check in applyDefinitionSchema relies on the ""
-// arm below instead, which is why that arm is the contract rather than a
-// belt-and-braces duplicate of the guards.
+// and every value is accepted. Only the supplied-value check in
+// applyDefinitionSchema guards on that before calling; the loader's default-value
+// check and applyDefinitionSchema's declared-default check both call unconditionally
+// and rely on the "" arm below instead, which is why that arm is the contract
+// rather than a belt-and-braces duplicate of the guards.
 //
 // Anything else is an error rather than silent acceptance. From FILES that is
 // unreachable — LoadCapabilityDefinitions rejects a declared type outside
