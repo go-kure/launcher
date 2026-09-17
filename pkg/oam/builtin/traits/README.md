@@ -473,3 +473,22 @@ so a shared map turns a label added to the Role into a label on the RoleBinding,
 added to the HPA into a label on the PDB. The same rule and the reason behind it are in
 the Conventions section of the component handlers' README
 (`pkg/oam/builtin/components/README.md`).
+
+Since go-kure/launcher#361 these handlers build against kure's release-1 builder
+contract (`go-kure/kure` ≥ `v0.2.0-beta.11`), under which a `Create<Kind>`
+constructor returns TypeMeta plus `metadata.name`/`metadata.namespace` and nothing
+else — no labels, no annotations, no defaults. Every other field on a generated
+object is therefore set by the trait itself, either as a direct field assignment
+(`np.Spec.PodSelector`, `rb.RoleRef`, `crb.RoleRef`, `es.Spec.Target`,
+`cm.Labels`) or through the remaining typed sugar kure still exposes for
+appending to a list (`AddRoleRule`, `AddRoleBindingSubject`,
+`AddNetworkPolicyPolicyType`, `AddConfigMapData`, `AddLabel`). Two practical
+consequences: the `Annotations = nil` lines in `configmap`, `networkpolicy` and
+`rbac` no longer strip anything a constructor stamped and are now defensive only;
+and a *new* trait that emits a selector-bearing kind must write that selector
+itself, because nothing upstream of it will. `CreateIngress` is the one
+constructor in this package whose signature changed with the contract — it no
+longer takes an ingress class, so `ingress` writes `spec.ingressClassName` via
+`SetIngressClassName` only when one was authored, leaving it nil otherwise
+(unchanged output: the old call passed the class in and then nil'd the field back
+out when it was empty).
