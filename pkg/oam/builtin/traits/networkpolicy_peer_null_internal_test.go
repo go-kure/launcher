@@ -224,7 +224,7 @@ type npTestReplicas int32
 type npTestEnabled bool
 
 func TestParseNPPeer_NamedScalarLabelValueStillFormats(t *testing.T) {
-	// go-kure/launcher#440 round-2 regression, F33: this map's values are not
+	// go-kure/launcher#440 round-2 finding F33, named-scalar label values: this map's values are not
 	// limited to what a YAML/JSON decoder produces — RegisterTraitLowering lets Go
 	// code assemble the same map[string]any programmatically, and a named type
 	// whose underlying kind is a scalar has a different dynamic type than the
