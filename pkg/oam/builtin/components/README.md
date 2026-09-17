@@ -1503,8 +1503,12 @@ object would change what the next `Generate` emits.
   every check and then expanded to **zero** objects at apply time with no error at
   all; with pruning enabled an empty desired result also removes whatever the previous
   inventory held. That case is rejected on its own diagnostic ("expands to zero
-  objects"), and it is keyed on a **null** `items` rather than a present one, because a
-  CRD may legitimately carry an object-valued `items` field that must keep compiling.
+  objects"), and it is keyed on a **null** `items` **on a kind ending in `List`**
+  rather than a present one — a CRD may legitimately carry an object-valued `items`
+  field that must keep compiling, and an ordinary, non-`List` kind may equally carry
+  a null-valued `items` field (a plausible spec-field collision) without being an
+  envelope at all. Matches Kustomize's own `inlineAnyEmbeddedLists`, which checks the
+  kind suffix before ever consulting `items`.
 
   The validated object is deep-copied when the config is built, not aliased, so a
   caller that keeps mutating the map it passed in cannot change what was validated.
