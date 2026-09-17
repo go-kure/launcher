@@ -265,15 +265,18 @@ class: `except` is an **exclusion**, so a dropped one renders a block strictly
 wider than the document authored. A mistyped `cidr` now reports itself as mistyped
 (`…ipBlock.cidr: expected string, got int`) instead of as missing.
 
-A `ports` item is the last depth, and the only object here whose key set the
-**schema** cannot close — `port` is an int-or-string union `PropertySchema` has no
-way to express, so the item is declared open and a `protcol` typo used to arrive
-intact. Both of its fields carry the same rule as everything above:
+A `ports` item is the last depth. `port` is an int-or-string union
+`PropertySchema` has no way to express, so it carries no declared type — the
+same idiom `cpu`/`memory` and daemonset's `maxUnavailable`/`maxSurge` use
+elsewhere in this codebase — but it is now a declared property (not left to
+`AdditionalProperties`), so the schema closes this key set too and a `protcol`
+typo is rejected before ever reaching the parser (go-kure/launcher#440 round
+3). Both of its fields carry the same rule as everything above:
 
 ```yaml
 ports:
   - {port: 53, protocol: [UDP]}   # rejected: `…ports[0].protocol: expected string, got []interface {}`
-  - {port: 53, protcol: UDP}      # rejected: `…ports[1]: unsupported key "protcol"`
+  - {port: 53, protcol: UDP}      # rejected: `…ports[1]: unsupported field "protcol" (allowed: port, protocol)`
   - {port: 80.9}                  # rejected: `…ports[2]: 'port' must be a whole number, got 80.9`
   - {port: 4294967376}            # rejected: `…ports[3]: 'port' 4294967376 is out of range (1-65535)`
 ```
