@@ -171,7 +171,9 @@ func stampManifestNamespaces(overrides map[schema.GroupVersionKind]manifest.Scop
 					return nil, errors.Errorf("object %s %q has unknown scope and no metadata.namespace; set an explicit namespace or a scopeOverrides entry (no CRD defining it is present in this source)", gvk.Kind, o.GetName())
 				}
 			case manifest.ScopeCluster:
-				// cluster-scoped: leave as-is
+				if ns := o.GetNamespace(); ns != "" {
+					return nil, errors.Errorf("object %s %q: scope is Cluster but the manifest carries metadata.namespace %q; the Kubernetes API rejects a namespace on a cluster-scoped object (apimachinery's ValidateObjectMetaAccessor: \"not allowed on this type\"), so remove the namespace from the source or correct the scope", gvk.Kind, o.GetName(), ns)
+				}
 			}
 		}
 		return objs, nil

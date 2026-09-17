@@ -38,7 +38,15 @@ func (h *CRDHandler) ToApplicationConfig(component *oam.Component, namespace str
 	return cfg, nil
 }
 
-// requireAllCRDs fails closed if any resolved object is not a CRD.
+// requireAllCRDs fails closed if any resolved object is not a CRD, and rejects
+// a CRD document that authors metadata.namespace: a CustomResourceDefinition is
+// always cluster-scoped, and the Kubernetes API rejects a namespace on a
+// cluster-scoped object (apimachinery's ValidateObjectMetaAccessor: "not
+// allowed on this type"), so an authored namespace here would only defer that
+// failure to apply time with a less legible error. Same reasoning and same
+// rejection shape as stampManifestNamespaces' manifest.ScopeCluster case
+// (manifests.go), for the same object kind emitted through the sibling `crd`
+// component.
 func requireAllCRDs(_ string, objs []client.Object) ([]client.Object, error) {
 	if len(objs) == 0 {
 		return nil, errors.Errorf("source resolved to no manifests")
@@ -47,6 +55,9 @@ func requireAllCRDs(_ string, objs []client.Object) ([]client.Object, error) {
 		if !manifest.IsCRD(o) {
 			gvk := o.GetObjectKind().GroupVersionKind()
 			return nil, errors.Errorf("object %s %q is not a CustomResourceDefinition (the crd component emits only CRDs; use the manifests component for other kinds)", gvk.Kind, o.GetName())
+		}
+		if ns := o.GetNamespace(); ns != "" {
+			return nil, errors.Errorf("object %s %q: a CustomResourceDefinition is cluster-scoped and must not carry metadata.namespace %q", o.GetObjectKind().GroupVersionKind().Kind, o.GetName(), ns)
 		}
 	}
 	return objs, nil
