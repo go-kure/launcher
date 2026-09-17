@@ -283,8 +283,10 @@ A wrong-typed `protocol` was **discarded**, and an absent protocol means TCP, so
 asked for. A numeric `port` went through a bare `int32(…)` conversion, which
 truncates a fractional value and is implementation-defined outside `int32` range:
 `80.9` rendered port 80, and `4294967376` also rendered port 80. A null or absent
-`protocol` still means TCP, every integer kind a decoder or a lowering rule can
-produce is still accepted, and a named port string is untouched.
+`protocol` still means TCP, every builtin integer kind a YAML/JSON decoder can
+produce is still accepted, and a named port string is untouched. Unlike a
+matchLabels value, a named Go integer type (from a lowering rule) is rejected
+here rather than accepted.
 
 ### Null `ingress` / `egress`
 

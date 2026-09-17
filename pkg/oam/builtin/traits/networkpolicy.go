@@ -592,9 +592,12 @@ var validNPPortKeys = map[string]bool{
 //
 // The 1-65535 bound is the API server's own (k8s.io/apimachinery
 // pkg/util/validation IsValidPortNum), applied here so the document fails at the
-// line that wrote it rather than at apply time. Every integer kind a YAML/JSON
-// decode or a lowering rule assembling properties in Go can produce is accepted,
-// matching npLabelValue's reach rather than the previous int/float64 pair.
+// line that wrote it rather than at apply time. Every builtin integer kind a
+// YAML/JSON decode can produce is accepted, wider reach than the previous
+// int/float64 pair -- but this is still an exact type switch, unlike
+// npLabelValue's reflect.Kind classification: a named integer type (a Go
+// lowering rule's own domain type) is rejected here, since a named type has no
+// established rendering contract the way a scalar label value's %v does.
 func npPortNumber(value any, path string) (int32, bool, error) {
 	var n int64
 	switch v := value.(type) {
