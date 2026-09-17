@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -329,7 +330,7 @@ var validNPIPBlockKeys = map[string]bool{
 // networking/v1/types.go:199-222). The other
 // metav1.LabelSelector reader in this repo — parseLabelSelector
 // (components/volumeclaim_spec.go), which takes its `selector` and `matchLabels`
-// through optionalObject — calls the same value absence, so the widest and the
+// through parseObjectField — calls the same value absence, so the widest and the
 // narrowest reading of one input differed by a Go type no document can express
 // (go-kure/launcher#430).
 //
@@ -407,12 +408,21 @@ var validNPSelectorKeys = map[string]bool{
 // it covers. Scalars are unaffected: a YAML/JSON decoder produces string, bool and
 // one of the numeric kinds for an ordinary label value, and each keeps its existing
 // %v rendering (go-kure/launcher#430).
+//
+// Classified by reflect.Kind, not by an exact type switch (go-kure/launcher#440
+// round-2 regression, F33): this map's values are not limited to what a YAML/JSON
+// decoder produces. RegisterTraitLowering lets Go code assemble the same
+// map[string]any programmatically, and a named type whose underlying kind is a
+// scalar — `type Environment string; Environment("prod")` — has a different
+// dynamic type than `string`, so `case string:` never matched it even though %v
+// renders it identically. A composite value's Kind (Map, Slice, Struct, Ptr, ...)
+// still falls through to false; only the scalar kinds render safely.
 func npLabelValue(value any) (string, bool) {
-	switch value.(type) {
-	case string, bool,
-		int, int8, int16, int32, int64,
-		uint, uint8, uint16, uint32, uint64,
-		float32, float64:
+	switch reflect.ValueOf(value).Kind() {
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
 		return fmt.Sprintf("%v", value), true
 	default:
 		return "", false

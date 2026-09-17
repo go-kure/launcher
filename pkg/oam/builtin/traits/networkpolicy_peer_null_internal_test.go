@@ -17,7 +17,7 @@ import (
 // parseNPPeer's bare `.(map[string]any)` assertion with ok=true and yield the
 // EMPTY selector, so one value read as the widest possible scope here and as
 // absence in the repo's other metav1.LabelSelector reader (parseLabelSelector in
-// components/volumeclaim_spec.go, via optionalObject).
+// components/volumeclaim_spec.go, via parseObjectField).
 //
 // These tests pin both halves. The null rows are the fix; the empty-object rows
 // are the control that the fix did not simply collapse empty into absent, which
@@ -210,6 +210,42 @@ func TestParseNPPeer_NonStringLabelValueStillFormats(t *testing.T) {
 		"replicas": "3",
 		"gen":      "7",
 		"tier":     "web",
+	} {
+		if got := peer.PodSelector.MatchLabels[key]; got != want {
+			t.Errorf("matchLabels[%s] = %q, want %q", key, got, want)
+		}
+	}
+}
+
+// npTestEnvironment and npTestReplicas exist only to give a scalar value a
+// different dynamic type than the builtin one, for TestParseNPPeer_NamedScalarLabelValueStillFormats.
+type npTestEnvironment string
+type npTestReplicas int32
+type npTestEnabled bool
+
+func TestParseNPPeer_NamedScalarLabelValueStillFormats(t *testing.T) {
+	// go-kure/launcher#440 round-2 regression, F33: this map's values are not
+	// limited to what a YAML/JSON decoder produces — RegisterTraitLowering lets Go
+	// code assemble the same map[string]any programmatically, and a named type
+	// whose underlying kind is a scalar has a different dynamic type than the
+	// builtin one. An exact type switch (`case string:`) never matched
+	// npTestEnvironment("prod") even though %v renders it identically to a plain
+	// string; a lowering rule that previously produced a valid label started
+	// failing transformation with no change to its own logic.
+	peer, err := parseNPPeer(map[string]any{
+		"podSelector": map[string]any{"matchLabels": map[string]any{
+			"env":      npTestEnvironment("prod"),
+			"replicas": npTestReplicas(3),
+			"enabled":  npTestEnabled(true),
+		}},
+	}, "from[0]")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for key, want := range map[string]string{
+		"env":      "prod",
+		"replicas": "3",
+		"enabled":  "true",
 	} {
 		if got := peer.PodSelector.MatchLabels[key]; got != want {
 			t.Errorf("matchLabels[%s] = %q, want %q", key, got, want)
