@@ -260,6 +260,45 @@ func TestManifestsHandler_ScopeOverride_ClusterWithAuthoredNamespaceRejected(t *
 	}
 }
 
+// clusterIssuerYAML is cert-manager's ClusterIssuer — a kind kure actually
+// registers (unlike the fictitious ClusterWidget above), whose scope comes
+// from a source-code marker on the vendored type rather than the Kubernetes
+// API itself (kure's generated table records it as
+// `ScopeSource: "marker"`, not `"builtin"`) — a "registered, non-API-governed"
+// kind. Neither ClusterWidget (never registered) nor PriorityClass below
+// (unregistered but in isAPIGovernedScope's residual cluster-scoped probe)
+// exercises this branch: kure's own registered, marker-sourced table entry.
+const clusterIssuerYAML = "apiVersion: cert-manager.io/v1\nkind: ClusterIssuer\nmetadata:\n  name: ci\n"
+
+func TestManifestsHandler_RegisteredMarkerScopedKind_UntouchedWithoutOverride(t *testing.T) {
+	got, err := generateManifests(t, "app-ns", clusterIssuerYAML)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(got) != 1 || got[0] != "ClusterIssuer:" {
+		t.Errorf("kure's table registers ClusterIssuer cluster-scoped (marker-sourced); it must not be stamped, got %v", got)
+	}
+}
+
+// The discriminating half: a Namespaced override must outrank kure's own
+// registered table entry for a marker-sourced kind exactly as it does for an
+// unregistered one (TestManifestsHandler_ScopeOverride_Namespaced above) —
+// proving the outranking rule keys on ScopeSource (isAPIGovernedScope), not
+// on whether kure registers the kind at all. A regression that widened
+// isAPIGovernedScope's `registered` branch to ignore ScopeSource would pass
+// every existing override test — none of them use a registered, non-builtin
+// kind — yet fail this one.
+func TestManifestsHandler_ScopeOverride_OutranksRegisteredMarkerScopedKind(t *testing.T) {
+	overrides := []any{map[string]any{"apiVersion": "cert-manager.io/v1", "kind": "ClusterIssuer", "scope": "Namespaced"}}
+	got, err := generateManifestsWithOverrides(t, "app-ns", clusterIssuerYAML, overrides)
+	if err != nil {
+		t.Fatalf("namespaced override on a registered marker-scoped kind should pass: %v", err)
+	}
+	if len(got) != 1 || got[0] != "ClusterIssuer:app-ns" {
+		t.Errorf("override must outrank kure's registered table for a non-API-governed kind, got %v", got)
+	}
+}
+
 func TestManifestsHandler_ScopeOverride_Validation(t *testing.T) {
 	cases := []struct {
 		name      string
