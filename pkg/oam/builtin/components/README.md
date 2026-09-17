@@ -1456,11 +1456,12 @@ object would change what the next `Generate` emits.
   and its diagnostic cannot be reproduced or asserted in a test. The same
   ordering rule applies to the other three parsers in this package that report
   a bad map entry by key — `parseResourceList`, `rejectUnknownKeys` and
-  `parseManifestSource`. An explicit **null** `affinity` is **absence** — no block is
-  emitted and nothing is enabled — matching what `pkg/oam`'s own property
-  validation already does with a null under an optional property; without
-  that, `affinity:` with no value validated against the published schema and
-  then failed to convert, while the same value built in Go turned pod
+  `parseManifestSource`. An explicit **null** `affinity` is **absence** —
+  Launcher supplies no explicit affinity settings, exactly as when the
+  property is omitted — matching what `pkg/oam`'s own property validation
+  already does with a null under an optional property; without that,
+  `affinity:` with no value validated against the published schema and then
+  failed to convert, while the same value built in Go turned pod
   anti-affinity on with every default. A null on a sub-field *inside* a
   present block is also absence — it takes the same default an omitted
   sub-field takes (go-kure/launcher#444 established this nested-null contract
