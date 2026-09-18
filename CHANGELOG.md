@@ -1,6 +1,353 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.22] - 2026-09-18
+
+### Added
+
+- Enforce environment policy on container securityContext.capabilities
+- Validate generated manifests against flux-schema
+- Surface per-app consumed capability keys on the transform result
+- Partition template-delivery helmchart output by Helm hook group
+- Detect the govulncheck env pin and keep golangci-lint pins in sync
+- Gate go-kure/.github pin bumps on their real impact
+- Shared pod-level builder with full corev1.PodSpec fidelity
+- Project DaemonSetSpec fields onto the daemonset kind
+- Add the job component with the full JobSpec surface
+- Share the DeploymentSpec surface with webservice and worker
+- Project podFailurePolicy onto job and cronjob
+- Reject undeclared authored component and trait properties
+- Re-vendor the forbidden-terms guard on pin bump
+- Adopt kure builder-contract release-1 (go-kure/launcher#361)
+
+### Build
+
+- Migrate to Renovate and make the version guard real
+- Update toolchain
+- Update module golang.org/x/mod to v0.40.0
+- Update dependency goreleaser to v2.18.0
+- Update module github.com/google/go-containerregistry to v0.22.0
+- Update dependency syft to v1.51.1
+- Update dependency golangci-lint to v2.13.2
+- Update dependency flux2 to v2.9.5
+- Update dependency go to v1.26.7
+- Update dependency git-cliff to v2.14.1
+- Update module google.golang.org/grpc to v1.83.1 [security]
+- Update module golang.org/x/crypto to v0.56.0 [security]
+- Update module github.com/google/go-containerregistry to v0.22.1
+- Update dependency goreleaser to v2.18.1
+- Bump Go to 1.26.8
+- Update module golang.org/x/mod to v0.41.0
+- Update module google.golang.org/grpc to v1.83.2 [security]
+- Update dependency hugo to v0.166.0
+- Update module golang.org/x/vuln to v1.8.0
+- Update dependency flux-schema-plugin to v0.13.0
+- Update dependency goreleaser to v2.18.2
+- Update dependency syft to v1.52.0
+
+### CI
+
+- Allow manual re-publish of an existing tag
+- Guard dispatch ref and correct the re-run recovery guidance
+- Refuse a dispatch over a live release, split the rerun rows
+- Serialize the wrapper, bound the re-run rows, flag docs rollback
+- Probe for an existing release on re-attempts, not just dispatches
+
+### Document Format
+
+- Enforce policy and support securityContext on init/sidecar containers
+- Externalize helmchart values via configMap valuesMode
+- Preserve ConfigMap-name uniqueness under truncation; reclassify changelog
+- Document configMap-mode reconciliation timing
+- Drop hand-written CHANGELOG entry, clarify README
+- Complete cronjob CronJobSpec/JobSpec projection
+- Document cronjob's CronJobSpec/JobSpec fields
+- Validate pod-level names and gate privileged pod fields
+- Pod-level cross-field rules for host namespaces, IPs and UIDs
+- Stop declaring a string type on the rolling-update knobs
+- Cite the strict-parsing contract behind the selector rejection
+- Project the StatefulSetSpec fields onto the statefulset kind
+- Project the full PersistentVolumeClaimSpec onto volumeClaimTemplates
+- Infer the update-strategy type and close three claim-spec gaps
+- Add the kind-named deployment component
+- Publish raw affinity, tolerations and topologySpreadConstraints on deployment
+- Complete the corev1.Toleration projection
+- Pin the raw scheduling projection and state the daemonset break
+
+### Documentation
+
+- Correct design.md overclaims and cross-repo issue refs
+- Correct template-delivery release-identity wording
+- Add AI agent gates (A1-A7) section
+- Correct README claims superseded by the capability/divisor enforcement fix
+- Fix inaccurate zero-divisor test comment
+- Record pkg/patch disposition as a standalone post-generation library
+- Address codex review on #308
+- Mark package composition as deferred in the Helm comparison
+- Drop the cross-package composability overstatement and the universal-typed claim
+- Stop implying PropertySchemaProvider closes the typing gap; name lowering rules
+- Add missing ContainerCapabilities field to policy struct example
+- Add type-name covenant and document-format lifecycle
+- Fix covenant/lifecycle accuracy issues from round-1 review
+- Fix remaining accuracy and gate-A7 issues from round-2 review
+- Fix CapabilityDefinition scope (trait-only, not component)
+- Correct PATH-ordering troubleshooting note for pinned golangci-lint
+- Clarify why --output's path is exempt from the CLI Safety path-escape rule
+- Correct README errors.As exception list
+- Document helmchart valuesMode configMap externalization
+- Document kurel build's LayoutAugmenter rejection
+- Document PolicyResult.ConsumedCapabilities (#290)
+- Document LayoutAugmentationCoverage and hook-group partitioning
+- Drop review-process provenance from durable comments
+- Describe the sync-go-version.sh mechanism
+- Explain strip-ack/rerun gotcha on pin-impact-ack
+- Note the strip-ack rerun gotcha in the pin-impact-ack section
+- Fix pin-impact-ack rerun gotcha wording (synchronize/reopened + fork scoping)
+- Align the LowerRaws and loweringDoc comments with pair dispatch
+- Document ServiceAccountNamer and the rbac trait's binding subject
+- State the config-name/application-name invariant
+- Correct why each stricter daemonset rule is stricter
+- Drop the cross-package README link the site link check rejects
+- Reattach the parseDeploymentIntOrPercent doc comment
+- Note that trait-level serviceName and netpol synthesis do not compose
+- Correct the last two workload-kind counts, and guard them
+- Say where null-as-omission stops, and pin the boundary
+- Qualify the bare issue references in the nested-null test
+- Stop claiming what the controller does with a paused deployment
+- Record why the run-to-completion kinds carry no auto health check
+- Finish the six-to-seven count migration and widen its guard
+- Correct the job force-replace workaround, which did not work
+- Name the three kinds instead of counting them
+- Stop claiming these kinds refused the five keys before
+- Correct four prose claims about the authored-properties check
+- Stop the schemaVersion aside from restating the additive test short a conjunct
+- Correct the engineTraitProperties note on what expose/ingress/httproute did before
+- Correct four inaccurate claims in the components README
+- Bound two more claims the parser fix left unsupported
+- Drop a wrong kind count from the parseAffinity test comment
+- Replace the parseStringField convention universal with the exceptions
+- Correct the securityContext policy-hook claim
+- Scope the container securityContext policy claim
+- Detect partial publishes and cover post-publication recovery
+- Key the completeness check on the tag, drop the scripted deletion
+- Use the goreleaser job conclusion as the completion oracle
+- Pin the attempt, key on not-success, state two limits
+- Let the command flag carried-over job rows
+- Find the attempt that ran goreleaser, not the latest
+- Require positive release ownership; correct the runner label
+- Replace the partial-publish deletion branch with escalation
+- Split transient re-run recovery, document the docs-deploy race
+- Close the --failed class by enumeration, add the guard-failure row
+- Correct two more statements of the guard's old trigger condition
+- Wait for the corrective docs deploy, not just the recovered one
+- Replace false universal wrong-type claims with per-parser ones
+- Narrow the new wrong-type disclaimer's own blanket claim
+- Don't overstate null-affinity as 'nothing is enabled' (codex round 2)
+- Scope the passthrough IsList residual to zero in-repo producers
+- Fix three wording nits found by codex round 2 confirm
+- Describe IsNullValue as the nil predicate it is
+- Scope npPortNumber's accepted-types claim to builtins only
+- Give bare F33/F36/round identifiers descriptive subjects
+- State the aliasing test's boundary and cite #425
+- Drop the wrong direction count from the daemonset summary
+- Name the two surfaces the null contract does not bind
+- Stop optionalInt64's comment asserting what #394 removes
+- Close out the remaining stale null/shape-check claims
+- Sync mapped docs with the kure release-1 builder contract
+- Describe a conflicting same-source scopeOverrides CRD as rejected
+
+### Fixed
+
+- Sync vendored downstream-references guard, cover config files
+- Pin downstream-references gate and drift-check to one commit
+- Retype renderChart seam for kure's variadic RenderChart
+- Pin the guard drift-check ref to the bumped action digest
+- Add missing enforceCapabilities calls and reject zero divisors
+- Revert enforceCapabilities addition, fix stale divisor comment
+- Pin the guard drift-check ref to the bumped action digest
+- Derive the guard drift-check ref from the action pin, not a copy
+- Fully qualify the PR reference, survive errexit on a missing pin
+- Enforce resource maxima against intrinsic workload defaults
+- Resolve follow-up-issue TODO, skip enforcement when no maxima set, widen output-unchanged assertions
+- Reject every capability when forbidden list contains ALL
+- Reconcile capabilities enforcement docs, qualify issue reference
+- Resolve golangci-lint version drift between mise.toml and the Makefile/CI pins
+- Use the canonical golangci-lint install.sh URL
+- Enforce pinned golangci-lint version; correct gosec rule ID in nolint
+- Don't mask a failed golangci-lint install behind a piped shell
+- Set TypeMeta on values ConfigMap and stop wrapping template delivery
+- Don't reject template delivery on inherited valuesMode default
+- Reject kurel-build components needing layout-level resources
+- Fail loudly when flux CLI or plugin list fails in validate-manifests
+- Reword downstream-consumer references caught by check-forbidden-terms
+- Correct hook-ordering wording; modernize new code
+- Harden hook-group coverage test, fallback pin, and docs
+- Normalize multi-event helm.sh/hook annotations before hook-group split
+- Drop excluded hook tokens from mixed excluded+custom annotations
+- Don't drop degenerate comma-only hook annotations; fix stale citations
+- Harden parity scripts and the govulncheck marker regex
+- Widen tool-version pin-detection regexes to any formatting
+- Use the same regex for ci.yml count and value extraction
+- Sync tool-version-parity docs and precommit gate
+- Anchor govulncheck doc-sync extraction to the correct occurrence
+- Wire govulncheck doc check into CI, harden checker and syncer
+- Doc-sync gaps and CI_VAL whitespace trim for govulncheck checks
+- Sed -i -E portability + DEVELOPMENT.md doc-sync gaps
+- Tolerate trailing whitespace on the ci.yml pin line; fold golangci-lint recovery instructions into all synced files
+- Scope the govulncheck-docs rule to its own customManager
+- Strip trailing whitespace from Makefile golangci-lint pin
+- Reject duplicate golangci-lint source pins in mise.toml
+- Tolerate mise.toml = spacing in duplicate-pin guard
+- Tolerate TOML single-quote pins; align syncer's mise parser with the checker
+- Scope mise.toml pin matching to [tools]; guard syncer against duplicate pins
+- Tolerate whitespace around the [tools] table header
+- Recognize TOML quoted-key [tools] table headers
+- Stop the pin-impact gate silently swallowing its own exit code
+- Guard --old/--new argument parsing and non-ahead compares
+- Add pin-impact-ack override, harden multi-step/dot-segment gaps
+- Recognize uses:/run: written as the step's first YAML key
+- Rerun pin-impact on label change, detect compound-line source
+- Scan .yaml workflows too, reject mixed deps in one run block
+- Bind pin-impact-ack to the reviewed head SHA
+- Skip label mutation on fork PRs, fix token auth, use immutable base SHA
+- Fail closed on ack-strip failure, cover reopened PRs, tighten perms
+- Wire go.mod/versions.yaml/README badge into the mise-sync postUpgradeTasks
+- Anchor go.mod's go-directive sed on content, not line number
+- Sync go.mod's go directive across all three modules
+- Drop dead self-substitution sed, harden go.mod directive sync
+- Widen go-version postUpgradeTasks fileFilters to every workflow file
+- Wire sync-versions.sh generate into the go-version postUpgradeTasks chain
+- Sed portability, AGENTS.md sync, and nested go.mod path-filter coverage
+- Fail loudly when AGENTS.md is missing in check-go-version
+- Commit the generated compatibility.md instead of leaving it untracked
+- Let a raw document lowering rule claim its own apiVersion
+- Scope a raw rule's settled apiVersion to its own seed
+- Bind a raw seed's settle group to the registry key that matched
+- Spell the raw apiVersion hook RawDocumentAPIVersion, not APIVersion
+- Pre-reserve pass-through Applications by API group, not full apiVersion
+- Enforce the PodSpec.OS contract and close the podResources object
+- Address review round on the shared pod builder
+- Forward ServiceAccountNamer and keep Windows pods legal
+- Single-source the ServiceAccount identity across the workload kinds
+- Synthesize gateway rules from the hostnames shorthand
+- Stop claiming upstream parity for two stricter daemonset rules
+- Give every generated object its own label map
+- Tighten claim-spec validation and pin nested schema parity
+- Reject a signed maxUnavailable percentage
+- Close a MaxStorageSize bypass and three silent-acceptance gaps
+- Close the claim resource-list schema to storage
+- Reject non-string name, size and mountPath on claim entries
+- Treat a null volumeClaimTemplates as absence, not a type error
+- Read an explicit null as omission on every optional field added here
+- Classify a typed nil as null, and read null lists as absence
+- Read an explicit null storage quantity as omitted
+- Deep-copy projected spec values instead of aliasing the config
+- Compare both defaulted halves of the deadline rule, and check replicas
+- Admit the deployment kind through the parser and the health-check map
+- Qualify issue references and harden two test assertions
+- Read an explicit null as omission on every deployment-spec field
+- Read every top-level null as omission, bound both rolling-update percentages
+- Read a claim's whole access-mode set in the non-RWX guard
+- Deep-copy the deployment's projected spec values
+- Skip the auto health check when a deployment is paused
+- Make the maxFailedIndexes Indexed-mode refusal reachable
+- Refuse the two job values that were read as omissions
+- Make job reachable from the traits it is allowed to carry
+- Refuse the empty podReplacementPolicy the parser was dropping
+- Refuse the cronjob keys a retyped job document leaves behind
+- Wait on the job, since kstatus can read one
+- Stop the job from dropping a template and waiting on a paused one
+- Refuse the dotted job name that admission would reject
+- Accept the engine-read `scope` property on every authored trait
+- Reject a property authored with the wrong container type
+- Drop the spec-level traits key that made the quickstart unparseable
+- Guard the test job's build-essential install with command -v
+- Guard on make as well as gcc, and qualify the issue reference
+- The guard's message must not claim publication succeeded
+- Probe the release on every path, fail closed on an undetermined answer
+- Retry the release probe, and stop the waiver claiming more than it can
+- Read an explicit null as absence in every components parser
+- Read an explicit null as absence in the six comma-ok parsers
+- Re-point the inherited optional* call sites at their delegates
+- Route remaining null-omission checks through authoredValue
+- Cite the issue that actually tracks the parseAffinity sub-fields
+- Close the capability type switch and read a null rendering as absent
+- Type-check a declared default on the Go-built path too
+- Address codex round-1 review findings for #431 null contract
+- Reject a mistyped postgresql affinity block instead of discarding it
+- Close the null and nodeSelector holes in postgresql affinity
+- Report the lowest-sorted bad map key, not whichever one iteration reaches
+- Follow #444's optional*-wrapper removal in postgresql affinity
+- PodAntiAffinityType null must be absence too (codex round 1)
+- Reject a list-shaped passthrough object
+- Reject passthrough envelopes with a null items, and freeze the validated object
+- Make the passthrough list rejection binding, and finish the freeze
+- Validate the emitted passthrough body in one place
+- Scope the null-items rejection to List-suffixed kinds, and fix nil-slice freeze (codex round 1)
+- Read a null NetworkPolicy peer selector as absent, not as empty
+- Reject a null NetworkPolicy peer envelope
+- Stop a null ingress/egress satisfying the joint requirement
+- Reject a null ingress/egress rule element
+- Reject a malformed peer selector instead of widening it
+- Reject a null matchLabels value instead of rendering "<nil>"
+- Reject a malformed NetworkPolicy key or label value, don't widen
+- Reject a wrong-typed protocol and a lossy numeric port
+- Classify NetworkPolicy label values by reflect.Kind, not exact type
+- Classify NetworkPolicy port numbers by reflect.Kind too
+- Declare the NetworkPolicy port schema instead of leaving it open
+- Classify NetworkPolicy port-name and protocol by reflect.Kind
+- Scan matchExpressions for matchLabelKeys clashes
+- Reject mistyped tolerations, copy projected scheduling
+- Reject scheduling shapes the apiserver refuses
+- Read a nested null in a toleration entry as omission
+- Close the admission and schema gaps the last fix left open
+- Require matchFields values, make the parity guard bidirectional
+- Normalize an emitted explicit null, and close two escapes in the matchFields parity guard
+- Strip an emitted null unconditionally, without a PlatformReserved exception
+- State the null contract and align its readers
+- Narrow the Enum rule and reach the null guard past a missing Items
+- Key the built-in Enum check to the rule the validator enforces
+- Correct the tolerationSeconds row's compatibility class and close the daemonset coverage gap
+- Finish the optional*-to-parse* rename after the #440 rebase
+- Restore authored-null handling, add matchLabelKeys/mismatchLabelKeys overlap check
+- Validate required node-affinity label values, not preferred
+- Close three defects the release-1 contract adoption exposed
+- Stop an override outvoting a bundled CRD, and a panic at emission
+- Reject an authored namespace on a cluster-scoped manifest or CRD
+
+### Testing
+
+- Rename derived-memory-limit test to match what it proves
+- Cover PatchError.Error() and Unwrap; fix patch README claim
+- Cover helmchart valuesMode: configMap and its LayoutAugmenter wrapper
+- Fix dot-boundary index in ConfigMap-name truncation test
+- Cover PolicyResult.ConsumedCapabilities
+- Cover hook-group partitioning, DNS-1123 safety, and coverage predicate
+- Cover coverage-forward, prune-protection e2e, and fail-closed guard
+- Pin grouping-key oracles; drop bare plan-step references
+- Cover cronjob CronJobSpec/JobSpec fields and widened schedule
+- Assert full unrecognized-key messages
+- Assert hostnames survive alongside authored gateway rules
+- Cover the generated claim spec end to end
+- Pin three guards that survived deletion
+- Observe every nested unknown-key guard on a claim entry
+- Rename the claim-schema walker after a post-rebase collision
+- Pin the shared non-RWX guard's effect on the older kinds
+- Fail rather than panic on an unset replicas pointer
+- Pin that the non-RWX strategy guard survives scale-to-zero
+- Fail rather than panic in the deployment aliasing mutator
+- Pin worker's topology spread under a non-noop policy
+- Close three oracle gaps in the worker scheduling tests
+- Pin whole scheduling objects, not field subsets
+- Correct two over-broad scope claims in scheduling test comments
+- Record the cross-PR cleanup where the next reader will hit it
+- Pin IsNullValue directly, including the shapes nothing reached
+- Pin that an absent NetworkPolicy port key errors, not panics
+- Walk all four schemaPodSpec flag combinations in the ordering guard
+- Pin the half of the Lt/Gt check no test could reach
+- Guard the second-render index in the aliasing control
+- Guard the new preferred-affinity test before indexing
+
 ## [0.1.0-alpha.21] - 2026-08-21
 
 ### Added
@@ -140,6 +487,10 @@ All notable changes to this project will be documented in this file.
 - Cover F5 capability-def schema defaults for trait-lowering rules
 - Cover ContractDescriber/HandlerContracts and Origin.Rule identity
 - Fix vacuous assertion in untouched-component rule-identity test
+
+### Release
+
+- V0.1.0-alpha.21
 
 ## [0.1.0-alpha.20] - 2026-08-03
 
