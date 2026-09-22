@@ -15,7 +15,7 @@ This document provides an overview of all GitHub Actions workflows used in the l
 | [Release](#release-workflow) | `release-publish.yml` | version tags, `workflow_dispatch` | Release with GoReleaser, SBOM, docs deploy |
 | [Create Release](#create-release-workflow) | `release-create.yml` | `workflow_dispatch` | Pre-release test gate + tag creation |
 | [PR Review](#pr-review-workflow) | `pr-review.yml` | pull_request, merge_group | Two-pass AI code review via claude-max-proxy |
-| [Claude](#claude-workflow) | `claude.yml` | PR/issue/comment events | @claude AI assistant |
+| [Claude](#claude-workflow) | `claude.yml` | issue/comment/review events mentioning `@claude` | @claude AI assistant |
 
 The last five workflows are thin callers that delegate to reusable workflows in
 [go-kure/.github](https://github.com/go-kure/.github). See
@@ -747,10 +747,12 @@ with:
 
 ### Triggers
 
-- PR events (opened, synchronize, ready_for_review, reopened)
 - Issue comments and PR review comments (when `@claude` is mentioned)
 - Issues opened or assigned
 - PR reviews submitted
+
+No `pull_request` trigger: a `pull_request` event carries no `@claude` mention, so the job
+would only start and immediately skip (go-kure/.github#222, fixed org-wide in #223).
 
 ### Purpose
 
