@@ -752,7 +752,8 @@ with:
 - PR reviews submitted
 
 No `pull_request` trigger: a `pull_request` event carries no `@claude` mention, so the job
-would only start and immediately skip (go-kure/.github#222, fixed org-wide in #223).
+would only start and immediately skip (go-kure/.github#222, fixed org-wide in
+go-kure/.github#223).
 
 ### Purpose
 
