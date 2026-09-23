@@ -1953,10 +1953,9 @@ func isExplicitNull(value any) bool {
 //   - affinity.podAntiAffinityType must let an explicit "" reach its enum check
 //     so it is refused by name; parseStringField would report "" as absent and
 //     fall back to the "preferred" default instead. parseAffinity therefore
-//     reads it with a direct type assertion, as does the postgresql handler
-//     (go-kure/launcher#448); go-kure/launcher#452 keeps that shape when it
-//     converts parseAffinity's other sub-fields to the presence-reporting
-//     helpers.
+//     reads it through authoredValue plus a type assertion that errors, as
+//     does the postgresql handler (go-kure/launcher#448); its other three
+//     sub-fields use the presence-reporting helpers (go-kure/launcher#452).
 //
 // The convention is right for the remaining callers because "" and absent
 // genuinely mean the same thing there — httpGet.path defaults to "/",
@@ -2952,22 +2951,55 @@ func parseAffinity(props map[string]any) (AffinityConfig, error) {
 		TopologyKey:         "kubernetes.io/hostname",
 		PodAntiAffinityType: "preferred",
 	}
-	if v, ok := raw["enablePodAntiAffinity"].(bool); ok {
-		cfg.EnablePodAntiAffinity = v
+	// Presence-reporting reads rather than bare comma-ok: a sub-field authored
+	// with the wrong type is refused by name instead of being discarded while
+	// the default above is emitted (go-kure/launcher#452). This is the same
+	// shape the postgresql handler's own affinity block took in
+	// go-kure/launcher#448; keep the two converged.
+	enabled, err := parseBoolField(raw, "enablePodAntiAffinity", "affinity.enablePodAntiAffinity")
+	if err != nil {
+		return AffinityConfig{}, err
 	}
-	if v, ok := raw["topologyKey"].(string); ok && v != "" {
-		cfg.TopologyKey = v
+	if enabled != nil {
+		cfg.EnablePodAntiAffinity = *enabled
 	}
-	if v, ok := raw["podAntiAffinityType"].(string); ok {
-		cfg.PodAntiAffinityType = v
+	// parseStringField's empty-means-absent matches the old `ok && v != ""`
+	// guard: an authored `topologyKey: ""` keeps the default.
+	topologyKey, present, err := parseStringField(raw, "topologyKey", "affinity.topologyKey")
+	if err != nil {
+		return AffinityConfig{}, err
+	}
+	if present {
+		cfg.TopologyKey = topologyKey
+	}
+	// Deliberately not parseStringField: it reports "" as absent, and an explicit
+	// empty podAntiAffinityType has to reach the enum switch below to be refused
+	// rather than fall back to "preferred". authoredValue still reads a null as
+	// absence, per the nested-null contract.
+	if v, present := authoredValue(raw, "podAntiAffinityType"); present {
+		paat, isString := v.(string)
+		if !isString {
+			return AffinityConfig{}, errors.Errorf("affinity.podAntiAffinityType: must be a string, got %T", v)
+		}
+		cfg.PodAntiAffinityType = paat
 	}
 	switch cfg.PodAntiAffinityType {
 	case "preferred", "required":
 	default:
-		return AffinityConfig{}, errors.Errorf("invalid podAntiAffinityType %q: must be \"preferred\" or \"required\"", cfg.PodAntiAffinityType)
+		return AffinityConfig{}, errors.Errorf("affinity.podAntiAffinityType: invalid value %q: must be \"preferred\" or \"required\"", cfg.PodAntiAffinityType)
 	}
-	if ns, ok := raw["nodeSelector"].(map[string]any); ok {
-		cfg.NodeSelector = stringMap(ns)
+	nodeSelector, present, err := parseObjectField(raw, "nodeSelector", "affinity.nodeSelector")
+	if err != nil {
+		return AffinityConfig{}, err
+	}
+	if present {
+		// stringMapStrict, not stringMap: a non-string selector value is refused
+		// by key rather than dropped, which would let the selector reach the
+		// cluster narrower than authored.
+		cfg.NodeSelector, err = stringMapStrict(nodeSelector, "affinity.nodeSelector")
+		if err != nil {
+			return AffinityConfig{}, err
+		}
 	}
 	return cfg, nil
 }
