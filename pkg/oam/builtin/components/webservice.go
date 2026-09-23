@@ -57,8 +57,8 @@ func (h *WebserviceHandler) PropertySchema() map[string]oam.PropertySchema {
 		"securityContext": schemaSecurityContext(false),
 		"workingDir":      schemaWorkingDir(false),
 		"volumes":         schemaVolumes(),
-		"initContainers":  schemaContainers(),
-		"sidecars":        schemaContainers(),
+		"initContainers":  schemaInitContainers(),
+		"sidecars":        schemaSidecars(),
 		"affinity":        schemaAffinity(),
 	}
 	maps.Copy(m, schemaPodSpec(false, false))

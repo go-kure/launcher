@@ -63,8 +63,8 @@ func (h *DeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 		"securityContext": schemaSecurityContext(false),
 		"workingDir":      schemaWorkingDir(false),
 		"volumes":         schemaVolumes(),
-		"initContainers":  schemaContainers(),
-		"sidecars":        schemaContainers(),
+		"initContainers":  schemaInitContainers(),
+		"sidecars":        schemaSidecars(),
 		// The three raw pod-level scheduling shapes (go-kure/launcher#412).
 		// They MUST stay above the maps.Copy calls below and they must not move
 		// into schemaPodSpec: maps.Copy overwrites the destination's keys, and

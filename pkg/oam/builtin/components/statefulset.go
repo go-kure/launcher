@@ -42,8 +42,8 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"workingDir":           schemaWorkingDir(false),
 		"volumeClaimTemplates": schemaVolumeClaimTemplates(),
 		"volumes":              schemaVolumes(),
-		"initContainers":       schemaContainers(),
-		"sidecars":             schemaContainers(),
+		"initContainers":       schemaInitContainers(),
+		"sidecars":             schemaSidecars(),
 		"affinity":             schemaAffinity(),
 	}
 	maps.Copy(m, schemaPodSpec(false, false))

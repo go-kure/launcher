@@ -233,9 +233,11 @@ type InitContainerConfig struct {
 	Command         []string
 	Args            []string
 	Env             []corev1.EnvVar
+	EnvFrom         []corev1.EnvFromSource
 	Resources       ResourceRequirements
 	VolumeMounts    []corev1.VolumeMount
 	SecurityContext *corev1.SecurityContext
+	WorkingDir      string
 }
 
 // SidecarContainerConfig holds the parsed OAM fields for a sidecar container.
@@ -245,10 +247,47 @@ type SidecarContainerConfig struct {
 	Command         []string
 	Args            []string
 	Env             []corev1.EnvVar
+	EnvFrom         []corev1.EnvFromSource
 	Resources       ResourceRequirements
 	VolumeMounts    []corev1.VolumeMount
 	Ports           []corev1.ContainerPort
 	SecurityContext *corev1.SecurityContext
+	WorkingDir      string
+	Probes          ProbeConfig
+	Lifecycle       *corev1.Lifecycle
+}
+
+// initContainerPropertyKeys is the accepted key set of one `initContainers`
+// entry, and sidecarPropertyKeys that of one `sidecars` entry. Both are pinned
+// to the published entry schemas (schemaInitContainers/schemaSidecars) by
+// TestContainerEntrySchemaMatchesParser, and handed to rejectUnknownKeys by
+// the parsers, so a key is either read or refused — never dropped.
+//
+// Until go-kure/launcher#321 neither entry was a closed set: the parsers read
+// the keys they knew and ignored the rest, and the entry schema was published
+// with AdditionalProperties, so an authored workingDir, envFrom, probes or
+// lifecycle built cleanly and reached no container.
+var (
+	initContainerPropertyKeys = []string{
+		"name", "image", "command", "args", "env", "envFrom", "resources",
+		"volumeMounts", "securityContext", "workingDir",
+	}
+	sidecarPropertyKeys = []string{
+		"name", "image", "command", "args", "env", "envFrom", "resources",
+		"volumeMounts", "securityContext", "workingDir", "ports", "probes", "lifecycle",
+	}
+)
+
+// initContainerRejectedKeys names the keys a sidecar accepts that an init
+// container refuses with an explanation rather than a bare unrecognized-key
+// error. Kubernetes forbids both on a regular init container: it runs to
+// completion before any app container starts, so there is nothing for a
+// readiness/liveness/startup probe to gate and no running container for a
+// postStart/preStop hook to wrap. Only a restartable (restartPolicy: Always)
+// init container may carry them, and this package does not model one.
+var initContainerRejectedKeys = map[string]string{
+	"probes":    "Kubernetes forbids probes on an init container, which runs to completion before the app containers start; author them on a sidecar instead",
+	"lifecycle": "Kubernetes forbids lifecycle hooks on an init container, which runs to completion before the app containers start; author them on a sidecar instead",
 }
 
 // AffinityConfig holds parsed affinity/anti-affinity configuration from OAM properties.
@@ -1435,8 +1474,10 @@ func parseHTTPHeaders(raw map[string]any, key string) ([]corev1.HTTPHeader, erro
 // just as unresolvable at runtime as a named port on a portless component,
 // so it is rejected the same way. matchName is ignored when namedPortsAllowed
 // is false, and "" plus namedPortsAllowed=true means "any syntactically
-// valid name" (used only by the grpc handler, which rejects every named
-// port afterward regardless of name with its own message).
+// valid name" (used by the grpc handler, which rejects every named port
+// afterward regardless of name with its own message, and by parseSidecars,
+// which checks the name against the sidecar's own declared ports afterward
+// in checkNamedPortsDeclared).
 func parsePort(v any, namedPortsAllowed bool, matchName string) (intstr.IntOrString, error) {
 	switch p := v.(type) {
 	case float64:
@@ -2579,6 +2620,20 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 		if ic.Name == "" {
 			return nil, errors.Errorf("initContainers[%d]: name is required", i)
 		}
+		label := fmt.Sprintf("initContainers[%d] %q", i, ic.Name)
+		// Closed key set (go-kure/launcher#321). The explained refusals run
+		// first so an init-container probe or hook names the Kubernetes rule
+		// it breaks rather than reading as a typo. Sorted, like
+		// parseVolumeClaimTemplates' equivalent loop, so an entry authoring
+		// both reports the same one every run.
+		for _, k := range slices.Sorted(maps.Keys(initContainerRejectedKeys)) {
+			if _, present := m[k]; present {
+				return nil, errors.Errorf("%s: %s: not supported on an init container — %s", label, k, initContainerRejectedKeys[k])
+			}
+		}
+		if err := rejectUnknownKeys(m, initContainerPropertyKeys, label); err != nil {
+			return nil, err
+		}
 		ic.Image, _ = m["image"].(string)
 		if ic.Image == "" {
 			return nil, errors.Errorf("initContainers[%d] %q: image is required", i, ic.Name)
@@ -2618,6 +2673,16 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
 		}
 		ic.SecurityContext = sc
+		envFrom, err := parseEnvFrom(m)
+		if err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
+		}
+		ic.EnvFrom = envFrom
+		if wd, present, err := parseStringField(m, "workingDir", "workingDir"); err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
+		} else if present {
+			ic.WorkingDir = wd
+		}
 		out = append(out, ic)
 	}
 	return out, nil
@@ -2634,6 +2699,11 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 		sc.Name, _ = m["name"].(string)
 		if sc.Name == "" {
 			return nil, errors.Errorf("sidecars[%d]: name is required", i)
+		}
+		label := fmt.Sprintf("sidecars[%d] %q", i, sc.Name)
+		// Closed key set (go-kure/launcher#321), see sidecarPropertyKeys.
+		if err := rejectUnknownKeys(m, sidecarPropertyKeys, label); err != nil {
+			return nil, err
 		}
 		sc.Image, _ = m["image"].(string)
 		if sc.Image == "" {
@@ -2701,9 +2771,94 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
 		}
 		sc.SecurityContext = parsedSC
+		envFrom, err := parseEnvFrom(m)
+		if err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
+		}
+		sc.EnvFrom = envFrom
+		if wd, present, err := parseStringField(m, "workingDir", "workingDir"); err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
+		} else if present {
+			sc.WorkingDir = wd
+		}
+		// Probes and hooks are parsed with every syntactically valid port name
+		// admitted, then checked against this sidecar's own declared port
+		// names: parseProbes/parseLifecycle resolve a named port against one
+		// name only, and a sidecar may declare several.
+		probes, err := parseProbes(m, true, "")
+		if err != nil {
+			return nil, errors.Errorf("%s: invalid probe configuration: %w", label, err)
+		}
+		sc.Probes = probes
+		lifecycle, err := parseLifecycle(m, true, "")
+		if err != nil {
+			return nil, errors.Errorf("%s: invalid lifecycle configuration: %w", label, err)
+		}
+		sc.Lifecycle = lifecycle
+		if err := checkNamedPortsDeclared(sc.Probes, sc.Lifecycle, sc.Ports); err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
+		}
 		out = append(out, sc)
 	}
 	return out, nil
+}
+
+// checkNamedPortsDeclared rejects a probe or lifecycle hook on a sidecar that
+// addresses a named port the sidecar does not itself declare. The kubelet
+// resolves a named httpGet/tcpSocket port only against the ports of the
+// container the probe or hook belongs to, so an undeclared name builds but
+// never resolves — the same rule parsePort enforces for a main container
+// against its single declared name, widened to a sidecar's whole port list.
+// A grpc port is always numeric (parseProbe rejects a named one), so only the
+// httpGet and tcpSocket handlers can carry a name.
+func checkNamedPortsDeclared(probes ProbeConfig, lc *corev1.Lifecycle, ports []corev1.ContainerPort) error {
+	var names []string
+	for _, p := range ports {
+		if p.Name != "" {
+			names = append(names, p.Name)
+		}
+	}
+	check := func(where string, port intstr.IntOrString) error {
+		if port.Type != intstr.String || slices.Contains(names, port.StrVal) {
+			return nil
+		}
+		if len(names) == 0 {
+			return errors.Errorf("%s: named port %q is not supported here: this sidecar declares no named ports for the kubelet to resolve the name against — use a numeric port, or name one of its ports", where, port.StrVal)
+		}
+		return errors.Errorf("%s: named port %q does not match any port this sidecar declares (%s): the kubelet resolves a named port only against a name the container itself declares", where, port.StrVal, strings.Join(names, ", "))
+	}
+	for _, p := range []struct {
+		kind  string
+		probe *corev1.Probe
+	}{{"readiness", probes.Readiness}, {"liveness", probes.Liveness}, {"startup", probes.Startup}} {
+		if p.probe == nil {
+			continue
+		}
+		if p.probe.HTTPGet != nil {
+			if err := check(p.kind+" probe: httpGet handler", p.probe.HTTPGet.Port); err != nil {
+				return err
+			}
+		}
+		if p.probe.TCPSocket != nil {
+			if err := check(p.kind+" probe: tcpSocket handler", p.probe.TCPSocket.Port); err != nil {
+				return err
+			}
+		}
+	}
+	if lc == nil {
+		return nil
+	}
+	for _, h := range []struct {
+		hook    string
+		handler *corev1.LifecycleHandler
+	}{{"lifecycle.postStart", lc.PostStart}, {"lifecycle.preStop", lc.PreStop}} {
+		if h.handler != nil && h.handler.HTTPGet != nil {
+			if err := check(h.hook+": httpGet handler", h.handler.HTTPGet.Port); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount, error) {
@@ -4129,7 +4284,25 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 	for _, m := range ic.VolumeMounts {
 		kubernetes.AddContainerVolumeMount(container, m)
 	}
+	container.EnvFrom = copyEnvFrom(ic.EnvFrom)
+	container.WorkingDir = ic.WorkingDir
 	return container, nil
+}
+
+// copyEnvFrom deep-copies an envFrom list for a rendered init or sidecar
+// container: an EnvFromSource carries its ConfigMapRef/SecretRef (and their
+// Optional flag) by pointer, so appending the elements would still share them
+// with the reusable config (see buildPodSpec's DeepCopy note). Returns nil for
+// an empty list so an unauthored envFrom renders as absent.
+func copyEnvFrom(in []corev1.EnvFromSource) []corev1.EnvFromSource {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]corev1.EnvFromSource, 0, len(in))
+	for i := range in {
+		out = append(out, *in[i].DeepCopy())
+	}
+	return out
 }
 
 func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error) {
@@ -4152,6 +4325,14 @@ func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error)
 	for _, m := range sc.VolumeMounts {
 		kubernetes.AddContainerVolumeMount(container, m)
 	}
+	container.EnvFrom = copyEnvFrom(sc.EnvFrom)
+	container.WorkingDir = sc.WorkingDir
+	// DeepCopy for the same reuse reason as copyEnvFrom: a probe and a hook
+	// are pointers into the config, with further pointers beneath them.
+	container.ReadinessProbe = sc.Probes.Readiness.DeepCopy()
+	container.LivenessProbe = sc.Probes.Liveness.DeepCopy()
+	container.StartupProbe = sc.Probes.Startup.DeepCopy()
+	container.Lifecycle = sc.Lifecycle.DeepCopy()
 	return container, nil
 }
 

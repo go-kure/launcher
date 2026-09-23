@@ -39,7 +39,7 @@ func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"workingDir":      schemaWorkingDir(false),
 		"tolerations":     schemaTolerations(),
 		"volumes":         schemaVolumes(),
-		"initContainers":  schemaContainers(),
+		"initContainers":  schemaInitContainers(),
 	}
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDaemonSetSpec())

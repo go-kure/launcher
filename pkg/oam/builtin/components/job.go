@@ -76,7 +76,7 @@ func (h *JobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"securityContext": schemaSecurityContext(false),
 		"workingDir":      schemaWorkingDir(false),
 		"volumes":         schemaVolumes(),
-		"initContainers":  schemaContainers(),
+		"initContainers":  schemaInitContainers(),
 	}
 	maps.Copy(m, schemaJobSpec(false))
 	maps.Copy(m, schemaPodSpec(false, true))
