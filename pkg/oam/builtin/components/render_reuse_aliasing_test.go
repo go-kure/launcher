@@ -90,6 +90,45 @@ func TestStatefulset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testin
 		if !ok {
 			t.Fatalf("first object is %T, want *appsv1.StatefulSet", *objects[0])
 		}
+		// Checked rather than dereferenced blind, for the reason spelled out in
+		// the deployment case below: a regression that leaves one of these
+		// unset is what this test exists to catch, and writing through it
+		// would panic instead of failing by name.
+		if sts.Spec.UpdateStrategy.RollingUpdate == nil || sts.Spec.UpdateStrategy.RollingUpdate.Partition == nil {
+			t.Fatal("first render has no updateStrategy.rollingUpdate.partition — nothing to alias, so this test cannot prove anything")
+		}
+		if sts.Spec.RevisionHistoryLimit == nil {
+			t.Fatal("first render has no revisionHistoryLimit — nothing to alias, so this test cannot prove anything")
+		}
+		if sts.Spec.PersistentVolumeClaimRetentionPolicy == nil {
+			t.Fatal("first render has no persistentVolumeClaimRetentionPolicy — nothing to alias, so this test cannot prove anything")
+		}
+		if sts.Spec.Ordinals == nil {
+			t.Fatal("first render has no ordinals — nothing to alias, so this test cannot prove anything")
+		}
+		if len(sts.Spec.VolumeClaimTemplates) != 1 {
+			t.Fatalf("volumeClaimTemplates = %d, want 1", len(sts.Spec.VolumeClaimTemplates))
+		}
+		pvc := &sts.Spec.VolumeClaimTemplates[0]
+		if pvc.Spec.Selector == nil || pvc.Spec.Selector.MatchLabels == nil {
+			t.Fatal("first render has no volumeClaimTemplates[0].selector.matchLabels — nothing to alias, so this test cannot prove anything")
+		}
+		if pvc.Spec.Resources.Limits == nil {
+			t.Fatal("first render has no volumeClaimTemplates[0].resources.limits — nothing to alias, so this test cannot prove anything")
+		}
+		if pvc.Spec.Resources.Requests == nil {
+			t.Fatal("first render has no volumeClaimTemplates[0].resources.requests — nothing to alias, so this test cannot prove anything")
+		}
+		if pvc.Spec.DataSourceRef == nil {
+			t.Fatal("first render has no volumeClaimTemplates[0].dataSourceRef — nothing to alias, so this test cannot prove anything")
+		}
+		if pvc.Spec.VolumeMode == nil {
+			t.Fatal("first render has no volumeClaimTemplates[0].volumeMode — nothing to alias, so this test cannot prove anything")
+		}
+		if pvc.Spec.VolumeAttributesClassName == nil {
+			t.Fatal("first render has no volumeClaimTemplates[0].volumeAttributesClassName — nothing to alias, so this test cannot prove anything")
+		}
+
 		// Spec-level pointers.
 		sts.Spec.UpdateStrategy.RollingUpdate.Partition = ptrInt32(99)
 		*sts.Spec.RevisionHistoryLimit = 99
@@ -97,10 +136,6 @@ func TestStatefulset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testin
 		sts.Spec.Ordinals.Start = 99
 
 		// Claim-template pointers and maps.
-		if len(sts.Spec.VolumeClaimTemplates) != 1 {
-			t.Fatalf("volumeClaimTemplates = %d, want 1", len(sts.Spec.VolumeClaimTemplates))
-		}
-		pvc := &sts.Spec.VolumeClaimTemplates[0]
 		pvc.Spec.Selector.MatchLabels["tier"] = "hijacked"
 		pvc.Spec.Resources.Limits[corev1.ResourceStorage] = resource.MustParse("99Gi")
 		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = resource.MustParse("99Gi")
@@ -114,21 +149,36 @@ func TestStatefulset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testin
 		t.Fatalf("second render's first object is %T, want *appsv1.StatefulSet", *second[0])
 	}
 
-	if got := *sts.Spec.UpdateStrategy.RollingUpdate.Partition; got != 2 {
+	// Guarded for the same reason as the mutator above: a second render that
+	// lost a field would otherwise report a panic rather than a named failure.
+	if sts.Spec.UpdateStrategy.RollingUpdate == nil || sts.Spec.UpdateStrategy.RollingUpdate.Partition == nil {
+		t.Error("updateStrategy.rollingUpdate.partition is gone from the second render — the first render's edit leaked back into the config")
+	} else if got := *sts.Spec.UpdateStrategy.RollingUpdate.Partition; got != 2 {
 		t.Errorf("updateStrategy.rollingUpdate.partition = %d, want 2 — the first render's edit leaked back into the config", got)
 	}
-	if got := *sts.Spec.RevisionHistoryLimit; got != 7 {
+	if sts.Spec.RevisionHistoryLimit == nil {
+		t.Error("revisionHistoryLimit is gone from the second render, want 7")
+	} else if got := *sts.Spec.RevisionHistoryLimit; got != 7 {
 		t.Errorf("revisionHistoryLimit = %d, want 7", got)
 	}
-	if got := sts.Spec.PersistentVolumeClaimRetentionPolicy.WhenDeleted; got != appsv1.RetainPersistentVolumeClaimRetentionPolicyType {
+	if sts.Spec.PersistentVolumeClaimRetentionPolicy == nil {
+		t.Error("persistentVolumeClaimRetentionPolicy is gone from the second render, want whenDeleted Retain")
+	} else if got := sts.Spec.PersistentVolumeClaimRetentionPolicy.WhenDeleted; got != appsv1.RetainPersistentVolumeClaimRetentionPolicyType {
 		t.Errorf("persistentVolumeClaimRetentionPolicy.whenDeleted = %q, want Retain", got)
 	}
-	if got := sts.Spec.Ordinals.Start; got != 3 {
+	if sts.Spec.Ordinals == nil {
+		t.Error("ordinals is gone from the second render, want start 3")
+	} else if got := sts.Spec.Ordinals.Start; got != 3 {
 		t.Errorf("ordinals.start = %d, want 3", got)
 	}
 
+	if len(sts.Spec.VolumeClaimTemplates) != 1 {
+		t.Fatalf("second render's volumeClaimTemplates = %d, want 1", len(sts.Spec.VolumeClaimTemplates))
+	}
 	pvc := sts.Spec.VolumeClaimTemplates[0]
-	if got := pvc.Spec.Selector.MatchLabels["tier"]; got != "db" {
+	if pvc.Spec.Selector == nil {
+		t.Error("selector is gone from the second render, want matchLabels[tier] db")
+	} else if got := pvc.Spec.Selector.MatchLabels["tier"]; got != "db" {
 		t.Errorf("selector.matchLabels[tier] = %q, want %q", got, "db")
 	}
 	if got := pvc.Spec.Resources.Limits[corev1.ResourceStorage]; got.String() != "2Gi" {
@@ -140,13 +190,19 @@ func TestStatefulset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testin
 	if got := pvc.Spec.Resources.Requests[corev1.ResourceStorage]; got.String() != "1Gi" {
 		t.Errorf("resources.requests.storage = %q, want 1Gi", got.String())
 	}
-	if got := pvc.Spec.DataSourceRef.Name; got != "seed" {
+	if pvc.Spec.DataSourceRef == nil {
+		t.Error("dataSourceRef is gone from the second render, want name seed")
+	} else if got := pvc.Spec.DataSourceRef.Name; got != "seed" {
 		t.Errorf("dataSourceRef.name = %q, want %q", got, "seed")
 	}
-	if got := *pvc.Spec.VolumeMode; got != corev1.PersistentVolumeFilesystem {
+	if pvc.Spec.VolumeMode == nil {
+		t.Error("volumeMode is gone from the second render, want Filesystem")
+	} else if got := *pvc.Spec.VolumeMode; got != corev1.PersistentVolumeFilesystem {
 		t.Errorf("volumeMode = %q, want Filesystem", got)
 	}
-	if got := *pvc.Spec.VolumeAttributesClassName; got != "gold" {
+	if pvc.Spec.VolumeAttributesClassName == nil {
+		t.Error("volumeAttributesClassName is gone from the second render, want gold")
+	} else if got := *pvc.Spec.VolumeAttributesClassName; got != "gold" {
 		t.Errorf("volumeAttributesClassName = %q, want %q", got, "gold")
 	}
 }
@@ -170,6 +226,14 @@ func TestDaemonset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.
 		if !ok {
 			t.Fatalf("first object is %T, want *appsv1.DaemonSet", *objects[0])
 		}
+		// Checked rather than dereferenced blind, for the reason spelled out in
+		// the deployment case below.
+		if ds.Spec.UpdateStrategy.RollingUpdate == nil || ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable == nil {
+			t.Fatal("first render has no updateStrategy.rollingUpdate.maxUnavailable — nothing to alias, so this test cannot prove anything")
+		}
+		if ds.Spec.RevisionHistoryLimit == nil {
+			t.Fatal("first render has no revisionHistoryLimit — nothing to alias, so this test cannot prove anything")
+		}
 		ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable = nil
 		*ds.Spec.RevisionHistoryLimit = 99
 	})
@@ -183,6 +247,9 @@ func TestDaemonset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.
 	}
 	if got := ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable.IntValue(); got != 1 {
 		t.Errorf("updateStrategy.rollingUpdate.maxUnavailable = %d, want 1", got)
+	}
+	if ds.Spec.RevisionHistoryLimit == nil {
+		t.Fatal("revisionHistoryLimit is gone from the second render, want 4")
 	}
 	if got := *ds.Spec.RevisionHistoryLimit; got != 4 {
 		t.Errorf("revisionHistoryLimit = %d, want 4", got)
