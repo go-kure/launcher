@@ -57,7 +57,7 @@ preflight reject every valid use of the trait.
 ### Storage
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
-| `pvc` | PersistentVolumeClaim | `name`, `size` (optional; policy default `storageSize`), `storageClassName`, `accessModes[]` (policy: `maxStorageSize`) |
+| `pvc` | PersistentVolumeClaim | `name`, `size` (optional; policy default `storageSize`; the effective size must be a positive quantity — zero or negative fails the build, as `ValidatePersistentVolumeClaimSpec` would refuse the claim), `storageClassName`, `accessModes[]` (policy: `maxStorageSize`) |
 | `volsync` | VolSync ReplicationSource | `sourcePVC`, `schedule`, `copyMethod`, `storageClassName`, `volumeSnapshotClassName`, `retain.{daily,weekly,monthly}` (class fields also supplied via capability rendering; injection is `copyMethod`-aware) |
 
 ### Configuration & scaling

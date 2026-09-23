@@ -113,6 +113,24 @@ func TestBuildPVC_InvalidSize(t *testing.T) {
 	}
 }
 
+// TestBuildPVC_NonPositiveSize guards the second parse of the size on the
+// same path (go-kure/launcher#384): BuildPVC re-parses PVCConfig.Size, and
+// the pvc trait reaches it without going through parseVolumes, so the
+// positivity rule upstream applies to requests[storage] must hold here too.
+func TestBuildPVC_NonPositiveSize(t *testing.T) {
+	for _, size := range []string{"0", "-1Gi"} {
+		t.Run(size, func(t *testing.T) {
+			_, err := components.BuildPVC(components.PVCConfig{Name: "data", Size: size}, "default", nil)
+			if err == nil {
+				t.Fatalf("expected error for size %q", size)
+			}
+			if !strings.Contains(err.Error(), "size must be positive") {
+				t.Errorf("error should name the positivity rule, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestBuildPVC_MultipleAccessModes(t *testing.T) {
 	pvc := components.PVCConfig{
 		Name:        "shared",

@@ -2082,21 +2082,59 @@ func TestParseVolumes_EmptyDir_NegativeSizeLimit_Error(t *testing.T) {
 	}
 }
 
-// TestParseVolumes_PVC_NegativeSize_Error is the pvc-type sibling of the
-// emptyDir case above — same root cause, same fix.
-func TestParseVolumes_PVC_NegativeSize_Error(t *testing.T) {
-	_, err := parseVolumes(map[string]any{
+// TestParseVolumes_PVC_NonPositiveSize_Error is the pvc-type sibling of the
+// emptyDir case above, tightened by go-kure/launcher#384: upstream
+// ValidatePersistentVolumeClaimSpec runs ValidatePositiveQuantityValue over
+// requests[storage], which rejects Cmp <= 0, so a zero-sized claim is as
+// inadmissible as a negative one and must be refused here, at parse time.
+func TestParseVolumes_PVC_NonPositiveSize_Error(t *testing.T) {
+	for _, size := range []string{"0", "0Gi", "-1Gi"} {
+		t.Run(size, func(t *testing.T) {
+			_, err := parseVolumes(map[string]any{
+				"volumes": []any{
+					map[string]any{
+						"name":      "data",
+						"type":      "pvc",
+						"mountPath": "/data",
+						"size":      size,
+					},
+				},
+			})
+			if err == nil {
+				t.Fatalf("expected error for PVC size %q", size)
+			}
+			if !strings.Contains(err.Error(), "PVC size must be positive") {
+				t.Errorf("error should name the positivity rule, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestParseVolumes_EmptyDir_ZeroSizeLimit_Accepted pins the deliberate
+// asymmetry with the pvc case above (go-kure/launcher#384): upstream
+// validateVolumeSource rejects only a negative emptyDir.sizeLimit (Cmp < 0),
+// and the kubelet treats a zero limit as "no volume-level limit" (both the
+// memory-medium sizing and local-storage eviction apply the limit only when it
+// is > 0). Zero is an admissible, meaningful value, so it must keep building.
+func TestParseVolumes_EmptyDir_ZeroSizeLimit_Accepted(t *testing.T) {
+	parsed, err := parseVolumes(map[string]any{
 		"volumes": []any{
 			map[string]any{
-				"name":      "data",
-				"type":      "pvc",
-				"mountPath": "/data",
-				"size":      "-1Gi",
+				"name":      "scratch",
+				"type":      "emptyDir",
+				"mountPath": "/tmp",
+				"sizeLimit": "0",
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error for a negative PVC size")
+	if err != nil {
+		t.Fatalf("parseVolumes: %v", err)
+	}
+	if len(parsed.Volumes) != 1 || parsed.Volumes[0].EmptyDir == nil || parsed.Volumes[0].EmptyDir.SizeLimit == nil {
+		t.Fatalf("Volumes = %+v, want one emptyDir with a sizeLimit", parsed.Volumes)
+	}
+	if !parsed.Volumes[0].EmptyDir.SizeLimit.IsZero() {
+		t.Errorf("SizeLimit = %s, want 0", parsed.Volumes[0].EmptyDir.SizeLimit)
 	}
 }
 
