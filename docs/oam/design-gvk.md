@@ -185,9 +185,17 @@ after parsing (`pkg/cmd/kurel/build.go:149`). An undeclared key is a build error
 allowed fields; a declared key whose value has the wrong type is a build error too. An array- or
 object-typed value that validation had to rebuild in order to check it — a typed Go `[]string`
 or `map[string]string` normalised into `[]any`/`map[string]any` — is written back in place, so
-the handler downstream sees the shape that was actually checked. Scalars are never rewritten,
-and a schema that declares no `Type` at all (a quantity, an int-or-string) is checked only
-against its `Enum`, if it has one.
+the handler downstream sees the shape that was actually checked. One scalar case is rewritten
+too: an `integer`-typed value of a Go kind the readers do not accept (`int8`, `int16`, or any
+unsigned kind, supplied by a library caller or a lowering rule) is written back as `int`, and an
+unsigned value above the `int` range is a build error rather than a silently defaulted field. The
+one YAML shape this reaches is an integer literal above the int64 maximum, which yaml.v3 decodes
+to `uint64`: it is now rejected at build instead of being dropped by the reader. Compound `Enum`
+members are compared element by element with the same exact numeric equality as scalar members, so a
+member declared with `uint16(80)` still matches the normalised value. `int`, `int32`, `int64` and
+an integral `float64` are left as they are. Other scalars are never rewritten, and a schema that
+declares no `Type` at all (a quantity, an int-or-string) is checked only against its `Enum`, if it
+has one.
 
 **Ordering is load-bearing.** The authored-properties check runs *after* `ResolveParameters`
 (`pkg/cmd/kurel/build.go:114`). In package mode an authored value may be a `${...}` placeholder,
