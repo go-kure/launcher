@@ -245,7 +245,13 @@ type LoweringContext struct {
 	Capabilities map[string]CapabilityBinding
 	// Origin is the authored location of the element being lowered.
 	Origin Origin
-	// Namer allocates deterministic collision-free names (D2).
+	// Namer allocates deterministic collision-free names (D2). Never nil when the
+	// engine calls a rule: every position, including a RawDocumentLoweringRule
+	// reached through LowerRaws, receives the one allocator shared across the whole
+	// run. A rule may therefore call Namer.Name unconditionally and must not carry
+	// a nil-guard fallback — that would be a second naming path with no collision
+	// detection. A nil Namer is a contract violation by whoever built the
+	// LoweringContext; code that drives a rule directly supplies NewNameAllocator().
 	Namer *NameAllocator
 }
 
@@ -274,7 +280,15 @@ type nameClaim struct {
 	round  int
 }
 
-func newNameAllocator() *NameAllocator {
+// NewNameAllocator returns an empty NameAllocator — the same constructor the
+// engine uses once per LowerRaws / Transform invocation. The zero value is NOT
+// usable (its reservation table is nil), so code that drives a lowering rule
+// directly, outside the engine (a rule's own unit test, a pre-pass, a golden-file
+// or fixture harness), builds its LoweringContext.Namer with this. Share ONE
+// allocator across every rule call that belongs to the same run, as the engine
+// does, so a generated-name collision between two documents is detected; a fresh
+// allocator per call detects nothing across calls.
+func NewNameAllocator() *NameAllocator {
 	return &NameAllocator{taken: make(map[string]nameClaim)}
 }
 
@@ -384,6 +398,13 @@ type RawDocumentLoweringRule interface {
 	// that across two methods of one interface, so it is a convention this
 	// interface relies on, not a compiler guarantee — assert with the
 	// two-value form and return an error on failure rather than panicking.
+	//
+	// lctx.Namer is never nil when LowerRaws calls this (unlike lctx.Document,
+	// which always is here — see LoweringContext): derive every generated child name through
+	// lctx.Namer.Name, with no nil fallback. A nil Namer is a contract violation
+	// by whoever built lctx; a caller driving the rule outside LowerRaws (e.g.
+	// the rule's own unit test in another module) passes NewNameAllocator(),
+	// shared across every call that belongs to the same run.
 	LowerDocument(doc any, lctx LoweringContext) (LoweringResult, error)
 }
 
@@ -746,7 +767,7 @@ type loweringDoc struct {
 // t.lower has no pass-through concept (a single in-transform document has nothing else
 // in its batch to collide with), so it always passes nil.
 func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext, preReserved []reservedIdentity) ([]loweringDoc, error) {
-	namer := newNameAllocator()
+	namer := NewNameAllocator()
 	for _, r := range preReserved {
 		if err := namer.Reserve(r.name, r.origin); err != nil {
 			return nil, &LoweringError{Origin: r.origin, Cause: err}
