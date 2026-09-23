@@ -384,8 +384,11 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 		return nil, err
 	}
 	config.sources = sources
-	config.ports = collectHTTPRoutePorts(config, defaultServiceName)
-	backendTargets, err := collectHTTPRouteBackendTargets(config, defaultServiceName)
+	// Self is the component's own Service, not defaultServiceName: a trait-level serviceName may
+	// name a Service the component does not own, and that backend is external (go-kure/launcher#399).
+	selfServiceName := resolveServiceName(app)
+	config.ports = collectHTTPRoutePorts(config, selfServiceName)
+	backendTargets, err := collectHTTPRouteBackendTargets(config, selfServiceName)
 	if err != nil {
 		return nil, err
 	}

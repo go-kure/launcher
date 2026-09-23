@@ -915,14 +915,15 @@ routes to a Service named after the component). That Service must exist
 independently — authored as a `manifests` component, or belonging to another
 component in the package. Nothing in this kind creates it.
 
-One caveat if you also use automatic NetworkPolicy synthesis: a `serviceName`
-given at trait level is currently treated as the routing component's *own*
-Service by the policy collectors, so a `networkPolicy.trafficSources` entry on
-such a trait produces an allow on this component's pods rather than on the pods
-backing the named Service. The routing itself is unaffected — the Ingress or
-HTTPRoute points where you said — and this is not specific to this kind
-(`worker` behaves identically today), but the two features do not yet compose.
-Tracked as go-kure/launcher#399.
+With automatic NetworkPolicy synthesis, a trait-level `serviceName` that differs
+from the component name is an external backend: a `networkPolicy.trafficSources`
+entry on such a trait lands its allow on the pods of the component that owns the
+named Service (on `servicePort`), not on this component's. When no component in
+the package owns that Service, no allow is synthesized for it and it stays
+authored. A `serviceName` equal to the component name — like `servicePort` alone
+— is treated as this component's own Service and keeps the allow here. `worker`
+behaves the same way. On a kind that names its own Service (a `statefulset`'s
+`serviceName`), "own" means that Service name rather than the component name.
 
 **`scaler` is not available on `deployment`.** It is restricted to `webservice` and
 `worker`, and that restriction is load-bearing rather than a taxonomy detail: an

@@ -122,15 +122,25 @@ func parseMatchLabelsSelector(raw map[string]any, path string) (*metav1.LabelSel
 	return &metav1.LabelSelector{MatchLabels: labels}, nil
 }
 
-// collectIngressPorts returns the ports for IngressPath entries that target the
-// component's own Service (path.ServiceName empty or equal to the component
-// service). Paths naming an external backend are skipped. Numeric Port and named
+// ingressPathService returns the Service a path routes to: its own backend name, or the trait's
+// Service (config.ServiceName — the component's own, or a trait-level serviceName) when it names none.
+func ingressPathService(config *IngressConfig, path IngressPath) string {
+	if path.ServiceName != "" {
+		return path.ServiceName
+	}
+	return config.ServiceName
+}
+
+// collectIngressPorts returns the ports for IngressPath entries that route to the
+// component's own Service (selfServiceName, resolved from the component — never the
+// trait-level serviceName, which may name a Service the component does not own, go-kure/launcher#399).
+// Paths routing anywhere else are external and skipped. Numeric Port and named
 // PortName are both collected; duplicates are de-duplicated.
-func collectIngressPorts(config *IngressConfig) []intstr.IntOrString {
+func collectIngressPorts(config *IngressConfig, selfServiceName string) []intstr.IntOrString {
 	seen := map[string]intstr.IntOrString{}
 	for _, rule := range config.Rules {
 		for _, path := range rule.Paths {
-			if path.ServiceName != "" && path.ServiceName != config.ServiceName {
+			if ingressPathService(config, path) != selfServiceName {
 				continue // external backend; skip
 			}
 			if path.Port > 0 {
@@ -144,8 +154,9 @@ func collectIngressPorts(config *IngressConfig) []intstr.IntOrString {
 }
 
 // collectHTTPRoutePorts returns numeric ports for BackendRef entries targeting the
-// component's own Service (ref.Name equal to selfServiceName). Refs naming an
-// external backend are skipped.
+// component's own Service (ref.Name equal to selfServiceName, resolved from the
+// component — never the trait-level serviceName, go-kure/launcher#399). Refs naming an external
+// backend are skipped.
 func collectHTTPRoutePorts(config *HTTPRouteConfig, selfServiceName string) []intstr.IntOrString {
 	seen := map[string]intstr.IntOrString{}
 	for _, rule := range config.Rules {
@@ -162,14 +173,16 @@ func collectHTTPRoutePorts(config *HTTPRouteConfig, selfServiceName string) []in
 // collectIngressBackendTargets returns the external backend targets of an ingress trait: paths
 // naming a Service other than the component's own, grouped by (service name, backendSelector) with
 // their ports. These drive ingress-synthesis retargeting (#227 for in-bundle components, #239 for
-// external Services carrying an explicit selector). Returns an error when one Service name is given
-// two different non-nil selectors — a Service has a single selector, so that is an authoring
-// conflict.
-func collectIngressBackendTargets(config *IngressConfig) ([]netpol.BackendTarget, error) {
+// external Services carrying an explicit selector). A path naming no backend of its own routes to
+// the trait's Service, which is external when a trait-level serviceName names a Service other than
+// the component's own (go-kure/launcher#399). Returns an error when one Service name is given two different non-nil
+// selectors — a Service has a single selector, so that is an authoring conflict.
+func collectIngressBackendTargets(config *IngressConfig, selfServiceName string) ([]netpol.BackendTarget, error) {
 	var g backendTargetGroups
 	for _, rule := range config.Rules {
 		for _, path := range rule.Paths {
-			if path.ServiceName == "" || path.ServiceName == config.ServiceName {
+			service := ingressPathService(config, path)
+			if service == selfServiceName {
 				continue // self backend; covered by BackendPorts
 			}
 			var port intstr.IntOrString
@@ -179,7 +192,7 @@ func collectIngressBackendTargets(config *IngressConfig) ([]netpol.BackendTarget
 			} else if path.PortName != "" {
 				port, hasPort = intstr.FromString(path.PortName), true
 			}
-			if err := g.add(path.ServiceName, path.BackendSelector, port, hasPort); err != nil {
+			if err := g.add(service, path.BackendSelector, port, hasPort); err != nil {
 				return nil, err
 			}
 		}
