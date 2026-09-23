@@ -270,7 +270,11 @@ graph), are unconstrained. Existing drift is grandfathered.
 **How it's enforced.** `site/scripts/check-kure-dep-sync.sh` (Go helper in
 `site/scripts/kuredepsync/`) runs in CI's `validate` job: diff-scoped and blocking on PRs /
 merge-queue (fails only when a change introduces or increases the lead), `--report`-only on
-push/schedule. Also wired into `make check` / `make precommit`. Renovate never proposes
+push/schedule. Also wired into `make check` / `make precommit` and `mise run verify`. In
+`--base` mode it fetches the base ref itself, depth-limited only when the checkout is already
+shallow (CI), so a local run never turns a full clone — and with it every linked worktree —
+shallow; `site/scripts/kuredepsync/wrapper_test.go` asserts a full clone stays full and a
+shallow one stays shallow across a run. Renovate never proposes
 these deps in the first place: `renovate.json` carries an `enabled: false` rule listing the
 shared-direct set — keep that list in step with go.mod changes that add or drop a shared
 direct dep (a missing entry is still caught by the CI guard, just as a red PR).

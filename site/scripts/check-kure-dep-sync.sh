@@ -19,7 +19,11 @@
 #                  fails. Used by push/schedule CI and for local inspection.
 #
 # The script is self-contained: it fetches the base ref itself so a workflow reorder
-# can't move it ahead of an external fetch step and silently break it.
+# can't move it ahead of an external fetch step and silently break it. That fetch
+# never turns a full clone shallow: it is depth-limited (--depth=1, as before) only
+# when the repository is already shallow (CI's checkout). A --depth fetch into a
+# full clone would write .git/shallow and graft the fetched commit as a root,
+# breaking rebase and merge-base for every linked worktree (go-kure/launcher#463).
 #
 # Usage: check-kure-dep-sync.sh --base origin/main
 #        check-kure-dep-sync.sh --report
@@ -86,13 +90,19 @@ fi
 # --base mode: resolve the base go.mod, fetching the ref ourselves.
 resolve_base() {
   local ref="$1"
+  # Depth-limit the fetch only in an already-shallow repository (CI), where it keeps
+  # the fetch small. In a full clone --depth would make it shallow, so fetch plainly.
+  local depth=()
+  if [[ "$(git -C "$REPO_ROOT" rev-parse --is-shallow-repository 2>/dev/null)" == "true" ]]; then
+    depth=(--depth=1)
+  fi
   if [[ "$ref" == origin/* ]]; then
     # Always refresh a remote-tracking base so a stale local origin/main can't cause
     # false positives/negatives; best-effort so offline runs fall back to the cached ref.
-    git -C "$REPO_ROOT" fetch --no-tags --depth=1 origin "${ref#origin/}" >/dev/null 2>&1 || true
+    git -C "$REPO_ROOT" fetch --no-tags ${depth[@]+"${depth[@]}"} origin "${ref#origin/}" >/dev/null 2>&1 || true
   elif ! git -C "$REPO_ROOT" rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
     # Non-tracking ref (e.g. a merge-base SHA): only fetch if the object is missing.
-    git -C "$REPO_ROOT" fetch --no-tags --depth=1 origin "$ref" >/dev/null 2>&1 || true
+    git -C "$REPO_ROOT" fetch --no-tags ${depth[@]+"${depth[@]}"} origin "$ref" >/dev/null 2>&1 || true
   fi
   git -C "$REPO_ROOT" rev-parse --verify --quiet "$ref^{commit}" >/dev/null
 }
