@@ -363,6 +363,15 @@ resolves to no in-bundle component is **left authored**. Resolution assumes the 
 port equals its container port, which holds for all builtin components (e.g. webservice sets
 `TargetPort == Port`).
 
+The same holds for a trait-level `serviceName` (with `servicePort`) that names a Service the
+routing component does not own: every path/backendRef that names no backend of its own routes there,
+and synthesis treats it as an external backend. The allow is retargeted onto the component that owns
+that Service, on `servicePort`, and the routing component gets none. When no component owns it, it
+takes the bare-external-Service path below and — since a trait-level Service carries no
+`backendSelector` — stays authored. "Own" is decided from the component alone (its
+`BackendServiceName()`, else its component name), so `servicePort` without `serviceName`, or a
+`serviceName` equal to the component's own Service, keeps the allow on the routing component.
+
 A backend that names a **bare external Service** (no owning OAM component in the bundle) cannot be
 resolved to a selector by name. To synthesize an allow for it, add an explicit authorable
 `backendSelector` (matchLabels only) beside the backend reference —
