@@ -1,9 +1,10 @@
 # Launcher — Design Document
 
-*Date: 2026-04-19 | Updated: 2026-08-23 | Status: Phase 3 shipped, Phase 5 gate met*
+*Date: 2026-04-19 | Updated: 2026-09-23 | Status: Phase 3 shipped, Phase 5 gate met*
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.7 | 2026-09-23 | Record the pre-release bug-fix exception to the document-format lifecycle in §9.1 |
 | 1.6 | 2026-08-23 | Record the type-name reservation covenant and document-format lifecycle decisions in §9.1 |
 | 1.5 | 2026-08-23 | Record the pkg/patch disposition in §9.1; note the pkg/launcher removal in §2; retitle the §5 patch row |
 | 1.4 | 2026-08-22 | Status refresh: Phase 1b and Phase 3 marked complete, Phase 5 noted gate-met; fix §5 kure-package paths and §13 cross-repo issue refs |
@@ -243,7 +244,7 @@ PR #58 closed issues #36 (package spec), #37 (ClusterProfile), #38 (policy inter
 | Capability rendering schema | Typed Go struct per handler + reflection-derived JSON Schema; `ValidateAndApplyDefaults` interface; custom `CapabilityDefinition` document kind deferred to Phase 2/3 | `design-capability-schema.md` |
 | `pkg/patch` disposition | **Keep** as a supported, standalone library for post-generation resource modification (JSONPath ops, TOML/YAML patch dialects, strategic-merge patch, conflict detection). Deliberately not part of the `kurel build` pipeline — that pipeline is closed through explicit registration (parameters plus registered component, trait, and lowering-rule handlers), not universally typed. Designated implementation for interactive patch mode (go-kure/launcher#18); not a conditional-composition mechanism (go-kure/launcher#39 does not depend on it) | `pkg/patch/README.md` |
 | Type-name reservation | Covenant: a type name in use by a dialect extending launcher's model is reserved; launcher takes it only by upstreaming the feature with the same semantics; successor names (`<family>.v<N>`) reserve the whole family; enforcement is review discipline, not CI | `design-gvk.md` |
-| Document-format lifecycle | `launcher.gokure.dev/v1alpha1` is long-lived; additive-only under one string (same test: existing docs stay valid and compile the same); a breaking change moves the apiVersion; no in-document format counter | `design-gvk.md` |
+| Document-format lifecycle | `launcher.gokure.dev/v1alpha1` is long-lived; additive-only under one string (same test: existing docs stay valid and compile the same); a breaking change moves the apiVersion, except that until the first stable release a bug fix may change or newly reject a document under a `fix(format)` changelog entry; no in-document format counter | `design-gvk.md` |
 
 ---
 

@@ -7,6 +7,7 @@ options-policy-interface.md*
 |---|---|---|
 | 1.0 | 2026-05-14 | Initial — records GVK decision, rationale, strictness rule, OAM reuse |
 | 1.1 | 2026-08-23 | Adds the type-name reservation covenant and document-format lifecycle |
+| 1.2 | 2026-09-23 | Adds the pre-release bug-fix exception to the document-format lifecycle |
 
 ---
 
@@ -252,7 +253,8 @@ relied on by any consumer that pins the version string, including a dialect that
 itself as extending it.
 
 **Stability promise.** While `launcher.gokure.dev/v1alpha1` is current, every document that
-was valid under it remains valid, and compiles to the same output.
+was valid under it remains valid, and compiles to the same output. Until launcher's first
+stable release, a bug fix is exempt from this — see "Pre-release bug-fix exception" below.
 
 **The additive test.** A change is additive **if and only if** every previously valid document
 remains valid *and* compiles to the same output. Additive changes ship freely under the same
@@ -270,10 +272,27 @@ handler declares was accepted before and is a build error now. It never compiled
 its author intended — the key was dropped — so the exception is taken deliberately here, under
 `v1alpha1`, rather than carried forward as a permanent hole in the promise.
 
+**Pre-release bug-fix exception.** While launcher is unreleased and has no stable consumers, a
+*bug fix* may change the output of, or newly reject, a `launcher.gokure.dev/v1alpha1` document
+without a version-string move (maintainer ruling, 2026-09-23). A bug fix here corrects
+behaviour that departs from what this format, its documentation, or the Kubernetes object it
+renders already specify; it is not a change of mind about what the format should do. It ships
+under the `fix(format)` commit scope, and its commit subject — the only part `cliff.toml` renders
+as the Document Format changelog entry (see "Changelog signal" below) — names which documents
+change: the affected kinds or properties. The commit body says whether they now compile to
+different output or are rejected. The
+exception covers bug fixes only. A deliberate feature that alters an existing document's output or validity,
+a removed or retyped field, and a changed default that corrects no bug stay breaking changes
+under the additive test and still move the version string. The exception ends at launcher's
+first stable release — the `v0.1.0-alpha.N` pre-release tags do not end it; from that release
+on, a bug fix that alters or rejects a previously valid document is a breaking change like any
+other.
+
 **Breaking changes move the version string.** A breaking document-format change requires a new
 `apiVersion` (via graduation to `v1beta1`/`v1`, or otherwise). Nothing that pins
 `launcher.gokure.dev/v1alpha1` should ever observe a breaking change without a version-string
-move to signal it.
+move to signal it — except, before launcher's first stable release, a bug fix taken under the
+pre-release bug-fix exception above, which its `fix(format)` changelog entry signals instead.
 
 **Evolution style.** Launcher's primary audience hand-writes `app.yaml`/`kurel.yaml`/
 `cluster.yaml` directly in git, rather than generating them from a higher-level API. That
@@ -301,7 +320,8 @@ on a format level rather than read a changelog.
 **Deprecation procedure.** A field slated for removal is documented as deprecated and continues
 to be accepted for at least one minor release before being dropped. Dropping it is a breaking
 change like any other, so — per "Breaking changes move the version string" above — it is
-removed only alongside a version-string move; there is no pre-`v1beta1` exception.
+removed only alongside a version-string move; there is no pre-`v1beta1` exception, and the
+pre-release bug-fix exception above does not cover removals.
 
 **Changelog signal.** A commit that changes the shape or meaning of a
 `launcher.gokure.dev/v1alpha1` document uses the conventional-commit scope `format`
