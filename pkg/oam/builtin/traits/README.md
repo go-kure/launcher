@@ -319,6 +319,34 @@ be an array`, a mistyped-key diagnostic for a key that is absent. The two shapes
 agree, and a genuinely non-null value of the wrong type keeps that
 `'ingress' must be an array` diagnostic for itself.
 
+### `policyTypes` follows key presence
+
+The rendered `spec.policyTypes` lists a direction when its key is **present** in the
+document, not when it has rules. In `networking.k8s.io/v1` a set `policyTypes` is
+authoritative: a direction missing from it is not isolated at all. Per direction:
+
+| document | `policyTypes` | rules for that direction |
+|---|---|---|
+| key absent | not listed | none |
+| key null | not listed (null is absence, above) | none |
+| key `[]` | **listed** | none — deny all for that direction |
+| key with rules | listed | the rules |
+
+```yaml
+ingress: []                       # policyTypes: [Ingress, Egress]; no ingress permitted
+egress:
+  - to:
+      - ipBlock: {cidr: 10.0.0.0/8}
+```
+
+This used to follow rule count, so the document above rendered `policyTypes:
+[Egress]` and left ingress completely open — the opposite of what `ingress: []`
+says. A single `ingress: []` with no `egress` hid the defect: it rendered no
+`policyTypes` at all, and the API server defaults that to `Ingress`. It now renders
+`policyTypes: [Ingress]` explicitly, which enforces the same thing. The same
+defaulting made a single `egress: []` isolate **ingress** and leave egress open; it
+now renders `policyTypes: [Egress]` (go-kure/launcher#467).
+
 ## Auto-synthesized NetworkPolicy
 
 Routing traits (`ingress`/`httproute`/`expose`) can surface platform-reserved

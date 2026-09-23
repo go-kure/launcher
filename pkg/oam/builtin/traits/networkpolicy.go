@@ -160,6 +160,13 @@ func (h *NetworkPolicyHandler) parseProperties(props map[string]any, app *stack.
 		return nil, errors.New("at least one of 'ingress' or 'egress' must be specified")
 	}
 
+	// Presence, not rule count, decides policyTypes in Generate: an authored
+	// `ingress: []` is "isolate ingress and permit nothing", and the only record
+	// of it once the loop below runs zero times is this flag (go-kure/launcher#467).
+	// A null was cleared to absence above, so it never sets one.
+	config.ingressSet = hasIngress
+	config.egressSet = hasEgress
+
 	if hasIngress {
 		ingressRules, ok := rawIngress.([]any)
 		if !ok {
@@ -737,6 +744,14 @@ type NetworkPolicyConfig struct {
 	componentName string
 	Ingress       []npIngressRule
 	Egress        []npEgressRule
+
+	// ingressSet and egressSet record that the authored document carried the key
+	// with a non-null value, including an empty list. They, not len(Ingress) or
+	// len(Egress), decide which policyTypes Generate lists: in networking.k8s.io/v1
+	// a direction missing from a set policyTypes is not isolated at all, so an
+	// empty list must still list its direction to deny everything for it.
+	ingressSet bool
+	egressSet  bool
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource
@@ -773,8 +788,16 @@ func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object
 		MatchLabels: map[string]string{"app": c.componentName},
 	}
 
-	if len(c.Ingress) > 0 {
+	// policyTypes follows key presence; the rule loops emit nothing for an empty
+	// list, which is exactly "deny all" for a listed direction.
+	if c.ingressSet {
 		kubernetes.AddNetworkPolicyPolicyType(np, networkingv1.PolicyTypeIngress)
+	}
+	if c.egressSet {
+		kubernetes.AddNetworkPolicyPolicyType(np, networkingv1.PolicyTypeEgress)
+	}
+
+	if len(c.Ingress) > 0 {
 		for _, rule := range c.Ingress {
 			ingressRule := networkingv1.NetworkPolicyIngressRule{}
 			for _, peer := range rule.From {
@@ -803,7 +826,6 @@ func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object
 	}
 
 	if len(c.Egress) > 0 {
-		kubernetes.AddNetworkPolicyPolicyType(np, networkingv1.PolicyTypeEgress)
 		for _, rule := range c.Egress {
 			egressRule := networkingv1.NetworkPolicyEgressRule{}
 			for _, peer := range rule.To {
