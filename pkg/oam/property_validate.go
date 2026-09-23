@@ -164,7 +164,9 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 // caller (validateObjectProperties) writes the returned value back into the props
 // map it holds, so a downstream consumer's type assertion (e.g. .(map[string]any))
 // sees the same normalized shape validation itself checked, instead of the
-// original, still-typed value silently surviving unassertable.
+// original, still-typed value silently surviving unassertable. An integer-typed
+// value is normalized the same way when its kind is one no reader asserts — see
+// normalizeIntegerValue.
 //
 // A null reaches here as a whole property value on one path: validateAuthoredProperties
 // (property_validate_authored.go) calls this function directly over every authored
@@ -220,6 +222,11 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		if !isIntegerValue(value) {
 			return value, errors.Errorf("%s: expected integer, got %T (%v)", path, value, value)
 		}
+		normalized, err := normalizeIntegerValue(value, path)
+		if err != nil {
+			return value, err
+		}
+		value = normalized
 	case PropertyTypeNumber:
 		if !isNumberValue(value) {
 			return value, errors.Errorf("%s: expected number, got %T", path, value)
@@ -451,6 +458,43 @@ func isIntegerValue(value any) bool {
 	}
 }
 
+// normalizeIntegerValue rewrites an accepted integer whose Go kind the property
+// readers cannot assert into a plain int, which every reader accepts
+// (go-kure/launcher#418). isIntegerValue matches by reflect.Kind, but the readers
+// downstream type-switch on concrete types — toInt32/toInt64 in
+// builtin/components/common.go on float64/int/int32/int64, and at least one trait reader
+// (httproute's backend port) on float64/int only — and treat anything else as "not
+// an integer", so a uint32 replicas passed validation and then rendered the schema
+// default. Writing the value back as int, the type gopkg.in/yaml.v3 decodes an
+// integer literal to, gives every reader the shape it already handles.
+//
+// Only the kinds no reader asserts are rewritten: int8, int16 and every unsigned
+// kind. Values whose kind is int, int32, int64 or a float are returned unchanged —
+// the decoder set, which every reader already accepts in its concrete form. A NAMED
+// type of one of those kinds (`type Replicas int32`) is therefore left alone too;
+// that is the named-scalar case tracked as go-kure/launcher#428, and converting it
+// here to int64 would silently break readers that do not accept int64 (see that
+// issue). A named int8/int16/unsigned type is rewritten, because this function keys
+// on the kind.
+//
+// An unsigned value above math.MaxInt is an error rather than a truncation: it has
+// no int representation, and the wrapped negative would read as a real value.
+func normalizeIntegerValue(value any, path string) (any, error) {
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Int8, reflect.Int16:
+		return int(rv.Int()), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		u := rv.Uint()
+		if u > math.MaxInt {
+			return value, errors.Errorf("%s: integer %d out of range (max %d)", path, u, math.MaxInt)
+		}
+		return int(u), nil
+	default:
+		return value, nil
+	}
+}
+
 // isNumberValue accepts any Go integer or floating-point kind.
 func isNumberValue(value any) bool {
 	_, ok := asFloatValue(value)
@@ -634,8 +678,8 @@ func asFloatValue(value any) (float64, bool) {
 // A plain reflect.DeepEqual is not enough: the enum literals come from a handler's
 // Go schema while the value comes from a decoder or a rule, so int(80) vs
 // float64(80) and string vs named-string-type comparisons are routine and are the
-// same value by every meaning a user has. Anything not string-kinded or
-// numeric-kinded falls back to DeepEqual.
+// same value by every meaning a user has. Arrays and objects are compared element
+// by element under the same rule; anything else falls back to DeepEqual.
 func enumContainsValue(enum []any, value any) bool {
 	for _, e := range enum {
 		if equalPropertyValues(e, value) {
@@ -650,12 +694,115 @@ func equalPropertyValues(a, b any) bool {
 		sb, ok := asStringValue(b)
 		return ok && sa == sb
 	}
-	if fa, ok := asFloatValue(a); ok {
+	if na, ok := asExactNumber(a); ok {
 		// Bool is neither string- nor numeric-kinded, so it never reaches here.
-		fb, ok := asFloatValue(b)
-		return ok && fa == fb
+		nb, ok := asExactNumber(b)
+		return ok && na.equal(nb)
+	}
+	// Compound members are compared element by element with this same function
+	// rather than by reflect.DeepEqual: validatePropertyValue normalizes the VALUE's
+	// nested integers (normalizeIntegerValue, go-kure/launcher#418) and collections
+	// before the Enum check, while members stay exactly as declared, so a member
+	// holding uint16(80) must still equal a value whose 80 is now an int. The walk is
+	// bounded by the member's own depth, which the Enum arm has already capped at
+	// enumMemberMaxDepth through containsNullValue.
+	if aa, ok := asArrayValue(a); ok {
+		ba, ok := asArrayValue(b)
+		if !ok || len(aa) != len(ba) {
+			return false
+		}
+		for i := range aa {
+			if !equalPropertyValues(aa[i], ba[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	if ao, ok := asObjectValue(a); ok {
+		bo, ok := asObjectValue(b)
+		if !ok || len(ao) != len(bo) {
+			return false
+		}
+		for k, av := range ao {
+			bv, present := bo[k]
+			if !present || !equalPropertyValues(av, bv) {
+				return false
+			}
+		}
+		return true
 	}
 	return reflect.DeepEqual(a, b)
+}
+
+// exactNumber is a numeric value in a form that compares without loss: an integer
+// of any Go kind as sign and magnitude, or a float as itself. Enum comparison used
+// to go through float64, which makes distinct integers above 2^53 compare equal —
+// harmless while only scalars were compared that way and a live admission of an
+// out-of-Enum value once compound members are compared element by element (review
+// of go-kure/launcher#418).
+type exactNumber struct {
+	isInt bool
+	neg   bool   // integer only: value < 0
+	mag   uint64 // integer only: |value|
+	f     float64
+}
+
+// asExactNumber accepts any Go integer or floating-point kind. NaN and ±Inf are
+// rejected, as asFloatValue rejects them.
+func asExactNumber(value any) (exactNumber, bool) {
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		i := rv.Int()
+		if i < 0 {
+			// -(i+1) cannot overflow, even for math.MinInt64.
+			return exactNumber{isInt: true, neg: true, mag: uint64(-(i + 1)) + 1}, true //nolint:gosec // i < 0, so -(i+1) >= 0
+		}
+		return exactNumber{isInt: true, mag: uint64(i)}, true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return exactNumber{isInt: true, mag: rv.Uint()}, true
+	case reflect.Float32, reflect.Float64:
+		f := rv.Float()
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return exactNumber{}, false
+		}
+		return exactNumber{f: f}, true
+	default:
+		return exactNumber{}, false
+	}
+}
+
+// equal compares two numbers exactly: integers by sign and magnitude, floats by
+// value, and a float against an integer only when the float is that integer
+// exactly — an integral float within the uint64 magnitude range.
+func (a exactNumber) equal(b exactNumber) bool {
+	switch {
+	case a.isInt && b.isInt:
+		return a.neg == b.neg && a.mag == b.mag
+	case !a.isInt && !b.isInt:
+		return a.f == b.f
+	case a.isInt:
+		a, b = b, a
+	}
+	// a is the float, b the integer.
+	f := a.f
+	if f != math.Trunc(f) {
+		return false
+	}
+	neg := f < 0
+	if neg {
+		f = -f
+	}
+	// 2^64 is exactly representable; every integral float below it converts to
+	// uint64 without loss.
+	if f >= 18446744073709551616.0 {
+		return false
+	}
+	mag := uint64(f)
+	if mag == 0 {
+		return b.mag == 0
+	}
+	return neg == b.neg && mag == b.mag
 }
 
 // validateEmittedComponent checks an emitted component's Properties against its

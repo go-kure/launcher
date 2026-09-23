@@ -1043,3 +1043,148 @@ func TestValidatePropertyValue_NumberAcceptsFiniteFloat(t *testing.T) {
 		t.Fatalf("expected a finite float to validate, got: %v", err)
 	}
 }
+
+// TestValidatePropertyValue_IntegerNormalization pins the write-back rule for
+// go-kure/launcher#418 at the validator itself; the end-to-end half (validation, then
+// the real webservice handler, asserting the rendered Deployment) lives in
+// builtin/components/integer_kinds_test.go.
+//
+// The decoder set is returned in its own concrete type, because readers exist that
+// accept float64 and int but NOT int64 (httproute's backend port), so rewriting
+// everything to one canonical type would silently break them — see
+// go-kure/launcher#428. Only the kinds no reader asserts become int.
+func TestValidatePropertyValue_IntegerNormalization(t *testing.T) {
+	type namedInt32 int32
+	type namedUint16 uint16
+	schema := PropertySchema{Type: PropertyTypeInteger}
+
+	for _, tc := range []struct {
+		in   any
+		want any
+	}{
+		// Untouched: the concrete types every reader already handles.
+		{int(7), int(7)},
+		{int32(7), int32(7)},
+		{int64(7), int64(7)},
+		{float64(7), float64(7)},
+		// Untouched: a named type of an untouched kind is #428's, not this one's.
+		{namedInt32(7), namedInt32(7)},
+		// Rewritten to int.
+		{int8(-7), int(-7)},
+		{int16(7), int(7)},
+		{uint(7), int(7)},
+		{uint8(7), int(7)},
+		{uint16(7), int(7)},
+		{uint32(7), int(7)},
+		{uint64(7), int(7)},
+		{uint64(math.MaxInt), int(math.MaxInt)},
+		{namedUint16(7), int(7)},
+	} {
+		got, err := validatePropertyValue(schema, tc.in, "properties.n")
+		if err != nil {
+			t.Errorf("%T(%v): unexpected error: %v", tc.in, tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%T(%v): got %T(%v), want %T(%v)", tc.in, tc.in, got, got, tc.want, tc.want)
+		}
+	}
+
+	_, err := validatePropertyValue(schema, uint64(math.MaxInt)+1, "properties.n")
+	if err == nil || !strings.Contains(err.Error(), "properties.n: integer") || !strings.Contains(err.Error(), "out of range") {
+		t.Errorf("uint64 above MaxInt: want an out-of-range error, got: %v", err)
+	}
+
+	// The write-back reaches array elements and the emitted path too, since both go
+	// through validatePropertyValue.
+	props := map[string]any{"ports": []uint16{80, 443}}
+	arr := map[string]PropertySchema{"ports": {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeInteger}}}
+	if err := validateProperties(arr, props, "properties"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	items, _ := props["ports"].([]any)
+	if len(items) != 2 || items[0] != 80 || items[1] != 443 {
+		t.Errorf("ports = %#v, want []any{80, 443} as int", props["ports"])
+	}
+}
+
+// TestValidatePropertyValue_CompoundEnumAfterIntegerNormalization is the regression
+// the #418 write-back introduced and review caught: a value's nested integers are
+// normalized (uint16 -> int) before the Enum check, but declared members are left as
+// written, so a compound member holding uint16(80) stopped matching the same value
+// once compared by reflect.DeepEqual. Compound members are now compared element by
+// element with the same numeric equality scalar members already use.
+func TestValidatePropertyValue_CompoundEnumAfterIntegerNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		schema PropertySchema
+		value  any
+	}{
+		{"array", PropertySchema{Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeInteger},
+			Enum: []any{[]any{uint16(80)}}}, []any{uint16(80)}},
+		{"typed array member", PropertySchema{Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeInteger},
+			Enum: []any{[]uint16{80, 443}}}, []uint16{80, 443}},
+		{"object", PropertySchema{Type: PropertyTypeObject, Properties: map[string]PropertySchema{"port": {Type: PropertyTypeInteger}},
+			Enum: []any{map[string]any{"port": uint16(80)}}}, map[string]any{"port": uint16(80)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := validatePropertyValue(tc.schema, tc.value, "properties.choice"); err != nil {
+				t.Errorf("a value equal to a declared compound member must match it, got: %v", err)
+			}
+		})
+	}
+
+	// Structural, not permissive: a different length, key set or element still fails.
+	for _, v := range []any{[]any{80, 443}, []any{81}} {
+		schema := PropertySchema{Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeInteger}, Enum: []any{[]any{uint16(80)}}}
+		if _, err := validatePropertyValue(schema, v, "properties.choice"); err == nil {
+			t.Errorf("%v must not match member [80]", v)
+		}
+	}
+	objSchema := PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true,
+		Properties: map[string]PropertySchema{"port": {Type: PropertyTypeInteger}},
+		Enum:       []any{map[string]any{"port": uint16(80)}}}
+	if _, err := validatePropertyValue(objSchema, map[string]any{"port": 80, "x": "y"}, "properties.choice"); err == nil {
+		t.Error("an object with an extra key must not match a member without it")
+	}
+}
+
+// TestEqualPropertyValues_IntegersCompareExactly pins the review finding on the
+// compound Enum comparison: comparing through float64 makes distinct integers above
+// 2^53 equal, which admitted a value outside a declared Enum once compound members
+// were compared element by element. Integers now compare exactly across signed and
+// unsigned kinds, and an integral float equals an integer only when it is that
+// integer exactly.
+func TestEqualPropertyValues_IntegersCompareExactly(t *testing.T) {
+	const big = int64(1) << 53
+	for _, tc := range []struct {
+		a, b any
+		want bool
+	}{
+		{big, big + 1, false},
+		{uint64(big), big + 1, false},
+		{[]any{big}, []any{big + 1}, false},
+		{map[string]any{"n": big}, map[string]any{"n": big + 1}, false},
+		{big + 1, uint64(big + 1), true},
+		{[]any{uint16(80)}, []any{80}, true},
+		{float64(80), 80, true},
+		{80, float64(80), true},
+		{float64(big), big + 1, false},
+		{float64(big), big, true},
+		{uint64(math.MaxUint64), int64(-1), false},
+		{int64(math.MinInt64), float64(math.MinInt64), true},
+		{float64(1 << 63), uint64(1 << 63), true},
+		{float64(80.5), 80, false},
+		{math.Copysign(0, -1), 0, true},
+	} {
+		if got := equalPropertyValues(tc.a, tc.b); got != tc.want {
+			t.Errorf("equalPropertyValues(%T(%v), %T(%v)) = %v, want %v", tc.a, tc.a, tc.b, tc.b, got, tc.want)
+		}
+	}
+
+	// Through the validator: the review's reproduction.
+	schema := PropertySchema{Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeInteger}, Enum: []any{[]any{big}}}
+	if _, err := validatePropertyValue(schema, []any{big + 1}, "properties.choice"); err == nil {
+		t.Error("[2^53+1] must not match Enum member [2^53]")
+	}
+}
