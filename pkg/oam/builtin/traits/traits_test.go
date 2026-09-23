@@ -1090,6 +1090,30 @@ func TestPVCTraitConfig_Generate_RejectsEmptySize(t *testing.T) {
 	}
 }
 
+// TestPVCTraitConfig_Generate_RejectsNonPositiveSize: the trait builds its
+// claim through components.BuildPVC, so the positivity rule upstream applies to
+// requests[storage] (go-kure/launcher#384) reaches it too — a zero or negative
+// size fails the build instead of emitting a claim admission refuses.
+func TestPVCTraitConfig_Generate_RejectsNonPositiveSize(t *testing.T) {
+	for _, size := range []string{"0", "-1Gi"} {
+		t.Run(size, func(t *testing.T) {
+			h := &traits.PVCHandler{}
+			trait := &oam.Trait{Type: "pvc", Properties: map[string]any{"name": "data", "size": size}}
+			bundle := newBundle()
+			if err := h.Apply(trait, newApp("api", "default"), bundle); err != nil {
+				t.Fatalf("Apply: %v", err)
+			}
+			_, err := bundle.Applications[0].Generate()
+			if err == nil {
+				t.Fatalf("expected Generate to reject size %q", size)
+			}
+			if !strings.Contains(err.Error(), "size must be positive") {
+				t.Errorf("error should name the positivity rule, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestPVCTraitConfig_ApplyPolicy_DefaultStorageSize(t *testing.T) {
 	// Omitted size takes the policy default.
 	if got := pvcSizeAfterPolicy(t, map[string]any{"name": "data"}, &stubPVCPolicy{defaultStorageSize: "7Gi"}); got != "7Gi" {

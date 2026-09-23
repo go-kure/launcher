@@ -2378,6 +2378,10 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				if err != nil {
 					return result, errors.Errorf("volume %q: invalid emptyDir sizeLimit %q: %w", volName, sizeLimit, err)
 				}
+				// Zero is deliberately allowed, unlike pvc.size below: upstream
+				// validateVolumeSource rejects only Cmp < 0 on sizeLimit, and the
+				// kubelet applies the limit only when it is > 0, so "0" means
+				// "no volume-level limit" rather than an inadmissible value.
 				if qty.Sign() < 0 {
 					return result, errors.Errorf("volume %q: emptyDir sizeLimit must not be negative, got %q", volName, sizeLimit)
 				}
@@ -2399,8 +2403,12 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			if err != nil {
 				return result, errors.Errorf("volume %q: invalid PVC size %q: %w", volName, size, err)
 			}
-			if qty.Sign() < 0 {
-				return result, errors.Errorf("volume %q: PVC size must not be negative, got %q", volName, size)
+			// ValidatePersistentVolumeClaimSpec runs ValidatePositiveQuantityValue
+			// over requests[storage], which rejects Cmp <= 0: a zero-sized claim
+			// is as inadmissible as a negative one, so refuse both here rather
+			// than emit a claim the apiserver will reject.
+			if qty.Sign() <= 0 {
+				return result, errors.Errorf("volume %q: PVC size must be positive, got %q", volName, size)
 			}
 			storageClass, storageClassExplicitEmpty, err := parseStorageClassField(m, fmt.Sprintf("volume %q: storageClass", volName))
 			if err != nil {
@@ -4375,11 +4383,17 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 	return vcts, nil
 }
 
-// BuildPVC creates a PersistentVolumeClaim from a PVCConfig.
+// BuildPVC creates a PersistentVolumeClaim from a PVCConfig. The size must be
+// a positive quantity — the rule ValidatePersistentVolumeClaimSpec applies to
+// requests[storage]. It is checked here as well as in parseVolumes because the
+// pvc trait builds its claim through this function without that parser.
 func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev1.PersistentVolumeClaim, error) {
 	qty, err := resource.ParseQuantity(pvc.Size)
 	if err != nil {
 		return nil, errors.Errorf("PVC %q: invalid size %q: %w", pvc.Name, pvc.Size, err)
+	}
+	if qty.Sign() <= 0 {
+		return nil, errors.Errorf("PVC %q: size must be positive, got %q", pvc.Name, pvc.Size)
 	}
 
 	claim := kubernetes.CreatePersistentVolumeClaim(pvc.Name, namespace)
