@@ -160,9 +160,31 @@ type augmentingDecorator struct {
 	augmenter layout.LayoutAugmenter
 }
 
-// AugmentLayout forwards to the inner config's LayoutAugmenter implementation.
+// layoutPostAugmenter is implemented by a decorator whose per-resource
+// processing must also reach resources the wrapped LayoutAugmenter adds in
+// AugmentLayout — resources the decorator's own Generate never sees, because
+// the inner augmenter creates them after Generate has returned. Unexported and
+// opt-in: a decorator that only rewrites what its inner Generate returns (e.g.
+// security-context patching a PodSpec) has nothing to do here and does not
+// implement it.
+type layoutPostAugmenter interface {
+	postAugmentLayout(l *layout.ManifestLayout) error
+}
+
+// AugmentLayout forwards to the inner config's LayoutAugmenter implementation,
+// then gives the outer decorator a chance to post-process the augmented layout
+// when it implements layoutPostAugmenter. The hook runs at every level of an
+// N-deep wrap chain, because each level's augmenter is the next inner
+// augmentingDecorator: the innermost augmenter adds its resources first, and
+// every decorator above it then sees them regardless of trait order.
 func (a augmentingDecorator) AugmentLayout(l *layout.ManifestLayout) error {
-	return a.augmenter.AugmentLayout(l)
+	if err := a.augmenter.AugmentLayout(l); err != nil {
+		return err
+	}
+	if p, ok := a.decoratedConfig.(layoutPostAugmenter); ok {
+		return p.postAugmentLayout(l)
+	}
+	return nil
 }
 
 // GenerateCoversAugmentLayout forwards to the inner augmenter's

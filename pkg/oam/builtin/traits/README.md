@@ -440,6 +440,19 @@ config. Without this forward, kure's layout walker — which keys a structural d
 capability on a decorated (trait-carrying) config, silently losing the augmenter's layout-level
 effect (the values `ConfigMap`, or the hook-group repartitioning) the moment any trait is added.
 
+A straight forward alone would also bypass every decorator's own processing for the resources
+the augmenter adds: those are created inside `AugmentLayout`, after every decorator's `Generate`
+has returned. So after the inner `AugmentLayout` returns, `augmentingDecorator` calls the outer
+decorator's unexported `postAugmentLayout` hook when it implements one. `prune-protection` is the
+one decorator that does: it annotates every resource on the per-app layout and its child layouts
+with `kustomize.toolkit.fluxcd.io/prune: disabled`, so the `helmchart` values `ConfigMap` is
+protected along with the `HelmRelease`. kure's walker calls `AugmentLayout` only on a layout it
+seeded with that one application's `Generate` output, so the trait's narrow scope is unchanged —
+sibling applications in the same bundle are never on that layout. The hook runs at every level of
+a decorator chain, so trait order does not matter. The other decorators (`configmap`,
+`external-secret`, `security-context`) rewrite the workload their inner `Generate` returns and
+have nothing to do for an augmenter-added resource, so they implement no hook.
+
 Every trait decorator also embeds `decoratorBase`, which forwards the optional
 interfaces a component config may implement — `stack.Validator`,
 `fluxNamespaceSettable`, `autoHealthCheckEmitter`, `servicePortProvider`,
