@@ -1717,7 +1717,7 @@ func TestLower_ComponentStep_RecordsEmittedPolicyNames(t *testing.T) {
 	doc.APIVersion = SupportedAPIVersion
 	doc.Kind = terminalDocumentKind
 
-	_, steps, err := tr.lowerDocumentBody(doc, TransformContext{}, newNameAllocator(), 0)
+	_, steps, err := tr.lowerDocumentBody(doc, TransformContext{}, NewNameAllocator(), 0)
 	if err != nil {
 		t.Fatalf("lowerDocumentBody: %v", err)
 	}
@@ -1759,7 +1759,7 @@ func TestLower_TraitStep_RecordsEmittedComponentAndPolicyNames(t *testing.T) {
 	doc.APIVersion = SupportedAPIVersion
 	doc.Kind = terminalDocumentKind
 
-	_, steps, err := tr.lowerDocumentBody(doc, TransformContext{}, newNameAllocator(), 0)
+	_, steps, err := tr.lowerDocumentBody(doc, TransformContext{}, NewNameAllocator(), 0)
 	if err != nil {
 		t.Fatalf("lowerDocumentBody: %v", err)
 	}

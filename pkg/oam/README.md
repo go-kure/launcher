@@ -214,6 +214,16 @@ reason two identically-named Kubernetes objects in different namespaces coexist.
 inputs sharing both a name and a namespace are rejected earlier, as a duplicate authored
 document, before either reaches the allocator.
 
+Every rule receives the run's one shared allocator as `LoweringContext.Namer`, which the
+engine never leaves nil at any position (raw documents included), so a rule derives every
+generated child name through `lctx.Namer.Name(base, suffix, origin)` with no nil-guard
+fallback. A nil `Namer` is a contract violation by whoever built the `LoweringContext`.
+Code that drives a rule directly, outside the engine — a rule's own unit test in another
+module, a pre-pass, a golden-file or fixture harness — builds the `Namer` with
+`NewNameAllocator()` (the zero value is not usable) and shares that one allocator across
+every call belonging to the same run, as `LowerRaws` does, so cross-document collisions
+are detected.
+
 Four registration interfaces, one per position in the document tree, each with its own
 registrar on `*Transformer` and a duplicate/dispatchable-collision guard (a type
 claimed by a lowering rule must not also be a dispatchable handler type, and a

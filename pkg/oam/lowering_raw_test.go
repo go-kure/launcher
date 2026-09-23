@@ -681,7 +681,7 @@ func TestLowerRaws_NestedTraitInRawDocumentRuleOutput_IsSealed(t *testing.T) {
 
 	raw := rawWebApplication("shop")
 	d := loweringDoc{raw: raw, rule: rule, origin: Origin{Document: "shop", DocumentKind: "WebApplication"}}
-	emitted, _, err := tr.lowerRawOnce(d, TransformContext{}, newNameAllocator(), 0)
+	emitted, _, err := tr.lowerRawOnce(d, TransformContext{}, NewNameAllocator(), 0)
 	if err != nil {
 		t.Fatalf("lowerRawOnce: %v", err)
 	}
