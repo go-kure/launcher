@@ -207,8 +207,12 @@ properties therefore have no declared shape, and are not checked.
 
 **Trait types declared by a `CapabilityDefinition`.** A definition supplied via
 `--capability-def` declares that a trait type *exists*; it does not declare what properties that
-type accepts. With no `PropertySchemaProvider` behind it, such a trait's properties are left
-unchecked rather than rejected wholesale.
+type accepts. With no `PropertySchemaProvider` behind it, such a trait's handler-owned properties
+are left unchecked rather than rejected wholesale. When the trait is served by a registered handler
+or lowering rule that declares no schema, the engine-owned `scope` (below) is still type-checked:
+that key is not the handler's to declare, so a handler that declares no schema cannot opt it out
+of being a string. A trait type with no registered handler or lowering rule at all is not
+checked here; it has nothing to apply it and fails later in the build.
 
 ### `scope` is declared by the engine, not by a handler
 

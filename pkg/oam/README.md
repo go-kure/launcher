@@ -352,7 +352,11 @@ One property is legal on **every** trait regardless of what its handler declares
 type, so a `pvc` or `certificate` trait can select a scoped `ClusterProfile` binding
 even though neither handler declares such a property. `expose`, `ingress` and
 `httproute` do declare it, but for an unrelated reason (sub-application naming), and
-their own declaration wins over the engine default. Add to `engineTraitProperties` if
+their own declaration wins over the engine default. Engine-owned keys are checked even
+on a trait whose handler or lowering rule declares no `PropertySchema` at all (for
+example a custom handler registered through `RegisterTrait`): a non-string `scope`
+there is rejected, while the handler's own keys stay unchecked because nothing
+declares them. Add to `engineTraitProperties` if
 another engine-read property is ever introduced; the merge never mutates the
 handler's returned schema, so `HandlerSchemas` still advertises only what each handler
 actually declares.
