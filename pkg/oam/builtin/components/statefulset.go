@@ -69,8 +69,12 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.Image = image
 
-	config.Replicas = parseReplicas(props, 1)
-	config.explicitReplicas = hasExplicitReplicas(props)
+	replicas, replicasAuthored, err := parseReplicas(props, 1)
+	if err != nil {
+		return nil, err
+	}
+	config.Replicas = replicas
+	config.explicitReplicas = replicasAuthored
 
 	if p, ok := toInt32(props["port"]); ok {
 		config.Port = p

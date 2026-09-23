@@ -1033,16 +1033,30 @@ func parseArgs(props map[string]any) ([]string, error) {
 	return args, nil
 }
 
-func parseReplicas(props map[string]any, defaultVal int32) int32 {
-	if n, ok := toInt32(props["replicas"]); ok {
-		return n
+// parseReplicas is the one reading of `replicas`, shared by every kind that
+// has it (webservice, worker, statefulset, deployment, postgresql). It returns
+// the count, whether the document authored it, and an error for a value that
+// is not an integer (naming its type) or is negative (naming the value).
+// Absent and explicit null both yield defaultVal with authored=false
+// (parseInt32Field reads a null as omission).
+//
+// It replaces a pair that ran the value through toInt32 and fell back to the
+// default whenever that failed, so `replicas: "3"` silently built one replica
+// and `replicas: -1` reached an object the apiserver refuses
+// (ValidateDeploymentSpec / ValidateStatefulSetSpec run ValidateNonnegativeField
+// on Replicas). go-kure/launcher#393.
+func parseReplicas(props map[string]any, defaultVal int32) (int32, bool, error) {
+	n, authored, err := parseInt32Field(props, "replicas", "replicas")
+	if err != nil {
+		return 0, false, err
 	}
-	return defaultVal
-}
-
-func hasExplicitReplicas(props map[string]any) bool {
-	_, ok := toInt32(props["replicas"])
-	return ok
+	if !authored {
+		return defaultVal, false, nil
+	}
+	if n < 0 {
+		return 0, false, errors.Errorf("replicas: must be >= 0, got %d", n)
+	}
+	return n, true, nil
 }
 
 // namedPortsAllowed is false for a component kind whose main container never

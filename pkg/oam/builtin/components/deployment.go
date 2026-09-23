@@ -116,27 +116,11 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.Image = image
 
-	// Not parseReplicas/hasExplicitReplicas, which the other kinds use: that
-	// pair runs the value through toInt32 and falls back to the default when
-	// the conversion fails, so `replicas: "3"` silently becomes 1 and
-	// `replicas: -1` is carried through to a Deployment the apiserver then
-	// refuses (ValidateDeploymentSpec runs ValidateNonnegativeField on
-	// Replicas). This kind reads it as a checked, presence-aware field
-	// instead. The divergence is deliberate and one-directional — deployment
-	// refuses documents the older kinds accept, never the reverse — because
-	// tightening the shared helper would change what those kinds already
-	// build. Tracked for them separately in go-kure/launcher#393.
-	replicas, replicasAuthored, err := parseInt32Field(props, "replicas", "replicas")
+	replicas, replicasAuthored, err := parseReplicas(props, 1)
 	if err != nil {
 		return nil, err
 	}
-	if replicasAuthored && replicas < 0 {
-		return nil, errors.Errorf("replicas: must be >= 0, got %d", replicas)
-	}
-	config.Replicas = 1
-	if replicasAuthored {
-		config.Replicas = replicas
-	}
+	config.Replicas = replicas
 	config.explicitReplicas = replicasAuthored
 
 	env, err := parseEnv(props)

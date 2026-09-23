@@ -419,10 +419,9 @@ func TestDeploymentHandler_NonRWXRejectsMultipleReplicas(t *testing.T) {
 }
 
 // TestDeploymentHandler_ReplicasIsValidated pins this kind's checked reading of
-// `replicas`. The shared parseReplicas helper the other kinds use runs the value
-// through toInt32 and falls back to the default when that fails, so a string
-// silently becomes 1 and a negative reaches the apiserver; deployment refuses
-// both at build time instead.
+// `replicas`: a non-integer and a negative are refused at build time rather
+// than defaulted or carried through to the apiserver. Every kind that reads
+// `replicas` shares the same reading; replicas_test.go pins it per kind.
 func TestDeploymentHandler_ReplicasIsValidated(t *testing.T) {
 	cases := []struct {
 		name  string

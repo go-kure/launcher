@@ -66,8 +66,12 @@ func (h *WorkerHandler) ToApplicationConfig(component *oam.Component, namespace 
 	}
 	config.Image = image
 
-	config.Replicas = parseReplicas(props, 1)
-	config.explicitReplicas = hasExplicitReplicas(props)
+	replicas, replicasAuthored, err := parseReplicas(props, 1)
+	if err != nil {
+		return nil, err
+	}
+	config.Replicas = replicas
+	config.explicitReplicas = replicasAuthored
 
 	env, err := parseEnv(props)
 	if err != nil {
