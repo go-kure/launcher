@@ -462,19 +462,16 @@ func schedulingAliasProps() map[string]any {
 // pointer.
 //
 // AXES THIS TEST DOES NOT COVER, so a later reader does not mistake it for
-// exhaustive: it exercises exactly those three fields, and **the rest of the
-// projection is still aliased** — go-kure/launcher#425. `ps := in.Config.PodSpec`
-// shares NodeSelector (a map, shared outright), SecurityContext, DNSConfig and
-// TerminationGracePeriodSeconds; `ps.Volumes = append(...)` shares each Volume's
-// nested VolumeSource pointers; the container appends share their nested
-// references. None of that is guarded here or anywhere else.
+// exhaustive: it exercises exactly those three fields. The rest of the pod
+// spec buildPodSpec projects — the authored pod-level fields, the appended
+// volumes and the main, init and sidecar containers — is guarded by
+// podspec_render_reuse_aliasing_test.go (go-kure/launcher#425), in the same
+// nested-reference style with its own shallow negative control.
 //
-// This matters because of where the test sits. A reader who finds a file named
-// render_reuse_aliasing_test.go, containing tests that prove three fields are
-// safe, will reasonably conclude aliasing is handled. It is not — three fields
-// of it are. Adding a field to the projection without adding a case here leaves
-// it silently unguarded, which is exactly how the three fields above came to be
-// added outside the boundary of the test directly above this one.
+// Adding a field to the projection without adding a case to one of the two
+// files leaves it silently unguarded, which is exactly how the three fields
+// above came to be added outside the boundary of the test directly above this
+// one.
 func TestDeployment_SchedulingRenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
 	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", schedulingAliasProps(),
 		func(objects []*client.Object) {
