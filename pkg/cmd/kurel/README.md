@@ -60,6 +60,17 @@ allowed set, rather than being silently dropped (go-kure/launcher#408):
 Error: validating application file "app.yaml": component "web": trait "expose": properties: unsupported field "tls" (allowed: allowedGroups, allowedHostnameWildcard, annotations, authResponseHeaders, authSigninURL, authURL, certManagerClusterIssuer, controllerType, forceSslRedirect, gatewayName, gatewayNamespace, hostnames, ingressClassName, name, networkPolicy, rules, scope, secretName, serviceName, servicePort, sslRedirect)
 ```
 
+The same check type-checks every declared property, so a value of the wrong YAML
+type fails the build instead of being coerced. Many handlers read string
+properties with a lenient type assertion that turns a non-string into `""`, which the
+handler then treats as absent — so on the handler alone, `delivery: 123` on a
+`helmchart` component builds with the `native` default. Through `build` it is
+rejected (go-kure/launcher#325):
+
+```text
+Error: validating application file "app.yaml": component "podinfo" (type "helmchart"): properties.delivery: expected string, got int
+```
+
 In package mode this runs *after* parameter resolution, because an authored `${...}`
 placeholder is a bare string until it is substituted — checking a typed property
 before that point would reject a document that is correct. See the OAM model's
