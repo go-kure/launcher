@@ -155,8 +155,12 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.explicitStorageSize = props["storageSize"] != nil
 
-	config.Replicas = parseReplicas(props, 1)
-	config.explicitReplicas = hasExplicitReplicas(props)
+	replicas, replicasAuthored, err := parseReplicas(props, 1)
+	if err != nil {
+		return nil, err
+	}
+	config.Replicas = replicas
+	config.explicitReplicas = replicasAuthored
 
 	if resources, ok := props["resources"].(map[string]any); ok {
 		r, err := parseResources(resources)

@@ -1020,16 +1020,27 @@ own bare-string type), which walks declared keys and shapes on the authored
 document itself. An authored `strategy` malformed enough to fail that check now
 fails there, before the handler ever sees it.
 
-**`replicas` is validated on `deployment` only.** The other workload kinds read
-`replicas` through a shared helper that falls back to the default whenever the
-value will not convert, so `replicas: "3"` silently becomes 1 and
-`replicas: -1` is carried through to an object the apiserver then refuses
-(`ValidateDeploymentSpec` runs `ValidateNonnegativeField` on it). `deployment`
-rejects both at build time instead: a non-integer and a negative are errors.
-The divergence is deliberate and one-directional — this kind refuses documents
-the older kinds accept, never the reverse — because tightening the shared
-helper would change what those kinds already build; that is tracked
-separately (go-kure/launcher#393).
+**`replicas` is validated the same way on every kind that reads it** —
+`deployment`, `webservice`, `worker`, `statefulset` and `postgresql` share one
+checked reading (`parseReplicas`, `common.go`). A value that is not an integer
+is an error naming its type (`replicas: must be an integer, got string`), and a
+negative is an error naming the value (`replicas: must be >= 0, got -1`).
+Absent or `null` takes the default 1. `replicas: 0` is accepted everywhere.
+An authored count, including 0 and 1, wins over a policy `DefaultReplicas`;
+only an absent or `null` one takes it.
+Before go-kure/launcher#393 only the `deployment` handler did this. The
+other handlers fell back to the default when the value would not convert, and
+carried `replicas: -1` through to an object the apiserver then refused
+(`ValidateDeploymentSpec` and `ValidateStatefulSetSpec` run
+`ValidateNonnegativeField` on it). What that changes in practice differs by
+entry point:
+
+- **`kurel build`** already refused a non-integer on every kind through the
+  authored-property check (see above). The change it sees is the negative
+  count, which is now a build error on those kinds too.
+- **A library caller that runs the handlers without
+  `ValidateAuthoredProperties`** used to get one replica for
+  `replicas: "3"` without any error. It now gets the handler's own error.
 
 **Non-RWX volumes.** A `ReadWriteOnce` (or `ReadWriteOncePod`) claim cannot be
 held by an outgoing and an incoming pod at once, so the handler allows **at
@@ -1176,8 +1187,8 @@ object would change what the next `Generate` emits.
   `webservice` and `worker` rather than owning. What distinguishes it is mostly
   what it leaves out: no `topologySpread`, no four-key `affinity` shorthand, no
   `port`; it declares no endpoint and emits no Service. It is not `worker` minus
-  a few things either — it validates `replicas` and reads nulls as omissions
-  across its whole surface, neither of which the role kinds do. The one thing it
+  a few things either — it reads nulls as omissions across its whole surface,
+  which the role kinds do not. The one thing it
   adds is the raw `corev1` scheduling surface the role kinds lack: `affinity`,
   `tolerations` and `topologySpreadConstraints` as the API shapes
   (go-kure/launcher#412, see "Raw scheduling properties" above). That is the
