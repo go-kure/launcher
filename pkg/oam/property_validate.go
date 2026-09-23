@@ -39,12 +39,15 @@ import (
 // rule here: the strip reaches only keys a schema declares, the same horizon
 // validation itself has.
 //
-// Scope note, deliberate: these functions run on EMITTED elements only. Authored
-// documents still pass through validate.go, which checks type names and identity
-// but not property shape. Wiring the authored path through here as well is a
-// behaviour change for existing users' documents and is out of scope for the
-// lowering engine; it is why the emission-time check exists as its own entry point
-// rather than as a call inside validate().
+// Scope note: validateProperties and its object walk run on EMITTED elements. The
+// authored path has its own entry point, ValidateAuthoredProperties
+// (property_validate_authored.go), which reaches the same validatePropertyValue for
+// every authored key — so a declared string property written as `123` is a type
+// error on either path (go-kure/launcher#325). It is a Transformer method rather
+// than a call inside validate() because it needs the registered handlers' schemas,
+// which the parser does not have; kurel build calls it right after parsing. A
+// caller that invokes Transform without it gets only the handlers' own reads,
+// which do not type-check every property.
 //
 // checkCapabilityValueType (capability.go) is NOT this: it validates a
 // ClusterProfile capability rendering against the FLAT schema subset those call

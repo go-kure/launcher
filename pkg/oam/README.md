@@ -316,6 +316,15 @@ and checks the shape of every key it does. `kurel build` calls it immediately af
 parsing — and, in package mode, necessarily *after* `ResolveParameters`, because a
 `${...}` placeholder is a bare string until substituted.
 
+The shape check is also the only place an authored scalar's *type* is enforced for
+every property (go-kure/launcher#325). Many built-in handlers read string properties
+with a comma-ok assertion (`cfg.Delivery, _ = props["delivery"].(string)`), so on
+the handler alone a `delivery: 123` becomes `""` and is defaulted as though it were
+absent. Type-checking once here, against the schema each handler already declares,
+is what rejects it — not a per-field check in each handler. A caller that drives
+`Transform` directly must therefore call `ValidateAuthoredProperties` first (after
+any parameter substitution) to get the same guarantee `kurel build` gives.
+
 Three positions are exempt, each because there is no schema to check against rather
 than by oversight: a type no handler and no lowering rule claims (rejected separately
 by the type allowlists and by `validateSettled`); a custom trait type from a
