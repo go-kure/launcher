@@ -83,6 +83,24 @@ author writes beside them in the same document. This covers those six parsers;
 it is not a claim that every property in this package is read through the
 helpers.
 
+An `env` entry with no usable `name` is an error at every position, not only
+at the top level. The published schema marks `env[].name` required, but that
+check reached only a top-level `env` list: an `env` list nested inside an
+`initContainers` or `sidecars` entry sat in an open object the schema did not
+describe, and `parseEnv` then skipped a nameless entry, so the container was
+emitted with the variable missing and nothing reported. `parseEnv` now refuses
+it itself, whether or not the schema layer reaches that position —
+`env[0]: name is required` for an absent, empty or null `name`, and
+`env[0].name: must be a string, got int` for a non-string one — so the rule
+holds for any caller, including one that hands properties to a handler without
+schema validation. **Behavior-changing** under `launcher.gokure.dev/v1alpha1`:
+a document authoring such an entry inside `initContainers`/`sidecars` built
+before (with the variable dropped) and is now rejected, and so is a top-level
+entry with `name: ""` — schema validation checks only that `name` is present
+and a string, so the empty name reached `parseEnv` and was skipped the same
+way. A top-level entry with `name` absent or null was already refused by
+schema validation and still is (go-kure/launcher#447).
+
 Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
 `daemonset`, `cronjob`, `job`)
 share these fields, projected directly onto real `corev1` types (same

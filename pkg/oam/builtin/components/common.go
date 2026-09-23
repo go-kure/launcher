@@ -295,10 +295,21 @@ func parseEnv(props map[string]any) ([]corev1.EnvVar, error) {
 		return nil, err
 	}
 	var envVars []corev1.EnvVar
-	for _, envMap := range envList {
-		envName, _ := envMap["name"].(string)
-		if envName == "" {
-			continue
+	for i, envMap := range envList {
+		// An entry without a usable name is refused, never skipped. The schema's
+		// Required check on env[].name is not guaranteed to have run: it did not
+		// reach an env list nested in an initContainers/sidecars entry, and a
+		// caller handing properties straight to a handler skips it entirely, so
+		// the `continue` this replaces dropped the variable silently
+		// (go-kure/launcher#447). parseStringField also names a
+		// present-but-non-string name instead of reading it as empty; an empty
+		// string or null reads as absent and gets the requiredness error.
+		envName, present, err := parseStringField(envMap, "name", fmt.Sprintf("env[%d].name", i))
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			return nil, errors.Errorf("env[%d]: name is required", i)
 		}
 		value, _ := envMap["value"].(string)
 		vfRaw, hasValueFromKey := authoredValue(envMap, "valueFrom")
