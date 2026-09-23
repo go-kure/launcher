@@ -1886,7 +1886,12 @@ and `ordinals`. The deployment kind projects the same two shapes and follows the
 `progressDeadlineSeconds`. `applyJobSpec` follows the same rule for the `job` and `cronjob`
 kinds: its ten scalar pointers go through the generic `copyPtr`, and `successPolicy` and
 `podFailurePolicy` — whose structs each own a slice of rules — through `DeepCopy`.
-Without that, editing the first rendered object — the same in-place
+The pod template every workload kind shares follows it too: `buildPodSpec` starts from a
+`DeepCopy` of the authored pod-level fields (`nodeSelector`, `podSecurityContext`,
+`terminationGracePeriodSeconds`, `imagePullSecrets`, …) and deep-copies each volume,
+toleration, topology spread constraint, the affinity, and the main, init and sidecar
+containers as it adds them — an `append` alone copies the element structs but shares the
+pointers, maps and slices they carry. Without that, editing the first rendered object — the same in-place
 customization the label rule above assumes — writes back into the config and reappears in
 every later render, with the symptom surfacing on a different object than the one that was
 edited.

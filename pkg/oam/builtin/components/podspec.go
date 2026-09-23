@@ -1198,30 +1198,40 @@ type podSpecInput struct {
 // spec.containers — kube preserves declaration order on the pod spec and
 // kustomize build output stays stable.
 func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
-	ps := in.Config.PodSpec
+	// Every value below is deep-copied on its way out of the config. The
+	// handler config is reusable and editing a generated object in place is an
+	// expected use, so every value projected out of the config must be a copy —
+	// the contract render_reuse_aliasing_test.go:17-49 states, exercised for
+	// this function by podspec_render_reuse_aliasing_test.go
+	// (go-kure/launcher#425).
+	//
+	// A plain struct copy (`ps := in.Config.PodSpec`) is not one: it shares
+	// every map, pointer and slice backing array the PodSpec carries
+	// (NodeSelector, SecurityContext, TerminationGracePeriodSeconds,
+	// ImagePullSecrets, …). The built containers are the same case one level
+	// down: they carry the config's own Command slices and probe, lifecycle and
+	// security-context pointers, so each is deep-copied as it is appended.
+	ps := *in.Config.PodSpec.DeepCopy()
 	for _, ic := range in.InitContainers {
 		initContainer, err := buildInitContainer(ic)
 		if err != nil {
 			return corev1.PodSpec{}, err
 		}
-		ps.InitContainers = append(ps.InitContainers, *initContainer)
+		ps.InitContainers = append(ps.InitContainers, *initContainer.DeepCopy())
 	}
 	if in.MainContainer == nil {
 		return corev1.PodSpec{}, errors.New("pod template requires a main container")
 	}
-	ps.Containers = append(ps.Containers, *in.MainContainer)
+	ps.Containers = append(ps.Containers, *in.MainContainer.DeepCopy())
 	for _, sc := range in.Sidecars {
 		sidecarContainer, err := buildSidecarContainer(sc)
 		if err != nil {
 			return corev1.PodSpec{}, err
 		}
-		ps.Containers = append(ps.Containers, *sidecarContainer)
+		ps.Containers = append(ps.Containers, *sidecarContainer.DeepCopy())
 	}
-	ps.Volumes = append(ps.Volumes, in.Volumes...)
-	// DeepCopy, not append-the-elements. The handler config is reusable and
-	// editing a generated object in place is an expected use, so every value
-	// projected out of the config must be a copy — the contract
-	// render_reuse_aliasing_test.go:17-49 states and exercises.
+	// Volumes, Tolerations and TopologySpreadConstraints: DeepCopy per
+	// element, not append-the-elements.
 	//
 	// `append(dst, src...)` is not enough here and the reason is easy to get
 	// backwards: it copies each element STRUCT, so writing Tolerations[0].Key
@@ -1235,7 +1245,13 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 	// shallow case as a negative control.
 	//
 	// Affinity was the plain form of the same bug: the config's pointer was
-	// assigned verbatim, sharing everything beneath it.
+	// assigned verbatim, sharing everything beneath it. Volumes are the same
+	// shape as the tolerations: each Volume's VolumeSource holds a
+	// *...VolumeSource pointer (EmptyDir, ConfigMap, PersistentVolumeClaim, …)
+	// that append would share.
+	for i := range in.Volumes {
+		ps.Volumes = append(ps.Volumes, *in.Volumes[i].DeepCopy())
+	}
 	for i := range in.Tolerations {
 		ps.Tolerations = append(ps.Tolerations, *in.Tolerations[i].DeepCopy())
 	}
