@@ -32,12 +32,14 @@ is rejected, that is a claim about the helper named beside it —
 separately from value and returns an error naming the field. A parser that
 does not use one of those helpers may still reject a wrong type on its own —
 several do, with their own error — so its behavior is left unspecified here.
-Some fields genuinely do fall through a bare type assertion and silently
-discard a wrongly typed value instead of erroring: the shared
+Some fields may still fall through a bare type assertion and silently
+discard a wrongly typed value instead of erroring. The shared
 `parseAffinity`'s four sub-fields (`enablePodAntiAffinity`, `topologyKey`,
-`podAntiAffinityType`, `nodeSelector`) are the documented example, tracked in
-go-kure/launcher#452. Do not generalize a rejection note from one field to its
-neighbours: adjudicate against the parser that actually reads it.
+`podAntiAffinityType`, `nodeSelector`) were the documented example until
+go-kure/launcher#452 moved them onto the helpers; the absence of a named
+example is not a claim that none remain. Do not generalize a rejection note
+from one field to its neighbours: adjudicate against the parser that actually
+reads it.
 
 ## Component types
 
@@ -617,19 +619,30 @@ supplies the two defaults above, and omitting the block entirely leaves
 `topologyKey`/`podAntiAffinityType` empty rather than defaulted (the defaults
 are applied by `parseAffinity` only once the block is present, unlike the
 `postgresql` handler, which also tracks whether the block was authored at all).
-**The four sub-fields are read with bare type assertions, so a
-sub-field authored with the wrong type is silently discarded and the default
-above is emitted as though the key had never been written** —
-`topologyKey: 123` emits `kubernetes.io/hostname` and says nothing. That is a
-known defect, tracked in go-kure/launcher#452, not the intended contract; the
-`postgresql` component's own affinity block was fixed to reject by name in
-go-kure/launcher#448 and is the shape this one is expected to converge on.
-Two behaviours are *not* defects and should survive that fix:
-`podAntiAffinityType` accepts a well-formed string outside the enum only to
-reject it by name, and an explicitly authored `podAntiAffinityType: ""` is an
+Each of the four sub-fields is read with a presence-reporting helper, so a
+sub-field authored with the wrong type is **rejected by name**
+(`affinity.topologyKey: must be a string, got float64`) rather than
+discarded while the default above is emitted as though the key had never
+been written, and a non-string `nodeSelector` **value** is refused by key
+(`affinity.nodeSelector["rack"]: must be a string, got int`), the
+alphabetically first offending key when several are wrong. A null sub-field
+is absence and takes the default an omitted one takes. `podAntiAffinityType`
+must be `preferred` or `required`: a well-formed string outside the enum is
+refused by name, and an explicitly authored `podAntiAffinityType: ""` is an
 error rather than a fall back to `preferred` — the empty string reaches the
 enum check instead of being read as an absent key. An authored
-`topologyKey: ""`, by contrast, *does* fall back to the default).
+`topologyKey: ""`, by contrast, *does* fall back to the default. This is the
+same contract the `postgresql` handler's own affinity block has
+(go-kure/launcher#448). **Behavior-changing** under
+`launcher.gokure.dev/v1alpha1` (go-kure/launcher#452) for one authored shape:
+the published schema leaves `nodeSelector` values untyped, so a document
+with a non-string value (`rack: 3`) passed schema validation, built with that
+entry dropped, and is now rejected. A wrongly typed sub-field itself was
+already refused by schema validation for an authored document; the parser's
+own check now covers a caller that hands properties to a handler without it,
+which previously got the default. The out-of-enum error now reads
+`affinity.podAntiAffinityType: invalid value …` rather than
+`invalid podAntiAffinityType …`).
 
 ### Pod-level properties
 
@@ -1635,10 +1648,9 @@ object would change what the next `Generate` emits.
   sub-field takes (go-kure/launcher#444 established this nested-null contract
   for every kind in the package); a non-null wrong-typed sub-field, and an
   explicitly empty `podAntiAffinityType`, remain errors.
-  This is narrower than the shared `parseAffinity`,
-  whose own four sub-field reads still discard a wrongly typed value silently
-  (`common.go`, tracked in go-kure/launcher#449); the two are expected to
-  converge on this handler's behaviour, not the other way round.
+  The shared `parseAffinity` (`common.go`) applies the same rules to its
+  four sub-fields since go-kure/launcher#452, so the two readers agree; a
+  change to one belongs in the other.
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
   data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
   platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
