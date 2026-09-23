@@ -314,3 +314,48 @@ func TestWithEngineTraitProperties_HandlerDeclarationWins(t *testing.T) {
 		t.Errorf("len(out) = %d, want %d — no key should have been added", len(out), len(in))
 	}
 }
+
+// TestValidateAuthoredProperties_EngineScopeCheckedWithoutHandlerSchema is
+// go-kure/launcher#426. PropertySchemaProvider is optional, and a trait whose handler
+// or lowering rule declares no schema used to skip the authored check entirely —
+// including `scope`, which the ENGINE reads off every trait (buildCapabilityKey)
+// whatever the handler declares. A non-string `scope` there was silently ignored and
+// the trait resolved against the unscoped capability binding.
+//
+// No built-in reaches this (TestNewBuiltinTransformer_HandlerSchemaParity in
+// pkg/cmd/kurel fails on a built-in without a schema), so both registrations go through
+// the exported API an external consumer uses: RegisterTrait and RegisterTraitLowering.
+func TestValidateAuthoredProperties_EngineScopeCheckedWithoutHandlerSchema(t *testing.T) {
+	tr := newSchemaTransformer()
+	tr.RegisterTrait("custom", &stubTraitHandler{typ: "custom"})
+	tr.RegisterTraitLowering(stubTraitLoweringRule{typ: "custom-rule"})
+
+	for _, traitType := range []string{"custom", "custom-rule"} {
+		t.Run(traitType, func(t *testing.T) {
+			// Half one: the engine-owned key is still type-checked.
+			app := authoredApp("webservice", map[string]any{"image": "nginx"},
+				Trait{Type: traitType, Properties: map[string]any{"scope": 3}})
+			err := tr.ValidateAuthoredProperties(app)
+			want := `component "web": trait "` + traitType + `": properties.scope: expected string, got int`
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("a non-string `scope` on a schema-less trait must be rejected with %q, got: %v", want, err)
+			}
+
+			// Half two: handler-owned keys stay unchecked — there is no schema to
+			// check them against, so an undeclared key must not become an error here.
+			app = authoredApp("webservice", map[string]any{"image": "nginx"},
+				Trait{Type: traitType, Properties: map[string]any{"scope": "fast", "anything": 1, "nested": map[string]any{"x": true}}})
+			if err := tr.ValidateAuthoredProperties(app); err != nil {
+				t.Errorf("handler-owned keys on a schema-less trait must stay accepted, got: %v", err)
+			}
+
+			// An explicit null is absent, exactly as on a trait whose handler declares
+			// a schema — it resolves the unscoped binding like omitting the key does.
+			app = authoredApp("webservice", map[string]any{"image": "nginx"},
+				Trait{Type: traitType, Properties: map[string]any{"scope": nil}})
+			if err := tr.ValidateAuthoredProperties(app); err != nil {
+				t.Errorf("an explicit null `scope` must stay accepted, got: %v", err)
+			}
+		})
+	}
+}

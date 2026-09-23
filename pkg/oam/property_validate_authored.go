@@ -38,9 +38,14 @@ import (
 //   - A custom trait type supplied through --capability-def is passed over for the
 //     same reason and is worth naming explicitly: a CapabilityDefinition declares
 //     that the type EXISTS, not what properties it accepts. There is no
-//     PropertySchemaProvider behind it, so its properties stay unchecked. Closing
-//     that needs CapabilityDefinition to carry a property schema of its own, which
-//     is a document-format change and not this check's business.
+//     PropertySchemaProvider behind it, so its handler-owned properties stay
+//     unchecked. Closing that needs CapabilityDefinition to carry a property schema
+//     of its own, which is a document-format change and not this check's business.
+//     When such a trait is served by a registered handler or lowering rule that
+//     declares no schema, the engine-owned keys (engineTraitProperties) are still
+//     checked: they are not the handler's to declare — see
+//     validateAuthoredTraitAgainst. A type with no registered handler or rule is
+//     passed over entirely, per the first bullet.
 //
 //   - Policies are passed over deliberately, and this one is a property of the
 //     model rather than a gap. ApplicationPolicy is documented pass-through
@@ -144,12 +149,40 @@ var engineTraitProperties = map[string]PropertySchema{
 
 // validateAuthoredTraitAgainst is validateAuthoredAgainst with engineTraitProperties
 // folded into the handler's schema.
+//
+// Engine-owned keys are checked whether or not the handler declares a schema
+// (go-kure/launcher#426). They are not the handler's to declare, so a handler that
+// implements no PropertySchemaProvider cannot opt them out of their type: without
+// this, a trait registered through RegisterTrait or RegisterTraitLowering with no
+// schema accepted `scope: 3`, which buildCapabilityKey then ignored, resolving the
+// unscoped capability binding with no diagnostic. The handler's own keys stay
+// unchecked in that case — there is nothing to check them against.
 func validateAuthoredTraitAgainst(handler any, props map[string]any, path string) error {
 	p, ok := handler.(PropertySchemaProvider)
 	if !ok {
-		return nil
+		return validateEngineTraitProperties(props, path)
 	}
 	return validateAuthoredProperties(withEngineTraitProperties(p.PropertySchema()), props, path)
+}
+
+// validateEngineTraitProperties checks only the engineTraitProperties keys present
+// in props, for a trait whose handler declares no schema. Any other key is left
+// alone. Values are written back exactly as validateAuthoredProperties writes them
+// back, and in the same sorted order, so a document with several problems always
+// reports the same one.
+func validateEngineTraitProperties(props map[string]any, path string) error {
+	for _, key := range slices.Sorted(maps.Keys(engineTraitProperties)) {
+		value, present := props[key]
+		if !present {
+			continue
+		}
+		normalized, err := validatePropertyValue(engineTraitProperties[key], value, path+"."+key)
+		if err != nil {
+			return err
+		}
+		props[key] = normalized
+	}
+	return nil
 }
 
 // withEngineTraitProperties returns schema plus any engine-read property it does not
