@@ -15,8 +15,10 @@ API has them, and the same value validation real admission applies (ADR-036 L1: 
 Container projection shared by every kind). Only genuine escape-hatch fields (`passthrough.object`,
 `manifests`/`crd` inline content) and key→value maps whose keys are data (`nodeSelector`,
 `resources.requests`/`limits`) stay open by design; the remaining open objects (`probes`,
-`lifecycle`, `volumes`, `initContainers`/`sidecars` entries, the four-key `affinity` shorthand)
-are a known gap, not the target shape. The raw `corev1` `affinity` that `deployment` publishes is
+`lifecycle`, `volumes`, the `volumeMounts`/`ports` items inside an `initContainers`/`sidecars`
+entry, the four-key `affinity` shorthand) are a known gap, not the target shape. The
+`initContainers`/`sidecars` entries themselves are closed (go-kure/launcher#321, see "Common
+config"). The raw `corev1` `affinity` that `deployment` publishes is
 a different schema and is not part of that gap — it is modeled field-by-field. Every property
 (including nested object fields and array item
 schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler API
@@ -589,7 +591,30 @@ mount list, the identical rule as `volumes`' duplicate-mountPath check
 above, since each `initContainers`/`sidecars` entry is its own container;
 each entry also accepts its own `securityContext`, the identical field set
 and validation as the main container's own `securityContext` described
-below — see that prose for the field list rather than restating it here),
+below — see that prose for the field list rather than restating it here;
+each entry is a **closed key set** (go-kure/launcher#321): an
+`initContainers` entry accepts `name`, `image`, `command`, `args`, `env`,
+`envFrom`, `resources`, `volumeMounts`, `securityContext` and `workingDir`,
+and a `sidecars` entry those plus `ports`, `probes` and `lifecycle`, each
+parsed by the same parser as the main container's field of that name. Any
+other key is an error naming the entry — before that the parsers read the
+keys they knew and dropped the rest, so an authored `workingDir`, `envFrom`,
+`probes` or `lifecycle` built cleanly and reached no container. `probes` and
+`lifecycle` on an init container are refused with their own message rather
+than accepted: Kubernetes forbids both on an init container, which runs to
+completion before the app containers start, and this package does not model
+the restartable (`restartPolicy: Always`) init container that may carry them
+— author them on a sidecar. A sidecar's probe or hook may address a port by
+name only when that sidecar itself declares a `ports[]` entry of that name —
+the kubelet resolves a named port against the container's own ports, so an
+undeclared name would build and never resolve; unlike the main container,
+whose single named port is fixed by its kind, a sidecar may declare several
+and any of them is accepted. Closing the entry is behavior-changing under an
+unchanged `launcher.gokure.dev/v1alpha1`: a document that authored any other
+key on an entry built before and errors now. It is taken on the same
+reasoning as the `volumeClaimTemplates` entry below — the key never reached
+the output its author intended — and is signalled by the `format` commit
+scope),
 and `affinity` (four keys, parsed by `parseAffinity`: `enablePodAntiAffinity`
 (boolean), `topologyKey` (string, default `kubernetes.io/hostname`),
 `podAntiAffinityType` (string, `preferred`|`required`, default `preferred`)

@@ -94,7 +94,7 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"securityContext":            schemaSecurityContext(false),
 		"workingDir":                 schemaWorkingDir(false),
 		"volumes":                    schemaVolumes(),
-		"initContainers":             schemaContainers(),
+		"initContainers":             schemaInitContainers(),
 		"concurrencyPolicy":          schemaCronJobConcurrencyPolicy(),
 		"suspend":                    schemaCronJobSuspend(),
 		"startingDeadlineSeconds":    schemaCronJobStartingDeadlineSeconds(),

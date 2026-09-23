@@ -16,8 +16,9 @@ import (
 // nested shape is modeled field-by-field, with a Description on every key,
 // wherever its parser is strict (env, envFrom, resources, securityContext, the
 // pod-level fragment). The objects still declared open (AdditionalProperties —
-// probes, lifecycle handlers, volume type-specific keys, initContainers/sidecars
-// item extras) are a known gap awaiting their own strict parsers, not a design
+// probes, lifecycle handlers, volume type-specific keys, the volumeMounts/ports
+// items inside an initContainers/sidecars entry — the entries themselves are
+// closed, see schemaContainerEntry) are a known gap awaiting their own strict parsers, not a design
 // choice to stay shallow. Each accessor returns a fresh value so consumers can't
 // mutate shared state.
 
@@ -516,22 +517,84 @@ func schemaVolumes() oam.PropertySchema {
 	}
 }
 
-// schemaContainers describes the shared `initContainers`/`sidecars` properties
-// (see parseInitContainers/parseSidecars). Their nested env/resources/
-// volumeMounts/ports shapes are kept open on the item object.
-func schemaContainers() oam.PropertySchema {
+// schemaContainerEntry is the property set an `initContainers` and a `sidecars`
+// entry share (see parseInitContainers/parseSidecars). The entry itself is a
+// closed key set (go-kure/launcher#321), pinned to initContainerPropertyKeys/
+// sidecarPropertyKeys by TestContainerEntrySchemaMatchesParser; the nested
+// fields reuse the main container's fragments, since each is read by the same
+// parser. A `volumeMounts` item stays open, as the `volumes` items do: its
+// parser reads name/mountPath/readOnly/subPath and rejects nothing else yet.
+func schemaContainerEntry() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"name":            {Type: oam.PropertyTypeString, Required: true, Description: "Container name."},
+		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference."},
+		"command":         schemaStringArray(),
+		"args":            schemaStringArray(),
+		"env":             schemaEnv(false),
+		"envFrom":         schemaEnvFrom(false),
+		"resources":       schemaResources(false),
+		"securityContext": schemaSecurityContext(false),
+		"workingDir":      schemaWorkingDir(false),
+		"volumeMounts": {
+			Type:        oam.PropertyTypeArray,
+			Description: "Pod volumes to mount into this container, by the name of a `volumes` entry.",
+			Items: &oam.PropertySchema{
+				Type:                 oam.PropertyTypeObject,
+				AdditionalProperties: true,
+				Description:          "A single volume mount.",
+				Properties: map[string]oam.PropertySchema{
+					"name":      {Type: oam.PropertyTypeString, Required: true, Description: "Name of the pod volume to mount."},
+					"mountPath": {Type: oam.PropertyTypeString, Required: true, Description: "Path in this container where the volume is mounted; unique within the container."},
+					"readOnly":  {Type: oam.PropertyTypeBoolean, Description: "Mount the volume read-only."},
+					"subPath":   {Type: oam.PropertyTypeString, Description: "Sub-path within the volume to mount instead of its root."},
+				},
+			},
+		},
+	}
+}
+
+// schemaInitContainers describes the `initContainers` property. An init
+// container takes no `probes` or `lifecycle` — Kubernetes forbids both on one
+// (see initContainerRejectedKeys) — and no `ports`.
+func schemaInitContainers() oam.PropertySchema {
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeArray,
-		Description: "Additional containers to run in the pod (init containers or sidecars).",
+		Description: "Init containers run to completion, in order, before the main container starts.",
+		Items: &oam.PropertySchema{
+			Type:        oam.PropertyTypeObject,
+			Description: "A single init container definition. Probes and lifecycle hooks are not accepted: Kubernetes forbids them on an init container.",
+			Properties:  schemaContainerEntry(),
+		},
+	}
+}
+
+// schemaSidecars describes the `sidecars` property: the shared entry plus the
+// fields only a long-running container can use.
+func schemaSidecars() oam.PropertySchema {
+	props := schemaContainerEntry()
+	props["ports"] = oam.PropertySchema{
+		Type:        oam.PropertyTypeArray,
+		Description: "Ports the sidecar exposes. A named port is what the sidecar's own probes and lifecycle hooks may address by name.",
 		Items: &oam.PropertySchema{
 			Type:                 oam.PropertyTypeObject,
 			AdditionalProperties: true,
-			Description:          "A single container definition.",
+			Description:          "A single container port.",
 			Properties: map[string]oam.PropertySchema{
-				"name":            {Type: oam.PropertyTypeString, Required: true, Description: "Container name."},
-				"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference."},
-				"securityContext": schemaSecurityContext(false),
+				"containerPort": {Type: oam.PropertyTypeInteger, Required: true, Description: "Port number the sidecar listens on."},
+				"name":          {Type: oam.PropertyTypeString, Description: "Port name, addressable by this sidecar's probes and lifecycle hooks."},
+				"protocol":      {Type: oam.PropertyTypeString, Description: "Port protocol; defaults to TCP."},
 			},
+		},
+	}
+	props["probes"] = schemaProbes(false)
+	props["lifecycle"] = schemaLifecycle(false)
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeArray,
+		Description: "Sidecar containers run alongside the main container for the pod's lifetime.",
+		Items: &oam.PropertySchema{
+			Type:        oam.PropertyTypeObject,
+			Description: "A single sidecar container definition.",
+			Properties:  props,
 		},
 	}
 }
