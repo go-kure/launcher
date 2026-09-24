@@ -105,6 +105,31 @@ and a string, so the empty name reached `parseEnv` and was skipped the same
 way. A top-level entry with `name` absent or null was already refused by
 schema validation and still is (go-kure/launcher#447).
 
+A required string field given a value of the wrong type is reported as a type
+error, not as missing. Fourteen required-string reads used to discard a failed
+type assertion and then test for `""`, so `fieldPath: 123` produced
+`fieldRef: fieldPath is required` and sent the author looking for a lost key.
+They now read through `requiredStringField` (or `parseStringField` directly
+where the existing message is kept verbatim), and each field gets its own
+messages: `fieldRef.fieldPath: must be a string, got int` for a wrong type, and
+`fieldRef: fieldPath is required` only for an absent, empty or null value. The
+fields are `env[].valueFrom.fileKeyRef.volumeName`/`.path`/`.key`,
+`valueFrom.fieldRef.fieldPath`, `valueFrom.resourceFieldRef.resource`,
+`envFrom[].configMapRef.name` and `.secretRef.name`, the `name` and `image` of
+an `initContainers`/`sidecars` entry and the `name`/`mountPath` of its
+`volumeMounts`, `helmchart` `valuesFrom[].name`, `manifests`
+`scopeOverrides[].apiVersion`/`.kind`, and `oci` `source.url` and `version`.
+`fileKeyRef`, `volumeMounts` and `scopeOverrides` used to report their fields
+together ("volumeName, path, and key are all required"), so a wrong type on
+one looked like any of them might be missing; each field is now named on its
+own. What is accepted is unchanged: every one of these values was rejected
+before and still is, and only the message changed. For a document run through
+schema validation, the schema already refuses a non-string at every one of
+these positions except `helmchart` `valuesFrom[].name`, whose items the
+published schema declares only as an open object. So the parser message is what an author
+sees there, and for any caller that hands properties to a handler without
+schema validation (go-kure/launcher#453).
+
 Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
 `daemonset`, `cronjob`, `job`)
 share these fields, projected directly onto real `corev1` types (same
