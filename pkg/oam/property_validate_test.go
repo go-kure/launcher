@@ -592,24 +592,21 @@ func TestValidatePropertyValue_EnumMemberHoldingNullIsRejected(t *testing.T) {
 	})
 
 	// A null nested below the top level of a member is just as unmatchable, and the
-	// walk has to reach it — PROVIDED the key it sits under is schema-declared, so
-	// the strip that makes the member unmatchable actually applies to it.
-	//
-	// KNOWN LIMITATION, pinned rather than fixed (go-kure/launcher#481): this
-	// schema declares no `Properties` at all, so "a" is itself an
-	// AdditionalProperties key, not a declared one — nothing strips a null under
-	// it, and a document authoring `options: {a: [{b: null}]}` verbatim would
-	// reach the Enum comparison unstripped and could genuinely match this member.
-	// containsNullValue does not thread the schema through its walk to tell that
-	// apart from a declared key's null, so it rejects the schema here regardless.
-	// This test pins the current (over-eager) behaviour rather than the correct
-	// one; closing #481 should invert it for this exact construction.
+	// walk has to reach it — through a declared key, an array's Items, and a declared
+	// key again, every one of which the value's normalization strips or rejects. The
+	// same member under an AdditionalProperties key is matchable; that case is
+	// TestValidatePropertyValue_EnumMemberNullWhereNothingStripsIt.
 	t.Run("null nested inside a member", func(t *testing.T) {
 		schema := map[string]PropertySchema{
 			"options": {
-				Type:                 PropertyTypeObject,
-				AdditionalProperties: true,
-				Enum:                 []any{map[string]any{"a": []any{map[string]any{"b": nil}}}},
+				Type: PropertyTypeObject,
+				Properties: map[string]PropertySchema{
+					"a": {Type: PropertyTypeArray, Items: &PropertySchema{
+						Type:       PropertyTypeObject,
+						Properties: map[string]PropertySchema{"b": {Type: PropertyTypeString}},
+					}},
+				},
+				Enum: []any{map[string]any{"a": []any{map[string]any{"b": nil}}}},
 			},
 		}
 		err := validateProperties(schema, map[string]any{"options": map[string]any{}}, "properties")
@@ -630,6 +627,210 @@ func TestValidatePropertyValue_EnumMemberHoldingNullIsRejected(t *testing.T) {
 			t.Fatalf("expected the ordinary enum rejection, got: %v", err)
 		}
 	})
+}
+
+// TestValidatePropertyValue_EnumMemberNullWhereNothingStripsIt pins
+// go-kure/launcher#481. A member holding a null is refused because the value it is
+// compared against has had its nulls stripped — but only where validatePropertyValue
+// actually strips (or rejects) one. Under a key an object leaves to
+// AdditionalProperties, inside an array element with no Items schema, and anywhere
+// below a schema with no declared Type, nothing is normalized, so a value holding a
+// null there reaches the Enum comparison as written and a member holding the same
+// null matches it. Each case here validates the member's own shape as the value, so
+// "accepted" means the member genuinely matched rather than that Enum was skipped.
+func TestValidatePropertyValue_EnumMemberNullWhereNothingStripsIt(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		schema PropertySchema
+		member any
+	}{
+		{
+			// The issue's own construction.
+			name:   "additionalProperties key",
+			schema: PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true},
+			member: map[string]any{"opaque": nil},
+		},
+		{
+			name:   "additionalProperties key, nested",
+			schema: PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true},
+			member: map[string]any{"a": []any{map[string]any{"b": nil}}},
+		},
+		{
+			// A null ELEMENT is only rejected by an array schema; under an opaque
+			// key there is none, so it survives too.
+			name:   "null element under additionalProperties key",
+			schema: PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true},
+			member: map[string]any{"opaque": []any{nil}},
+		},
+		{
+			name: "additionalProperties key beside a declared one",
+			schema: PropertySchema{
+				Type:                 PropertyTypeObject,
+				AdditionalProperties: true,
+				Properties:           map[string]PropertySchema{"mode": {Type: PropertyTypeString}},
+			},
+			member: map[string]any{"mode": "fast", "opaque": nil},
+		},
+		{
+			name: "additionalProperties key of a declared nested object",
+			schema: PropertySchema{
+				Type: PropertyTypeObject,
+				Properties: map[string]PropertySchema{
+					"meta": {Type: PropertyTypeObject, AdditionalProperties: true},
+				},
+			},
+			member: map[string]any{"meta": map[string]any{"opaque": nil}},
+		},
+		{
+			name: "additionalProperties key inside an Items schema",
+			schema: PropertySchema{
+				Type:  PropertyTypeArray,
+				Items: &PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true},
+			},
+			member: []any{map[string]any{"opaque": nil}},
+		},
+		{
+			name:   "inside an array element with no Items schema",
+			schema: PropertySchema{Type: PropertyTypeArray},
+			member: []any{map[string]any{"a": nil}},
+		},
+		{
+			name:   "below a schema with no declared Type",
+			schema: PropertySchema{},
+			member: map[string]any{"a": nil},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := tc.schema
+			schema.Enum = []any{tc.member}
+			// Copied rather than shared: validation may normalize the value in place.
+			value := deepCopyTestValue(tc.member)
+			if _, err := validatePropertyValue(schema, value, "properties.choice"); err != nil {
+				t.Fatalf("a member whose null nothing strips must match the same value, got: %v", err)
+			}
+		})
+	}
+
+	// The relaxation must not stop the Enum from rejecting: a value that differs from
+	// the member only where the member holds its null is still outside the set.
+	t.Run("still rejects a non-member", func(t *testing.T) {
+		schema := PropertySchema{
+			Type:                 PropertyTypeObject,
+			AdditionalProperties: true,
+			Enum:                 []any{map[string]any{"opaque": nil}},
+		}
+		for _, value := range []any{
+			map[string]any{"opaque": "x"},
+			map[string]any{"opaque": map[string]any{}},
+			map[string]any{},
+		} {
+			_, err := validatePropertyValue(schema, value, "properties.choice")
+			if err == nil || !strings.Contains(err.Error(), "not in allowed set") {
+				t.Errorf("%v: expected the ordinary enum rejection, got: %v", value, err)
+			}
+		}
+	})
+
+	// A null compares by the null contract, not by Go type: a typed nil a rule wrote
+	// is the same null as the untyped one a decoder produces, and neither is the
+	// empty collection whose type assertion a typed nil satisfies.
+	t.Run("null compares as null, not as an empty collection", func(t *testing.T) {
+		schema := PropertySchema{
+			Type:                 PropertyTypeObject,
+			AdditionalProperties: true,
+			Enum:                 []any{map[string]any{"opaque": []any(nil)}},
+		}
+		for _, value := range []any{
+			map[string]any{"opaque": nil},
+			map[string]any{"opaque": map[string]any(nil)},
+		} {
+			if _, err := validatePropertyValue(schema, value, "properties.choice"); err != nil {
+				t.Errorf("%#v: a null must equal a null member, got: %v", value, err)
+			}
+		}
+		_, err := validatePropertyValue(schema, map[string]any{"opaque": []any{}}, "properties.choice")
+		if err == nil || !strings.Contains(err.Error(), "not in allowed set") {
+			t.Errorf("an empty list is not null and must not match a null member, got: %v", err)
+		}
+	})
+
+	// Where normalization DOES strip or reject, the member stays refused — the
+	// relaxation is exactly as wide as the strip's horizon.
+	for _, tc := range []struct {
+		name   string
+		schema PropertySchema
+		value  any
+		member any
+	}{
+		{
+			name: "declared key beside an additionalProperties escape",
+			schema: PropertySchema{
+				Type:                 PropertyTypeObject,
+				AdditionalProperties: true,
+				Properties:           map[string]PropertySchema{"mode": {Type: PropertyTypeString}},
+			},
+			value:  map[string]any{},
+			member: map[string]any{"mode": nil},
+		},
+		{
+			name:   "array element, even with no Items schema",
+			schema: PropertySchema{Type: PropertyTypeArray},
+			value:  []any{},
+			member: []any{nil},
+		},
+		{
+			name: "array element under a declared key of an additionalProperties object",
+			schema: PropertySchema{
+				Type:                 PropertyTypeObject,
+				AdditionalProperties: true,
+				Properties:           map[string]PropertySchema{"list": {Type: PropertyTypeArray}},
+			},
+			value:  map[string]any{},
+			member: map[string]any{"list": []any{nil}},
+		},
+	} {
+		t.Run("still refused: "+tc.name, func(t *testing.T) {
+			schema := tc.schema
+			schema.Enum = []any{tc.member}
+			_, err := validatePropertyValue(schema, tc.value, "properties.choice")
+			if err == nil || !strings.Contains(err.Error(), "Enum member 0 holding a null") {
+				t.Fatalf("expected the schema-level message, got: %v", err)
+			}
+		})
+	}
+
+	// Not walking an opaque subtree for nulls must not stop walking it for depth: the
+	// cap is what bounds equalPropertyValues' own recursion over the member.
+	t.Run("depth cap still applies under an additionalProperties key", func(t *testing.T) {
+		loop := map[string]any{}
+		loop["opaque"] = loop
+		schema := PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true, Enum: []any{loop}}
+		_, err := validatePropertyValue(schema, map[string]any{"opaque": map[string]any{}}, "properties.choice")
+		if err == nil || !strings.Contains(err.Error(), "Enum member 0 holding a null") {
+			t.Fatalf("a self-referential member must be refused at the depth cap, got: %v", err)
+		}
+	})
+}
+
+// deepCopyTestValue copies the []any/map[string]any literals the Enum tests build, so a
+// value handed to the validator never shares storage with the member it is compared to.
+func deepCopyTestValue(v any) any {
+	switch t := v.(type) {
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = deepCopyTestValue(e)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, e := range t {
+			out[k] = deepCopyTestValue(e)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // A nested declared object inherits the strip through the object recursion, so the

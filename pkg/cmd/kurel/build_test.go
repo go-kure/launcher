@@ -551,7 +551,16 @@ func sortedSchemaKeys(m map[string]oam.PropertySchema) []string {
 //
 // Why the rule: Enum members are compared against a value validatePropertyValue has
 // already normalized (explicit nulls stripped, typed collections copied), while the
-// declared members are not, so a member holding a null at any depth can never match.
+// declared members are not, so a member holding a null where the strip reaches can
+// never match.
+//
+// Deliberately STRICTER than the runtime arm: this walk does not read the schema, so it
+// also flags a null the runtime admits because normalization leaves it in place — under
+// an AdditionalProperties key, inside an element of an array with no Items, below a
+// schema with no Type (go-kure/launcher#481). No built-in schema declares a member
+// holding a null anywhere, so the stricter reading costs nothing today; a built-in
+// that needs one would have to relax this walk. Replacing this mirror with the
+// runtime's own check is go-kure/launcher#464.
 //
 // Keyed per MEMBER, not per schema type, because that is what the validator does: an
 // Enum declared on an array- or object-typed node is legal and keeps matching, as long
@@ -592,7 +601,7 @@ func assertEnumMembersNonNull(t *testing.T, path string, node oam.PropertySchema
 	t.Helper()
 	for i, member := range node.Enum {
 		if schemaValueHoldsNull(member, 0) {
-			t.Errorf("%s: PropertySchema declares Enum member %d holding a null — validatePropertyValue rejects it, and no validated value could have matched it", path, i)
+			t.Errorf("%s: PropertySchema declares Enum member %d holding a null — no built-in schema may, even where validatePropertyValue would admit it", path, i)
 		}
 	}
 	for _, k := range sortedSchemaKeys(node.Properties) {
@@ -609,11 +618,15 @@ const schemaEnumMemberMaxDepth = 32
 // schemaValueHoldsNull mirrors pkg/oam's containsNullValue, which is unexported and in
 // another package: the same nil-kind set, the same walk through slices/arrays and
 // string-keyed maps, and the same treatment of an over-deep member as null-bearing
-// rather than clean.
+// rather than clean. containsNullValue is the runtime's schema-less fallback, not its
+// whole rule: the Enum arm walks each member alongside its schema
+// (enumMemberHoldsStrippedNull), so this mirror flags a superset of what the runtime
+// refuses — see the test's doc comment above.
 //
 // Drift here can only make this test miss a member the validator would reject, never
-// invent one: the runtime arm stays authoritative and pkg/oam's own
-// TestValidatePropertyValue_EnumMemberHoldingNullIsRejected pins it directly.
+// invent one beyond that superset: the runtime arm stays authoritative and pkg/oam's
+// own TestValidatePropertyValue_EnumMemberHoldingNullIsRejected and
+// TestValidatePropertyValue_EnumMemberNullWhereNothingStripsIt pin it directly.
 func schemaValueHoldsNull(v any, depth int) bool {
 	if schemaValueIsNull(v) {
 		return true
