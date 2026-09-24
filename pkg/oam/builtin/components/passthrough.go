@@ -136,9 +136,17 @@ func validateEmittableObject(componentName string, object map[string]any) error 
 // here rather than downstream because Generate emits the map as a SINGLE
 // unstructured and stamps a name and a namespace onto it: a list would arrive as
 // one named envelope whose items never see per-object label mutation, namespace
-// stamping or ownership checks, while Flux's kustomize unwraps it at apply time
-// into N objects that do reach the cluster. One envelope bypasses every per-object
-// rule at once, which is why no single downstream check can catch it.
+// stamping or ownership checks, while Flux unwraps it at apply time into N objects
+// that do reach the cluster. One envelope bypasses every per-object rule at once,
+// which is why no single downstream check can catch it.
+//
+// Two stages expand lists on the way to the cluster, with different predicates, and
+// each arm below matches one of them. Kustomize's build (kustomize/api
+// resource/factory.go, inlineAnyEmbeddedLists) consults `items` only on a kind
+// ending in "List". Flux's kustomize-controller then decodes the build output with
+// fluxcd/pkg/ssa utils.ReadObjects, which expands every object for which
+// Unstructured.IsList holds, kind unchecked, and applies the members instead of the
+// object. The first arm matches the Flux stage, the second the Kustomize stage.
 func rejectListEnvelope(componentName, kind string, object map[string]any) error {
 	// Keyed on apimachinery's own predicate, not on the kind name. Unstructured.IsList
 	// is "items is present AND is a []interface{}" (k8s.io/apimachinery v0.36.3), and a
@@ -146,6 +154,14 @@ func rejectListEnvelope(componentName, kind string, object map[string]any) error
 	// would slip past `kind == "List"`, while a CRD whose kind merely ENDS in "List"
 	// with no items is not a list at all and must keep compiling. Both directions are
 	// pinned in TestPassthrough_ListShapedObjectIsRejected.
+	//
+	// Deliberately stricter than Kustomize for a kind NOT ending in "List" that carries
+	// a top-level items array (go-kure/launcher#486). Kustomize keeps `{kind: Widget,
+	// items: [<ConfigMap>]}` as one resource, but Flux's ReadObjects keys on this same
+	// IsList predicate with no kind check, so the Widget is never applied and the
+	// ConfigMap is, in whatever namespace it names. Narrowing this arm to the kind
+	// suffix reopens exactly the smuggle it exists to stop; with scalar members,
+	// ReadObjects instead fails the whole apply. Both pinned as rejected.
 	//
 	// Residual, scoped rather than merely disclosed: IsList requires exactly
 	// []interface{}, so a Go-assembled []map[string]any under `items` would slip past.
@@ -193,7 +209,8 @@ func rejectListEnvelope(componentName, kind string, object map[string]any) error
 	// otherwise — so an ordinary object of a non-List kind that
 	// happens to carry a field named `items` set to null is never treated as a list
 	// envelope by Kustomize, and rejecting it here would be stricter than the tool
-	// this check exists to match. A CRD's `spec.items` colliding with this top-level
+	// this arm exists to match. Flux's stage agrees: a null items is not IsList, so
+	// ReadObjects applies the object as one. A CRD's `spec.items` colliding with this top-level
 	// key is the concrete case: without the guard, `{apiVersion: example.com/v1, kind:
 	// Widget, items: null}` fails to compile despite being one ordinary resource.
 	if strings.HasSuffix(kind, "List") {

@@ -1747,12 +1747,22 @@ object would change what the next `Generate` emits.
   non-string `namespace` is neither rejected nor defaulted and reaches the output as
   authored. A list would therefore arrive downstream as one *named*
   envelope whose `items` never see per-object label mutation, namespace stamping or
-  ownership checks — while Flux's kustomize unwraps it at apply time into N objects that
+  ownership checks — while Flux unwraps it at apply time into N objects that
   do reach the cluster. One envelope bypasses every per-object rule at once, which is why
   the rejection lives here and not in each consumer. Declare one component per object.
   The check is apimachinery's own `Unstructured.IsList` — `items` present **and** a
   sequence — never the kind name, so a typed `ConfigMapList` is caught and a CRD whose
   kind merely *ends* in `List` with no `items` still compiles.
+
+  This arm is **deliberately stricter than Kustomize** for a kind that does *not* end in
+  `List` but carries a top-level `items` array, such as `{kind: Widget, items: [...]}`.
+  Kustomize's build keeps that as one resource, because it consults `items` only on a
+  `List`-suffixed kind. Flux's kustomize-controller then decodes the build output with
+  the same `IsList` predicate and no kind check, and applies the array's members *instead
+  of* the object: a `Widget` whose `items` holds a `ConfigMap` puts that `ConfigMap` on
+  the cluster, in whatever namespace it names, and never applies the `Widget`. With
+  scalar members the Flux apply fails outright. Either way it is not one object, so it is
+  rejected.
 
   A second arm catches what `IsList` structurally cannot. It requires `items` to be
   exactly a `[]interface{}`, so an authored `items: null` — an untyped nil — passed
@@ -1764,7 +1774,8 @@ object would change what the next `Generate` emits.
   field that must keep compiling, and an ordinary, non-`List` kind may equally carry
   a null-valued `items` field (a plausible spec-field collision) without being an
   envelope at all. Matches Kustomize's own `inlineAnyEmbeddedLists`, which checks the
-  kind suffix before ever consulting `items`.
+  kind suffix before ever consulting `items`; Flux agrees, since a null `items` is not
+  a list to `IsList` and the object is applied as one.
 
   The validated object is deep-copied when the config is built, not aliased, so a
   caller that keeps mutating the map it passed in cannot change what was validated.
