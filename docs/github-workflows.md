@@ -98,7 +98,7 @@ temporary branch — the merged result — before the PR is allowed to land.
 | `action-pins` | `action-pins` | 2 min | — | Fails if any third-party `uses:` ref is not pinned to a 40-char commit SHA (`go-kure/.github` composite action) |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
-| `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) |
+| `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) |
 | `pin-impact` | `pin-impact` | 3 min | — | Renders and gates on the real impact of a `go-kure/.github` pin bump: resolves each referenced action's `scripts/*.sh` (and their `source`d siblings), intersects against the compare diff, fails if a consumed path changed (PR only, go-kure/launcher#358) |
 | `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
@@ -140,6 +140,18 @@ Runs on main and `release/*` branches only (not PRs):
 - **Doc-sync checks** — `docs-build` (Layers 1/2) and `doc-gate` (Layer 3) run the canonical
   `check-doc-sync`, `check-links` and `check-doc-gate` actions from `go-kure/.github`; launcher no
   longer vendors its own copies under `site/scripts/`
+- **Documentation YAML fence check** — `docs-build` runs `make check-doc-fences`
+  (`site/scripts/check-doc-fences.sh`, go-kure/launcher#442), which checks every YAML fence
+  marked with a `check` attribute in its info string and reports a failing fence as
+  `file:line`. `build` fences must `kurel build` against their named `profile`; `snippet` and
+  `template` fences must be well-formed YAML. Unmarked fences are not checked, so adding a page
+  cannot break the build. It runs in `docs-build`, not `lint`, so a documentation-only change
+  cannot skip it; `Makefile`, `go.mod` and `go.sum` are in the `docs:` path filter because the
+  check builds `kurel`. The target runs the gate's self-test
+  (`site/scripts/check-doc-fences-test.sh`) first — broken-fence fixtures that must fail, plus the
+  quickstart with `traits: []` re-introduced at spec level (go-kure/launcher#417) — so a gate that
+  can no longer fail goes red as well. Marker syntax: `DEVELOPMENT.md` § "Checking documentation
+  YAML fences"
 - **Manifest schema validation** — `validate-manifests` builds a representative subset of
   `examples/*.yaml` via `kurel build` and validates the output against
   [fluxcd/flux-schema](https://github.com/fluxcd/flux-schema)'s `default` (embedded) catalog plus

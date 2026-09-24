@@ -59,9 +59,13 @@ run = "make check-govulncheck-docs"
 description = "Sync govulncheck doc mentions (docs/github-workflows.md) from ci.yml"
 run = "make sync-govulncheck-docs"
 
+[tasks.check-doc-fences]
+description = "Check the documentation's marked YAML fences (self-test, then the tree)"
+run = "make check-doc-fences"
+
 [tasks.verify]
-description = "Run all checks (tidy, lint, test, kure dep sync, tool pins)"
-depends = ["tidy", "lint", "test", "check-kure-dep-sync", "check-tool-versions", "check-govulncheck-docs"]
+description = "Run all checks (tidy, lint, test, kure dep sync, tool pins, doc fences)"
+depends = ["tidy", "lint", "test", "check-kure-dep-sync", "check-tool-versions", "check-govulncheck-docs", "check-doc-fences"]
 
 [tasks.changelog]
 description = "Generate changelog from git history"

@@ -40,7 +40,7 @@ rendering schema for a custom (non-builtin) trait type.
 
 ### Example document headers
 
-```yaml
+```yaml {check="snippet"}
 # app.yaml
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
@@ -48,7 +48,7 @@ metadata:
   name: my-app
 ```
 
-```yaml
+```yaml {check="snippet"}
 # kurel.yaml
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: Package
@@ -57,7 +57,7 @@ metadata:
   version: "1.0.0"
 ```
 
-```yaml
+```yaml {check="snippet"}
 # cluster.yaml
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: ClusterProfile
