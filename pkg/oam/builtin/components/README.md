@@ -1693,13 +1693,18 @@ object would change what the next `Generate` emits.
   The shared `parseAffinity` (`common.go`) applies the same rules to its
   four sub-fields since go-kure/launcher#452, so the two readers agree; a
   change to one belongs in the other.
-  `inheritedMetadata.labels` and `inheritedMetadata.annotations` are
-  string→string maps whose values must be strings: a non-string value
-  (`tier: 3`, `enabled: true`) is refused by field and key
-  (`inheritedMetadata.labels["tier"]: must be a string, got int`) instead of
-  being dropped from the generated resources' metadata, with the same
+  The handler's other string→string maps — `inheritedMetadata.labels`,
+  `inheritedMetadata.annotations`, `postgresql.parameters`,
+  `pooler.parameters` and `externalClusters[].connectionParameters` — take
+  string values only: a non-string value (`tier: 3`,
+  `max_connections: 100`, `enabled: true`) is refused by field and key
+  (`postgresql.parameters["max_connections"]: must be a string, got int`)
+  instead of being dropped from the emitted resources, with the same
   alphabetically-first rule as `nodeSelector` when several are wrong
-  (go-kure/launcher#466). Quote such a value to keep it.
+  (go-kure/launcher#466). Quote such a value to keep it
+  (`max_connections: "100"`); a number is not converted to its string form,
+  because YAML's rendering of a number is not always the text the author
+  typed (`1.10` decodes to `1.1`).
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
   data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
   platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)

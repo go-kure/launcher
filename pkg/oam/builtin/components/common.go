@@ -163,26 +163,17 @@ func decodedQuantityString(v any) (string, bool) {
 	}
 }
 
-func stringMap(m map[string]any) map[string]string {
-	result := make(map[string]string, len(m))
-	for k, v := range m {
-		if s, ok := v.(string); ok {
-			result[k] = s
-		}
-	}
-	return result
-}
-
-// stringMapStrict is stringMap with the silent discard removed: a value that is
-// not a string is refused by key instead of being dropped.
+// stringMapStrict reads an authored string→string map, refusing a value that is
+// not a string by key instead of dropping it.
 //
-// stringMap keeps the lenient behaviour because it has several callers whose
-// contracts have not been reviewed; converting them is a wider blast radius than
-// any one fix should carry. But refusing a wrongly-typed CONTAINER while its
-// wrongly-typed CONTENTS are still discarded is not a coherent contract — a
-// caller that rejects `nodeSelector: "zone-a"` by name and then loses
-// `nodeSelector: {rack: 3}` without a word is checking the envelope and not the
-// payload (go-kure/launcher#448).
+// It replaced a lenient stringMap that discarded non-string values silently.
+// Refusing a wrongly-typed CONTAINER while its wrongly-typed CONTENTS are
+// discarded is not a coherent contract — a caller that rejects
+// `nodeSelector: "zone-a"` by name and then loses `nodeSelector: {rack: 3}`
+// without a word is checking the envelope and not the payload
+// (go-kure/launcher#448). go-kure/launcher#466 reviewed every remaining
+// caller and found none where the drop was correct, so the lenient reader was
+// removed rather than left for a new caller to pick up.
 //
 // Keys are reported one at a time and in the caller's label space, so the
 // message names the field an author can actually find. Sorted, like

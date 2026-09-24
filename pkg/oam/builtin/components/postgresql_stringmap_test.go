@@ -23,6 +23,46 @@ var postgresqlStringMapSites = []struct {
 	get   func(*components.PostgresqlConfig) map[string]string
 }{
 	{
+		name: "pooler.parameters",
+		props: func(v any) map[string]any {
+			return map[string]any{"pooler": map[string]any{
+				"enabled":    true,
+				"parameters": map[string]any{"default_pool_size": "25", "max_client_conn": v},
+			}}
+		},
+		key:   "max_client_conn",
+		label: `pooler.parameters["max_client_conn"]`,
+		get:   func(c *components.PostgresqlConfig) map[string]string { return c.PoolerParameters },
+	},
+	{
+		name: "externalClusters[].connectionParameters",
+		props: func(v any) map[string]any {
+			return map[string]any{"externalClusters": []any{
+				map[string]any{"name": "first", "connectionParameters": map[string]any{"host": "a.example.com"}},
+				map[string]any{"name": "second", "connectionParameters": map[string]any{"host": "b.example.com", "port": v}},
+			}}
+		},
+		key:   "port",
+		label: `externalClusters[1].connectionParameters["port"]`,
+		get: func(c *components.PostgresqlConfig) map[string]string {
+			if len(c.ExternalClusters) != 2 {
+				return nil
+			}
+			return c.ExternalClusters[1].ConnectionParameters
+		},
+	},
+	{
+		name: "postgresql.parameters",
+		props: func(v any) map[string]any {
+			return map[string]any{"postgresql": map[string]any{
+				"parameters": map[string]any{"shared_buffers": "256MB", "max_connections": v},
+			}}
+		},
+		key:   "max_connections",
+		label: `postgresql.parameters["max_connections"]`,
+		get:   func(c *components.PostgresqlConfig) map[string]string { return c.PostgresqlParameters },
+	},
+	{
 		name: "inheritedMetadata.labels",
 		props: func(v any) map[string]any {
 			return map[string]any{"inheritedMetadata": map[string]any{
