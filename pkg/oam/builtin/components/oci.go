@@ -93,19 +93,31 @@ func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace str
 	}
 	cfg.Version = version
 
-	if p, ok := props["path"].(string); ok && p != "" {
+	if p, present, err := parseStringField(props, "path", "path"); err != nil {
+		return nil, err
+	} else if present {
 		cfg.Path = p
 	}
-	if pr, ok := props["prune"].(bool); ok {
-		cfg.Prune = pr
+	if pr, err := parseBoolField(props, "prune", "prune"); err != nil {
+		return nil, err
+	} else if pr != nil {
+		cfg.Prune = *pr
 	}
-	cfg.Interval, _ = props["interval"].(string)
+	interval, _, err := parseStringField(props, "interval", "interval")
+	if err != nil {
+		return nil, err
+	}
+	cfg.Interval = interval
 	if cfg.Interval != "" {
 		if _, err := time.ParseDuration(cfg.Interval); err != nil {
 			return nil, errors.Errorf("oci: interval %q is invalid: must be a valid Go duration (e.g. 10m, 1h30m)", cfg.Interval)
 		}
 	}
-	cfg.TargetNamespace, _ = props["targetNamespace"].(string)
+	targetNamespace, _, err := parseStringField(props, "targetNamespace", "targetNamespace")
+	if err != nil {
+		return nil, err
+	}
+	cfg.TargetNamespace = targetNamespace
 
 	return cfg, nil
 }

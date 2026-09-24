@@ -139,7 +139,9 @@ func (h *WorkerHandler) ToApplicationConfig(component *oam.Component, namespace 
 		return nil, err
 	}
 	config.InitContainers = initContainers
-	if ts, ok := props["topologySpread"].(bool); ok && !ts {
+	if ts, err := parseBoolField(props, "topologySpread", "topologySpread"); err != nil {
+		return nil, err
+	} else if ts != nil && !*ts {
 		config.TopologySpreadDisabled = true
 	}
 	affinity, err := parseAffinity(props)

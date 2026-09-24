@@ -76,11 +76,15 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	config.Replicas = replicas
 	config.explicitReplicas = replicasAuthored
 
-	if p, ok := toInt32(props["port"]); ok {
+	if p, present, err := parseInt32Field(props, "port", "port"); err != nil {
+		return nil, err
+	} else if present {
 		config.Port = p
 	}
 
-	if sn, ok := props["serviceName"].(string); ok && sn != "" {
+	if sn, present, err := parseStringField(props, "serviceName", "serviceName"); err != nil {
+		return nil, err
+	} else if present {
 		config.ServiceName = sn
 	} else {
 		config.ServiceName = component.Name

@@ -1244,6 +1244,28 @@ object would change what the next `Generate` emits.
 
 ## Per-type highlights
 
+Wrong-type handling for the optional top-level properties go-kure/launcher#405
+moved onto the presence-reporting helpers: `port` on `webservice`, `daemonset`
+and `statefulset` (`parseInt32Field`; on `webservice` both reads of it — the
+conversion and the `Endpoints` declaration — so a wrong type is not declared
+as an endpoint on port 80 either), `topologySpread` on `webservice` and
+`worker` and `prune` on `oci` (`parseBoolField`), `serviceName` on
+`statefulset` and `path`, `interval` and `targetNamespace` on `oci`
+(`parseStringField`, so an authored `""` still reads as absent), and
+`restartPolicy` on `cronjob` (read raw, as `job` reads it, so `""` still
+reaches the enum refusal). A present value of the wrong type is rejected by
+name (`topologySpread: must be a boolean, got string`) and a null reads as
+absence. Before, each fell back to its default as though the key had been
+omitted — `topologySpread: "false"` kept the spread constraints and
+`prune: "false"` pruned — for a handler called directly; schema validation
+already refused these shapes in an authored document. One authored shape does
+change: `port` is declared `integer` with no maximum, so an integer outside the
+int32 range (`port: 5000000000`) passed validation and built as though no port
+were authored (80 on `webservice`, none on `daemonset`/`statefulset`); it is
+now refused, with `parseInt32Field`'s existing wording (`port: must be an
+integer, got int`). The `postgresql` and
+`helmchart` handlers' own top-level reads were not part of that change.
+
 - **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
   plus the full `DeploymentSpec`-level surface they share with `deployment` —
   `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
