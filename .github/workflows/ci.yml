@@ -108,6 +108,10 @@ jobs:
             # these two scripts plus ci.yml/docs/github-workflows.md, both already listed above.
             - 'scripts/check-govulncheck-docs.sh'
             - 'scripts/sync-govulncheck-docs.sh'
+            # The verify-merge self-test runs in `validate`; a PR touching only the
+            # script or its fixture harness must not be able to skip it.
+            - 'scripts/verify-merge.sh'
+            - 'scripts/test/**'
           docs:
             - 'site/**'
             - 'docs/**'
@@ -264,6 +268,11 @@ jobs:
         fi
         GOWORK=off go vet ./...
         GOWORK=off go test ./...
+
+    # scripts/verify-merge.sh is a local tool (it builds refs/pull/N/merge, the tree
+    # this job's PR run checks out); its fixture self-test runs here so it cannot rot.
+    - name: Self-test verify-merge
+      run: make test-verify-merge
 
     # Blocking on PR / merge-queue: fail only when the change newly leads imported kure
     # on a shared direct dep. The script fetches its own base ref.

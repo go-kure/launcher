@@ -87,12 +87,38 @@ PR-only jobs (parallel, non-blocking):
 On `merge_group` events (merge queue), `lint`/`test`/`build` run against the queue's
 temporary branch — the merged result — before the PR is allowed to land.
 
+### Which tree a PR run builds
+
+On `pull_request` events, `actions/checkout` checks out `refs/pull/<N>/merge`: the branch
+merged into its base, not the branch. Yet every check run on the PR is stamped with the
+**branch head's** SHA. A red PR check can therefore name a commit that builds green — a
+textually clean merge can still fail to compile, for example when `main` grew a call site to
+a helper the branch removed. Checking out the SHA on the check and rebuilding it does not
+reproduce that failure; rebuilding the merge ref does:
+
+```bash
+mise run verify-merge <n>       # or: bash scripts/verify-merge.sh <n>
+```
+
+`scripts/verify-merge.sh` fetches `refs/pull/<n>/merge`, extracts it into a throwaway
+directory and runs `go build ./...` and `go test ./...` there, leaving the working tree
+untouched. Run it from the PR's branch after pushing. Exit `0` is green, `1` means the merge
+ref fails to build or test, and `2` means **not computable** — the PR has no merge ref (it is
+closed or conflicts with its base), or the ref was generated for a different head than the
+local `HEAD` (GitHub regenerates it a few seconds after each push). `2` never reads as a pass.
+`make verify-merge PR=<n>` runs the same script but is pass/fail only: make exits with its own
+`2` on any recipe failure, so a failing merge ref and a not-computable one look alike there.
+The merge ref reflects the base as of GitHub's last computation, which is what the PR run
+built; the merge queue re-tests against the current `main` before anything lands, so this is
+a local diagnostic, not a gate that protects `main`. The `lint` job runs its fixture
+self-test (`make test-verify-merge`).
+
 ### Jobs Detail
 
 | Job | Check Name | Timeout | Dependencies | Purpose |
 |-----|------------|---------|--------------|---------|
 | `changes` | `detect-changes` | 2 min | — | Path filter: `go:` and `docs:` outputs control downstream jobs |
-| `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint, tool-version parity (golangci-lint pin across Makefile/ci.yml/docs), govulncheck doc parity; diff-based lint on PRs |
+| `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint, tool-version parity (golangci-lint pin across Makefile/ci.yml/docs), govulncheck doc parity, verify-merge self-test; diff-based lint on PRs |
 | `test` | `test` | 25 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
 | `security` | `Security` | 15 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `action-pins` | `action-pins` | 2 min | — | Fails if any third-party `uses:` ref is not pinned to a 40-char commit SHA (`go-kure/.github` composite action) |

@@ -63,9 +63,17 @@ run = "make sync-govulncheck-docs"
 description = "Check the documentation's marked YAML fences (self-test, then the tree)"
 run = "make check-doc-fences"
 
+[tasks.test-verify-merge]
+description = "Self-test scripts/verify-merge.sh against a throwaway fixture repository"
+run = "make test-verify-merge"
+
 [tasks.verify]
-description = "Run all checks (tidy, lint, test, kure dep sync, tool pins, doc fences)"
-depends = ["tidy", "lint", "test", "check-kure-dep-sync", "check-tool-versions", "check-govulncheck-docs", "check-doc-fences"]
+description = "Run all checks (tidy, lint, test, kure dep sync, tool pins, doc fences, verify-merge self-test)"
+depends = ["tidy", "lint", "test", "check-kure-dep-sync", "check-tool-versions", "check-govulncheck-docs", "check-doc-fences", "test-verify-merge"]
+
+[tasks.verify-merge]
+description = "Build and test a PR's merge ref, the tree its CI builds (mise run verify-merge <pr-number>)"
+run = "bash scripts/verify-merge.sh"
 
 [tasks.changelog]
 description = "Generate changelog from git history"

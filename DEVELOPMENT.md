@@ -55,6 +55,12 @@ The `main` branch is protected — all changes must go through pull requests.
    gh pr create
    ```
 
+   PR checks build `refs/pull/<n>/merge` (the branch merged into `main`), not the branch. If
+   a check is red while `make precommit` is green on the branch, rebuild what CI built:
+   `mise run verify-merge <n>` (exit `1` = merge ref fails, `2` = not computable, never a
+   pass; `make verify-merge PR=<n>` gives pass/fail only, as make exits `2` on any failure). See
+   `docs/github-workflows.md` § Which tree a PR run builds.
+
 4. **Pass required CI checks**: `lint`, `test`, `build`
 
 5. **Merge** via the merge queue (linear history required — rebase, no merge commits)
@@ -213,6 +219,10 @@ This will:
 - Run all tests
 - Check kure dependency sync
 - Check tool-version pins (golangci-lint, govulncheck) stay consistent across Makefile, CI and docs
+- Self-test `scripts/verify-merge.sh` against a throwaway fixture repository
+
+It builds the branch. A PR's CI builds the branch merged into `main`; to reproduce that tree
+locally, run `mise run verify-merge <n>` after pushing.
 
 ## CI/CD Pipeline
 
@@ -303,6 +313,8 @@ guard's shared-direct set.
 - `check` - Quick code quality check
 - `precommit` - Run all pre-commit checks
 - `ci` - Run full CI pipeline
+- `verify-merge PR=<n>` - Build and test the PR's merge ref (`refs/pull/<n>/merge`), the tree its CI builds
+- `test-verify-merge` - Self-test `scripts/verify-merge.sh`
 
 ### Release
 - `release TYPE=<type>` - Preview release (dry-run); types: alpha, beta, rc, stable
