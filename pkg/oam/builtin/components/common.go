@@ -514,11 +514,20 @@ func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 	if err := rejectUnknownKeys(m, []string{"volumeName", "path", "key", "optional"}, "fileKeyRef"); err != nil {
 		return nil, err
 	}
-	volumeName, _ := m["volumeName"].(string)
-	path, _ := m["path"].(string)
-	key, _ := m["key"].(string)
-	if volumeName == "" || path == "" || key == "" {
-		return nil, errors.Errorf("fileKeyRef: volumeName, path, and key are all required")
+	// Each field is read on its own so a wrongly typed one is named as a type
+	// error and an absent one is named individually, rather than any of them
+	// collapsing into one "all required" message (go-kure/launcher#453).
+	volumeName, err := requiredStringField(m, "volumeName", "fileKeyRef")
+	if err != nil {
+		return nil, err
+	}
+	path, err := requiredStringField(m, "path", "fileKeyRef")
+	if err != nil {
+		return nil, err
+	}
+	key, err := requiredStringField(m, "key", "fileKeyRef")
+	if err != nil {
+		return nil, err
 	}
 	// Mirrors real admission's validateFileKeySelector exactly: volumeName
 	// must be a valid DNS-1123 label (it names a pod volume, which has that
@@ -629,9 +638,9 @@ func parseFieldRef(m map[string]any) (*corev1.ObjectFieldSelector, error) {
 	if err := rejectUnknownKeys(m, []string{"fieldPath", "apiVersion"}, "fieldRef"); err != nil {
 		return nil, err
 	}
-	path, _ := m["fieldPath"].(string)
-	if path == "" {
-		return nil, errors.Errorf("fieldRef: fieldPath is required")
+	path, err := requiredStringField(m, "fieldPath", "fieldRef")
+	if err != nil {
+		return nil, err
 	}
 	if err := validateFieldPath(path); err != nil {
 		return nil, err
@@ -694,9 +703,9 @@ func parseResourceFieldRef(m map[string]any) (*corev1.ResourceFieldSelector, err
 	if err := rejectUnknownKeys(m, []string{"resource", "containerName", "divisor"}, "resourceFieldRef"); err != nil {
 		return nil, err
 	}
-	res, _ := m["resource"].(string)
-	if res == "" {
-		return nil, errors.Errorf("resourceFieldRef: resource is required")
+	res, err := requiredStringField(m, "resource", "resourceFieldRef")
+	if err != nil {
+		return nil, err
 	}
 	if !validResourceFieldSelectors[res] && !strings.HasPrefix(res, "requests.hugepages-") && !strings.HasPrefix(res, "limits.hugepages-") {
 		return nil, errors.Errorf("resourceFieldRef: unsupported resource %q (must be one of limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory, requests.ephemeral-storage, or a requests.hugepages-<size>/limits.hugepages-<size> selector)", res)
@@ -807,9 +816,9 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 			if err := rejectUnknownKeys(cm, []string{"name", "optional"}, fmt.Sprintf("envFrom[%d].configMapRef", i)); err != nil {
 				return nil, err
 			}
-			name, _ := cm["name"].(string)
-			if name == "" {
-				return nil, errors.Errorf("envFrom[%d].configMapRef: name is required", i)
+			name, err := requiredStringField(cm, "name", fmt.Sprintf("envFrom[%d].configMapRef", i))
+			if err != nil {
+				return nil, err
 			}
 			// Matches ValidateConfigMapName (= apimachineryvalidation.NameIsDNSSubdomain):
 			// every Kubernetes object name, ConfigMap included, must be a valid
@@ -830,9 +839,9 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 			if err := rejectUnknownKeys(sec, []string{"name", "optional"}, fmt.Sprintf("envFrom[%d].secretRef", i)); err != nil {
 				return nil, err
 			}
-			name, _ := sec["name"].(string)
-			if name == "" {
-				return nil, errors.Errorf("envFrom[%d].secretRef: name is required", i)
+			name, err := requiredStringField(sec, "name", fmt.Sprintf("envFrom[%d].secretRef", i))
+			if err != nil {
+				return nil, err
 			}
 			// Matches ValidateSecretName (= apimachineryvalidation.NameIsDNSSubdomain):
 			// every Kubernetes object name, Secret included, must be a valid
@@ -1850,6 +1859,24 @@ func parseStringField(raw map[string]any, key, label string) (string, bool, erro
 	return s, true, nil
 }
 
+// requiredStringField reads a required string field through parseStringField,
+// so the two ways an author can get it wrong get their own message: a present
+// value of the wrong type is "<label>.<key>: must be a string, got <T>", and
+// only a genuinely absent, empty or null one is "<label>: <key> is required".
+// A bare `v, _ := raw[key].(string)` followed by an empty check reported a
+// wrongly typed value as missing, sending the author to look for a lost key
+// instead of a wrong type (go-kure/launcher#453).
+func requiredStringField(raw map[string]any, key, label string) (string, error) {
+	s, present, err := parseStringField(raw, key, label+"."+key)
+	if err != nil {
+		return "", err
+	}
+	if !present {
+		return "", errors.Errorf("%s: %s is required", label, key)
+	}
+	return s, nil
+}
+
 // parseObjectField mirrors parseStringField for object-typed fields — used
 // where a bare `v.(map[string]any), ok` type assertion would silently treat
 // a present-but-wrong-type value the same as absent. It also treats an
@@ -2648,9 +2675,9 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 	var out []InitContainerConfig
 	for i, m := range raw {
 		ic := InitContainerConfig{}
-		ic.Name, _ = m["name"].(string)
-		if ic.Name == "" {
-			return nil, errors.Errorf("initContainers[%d]: name is required", i)
+		ic.Name, err = requiredStringField(m, "name", fmt.Sprintf("initContainers[%d]", i))
+		if err != nil {
+			return nil, err
 		}
 		label := fmt.Sprintf("initContainers[%d] %q", i, ic.Name)
 		// Closed key set (go-kure/launcher#321). The explained refusals run
@@ -2666,10 +2693,16 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 		if err := rejectUnknownKeys(m, initContainerPropertyKeys, label); err != nil {
 			return nil, err
 		}
-		ic.Image, _ = m["image"].(string)
-		if ic.Image == "" {
-			return nil, errors.Errorf("initContainers[%d] %q: image is required", i, ic.Name)
+		// Same shape as workingDir below, so a wrongly typed image is named as
+		// a type error rather than reported missing (go-kure/launcher#453).
+		img, present, err := parseStringField(m, "image", "image")
+		if err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
 		}
+		if !present {
+			return nil, errors.Errorf("%s: image is required", label)
+		}
+		ic.Image = img
 		if err := ValidateImageRef(ic.Image); err != nil {
 			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
 		}
@@ -2728,19 +2761,25 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 	var out []SidecarContainerConfig
 	for i, m := range raw {
 		sc := SidecarContainerConfig{}
-		sc.Name, _ = m["name"].(string)
-		if sc.Name == "" {
-			return nil, errors.Errorf("sidecars[%d]: name is required", i)
+		sc.Name, err = requiredStringField(m, "name", fmt.Sprintf("sidecars[%d]", i))
+		if err != nil {
+			return nil, err
 		}
 		label := fmt.Sprintf("sidecars[%d] %q", i, sc.Name)
 		// Closed key set (go-kure/launcher#321), see sidecarPropertyKeys.
 		if err := rejectUnknownKeys(m, sidecarPropertyKeys, label); err != nil {
 			return nil, err
 		}
-		sc.Image, _ = m["image"].(string)
-		if sc.Image == "" {
-			return nil, errors.Errorf("sidecars[%d] %q: image is required", i, sc.Name)
+		// Same shape as workingDir below, so a wrongly typed image is named as
+		// a type error rather than reported missing (go-kure/launcher#453).
+		img, present, err := parseStringField(m, "image", "image")
+		if err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
 		}
+		if !present {
+			return nil, errors.Errorf("%s: image is required", label)
+		}
+		sc.Image = img
 		if err := ValidateImageRef(sc.Image); err != nil {
 			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
 		}
@@ -2905,10 +2944,14 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 		if !ok {
 			return nil, errors.Errorf("%s: volumeMounts[%d] expected object, got %T", prefix, i, v)
 		}
-		n, _ := mm["name"].(string)
-		mountPath, _ := mm["mountPath"].(string)
-		if n == "" || mountPath == "" {
-			return nil, errors.Errorf("%s: volumeMounts[%d]: name and mountPath are required", prefix, i)
+		mountLabel := fmt.Sprintf("%s: volumeMounts[%d]", prefix, i)
+		n, err := requiredStringField(mm, "name", mountLabel)
+		if err != nil {
+			return nil, err
+		}
+		mountPath, err := requiredStringField(mm, "mountPath", mountLabel)
+		if err != nil {
+			return nil, err
 		}
 		// Same per-container mountPath-uniqueness rule as parseVolumes' own
 		// fix above (ValidateVolumeMounts' mountpoints.Has check) — this

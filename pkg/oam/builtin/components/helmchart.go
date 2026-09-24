@@ -165,10 +165,11 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 			default:
 				return nil, errors.Errorf("valuesFrom[%d]: kind %q is invalid; must be ConfigMap or Secret", i, vfc.Kind)
 			}
-			vfc.Name, _ = m["name"].(string)
-			if vfc.Name == "" {
-				return nil, errors.Errorf("valuesFrom[%d]: name is required", i)
+			name, err := requiredStringField(m, "name", fmt.Sprintf("valuesFrom[%d]", i))
+			if err != nil {
+				return nil, err
 			}
+			vfc.Name = name
 			vfc.ValuesKey, _ = m["valuesKey"].(string)
 			vfc.TargetPath, _ = m["targetPath"].(string)
 			cfg.ValuesFrom = append(cfg.ValuesFrom, vfc)

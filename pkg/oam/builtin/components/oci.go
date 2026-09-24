@@ -70,18 +70,28 @@ func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace str
 	if !ok {
 		return nil, errors.New("oci: source is required")
 	}
-	cfg.URL, _ = src["url"].(string)
-	if cfg.URL == "" {
+	// A wrongly typed url or version is named as a type error, not reported
+	// missing (go-kure/launcher#453).
+	srcURL, present, err := parseStringField(src, "url", "oci: source.url")
+	if err != nil {
+		return nil, err
+	}
+	if !present {
 		return nil, errors.New("oci: source.url is required")
 	}
+	cfg.URL = srcURL
 	if !strings.HasPrefix(cfg.URL, "oci://") {
 		return nil, errors.Errorf("oci: source.url %q must use the oci:// scheme", cfg.URL)
 	}
 
-	cfg.Version, _ = props["version"].(string)
-	if cfg.Version == "" {
+	version, present, err := parseStringField(props, "version", "oci: version")
+	if err != nil {
+		return nil, err
+	}
+	if !present {
 		return nil, errors.New("oci: version is required (a tag, or sha256:<digest>)")
 	}
+	cfg.Version = version
 
 	if p, ok := props["path"].(string); ok && p != "" {
 		cfg.Path = p

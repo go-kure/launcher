@@ -1,6 +1,8 @@
 package components
 
 import (
+	"fmt"
+
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/manifest"
 	"github.com/go-kure/kure/pkg/stack"
@@ -84,12 +86,16 @@ func parseScopeOverrides(props map[string]any) (map[schema.GroupVersionKind]mani
 		if !ok {
 			return nil, nil, errors.Errorf("scopeOverrides[%d]: expected an object", i)
 		}
-		apiVersion, _ := m["apiVersion"].(string)
-		kind, _ := m["kind"].(string)
-		scopeStr, _ := m["scope"].(string)
-		if apiVersion == "" || kind == "" {
-			return nil, nil, errors.Errorf("scopeOverrides[%d]: apiVersion and kind are required", i)
+		label := fmt.Sprintf("scopeOverrides[%d]", i)
+		apiVersion, err := requiredStringField(m, "apiVersion", label)
+		if err != nil {
+			return nil, nil, err
 		}
+		kind, err := requiredStringField(m, "kind", label)
+		if err != nil {
+			return nil, nil, err
+		}
+		scopeStr, _ := m["scope"].(string)
 		var scope manifest.ScopeResult
 		switch scopeStr {
 		case "Cluster":
