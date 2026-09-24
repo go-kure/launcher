@@ -877,14 +877,22 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 // list, which only references those claims by name, still is not.
 func parseResources(resources map[string]any) (ResourceRequirements, error) {
 	var req ResourceRequirements
-	if requests, ok := resources["requests"].(map[string]any); ok {
+	// requests/limits go through parseObjectField, like the enclosing
+	// `resources` object at every call site: a bare comma-ok assertion read a
+	// wrongly typed value (`requests: "big"`) as absent and dropped it
+	// (go-kure/launcher#405).
+	if requests, present, err := parseObjectField(resources, "requests", "resources.requests"); err != nil {
+		return ResourceRequirements{}, err
+	} else if present {
 		rl, err := parseResourceList(requests)
 		if err != nil {
 			return ResourceRequirements{}, errors.Errorf("resources.requests: %w", err)
 		}
 		req.Requests = rl
 	}
-	if limits, ok := resources["limits"].(map[string]any); ok {
+	if limits, present, err := parseObjectField(resources, "limits", "resources.limits"); err != nil {
+		return ResourceRequirements{}, err
+	} else if present {
 		rl, err := parseResourceList(limits)
 		if err != nil {
 			return ResourceRequirements{}, errors.Errorf("resources.limits: %w", err)
@@ -2728,10 +2736,12 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
 		}
 		ic.Env = env
-		if resources, ok := m["resources"].(map[string]any); ok {
+		if resources, present, err := parseObjectField(m, "resources", "resources"); err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
+		} else if present {
 			r, err := parseResources(resources)
 			if err != nil {
-				return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
+				return nil, errors.Errorf("%s: %w", label, err)
 			}
 			ic.Resources = r
 		}
@@ -2805,10 +2815,12 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
 		}
 		sc.Env = env
-		if resources, ok := m["resources"].(map[string]any); ok {
+		if resources, present, err := parseObjectField(m, "resources", "resources"); err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
+		} else if present {
 			r, err := parseResources(resources)
 			if err != nil {
-				return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
+				return nil, errors.Errorf("%s: %w", label, err)
 			}
 			sc.Resources = r
 		}
