@@ -213,9 +213,11 @@ The same applies one depth further down, to a `matchLabels` **value**. `env:` wi
 no value is rejected as `…matchLabels: "env" has no value`, and a **composite**
 value — a mapping or a list — as `…matchLabels: "env" must be a string, number or
 boolean, got …`. Both used to reach `%v` and render `<nil>`, `map[a:1]` or `[x y]`
-into a label the API server then refuses, one layer away from the cause. Scalars
-are unaffected: `port: 8080` is still the label value `"8080"`, and so are booleans
-and every numeric kind a YAML or JSON decoder produces.
+into a label the API server then refuses, one layer away from the cause. A scalar
+still renders as before — `port: 8080` is the label value `"8080"`, and booleans
+and every numeric kind a YAML or JSON decoder produces render the same way — but
+the result must then pass the content check described under "Label and CIDR
+content" below.
 
 The peer **envelope** itself is the one place in this section where a null is an
 **error**, not absence:
@@ -291,6 +293,36 @@ or a lowering rule can produce is accepted — including a named Go numeric or
 string type, matching `matchLabels`' reach (go-kure/launcher#440 rounds 2-3):
 a named-port string and a `protocol` assembled as a `corev1.Protocol` both
 parse the same as their builtin-typed equivalents.
+
+### Label and CIDR content
+
+Everything above checks **type** and **nullity**. A well-typed value is also
+checked for **content**, against the validators the API server applies to a
+NetworkPolicy peer, so a document that renders is one the cluster admits
+(go-kure/launcher#469):
+
+- A `matchLabels` **key** must be a qualified name (`app.kubernetes.io/name`), and
+  the rendered **value** a valid label value: empty, or at most 63 characters of
+  alphanumerics, `-`, `_` and `.`, starting and ending with an alphanumeric. A
+  number is checked as rendered, so `1000000.0` (`"1e+06"`), `-1` and `.inf`
+  (`"+Inf"`) are rejected, and the diagnostic names the type they were rendered
+  from.
+- `ipBlock.cidr` and each `except` entry must be a CIDR, and each exception a
+  **strict subset** of `cidr`: inside it, with a longer prefix, in the same address
+  family. The check follows the pinned Kubernetes minor, where strict CIDR
+  validation is on by default (it is from 1.36), so `10.0.0.1/8` (bits set past the prefix),
+  `010.0.0.0/8` and an IPv4-mapped IPv6 CIDR are rejected as well. Non-canonical
+  IPv6 text such as upper-case hex is still accepted, as it is upstream.
+
+```yaml
+from:
+  - podSelector: {matchLabels: {size: 1000000.0}}      # rejected: `…matchLabels: "size" has invalid label value "1e+06" (rendered from float64): …`
+  - podSelector: {matchLabels: {"bad key": web}}       # rejected: `…matchLabels: invalid label key "bad key": …`
+  - ipBlock: {cidr: not-cidr}                          # rejected: `…ipBlock.cidr: invalid CIDR "not-cidr": …`
+  - ipBlock: {cidr: 10.0.0.0/8, except: [10.0.0.0/8]}  # rejected: `…ipBlock.except[0]: "10.0.0.0/8" must be a strict subset of cidr "10.0.0.0/8"`
+```
+
+Each of these used to render, and fail only when the manifest was applied.
 
 ### Null `ingress` / `egress`
 
