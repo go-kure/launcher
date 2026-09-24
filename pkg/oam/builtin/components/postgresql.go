@@ -244,7 +244,10 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 			config.PoolerPoolMode = PoolModeSession
 		}
 		if params, ok := pooler["parameters"].(map[string]any); ok {
-			config.PoolerParameters = stringMap(params)
+			var err error
+			if config.PoolerParameters, err = stringMapStrict(params, "pooler.parameters"); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -267,7 +270,7 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 
 	if ecList, ok := props["externalClusters"].([]any); ok {
-		for _, ec := range ecList {
+		for i, ec := range ecList {
 			ecMap, ok := ec.(map[string]any)
 			if !ok {
 				continue
@@ -280,7 +283,11 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 				ext.BarmanObjectStore = bos
 			}
 			if cp, ok := ecMap["connectionParameters"].(map[string]any); ok {
-				ext.ConnectionParameters = stringMap(cp)
+				var err error
+				label := fmt.Sprintf("externalClusters[%d].connectionParameters", i)
+				if ext.ConnectionParameters, err = stringMapStrict(cp, label); err != nil {
+					return nil, err
+				}
 			}
 			if ext.Name != "" {
 				config.ExternalClusters = append(config.ExternalClusters, ext)
@@ -322,7 +329,10 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 
 	if pg, ok := props["postgresql"].(map[string]any); ok {
 		if params, ok := pg["parameters"].(map[string]any); ok {
-			config.PostgresqlParameters = stringMap(params)
+			var err error
+			if config.PostgresqlParameters, err = stringMapStrict(params, "postgresql.parameters"); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -331,9 +341,10 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 
 	if im, ok := props["inheritedMetadata"].(map[string]any); ok {
-		// stringMapStrict, not stringMap: these become label and annotation
-		// values on the generated resources, where a dropped key is a different
-		// cluster state from the one the author wrote (go-kure/launcher#466).
+		// A non-string value is refused, not dropped: these become label and
+		// annotation values on the generated resources, where a dropped key is
+		// a different cluster state from the one the author wrote
+		// (go-kure/launcher#466).
 		var err error
 		if labels, ok := im["labels"].(map[string]any); ok {
 			if config.InheritedLabels, err = stringMapStrict(labels, "inheritedMetadata.labels"); err != nil {
