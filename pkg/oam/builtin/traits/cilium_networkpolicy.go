@@ -68,8 +68,19 @@ func (h *CiliumNetworkPolicyHandler) parseProperties(props map[string]any, app *
 		return nil, errors.New("required property 'name' missing or not a string")
 	}
 
-	_, hasEgress := props["egress"]
-	_, hasIngress := props["ingress"]
+	// A null reads as absence before the joint requirement below, not after it —
+	// the same decision networkpolicy.go makes for the same pair of keys. Both are
+	// optional individually, so a null is absence, and a presence-only check let
+	// `egress:` with no value satisfy the requirement while contributing nothing: a
+	// document that asked for no policy produced one (go-kure/launcher#468).
+	rawEgress, hasEgress := props["egress"]
+	rawIngress, hasIngress := props["ingress"]
+	if hasEgress && oam.IsNullValue(rawEgress) {
+		hasEgress = false
+	}
+	if hasIngress && oam.IsNullValue(rawIngress) {
+		hasIngress = false
+	}
 	if !hasEgress && !hasIngress {
 		return nil, errors.New("at least one of 'egress' or 'ingress' must be specified")
 	}
@@ -111,14 +122,20 @@ func (c *CiliumNetworkPolicyConfig) Generate(app *stack.Application) ([]*client.
 }
 
 func (c *CiliumNetworkPolicyConfig) toAPIRule() (*ciliumapi.Rule, error) {
+	// Each field is optional, so a null is absence and the key is omitted. The
+	// check is oam.IsNullValue, not `!= nil`: a TYPED nil (map[string]any(nil)) is a
+	// non-nil interface, so it passed `!= nil`, marshalled as
+	// `"endpointSelector": null`, and Cilium's EndpointSelector.UnmarshalJSON turns
+	// that into an allocated empty selector — a wildcard over every endpoint, where
+	// the untyped nil omitted the key (go-kure/launcher#468).
 	raw := map[string]any{}
-	if c.EndpointSelector != nil {
+	if !oam.IsNullValue(c.EndpointSelector) {
 		raw["endpointSelector"] = c.EndpointSelector
 	}
-	if c.Egress != nil {
+	if !oam.IsNullValue(c.Egress) {
 		raw["egress"] = c.Egress
 	}
-	if c.Ingress != nil {
+	if !oam.IsNullValue(c.Ingress) {
 		raw["ingress"] = c.Ingress
 	}
 

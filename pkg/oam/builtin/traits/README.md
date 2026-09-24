@@ -429,6 +429,21 @@ backend's pods on the backend ports. Without a `backendSelector`, an external ba
 is rejected (it could never take effect), and a `backendSelector` on a ref that resolves to a
 sibling component is ignored (component-label retargeting wins). Same-namespace only.
 
+### Null `trafficSources` and `matchLabels`
+
+`networkPolicy.trafficSources` is required once `networkPolicy` is present, and an
+authored `trafficSources: []` is the deliberate way to switch synthesis off. A `null`
+is **not** `[]`: it is rejected (`expected array, got null`), whatever its Go shape. A
+**typed** nil list from a lowering rule used to take the `[]` opt-out path and disable
+synthesis with no diagnostic, where an authored null was already an error
+(go-kure/launcher#468).
+
+`matchLabels` is likewise required in every matchLabels-only selector parsed here — a
+traffic source's `podSelector` and a routing trait's `backendSelector`. A null
+`matchLabels` is rejected (`expected object, got null`). In a `podSelector` a typed nil
+map used to pass the presence check and render an empty selector, which matches every
+pod; a `backendSelector` already refused it, as an empty `matchLabels`.
+
 ## Extending
 
 Custom traits implement `oam.TraitHandler` (`CanHandle` + `Apply`), optionally
@@ -547,6 +562,21 @@ Rewrite the affected rules to the shapes the new API supports.
 define their own `UnmarshalJSON`. In this API those are `EndpointSelector` and `ICMPField`,
 so unknown keys nested inside `endpointSelector` or `icmps` are still dropped silently. The
 `toPorts.rules.*` shapes that motivated the guard are covered.
+
+### Null `endpointSelector` / `egress` / `ingress`
+
+All three keys are optional, so a `null` is **absence** — the same contract as the
+`networkpolicy` trait above. Two consequences (go-kure/launcher#468):
+
+- `egress` and `ingress` are **required jointly** (`at least one of 'egress' or
+  'ingress' must be specified`), and a null is cleared to absence before that check,
+  so it cannot satisfy it. A document whose only rule key is null is rejected rather
+  than rendering a policy nobody asked for. An authored `egress: []` is a value and
+  still satisfies it.
+- A null `endpointSelector` renders exactly as an omitted one. A **typed** nil — an
+  uninitialized Go map from a lowering rule — used to be emitted as
+  `endpointSelector: null`, which Cilium decodes to an empty selector matching
+  **every endpoint**, while an authored null omitted the key. Both shapes now omit it.
 
 ## Conventions
 
