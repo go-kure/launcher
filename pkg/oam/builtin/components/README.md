@@ -1736,9 +1736,14 @@ object would change what the next `Generate` emits.
   instead of being dropped from the emitted resources, with the same
   alphabetically-first rule as `nodeSelector` when several are wrong
   (go-kure/launcher#466). Quote such a value to keep it
-  (`max_connections: "100"`); a number is not converted to its string form,
+  (`max_connections: "100"`), and declare a Package parameter substituted as
+  a whole value there as `type: string`, since whole-value substitution keeps
+  the parameter's type; a number is not converted to its string form,
   because YAML's rendering of a number is not always the text the author
-  typed (`1.10` decodes to `1.1`).
+  typed (`1.10` decodes to `1.1`). An explicit null value is absence, per
+  "The null contract" below: the key is left out, not refused. The same
+  holds for `nodeSelector` values in both affinity readers, which share the
+  helper.
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
   data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
   platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)

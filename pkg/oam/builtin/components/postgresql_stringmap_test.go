@@ -126,3 +126,26 @@ func TestPostgresqlStringMaps_StringValuesRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// TestPostgresqlStringMaps_NullValueIsAbsent pins the package's null contract (README
+// "The null contract") for these maps: a key authored as `max_connections:` with no
+// value is absent, not a wrong-typed value. The lenient reader skipped a null along
+// with every other non-string; the strict one must keep skipping it while refusing
+// the rest, or a document that built correctly becomes an error.
+func TestPostgresqlStringMaps_NullValueIsAbsent(t *testing.T) {
+	for _, site := range postgresqlStringMapSites {
+		t.Run(site.name, func(t *testing.T) {
+			cfg, err := postgresqlConfigFor(t, site.props(nil))
+			if err != nil {
+				t.Fatalf("a null value must read as absent, got error: %v", err)
+			}
+			got := site.get(cfg)
+			if _, present := got[site.key]; present {
+				t.Errorf("%s[%q] is present (%q); a null value must leave the key out", site.name, site.key, got[site.key])
+			}
+			if len(got) != 1 {
+				t.Errorf("%s: got %#v, want only the non-null pair", site.name, got)
+			}
+		})
+	}
+}
