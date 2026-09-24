@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
@@ -47,6 +48,15 @@ func parseTrafficSources(props map[string]any, component, traitType string) ([]n
 	if !hasSources {
 		return nil, ve("networkPolicy.trafficSources",
 			"required field missing; use trafficSources: [] to explicitly disable auto-generation")
+	}
+	// A null is not `[]`. trafficSources is required once networkPolicy is present,
+	// and a null in a required field is an error, not the opt-out below: a TYPED nil
+	// ([]any(nil)) satisfied the assertion, reached `len() == 0` and switched
+	// auto-generation off with no diagnostic, indistinguishable in the output from
+	// an authored `trafficSources: []` (go-kure/launcher#468).
+	if oam.IsNullValue(rawSources) {
+		return nil, ve("networkPolicy.trafficSources",
+			"expected array, got null; use trafficSources: [] to explicitly disable auto-generation")
 	}
 	rawList, ok := rawSources.([]any)
 	if !ok {
@@ -106,6 +116,13 @@ func parseMatchLabelsSelector(raw map[string]any, path string) (*metav1.LabelSel
 	rawML, hasML := raw["matchLabels"]
 	if !hasML {
 		return nil, fmt.Errorf("%s: missing required 'matchLabels'", path)
+	}
+	// The presence check above passes for a key that is present-but-null. A TYPED
+	// nil then satisfied the assertion below with a nil map, the label loop ran zero
+	// times and the result was an empty selector, which matches every pod. A null
+	// in a required field is an error (go-kure/launcher#468).
+	if oam.IsNullValue(rawML) {
+		return nil, errors.Errorf("%s.matchLabels: expected object, got null", path)
 	}
 	ml, ok := rawML.(map[string]any)
 	if !ok {
