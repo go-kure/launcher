@@ -11,7 +11,7 @@ Build Kubernetes manifests from an OAM Application and a platform ClusterProfile
 
 `app.yaml` — a single webservice component:
 
-```yaml
+```yaml {check="build" profile="examples/cluster-profiles/minimal.yaml"}
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
@@ -29,7 +29,7 @@ spec:
 
 `profile.yaml` — minimal platform choices:
 
-```yaml
+```yaml {check="snippet"}
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: ClusterProfile
 metadata:

@@ -68,7 +68,7 @@ spec:
 
 ### app.yaml with placeholders
 
-```yaml
+```yaml {check="template"}
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:

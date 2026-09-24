@@ -121,6 +121,11 @@ jobs:
             - '**.yml'
             - '**.yaml'
             - '**.toml'
+            # docs-build's fence check runs `make check-doc-fences`, which builds
+            # kurel — a PR touching only these must not be able to skip it.
+            - 'Makefile'
+            - 'go.mod'
+            - 'go.sum'
 
   # =============================================================================
   # Stage 1: Fast Validation
@@ -926,6 +931,24 @@ jobs:
 
     - name: Validate docs map (code↔docs sync)
       uses: go-kure/.github/.github/actions/check-doc-sync@f074d4be2111d46e347add9ce7843ad096f81b76 # main
+
+    # Checks the YAML fences marked {check="build|snippet|template"} (unmarked
+    # fences are not checked) — go-kure/launcher#442. Here rather than in `lint`
+    # because this job runs on documentation-only changes, so a fence defect
+    # cannot land just because no Go file changed. `make check-doc-fences` builds
+    # bin/kurel (Go is set up above) and runs the gate's self-test before the
+    # tree, so a gate that could no longer fail a broken fence goes red too.
+    - name: Install build tools
+      run: command -v make &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends make)
+
+    # Own module cache under runner.temp: the Hugo-modules cache below restores
+    # into and saves ~/go/pkg/mod, keyed on site/go.sum only. Downloading
+    # launcher's modules there would put them under that key — restored over on
+    # the next run and saved into the Hugo cache on a key miss.
+    - name: Check documentation YAML fences
+      env:
+        GOMODCACHE: ${{ runner.temp }}/gomod-doc-fences
+      run: make check-doc-fences
 
     - name: Inject front matter
       run: bash site/scripts/inject-frontmatter.sh

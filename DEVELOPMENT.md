@@ -121,6 +121,40 @@ This runs in CI as the non-required `validate-manifests` job (see
 `docs/github-workflows.md`) — not yet in the required-checks list below while it
 completes its first non-blocking cycle (go-kure/launcher#292).
 
+### Checking documentation YAML fences
+
+```bash
+# Self-test the gate, then check every marked YAML fence in the tracked *.md files.
+# Builds bin/kurel first; needs yq (mise-managed, see mise.toml).
+make check-doc-fences
+```
+
+A YAML fence in the documentation is checked only when it is marked, with a `check`
+attribute after the language in the fence's info string. Hugo renders the attribute as
+an HTML attribute and GitHub ignores it, so the page looks the same either way:
+
+````markdown
+```yaml {check="build" profile="examples/cluster-profiles/minimal.yaml"}
+```yaml {check="snippet"}
+```yaml {check="template"}
+````
+
+| Mode | Use it for | The check |
+|---|---|---|
+| `build` | a complete `Application` a reader can copy | `kurel build` must succeed against `profile`, a ClusterProfile path relative to the repository root (required) |
+| `snippet` | a fragment: an envelope header, one stanza | well-formed YAML; not expected to be a whole document |
+| `template` | a package `app.yaml` with unresolved `${...}` placeholders | well-formed YAML; the placeholders need the package's parameters and values to resolve |
+
+Unmarked fences are not checked. Mark a fence `build` whenever it is a whole
+application: that is the only mode that runs the envelope and the handlers, and it is
+what catches a defect like go-kure/launcher#417 (`traits: []` at spec level). A marker
+that cannot be honoured fails rather than being skipped: an unknown mode, a marker on a
+non-YAML fence, a `build` fence with no `profile` or a missing one, an unclosed fence.
+Failures are reported as `<file>:<line of the opening fence>: <reason>`.
+
+This runs in CI in the `docs-build` job (see `docs/github-workflows.md`), which runs on
+documentation-only changes.
+
 ### 4. Testing
 
 ```bash
@@ -246,6 +280,7 @@ guard's shared-direct set.
 ### Building
 - `build` / `build-kurel` - Build kurel executable
 - `validate-manifests` - Build example manifests and validate against flux-schema
+- `check-doc-fences` - Check the documentation's marked YAML fences (self-test, then the tree)
 
 ### Testing
 - `test` - Run all tests

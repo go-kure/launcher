@@ -80,7 +80,7 @@ the GVK rationale and `docs/oam/options-param-syntax.md` for the parameter synta
 
 ### 4.1 Basic structure
 
-```yaml
+```yaml {check="build" profile="examples/cluster-profiles/minimal.yaml"}
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:

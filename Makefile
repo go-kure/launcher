@@ -114,6 +114,13 @@ $(BUILD_DIR):
 validate-manifests: build-kurel ## Build example manifests and validate against flux-schema
 	@bash site/scripts/validate-manifests.sh
 
+# Self-test first: a gate that cannot fail a broken fence proves nothing when it
+# passes the real tree (go-kure/launcher#442).
+.PHONY: check-doc-fences
+check-doc-fences: build-kurel ## Check the documentation's marked YAML fences (self-test, then the tree)
+	@bash site/scripts/check-doc-fences-test.sh
+	@bash site/scripts/check-doc-fences.sh
+
 # =============================================================================
 # Testing
 # =============================================================================
