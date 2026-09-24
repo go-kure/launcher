@@ -1147,7 +1147,27 @@ type mainContainerInput struct {
 // the literal directly. Resources is set unconditionally right below, so the
 // fabricated defaults are dropped rather than replicated (approved delta,
 // go-kure/launcher#361).
-func buildMainContainer(name string, in mainContainerInput) *corev1.Container {
+//
+// name is the component name, and it reaches three places with three different
+// rules. metadata.name and the `app:` label both accept a dotted name — a
+// DNS-1123 *subdomain*, which is what validateComponent enforces
+// (pkg/oam/validate.go) — but corev1.Container.Name is a DNS-1123 *label*,
+// which forbids dots. So `batch.worker` is a valid component name that would
+// build a workload the API server refuses at admission, with an error naming a
+// field the author never wrote. The check lives here rather than in
+// validateComponent because component types that name no container after the
+// component (helmchart, manifests, custom types, …) legitimately accept a
+// dotted name; checking in the one builder every workload kind goes through
+// covers every present and future caller (go-kure/launcher#407). The name is
+// refused, never rewritten: deriving `batch-worker` would silently rename the
+// container and could collide with an init container or sidecar of that name.
+func buildMainContainer(name string, in mainContainerInput) (*corev1.Container, error) {
+	if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
+		return nil, errors.Errorf("component name %q cannot be a container name: %s; "+
+			"the workload's main container is named after the component, and a container name is a DNS-1123 label "+
+			"(no dots), stricter than the DNS-1123 subdomain a component name may otherwise be",
+			name, strings.Join(errs, "; "))
+	}
 	container := &corev1.Container{
 		Name:    name,
 		Image:   in.Image,
@@ -1170,7 +1190,7 @@ func buildMainContainer(name string, in mainContainerInput) *corev1.Container {
 		container.SecurityContext = &sc
 	}
 	container.VolumeMounts = append(container.VolumeMounts, in.VolumeMounts...)
-	return container
+	return container, nil
 }
 
 // podSpecInput is everything a kind handler contributes to its pod template

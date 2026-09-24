@@ -314,7 +314,7 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 	if c.Port > 0 {
 		ports = []corev1.ContainerPort{{Name: "http", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
 	}
-	container := buildMainContainer(app.Name, mainContainerInput{
+	container, err := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
 		Command:         c.Command,
 		Args:            c.Args,
@@ -328,6 +328,9 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	ds := kubernetes.CreateDaemonSet(app.Name, app.Namespace)
 	ds.Labels = appLabels(app.Name)

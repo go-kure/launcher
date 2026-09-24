@@ -407,7 +407,7 @@ func (c *DeploymentConfig) Generate(app *stack.Application) ([]*client.Object, e
 func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
 	// No Ports: this kind publishes no port property (see parseProbes'
 	// namedPortsAllowed=false above).
-	container := buildMainContainer(app.Name, mainContainerInput{
+	container, err := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
 		Command:         c.Command,
 		Args:            c.Args,
@@ -420,6 +420,9 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
 	dep.Labels = deploymentComponentLabels(app.Name)

@@ -491,7 +491,10 @@ func TestBuildPodSpec_LayersOnAuthoredFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsePodSpec: %v", err)
 	}
-	main := buildMainContainer("api", mainContainerInput{Image: "ghcr.io/org/api:v1"})
+	main, err := buildMainContainer("api", mainContainerInput{Image: "ghcr.io/org/api:v1"})
+	if err != nil {
+		t.Fatalf("buildMainContainer: %v", err)
+	}
 	ps, err := buildPodSpec(podSpecInput{
 		Config:                    cfg,
 		DefaultServiceAccountName: "api",
@@ -554,7 +557,10 @@ func TestBuildPodSpec_ContainerOSFields(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parsePodSpec: %v", err)
 			}
-			main := buildMainContainer("api", mainContainerInput{Image: "ghcr.io/org/api:v1", SecurityContext: tc.sc})
+			main, err := buildMainContainer("api", mainContainerInput{Image: "ghcr.io/org/api:v1", SecurityContext: tc.sc})
+			if err != nil {
+				t.Fatalf("buildMainContainer: %v", err)
+			}
 			_, err = buildPodSpec(podSpecInput{Config: cfg, DefaultServiceAccountName: "api", MainContainer: main})
 			if tc.wantErr == "" {
 				if err != nil {

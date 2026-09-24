@@ -357,7 +357,7 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	if c.Port > 0 {
 		ports = []corev1.ContainerPort{{Name: "tcp", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
 	}
-	container := buildMainContainer(app.Name, mainContainerInput{
+	container, err := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
 		Command:         c.Command,
 		Args:            c.Args,
@@ -371,6 +371,9 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    mounts,
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	sts := kubernetes.CreateStatefulSet(app.Name, app.Namespace)
 	sts.Labels = appLabels(app.Name)

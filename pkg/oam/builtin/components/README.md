@@ -130,6 +130,25 @@ published schema declares only as an open object. So the parser message is what 
 sees there, and for any caller that hands properties to a handler without
 schema validation (go-kure/launcher#453).
 
+**The main container is named after the component, so a workload component
+name must be a DNS-1123 *label*, not merely a subdomain.** A component name is
+validated as a DNS-1123 subdomain (`pkg/oam/validate.go`), which permits dots,
+and that name reaches `metadata.name` and the `app:` label unchanged — both
+accept it. It also becomes the name of the pod's main container, and a
+container name is a DNS-1123 label, which forbids dots. `batch.worker` would
+therefore build a workload the API server rejects at admission, naming
+`spec.template.spec.containers[0].name`, a field the author never wrote. All
+seven workload kinds (`webservice`, `worker`, `deployment`, `statefulset`,
+`daemonset`, `cronjob`, `job`) now refuse such a name at generation, in the one
+builder they share. The name is refused rather than rewritten to `batch-worker`:
+a derived name would silently rename the container and could collide with an
+init container or sidecar of that name. Component types that name no container
+after the component (`helmchart`, `manifests`, `passthrough`, …) keep accepting
+a dotted name, so the component-name rule itself is unchanged. `job` refused
+the name from its introduction; the other six gained the check in
+go-kure/launcher#407. Nothing that previously produced an applyable manifest is
+affected — such a document never did.
+
 Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
 `daemonset`, `cronjob`, `job`)
 share these fields, projected directly onto real `corev1` types (same
@@ -1552,16 +1571,9 @@ change.
   that parsed before parses differently — so no document that built before
   stopped building.
 
-  **The component name must be a DNS-1123 *label*, not merely a subdomain.** A
-  component name is validated as a DNS-1123 subdomain, which permits dots, and
-  that name reaches `metadata.name` and the `app:` label unchanged — both accept
-  it. It also becomes the name of the Job's main container, and a container name
-  is a DNS-1123 label, which forbids dots. `batch.worker` would therefore build a
-  Job the API server rejects at admission, naming a field the author never wrote,
-  so this component refuses the name at generation instead. Nothing that
-  previously produced an applyable manifest is affected — such a document never
-  did. The other workload kinds share the gap and are tracked as
-  go-kure/launcher#407.
+  **The component name must be a DNS-1123 *label*, not merely a subdomain** — a
+  rule this component shares with every workload kind; see "The main container
+  is named after the component" under "Common config" above.
 
   **Known limitation — a `job` component is not updatable in place.** A Job's pod
   template is immutable: `ValidateJobSpecUpdate` runs `validatePodTemplateUpdate`

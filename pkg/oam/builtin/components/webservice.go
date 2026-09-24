@@ -368,7 +368,7 @@ func (c *WebserviceConfig) Generate(app *stack.Application) ([]*client.Object, e
 }
 
 func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
-	container := buildMainContainer(app.Name, mainContainerInput{
+	container, err := buildMainContainer(app.Name, mainContainerInput{
 		Image:     c.Image,
 		Command:   c.Command,
 		Args:      c.Args,
@@ -384,6 +384,9 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
 	dep.Labels = appLabels(app.Name)
