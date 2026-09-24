@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"net/netip"
 	"reflect"
 	"slices"
 	"strings"
@@ -14,6 +15,8 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -450,6 +453,83 @@ func npLabelValue(value any) (string, bool) {
 	}
 }
 
+// npValidateLabel checks one matchLabels entry's CONTENT, after npLabelValue has
+// checked its type: the key must be a qualified name and the rendered value a
+// valid label value, the two rules the API server applies to a peer selector
+// (ValidateNetworkPolicyPeer -> metav1 validation.ValidateLabelSelector ->
+// ValidateLabels). A well-typed scalar used to be accepted whatever it held, so
+// `1000000.0` rendered "1e+06", `-1` rendered "-1" and a 64-character string
+// rendered verbatim — each a manifest the API server refuses on apply, one layer
+// away from the line that wrote it (go-kure/launcher#469).
+//
+// The rendered value is what is checked, because it is what reaches the cluster;
+// the original's type is named when it was not a string, since "1e+06" is not
+// what the author typed.
+func npValidateLabel(key, value string, original any, path string) error {
+	if errs := validation.IsQualifiedName(key); len(errs) > 0 {
+		return errors.Errorf("%s: invalid label key %q: %s", path, key, strings.Join(errs, "; "))
+	}
+	if errs := validation.IsValidLabelValue(value); len(errs) > 0 {
+		rendered := ""
+		if reflect.ValueOf(original).Kind() != reflect.String {
+			rendered = fmt.Sprintf(" (rendered from %T)", original)
+		}
+		return errors.Errorf("%s: %q has invalid label value %q%s: %s", path, key, value, rendered, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// npValidateIPBlock checks an ipBlock's CONTENT, after the parser has checked its
+// types: `cidr` and each `except` entry must be CIDRs the API server accepts, and
+// each exception must be a strict subset of the block. This is upstream
+// ValidateIPBlock (pkg/apis/networking/validation, release-1.37) rule for rule,
+// so a block that renders here is one the cluster admits (go-kure/launcher#469).
+//
+// strictValidation is true because that is the pinned minor's default: the
+// StrictIPCIDRValidation gate is beta and on by default from 1.36, and the
+// k8s.io/api this module pins is later than that. Strict mode rejects a CIDR with bits set
+// past the prefix (`10.0.0.1/8`), leading zeros and IPv4-mapped IPv6; the legacy
+// half still admits non-canonical IPv6 text such as upper-case hex.
+//
+// Containment is compared with net/netip on the validated strings. Strict
+// validation guarantees netip.ParsePrefix accepts them and that each is already
+// masked, so Contains on the exception's address plus a longer prefix length is
+// exactly upstream's net.IPNet test, and an exception in the other address family
+// is outside the block, as it is upstream.
+func npValidateIPBlock(ib *networkingv1.IPBlock, path string) error {
+	if errs := validation.IsValidCIDRForLegacyField(nil, ib.CIDR, true, nil); len(errs) > 0 {
+		return errors.Errorf("%s.cidr: invalid CIDR %q: %s", path, ib.CIDR, npFieldErrorDetails(errs))
+	}
+	block, err := netip.ParsePrefix(ib.CIDR)
+	if err != nil {
+		return errors.Errorf("%s.cidr: invalid CIDR %q: %v", path, ib.CIDR, err)
+	}
+	for i, e := range ib.Except {
+		if errs := validation.IsValidCIDRForLegacyField(nil, e, true, nil); len(errs) > 0 {
+			return errors.Errorf("%s.except[%d]: invalid CIDR %q: %s", path, i, e, npFieldErrorDetails(errs))
+		}
+		except, err := netip.ParsePrefix(e)
+		if err != nil {
+			return errors.Errorf("%s.except[%d]: invalid CIDR %q: %v", path, i, e, err)
+		}
+		if !block.Contains(except.Addr()) || block.Bits() >= except.Bits() {
+			return errors.Errorf("%s.except[%d]: %q must be a strict subset of cidr %q", path, i, e, ib.CIDR)
+		}
+	}
+	return nil
+}
+
+// npFieldErrorDetails joins the Detail of each field error. The errors were built
+// against a nil path, so their own Error() would lead with an empty field name;
+// the caller supplies the path in this parser's own notation instead.
+func npFieldErrorDetails(errs field.ErrorList) string {
+	details := make([]string, 0, len(errs))
+	for _, e := range errs {
+		details = append(details, e.Detail)
+	}
+	return strings.Join(details, "; ")
+}
+
 // parseNPLabelSelector reads one optional selector-shaped key of a peer —
 // podSelector or namespaceSelector — and returns nil when it is absent or null.
 //
@@ -489,6 +569,9 @@ func parseNPLabelSelector(peerMap map[string]any, key, path string) (*metav1.Lab
 			value, ok := npLabelValue(ml[k])
 			if !ok {
 				return nil, errors.Errorf("%s.%s.matchLabels: %q must be a string, number or boolean, got %T", path, key, k, ml[k])
+			}
+			if err := npValidateLabel(k, value, ml[k], path+"."+key+".matchLabels"); err != nil {
+				return nil, err
 			}
 			labels[k] = value
 		}
@@ -570,6 +653,9 @@ func parseNPPeer(raw any, path string) (npPeer, error) {
 				return npPeer{}, errors.Errorf("%s.ipBlock.except: expected string values", path)
 			}
 			ipBlock.Except = append(ipBlock.Except, s)
+		}
+		if err := npValidateIPBlock(ipBlock, path+".ipBlock"); err != nil {
+			return npPeer{}, err
 		}
 		peer.IPBlock = ipBlock
 	}
