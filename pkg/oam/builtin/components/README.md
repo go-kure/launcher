@@ -195,7 +195,16 @@ than `prefix`/`configMapRef`/`secretRef` (e.g. a misspelled `prefx`) is
 rejected outright too, rather than being silently ignored while the rest of
 the entry still builds — on `prefix` specifically, that previously emitted
 an unprefixed import instead of the intended one),
-`resources` — a `corev1.ResourceRequirements` projection: `requests`/`limits`
+`resources` — a `corev1.ResourceRequirements` projection read with
+`parseObjectField`, as are its `requests` and `limits`: a present value of the
+wrong type (`resources: "big"`, `requests: 3`) is **rejected by name**
+(`resources: must be an object, got string`) by each of the eight kinds that accept `resources` (webservice, worker,
+deployment, statefulset, daemonset, cronjob, job, postgresql) and by each
+`initContainers`/`sidecars` entry, and a null reads as absence. Until
+go-kure/launcher#405 all three were read with a bare comma-ok assertion, so a
+handler called directly — without the schema validation an authored document
+gets first, which already refused these shapes — dropped the value and emitted
+a container with no requests or limits. `requests`/`limits`
 accept `cpu`/`memory` (defaults 100m/128Mi — subject to the environment
 policy's `MaxCPU()`/`MaxMemory()` maxima the same as an authored value; see
 "Policy defaults & enforcement ordering" below) plus any other well-formed

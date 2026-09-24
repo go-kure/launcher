@@ -74,7 +74,9 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, err
 	}
 	config.EnvFrom = envFrom
-	if resources, ok := props["resources"].(map[string]any); ok {
+	if resources, present, err := parseObjectField(props, "resources", "resources"); err != nil {
+		return nil, err
+	} else if present {
 		r, err := parseResources(resources)
 		if err != nil {
 			return nil, errors.Wrap(err, "invalid resources configuration")
