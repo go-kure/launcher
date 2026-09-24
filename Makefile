@@ -377,14 +377,23 @@ check-govulncheck-docs: ## Verify govulncheck version parity (docs/github-workfl
 sync-govulncheck-docs: ## Sync govulncheck doc mentions (docs/github-workflows.md) from ci.yml
 	sh scripts/sync-govulncheck-docs.sh
 
+.PHONY: verify-merge
+verify-merge: ## Build and test a PR's merge ref (refs/pull/PR/merge), the tree its CI builds (PR=<n>)
+	@test -n "$(PR)" || { echo "usage: make verify-merge PR=<pr-number>" >&2; exit 64; }
+	bash scripts/verify-merge.sh '$(PR)'
+
+.PHONY: test-verify-merge
+test-verify-merge: ## Self-test scripts/verify-merge.sh against a throwaway fixture repository
+	bash scripts/test/verify-merge-test.sh
+
 .PHONY: check
-check: lint vet test-short check-kure-dep-sync check-tool-versions check-govulncheck-docs ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins)
+check: lint vet test-short check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins, verify-merge self-test)
 
 .PHONY: precommit
-precommit: fmt tidy lint test check-kure-dep-sync check-tool-versions check-govulncheck-docs ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync, tool pins)
+precommit: fmt tidy lint test check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync, tool pins, verify-merge self-test)
 
 .PHONY: ci
-ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln check-kure-dep-sync check-tool-versions check-govulncheck-docs ## Run comprehensive CI pipeline
+ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge ## Run comprehensive CI pipeline
 
 # =============================================================================
 # Cleanup
