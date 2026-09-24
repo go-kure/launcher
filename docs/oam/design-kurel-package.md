@@ -90,7 +90,7 @@ spec:
   - name: web
     type: webservice        # must match a registered ComponentHandler
     properties:
-      image: myregistry/myapp:latest
+      image: myregistry/myapp:1.0.0
       port: 8080
       replicas: 1
     traits:
