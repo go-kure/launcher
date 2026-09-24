@@ -180,10 +180,17 @@ func decodedQuantityString(v any) (string, bool) {
 // parsePodSpec's rejected-key loop: map iteration order is randomised, so a
 // nodeSelector authoring two wrongly-typed values at once would otherwise name
 // a different one run to run.
+//
+// An explicit null value is absence, per "The null contract" in README.md: the
+// key is left out, as the lenient reader did, rather than refused as a
+// wrongly-typed value.
 func stringMapStrict(m map[string]any, label string) (map[string]string, error) {
 	result := make(map[string]string, len(m))
 	for _, k := range slices.Sorted(maps.Keys(m)) {
-		v := m[k]
+		v, present := authoredValue(m, k)
+		if !present {
+			continue
+		}
 		s, ok := v.(string)
 		if !ok {
 			return nil, errors.Errorf("%s[%q]: must be a string, got %T", label, k, v)
