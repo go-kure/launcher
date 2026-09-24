@@ -427,11 +427,21 @@ of thing:
   schema, which is why the guard runs before the `Items` walk rather than inside
   it: declaring no element schema says nothing about the members, but it does not
   license the one member no `Items` type could ever have matched.
-- **An `Enum` member holding a null is rejected**, wherever the null sits in it.
-  Members are compared against a value that has already been normalised, while the
-  declared members are not, so such a member could never match anything that
-  reaches the comparison. Refusing it names the schema defect instead of leaving an
-  `Enum` that silently never matches.
+- **An `Enum` member holding a null where the value's null would be stripped or
+  rejected is refused.** Members are compared against a value that has already been
+  normalised, while the declared members are not, so such a member could never
+  match anything that reaches the comparison. Refusing it names the schema defect
+  instead of leaving an `Enum` that silently never matches.
+
+  The member is walked alongside its schema, because normalisation does not reach
+  everywhere: a key an object leaves to `AdditionalProperties: true`, anything inside
+  an array element with no `Items` schema, and anything below a schema with no
+  declared `Type` pass through as written. A value can hold a null there, so a member
+  holding the same null matches it and is accepted — `{opaque: null}` against
+  `Enum: [{opaque: null}]` on an open object. A null compares equal only to a null,
+  whatever its Go type, and never to an empty collection. A member that cannot match
+  for another reason — the wrong shape for the schema's type, or a key a closed
+  object refuses — is still refused for any null it holds, as before.
 
   Refused per *member*, not per schema type. Refusing every `Enum` declared on an
   array or object type is simpler to state and was the first shape of this rule,

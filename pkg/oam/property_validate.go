@@ -298,22 +298,20 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// Enum members are compared against a value this function has already
 		// NORMALIZED — an object's explicit nulls stripped, a typed collection copied
 		// into []any/map[string]any — while the declared members are left exactly as
-		// written. So a member holding a null at any depth can never match a value that
-		// reached this line: Enum{{"x": nil}} stopped matching `{x: null}` the moment
+		// written. So a member holding a null where the value's own null would have
+		// been stripped or rejected can never match a value that reached this line:
+		// Enum{{"x": nil}} under a declared "x" stopped matching `{x: null}` the moment
 		// the strip existed.
 		//
-		// KNOWN LIMITATION: that premise assumes every key the null sits under gets
-		// stripped, which is false for a key an enclosing schema leaves to
-		// AdditionalProperties: true — validateObjectProperties skips normalization
-		// for such a key entirely, so a real authored value CAN still hold a null
-		// there. containsNullValue does not thread the schema through its walk, so it
-		// cannot tell that key apart from a declared one and rejects the member
-		// anyway, refusing a schema with a genuinely matchable Enum member. Latent: no
-		// built-in schema in this repo declares Enum and AdditionalProperties: true on
-		// the same PropertySchema (verified by inspection of every AdditionalProperties
-		// site against every Enum site), but PropertySchema is exported, so an
-		// external caller could still construct one that hits this. Tracked as
-		// go-kure/launcher#481.
+		// Only THERE, though. The strip reaches exactly the keys a schema declares:
+		// a key an object leaves to AdditionalProperties: true is skipped by
+		// validateObjectProperties untouched, as is everything inside an array element
+		// with no Items schema and everything below a schema with no declared Type. A
+		// value holding a null in one of those places reaches the comparison as
+		// written, so a member holding the same null is matchable and refusing it
+		// would refuse a working schema (go-kure/launcher#481). The member is
+		// therefore walked alongside this schema, by enumMemberHoldsStrippedNull,
+		// rather than scanned for a null anywhere.
 		//
 		// Refused per MEMBER, not per schema type. Refusing every Enum declared on an
 		// array or object type would be simpler to state, but it also refuses the
@@ -324,8 +322,9 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		//
 		// Normalizing members instead was the other option, and is the expensive one:
 		// it would make Enum one more reader of "null" that has to reproduce the strip
-		// exactly, forever. containsNullValue is still a null reader, but a far cheaper
-		// one — it only answers "is there a null anywhere in this literal".
+		// exactly, forever. enumMemberHoldsStrippedNull is still a null reader, but a
+		// far cheaper one — it only answers "is there a null in this literal where the
+		// strip would have removed one", and never rewrites the member.
 		//
 		// The comment this replaces cited TestBuiltinHandlerSchemaEnumsAreScalar as
 		// asserting that no built-in schema declares an Enum on a non-scalar type. That
@@ -336,7 +335,7 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// for a member holding a null. Nothing asserts the per-TYPE property any more,
 		// and this arm does not need it to be true.
 		for i, member := range schema.Enum {
-			if containsNullValue(member, 0) {
+			if enumMemberHoldsStrippedNull(schema, member, 0) {
 				return value, errors.Errorf(
 					"%s: schema declares Enum member %d holding a null, which no validated value can match",
 					path, i)
@@ -563,16 +562,120 @@ func IsNullValue(value any) bool {
 	return isNullValue(value)
 }
 
-// enumMemberMaxDepth bounds containsNullValue's walk. An Enum member is a schema
-// literal, so nothing legitimate comes close; the cap exists only so a self-
-// referential map handed in by a buggy handler cannot hang the validator.
+// enumMemberMaxDepth bounds the walk over a declared Enum member
+// (enumMemberHoldsStrippedNull and the helpers it falls back to). An Enum member is a
+// schema literal, so nothing legitimate comes close; the cap exists only so a self-
+// referential map handed in by a buggy handler cannot hang the validator — here, or
+// in equalPropertyValues, whose recursion over a member only this cap bounds.
 const enumMemberMaxDepth = 32
+
+// enumMemberHoldsStrippedNull reports whether an Enum member declared on schema holds
+// a null where validatePropertyValue would have stripped or rejected the value's own,
+// so the member can never match anything that reaches the Enum comparison. It walks
+// the member alongside schema, mirroring what validatePropertyValue normalizes:
+//
+//   - The member itself null: a null value returns before the comparison.
+//   - An object schema: a DECLARED key holding a null is stripped from the value, and
+//     a declared key's non-null value is walked against its own field schema. A key
+//     left to AdditionalProperties: true is not normalized at all, so a null anywhere
+//     under it is matchable and only the depth cap applies.
+//   - An array schema: a null element is rejected whatever Items says; a non-null
+//     element is walked against Items, or — with no Items — not normalized.
+//   - No declared Type: nothing is normalized, so only the depth cap applies.
+//
+// Where the member cannot match regardless of nulls — a shape that is not the schema's
+// type, or a key a closed object would refuse — containsNullValue's schema-less
+// answer is kept, so those members are refused exactly as they were before the walk
+// learned the schema (go-kure/launcher#481).
+//
+// Exceeding enumMemberMaxDepth counts as holding a null, for the reason
+// containsNullValue gives.
+func enumMemberHoldsStrippedNull(schema PropertySchema, member any, depth int) bool {
+	if isNullValue(member) || depth >= enumMemberMaxDepth {
+		return true
+	}
+	switch schema.Type {
+	case "":
+		return exceedsEnumMemberDepth(member, depth)
+	case PropertyTypeArray:
+		items, ok := asArrayValue(member)
+		if !ok {
+			return containsNullValue(member, depth)
+		}
+		for _, item := range items {
+			if schema.Items == nil {
+				if isNullValue(item) || exceedsEnumMemberDepth(item, depth+1) {
+					return true
+				}
+				continue
+			}
+			if enumMemberHoldsStrippedNull(*schema.Items, item, depth+1) {
+				return true
+			}
+		}
+		return false
+	case PropertyTypeObject:
+		obj, ok := asObjectValue(member)
+		if !ok {
+			return containsNullValue(member, depth)
+		}
+		for key, val := range obj {
+			field, declared := schema.Properties[key]
+			var holds bool
+			switch {
+			case declared:
+				holds = enumMemberHoldsStrippedNull(field, val, depth+1)
+			case schema.AdditionalProperties:
+				holds = exceedsEnumMemberDepth(val, depth+1)
+			default:
+				holds = containsNullValue(val, depth+1)
+			}
+			if holds {
+				return true
+			}
+		}
+		return false
+	default:
+		return containsNullValue(member, depth)
+	}
+}
+
+// exceedsEnumMemberDepth reports whether v nests past enumMemberMaxDepth, walking the
+// same slices/arrays and string-keyed maps containsNullValue does but passing over a
+// null: it is used on the parts of an Enum member the value's normalization leaves
+// alone, where a null is matchable but the member's depth must still be bounded.
+func exceedsEnumMemberDepth(v any, depth int) bool {
+	if isNullValue(v) {
+		return false
+	}
+	if depth >= enumMemberMaxDepth {
+		return true
+	}
+	if items, ok := asArrayValue(v); ok {
+		for _, item := range items {
+			if exceedsEnumMemberDepth(item, depth+1) {
+				return true
+			}
+		}
+		return false
+	}
+	if obj, ok := asObjectValue(v); ok {
+		for _, val := range obj {
+			if exceedsEnumMemberDepth(val, depth+1) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
 
 // containsNullValue reports whether v is a null, or holds one at any depth, walking
 // slices/arrays and string-keyed maps through the same coercions validatePropertyValue
-// applies to a document value. It is used only on declared Enum members, which this
-// validator never normalises — see the Enum arm above for why a member holding a null
-// is a schema defect rather than a value that merely fails to match.
+// applies to a document value. It is the schema-less answer enumMemberHoldsStrippedNull
+// falls back to where a member cannot match whatever its nulls — see the Enum arm above
+// for why a member holding a null is a schema defect rather than a value that merely
+// fails to match.
 //
 // Exceeding enumMemberMaxDepth counts as "contains a null", not as clean: at that point
 // the member cannot be shown null-free, and the two failure modes are a loud schema
@@ -690,6 +793,15 @@ func enumContainsValue(enum []any, value any) bool {
 }
 
 func equalPropertyValues(a, b any) bool {
+	// A null equals a null and nothing else, by the null contract rather than by Go
+	// type. It reaches here only where the value's normalization leaves a null in
+	// place (enumMemberHoldsStrippedNull admits a member holding one there), and a
+	// typed nil would otherwise compare as the empty collection its type assertion
+	// yields: a member's []any(nil) matching an authored `[]`, or an authored null
+	// failing to match a rule's map[string]any(nil).
+	if an, bn := isNullValue(a), isNullValue(b); an || bn {
+		return an && bn
+	}
 	if sa, ok := asStringValue(a); ok {
 		sb, ok := asStringValue(b)
 		return ok && sa == sb
@@ -705,7 +817,7 @@ func equalPropertyValues(a, b any) bool {
 	// before the Enum check, while members stay exactly as declared, so a member
 	// holding uint16(80) must still equal a value whose 80 is now an int. The walk is
 	// bounded by the member's own depth, which the Enum arm has already capped at
-	// enumMemberMaxDepth through containsNullValue.
+	// enumMemberMaxDepth through enumMemberHoldsStrippedNull.
 	if aa, ok := asArrayValue(a); ok {
 		ba, ok := asArrayValue(b)
 		if !ok || len(aa) != len(ba) {
