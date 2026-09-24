@@ -27,23 +27,25 @@ type autoHealthCheckEmitter interface {
 // N-deep wrap chain never hides an interface from a later trait or a post-build
 // phase.
 //
-// The six forwarded interfaces are exactly those type-asserted on app.Config
+// The seven forwarded interfaces are exactly those type-asserted on app.Config
 // AFTER traits run: stack.Validator (kure pkg/stack/application.go:51),
 // fluxNamespaceSettable (oam/transform.go:830,887), autoHealthCheckEmitter
 // (oam/transform.go:875), servicePortProvider and serviceBackendNamer
-// (traits/ingress.go:33,45,55 and oam/netpol_synthesis.go:57,60), and
-// oam.ServiceAccountNamer (traits/rbac.go:88). Enforceable and
+// (traits/ingress.go:33,45,55 and oam/netpol_synthesis.go:57,60),
+// oam.ServiceAccountNamer (traits/rbac.go:88), and nonRWXClaimer (read by the
+// scaler trait, traits/scaler.go). Enforceable and
 // SourceDeduplicatable are deliberately absent: the former is asserted only on
 // trait sub-apps (transform.go:675), the latter runs in phase 1 (transform.go:461),
-// so neither can see a decorator. A seventh, kure's layout.LayoutAugmenter, is
-// forwarded separately — see wrapIfAugmenter below — because unlike these six
+// so neither can see a decorator. An eighth, kure's layout.LayoutAugmenter, is
+// forwarded separately — see wrapIfAugmenter below — because unlike these seven
 // it must NOT be present unconditionally.
 //
 // Every method is defined unconditionally, so an embedding decorator ALWAYS
-// satisfies all six. Call sites must therefore test the returned VALUE, not the
-// interface's presence. Three already do this correctly and must stay that way:
+// satisfies all seven. Call sites must therefore test the returned VALUE, not the
+// interface's presence. Four already do this correctly and must stay that way:
 // resolveServiceName (ingress.go) checks for a non-empty name, rbac.go's
-// binding subject falls back to the component name on "", and
+// binding subject falls back to the component name on "", the scaler treats
+// an empty claim name as "no claim limits the replicas", and
 // applyAutoHealthChecks (oam/transform.go:884-889) gates its settable check on
 // isFluxControlPlaneGVK.
 type decoratorBase struct {
@@ -110,6 +112,18 @@ func (d decoratorBase) ServiceAccountName() string {
 	return ""
 }
 
+// NonRWXClaim forwards the inner config's single-pod claim (nonRWXClaimer), or
+// "" when the inner config names none. Without this forward, a decorating
+// trait declared before `scaler` (configmap with a mountPath, security-context,
+// external-secret, prune-protection) hides the claim and the scaler's
+// maxReplicas check silently passes.
+func (d decoratorBase) NonRWXClaim() string {
+	if n, ok := d.Inner.(nonRWXClaimer); ok {
+		return n.NonRWXClaim()
+	}
+	return ""
+}
+
 // checkVolumeCollision returns an error if podSpec already has a Volume named
 // name. Both ExternalSecretDecorator and ConfigMapDecorator add a Volume named
 // after their target resource (the Secret or ConfigMap), and decorators can
@@ -131,13 +145,13 @@ func checkVolumeCollision(podSpec *corev1.PodSpec, name, source, hint string) er
 }
 
 // decoratedConfig is the method set every decoratorBase-embedding decorator
-// satisfies unconditionally: Generate, plus decoratorBase's six forwards
+// satisfies unconditionally: Generate, plus decoratorBase's seven forwards
 // (Validate, SetFluxNamespace, EmitsAutoHealthCheck, ServicePort,
-// BackendServiceName, ServiceAccountName). augmentingDecorator embeds this — not the narrower
+// BackendServiceName, ServiceAccountName, NonRWXClaim). augmentingDecorator embeds this — not the narrower
 // stack.ApplicationConfig — because embedding an interface-typed field
 // promotes only that interface's own declared method set, not the full
 // method set of the dynamic value stored in it: a field typed as plain
-// stack.ApplicationConfig would silently drop the six decoratorBase forwards
+// stack.ApplicationConfig would silently drop the seven decoratorBase forwards
 // the moment wrapIfAugmenter actually wraps, reintroducing Task 1's bug for
 // every future component whose inner config implements LayoutAugmenter.
 type decoratedConfig interface {
@@ -148,12 +162,13 @@ type decoratedConfig interface {
 	servicePortProvider
 	serviceBackendNamer
 	oam.ServiceAccountNamer
+	nonRWXClaimer
 }
 
 // augmentingDecorator adds AugmentLayout to an outer decorator only when the
 // wrapped inner config implements layout.LayoutAugmenter. See wrapIfAugmenter
 // for why this must be conditional rather than an unconditional forward like
-// decoratorBase's other six methods, and see decoratedConfig for why this
+// decoratorBase's other seven methods, and see decoratedConfig for why this
 // embeds that instead of stack.ApplicationConfig.
 type augmentingDecorator struct {
 	decoratedConfig
@@ -195,7 +210,7 @@ func (a augmentingDecorator) AugmentLayout(l *layout.ManifestLayout) error {
 // wrapIfAugmenter below), and pkg/cmd/kurel's build guard already treats
 // "absent" and "false" identically, so decorating an inner that doesn't
 // implement it is exactly as fail-closed as not implementing this method at
-// all. Defined directly on augmentingDecorator rather than as a sixth
+// all. Defined directly on augmentingDecorator rather than as an eighth
 // decoratorBase forward: that would also require adding it to decoratedConfig
 // (the embedding hazard decoratedConfig's own doc comment describes) and
 // would grant a meaningless method to every non-augmenting decorator.
@@ -214,7 +229,7 @@ var _ oam.LayoutAugmentationCoverage = augmentingDecorator{}
 // PRESENCE, and that presence decides whether the app gets a per-app
 // sub-layout or merges into the parent's flat Resources (walker.go:473-505) —
 // a structural decision, not a side effect with a safe no-op default. So
-// unlike decoratorBase's other six forwards, this one cannot be defined
+// unlike decoratorBase's other seven forwards, this one cannot be defined
 // unconditionally: doing so would force every decorated component into
 // per-app sub-layout placement regardless of what its inner config wants.
 // Every trait decorator constructor must route its return value through this.

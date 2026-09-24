@@ -57,6 +57,9 @@ func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Applica
 	config := &ScalerConfig{
 		componentName: app.Name,
 	}
+	if c, ok := app.Config.(nonRWXClaimer); ok {
+		config.nonRWXClaim = c.NonRWXClaim()
+	}
 
 	// minReplicas/maxReplicas are optional at parse time: a policy default may
 	// supply them. When present they must be whole numbers; the effective-value
@@ -143,6 +146,15 @@ func toInt32ForScaler(v any) (int32, bool) {
 	}
 }
 
+// nonRWXClaimer is implemented by component configs whose Deployment carries a
+// claim only one pod can hold read-write (webservice, worker). NonRWXClaim
+// names that claim, or returns "" when none constrains the workload.
+// decoratorBase forwards it, so a decorating trait declared before the scaler
+// does not hide it.
+type nonRWXClaimer interface {
+	NonRWXClaim() string
+}
+
 // ScalerConfig implements stack.ApplicationConfig for scaler traits.
 type ScalerConfig struct {
 	componentName     string
@@ -154,6 +166,10 @@ type ScalerConfig struct {
 
 	explicitMinReplicas bool
 	explicitMaxReplicas bool
+
+	// nonRWXClaim is the component's single-pod claim (see nonRWXClaimer),
+	// captured at Apply; "" when the component has none.
+	nonRWXClaim string
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource
@@ -192,6 +208,12 @@ func (c *ScalerConfig) validateEffective() error {
 	}
 	if c.EnablePDB && c.MinReplicas < 2 {
 		return errors.Errorf("enablePDB requires minReplicas >= 2 (got %d); with 1 replica PDB blocks all voluntary disruptions", c.MinReplicas)
+	}
+	// The component's own non-RWX guard reads only its authored replicas, but
+	// the HPA scales the same Deployment up to maxReplicas, so the limit has to
+	// hold here too. Checked on the effective value, after any policy default.
+	if c.nonRWXClaim != "" && c.MaxReplicas > 1 {
+		return errors.Errorf("trait %q: maxReplicas %d would scale the Deployment past one pod, but volume %q is a non-RWX claim that allows at most one replica; set maxReplicas to 1 or request ReadWriteMany on the claim", "scaler", c.MaxReplicas, c.nonRWXClaim)
 	}
 	return nil
 }

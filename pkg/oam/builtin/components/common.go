@@ -2574,17 +2574,26 @@ var validAccessModes = map[string]bool{
 // the apiserver does — so a set containing it never also contains ReadWriteMany
 // and the ordering of these two checks cannot matter.
 func hasNonRWXPVC(pvcs []PVCConfig) bool {
+	return firstNonRWXPVC(pvcs) != ""
+}
+
+// firstNonRWXPVC returns the name of the first claim hasNonRWXPVC counts as
+// constraining, or "" when there is none, so a guard outside this package can
+// name the claim it refuses on (see NonRWXClaim on the Deployment kinds).
+// parseVolumes requires every volume to be named, so a constraining claim never
+// has an empty name.
+func firstNonRWXPVC(pvcs []PVCConfig) string {
 	for _, pvc := range pvcs {
 		if slices.Contains(pvc.AccessModes, string(corev1.ReadWriteMany)) {
 			continue
 		}
 		for _, mode := range pvc.AccessModes {
 			if mode == string(corev1.ReadWriteOnce) || mode == string(corev1.ReadWriteOncePod) {
-				return true
+				return pvc.Name
 			}
 		}
 	}
-	return false
+	return ""
 }
 
 func parseAccessModes(m map[string]any) ([]string, error) {
