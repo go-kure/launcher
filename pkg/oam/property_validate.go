@@ -164,9 +164,12 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 // caller (validateObjectProperties) writes the returned value back into the props
 // map it holds, so a downstream consumer's type assertion (e.g. .(map[string]any))
 // sees the same normalized shape validation itself checked, instead of the
-// original, still-typed value silently surviving unassertable. An integer-typed
-// value is normalized the same way when its kind is one no reader asserts — see
-// normalizeIntegerValue.
+// original, still-typed value silently surviving unassertable. Scalars are
+// normalized the same way (go-kure/launcher#428): a named string, boolean or number
+// type (`type Mode string`) is written back as its predeclared type (unnamedScalar),
+// and an integer-typed value whose kind or name no reader asserts becomes int (see
+// normalizeIntegerValue). An untyped schema (`case "":`) checks no type, so its
+// value is left as supplied.
 //
 // A null reaches here as a whole property value on one path: validateAuthoredProperties
 // (property_validate_authored.go) calls this function directly over every authored
@@ -214,10 +217,12 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		if !isStringValue(value) {
 			return value, errors.Errorf("%s: expected string, got %T", path, value)
 		}
+		value = unnamedScalar(value)
 	case PropertyTypeBoolean:
 		if !isBooleanValue(value) {
 			return value, errors.Errorf("%s: expected boolean, got %T", path, value)
 		}
+		value = unnamedScalar(value)
 	case PropertyTypeInteger:
 		if !isIntegerValue(value) {
 			return value, errors.Errorf("%s: expected integer, got %T (%v)", path, value, value)
@@ -231,6 +236,7 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		if !isNumberValue(value) {
 			return value, errors.Errorf("%s: expected number, got %T", path, value)
 		}
+		value = unnamedScalar(value)
 	case PropertyTypeArray:
 		items, ok := asArrayValue(value)
 		if !ok {
@@ -458,30 +464,45 @@ func isIntegerValue(value any) bool {
 	}
 }
 
-// normalizeIntegerValue rewrites an accepted integer whose Go kind the property
+// normalizeIntegerValue rewrites an accepted integer whose Go type the property
 // readers cannot assert into a plain int, which every reader accepts
-// (go-kure/launcher#418). isIntegerValue matches by reflect.Kind, but the readers
-// downstream type-switch on concrete types — toInt32/toInt64 in
-// builtin/components/common.go on float64/int/int32/int64, and at least one trait reader
-// (httproute's backend port) on float64/int only — and treat anything else as "not
-// an integer", so a uint32 replicas passed validation and then rendered the schema
-// default. Writing the value back as int, the type gopkg.in/yaml.v3 decodes an
-// integer literal to, gives every reader the shape it already handles.
+// (go-kure/launcher#418, go-kure/launcher#428). isIntegerValue matches by
+// reflect.Kind, but the readers downstream type-switch on concrete types —
+// toInt32/toInt64 in builtin/components/common.go on float64/int/int32/int64, and at
+// least one trait reader (toIngressPort, which reads servicePort) on float64/int
+// only — and treat anything else as "not an integer", so a uint32 replicas passed
+// validation and then rendered the schema default. Writing the value back as int,
+// the type gopkg.in/yaml.v3 decodes an integer literal to, gives every reader the
+// shape it already handles.
 //
-// Only the kinds no reader asserts are rewritten: int8, int16 and every unsigned
-// kind. Values whose kind is int, int32, int64 or a float are returned unchanged —
-// the decoder set, which every reader already accepts in its concrete form. A NAMED
-// type of one of those kinds (`type Replicas int32`) is therefore left alone too;
-// that is the named-scalar case tracked as go-kure/launcher#428, and converting it
-// here to int64 would silently break readers that do not accept int64 (see that
-// issue). A named int8/int16/unsigned type is rewritten, because this function keys
-// on the kind.
+// The decoder set is returned unchanged: a value whose type is exactly int, int32,
+// int64 or float64. So is an integral value of the predeclared float32, which no
+// reader accepts and which this function has never rewritten. Everything else that
+// passed isIntegerValue is rewritten:
 //
-// An unsigned value above math.MaxInt is an error rather than a truncation: it has
-// no int representation, and the wrapped negative would read as a real value.
+//   - int8, int16 and every unsigned kind, named or not, become int.
+//   - A NAMED type of kind int, int32 or int64 (`type Replicas int32`) becomes int
+//     too, not its underlying type: an int32 or int64 is not a port to
+//     toIngressPort (the ingress and httproute servicePort reader), which accepts
+//     float64 and int only, and int is the one integer type every reader accepts.
+//   - A named float type becomes its underlying float64/float32 (unnamedScalar); an
+//     integral float64 is already in the decoder set.
+//
+// A value with no int representation is an error rather than a truncation: an
+// unsigned value above math.MaxInt, or (on a 32-bit platform) a named int64 outside
+// the int range. The wrapped value would read as a real one.
 func normalizeIntegerValue(value any, path string) (any, error) {
 	rv := reflect.ValueOf(value)
 	switch rv.Kind() {
+	case reflect.Int, reflect.Int32, reflect.Int64:
+		if !isNamedScalar(rv) {
+			return value, nil
+		}
+		i := rv.Int()
+		if int64(int(i)) != i {
+			return value, errors.Errorf("%s: integer %d out of range (min %d, max %d)", path, i, math.MinInt, math.MaxInt)
+		}
+		return int(i), nil
 	case reflect.Int8, reflect.Int16:
 		return int(rv.Int()), nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
@@ -491,8 +512,46 @@ func normalizeIntegerValue(value any, path string) (any, error) {
 		}
 		return int(u), nil
 	default:
-		return value, nil
+		return unnamedScalar(value), nil
 	}
+}
+
+// predeclaredScalarTypes maps each scalar reflect.Kind to the predeclared Go type of
+// that kind — the type a named scalar type (`type Mode string`) is defined over.
+var predeclaredScalarTypes = map[reflect.Kind]reflect.Type{
+	reflect.String:  reflect.TypeFor[string](),
+	reflect.Bool:    reflect.TypeFor[bool](),
+	reflect.Int:     reflect.TypeFor[int](),
+	reflect.Int8:    reflect.TypeFor[int8](),
+	reflect.Int16:   reflect.TypeFor[int16](),
+	reflect.Int32:   reflect.TypeFor[int32](),
+	reflect.Int64:   reflect.TypeFor[int64](),
+	reflect.Uint:    reflect.TypeFor[uint](),
+	reflect.Uint8:   reflect.TypeFor[uint8](),
+	reflect.Uint16:  reflect.TypeFor[uint16](),
+	reflect.Uint32:  reflect.TypeFor[uint32](),
+	reflect.Uint64:  reflect.TypeFor[uint64](),
+	reflect.Float32: reflect.TypeFor[float32](),
+	reflect.Float64: reflect.TypeFor[float64](),
+}
+
+// isNamedScalar reports whether rv holds a scalar of a named (defined) type rather
+// than the predeclared type of its kind.
+func isNamedScalar(rv reflect.Value) bool {
+	t, ok := predeclaredScalarTypes[rv.Kind()]
+	return ok && rv.Type() != t
+}
+
+// unnamedScalar converts a value of a named scalar type to the predeclared type of
+// its kind — `Mode("rolling")` to `"rolling"` — so a reader's concrete type
+// assertion (`.(string)`, `.(bool)`) accepts it (go-kure/launcher#428). Any other
+// value, including one already of a predeclared type, is returned unchanged.
+func unnamedScalar(value any) any {
+	rv := reflect.ValueOf(value)
+	if !isNamedScalar(rv) {
+		return value
+	}
+	return rv.Convert(predeclaredScalarTypes[rv.Kind()]).Interface()
 }
 
 // isNumberValue accepts any Go integer or floating-point kind.
@@ -677,9 +736,10 @@ func asFloatValue(value any) (float64, bool) {
 //
 // A plain reflect.DeepEqual is not enough: the enum literals come from a handler's
 // Go schema while the value comes from a decoder or a rule, so int(80) vs
-// float64(80) and string vs named-string-type comparisons are routine and are the
-// same value by every meaning a user has. Arrays and objects are compared element
-// by element under the same rule; anything else falls back to DeepEqual.
+// float64(80), string vs named-string-type and bool vs named-bool-type comparisons
+// are routine and are the same value by every meaning a user has. Arrays and
+// objects are compared element by element under the same rule; anything else falls
+// back to DeepEqual.
 func enumContainsValue(enum []any, value any) bool {
 	for _, e := range enum {
 		if equalPropertyValues(e, value) {
@@ -694,8 +754,13 @@ func equalPropertyValues(a, b any) bool {
 		sb, ok := asStringValue(b)
 		return ok && sa == sb
 	}
+	// A boolean is compared by kind like a string, so a member declared with a named
+	// boolean type still matches a value validation has already unnamed.
+	if ba := reflect.ValueOf(a); ba.Kind() == reflect.Bool {
+		bb := reflect.ValueOf(b)
+		return bb.Kind() == reflect.Bool && ba.Bool() == bb.Bool()
+	}
 	if na, ok := asExactNumber(a); ok {
-		// Bool is neither string- nor numeric-kinded, so it never reaches here.
 		nb, ok := asExactNumber(b)
 		return ok && na.equal(nb)
 	}

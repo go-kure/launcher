@@ -315,10 +315,14 @@ cannot silently produce properties its own target handler would reject.
 
 Both this check and the authored one below write a normalised value back where the
 handler's reader would not accept what was supplied: a typed Go collection becomes
-`[]any`/`map[string]any`, and an `integer` value of kind `int8`, `int16` or any
-unsigned kind becomes `int` — an unsigned value above the `int` range is rejected
-instead. Integer kinds `int`, `int32`, `int64` and an integral `float64` are left as
-they are, because some readers accept `int` but not `int64`.
+`[]any`/`map[string]any`; a `string`, `boolean` or `number` value of a named Go type
+(`type Mode string`) becomes its predeclared type; and an `integer` value of kind
+`int8`, `int16` or any unsigned kind, or of any named integer type
+(`type Replicas int32`), becomes `int` — a value outside the `int` range is rejected
+instead. Values already of type `int`, `int32`, `int64` or `float64` are left as they
+are, because some readers accept `int` but not `int64`; a named integer type becomes
+`int` rather than its underlying type for the same reason. A property whose schema
+declares no `Type`, or a key an open object leaves undeclared, is not rewritten.
 
 `ValidateAuthoredProperties` (`property_validate_authored.go`) is that check's
 authored-path counterpart, and closes go-kure/launcher#408. Parsing is strict

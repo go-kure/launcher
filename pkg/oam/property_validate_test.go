@@ -1052,10 +1052,16 @@ func TestValidatePropertyValue_NumberAcceptsFiniteFloat(t *testing.T) {
 // The decoder set is returned in its own concrete type, because readers exist that
 // accept float64 and int but NOT int64 (httproute's backend port), so rewriting
 // everything to one canonical type would silently break them — see
-// go-kure/launcher#428. Only the kinds no reader asserts become int.
+// go-kure/launcher#428. Only the kinds, and the named types, no reader asserts
+// become int.
 func TestValidatePropertyValue_IntegerNormalization(t *testing.T) {
+	type namedInt int
 	type namedInt32 int32
+	type namedInt64 int64
 	type namedUint16 uint16
+	type namedUint64 uint64
+	type namedFloat64 float64
+	type namedFloat32 float32
 	schema := PropertySchema{Type: PropertyTypeInteger}
 
 	for _, tc := range []struct {
@@ -1067,8 +1073,15 @@ func TestValidatePropertyValue_IntegerNormalization(t *testing.T) {
 		{int32(7), int32(7)},
 		{int64(7), int64(7)},
 		{float64(7), float64(7)},
-		// Untouched: a named type of an untouched kind is #428's, not this one's.
-		{namedInt32(7), namedInt32(7)},
+		// A named type of a decoder-set kind becomes int, not its underlying type:
+		// toIngressPort (servicePort) accepts float64/int only (#428).
+		{namedInt(7), int(7)},
+		{namedInt32(-7), int(-7)},
+		{namedInt64(7), int(7)},
+		{namedInt64(math.MaxInt), int(math.MaxInt)},
+		// A named float becomes its predeclared float type.
+		{namedFloat64(7), float64(7)},
+		{namedFloat32(7), float32(7)},
 		// Rewritten to int.
 		{int8(-7), int(-7)},
 		{int16(7), int(7)},
@@ -1090,9 +1103,11 @@ func TestValidatePropertyValue_IntegerNormalization(t *testing.T) {
 		}
 	}
 
-	_, err := validatePropertyValue(schema, uint64(math.MaxInt)+1, "properties.n")
-	if err == nil || !strings.Contains(err.Error(), "properties.n: integer") || !strings.Contains(err.Error(), "out of range") {
-		t.Errorf("uint64 above MaxInt: want an out-of-range error, got: %v", err)
+	for _, v := range []any{uint64(math.MaxInt) + 1, namedUint64(math.MaxUint64)} {
+		_, err := validatePropertyValue(schema, v, "properties.n")
+		if err == nil || !strings.Contains(err.Error(), "properties.n: integer") || !strings.Contains(err.Error(), "out of range") {
+			t.Errorf("%T above MaxInt: want an out-of-range error, got: %v", v, err)
+		}
 	}
 
 	// The write-back reaches array elements and the emitted path too, since both go
@@ -1105,6 +1120,65 @@ func TestValidatePropertyValue_IntegerNormalization(t *testing.T) {
 	items, _ := props["ports"].([]any)
 	if len(items) != 2 || items[0] != 80 || items[1] != 443 {
 		t.Errorf("ports = %#v, want []any{80, 443} as int", props["ports"])
+	}
+}
+
+// TestValidatePropertyValue_NamedScalarNormalization pins go-kure/launcher#428 at the
+// validator: a named string, boolean or number type passes by kind and is written
+// back as its predeclared type, on the top-level and array-element paths. The
+// end-to-end half (a lowering rule emits named types, the real handlers render them)
+// is builtin/traits/named_scalar_lowering_test.go.
+func TestValidatePropertyValue_NamedScalarNormalization(t *testing.T) {
+	type mode string
+	type flag bool
+	type ratio float64
+	type count int32
+
+	for _, tc := range []struct {
+		schema PropertySchema
+		in     any
+		want   any
+	}{
+		{PropertySchema{Type: PropertyTypeString}, mode("rolling"), "rolling"},
+		{PropertySchema{Type: PropertyTypeString, Enum: []any{"rolling", "recreate"}}, mode("rolling"), "rolling"},
+		// A member declared with the named type still matches the unnamed value.
+		{PropertySchema{Type: PropertyTypeString, Enum: []any{mode("rolling")}}, mode("rolling"), "rolling"},
+		{PropertySchema{Type: PropertyTypeBoolean}, flag(true), true},
+		{PropertySchema{Type: PropertyTypeBoolean, Enum: []any{flag(false)}}, flag(false), false},
+		{PropertySchema{Type: PropertyTypeNumber}, ratio(0.5), 0.5},
+		{PropertySchema{Type: PropertyTypeNumber}, count(3), int32(3)},
+		// The decoder set is untouched.
+		{PropertySchema{Type: PropertyTypeString}, "x", "x"},
+		{PropertySchema{Type: PropertyTypeBoolean}, false, false},
+		{PropertySchema{Type: PropertyTypeNumber}, 0.5, 0.5},
+		{PropertySchema{Type: PropertyTypeNumber}, int64(3), int64(3)},
+		// An untyped schema checks no type and rewrites nothing.
+		{PropertySchema{}, mode("rolling"), mode("rolling")},
+	} {
+		got, err := validatePropertyValue(tc.schema, tc.in, "properties.v")
+		if err != nil {
+			t.Errorf("%T(%v) under %q: unexpected error: %v", tc.in, tc.in, tc.schema.Type, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%T(%v) under %q: got %T(%v), want %T(%v)", tc.in, tc.in, tc.schema.Type, got, got, tc.want, tc.want)
+		}
+	}
+
+	// A named boolean member must not match the opposite value.
+	if _, err := validatePropertyValue(PropertySchema{Type: PropertyTypeBoolean, Enum: []any{flag(false)}}, true, "properties.v"); err == nil {
+		t.Error("true matched Enum [false]")
+	}
+
+	// Array elements are written back through the same path.
+	props := map[string]any{"modes": []mode{"a", "b"}}
+	arr := map[string]PropertySchema{"modes": {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeString}}}
+	if err := validateProperties(arr, props, "properties"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	items, _ := props["modes"].([]any)
+	if len(items) != 2 || items[0] != "a" || items[1] != "b" {
+		t.Errorf("modes = %#v, want []any{\"a\", \"b\"} as string", props["modes"])
 	}
 }
 
