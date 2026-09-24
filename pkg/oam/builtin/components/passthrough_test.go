@@ -172,7 +172,7 @@ func TestPassthroughHandler_Errors(t *testing.T) {
 // Generate emits the authored map as a single unstructured and stamps a name and a
 // namespace onto it, so a list arrives downstream as one NAMED envelope whose items
 // never see per-object label mutation, namespace stamping or ownership checks — while
-// Flux's kustomize unwraps it at apply time into N objects that do reach the cluster.
+// Flux unwraps it at apply time into N objects that do reach the cluster.
 //
 // The rejection is keyed on apimachinery's Unstructured.IsList ("items is present AND
 // is a []interface{}"), never on the kind name. The accept cases below are what
@@ -202,6 +202,25 @@ func TestPassthrough_ListShapedObjectIsRejected(t *testing.T) {
 		"empty items": {
 			"apiVersion": "v1", "kind": "List",
 			"items": []any{},
+		},
+		// A kind that does NOT end in "List" but carries a top-level items ARRAY.
+		// Deliberately stricter than Kustomize, whose inlineAnyEmbeddedLists keeps
+		// this as one ordinary resource because it checks the kind suffix first. The
+		// stage that decides what reaches the cluster is Flux's, not Kustomize's:
+		// kustomize-controller decodes the build output with fluxcd/pkg/ssa's
+		// utils.ReadObjects, which expands any object for which Unstructured.IsList
+		// holds, kind unchecked. So the Widget below is never applied and the
+		// ConfigMap is, in whatever namespace it names — the smuggle this arm exists
+		// to stop. Narrowing this arm to the kind suffix reopens it.
+		"non-List kind with a top-level items array of objects": {
+			"apiVersion": "example.com/v1", "kind": "Widget",
+			"items": []any{item},
+		},
+		// The same shape with scalar members is still refused: Flux's ReadObjects
+		// fails the whole apply on it ("items member is not an object").
+		"non-List kind with a top-level items array of scalars": {
+			"apiVersion": "example.com/v1", "kind": "Widget",
+			"items": []any{"a", "b"},
 		},
 	}
 	for name, object := range rejected {
