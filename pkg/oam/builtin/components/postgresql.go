@@ -331,11 +331,19 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 
 	if im, ok := props["inheritedMetadata"].(map[string]any); ok {
+		// stringMapStrict, not stringMap: these become label and annotation
+		// values on the generated resources, where a dropped key is a different
+		// cluster state from the one the author wrote (go-kure/launcher#466).
+		var err error
 		if labels, ok := im["labels"].(map[string]any); ok {
-			config.InheritedLabels = stringMap(labels)
+			if config.InheritedLabels, err = stringMapStrict(labels, "inheritedMetadata.labels"); err != nil {
+				return nil, err
+			}
 		}
 		if annotations, ok := im["annotations"].(map[string]any); ok {
-			config.InheritedAnnotations = stringMap(annotations)
+			if config.InheritedAnnotations, err = stringMapStrict(annotations, "inheritedMetadata.annotations"); err != nil {
+				return nil, err
+			}
 		}
 	}
 
