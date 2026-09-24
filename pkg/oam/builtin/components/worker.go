@@ -327,7 +327,7 @@ func (c *WorkerConfig) Generate(app *stack.Application) ([]*client.Object, error
 
 func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
 	// No Ports: worker exposes no port property (see parseProbes' namedPortsAllowed=false above).
-	container := buildMainContainer(app.Name, mainContainerInput{
+	container, err := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
 		Command:         c.Command,
 		Args:            c.Args,
@@ -340,6 +340,9 @@ func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deploym
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
 	dep.Labels = appLabels(app.Name)

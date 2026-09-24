@@ -447,7 +447,7 @@ func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, erro
 
 func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob, error) {
 	// No Ports: cronjob exposes no port property (see parseProbes' namedPortsAllowed=false above).
-	container := buildMainContainer(app.Name, mainContainerInput{
+	container, err := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
 		Command:         c.Command,
 		Args:            c.Args,
@@ -460,6 +460,9 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	cj := kubernetes.CreateCronJob(app.Name, app.Namespace)
 	cj.Spec.Schedule = c.Schedule
