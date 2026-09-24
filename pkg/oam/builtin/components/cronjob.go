@@ -133,7 +133,14 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	config.Schedule = schedule
 
 	config.RestartPolicy = corev1.RestartPolicyOnFailure
-	if rp, ok := props["restartPolicy"].(string); ok {
+	// Read raw rather than through parseStringField, as job.go does: that helper
+	// reports an authored "" as absent, and "" is a value the switch below must
+	// refuse rather than default.
+	if raw, present := authoredValue(props, "restartPolicy"); present {
+		rp, ok := raw.(string)
+		if !ok {
+			return nil, errors.Errorf("restartPolicy: must be a string, got %T", raw)
+		}
 		switch rp {
 		case string(corev1.RestartPolicyNever):
 			config.RestartPolicy = corev1.RestartPolicyNever

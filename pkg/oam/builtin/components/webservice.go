@@ -30,8 +30,13 @@ func (h *WebserviceHandler) CanHandle(componentType string) bool {
 // way it does for a postgresql target. The webservice's single `port` property drives both the
 // container port and the Service port (TargetPort == Port), so there is one endpoint per component.
 func (h *WebserviceHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	// Same read as ToApplicationConfig's: ComponentEndpoints calls this with no
+	// schema validation first, so a wrongly typed port must be refused here too
+	// rather than declared as the default 80.
 	port := int32(80)
-	if p, ok := toInt32(component.Properties["port"]); ok {
+	if p, present, err := parseInt32Field(component.Properties, "port", "port"); err != nil {
+		return nil, err
+	} else if present {
 		port = p
 	}
 	return []netpol.Endpoint{{
@@ -85,7 +90,9 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 	config.Image = image
 
 	config.Port = 80
-	if p, ok := toInt32(props["port"]); ok {
+	if p, present, err := parseInt32Field(props, "port", "port"); err != nil {
+		return nil, err
+	} else if present {
 		config.Port = p
 	}
 
@@ -166,7 +173,9 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 		return nil, err
 	}
 	config.InitContainers = initContainers
-	if ts, ok := props["topologySpread"].(bool); ok && !ts {
+	if ts, err := parseBoolField(props, "topologySpread", "topologySpread"); err != nil {
+		return nil, err
+	} else if ts != nil && !*ts {
 		config.TopologySpreadDisabled = true
 	}
 	affinity, err := parseAffinity(props)

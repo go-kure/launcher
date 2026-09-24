@@ -93,7 +93,9 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, err
 	}
 	config.Args = args
-	if port, ok := toInt32(props["port"]); ok {
+	if port, present, err := parseInt32Field(props, "port", "port"); err != nil {
+		return nil, err
+	} else if present {
 		config.Port = port
 	}
 	// namedPortsAllowed mirrors createContainer's own `c.Port > 0` guard below:
