@@ -140,9 +140,10 @@ func TestValidate_ScalerTraitOnPostgresql(t *testing.T) {
 // keeps the two apart is traitComponentRestrictions: "scaler" is admitted on
 // webservice and worker only, so the combination never reaches a handler. The
 // restriction is therefore load-bearing for this kind, not a taxonomy detail,
-// and adding "deployment" to that set would need the replica guard to account
-// for maxReplicas first. webservice and worker do admit the trait and carry the
-// same guard, so there the interaction is live: go-kure/launcher#395.
+// and adding "deployment" to that set would need DeploymentConfig to report its
+// claim through NonRWXClaim first. webservice and worker do admit the trait;
+// there the scaler itself refuses maxReplicas > 1 beside a non-RWX claim
+// (builtin/traits/scaler_nonrwx_test.go).
 func TestValidate_ScalerTraitOnDeployment(t *testing.T) {
 	app := &Application{
 		APIVersion: SupportedAPIVersion,

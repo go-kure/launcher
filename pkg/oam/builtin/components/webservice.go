@@ -243,6 +243,12 @@ func (c *WebserviceConfig) ServiceAccountName() string {
 	return effectiveServiceAccountName(c.PodSpec, c.Name)
 }
 
+// NonRWXClaim names the first claim that limits this Deployment to one pod
+// (the one applyNonRWXConstraint refuses more replicas on), or "" when none
+// does. The scaler trait reads it: its HPA scales this Deployment past the
+// authored replicas, so the same limit has to hold for maxReplicas.
+func (c *WebserviceConfig) NonRWXClaim() string { return firstNonRWXPVC(c.PVCs) }
+
 // ApplyPolicy applies defaults then enforces limits from the policy.
 // Defaults are applied first so that enforced checks run on effective post-default values.
 func (c *WebserviceConfig) ApplyPolicy(p oam.Policy) error {

@@ -64,7 +64,7 @@ preflight reject every valid use of the trait.
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `configmap` | ConfigMap (+ optional volume mount) | `name`, `data`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, Job, or CronJob; any other component fails generation) |
-| `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB` |
+| `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`. On a `webservice` or `worker` with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. |
 
 ### Operational (FluxCD)
 | `type` | Effect | Key properties |
@@ -456,12 +456,14 @@ have nothing to do for an augmenter-added resource, so they implement no hook.
 Every trait decorator also embeds `decoratorBase`, which forwards the optional
 interfaces a component config may implement — `stack.Validator`,
 `fluxNamespaceSettable`, `autoHealthCheckEmitter`, `servicePortProvider`,
-`serviceBackendNamer` and `oam.ServiceAccountNamer` — so a decorated config
-keeps answering them. The `ServiceAccountNamer` forward is what keeps the
+`serviceBackendNamer`, `oam.ServiceAccountNamer` and `nonRWXClaimer` — so a
+decorated config keeps answering them. The `ServiceAccountNamer` forward is what keeps the
 `rbac` row above true once a second trait is present: without it a workload
 that authored `serviceAccountName` would stop reporting its account as soon as
 any trait wrapped it, and `rbac` would silently bind the per-component name
-instead. A config that implements none of them gets the zero answer (`nil`,
+instead. The `nonRWXClaimer` forward does the same for the `scaler` row: a
+decorating trait declared before `scaler` must not hide the claim that caps
+`maxReplicas` at 1. A config that implements none of them gets the zero answer (`nil`,
 `0`, `""`), which every reader treats as "not set".
 
 `augmentingDecorator` also forwards `oam.LayoutAugmentationCoverage`'s
