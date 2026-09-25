@@ -15,15 +15,19 @@
 # Run it from the PR's branch, after pushing. It fetches refs/pull/<N>/merge,
 # refuses a merge ref whose head parent is not the local HEAD (GitHub
 # regenerates the ref a few seconds after each push, so an early fetch names
-# the previous head), extracts that tree into a throwaway directory and runs
-# `go build ./...` and `go test ./...` there. The working tree is not touched.
+# the previous head), extracts that tree into a throwaway directory, fetches its
+# modules (`go mod download`) and runs `go build ./...` and `go test ./...`
+# there. The working tree is not touched.
 #
 # Exit codes:
 #   0   merge ref builds and tests green
 #   1   merge ref fails to build or its tests fail
 #   2   not computable: no merge ref (PR closed, conflicting, not yet
-#       computed, fetch failed), or the ref is stale for the local HEAD.
-#       Never a pass.
+#       computed, fetch failed), the ref is stale for the local HEAD, go is
+#       not on PATH, or `go mod download` fails in the merged tree (a
+#       toolchain that cannot run its go.mod, e.g. under GOTOOLCHAIN=local;
+#       a module proxy or network failure; a requirement that cannot be
+#       fetched at all). Never a pass.
 #   64  usage error
 #
 # The merge queue re-tests the rebased result before anything lands on main,
@@ -63,6 +67,10 @@ not_computable() {
 	exit 2
 }
 
+if ! command -v go >/dev/null 2>&1; then
+	not_computable "go is not on PATH"
+fi
+
 head="$(git rev-parse --verify HEAD)"
 ref="refs/pull/$pr/merge"
 
@@ -86,10 +94,29 @@ echo "verify-merge: $ref = $merge (base $base, head $head)"
 
 tree="$(mktemp -d "${TMPDIR:-/tmp}/verify-merge.XXXXXX")"
 trap 'rm -rf "$tree"' EXIT
-git archive "$merge" | tar -x -C "$tree"
+src="$tree/src"
+modcopy="$tree/mod"
+mkdir "$src" "$modcopy"
+git archive "$merge" | tar -x -C "$src"
 
-cd "$tree"
+cd "$src"
 export GOWORK=off
+if [ ! -f go.mod ]; then
+	echo "verify-merge: FAIL: $ref has no go.mod at its root" >&2
+	exit 1
+fi
+# Fetch the modules first, so a failure that is the environment's rather than
+# the merge ref's (a toolchain that cannot run this go.mod, an unreachable
+# proxy) is reported as not computable instead of as a build failure. It runs
+# against a copy of go.mod/go.sum: go mod download may add go.sum entries, and
+# the build must see the go.sum the ref carries, as CI does.
+cp go.mod "$modcopy/go.mod"
+if [ -f go.sum ]; then
+	cp go.sum "$modcopy/go.sum"
+fi
+if ! go mod download -modfile="$modcopy/go.mod"; then
+	not_computable "go mod download failed in $ref (see the errors above): the Go toolchain cannot run its go.mod, or a module could not be fetched"
+fi
 if ! go build ./...; then
 	echo "verify-merge: FAIL: $ref does not build (the branch alone may; see the errors above)" >&2
 	exit 1

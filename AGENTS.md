@@ -128,7 +128,8 @@ Both build the branch. A PR's CI builds `refs/pull/<n>/merge` — the branch mer
 base — and stamps the check with the branch head's SHA, so a red PR can accompany a green
 branch build. To rebuild the tree CI built, after pushing run `mise run verify-merge <n>`
 (or `bash scripts/verify-merge.sh <n>`); exit `1` means the merge ref fails, `2` means not
-computable (no merge ref, or one generated for a different head), never a pass.
+computable (no merge ref, one generated for a different head, no usable Go toolchain, or its
+modules cannot be fetched), never a pass.
 `make verify-merge PR=<n>` runs the same check, but make reports every failure as its own
 exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which tree a PR run builds.
 

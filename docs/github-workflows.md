@@ -101,11 +101,16 @@ mise run verify-merge <n>       # or: bash scripts/verify-merge.sh <n>
 ```
 
 `scripts/verify-merge.sh` fetches `refs/pull/<n>/merge`, extracts it into a throwaway
-directory and runs `go build ./...` and `go test ./...` there, leaving the working tree
-untouched. Run it from the PR's branch after pushing. Exit `0` is green, `1` means the merge
-ref fails to build or test, and `2` means **not computable** — the PR has no merge ref (it is
-closed or conflicts with its base), or the ref was generated for a different head than the
-local `HEAD` (GitHub regenerates it a few seconds after each push). `2` never reads as a pass.
+directory, fetches its modules (`go mod download`) and runs `go build ./...` and
+`go test ./...` there, leaving the working tree untouched. Run it from the PR's branch after
+pushing. Exit `0` is green, `1` means the merge ref fails to build or test, and `2` means
+**not computable** — the PR has no merge ref (it is closed or conflicts with its base), the
+ref was generated for a different head than the local `HEAD` (GitHub regenerates it a few
+seconds after each push), `go` is not on `PATH`, or `go mod download` fails in the merged
+tree (the local toolchain cannot run its `go.mod`, e.g. under `GOTOOLCHAIN=local`; the module
+proxy or network is unreachable; a requirement cannot be fetched at all). `2` never reads as
+a pass. The download runs against a copy of `go.mod`/`go.sum`, so the build still sees the
+`go.sum` the ref carries, as CI does.
 `make verify-merge PR=<n>` runs the same script but is pass/fail only: make exits with its own
 `2` on any recipe failure, so a failing merge ref and a not-computable one look alike there.
 The merge ref reflects the base as of GitHub's last computation, which is what the PR run
