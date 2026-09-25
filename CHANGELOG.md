@@ -1,6 +1,69 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.1.0-alpha.23] - 2026-09-25
+
+### Added
+
+- Export NewNameAllocator for out-of-package rule drivers
+- Add verify-merge to rebuild a PR's merge ref locally
+
+### Build
+
+- Update dependency git-cliff to v2.14.2
+- Update dependency golangci-lint to v2.14.0
+- Update dependency flux-schema-plugin to v0.14.0
+
+### Document Format
+
+- Allow pre-release bug fixes to change v1alpha1 output
+- Derive networkpolicy policyTypes from key presence
+- Retarget a trait-level serviceName's netpol allow off the router
+- Close init/sidecar container entries and wire their missing fields
+- Require a positive PVC size for volumes and the pvc trait
+- Reject non-integer and negative replicas on every replica-bearing kind
+- Check engine-owned trait properties when a handler declares no schema
+- Normalize integer kinds readers cannot assert, reject unsigned overflow
+- Reject a nameless env entry instead of dropping it
+- Reject a wrongly typed affinity sub-field by name
+- Refuse a scaler maxReplicas above 1 beside a non-RWX claim
+- Reject a non-string inheritedMetadata label or annotation value
+- Reject a non-string postgresql, pooler or connection parameter
+- Read a null string-map value as absent, not as a wrong type
+- Check networkpolicy label and CIDR content at parse time
+- Refuse a dotted component name on every workload kind
+
+### Fixed
+
+- Drop the no-op pull_request trigger from the Claude workflow
+- Fully qualify the cross-repo issue reference
+- Align the local test budget with CI's 5m
+- Stop check-kure-dep-sync turning a full clone shallow
+- Extend prune-protection to LayoutAugmenter-added resources
+- Deep-copy every value buildPodSpec projects out of the config
+- Write named scalar property types back as their plain Go type
+- Report a wrongly typed required string as a type error
+- Reject a wrongly typed resources property by name
+- Reject wrongly typed optional scalars in the handler audit
+- Word an out-of-int32-range integer apart from a wrong type
+- Accept an Enum member whose null nothing strips
+- Keep a value's typed nil matching an empty Enum member
+- Pin the kurel-package example image to a version tag
+- State the 63-character label limit in the container-name refusal
+- Build kure objects from generated constructors (kure v0.2.0-beta.13)
+- Report a missing toolchain or module fetch as not computable
+
+### Testing
+
+- Pin non-string rejection of string-typed authored properties
+- Guard the statefulset and daemonset aliasing mutators against nil
+- Pin rejection of a top-level items array on a non-List kind
+- Pin a null nodeSelector value as absent in both affinity readers
+- Gate the documentation's YAML fences on their declared mode
+- Accept spaced check markers and refuse unreadable ones
+- Pin the strict CIDR reason for a leading-zero ipBlock
+- Expand the case environment safely on bash < 4.4
+
 ## [0.1.0-alpha.22] - 2026-09-18
 
 ### Added
@@ -347,6 +410,10 @@ All notable changes to this project will be documented in this file.
 - Pin the half of the Lt/Gt check no test could reach
 - Guard the second-render index in the aliasing control
 - Guard the new preferred-affinity test before indexing
+
+### Release
+
+- V0.1.0-alpha.22
 
 ## [0.1.0-alpha.21] - 2026-08-21
 
