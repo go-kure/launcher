@@ -44,7 +44,7 @@ preflight reject every valid use of the trait.
 | `httproute` | Gateway API HTTPRoute | `rules[]` (`matches`/`backendRefs`/`filters`/`timeouts`), `hostnames[]`, `annotations`; `parentRefs[]` optional — synthesized from the `gatewayName`/`gatewayNamespace` capability when omitted |
 | `expose` | Ingress **or** HTTPRoute | `rules[]`, `hostnames[]` — controller chosen by ClusterProfile (`controllerType`) |
 | `networkpolicy` | NetworkPolicy | `ingress[]`/`egress[]` (`from`/`to`, `ports`) |
-| `cilium-networkpolicy` | CiliumNetworkPolicy | `name`, `endpointSelector`, `ingress`/`egress` (raw Cilium rules — decoded strictly, see below) |
+| `cilium-networkpolicy` | CiliumNetworkPolicy | `name`, `endpointSelector` (required), `ingress`/`egress` (raw Cilium rules, at least one rule between them — decoded strictly, see below) |
 
 ### Security
 | `type` | Produces | Key properties |
@@ -563,20 +563,27 @@ define their own `UnmarshalJSON`. In this API those are `EndpointSelector` and `
 so unknown keys nested inside `endpointSelector` or `icmps` are still dropped silently. The
 `toPorts.rules.*` shapes that motivated the guard are covered.
 
-### Null `endpointSelector` / `egress` / `ingress`
+### Null or empty `endpointSelector` / `egress` / `ingress`
 
-All three keys are optional, so a `null` is **absence** — the same contract as the
-`networkpolicy` trait above. Two consequences (go-kure/launcher#468):
+A `null` is **absence**, whatever its Go shape — the same contract as the
+`networkpolicy` trait above. The trait refuses at build time, by name, every document
+that would render a CiliumNetworkPolicy the cluster rejects on apply
+(go-kure/launcher#468):
 
-- `egress` and `ingress` are **required jointly** (`at least one of 'egress' or
-  'ingress' must be specified`), and a null is cleared to absence before that check,
-  so it cannot satisfy it. A document whose only rule key is null is rejected rather
-  than rendering a policy nobody asked for. An authored `egress: []` is a value and
-  still satisfies it.
-- A null `endpointSelector` renders exactly as an omitted one. A **typed** nil — an
-  uninitialized Go map from a lowering rule — used to be emitted as
+- `egress` and `ingress` are **required jointly, and must carry at least one rule
+  between them** (`at least one of 'egress' or 'ingress' must be specified with at
+  least one rule`). Cilium renders both as `omitempty` lists, so a null and an empty
+  list alike produce no rule key, and the CRD (anyOf
+  `ingress`/`ingressDeny`/`egress`/`egressDeny`) rejects that. `egress: []` alone, or
+  `egress: []` beside a null `ingress`, is therefore an error. An empty or null key
+  beside a direction that does carry a rule is simply absent.
+- `endpointSelector` is **required**. The trait synthesizes no default selector and
+  exposes no `nodeSelector`, so an omitted selector would render a policy the CRD
+  rejects (oneOf `endpointSelector`/`nodeSelector`). A null is refused the same way as
+  an omitted key. To select every endpoint, author `endpointSelector: {}`. A **typed**
+  nil — an uninitialized Go map from a lowering rule — used to be emitted as
   `endpointSelector: null`, which Cilium decodes to an empty selector matching
-  **every endpoint**, while an authored null omitted the key. Both shapes now omit it.
+  **every endpoint**, so a null silently became select-all.
 
 ## Conventions
 

@@ -1529,7 +1529,8 @@ func TestCiliumNetworkPolicyHandler_Apply_AppendsToBundle(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "cilium-networkpolicy",
 		Properties: map[string]any{
-			"name": "api-allow",
+			"name":             "api-allow",
+			"endpointSelector": map[string]any{"matchLabels": map[string]any{"app": "api"}},
 			"ingress": []any{
 				map[string]any{"fromEndpoints": []any{map[string]any{"matchLabels": map[string]any{"app": "frontend"}}}},
 			},
@@ -1786,7 +1787,8 @@ func TestCiliumNetworkPolicyConfig_Generate(t *testing.T) {
 	err := h.Apply(&oam.Trait{
 		Type: "cilium-networkpolicy",
 		Properties: map[string]any{
-			"name": "test-policy",
+			"name":             "test-policy",
+			"endpointSelector": map[string]any{"matchLabels": map[string]any{"app": "api"}},
 			"ingress": []any{
 				map[string]any{"fromEndpoints": []any{map[string]any{"matchLabels": map[string]any{"app": "frontend"}}}},
 			},

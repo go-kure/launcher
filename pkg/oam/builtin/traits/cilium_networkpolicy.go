@@ -3,6 +3,7 @@ package traits
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 
 	ciliumapi "github.com/cilium/cilium/pkg/policy/api"
 	kurecilium "github.com/go-kure/kure/pkg/kubernetes/cilium"
@@ -37,7 +38,7 @@ func (h *CiliumNetworkPolicyHandler) ValidateAndApplyDefaults(rendering map[stri
 func (h *CiliumNetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"name":             {Type: oam.PropertyTypeString, Required: true, Description: "Name of the generated CiliumNetworkPolicy resource."},
-		"endpointSelector": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Cilium endpoint selector matching the pods this policy applies to."},
+		"endpointSelector": {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true, Description: "Cilium endpoint selector matching the pods this policy applies to. Required: no default is synthesized; {} selects every endpoint."},
 		"egress":           {Type: oam.PropertyTypeArray, Description: "Cilium egress rules controlling outbound traffic.", Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "A single Cilium egress rule (opaque api.Rule shape)."}},
 		"ingress":          {Type: oam.PropertyTypeArray, Description: "Cilium ingress rules controlling inbound traffic.", Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "A single Cilium ingress rule (opaque api.Rule shape)."}},
 	}
@@ -68,21 +69,29 @@ func (h *CiliumNetworkPolicyHandler) parseProperties(props map[string]any, app *
 		return nil, errors.New("required property 'name' missing or not a string")
 	}
 
-	// A null reads as absence before the joint requirement below, not after it —
-	// the same decision networkpolicy.go makes for the same pair of keys. Both are
-	// optional individually, so a null is absence, and a presence-only check let
-	// `egress:` with no value satisfy the requirement while contributing nothing: a
-	// document that asked for no policy produced one (go-kure/launcher#468).
-	rawEgress, hasEgress := props["egress"]
-	rawIngress, hasIngress := props["ingress"]
-	if hasEgress && oam.IsNullValue(rawEgress) {
-		hasEgress = false
+	// The joint requirement counts rules, not keys. api.Rule carries Egress and
+	// Ingress as `omitempty` lists, so a null and an empty list both render no rule
+	// key at all, and a CiliumNetworkPolicy without one is rejected by the CRD
+	// (anyOf ingress/ingressDeny/egress/egressDeny) and by Rule.Sanitize. A
+	// presence-only check let `egress:` with no value, or `egress: []`, satisfy the
+	// requirement and render a policy the cluster refuses (go-kure/launcher#468).
+	// A non-list value is left to count: the strict decode in toAPIRule rejects it
+	// with the type error, which is the more useful message.
+	if !hasCiliumRules(props["egress"]) && !hasCiliumRules(props["ingress"]) {
+		return nil, errors.New("at least one of 'egress' or 'ingress' must be specified with at least one rule " +
+			"(a null or empty list renders no rule, and Cilium rejects a policy without one)")
 	}
-	if hasIngress && oam.IsNullValue(rawIngress) {
-		hasIngress = false
-	}
-	if !hasEgress && !hasIngress {
-		return nil, errors.New("at least one of 'egress' or 'ingress' must be specified")
+
+	// endpointSelector is required: this trait synthesizes no default and exposes no
+	// nodeSelector, so an omitted selector renders a policy with neither, which the
+	// CRD (oneOf endpointSelector/nodeSelector) and Rule.Sanitize reject. A null is
+	// absence and is refused the same way, whatever its Go shape — a TYPED nil used
+	// to be emitted as `endpointSelector: null`, which Cilium decodes to a wildcard
+	// over every endpoint. An authored `{}` is a value (Cilium's explicit
+	// select-all) and passes.
+	if sel, ok := props["endpointSelector"]; !ok || oam.IsNullValue(sel) {
+		return nil, errors.New("required property 'endpointSelector' missing or null " +
+			"(no default selector is synthesized; use {} to select every endpoint)")
 	}
 
 	return &CiliumNetworkPolicyConfig{
@@ -92,6 +101,22 @@ func (h *CiliumNetworkPolicyHandler) parseProperties(props map[string]any, app *
 		Egress:           props["egress"],
 		Ingress:          props["ingress"],
 	}, nil
+}
+
+// hasCiliumRules reports whether v, an egress or ingress property value, would
+// render at least one rule: a null (typed or untyped) or an empty list renders
+// none. A non-list, non-null value reports true so the strict decode in toAPIRule
+// reports its type error rather than this check misnaming it as missing.
+func hasCiliumRules(v any) bool {
+	if oam.IsNullValue(v) {
+		return false
+	}
+	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		return rv.Len() > 0
+	default:
+		return true
+	}
 }
 
 // CiliumNetworkPolicyConfig implements stack.ApplicationConfig for cilium-networkpolicy traits.
@@ -122,8 +147,11 @@ func (c *CiliumNetworkPolicyConfig) Generate(app *stack.Application) ([]*client.
 }
 
 func (c *CiliumNetworkPolicyConfig) toAPIRule() (*ciliumapi.Rule, error) {
-	// Each field is optional, so a null is absence and the key is omitted. The
-	// check is oam.IsNullValue, not `!= nil`: a TYPED nil (map[string]any(nil)) is a
+	// A null is absence and the key is omitted. For a document this is
+	// unreachable for endpointSelector and for an all-null rule set —
+	// parseProperties refuses those — but a CiliumNetworkPolicyConfig built
+	// directly in Go reaches here unchecked, and a null must still not turn into a
+	// wildcard. The check is oam.IsNullValue, not `!= nil`: a TYPED nil (map[string]any(nil)) is a
 	// non-nil interface, so it passed `!= nil`, marshalled as
 	// `"endpointSelector": null`, and Cilium's EndpointSelector.UnmarshalJSON turns
 	// that into an allocated empty selector — a wildcard over every endpoint, where
