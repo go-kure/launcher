@@ -166,7 +166,7 @@ func decodedQuantityString(v any) (string, bool) {
 // stringMapStrict reads an authored string→string map, refusing a value that is
 // not a string by key instead of dropping it.
 //
-// It replaced a lenient stringMap that discarded non-string values silently.
+// It replaced a lenient reader that discarded non-string values silently.
 // Refusing a wrongly-typed CONTAINER while its wrongly-typed CONTENTS are
 // discarded is not a coherent contract — a caller that rejects
 // `nodeSelector: "zone-a"` by name and then loses `nodeSelector: {rack: 3}`
@@ -3043,9 +3043,9 @@ func parseAffinity(props map[string]any) (AffinityConfig, error) {
 		return AffinityConfig{}, err
 	}
 	if present {
-		// stringMapStrict, not stringMap: a non-string selector value is refused
-		// by key rather than dropped, which would let the selector reach the
-		// cluster narrower than authored.
+		// A non-string selector value is refused by key rather than dropped,
+		// which would let the selector reach the cluster narrower than authored.
+		// A null value is absence and is left out of the selector.
 		cfg.NodeSelector, err = stringMapStrict(nodeSelector, "affinity.nodeSelector")
 		if err != nil {
 			return AffinityConfig{}, err

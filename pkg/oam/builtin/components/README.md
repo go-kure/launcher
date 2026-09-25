@@ -685,7 +685,10 @@ discarded while the default above is emitted as though the key had never
 been written, and a non-string `nodeSelector` **value** is refused by key
 (`affinity.nodeSelector["rack"]: must be a string, got int`), the
 alphabetically first offending key when several are wrong. A null sub-field
-is absence and takes the default an omitted one takes. `podAntiAffinityType`
+is absence and takes the default an omitted one takes, and a null
+`nodeSelector` value is absence too: `nodeSelector: {zone: a, rack: null}`
+builds the selector `{zone: a}` (before go-kure/launcher#466 it was refused
+as `must be a string, got <nil>`). `podAntiAffinityType`
 must be `preferred` or `required`: a well-formed string outside the enum is
 refused by name, and an explicitly authored `podAntiAffinityType: ""` is an
 error rather than a fall back to `preferred` — the empty string reaches the

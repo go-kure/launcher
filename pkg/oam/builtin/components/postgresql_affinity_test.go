@@ -270,10 +270,10 @@ func TestPostgresqlAffinity_NullPodAntiAffinityTypeIsNotEmptyString(t *testing.T
 
 // TestPostgresqlAffinity_NodeSelectorValuesMustBeStrings closes the silent discard the
 // rest of this file exists to remove, one level further down. The block rejected a
-// wrongly-typed nodeSelector CONTAINER by name and then handed its CONTENTS to
-// stringMap, which drops every non-string value without a word — so
-// `nodeSelector: {rack: 3}` reached the emitted cluster as a nodeSelector with no rack
-// constraint, which is the exact failure #448 is about.
+// wrongly-typed nodeSelector CONTAINER by name and then handed its CONTENTS to the
+// former lenient string-map reader, which dropped every non-string value without a
+// word — so `nodeSelector: {rack: 3}` reached the emitted cluster as a nodeSelector
+// with no rack constraint, which is the exact failure #448 is about.
 func TestPostgresqlAffinity_NodeSelectorValuesMustBeStrings(t *testing.T) {
 	_, err := postgresqlConfigFor(t, map[string]any{
 		"affinity": map[string]any{
@@ -291,7 +291,27 @@ func TestPostgresqlAffinity_NodeSelectorValuesMustBeStrings(t *testing.T) {
 	}
 }
 
-// The control for the test above: an all-string nodeSelector must still round-trip
+// TestPostgresqlAffinity_NullNodeSelectorValueIsAbsent: a null nodeSelector value is
+// absence (README "The null contract"), not a wrong-typed value — the key is left out
+// of the selector while the rest of it is kept.
+func TestPostgresqlAffinity_NullNodeSelectorValueIsAbsent(t *testing.T) {
+	cfg, err := postgresqlConfigFor(t, map[string]any{
+		"affinity": map[string]any{
+			"nodeSelector": map[string]any{"zone": "a", "rack": nil},
+		},
+	})
+	if err != nil {
+		t.Fatalf("a null nodeSelector value must read as absent, got error: %v", err)
+	}
+	if _, present := cfg.AffinityNodeSelector["rack"]; present {
+		t.Errorf("AffinityNodeSelector[%q] is present; a null value must leave the key out", "rack")
+	}
+	if len(cfg.AffinityNodeSelector) != 1 || cfg.AffinityNodeSelector["zone"] != "a" {
+		t.Errorf("AffinityNodeSelector = %#v, want only the non-null pair", cfg.AffinityNodeSelector)
+	}
+}
+
+// The control for the first test above: an all-string nodeSelector must still round-trip
 // every pair. A parser that rejected any multi-key selector would pass the test above.
 func TestPostgresqlAffinity_ValidNodeSelectorRoundTrips(t *testing.T) {
 	cfg, err := postgresqlConfigFor(t, map[string]any{

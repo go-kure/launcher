@@ -88,6 +88,17 @@ func TestParseAffinity_PreservedBehaviour(t *testing.T) {
 			want: defaults,
 		},
 		{
+			// A null nodeSelector VALUE is absence too: the key is left out of the
+			// selector rather than refused as a non-string value.
+			name: "null nodeSelector value leaves the key out",
+			aff:  map[string]any{"nodeSelector": map[string]any{"zone": "a", "rack": nil}},
+			want: AffinityConfig{
+				TopologyKey:         "kubernetes.io/hostname",
+				PodAntiAffinityType: "preferred",
+				NodeSelector:        map[string]string{"zone": "a"},
+			},
+		},
+		{
 			name: "fully authored block is honoured",
 			aff: map[string]any{
 				"enablePodAntiAffinity": true,
