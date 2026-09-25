@@ -1,0 +1,57 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres
+    type: postgresql
+    properties:
+      version: "16"
+      storageSize: "10Gi"
+      replicas: 2
+      resources:
+        requests:
+          cpu: 500m
+        limits:
+          memory: 1Gi
+      bootstrap:
+        pg_basebackup:
+          source: origin
+      externalClusters:
+      - name: origin
+        connectionParameters:
+          host: origin-rw.default.svc
+          user: streaming_replica
+          dbname: postgres
+        barmanObjectStore:
+          destinationPath: s3://origin-bucket/postgres/
+          endpointURL: https://s3.example.com
+          serverName: origin
+          s3Credentials:
+            accessKeyId:
+              name: origin-backup-creds
+              key: ACCESS_KEY_ID
+            secretAccessKey:
+              name: origin-backup-creds
+              key: SECRET_ACCESS_KEY
+          wal:
+            maxParallel: 4
+      pooler:
+        enabled: true
+        type: ro
+        instances: 0
+      managedRoles:
+      - name: app_user
+        login: true
+        connectionLimit: 25
+        passwordSecret: app-db-creds
+      - name: legacy_user
+        ensure: absent
+      objectStore:
+        destinationPath: s3://my-bucket/postgres/
+        endpointURL: https://s3.example.com
+        secretName: postgres-backup-creds
+        serverName: postgres
+        retentionPolicy: 14d

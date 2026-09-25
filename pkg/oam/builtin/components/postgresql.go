@@ -1,9 +1,14 @@
 package components
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 
+	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	machineryapi "github.com/cloudnative-pg/machinery/pkg/api"
+	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	kurecnpg "github.com/go-kure/kure/pkg/kubernetes/cnpg"
 	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
@@ -23,6 +28,16 @@ const (
 	cnpgClusterLabel    = "cnpg.io/cluster"
 	cnpgPoolerNameLabel = "cnpg.io/poolerName"
 	postgresqlPort      = 5432
+)
+
+// barmanCloudPluginName is the CNPG plugin entry that archives WAL to a Barman Cloud
+// ObjectStore. s3AccessKeyIDKey and s3SecretAccessKeyKey are the keys read from a
+// backup/objectStore credentials Secret. kure's retired config-struct layer injected all
+// three; launcher's output has always carried them, so they are written explicitly here.
+const (
+	barmanCloudPluginName = "barman-cloud.barmancloud.cnpg.io"
+	s3AccessKeyIDKey      = "ACCESS_KEY_ID"
+	s3SecretAccessKeyKey  = "SECRET_ACCESS_KEY"
 )
 
 // PostgresqlHandler handles OAM postgresql components.
@@ -107,14 +122,15 @@ func (h *PostgresqlHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
-// ToApplicationConfig converts an OAM postgresql component to a PostgresqlConfig.
 // unsupportedResourceNames returns any resource name in rl other than cpu/memory, sorted for a
 // deterministic error message. The shared `resources` schema (schemaResources) accepts any named
 // resource — e.g. "ephemeral-storage", "nvidia.com/gpu" — for every workload kind, forwarded
-// directly onto a real corev1.Container for the seven direct workload kinds. postgresql instead
-// forwards through kurecnpg.ResourceOptions (an external go-kure/kure type), which has fields
-// only for cpu/memory; anything else would otherwise be silently dropped when createCluster
-// builds the CNPG Cluster. Rejecting it here, at parse time, surfaces that loudly instead.
+// directly onto a real corev1.Container for the seven direct workload kinds. postgresql forwards
+// cpu/memory only (cnpgResourceList): the CNPG builder it originally went through had fields for
+// nothing else, and the restriction was kept when that builder was retired so that document
+// validity did not change; lifting it is a separate, additive format change. Anything else would
+// be silently dropped when createCluster builds the CNPG Cluster; rejecting it here, at parse
+// time, surfaces that loudly instead.
 func unsupportedResourceNames(rl corev1.ResourceList) []string {
 	var names []string
 	for name := range rl {
@@ -126,6 +142,7 @@ func unsupportedResourceNames(rl corev1.ResourceList) []string {
 	return names
 }
 
+// ToApplicationConfig converts an OAM postgresql component to a PostgresqlConfig.
 func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &PostgresqlConfig{
 		Name:      component.Name,
@@ -711,8 +728,8 @@ func (c *PostgresqlConfig) ApplyPolicy(p oam.Policy) error {
 		return err
 	}
 	// Direct form kept deliberately (not enforceMaxResources): createCluster
-	// forwards c.Resources straight into kurecnpg.ResourceOptions behind a
-	// != "" guard (see below) and never calls buildResourceRequirements, so
+	// forwards c.Resources' cpu/memory entries straight onto the Cluster spec
+	// (cnpgResourceList, below) and never calls buildResourceRequirements, so
 	// there is no intrinsic-default tier here for c.Resources to diverge from.
 	if err := enforceMaxResource(quantityString(c.Resources.Requests, corev1.ResourceCPU), p.MaxCPU(), "cpu request"); err != nil {
 		return err
@@ -765,167 +782,278 @@ func (c *PostgresqlConfig) createCluster(app *stack.Application) (client.Object,
 		imageName = fmt.Sprintf("ghcr.io/cloudnative-pg/postgresql:%s", c.Version)
 	}
 
-	opts := &kurecnpg.ClusterOptions{
-		Instances:            c.Replicas,
-		ImageName:            imageName,
-		StorageSize:          c.StorageSize,
-		InheritedLabels:      c.InheritedLabels,
-		InheritedAnnotations: c.InheritedAnnotations,
-		PostgresParams:       c.PostgresqlParameters,
+	// kure's generated constructor carries identity only; every spec value below is
+	// written here. enablePDB (from the instance count) and primaryUpdateStrategy
+	// were injected by kure's retired config-struct layer and are kept explicit so
+	// the emitted Cluster is unchanged.
+	enablePDB := c.Replicas > 1
+	cluster := kurecnpg.CreateCluster(app.Name, app.Namespace)
+	cluster.Spec = cnpgv1.ClusterSpec{
+		Instances:             int(c.Replicas),
+		ImageName:             imageName,
+		EnablePDB:             &enablePDB,
+		PrimaryUpdateStrategy: cnpgv1.PrimaryUpdateStrategyUnsupervised,
+		StorageConfiguration:  cnpgv1.StorageConfiguration{Size: c.StorageSize},
 	}
 
-	cpuRequest := quantityString(c.Resources.Requests, corev1.ResourceCPU)
-	memoryRequest := quantityString(c.Resources.Requests, corev1.ResourceMemory)
-	cpuLimit := quantityString(c.Resources.Limits, corev1.ResourceCPU)
-	memoryLimit := quantityString(c.Resources.Limits, corev1.ResourceMemory)
-	if cpuRequest != "" || memoryRequest != "" || cpuLimit != "" || memoryLimit != "" {
-		opts.Resources = &kurecnpg.ResourceOptions{
-			RequestsCPU:    cpuRequest,
-			RequestsMemory: memoryRequest,
-			LimitsCPU:      cpuLimit,
-			LimitsMemory:   memoryLimit,
+	// Left nil when both maps are empty: a non-nil empty block renders
+	// `inheritedMetadata: {}`.
+	if len(c.InheritedLabels) > 0 || len(c.InheritedAnnotations) > 0 {
+		cluster.Spec.InheritedMetadata = &cnpgv1.EmbeddedObjectMetadata{
+			Labels:      c.InheritedLabels,
+			Annotations: c.InheritedAnnotations,
 		}
+	}
+
+	cluster.Spec.Resources = corev1.ResourceRequirements{
+		Requests: cnpgResourceList(c.Resources.Requests),
+		Limits:   cnpgResourceList(c.Resources.Limits),
 	}
 
 	if c.BackupRetentionPolicy != "" || c.BackupDestinationPath != "" {
-		backup := &kurecnpg.BackupOptions{
+		bos := &barmanapi.BarmanObjectStoreConfiguration{
 			DestinationPath: c.BackupDestinationPath,
 			EndpointURL:     c.BackupEndpointURL,
-			RetentionPolicy: c.BackupRetentionPolicy,
 		}
 		if c.BackupSecretName != "" {
-			backup.S3Credentials = &kurecnpg.S3CredentialOptions{SecretName: c.BackupSecretName}
+			bos.AWS = s3Credentials(c.BackupSecretName)
 		}
-		opts.Backup = backup
+		cluster.Spec.Backup = &cnpgv1.BackupConfiguration{
+			RetentionPolicy:   c.BackupRetentionPolicy,
+			BarmanObjectStore: bos,
+		}
 	}
 
 	if c.MonitoringEnabled {
-		mon := &kurecnpg.MonitoringOptions{EnablePodMonitor: true}
+		mon := &cnpgv1.MonitoringConfiguration{EnablePodMonitor: true} //nolint:staticcheck // SA1019: EnablePodMonitor is still the only upstream opt-in for operator-created PodMonitors
 		for _, cq := range c.MonitoringCustomQueries {
-			mon.CustomQueriesConfigMap = append(mon.CustomQueriesConfigMap, kurecnpg.ConfigMapKeyRefOptions{
-				Name: cq.Name,
-				Key:  cq.Key,
+			mon.CustomQueriesConfigMap = append(mon.CustomQueriesConfigMap, cnpgv1.ConfigMapKeySelector{
+				LocalObjectReference: machineryapi.LocalObjectReference{Name: cq.Name},
+				Key:                  cq.Key,
 			})
 		}
-		opts.Monitoring = mon
+		cluster.Spec.Monitoring = mon
 	}
 
-	if c.BootstrapRecoverySource != "" || c.BootstrapPgBasebackupSource != "" {
-		opts.Bootstrap = &kurecnpg.BootstrapOptions{
-			RecoverySource:     c.BootstrapRecoverySource,
-			PgBasebackupSource: c.BootstrapPgBasebackupSource,
+	// ToApplicationConfig refuses both sources together; recovery still wins here
+	// to match the retired builder should that guard ever move.
+	switch {
+	case c.BootstrapRecoverySource != "":
+		cluster.Spec.Bootstrap = &cnpgv1.BootstrapConfiguration{
+			Recovery: &cnpgv1.BootstrapRecovery{Source: c.BootstrapRecoverySource},
+		}
+	case c.BootstrapPgBasebackupSource != "":
+		cluster.Spec.Bootstrap = &cnpgv1.BootstrapConfiguration{
+			PgBaseBackup: &cnpgv1.BootstrapPgBaseBackup{Source: c.BootstrapPgBasebackupSource},
 		}
 	}
 
 	if len(c.ExternalClusters) > 0 {
-		ecs := make([]kurecnpg.ExternalClusterOptions, len(c.ExternalClusters))
-		for i, ec := range c.ExternalClusters {
-			ecs[i] = kurecnpg.ExternalClusterOptions{
+		ecs := make([]cnpgv1.ExternalCluster, 0, len(c.ExternalClusters))
+		for _, ec := range c.ExternalClusters {
+			ext := cnpgv1.ExternalCluster{
 				Name:                 ec.Name,
 				ConnectionParameters: ec.ConnectionParameters,
-				BarmanObjectStore:    ec.BarmanObjectStore,
 			}
+			if ec.BarmanObjectStore != nil {
+				bos, err := toBarmanObjectStore(ec.BarmanObjectStore)
+				if err != nil {
+					return nil, errors.Wrapf(err, "external cluster %q", ec.Name)
+				}
+				ext.BarmanObjectStore = bos
+			}
+			ecs = append(ecs, ext)
 		}
-		opts.ExternalClusters = ecs
+		cluster.Spec.ExternalClusters = ecs
 	}
 
+	if len(c.PostgresqlParameters) > 0 {
+		cluster.Spec.PostgresConfiguration.Parameters = c.PostgresqlParameters
+	}
 	if c.SynchronousMethod != "" {
-		opts.Synchronous = &kurecnpg.SynchronousOptions{
-			Method:         c.SynchronousMethod,
-			Number:         c.SynchronousNumber,
-			DataDurability: c.SynchronousDataDurability,
+		sync := &cnpgv1.SynchronousReplicaConfiguration{
+			Method: cnpgv1.SynchronousReplicaConfigurationMethod(c.SynchronousMethod),
+			Number: int(c.SynchronousNumber),
 		}
+		if c.SynchronousDataDurability != "" {
+			sync.DataDurability = cnpgv1.DataDurabilityLevel(c.SynchronousDataDurability)
+		}
+		cluster.Spec.PostgresConfiguration.Synchronous = sync
 	}
 
+	// An objectStore component archives WAL through the barman-cloud plugin, pointed
+	// at the ObjectStore createObjectStore emits under the same name.
 	if c.ObjectStore != nil {
-		opts.ObjectStoreName = app.Name
+		isWALArchiver := true
+		cluster.Spec.Plugins = []cnpgv1.PluginConfiguration{{
+			Name:          barmanCloudPluginName,
+			IsWALArchiver: &isWALArchiver,
+			Parameters:    map[string]string{"objectStoreName": app.Name},
+		}}
 	}
 
 	if c.AffinityEnabled {
-		opts.Affinity = &kurecnpg.AffinityOptions{
-			EnablePodAntiAffinity: c.AffinityEnablePodAntiAffinity,
+		// Always written, false included: CNPG reads a nil enablePodAntiAffinity
+		// as enabled.
+		enablePAA := c.AffinityEnablePodAntiAffinity
+		cluster.Spec.Affinity = cnpgv1.AffinityConfiguration{
+			EnablePodAntiAffinity: &enablePAA,
 			TopologyKey:           c.AffinityTopologyKey,
 			PodAntiAffinityType:   c.AffinityPodAntiAffinityType,
 			NodeSelector:          c.AffinityNodeSelector,
 		}
 	}
 
-	if len(c.ManagedRoles) > 0 {
-		roles := make([]kurecnpg.ManagedRoleOptions, len(c.ManagedRoles))
-		for i, role := range c.ManagedRoles {
-			roles[i] = kurecnpg.ManagedRoleOptions{
-				Name:            role.Name,
-				Ensure:          role.Ensure,
-				Comment:         role.Comment,
-				Login:           role.Login,
-				Superuser:       role.Superuser,
-				CreateDB:        role.CreateDB,
-				CreateRole:      role.CreateRole,
-				Replication:     role.Replication,
-				Inherit:         role.Inherit,
-				ConnectionLimit: role.ConnectionLimit,
-				PasswordSecret:  role.PasswordSecret,
-				InRoles:         role.InRoles,
-			}
+	for _, role := range c.ManagedRoles {
+		rc := cnpgv1.RoleConfiguration{
+			Name:        role.Name,
+			Comment:     role.Comment,
+			Login:       role.Login,
+			Superuser:   role.Superuser,
+			CreateDB:    role.CreateDB,
+			CreateRole:  role.CreateRole,
+			Replication: role.Replication,
+			Inherit:     role.Inherit,
+			InRoles:     role.InRoles,
 		}
-		opts.ManagedRoles = roles
+		// A nil limit stays 0 (omitempty) so the operator applies its own default.
+		if role.ConnectionLimit != nil {
+			rc.ConnectionLimit = *role.ConnectionLimit
+		}
+		// Only "absent" is written; "present" and unset leave the field for the
+		// operator to default.
+		if role.Ensure == "absent" {
+			rc.Ensure = cnpgv1.EnsureAbsent
+		}
+		if role.PasswordSecret != "" {
+			rc.PasswordSecret = &cnpgv1.LocalObjectReference{Name: role.PasswordSecret}
+		}
+		kurecnpg.AddClusterManagedRole(cluster, rc)
 	}
 
-	return kurecnpg.Cluster(&kurecnpg.ClusterConfig{
-		Name:      app.Name,
-		Namespace: app.Namespace,
-		Options:   opts,
-	})
+	return cluster, nil
+}
+
+// cnpgResourceList copies the cpu and memory entries of rl, the only resource names the
+// postgresql component forwards (see unsupportedResourceNames). It returns nil when neither
+// is present so an unset side renders as absent.
+func cnpgResourceList(rl corev1.ResourceList) corev1.ResourceList {
+	var out corev1.ResourceList
+	for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+		q, ok := rl[name]
+		if !ok {
+			continue
+		}
+		if out == nil {
+			out = corev1.ResourceList{}
+		}
+		out[name] = q.DeepCopy()
+	}
+	return out
+}
+
+// s3Credentials references the access-key pair in secretName under the key names
+// launcher has always emitted (ACCESS_KEY_ID / SECRET_ACCESS_KEY).
+func s3Credentials(secretName string) *barmanapi.S3Credentials {
+	return &barmanapi.S3Credentials{
+		AccessKeyIDReference: &machineryapi.SecretKeySelector{
+			LocalObjectReference: machineryapi.LocalObjectReference{Name: secretName},
+			Key:                  s3AccessKeyIDKey,
+		},
+		SecretAccessKeyReference: &machineryapi.SecretKeySelector{
+			LocalObjectReference: machineryapi.LocalObjectReference{Name: secretName},
+			Key:                  s3SecretAccessKeyKey,
+		},
+	}
+}
+
+// toBarmanObjectStore converts an authored externalClusters[].barmanObjectStore map into the
+// upstream Barman configuration by a JSON round-trip.
+func toBarmanObjectStore(m map[string]any) (*barmanapi.BarmanObjectStoreConfiguration, error) {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal barman object store")
+	}
+	var bos barmanapi.BarmanObjectStoreConfiguration
+	if err := json.Unmarshal(data, &bos); err != nil {
+		return nil, errors.Wrap(err, "unmarshal barman object store")
+	}
+	return &bos, nil
 }
 
 func (c *PostgresqlConfig) createPooler(app *stack.Application) client.Object {
-	pgBouncer := &kurecnpg.PgBouncerOptions{
-		PoolMode: string(c.PoolerPoolMode),
+	// pgbouncer is required upstream (no omitempty), so it is always set, empty
+	// when nothing is authored.
+	pgBouncer := &cnpgv1.PgBouncerSpec{}
+	if c.PoolerPoolMode != "" {
+		pgBouncer.PoolMode = cnpgv1.PgBouncerPoolMode(c.PoolerPoolMode)
 	}
 	if len(c.PoolerParameters) > 0 {
 		pgBouncer.Parameters = c.PoolerParameters
 	}
-	return kurecnpg.Pooler(&kurecnpg.PoolerConfig{
-		Name:      app.Name + "-pooler",
-		Namespace: app.Namespace,
-		Options: &kurecnpg.PoolerOptions{
-			ClusterName: app.Name,
-			Instances:   c.PoolerInstances,
-			Type:        c.PoolerType,
-			PgBouncer:   pgBouncer,
-		},
-	})
+
+	// Anything other than "ro" is written as rw, the value launcher has always
+	// emitted for an unset type.
+	poolerType := cnpgv1.PoolerTypeRW
+	if c.PoolerType == "ro" {
+		poolerType = cnpgv1.PoolerTypeRO
+	}
+
+	pooler := kurecnpg.CreatePooler(app.Name+"-pooler", app.Namespace)
+	pooler.Spec = cnpgv1.PoolerSpec{
+		Cluster:   cnpgv1.LocalObjectReference{Name: app.Name},
+		Type:      poolerType,
+		PgBouncer: pgBouncer,
+	}
+	// A non-positive count is omitted so the operator default applies.
+	if c.PoolerInstances > 0 {
+		instances := c.PoolerInstances
+		pooler.Spec.Instances = &instances
+	}
+	return pooler
 }
 
 func (c *PostgresqlConfig) createObjectStore(app *stack.Application) client.Object {
-	return kurecnpg.ObjectStore(&kurecnpg.ObjectStoreConfig{
-		Name:      app.Name,
-		Namespace: app.Namespace,
-		Options: &kurecnpg.ObjectStoreOptions{
+	store := kurecnpg.CreateObjectStore(app.Name, app.Namespace)
+	store.Spec = barmanv1.ObjectStoreSpec{
+		Configuration: barmanapi.BarmanObjectStoreConfiguration{
 			DestinationPath: c.ObjectStore.DestinationPath,
 			EndpointURL:     c.ObjectStore.EndpointURL,
 			ServerName:      c.ObjectStore.ServerName,
-			SecretName:      c.ObjectStore.SecretName,
-			RetentionPolicy: c.ObjectStore.RetentionPolicy,
 		},
-	})
+		RetentionPolicy: c.ObjectStore.RetentionPolicy,
+	}
+	if c.ObjectStore.SecretName != "" {
+		kurecnpg.SetObjectStoreS3Credentials(store, s3Credentials(c.ObjectStore.SecretName))
+	}
+	return store
 }
 
 func (c *PostgresqlConfig) createDatabase(app *stack.Application, db DatabaseEntry) client.Object {
-	exts := make([]kurecnpg.ExtensionOptions, len(db.Extensions))
-	for i, ext := range db.Extensions {
-		exts[i] = kurecnpg.ExtensionOptions{Name: ext.Name, Ensure: ext.Ensure}
+	database := kurecnpg.CreateDatabase(app.Name+"-"+db.Name, app.Namespace)
+	database.Spec = cnpgv1.DatabaseSpec{
+		ClusterRef: corev1.LocalObjectReference{Name: app.Name},
+		Name:       db.Name,
+		Owner:      db.Owner,
 	}
-	return kurecnpg.Database(&kurecnpg.DatabaseConfig{
-		Name:      app.Name + "-" + db.Name,
-		Namespace: app.Namespace,
-		Options: &kurecnpg.DatabaseOptions{
-			ClusterName:   app.Name,
-			DBName:        db.Name,
-			Owner:         db.Owner,
-			ReclaimPolicy: db.ReclaimPolicy,
-			Ensure:        db.Ensure,
-			Extensions:    exts,
-		},
-	})
+	// Only the non-default values are written; "present"/"retain" and unset leave
+	// the field for the operator to default.
+	if db.Ensure == "absent" {
+		database.Spec.Ensure = cnpgv1.EnsureAbsent
+	}
+	if db.ReclaimPolicy == "delete" {
+		database.Spec.ReclaimPolicy = cnpgv1.DatabaseReclaimDelete
+	}
+	// An extension's ensure is always written — present unless authored absent —
+	// matching what launcher has always emitted.
+	for _, ext := range db.Extensions {
+		ensure := cnpgv1.EnsurePresent
+		if ext.Ensure == "absent" {
+			ensure = cnpgv1.EnsureAbsent
+		}
+		kurecnpg.AddDatabaseExtension(database, cnpgv1.ExtensionSpec{
+			DatabaseObjectSpec: cnpgv1.DatabaseObjectSpec{Name: ext.Name, Ensure: ensure},
+		})
+	}
+	return database
 }

@@ -531,14 +531,11 @@ func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Objec
 		return nil, errors.Errorf("invalid refreshInterval %q: %w", c.RefreshInterval, err)
 	}
 
-	es := externalsecrets.ExternalSecret(&externalsecrets.ExternalSecretConfig{
-		Name:      c.SecretName,
-		Namespace: app.Namespace,
-		SecretStoreRef: esv1.SecretStoreRef{
-			Name: c.StoreRefName,
-			Kind: c.StoreRefKind,
-		},
-	})
+	es := externalsecrets.CreateExternalSecret(c.SecretName, app.Namespace)
+	es.Spec.SecretStoreRef = esv1.SecretStoreRef{
+		Name: c.StoreRefName,
+		Kind: c.StoreRefKind,
+	}
 	kubernetes.AddLabel(es, "app", c.componentName)
 	externalsecrets.SetRefreshInterval(es, metav1.Duration{Duration: dur})
 
