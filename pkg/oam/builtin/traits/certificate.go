@@ -258,21 +258,20 @@ func (c *CertificateConfig) Generate(app *stack.Application) ([]*client.Object, 
 		return nil, errors.Errorf("invalid renewBefore %q: %w", c.RenewBefore, err)
 	}
 
-	cert := certmanager.Certificate(&certmanager.CertificateConfig{
-		Name:       c.SecretName,
-		Namespace:  app.Namespace,
-		SecretName: c.SecretName,
-		IssuerRef: cmmeta.IssuerReference{
-			Name: c.IssuerName,
-			Kind: c.IssuerKind,
-		},
-		DNSNames:    c.DNSNames,
-		Duration:    &metav1.Duration{Duration: dur},
-		RenewBefore: &metav1.Duration{Duration: renewBefore},
-	})
+	cert := certmanager.CreateCertificate(c.SecretName, app.Namespace)
+	cert.Spec.SecretName = c.SecretName
+	cert.Spec.IssuerRef = cmmeta.IssuerReference{
+		Name: c.IssuerName,
+		Kind: c.IssuerKind,
+	}
+	for _, dns := range c.DNSNames {
+		certmanager.AddCertificateDNSName(cert, dns)
+	}
+	certmanager.SetCertificateDuration(cert, &metav1.Duration{Duration: dur})
+	certmanager.SetCertificateRenewBefore(cert, &metav1.Duration{Duration: renewBefore})
 
-	// The kure helper cannot carry privateKey; set it directly. Only populate the
-	// sub-fields the user authored so cert-manager defaults the rest.
+	// Only populate the privateKey sub-fields the user authored so cert-manager
+	// defaults the rest.
 	if c.PKAlgorithm != "" || c.PKSize != 0 || c.PKEncoding != "" || c.PKRotationPolicy != "" {
 		cert.Spec.PrivateKey = &certv1.CertificatePrivateKey{
 			Algorithm:      certv1.PrivateKeyAlgorithm(c.PKAlgorithm),

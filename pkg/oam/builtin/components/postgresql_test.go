@@ -647,6 +647,29 @@ func TestPostgresqlConfig_Generate_WithBootstrap(t *testing.T) {
 	}
 }
 
+// An externalClusters[].barmanObjectStore that does not fit the upstream Barman
+// configuration fails Generate, naming the external cluster, instead of being
+// dropped or half-applied.
+func TestPostgresqlConfig_Generate_ExternalClusterMalformedBarmanObjectStore(t *testing.T) {
+	pc := newPostgresqlApp(t, map[string]any{
+		"externalClusters": []any{
+			map[string]any{
+				"name":              "x",
+				"barmanObjectStore": map[string]any{"destinationPath": float64(123)},
+			},
+		},
+	})
+	app := stack.NewApplication("db", "default", pc)
+	_, err := pc.Generate(app)
+	if err == nil {
+		t.Fatal("expected an error for a malformed barmanObjectStore, got nil")
+	}
+	const want = `external cluster "x": unmarshal barman object store:`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not contain %q", err.Error(), want)
+	}
+}
+
 func newPostgresqlApp(t *testing.T, props map[string]any) *components.PostgresqlConfig {
 	t.Helper()
 	h := &components.PostgresqlHandler{}

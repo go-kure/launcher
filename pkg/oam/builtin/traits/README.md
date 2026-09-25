@@ -580,3 +580,16 @@ longer takes an ingress class, so `ingress` writes `spec.ingressClassName` via
 `SetIngressClassName` only when one was authored, leaving it nil otherwise
 (unchanged output: the old call passed the class in and then nil'd the field back
 out when it was empty).
+
+kure `v0.2.0-beta.13` (release 2 of the builder contract) retired the
+config-struct layer the remaining four traits still went through
+(`certmanager.Certificate`, `cilium.CiliumNetworkPolicy`,
+`externalsecrets.ExternalSecret`, `volsync.ReplicationSource` and their `*Config`
+types). `certificate`, `cilium-networkpolicy`, `external-secret` and `volsync` now
+call the generated `CreateCertificate` / `CreateCiliumNetworkPolicy` /
+`CreateExternalSecret` / `CreateReplicationSource` and set the spec themselves —
+through `AddCertificateDNSName`, `SetCertificateDuration`,
+`SetCertificateRenewBefore` and `SetCiliumNetworkPolicySpec`, or by assigning
+`es.Spec.SecretStoreRef` and the upstream `ReplicationSourceResticSpec` /
+`ReplicationSourceTriggerSpec` directly. None of those layers injected a value, so
+the emitted manifests are unchanged.

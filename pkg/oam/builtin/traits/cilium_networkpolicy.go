@@ -103,11 +103,8 @@ func (c *CiliumNetworkPolicyConfig) Generate(app *stack.Application) ([]*client.
 		return nil, errors.Errorf("cilium-networkpolicy %q: %w", c.Name, err)
 	}
 
-	cnp := kurecilium.CiliumNetworkPolicy(&kurecilium.CiliumNetworkPolicyConfig{
-		Name:      c.Name,
-		Namespace: app.Namespace,
-		Spec:      rule,
-	})
+	cnp := kurecilium.CreateCiliumNetworkPolicy(c.Name, app.Namespace)
+	kurecilium.SetCiliumNetworkPolicySpec(cnp, rule)
 
 	obj := client.Object(cnp)
 	return []*client.Object{&obj}, nil

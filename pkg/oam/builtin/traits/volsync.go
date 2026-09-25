@@ -184,11 +184,11 @@ func (c *VolsyncConfig) Generate(app *stack.Application) ([]*client.Object, erro
 	weekly := int32(c.RetainWeekly)             //nolint:gosec
 	monthly := int32(c.RetainMonthly)           //nolint:gosec
 
-	mover := &kurevol.SourceResticConfig{
+	mover := &volsyncv1alpha1.ReplicationSourceResticSpec{
 		Repository:        c.Repository,
 		PruneIntervalDays: &pruneInterval,
 		ReplicationSourceVolumeOptions: volsyncv1alpha1.ReplicationSourceVolumeOptions{
-			CopyMethod: kurevol.CopyMethod(c.CopyMethod),
+			CopyMethod: volsyncv1alpha1.CopyMethodType(c.CopyMethod),
 		},
 		Retain: &volsyncv1alpha1.ResticRetainPolicy{
 			Daily:   &daily,
@@ -211,13 +211,10 @@ func (c *VolsyncConfig) Generate(app *stack.Application) ([]*client.Object, erro
 	}
 
 	schedule := c.Schedule
-	rs := kurevol.ReplicationSource(&kurevol.ReplicationSourceConfig{
-		Name:      app.Name,
-		Namespace: app.Namespace,
-		SourcePVC: c.SourcePVC,
-		Trigger:   &kurevol.TriggerConfig{Schedule: &schedule},
-		Mover:     mover,
-	})
+	rs := kurevol.CreateReplicationSource(app.Name, app.Namespace)
+	rs.Spec.SourcePVC = c.SourcePVC
+	rs.Spec.Trigger = &volsyncv1alpha1.ReplicationSourceTriggerSpec{Schedule: &schedule}
+	rs.Spec.Restic = mover
 
 	obj := client.Object(rs)
 	return []*client.Object{&obj}, nil

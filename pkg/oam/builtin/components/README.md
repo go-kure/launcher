@@ -1214,8 +1214,8 @@ This three-tier effective-value enforcement applies to the seven kind
 components that call `buildResourceRequirements` on their main container
 (`webservice`, `worker`, `deployment`, `cronjob`, `job`, `statefulset`,
 `daemonset`).
-**`postgresql` is exempt**: `createCluster` forwards `c.Resources` straight
-into `kurecnpg.ResourceOptions` behind a `!= ""` guard and never calls
+**`postgresql` is exempt**: `createCluster` copies the cpu/memory entries of
+`c.Resources` straight onto the Cluster spec (`cnpgResourceList`) and never calls
 `buildResourceRequirements`, so it has no intrinsic tier for its existing
 direct-form checks to diverge from.
 
@@ -1737,18 +1737,19 @@ change.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.
-  `resources` forwards `cpu`/`memory` only — the underlying CNPG builder
-  (`kurecnpg.ResourceOptions`, an external `go-kure/kure` type) has no fields
-  for other resource names, so any other name authored under `requests`/
-  `limits` (e.g. `ephemeral-storage`, `nvidia.com/gpu`) is rejected with an
-  explicit error rather than silently dropped; the other seven workload kinds
-  forward every resource name directly onto the real `corev1.Container` and
-  have no such restriction.
+  `resources` forwards `cpu`/`memory` only — the CNPG builder it was
+  written against had fields for nothing else, and the restriction was kept
+  when kure retired that builder so that document validity did not change
+  (lifting it is a separate, additive format change) — so any other name authored under `requests`/`limits` (e.g.
+  `ephemeral-storage`, `nvidia.com/gpu`) is rejected with an explicit error
+  rather than silently dropped; the other seven workload kinds forward every
+  resource name directly onto the real `corev1.Container` and have no such
+  restriction.
   `affinity` takes the same four keys as the shared `affinity` property
   (`enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType`,
   `nodeSelector`) with the same defaults — `kubernetes.io/hostname` and
-  `preferred` — but the handler parses it itself into
-  `kurecnpg.AffinityOptions` instead of calling `parseAffinity`, because CNPG
+  `preferred` — but the handler parses it itself into the CNPG
+  `AffinityConfiguration` instead of calling `parseAffinity`, because CNPG
   carries its own affinity shape rather than a `corev1.Affinity`. The block
   and each of its four sub-fields are read with the presence-reporting
   helpers, so a value authored with the wrong type is rejected by name
@@ -2135,3 +2136,23 @@ The `obj.Annotations = nil`
 assignments scattered through the handlers, which existed to strip the `app:`
 annotation the constructors used to stamp, are now no-ops — kept so the field
 stays at a known value regardless of what a future constructor does.
+
+**`postgresql` writes every CNPG value itself (kure `v0.2.0-beta.13`).** kure's
+release-2 builder contract retired the CNPG config-struct layer
+(`cnpg.Cluster`/`Pooler`/`ObjectStore`/`Database` and their `*Options` types) that
+`postgresql` used to go through. The handler now calls the generated
+`CreateCluster`/`CreatePooler`/`CreateObjectStore`/`CreateDatabase` and assigns the
+upstream `cnpgv1` / barman-cloud structs directly, with `AddClusterManagedRole`,
+`AddDatabaseExtension` and `SetObjectStoreS3Credentials` where kure admits them.
+The values that layer used to inject are written explicitly, so the emitted
+manifests are unchanged byte for byte: `enablePDB` (true only for more than one
+instance), `primaryUpdateStrategy: unsupervised`, the `ACCESS_KEY_ID` /
+`SECRET_ACCESS_KEY` key names on backup and objectStore credentials, the
+`barman-cloud.barmancloud.cnpg.io` WAL-archiver plugin entry when an `objectStore`
+is declared, the pooler `type` (`rw` unless `ro` was authored) and its always-present
+`pgbouncer` block, and `ensure: present` on every extension not authored `absent`.
+The layer's guards are kept too: `inheritedMetadata`, `managed`, `bootstrap`,
+`postgresql.synchronous` and the credential references are omitted when their input
+is empty, a pooler `instances` of zero or less is omitted, and a role's or
+database's `ensure` / `databaseReclaimPolicy` is written only for `absent` /
+`delete`.
