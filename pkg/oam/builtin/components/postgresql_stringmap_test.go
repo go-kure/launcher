@@ -10,8 +10,9 @@ import (
 
 // postgresqlStringMapSites lists the string→string maps the postgresql handler reads
 // from authored properties (go-kure/launcher#466). Each of them used to go through
-// stringMap, which dropped a non-string value without a word: an author writing
-// `max_connections: 100` — the ordinary unquoted YAML form, which gopkg.in/yaml.v3
+// the former lenient string-map reader, which dropped a non-string value without a
+// word: an author writing `max_connections: 100` — the ordinary unquoted YAML form,
+// which gopkg.in/yaml.v3
 // decodes to an int — got a cluster with no max_connections at all, from a document
 // that validated (the handler's schema leaves these maps open). One entry per site, so
 // reverting any single conversion fails exactly its own subtest.

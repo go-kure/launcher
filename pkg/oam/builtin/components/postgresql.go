@@ -570,11 +570,12 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 			return nil, err
 		}
 		if present {
-			// stringMapStrict, not stringMap: this block's whole purpose is that a
-			// wrongly-typed sub-field is refused by name rather than discarded, and
-			// a non-string nodeSelector VALUE is exactly that. stringMap dropped it
-			// silently, so the reject-the-envelope check added above sat directly on
-			// top of a silent discard of its own contents.
+			// Strict by design: this block's whole purpose is that a wrongly-typed
+			// sub-field is refused by name rather than discarded, and a non-string
+			// nodeSelector VALUE is exactly that. The former lenient reader dropped
+			// it silently, so the reject-the-envelope check added above sat directly
+			// on top of a silent discard of its own contents. A null value is still
+			// absence and is left out of the selector.
 			config.AffinityNodeSelector, err = stringMapStrict(nodeSelector, "affinity.nodeSelector")
 			if err != nil {
 				return nil, err
