@@ -191,7 +191,8 @@ run_case() { # <name> <branch> <want-rc> <want-substring> [args...]
 	git clone -q "$UP" "$clone"
 	git -C "$clone" checkout -q "origin/$br" 2>/dev/null || git -C "$clone" checkout -q "$br"
 	set +e
-	out="$(cd "$clone" && env "${CASE_ENV[@]}" "$BASH" "$SUT" "$@" 2>&1)"
+	# ${a[@]+...}: an empty array under set -u is "unbound" on bash < 4.4 (macOS 3.2).
+	out="$(cd "$clone" && env ${CASE_ENV[@]+"${CASE_ENV[@]}"} "$BASH" "$SUT" "$@" 2>&1)"
 	rc=$?
 	set -e
 	if [ "$rc" -ne "$want" ] || ! grep -qF -- "$sub" <<<"$out"; then
