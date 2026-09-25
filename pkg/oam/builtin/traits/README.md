@@ -298,8 +298,11 @@ parse the same as their builtin-typed equivalents.
 
 Everything above checks **type** and **nullity**. A well-typed value is also
 checked for **content**, against the validators the API server applies to a
-NetworkPolicy peer, so a document that renders is one the cluster admits
-(go-kure/launcher#469):
+NetworkPolicy peer's labels and CIDRs, so a label or CIDR that renders is one
+the cluster admits (go-kure/launcher#469). This covers label and CIDR content
+only, not the peer's shape: a peer that sets `ipBlock` alongside a
+`podSelector` or `namespaceSelector` still renders, and the API server refuses
+it (go-kure/launcher#470):
 
 - A `matchLabels` **key** must be a qualified name (`app.kubernetes.io/name`), and
   the rendered **value** a valid label value: empty, or at most 63 characters of
