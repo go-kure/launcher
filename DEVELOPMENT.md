@@ -147,9 +147,11 @@ an HTML attribute and GitHub ignores it, so the page looks the same either way:
 
 Unmarked fences are not checked. Mark a fence `build` whenever it is a whole
 application: that is the only mode that runs the envelope and the handlers, and it is
-what catches a defect like go-kure/launcher#417 (`traits: []` at spec level). A marker
-that cannot be honoured fails rather than being skipped: an unknown mode, a marker on a
-non-YAML fence, a `build` fence with no `profile` or a missing one, an unclosed fence.
+what catches a defect like go-kure/launcher#417 (`traits: []` at spec level). Spaces
+around `=` are allowed, as Hugo allows them. A marker that cannot be honoured fails
+rather than being skipped: a `check` attribute whose value cannot be read (`{check}`,
+`{check: "build"}`), an unknown mode, a marker on a non-YAML fence, a `build` fence with
+no `profile` or a missing one, an unclosed fence.
 Failures are reported as `<file>:<line of the opening fence>: <reason>`.
 
 This runs in CI in the `docs-build` job (see `docs/github-workflows.md`), which runs on
