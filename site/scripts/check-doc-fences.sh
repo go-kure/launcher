@@ -27,10 +27,13 @@
 # "Well-formed" means yq parses it. yq accepts a duplicated mapping key, which
 # kurel's parser rejects, so a snippet or template with one still passes.
 #
-# A marker that cannot be honoured is a failure, never a skip: an unknown mode, a
-# marker on a non-YAML fence, a build fence without a profile or with a profile
-# that does not exist, and a marked fence that is never closed. Each failure is
-# reported as <file>:<line of the opening fence>: <reason>.
+# Spaces around `=` are allowed (`{check = "build"}`), as goldmark, Hugo's
+# Markdown parser, allows them. A marker that cannot be honoured is a failure,
+# never a skip: a `check` attribute whose value cannot be read (`{check}`,
+# `{check: "build"}`), an unknown mode, a marker on a non-YAML fence, a build fence
+# without a profile or with a profile that does not exist, and a marked fence that
+# is never closed. Each failure is reported as
+# <file>:<line of the opening fence>: <reason>.
 #
 # Usage: bash site/scripts/check-doc-fences.sh [--root DIR] [FILE...]
 #   With no FILE, every tracked *.md under DIR (default: the repository root) is
@@ -106,7 +109,12 @@ extract_fences() {
         if (fchar == "`" && index(info, "`")) next
         sub(/^[ \t]+/, "", info); sub(/[ \t]+$/, "", info)
         infence = 1; flen = length(run); start = NR
-        marked = (info ~ /\{([^}]*[ \t,])?check=/)
+        # Marked: the attribute block holds the word `check` where an attribute name
+        # starts, whether or not it parses (`{check}`, `{check: "build"}`) — the
+        # caller refuses one it cannot read. Quoted values are emptied first so the
+        # word inside another attribute value is not a marker.
+        spec = info; gsub(/"[^"]*"/, "\"\"", spec)
+        marked = (spec ~ /\{([^}]*[ \t,])?check([^A-Za-z0-9_.-]|$)/)
         if (marked) { n++; path = outdir "/" n ".yaml"; printf "" > path }
         next
       }
@@ -130,9 +138,11 @@ extract_fences() {
   ' "$1"
 }
 
-# attr NAME ATTRS — prints the value of NAME="value" or NAME=value in ATTRS.
+# attr NAME ATTRS — prints the value of NAME="value" or NAME=value in ATTRS. Spaces
+# around `=` are allowed, as goldmark (Hugo's Markdown parser) allows them.
 attr() {
-  local re_q="(^|[[:space:],{])$1=\"([^\"]*)\"" re_u="(^|[[:space:],{])$1=([^[:space:],}\"]+)"
+  local re_q="(^|[[:space:],{])$1[[:space:]]*=[[:space:]]*\"([^\"]*)\""
+  local re_u="(^|[[:space:],{])$1[[:space:]]*=[[:space:]]*([^[:space:],}\"]+)"
   if [[ "$2" =~ $re_q ]] || [[ "$2" =~ $re_u ]]; then
     printf '%s' "${BASH_REMATCH[2]}"
   fi
@@ -213,6 +223,9 @@ for f in "${files[@]}"; do
         if ! err="$(yq eval '.' "$body" 2>&1 >/dev/null)"; then
           report "$f" "$line" "$mode is not well-formed YAML: $(oneline "$err" "$body")"
         fi
+        ;;
+      "")
+        report "$f" "$line" "check marker cannot be parsed; want check=\"build\", \"snippet\" or \"template\""
         ;;
       *)
         report "$f" "$line" "unknown check mode '${mode}'; want build, snippet or template"

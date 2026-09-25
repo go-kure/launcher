@@ -220,6 +220,43 @@ a: 1
 EOF
 expect "marker: an unknown mode is refused, not skipped" 1 "unknown-mode.md:1: unknown check mode" unknown-mode.md
 
+# Goldmark, which parses the attribute block for Hugo, allows spaces around `=`, so
+# `{check = "snippet"}` is as much a marker as `{check="snippet"}`.
+cat >"$WORK/spaced-snippet.md" <<'EOF'
+```yaml {check = "snippet"}
+name: [unclosed
+```
+EOF
+expect "marker: spaces around = still mark the fence" 1 "spaced-snippet.md:1: snippet is not well-formed YAML" spaced-snippet.md
+
+sed 's/{check="build" profile="empty-profile.yaml"}/{check= "build"  profile ="empty-profile.yaml"}/' \
+  "$WORK/build-ok.md" >"$WORK/spaced-build.md"
+expect "marker: spaces around = still find the mode and the profile" 0 "checked build=1" spaced-build.md
+
+# A block naming `check` that cannot be read as check=<mode> is refused, not
+# taken for an unmarked fence.
+cat >"$WORK/bare-check.md" <<'EOF'
+```yaml {check}
+name: [unclosed
+```
+EOF
+expect "marker: a bare check with no value is refused" 1 "bare-check.md:1: check marker cannot be parsed" bare-check.md
+
+cat >"$WORK/colon-check.md" <<'EOF'
+```yaml {check: "snippet"}
+name: [unclosed
+```
+EOF
+expect "marker: check written with a colon is refused" 1 "colon-check.md:1: check marker cannot be parsed" colon-check.md
+
+# The word inside another attribute's quoted value is not a marker.
+cat >"$WORK/quoted-check.md" <<'EOF'
+```yaml {title="then check = it"}
+name: [unclosed
+```
+EOF
+expect "marker: check inside a quoted value is not a marker" 0 "checked build=0 snippet=0" quoted-check.md
+
 cat >"$WORK/wrong-lang.md" <<'EOF'
 ```bash {check="snippet"}
 echo hi
@@ -252,22 +289,41 @@ cat >"$WORK/list-item.md" <<'EOF'
 EOF
 expect "fence: an indented fence inside a list item is de-indented and built" 0 "" list-item.md
 
+# The bare ``` before the quoted marker is shorter than the four-backtick opener,
+# so it does not close the outer fence and the marker stays quoted.
 cat >"$WORK/nested.md" <<'EOF'
 ````markdown
+Close a fence with three backticks:
+```
+Then mark the next one:
 ```yaml {check="snippet"}
 name: [unclosed
 ```
 ````
+EOF
+expect "fence: a marker quoted inside an outer fence is not a fence" 0 "" nested.md
 
+# A ~~~ fence closes only on tildes: the backtick lines are body, so the malformed
+# line after them is still inside the fence and must be checked.
+cat >"$WORK/tilde.md" <<'EOF'
 ~~~yaml {check="snippet"}
 a: |
   ```
   not a fence close
   ```
-b: 2
+b: [bad
 ~~~
 EOF
-expect "fence: a marker quoted inside an outer fence is not a fence" 0 "" nested.md
+expect "fence: backticks do not close a tilde fence" 1 "tilde.md:1: snippet is not well-formed YAML" tilde.md
+
+# A line starting with ``` whose info string holds a backtick is an inline code
+# span, not a fence opener, so nothing after it is taken for fence body.
+cat >"$WORK/backtick-info.md" <<'EOF'
+```yaml {check="snippet"}``` marks a fence for checking.
+
+Plain prose.
+EOF
+expect "fence: a backtick in the info string means not a fence" 0 "checked build=0 snippet=0" backtick-info.md
 
 # A closing fence may be indented at most three spaces more than its opener; a
 # deeper fence-like line (here inside a block scalar) is body, so the malformed
