@@ -104,8 +104,14 @@ func TestParseNPPeer_InvalidCIDRContentIsRejected(t *testing.T) {
 			`from[0].ipBlock.cidr: invalid CIDR "10.0.0.1": `},
 		{"host bits set", map[string]any{"cidr": "10.0.0.1/8"},
 			`from[0].ipBlock.cidr: invalid CIDR "10.0.0.1/8": `},
+		// The leading-zero cases pin the strict validator's own reason: the
+		// netip.ParsePrefix fallback also refuses a leading zero, with the same
+		// "invalid CIDR" prefix, so without the reason these would pass with strict
+		// validation switched off.
 		{"leading zeros", map[string]any{"cidr": "010.0.0.0/8"},
-			`from[0].ipBlock.cidr: invalid CIDR "010.0.0.0/8": `},
+			`from[0].ipBlock.cidr: invalid CIDR "010.0.0.0/8": must not have leading 0s`},
+		{"leading zeros in except", map[string]any{"cidr": "10.0.0.0/8", "except": []any{"010.1.0.0/16"}},
+			`from[0].ipBlock.except[0]: invalid CIDR "010.1.0.0/16": must not have leading 0s`},
 		{"ipv4-mapped ipv6", map[string]any{"cidr": "::ffff:10.0.0.0/104"},
 			`from[0].ipBlock.cidr: invalid CIDR "::ffff:10.0.0.0/104": `},
 		{"malformed except", map[string]any{"cidr": "10.0.0.0/8", "except": []any{"10.1.0.0/16", "also-bad"}},
