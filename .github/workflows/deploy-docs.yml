@@ -90,6 +90,7 @@ jobs:
       with:
         go-version: ${{ steps.go-version.outputs.version }}
         check-latest: true
+        cache: false
 
     - name: Read yq version from mise.toml
       id: yq-version
