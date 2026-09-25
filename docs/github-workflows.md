@@ -860,16 +860,25 @@ a Flux plugin, not the Flux CLI itself.
 The runners are ephemeral ARC pods, so nothing on disk survives between jobs — everything
 useful must round-trip through the cache server.
 
-**Module cache** (dependency-only, one combined step per Go job):
+**Module cache** (dependency-only, split restore + save per Go job, like the build cache
+below):
 
 ```yaml
-- name: Cache Go modules
-  uses: actions/cache@v6
+- name: Restore Go modules cache
+  id: gomod
+  uses: actions/cache/restore@v6
   with:
     path: ~/go/pkg/mod
     key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
     restore-keys: |
       ${{ runner.os }}-gomod-
+# ... end of job ...
+- name: Save Go modules cache
+  if: success() && steps.gomod.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+  uses: actions/cache/save@v6
+  with:
+    path: ~/go/pkg/mod
+    key: ${{ steps.gomod.outputs.cache-primary-key }}
 ```
 
 **Go build cache** (`~/.cache/go-build`) uses split `actions/cache/restore` + `actions/cache/save`
@@ -889,7 +898,7 @@ each other's entry:
       ${{ runner.os }}-${{ runner.arch }}-go-<GOVER>-gocache-<purpose>-
 # ... compile / test ...
 - name: Save Go build cache
-  if: success() && steps.gocache.outputs.cache-hit != 'true'
+  if: success() && steps.gocache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
   uses: actions/cache/save@v6
   with:
     path: ~/.cache/go-build
@@ -899,8 +908,8 @@ each other's entry:
 Purpose prefixes: `gocache-validate-`, `gocache-test-race-cover-`, `gocache-security-`,
 `gocache-build-` (the `cross-platform` job adds `<os>-<arch>` because cross-compiled artifacts
 differ per target). The source hash covers `**/*.go`, `go.mod`, `go.sum`, `Makefile`, and
-`**/testdata/**`. The save runs only on a non-exact (fallback/miss) restore and only when the
-run succeeded, so a broken build never publishes a cache.
+`**/testdata/**`. The save runs only on a non-exact (fallback/miss) restore, only when the
+run succeeded (so a broken build never publishes a cache), and only on `main` (see below).
 
 **Cross-ref scoping caveat.** GitHub caches are ref-scoped: a `pull_request` cache lives on
 `refs/pull/N/merge` and is **not** visible to the `merge_group` (merge-queue) run — verified
@@ -910,6 +919,15 @@ main's cache via **restore-key fallback** (not an exact hit) and Go reuses uncha
 entries internally. This lowers the absolute cost of both runs but does **not** deduplicate the
 PR↔queue build — that duplication is inherent to the merge queue and cannot be removed with
 GitHub-scoped caches.
+
+**Saves are default-branch only.** Because nothing but the PR itself can read a PR-scoped entry,
+and the `gh-readonly-queue/*` branch a queue run saves to is deleted right after the run, every
+save step is gated on `github.ref == 'refs/heads/main'`. Saving from those refs never helps a
+later run; it only fills the size-capped cache server, whose LRU eviction then pushes out the
+`main` entries every run actually restores. The same rule applies to any new cache step: use
+split restore/save with the save gated to `main`, never the combined `actions/cache` (which
+saves on a miss from any ref). Small version-keyed tool caches (yq, Hugo, lychee, Hugo modules)
+are the exception: their key rarely changes, so the combined form writes almost nothing.
 
 Cache and artifact traffic routes through an in-cluster cache server. Setting
 `ACTIONS_RESULTS_URL` in the workflow `env:` block ensures upload/download-artifact and

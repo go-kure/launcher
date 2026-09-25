@@ -162,8 +162,9 @@ jobs:
         go-version: ${{ steps.go-version.outputs.version }}
         cache: false
 
-    - name: Cache Go modules
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+    - name: Restore Go modules cache
+      id: gomod
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
@@ -299,12 +300,23 @@ jobs:
           make lint
         fi
 
+    # Default-branch only: a PR's or merge-queue run's own cache entry is dead the moment it
+    # merges (GitHub scopes a cache to the branch that wrote it and its descendants), so saving
+    # from those refs only inflates the shared actions-cache bucket for no restore benefit.
+    # Restores still fall back to the main-branch entry via restore-keys above.
     - name: Save Go build cache
-      if: success() && steps.gocache.outputs.cache-hit != 'true'
+      if: success() && steps.gocache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.cache/go-build
         key: ${{ steps.gocache.outputs.cache-primary-key }}
+
+    - name: Save Go modules cache
+      if: success() && steps.gomod.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ steps.gomod.outputs.cache-primary-key }}
 
   action-pins:
     name: action-pins
@@ -461,8 +473,9 @@ jobs:
         go-version: ${{ steps.go-version.outputs.version }}
         cache: false
 
-    - name: Cache Go modules
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+    - name: Restore Go modules cache
+      id: gomod
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
@@ -499,12 +512,23 @@ jobs:
 
     # Save only on non-exact restore (fallback/miss) and only if the run succeeded, so a
     # broken build never publishes a cache. Refreshes the per-tree entry for main-warming.
+    # Default-branch only: a PR's or merge-queue run's own cache entry is dead the moment it
+    # merges (GitHub scopes a cache to the branch that wrote it and its descendants), so saving
+    # from those refs only inflates the shared actions-cache bucket for no restore benefit.
+    # Restores still fall back to the main-branch entry via restore-keys above.
     - name: Save Go build cache
-      if: success() && steps.gocache.outputs.cache-hit != 'true'
+      if: success() && steps.gocache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.cache/go-build
         key: ${{ steps.gocache.outputs.cache-primary-key }}
+
+    - name: Save Go modules cache
+      if: success() && steps.gomod.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ steps.gomod.outputs.cache-primary-key }}
 
     - name: Upload test log
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -555,8 +579,9 @@ jobs:
         go-version: ${{ steps.go-version.outputs.version }}
         cache: false
 
-    - name: Cache Go modules
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+    - name: Restore Go modules cache
+      id: gomod
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
@@ -629,12 +654,23 @@ jobs:
         #   untagged so no bump can clear it — see docs/github-workflows.md.
         allowlist: 'GO-2026-5377'
 
+    # Default-branch only: a PR's or merge-queue run's own cache entry is dead the moment it
+    # merges (GitHub scopes a cache to the branch that wrote it and its descendants), so saving
+    # from those refs only inflates the shared actions-cache bucket for no restore benefit.
+    # Restores still fall back to the main-branch entry via restore-keys above.
     - name: Save Go build cache
-      if: success() && steps.gocache.outputs.cache-hit != 'true'
+      if: success() && steps.gocache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.cache/go-build
         key: ${{ steps.gocache.outputs.cache-primary-key }}
+
+    - name: Save Go modules cache
+      if: success() && steps.gomod.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ steps.gomod.outputs.cache-primary-key }}
 
     - name: Check for outdated dependencies
       run: make outdated
@@ -753,8 +789,9 @@ jobs:
         go-version: ${{ steps.go-version.outputs.version }}
         cache: false
 
-    - name: Cache Go modules
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+    - name: Restore Go modules cache
+      id: gomod
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
@@ -784,12 +821,23 @@ jobs:
     - name: Build kurel
       run: make build-kurel
 
+    # Default-branch only: a PR's or merge-queue run's own cache entry is dead the moment it
+    # merges (GitHub scopes a cache to the branch that wrote it and its descendants), so saving
+    # from those refs only inflates the shared actions-cache bucket for no restore benefit.
+    # Restores still fall back to the main-branch entry via restore-keys above.
     - name: Save Go build cache
-      if: success() && steps.gocache.outputs.cache-hit != 'true'
+      if: success() && steps.gocache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.cache/go-build
         key: ${{ steps.gocache.outputs.cache-primary-key }}
+
+    - name: Save Go modules cache
+      if: success() && steps.gomod.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ steps.gomod.outputs.cache-primary-key }}
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -1205,8 +1253,9 @@ jobs:
         go-version: ${{ steps.go-version.outputs.version }}
         cache: false
 
-    - name: Cache Go modules
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+    - name: Restore Go modules cache
+      id: gomod
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-gomod-${{ hashFiles('**/go.sum') }}
@@ -1254,12 +1303,23 @@ jobs:
         go build -ldflags="-s -w -X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.BuildTime=${BUILD_TIME}" \
           -o bin/kurel-${{ matrix.os }}-${{ matrix.arch }}${EXT} ./cmd/kurel
 
+    # Default-branch only: a PR's or merge-queue run's own cache entry is dead the moment it
+    # merges (GitHub scopes a cache to the branch that wrote it and its descendants), so saving
+    # from those refs only inflates the shared actions-cache bucket for no restore benefit.
+    # Restores still fall back to the main-branch entry via restore-keys above.
     - name: Save Go build cache
-      if: success() && steps.gocache.outputs.cache-hit != 'true'
+      if: success() && steps.gocache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.cache/go-build
         key: ${{ steps.gocache.outputs.cache-primary-key }}
+
+    - name: Save Go modules cache
+      if: success() && steps.gomod.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ steps.gomod.outputs.cache-primary-key }}
 
     - name: Upload cross-platform artifacts
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
