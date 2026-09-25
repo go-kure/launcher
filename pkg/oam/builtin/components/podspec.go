@@ -398,9 +398,11 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 	if raw, present, err := parseObjectField(props, "podResources", "podResources"); err != nil {
 		return PodSpecConfig{}, err
 	} else if present {
-		// parseResources only type-asserts requests/limits, so close the object
-		// here: a typo'd key or a non-object requests/limits value must fail,
-		// not silently emit no pod-level resources.
+		// Close the object here: a typo'd key must fail, not silently emit no
+		// pod-level resources. parseResources refuses a non-object
+		// requests/limits itself, but under its own `resources.<k>` label; the
+		// pre-check below is kept so the error names the key the author wrote
+		// (`podResources.<k>`).
 		if err := rejectUnknownKeys(raw, []string{"requests", "limits"}, "podResources"); err != nil {
 			return PodSpecConfig{}, err
 		}

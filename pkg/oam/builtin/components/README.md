@@ -1262,9 +1262,13 @@ already refused these shapes in an authored document. One authored shape does
 change: `port` is declared `integer` with no maximum, so an integer outside the
 int32 range (`port: 5000000000`) passed validation and built as though no port
 were authored (80 on `webservice`, none on `daemonset`/`statefulset`); it is
-now refused, with `parseInt32Field`'s existing wording (`port: must be an
-integer, got int`). The `postgresql` and
-`helmchart` handlers' own top-level reads were not part of that change.
+now refused by value, not by type (`port: must be an integer within int32
+range, got 5000000000`). `parseInt32Field` words that case apart from a wrong
+type for every field it reads, so an out-of-range `replicas` or
+`minReadySeconds` gets the same range message. `postgresql`'s other top-level
+reads (`storageSize`, `backup`, `pooler`, …; tracked separately — its
+`resources` read is covered above) and `helmchart`'s were not part of that
+change.
 
 - **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
   plus the full `DeploymentSpec`-level surface they share with `deployment` —

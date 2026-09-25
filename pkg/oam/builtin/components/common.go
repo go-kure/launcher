@@ -1812,7 +1812,9 @@ func parseBoolField(raw map[string]any, key, label string) (*bool, error) {
 }
 
 // parseInt32Field mirrors parseBoolField for toInt32-convertible fields,
-// including its null-reads-as-absence contract.
+// including its null-reads-as-absence contract. A whole number outside the
+// int32 range gets its own message: toInt32 refuses it with the same ok=false
+// as a wrong type, but "must be an integer, got int" would contradict itself.
 func parseInt32Field(raw map[string]any, key, label string) (int32, bool, error) {
 	v, present := authoredValue(raw, key)
 	if !present {
@@ -1820,9 +1822,34 @@ func parseInt32Field(raw map[string]any, key, label string) (int32, bool, error)
 	}
 	i, ok := toInt32(v)
 	if !ok {
+		if s, whole := wholeNumberString(v); whole {
+			return 0, false, errors.Errorf("%s: must be an integer within int32 range, got %s", label, s)
+		}
 		return 0, false, errors.Errorf("%s: must be an integer, got %T", label, v)
 	}
 	return i, true, nil
+}
+
+// wholeNumberString reports whether v is a whole number of one of the kinds
+// toInt32/toInt64 read (int, int32, int64, or a finite integral float64) and
+// renders it in plain decimal — never float64's exponent form, so a
+// JSON-decoded 5000000000 prints as authored rather than as 5e+09.
+func wholeNumberString(v any) (string, bool) {
+	switch n := v.(type) {
+	case int:
+		return strconv.FormatInt(int64(n), 10), true
+	case int32:
+		return strconv.FormatInt(int64(n), 10), true
+	case int64:
+		return strconv.FormatInt(n, 10), true
+	case float64:
+		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) {
+			return "", false
+		}
+		return strconv.FormatFloat(n, 'f', -1, 64), true
+	default:
+		return "", false
+	}
 }
 
 // parseInt64Field mirrors parseBoolField for toInt64-convertible fields,
