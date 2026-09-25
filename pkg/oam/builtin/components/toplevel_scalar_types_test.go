@@ -176,6 +176,9 @@ func TestWebserviceEndpoints_Port(t *testing.T) {
 // An integer beyond int32 is the one port shape schema validation lets through
 // (the schema declares `integer` with no maximum); toInt32's ok used to drop it
 // for the default, and it must now be refused on each kind that reads `port`.
+// The refusal names the range, not the type: the value IS an integer, so
+// "must be an integer, got int" would contradict itself. The float64 rows are
+// the shape a JSON-decoded document delivers.
 func TestPort_OutOfInt32RangeIsRejected(t *testing.T) {
 	for _, k := range []struct {
 		kind    string
@@ -185,11 +188,21 @@ func TestPort_OutOfInt32RangeIsRejected(t *testing.T) {
 		{"daemonset", &components.DaemonsetHandler{}},
 		{"statefulset", &components.StatefulsetHandler{}},
 	} {
-		t.Run(k.kind, func(t *testing.T) {
-			err := convert(k.handler, k.kind, withProp(imageBase, "port", 5000000000))
-			if err == nil || !strings.Contains(err.Error(), "port: must be an integer") {
-				t.Fatalf("error = %v, want the port refusal", err)
-			}
-		})
+		for _, v := range []struct {
+			name  string
+			value any
+			want  string
+		}{
+			{"int", 5000000000, "port: must be an integer within int32 range, got 5000000000"},
+			{"negative int64", int64(-5000000000), "port: must be an integer within int32 range, got -5000000000"},
+			{"float64", float64(5000000000), "port: must be an integer within int32 range, got 5000000000"},
+		} {
+			t.Run(k.kind+"/"+v.name, func(t *testing.T) {
+				err := convert(k.handler, k.kind, withProp(imageBase, "port", v.value))
+				if err == nil || !strings.Contains(err.Error(), v.want) {
+					t.Fatalf("error = %v, want it to contain %q", err, v.want)
+				}
+			})
+		}
 	}
 }
