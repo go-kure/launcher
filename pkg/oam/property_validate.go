@@ -852,15 +852,25 @@ func enumContainsValue(enum []any, value any) bool {
 	return false
 }
 
+// equalPropertyValues reports whether value b equals Enum member a. The order
+// matters: a is always the declared member (enumContainsValue passes it first and
+// the recursion below keeps the sides), b the validated value.
 func equalPropertyValues(a, b any) bool {
-	// A null equals a null and nothing else, by the null contract rather than by Go
-	// type. It reaches here only where the value's normalization leaves a null in
-	// place (enumMemberHoldsStrippedNull admits a member holding one there), and a
-	// typed nil would otherwise compare as the empty collection its type assertion
-	// yields: a member's []any(nil) matching an authored `[]`, or an authored null
-	// failing to match a rule's map[string]any(nil).
-	if an, bn := isNullValue(a), isNullValue(b); an || bn {
-		return an && bn
+	// A member's null equals a null value and nothing else, by the null contract
+	// rather than by Go type. A member reaches here holding a null only where the
+	// value's normalization leaves a null in place (enumMemberHoldsStrippedNull
+	// admits it there), and a typed nil member would otherwise compare as the empty
+	// collection its type assertion yields: a member's []any(nil) matching an
+	// authored `[]`, or an authored null failing to match a member's
+	// map[string]any(nil).
+	//
+	// The guard is one-sided on purpose. Where only the VALUE holds a null and the
+	// member does not, comparison falls through unchanged: a value's typed nil under
+	// an undeclared key is outside every normalization rule, and it has always
+	// compared as its empty collection there, so it matches a member's `[]`/`{}`.
+	// Refusing it would be a new policy for undeclared keys, not this fix.
+	if isNullValue(a) {
+		return isNullValue(b)
 	}
 	if sa, ok := asStringValue(a); ok {
 		sb, ok := asStringValue(b)

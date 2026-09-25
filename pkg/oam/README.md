@@ -442,8 +442,12 @@ of thing:
   an array element with no `Items` schema, and anything below a schema with no
   declared `Type` pass through as written. A value can hold a null there, so a member
   holding the same null matches it and is accepted — `{opaque: null}` against
-  `Enum: [{opaque: null}]` on an open object. A null compares equal only to a null,
-  whatever its Go type, and never to an empty collection. A member that cannot match
+  `Enum: [{opaque: null}]` on an open object. A member's null compares equal only to
+  a null value, whatever either side's Go type, and never to an empty collection. The
+  rule is one-sided: where only the *value* holds a typed nil under such a key and the
+  member holds an empty `[]`/`{}`, the two still match, as they always have — an
+  undeclared key is outside every normalisation rule, so this does not start
+  distinguishing a typed nil from an empty collection there. A member that cannot match
   for another reason — the wrong shape for the schema's type, or a key a closed
   object refuses — is still refused for any null it holds, as before.
 

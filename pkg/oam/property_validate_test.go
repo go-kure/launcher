@@ -812,6 +812,58 @@ func TestValidatePropertyValue_EnumMemberNullWhereNothingStripsIt(t *testing.T) 
 	})
 }
 
+// TestValidatePropertyValue_EnumValueTypedNilUnderOpaqueKeyKeepsMatching pins the
+// review finding on go-kure/launcher#481's null guard: it must separate null from
+// non-null only where the MEMBER holds the null. A VALUE holding a typed nil under an
+// AdditionalProperties key is outside every normalization rule, and before the guard
+// it compared as the empty collection its type yields — so it matched a member
+// holding that empty collection. The guard briefly turned that into a rejection,
+// a new policy for undeclared keys nobody asked for.
+func TestValidatePropertyValue_EnumValueTypedNilUnderOpaqueKeyKeepsMatching(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		member any
+		value  any
+	}{
+		{"typed nil list vs empty list", map[string]any{"tags": []any{}}, map[string]any{"tags": []string(nil)}},
+		{"typed nil map vs empty map", map[string]any{"tags": map[string]any{}}, map[string]any{"tags": map[string]string(nil)}},
+		{"typed nil any-list vs empty list", map[string]any{"tags": []any{}}, map[string]any{"tags": []any(nil)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true, Enum: []any{tc.member}}
+			if _, err := validatePropertyValue(schema, tc.value, "p"); err != nil {
+				t.Fatalf("a value's typed nil under an opaque key must still match an empty member, got: %v", err)
+			}
+		})
+	}
+
+	// Unchanged on the other side: an untyped nil value never matched a non-null
+	// member (it has no collection type to compare as), and still does not.
+	schema := PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true, Enum: []any{map[string]any{"tags": []any{}}}}
+	_, err := validatePropertyValue(schema, map[string]any{"tags": nil}, "p")
+	if err == nil || !strings.Contains(err.Error(), "not in allowed set") {
+		t.Errorf("an untyped null value must not match an empty-list member, got: %v", err)
+	}
+
+	// The comparison is directional: a is the member, b the value.
+	for _, tc := range []struct {
+		a, b any
+		want bool
+	}{
+		{[]any{}, []string(nil), true},
+		{map[string]any{}, map[string]string(nil), true},
+		{[]any{}, nil, false},
+		{[]any(nil), []any{}, false},
+		{[]any(nil), map[string]any(nil), true},
+		{nil, []string(nil), true},
+		{map[string]any(nil), "x", false},
+	} {
+		if got := equalPropertyValues(tc.a, tc.b); got != tc.want {
+			t.Errorf("equalPropertyValues(member %#v, value %#v) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
 // deepCopyTestValue copies the []any/map[string]any literals the Enum tests build, so a
 // value handed to the validator never shares storage with the member it is compared to.
 func deepCopyTestValue(v any) any {
