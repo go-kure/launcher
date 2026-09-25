@@ -135,16 +135,18 @@ name must be a DNS-1123 *label*, not merely a subdomain.** A component name is
 validated as a DNS-1123 subdomain (`pkg/oam/validate.go`), which permits dots,
 and that name reaches `metadata.name` and the `app:` label unchanged — both
 accept it. It also becomes the name of the pod's main container, and a
-container name is a DNS-1123 label, which forbids dots. `batch.worker` would
-therefore build a workload the API server rejects at admission, naming
-`spec.template.spec.containers[0].name`, a field the author never wrote. All
+container name is a DNS-1123 label, which forbids dots and allows at most 63
+characters where a subdomain allows 253. `batch.worker` would therefore build
+a workload the API server rejects at admission, naming
+`spec.template.spec.containers[0].name`, a field the author never wrote; an
+undotted name longer than 63 characters is refused by the same check. All
 seven workload kinds (`webservice`, `worker`, `deployment`, `statefulset`,
 `daemonset`, `cronjob`, `job`) now refuse such a name at generation, in the one
 builder they share. The name is refused rather than rewritten to `batch-worker`:
 a derived name would silently rename the container and could collide with an
 init container or sidecar of that name. Component types that name no container
 after the component (`helmchart`, `manifests`, `passthrough`, …) keep accepting
-a dotted name, so the component-name rule itself is unchanged. `job` refused
+a dotted or longer name, so the component-name rule itself is unchanged. `job` refused
 the name from its introduction; the other six gained the check in
 go-kure/launcher#407. Nothing that previously produced an applyable manifest is
 affected — such a document never did.

@@ -65,6 +65,28 @@ func TestWorkloadHandlers_DottedComponentName_Refused(t *testing.T) {
 	}
 }
 
+// TestWorkloadHandlers_LongComponentName_Refused pins the label's other rule:
+// a DNS-1123 label is at most 63 characters, a component name (a subdomain) up
+// to 253. An undotted 64-character name is refused by the same check, so the
+// message must state the length rule too, not only the dot.
+func TestWorkloadHandlers_LongComponentName_Refused(t *testing.T) {
+	name := strings.Repeat("a", 64)
+	for _, tc := range containerNameCases {
+		t.Run(tc.typ, func(t *testing.T) {
+			_, err := generateWorkload(t, tc.handler, name, tc.typ, tc.props)
+			if err == nil {
+				t.Fatalf("Generate accepted a 64-character component name for type %s, want a refusal — "+
+					"the emitted container name would be rejected at admission", tc.typ)
+			}
+			for _, want := range []string{name, "container name", "DNS-1123 label", "at most 63 characters"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q, want it to mention %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 // TestWorkloadHandlers_UndottedComponentName_EmitsValidContainerName is the
 // counterpart: an undotted name still builds, so the refusal above is of the
 // dot and not of every name, and the container name that is emitted passes
