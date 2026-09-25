@@ -48,8 +48,9 @@ func TestTraitConfigs_ComponentName(t *testing.T) {
 			handler: &traits.CiliumNetworkPolicyHandler{},
 			app:     newApp(component, "default"),
 			trait: &oam.Trait{Type: "cilium-networkpolicy", Properties: map[string]any{
-				"name":    "test-policy",
-				"ingress": []any{map[string]any{"fromEndpoints": []any{map[string]any{"matchLabels": map[string]any{"app": "frontend"}}}}},
+				"name":             "test-policy",
+				"endpointSelector": map[string]any{"matchLabels": map[string]any{"app": "api"}},
+				"ingress":          []any{map[string]any{"fromEndpoints": []any{map[string]any{"matchLabels": map[string]any{"app": "frontend"}}}}},
 			}},
 		},
 		{

@@ -20,8 +20,9 @@ func TestCiliumNetworkPolicyHandler_Apply_PropagatesNamespace(t *testing.T) {
 	trait := &oam.Trait{
 		Type: "cilium-networkpolicy",
 		Properties: map[string]any{
-			"name":   "allow-egress",
-			"egress": []any{},
+			"name":             "allow-egress",
+			"endpointSelector": map[string]any{"matchLabels": map[string]any{"app": "api"}},
+			"egress":           []any{map[string]any{"toEndpoints": []any{map[string]any{}}}},
 		},
 	}
 	if err := h.Apply(trait, app, bundle); err != nil {
@@ -133,7 +134,7 @@ func TestCiliumNetworkPolicyConfig_Generate_EndpointSelectorGapIsKnown(t *testin
 	cfg := &traits.CiliumNetworkPolicyConfig{
 		Name:             "selector-gap",
 		EndpointSelector: map[string]any{"matchLabels": map[string]any{"app": "frontend"}, "bogusKey": "ignored"},
-		Egress:           []any{},
+		Egress:           []any{map[string]any{"toEndpoints": []any{map[string]any{}}}},
 	}
 	if _, err := cfg.Generate(stack.NewApplication("myapp", "production", nil)); err != nil {
 		t.Skipf("endpointSelector is now strictly decoded (%v) — remove this test and the "+
