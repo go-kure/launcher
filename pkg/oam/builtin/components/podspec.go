@@ -1152,9 +1152,11 @@ type mainContainerInput struct {
 // rules. metadata.name and the `app:` label both accept a dotted name — a
 // DNS-1123 *subdomain*, which is what validateComponent enforces
 // (pkg/oam/validate.go) — but corev1.Container.Name is a DNS-1123 *label*,
-// which forbids dots. So `batch.worker` is a valid component name that would
-// build a workload the API server refuses at admission, with an error naming a
-// field the author never wrote. The check lives here rather than in
+// which forbids dots and caps the length at 63 characters where a subdomain
+// allows 253. So `batch.worker` is a valid component name that would build a
+// workload the API server refuses at admission, with an error naming a field
+// the author never wrote; the same check refuses an undotted name longer than
+// 63 characters, so its message states both rules. The check lives here rather than in
 // validateComponent because component types that name no container after the
 // component (helmchart, manifests, custom types, …) legitimately accept a
 // dotted name; checking in the one builder every workload kind goes through
@@ -1165,7 +1167,8 @@ func buildMainContainer(name string, in mainContainerInput) (*corev1.Container, 
 	if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
 		return nil, errors.Errorf("component name %q cannot be a container name: %s; "+
 			"the workload's main container is named after the component, and a container name is a DNS-1123 label "+
-			"(no dots), stricter than the DNS-1123 subdomain a component name may otherwise be",
+			"(no dots, at most 63 characters), stricter than the DNS-1123 subdomain (up to 253 characters) "+
+			"a component name may otherwise be",
 			name, strings.Join(errs, "; "))
 	}
 	container := &corev1.Container{
