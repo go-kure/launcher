@@ -258,6 +258,9 @@ type LoweringContext struct {
 // NameAllocator hands out deterministic, collision-free generated names within one
 // lowering run (D2). A name already claimed by a different origin is a hard error
 // naming both origins — a collision fails the build, never silently overwrites.
+// The one exception is EmitOrAdopt: when a name was first claimed through it, a
+// repeat EmitOrAdopt claim for the same content identity, from any origin, adopts
+// the existing element instead of colliding.
 type NameAllocator struct {
 	taken map[string]nameClaim
 	// round is the fixpoint round currently being processed, set by runLowering
@@ -274,10 +277,12 @@ type NameAllocator struct {
 
 // nameClaim records which origin claimed a generated name, and in which round, so
 // Reserve's error message can say whether the collision was within one round or
-// across rounds.
+// across rounds. identity is the content identity an EmitOrAdopt claim was made
+// for; it is empty for a Reserve claim, which is never adoptable.
 type nameClaim struct {
-	origin Origin
-	round  int
+	origin   Origin
+	round    int
+	identity string
 }
 
 // NewNameAllocator returns an empty NameAllocator — the same constructor the
@@ -343,15 +348,72 @@ func (n *NameAllocator) Reserve(name string, origin Origin) error {
 	return nil
 }
 
+// EmitOrAdopt claims name for an element whose content is fully determined by
+// identity — for a shared derived object, a string built from every input that
+// shapes it (its kind, URL, interval, …). It is the one exception to Reserve's
+// "every repeat claim collides" rule, and it is sound for the reason Reserve's
+// carve-out was not: equal identity means equal content, so two claimants cannot be
+// two different elements.
+//
+// The first claim of name returns adopted=false: the caller emits the element. A
+// later claim with the same identity, from any origin and in any round, returns
+// adopted=true: the element already exists and the caller must not emit it again.
+// Sibling components of one round cannot see each other's output
+// (LoweringContext.Document is read-only within a round), so this is how they share
+// one object instead of colliding on its name.
+//
+// A claim with a different identity, a name Reserve already holds, and an empty
+// identity are all hard errors; Reserve likewise still refuses a name claimed here.
+// Keyed on (namespace, name), like Reserve.
+func (n *NameAllocator) EmitOrAdopt(name, identity string, origin Origin) (adopted bool, err error) {
+	if identity == "" {
+		return false, errors.Errorf("lowering: %s claimed generated name %q with an empty content identity", origin, name)
+	}
+	key := origin.Namespace + "\x00" + name
+	if prior, ok := n.taken[key]; ok {
+		if prior.identity == "" {
+			return false, errors.Errorf("lowering: generated name %q collides — already reserved by %s, and a reserved name cannot be adopted by %s", name, prior.origin, origin)
+		}
+		if prior.identity != identity {
+			return false, errors.Errorf("lowering: generated name %q collides — %s emitted it for different content than %s wants (%q vs %q)", name, prior.origin, origin, prior.identity, identity)
+		}
+		return true, nil
+	}
+	n.taken[key] = nameClaim{origin: origin, round: n.round, identity: identity}
+	return false, nil
+}
+
 // Name builds "<base>-<suffix>", validates it as a DNS-1123 subdomain, reserves it
 // against origin, and returns it.
 func (n *NameAllocator) Name(base, suffix string, origin Origin) (string, error) {
-	name := base + "-" + suffix
-	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
-		return "", errors.Errorf("lowering: generated name %q is not a valid DNS-1123 subdomain: %s", name, strings.Join(errs, "; "))
+	name, err := generatedName(base, suffix)
+	if err != nil {
+		return "", err
 	}
 	if err := n.Reserve(name, origin); err != nil {
 		return "", err
+	}
+	return name, nil
+}
+
+// NameOrAdopt is Name for EmitOrAdopt: it builds and validates "<base>-<suffix>",
+// then claims it for identity. adopted reports that the element already exists.
+func (n *NameAllocator) NameOrAdopt(base, suffix, identity string, origin Origin) (name string, adopted bool, err error) {
+	name, err = generatedName(base, suffix)
+	if err != nil {
+		return "", false, err
+	}
+	adopted, err = n.EmitOrAdopt(name, identity, origin)
+	if err != nil {
+		return "", false, err
+	}
+	return name, adopted, nil
+}
+
+func generatedName(base, suffix string) (string, error) {
+	name := base + "-" + suffix
+	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+		return "", errors.Errorf("lowering: generated name %q is not a valid DNS-1123 subdomain: %s", name, strings.Join(errs, "; "))
 	}
 	return name, nil
 }

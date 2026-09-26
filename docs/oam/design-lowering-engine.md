@@ -41,7 +41,11 @@ touch traits, components, and policies, but not documents" declaratively.
 Holds, at a real but bounded cost. `NameAllocator` (`lowering.go:140-172`) is the whole
 naming mechanism: deterministic `<base>-<suffix>` generation plus collision detection
 keyed by authored `Origin`, so two rules independently choosing the same generated name
-fail loudly and name both origins rather than silently overwriting. `Origin` provenance
+fail loudly and name both origins rather than silently overwriting. The exception is a
+claim through `EmitOrAdopt` / `NameOrAdopt` for an element whose content is fully
+determined by an identity: a repeat claim with the same identity, from any origin, adopts
+the element already emitted, while a different identity, or a name first taken by a plain
+`Reserve` / `Name`, still collides. `Origin` provenance
 (`lowering.go:46-52`) rides as unexported `origin *Origin` / `sealed bool` fields on
 `Trait`/`Component`/`ApplicationPolicy`/`Application` — yaml.v3 ignores unexported
 fields, so this cost nothing in the wire format, and value-copy semantics at existing
