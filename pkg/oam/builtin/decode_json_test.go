@@ -141,6 +141,22 @@ func TestUnreachableJSONFields(t *testing.T) {
 	}
 }
 
+// RecursiveEmbed embeds a pointer to itself, the one shape whose embedded fields
+// never run out; encoding/json stops at the repeat, and so must the check. It is
+// exported so the embedded field is exported too, as it would be in a spec type.
+type RecursiveEmbed struct {
+	*RecursiveEmbed
+	Name string `json:"name"`
+}
+
+// TestUnreachableJSONFields_RecursiveEmbedding: a type that embeds itself is
+// walked once, instead of recursing until the stack overflows.
+func TestUnreachableJSONFields_RecursiveEmbedding(t *testing.T) {
+	if got := builtin.UnreachableJSONFields(reflect.TypeFor[RecursiveEmbed](), "name"); !slices.Equal(got, []string{"name"}) {
+		t.Errorf("UnreachableJSONFields = %v, want [name]", got)
+	}
+}
+
 // TestUnreachableJSONFields_HelmReleaseSpec shows the intended use: a terminal that
 // owns keys asserts none of them shadows a spec field, against an exclusion list
 // that should stay empty.
