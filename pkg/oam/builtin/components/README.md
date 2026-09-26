@@ -1808,7 +1808,10 @@ not part of either change.
   `databases[0].extensions[1]: must be an object, got string`) where it used
   to be dropped, so `pooler.enabled: "true"` no longer builds a cluster with
   no pooler and `backup: "s3"` no longer builds one with no backup; an
-  explicit null is absence. Two further shapes that used to vanish are now
+  explicit null is absence, typed or untyped, so a typed-nil `storageSize`
+  takes the policy default and a typed-nil `pooler.instances` or
+  `replication.synchronous.number` takes the handler default rather than
+  being refused as a bad number. Two further shapes that used to vanish are now
   errors: a non-string `managedRoles[].inRoles` entry, and an
   `externalClusters` entry without a `name`. `Endpoints` reads
   `pooler.enabled` the same way, so it refuses the wrong type instead of

@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	"github.com/go-kure/kure/pkg/stack"
+
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
@@ -129,6 +132,95 @@ func TestPostgresql_NullIsAbsence(t *testing.T) {
 	}
 	if cfg.Version != "16" || cfg.ObjectStore != nil || cfg.PoolerEnabled || cfg.Databases != nil || cfg.BackupRetentionPolicy != "" {
 		t.Errorf("nulls did not read as absent: %+v", cfg)
+	}
+}
+
+// TestPostgresql_TypedNullMatchesOmitted: a typed nil in a scalar slot reads
+// exactly as an omitted key. storageSize used to count as authored because the
+// presence check was `props[key] != nil`, which a typed nil passes, so the 1Gi
+// fallback beat a policy default; pooler.instances and replication.synchronous.number
+// refused a typed nil as an invalid number.
+func TestPostgresql_TypedNullMatchesOmitted(t *testing.T) {
+	policy := &stubPolicy{defaultStorageSize: "20Gi"}
+	build := func(t *testing.T, props map[string]any) *components.PostgresqlConfig {
+		t.Helper()
+		pc := newPostgresqlApp(t, props)
+		if err := stack.ApplicationConfig(pc).(oam.Enforceable).ApplyPolicy(policy); err != nil {
+			t.Fatalf("ApplyPolicy: %v", err)
+		}
+		return pc
+	}
+
+	t.Run("storageSize", func(t *testing.T) {
+		got := build(t, map[string]any{"storageSize": (*string)(nil)}).StorageSize
+		want := build(t, map[string]any{}).StorageSize
+		if got != want {
+			t.Errorf("typed-nil storageSize = %q, omitted = %q", got, want)
+		}
+	})
+	t.Run("pooler.instances", func(t *testing.T) {
+		got := build(t, map[string]any{"pooler": map[string]any{"enabled": true, "instances": (*int)(nil)}}).PoolerInstances
+		want := build(t, map[string]any{"pooler": map[string]any{"enabled": true}}).PoolerInstances
+		if got != want {
+			t.Errorf("typed-nil pooler.instances = %d, omitted = %d", got, want)
+		}
+	})
+	t.Run("replication.synchronous.number", func(t *testing.T) {
+		sync := func(extra map[string]any) map[string]any {
+			s := map[string]any{"method": "any"}
+			for k, v := range extra {
+				s[k] = v
+			}
+			return map[string]any{"replication": map[string]any{"synchronous": s}}
+		}
+		got := build(t, sync(map[string]any{"number": (*int)(nil)})).SynchronousNumber
+		want := build(t, sync(nil)).SynchronousNumber
+		if got != want {
+			t.Errorf("typed-nil synchronous.number = %d, omitted = %d", got, want)
+		}
+	})
+}
+
+// TestPostgresql_ManagedRoleFlagsAreIndependent: each boolean role flag lands on
+// its own field, in the parsed config and on the generated Cluster. Setting one
+// flag must set exactly that one, so a swapped destination (login granting
+// superuser) fails here.
+func TestPostgresql_ManagedRoleFlagsAreIndependent(t *testing.T) {
+	flags := []string{"login", "superuser", "createdb", "createrole", "replication"}
+	for _, flag := range flags {
+		t.Run(flag, func(t *testing.T) {
+			pc := newPostgresqlApp(t, map[string]any{"managedRoles": []any{
+				map[string]any{"name": "app_user", flag: true, "inherit": false},
+			}})
+			if len(pc.ManagedRoles) != 1 {
+				t.Fatalf("parsed %d roles, want 1", len(pc.ManagedRoles))
+			}
+			r := pc.ManagedRoles[0]
+			parsed := map[string]bool{
+				"login": r.Login, "superuser": r.Superuser, "createdb": r.CreateDB,
+				"createrole": r.CreateRole, "replication": r.Replication,
+			}
+			cluster := (*generatePostgresql(t, pc)[0]).(*cnpgv1.Cluster)
+			if cluster.Spec.Managed == nil || len(cluster.Spec.Managed.Roles) != 1 {
+				t.Fatalf("generated managed roles = %v, want 1", cluster.Spec.Managed)
+			}
+			rc := cluster.Spec.Managed.Roles[0]
+			generated := map[string]bool{
+				"login": rc.Login, "superuser": rc.Superuser, "createdb": rc.CreateDB,
+				"createrole": rc.CreateRole, "replication": rc.Replication,
+			}
+			for _, f := range flags {
+				if parsed[f] != (f == flag) {
+					t.Errorf("config %s = %v with only %s authored", f, parsed[f], flag)
+				}
+				if generated[f] != (f == flag) {
+					t.Errorf("Cluster role %s = %v with only %s authored", f, generated[f], flag)
+				}
+			}
+			if r.Inherit == nil || *r.Inherit || rc.Inherit == nil || *rc.Inherit {
+				t.Errorf("inherit: false not carried: config %v, Cluster %v", r.Inherit, rc.Inherit)
+			}
+		})
 	}
 }
 

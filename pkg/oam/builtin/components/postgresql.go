@@ -184,12 +184,17 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 
 	config.StorageSize = "1Gi"
-	if size, present, err := parseRawStringField(props, "storageSize", "storageSize"); err != nil {
+	// explicitStorageSize takes the parser's presence, not `props[...] != nil`: a
+	// typed nil is a non-nil interface and used to count as authored, which kept
+	// the 1Gi fallback over a policy default.
+	size, sizePresent, err := parseRawStringField(props, "storageSize", "storageSize")
+	if err != nil {
 		return nil, err
-	} else if present {
+	}
+	if sizePresent {
 		config.StorageSize = size
 	}
-	config.explicitStorageSize = props["storageSize"] != nil
+	config.explicitStorageSize = sizePresent
 
 	replicas, replicasAuthored, err := parseReplicas(props, 1)
 	if err != nil {
@@ -284,7 +289,7 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 			config.PoolerEnabled = *enabled
 		}
 		config.PoolerInstances = 3
-		if v := pooler["instances"]; v != nil {
+		if v, present := authoredValue(pooler, "instances"); present {
 			n, ok := toInt32(v)
 			if !ok {
 				return nil, errors.Errorf("invalid pooler instances value: %v", v)
@@ -403,7 +408,7 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 				}
 			}
 			config.SynchronousNumber = 1
-			if v := sync["number"]; v != nil {
+			if v, present := authoredValue(sync, "number"); present {
 				n, ok := toInt32(v)
 				if !ok {
 					return nil, errors.Errorf("invalid replication synchronous number value: %v", v)
