@@ -32,7 +32,16 @@ for their full documentation.
 ### Triggers
 
 - Push to: `main`, `develop`, `release/*`
-- Pull requests to: `main`, `develop`
+- Pull requests to: `main`, `develop` — on `opened`, `synchronize`, `reopened`, `labeled` and
+  `unlabeled`. The label events exist because two overrides are labels read from the event
+  payload: `pin-impact-ack` (pin-impact gate) and `docs-skip` (doc-gate). Without them, adding
+  either label would not re-evaluate the failed check until an unrelated push. The cost is real:
+  every PR, Renovate PRs included, gets its full label set at creation, and each label add or
+  remove starts a whole-pipeline run that the concurrency group cancels in favour of the next —
+  one superseded run per label. `strip-ack` removing a stale `pin-impact-ack` on a new commit
+  starts one more. The trigger is kept deliberately (go-kure/launcher#445). Narrowing it to those
+  two labels would need a label-aware concurrency key and a `build` job that cannot report green on
+  a no-op run; otherwise a skipped run cancels the real one and leaves a false green.
 - Merge group (merge queue's temporary branch — required checks must report here)
 - Schedule: 4am UTC daily (catch external changes)
 - Manual dispatch
