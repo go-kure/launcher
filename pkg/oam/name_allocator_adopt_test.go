@@ -104,8 +104,9 @@ func TestNameOrAdopt(t *testing.T) {
 
 // sharedSourceRule is the synthetic stand-in for a rule whose components share a
 // derived object: every "source-user" component emits its own leaf plus a source
-// component named from the url property, adopting the source when another component
-// already emitted one for the same url.
+// component under the fixed name "shared-source". The url property is the claim's
+// identity, not part of the name, so two components with the same url adopt one
+// source and two with different urls collide on the name deliberately.
 type sharedSourceRule struct{}
 
 func (sharedSourceRule) ComponentType() string { return "source-user" }
