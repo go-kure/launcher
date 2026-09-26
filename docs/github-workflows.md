@@ -926,8 +926,9 @@ save step is gated on `github.ref == 'refs/heads/main'`. Saving from those refs 
 later run; it only fills the size-capped cache server, whose LRU eviction then pushes out the
 `main` entries every run actually restores. The same rule applies to any new cache step: use
 split restore/save with the save gated to `main`, never the combined `actions/cache` (which
-saves on a miss from any ref). Small version-keyed tool caches (yq, Hugo, lychee, Hugo modules)
-are the exception: their key rarely changes, so the combined form writes almost nothing.
+saves on a miss from any ref). The `docs-build` Hugo modules cache follows the rule too, since it
+also carries `~/go/pkg/mod`. Only the small tool-binary caches keyed on a pinned version (yq,
+Hugo, lychee) keep the combined form: their key rarely changes, so they write almost nothing.
 
 Cache and artifact traffic routes through an in-cluster cache server. Setting
 `ACTIONS_RESULTS_URL` in the workflow `env:` block ensures upload/download-artifact and
