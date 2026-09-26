@@ -59,7 +59,7 @@ var validTraitTypes = map[string]bool{
 // traitComponentRestrictions maps trait types to the component types they support.
 // Traits not listed here are allowed on any component type.
 var traitComponentRestrictions = map[string]map[string]bool{
-	"scaler": {"webservice": true, "worker": true},
+	"scaler": {"webservice": true, "worker": true, "deployment": true},
 }
 
 // validate performs semantic validation on a parsed Application.

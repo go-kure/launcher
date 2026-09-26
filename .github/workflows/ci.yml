@@ -12,10 +12,18 @@ on:
     # go-kure/kure#729): without them, adding the pin-impact job's
     # 'pin-impact-ack' override label doesn't start a new run, so the
     # required `build` check stays failed until an unrelated push — the
-    # acknowledgement path existed but nothing re-evaluated it. This does
-    # mean ANY label add/remove on a PR reruns the whole pipeline, not just
-    # pin-impact — accepted: label changes are rare, deliberate maintainer
-    # actions, not routine PR activity.
+    # acknowledgement path existed but nothing re-evaluated it. doc-gate's
+    # 'docs-skip' bypass depends on the same trigger: it reads the label from
+    # the event payload, so adding it must start a run too.
+    # Cost, measured (go-kure/launcher#445): every PR, Renovate PRs included,
+    # gets its full label set at creation, and each label add/remove starts a
+    # whole-pipeline run that the concurrency group below cancels in favour of
+    # the next one — one superseded run per label. strip-ack's own removal of a
+    # stale 'pin-impact-ack' costs nothing: it uses GITHUB_TOKEN, and events
+    # that token causes start no workflow run. Kept deliberately:
+    # narrowing the trigger to these two labels needs a label-aware
+    # concurrency key and a `build` that cannot report green on a no-op run,
+    # or a skipped run cancels the real one and leaves a false green.
     types: [opened, synchronize, reopened, labeled, unlabeled]
   merge_group:  # required: checks must report on the merge queue's temporary branch
   schedule:

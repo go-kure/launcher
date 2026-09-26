@@ -141,7 +141,8 @@ parseable-but-undispatchable, and in both cases a handler-level test suite stays
 parses a minimal document for every registered built-in type through
 `ParseWithExtraTypes`, the same entry point `kurel build` uses. Two other per-type
 registries have the same shape and the same failure mode — `traitComponentRestrictions`
-(which traits a component type accepts) and `componentHealthCheckGVK` (the workload GVK
+(which traits a component type accepts; today only `scaler` is restricted, to `webservice`,
+`worker` and `deployment`, the kinds that report a non-RWX claim to it) and `componentHealthCheckGVK` (the workload GVK
 a component type's auto health check targets; an unlisted type is skipped silently, so
 its bundle simply carries one health check fewer).
 

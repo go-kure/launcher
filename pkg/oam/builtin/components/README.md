@@ -1048,14 +1048,13 @@ authored. A `serviceName` equal to the component name — like `servicePort` alo
 behaves the same way. On a kind that names its own Service (a `statefulset`'s
 `serviceName`), "own" means that Service name rather than the component name.
 
-**`scaler` is not available on `deployment`.** It is restricted to `webservice` and
-`worker`. An HPA scales the Deployment past the replica count the document
-authored, and the non-RWX guard below reads only the authored `replicas`. On
-`webservice` and `worker` the `scaler` trait covers that gap itself: it refuses
-an effective `maxReplicas` above 1 when the component carries a non-RWX claim
-(see "Non-RWX volumes"). `deployment` does not report its claim to the trait
-(`NonRWXClaim`), so admitting `scaler` here would need that method first. It
-stays excluded until that is decided on its own.
+**`scaler` is available on `deployment`**, as on `webservice` and `worker`. An HPA
+scales the Deployment past the replica count the document authored, and the
+non-RWX guard below reads only the authored `replicas`. The `scaler` trait covers
+that gap itself: `deployment` reports its first non-RWX claim to the trait
+(`NonRWXClaim`), and the trait refuses an effective `maxReplicas` above 1 when
+one is present (see "Non-RWX volumes"). `statefulset` is still excluded: its
+claims come from `volumeClaimTemplates`, one per pod, so the question differs.
 
 | Property | Type | Effect | Compatibility |
 |----------|------|--------|---------------|
@@ -1149,8 +1148,8 @@ silently, because there was no authored value to contradict. `deployment`,
 `webservice` and `worker` all run the one `applyNonRWXConstraint`.
 
 That guard reads only the authored `replicas`, but a `scaler` trait's HPA scales
-the same Deployment up to `maxReplicas`. So on `webservice` and `worker` the
-trait is held to the same limit: with a non-RWX claim attached, an effective
+the same Deployment up to `maxReplicas`. So on `deployment`, `webservice` and
+`worker` the trait is held to the same limit: with a non-RWX claim attached, an effective
 `maxReplicas` above 1 fails the build with an error naming the `scaler` trait
 and the claim's volume. "Effective" means after an EnvironmentPolicy
 `scalerMaxReplicas` default is applied. `maxReplicas: 1` still builds. A
