@@ -224,6 +224,22 @@ module, a pre-pass, a golden-file or fixture harness — builds the `Namer` with
 every call belonging to the same run, as `LowerRaws` does, so cross-document collisions
 are detected.
 
+`Reserve`/`Name` fail on every repeat claim of a name, including one from the same content.
+Rules whose outputs share one derived object (two components pointing at the same chart
+source, say) use the emit-or-adopt pair instead:
+- `EmitOrAdopt(name, identity, origin)` claims a name for an element whose content is fully
+  determined by `identity`, a string the rule builds from every input that shapes that
+  element.
+- `NameOrAdopt(base, suffix, identity, origin)` is the same claim through `Name`'s
+  `<base>-<suffix>` construction and DNS-1123 check.
+
+The first claim returns `adopted=false`, and the rule emits the element. A later claim with
+the same identity, from any origin and in any round, returns `adopted=true`, and the rule must
+not emit the element again. Same-round sibling components cannot see each other's output, so
+this is how they share one object instead of colliding. A different identity at the same name,
+an empty identity, and a name already held by `Reserve` stay hard errors, and `Reserve` still
+refuses a name claimed this way.
+
 Four registration interfaces, one per position in the document tree, each with its own
 registrar on `*Transformer` and a duplicate/dispatchable-collision guard (a type
 claimed by a lowering rule must not also be a dispatchable handler type, and a
