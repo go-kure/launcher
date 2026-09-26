@@ -660,7 +660,7 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 			},
 		}
 		if peer.PodSelector != nil {
-			to.PodSelector = peer.PodSelector.DeepCopy() // one per emitted peer (#396)
+			to.PodSelector = peer.PodSelector.DeepCopy() // one per emitted peer (go-kure/launcher#396)
 		}
 		kubernetes.AddNetworkPolicyEgressPeer(&rule, to)
 		for _, p := range peer.Ports {
@@ -918,7 +918,8 @@ func (c *componentEndpointIngressPolicyConfig) Generate(app *stack.Application) 
 	np := kubernetes.CreateNetworkPolicy(c.policyName(), app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
-	// DeepCopy, not *c.Endpoint.PodSelector: a struct copy still shares MatchLabels (#396).
+	// DeepCopy, not *c.Endpoint.PodSelector: a struct copy still shares MatchLabels
+	// (go-kure/launcher#396).
 	np.Spec.PodSelector = *c.Endpoint.PodSelector.DeepCopy()
 	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
 
@@ -930,7 +931,7 @@ func (c *componentEndpointIngressPolicyConfig) Generate(app *stack.Application) 
 				NamespaceSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{"kubernetes.io/metadata.name": src.Namespace},
 				},
-				PodSelector: src.PodSelector.DeepCopy(), // one per emitted peer (#396)
+				PodSelector: src.PodSelector.DeepCopy(), // one per emitted peer (go-kure/launcher#396)
 			}
 			kubernetes.AddNetworkPolicyIngressPeer(&rule, peer)
 		}

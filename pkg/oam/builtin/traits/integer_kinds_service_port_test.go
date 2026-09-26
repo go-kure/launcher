@@ -151,7 +151,7 @@ func TestServicePort_EveryGoIntegerKind(t *testing.T) {
 	}
 }
 
-// TestServicePort_OutOfRangeIsRefused pins the other half of #525: widening the
+// TestServicePort_OutOfRangeIsRefused pins the other half of go-kure/launcher#525: widening the
 // reader must not turn it into a truncating one. A value above 65535, zero, a
 // negative, one that wraps into range as an int32 (2^32+80) and a fractional float
 // are all errors naming the field — never a port.

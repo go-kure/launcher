@@ -630,7 +630,7 @@ func IsNullValue(value any) bool {
 // its own type switch happens to list.
 //
 // A value int64 cannot hold is refused, never wrapped: an unsigned value above
-// math.MaxInt64, or a float at or beyond ±2^63. The caller still range-checks the
+// math.MaxInt64, or a float outside -2^63 <= f < 2^63. The caller still range-checks the
 // result against its own target — a port, an int32 replica count — and refuses what
 // does not fit rather than converting it.
 func IntegerValue(value any) (int64, bool) {
