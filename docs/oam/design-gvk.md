@@ -8,6 +8,7 @@ options-policy-interface.md*
 | 1.0 | 2026-05-14 | Initial — records GVK decision, rationale, strictness rule, OAM reuse |
 | 1.1 | 2026-08-23 | Adds the type-name reservation covenant and document-format lifecycle |
 | 1.2 | 2026-09-23 | Adds the pre-release bug-fix exception to the document-format lifecycle |
+| 1.3 | 2026-09-26 | Adds the two-axis type model (terminal/lowerable, kind-named/role-named) and the naming rule |
 
 ---
 
@@ -151,6 +152,58 @@ dialect statement (its own `extends` / reserved-types / shadowed-types declarati
 is published) is informational input to review, not an automated check. This is revisitable if
 launcher gains outside contributors who cannot be expected to know the covenant by convention
 alone.
+
+---
+
+## Two Axes of a Type, and the Naming Rule
+
+Every component and trait type sits on two independent axes. The first is a tier boundary
+the engine enforces; the second is a naming convention only.
+
+**Axis A — terminal vs lowerable.** A *terminal* type is served by a dispatchable handler
+(`RegisterComponent` / `RegisterTrait`) and emits Kubernetes objects. A *lowerable* type is
+served by a lowering rule (`RegisterComponentLowering` / `RegisterTraitLowering`) and emits
+other OAM entries, never objects. Which entries depends on the rule's position: a component
+rule emits components and policies, a trait rule traits, components and policies
+(`loweringPositionRules` in `pkg/oam/lowering.go`). The lowering fixpoint expands it until only terminal
+types remain (see `design-lowering-engine.md`). A type is never both: each registration path
+panics when the name is already claimed on the other side (`pkg/oam/transform.go`,
+`pkg/oam/lowering.go`), because the handler would win dispatch and the rule would never run.
+The builtin example today is the `expose` trait, which lowers into a terminal `ingress` or
+`httproute` trait.
+
+**Axis B — kind-named vs role-named.** A *kind-named* type projects exactly one Kubernetes API
+kind as that kind, adding no launcher opinions of its own, and is named after it: the
+`deployment` component, the `ingress`, `httproute` and `networkpolicy` traits. Supporting
+objects that kind needs (the `deployment` component's ServiceAccount, an optional PVC) do not
+change that. A *role-named* type is named for the job it does: it combines kinds as peers
+(`webservice`: Deployment plus Service), chooses between them (`expose`: an `ingress` or an
+`httproute`), or emits one primary kind shaped by launcher's opinions about that job
+(`worker`: a Deployment with a default topology spread and an `affinity` shorthand, both of
+which `deployment` deliberately leaves out; see `pkg/oam/builtin/components/README.md`). The
+number of kinds emitted does not decide the axis; whether the type projects the API kind or a
+role does. Nothing checks this axis; it binds naming choices, like the covenant above.
+
+The axes are orthogonal. `deployment` and `webservice` are both terminal, one kind-named and one
+role-named; `expose` is lowerable and role-named. The layering the Helm-family redesign uses
+(go-kure/launcher#336) is a role-named lowerable upper tier (`helm`) over kind-named terminals
+(`helmrelease`, `helmrepository`, `ocirepository`, …).
+
+**Naming rule.** A new type name is chosen as follows:
+
+1. A type that projects exactly one API kind, without opinions of its own, takes that kind's
+   name in lowercase:
+   `Deployment` → `deployment`, `HTTPRoute` → `httproute`.
+2. Any other type takes a role name.
+3. A vendor prefix, `<vendor>-<kind>`, is added only when the bare kind name is already taken
+   by something a reader would plausibly mean instead. Precedent: `cilium-networkpolicy`
+   alongside core `networkpolicy`. Under this rule the Flux `Kustomization` CR becomes
+   `fluxcd-kustomization`, because bare `kustomization` collides with `kustomization.yaml`.
+
+A name this rule produces is still subject to the reservation covenant above. One existing
+builtin predates the rule: `helmchart` is a role-level composite (a HelmRelease plus its
+source, or client-side rendered manifests), not a projection of the Flux `HelmChart` CR its name suggests. Its retirement and the reuse of
+the name for that CR are tracked in go-kure/launcher#350 and go-kure/launcher#351.
 
 ---
 
