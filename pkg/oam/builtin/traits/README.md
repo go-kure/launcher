@@ -591,29 +591,37 @@ A **typed** nil (`map[string]any(nil)`, `[]any(nil)`) is what an uninitialized G
 or slice produces when a lowering rule or a Go-API caller assigns it into a property.
 A bare `v.(map[string]any)` succeeds on it, so it used to read as an authored empty
 value where an untyped null (`key:` with no value in a document) did not. Since
-go-kure/launcher#465, every such site in this package gives a typed nil the same answer
-as an untyped one:
+go-kure/launcher#465, the parsers of `httproute`, `ingress`, `external-secret`,
+`fluxcd-postbuild`, `fluxcd-patches`, `rbac`, `certificate`, `pvc` and `expose`, and the
+shared `networkPolicy.trafficSources` parser, give a typed nil the answer an untyped one
+gets. The rule is the untyped answer, whatever it is:
 
-- **Refused like a null element:**
-  - an `httproute` `rules[]`, `matches[]` or `backendRefs[]` entry, which used to become a
-    catch-all rule, a match-everything match, or a default self backend;
-  - an `ingress` `rules[].paths[]` or `tls[]` entry, which used to become a `/` path or an
-    empty TLS block;
-  - a `fluxcd-patches` `patches` list or `target`, which used to satisfy the requirement
-    with zero patches or emit an empty selector.
-- **Absent:**
-  - `httproute` `backendRefs`, which now takes the default self backend again;
-  - `externalAuth.grpc`/`http`/`forwardBody`, which are no longer emitted as `{}`;
-  - `external-secret` `target.template`;
-  - `pvc` `accessModes`, which now takes the `ReadWriteOnce` default instead of erroring;
-  - `expose` `annotations`, which used to panic when `sslRedirect` wrote into it.
+- **Refused, with the untyped message:** a list entry (`httproute` `parentRefs[]`,
+  `rules[]`, `matches[]`, `headers[]`, `backendRefs[]`, `filters[]` and header-modifier
+  entries; `ingress` `rules[]`, `paths[]`, `tls[]`; `external-secret` `data[]` and
+  `dataFrom[]`; `fluxcd-postbuild` `substituteFrom[]`; `rbac` `rules[]`;
+  `trafficSources[]`), and a required or typed-when-present block (the `httproute`
+  filter blocks and their `backendRef`s, `ingress`/`httproute` `backendSelector`,
+  `data[].remoteRef`, `certificate` `issuerRef`, `rbac` `apiGroups`/`resources`/`verbs`,
+  `fluxcd-postbuild` `substitute`/`substituteFrom`, `fluxcd-patches` `patches`/`target`,
+  `networkPolicy`, `podSelector`). Before, a typed nil there became a catch-all rule, a
+  `/` path, an empty TLS block, or an empty value that let a valid sibling carry the
+  document.
+- **Absent:** an optional block (`httproute` `annotations`, `backendRefs`, `timeouts`,
+  a match or redirect/rewrite `path`, mirror `fraction`, `externalAuth`
+  `grpc`/`http`/`forwardBody`; `ingress` `annotations`; `external-secret` `remoteRef`,
+  `dataFrom[].extract`/`find`/`find.tags`, `target.template` and its `data`; `pvc`
+  `accessModes`, which takes the `ReadWriteOnce` default; `expose` `annotations`, which
+  used to panic when `sslRedirect` wrote into it).
 
-The sites the sweep left alone are safe by one of three reasons:
-- a required key or entry check fires first;
-- the value is filtered through `oam.IsNullValue` upstream;
-- a nil map or list ranges and renders exactly as absence does.
+The remaining comma-ok assertions in these files are safe for one of three reasons:
+- a required key or entry check fires first with the same message for both shapes;
+- the value is filtered through `oam.IsNullValue` first (the `networkpolicy` trait
+  parser, via `nonNullObject`/`nonNullArray`);
+- a nil map or list only ranges, so both shapes produce the same parse.
 
-`TestTypedNilSweep` pins each fixed site.
+`TestTypedNilSweep` and `TestTypedNilSweepFollowUp` pin each fixed site against the
+untyped answer.
 
 ## Conventions
 

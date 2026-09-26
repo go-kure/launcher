@@ -35,6 +35,11 @@ func parseTrafficSources(props map[string]any, component, traitType string) ([]n
 	if !hasNP {
 		return nil, nil
 	}
+	// Each `oam.IsNullValue(x) { x = nil }` below makes a typed nil take the
+	// refusal an untyped null takes, word for word (go-kure/launcher#465).
+	if oam.IsNullValue(rawNP) {
+		rawNP = nil
+	}
 	np, ok := rawNP.(map[string]any)
 	if !ok {
 		return nil, ve("networkPolicy", "expected object, got %T", rawNP)
@@ -69,6 +74,9 @@ func parseTrafficSources(props map[string]any, component, traitType string) ([]n
 
 	out := make([]netpol.TrafficSource, 0, len(rawList))
 	for i, raw := range rawList {
+		if oam.IsNullValue(raw) {
+			raw = nil
+		}
 		m, ok := raw.(map[string]any)
 		if !ok {
 			return nil, ve(fmt.Sprintf("networkPolicy.trafficSources[%d]", i), "expected object, got %T", raw)
@@ -89,6 +97,9 @@ func parseTrafficSources(props map[string]any, component, traitType string) ([]n
 		}
 		src := netpol.TrafficSource{Namespace: ns}
 		if rawSel, hasSel := m["podSelector"]; hasSel {
+			if oam.IsNullValue(rawSel) {
+				rawSel = nil
+			}
 			selMap, ok := rawSel.(map[string]any)
 			if !ok {
 				return nil, ve(fmt.Sprintf("networkPolicy.trafficSources[%d].podSelector", i),

@@ -193,7 +193,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 		config.Scope = scope
 	}
 
-	if rawAnnotations, ok := props["annotations"].(map[string]any); ok {
+	if rawAnnotations, ok := props["annotations"].(map[string]any); ok && rawAnnotations != nil {
 		config.Annotations = make(map[string]string, len(rawAnnotations))
 		for k, v := range rawAnnotations {
 			config.Annotations[k] = fmt.Sprintf("%v", v)
@@ -210,7 +210,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	}
 	for i, rawRule := range rawRules {
 		ruleMap, ok := rawRule.(map[string]any)
-		if !ok {
+		if !ok || ruleMap == nil {
 			return nil, errors.Errorf("rules[%d]: expected object", i)
 		}
 
@@ -266,6 +266,9 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 			// backend is retargeted onto the component's own pods, so a selector there can never
 			// take effect — reject it loudly rather than silently ignore.
 			if rawSel, ok := pathMap["backendSelector"]; ok {
+				if oam.IsNullValue(rawSel) {
+					rawSel = nil // a typed nil is refused exactly as an untyped one
+				}
 				selMap, ok := rawSel.(map[string]any)
 				if !ok {
 					return nil, errors.Errorf("rules[%d].paths[%d].backendSelector: expected object, got %T", i, j, rawSel)
