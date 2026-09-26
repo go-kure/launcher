@@ -162,19 +162,14 @@ type VolsyncConfig struct {
 // provenance attribution.
 func (c *VolsyncConfig) ComponentName() string { return c.componentName }
 
-// yamlToInt converts a numeric value (int, float64) from YAML to int.
-// Non-integer float values (e.g. 1.5) are rejected.
+// yamlToInt converts a whole number of any Go integer kind, or an integral float,
+// to int. A fraction (e.g. 1.5) or a value int cannot hold is rejected.
 func yamlToInt(v any) (int, bool) {
-	switch n := v.(type) {
-	case int:
-		return n, true
-	case float64:
-		if n != float64(int(n)) {
-			return 0, false
-		}
-		return int(n), true
+	n, ok := oam.IntegerValue(v)
+	if !ok || n < math.MinInt || n > math.MaxInt {
+		return 0, false
 	}
-	return 0, false
+	return int(n), true
 }
 
 // Generate creates a VolSync ReplicationSource resource.
