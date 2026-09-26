@@ -3,6 +3,7 @@ package components
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 
 	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
@@ -819,11 +820,13 @@ func (c *PostgresqlConfig) createCluster(app *stack.Application) (client.Object,
 	}
 
 	// Left nil when both maps are empty: a non-nil empty block renders
-	// `inheritedMetadata: {}`.
+	// `inheritedMetadata: {}`. Cloned, never the config's own maps: a caller
+	// editing the generated Cluster would otherwise edit the config, and the next
+	// Generate would differ from this one (go-kure/launcher#396).
 	if len(c.InheritedLabels) > 0 || len(c.InheritedAnnotations) > 0 {
 		cluster.Spec.InheritedMetadata = &cnpgv1.EmbeddedObjectMetadata{
-			Labels:      c.InheritedLabels,
-			Annotations: c.InheritedAnnotations,
+			Labels:      maps.Clone(c.InheritedLabels),
+			Annotations: maps.Clone(c.InheritedAnnotations),
 		}
 	}
 
