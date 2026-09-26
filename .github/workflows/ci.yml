@@ -18,8 +18,9 @@ on:
     # Cost, measured (go-kure/launcher#445): every PR, Renovate PRs included,
     # gets its full label set at creation, and each label add/remove starts a
     # whole-pipeline run that the concurrency group below cancels in favour of
-    # the next one — one superseded run per label. strip-ack removing a stale
-    # 'pin-impact-ack' on a new commit starts one more. Kept deliberately:
+    # the next one — one superseded run per label. strip-ack's own removal of a
+    # stale 'pin-impact-ack' costs nothing: it uses GITHUB_TOKEN, and events
+    # that token causes start no workflow run. Kept deliberately:
     # narrowing the trigger to these two labels needs a label-aware
     # concurrency key and a `build` that cannot report green on a no-op run,
     # or a skipped run cancels the real one and leaves a false green.
