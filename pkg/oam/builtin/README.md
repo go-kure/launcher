@@ -16,7 +16,9 @@ wrongly typed value is an error rather than a dropped field. It decodes only: no
 semantic checks. It shares one limitation with `encoding/json`: unknown keys nested inside a
 type that has its own `UnmarshalJSON` are still dropped. `UnreachableJSONFields(type, owned...)`
 lists the spec fields an author cannot set that way (tagged `json:"-"`, or shadowed by an owned
-key). A handler that decodes an external spec type asserts that list is empty, against an
+key), including fields promoted from embedded structs; like `encoding/json`, it visits each
+embedded struct type once, so a type that embeds itself is safe to pass. A handler that
+decodes an external spec type asserts that list is empty, against an
 explicit exclusion list, so an upstream field added under a name launcher already owns fails
 the test instead of silently becoming unreachable. The `cilium-networkpolicy` trait decodes its
 raw rules this way.

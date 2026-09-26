@@ -84,18 +84,22 @@ func DecodeStrictJSON[T any](src map[string]any, owned ...string) (*T, map[strin
 // owns turns the test red instead of silently becoming unreachable.
 func UnreachableJSONFields(t reflect.Type, owned ...string) []string {
 	var out []string
-	collectUnreachable(t, owned, &out)
+	collectUnreachable(t, owned, map[reflect.Type]bool{}, &out)
 	slices.Sort(out)
 	return out
 }
 
-func collectUnreachable(t reflect.Type, owned []string, out *[]string) {
+// collectUnreachable walks t and its embedded structs. seen stops the walk at a
+// struct already visited, as encoding/json does: a type that embeds itself (or
+// a cycle of embeddings) otherwise recursed until the stack overflowed.
+func collectUnreachable(t reflect.Type, owned []string, seen map[reflect.Type]bool, out *[]string) {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	if t.Kind() != reflect.Struct {
+	if t.Kind() != reflect.Struct || seen[t] {
 		return
 	}
+	seen[t] = true
 	for f := range t.Fields() {
 		tag := f.Tag.Get("json")
 		if tag == "-" {
@@ -111,7 +115,7 @@ func collectUnreachable(t reflect.Type, owned []string, out *[]string) {
 				ft = ft.Elem()
 			}
 			if ft.Kind() == reflect.Struct {
-				collectUnreachable(ft, owned, out)
+				collectUnreachable(ft, owned, seen, out)
 				continue
 			}
 		}
