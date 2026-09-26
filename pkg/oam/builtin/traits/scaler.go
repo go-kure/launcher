@@ -147,7 +147,7 @@ func toInt32ForScaler(v any) (int32, bool) {
 }
 
 // nonRWXClaimer is implemented by component configs whose Deployment carries a
-// claim only one pod can hold read-write (webservice, worker). NonRWXClaim
+// claim only one pod can hold read-write (webservice, worker, deployment). NonRWXClaim
 // names that claim, or returns "" when none constrains the workload.
 // decoratorBase forwards it, so a decorating trait declared before the scaler
 // does not hide it.

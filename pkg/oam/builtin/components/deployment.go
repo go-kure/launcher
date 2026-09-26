@@ -273,6 +273,12 @@ func (c *DeploymentConfig) ServiceAccountName() string {
 	return effectiveServiceAccountName(c.PodSpec, c.Name)
 }
 
+// NonRWXClaim names the first claim that limits this Deployment to one pod
+// (the one applyNonRWXConstraint refuses more replicas on), or "" when none
+// does. The scaler trait reads it: its HPA scales this Deployment past the
+// authored replicas, so the same limit has to hold for maxReplicas.
+func (c *DeploymentConfig) NonRWXClaim() string { return firstNonRWXPVC(c.PVCs) }
+
 // EmitsAutoHealthCheck reports whether the synthesized readiness check on this
 // component's Deployment is a health signal. It is not when the document sets
 // `paused: true`: pausing tells the Deployment controller not to roll the

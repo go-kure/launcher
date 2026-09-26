@@ -125,7 +125,7 @@ spec:
 `
 
 // TestParseWithExtraTypes_DefersTraitRestrictionForLowerableComponent proves that a
-// trait restricted to specific component types ("scaler": webservice/worker only,
+// trait restricted to specific component types ("scaler": webservice/worker/deployment only,
 // traitComponentRestrictions in validate.go) is NOT rejected against a lowerable
 // component type's authored type. web-and-cache is not terminal — a registered
 // ComponentLoweringRule would rewrite it before the fixpoint settles, so validating
