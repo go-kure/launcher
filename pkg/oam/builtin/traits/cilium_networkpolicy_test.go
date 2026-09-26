@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/go-kure/kure/pkg/stack"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -122,6 +123,50 @@ func TestCiliumNetworkPolicyConfig_Generate_AcceptsSupportedRules(t *testing.T) 
 	if len(objs) != 1 {
 		t.Fatalf("expected 1 object, got %d", len(objs))
 	}
+
+	// The decoded rule must carry what was authored, not merely decode: a rule
+	// that decoded and was then dropped would render an empty spec.
+	cnp, ok := (*objs[0]).(*ciliumv2.CiliumNetworkPolicy)
+	if !ok || cnp.Spec == nil {
+		t.Fatalf("object = %T with spec %v, want a CiliumNetworkPolicy with a spec", *objs[0], cnp)
+	}
+	spec := cnp.Spec
+	if spec.EndpointSelector.LabelSelector == nil || !hasLabel(spec.EndpointSelector.LabelSelector.MatchLabels, "app", "frontend") {
+		t.Errorf("endpointSelector = %+v, want app=frontend", spec.EndpointSelector.LabelSelector)
+	}
+	if len(spec.Ingress) != 0 {
+		t.Errorf("ingress = %+v, want none", spec.Ingress)
+	}
+	if len(spec.Egress) != 1 {
+		t.Fatalf("egress rules = %d, want 1", len(spec.Egress))
+	}
+	eg := spec.Egress[0]
+	if len(eg.ToEndpoints) != 1 || eg.ToEndpoints[0].LabelSelector == nil ||
+		!hasLabel(eg.ToEndpoints[0].LabelSelector.MatchLabels, "app", "backend") {
+		t.Errorf("toEndpoints = %+v, want one selector app=backend", eg.ToEndpoints)
+	}
+	if len(eg.ToPorts) != 1 || len(eg.ToPorts[0].Ports) != 1 {
+		t.Fatalf("toPorts = %+v, want one port rule with one port", eg.ToPorts)
+	}
+	if p := eg.ToPorts[0].Ports[0]; p.Port != "9092" || p.Protocol != "TCP" {
+		t.Errorf("port = %s/%s, want 9092/TCP", p.Port, p.Protocol)
+	}
+	l7 := eg.ToPorts[0].Rules
+	if l7 == nil || len(l7.HTTP) != 1 || l7.HTTP[0].Method != "GET" || l7.HTTP[0].Path != "/healthz" {
+		t.Errorf("L7 rules = %+v, want one HTTP rule GET /healthz", l7)
+	}
+}
+
+// hasLabel reports whether a Cilium selector's matchLabels carries key=value.
+// Cilium stores an authored key with a source prefix ("any:app"), so the match
+// is on the key's suffix.
+func hasLabel(matchLabels map[string]string, key, value string) bool {
+	for k, v := range matchLabels {
+		if (k == key || strings.HasSuffix(k, ":"+key) || strings.HasSuffix(k, "."+key)) && v == value {
+			return true
+		}
+	}
+	return false
 }
 
 // TestCiliumNetworkPolicyConfig_Generate_EndpointSelectorGapIsKnown pins the

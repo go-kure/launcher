@@ -546,7 +546,7 @@ NetworkPolicies target that `<domain>/component` label by default (domain from
 
 `cilium-networkpolicy` passes `endpointSelector`, `ingress` and `egress` through to
 Cilium's `api.Rule` as opaque shapes, so the trait schema cannot validate them. They are
-decoded with `DisallowUnknownFields`: a property the linked Cilium API version does not
+decoded with `DisallowUnknownFields`, through the shared `builtin.DecodeStrictJSON`: a property the linked Cilium API version does not
 recognise makes the build fail, naming the rejected field.
 
 This is deliberate. Lenient decoding silently **widened** policies whenever Cilium removed
