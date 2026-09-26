@@ -9,8 +9,8 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
-// The non-RWX guard on webservice and worker reads only the authored
-// `replicas`. A `scaler` trait targets the same Deployment with an HPA, so the
+// The non-RWX guard on webservice, worker and deployment reads only the
+// authored `replicas`. A `scaler` trait targets the same Deployment with an HPA, so the
 // trait's effective maxReplicas is what actually bounds the pod count. These
 // tests run the whole transformer, because the effective maxReplicas can come
 // from a policy default and the component config can be wrapped by a
@@ -20,6 +20,7 @@ func nonRWXScalerTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
 		"webservice": &components.WebserviceHandler{},
 		"worker":     &components.WorkerHandler{},
+		"deployment": &components.DeploymentHandler{},
 	}, nil)
 	tr.RegisterBuiltinTrait("scaler", &traits.ScalerHandler{})
 	tr.RegisterBuiltinTrait("configmap", &traits.ConfigMapHandler{})
@@ -87,6 +88,13 @@ func TestScaler_NonRWXClaim_RejectsMaxReplicasAboveOne(t *testing.T) {
 			[]oam.Trait{scalerTrait(map[string]any{"minReplicas": 1})}, "4"},
 		{"worker/behind-decorator", "worker", []string{"ReadWriteOnce"}, nil,
 			[]oam.Trait{configmapMount, scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 5})}, "5"},
+		{"deployment/authored", "deployment", []string{"ReadWriteOnce"}, nil,
+			[]oam.Trait{scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 5})}, "5"},
+		{"deployment/policy-default-max", "deployment", []string{"ReadWriteOnce"},
+			&stubScalerPolicy{defaultScalerMax: int32ptr32(4)},
+			[]oam.Trait{scalerTrait(map[string]any{"minReplicas": 1})}, "4"},
+		{"deployment/behind-decorator", "deployment", []string{"ReadWriteOnce"}, nil,
+			[]oam.Trait{configmapMount, scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 5})}, "5"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -114,6 +122,9 @@ func TestScaler_NonRWXClaim_AcceptsSafeCombinations(t *testing.T) {
 		{"worker/maxReplicas-1", "worker", claimProps("ReadWriteOnce"), 1},
 		{"webservice/shareable-claim", "webservice", claimProps("ReadWriteOnce", "ReadWriteMany"), 5},
 		{"worker/no-claim", "worker", map[string]any{"image": "ghcr.io/org/app:v1"}, 5},
+		{"deployment/maxReplicas-1", "deployment", claimProps("ReadWriteOnce"), 1},
+		{"deployment/shareable-claim", "deployment", claimProps("ReadWriteOnce", "ReadWriteMany"), 5},
+		{"deployment/no-claim", "deployment", map[string]any{"image": "ghcr.io/org/app:v1"}, 5},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

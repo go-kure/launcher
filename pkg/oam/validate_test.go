@@ -132,18 +132,13 @@ func TestValidate_ScalerTraitOnPostgresql(t *testing.T) {
 	}
 }
 
-// TestValidate_ScalerTraitOnDeployment pins the one place that sees both halves
-// of the non-RWX/HPA interaction. DeploymentConfig.applyNonRWXConstraint
+// TestValidate_ScalerTraitOnDeployment pins that "scaler" is admitted on
+// deployment (go-kure/launcher#513). DeploymentConfig.applyNonRWXConstraint
 // (builtin/components/deployment.go) reads only the authored `replicas`, so it
-// cannot see an HPA that scales past 1 — and a scaler trait's HPA targets
-// apps/v1 Deployment by name, which is exactly what this component emits. What
-// keeps the two apart is traitComponentRestrictions: "scaler" is admitted on
-// webservice and worker only, so the combination never reaches a handler. The
-// restriction is therefore load-bearing for this kind, not a taxonomy detail,
-// and adding "deployment" to that set would need DeploymentConfig to report its
-// claim through NonRWXClaim first. webservice and worker do admit the trait;
-// there the scaler itself refuses maxReplicas > 1 beside a non-RWX claim
-// (builtin/traits/scaler_nonrwx_test.go).
+// cannot see an HPA that scales past 1. Admission is safe because
+// DeploymentConfig reports its claim through NonRWXClaim, exactly as
+// webservice and worker do, and the scaler itself refuses an effective
+// maxReplicas > 1 beside a non-RWX claim (builtin/traits/scaler_nonrwx_test.go).
 func TestValidate_ScalerTraitOnDeployment(t *testing.T) {
 	app := &Application{
 		APIVersion: SupportedAPIVersion,
@@ -162,9 +157,35 @@ func TestValidate_ScalerTraitOnDeployment(t *testing.T) {
 		},
 	}
 
+	if err := validate(app); err != nil {
+		t.Fatalf("expected scaler trait on deployment to validate, got: %v", err)
+	}
+}
+
+// TestValidate_ScalerTraitOnStatefulset pins that statefulset stays excluded:
+// its claims come from volumeClaimTemplates, one per pod, so the non-RWX
+// question differs and admitting it is a separate decision (go-kure/launcher#513).
+func TestValidate_ScalerTraitOnStatefulset(t *testing.T) {
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   Metadata{Name: "test-app"},
+		Spec: ApplicationSpec{
+			Components: []Component{
+				{
+					Name: "db",
+					Type: "statefulset",
+					Traits: []Trait{
+						{Type: "scaler", Properties: map[string]any{"maxReplicas": 5}},
+					},
+				},
+			},
+		},
+	}
+
 	err := validate(app)
 	if err == nil {
-		t.Fatal("expected validation error for scaler trait on deployment, got nil")
+		t.Fatal("expected validation error for scaler trait on statefulset, got nil")
 	}
 	if !strings.Contains(err.Error(), "not supported on component type") {
 		t.Errorf("error = %q, want to contain 'not supported on component type'", err.Error())
