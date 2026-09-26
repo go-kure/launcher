@@ -211,9 +211,14 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	if !ok || len(rawRules) == 0 {
 		return nil, errors.New("required property 'rules' missing or empty")
 	}
+	// Every `m == nil` / `l == nil` beside a comma-ok assertion in this parser is the
+	// typed-nil guard: map[string]any(nil) and []any(nil) assert with ok=true, and
+	// without it a null element became a catch-all rule, match or self backend, and
+	// a null optional block was emitted as an empty one. Each takes the answer an
+	// untyped null takes (go-kure/launcher#465).
 	for i, rawRule := range rawRules {
 		ruleMap, ok := rawRule.(map[string]any)
-		if !ok {
+		if !ok || ruleMap == nil {
 			return nil, errors.Errorf("rules[%d]: expected object", i)
 		}
 
@@ -223,7 +228,7 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 		if rawMatches, ok := ruleMap["matches"].([]any); ok {
 			for j, rawMatch := range rawMatches {
 				matchMap, ok := rawMatch.(map[string]any)
-				if !ok {
+				if !ok || matchMap == nil {
 					return nil, errors.Errorf("rules[%d].matches[%d]: expected object", i, j)
 				}
 
@@ -276,10 +281,10 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 		}
 
 		// Optional: backendRefs
-		if rawBackends, ok := ruleMap["backendRefs"].([]any); ok {
+		if rawBackends, ok := ruleMap["backendRefs"].([]any); ok && rawBackends != nil {
 			for j, rawBackend := range rawBackends {
 				backendMap, ok := rawBackend.(map[string]any)
-				if !ok {
+				if !ok || backendMap == nil {
 					return nil, errors.Errorf("rules[%d].backendRefs[%d]: expected object", i, j)
 				}
 				// nameExplicit is true only when the backendRef names a DIFFERENT service
@@ -718,7 +723,9 @@ func parseExternalAuth(filterMap map[string]any, scope string) (*HTTPExternalAut
 		Protocol:   protocol,
 		BackendRef: MirrorBackendRef{Name: name, Port: port},
 	}
-	if rawGRPC, ok := raw["grpc"].(map[string]any); ok {
+	// The `!= nil` guards: a typed-nil block is absent, as an untyped null is,
+	// rather than emitted as `{}` (go-kure/launcher#465).
+	if rawGRPC, ok := raw["grpc"].(map[string]any); ok && rawGRPC != nil {
 		g := &HTTPGRPCAuth{}
 		if rawHdrs, ok := rawGRPC["allowedHeaders"].([]any); ok {
 			for i, v := range rawHdrs {
@@ -731,7 +738,7 @@ func parseExternalAuth(filterMap map[string]any, scope string) (*HTTPExternalAut
 		}
 		ea.GRPC = g
 	}
-	if rawHTTP, ok := raw["http"].(map[string]any); ok {
+	if rawHTTP, ok := raw["http"].(map[string]any); ok && rawHTTP != nil {
 		h := &HTTPHTTPAuth{}
 		if path, ok := rawHTTP["path"].(string); ok {
 			h.Path = path
@@ -756,7 +763,7 @@ func parseExternalAuth(filterMap map[string]any, scope string) (*HTTPExternalAut
 		}
 		ea.HTTP = h
 	}
-	if rawFwd, ok := raw["forwardBody"].(map[string]any); ok {
+	if rawFwd, ok := raw["forwardBody"].(map[string]any); ok && rawFwd != nil {
 		fb := &HTTPForwardBody{}
 		if rawSize, ok := rawFwd["maxSize"]; ok {
 			size, err := coerceInt32(rawSize)

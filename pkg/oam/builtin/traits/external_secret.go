@@ -234,7 +234,7 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 			}
 			config.DeletionPolicy = deletionPolicy(dp)
 		}
-		if rawTemplate, ok := rawTarget["template"].(map[string]any); ok {
+		if rawTemplate, ok := rawTarget["template"].(map[string]any); ok && rawTemplate != nil {
 			tmpl := &esTemplate{}
 			if t, ok := rawTemplate["type"].(string); ok {
 				tmpl.Type = t

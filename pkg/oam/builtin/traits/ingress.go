@@ -226,8 +226,11 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 
 		rule := IngressRule{Host: host}
 		for j, rawPath := range rawPaths {
+			// pathMap == nil: a typed-nil element asserts with ok=true and became a
+			// `/` Prefix path to the self backend; it is refused like an untyped null
+			// (go-kure/launcher#465). Same guard on tls[] below.
 			pathMap, ok := rawPath.(map[string]any)
-			if !ok {
+			if !ok || pathMap == nil {
 				return nil, errors.Errorf("rules[%d].paths[%d]: expected object", i, j)
 			}
 
@@ -339,7 +342,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	if rawTLS, ok := props["tls"].([]any); ok {
 		for i, rawEntry := range rawTLS {
 			entry, ok := rawEntry.(map[string]any)
-			if !ok {
+			if !ok || entry == nil {
 				return nil, errors.Errorf("tls[%d]: expected object", i)
 			}
 			tlsEntry := IngressTLS{}

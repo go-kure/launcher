@@ -622,6 +622,12 @@ func parseObjectList(props map[string]any, key string) ([]map[string]any, bool, 
 	}
 	out := make([]map[string]any, 0, len(arr))
 	for i, item := range arr {
+		// A typed-nil element is a null element: normalise it so the assertion below
+		// refuses it exactly as it refuses an untyped null, instead of passing a nil
+		// map on as an authored empty object (go-kure/launcher#465).
+		if isExplicitNull(item) {
+			item = nil
+		}
 		m, ok := item.(map[string]any)
 		if !ok {
 			return nil, false, errors.Errorf("%s: must be an object, got %T", indexedLabel(key, i), item)

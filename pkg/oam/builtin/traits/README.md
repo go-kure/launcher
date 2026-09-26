@@ -585,6 +585,36 @@ that would render a CiliumNetworkPolicy the cluster rejects on apply
   `endpointSelector: null`, which Cilium decodes to an empty selector matching
   **every endpoint**, so a null silently became select-all.
 
+### Typed nils in the other trait parsers
+
+A **typed** nil (`map[string]any(nil)`, `[]any(nil)`) is what an uninitialized Go map
+or slice produces when a lowering rule or a Go-API caller assigns it into a property.
+A bare `v.(map[string]any)` succeeds on it, so it used to read as an authored empty
+value where an untyped null (`key:` with no value in a document) did not. Since
+go-kure/launcher#465, every such site in this package gives a typed nil the same answer
+as an untyped one:
+
+- **Refused like a null element:**
+  - an `httproute` `rules[]`, `matches[]` or `backendRefs[]` entry, which used to become a
+    catch-all rule, a match-everything match, or a default self backend;
+  - an `ingress` `rules[].paths[]` or `tls[]` entry, which used to become a `/` path or an
+    empty TLS block;
+  - a `fluxcd-patches` `patches` list or `target`, which used to satisfy the requirement
+    with zero patches or emit an empty selector.
+- **Absent:**
+  - `httproute` `backendRefs`, which now takes the default self backend again;
+  - `externalAuth.grpc`/`http`/`forwardBody`, which are no longer emitted as `{}`;
+  - `external-secret` `target.template`;
+  - `pvc` `accessModes`, which now takes the `ReadWriteOnce` default instead of erroring;
+  - `expose` `annotations`, which used to panic when `sslRedirect` wrote into it.
+
+The sites the sweep left alone are safe by one of three reasons:
+- a required key or entry check fires first;
+- the value is filtered through `oam.IsNullValue` upstream;
+- a nil map or list ranges and renders exactly as absence does.
+
+`TestTypedNilSweep` pins each fixed site.
+
 ## Conventions
 
 Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access
