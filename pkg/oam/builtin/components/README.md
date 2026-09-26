@@ -2037,6 +2037,15 @@ Fixed as `go-kure/launcher#430`; `networkpolicy_internal_test.go`'s
 `TestParseNPPeer_NamespaceSelectorPresenceCases` pins the typed-nil case
 directly.
 
+The same typed-nil shape reached **list elements**. `parseObjectList` read a
+null key as absence, but a typed-nil *element* (`[]any{map[string]any(nil)}`)
+passed its per-element assertion as an empty object, where an untyped null
+element is refused (`tolerations[0]: must be an object, got <nil>`). Most
+callers then failed on a missing required field anyway. `tolerations` did not:
+an empty entry became an `Exists` toleration with no key, which tolerates
+**every** taint. The element is now normalised to a null first, so every caller
+refuses both shapes identically (go-kure/launcher#465).
+
 ## Conventions
 
 Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access

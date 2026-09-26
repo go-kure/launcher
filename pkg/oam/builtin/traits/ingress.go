@@ -193,7 +193,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 		config.Scope = scope
 	}
 
-	if rawAnnotations, ok := props["annotations"].(map[string]any); ok {
+	if rawAnnotations, ok := props["annotations"].(map[string]any); ok && rawAnnotations != nil {
 		config.Annotations = make(map[string]string, len(rawAnnotations))
 		for k, v := range rawAnnotations {
 			config.Annotations[k] = fmt.Sprintf("%v", v)
@@ -210,7 +210,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	}
 	for i, rawRule := range rawRules {
 		ruleMap, ok := rawRule.(map[string]any)
-		if !ok {
+		if !ok || ruleMap == nil {
 			return nil, errors.Errorf("rules[%d]: expected object", i)
 		}
 
@@ -226,8 +226,11 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 
 		rule := IngressRule{Host: host}
 		for j, rawPath := range rawPaths {
+			// pathMap == nil: a typed-nil element asserts with ok=true and became a
+			// `/` Prefix path to the self backend; it is refused like an untyped null
+			// (go-kure/launcher#465). Same guard on tls[] below.
 			pathMap, ok := rawPath.(map[string]any)
-			if !ok {
+			if !ok || pathMap == nil {
 				return nil, errors.Errorf("rules[%d].paths[%d]: expected object", i, j)
 			}
 
@@ -263,6 +266,9 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 			// backend is retargeted onto the component's own pods, so a selector there can never
 			// take effect — reject it loudly rather than silently ignore.
 			if rawSel, ok := pathMap["backendSelector"]; ok {
+				if oam.IsNullValue(rawSel) {
+					rawSel = nil // a typed nil is refused exactly as an untyped one
+				}
 				selMap, ok := rawSel.(map[string]any)
 				if !ok {
 					return nil, errors.Errorf("rules[%d].paths[%d].backendSelector: expected object, got %T", i, j, rawSel)
@@ -339,7 +345,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	if rawTLS, ok := props["tls"].([]any); ok {
 		for i, rawEntry := range rawTLS {
 			entry, ok := rawEntry.(map[string]any)
-			if !ok {
+			if !ok || entry == nil {
 				return nil, errors.Errorf("tls[%d]: expected object", i)
 			}
 			tlsEntry := IngressTLS{}

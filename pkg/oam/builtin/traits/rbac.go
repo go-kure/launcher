@@ -65,7 +65,7 @@ func (h *RBACHandler) parseProperties(props map[string]any, app *stack.Applicati
 	rules := make([]rbacRule, 0, len(rawRules))
 	for i, raw := range rawRules {
 		ruleMap, ok := raw.(map[string]any)
-		if !ok {
+		if !ok || ruleMap == nil {
 			return nil, errors.Errorf("rbac: rules[%d]: expected object", i)
 		}
 		rule, err := parseRBACRule(ruleMap, i)
@@ -128,7 +128,7 @@ func parseRBACStringSlice(m map[string]any, field string, ruleIdx int) ([]string
 		return nil, nil
 	}
 	list, ok := raw.([]any)
-	if !ok {
+	if !ok || list == nil {
 		return nil, errors.Errorf("rbac: rules[%d].%s: expected array", ruleIdx, field)
 	}
 	result := make([]string, 0, len(list))

@@ -159,7 +159,7 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	// IngressHandler.parseProperties's identical block (ingress.go) — annotations
 	// are a generic Kubernetes concept, not nginx-ingress-specific, so both
 	// controllerType paths support them the same way.
-	if rawAnnotations, ok := props["annotations"].(map[string]any); ok {
+	if rawAnnotations, ok := props["annotations"].(map[string]any); ok && rawAnnotations != nil {
 		config.Annotations = make(map[string]string, len(rawAnnotations))
 		for k, v := range rawAnnotations {
 			config.Annotations[k] = fmt.Sprintf("%v", v)
@@ -181,7 +181,7 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	}
 	for i, rawRef := range rawParentRefs {
 		refMap, ok := rawRef.(map[string]any)
-		if !ok {
+		if !ok || refMap == nil {
 			return nil, errors.Errorf("parentRefs[%d]: expected object", i)
 		}
 		name, ok := refMap["name"].(string)
@@ -211,9 +211,14 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	if !ok || len(rawRules) == 0 {
 		return nil, errors.New("required property 'rules' missing or empty")
 	}
+	// Every `m == nil` / `l == nil` beside a comma-ok assertion in this parser is the
+	// typed-nil guard: map[string]any(nil) and []any(nil) assert with ok=true, and
+	// without it a null element became a catch-all rule, match or self backend, and
+	// a null optional block was emitted as an empty one. Each takes the answer an
+	// untyped null takes (go-kure/launcher#465).
 	for i, rawRule := range rawRules {
 		ruleMap, ok := rawRule.(map[string]any)
-		if !ok {
+		if !ok || ruleMap == nil {
 			return nil, errors.Errorf("rules[%d]: expected object", i)
 		}
 
@@ -223,14 +228,14 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 		if rawMatches, ok := ruleMap["matches"].([]any); ok {
 			for j, rawMatch := range rawMatches {
 				matchMap, ok := rawMatch.(map[string]any)
-				if !ok {
+				if !ok || matchMap == nil {
 					return nil, errors.Errorf("rules[%d].matches[%d]: expected object", i, j)
 				}
 
 				match := HTTPRouteMatch{}
 
 				// Optional: path
-				if rawPath, ok := matchMap["path"].(map[string]any); ok {
+				if rawPath, ok := matchMap["path"].(map[string]any); ok && rawPath != nil {
 					pm := &PathMatch{
 						Type:  "PathPrefix",
 						Value: "/",
@@ -248,7 +253,7 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 				if rawHeaders, ok := matchMap["headers"].([]any); ok {
 					for k, rawHeader := range rawHeaders {
 						headerMap, ok := rawHeader.(map[string]any)
-						if !ok {
+						if !ok || headerMap == nil {
 							return nil, errors.Errorf("rules[%d].matches[%d].headers[%d]: expected object", i, j, k)
 						}
 						hm := HeaderMatch{
@@ -276,10 +281,10 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 		}
 
 		// Optional: backendRefs
-		if rawBackends, ok := ruleMap["backendRefs"].([]any); ok {
+		if rawBackends, ok := ruleMap["backendRefs"].([]any); ok && rawBackends != nil {
 			for j, rawBackend := range rawBackends {
 				backendMap, ok := rawBackend.(map[string]any)
-				if !ok {
+				if !ok || backendMap == nil {
 					return nil, errors.Errorf("rules[%d].backendRefs[%d]: expected object", i, j)
 				}
 				// nameExplicit is true only when the backendRef names a DIFFERENT service
@@ -311,6 +316,9 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 
 				// backendSelector is honored only for an explicit external backend (see ingress).
 				if rawSel, ok := backendMap["backendSelector"]; ok {
+					if oam.IsNullValue(rawSel) {
+						rawSel = nil // a typed nil is refused exactly as an untyped one
+					}
 					selMap, ok := rawSel.(map[string]any)
 					if !ok {
 						return nil, errors.Errorf("rules[%d].backendRefs[%d].backendSelector: expected object, got %T", i, j, rawSel)
@@ -409,7 +417,7 @@ func parseRuleFilters(ruleMap map[string]any, ruleIdx int) ([]HTTPRouteFilter, e
 	var out []HTTPRouteFilter
 	for j, rawFilter := range raw {
 		filterMap, ok := rawFilter.(map[string]any)
-		if !ok {
+		if !ok || filterMap == nil {
 			return nil, errors.Errorf("rules[%d].filters[%d]: expected object", ruleIdx, j)
 		}
 		filterType, _ := filterMap["type"].(string)
@@ -476,7 +484,7 @@ func parseRuleFilters(ruleMap map[string]any, ruleIdx int) ([]HTTPRouteFilter, e
 // populated fields is a no-op — we reject it.
 func parseRequestRedirect(filterMap map[string]any, scope string) (*HTTPRequestRedirect, error) {
 	raw, ok := filterMap["requestRedirect"].(map[string]any)
-	if !ok {
+	if !ok || raw == nil {
 		return nil, errors.Errorf("%s: requestRedirect block is required", scope)
 	}
 	rr := &HTTPRequestRedirect{}
@@ -509,7 +517,7 @@ func parseRequestRedirect(filterMap map[string]any, scope string) (*HTTPRequestR
 		}
 		rr.StatusCode = &code
 	}
-	if rawPath, ok := raw["path"].(map[string]any); ok {
+	if rawPath, ok := raw["path"].(map[string]any); ok && rawPath != nil {
 		pm, err := parsePathModifier(rawPath, scope)
 		if err != nil {
 			return nil, err
@@ -526,14 +534,14 @@ func parseRequestRedirect(filterMap map[string]any, scope string) (*HTTPRequestR
 // of hostname or path must be set.
 func parseURLRewrite(filterMap map[string]any, scope string) (*HTTPURLRewrite, error) {
 	raw, ok := filterMap["urlRewrite"].(map[string]any)
-	if !ok {
+	if !ok || raw == nil {
 		return nil, errors.Errorf("%s: urlRewrite block is required", scope)
 	}
 	rw := &HTTPURLRewrite{}
 	if hostname, ok := raw["hostname"].(string); ok {
 		rw.Hostname = hostname
 	}
-	if rawPath, ok := raw["path"].(map[string]any); ok {
+	if rawPath, ok := raw["path"].(map[string]any); ok && rawPath != nil {
 		pm, err := parsePathModifier(rawPath, scope)
 		if err != nil {
 			return nil, err
@@ -551,11 +559,11 @@ func parseURLRewrite(filterMap map[string]any, scope string) (*HTTPURLRewrite, e
 // percent or fraction may be set.
 func parseRequestMirror(filterMap map[string]any, scope string) (*HTTPRequestMirror, error) {
 	raw, ok := filterMap["requestMirror"].(map[string]any)
-	if !ok {
+	if !ok || raw == nil {
 		return nil, errors.Errorf("%s: requestMirror block is required", scope)
 	}
 	rawBR, ok := raw["backendRef"].(map[string]any)
-	if !ok {
+	if !ok || rawBR == nil {
 		return nil, errors.Errorf("%s: requestMirror.backendRef is required", scope)
 	}
 	name, _ := rawBR["name"].(string)
@@ -588,7 +596,7 @@ func parseRequestMirror(filterMap map[string]any, scope string) (*HTTPRequestMir
 		}
 		m.Percent = &pct
 	}
-	if rawFrac, ok := raw["fraction"].(map[string]any); ok {
+	if rawFrac, ok := raw["fraction"].(map[string]any); ok && rawFrac != nil {
 		hasFraction = true
 		rawNum, ok := rawFrac["numerator"]
 		if !ok {
@@ -624,7 +632,7 @@ func parseRequestMirror(filterMap map[string]any, scope string) (*HTTPRequestMir
 // Gateway API, but an empty cors block is rejected as a no-op.
 func parseCORS(filterMap map[string]any, scope string) (*HTTPCORS, error) {
 	raw, ok := filterMap["cors"].(map[string]any)
-	if !ok {
+	if !ok || raw == nil {
 		return nil, errors.Errorf("%s: cors block is required", scope)
 	}
 	c := &HTTPCORS{}
@@ -688,7 +696,7 @@ func parseCORS(filterMap map[string]any, scope string) (*HTTPCORS, error) {
 // protocol ("HTTP" or "GRPC") and backendRef are required.
 func parseExternalAuth(filterMap map[string]any, scope string) (*HTTPExternalAuth, error) {
 	raw, ok := filterMap["externalAuth"].(map[string]any)
-	if !ok {
+	if !ok || raw == nil {
 		return nil, errors.Errorf("%s: externalAuth block is required", scope)
 	}
 	protocol, _ := raw["protocol"].(string)
@@ -696,7 +704,7 @@ func parseExternalAuth(filterMap map[string]any, scope string) (*HTTPExternalAut
 		return nil, errors.Errorf("%s: externalAuth.protocol must be \"HTTP\" or \"GRPC\", got %q", scope, protocol)
 	}
 	rawBR, ok := raw["backendRef"].(map[string]any)
-	if !ok {
+	if !ok || rawBR == nil {
 		return nil, errors.Errorf("%s: externalAuth.backendRef is required", scope)
 	}
 	name, _ := rawBR["name"].(string)
@@ -718,7 +726,9 @@ func parseExternalAuth(filterMap map[string]any, scope string) (*HTTPExternalAut
 		Protocol:   protocol,
 		BackendRef: MirrorBackendRef{Name: name, Port: port},
 	}
-	if rawGRPC, ok := raw["grpc"].(map[string]any); ok {
+	// The `!= nil` guards: a typed-nil block is absent, as an untyped null is,
+	// rather than emitted as `{}` (go-kure/launcher#465).
+	if rawGRPC, ok := raw["grpc"].(map[string]any); ok && rawGRPC != nil {
 		g := &HTTPGRPCAuth{}
 		if rawHdrs, ok := rawGRPC["allowedHeaders"].([]any); ok {
 			for i, v := range rawHdrs {
@@ -731,7 +741,7 @@ func parseExternalAuth(filterMap map[string]any, scope string) (*HTTPExternalAut
 		}
 		ea.GRPC = g
 	}
-	if rawHTTP, ok := raw["http"].(map[string]any); ok {
+	if rawHTTP, ok := raw["http"].(map[string]any); ok && rawHTTP != nil {
 		h := &HTTPHTTPAuth{}
 		if path, ok := rawHTTP["path"].(string); ok {
 			h.Path = path
@@ -756,7 +766,7 @@ func parseExternalAuth(filterMap map[string]any, scope string) (*HTTPExternalAut
 		}
 		ea.HTTP = h
 	}
-	if rawFwd, ok := raw["forwardBody"].(map[string]any); ok {
+	if rawFwd, ok := raw["forwardBody"].(map[string]any); ok && rawFwd != nil {
 		fb := &HTTPForwardBody{}
 		if rawSize, ok := rawFwd["maxSize"]; ok {
 			size, err := coerceInt32(rawSize)
@@ -804,7 +814,7 @@ func parsePathModifier(raw map[string]any, scope string) (*HTTPPathModifier, err
 // RequestHeaderModifier and ResponseHeaderModifier filters.
 func parseHeaderModifier(filterMap map[string]any, key, scope string) (*HTTPHeaderModifier, error) {
 	raw, ok := filterMap[key].(map[string]any)
-	if !ok {
+	if !ok || raw == nil {
 		return nil, errors.Errorf("%s: %s block is required", scope, key)
 	}
 	hm := &HTTPHeaderModifier{}
@@ -845,7 +855,7 @@ func parseHeaderKVList(raw []any, scope string) ([]HTTPHeaderKV, error) {
 	var out []HTTPHeaderKV
 	for i, entry := range raw {
 		m, ok := entry.(map[string]any)
-		if !ok {
+		if !ok || m == nil {
 			return nil, errors.Errorf("%s[%d]: expected object", scope, i)
 		}
 		name, _ := m["name"].(string)
@@ -862,7 +872,7 @@ func parseHeaderKVList(raw []any, scope string) ([]HTTPHeaderKV, error) {
 // block is absent.
 func parseRuleTimeouts(ruleMap map[string]any, ruleIdx int) (*HTTPRouteTimeouts, error) {
 	raw, ok := ruleMap["timeouts"].(map[string]any)
-	if !ok {
+	if !ok || raw == nil {
 		return nil, nil
 	}
 	t := &HTTPRouteTimeouts{}

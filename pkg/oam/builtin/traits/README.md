@@ -585,6 +585,44 @@ that would render a CiliumNetworkPolicy the cluster rejects on apply
   `endpointSelector: null`, which Cilium decodes to an empty selector matching
   **every endpoint**, so a null silently became select-all.
 
+### Typed nils in the other trait parsers
+
+A **typed** nil (`map[string]any(nil)`, `[]any(nil)`) is what an uninitialized Go map
+or slice produces when a lowering rule or a Go-API caller assigns it into a property.
+A bare `v.(map[string]any)` succeeds on it, so it used to read as an authored empty
+value where an untyped null (`key:` with no value in a document) did not. Since
+go-kure/launcher#465, the parsers of `httproute`, `ingress`, `external-secret`,
+`fluxcd-postbuild`, `fluxcd-patches`, `rbac`, `certificate`, `pvc` and `expose`, and the
+shared `networkPolicy.trafficSources` parser, give a typed nil the answer an untyped one
+gets. The rule is the untyped answer, whatever it is:
+
+- **Refused, with the untyped message:** a list entry (`httproute` `parentRefs[]`,
+  `rules[]`, `matches[]`, `headers[]`, `backendRefs[]`, `filters[]` and header-modifier
+  entries; `ingress` `rules[]`, `paths[]`, `tls[]`; `external-secret` `data[]` and
+  `dataFrom[]`; `fluxcd-postbuild` `substituteFrom[]`; `rbac` `rules[]`;
+  `trafficSources[]`), and a required or typed-when-present block (the `httproute`
+  filter blocks and their `backendRef`s, `ingress`/`httproute` `backendSelector`,
+  `data[].remoteRef`, `certificate` `issuerRef`, `rbac` `apiGroups`/`resources`/`verbs`,
+  `fluxcd-postbuild` `substitute`/`substituteFrom`, `fluxcd-patches` `patches`/`target`,
+  `networkPolicy`, `podSelector`). Before, a typed nil there became a catch-all rule, a
+  `/` path, an empty TLS block, or an empty value that let a valid sibling carry the
+  document.
+- **Absent:** an optional block (`httproute` `annotations`, `backendRefs`, `timeouts`,
+  a match or redirect/rewrite `path`, mirror `fraction`, `externalAuth`
+  `grpc`/`http`/`forwardBody`; `ingress` `annotations`; `external-secret` `remoteRef`,
+  `dataFrom[].extract`/`find`/`find.tags`, `target.template` and its `data`; `pvc`
+  `accessModes`, which takes the `ReadWriteOnce` default; `expose` `annotations`, which
+  used to panic when `sslRedirect` wrote into it).
+
+The remaining comma-ok assertions in these files are safe for one of three reasons:
+- a required key or entry check fires first with the same message for both shapes;
+- the value is filtered through `oam.IsNullValue` first (the `networkpolicy` trait
+  parser, via `nonNullObject`/`nonNullArray`);
+- a nil map or list only ranges, so both shapes produce the same parse.
+
+`TestTypedNilSweep` and `TestTypedNilSweepFollowUp` pin each fixed site against the
+untyped answer.
+
 ## Conventions
 
 Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access
