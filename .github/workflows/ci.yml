@@ -1013,8 +1013,9 @@ jobs:
     - name: Generate versions config overlay
       run: bash scripts/gen-versions-toml.sh --version dev
 
-    - name: Cache Hugo modules
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+    - name: Restore Hugo modules cache
+      id: hugomod
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: |
           ${{ runner.temp }}/hugo_cache
@@ -1078,6 +1079,17 @@ jobs:
       uses: go-kure/.github/.github/actions/check-links@1d748512f0bf84271b66cb8c8f4e311b6cde684a # main
       with:
         built-dir: site/.linkcheck
+
+    # Default-branch only, like the Go caches: this entry also carries ~/go/pkg/mod, so it is
+    # not a small tool cache, and a PR or merge-queue copy can never be restored by another run.
+    - name: Save Hugo modules cache
+      if: success() && steps.hugomod.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: |
+          ${{ runner.temp }}/hugo_cache
+          ~/go/pkg/mod
+        key: ${{ steps.hugomod.outputs.cache-primary-key }}
 
   doc-gate:
     name: doc-gate
