@@ -62,8 +62,11 @@ func (h *FluxCDPatchesHandler) Apply(trait *oam.Trait, _ *stack.Application, bun
 		return errors.New("fluxcd-patches: required property 'patches' missing")
 	}
 
+	// items == nil: a typed-nil []any asserts with ok=true and would satisfy the
+	// requirement with zero patches; it is refused like an untyped null
+	// (go-kure/launcher#465).
 	items, ok := raw.([]any)
-	if !ok {
+	if !ok || items == nil {
 		return errors.New("fluxcd-patches: 'patches' must be a list")
 	}
 
@@ -82,7 +85,7 @@ func (h *FluxCDPatchesHandler) Apply(trait *oam.Trait, _ *stack.Application, bun
 
 		if targetRaw, ok := m["target"]; ok {
 			t, ok := targetRaw.(map[string]any)
-			if !ok {
+			if !ok || t == nil {
 				return errors.Errorf("fluxcd-patches: patch[%d].target must be an object", i)
 			}
 			sel := &stack.PatchSelector{}

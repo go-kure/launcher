@@ -345,7 +345,9 @@ func setSSLRedirectAnnotations(props map[string]any) {
 	var anns map[string]any
 	set := func(key string, val bool) {
 		if anns == nil {
-			if existing, ok := props["annotations"].(map[string]any); ok {
+			// A typed-nil map asserts with ok=true; writing into it would panic, and
+			// a null reads as absence here as it does untyped (go-kure/launcher#465).
+			if existing, ok := props["annotations"].(map[string]any); ok && existing != nil {
 				anns = existing
 			} else {
 				anns = map[string]any{}

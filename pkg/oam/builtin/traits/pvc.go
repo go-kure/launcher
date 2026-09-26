@@ -94,7 +94,9 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 	}
 
 	accessModes := []string{string(corev1.ReadWriteOnce)}
-	if rawModes, ok := props["accessModes"].([]any); ok {
+	// rawModes != nil: a typed-nil []any is absent and takes the default, as an
+	// untyped null does, not "empty when specified" (go-kure/launcher#465).
+	if rawModes, ok := props["accessModes"].([]any); ok && rawModes != nil {
 		if len(rawModes) == 0 {
 			return nil, errors.New("accessModes must not be empty when specified")
 		}
