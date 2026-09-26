@@ -122,8 +122,12 @@ func appendIngressTrafficRules(np *networkingv1.NetworkPolicy, rules []trafficRu
 					},
 				},
 			}
+			// A copy per emitted peer: the source's selector is retained trait
+			// configuration shared by every rule and policy built from it, so
+			// handing it out would let an edit to one policy rewrite them all
+			// (go-kure/launcher#396). DeepCopy clones the MatchLabels map too.
 			if src.PodSelector != nil {
-				peer.PodSelector = src.PodSelector
+				peer.PodSelector = src.PodSelector.DeepCopy()
 			}
 			kubernetes.AddNetworkPolicyIngressPeer(&rule, peer)
 		}
@@ -163,7 +167,8 @@ func (c *backendIngressAllowPolicyConfig) Generate(app *stack.Application) ([]*c
 	np := kubernetes.CreateNetworkPolicy(c.PolicyName, app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
-	np.Spec.PodSelector = *c.PodSelector
+	// DeepCopy, not *c.PodSelector: a struct copy still shares the MatchLabels map.
+	np.Spec.PodSelector = *c.PodSelector.DeepCopy()
 	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
 
 	appendIngressTrafficRules(np, c.Rules)
@@ -655,7 +660,7 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 			},
 		}
 		if peer.PodSelector != nil {
-			to.PodSelector = peer.PodSelector
+			to.PodSelector = peer.PodSelector.DeepCopy() // one per emitted peer (#396)
 		}
 		kubernetes.AddNetworkPolicyEgressPeer(&rule, to)
 		for _, p := range peer.Ports {
@@ -913,7 +918,8 @@ func (c *componentEndpointIngressPolicyConfig) Generate(app *stack.Application) 
 	np := kubernetes.CreateNetworkPolicy(c.policyName(), app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
-	np.Spec.PodSelector = *c.Endpoint.PodSelector
+	// DeepCopy, not *c.Endpoint.PodSelector: a struct copy still shares MatchLabels (#396).
+	np.Spec.PodSelector = *c.Endpoint.PodSelector.DeepCopy()
 	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
 
 	proto := corev1.ProtocolTCP
@@ -924,7 +930,7 @@ func (c *componentEndpointIngressPolicyConfig) Generate(app *stack.Application) 
 				NamespaceSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{"kubernetes.io/metadata.name": src.Namespace},
 				},
-				PodSelector: src.PodSelector,
+				PodSelector: src.PodSelector.DeepCopy(), // one per emitted peer (#396)
 			}
 			kubernetes.AddNetworkPolicyIngressPeer(&rule, peer)
 		}

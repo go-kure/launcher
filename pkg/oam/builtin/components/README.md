@@ -2086,7 +2086,10 @@ The pod template every workload kind shares follows it too: `buildPodSpec` start
 `terminationGracePeriodSeconds`, `imagePullSecrets`, …) and deep-copies each volume,
 toleration, topology spread constraint, the affinity, and the main, init and sidecar
 containers as it adds them — an `append` alone copies the element structs but shares the
-pointers, maps and slices they carry. Without that, editing the first rendered object — the same in-place
+pointers, maps and slices they carry. The `postgresql` Cluster follows it for
+`spec.inheritedMetadata`: its `labels` and `annotations` are clones of the config's
+`InheritedLabels`/`InheritedAnnotations`, not the maps themselves
+(go-kure/launcher#396). Without that, editing the first rendered object — the same in-place
 customization the label rule above assumes — writes back into the config and reappears in
 every later render, with the symptom surfacing on a different object than the one that was
 edited.

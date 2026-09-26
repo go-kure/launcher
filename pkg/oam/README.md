@@ -108,6 +108,13 @@ as a guard, not as a fix-up. Everything else on the policy (`spec.podSelector`,
 `spec.policyTypes`, the rules) is written by the synthesizer as a direct field
 assignment; nothing upstream of it supplies a default.
 
+No synthesized policy shares a selector with its inputs or with another policy. Every
+peer's `podSelector` and every policy's `spec.podSelector` is a `DeepCopy` of the traffic
+source, egress peer, backend or endpoint selector it came from. The inputs are retained
+trait configuration, reused by every rule and every policy built from them, so a label a
+consumer stamps onto one generated policy would otherwise reach all of them
+(go-kure/launcher#396).
+
 ## Parsing
 
 | Function | Purpose |

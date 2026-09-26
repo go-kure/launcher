@@ -608,6 +608,12 @@ added to the HPA into a label on the PDB. The same rule and the reason behind it
 the Conventions section of the component handlers' README
 (`pkg/oam/builtin/components/README.md`).
 
+The same holds for the traffic sources a routing trait retains (`TrafficSources()`):
+NetworkPolicy synthesis in `pkg/oam` gives every emitted peer, and every synthesized
+policy's `spec.podSelector`, its own deep copy of the source or backend selector. So a
+label a caller stamps on one generated NetworkPolicy never reaches another policy
+built from the same source, or the trait configuration (go-kure/launcher#396).
+
 Since go-kure/launcher#361 these handlers build against kure's release-1 builder
 contract (`go-kure/kure` ≥ `v0.2.0-beta.11`), under which a `Create<Kind>`
 constructor returns TypeMeta plus `metadata.name`/`metadata.namespace` and nothing
