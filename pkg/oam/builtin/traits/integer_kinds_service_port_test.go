@@ -8,7 +8,6 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	networkingv1 "k8s.io/api/networking/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -146,7 +145,7 @@ func TestServicePort_EveryGoIntegerKind(t *testing.T) {
 					}
 					return
 				}
-				backendIs(t, objs, "other-svc", gatewayv1.PortNumber(tc.want))
+				backendIs(t, objs, "other-svc", tc.want)
 			})
 		}
 	}
