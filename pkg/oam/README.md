@@ -412,7 +412,8 @@ still has (`k8s.io/api` `networking/v1/types.go:199-222`).
 `IntegerValue` is the matching reader for integers. It returns a property value as
 an `int64` when it is a whole number of any Go integer kind, named or not, or a
 finite integral float. It refuses a fraction, NaN/±Inf, a non-number, an unsigned
-value above `math.MaxInt64`, and a float at or beyond ±2^63. The builtin handlers
+value above `math.MaxInt64`, and a float outside −2^63 ≤ value < 2^63 (−2^63 itself
+fits `int64` and reads; 2^63 does not). The builtin handlers
 read every integer property through it, and each then checks the result against its
 own target (a port is 1–65535, a replica count fits `int32`), refusing a value that
 does not fit rather than converting it. So a plain `int32` or `int64` from a lowering

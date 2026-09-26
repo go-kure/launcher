@@ -26,8 +26,15 @@ func validateThenRenderDeployment(t *testing.T, props map[string]any) (*appsv1.D
 	if err := tr.ValidateAuthoredProperties(app); err != nil {
 		return nil, err
 	}
+	return renderDeployment(t, h, &app.Spec.Components[0]), nil
+}
 
-	comp := &app.Spec.Components[0]
+// renderDeployment runs the handler alone. Validation normalizes the values it
+// checks, so a reader that only knows some integer kinds renders correctly behind
+// it; a handler called directly, as Transform's callers and the lowering engine
+// do, sees the authored Go kind and must read it too.
+func renderDeployment(t *testing.T, h *components.WebserviceHandler, comp *oam.Component) *appsv1.Deployment {
+	t.Helper()
 	cfg, err := h.ToApplicationConfig(comp, "default")
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
@@ -38,11 +45,11 @@ func validateThenRenderDeployment(t *testing.T, props map[string]any) (*appsv1.D
 	}
 	for _, obj := range objects {
 		if d, ok := (*obj).(*appsv1.Deployment); ok {
-			return d, nil
+			return d
 		}
 	}
 	t.Fatal("no Deployment rendered")
-	return nil, nil
+	return nil
 }
 
 // TestIntegerProperty_EveryGoIntegerKindReachesTheReader is go-kure/launcher#418.
@@ -72,27 +79,46 @@ func TestIntegerProperty_EveryGoIntegerKindReachesTheReader(t *testing.T) {
 		// through interface{}: an integral float64 must keep working.
 		{"float64", float64(3), float64(8080)},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			d, err := validateThenRenderDeployment(t, map[string]any{
-				"image":    "ghcr.io/org/app:v1",
-				"replicas": tc.replicas,
-				"port":     tc.port,
-			})
+	render := map[string]func(t *testing.T, props map[string]any) *appsv1.Deployment{
+		"validated": func(t *testing.T, props map[string]any) *appsv1.Deployment {
+			d, err := validateThenRenderDeployment(t, props)
 			if err != nil {
 				t.Fatalf("validation: %v", err)
 			}
-			if d.Spec.Replicas == nil {
-				t.Fatalf("replicas %T(3) rendered no replicas field", tc.replicas)
-			}
-			if *d.Spec.Replicas != 3 {
-				t.Errorf("replicas %T(3) rendered %d, want 3 — the supplied value was dropped", tc.replicas, *d.Spec.Replicas)
-			}
-			ports := d.Spec.Template.Spec.Containers[0].Ports
-			if len(ports) == 0 || ports[0].ContainerPort != 8080 {
-				t.Errorf("port %T(8080) rendered %v, want containerPort 8080", tc.port, ports)
-			}
-		})
+			return d
+		},
+		// go-kure/launcher#525: without validation in front, the reader itself
+		// must handle the kind.
+		"handler-only": func(t *testing.T, props map[string]any) *appsv1.Deployment {
+			return renderDeployment(t, &components.WebserviceHandler{},
+				&oam.Component{Name: "app", Type: "webservice", Properties: props})
+		},
+	}
+	for _, tc := range cases {
+		for path, run := range render {
+			t.Run(tc.name+"/"+path, func(t *testing.T) {
+				d := run(t, map[string]any{
+					"image":    "ghcr.io/org/app:v1",
+					"replicas": tc.replicas,
+					"port":     tc.port,
+				})
+				checkReplicasAndPort(t, d, tc.replicas, tc.port)
+			})
+		}
+	}
+}
+
+func checkReplicasAndPort(t *testing.T, d *appsv1.Deployment, replicas, port any) {
+	t.Helper()
+	if d.Spec.Replicas == nil {
+		t.Fatalf("replicas %T(3) rendered no replicas field", replicas)
+	}
+	if *d.Spec.Replicas != 3 {
+		t.Errorf("replicas %T(3) rendered %d, want 3 — the supplied value was dropped", replicas, *d.Spec.Replicas)
+	}
+	ports := d.Spec.Template.Spec.Containers[0].Ports
+	if len(ports) == 0 || ports[0].ContainerPort != 8080 {
+		t.Errorf("port %T(8080) rendered %v, want containerPort 8080", port, ports)
 	}
 }
 
