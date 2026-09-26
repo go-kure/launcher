@@ -612,19 +612,25 @@ func validateContainerOSFields(ps *corev1.PodSpec) error {
 // []any(nil) a lowering rule produces for an unset optional slice — is absence,
 // per authoredValue in common.go.
 func parseObjectList(props map[string]any, key string) ([]map[string]any, bool, error) {
-	v, present := authoredValue(props, key)
+	return parseObjectListField(props, key, key)
+}
+
+// parseObjectListField is parseObjectList for a nested field, whose error names the
+// full dotted path in label rather than the bare key.
+func parseObjectListField(raw map[string]any, key, label string) ([]map[string]any, bool, error) {
+	v, present := authoredValue(raw, key)
 	if !present {
 		return nil, false, nil
 	}
 	arr, ok := v.([]any)
 	if !ok {
-		return nil, false, errors.Errorf("%s: must be an array, got %T", key, v)
+		return nil, false, errors.Errorf("%s: must be an array, got %T", label, v)
 	}
 	out := make([]map[string]any, 0, len(arr))
 	for i, item := range arr {
 		m, ok := item.(map[string]any)
 		if !ok {
-			return nil, false, errors.Errorf("%s: must be an object, got %T", indexedLabel(key, i), item)
+			return nil, false, errors.Errorf("%s: must be an object, got %T", indexedLabel(label, i), item)
 		}
 		out = append(out, m)
 	}

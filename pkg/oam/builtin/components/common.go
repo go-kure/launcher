@@ -1892,6 +1892,22 @@ func parseStringField(raw map[string]any, key, label string) (string, bool, erro
 	return s, true, nil
 }
 
+// parseRawStringField is parseStringField for a field where an explicit "" is a
+// value, not absence: an enum that must reach its switch to be refused, or a string
+// a handler has always copied through as authored. present is true for "". A
+// wrongly typed value is an error; a null is absence, per authoredValue.
+func parseRawStringField(raw map[string]any, key, label string) (string, bool, error) {
+	v, present := authoredValue(raw, key)
+	if !present {
+		return "", false, nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", false, errors.Errorf("%s: must be a string, got %T", label, v)
+	}
+	return s, true, nil
+}
+
 // requiredStringField reads a required string field through parseStringField,
 // so the two ways an author can get it wrong get their own message: a present
 // value of the wrong type is "<label>.<key>: must be a string, got <T>", and

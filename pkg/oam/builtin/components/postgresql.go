@@ -62,7 +62,11 @@ func (h *PostgresqlHandler) Endpoints(component *oam.Component) ([]netpol.Endpoi
 		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
 	}}
 	// The pooler resource name mirrors createPooler: <component name>-pooler.
-	if poolerEnabled(component) {
+	enabled, err := poolerEnabled(component)
+	if err != nil {
+		return nil, err
+	}
+	if enabled {
 		eps = append(eps, netpol.Endpoint{
 			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgPoolerNameLabel: component.Name + "-pooler"}},
 			Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
@@ -73,14 +77,18 @@ func (h *PostgresqlHandler) Endpoints(component *oam.Component) ([]netpol.Endpoi
 
 // poolerEnabled reports whether the component declares an enabled pooler. It reads the raw
 // property (mirroring ToApplicationConfig's pooler parse) so Endpoints stays a lightweight,
-// side-effect-free view that does not require a full config build.
-func poolerEnabled(component *oam.Component) bool {
-	pooler, ok := component.Properties["pooler"].(map[string]any)
-	if !ok {
-		return false
+// side-effect-free view that does not require a full config build. A wrongly typed
+// pooler or pooler.enabled is an error here too, not "no pooler".
+func poolerEnabled(component *oam.Component) (bool, error) {
+	pooler, present, err := parseObjectField(component.Properties, "pooler", "pooler")
+	if err != nil || !present {
+		return false, err
 	}
-	enabled, _ := pooler["enabled"].(bool)
-	return enabled
+	enabled, err := parseBoolField(pooler, "enabled", "pooler.enabled")
+	if err != nil || enabled == nil {
+		return false, err
+	}
+	return *enabled, nil
 }
 
 // PropertySchema declares the postgresql component's top-level user-facing
@@ -151,8 +159,15 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 
 	props := component.Properties
 
+	// Every optional read below refuses a wrongly typed value by path instead of
+	// treating it as absent (go-kure/launcher#512). Strings go through
+	// parseRawStringField, which keeps an explicit "" as a value: the enums must
+	// still reach their switch to refuse it, and the free-form strings were always
+	// copied through as authored. A null is absence throughout.
 	config.Provider = "cnpg"
-	if provider, ok := props["provider"].(string); ok {
+	if provider, present, err := parseRawStringField(props, "provider", "provider"); err != nil {
+		return nil, err
+	} else if present {
 		switch provider {
 		case "cnpg":
 			config.Provider = provider
@@ -162,12 +177,16 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 
 	config.Version = "16"
-	if version, ok := props["version"].(string); ok {
+	if version, present, err := parseRawStringField(props, "version", "version"); err != nil {
+		return nil, err
+	} else if present {
 		config.Version = version
 	}
 
 	config.StorageSize = "1Gi"
-	if size, ok := props["storageSize"].(string); ok {
+	if size, present, err := parseRawStringField(props, "storageSize", "storageSize"); err != nil {
+		return nil, err
+	} else if present {
 		config.StorageSize = size
 	}
 	config.explicitStorageSize = props["storageSize"] != nil
@@ -195,44 +214,74 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 		config.Resources = r
 	}
 
-	if backup, ok := props["backup"].(map[string]any); ok {
-		if v, ok := backup["retentionPolicy"].(string); ok {
-			config.BackupRetentionPolicy = v
-		}
-		if v, ok := backup["destinationPath"].(string); ok {
-			config.BackupDestinationPath = v
-		}
-		if v, ok := backup["endpointURL"].(string); ok {
-			config.BackupEndpointURL = v
-		}
-		if v, ok := backup["secretName"].(string); ok {
-			config.BackupSecretName = v
-		}
+	backup, present, err := parseObjectField(props, "backup", "backup")
+	if err != nil {
+		return nil, err
 	}
-
-	if monitoring, ok := props["monitoring"].(map[string]any); ok {
-		if enabled, ok := monitoring["enabled"].(bool); ok {
-			config.MonitoringEnabled = enabled
-		}
-		if cqList, ok := monitoring["customQueries"].([]any); ok {
-			for i, cq := range cqList {
-				cqMap, ok := cq.(map[string]any)
-				if !ok {
-					continue
-				}
-				name, _ := cqMap["name"].(string)
-				key, _ := cqMap["key"].(string)
-				if name == "" || key == "" {
-					return nil, errors.Errorf("monitoring.customQueries[%d]: both 'name' and 'key' are required", i)
-				}
-				config.MonitoringCustomQueries = append(config.MonitoringCustomQueries, CustomQueryRef{Name: name, Key: key})
+	if present {
+		for _, f := range []struct {
+			key string
+			dst *string
+		}{
+			{"retentionPolicy", &config.BackupRetentionPolicy},
+			{"destinationPath", &config.BackupDestinationPath},
+			{"endpointURL", &config.BackupEndpointURL},
+			{"secretName", &config.BackupSecretName},
+		} {
+			v, present, err := parseRawStringField(backup, f.key, "backup."+f.key)
+			if err != nil {
+				return nil, err
+			}
+			if present {
+				*f.dst = v
 			}
 		}
 	}
 
-	if pooler, ok := props["pooler"].(map[string]any); ok {
-		if enabled, ok := pooler["enabled"].(bool); ok {
-			config.PoolerEnabled = enabled
+	monitoring, present, err := parseObjectField(props, "monitoring", "monitoring")
+	if err != nil {
+		return nil, err
+	}
+	if present {
+		enabled, err := parseBoolField(monitoring, "enabled", "monitoring.enabled")
+		if err != nil {
+			return nil, err
+		}
+		if enabled != nil {
+			config.MonitoringEnabled = *enabled
+		}
+		cqList, _, err := parseObjectListField(monitoring, "customQueries", "monitoring.customQueries")
+		if err != nil {
+			return nil, err
+		}
+		for i, cqMap := range cqList {
+			label := fmt.Sprintf("monitoring.customQueries[%d]", i)
+			name, _, err := parseStringField(cqMap, "name", label+".name")
+			if err != nil {
+				return nil, err
+			}
+			key, _, err := parseStringField(cqMap, "key", label+".key")
+			if err != nil {
+				return nil, err
+			}
+			if name == "" || key == "" {
+				return nil, errors.Errorf("%s: both 'name' and 'key' are required", label)
+			}
+			config.MonitoringCustomQueries = append(config.MonitoringCustomQueries, CustomQueryRef{Name: name, Key: key})
+		}
+	}
+
+	pooler, present, err := parseObjectField(props, "pooler", "pooler")
+	if err != nil {
+		return nil, err
+	}
+	if present {
+		enabled, err := parseBoolField(pooler, "enabled", "pooler.enabled")
+		if err != nil {
+			return nil, err
+		}
+		if enabled != nil {
+			config.PoolerEnabled = *enabled
 		}
 		config.PoolerInstances = 3
 		if v := pooler["instances"]; v != nil {
@@ -242,81 +291,110 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 			}
 			config.PoolerInstances = n
 		}
-		if typ, ok := pooler["type"].(string); ok {
+		config.PoolerType = "rw"
+		if typ, present, err := parseRawStringField(pooler, "type", "pooler.type"); err != nil {
+			return nil, err
+		} else if present {
 			switch typ {
 			case "rw", "ro":
 				config.PoolerType = typ
 			default:
 				return nil, errors.Errorf("unsupported pooler type %q, supported: rw, ro", typ)
 			}
-		} else {
-			config.PoolerType = "rw"
 		}
-		if mode, ok := pooler["poolMode"].(string); ok {
+		config.PoolerPoolMode = PoolModeSession
+		if mode, present, err := parseRawStringField(pooler, "poolMode", "pooler.poolMode"); err != nil {
+			return nil, err
+		} else if present {
 			switch PoolMode(mode) {
 			case PoolModeSession, PoolModeTransaction, PoolModeStatement:
 				config.PoolerPoolMode = PoolMode(mode)
 			default:
 				return nil, errors.Errorf("unsupported pooler pool mode %q, supported: session, transaction, statement", mode)
 			}
-		} else {
-			config.PoolerPoolMode = PoolModeSession
 		}
-		if params, ok := pooler["parameters"].(map[string]any); ok {
-			var err error
+		if params, present, err := parseObjectField(pooler, "parameters", "pooler.parameters"); err != nil {
+			return nil, err
+		} else if present {
 			if config.PoolerParameters, err = stringMapStrict(params, "pooler.parameters"); err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	if bootstrap, ok := props["bootstrap"].(map[string]any); ok {
-		_, hasRecovery := bootstrap["recovery"].(map[string]any)
-		_, hasPgBasebackup := bootstrap["pg_basebackup"].(map[string]any)
+	bootstrap, present, err := parseObjectField(props, "bootstrap", "bootstrap")
+	if err != nil {
+		return nil, err
+	}
+	if present {
+		recovery, hasRecovery, err := parseObjectField(bootstrap, "recovery", "bootstrap.recovery")
+		if err != nil {
+			return nil, err
+		}
+		pgbb, hasPgBasebackup, err := parseObjectField(bootstrap, "pg_basebackup", "bootstrap.pg_basebackup")
+		if err != nil {
+			return nil, err
+		}
 		if hasRecovery && hasPgBasebackup {
 			return nil, errors.New("bootstrap: recovery and pg_basebackup are mutually exclusive")
 		}
-		if recovery, ok := bootstrap["recovery"].(map[string]any); ok {
-			if source, ok := recovery["source"].(string); ok {
-				config.BootstrapRecoverySource = source
+		if hasRecovery {
+			if config.BootstrapRecoverySource, _, err = parseRawStringField(recovery, "source", "bootstrap.recovery.source"); err != nil {
+				return nil, err
 			}
 		}
-		if pgbb, ok := bootstrap["pg_basebackup"].(map[string]any); ok {
-			if source, ok := pgbb["source"].(string); ok {
-				config.BootstrapPgBasebackupSource = source
-			}
-		}
-	}
-
-	if ecList, ok := props["externalClusters"].([]any); ok {
-		for i, ec := range ecList {
-			ecMap, ok := ec.(map[string]any)
-			if !ok {
-				continue
-			}
-			ext := ExternalCluster{}
-			if n, ok := ecMap["name"].(string); ok {
-				ext.Name = n
-			}
-			if bos, ok := ecMap["barmanObjectStore"].(map[string]any); ok {
-				ext.BarmanObjectStore = bos
-			}
-			if cp, ok := ecMap["connectionParameters"].(map[string]any); ok {
-				var err error
-				label := fmt.Sprintf("externalClusters[%d].connectionParameters", i)
-				if ext.ConnectionParameters, err = stringMapStrict(cp, label); err != nil {
-					return nil, err
-				}
-			}
-			if ext.Name != "" {
-				config.ExternalClusters = append(config.ExternalClusters, ext)
+		if hasPgBasebackup {
+			if config.BootstrapPgBasebackupSource, _, err = parseRawStringField(pgbb, "source", "bootstrap.pg_basebackup.source"); err != nil {
+				return nil, err
 			}
 		}
 	}
 
-	if replication, ok := props["replication"].(map[string]any); ok {
-		if sync, ok := replication["synchronous"].(map[string]any); ok {
-			if method, ok := sync["method"].(string); ok {
+	ecList, _, err := parseObjectListField(props, "externalClusters", "externalClusters")
+	if err != nil {
+		return nil, err
+	}
+	for i, ecMap := range ecList {
+		label := fmt.Sprintf("externalClusters[%d]", i)
+		ext := ExternalCluster{}
+		// A nameless entry is refused rather than skipped: it used to be dropped
+		// from the cluster without a word, the same silent loss as a wrong type.
+		name, present, err := parseStringField(ecMap, "name", label+".name")
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			return nil, errors.Errorf("%s: 'name' is required", label)
+		}
+		ext.Name = name
+		if bos, present, err := parseObjectField(ecMap, "barmanObjectStore", label+".barmanObjectStore"); err != nil {
+			return nil, err
+		} else if present {
+			ext.BarmanObjectStore = bos
+		}
+		if cp, present, err := parseObjectField(ecMap, "connectionParameters", label+".connectionParameters"); err != nil {
+			return nil, err
+		} else if present {
+			if ext.ConnectionParameters, err = stringMapStrict(cp, label+".connectionParameters"); err != nil {
+				return nil, err
+			}
+		}
+		config.ExternalClusters = append(config.ExternalClusters, ext)
+	}
+
+	replication, present, err := parseObjectField(props, "replication", "replication")
+	if err != nil {
+		return nil, err
+	}
+	if present {
+		sync, present, err := parseObjectField(replication, "synchronous", "replication.synchronous")
+		if err != nil {
+			return nil, err
+		}
+		if present {
+			if method, present, err := parseRawStringField(sync, "method", "replication.synchronous.method"); err != nil {
+				return nil, err
+			} else if present {
 				switch method {
 				case "any", "first":
 					config.SynchronousMethod = method
@@ -335,7 +413,9 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 			if config.SynchronousNumber < 0 {
 				return nil, errors.Errorf("replication synchronous number must be >= 0, got %d", config.SynchronousNumber)
 			}
-			if dd, ok := sync["dataDurability"].(string); ok {
+			if dd, present, err := parseRawStringField(sync, "dataDurability", "replication.synchronous.dataDurability"); err != nil {
+				return nil, err
+			} else if present {
 				switch dd {
 				case "required", "preferred":
 					config.SynchronousDataDurability = dd
@@ -346,175 +426,211 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 		}
 	}
 
-	if pg, ok := props["postgresql"].(map[string]any); ok {
-		if params, ok := pg["parameters"].(map[string]any); ok {
-			var err error
+	pg, present, err := parseObjectField(props, "postgresql", "postgresql")
+	if err != nil {
+		return nil, err
+	}
+	if present {
+		if params, present, err := parseObjectField(pg, "parameters", "postgresql.parameters"); err != nil {
+			return nil, err
+		} else if present {
 			if config.PostgresqlParameters, err = stringMapStrict(params, "postgresql.parameters"); err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	if img, ok := props["imageName"].(string); ok {
-		config.ImageName = img
+	if config.ImageName, _, err = parseRawStringField(props, "imageName", "imageName"); err != nil {
+		return nil, err
 	}
 
-	if im, ok := props["inheritedMetadata"].(map[string]any); ok {
+	im, present, err := parseObjectField(props, "inheritedMetadata", "inheritedMetadata")
+	if err != nil {
+		return nil, err
+	}
+	if present {
 		// A non-string value is refused, not dropped: these become label and
 		// annotation values on the generated resources, where a dropped key is
 		// a different cluster state from the one the author wrote
 		// (go-kure/launcher#466).
-		var err error
-		if labels, ok := im["labels"].(map[string]any); ok {
+		if labels, present, err := parseObjectField(im, "labels", "inheritedMetadata.labels"); err != nil {
+			return nil, err
+		} else if present {
 			if config.InheritedLabels, err = stringMapStrict(labels, "inheritedMetadata.labels"); err != nil {
 				return nil, err
 			}
 		}
-		if annotations, ok := im["annotations"].(map[string]any); ok {
+		if annotations, present, err := parseObjectField(im, "annotations", "inheritedMetadata.annotations"); err != nil {
+			return nil, err
+		} else if present {
 			if config.InheritedAnnotations, err = stringMapStrict(annotations, "inheritedMetadata.annotations"); err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	if roleList, ok := props["managedRoles"].([]any); ok {
-		for i, r := range roleList {
-			rMap, ok := r.(map[string]any)
-			if !ok {
-				return nil, errors.Errorf("managedRoles[%d]: must be an object", i)
-			}
-			name, _ := rMap["name"].(string)
-			if name == "" {
-				return nil, errors.Errorf("managedRoles[%d]: 'name' is required", i)
-			}
-			role := ManagedRoleConfig{Name: name}
-			if ensure, ok := rMap["ensure"].(string); ok {
-				switch ensure {
-				case "present", "absent":
-					role.Ensure = ensure
-				default:
-					return nil, errors.Errorf("managedRoles[%d]: unsupported ensure %q, supported: present, absent", i, ensure)
-				}
-			}
-			if v, ok := rMap["login"].(bool); ok {
-				role.Login = v
-			}
-			if v, ok := rMap["superuser"].(bool); ok {
-				role.Superuser = v
-			}
-			if v, ok := rMap["createdb"].(bool); ok {
-				role.CreateDB = v
-			}
-			if v, ok := rMap["createrole"].(bool); ok {
-				role.CreateRole = v
-			}
-			if v, ok := rMap["replication"].(bool); ok {
-				role.Replication = v
-			}
-			if v, ok := rMap["inherit"].(bool); ok {
-				role.Inherit = &v
-			}
-			if v := rMap["connectionLimit"]; v != nil {
-				n, ok := toInt32(v)
-				if !ok {
-					return nil, errors.Errorf("managedRoles[%d]: invalid connectionLimit value: %v", i, v)
-				}
-				n64 := int64(n)
-				role.ConnectionLimit = &n64
-			}
-			if v, ok := rMap["passwordSecret"].(string); ok {
-				role.PasswordSecret = v
-			}
-			if v, ok := rMap["comment"].(string); ok {
-				role.Comment = v
-			}
-			if inRoles, ok := rMap["inRoles"].([]any); ok {
-				for _, ir := range inRoles {
-					if s, ok := ir.(string); ok {
-						role.InRoles = append(role.InRoles, s)
-					}
-				}
-			}
-			config.ManagedRoles = append(config.ManagedRoles, role)
+	roleList, _, err := parseObjectListField(props, "managedRoles", "managedRoles")
+	if err != nil {
+		return nil, err
+	}
+	for i, rMap := range roleList {
+		label := fmt.Sprintf("managedRoles[%d]", i)
+		name, present, err := parseStringField(rMap, "name", label+".name")
+		if err != nil {
+			return nil, err
 		}
+		if !present {
+			return nil, errors.Errorf("%s: 'name' is required", label)
+		}
+		role := ManagedRoleConfig{Name: name}
+		if ensure, present, err := parseRawStringField(rMap, "ensure", label+".ensure"); err != nil {
+			return nil, err
+		} else if present {
+			switch ensure {
+			case "present", "absent":
+				role.Ensure = ensure
+			default:
+				return nil, errors.Errorf("%s: unsupported ensure %q, supported: present, absent", label, ensure)
+			}
+		}
+		for _, f := range []struct {
+			key string
+			dst *bool
+		}{
+			{"login", &role.Login},
+			{"superuser", &role.Superuser},
+			{"createdb", &role.CreateDB},
+			{"createrole", &role.CreateRole},
+			{"replication", &role.Replication},
+		} {
+			v, err := parseBoolField(rMap, f.key, label+"."+f.key)
+			if err != nil {
+				return nil, err
+			}
+			if v != nil {
+				*f.dst = *v
+			}
+		}
+		if role.Inherit, err = parseBoolField(rMap, "inherit", label+".inherit"); err != nil {
+			return nil, err
+		}
+		if v, present := authoredValue(rMap, "connectionLimit"); present {
+			n, ok := toInt32(v)
+			if !ok {
+				return nil, errors.Errorf("%s: invalid connectionLimit value: %v", label, v)
+			}
+			n64 := int64(n)
+			role.ConnectionLimit = &n64
+		}
+		if role.PasswordSecret, _, err = parseRawStringField(rMap, "passwordSecret", label+".passwordSecret"); err != nil {
+			return nil, err
+		}
+		if role.Comment, _, err = parseRawStringField(rMap, "comment", label+".comment"); err != nil {
+			return nil, err
+		}
+		if role.InRoles, _, err = parseStringList(rMap, "inRoles", label+".inRoles"); err != nil {
+			return nil, err
+		}
+		config.ManagedRoles = append(config.ManagedRoles, role)
 	}
 
-	if osMap, ok := props["objectStore"].(map[string]any); ok {
-		dp, _ := osMap["destinationPath"].(string)
-		if dp == "" {
+	osMap, present, err := parseObjectField(props, "objectStore", "objectStore")
+	if err != nil {
+		return nil, err
+	}
+	if present {
+		dp, present, err := parseStringField(osMap, "destinationPath", "objectStore.destinationPath")
+		if err != nil {
+			return nil, err
+		}
+		if !present {
 			return nil, errors.New("objectStore: 'destinationPath' is required")
 		}
 		os := &ObjectStoreConfig{DestinationPath: dp}
-		if eu, ok := osMap["endpointURL"].(string); ok {
-			os.EndpointURL = eu
-		}
-		if sn, ok := osMap["secretName"].(string); ok {
-			os.SecretName = sn
-		}
-		if rp, ok := osMap["retentionPolicy"].(string); ok {
-			os.RetentionPolicy = rp
-		}
-		if sv, ok := osMap["serverName"].(string); ok {
-			os.ServerName = sv
+		for _, f := range []struct {
+			key string
+			dst *string
+		}{
+			{"endpointURL", &os.EndpointURL},
+			{"secretName", &os.SecretName},
+			{"retentionPolicy", &os.RetentionPolicy},
+			{"serverName", &os.ServerName},
+		} {
+			if *f.dst, _, err = parseRawStringField(osMap, f.key, "objectStore."+f.key); err != nil {
+				return nil, err
+			}
 		}
 		config.ObjectStore = os
 	}
 
-	if dbList, ok := props["databases"].([]any); ok {
-		for i, d := range dbList {
-			dMap, ok := d.(map[string]any)
-			if !ok {
-				return nil, errors.Errorf("databases[%d]: must be an object", i)
+	dbList, _, err := parseObjectListField(props, "databases", "databases")
+	if err != nil {
+		return nil, err
+	}
+	for i, dMap := range dbList {
+		label := fmt.Sprintf("databases[%d]", i)
+		name, present, err := parseStringField(dMap, "name", label+".name")
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			return nil, errors.Errorf("%s: 'name' is required", label)
+		}
+		owner, present, err := parseStringField(dMap, "owner", label+".owner")
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			return nil, errors.Errorf("%s: 'owner' is required", label)
+		}
+		entry := DatabaseEntry{Name: name, Owner: owner}
+		if ensure, present, err := parseRawStringField(dMap, "ensure", label+".ensure"); err != nil {
+			return nil, err
+		} else if present {
+			switch ensure {
+			case "present", "absent":
+				entry.Ensure = ensure
+			default:
+				return nil, errors.Errorf("%s: unsupported ensure %q, supported: present, absent", label, ensure)
 			}
-			name, _ := dMap["name"].(string)
-			if name == "" {
-				return nil, errors.Errorf("databases[%d]: 'name' is required", i)
+		}
+		if rp, present, err := parseRawStringField(dMap, "databaseReclaimPolicy", label+".databaseReclaimPolicy"); err != nil {
+			return nil, err
+		} else if present {
+			switch rp {
+			case "retain", "delete":
+				entry.ReclaimPolicy = rp
+			default:
+				return nil, errors.Errorf("%s: unsupported databaseReclaimPolicy %q, supported: retain, delete", label, rp)
 			}
-			owner, _ := dMap["owner"].(string)
-			if owner == "" {
-				return nil, errors.Errorf("databases[%d]: 'owner' is required", i)
+		}
+		extList, _, err := parseObjectListField(dMap, "extensions", label+".extensions")
+		if err != nil {
+			return nil, err
+		}
+		for j, eMap := range extList {
+			extLabel := fmt.Sprintf("%s.extensions[%d]", label, j)
+			extName, present, err := parseStringField(eMap, "name", extLabel+".name")
+			if err != nil {
+				return nil, err
 			}
-			entry := DatabaseEntry{Name: name, Owner: owner}
-			if ensure, ok := dMap["ensure"].(string); ok {
+			if !present {
+				return nil, errors.Errorf("%s: 'name' is required", extLabel)
+			}
+			ext := DatabaseExtension{Name: extName}
+			if ensure, present, err := parseRawStringField(eMap, "ensure", extLabel+".ensure"); err != nil {
+				return nil, err
+			} else if present {
 				switch ensure {
 				case "present", "absent":
-					entry.Ensure = ensure
+					ext.Ensure = ensure
 				default:
-					return nil, errors.Errorf("databases[%d]: unsupported ensure %q, supported: present, absent", i, ensure)
+					return nil, errors.Errorf("%s: unsupported ensure %q, supported: present, absent", extLabel, ensure)
 				}
 			}
-			if rp, ok := dMap["databaseReclaimPolicy"].(string); ok {
-				switch rp {
-				case "retain", "delete":
-					entry.ReclaimPolicy = rp
-				default:
-					return nil, errors.Errorf("databases[%d]: unsupported databaseReclaimPolicy %q, supported: retain, delete", i, rp)
-				}
-			}
-			if extList, ok := dMap["extensions"].([]any); ok {
-				for j, e := range extList {
-					eMap, ok := e.(map[string]any)
-					if !ok {
-						continue
-					}
-					extName, _ := eMap["name"].(string)
-					if extName == "" {
-						return nil, errors.Errorf("databases[%d].extensions[%d]: 'name' is required", i, j)
-					}
-					ext := DatabaseExtension{Name: extName}
-					if ensure, ok := eMap["ensure"].(string); ok {
-						switch ensure {
-						case "present", "absent":
-							ext.Ensure = ensure
-						default:
-							return nil, errors.Errorf("databases[%d].extensions[%d]: unsupported ensure %q, supported: present, absent", i, j, ensure)
-						}
-					}
-					entry.Extensions = append(entry.Extensions, ext)
-				}
-			}
-			config.Databases = append(config.Databases, entry)
+			entry.Extensions = append(entry.Extensions, ext)
 		}
+		config.Databases = append(config.Databases, entry)
 	}
 
 	// Presence-reporting reads rather than bare comma-ok: an affinity block, or a

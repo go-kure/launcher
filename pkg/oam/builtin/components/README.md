@@ -1287,9 +1287,9 @@ now refused by value, not by type (`port: must be an integer within int32
 range, got 5000000000`). `parseInt32Field` words that case apart from a wrong
 type for every field it reads, so an out-of-range `replicas` or
 `minReadySeconds` gets the same range message. `postgresql`'s other top-level
-reads (`storageSize`, `backup`, `pooler`, …; tracked separately — its
-`resources` read is covered above) and `helmchart`'s were not part of that
-change.
+reads (`storageSize`, `backup`, `pooler`, …) were converted separately, in
+go-kure/launcher#512 (see the `postgresql` entry below); `helmchart`'s were
+not part of either change.
 
 - **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
   plus the full `DeploymentSpec`-level surface they share with `deployment` —
@@ -1797,6 +1797,22 @@ change.
   "The null contract" below: the key is left out, not refused. The same
   holds for `nodeSelector` values in both affinity readers, which share the
   helper.
+  Every other optional property the handler reads goes through the same
+  presence-reporting helpers (go-kure/launcher#512): `provider`, `version`,
+  `storageSize`, `imageName`, the `backup`, `monitoring`, `pooler`,
+  `bootstrap`, `replication.synchronous` and `objectStore` blocks and their
+  fields, and each entry of `managedRoles`, `databases` (with its
+  `extensions`), `externalClusters` and `monitoring.customQueries`. A value of
+  the wrong type is refused by its path
+  (`managedRoles[0].login: must be a boolean, got string`,
+  `databases[0].extensions[1]: must be an object, got string`) where it used
+  to be dropped, so `pooler.enabled: "true"` no longer builds a cluster with
+  no pooler and `backup: "s3"` no longer builds one with no backup; an
+  explicit null is absence. Two further shapes that used to vanish are now
+  errors: a non-string `managedRoles[].inRoles` entry, and an
+  `externalClusters` entry without a `name`. `Endpoints` reads
+  `pooler.enabled` the same way, so it refuses the wrong type instead of
+  declaring no pooler endpoint.
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
   data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
   platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
