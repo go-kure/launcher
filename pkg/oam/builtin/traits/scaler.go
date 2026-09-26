@@ -118,32 +118,14 @@ func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Applica
 	return config, nil
 }
 
-// toInt32ForScaler parses v as int32, requiring a whole number.
+// toInt32ForScaler parses v as int32, requiring a whole number of any Go integer
+// kind (or an integral float) inside the int32 range.
 func toInt32ForScaler(v any) (int32, bool) {
-	switch n := v.(type) {
-	case float64:
-		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) {
-			return 0, false
-		}
-		if n < math.MinInt32 || n > math.MaxInt32 {
-			return 0, false
-		}
-		return int32(n), true //nolint:gosec
-	case int:
-		if n < math.MinInt32 || n > math.MaxInt32 {
-			return 0, false
-		}
-		return int32(n), true //nolint:gosec
-	case int32:
-		return n, true
-	case int64:
-		if n < math.MinInt32 || n > math.MaxInt32 {
-			return 0, false
-		}
-		return int32(n), true //nolint:gosec
-	default:
+	n, ok := oam.IntegerValue(v)
+	if !ok || n < math.MinInt32 || n > math.MaxInt32 {
 		return 0, false
 	}
+	return int32(n), true
 }
 
 // nonRWXClaimer is implemented by component configs whose Deployment carries a

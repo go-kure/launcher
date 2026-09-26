@@ -402,6 +402,18 @@ while a nil one applies no constraint on that axis — which is *not* the same a
 matching nothing, since what the peer then selects depends on the sibling fields it
 still has (`k8s.io/api` `networking/v1/types.go:199-222`).
 
+`IntegerValue` is the matching reader for integers. It returns a property value as
+an `int64` when it is a whole number of any Go integer kind, named or not, or a
+finite integral float. It refuses a fraction, NaN/±Inf, a non-number, an unsigned
+value above `math.MaxInt64`, and a float at or beyond ±2^63. The builtin handlers
+read every integer property through it, and each then checks the result against its
+own target (a port is 1–65535, a replica count fits `int32`), refusing a value that
+does not fit rather than converting it. So a plain `int32` or `int64` from a lowering
+rule or a Go caller reads the same as the `int` the YAML decoder produces, and a
+value that would only fit after wrapping, like 2^32+80 for a port, is an error
+instead of port 80. An out-of-tree handler should read integers through it for the
+same reason.
+
 ### What an explicit `null` means on the emitted path
 
 The contract, stated once because "null" has several readers here and aligning

@@ -2,6 +2,7 @@ package traits
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
@@ -298,11 +299,12 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 					}
 				}
 				portExplicit := false
-				if port, ok := backendMap["port"].(float64); ok {
-					br.Port = int32(port) //nolint:gosec
-					portExplicit = true
-				} else if port, ok := backendMap["port"].(int); ok {
-					br.Port = int32(port) //nolint:gosec
+				if rawPort, ok := backendMap["port"]; ok && !oam.IsNullValue(rawPort) {
+					port, ok := toIngressPort(rawPort)
+					if !ok {
+						return nil, errors.Errorf("rules[%d].backendRefs[%d].port must be a valid port number (1–65535), got %v", i, j, rawPort)
+					}
+					br.Port = port
 					portExplicit = true
 				}
 				if nameExplicit && !portExplicit {
@@ -895,36 +897,31 @@ func parseRuleTimeouts(ruleMap map[string]any, ruleIdx int) (*HTTPRouteTimeouts,
 	return t, nil
 }
 
-// coerceInt32 handles both int and float64 JSON number types.
+// coerceInt32 reads a whole number of any Go integer kind, or an integral float,
+// that fits int32. A fraction or an out-of-range value is an error: converting it
+// would truncate 8080.5 to 8080 and wrap 2^32+80 to 80, both of which the callers'
+// own range checks would then accept (go-kure/launcher#525).
 func coerceInt32(v any) (int32, error) {
-	switch n := v.(type) {
-	case int:
-		return int32(n), nil //nolint:gosec
-	case int32:
-		return n, nil
-	case int64:
-		return int32(n), nil //nolint:gosec
-	case float64:
-		return int32(n), nil //nolint:gosec
-	default:
-		return 0, errors.Errorf("expected number, got %T", v)
+	n, ok := oam.IntegerValue(v)
+	if !ok {
+		return 0, errors.Errorf("expected an integer, got %T (%v)", v, v)
 	}
+	if n < math.MinInt32 || n > math.MaxInt32 {
+		return 0, errors.Errorf("integer %d out of range (min %d, max %d)", n, math.MinInt32, math.MaxInt32)
+	}
+	return int32(n), nil
 }
 
 // coerceInt is the untyped counterpart of coerceInt32.
 func coerceInt(v any) (int, error) {
-	switch n := v.(type) {
-	case int:
-		return n, nil
-	case int32:
-		return int(n), nil
-	case int64:
-		return int(n), nil
-	case float64:
-		return int(n), nil
-	default:
-		return 0, errors.Errorf("expected number, got %T", v)
+	n, ok := oam.IntegerValue(v)
+	if !ok {
+		return 0, errors.Errorf("expected an integer, got %T (%v)", v, v)
 	}
+	if n < math.MinInt || n > math.MaxInt {
+		return 0, errors.Errorf("integer %d out of range (min %d, max %d)", n, math.MinInt, math.MaxInt)
+	}
+	return int(n), nil
 }
 
 // isAllowedRedirectStatus matches the Gateway API enum for

@@ -384,6 +384,16 @@ now renders `policyTypes: [Egress]` (go-kure/launcher#467).
 
 ## Auto-synthesized NetworkPolicy
 
+Every integer property is read through `oam.IntegerValue`, so any Go integer kind
+(a plain `int32`/`int64` or an unsigned kind from a lowering rule or a Go caller)
+renders the same as the `int` a YAML literal decodes to. The value is then
+range-checked against its target and refused if it does not fit, never truncated or
+wrapped. For routing ports this covers the trait-level `servicePort`, an ingress
+`rules[].paths[].port`, and an httproute `rules[].backendRefs[].port`: each must be
+1–65535, and an error names the field. A present-but-invalid path or backendRef
+`port` used to fall back to the component's port (ingress) or render as-is
+(httproute); it is now an error.
+
 Routing traits (`ingress`/`httproute`/`expose`) can surface platform-reserved
 `networkPolicy.trafficSources`, which the OAM layer collects to synthesize a
 matching `NetworkPolicy` (see [`pkg/oam/netpol`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/netpol)).

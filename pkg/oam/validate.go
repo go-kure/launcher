@@ -376,14 +376,18 @@ func validateParamDefault(p *ParameterDecl) error {
 	// Non-string default: the Go type decoded by yaml.Unmarshal must match the declared type.
 	switch string(p.Type) {
 	case "integer":
+		if _, ok := IntegerValue(p.Default); ok {
+			break
+		}
 		switch tv := p.Default.(type) {
-		case int, int64:
-			// OK
 		case float64:
 			if tv != math.Trunc(tv) {
 				return packageValidationError("parameters",
 					fmt.Sprintf("parameter %q has fractional default %g; integer parameters require whole numbers", p.Name, tv))
 			}
+			// An integral float64 IntegerValue refused is outside the int64 range.
+			return packageValidationError("parameters",
+				fmt.Sprintf("parameter %q has default %g outside the integer range", p.Name, tv))
 		default:
 			return packageValidationError("parameters",
 				fmt.Sprintf("parameter %q (type integer) has default of type %T; expected a whole number", p.Name, p.Default))
