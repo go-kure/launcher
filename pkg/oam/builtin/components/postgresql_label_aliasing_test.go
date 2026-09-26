@@ -47,11 +47,26 @@ func TestPostgresql_InheritedMetadataSharesNoMap(t *testing.T) {
 		return nil
 	}
 
+	// A copy that shares no map but drops the entries would pass the identity
+	// checks below; each Cluster must still carry exactly the authored metadata.
+	wantLabels := map[string]string{"team": "backend"}
+	wantAnnotations := map[string]string{"owner": "dba"}
+	checkContent := func(which string, m *cnpgv1.EmbeddedObjectMetadata) {
+		t.Helper()
+		if m == nil {
+			t.Fatalf("%s Cluster: spec.inheritedMetadata not rendered", which)
+		}
+		if !reflect.DeepEqual(m.Labels, wantLabels) {
+			t.Errorf("%s Cluster: inheritedMetadata.labels = %v, want %v", which, m.Labels, wantLabels)
+		}
+		if !reflect.DeepEqual(m.Annotations, wantAnnotations) {
+			t.Errorf("%s Cluster: inheritedMetadata.annotations = %v, want %v", which, m.Annotations, wantAnnotations)
+		}
+	}
+
 	first := generate()
 	meta := first.Spec.InheritedMetadata
-	if meta == nil {
-		t.Fatal("spec.inheritedMetadata not rendered")
-	}
+	checkContent("first", meta)
 	same := func(a, b map[string]string) bool {
 		return a != nil && b != nil && reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
 	}
@@ -67,6 +82,7 @@ func TestPostgresql_InheritedMetadataSharesNoMap(t *testing.T) {
 	meta.Labels["stamped"] = "by-caller"
 	meta.Annotations["stamped"] = "by-caller"
 	second := generate().Spec.InheritedMetadata
+	checkContent("second", second)
 	if _, leaked := second.Labels["stamped"]; leaked {
 		t.Error("a label stamped on one generated Cluster appeared on the next Generate")
 	}
