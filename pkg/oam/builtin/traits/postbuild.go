@@ -45,8 +45,11 @@ func (h *PostBuildHandler) Apply(trait *oam.Trait, _ *stack.Application, bundle 
 	pb := &stack.PostBuild{}
 
 	if raw, ok := trait.Properties["substitute"]; ok {
+		// The `== nil` guards in this function refuse a typed nil exactly as they
+		// refuse an untyped one (go-kure/launcher#465); without them a typed-nil
+		// substitute or substituteFrom beside a valid sibling passed as empty.
 		m, ok := raw.(map[string]any)
-		if !ok {
+		if !ok || m == nil {
 			return errors.New("fluxcd-postbuild: 'substitute' must be a map")
 		}
 		pb.Substitute = make(map[string]string, len(m))
@@ -61,12 +64,12 @@ func (h *PostBuildHandler) Apply(trait *oam.Trait, _ *stack.Application, bundle 
 
 	if raw, ok := trait.Properties["substituteFrom"]; ok {
 		items, ok := raw.([]any)
-		if !ok {
+		if !ok || items == nil {
 			return errors.New("fluxcd-postbuild: 'substituteFrom' must be a list")
 		}
 		for i, item := range items {
 			m, ok := item.(map[string]any)
-			if !ok {
+			if !ok || m == nil {
 				return errors.Errorf("fluxcd-postbuild: substituteFrom[%d] must be an object", i)
 			}
 

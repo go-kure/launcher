@@ -110,7 +110,7 @@ func (h *CertificateHandler) parseProperties(props map[string]any, app *stack.Ap
 	config.SecretName = secretName
 
 	issuerRef, ok := props["issuerRef"].(map[string]any)
-	if !ok {
+	if !ok || issuerRef == nil {
 		return nil, errors.New("required property 'issuerRef' missing or not a map")
 	}
 	issuerName, ok := issuerRef["name"].(string)

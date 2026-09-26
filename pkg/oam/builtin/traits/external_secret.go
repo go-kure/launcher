@@ -239,7 +239,7 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 			if t, ok := rawTemplate["type"].(string); ok {
 				tmpl.Type = t
 			}
-			if rawData, ok := rawTemplate["data"].(map[string]any); ok {
+			if rawData, ok := rawTemplate["data"].(map[string]any); ok && rawData != nil {
 				tmpl.Data = make(map[string]string, len(rawData))
 				for k, v := range rawData {
 					tmpl.Data[k] = fmt.Sprintf("%v", v)
@@ -252,7 +252,7 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 	if rawData, ok := props["data"].([]any); ok {
 		for i, item := range rawData {
 			entry, ok := item.(map[string]any)
-			if !ok {
+			if !ok || entry == nil {
 				return nil, errors.Errorf("data[%d]: expected object", i)
 			}
 			if bad := unsupportedKeys(entry, "secretKey", "remoteRef"); len(bad) > 0 {
@@ -269,7 +269,7 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 			var ref esRemoteRef
 			if raw, present := entry["remoteRef"]; present {
 				rawRef, ok := raw.(map[string]any)
-				if !ok {
+				if !ok || rawRef == nil {
 					return nil, errors.Errorf("data[%d].remoteRef: must be an object", i)
 				}
 				if bad := unsupportedKeys(rawRef, "key", "property", "version", "decodingStrategy"); len(bad) > 0 {
@@ -314,11 +314,11 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 	if rawDataFrom, ok := props["dataFrom"].([]any); ok {
 		for i, item := range rawDataFrom {
 			entry, ok := item.(map[string]any)
-			if !ok {
+			if !ok || entry == nil {
 				return nil, errors.Errorf("dataFrom[%d]: expected object", i)
 			}
 			dfEntry := esDataFromEntry{}
-			if rawExtract, ok := entry["extract"].(map[string]any); ok {
+			if rawExtract, ok := entry["extract"].(map[string]any); ok && rawExtract != nil {
 				key, _ := rawExtract["key"].(string)
 				if key == "" {
 					return nil, errors.Errorf("dataFrom[%d].extract: required field 'key' missing or empty", i)
@@ -335,14 +335,14 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 				}
 				dfEntry.Extract = ref
 			}
-			if rawFind, ok := entry["find"].(map[string]any); ok {
+			if rawFind, ok := entry["find"].(map[string]any); ok && rawFind != nil {
 				find := &esFind{}
 				if rawName, ok := rawFind["name"].(map[string]any); ok {
 					if re, ok := rawName["regexp"].(string); ok {
 						find.Name = &esFindName{RegExp: re}
 					}
 				}
-				if rawTags, ok := rawFind["tags"].(map[string]any); ok {
+				if rawTags, ok := rawFind["tags"].(map[string]any); ok && rawTags != nil {
 					find.Tags = make(map[string]string, len(rawTags))
 					for k, v := range rawTags {
 						find.Tags[k] = fmt.Sprintf("%v", v)
@@ -362,7 +362,7 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 
 	// Shorthand: top-level remoteRef maps to a single data entry where secretKey=secretName.
 	// Matches the shape used in launcher examples (e.g. examples/04-webservice-full.yaml).
-	if rawRef, ok := props["remoteRef"].(map[string]any); ok {
+	if rawRef, ok := props["remoteRef"].(map[string]any); ok && rawRef != nil {
 		if len(config.Data) > 0 || len(config.DataFrom) > 0 {
 			return nil, errors.New("external-secret: 'remoteRef' cannot be combined with 'data' or 'dataFrom'")
 		}
