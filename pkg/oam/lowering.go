@@ -258,6 +258,9 @@ type LoweringContext struct {
 // NameAllocator hands out deterministic, collision-free generated names within one
 // lowering run (D2). A name already claimed by a different origin is a hard error
 // naming both origins — a collision fails the build, never silently overwrites.
+// The one exception is EmitOrAdopt: when a name was first claimed through it, a
+// repeat EmitOrAdopt claim for the same content identity, from any origin, adopts
+// the existing element instead of colliding.
 type NameAllocator struct {
 	taken map[string]nameClaim
 	// round is the fixpoint round currently being processed, set by runLowering
