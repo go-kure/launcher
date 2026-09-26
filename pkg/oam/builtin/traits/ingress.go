@@ -281,7 +281,11 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 			}
 
 			portExplicit := false
-			if port, ok := toIngressPort(pathMap["port"]); ok {
+			if rawPort, ok := pathMap["port"]; ok && !oam.IsNullValue(rawPort) {
+				port, ok := toIngressPort(rawPort)
+				if !ok {
+					return nil, errors.Errorf("rules[%d].paths[%d].port must be a valid port number (1–65535), got %v", i, j, rawPort)
+				}
 				p.Port = port
 				portExplicit = true
 			}
@@ -494,18 +498,16 @@ func (c *IngressConfig) Generate(app *stack.Application) ([]*client.Object, erro
 	return []*client.Object{&obj}, nil
 }
 
+// toIngressPort reads a service port: a whole number of any Go integer kind, or an
+// integral float, in 1–65535. Anything else — a fraction, zero, a negative, a value
+// that would only fit after wrapping — is refused, never converted
+// (go-kure/launcher#525).
 func toIngressPort(v any) (int32, bool) {
-	switch n := v.(type) {
-	case float64:
-		if n > 0 && n <= 65535 {
-			return int32(n), true //nolint:gosec // validated above
-		}
-	case int:
-		if n > 0 && n <= 65535 {
-			return int32(n), true //nolint:gosec // validated above
-		}
+	n, ok := oam.IntegerValue(v)
+	if !ok || n < 1 || n > 65535 {
+		return 0, false
 	}
-	return 0, false
+	return int32(n), true
 }
 
 func toPathType(s string) networkingv1.PathType {

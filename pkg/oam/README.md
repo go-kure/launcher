@@ -108,6 +108,13 @@ as a guard, not as a fix-up. Everything else on the policy (`spec.podSelector`,
 `spec.policyTypes`, the rules) is written by the synthesizer as a direct field
 assignment; nothing upstream of it supplies a default.
 
+No synthesized policy shares a selector with its inputs or with another policy. Every
+peer's `podSelector` and every policy's `spec.podSelector` is a `DeepCopy` of the traffic
+source, egress peer, backend or endpoint selector it came from. The inputs are retained
+trait configuration, reused by every rule and every policy built from them, so a label a
+consumer stamps onto one generated policy would otherwise reach all of them
+(go-kure/launcher#396).
+
 ## Parsing
 
 | Function | Purpose |
@@ -401,6 +408,19 @@ difference is a behaviour change, not a cosmetic one. The standing example is a
 while a nil one applies no constraint on that axis — which is *not* the same as
 matching nothing, since what the peer then selects depends on the sibling fields it
 still has (`k8s.io/api` `networking/v1/types.go:199-222`).
+
+`IntegerValue` is the matching reader for integers. It returns a property value as
+an `int64` when it is a whole number of any Go integer kind, named or not, or a
+finite integral float. It refuses a fraction, NaN/±Inf, a non-number, an unsigned
+value above `math.MaxInt64`, and a float outside −2^63 ≤ value < 2^63 (−2^63 itself
+fits `int64` and reads; 2^63 does not). The builtin handlers
+read every integer property through it, and each then checks the result against its
+own target (a port is 1–65535, a replica count fits `int32`), refusing a value that
+does not fit rather than converting it. So a plain `int32` or `int64` from a lowering
+rule or a Go caller reads the same as the `int` the YAML decoder produces, and a
+value that would only fit after wrapping, like 2^32+80 for a port, is an error
+instead of port 80. An out-of-tree handler should read integers through it for the
+same reason.
 
 ### What an explicit `null` means on the emitted path
 

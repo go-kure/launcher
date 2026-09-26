@@ -384,6 +384,16 @@ now renders `policyTypes: [Egress]` (go-kure/launcher#467).
 
 ## Auto-synthesized NetworkPolicy
 
+Every integer property is read through `oam.IntegerValue`, so any Go integer kind
+(a plain `int32`/`int64` or an unsigned kind from a lowering rule or a Go caller)
+renders the same as the `int` a YAML literal decodes to. The value is then
+range-checked against its target and refused if it does not fit, never truncated or
+wrapped. For routing ports this covers the trait-level `servicePort`, an ingress
+`rules[].paths[].port`, and an httproute `rules[].backendRefs[].port`: each must be
+1–65535, and an error names the field. A present-but-invalid path or backendRef
+`port` used to fall back to the component's port (ingress) or render as-is
+(httproute); it is now an error.
+
 Routing traits (`ingress`/`httproute`/`expose`) can surface platform-reserved
 `networkPolicy.trafficSources`, which the OAM layer collects to synthesize a
 matching `NetworkPolicy` (see [`pkg/oam/netpol`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/netpol)).
@@ -597,6 +607,12 @@ so a shared map turns a label added to the Role into a label on the RoleBinding,
 added to the HPA into a label on the PDB. The same rule and the reason behind it are in
 the Conventions section of the component handlers' README
 (`pkg/oam/builtin/components/README.md`).
+
+The same holds for the traffic sources a routing trait retains (`TrafficSources()`):
+NetworkPolicy synthesis in `pkg/oam` gives every emitted peer, and every synthesized
+policy's `spec.podSelector`, its own deep copy of the source or backend selector. So a
+label a caller stamps on one generated NetworkPolicy never reaches another policy
+built from the same source, or the trait configuration (go-kure/launcher#396).
 
 Since go-kure/launcher#361 these handlers build against kure's release-1 builder
 contract (`go-kure/kure` ≥ `v0.2.0-beta.11`), under which a `Create<Kind>`

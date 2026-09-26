@@ -100,16 +100,18 @@ func coerceSuppliedValues(supplied map[string]any, schema map[string]*ParameterD
 func coerceValue(v any, decl *ParameterDecl) (any, error) {
 	switch string(decl.Type) {
 	case "integer":
-		switch tv := v.(type) {
-		case int:
-			return tv, nil
-		case int64:
-			return int(tv), nil
-		case float64:
-			if tv != math.Trunc(tv) {
-				return nil, errors.Errorf("parameter %q (type integer): %g is not a valid integer (fractional values are not allowed)", decl.Name, tv)
+		if n, ok := IntegerValue(v); ok {
+			if n < math.MinInt || n > math.MaxInt {
+				return nil, errors.Errorf("parameter %q (type integer): %d is out of range", decl.Name, n)
 			}
-			return int(tv), nil
+			return int(n), nil
+		}
+		switch tv := v.(type) {
+		case float64:
+			if tv == math.Trunc(tv) {
+				return nil, errors.Errorf("parameter %q (type integer): %g is out of range", decl.Name, tv)
+			}
+			return nil, errors.Errorf("parameter %q (type integer): %g is not a valid integer (fractional values are not allowed)", decl.Name, tv)
 		case string:
 			n, err := strconv.Atoi(tv)
 			if err != nil {

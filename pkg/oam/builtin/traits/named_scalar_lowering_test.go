@@ -217,10 +217,9 @@ func TestLowering_NamedScalarReachesTheHandler(t *testing.T) {
 }
 
 // TestLowering_NamedScalarReachesHTTPRouteServicePort pins the reader the issue
-// singles out: httproute reads servicePort through toIngressPort, which accepts
-// float64 and int only. A named integer must reach it as int — normalizing to its
-// underlying int32/int64 would leave the port unreadable — and a plain int must stay
-// an int. The component is a worker, which exposes no Service port of its own, so
+// singles out: httproute reads servicePort through toIngressPort, which then
+// accepted float64 and int only. A named integer must reach it and render the same
+// port; TestServicePort_EveryGoIntegerKind covers the plain kinds (go-kure/launcher#525). The component is a worker, which exposes no Service port of its own, so
 // the trait-level serviceName/servicePort pair is what names the backend.
 func TestLowering_NamedScalarReachesHTTPRouteServicePort(t *testing.T) {
 	for _, tc := range []struct {

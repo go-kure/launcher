@@ -464,26 +464,27 @@ func isIntegerValue(value any) bool {
 }
 
 // normalizeIntegerValue rewrites an accepted integer whose Go type the property
-// readers cannot assert into a plain int, which every reader accepts
-// (go-kure/launcher#418, go-kure/launcher#428). isIntegerValue matches by
-// reflect.Kind, but the readers downstream type-switch on concrete types —
-// toInt32/toInt64 in builtin/components/common.go on float64/int/int32/int64, and at
-// least one trait reader (toIngressPort, which reads servicePort) on float64/int
-// only — and treat anything else as "not an integer", so a uint32 replicas passed
-// validation and then rendered the schema default. Writing the value back as int,
-// the type gopkg.in/yaml.v3 decodes an integer literal to, gives every reader the
-// shape it already handles.
+// readers could not assert into a plain int (go-kure/launcher#418,
+// go-kure/launcher#428). isIntegerValue matches by reflect.Kind, but the readers
+// downstream used to type-switch on concrete types — toInt32/toInt64 in
+// builtin/components/common.go on float64/int/int32/int64, toIngressPort on
+// float64/int only — and treat anything else as "not an integer", so a uint32
+// replicas passed validation and then rendered the schema default. Writing the
+// value back as int, the type gopkg.in/yaml.v3 decodes an integer literal to, gave
+// every reader a shape it handled. The builtin readers now all read through
+// IntegerValue (go-kure/launcher#525) and accept every kind themselves; the
+// rewrite stays so that a handler outside this repository, still switching on
+// the decoder set, keeps receiving it.
 //
 // The decoder set is returned unchanged: a value whose type is exactly int, int32,
-// int64 or float64. So is an integral value of the predeclared float32, which no
-// reader accepts and which this function has never rewritten. Everything else that
-// passed isIntegerValue is rewritten:
+// int64 or float64. So is an integral value of the predeclared float32, which this
+// function has never rewritten. Everything else that passed isIntegerValue is
+// rewritten:
 //
 //   - int8, int16 and every unsigned kind, named or not, become int.
 //   - A NAMED type of kind int, int32 or int64 (`type Replicas int32`) becomes int
-//     too, not its underlying type: an int32 or int64 is not a port to
-//     toIngressPort (the ingress and httproute servicePort reader), which accepts
-//     float64 and int only, and int is the one integer type every reader accepts.
+//     too, not its underlying type: int is the one integer type a reader written
+//     against the decoder set is sure to accept.
 //   - A named float type becomes its underlying float64/float32 (unnamedScalar); an
 //     integral float64 is already in the decoder set.
 //
@@ -619,6 +620,44 @@ func isNullValue(value any) bool {
 // that shape by construction, with no unusual authoring required.
 func IsNullValue(value any) bool {
 	return isNullValue(value)
+}
+
+// IntegerValue reports value as an int64 when it is a whole number: any Go integer
+// kind, named or not, or a finite float with no fractional part — the shape a YAML
+// numeric literal takes through interface{}. It is the one conversion every
+// integer property reader shares (go-kure/launcher#525), so a reader accepts
+// exactly the kinds isIntegerValue lets through validation instead of the subset
+// its own type switch happens to list.
+//
+// A value int64 cannot hold is refused, never wrapped: an unsigned value above
+// math.MaxInt64, or a float outside -2^63 <= f < 2^63. The caller still range-checks the
+// result against its own target — a port, an int32 replica count — and refuses what
+// does not fit rather than converting it.
+func IntegerValue(value any) (int64, bool) {
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int(), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		u := rv.Uint()
+		if u > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(u), true
+	case reflect.Float32, reflect.Float64:
+		f := rv.Float()
+		if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+			return 0, false
+		}
+		// -2^63 is exactly representable and in range; +2^63 (what math.MaxInt64
+		// rounds to as a float) is not, hence ">=" on the upper bound only.
+		if f < math.MinInt64 || f >= math.MaxInt64 {
+			return 0, false
+		}
+		return int64(f), true
+	default:
+		return 0, false
+	}
 }
 
 // enumMemberMaxDepth bounds the walk over a declared Enum member

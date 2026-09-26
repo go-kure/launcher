@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // ValidateImageRef validates a container image reference.
@@ -66,31 +67,14 @@ func hasExplicitLatestTag(image string) bool {
 
 // --- Property type helpers (inlined from the downstream runtime's proputil) ---
 
+// toInt32 reads a whole number of any Go integer kind, or an integral float, that
+// fits int32 (go-kure/launcher#525); anything else is refused, never wrapped.
 func toInt32(v any) (int32, bool) {
-	switch n := v.(type) {
-	case float64:
-		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) {
-			return 0, false
-		}
-		if n < math.MinInt32 || n > math.MaxInt32 {
-			return 0, false
-		}
-		return int32(n), true
-	case int:
-		if n < math.MinInt32 || n > math.MaxInt32 {
-			return 0, false
-		}
-		return int32(n), true
-	case int32:
-		return n, true
-	case int64:
-		if n < math.MinInt32 || n > math.MaxInt32 {
-			return 0, false
-		}
-		return int32(n), true
-	default:
+	n, ok := oam.IntegerValue(v)
+	if !ok || n < math.MinInt32 || n > math.MaxInt32 {
 		return 0, false
 	}
+	return int32(n), true
 }
 
 // toInt64 mirrors toInt32 for the *int64 fields corev1 uses for UID/GID
@@ -107,30 +91,7 @@ func toInt32(v any) (int32, bool) {
 // securityContext.runAsUser fell back to the container image's own default
 // user, which may be root).
 func toInt64(v any) (int64, bool) {
-	switch n := v.(type) {
-	case float64:
-		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) {
-			return 0, false
-		}
-		// float64 cannot exactly represent math.MaxInt64 (nearest representable
-		// value rounds up to 2^63), so the upper bound must be a strict "<"
-		// against the rounded constant — the same overflow-safe comparison
-		// idiom Go's standard library uses for float-to-int64 conversions.
-		// math.MinInt64 (-2^63) IS exactly representable, so "<" is correct
-		// there too (n == MinInt64 must still be accepted).
-		if n < math.MinInt64 || n >= math.MaxInt64 {
-			return 0, false
-		}
-		return int64(n), true
-	case int:
-		return int64(n), true
-	case int32:
-		return int64(n), true
-	case int64:
-		return n, true
-	default:
-		return 0, false
-	}
+	return oam.IntegerValue(v)
 }
 
 // decodedQuantityString converts a decoded YAML/JSON scalar into the string
@@ -152,13 +113,10 @@ func decodedQuantityString(v any) (string, bool) {
 			return "", false
 		}
 		return strconv.FormatFloat(n, 'f', -1, 64), true
-	case int:
-		return strconv.FormatInt(int64(n), 10), true
-	case int32:
-		return strconv.FormatInt(int64(n), 10), true
-	case int64:
-		return strconv.FormatInt(n, 10), true
 	default:
+		if i, ok := oam.IntegerValue(v); ok {
+			return strconv.FormatInt(i, 10), true
+		}
 		return "", false
 	}
 }
@@ -1519,18 +1477,12 @@ func parseHTTPHeaders(raw map[string]any, key string) ([]corev1.HTTPHeader, erro
 // which checks the name against the sidecar's own declared ports afterward
 // in checkNamedPortsDeclared).
 func parsePort(v any, namedPortsAllowed bool, matchName string) (intstr.IntOrString, error) {
+	if n, ok := oam.IntegerValue(v); ok {
+		return validateNumericPort(n)
+	}
 	switch p := v.(type) {
 	case float64:
-		if math.IsNaN(p) || math.IsInf(p, 0) || p != math.Trunc(p) {
-			return intstr.IntOrString{}, errors.Errorf("port must be an integer, got %v", p)
-		}
-		return validateNumericPort(int64(p))
-	case int:
-		return validateNumericPort(int64(p))
-	case int32:
-		return validateNumericPort(int64(p))
-	case int64:
-		return validateNumericPort(p)
+		return intstr.IntOrString{}, errors.Errorf("port must be an integer, got %v", p)
 	case string:
 		if p == "" {
 			return intstr.IntOrString{}, errors.Errorf("port must not be an empty string")
@@ -1831,25 +1783,22 @@ func parseInt32Field(raw map[string]any, key, label string) (int32, bool, error)
 }
 
 // wholeNumberString reports whether v is a whole number of one of the kinds
-// toInt32/toInt64 read (int, int32, int64, or a finite integral float64) and
+// toInt32/toInt64 read (any Go integer kind, or a finite integral float) and
 // renders it in plain decimal — never float64's exponent form, so a
-// JSON-decoded 5000000000 prints as authored rather than as 5e+09.
+// JSON-decoded 5000000000 prints as authored rather than as 5e+09. A float64
+// beyond the int64 range still renders, as it did before the integer kinds were
+// widened (go-kure/launcher#525).
 func wholeNumberString(v any) (string, bool) {
-	switch n := v.(type) {
-	case int:
-		return strconv.FormatInt(int64(n), 10), true
-	case int32:
-		return strconv.FormatInt(int64(n), 10), true
-	case int64:
-		return strconv.FormatInt(n, 10), true
-	case float64:
+	if n, ok := v.(float64); ok {
 		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) {
 			return "", false
 		}
 		return strconv.FormatFloat(n, 'f', -1, 64), true
-	default:
-		return "", false
 	}
+	if n, ok := oam.IntegerValue(v); ok {
+		return strconv.FormatInt(n, 10), true
+	}
+	return "", false
 }
 
 // parseInt64Field mirrors parseBoolField for toInt64-convertible fields,
@@ -3338,23 +3287,17 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 }
 
 func parseHistoryLimit(field string, v any) (int32, error) {
-	switch n := v.(type) {
-	case int:
-		if n < 0 || n > math.MaxInt32 {
-			return 0, errors.Errorf("%s: must be between 0 and %d, got %d", field, math.MaxInt32, n)
+	n, ok := oam.IntegerValue(v)
+	if !ok {
+		if f, isFloat := v.(float64); isFloat {
+			return 0, errors.Errorf("%s: must be an integer, got %g", field, f)
 		}
-		return int32(n), nil //nolint:gosec
-	case float64:
-		if n != float64(int64(n)) {
-			return 0, errors.Errorf("%s: must be an integer, got %g", field, n)
-		}
-		if n < 0 || n > math.MaxInt32 {
-			return 0, errors.Errorf("%s: must be between 0 and %d, got %g", field, math.MaxInt32, n)
-		}
-		return int32(n), nil
-	default:
 		return 0, errors.Errorf("%s: must be an integer, got %T", field, v)
 	}
+	if n < 0 || n > math.MaxInt32 {
+		return 0, errors.Errorf("%s: must be between 0 and %d, got %d", field, math.MaxInt32, n)
+	}
+	return int32(n), nil
 }
 
 // JobSpecConfig carries the batchv1.JobSpec fields shared by a cronjob's jobTemplate

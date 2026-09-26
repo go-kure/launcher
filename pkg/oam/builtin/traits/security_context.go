@@ -353,19 +353,12 @@ func extractPodSpecSC(obj client.Object) *corev1.PodSpec {
 }
 
 func toInt64(v any) (int64, error) {
-	switch n := v.(type) {
-	case int:
-		return int64(n), nil
-	case int32:
-		return int64(n), nil
-	case int64:
+	n, ok := oam.IntegerValue(v)
+	if ok {
 		return n, nil
-	case float64:
-		if n != math.Trunc(n) {
-			return 0, errors.Errorf("expected integer, got non-integral float %v", n)
-		}
-		return int64(n), nil
-	default:
-		return 0, errors.Errorf("expected integer, got %T", v)
 	}
+	if f, isFloat := v.(float64); isFloat && f != math.Trunc(f) {
+		return 0, errors.Errorf("expected integer, got non-integral float %v", f)
+	}
+	return 0, errors.Errorf("expected integer, got %T (%v)", v, v)
 }
