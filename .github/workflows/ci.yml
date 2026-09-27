@@ -19,8 +19,9 @@ on:
     # gets its full label set at creation, and each label add/remove starts a
     # whole-pipeline run that the concurrency group below cancels in favour of
     # the next one — one superseded run per label. strip-ack's own removal of a
-    # stale 'pin-impact-ack' costs nothing: it uses GITHUB_TOKEN, and events
-    # that token causes start no workflow run. Kept deliberately:
+    # stale 'pin-impact-ack' costs nothing: it uses GITHUB_TOKEN, and a label
+    # change made with that token starts no workflow run (GitHub exempts only
+    # workflow_dispatch and repository_dispatch from that rule). Kept deliberately:
     # narrowing the trigger to these two labels needs a label-aware
     # concurrency key and a `build` that cannot report green on a no-op run,
     # or a skipped run cancels the real one and leaves a false green.

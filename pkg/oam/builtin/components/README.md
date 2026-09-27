@@ -1050,12 +1050,14 @@ behaves the same way. On a kind that names its own Service (a `statefulset`'s
 `serviceName`), "own" means that Service name rather than the component name.
 
 **`scaler` is available on `deployment`**, as on `webservice` and `worker`. An HPA
-scales the Deployment past the replica count the document authored, and the
-non-RWX guard below reads only the authored `replicas`. The `scaler` trait covers
+scales the Deployment past its replica count, and the non-RWX guard below checks
+only the component's effective replica count (authored, or the policy default),
+so it cannot account for later HPA scaling. The `scaler` trait covers
 that gap itself: `deployment` reports its first non-RWX claim to the trait
 (`NonRWXClaim`), and the trait refuses an effective `maxReplicas` above 1 when
-one is present (see "Non-RWX volumes"). `statefulset` is still excluded: its
-claims come from `volumeClaimTemplates`, one per pod, so the question differs.
+one is present (see "Non-RWX volumes"). `statefulset` is still excluded: besides
+standalone claims from `volumes`, emitted as PVCs as on the other kinds, it has
+per-pod claims from `volumeClaimTemplates`, so the question differs.
 
 | Property | Type | Effect | Compatibility |
 |----------|------|--------|---------------|
@@ -1148,15 +1150,18 @@ That refusal reaches `webservice` and `worker` only now that they publish
 silently, because there was no authored value to contradict. `deployment`,
 `webservice` and `worker` all run the one `applyNonRWXConstraint`.
 
-That guard reads only the authored `replicas`, but a `scaler` trait's HPA scales
-the same Deployment up to `maxReplicas`. So on `deployment`, `webservice` and
+That guard checks the component's effective replica count, but a `scaler`
+trait's HPA scales the same Deployment up to `maxReplicas`, which the guard
+cannot see. So on `deployment`, `webservice` and
 `worker` the trait is held to the same limit: with a non-RWX claim attached, an effective
 `maxReplicas` above 1 fails the build with an error naming the `scaler` trait
 and the claim's volume. "Effective" means after an EnvironmentPolicy
-`scalerMaxReplicas` default is applied. `maxReplicas: 1` still builds. A
-document that combined the two used to build and then left pods 2 and up
-unschedulable or stuck attaching; it is now refused under the pre-release
-bug-fix exception (`docs/oam/design-gvk.md`).
+`scalerMaxReplicas` default is applied. `maxReplicas: 1` still builds. On
+`webservice` and `worker`, a document that combined the two used to build and
+then left pods 2 and up unschedulable or stuck attaching; it is now refused
+under the pre-release bug-fix exception (`docs/oam/design-gvk.md`). On
+`deployment` the combination was never accepted, because `scaler` was not
+admitted there: the trait is newly admitted with this safeguard in place.
 
 The guard reads a claim's **whole** access-mode set, not each mode on its own.
 `accessModes` requests a volume supporting *every* mode listed, so

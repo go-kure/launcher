@@ -40,7 +40,8 @@ for their full documentation.
   its full label set at creation, and each label add or remove starts a whole-pipeline run that
   the concurrency group cancels in favour of the next — one superseded run per label.
   `strip-ack` removing a stale `pin-impact-ack` on a new commit starts no run: it uses
-  `GITHUB_TOKEN`, whose events do not trigger workflows. The trigger is kept deliberately
+  `GITHUB_TOKEN`, and a label change made with that token does not trigger workflows (only
+  `workflow_dispatch` and `repository_dispatch` are exempt from that rule). The trigger is kept deliberately
   (go-kure/launcher#445). Narrowing it to those
   two labels would need a label-aware concurrency key and a `build` job that cannot report green on
   a no-op run; otherwise a skipped run cancels the real one and leaves a false green.

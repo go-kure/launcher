@@ -134,9 +134,9 @@ func TestValidate_ScalerTraitOnPostgresql(t *testing.T) {
 
 // TestValidate_ScalerTraitOnDeployment pins that "scaler" is admitted on
 // deployment (go-kure/launcher#513). DeploymentConfig.applyNonRWXConstraint
-// (builtin/components/deployment.go) reads only the authored `replicas`, so it
-// cannot see an HPA that scales past 1. Admission is safe because
-// DeploymentConfig reports its claim through NonRWXClaim, exactly as
+// (builtin/components/deployment.go) checks only the component's effective
+// replica count, so it cannot see an HPA that scales past 1. Admission is
+// safe because DeploymentConfig reports its claim through NonRWXClaim, exactly as
 // webservice and worker do, and the scaler itself refuses an effective
 // maxReplicas > 1 beside a non-RWX claim (builtin/traits/scaler_nonrwx_test.go).
 func TestValidate_ScalerTraitOnDeployment(t *testing.T) {
@@ -163,8 +163,9 @@ func TestValidate_ScalerTraitOnDeployment(t *testing.T) {
 }
 
 // TestValidate_ScalerTraitOnStatefulset pins that statefulset stays excluded:
-// its claims come from volumeClaimTemplates, one per pod, so the non-RWX
-// question differs and admitting it is a separate decision (go-kure/launcher#513).
+// besides standalone PVCs from `volumes`, it has per-pod claims from
+// volumeClaimTemplates, so the non-RWX question differs and admitting it is a
+// separate decision (go-kure/launcher#513).
 func TestValidate_ScalerTraitOnStatefulset(t *testing.T) {
 	app := &Application{
 		APIVersion: SupportedAPIVersion,
