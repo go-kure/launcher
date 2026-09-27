@@ -240,6 +240,13 @@ this is how they share one object instead of colliding. A different identity at 
 an empty identity, and a name already held by `Reserve` stay hard errors, and `Reserve` still
 refuses a name claimed this way.
 
+Two caller constraints the allocator does not check. The shared element must be of a terminal
+type, one no lowering rule claims: claims outlive the round, so a lowerable element could be
+replaced under another name while a later adopter still references the claimed one. And
+adoption covers only the shared element: the adopting rule still emits its own output, because
+the engine rejects an empty `LoweringResult` as a deletion, so a rule whose whole expansion is
+the shared element cannot use this pair.
+
 Four registration interfaces, one per position in the document tree, each with its own
 registrar on `*Transformer` and a duplicate/dispatchable-collision guard (a type
 claimed by a lowering rule must not also be a dispatchable handler type, and a
