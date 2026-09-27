@@ -174,7 +174,10 @@ func generateWithTopologySpreadless(t *testing.T, h oam.ComponentHandler, comp *
 		return nil, err
 	}
 	for _, o := range objects {
-		if dep, ok := (*o).(*appsv1.Deployment); ok {
+		if o == nil {
+			continue
+		}
+		if dep, ok := (*o).(*appsv1.Deployment); ok && dep != nil {
 			return dep.Spec.Template.Spec.TopologySpreadConstraints, nil
 		}
 	}
@@ -264,7 +267,10 @@ func transformedDeploymentCtx(t *testing.T, comp oam.Component, ctx oam.Transfor
 		return nil, nil, err
 	}
 	for _, o := range objects {
-		if dep, ok := (*o).(*appsv1.Deployment); ok {
+		if o == nil {
+			continue
+		}
+		if dep, ok := (*o).(*appsv1.Deployment); ok && dep != nil {
 			return dep, result, nil
 		}
 	}
