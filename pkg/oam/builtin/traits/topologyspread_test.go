@@ -205,15 +205,29 @@ func topologySpreadTransformer() *oam.Transformer {
 // generated for the component named name.
 func transformedDeployment(t *testing.T, comp oam.Component, p oam.Policy) (*appsv1.Deployment, error) {
 	t.Helper()
+	dep, _, err := transformedDeploymentCtx(t, comp, oam.TransformContext{Namespace: "default", Policy: p})
+	return dep, err
+}
+
+// transformedDeploymentCtx is transformedDeployment with the caller's whole
+// transform context. It runs the authored-property check first, exactly as
+// kurel build does, and also returns the policy result so a test can read
+// which capability keys the traits resolved.
+func transformedDeploymentCtx(t *testing.T, comp oam.Component, ctx oam.TransformContext) (*appsv1.Deployment, *oam.PolicyResult, error) {
+	t.Helper()
 	app := &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,
 		Kind:       "Application",
 		Metadata:   oam.Metadata{Name: "pkg", Namespace: "default"},
 		Spec:       oam.ApplicationSpec{Components: []oam.Component{comp}},
 	}
-	cluster, _, err := topologySpreadTransformer().TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Policy: p})
+	tr := topologySpreadTransformer()
+	if err := tr.ValidateAuthoredProperties(app); err != nil {
+		return nil, nil, err
+	}
+	cluster, result, err := tr.TransformWithPolicy(app, ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var found *stack.Application
 	var visitBundle func(b *stack.Bundle)
@@ -247,15 +261,15 @@ func transformedDeployment(t *testing.T, comp oam.Component, p oam.Policy) (*app
 	}
 	objects, err := found.Config.Generate(found)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, o := range objects {
 		if dep, ok := (*o).(*appsv1.Deployment); ok {
-			return dep, nil
+			return dep, result, nil
 		}
 	}
 	t.Fatalf("application %q generated no Deployment", comp.Name)
-	return nil, nil
+	return nil, nil, nil
 }
 
 // The replica count the trait reads is the one the Deployment carries after
@@ -343,6 +357,80 @@ func TestTopologySpread_RejectsProperties(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "maxSkew") {
 		t.Errorf("error should name the property, got: %v", err)
+	}
+}
+
+// `scope` is not the trait's property but the transform engine's: it is legal
+// on every authored trait and selects the "<type>.<scope>" ClusterProfile
+// capability binding. The trait must let it through — refusing it would let a
+// document pass the authored check and then fail at Apply — while any other
+// key next to it is still refused by name.
+func TestTopologySpread_AcceptsEngineOwnedScope(t *testing.T) {
+	app := stack.NewApplication("api", "default", &cmStub{name: "api", namespace: "default"})
+	if err := (&traits.TopologySpreadHandler{}).Apply(
+		&oam.Trait{Type: "topology-spread", Properties: map[string]any{"scope": "zone-a"}}, app, newBundle()); err != nil {
+		t.Fatalf("Apply with only the engine-owned scope: %v", err)
+	}
+
+	app = stack.NewApplication("api", "default", &cmStub{name: "api", namespace: "default"})
+	err := (&traits.TopologySpreadHandler{}).Apply(
+		&oam.Trait{Type: "topology-spread", Properties: map[string]any{"scope": "zone-a", "maxSkew": 2}}, app, newBundle())
+	if err == nil {
+		t.Fatal("expected an error for maxSkew next to scope, got none")
+	}
+	if !strings.Contains(err.Error(), `"maxSkew"`) {
+		t.Errorf("error should name maxSkew, got: %v", err)
+	}
+}
+
+// End to end: an authored `scope` passes the authored check, selects the
+// scoped capability binding, and the Deployment is still decorated.
+func TestTopologySpread_ScopeSelectsScopedCapability(t *testing.T) {
+	comp := oam.Component{
+		Name: "api", Type: "deployment",
+		Properties: map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3},
+		Traits:     []oam.Trait{{Type: "topology-spread", Properties: map[string]any{"scope": "zone-a"}}},
+	}
+	dep, result, err := transformedDeploymentCtx(t, comp, oam.TransformContext{
+		Namespace: "default",
+		Capabilities: map[string]oam.CapabilityBinding{
+			"topology-spread":        {},
+			"topology-spread.zone-a": {},
+		},
+	})
+	if err != nil {
+		t.Fatalf("transform with scope: %v", err)
+	}
+	if got, want := result.ConsumedCapabilities, []string{"topology-spread.zone-a"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("consumed capabilities %v, want %v", got, want)
+	}
+	want := []string{"kubernetes.io/hostname/DoNotSchedule", "topology.kubernetes.io/zone/ScheduleAnyway"}
+	if got := spreadKeys(dep.Spec.Template.Spec.TopologySpreadConstraints); !reflect.DeepEqual(got, want) {
+		t.Errorf("constraints %v, want %v", got, want)
+	}
+}
+
+// A ClusterProfile capability rendering is merged into the trait's properties
+// before Apply. The trait reads none, so a rendering key other than an
+// engine-owned one is refused by name like an authored one: it would
+// otherwise be a platform setting that silently does nothing.
+func TestTopologySpread_RefusesCapabilityRenderingKey(t *testing.T) {
+	comp := oam.Component{
+		Name: "api", Type: "deployment",
+		Properties: map[string]any{"image": "ghcr.io/org/api:v1"},
+		Traits:     []oam.Trait{*topologySpreadTrait()},
+	}
+	_, _, err := transformedDeploymentCtx(t, comp, oam.TransformContext{
+		Namespace: "default",
+		Capabilities: map[string]oam.CapabilityBinding{
+			"topology-spread": {Rendering: map[string]any{"maxSkew": 2}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected an error for a capability rendering key, got none")
+	}
+	if !strings.Contains(err.Error(), `"maxSkew"`) {
+		t.Errorf("error should name maxSkew, got: %v", err)
 	}
 }
 

@@ -296,6 +296,22 @@ func TestValidateAuthoredProperties_EngineScopeDoesNotMutateHandlerSchema(t *tes
 	}
 }
 
+// TestIsEngineTraitProperty pins the exported view of engineTraitProperties that a
+// handler outside this package uses to let engine-owned keys through: every key of
+// the map, and nothing else.
+func TestIsEngineTraitProperty(t *testing.T) {
+	for key := range engineTraitProperties {
+		if !IsEngineTraitProperty(key) {
+			t.Errorf("IsEngineTraitProperty(%q) = false, want true", key)
+		}
+	}
+	for _, key := range []string{"", "Scope", "size", "maxSkew"} {
+		if IsEngineTraitProperty(key) {
+			t.Errorf("IsEngineTraitProperty(%q) = true, want false", key)
+		}
+	}
+}
+
 // TestWithEngineTraitProperties_HandlerDeclarationWins covers the three handlers that
 // declare `scope` themselves (expose, ingress, httproute): their own description and
 // constraints must survive the merge, so the engine default never silently overrides

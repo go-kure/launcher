@@ -375,7 +375,9 @@ their own declaration wins over the engine default. Engine-owned keys are checke
 on a trait whose handler or lowering rule declares no `PropertySchema` at all (for
 example a custom handler registered through `RegisterTrait`): a non-string `scope`
 there is rejected, while the handler's own keys stay unchecked because nothing
-declares them. Add to `engineTraitProperties` if
+declares them. A handler that refuses keys it does not read (for example
+`topology-spread`, which takes none) asks `IsEngineTraitProperty` and lets these
+through. Add to `engineTraitProperties` if
 another engine-read property is ever introduced; the merge never mutates the
 handler's returned schema, so `HandlerSchemas` still advertises only what each handler
 actually declares.

@@ -22,7 +22,8 @@ import (
 // source; a Deployment passed through as raw, unstructured output is not
 // inspected). It makes that opinion available on a kind that carries
 // none of its own (`deployment`), so a document or a lowering rule can ask for
-// it explicitly. The trait takes no properties.
+// it explicitly. The trait takes no properties of its own; the engine-owned
+// ones every trait accepts (`scope`) are let through.
 //
 // The replica count is read from the generated Deployment's spec.replicas, so
 // it is the count after the environment policy ran: the transformer applies
@@ -43,14 +44,23 @@ func (h *TopologySpreadHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{}
 }
 
-// Apply wraps app.Config with a topologySpreadConfig decorator. An authored
-// property is refused by name: the schema is empty, and a key that silently
-// did nothing would read as a knob the trait does not have.
+// Apply wraps app.Config with a topologySpreadConfig decorator. A property is
+// refused by name: the schema is empty, and a key that silently did nothing
+// would read as a knob the trait does not have. That covers a key merged in
+// from a ClusterProfile capability rendering as well as an authored one.
+//
+// The engine-owned keys (oam.IsEngineTraitProperty — today `scope`, which
+// selects the "<type>.<scope>" capability binding) are not the trait's: they
+// are legal on every trait and the engine has already consumed them by the
+// time Apply runs, so they are let through.
 func (h *TopologySpreadHandler) Apply(trait *oam.Trait, app *stack.Application, _ *stack.Bundle) error {
-	if trait != nil && len(trait.Properties) > 0 {
-		// Sorted, so a trait with several authored keys always names the same one.
-		first := slices.Sorted(maps.Keys(trait.Properties))[0]
-		return errors.Errorf("topology-spread: unknown property %q; the trait takes no properties", first)
+	if trait != nil {
+		// Sorted, so a trait with several keys always names the same one.
+		for _, key := range slices.Sorted(maps.Keys(trait.Properties)) {
+			if !oam.IsEngineTraitProperty(key) {
+				return errors.Errorf("topology-spread: unknown property %q; the trait takes no properties", key)
+			}
+		}
 	}
 	app.Config = wrapIfAugmenter(
 		&topologySpreadConfig{decoratorBase: decoratorBase{Inner: app.Config}},

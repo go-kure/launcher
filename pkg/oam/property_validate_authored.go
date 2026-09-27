@@ -147,6 +147,16 @@ var engineTraitProperties = map[string]PropertySchema{
 	},
 }
 
+// IsEngineTraitProperty reports whether key is one of engineTraitProperties: a
+// property the transform engine reads off every trait itself, legal on every trait
+// whatever its handler declares. A handler that refuses keys it does not read must
+// let these through — the engine consumes them before Apply (buildCapabilityKey),
+// so refusing one there would reject a document the authored check accepted.
+func IsEngineTraitProperty(key string) bool {
+	_, ok := engineTraitProperties[key]
+	return ok
+}
+
 // validateAuthoredTraitAgainst is validateAuthoredAgainst with engineTraitProperties
 // folded into the handler's schema.
 //
