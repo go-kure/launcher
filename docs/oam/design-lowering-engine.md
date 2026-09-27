@@ -38,10 +38,12 @@ touch traits, components, and policies, but not documents" declaratively.
 
 ## D2 — 1→N everywhere
 
-Holds, at a real but bounded cost. `NameAllocator` (`lowering.go:140-172`) is the whole
-naming mechanism: deterministic `<base>-<suffix>` generation plus collision detection
-keyed by authored `Origin`, so two rules independently choosing the same generated name
-fail loudly and name both origins rather than silently overwriting. The exception is a
+Holds, at a real but bounded cost. `NameAllocator` (in `lowering.go`, with its
+`Reserve` / `Name` / `EmitOrAdopt` / `NameOrAdopt` methods) is the whole naming
+mechanism: deterministic `<base>-<suffix>` generation plus collision detection keyed by
+namespace and generated name, with each claim's authored `Origin` retained for
+diagnostics, so two rules independently choosing the same generated name fail loudly
+and name both origins rather than silently overwriting. The exception is a
 claim through `EmitOrAdopt` / `NameOrAdopt` for an element whose content is fully
 determined by an identity: a repeat claim with the same identity, from any origin, adopts
 the element already emitted, while a different identity, or a name first taken by a plain
