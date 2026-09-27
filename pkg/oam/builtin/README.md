@@ -4,8 +4,9 @@
 
 Package `builtin` holds the rendering-schema types shared by the built-in capability
 handlers (e.g. `CertificateRendering`, `ExposeRendering`, `ExternalSecretRendering`,
-`NetworkPolicyRendering`, `ConfigmapRendering`, `VolSyncRendering`, `PVCRendering`) and the
-`DecodeStrict[T]` helper used by handlers to decode capability properties.
+`NetworkPolicyRendering`, `ConfigmapRendering`, `TopologySpreadRendering`, `VolSyncRendering`,
+`PVCRendering`) and the `DecodeStrict[T]` helper used by handlers to decode capability
+properties.
 
 `VolSyncRendering` and `PVCRendering` carry platform-supplied storage-class defaults
 (`storageClassName`, plus `volumeSnapshotClassName` for volsync) that a ClusterProfile capability

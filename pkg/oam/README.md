@@ -377,7 +377,10 @@ example a custom handler registered through `RegisterTrait`): a non-string `scop
 there is rejected, while the handler's own keys stay unchecked because nothing
 declares them. A handler that refuses keys it does not read (for example
 `topology-spread`, which takes none) asks `IsEngineTraitProperty` and lets these
-through. Add to `engineTraitProperties` if
+through. It cannot tell an authored `scope` from one a capability rendering merged
+in, and a rendered one selects nothing (the binding was already chosen), so such a
+handler also refuses rendering keys in `ValidateAndApplyDefaults`, at
+`EvaluateProfile`. Add to `engineTraitProperties` if
 another engine-read property is ever introduced; the merge never mutates the
 handler's returned schema, so `HandlerSchemas` still advertises only what each handler
 actually declares.
