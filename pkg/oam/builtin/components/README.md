@@ -52,6 +52,7 @@ reads it.
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
 | `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
+| `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`. Emits nothing else — see below. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
@@ -1318,6 +1319,32 @@ change.
   (go-kure/launcher#412, see "Raw scheduling properties" above). That is the
   same distinction in the other direction — the role kinds carry the opinion,
   this kind carries the API.
+- **service** — the kind-named Service (go-kure/launcher#411), an independent
+  component rather than half of a workload: it emits the Service and nothing
+  else, and the workload component whose pods it selects owns their
+  ServiceAccount. `selector` defaults to `app: <component name>`, the label
+  every workload kind puts on its pods; set it when the Service fronts a
+  workload named differently (a `deployment` named `api-server` behind a
+  `service` named `api`). `ports` is the full `corev1.ServicePort` list, at
+  least one entry: `port` (required), `targetPort` (a number or a container
+  port name; defaults to `port`), `protocol` (`TCP`, `UDP` or `SCTP`; defaults
+  to `TCP`) and `name` (required once there is more than one port; names and
+  port/protocol pairs must be unique). `type` is `ClusterIP` (default),
+  `NodePort` or `LoadBalancer`; `ExternalName` is not offered, since it has no
+  selector. An empty `selector` is refused.
+  - **Routing traits use the first port.** `ingress`, `httproute` and the other
+    routing traits on a `service` component resolve their implicit backend to
+    `ports[0].port` and refuse any other port on it (`cannot route implicit
+    backend to port N`). To route to a later port, name the Service as an
+    explicit backend (a `backendRef` on the Service's name and that port).
+  - **Synthesized NetworkPolicy.** The `{component}-allow-ingress-traffic`
+    policy for traffic routed to a `service` selects its `selector` pods — not
+    the component label, which no pod carries — and opens the `targetPort` of
+    each routed TCP port. A route that reaches only a UDP or SCTP port
+    synthesizes no policy.
+  - It implements `oam.EndpointProvider`: one endpoint, the `selector` pods on
+    every TCP `targetPort` (deduplicated). A Service with no TCP port declares
+    none.
 - **statefulset** — `serviceName` (headless) and `volumeClaimTemplates`
   (`name`, `mountPath`, `size`, `storageClass`, `accessModes`, plus the rest of
   `corev1.PersistentVolumeClaimSpec`). The StatefulSetSpec-level and

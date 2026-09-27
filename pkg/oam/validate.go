@@ -30,6 +30,7 @@ var validComponentTypes = map[string]bool{
 	"helmchart":   true,
 	"daemonset":   true,
 	"statefulset": true,
+	"service":     true,
 	"passthrough": true,
 	"crd":         true,
 	"manifests":   true,

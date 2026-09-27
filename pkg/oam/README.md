@@ -93,6 +93,13 @@ matching `<domain>/component` on every rendered workload and helm-rendered pod �
 `ComponentLabelKey` to a label its pods do carry (e.g. `"app"`). A caller that injects
 `trafficSources`/`EgressPeers` without either will synthesize a policy that selects nothing.
 
+One exception on the inbound side: a component whose config reports a routing target — the
+`service` kind, whose Service fronts pods another component owns — gets its
+`{comp}-allow-ingress-traffic` policy on the Service's `selector` pods instead of the component
+label, with each routed Service port translated to its `targetPort`. A routed port that is not
+one of the Service's TCP ports is dropped (the rules are TCP), and a route left with no port
+synthesizes no policy.
+
 Every synthesized `NetworkPolicy` carries **no labels and no annotations of its own** —
 only `metadata.name` and `metadata.namespace`, plus the spec. A consumer cannot select
 the synthesized set by label; identify it by the `{comp}-allow-*` name. No attribution

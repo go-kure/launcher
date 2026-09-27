@@ -1,0 +1,31 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: hello
+  namespace: default
+spec:
+  components:
+    - name: api-server
+      type: deployment
+      properties:
+        image: ghcr.io/example/api:v1.0
+    - name: api
+      type: service
+      properties:
+        selector:
+          app: api-server
+        ports:
+          - name: http
+            port: 80
+            targetPort: 8080
+          - name: dns
+            port: 53
+            protocol: UDP
+      traits:
+        - type: ingress
+          properties:
+            ingressClassName: nginx
+            rules:
+              - host: api.example.com
+                paths:
+                  - path: /
