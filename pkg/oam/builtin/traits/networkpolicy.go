@@ -660,7 +660,33 @@ func parseNPPeer(raw any, path string) (npPeer, error) {
 		peer.IPBlock = ipBlock
 	}
 
+	if err := npValidatePeerShape(peer, path); err != nil {
+		return npPeer{}, err
+	}
 	return peer, nil
+}
+
+// npValidatePeerShape applies the two structural rules upstream
+// ValidateNetworkPolicyPeer (pkg/apis/networking/validation) puts on a peer, in
+// its own words: at least one of podSelector, namespaceSelector and ipBlock must
+// be set ("must specify a peer"), and ipBlock excludes both selectors ("may not
+// specify both ipBlock and another peer"). Every value in such a peer can be legal
+// on its own, so no per-field check sees the combination; it used to render and
+// fail on apply (go-kure/launcher#470).
+//
+// It runs on the PARSED peer, after null normalization, so a peer whose only keys
+// are null names no peer and is rejected like `- {}`, and a null selector beside
+// an ipBlock is absent rather than "another peer". A non-nil EMPTY selector
+// counts as set — `podSelector: {}` is a real peer — which is also upstream's
+// reading.
+func npValidatePeerShape(peer npPeer, path string) error {
+	switch {
+	case peer.PodSelector == nil && peer.NamespaceSelector == nil && peer.IPBlock == nil:
+		return errors.Errorf("%s: must specify a peer", path)
+	case peer.IPBlock != nil && (peer.PodSelector != nil || peer.NamespaceSelector != nil):
+		return errors.Errorf("%s: may not specify both ipBlock and another peer", path)
+	}
+	return nil
 }
 
 var validNPProtocols = map[string]corev1.Protocol{

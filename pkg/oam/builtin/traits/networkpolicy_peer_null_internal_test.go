@@ -40,15 +40,24 @@ func TestParseNPPeer_NullSelectorIsAbsent(t *testing.T) {
 	// an untyped nil is what a YAML `namespaceSelector:` with no value decodes
 	// to, a typed nil is what Go construction produces, and no document can
 	// express the difference.
+	//
+	// The null key is paired with a populated sibling selector: a peer left with
+	// no selector and no ipBlock is rejected as naming no peer at all
+	// (go-kure/launcher#470), so on its own a null would assert that rule
+	// instead of this one.
 	nullShapes := map[string]any{
 		"untyped nil": nil,
 		"typed nil":   map[string]any(nil),
 	}
+	sibling := map[string]string{"podSelector": "namespaceSelector", "namespaceSelector": "podSelector"}
 
 	for _, key := range []string{"podSelector", "namespaceSelector"} {
 		for shape, value := range nullShapes {
 			t.Run(key+"/"+shape, func(t *testing.T) {
-				peer, err := parseNPPeer(map[string]any{key: value}, "from[0]")
+				peer, err := parseNPPeer(map[string]any{
+					key:          value,
+					sibling[key]: map[string]any{"matchLabels": map[string]any{"app": "web"}},
+				}, "from[0]")
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -477,9 +486,17 @@ func TestParseNPPeer_NullIPBlockIsAbsentNotAnError(t *testing.T) {
 	// check and fail it — so the same "null" was absence when untyped and an
 	// error when typed. Under the contract both are absence, and absence of an
 	// optional key is not an error.
+	//
+	// Paired with a podSelector for the reason TestParseNPPeer_NullSelectorIsAbsent
+	// gives: a null-only peer names no peer and is rejected on that ground. That a
+	// null ipBlock beside a selector parses is also the proof it reads as absent —
+	// a present one there is rejected as ipBlock combined with another peer.
 	for shape, value := range map[string]any{"untyped nil": nil, "typed nil": map[string]any(nil)} {
 		t.Run(shape, func(t *testing.T) {
-			peer, err := parseNPPeer(map[string]any{"ipBlock": value}, "from[0]")
+			peer, err := parseNPPeer(map[string]any{
+				"ipBlock":     value,
+				"podSelector": map[string]any{"matchLabels": map[string]any{"app": "web"}},
+			}, "from[0]")
 			if err != nil {
 				t.Fatalf("a null ipBlock must read as absent, got error: %v", err)
 			}
@@ -515,16 +532,117 @@ func TestParseNPPeer_NullPeerEnvelopeIsRejected(t *testing.T) {
 	}
 }
 
-func TestParseNPPeer_PresentEmptyPeerStillParses(t *testing.T) {
-	// The control for the test above, and it is the one that stops the fix from
-	// being "reject anything falsy". An authored `- {}` is a present, empty peer:
-	// distinct from a null, and this parser has always accepted it. If the null
-	// guard were keyed on emptiness rather than on nil-ness, this would break.
-	peer, err := parseNPPeer(map[string]any{}, "from[0]")
-	if err != nil {
-		t.Fatalf("an authored empty peer object must still parse, got: %v", err)
+func TestParseNPPeer_EmptyPeerIsRejected(t *testing.T) {
+	// An authored `- {}` used to parse into a peer with every field nil, pinned by
+	// this test as "a present, empty peer". The API server refuses exactly that
+	// shape — ValidateNetworkPolicyPeer requires at least one of podSelector,
+	// namespaceSelector or ipBlock ("must specify a peer") — so the document
+	// rendered and failed on apply, one layer from the line that wrote it
+	// (go-kure/launcher#470). It is now rejected here, in upstream's words.
+	//
+	// Emptiness is judged AFTER null normalization: a null key is absent, so a
+	// peer whose only keys are null names no peer either and gets the same
+	// answer. Both nil shapes are exercised, since a typed nil is what a lowering
+	// rule's uninitialized map produces and must not read as an authored `{}`.
+	for _, tc := range []struct {
+		name string
+		peer map[string]any
+	}{
+		{"empty object", map[string]any{}},
+		{"null podSelector only", map[string]any{"podSelector": nil}},
+		{"typed-nil namespaceSelector only", map[string]any{"namespaceSelector": map[string]any(nil)}},
+		{"null ipBlock only", map[string]any{"ipBlock": nil}},
+		{"every key null", map[string]any{
+			"podSelector":       nil,
+			"namespaceSelector": map[string]any(nil),
+			"ipBlock":           map[string]any(nil),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			peer, err := parseNPPeer(tc.peer, "from[0]")
+			if err == nil {
+				t.Fatalf("a peer naming no selector and no ipBlock must be rejected, got %+v", peer)
+			}
+			if got, want := err.Error(), "from[0]: must specify a peer"; got != want {
+				t.Errorf("diagnostic = %q, want %q", got, want)
+			}
+		})
 	}
-	if peer.PodSelector != nil || peer.NamespaceSelector != nil || peer.IPBlock != nil {
-		t.Errorf("an empty peer produced %+v, want all three fields nil", peer)
+}
+
+func TestParseNPPeer_EmptySelectorPeerStillParses(t *testing.T) {
+	// The control for the test above, and the one that stops the fix from being
+	// "reject anything empty". `- podSelector: {}` is a real peer — every pod in
+	// the policy's own namespace — and the API server accepts it, because a
+	// non-nil empty selector counts as specified. The rule keys on which fields
+	// are present after null normalization, never on whether they carry labels.
+	for _, key := range []string{"podSelector", "namespaceSelector"} {
+		t.Run(key, func(t *testing.T) {
+			peer, err := parseNPPeer(map[string]any{key: map[string]any{}}, "from[0]")
+			if err != nil {
+				t.Fatalf("%s: {} is a valid peer, got: %v", key, err)
+			}
+			got := peer.PodSelector
+			if key == "namespaceSelector" {
+				got = peer.NamespaceSelector
+			}
+			if got == nil {
+				t.Errorf("%s: {} produced a nil selector", key)
+			}
+		})
+	}
+}
+
+func TestParseNPPeer_IPBlockWithSelectorIsRejected(t *testing.T) {
+	// The second structural rule upstream ValidateNetworkPolicyPeer applies: an
+	// IP-based peer and a label-based peer are mutually exclusive, so ipBlock
+	// beside either selector is refused on apply ("may not specify both ipBlock
+	// and another peer"). Each value is legal on its own, so no per-field check
+	// can see this; it used to render (go-kure/launcher#470).
+	ipBlock := map[string]any{"cidr": "10.0.0.0/8"}
+	selector := map[string]any{"matchLabels": map[string]any{"app": "web"}}
+	for _, tc := range []struct {
+		name string
+		peer map[string]any
+	}{
+		{"with podSelector", map[string]any{"ipBlock": ipBlock, "podSelector": selector}},
+		{"with namespaceSelector", map[string]any{"ipBlock": ipBlock, "namespaceSelector": selector}},
+		{"with an empty namespaceSelector", map[string]any{"ipBlock": ipBlock, "namespaceSelector": map[string]any{}}},
+		{"with both selectors", map[string]any{"ipBlock": ipBlock, "podSelector": selector, "namespaceSelector": selector}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			peer, err := parseNPPeer(tc.peer, "from[0]")
+			if err == nil {
+				t.Fatalf("ipBlock combined with a selector must be rejected, got %+v", peer)
+			}
+			if got, want := err.Error(), "from[0]: may not specify both ipBlock and another peer"; got != want {
+				t.Errorf("diagnostic = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestParseNPPeer_LegalPeerCombinationsStillParse(t *testing.T) {
+	// Controls for the test above: podSelector with namespaceSelector is the one
+	// legal pair, and ipBlock alone is a peer. A null selector beside an ipBlock
+	// is absent, so it is not "another peer".
+	selector := map[string]any{"matchLabels": map[string]any{"app": "web"}}
+	for _, tc := range []struct {
+		name string
+		peer map[string]any
+	}{
+		{"podSelector with namespaceSelector", map[string]any{"podSelector": selector, "namespaceSelector": selector}},
+		{"ipBlock alone", map[string]any{"ipBlock": map[string]any{"cidr": "10.0.0.0/8"}}},
+		{"ipBlock with null selectors", map[string]any{
+			"ipBlock":           map[string]any{"cidr": "10.0.0.0/8"},
+			"podSelector":       nil,
+			"namespaceSelector": map[string]any(nil),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseNPPeer(tc.peer, "from[0]"); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
