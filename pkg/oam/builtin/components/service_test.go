@@ -201,6 +201,57 @@ func TestServiceHandler_Rejects(t *testing.T) {
 	}
 }
 
+// The component name becomes the Service's name, and the API server validates a Service name as a
+// DNS-1035 label: stricter than the DNS-1123 subdomain every component name already passes. A name
+// that is a valid subdomain but not a valid Service name is refused here, on both entry points, rather
+// than emitted as a Service the cluster rejects on apply.
+func TestServiceHandler_RejectsInvalidServiceName(t *testing.T) {
+	props := func() map[string]any { return map[string]any{"ports": []any{map[string]any{"port": 80}}} }
+	tests := []struct {
+		name      string
+		component string
+	}{
+		{"dot", "api.v1"},
+		{"longer than 63 characters", strings.Repeat("a", 64)},
+		{"leading digit", "1api"},
+	}
+	h := &components.ServiceHandler{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comp := &oam.Component{Name: tt.component, Type: "service", Properties: props()}
+			want := "is not a valid Service name"
+			if _, err := h.ToApplicationConfig(comp, "default"); err == nil || !strings.Contains(err.Error(), want) ||
+				!strings.Contains(err.Error(), "DNS-1035 label") {
+				t.Errorf("ToApplicationConfig(%q) error = %v, want one containing %q and the DNS-1035 rule", tt.component, err, want)
+			}
+			if _, err := h.Endpoints(comp); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("Endpoints(%q) error = %v, want one containing %q", tt.component, err, want)
+			}
+		})
+	}
+}
+
+// A name at the DNS-1035 limit still builds: the check is the Service-name rule, not a tighter one.
+func TestServiceHandler_AcceptsLongestValidServiceName(t *testing.T) {
+	name := "a" + strings.Repeat("b-", 30) + "cd" // 63 characters
+	if len(name) != 63 {
+		t.Fatalf("test name is %d characters, want 63", len(name))
+	}
+	if svc := generateService(t, name, map[string]any{"ports": []any{map[string]any{"port": 80}}}); svc.Name != name {
+		t.Errorf("Service name = %q, want %q", svc.Name, name)
+	}
+}
+
+// Generate names the Service after the Application, which a library caller builds itself, so it
+// applies the same rule to the name it actually emits.
+func TestServiceConfig_GenerateRejectsInvalidServiceName(t *testing.T) {
+	cfg := serviceConfig(t, "api", map[string]any{"ports": []any{map[string]any{"port": 80}}})
+	if _, err := cfg.Generate(stack.NewApplication("api.v1", "default", cfg)); err == nil ||
+		!strings.Contains(err.Error(), "is not a valid Service name") {
+		t.Errorf("Generate(api.v1) error = %v, want an invalid Service name error", err)
+	}
+}
+
 // The same port number on two protocols is legal (a DNS Service on 53/TCP and 53/UDP).
 func TestServiceHandler_SamePortDifferentProtocols(t *testing.T) {
 	svc := generateService(t, "dns", map[string]any{"ports": []any{
