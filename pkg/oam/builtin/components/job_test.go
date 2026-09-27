@@ -870,6 +870,41 @@ func TestJobHandler_PodFailurePolicy_StatusDefaultsToTrue(t *testing.T) {
 	}
 }
 
+// TestJobHandler_PodFailurePolicy_StatusParsed drives the handler directly,
+// without the authored-property check. That check strips a declared key's
+// explicit null before the handler sees it, so only this path reaches the
+// parser's own null branch — the one a caller handing properties straight to
+// the handler depends on. It also pins that an explicit status is carried
+// through as written rather than overwritten by the default.
+func TestJobHandler_PodFailurePolicy_StatusParsed(t *testing.T) {
+	cases := []struct {
+		name    string
+		pattern map[string]any
+		want    corev1.ConditionStatus
+	}{
+		{"status absent", map[string]any{"type": "DisruptionTarget"}, corev1.ConditionTrue},
+		{"status explicit null", map[string]any{"type": "DisruptionTarget", "status": nil}, corev1.ConditionTrue},
+		{"status True", map[string]any{"type": "DisruptionTarget", "status": "True"}, corev1.ConditionTrue},
+		{"status False", map[string]any{"type": "DisruptionTarget", "status": "False"}, corev1.ConditionFalse},
+		{"status Unknown", map[string]any{"type": "DisruptionTarget", "status": "Unknown"}, corev1.ConditionUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			job, _ := generateJob(t, podFailurePolicyProps([]any{map[string]any{
+				"action":          "Ignore",
+				"onPodConditions": []any{tc.pattern},
+			}}, nil))
+			pfp := job.Spec.PodFailurePolicy
+			if pfp == nil || len(pfp.Rules) != 1 || len(pfp.Rules[0].OnPodConditions) != 1 {
+				t.Fatalf("PodFailurePolicy = %+v, want one rule with one pattern", pfp)
+			}
+			if got := pfp.Rules[0].OnPodConditions[0].Status; got != tc.want {
+				t.Errorf("OnPodConditions[0].Status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestJobHandler_PodFailurePolicy_EmptyRules pins the one place this parser is
 // deliberately no stricter than upstream. validatePodFailurePolicy has no
 // "at least one rule" check — unlike validateSuccessPolicy, which does — and the
@@ -1091,7 +1126,7 @@ func TestJobHandler_PodFailurePolicyValidation_Table(t *testing.T) {
 		},
 		{
 			// Stricter than upstream, whose defaulter fills an empty status
-			// too: only an absent key is defaulted here, and an authored
+			// too: only an absent or null key is defaulted here, and an authored
 			// empty string is refused as the likely mistake it is.
 			"onPodConditions entry with an empty status",
 			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": ""}}}}, nil),
