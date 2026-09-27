@@ -24,7 +24,8 @@ handler reads from merged properties (e.g. `networkPolicy`, `allowedHostnameWild
 **closed**: the `rbac` rule object and the `fluxcd-patches` patch item and its `target` selector
 enumerate their fields and set `additionalProperties: false` (unknown keys rejected), matching the
 downstream single-owner adoption of these builtins. `prune-protection` and
-`topology-spread` accept no properties and so declare an empty schema. Every property (including nested object fields and
+`topology-spread` accept no properties of their own and so declare an empty schema (the
+engine-owned `scope`, legal on every trait, is still accepted). Every property (including nested object fields and
 array item schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler
 API Reference.
 
@@ -64,7 +65,7 @@ preflight reject every valid use of the trait.
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `configmap` | ConfigMap (+ optional volume mount) | `name`, `data`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, Job, or CronJob; any other component fails generation) |
-| `topology-spread` | (modifies the Deployment's PodSpec) | (no properties). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source), from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment; a Deployment passed through as raw, unstructured output (`passthrough`, `helmchart` templates) is not inspected (see below). |
+| `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; the engine-owned `scope` is accepted). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source), from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment; a Deployment passed through as raw, unstructured output (`passthrough`, `helmchart` templates) is not inspected (see below). |
 | `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`. Admitted on `webservice`, `worker` and `deployment` only. On any of them with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. |
 
 ### Operational (FluxCD)
@@ -508,7 +509,11 @@ role kinds.
 
 The trait is strict in four ways, each an error at build time:
 
-- **No properties.** Any key under the trait is refused by name.
+- **No properties.** Any key under the trait is refused by name, whether
+  authored or merged in from a `ClusterProfile` capability rendering. The
+  exception is the engine-owned keys every trait accepts — today `scope`,
+  which selects the `topology-spread.<scope>` capability binding: they are
+  read by the transform engine, not by the trait, and are let through.
 - **No merging.** A Deployment that already has `topologySpreadConstraints` is
   refused rather than merged, whatever put them there: the raw property on
   `deployment`, or the `topologySpread` default of `webservice`/`worker` at 2
