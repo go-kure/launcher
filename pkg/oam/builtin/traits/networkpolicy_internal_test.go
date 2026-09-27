@@ -42,12 +42,18 @@ func TestParseNPPeer_NamespaceSelectorPresenceCases(t *testing.T) {
 		}
 	})
 
+	// The two null subtests below pair the null key with a podSelector: a peer
+	// left with no selector and no ipBlock is rejected as naming no peer at all
+	// (go-kure/launcher#470), which is a different rule from the one pinned here.
+	podSelector := map[string]any{"matchLabels": map[string]any{"app": "client"}}
+
 	t.Run("authored null is absent", func(t *testing.T) {
 		// A YAML `namespaceSelector:` with no value decodes to an UNTYPED nil, which
-		// fails the map type assertion in parseNPPeer and leaves the selector nil.
-		// That is the contract's "a null is absent" holding on this path.
+		// parseNPPeer reads as absence and leaves the selector nil. That is the
+		// contract's "a null is absent" holding on this path.
 		peer, err := parseNPPeer(map[string]any{
 			"namespaceSelector": nil,
+			"podSelector":       podSelector,
 		}, "from[0]")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -70,6 +76,7 @@ func TestParseNPPeer_NamespaceSelectorPresenceCases(t *testing.T) {
 		// This is the other half of go-kure/launcher#430, now closed on this path too.
 		peer, err := parseNPPeer(map[string]any{
 			"namespaceSelector": map[string]any(nil),
+			"podSelector":       podSelector,
 		}, "from[0]")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)

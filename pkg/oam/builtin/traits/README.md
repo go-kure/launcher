@@ -148,10 +148,11 @@ one does not constrain namespaces at all — which, for a peer that *also* sets
 `networking/v1/types.go:199-222`).
 
 The "own namespace" reading belongs to that pairing, not to the null on its own. A
-peer with **no** selector and no `ipBlock` is not a narrow peer and it selects
-nothing on purpose: it names no peer at all, and the type's own summary is that
-"only certain combinations of fields are allowed" (`types.go:197-198`). Read a null
-selector as absence first, then ask what the peer has left.
+peer with **no** selector and no `ipBlock` is not a narrow peer: it names no peer
+at all, and the type's own summary is that "only certain combinations of fields
+are allowed" (`types.go:197-198`). The API server refuses it, so the parser does
+too (see [Peer shape](#peer-shape) below). Read a null selector as absence first,
+then ask what the peer has left.
 
 An explicit `null` is **absence**, following the contract `oam.IsNullValue` carries
 (see [`pkg/oam`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)) — so
@@ -226,14 +227,14 @@ The peer **envelope** itself is the one place in this section where a null is an
 
 ```yaml
 from:
-  - {}                            # a present, empty peer: parsed, selectors all absent
-  -                               # null: rejected, `ingress[0].from[1]: expected object`
+  -                               # null: rejected, `ingress[0].from[0]: expected object`
 ```
 
 A peer sits in a list, so "absent" has no meaning for it — dropping the element
-would silently shrink the rule, and an authored `- {}` already expresses the empty
-peer. This is what an untyped `nil` in that position always did; the typed nil now
-agrees with it instead of being accepted as a peer that names no source at all.
+would silently shrink the rule. This is what an untyped `nil` in that position
+always did; the typed nil now agrees with it instead of being accepted as a peer
+that names no source at all. An authored `- {}` is present but names no peer
+either, and is rejected by the shape rule under [Peer shape](#peer-shape).
 
 The same holds one level up, for an element of the `ingress`/`egress` **rule**
 list, where it matters more: a rule with neither `from`/`to` nor `ports` matches
@@ -301,10 +302,8 @@ parse the same as their builtin-typed equivalents.
 Everything above checks **type** and **nullity**. A well-typed value is also
 checked for **content**, against the validators the API server applies to a
 NetworkPolicy peer's labels and CIDRs, so a label or CIDR that renders is one
-the cluster admits (go-kure/launcher#469). This covers label and CIDR content
-only, not the peer's shape: a peer that sets `ipBlock` alongside a
-`podSelector` or `namespaceSelector` still renders, and the API server refuses
-it (go-kure/launcher#470):
+the cluster admits (go-kure/launcher#469). The combination of fields a peer
+sets is a separate check, under [Peer shape](#peer-shape). The content rules:
 
 - A `matchLabels` **key** must be a qualified name (`app.kubernetes.io/name`), and
   the rendered **value** a valid label value: empty, or at most 63 characters of
@@ -328,6 +327,30 @@ from:
 ```
 
 Each of these used to render, and fail only when the manifest was applied.
+
+### Peer shape
+
+A peer must name something, and an `ipBlock` stands alone. These are the two
+structural rules the API server applies to a peer (`ValidateNetworkPolicyPeer`),
+and the parser applies them in the same words, after reading every null as
+absence (go-kure/launcher#470). Each row is shown as if authored on its own:
+
+```yaml
+from:
+  - {}                                            # rejected: `…: must specify a peer`
+  - podSelector:                                  # null -> absent, so no peer is named: rejected the same way
+  - ipBlock: {cidr: 10.0.0.0/8}
+    podSelector: {matchLabels: {app: web}}        # rejected: `…: may not specify both ipBlock and another peer`
+  - podSelector: {}                               # every pod in the policy's own namespace: accepted
+  - podSelector: {matchLabels: {app: web}}
+    namespaceSelector: {matchLabels: {env: prod}} # the one legal pair: accepted
+```
+
+An empty selector (`{}`) counts as set, so `- podSelector: {}` is a peer. A null
+selector does not, so an `ipBlock` beside a `podSelector:` with no value is still
+legal. Each rejected shape is one where every value is legal on its own, so the
+per-field checks above could not see it; both used to render and fail only when
+the manifest was applied.
 
 ### Null `ingress` / `egress`
 
