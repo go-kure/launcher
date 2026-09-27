@@ -266,3 +266,100 @@ func TestPostgresql_EndpointsRefusesWrongTypedPooler(t *testing.T) {
 		t.Errorf("enabled pooler: Endpoints = (%d endpoints, %v), want (2, nil)", len(eps), err)
 	}
 }
+
+// TestPostgresql_EndpointsRefusesWrongTypedPoolerEnvelope: the pooler block itself,
+// authored as something other than an object, is refused by Endpoints too. Read as
+// absent, it would declare no pooler endpoint for a document the config build then
+// refuses on the same value.
+func TestPostgresql_EndpointsRefusesWrongTypedPoolerEnvelope(t *testing.T) {
+	h := &components.PostgresqlHandler{}
+	cases := map[string]any{
+		"string": "x",
+		"bool":   true,
+		"list":   []any{map[string]any{"enabled": true}},
+	}
+	for name, pooler := range cases {
+		t.Run(name, func(t *testing.T) {
+			eps, err := h.Endpoints(&oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{
+				"pooler": pooler,
+			}})
+			if err == nil {
+				t.Fatalf("pooler %#v: Endpoints = %d endpoints, want an error", pooler, len(eps))
+			}
+			if !strings.Contains(err.Error(), "pooler: must be an object") {
+				t.Errorf("Endpoints error = %q, want one naming the pooler envelope", err)
+			}
+		})
+	}
+}
+
+// TestPostgresql_EmptyEnsureIsRefused: every ensure enum (role, database, database
+// extension) keeps an authored "" as a value and refuses it by path rather than
+// reading it as omitted, the same as a wrong enum value.
+func TestPostgresql_EmptyEnsureIsRefused(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]any
+		want  string
+	}{
+		{"managedRoles", map[string]any{"managedRoles": []any{map[string]any{"name": "r", "ensure": ""}}}, `managedRoles[0]: unsupported ensure ""`},
+		{"databases", map[string]any{"databases": []any{map[string]any{"name": "d", "owner": "o", "ensure": ""}}}, `databases[0]: unsupported ensure ""`},
+		{"databases.extensions", map[string]any{"databases": []any{map[string]any{"name": "d", "owner": "o", "extensions": []any{map[string]any{"name": "e", "ensure": ""}}}}}, `databases[0].extensions[0]: unsupported ensure ""`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := postgresqlConfigFor(t, tc.props)
+			if err == nil {
+				t.Fatalf("props %v: an empty ensure was accepted", tc.props)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestPostgresql_EmptyVersionIsKept pins what an authored `version: ""` does today:
+// version is a free-form string, copied through as authored, so "" is a value and not
+// an omission — it does not take the "16" default, unlike a null (see
+// TestPostgresql_NullIsAbsence). This is the behaviour the handler had before the
+// strict reads; a change to it is a document-format decision, not a parser fix.
+func TestPostgresql_EmptyVersionIsKept(t *testing.T) {
+	cfg, err := postgresqlConfigFor(t, map[string]any{"version": ""})
+	if err != nil {
+		t.Fatalf("version \"\": %v", err)
+	}
+	if cfg.Version != "" {
+		t.Errorf("version \"\" read as %q, want it kept as authored", cfg.Version)
+	}
+}
+
+// TestPostgresql_CustomQueryWrongTypeNamesField: a wrongly typed `name` or `key` in a
+// monitoring.customQueries entry is refused with the entry's index and the field,
+// not reported as a missing field or dropped.
+func TestPostgresql_CustomQueryWrongTypeNamesField(t *testing.T) {
+	valid := map[string]any{"name": "cm", "key": "queries.yaml"}
+	cases := []struct {
+		name    string
+		queries []any
+		want    string
+	}{
+		{"key int", []any{map[string]any{"name": "cm", "key": 5}}, "monitoring.customQueries[0].key: must be a string, got int"},
+		{"key object", []any{map[string]any{"name": "cm", "key": map[string]any{"k": "v"}}}, "monitoring.customQueries[0].key: must be a string, got map[string]interface {}"},
+		{"key in second entry", []any{valid, map[string]any{"name": "cm", "key": true}}, "monitoring.customQueries[1].key: must be a string, got bool"},
+		{"name in second entry", []any{valid, map[string]any{"name": 7, "key": "k"}}, "monitoring.customQueries[1].name: must be a string, got int"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := postgresqlConfigFor(t, map[string]any{
+				"monitoring": map[string]any{"enabled": true, "customQueries": tc.queries},
+			})
+			if err == nil {
+				t.Fatalf("customQueries %v: accepted", tc.queries)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
