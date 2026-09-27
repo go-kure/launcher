@@ -47,7 +47,10 @@ and name both origins rather than silently overwriting. The exception is a
 claim through `EmitOrAdopt` / `NameOrAdopt` for an element whose content is fully
 determined by an identity: a repeat claim with the same identity, from any origin, adopts
 the element already emitted, while a different identity, or a name first taken by a plain
-`Reserve` / `Name`, still collides. `Origin` provenance
+`Reserve` / `Name`, still collides. Adoption is sound only for a terminal-type shared
+element (claims outlive the round, so a lowerable one could be replaced under another name
+behind an adopter), and it covers only that element: the adopting rule must still emit its
+own output, since an empty result remains a forbidden deletion. `Origin` provenance
 (`lowering.go:46-52`) rides as unexported `origin *Origin` / `sealed bool` fields on
 `Trait`/`Component`/`ApplicationPolicy`/`Application` — yaml.v3 ignores unexported
 fields, so this cost nothing in the wire format, and value-copy semantics at existing

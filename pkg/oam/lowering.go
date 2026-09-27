@@ -260,7 +260,8 @@ type LoweringContext struct {
 // naming both origins — a collision fails the build, never silently overwrites.
 // The one exception is EmitOrAdopt: when a name was first claimed through it, a
 // repeat EmitOrAdopt claim for the same content identity, from any origin, adopts
-// the existing element instead of colliding.
+// the existing element instead of colliding (for a terminal-type shared element
+// only — see EmitOrAdopt).
 type NameAllocator struct {
 	taken map[string]nameClaim
 	// round is the fixpoint round currently being processed, set by runLowering
@@ -365,6 +366,14 @@ func (n *NameAllocator) Reserve(name string, origin Origin) error {
 // A claim with a different identity, a name Reserve already holds, and an empty
 // identity are all hard errors; Reserve likewise still refuses a name claimed here.
 // Keyed on (namespace, name), like Reserve.
+//
+// Two constraints on the caller, neither checked here. The element emitted under
+// the claim must be of a terminal type, one no lowering rule claims: claims outlive
+// the round, so a lowerable element could be replaced under another name while a
+// later adopter still points at the claimed one. And adoption covers only the shared
+// element: the adopting rule still emits its own output for the element it lowers,
+// since the engine rejects an empty LoweringResult as a deletion (D2), so a rule
+// whose whole expansion is the shared element is outside this API's contract.
 func (n *NameAllocator) EmitOrAdopt(name, identity string, origin Origin) (adopted bool, err error) {
 	if identity == "" {
 		return false, errors.Errorf("lowering: %s claimed generated name %q with an empty content identity", origin, name)

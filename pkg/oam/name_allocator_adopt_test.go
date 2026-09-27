@@ -313,6 +313,47 @@ func TestLower_EmitOrAdopt_StaggeredSiblingsAdopt(t *testing.T) {
 	}
 }
 
+// sharedSourceOnlyRule emits nothing but the shared source, so an adopting sibling
+// is left with an empty result — outside EmitOrAdopt's contract.
+type sharedSourceOnlyRule struct{}
+
+func (sharedSourceOnlyRule) ComponentType() string { return "source-only" }
+
+func (sharedSourceOnlyRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	url, _ := comp.Properties["url"].(string)
+	adopted, err := lctx.Namer.EmitOrAdopt("shared-source", "source|"+url, lctx.Origin)
+	if err != nil || adopted {
+		return LoweringResult{}, err
+	}
+	return LoweringResult{Components: []Component{{Name: "shared-source", Type: "worker", Properties: map[string]any{"image": url}}}}, nil
+}
+
+// TestLower_EmitOrAdopt_SharedOnlyExpansionFails pins the contract boundary: a rule
+// whose whole expansion is the shared element leaves the adopting sibling with
+// nothing to emit, and the engine rejects that as a deletion rather than converging.
+func TestLower_EmitOrAdopt_SharedOnlyExpansionFails(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(sharedSourceOnlyRule{})
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: "myapp"},
+		Spec: ApplicationSpec{Components: []Component{
+			{Name: "a", Type: "source-only", Properties: map[string]any{"url": "nginx:1"}},
+			{Name: "b", Type: "source-only", Properties: map[string]any{"url": "nginx:1"}},
+		}},
+	}
+	_, err := tr.lower(app, TransformContext{})
+	if err == nil {
+		t.Fatal("an adopting sibling with an empty expansion was accepted")
+	}
+	for _, want := range []string{"emitted nothing", `component "b"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %s", err, want)
+		}
+	}
+}
+
 func TestLower_EmitOrAdopt_DifferentContentCollides(t *testing.T) {
 	_, err := lowerSharedSource(t, "nginx:1", "nginx:2")
 	if err == nil {
