@@ -45,8 +45,9 @@ emitting only a Service in front of pods another component owns —
 the `job` component — a run-to-completion workload sharing the whole
 JobSpec-level surface with `cronjob`'s job template — and the
 `security-context` trait were added in this release. The `topology-spread`
-trait (launcher's default spread constraints on any generated Deployment, from
-its post-policy replica count) is registered the same way.
+trait (launcher's default spread constraints on any typed Deployment a
+component generates, from its post-policy replica count) is registered the
+same way.
 
 Because a lowering rule may claim types the parser would otherwise reject, `build`
 constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`
