@@ -28,6 +28,23 @@ func TestEmitOrAdopt(t *testing.T) {
 		}
 	})
 
+	t.Run("a claim from an earlier round is adopted in a later round", func(t *testing.T) {
+		n := NewNameAllocator()
+		n.round = 0
+		if adopted, err := n.EmitOrAdopt("src", "helmrepository|https://charts.example", a); err != nil || adopted {
+			t.Fatalf("round-0 claim = (%v, %v), want (false, nil)", adopted, err)
+		}
+		n.round = 1
+		adopted, err := n.EmitOrAdopt("src", "helmrepository|https://charts.example", b)
+		if err != nil || !adopted {
+			t.Fatalf("round-1 same-identity claim = (%v, %v), want (true, nil)", adopted, err)
+		}
+		n.round = 2
+		if _, err := n.EmitOrAdopt("src", "helmrepository|https://other.example", b); err == nil {
+			t.Error("a later-round claim with different content was adopted")
+		}
+	})
+
 	t.Run("different identity hard-fails naming both origins", func(t *testing.T) {
 		n := NewNameAllocator()
 		if _, err := n.EmitOrAdopt("src", "helmrepository|https://one.example", a); err != nil {
@@ -102,6 +119,54 @@ func TestNameOrAdopt(t *testing.T) {
 	}
 }
 
+// TestNameOrAdopt_Errors: every EmitOrAdopt refusal surfaces through the wrapper
+// as an error with no name and adopted=false, never as a silent claim.
+func TestNameOrAdopt_Errors(t *testing.T) {
+	a, b := adoptOrigin("a", ""), adoptOrigin("b", "")
+	tests := []struct {
+		name     string
+		setup    func(t *testing.T, n *NameAllocator)
+		identity string
+	}{
+		{
+			name: "conflicting identity",
+			setup: func(t *testing.T, n *NameAllocator) {
+				if _, _, err := n.NameOrAdopt("podinfo", "helmrepo", "helmrepository|https://one.example", a); err != nil {
+					t.Fatal(err)
+				}
+			},
+			identity: "helmrepository|https://two.example",
+		},
+		{
+			name:     "empty identity",
+			setup:    func(*testing.T, *NameAllocator) {},
+			identity: "",
+		},
+		{
+			name: "name first taken by Reserve",
+			setup: func(t *testing.T, n *NameAllocator) {
+				if err := n.Reserve("podinfo-helmrepo", a); err != nil {
+					t.Fatal(err)
+				}
+			},
+			identity: "helmrepository|https://one.example",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n := NewNameAllocator()
+			tt.setup(t, n)
+			name, adopted, err := n.NameOrAdopt("podinfo", "helmrepo", tt.identity, b)
+			if err == nil {
+				t.Fatalf("NameOrAdopt = (%q, %v, nil), want an error", name, adopted)
+			}
+			if name != "" || adopted {
+				t.Errorf("NameOrAdopt returned (%q, %v) alongside error %v, want (\"\", false)", name, adopted, err)
+			}
+		})
+	}
+}
+
 // sharedSourceRule is the synthetic stand-in for a rule whose components share a
 // derived object: every "source-user" component emits its own leaf plus a source
 // component under the fixed name "shared-source". The url property is the claim's
@@ -162,6 +227,60 @@ func TestLower_EmitOrAdopt_SharedSourceEmittedOnce(t *testing.T) {
 	}
 	if sources != 1 || len(names) != 3 {
 		t.Errorf("components = %v, want a, b and exactly one shared-source", names)
+	}
+}
+
+// delayedSourceUserRule re-emits its component unchanged except for the type,
+// "source-user", so sharedSourceRule sees it one round later than an authored
+// source-user sibling.
+type delayedSourceUserRule struct{}
+
+func (delayedSourceUserRule) ComponentType() string { return "delayed-source-user" }
+
+func (delayedSourceUserRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: comp.Name, Type: "source-user", Properties: comp.Properties}}}, nil
+}
+
+// TestLower_EmitOrAdopt_StaggeredSiblingsAdopt: siblings that reach the shared
+// source in different lowering rounds still converge on one adopted element,
+// whichever of them claims it first.
+func TestLower_EmitOrAdopt_StaggeredSiblingsAdopt(t *testing.T) {
+	for _, tc := range []struct{ name, typeA, typeB string }{
+		{"later sibling delayed", "source-user", "delayed-source-user"},
+		{"earlier sibling delayed", "delayed-source-user", "source-user"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := NewTransformer(nil, nil)
+			tr.RegisterComponentLowering(sharedSourceRule{})
+			tr.RegisterComponentLowering(delayedSourceUserRule{})
+			app := &Application{
+				APIVersion: SupportedAPIVersion,
+				Kind:       terminalDocumentKind,
+				Metadata:   Metadata{Name: "myapp"},
+				Spec: ApplicationSpec{Components: []Component{
+					{Name: "a", Type: tc.typeA, Properties: map[string]any{"url": "nginx:1"}},
+					{Name: "b", Type: tc.typeB, Properties: map[string]any{"url": "nginx:1"}},
+				}},
+			}
+			out, err := tr.lower(app, TransformContext{})
+			if err != nil {
+				t.Fatalf("lower: %v", err)
+			}
+			if len(out) != 1 {
+				t.Fatalf("lower returned %d documents, want 1", len(out))
+			}
+			var names []string
+			sources := 0
+			for _, c := range out[0].Spec.Components {
+				names = append(names, c.Name)
+				if c.Name == "shared-source" {
+					sources++
+				}
+			}
+			if sources != 1 || len(names) != 3 {
+				t.Errorf("components = %v, want a, b and exactly one shared-source", names)
+			}
+		})
 	}
 }
 
