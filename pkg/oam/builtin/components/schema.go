@@ -729,9 +729,9 @@ func schemaJobSpec(reserved bool) map[string]oam.PropertySchema {
 										"type": {Type: oam.PropertyTypeString, Required: true, Description: "Pod condition type to match, such as \"DisruptionTarget\". Must be a qualified name."},
 										"status": {
 											Type:        oam.PropertyTypeString,
-											Required:    true,
+											Default:     string(corev1.ConditionTrue),
 											Enum:        []any{string(corev1.ConditionTrue), string(corev1.ConditionFalse), string(corev1.ConditionUnknown)},
-											Description: "Pod condition status to match. Required: nothing in this package defaults it, and the API server rejects an empty one.",
+											Description: "Pod condition status to match. Defaults to \"True\" when omitted, as Kubernetes does; an empty string is rejected rather than defaulted.",
 										},
 									},
 								},
