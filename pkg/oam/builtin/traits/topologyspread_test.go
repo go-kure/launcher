@@ -99,10 +99,12 @@ func TestTopologySpreadHandler_CanHandle(t *testing.T) {
 }
 
 // The trait's tiers are the role kinds' tiers: nothing at one replica, a hard
-// hostname spread from two, a soft zone spread added from three. The expected
-// value is spelled out rather than only compared against
-// components.BuildTopologySpreadConstraints, so a change to the shared opinion
-// shows up here as a decision and not as a silently moving target.
+// hostname spread from two, a soft zone spread added from three. The tiers,
+// maxSkew and selector are spelled out, so a change to any of them in the
+// shared opinion fails here. The comparison against
+// components.BuildTopologySpreadConstraints pins something else: the trait
+// emits exactly what the role kinds' helper returns for the same replicas and
+// selector, whatever that helper currently returns.
 func TestTopologySpread_StampsDefaultConstraintsByReplicas(t *testing.T) {
 	cases := []struct {
 		replicas int
@@ -360,6 +362,97 @@ func TestTopologySpread_NoDeploymentFails(t *testing.T) {
 	}
 }
 
+// manifestsComponent returns a `manifests` component named api whose inline
+// source is the given YAML.
+func manifestsComponent(inline string) *oam.Component {
+	return &oam.Component{Name: "api", Type: "manifests", Properties: map[string]any{"inline": inline}}
+}
+
+// manifestsDeployment is an inline apps/v1 Deployment named web; replicas and
+// selector are spliced in verbatim (each a complete, indented YAML block, or
+// empty to leave the field unset).
+func manifestsDeployment(replicas, selector string) string {
+	return "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n" +
+		replicas + selector +
+		"  template:\n    metadata:\n      labels:\n        app: web\n        tier: front\n" +
+		"    spec:\n      containers:\n      - name: web\n        image: ghcr.io/org/web:v1\n"
+}
+
+// A Deployment in a `manifests` source is decoded into the typed Deployment,
+// so the trait decorates it like one a launcher kind builds, using its own
+// selector rather than any component-derived label.
+func TestTopologySpread_DecoratesManifestsDeployment(t *testing.T) {
+	deps, err := generateWithTopologySpread(t, &components.ManifestsHandler{},
+		manifestsComponent(manifestsDeployment("  replicas: 2\n", "  selector:\n    matchLabels:\n      app: web\n")), nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	got := deps[0].Spec.Template.Spec.TopologySpreadConstraints
+	want := components.BuildTopologySpreadConstraints(2, map[string]string{"app": "web"})
+	if len(got) != 1 || !reflect.DeepEqual(got, want) {
+		t.Errorf("manifests Deployment at replicas=2: constraints %+v, want %+v", got, want)
+	}
+}
+
+// A Deployment whose selector the trait cannot copy into a spread selector is
+// refused at every replica count, not only once the count reaches the tier
+// that emits constraints. The environment policy sets the count, so a check
+// gated on it would let one document build in one environment and fail in
+// another.
+func TestTopologySpread_RefusesNonMatchLabelsSelectorAtAnyReplicas(t *testing.T) {
+	selectors := map[string]string{
+		"matchLabels plus matchExpressions": "  selector:\n    matchLabels:\n      app: web\n    matchExpressions:\n    - {key: tier, operator: In, values: [front]}\n",
+		"matchExpressions only":             "  selector:\n    matchExpressions:\n    - {key: app, operator: In, values: [web]}\n",
+		"no selector":                       "",
+	}
+	replicaCounts := map[string]string{
+		"unset":      "",
+		"replicas=1": "  replicas: 1\n",
+		"replicas=3": "  replicas: 3\n",
+	}
+	for selName, sel := range selectors {
+		for repName, rep := range replicaCounts {
+			_, err := generateWithTopologySpread(t, &components.ManifestsHandler{},
+				manifestsComponent(manifestsDeployment(rep, sel)), nil)
+			if err == nil {
+				t.Errorf("%s, %s: expected an error, got none", selName, repName)
+				continue
+			}
+			if !strings.Contains(err.Error(), "matchLabels") {
+				t.Errorf("%s, %s: error should name the matchLabels requirement, got: %v", selName, repName, err)
+			}
+		}
+	}
+}
+
+// A Deployment emitted as raw, unstructured output (here a passthrough
+// object) is not inspected, and the error says so rather than claiming the
+// component has no Deployment at all.
+func TestTopologySpread_UnstructuredDeploymentIsNotInspected(t *testing.T) {
+	comp := &oam.Component{Name: "api", Type: "passthrough", Properties: map[string]any{
+		"object": map[string]any{
+			"apiVersion": "apps/v1", "kind": "Deployment",
+			"metadata": map[string]any{"name": "api"},
+			"spec":     map[string]any{"replicas": 3},
+		},
+	}}
+	cfg, err := (&components.PassthroughHandler{}).ToApplicationConfig(comp, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	app := stack.NewApplication(comp.Name, "default", cfg)
+	if err := (&traits.TopologySpreadHandler{}).Apply(topologySpreadTrait(), app, newBundle()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	_, err = app.Config.Generate(app)
+	if err == nil {
+		t.Fatal("expected an error for a passthrough Deployment, got none")
+	}
+	if !strings.Contains(err.Error(), "unstructured") || !strings.Contains(err.Error(), "not inspected") {
+		t.Errorf("error should say an unstructured Deployment is not inspected, got: %v", err)
+	}
+}
+
 // The constraints' selectors are copies: a later edit to the Deployment's own
 // selector map must not reach them (the selectorFrom rule in components).
 func TestTopologySpread_SelectorsDoNotAliasTheDeployment(t *testing.T) {
@@ -369,6 +462,10 @@ func TestTopologySpread_SelectorsDoNotAliasTheDeployment(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	dep := deps[0]
+	// Without constraints the loop below would pass vacuously.
+	if n := len(dep.Spec.Template.Spec.TopologySpreadConstraints); n != 2 {
+		t.Fatalf("replicas=3: %d constraints, want 2", n)
+	}
 	dep.Spec.Selector.MatchLabels["example.test/added-after"] = "yes"
 	dep.Spec.Template.Labels["example.test/added-after"] = "yes"
 	for i, c := range dep.Spec.Template.Spec.TopologySpreadConstraints {

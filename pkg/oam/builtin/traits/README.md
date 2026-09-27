@@ -64,7 +64,7 @@ preflight reject every valid use of the trait.
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `configmap` | ConfigMap (+ optional volume mount) | `name`, `data`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, Job, or CronJob; any other component fails generation) |
-| `topology-spread` | (modifies the Deployment's PodSpec) | (no properties). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every Deployment the component generates, from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints, and a component that generates no Deployment (see below). |
+| `topology-spread` | (modifies the Deployment's PodSpec) | (no properties). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source), from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment; a Deployment passed through as raw, unstructured output (`passthrough`, `helmchart` templates) is not inspected (see below). |
 | `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`. Admitted on `webservice`, `worker` and `deployment` only. On any of them with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. |
 
 ### Operational (FluxCD)
@@ -495,7 +495,8 @@ identical:
 | 3 or more | the above, plus `topology.kubernetes.io/zone`, `maxSkew: 1`, `ScheduleAnyway` |
 
 Each constraint's `labelSelector` is a copy of the Deployment's own
-`spec.selector.matchLabels` (`app: <component>` for every built-in kind).
+`spec.selector.matchLabels` (`app: <component>` for `deployment`, `webservice`
+and `worker`; whatever the manifest declares for a `manifests` Deployment).
 
 The replica count is the one the generated Deployment carries, which is the
 count **after** the environment policy ran: the transformer applies the policy
@@ -505,7 +506,7 @@ defaulting to 3 therefore gets both constraints, the same as a `worker` would.
 A `scaler` HPA does not change the count the trait sees, as it does not for the
 role kinds.
 
-The trait is strict in three ways, each an error at build time:
+The trait is strict in four ways, each an error at build time:
 
 - **No properties.** Any key under the trait is refused by name.
 - **No merging.** A Deployment that already has `topologySpreadConstraints` is
@@ -514,11 +515,23 @@ The trait is strict in three ways, each an error at build time:
   or more replicas. Set `topologySpread: false` on a role kind to use the trait
   instead. At one replica the role kinds produce no constraints, so there is
   nothing to conflict with.
-- **A Deployment is required.** A component whose output contains no
-  Deployment (`statefulset`, `helmchart`, `manifests`, …) fails, rather than
-  carrying a trait that does nothing. A Deployment whose selector is not made
-  of `matchLabels` alone is refused too, since the spread selector could not
-  select exactly its pods; no built-in kind produces one.
+- **A typed Deployment is required.** The trait acts on the typed Deployment
+  objects a component's `Generate` returns: the one `deployment`, `webservice`
+  or `worker` builds, and any `apps/v1` Deployment in a `manifests` source,
+  which is decoded into that type. A component whose output contains none
+  (`statefulset`, `daemonset`, a `manifests` source without a Deployment, …)
+  fails, rather than carrying a trait that does nothing. A Deployment passed
+  through as raw, unstructured output — a `passthrough` object, or one rendered
+  from `helmchart` templates — is not inspected, as for the other
+  Deployment-decorating traits, so such a component fails the same way.
+- **A `matchLabels` selector is required.** A Deployment whose selector is
+  missing, has no `matchLabels`, or also carries `matchExpressions` is refused,
+  since the spread selector could not select exactly its pods. The check runs
+  at every replica count, including 1 and unset where no constraint would be
+  written, so a document does not build in one environment and fail in
+  another whose policy raises the count. `deployment`, `webservice` and
+  `worker` always select on `app: <component>`; a `manifests` Deployment can
+  declare any selector, and is refused when it does not meet this rule.
 
 ## Decorator forwarding for layout-augmenting components
 
