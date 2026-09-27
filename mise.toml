@@ -67,9 +67,13 @@ run = "make check-doc-fences"
 description = "Self-test scripts/verify-merge.sh against a throwaway fixture repository"
 run = "make test-verify-merge"
 
+[tasks.test-pin-impact]
+description = "Run scripts/check-pin-impact.sh's hermetic cases (stub curl, throwaway git repositories, no network)"
+run = "make test-pin-impact"
+
 [tasks.verify]
-description = "Run all checks (tidy, lint, test, kure dep sync, tool pins, doc fences, verify-merge self-test)"
-depends = ["tidy", "lint", "test", "check-kure-dep-sync", "check-tool-versions", "check-govulncheck-docs", "check-doc-fences", "test-verify-merge"]
+description = "Run all checks (tidy, lint, test, kure dep sync, tool pins, doc fences, verify-merge self-test, pin-impact cases)"
+depends = ["tidy", "lint", "test", "check-kure-dep-sync", "check-tool-versions", "check-govulncheck-docs", "check-doc-fences", "test-verify-merge", "test-pin-impact"]
 
 [tasks.verify-merge]
 description = "Build and test a PR's merge ref, the tree its CI builds (mise run verify-merge <pr-number>)"

@@ -108,9 +108,11 @@ jobs:
             # these two scripts plus ci.yml/docs/github-workflows.md, both already listed above.
             - 'scripts/check-govulncheck-docs.sh'
             - 'scripts/sync-govulncheck-docs.sh'
-            # The verify-merge self-test runs in `validate`; a PR touching only the
-            # script or its fixture harness must not be able to skip it.
+            # The verify-merge self-test and the check-pin-impact cases run in
+            # `validate`; a PR touching only either script or the harness under
+            # scripts/test/ must not be able to skip them.
             - 'scripts/verify-merge.sh'
+            - 'scripts/check-pin-impact.sh'
             - 'scripts/test/**'
           docs:
             - 'site/**'
@@ -274,6 +276,15 @@ jobs:
     # this job's PR run checks out); its fixture self-test runs here so it cannot rot.
     - name: Self-test verify-merge
       run: make test-verify-merge
+
+    # The pin-impact job runs scripts/check-pin-impact.sh only on a PR, and only
+    # a go-kure/.github pin bump reaches its fail-closed paths, so those paths
+    # would otherwise go unexercised until a real bump hit one. These cases
+    # exercise its refusal paths, plus the no-change, inert, affected and
+    # acknowledged outcomes. Hermetic: pin-impact-lib.sh stubs curl and builds a throwaway
+    # git repository per case; no network.
+    - name: Run check-pin-impact cases
+      run: make test-pin-impact
 
     # Blocking on PR / merge-queue: fail only when the change newly leads imported kure
     # on a shared direct dep. The script fetches its own base ref.
