@@ -259,6 +259,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"job":         &components.JobHandler{},
 		"daemonset":   &components.DaemonsetHandler{},
 		"statefulset": &components.StatefulsetHandler{},
+		"service":     &components.ServiceHandler{},
 		"postgresql":  &components.PostgresqlHandler{},
 		"helmchart":   &components.HelmchartHandler{},
 		"passthrough": &components.PassthroughHandler{},

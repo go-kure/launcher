@@ -426,7 +426,7 @@ spec:
 func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 	want := []string{
 		"crd", "cronjob", "daemonset", "deployment", "helmchart", "job", "manifests",
-		"oci", "passthrough", "postgresql", "statefulset", "webservice", "worker",
+		"oci", "passthrough", "postgresql", "service", "statefulset", "webservice", "worker",
 	}
 	got := make([]string, 0, len(builtinComponentHandlers()))
 	for name, h := range builtinComponentHandlers() {

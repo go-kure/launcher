@@ -47,6 +47,17 @@ type servicePortProvider interface {
 	ServicePort() int32
 }
 
+// serviceRoutingTargeter is optionally implemented by a component config whose Service selects
+// pods the component does not own — the `service` kind, fronting another component's workload
+// (go-kure/launcher#411). Traffic routed to such a component lands on the returned selector's pods,
+// on the target ports those pods listen on, never on pods carrying the component's own label.
+// servicePorts are the routed Service ports (a number or a port name); the returned target ports
+// are the ones a TCP allow should open, with any unmatched or non-TCP Service port dropped. A nil
+// selector means "not a routing targeter" (a trait decorator wrapping any other config).
+type serviceRoutingTargeter interface {
+	ServiceRoutingTarget(servicePorts []intstr.IntOrString) (*metav1.LabelSelector, []intstr.IntOrString)
+}
+
 // componentServiceName returns the Kubernetes Service name a component owns and whether it owns one.
 // A component is a valid backendRef target only if it declares an explicit BackendServiceName or a
 // positive ServicePort; a Service-less component (e.g. a worker, or a daemonset with no port) owns
@@ -240,6 +251,14 @@ func (r *npSynthesisRegistry) buildLookups(cluster *stack.Cluster, componentMap 
 	for _, name := range names {
 		entry := componentMap[name]
 		r.componentPlacement[name] = componentPlacement{bundle: appToBundle[entry.app], namespace: entry.app.Namespace}
+		// Test the returned VALUE, not the interface's presence: every trait decorator forwards
+		// ServiceRoutingTarget unconditionally and answers a nil selector when the config it wraps
+		// is not a routing targeter — that component keeps its component-label policy.
+		if rt, ok := entry.app.Config.(serviceRoutingTargeter); ok {
+			if sel, _ := rt.ServiceRoutingTarget(nil); sel != nil {
+				r.routingTargets[name] = rt
+			}
+		}
 		svc, owns := componentServiceName(entry.app)
 		if !owns {
 			continue // Service-less component: not a backendRef target, must not claim a Service name
@@ -271,16 +290,45 @@ func (r *npSynthesisRegistry) emitComponents(labelKey string) error {
 			continue
 		}
 		policyName := compName + "-allow-ingress-traffic"
+		var cfg stack.ApplicationConfig = &componentAllowPolicyConfig{ComponentName: compName, Rules: rules, PodSelectorKey: labelKey}
+		if rt, ok := r.routingTargets[compName]; ok {
+			sel, retargeted, err := retargetTrafficRules(compName, rt, rules)
+			if err != nil {
+				return err
+			}
+			if sel == nil {
+				continue // every routed port was unmatched or non-TCP: nothing a TCP allow may open
+			}
+			cfg = &backendIngressAllowPolicyConfig{PolicyName: policyName, PodSelector: sel, Rules: retargeted}
+		}
 		// Key by namespace/name (not bare name) to preserve the #239 external-vs-component collision
 		// check and avoid future cross-namespace false positives.
 		r.emitted[ce.namespace+"/"+policyName] = struct{}{}
-		r.queue(ce.bundle, stack.NewApplication(
-			policyName,
-			ce.namespace,
-			&componentAllowPolicyConfig{ComponentName: compName, Rules: rules, PodSelectorKey: labelKey},
-		))
+		r.queue(ce.bundle, stack.NewApplication(policyName, ce.namespace, cfg))
 	}
 	return nil
+}
+
+// retargetTrafficRules translates a component's inbound rules through its serviceRoutingTargeter
+// (go-kure/launcher#411): each rule's Service ports become the selected pods' target ports, a rule
+// left with none is dropped, and the result is deduplicated. It returns a nil selector when no rule
+// survives, and an error when the component supplies a selector the synthesis would not emit — a
+// policy with an empty selector would admit the traffic to every pod in the namespace.
+func retargetTrafficRules(compName string, rt serviceRoutingTargeter, rules []trafficRule) (*metav1.LabelSelector, []trafficRule, error) {
+	var sel *metav1.LabelSelector
+	var out []trafficRule
+	for _, tr := range rules {
+		s, ports := rt.ServiceRoutingTarget(tr.Ports)
+		sel = s
+		out = appendDedupTrafficRules(out, []trafficRule{{Sources: tr.Sources, Ports: ports}})
+	}
+	if len(out) == 0 {
+		return nil, nil, nil
+	}
+	if err := validateMatchLabelsSelector(sel); err != nil {
+		return nil, nil, errors.Wrapf(err, "component %q: routing target", compName)
+	}
+	return sel, out, nil
 }
 
 // externalBackendEntry accumulates one external routing backend (a bare Service with no owning
@@ -324,8 +372,9 @@ type componentInboundEntry struct {
 // component, component → placement), the per-component and external-backend accumulators, every
 // emitted policy's namespace/name (to detect collisions), and the deferred append queue.
 type npSynthesisRegistry struct {
-	serviceToComponent map[string]string             // svc name → component name (cluster-wide, ambiguity-checked)
-	componentPlacement map[string]componentPlacement // component name → its own bundle + namespace
+	serviceToComponent map[string]string                 // svc name → component name (cluster-wide, ambiguity-checked)
+	componentPlacement map[string]componentPlacement     // component name → its own bundle + namespace
+	routingTargets     map[string]serviceRoutingTargeter // component name → where its routed traffic lands (#411)
 	components         map[string]*componentInboundEntry
 	componentOrder     []string
 	emitted            map[string]struct{}              // namespace/name of every synthesized policy
@@ -338,6 +387,7 @@ func newNPSynthesisRegistry() *npSynthesisRegistry {
 	return &npSynthesisRegistry{
 		serviceToComponent: map[string]string{},
 		componentPlacement: map[string]componentPlacement{},
+		routingTargets:     map[string]serviceRoutingTargeter{},
 		components:         map[string]*componentInboundEntry{},
 		emitted:            map[string]struct{}{},
 		externalBackends:   map[string]*externalBackendEntry{},
