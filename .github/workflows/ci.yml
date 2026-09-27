@@ -419,12 +419,10 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # The PR's base at the time it was opened/last synced, not the
-        # branch's current (possibly since-advanced) tip — avoids comparing
-        # against a base go-kure/launcher never actually merged onto
-        # (chatgpt-codex-connector P2 finding, go-kure/launcher#363,
-        # 2026-08-30).
+        # Fallback base only. The run step below prefers the first parent of
+        # the checked-out merge commit; see the comment there.
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         REPO: ${{ github.repository }}
         IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
@@ -446,6 +444,21 @@ jobs:
           export PIN_IMPACT_ACK=true
         else
           export PIN_IMPACT_ACK=false
+        fi
+        # Compare against the base this checkout was actually merged onto.
+        # The checkout is GitHub's test merge of the PR head into the base
+        # branch as it is now, so the new pins come from that merge, and the
+        # old pins must come from its first parent. The payload's base.sha
+        # can lag behind that tip: after main moved, it still named the base
+        # from when the PR was opened, so a pin bump that landed on main in
+        # between was reported as this PR's (go-kure/launcher#537's run
+        # 36344473052 failed on a bump it did not contain). The first parent
+        # also keeps go-kure/launcher#363's rule: never compare against a base
+        # the PR is not being merged onto, such as a separately fetched main.
+        # The payload base is used only when the checkout is not that merge
+        # commit.
+        if [[ "$(git rev-parse -q --verify 'HEAD^2' || true)" == "$HEAD_SHA" ]]; then
+          BASE_SHA="$(git rev-parse 'HEAD^1')"
         fi
         ./scripts/check-pin-impact.sh --base-ref "$BASE_SHA" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
 
