@@ -260,9 +260,9 @@ each value authored as either a quantity string (`"500m"`, `"2Gi"`) or a bare
 YAML/JSON number (`1`, `0.5`) — both are valid `resource.Quantity` input
 (`Quantity.UnmarshalJSON` parses a bare numeric literal the same way it parses
 a quoted one), and both forms are also accepted by the published property
-schema itself: `cpu`/`memory` are declared with no `Type`, since the schema
-vocabulary has no string-or-number union and a `string`-only declaration would
-reject the numeric form the parser accepts — parsed as `resource.Quantity` and
+schema itself: `cpu`/`memory` are declared as the `Types: [string, number]`
+union (go-kure/launcher#383), so a value of any other type is rejected by
+property validation before the parser sees it — parsed as `resource.Quantity` and
 round-tripped unmodified. A resource name is validated the same way real
 admission validates `corev1.Container.Resources` (mirrors
 `ValidateContainerResourceName`): an unqualified name (no `/`) must be
@@ -1420,14 +1420,12 @@ not part of either change.
   writing `maxUnavailable: 0` alongside it. The error names which half was
   defaulted, since that is the half absent from the author's YAML.
 
-  Both knobs are published with **no declared schema type**, the same treatment
-  `schemaResources` gives cpu/memory quantities. Launcher's `PropertyType` set
-  has no int-or-string union, and declaring `string` would not merely understate
-  what is accepted: property validation rejects a non-string outright, so the
-  integer form the parser accepts could never reach it through a
-  schema-validating consumer. Leaving the type unset skips that check and keeps
-  both forms reachable; the property descriptions carry the constraint instead
-  (go-kure/launcher#383).
+  Both knobs are published as the `Types: [integer, string]` union
+  (go-kure/launcher#383), so the integer and the percentage form both pass
+  property validation on the authored and the emitted path alike, and a value of
+  any other type is rejected there before the parser sees it. The union leaves
+  `Type` empty, so a schema consumer that does not read `Types` still accepts
+  both forms.
 
   **Two rules here are deliberately stricter than upstream.** The API accepts
   both shapes; what it does with them differs. `updateStrategy.type` is required
@@ -2016,7 +2014,7 @@ document's meaning or acceptance moved.
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|
 | `podManagementPolicy` | enum | `OrderedReady` (also the apiserver's default for an unauthored StatefulSet, so authoring it is a no-op that only pins the value in the manifest) or `Parallel`. | additive |
-| `updateStrategy{type, rollingUpdate{partition, maxUnavailable}}` | object | `type` is `RollingUpdate` or `OnDelete`; `rollingUpdate` is rejected under `OnDelete`, mirroring `ValidateStatefulSetSpec`. `type` is required only for an otherwise empty `updateStrategy: {}`, whose whole meaning would come from apiserver defaulting; when `rollingUpdate` is authored, `RollingUpdate` is inferred, since it is both the API default and the only type that reads the field. `partition` is `>= 0`. `maxUnavailable` takes a positive integer or a 1–100% string; the schema leaf declares **no type**, because launcher's `PropertyType` set has no int-or-string member and declaring `string` would make a schema-validating consumer reject the integer form outright (go-kure/launcher#383). | additive |
+| `updateStrategy{type, rollingUpdate{partition, maxUnavailable}}` | object | `type` is `RollingUpdate` or `OnDelete`; `rollingUpdate` is rejected under `OnDelete`, mirroring `ValidateStatefulSetSpec`. `type` is required only for an otherwise empty `updateStrategy: {}`, whose whole meaning would come from apiserver defaulting; when `rollingUpdate` is authored, `RollingUpdate` is inferred, since it is both the API default and the only type that reads the field. `partition` is `>= 0`. `maxUnavailable` takes a positive integer or a 1–100% string; the schema leaf is the `Types: [integer, string]` union (go-kure/launcher#383), so a schema-validating consumer accepts both forms. | additive |
 | `revisionHistoryLimit` | int ≥ 0 | Retained controller revisions. | additive |
 | `minReadySeconds` | int ≥ 0 | Readiness settling time before a pod counts as available. | additive |
 | `persistentVolumeClaimRetentionPolicy{whenDeleted, whenScaled}` | object | Each is `Retain` or `Delete`. | additive |

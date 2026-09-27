@@ -540,12 +540,10 @@ func schemaVolumeClaimSpec() map[string]oam.PropertySchema {
 				// a schema consumer accept `requests: {cpu: "1"}` that
 				// parseStorageResourceList then rejects.
 				//
-				// `storage` itself carries no declared Type, for the reason
-				// schemaResources gives for cpu/memory: the parser takes either a
-				// quantity string or a bare number (decodedQuantityString), and
-				// PropertySchema has no string-or-number union, so declaring
-				// PropertyTypeString would reject the numeric form the parser
-				// accepts.
+				// `storage` itself is the string/number quantity union
+				// (quantityTypes), for the reason schemaResources gives for
+				// cpu/memory: the parser takes either a quantity string or a bare
+				// number (decodedQuantityString).
 				"requests": {Type: oam.PropertyTypeObject, Description: `Minimum storage, e.g. {"storage": "10Gi"}.`, Properties: schemaClaimStorage("Storage the claim asks for. The long spelling of `size` — author one or the other, not both. Must be positive.")},
 				"limits":   {Type: oam.PropertyTypeObject, Description: "Upper bound on storage; honoured only by provisioners that implement it.", Properties: schemaClaimStorage("Upper bound on the volume's size. Must be positive — launcher rejects a non-positive limit as an authoring mistake, though the apiserver never reads this field.")},
 			},
@@ -569,6 +567,6 @@ func schemaVolumeClaimSpec() map[string]oam.PropertySchema {
 // limits each publish, built fresh per call so the two share no map state.
 func schemaClaimStorage(desc string) map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"storage": {Description: desc},
+		"storage": {Types: quantityTypes(), Description: desc},
 	}
 }

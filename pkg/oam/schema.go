@@ -31,8 +31,27 @@ const (
 // AdditionalProperties defaults to false: a handler that accepts arbitrary keys
 // (an escape hatch, e.g. the passthrough component's `object`) sets it true.
 type PropertySchema struct {
-	// Type is the value type. Required.
+	// Type is the value type. Required unless Types is set; the two are mutually
+	// exclusive.
 	Type PropertyType `json:"type" yaml:"type"`
+	// Types declares a union: the value is accepted when it matches any one of the
+	// listed types, and is normalized as that single Type would normalize it. It is
+	// how a Kubernetes int-or-string field (intstr.IntOrString, e.g. a rolling
+	// update's maxUnavailable or a port) or a quantity (a string or a bare number)
+	// is published (go-kure/launcher#383).
+	//
+	// Members must be at least two distinct scalar types (string, integer, number,
+	// boolean); a union with an array or object member would need to say which
+	// member's Properties/Items apply, which this vocabulary does not express.
+	// Setting both Type and Types, or a malformed union, is a schema error that
+	// validatePropertyValue reports as soon as a value reaches the leaf.
+	//
+	// Type stays empty on a union leaf, deliberately: a consumer that predates Types
+	// reads an empty Type as "no declared type" and keeps accepting every member,
+	// so the field is additive for it. Like Enum/Properties/Items, Types is only
+	// meaningful for handler properties — the two flat call sites reject the key
+	// at decode time (flatschema.go's key allow-sets).
+	Types []PropertyType `json:"types,omitempty" yaml:"types,omitempty"`
 	// Description is human-facing prose for the property, surfaced in generated
 	// API references (e.g. the downstream runtime's Handler API Reference). Optional.
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`

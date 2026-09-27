@@ -278,10 +278,11 @@ class: `except` is an **exclusion**, so a dropped one renders a block strictly
 wider than the document authored. A mistyped `cidr` now reports itself as mistyped
 (`…ipBlock.cidr: expected string, got int`) instead of as missing.
 
-A `ports` item is the last depth. `port` is an int-or-string union
-`PropertySchema` has no way to express, so it carries no declared type — the
-same idiom `cpu`/`memory` and daemonset's `maxUnavailable`/`maxSurge` use
-elsewhere in this codebase — but it is now a declared property (not left to
+A `ports` item is the last depth. `port` is an int-or-string union, published
+as `Types: [integer, string]` (go-kure/launcher#383) like the rolling-update
+`maxUnavailable`/`maxSurge` knobs of the workload components, so a value of any
+other type — `port: true` — is rejected by property validation before the
+parser sees it. It is a declared property (not left to
 `AdditionalProperties`), so the schema closes this key set too and a `protcol`
 typo is rejected before ever reaching the parser (go-kure/launcher#440 round
 3). Both of its fields carry the same rule as everything above:

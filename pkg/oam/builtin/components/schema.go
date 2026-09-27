@@ -26,6 +26,20 @@ func accessModesEnum() []any {
 	return []any{"ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"}
 }
 
+// intOrStringTypes is the Types union an intstr.IntOrString leaf publishes: a
+// rolling update's maxUnavailable/maxSurge takes an integer or a percentage string
+// (go-kure/launcher#383).
+func intOrStringTypes() []oam.PropertyType {
+	return []oam.PropertyType{oam.PropertyTypeInteger, oam.PropertyTypeString}
+}
+
+// quantityTypes is the Types union a resource.Quantity leaf publishes: the parsers
+// (decodedQuantityString) take a quantity string or a bare number, fractional
+// included, so the numeric member is number rather than integer.
+func quantityTypes() []oam.PropertyType {
+	return []oam.PropertyType{oam.PropertyTypeString, oam.PropertyTypeNumber}
+}
+
 // schemaEnv describes the shared `env` property (see parseEnv/parseEnvVarSource).
 // `valueFrom` models its five mutually-exclusive sources; each selector object
 // stays shallow (a handful of flat string fields — no further nesting needed).
@@ -149,18 +163,15 @@ func schemaEnvFrom(reserved bool) oam.PropertySchema {
 func schemaResources(reserved bool) oam.PropertySchema {
 	// requests and limits each get their own map so the returned schema shares no
 	// sub-map state (honoring the file-level freshness contract above).
-	// cpu/memory are deliberately left with no declared Type. parseResourceList
-	// accepts either a quantity string ("500m") or a bare YAML/JSON number
-	// (0.5) — see its doc comment — but PropertySchema has no string-or-number
-	// union type, and a declared Type: PropertyTypeString would make
-	// validatePropertyValue reject the numeric form the parser and README both
-	// promise. Leaving Type unset matches how any other, non-cpu/memory
-	// resource name already validates today: AdditionalProperties skips a
-	// per-key type check for those entirely.
+	// cpu/memory are a string/number union (quantityTypes): parseResourceList
+	// accepts either a quantity string ("500m") or a bare YAML/JSON number (0.5) —
+	// see its doc comment. Any other, non-cpu/memory resource name still has no
+	// per-key type check: AdditionalProperties admits it and parseResourceList
+	// alone reads it.
 	quantity := func() map[string]oam.PropertySchema {
 		return map[string]oam.PropertySchema{
-			"cpu":    {Description: `CPU quantity as a string or bare number of cores (e.g. "500m", "1", or 0.5).`},
-			"memory": {Description: `Memory quantity as a string (e.g. "512Mi", "1Gi") or a bare number of bytes.`},
+			"cpu":    {Types: quantityTypes(), Description: `CPU quantity as a string or bare number of cores (e.g. "500m", "1", or 0.5).`},
+			"memory": {Types: quantityTypes(), Description: `Memory quantity as a string (e.g. "512Mi", "1Gi") or a bare number of bytes.`},
 		}
 	}
 	return oam.PropertySchema{

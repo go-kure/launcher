@@ -170,7 +170,9 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 // type (`type Mode string`) is written back as its predeclared type (unnamedScalar),
 // and an integer-typed value whose kind or name no reader asserts becomes int (see
 // normalizeIntegerValue). An untyped schema (`case "":`) checks no type, so its
-// value is left as supplied.
+// value is left as supplied. A Types union (go-kure/launcher#383) also has an empty
+// Type; validateUnionValue checks it against its members and normalizes it as the
+// matching member would.
 //
 // A null reaches here as a whole property value on one path: validateAuthoredProperties
 // (property_validate_authored.go) calls this function directly over every authored
@@ -210,8 +212,22 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		return value, nil
 	}
 
+	if schema.Type != "" && len(schema.Types) > 0 {
+		// A schema, not a document, is wrong here — the same loud failure as an
+		// unsupported Type below.
+		return value, errors.Errorf("%s: schema declares both type %q and types %v; set exactly one", path, schema.Type, schema.Types)
+	}
+
 	switch schema.Type {
 	case "":
+		if len(schema.Types) > 0 {
+			normalized, err := validateUnionValue(schema.Types, value, path)
+			if err != nil {
+				return value, err
+			}
+			value = normalized
+			break
+		}
 		// No declared type: nothing to check beyond Enum below. Reachable for a
 		// schema built for a call site that leaves Type empty (flatschema.go).
 	case PropertyTypeString:
@@ -353,6 +369,62 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		}
 	}
 	return value, nil
+}
+
+// validateUnionValue checks value against a Types union (go-kure/launcher#383): it is
+// accepted when it matches any member, and is normalized by exactly the single-Type
+// path that member names, so a union leaf's reader sees the same shapes a
+// single-typed leaf's reader does (an unsigned integer becomes int, a named string
+// becomes string, and so on).
+//
+// Members are tried in declared order and the first whose kind matches decides. A
+// member that matches by kind but still fails — an integer with no int
+// representation — reports its own error rather than falling through to the next
+// member, whose "expected" message would hide the real reason.
+//
+// The member list itself is checked first, since it is the schema that is wrong
+// when it fails: at least two distinct scalar types. An array or object member
+// would need Items/Properties of its own, and a single member is just Type spelled
+// differently.
+func validateUnionValue(types []PropertyType, value any, path string) (any, error) {
+	if len(types) < 2 {
+		return value, errors.Errorf("%s: schema declares types %v: a union needs at least two members (use type for one)", path, types)
+	}
+	seen := make(map[PropertyType]bool, len(types))
+	for _, typ := range types {
+		if _, ok := unionMemberMatches[typ]; !ok {
+			return value, errors.Errorf("%s: schema declares types member %q, but union members must be scalar types (string, integer, number, boolean)", path, typ)
+		}
+		if seen[typ] {
+			return value, errors.Errorf("%s: schema declares types member %q more than once", path, typ)
+		}
+		seen[typ] = true
+	}
+	for _, typ := range types {
+		if unionMemberMatches[typ](value) {
+			return validatePropertyValue(PropertySchema{Type: typ}, value, path)
+		}
+	}
+	return value, errors.Errorf("%s: expected one of %s, got %T", path, joinPropertyTypes(types), value)
+}
+
+// unionMemberMatches is the set of types a Types union may list, each with the kind
+// test its single-Type case in validatePropertyValue applies first.
+var unionMemberMatches = map[PropertyType]func(any) bool{
+	PropertyTypeString:  isStringValue,
+	PropertyTypeInteger: isIntegerValue,
+	PropertyTypeNumber:  isNumberValue,
+	PropertyTypeBoolean: isBooleanValue,
+}
+
+// joinPropertyTypes renders a union's members for a type-error message, in declared
+// order.
+func joinPropertyTypes(types []PropertyType) string {
+	out := string(types[0])
+	for _, typ := range types[1:] {
+		out += ", " + string(typ)
+	}
+	return out
 }
 
 // enforcePlatformReserved rejects an AUTHORED value for any property the schema marks

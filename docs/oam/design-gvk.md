@@ -259,8 +259,9 @@ member declared with `uint16(80)` still matches the normalised value. `int`, `in
 an integral `float64` are left as they are when their type is exactly that one; a named integer
 type becomes `int` rather than its underlying type because a reader such as `servicePort`'s accepts
 `float64` and `int` only. A key an open object leaves undeclared is not rewritten, and a schema that
-declares no `Type` at all (a quantity, an int-or-string) is checked only against its `Enum`, if it
-has one.
+declares no `Type` at all is checked only against its `Enum`, if it has one. A quantity or an
+int-or-string leaf declares a `Types` union instead (go-kure/launcher#383): the value must match one
+member and is normalised as that member's single `Type` would be.
 
 **Ordering is load-bearing.** The authored-properties check runs *after* `ResolveParameters`
 (`pkg/cmd/kurel/build.go:114`). In package mode an authored value may be a `${...}` placeholder,

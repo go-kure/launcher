@@ -246,10 +246,11 @@ func TestParseNPPort_AbsentPortKeyIsRejectedNotPanicked(t *testing.T) {
 }
 
 func TestParseNPPort_UnknownKeyIsRejected(t *testing.T) {
-	// The port item is the one object in this trait whose key set the SCHEMA
-	// cannot close — it is declared AdditionalProperties because `port` is an
-	// int-or-string union — so `protcol` reached the parser and was dropped to
-	// TCP. `endPort` is a real NetworkPolicyPort field this parser does not
+	// The port item's key set was once left open at the schema layer
+	// (AdditionalProperties, before `port` was declared — today an integer/string
+	// Types union), so `protcol` reached the parser and was dropped to TCP. The
+	// parser keeps its own check for callers that skip schema validation.
+	// `endPort` is a real NetworkPolicyPort field this parser does not
 	// implement: accepting it would render a single port where a range was
 	// authored.
 	for _, key := range []string{"protcol", "endPort", "Port"} {
