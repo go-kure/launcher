@@ -27,6 +27,14 @@ type serviceBackendNamer interface {
 	BackendServiceName() string
 }
 
+// servicePortNamer is implemented by component configs that know their Service's port
+// names — the `service` kind (go-kure/launcher#411). ServicePortName returns the name of
+// the port ServicePort returns ("" when that port is unnamed) and true; decorators
+// (decoratorBase) always implement it and return false for an inner config that does not.
+type servicePortNamer interface {
+	ServicePortName() (string, bool)
+}
+
 // resolveDefaultPort returns the component's service port, or 0 if the component
 // does not expose a service port.
 func resolveDefaultPort(app *stack.Application) int32 {
@@ -59,6 +67,24 @@ func checkImplicitBackend(app *stack.Application, location string) error {
 			location, app.Name)
 	}
 	return nil
+}
+
+// checkImplicitPortName refuses an implicit backend addressed by a port name other than
+// the name of the component's own service port, when the component knows its port names
+// (servicePortNamer). This holds a named port to the same one port a numbered one is held
+// to; a component that does not know its port names keeps the name unchecked.
+func checkImplicitPortName(app *stack.Application, portName string, servicePort int32, location string) error {
+	pn, ok := app.Config.(servicePortNamer)
+	if !ok {
+		return nil
+	}
+	name, known := pn.ServicePortName()
+	if !known || portName == name {
+		return nil
+	}
+	return errors.Errorf(
+		"%s: cannot route implicit backend to port %q — component service exposes port %d (name %q); specify an explicit backend name or match the component port",
+		location, portName, servicePort, name)
 }
 
 // validPathTypes is the set of path types accepted by the Kubernetes Ingress API.
@@ -305,6 +331,11 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 				if !traitPortProvided {
 					if err := checkImplicitBackend(app, fmt.Sprintf("rules[%d].paths[%d]", i, j)); err != nil {
 						return nil, err
+					}
+					if p.PortName != "" {
+						if err := checkImplicitPortName(app, p.PortName, defaultPort, fmt.Sprintf("rules[%d].paths[%d]", i, j)); err != nil {
+							return nil, err
+						}
 					}
 				}
 				if portExplicit && p.Port > 0 && p.Port != defaultPort {

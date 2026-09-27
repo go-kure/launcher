@@ -207,8 +207,17 @@ func TestServiceHandler_SamePortDifferentProtocols(t *testing.T) {
 		map[string]any{"name": "dns-tcp", "port": 53},
 		map[string]any{"name": "dns-udp", "port": 53, "protocol": "UDP"},
 	}})
-	if len(svc.Spec.Ports) != 2 {
-		t.Fatalf("ports = %+v, want two", svc.Spec.Ports)
+	want := []corev1.ServicePort{
+		{Name: "dns-tcp", Port: 53, TargetPort: intstr.FromInt32(53), Protocol: corev1.ProtocolTCP},
+		{Name: "dns-udp", Port: 53, TargetPort: intstr.FromInt32(53), Protocol: corev1.ProtocolUDP},
+	}
+	if len(svc.Spec.Ports) != len(want) {
+		t.Fatalf("ports = %+v, want %+v", svc.Spec.Ports, want)
+	}
+	for i := range want {
+		if svc.Spec.Ports[i] != want[i] {
+			t.Errorf("ports[%d] = %+v, want %+v", i, svc.Spec.Ports[i], want[i])
+		}
 	}
 }
 
@@ -221,6 +230,31 @@ func TestServiceConfig_ServicePortIsFirstPort(t *testing.T) {
 	}
 	if got := pp.ServicePort(); got != 80 {
 		t.Errorf("ServicePort() = %d, want 80 (the first port)", got)
+	}
+}
+
+// ServicePortName is the first port's name, reported as known even when that port is unnamed:
+// routing traits use it to refuse an implicit backend addressed by any other port name.
+func TestServiceConfig_ServicePortNameIsFirstPortName(t *testing.T) {
+	tests := []struct {
+		name  string
+		props map[string]any
+		want  string
+	}{
+		{"named first port", serviceFrontingOtherWorkload(), "http"},
+		{"unnamed single port", map[string]any{"ports": []any{map[string]any{"port": 8080}}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := serviceConfig(t, "api", tt.props)
+			pn, ok := cfg.(interface{ ServicePortName() (string, bool) })
+			if !ok {
+				t.Fatal("ServiceConfig does not implement ServicePortName")
+			}
+			if got, known := pn.ServicePortName(); got != tt.want || !known {
+				t.Errorf("ServicePortName() = %q, %v; want %q, true", got, known, tt.want)
+			}
+		})
 	}
 }
 
@@ -276,7 +310,9 @@ func TestServiceHandler_Endpoints(t *testing.T) {
 	h := &components.ServiceHandler{}
 	props := serviceFrontingOtherWorkload()
 	props["ports"] = append(props["ports"].([]any),
-		map[string]any{"name": "admin", "port": 9000, "targetPort": "admin"},
+		// The Service port name and the container port name differ on purpose, so a declared
+		// endpoint port taken from the wrong one of the two is caught.
+		map[string]any{"name": "admin", "port": 9000, "targetPort": "mgmt"},
 		map[string]any{"name": "alt", "port": 8081, "targetPort": 8080})
 	eps, err := h.Endpoints(&oam.Component{Name: "api", Type: "service", Properties: props})
 	if err != nil {
@@ -288,7 +324,7 @@ func TestServiceHandler_Endpoints(t *testing.T) {
 	if sel := eps[0].PodSelector; sel == nil || len(sel.MatchLabels) != 1 || sel.MatchLabels["app"] != "api-server" {
 		t.Errorf("selector = %v, want app=api-server", eps[0].PodSelector)
 	}
-	want := []intstr.IntOrString{intstr.FromInt32(8080), intstr.FromString("admin")}
+	want := []intstr.IntOrString{intstr.FromInt32(8080), intstr.FromString("mgmt")}
 	if len(eps[0].Ports) != len(want) {
 		t.Fatalf("ports = %v, want %v", eps[0].Ports, want)
 	}
@@ -330,6 +366,13 @@ func TestServiceHandler_PropertySchema(t *testing.T) {
 		t.Fatalf("ports schema = %+v, want a required array", ports)
 	}
 	item := ports.Items.Properties
+	// A missing entry reads as the zero PropertySchema (Type "", not Required), so each key's
+	// presence is asserted before its fields.
+	for _, key := range []string{"name", "port", "targetPort", "protocol"} {
+		if _, ok := item[key]; !ok {
+			t.Errorf("ports[] schema has no %q property", key)
+		}
+	}
 	if !item["port"].Required {
 		t.Error("ports[].port must be required")
 	}

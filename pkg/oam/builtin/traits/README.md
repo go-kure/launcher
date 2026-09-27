@@ -506,7 +506,7 @@ have nothing to do for an augmenter-added resource, so they implement no hook.
 Every trait decorator also embeds `decoratorBase`, which forwards the optional
 interfaces a component config may implement — `stack.Validator`,
 `fluxNamespaceSettable`, `autoHealthCheckEmitter`, `servicePortProvider`,
-`serviceBackendNamer`, `oam.ServiceAccountNamer`, `nonRWXClaimer` and
+`serviceBackendNamer`, `servicePortNamer`, `oam.ServiceAccountNamer`, `nonRWXClaimer` and
 `serviceRoutingTargeter` — so a decorated config keeps answering them. The `ServiceAccountNamer` forward is what keeps the
 `rbac` row above true once a second trait is present: without it a workload
 that authored `serviceAccountName` would stop reporting its account as soon as
@@ -515,8 +515,10 @@ instead. The `nonRWXClaimer` forward does the same for the `scaler` row: a
 decorating trait declared before `scaler` must not hide the claim that caps
 `maxReplicas` at 1. The `serviceRoutingTargeter` forward keeps a decorated `service`
 component's synthesized ingress allow on its `selector` pods rather than on the component
-label, which none of its pods carry. A config that implements none of them gets the zero
-answer (`nil`, `0`, `""`), which every reader treats as "not set".
+label, which none of its pods carry. The `servicePortNamer` forward keeps an `ingress` path's
+`portName` on a decorated `service` component held to the first port, the same rule a port
+number is held to. A config that implements none of them gets the zero
+answer (`nil`, `0`, `""`, `false`), which every reader treats as "not set".
 
 `augmentingDecorator` also forwards `oam.LayoutAugmentationCoverage`'s
 `GenerateCoversAugmentLayout() bool` — the interface `kurel build`'s guard consults before
