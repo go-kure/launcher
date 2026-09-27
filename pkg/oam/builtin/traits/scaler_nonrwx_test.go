@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-kure/kure/pkg/stack"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
@@ -53,14 +56,50 @@ func scalerTrait(props map[string]any) oam.Trait {
 
 func transformOne(t *testing.T, kind string, props map[string]any, policy oam.Policy, trs ...oam.Trait) error {
 	t.Helper()
+	_, err := transformCluster(t, kind, props, policy, trs...)
+	return err
+}
+
+func transformCluster(t *testing.T, kind string, props map[string]any, policy oam.Policy, trs ...oam.Trait) (*stack.Cluster, error) {
+	t.Helper()
 	app := &oam.Application{
 		Metadata: oam.Metadata{Name: "pkg", Namespace: "default"},
 		Spec: oam.ApplicationSpec{Components: []oam.Component{{
 			Name: "app", Type: kind, Properties: props, Traits: trs,
 		}}},
 	}
-	_, err := nonRWXScalerTransformer().Transform(app, oam.TransformContext{Policy: policy})
-	return err
+	return nonRWXScalerTransformer().Transform(app, oam.TransformContext{Policy: policy})
+}
+
+// generatedHPAs runs Generate on every application in the cluster and returns
+// the HorizontalPodAutoscalers it emits.
+func generatedHPAs(t *testing.T, cluster *stack.Cluster) []*autoscalingv2.HorizontalPodAutoscaler {
+	t.Helper()
+	var hpas []*autoscalingv2.HorizontalPodAutoscaler
+	var walk func(node *stack.Node)
+	walk = func(node *stack.Node) {
+		if node == nil {
+			return
+		}
+		if node.Bundle != nil {
+			for _, a := range node.Bundle.Applications {
+				objs, err := a.Generate()
+				if err != nil {
+					t.Fatalf("Generate: %v", err)
+				}
+				for _, o := range objs {
+					if hpa, ok := (*o).(*autoscalingv2.HorizontalPodAutoscaler); ok {
+						hpas = append(hpas, hpa)
+					}
+				}
+			}
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(cluster.Node)
+	return hpas
 }
 
 func TestScaler_NonRWXClaim_RejectsMaxReplicasAboveOne(t *testing.T) {
@@ -128,11 +167,61 @@ func TestScaler_NonRWXClaim_AcceptsSafeCombinations(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := transformOne(t, tc.kind, tc.props, nil,
+			cluster, err := transformCluster(t, tc.kind, tc.props, nil,
 				scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": tc.max}))
 			if err != nil {
 				t.Fatalf("expected the build to succeed, got: %v", err)
 			}
+			// Accepted is not enough: the scaler has to emit an HPA that targets
+			// this component's Deployment with the authored bounds.
+			hpas := generatedHPAs(t, cluster)
+			if len(hpas) != 1 {
+				t.Fatalf("generated %d HPAs, want 1", len(hpas))
+			}
+			spec := hpas[0].Spec
+			ref := spec.ScaleTargetRef
+			if ref.APIVersion != "apps/v1" || ref.Kind != "Deployment" || ref.Name != "app" {
+				t.Errorf("scaleTargetRef = %s %s/%s, want apps/v1 Deployment/app", ref.APIVersion, ref.Kind, ref.Name)
+			}
+			if spec.MinReplicas == nil || *spec.MinReplicas != 1 {
+				t.Errorf("minReplicas = %v, want 1", spec.MinReplicas)
+			}
+			if spec.MaxReplicas != int32(tc.max) {
+				t.Errorf("maxReplicas = %d, want %d", spec.MaxReplicas, tc.max)
+			}
 		})
+	}
+}
+
+// A deployment's non-RWX guard must look past a shareable first claim: the
+// claim that limits the pod count here is the second one, and the refusal has
+// to name it.
+func TestScaler_NonRWXClaim_DeploymentNamesLaterClaim(t *testing.T) {
+	props := map[string]any{
+		"image":    "ghcr.io/org/app:v1",
+		"replicas": 1,
+		"volumes": []any{
+			map[string]any{
+				"name": "shared", "type": "pvc", "mountPath": "/shared", "size": "1Gi",
+				"accessModes": []any{"ReadWriteMany"},
+			},
+			map[string]any{
+				"name": "scratch", "type": "pvc", "mountPath": "/scratch", "size": "1Gi",
+				"accessModes": []any{"ReadWriteOnce"},
+			},
+		},
+	}
+	err := transformOne(t, "deployment", props, nil,
+		scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 5}))
+	if err == nil {
+		t.Fatal("expected the build to fail: the second claim is ReadWriteOnce and the HPA can scale to 5")
+	}
+	for _, want := range []string{`"scaler"`, `volume "scratch"`, "maxReplicas 5"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %s", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), `"shared"`) {
+		t.Errorf("error %q names the shareable claim %q", err, "shared")
 	}
 }

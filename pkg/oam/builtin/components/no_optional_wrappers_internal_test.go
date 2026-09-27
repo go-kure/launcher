@@ -34,15 +34,16 @@ func optionalWrappers(f *ast.File) []string {
 	return names
 }
 
-// TestNoOptionalFieldWrappers fails if any non-test file in this package
-// declares an optional<X> field wrapper (go-kure/launcher#459).
-func TestNoOptionalFieldWrappers(t *testing.T) {
-	paths, err := filepath.Glob("*.go")
+// scanOptionalWrappers parses every non-test Go file directly in dir and
+// returns one "<path> declares <name>" finding per optional<X> wrapper, plus
+// the number of files it parsed.
+func scanOptionalWrappers(t testing.TB, dir string) (findings []string, scanned int) {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		t.Fatalf("glob package files: %v", err)
 	}
 	fset := token.NewFileSet()
-	scanned := 0
 	for _, path := range paths {
 		if strings.HasSuffix(path, "_test.go") {
 			continue
@@ -57,12 +58,47 @@ func TestNoOptionalFieldWrappers(t *testing.T) {
 		}
 		scanned++
 		for _, name := range optionalWrappers(f) {
-			t.Errorf("%s declares %s: %s", path, name, optionalWrapperReason)
+			findings = append(findings, path+" declares "+name)
 		}
+	}
+	return findings, scanned
+}
+
+// TestNoOptionalFieldWrappers fails if any non-test file in this package
+// declares an optional<X> field wrapper (go-kure/launcher#459).
+func TestNoOptionalFieldWrappers(t *testing.T) {
+	findings, scanned := scanOptionalWrappers(t, ".")
+	for _, finding := range findings {
+		t.Errorf("%s: %s", finding, optionalWrapperReason)
 	}
 	// A glob that matched nothing (wrong working directory) would pass vacuously.
 	if scanned == 0 {
 		t.Fatal("scanned no non-test Go files; the guard is not looking at this package")
+	}
+}
+
+// TestScanOptionalWrappersScansEveryFile proves the directory scan reaches
+// every non-test file, not only common.go where the abolished wrappers lived,
+// and that it skips _test.go files.
+func TestScanOptionalWrappersScansEveryFile(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"common.go":       "package components\n\nfunc parseStringField() {}\n",
+		"podspec.go":      "package components\n\nfunc optionalObjectList() {}\n",
+		"planted_test.go": "package components\n\nfunc optionalIgnoredInTests() {}\n",
+	}
+	for name, src := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	findings, scanned := scanOptionalWrappers(t, dir)
+	if scanned != 2 {
+		t.Errorf("scanned %d files, want 2 (common.go, podspec.go)", scanned)
+	}
+	want := filepath.Join(dir, "podspec.go") + " declares optionalObjectList"
+	if len(findings) != 1 || findings[0] != want {
+		t.Fatalf("findings = %q, want [%q]", findings, want)
 	}
 }
 
