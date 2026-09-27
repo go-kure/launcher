@@ -145,6 +145,17 @@ func (c *ServiceConfig) ServicePort() int32 {
 	return c.Ports[0].Port
 }
 
+// ServicePortName returns the first port's name ("" when it is unnamed) and
+// true: this config knows its port names, so routing traits refuse an implicit
+// backend addressed by any other port name — a later port's, or one the
+// Service does not have — just as they refuse any other port number.
+func (c *ServiceConfig) ServicePortName() (string, bool) {
+	if len(c.Ports) == 0 {
+		return "", false
+	}
+	return c.Ports[0].Name, true
+}
+
 // ServiceRoutingTarget tells pkg/oam's inbound NetworkPolicy synthesis where
 // traffic routed to this Service actually lands: the selector's pods, not the
 // pods carrying this component's label (it owns none), on the target ports

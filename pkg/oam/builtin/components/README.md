@@ -1332,11 +1332,18 @@ change.
   port/protocol pairs must be unique). `type` is `ClusterIP` (default),
   `NodePort` or `LoadBalancer`; `ExternalName` is not offered, since it has no
   selector. An empty `selector` is refused.
-  - **Routing traits use the first port.** `ingress`, `httproute` and the other
-    routing traits on a `service` component resolve their implicit backend to
-    `ports[0].port` and refuse any other port on it (`cannot route implicit
-    backend to port N`). To route to a later port, name the Service as an
-    explicit backend (a `backendRef` on the Service's name and that port).
+  - **Routing traits use the first port.** `ingress`, `httproute` and `expose`
+    (which lowers to one of the two) on a `service` component resolve their
+    implicit backend to `ports[0].port` and refuse any other port on it,
+    whether it is named by number (`cannot route implicit backend to port N`)
+    or by an ingress path's `portName` (`cannot route implicit backend to port
+    "name"`); a `portName` must be the first port's own name, so an unknown
+    name is refused too. Naming the component's own Service as the backend
+    (`backend: api` on an ingress path, `backendRefs: [{name: api, port:
+    9000}]` on an httproute) is still the implicit backend and is refused the
+    same way. To reach a later port, put the routing trait on another
+    component and name this Service there as an explicit backend, with that
+    port.
   - **Synthesized NetworkPolicy.** The `{component}-allow-ingress-traffic`
     policy for traffic routed to a `service` selects its `selector` pods — not
     the component label, which no pod carries — and opens the `targetPort` of
@@ -1750,7 +1757,7 @@ change.
   limitation: the child directory name's DNS-1123 truncation (mirroring `valuesConfigMapName`'s own
   `sha256`-prefixed truncation above) makes same-name collisions vanishingly unlikely *within* one
   Application, but two different Applications with a same-named component still collide — component
-  names are unique only within one Application (`pkg/oam/validate.go:192-195`), while emitted
+  names are unique only within one Application (`pkg/oam/validate.go:193-196`), while emitted
   Kustomization CRs for hook-group children share one controller namespace; a pre-existing gap
   (inherited from a downstream consumer's reference implementation) that this partitioning newly exposes, not one
   it introduces. `kurel build`'s flat output **accepts** `delivery: template` — its `Generate`
