@@ -1384,6 +1384,27 @@ func TestCronjobHandler_PodFailurePolicy_Projected(t *testing.T) {
 		}
 	})
 
+	t.Run("onPodConditions status defaults to True", func(t *testing.T) {
+		// go-kure/launcher#410, through the cronjob component's jobTemplate.
+		spec, msg := cronjobPodFailurePolicy(t, map[string]any{
+			"restartPolicy": "Never",
+			"podFailurePolicy": map[string]any{"rules": []any{map[string]any{
+				"action":          "Ignore",
+				"onPodConditions": []any{map[string]any{"type": "DisruptionTarget"}},
+			}}},
+		})
+		if msg != "" {
+			t.Fatalf("refused: %s", msg)
+		}
+		pfp := spec.PodFailurePolicy
+		if pfp == nil || len(pfp.Rules) != 1 || len(pfp.Rules[0].OnPodConditions) != 1 {
+			t.Fatalf("PodFailurePolicy = %+v, want one rule with one pattern", pfp)
+		}
+		if got := pfp.Rules[0].OnPodConditions[0].Status; got != corev1.ConditionTrue {
+			t.Errorf("OnPodConditions[0].Status = %q, want True", got)
+		}
+	})
+
 	t.Run("restartPolicy rule applies to the jobTemplate too", func(t *testing.T) {
 		// No restartPolicy authored, so the cronjob component's own OnFailure
 		// default lands on the template.

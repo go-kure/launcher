@@ -4121,34 +4121,45 @@ func parseJobPodFailurePolicyOnPodConditions(raw any, label string) ([]batchv1.P
 		}
 		pattern.Type = corev1.PodConditionType(t)
 
-		// batchv1's field doc says status "Defaults to True", but nothing in
-		// this package defaults it and upstream's own validation — which runs
-		// after API-server defaulting — reports an empty status as Required
-		// rather than filling it in. An unauthored status is therefore refused
-		// here instead of emitted empty for admission to reject.
-		raw, present = obj["status"]
-		if !present || isExplicitNull(raw) {
-			return nil, errors.Errorf("%s.status: required, must be %q, %q or %q", entryLabel, corev1.ConditionTrue, corev1.ConditionFalse, corev1.ConditionUnknown)
+		status, err := parseJobPodFailurePolicyConditionStatus(obj, entryLabel)
+		if err != nil {
+			return nil, err
 		}
-		s, ok := raw.(string)
-		if !ok {
-			return nil, errors.Errorf("%s.status: must be a string, got %T", entryLabel, raw)
-		}
-		// Empty reported as missing rather than invalid, as for action and
-		// operator above — and as upstream reports it.
-		if s == "" {
-			return nil, errors.Errorf("%s.status: required, must be %q, %q or %q", entryLabel, corev1.ConditionTrue, corev1.ConditionFalse, corev1.ConditionUnknown)
-		}
-		switch corev1.ConditionStatus(s) {
-		case corev1.ConditionTrue, corev1.ConditionFalse, corev1.ConditionUnknown:
-			pattern.Status = corev1.ConditionStatus(s)
-		default:
-			return nil, errors.Errorf("%s.status: invalid value %q, must be %q, %q or %q", entryLabel, s, corev1.ConditionTrue, corev1.ConditionFalse, corev1.ConditionUnknown)
-		}
+		pattern.Status = status
 
 		patterns = append(patterns, pattern)
 	}
 	return patterns, nil
+}
+
+// parseJobPodFailurePolicyConditionStatus decodes one onPodConditions pattern's
+// `status`. An absent (or null) key defaults to True, as upstream's
+// SetDefaults_PodFailurePolicyOnPodConditionsPattern does before validation runs
+// (go-kure/launcher#410). The default is written out rather than left to the API
+// server because PodFailurePolicyOnPodConditionsPattern.Status carries no
+// omitempty: left unset, it would be emitted as `status: ""`.
+func parseJobPodFailurePolicyConditionStatus(obj map[string]any, entryLabel string) (corev1.ConditionStatus, error) {
+	raw, present := obj["status"]
+	if !present || isExplicitNull(raw) {
+		return corev1.ConditionTrue, nil
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return "", errors.Errorf("%s.status: must be a string, got %T", entryLabel, raw)
+	}
+	// Deliberately stricter than upstream, whose defaulter fills an empty status
+	// too: only an absent key is defaulted, so an authored empty string — more
+	// likely a templating slip than a request for True — is refused rather than
+	// silently read as True.
+	if s == "" {
+		return "", errors.Errorf("%s.status: must not be empty; omit it to default to %q, or set %q, %q or %q", entryLabel, corev1.ConditionTrue, corev1.ConditionTrue, corev1.ConditionFalse, corev1.ConditionUnknown)
+	}
+	switch status := corev1.ConditionStatus(s); status {
+	case corev1.ConditionTrue, corev1.ConditionFalse, corev1.ConditionUnknown:
+		return status, nil
+	default:
+		return "", errors.Errorf("%s.status: invalid value %q, must be %q, %q or %q", entryLabel, s, corev1.ConditionTrue, corev1.ConditionFalse, corev1.ConditionUnknown)
+	}
 }
 
 // validateJobPodFailurePolicy applies the podFailurePolicy rules that depend on

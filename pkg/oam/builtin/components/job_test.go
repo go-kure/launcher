@@ -9,6 +9,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -816,6 +817,59 @@ func TestJobHandler_PodFailurePolicy_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestJobHandler_PodFailurePolicy_StatusDefaultsToTrue pins go-kure/launcher#410:
+// an onPodConditions pattern without a status matches status True, the value
+// upstream's SetDefaults_PodFailurePolicyOnPodConditionsPattern fills in. The
+// default is written out rather than left to the API server because
+// PodFailurePolicyOnPodConditionsPattern.Status carries no omitempty, so an
+// unset field would be emitted as `status: ""`.
+//
+// Each case runs the authored-property check first, as kurel build does, so a
+// schema that still marked status required fails here and not only at the
+// parser.
+func TestJobHandler_PodFailurePolicy_StatusDefaultsToTrue(t *testing.T) {
+	cases := []struct {
+		name    string
+		pattern map[string]any
+	}{
+		{"status absent", map[string]any{"type": "DisruptionTarget"}},
+		{"status explicit null", map[string]any{"type": "DisruptionTarget", "status": nil}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := podFailurePolicyProps([]any{map[string]any{
+				"action":          "Ignore",
+				"onPodConditions": []any{tc.pattern},
+			}}, map[string]any{"image": "ghcr.io/org/batch:v1.0.0"})
+
+			tr := oam.NewTransformer(map[string]oam.ComponentHandler{"job": &components.JobHandler{}}, nil)
+			app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{
+				{Name: "batch", Type: "job", Properties: props},
+			}}}
+			if err := tr.ValidateAuthoredProperties(app); err != nil {
+				t.Fatalf("ValidateAuthoredProperties refused a pattern without status: %v", err)
+			}
+
+			job, _ := generateJob(t, app.Spec.Components[0].Properties)
+			pfp := job.Spec.PodFailurePolicy
+			if pfp == nil || len(pfp.Rules) != 1 || len(pfp.Rules[0].OnPodConditions) != 1 {
+				t.Fatalf("PodFailurePolicy = %+v, want one rule with one pattern", pfp)
+			}
+			if got := pfp.Rules[0].OnPodConditions[0]; got.Type != corev1.DisruptionTarget || got.Status != corev1.ConditionTrue {
+				t.Errorf("OnPodConditions[0] = %+v, want DisruptionTarget/True", got)
+			}
+
+			out, err := yaml.Marshal(job)
+			if err != nil {
+				t.Fatalf("marshal Job: %v", err)
+			}
+			if !strings.Contains(string(out), `status: "True"`) {
+				t.Errorf("emitted Job does not carry status \"True\":\n%s", out)
+			}
+		})
+	}
+}
+
 // TestJobHandler_PodFailurePolicy_EmptyRules pins the one place this parser is
 // deliberately no stricter than upstream. validatePodFailurePolicy has no
 // "at least one rule" check — unlike validateSuccessPolicy, which does — and the
@@ -1028,23 +1082,20 @@ func TestJobHandler_PodFailurePolicyValidation_Table(t *testing.T) {
 			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "", "status": "True"}}}}, nil),
 			"onPodConditions[0].type: required",
 		},
-		{
-			// Nothing in this package defaults status, and upstream — which
-			// runs after API-server defaulting — reports an empty one as
-			// Required, so it is refused here rather than emitted empty.
-			"onPodConditions entry missing status",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "DisruptionTarget"}}}}, nil),
-			"onPodConditions[0].status: required",
-		},
+		// An absent status is no longer refused: it defaults to True, pinned
+		// in TestJobHandler_PodFailurePolicy_StatusDefaultsToTrue.
 		{
 			"onPodConditions entry with an unknown status",
 			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": "Maybe"}}}}, nil),
 			"onPodConditions[0].status: invalid value \"Maybe\"",
 		},
 		{
+			// Stricter than upstream, whose defaulter fills an empty status
+			// too: only an absent key is defaulted here, and an authored
+			// empty string is refused as the likely mistake it is.
 			"onPodConditions entry with an empty status",
 			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": ""}}}}, nil),
-			"onPodConditions[0].status: required",
+			"onPodConditions[0].status: must not be empty",
 		},
 	}
 	for _, tc := range cases {

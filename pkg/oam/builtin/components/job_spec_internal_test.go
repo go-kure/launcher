@@ -69,6 +69,20 @@ func TestJobSpecSchemaMatchesParser(t *testing.T) {
 	assertPropertyKeys(t, onPodConditions.Items.Properties,
 		"podFailurePolicy.rules[].onPodConditions[]", jobPodFailurePolicyOnPodConditionsKeys)
 
+	// go-kure/launcher#410: the parser defaults an absent status to True, so
+	// the schema must neither demand it — the authored-property check would
+	// refuse the document before the parser runs — nor hide the default.
+	status := onPodConditions.Items.Properties["status"]
+	if status.Required {
+		t.Error("onPodConditions[].status.Required = true, want false — parseJobPodFailurePolicyOnPodConditions defaults it")
+	}
+	if status.Default != "True" {
+		t.Errorf("onPodConditions[].status.Default = %v, want \"True\"", status.Default)
+	}
+	if !onPodConditions.Items.Properties["type"].Required {
+		t.Error("onPodConditions[].type.Required = false, want true — the parser still demands it")
+	}
+
 	for k, node := range s {
 		if node.Description == "" {
 			t.Errorf("schemaJobSpec[%q]: Description is empty", k)
