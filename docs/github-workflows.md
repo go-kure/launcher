@@ -205,7 +205,10 @@ Runs on main and `release/*` branches only (not PRs):
 - **Pin-impact gate** — `pin-impact` (PR only) renders a `go-kure/.github` pin bump's real effect
   (which `scripts/*.sh` a referenced action actually runs, whether the compare touches any of them)
   into the job summary and fails on a match, so a bump touching consumed code cannot merge
-  unreviewed. `scripts/check-pin-impact.sh` is a vendored copy of `go-kure/kure`'s, first ported
+  unreviewed. The old pins are read from the first parent of the checked-out test merge, the base
+  branch as the PR would merge onto it now, not from the event payload's `base.sha`, which can
+  still name the base from when the PR was opened: a bump that landed on `main` since then would
+  otherwise be reported as the PR's own. `scripts/check-pin-impact.sh` is a vendored copy of `go-kure/kure`'s, first ported
   (go-kure/kure#729) after go-kure/launcher#358 turned up the identical blind spot here, and since
   brought level with its hardened form (go-kure/kure#731). It follows three things, and nothing
   else:
