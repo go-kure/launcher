@@ -163,6 +163,7 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.Volumes = parsed.Volumes
 	config.VolumeMounts = parsed.Mounts
+	config.VolumeDevices = parsed.Devices
 	config.PVCs = parsed.PVCs
 
 	// Init containers must be added before the main container so they
@@ -189,6 +190,9 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 		return nil, err
 	}
 	config.Sidecars = sidecars
+	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := parsePodSpec(props, false)
 	if err != nil {
@@ -223,6 +227,7 @@ type WebserviceConfig struct {
 	WorkingDir             string
 	Volumes                []corev1.Volume
 	VolumeMounts           []corev1.VolumeMount
+	VolumeDevices          []corev1.VolumeDevice
 	PVCs                   []PVCConfig
 	InitContainers         []InitContainerConfig
 	Sidecars               []SidecarContainerConfig
@@ -383,6 +388,7 @@ func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 		Lifecycle:       c.Lifecycle,
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
+		VolumeDevices:   c.VolumeDevices,
 	})
 	if err != nil {
 		return nil, err

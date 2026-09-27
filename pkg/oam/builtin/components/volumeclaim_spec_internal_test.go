@@ -174,6 +174,27 @@ func TestParseVolumeClaimTemplates_SpecRoundTrip(t *testing.T) {
 	}
 }
 
+// TestParseVolumeClaimTemplates_BlockWithDevicePath: a Block claim template
+// carries its devicePath and no mountPath (go-kure/launcher#385).
+func TestParseVolumeClaimTemplates_BlockWithDevicePath(t *testing.T) {
+	vcts, err := parseVolumeClaimTemplates(vctProps(map[string]any{
+		"name":       "disk",
+		"size":       "10Gi",
+		"devicePath": "/dev/xvda",
+		"volumeMode": "Block",
+	}))
+	if err != nil {
+		t.Fatalf("parseVolumeClaimTemplates: %v", err)
+	}
+	v := vcts[0]
+	if v.DevicePath != "/dev/xvda" || v.MountPath != "" {
+		t.Errorf("DevicePath = %q, MountPath = %q; want /dev/xvda and empty", v.DevicePath, v.MountPath)
+	}
+	if v.Spec.VolumeMode == nil || *v.Spec.VolumeMode != corev1.PersistentVolumeBlock {
+		t.Errorf("VolumeMode = %v, want Block", v.Spec.VolumeMode)
+	}
+}
+
 // TestParseVolumeClaimTemplates_LongSizeSpelling: resources.requests.storage
 // satisfies the size requirement on its own.
 func TestParseVolumeClaimTemplates_LongSizeSpelling(t *testing.T) {
@@ -384,7 +405,9 @@ func TestParseVolumeClaimTemplates_SpecErrors(t *testing.T) {
 			"size must be positive",
 		},
 		{"volumeMode enum", with(map[string]any{"volumeMode": "Raw"}), "volumeMode: invalid value"},
-		{"volumeMode Block rejected", with(map[string]any{"volumeMode": "Block"}), "Block is not supported"},
+		// Block is accepted since go-kure/launcher#385, but only with a
+		// devicePath: `with` authors a mountPath, which a Block claim cannot use.
+		{"volumeMode Block with mountPath", with(map[string]any{"volumeMode": "Block"}), "volumeMode Block is consumed through devicePath, not mountPath"},
 		{
 			"selector empty",
 			with(map[string]any{"selector": map[string]any{}}),

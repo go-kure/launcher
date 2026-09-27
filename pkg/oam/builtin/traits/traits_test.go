@@ -1114,6 +1114,56 @@ func TestPVCTraitConfig_Generate_RejectsNonPositiveSize(t *testing.T) {
 	}
 }
 
+// TestPVCTraitConfig_VolumeMode: an authored volumeMode reaches the claim, an
+// unauthored one stays nil (the claim is byte-identical to before), and any
+// other value is refused (go-kure/launcher#385).
+func TestPVCTraitConfig_VolumeMode(t *testing.T) {
+	claimFor := func(t *testing.T, props map[string]any) *corev1.PersistentVolumeClaim {
+		t.Helper()
+		h := &traits.PVCHandler{}
+		bundle := newBundle()
+		if err := h.Apply(&oam.Trait{Type: "pvc", Properties: props}, newApp("api", "default"), bundle); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		objs, err := bundle.Applications[0].Generate()
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return (*objs[0]).(*corev1.PersistentVolumeClaim)
+	}
+	for _, mode := range []corev1.PersistentVolumeMode{corev1.PersistentVolumeBlock, corev1.PersistentVolumeFilesystem} {
+		t.Run(string(mode), func(t *testing.T) {
+			pvc := claimFor(t, map[string]any{"name": "disk", "size": "5Gi", "volumeMode": string(mode)})
+			if pvc.Spec.VolumeMode == nil || *pvc.Spec.VolumeMode != mode {
+				t.Errorf("volumeMode = %v, want %s", pvc.Spec.VolumeMode, mode)
+			}
+		})
+	}
+	t.Run("unauthored", func(t *testing.T) {
+		if vm := claimFor(t, map[string]any{"name": "disk", "size": "5Gi"}).Spec.VolumeMode; vm != nil {
+			t.Errorf("volumeMode = %v, want nil", *vm)
+		}
+	})
+	for name, v := range map[string]any{"unknown value": "Raw", "wrong type": 1} {
+		t.Run(name, func(t *testing.T) {
+			h := &traits.PVCHandler{}
+			err := h.Apply(&oam.Trait{Type: "pvc", Properties: map[string]any{"name": "disk", "size": "5Gi", "volumeMode": v}}, newApp("api", "default"), newBundle())
+			if err == nil || !strings.Contains(err.Error(), "volumeMode") {
+				t.Errorf("expected a volumeMode error, got %v", err)
+			}
+		})
+	}
+	t.Run("schema publishes the enum", func(t *testing.T) {
+		s, ok := (&traits.PVCHandler{}).PropertySchema()["volumeMode"]
+		if !ok {
+			t.Fatal("pvc schema has no volumeMode")
+		}
+		if len(s.Enum) != 2 || s.Enum[0] != "Filesystem" || s.Enum[1] != "Block" {
+			t.Errorf("volumeMode enum = %v, want [Filesystem Block]", s.Enum)
+		}
+	})
+}
+
 func TestPVCTraitConfig_ApplyPolicy_DefaultStorageSize(t *testing.T) {
 	// Omitted size takes the policy default.
 	if got := pvcSizeAfterPolicy(t, map[string]any{"name": "data"}, &stubPVCPolicy{defaultStorageSize: "7Gi"}); got != "7Gi" {

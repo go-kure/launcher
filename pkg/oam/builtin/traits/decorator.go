@@ -244,8 +244,11 @@ func wrapIfAugmenter(outer decoratedConfig, inner stack.ApplicationConfig) stack
 // has a VolumeMount at mountPath. Two decorators can mount DIFFERENTLY NAMED
 // volumes at the same path — checkVolumeCollision (which compares Volume.Name)
 // does not catch that — yet Kubernetes requires every VolumeMount.MountPath in a
-// container to be unique and rejects the PodSpec otherwise. hint names the
-// property the caller can change to resolve the collision.
+// container to be unique and rejects the PodSpec otherwise. A raw block
+// device's devicePath is checked too (go-kure/launcher#385):
+// ValidateVolumeDevices refuses a devicePath that is also a mountPath in the
+// same container. hint names the property the caller can change to resolve
+// the collision.
 func checkMountPathCollision(podSpec *corev1.PodSpec, mountPath, source, hint string) error {
 	if len(podSpec.Containers) == 0 {
 		return nil
@@ -255,6 +258,13 @@ func checkMountPathCollision(podSpec *corev1.PodSpec, mountPath, source, hint st
 			return errors.Errorf(
 				"%s: mountPath %q is already used by volume %q on the workload; %s",
 				source, mountPath, vm.Name, hint)
+		}
+	}
+	for _, vd := range podSpec.Containers[0].VolumeDevices {
+		if vd.DevicePath == mountPath {
+			return errors.Errorf(
+				"%s: mountPath %q is already the devicePath of block volume %q on the workload; %s",
+				source, mountPath, vd.Name, hint)
 		}
 	}
 	return nil

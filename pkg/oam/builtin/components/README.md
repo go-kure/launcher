@@ -16,7 +16,8 @@ Container projection shared by every kind). Only genuine escape-hatch fields (`p
 `manifests`/`crd` inline content) and key→value maps whose keys are data (`nodeSelector`,
 `resources.requests`/`limits`) stay open by design; the remaining open objects (`probes`,
 `lifecycle`, `volumes`, the `volumeMounts`/`ports` items inside an `initContainers`/`sidecars`
-entry, the four-key `affinity` shorthand) are a known gap, not the target shape. The
+entry, the four-key `affinity` shorthand) are a known gap, not the target shape; the
+`volumeDevices` items beside them are closed. The
 `initContainers`/`sidecars` entries themselves are closed (go-kure/launcher#321, see "Common
 config"). The raw `corev1` `affinity` that `deployment` publishes is
 a different schema and is not part of that gap — it is modeled field-by-field. Every property
@@ -580,7 +581,9 @@ if authored, must be a boolean — a present-but-non-boolean value (e.g.
 `readOnly: "true"`) is rejected rather than silently defaulting to a
 writable mount (same fix applied to `initContainers`/`sidecars`' own
 `volumeMounts` entries below, which had the identical gap);
-`name` and `mountPath` are both required on every entry — a present-but-
+`name` and `mountPath` are both required on every entry — the one exception
+is a `pvc` entry with `volumeMode: Block`, which authors `devicePath` instead
+(see "Raw block volumes" below) — a present-but-
 non-string value (e.g. a numeric `mountPath`) collapses to the same empty
 value as an absent one, so both are rejected the same way: an entry missing
 either, or authoring one with the wrong type, previously built with no
@@ -678,7 +681,8 @@ and validation as the main container's own `securityContext` described
 below — see that prose for the field list rather than restating it here;
 each entry is a **closed key set** (go-kure/launcher#321): an
 `initContainers` entry accepts `name`, `image`, `command`, `args`, `env`,
-`envFrom`, `resources`, `volumeMounts`, `securityContext` and `workingDir`,
+`envFrom`, `resources`, `volumeMounts`, `volumeDevices` (see "Raw block
+volumes" below), `securityContext` and `workingDir`,
 and a `sidecars` entry those plus `ports`, `probes` and `lifecycle`, each
 parsed by the same parser as the main container's field of that name. Any
 other key is an error naming the entry — before that the parsers read the
@@ -735,6 +739,54 @@ own check now covers a caller that hands properties to a handler without it,
 which previously got the default. The out-of-enum error now reads
 `affinity.podAntiAffinityType: invalid value …` rather than
 `invalid podAntiAffinityType …`).
+
+### Raw block volumes (`volumeMode: Block`)
+
+A claim with `volumeMode: Block` has no filesystem. A container consumes it
+through `volumeDevices` at a `devicePath`, never through `volumeMounts`
+(go-kure/launcher#385). The claim and the pod template are validated as
+separate objects, so the apiserver accepts a Block claim paired with a
+filesystem mount and the pods then fail at kubelet mount time; every rule
+below reports that mismatch at build time instead. The rules are the same on
+all seven kinds (`webservice`, `worker`, `deployment`, `statefulset`,
+`daemonset`, `job`, `cronjob`), because they live in the shared parsers.
+
+- **`volumes[]` pvc entry.** Adds `volumeMode` (`Filesystem`|`Block`) and
+  `devicePath`. The entry takes exactly one of `mountPath` and `devicePath`,
+  and `devicePath` is authored if and only if `volumeMode: Block` is — in both
+  directions, with nothing inferred: `mountPath` with `Block`, `devicePath`
+  with `Filesystem` or with no mode, and both paths at once are each an error.
+  A Block entry reaches the main container as a `corev1.VolumeDevice` and has
+  no `volumeMount`. The claim carries the authored mode; an unauthored mode
+  stays unset (the apiserver defaults it to `Filesystem`), so an existing
+  document's claim is byte-identical. `devicePath` on any other volume type is
+  an error.
+- **`volumeClaimTemplates[]` entry (`statefulset`).** The same exactly-one
+  rule with `devicePath`, and `volumeMode: Block` is now accepted (it was
+  rejected before). A Block template renders a claim template with
+  `volumeMode: Block` and a main-container `volumeDevices` entry.
+- **`initContainers[]` / `sidecars[]` entry.** Adds `volumeDevices:
+  [{name, devicePath}]`, a closed key set with both keys required. A
+  `volumeDevices` name must be a Block volume this component declares (a
+  `volumes` pvc entry or a claim template); a `volumeMounts` name must **not**
+  be one. A `volumeMounts` name the component does not declare at all stays
+  accepted, because the `configmap` and `external-secret` traits add their
+  volumes after the component is generated — and neither adds a Block volume.
+- **Path rules** mirror `ValidateVolumeDevices`, per container: a
+  `devicePath` is unique, contains no `..` element, and is not also a
+  `mountPath`; a volume is not named in both `volumeMounts` and
+  `volumeDevices`. On `statefulset` this spans the claim templates and
+  `volumes` together. The `configmap` and `external-secret` traits likewise
+  refuse to mount at a path the main container already uses as a
+  `devicePath`.
+
+**Compatibility.** Additive: every new rejection concerns a Block volume,
+and no document could declare one before (a `volumes` pvc entry had no
+`volumeMode`, and a claim template's `Block` was rejected). The one new rule
+that reads existing keys — a `volumeMounts` entry naming a Block volume is an
+error — can therefore only fire on a document that uses the new surface. The
+published schemas drop `Required` from `mountPath` on `volumes` items and
+claim templates; the parsers still require one of the two paths.
 
 ### Pod-level properties
 
@@ -1319,8 +1371,10 @@ change.
   same distinction in the other direction — the role kinds carry the opinion,
   this kind carries the API.
 - **statefulset** — `serviceName` (headless) and `volumeClaimTemplates`
-  (`name`, `mountPath`, `size`, `storageClass`, `accessModes`, plus the rest of
-  `corev1.PersistentVolumeClaimSpec`). The StatefulSetSpec-level and
+  (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
+  `size`, `storageClass`, `accessModes`, plus the rest of
+  `corev1.PersistentVolumeClaimSpec`; see "Raw block volumes" above). The
+  StatefulSetSpec-level and
   claim-template field sets are classified in "StatefulSet-level and
   claim-template properties" below.
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`/`tolerationSeconds`;
@@ -1913,7 +1967,7 @@ text moved, which is why three goldens lost a `podManagementPolicy:
 OrderedReady` line. The claim entry's five
 pre-existing keys (`name`, `mountPath`, `size`, `storageClass`, `accessModes`)
 now sit inside a closed key set, so a typo in an entry is reported instead of
-being silently dropped.
+being silently dropped. `devicePath` joined that set with go-kure/launcher#385.
 
 Columns match the pod-level table above: **additive** means no document that
 built before builds differently now; **behavior-changing** means an existing
@@ -1929,7 +1983,8 @@ document's meaning or acceptance moved.
 | `ordinals{start}` | object | `start` shifts the replica ordinal range and is required once `ordinals` is authored; `>= 0`. | additive |
 | `selector` (claim) | object | `matchLabels`/`matchExpressions`, with the operator arity rule — `In`/`NotIn` need at least one value, `Exists`/`DoesNotExist` none — and every `values` entry validated as a label value, the check `ValidateLabelSelectorRequirement` runs on a newly created claim template. An entirely empty `selector` is rejected: the apiserver would accept it as matching every volume, which is never what an author who wrote the key meant. **Authoring a selector opts the claim out of dynamic provisioning**: a claim with a non-empty selector is never provisioned from its `StorageClass` and stays `Pending` until a pre-provisioned PV matches ([Kubernetes: persistent volumes — Selector](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#selector)). | additive |
 | `resources{requests,limits}` (claim) | object | `storage` is the only accepted resource name — `ValidatePersistentVolumeClaimSpec` reads `requests[storage]` and nothing else, so any other name would be silently ignored. Quantities must be positive. `apply` *merges* `requests` onto the claim-template literal `createStatefulSet` already built (`statefulset.go`, which writes `requests.storage` from `size`), so `size` survives when only `limits` is authored. `requests.storage` is the long spelling of `size`; authoring both is an error. | additive |
-| `volumeMode` (claim) | enum | Only `Filesystem` is accepted. The API's other mode, `Block`, is rejected at parse time: every claim entry requires a `mountPath` and this kind renders it as a filesystem `volumeMount`, while a block volume must be consumed through `volumeDevices`/`devicePath`. The claim and the pod template are validated as separate objects, so the apiserver would accept the mismatched pair and the pods would then fail at kubelet mount time. Raw block support is go-kure/launcher#385. | additive |
+| `volumeMode` (claim) | enum | `Filesystem` or `Block`. `Filesystem` pairs with `mountPath`; `Block` pairs with `devicePath` and renders a main-container `volumeDevices` entry instead of a `volumeMount` (go-kure/launcher#385, see "Raw block volumes"). Until then `Block` was rejected, because every claim was mounted as a filesystem and the apiserver would have accepted the mismatched claim/pod pair. | additive |
+| `devicePath` (claim) | string | Where a `volumeMode: Block` claim appears in the main container as a raw block device. Not a claim-spec field. Exactly one of `mountPath` and `devicePath` is required, and `devicePath` only with `volumeMode: Block`. | additive |
 | `dataSourceRef{apiGroup,kind,name,namespace}` (claim) | object | Mirrors upstream `validateDataSourceRef`: `kind` and `name` are required non-empty with no format rule (a Kind is a CamelCase identifier, not a DNS name), `apiGroup` must be a DNS-1123 subdomain when non-empty, an omitted or empty `apiGroup` pins `kind` to `PersistentVolumeClaim` (the core group holds no other populator), and `namespace`, when set, is a DNS-1123 *label* (`ValidateNamespaceName`), not a subdomain. | additive |
 | `volumeAttributesClassName` (claim) | string | DNS-1123 subdomain naming a `VolumeAttributesClass`. | additive |
 | `storageClass` (claim) | string | **Behavior-changing.** A non-empty value is now validated as a DNS-1123 subdomain (`ValidateClassName`, the check `ValidatePersistentVolumeClaimSpec` runs and the one the `volumes[].pvc` path already applied). An invalid class name previously built a claim and was refused later by the apiserver; it is now refused here. A present-but-non-string value is likewise rejected rather than read as absent and provisioned through the cluster default class. | behavior-changing |
@@ -1947,7 +2002,8 @@ reason rather than silently ignored:
 - `volumeName` (claim) — pre-binding a claim *template* to one named
   PersistentVolume would point every replica at the same volume.
 - `volumeMount` (claim) — not a claim-spec field at all; the container mount
-  is authored as `mountPath` on the same entry.
+  is authored as `mountPath` (or, for a `volumeMode: Block` claim,
+  `devicePath`) on the same entry.
 - `dataSource` (claim) — when `dataSourceRef` carries no `namespace` the
   apiserver mirrors it into the superseded `dataSource` field, so authoring
   both is redundant; when it does carry a `namespace` the apiserver does not

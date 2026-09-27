@@ -1137,6 +1137,9 @@ type mainContainerInput struct {
 	Lifecycle       *corev1.Lifecycle
 	SecurityContext *corev1.SecurityContext
 	VolumeMounts    []corev1.VolumeMount
+	// VolumeDevices are the volumeMode: Block volumes the main container
+	// attaches as raw block devices (go-kure/launcher#385).
+	VolumeDevices []corev1.VolumeDevice
 }
 
 // buildMainContainer builds the main container of every workload kind.
@@ -1193,6 +1196,7 @@ func buildMainContainer(name string, in mainContainerInput) (*corev1.Container, 
 		container.SecurityContext = &sc
 	}
 	container.VolumeMounts = append(container.VolumeMounts, in.VolumeMounts...)
+	container.VolumeDevices = copyVolumeDevices(in.VolumeDevices)
 	return container, nil
 }
 

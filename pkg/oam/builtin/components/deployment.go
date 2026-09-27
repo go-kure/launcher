@@ -182,6 +182,7 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.Volumes = parsed.Volumes
 	config.VolumeMounts = parsed.Mounts
+	config.VolumeDevices = parsed.Devices
 	config.PVCs = parsed.PVCs
 
 	initContainers, err := parseInitContainers(props)
@@ -195,6 +196,9 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 		return nil, err
 	}
 	config.Sidecars = sidecars
+	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := parsePodSpec(props, false)
 	if err != nil {
@@ -248,6 +252,7 @@ type DeploymentConfig struct {
 	WorkingDir      string
 	Volumes         []corev1.Volume
 	VolumeMounts    []corev1.VolumeMount
+	VolumeDevices   []corev1.VolumeDevice
 	PVCs            []PVCConfig
 	InitContainers  []InitContainerConfig
 	Sidecars        []SidecarContainerConfig
@@ -419,6 +424,7 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 		Lifecycle:       c.Lifecycle,
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
+		VolumeDevices:   c.VolumeDevices,
 	})
 	if err != nil {
 		return nil, err

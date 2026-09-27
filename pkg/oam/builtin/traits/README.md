@@ -57,7 +57,7 @@ preflight reject every valid use of the trait.
 ### Storage
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
-| `pvc` | PersistentVolumeClaim | `name`, `size` (optional; policy default `storageSize`; the effective size must be a positive quantity — zero or negative fails the build, as `ValidatePersistentVolumeClaimSpec` would refuse the claim), `storageClassName`, `accessModes[]` (policy: `maxStorageSize`) |
+| `pvc` | PersistentVolumeClaim | `name`, `size` (optional; policy default `storageSize`; the effective size must be a positive quantity — zero or negative fails the build, as `ValidatePersistentVolumeClaimSpec` would refuse the claim), `storageClassName`, `accessModes[]`, `volumeMode` (optional `Filesystem`\|`Block`; omitted leaves the claim's mode unset, which the apiserver defaults to `Filesystem`; any other value or type fails the build) (policy: `maxStorageSize`) |
 | `volsync` | VolSync ReplicationSource | `sourcePVC`, `schedule`, `copyMethod`, `storageClassName`, `volumeSnapshotClassName`, `retain.{daily,weekly,monthly}` (class fields also supplied via capability rendering; injection is `copyMethod`-aware) |
 
 ### Configuration & scaling
@@ -133,7 +133,10 @@ not the app — chooses the implementation:
   non-label-safe name is rejected at render time rather than producing an invalid Volume. A
   `mountPath` already used by another decorator's volume (e.g. `configmap`) is also rejected at
   render time — even when the two volumes have different names, Kubernetes requires every
-  `VolumeMount.mountPath` in a container to be unique.
+  `VolumeMount.mountPath` in a container to be unique. The same applies, for both `external-secret`
+  and `configmap`, to a path the workload's main container already uses as the `devicePath` of a
+  raw block volume (`volumeMode: Block`): Kubernetes refuses a `devicePath` that is also a
+  `mountPath` in the same container.
 
 ## NetworkPolicy nulls: null, empty and absent
 

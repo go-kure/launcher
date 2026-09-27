@@ -209,6 +209,7 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 	}
 	config.Volumes = parsed.Volumes
 	config.VolumeMounts = parsed.Mounts
+	config.VolumeDevices = parsed.Devices
 	config.PVCs = parsed.PVCs
 
 	initContainers, err := parseInitContainers(props)
@@ -216,6 +217,9 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 		return nil, err
 	}
 	config.InitContainers = initContainers
+	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, nil); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := parsePodSpec(props, true)
 	if err != nil {
@@ -249,6 +253,7 @@ type JobConfig struct {
 	WorkingDir      string
 	Volumes         []corev1.Volume
 	VolumeMounts    []corev1.VolumeMount
+	VolumeDevices   []corev1.VolumeDevice
 	InitContainers  []InitContainerConfig
 	PVCs            []PVCConfig
 	// PodSpec holds the shared pod-level properties (see parsePodSpec). Parsed
@@ -402,6 +407,7 @@ func (c *JobConfig) createJob(app *stack.Application) (*batchv1.Job, error) {
 		Lifecycle:       c.Lifecycle,
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
+		VolumeDevices:   c.VolumeDevices,
 	})
 	if err != nil {
 		return nil, err

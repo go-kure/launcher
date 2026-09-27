@@ -508,10 +508,14 @@ func schemaVolumes() oam.PropertySchema {
 			AdditionalProperties: true,
 			Description:          "A single volume and its mount.",
 			Properties: map[string]oam.PropertySchema{
-				"name":      {Type: oam.PropertyTypeString, Required: true, Description: "Volume name."},
-				"type":      {Type: oam.PropertyTypeString, Enum: []any{"hostPath", "emptyDir", "pvc", "configMap", "secret"}, Description: "Volume source type."},
-				"mountPath": {Type: oam.PropertyTypeString, Required: true, Description: "Path where the volume is mounted in the container."},
-				"readOnly":  {Type: oam.PropertyTypeBoolean, Description: "Mount the volume read-only."},
+				"name": {Type: oam.PropertyTypeString, Required: true, Description: "Volume name."},
+				"type": {Type: oam.PropertyTypeString, Enum: []any{"hostPath", "emptyDir", "pvc", "configMap", "secret"}, Description: "Volume source type."},
+				// mountPath is no longer schema-Required: a volumeMode: Block pvc
+				// authors devicePath instead. parseVolumes requires exactly one.
+				"mountPath":  {Type: oam.PropertyTypeString, Description: "Path where the volume is mounted in the container. Required on every volume except a pvc with volumeMode: Block, which authors devicePath instead."},
+				"devicePath": {Type: oam.PropertyTypeString, Description: "pvc only: path in the container where a volumeMode: Block claim appears as a raw block device. Authored instead of mountPath, and only together with volumeMode: Block."},
+				"volumeMode": {Type: oam.PropertyTypeString, Enum: []any{"Filesystem", "Block"}, Description: "pvc only: the claim's volumeMode. Filesystem (the apiserver default when omitted) pairs with mountPath; Block pairs with devicePath."},
+				"readOnly":   {Type: oam.PropertyTypeBoolean, Description: "Mount the volume read-only."},
 			},
 		},
 	}
@@ -547,6 +551,20 @@ func schemaContainerEntry() map[string]oam.PropertySchema {
 					"mountPath": {Type: oam.PropertyTypeString, Required: true, Description: "Path in this container where the volume is mounted; unique within the container."},
 					"readOnly":  {Type: oam.PropertyTypeBoolean, Description: "Mount the volume read-only."},
 					"subPath":   {Type: oam.PropertyTypeString, Description: "Sub-path within the volume to mount instead of its root."},
+				},
+			},
+		},
+		// Closed, unlike volumeMounts: parseVolumeDeviceList rejects any key
+		// but these two (volumeDeviceKeys).
+		"volumeDevices": {
+			Type:        oam.PropertyTypeArray,
+			Description: "Raw block volumes to attach to this container, by the name of a `volumes` pvc entry or claim template authored with volumeMode: Block.",
+			Items: &oam.PropertySchema{
+				Type:        oam.PropertyTypeObject,
+				Description: "A single raw block device.",
+				Properties: map[string]oam.PropertySchema{
+					"name":       {Type: oam.PropertyTypeString, Required: true, Description: "Name of the Block pod volume to attach."},
+					"devicePath": {Type: oam.PropertyTypeString, Required: true, Description: "Path in this container where the block device appears; unique within the container and distinct from every mountPath."},
 				},
 			},
 		},
@@ -802,7 +820,8 @@ func schemaVolumeClaimTemplates() oam.PropertySchema {
 	props := map[string]oam.PropertySchema{
 		"name":         {Type: oam.PropertyTypeString, Required: true, Description: "Claim name (also used as the mount name)."},
 		"size":         {Type: oam.PropertyTypeString, Description: `Requested storage size (e.g. "10Gi"). Shorthand for resources.requests.storage; exactly one of the two is required.`},
-		"mountPath":    {Type: oam.PropertyTypeString, Required: true, Description: "Path where the claim is mounted in the container. Not a claim-spec field — it drives the container's VolumeMount."},
+		"mountPath":    {Type: oam.PropertyTypeString, Description: "Path where the claim is mounted in the container. Not a claim-spec field — it drives the container's VolumeMount. Exactly one of mountPath and devicePath is required."},
+		"devicePath":   {Type: oam.PropertyTypeString, Description: "Path in the container where a volumeMode: Block claim appears as a raw block device. Not a claim-spec field — it drives the container's VolumeDevice. Authored instead of mountPath, and only together with volumeMode: Block."},
 		"storageClass": {Type: oam.PropertyTypeString, Description: "StorageClass used to provision the volume. Omitted means the cluster's default class."},
 		"accessModes":  {Type: oam.PropertyTypeArray, Description: "Requested access modes for the volume.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: accessModesEnum(), Description: "A single access mode."}},
 	}
@@ -812,7 +831,7 @@ func schemaVolumeClaimTemplates() oam.PropertySchema {
 		Description: "PersistentVolumeClaim templates provisioned per replica.",
 		Items: &oam.PropertySchema{
 			Type:        oam.PropertyTypeObject,
-			Description: "A single volume claim template: the corev1.PersistentVolumeClaimSpec fields, plus mountPath.",
+			Description: "A single volume claim template: the corev1.PersistentVolumeClaimSpec fields, plus mountPath or devicePath.",
 			Properties:  props,
 		},
 	}
