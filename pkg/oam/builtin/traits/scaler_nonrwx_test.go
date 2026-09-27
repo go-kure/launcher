@@ -12,9 +12,10 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
-// The non-RWX guard on webservice, worker and deployment reads only the
-// authored `replicas`. A `scaler` trait targets the same Deployment with an HPA, so the
-// trait's effective maxReplicas is what actually bounds the pod count. These
+// The non-RWX guard on webservice, worker and deployment checks only the
+// component's effective `replicas` (authored, or the policy default). A
+// `scaler` trait targets the same Deployment with an HPA, so the trait's
+// effective maxReplicas is what actually bounds the pod count. These
 // tests run the whole transformer, because the effective maxReplicas can come
 // from a policy default and the component config can be wrapped by a
 // decorating trait declared before the scaler: both are only visible there.
