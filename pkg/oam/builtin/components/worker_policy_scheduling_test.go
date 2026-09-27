@@ -21,7 +21,7 @@ import (
 // or nowhere.
 //
 // worker's topology-spread opinion is evaluated inside Generate, from
-// c.Replicas (worker.go, createDeployment -> buildTopologySpreadConstraints).
+// c.Replicas (worker.go, createDeployment -> BuildTopologySpreadConstraints).
 // By then ApplyPolicy has already run — transform.go calls it on the config
 // ToApplicationConfig returned — and ApplyPolicy substitutes the environment
 // policy's DefaultReplicas for a document that authored none (worker.go ->
@@ -162,7 +162,7 @@ func appSelector(name string) *metav1.LabelSelector {
 // ApplyPolicy left behind, not the one the document authored.
 //
 // Read the count before the policy applies and this fails with zero
-// constraints: buildTopologySpreadConstraints returns nil at replicas <= 1
+// constraints: BuildTopologySpreadConstraints returns nil at replicas <= 1
 // (common.go) and the authored count is absent, so 1. The emitted object would
 // then be a three-replica Deployment with no anti-collocation at all.
 func TestWorkerTopologySpread_FollowsPolicyDefaultedReplicas(t *testing.T) {
@@ -214,12 +214,12 @@ func TestWorkerTopologySpread_FollowsPolicyDefaultedReplicas(t *testing.T) {
 	// NodeAffinityPolicy, NodeTaintsPolicy and MatchLabelKeys; a regression
 	// setting any of them leaves every assertion above green while changing
 	// where the scheduler puts the pods. Measured, not assumed: adding
-	// MinDomains: 5 to the hostname constraint in buildTopologySpreadConstraints
+	// MinDomains: 5 to the hostname constraint in BuildTopologySpreadConstraints
 	// (common.go) leaves every assertion above green, and within this package
 	// only the exact-object comparison below fails.
 	//
 	// Repository-wide it is also caught by TestFixtures/params-scalar, because
-	// buildTopologySpreadConstraints is shared with webservice and that golden
+	// BuildTopologySpreadConstraints is shared with webservice and that golden
 	// renders the hostname constraint verbatim. That is a golden diff on an
 	// unrelated kind, not an oracle for the worker path — it names no field and
 	// would not survive the fixture being retired, so it is not what this test
@@ -275,7 +275,7 @@ func TestWorkerTopologySpread_NoPolicyMeansNoSpread(t *testing.T) {
 //
 // It also pins that the count drives WHICH tiers appear rather than the opinion
 // being all-or-nothing: two replicas get the hostname tier alone, since the
-// zone tier needs three (buildTopologySpreadConstraints, common.go). Without
+// zone tier needs three (BuildTopologySpreadConstraints, common.go). Without
 // this case, reading the policy default unconditionally would satisfy the test
 // above while being wrong for every document that sets its own count.
 func TestWorkerTopologySpread_AuthoredReplicasIgnorePolicyDefault(t *testing.T) {

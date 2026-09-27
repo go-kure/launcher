@@ -361,7 +361,7 @@ func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deploym
 
 	var tscs []corev1.TopologySpreadConstraint
 	if !c.TopologySpreadDisabled {
-		tscs = buildTopologySpreadConstraints(c.Replicas, appLabels(app.Name))
+		tscs = BuildTopologySpreadConstraints(c.Replicas, appLabels(app.Name))
 	}
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:                    c.PodSpec,

@@ -17,9 +17,9 @@ import (
 func TestSelectorBuilders_DoNotAliasTheCallerMap(t *testing.T) {
 	const key = "example.test/added-after"
 
-	t.Run("buildTopologySpreadConstraints", func(t *testing.T) {
+	t.Run("BuildTopologySpreadConstraints", func(t *testing.T) {
 		callerMap := map[string]string{"app": "shop"}
-		constraints := buildTopologySpreadConstraints(3, callerMap)
+		constraints := BuildTopologySpreadConstraints(3, callerMap)
 		if len(constraints) != 2 {
 			t.Fatalf("got %d constraints at replicas=3, want 2", len(constraints))
 		}

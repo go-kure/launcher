@@ -372,3 +372,30 @@ func TestValidate_SecurityContextTrait(t *testing.T) {
 		t.Errorf("unexpected error for security-context trait: %v", err)
 	}
 }
+
+// TestValidate_TopologySpreadTrait guards that standalone validation accepts the
+// topology-spread trait, which TopologySpreadHandler ships, on every kind that
+// generates a Deployment. The trait carries no component restriction: a
+// component that generates no Deployment fails at build time instead.
+func TestValidate_TopologySpreadTrait(t *testing.T) {
+	for _, typ := range []string{"deployment", "webservice", "worker"} {
+		app := &Application{
+			APIVersion: SupportedAPIVersion,
+			Kind:       "Application",
+			Metadata:   Metadata{Name: "test-app"},
+			Spec: ApplicationSpec{
+				Components: []Component{
+					{
+						Name:       "api",
+						Type:       typ,
+						Properties: map[string]any{"image": "nginx:1.25"},
+						Traits:     []Trait{{Type: "topology-spread"}},
+					},
+				},
+			},
+		}
+		if err := validate(app); err != nil {
+			t.Errorf("%s: unexpected error for topology-spread trait: %v", typ, err)
+		}
+	}
+}

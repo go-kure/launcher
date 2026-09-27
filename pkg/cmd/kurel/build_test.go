@@ -1088,6 +1088,83 @@ spec:
 	}
 }
 
+// topologySpreadAppYAML is a deployment component carrying the topology-spread
+// trait; %s is spliced into the trait entry so the same document can carry an
+// authored property.
+const topologySpreadAppYAML = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: api
+      type: deployment
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        replicas: 3
+      traits:
+        - type: topology-spread%s
+`
+
+// TestBuildCommand_TopologySpreadTrait is the end-to-end registration check for
+// the topology-spread trait: the validate.go allowlist admits it and
+// builtinTraitHandlers dispatches it, so a deployment at three replicas comes
+// out with both default constraints.
+func TestBuildCommand_TopologySpreadTrait(t *testing.T) {
+	if _, ok := builtinTraitHandlers()["topology-spread"]; !ok {
+		t.Error(`builtinTraitHandlers() does not register "topology-spread"`)
+	}
+
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", fmt.Sprintf(topologySpreadAppYAML, ""))
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("build failed: %v\noutput: %s", err, out.String())
+	}
+
+	got := out.String()
+	for _, want := range []string{
+		"topologySpreadConstraints:",
+		"topologyKey: kubernetes.io/hostname",
+		"whenUnsatisfiable: DoNotSchedule",
+		"topologyKey: topology.kubernetes.io/zone",
+		"whenUnsatisfiable: ScheduleAnyway",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, got)
+		}
+	}
+}
+
+// TestBuildCommand_TopologySpreadTrait_RejectsProperties: the trait takes no
+// properties, and kurel build reports an authored one by name.
+func TestBuildCommand_TopologySpreadTrait_RejectsProperties(t *testing.T) {
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml",
+		fmt.Sprintf(topologySpreadAppYAML, "\n          properties:\n            maxSkew: 2"))
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected build to fail for an authored topology-spread property, output:\n%s", out.String())
+	}
+	if !strings.Contains(err.Error(), "maxSkew") {
+		t.Errorf("error should name the rejected property, got: %v", err)
+	}
+}
+
 // augmenterOnlyStub implements layout.LayoutAugmenter but not
 // oam.LayoutAugmentationCoverage — the fail-closed proof for every augmenter
 // this repo doesn't yet know the coverage of, independent of helmchart.
