@@ -1,6 +1,8 @@
 package oam
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -177,6 +179,25 @@ func (o Origin) sameAuthoredLocation(other Origin) bool {
 	return o == other
 }
 
+// sameAuthoredDocument reports whether o and other lie in the same authored document:
+// the document-level fields only (Namespace, Document, DocumentKind), so two sibling
+// components, traits or policies of one document match while elements of two different
+// documents never do. NameAllocator.EmitOrAdopt uses it to keep adoption inside one
+// document: each settled document is transformed on its own, so an element adopted from
+// another document would be missing from the adopter's output.
+func (o Origin) sameAuthoredDocument(other Origin) bool {
+	return o.Namespace == other.Namespace && o.Document == other.Document && o.DocumentKind == other.DocumentKind
+}
+
+// identityDigest renders a non-reversible short digest of an EmitOrAdopt content
+// identity for error messages. An identity may be built from sensitive inputs
+// (credentials, tokens), and a collision error travels through LoweringError to CLI
+// output and logs, so the raw identity is never echoed.
+func identityDigest(identity string) string {
+	sum := sha256.Sum256([]byte(identity))
+	return "sha256:" + hex.EncodeToString(sum[:])[:12]
+}
+
 // LoweringResult is what a rule returns. Which fields a rule may populate is
 // position-dependent — the engine enforces it (see loweringPositionRules):
 //
@@ -259,9 +280,9 @@ type LoweringContext struct {
 // lowering run (D2). A name already claimed by a different origin is a hard error
 // naming both origins — a collision fails the build, never silently overwrites.
 // The one exception is EmitOrAdopt: when a name was first claimed through it, a
-// repeat EmitOrAdopt claim for the same content identity, from any origin, adopts
-// the existing element instead of colliding (for a terminal-type shared element
-// only — see EmitOrAdopt).
+// repeat EmitOrAdopt claim for the same content identity, from any element of the
+// same authored document, adopts the existing element instead of colliding (for a
+// terminal-type shared element only — see EmitOrAdopt).
 type NameAllocator struct {
 	taken map[string]nameClaim
 	// round is the fixpoint round currently being processed, set by runLowering
@@ -357,23 +378,31 @@ func (n *NameAllocator) Reserve(name string, origin Origin) error {
 // two different elements.
 //
 // The first claim of name returns adopted=false: the caller emits the element. A
-// later claim with the same identity, from any origin and in any round, returns
+// later claim with the same identity, from any element of the same authored document
+// (Origin's Namespace, Document and DocumentKind) and in any round, returns
 // adopted=true: the element already exists and the caller must not emit it again.
 // Sibling components of one round cannot see each other's output
 // (LoweringContext.Document is read-only within a round), so this is how they share
 // one object instead of colliding on its name.
 //
-// A claim with a different identity, a name Reserve already holds, and an empty
-// identity are all hard errors; Reserve likewise still refuses a name claimed here.
-// Keyed on (namespace, name), like Reserve.
+// A claim with a different identity, a same-identity claim from a different authored
+// document, a name Reserve already holds, and an empty identity are all hard errors;
+// Reserve likewise still refuses a name claimed here. The cross-document case stays a
+// collision because every settled document is transformed on its own: an element
+// adopted from another document would be missing from the adopter's output. Keyed on
+// (namespace, name), like Reserve. Errors identify an identity only by a short
+// SHA-256 digest, never its text, so an identity may include sensitive inputs.
 //
-// Two constraints on the caller, neither checked here. The element emitted under
+// Three constraints on the caller, none checked here. The element emitted under
 // the claim must be of a terminal type, one no lowering rule claims: claims outlive
 // the round, so a lowerable element could be replaced under another name while a
-// later adopter still points at the claimed one. And adoption covers only the shared
+// later adopter still points at the claimed one. Adoption covers only the shared
 // element: the adopting rule still emits its own output for the element it lowers,
 // since the engine rejects an empty LoweringResult as a deletion (D2), so a rule
-// whose whole expansion is the shared element is outside this API's contract.
+// whose whole expansion is the shared element is outside this API's contract. And
+// the document check sees only the authored document: when a document rule fans one
+// authored document out into several documents, their elements share that Origin, so
+// adoption must not be relied on across them.
 func (n *NameAllocator) EmitOrAdopt(name, identity string, origin Origin) (adopted bool, err error) {
 	if identity == "" {
 		return false, errors.Errorf("lowering: %s claimed generated name %q with an empty content identity", origin, name)
@@ -384,7 +413,10 @@ func (n *NameAllocator) EmitOrAdopt(name, identity string, origin Origin) (adopt
 			return false, errors.Errorf("lowering: generated name %q collides — already reserved by %s, and a reserved name cannot be adopted by %s", name, prior.origin, origin)
 		}
 		if prior.identity != identity {
-			return false, errors.Errorf("lowering: generated name %q collides — %s emitted it for different content than %s wants (%q vs %q)", name, prior.origin, origin, prior.identity, identity)
+			return false, errors.Errorf("lowering: generated name %q collides — %s emitted it for different content than %s wants (identity %s vs %s)", name, prior.origin, origin, identityDigest(prior.identity), identityDigest(identity))
+		}
+		if !prior.origin.sameAuthoredDocument(origin) {
+			return false, errors.Errorf("lowering: generated name %q collides — already emitted by %s, and an element of another document cannot be adopted by %s", name, prior.origin, origin)
 		}
 		return true, nil
 	}
