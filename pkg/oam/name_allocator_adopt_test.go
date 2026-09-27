@@ -1,12 +1,30 @@
 package oam
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func adoptOrigin(component, namespace string) Origin {
 	return Origin{Document: "app", DocumentKind: "Application", Namespace: namespace, Component: component, ComponentType: "source-user"}
+}
+
+// assertIdentityDigests checks that a conflicting-identity error names each identity
+// by its digest and never echoes the identity text itself, which may carry
+// sensitive inputs.
+func assertIdentityDigests(t *testing.T, err error, identities ...string) {
+	t.Helper()
+	for _, id := range identities {
+		if !strings.Contains(err.Error(), identityDigest(id)) {
+			t.Errorf("error %q does not contain the digest %s of %q", err, identityDigest(id), id)
+		}
+		if strings.Contains(err.Error(), id) {
+			t.Errorf("error %q echoes the raw identity %q", err, id)
+		}
+	}
 }
 
 func TestEmitOrAdopt(t *testing.T) {
@@ -59,6 +77,7 @@ func TestEmitOrAdopt(t *testing.T) {
 				t.Errorf("error %q does not contain %s", err, want)
 			}
 		}
+		assertIdentityDigests(t, err, "helmrepository|https://one.example", "helmrepository|https://two.example")
 	})
 
 	// The first claimant gets no pass on its own name: changed content from the
@@ -81,12 +100,35 @@ func TestEmitOrAdopt(t *testing.T) {
 				if err == nil {
 					t.Fatalf("same-origin claim with different content = (%v, nil), want an error", adopted)
 				}
-				for _, want := range []string{`"src"`, `component "a"`, "https://one.example", "https://two.example"} {
-					if !strings.Contains(err.Error(), want) {
-						t.Errorf("error %q does not contain %s", err, want)
-					}
+				assertIdentityDigests(t, err, "helmrepository|https://one.example", "helmrepository|https://two.example")
+				if !strings.Contains(err.Error(), `component "a"`) {
+					t.Errorf("error %q does not name the origin", err)
 				}
 			})
+		}
+	})
+
+	// Adoption stays inside one authored document: each settled document is
+	// transformed on its own, so adopting another document's element would leave it
+	// missing from the adopter's output.
+	t.Run("same identity from another document in the namespace hard-fails", func(t *testing.T) {
+		for _, other := range []Origin{
+			{Document: "other", DocumentKind: "Application", Component: "b", ComponentType: "source-user"},
+			{Document: "app", DocumentKind: "WebApplication", Component: "b", ComponentType: "source-user"},
+		} {
+			n := NewNameAllocator()
+			if _, err := n.EmitOrAdopt("src", "helmrepository|https://charts.example", a); err != nil {
+				t.Fatal(err)
+			}
+			adopted, err := n.EmitOrAdopt("src", "helmrepository|https://charts.example", other)
+			if err == nil {
+				t.Fatalf("claim from %s = (%v, nil), want a cross-document collision", other, adopted)
+			}
+			for _, want := range []string{`"src"`, a.String(), other.String()} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %s", err, want)
+				}
+			}
 		}
 	})
 
@@ -207,6 +249,21 @@ func (sharedSourceRule) ComponentType() string { return "source-user" }
 
 func (sharedSourceRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
 	url, _ := comp.Properties["url"].(string)
+	return lowerWithSharedSource(comp, url, lctx)
+}
+
+// imageSourceRule is sharedSourceRule keyed on the image property, which is what a
+// testRawRule-emitted component carries.
+type imageSourceRule struct{}
+
+func (imageSourceRule) ComponentType() string { return "image-source-user" }
+
+func (imageSourceRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	image, _ := comp.Properties["image"].(string)
+	return lowerWithSharedSource(comp, image, lctx)
+}
+
+func lowerWithSharedSource(comp *Component, url string, lctx LoweringContext) (LoweringResult, error) {
 	leaf := Component{Name: comp.Name, Type: "webservice", Properties: map[string]any{"image": "nginx"}}
 	adopted, err := lctx.Namer.EmitOrAdopt("shared-source", "source|"+url, lctx.Origin)
 	if err != nil {
@@ -352,6 +409,57 @@ func TestLower_EmitOrAdopt_SharedOnlyExpansionFails(t *testing.T) {
 			t.Errorf("error %q does not contain %s", err, want)
 		}
 	}
+}
+
+// TestLowerRaws_EmitOrAdopt_ScopedToAuthoredDocument: LowerRaws runs every raw input
+// through one allocator but returns each settled document separately, so a matching
+// claim from another authored document in the same namespace must collide rather
+// than adopt — adopting would leave the second document without the element. In
+// disjoint namespaces the two claims never meet, and each document emits its own.
+func TestLowerRaws_EmitOrAdopt_ScopedToAuthoredDocument(t *testing.T) {
+	newTransformer := func() *Transformer {
+		tr := NewTransformer(nil, nil)
+		tr.RegisterRawDocumentLowering(testRawRule{kind: "WebApplication", compType: "image-source-user"})
+		tr.RegisterComponentLowering(imageSourceRule{})
+		return tr
+	}
+
+	t.Run("same namespace collides", func(t *testing.T) {
+		_, err := newTransformer().LowerRaws([]json.RawMessage{rawWebApplication("shop"), rawWebApplication("cart")}, TransformContext{})
+		if err == nil {
+			t.Fatal("a document adopted a shared element that exists only in another document")
+		}
+		for _, want := range []string{`"shared-source"`, `in document "shop"`, `in document "cart"`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not contain %s", err, want)
+			}
+		}
+	})
+
+	t.Run("disjoint namespaces each emit", func(t *testing.T) {
+		out, err := newTransformer().LowerRaws([]json.RawMessage{rawWebApplicationNS("shop", "prod"), rawWebApplicationNS("cart", "prod-2")}, TransformContext{})
+		if err != nil {
+			t.Fatalf("LowerRaws: %v", err)
+		}
+		if len(out) != 2 {
+			t.Fatalf("LowerRaws returned %d documents, want 2", len(out))
+		}
+		for i, raw := range out {
+			var doc Application
+			if err := yaml.Unmarshal(raw, &doc); err != nil {
+				t.Fatalf("document %d: %v", i, err)
+			}
+			sources := 0
+			for _, c := range doc.Spec.Components {
+				if c.Name == "shared-source" {
+					sources++
+				}
+			}
+			if sources != 1 {
+				t.Errorf("document %q carries %d shared-source components, want 1", doc.Metadata.Name, sources)
+			}
+		}
+	})
 }
 
 func TestLower_EmitOrAdopt_DifferentContentCollides(t *testing.T) {

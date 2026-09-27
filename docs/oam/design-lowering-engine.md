@@ -45,12 +45,16 @@ namespace and generated name, with each claim's authored `Origin` retained for
 diagnostics, so two rules independently choosing the same generated name fail loudly
 and name both origins rather than silently overwriting. The exception is a
 claim through `EmitOrAdopt` / `NameOrAdopt` for an element whose content is fully
-determined by an identity: a repeat claim with the same identity, from any origin, adopts
-the element already emitted, while a different identity, or a name first taken by a plain
-`Reserve` / `Name`, still collides. Adoption is sound only for a terminal-type shared
-element (claims outlive the round, so a lowerable one could be replaced under another name
-behind an adopter), and it covers only that element: the adopting rule must still emit its
-own output, since an empty result remains a forbidden deletion. `Origin` provenance
+determined by an identity: a repeat claim with the same identity, from any element of the
+same authored document, adopts the element already emitted, while a different identity, the
+same identity from another authored document (settled documents are transformed one at a
+time, so it would lack the element), or a name first taken by a plain `Reserve` / `Name`,
+still collides; errors carry only a digest of each identity. Adoption is sound only for a
+terminal-type shared element (claims outlive the round, so a lowerable one could be
+replaced under another name behind an adopter), and it covers only that element: the
+adopting rule must still emit its own output, since an empty result remains a forbidden
+deletion. The document check sees only the authored `Origin`, so documents fanned out from
+one authored document are not told apart for adoption. `Origin` provenance
 (`lowering.go:46-52`) rides as unexported `origin *Origin` / `sealed bool` fields on
 `Trait`/`Component`/`ApplicationPolicy`/`Application` — yaml.v3 ignores unexported
 fields, so this cost nothing in the wire format, and value-copy semantics at existing

@@ -234,18 +234,23 @@ source, say) use the emit-or-adopt pair instead:
   `<base>-<suffix>` construction and DNS-1123 check.
 
 The first claim returns `adopted=false`, and the rule emits the element. A later claim with
-the same identity, from any origin and in any round, returns `adopted=true`, and the rule must
-not emit the element again. Same-round sibling components cannot see each other's output, so
-this is how they share one object instead of colliding. A different identity at the same name,
-an empty identity, and a name already held by `Reserve` stay hard errors, and `Reserve` still
-refuses a name claimed this way.
+the same identity, from any element of the same authored document and in any round, returns
+`adopted=true`, and the rule must not emit the element again. Same-round sibling components
+cannot see each other's output, so this is how they share one object instead of colliding. A
+different identity at the same name, the same identity claimed from another authored document
+(each settled document is transformed on its own, so it would lack the adopted element), an
+empty identity, and a name already held by `Reserve` stay hard errors, and `Reserve` still
+refuses a name claimed this way. Errors name an identity only by a short SHA-256 digest, never
+its text, so an identity may include sensitive inputs.
 
-Two caller constraints the allocator does not check. The shared element must be of a terminal
+Three caller constraints the allocator does not check. The shared element must be of a terminal
 type, one no lowering rule claims: claims outlive the round, so a lowerable element could be
-replaced under another name while a later adopter still references the claimed one. And
-adoption covers only the shared element: the adopting rule still emits its own output, because
-the engine rejects an empty `LoweringResult` as a deletion, so a rule whose whole expansion is
-the shared element cannot use this pair.
+replaced under another name while a later adopter still references the claimed one. Adoption
+covers only the shared element: the adopting rule still emits its own output, because the
+engine rejects an empty `LoweringResult` as a deletion, so a rule whose whole expansion is the
+shared element cannot use this pair. And the document check sees only the authored document:
+when a document rule fans one authored document out into several documents, their elements
+share that origin, so adoption must not be relied on across them.
 
 Four registration interfaces, one per position in the document tree, each with its own
 registrar on `*Transformer` and a duplicate/dispatchable-collision guard (a type
