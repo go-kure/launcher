@@ -1997,6 +1997,17 @@ moved the handling into the shared helpers themselves, which made every wrapper 
 exact no-op forward; they were removed and every caller now uses the `parse*` helper
 directly.
 
+`TestNoOptionalFieldWrappers` (`no_optional_wrappers_internal_test.go`) keeps them
+removed: it fails on any function or method whose name starts with `optional`. It
+parses every production `.go` file directly in this package's directory — every
+file, not only `common.go`, and never a `_test.go` file or a subdirectory — and
+fails if it parsed none, so a wrong working directory cannot pass it vacuously. A
+new optional field is read with the helper for its type instead: `parseStringField`
+(or `requiredStringField` when the field is required), `parseBoolField`,
+`parseInt32Field`, `parseInt64Field`, `parseObjectField`, `parseObjectList` or
+`parseStringList`. Each already reads an explicit null as absence through
+`authoredValue`, so a wrapper would only repeat that check.
+
 Two limits worth knowing before relying on the rule:
 
 - **A parser that answers presence with a bare `v, ok := props[key]` does not comply
