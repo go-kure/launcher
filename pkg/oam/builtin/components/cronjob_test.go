@@ -1384,26 +1384,41 @@ func TestCronjobHandler_PodFailurePolicy_Projected(t *testing.T) {
 		}
 	})
 
-	t.Run("onPodConditions status defaults to True", func(t *testing.T) {
-		// go-kure/launcher#410, through the cronjob component's jobTemplate.
-		spec, msg := cronjobPodFailurePolicy(t, map[string]any{
-			"restartPolicy": "Never",
-			"podFailurePolicy": map[string]any{"rules": []any{map[string]any{
-				"action":          "Ignore",
-				"onPodConditions": []any{map[string]any{"type": "DisruptionTarget"}},
-			}}},
+	// go-kure/launcher#410, through the cronjob component's jobTemplate: an
+	// absent or null status defaults to True, an explicit one is kept. The
+	// handler is driven directly, so the null reaches the parser rather than
+	// being stripped by the authored-property check first.
+	statusCases := []struct {
+		name    string
+		pattern map[string]any
+		want    corev1.ConditionStatus
+	}{
+		{"absent", map[string]any{"type": "DisruptionTarget"}, corev1.ConditionTrue},
+		{"explicit null", map[string]any{"type": "DisruptionTarget", "status": nil}, corev1.ConditionTrue},
+		{"False", map[string]any{"type": "DisruptionTarget", "status": "False"}, corev1.ConditionFalse},
+		{"Unknown", map[string]any{"type": "DisruptionTarget", "status": "Unknown"}, corev1.ConditionUnknown},
+	}
+	for _, tc := range statusCases {
+		t.Run("onPodConditions status "+tc.name, func(t *testing.T) {
+			spec, msg := cronjobPodFailurePolicy(t, map[string]any{
+				"restartPolicy": "Never",
+				"podFailurePolicy": map[string]any{"rules": []any{map[string]any{
+					"action":          "Ignore",
+					"onPodConditions": []any{tc.pattern},
+				}}},
+			})
+			if msg != "" {
+				t.Fatalf("refused: %s", msg)
+			}
+			pfp := spec.PodFailurePolicy
+			if pfp == nil || len(pfp.Rules) != 1 || len(pfp.Rules[0].OnPodConditions) != 1 {
+				t.Fatalf("PodFailurePolicy = %+v, want one rule with one pattern", pfp)
+			}
+			if got := pfp.Rules[0].OnPodConditions[0].Status; got != tc.want {
+				t.Errorf("OnPodConditions[0].Status = %q, want %q", got, tc.want)
+			}
 		})
-		if msg != "" {
-			t.Fatalf("refused: %s", msg)
-		}
-		pfp := spec.PodFailurePolicy
-		if pfp == nil || len(pfp.Rules) != 1 || len(pfp.Rules[0].OnPodConditions) != 1 {
-			t.Fatalf("PodFailurePolicy = %+v, want one rule with one pattern", pfp)
-		}
-		if got := pfp.Rules[0].OnPodConditions[0].Status; got != corev1.ConditionTrue {
-			t.Errorf("OnPodConditions[0].Status = %q, want True", got)
-		}
-	})
+	}
 
 	t.Run("restartPolicy rule applies to the jobTemplate too", func(t *testing.T) {
 		// No restartPolicy authored, so the cronjob component's own OnFailure
