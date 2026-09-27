@@ -47,7 +47,10 @@ JobSpec-level surface with `cronjob`'s job template — and the
 `security-context` trait were added in this release. The `topology-spread`
 trait (launcher's default spread constraints on any typed Deployment a
 component generates, from its post-policy replica count) is registered the
-same way.
+same way. The `force-replace` trait (opt-in Flux force-apply, e.g. so a `job`
+can be updated in place) is registered in both `builtinTraitHandlers()` and
+`pkg/oam`'s trait allowlist, and `force_replace_build_test.go` builds a `job`
+with and without it.
 
 Because a lowering rule may claim types the parser would otherwise reject, `build`
 constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`

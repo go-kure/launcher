@@ -288,6 +288,7 @@ func builtinTraitHandlers() map[string]oam.TraitHandler {
 		"fluxcd-patches":       &traits.FluxCDPatchesHandler{},
 		"fluxcd-postbuild":     &traits.PostBuildHandler{},
 		"prune-protection":     &traits.PruneProtectionHandler{},
+		"force-replace":        &traits.ForceReplaceHandler{},
 		"security-context":     &traits.SecurityContextHandler{},
 		"topology-spread":      &traits.TopologySpreadHandler{},
 	}

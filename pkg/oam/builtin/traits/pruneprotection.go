@@ -75,19 +75,22 @@ func (p *pruneProtectedConfig) Generate(app *stack.Application) ([]*client.Objec
 // augmenter added or moved into children. Sibling applications never share
 // this layout, which keeps the trait's narrow scope intact.
 func (p *pruneProtectedConfig) postAugmentLayout(l *layout.ManifestLayout) error {
-	annotateLayout(l)
+	annotateLayout(l, setPruneDisabled)
 	return nil
 }
 
-func annotateLayout(l *layout.ManifestLayout) {
+// annotateLayout applies set to every resource on l and on its child layouts,
+// recursively. Shared by the annotation-stamping decorators (prune-protection,
+// force-replace) for their postAugmentLayout hooks.
+func annotateLayout(l *layout.ManifestLayout, set func(client.Object)) {
 	if l == nil {
 		return
 	}
 	for _, r := range l.Resources {
-		setPruneDisabled(r)
+		set(r)
 	}
 	for _, c := range l.Children {
-		annotateLayout(c)
+		annotateLayout(c, set)
 	}
 }
 

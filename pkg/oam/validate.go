@@ -56,6 +56,7 @@ var validTraitTypes = map[string]bool{
 	"fluxcd-postbuild":     true,
 	"prune-protection":     true,
 	"topology-spread":      true,
+	"force-replace":        true,
 }
 
 // traitComponentRestrictions maps trait types to the component types they support.

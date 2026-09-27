@@ -202,6 +202,16 @@ func TestWrapIfAugmenter_AllConstructionSites(t *testing.T) {
 		assertForwards(t, app.Config, &called)
 	})
 
+	t.Run("ForceReplaceHandler", func(t *testing.T) {
+		called := false
+		app := stack.NewApplication("app", "default", &augmenterStub{called: &called})
+		if err := (&traits.ForceReplaceHandler{}).Apply(
+			&oam.Trait{Type: "force-replace"}, app, &stack.Bundle{}); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		assertForwards(t, app.Config, &called)
+	})
+
 	// NewConfigMapDecorator/RealHelmchart* below is the end-to-end proof that
 	// presence-based forwarding fires for a production component (a real
 	// valuesMode: configMap helmchart config), not just augmenterStub. See
