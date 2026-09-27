@@ -1332,6 +1332,15 @@ change.
   port/protocol pairs must be unique). `type` is `ClusterIP` (default),
   `NodePort` or `LoadBalancer`; `ExternalName` is not offered, since it has no
   selector. An empty `selector` is refused.
+  - **The component name must be a valid Service name.** It becomes the
+    Service's `metadata.name`, which the API server validates as a DNS-1035
+    label: at most 63 characters, lowercase letters, digits and `-`, starting
+    with a letter and ending with a letter or digit. That is stricter than the
+    DNS-1123 subdomain every component name already passes, so `api.v1`, a
+    64-character name and `1api` are refused here (`name: "api.v1" is not a
+    valid Service name, which must be a DNS-1035 label`) instead of building a
+    manifest the cluster rejects on apply. `Generate` applies the same rule to
+    the Application name it is handed.
   - **Routing traits use the first port.** `ingress`, `httproute` and `expose`
     (which lowers to one of the two) on a `service` component resolve their
     implicit backend to `ports[0].port` and refuse any other port on it,

@@ -28,6 +28,9 @@ import (
 // workload component owns their ServiceAccount. `selector` names those pods
 // explicitly when the workload is named differently.
 //
+// The component name is the Service's name, so it must be a DNS-1035 label,
+// as the API server requires of a Service (validateServiceName).
+//
 // `ports` is the full corev1.ServicePort list, each entry with its own
 // `targetPort` (default: the entry's `port`) and `protocol` (default TCP),
 // rather than webservice's single port that drives both sides.
@@ -181,6 +184,9 @@ func (c *ServiceConfig) ServiceRoutingTarget(servicePorts []intstr.IntOrString) 
 // Generate creates the Service. Nothing else: the selected pods' workload
 // component owns their ServiceAccount.
 func (c *ServiceConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	if err := validateServiceName(app.Name); err != nil {
+		return nil, err
+	}
 	svc := kubernetes.CreateService(app.Name, app.Namespace)
 	svc.Labels = appLabels(app.Name)
 	svc.Annotations = nil
@@ -202,9 +208,26 @@ func appendUniquePort(ports []intstr.IntOrString, p intstr.IntOrString) []intstr
 	return append(ports, p)
 }
 
+// validateServiceName refuses a name the API server would refuse for a
+// Service. Kubernetes validates a Service name as a DNS-1035 label (at most 63
+// characters, lowercase alphanumerics and '-', starting with a letter), which
+// is stricter than the DNS-1123 subdomain every component name already
+// passes: "api.v1", a 64-character name and "1api" all pass that check.
+func validateServiceName(name string) error {
+	if errs := validation.IsDNS1035Label(name); len(errs) > 0 {
+		return errors.Errorf("name: %q is not a valid Service name, which must be a DNS-1035 label: %s", name, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 // parseService reads a service component's properties, applying the defaults
-// and the checks ValidateService applies to the same fields.
+// and the checks ValidateService applies to the same fields. The component
+// name is the Service's name, so it is checked against the Service-name rule
+// first.
 func parseService(component *oam.Component) (*ServiceConfig, error) {
+	if err := validateServiceName(component.Name); err != nil {
+		return nil, err
+	}
 	props := component.Properties
 	c := &ServiceConfig{Name: component.Name, Type: corev1.ServiceTypeClusterIP}
 
