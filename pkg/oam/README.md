@@ -327,11 +327,23 @@ Handlers may implement `PropertySchemaProvider` (`PropertySchema() map[string]Pr
 to declare a constrained schema for their user-facing properties. `PropertySchema` is launcher's
 single schema vocabulary — the same type also backs `kurel.yaml` parameters (`ParameterDecl`) and
 `CapabilityDefinition` rendering properties. It has `Type` (string/integer/boolean/number/array/object),
-`Description`, `Required`, `Default`, `Enum`, nested `Properties`, `Items`, and `AdditionalProperties`
-(default false; escape-hatch fields set it true). The rich fields (`Enum`, `Properties`, `Items`,
+`Types`, `Description`, `Required`, `Default`, `Enum`, nested `Properties`, `Items`, and `AdditionalProperties`
+(default false; escape-hatch fields set it true). The rich fields (`Types`, `Enum`, `Properties`, `Items`,
 `AdditionalProperties`) are meaningful only for handler properties: the two flat call sites (kurel
 parameters, capability rendering) reject them at decode time, so unifying the type does not widen
-their accepted behavior. `Transformer.HandlerSchemas()` returns a `HandlerSchemaSet{ Components, Traits }`
+their accepted behavior.
+
+`Types` is the union idiom (go-kure/launcher#383): a leaf that accepts more than one scalar type
+lists them, and a value is accepted when it matches any member, normalised exactly as that member's
+single `Type` would be (below). Members are two or more distinct scalar types (string, integer,
+number, boolean); `Type` and `Types` are mutually exclusive. A schema that sets both, or a malformed
+union, is a schema error reported as soon as a value reaches the leaf. Every Kubernetes
+`intstr.IntOrString` leaf — the rolling-update `maxUnavailable`/`maxSurge` knobs, the networkpolicy
+`port` — declares `integer`/`string`, and every `resource.Quantity` leaf (`cpu`, `memory`, a claim's
+`storage`) declares `string`/`number`, because their parsers take a fractional number too. `Type`
+stays empty on a union leaf, so a schema consumer that does not read `Types` sees an untyped leaf and
+keeps accepting every member. A completeness test (`pkg/cmd/kurel`) enforces that every built-in
+schema node declares exactly one of `Type` and `Types`. `Transformer.HandlerSchemas()` returns a `HandlerSchemaSet{ Components, Traits }`
 of every registered handler that declares one, so the downstream runtime's validator can check a component/trait's
 properties before the handler is invoked. Built-in examples: the `configmap` trait and the
 `passthrough` component.
@@ -353,7 +365,7 @@ capability rendering is resolved into it (see Lowering above).
 
 Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
 component/trait/policy's properties against its TARGET handler's declared schema —
-enforcing `Required`, `Type`, `Enum`, and nested `Properties`/`Items`/
+enforcing `Required`, `Type`/`Types`, `Enum`, and nested `Properties`/`Items`/
 `AdditionalProperties` — immediately after a lowering rule returns it, so a rule
 cannot silently produce properties its own target handler would reject.
 
@@ -365,8 +377,9 @@ handler's reader would not accept what was supplied: a typed Go collection becom
 (`type Replicas int32`), becomes `int` — a value outside the `int` range is rejected
 instead. Values already of type `int`, `int32`, `int64` or `float64` are left as they
 are, because some readers accept `int` but not `int64`; a named integer type becomes
-`int` rather than its underlying type for the same reason. A property whose schema
-declares no `Type`, or a key an open object leaves undeclared, is not rewritten.
+`int` rather than its underlying type for the same reason. A `Types` union leaf is
+rewritten by whichever member the value matched. A property whose schema declares
+neither `Type` nor `Types`, or a key an open object leaves undeclared, is not rewritten.
 
 `ValidateAuthoredProperties` (`property_validate_authored.go`) is that check's
 authored-path counterpart, and closes go-kure/launcher#408. Parsing is strict

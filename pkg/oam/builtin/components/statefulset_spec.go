@@ -336,19 +336,8 @@ func schemaStatefulSetSpec() map[string]oam.PropertySchema {
 					Type:        oam.PropertyTypeObject,
 					Description: "RollingUpdate parameters; only allowed when type is RollingUpdate.",
 					Properties: map[string]oam.PropertySchema{
-						"partition": {Type: oam.PropertyTypeInteger, Description: "Ordinal below which pods are left untouched by a rolling update (canary partitioning). Must be >= 0; the API default is 0."},
-						// No declared Type, mirroring schemaResources' cpu/memory
-						// quantities (schema.go:148-155). PropertyType carries no
-						// int-or-string member (pkg/oam/schema.go), and declaring
-						// `string` here does not merely understate the accepted set —
-						// validatePropertyValue rejects a non-string outright
-						// (pkg/oam/property_validate.go:118-121), so `maxUnavailable: 2`
-						// could never reach parseMaxUnavailable's integer branch through
-						// a schema-validating consumer. Type "" skips the check
-						// (property_validate.go:114-117) and leaves both forms reachable;
-						// the Description carries the constraint instead. Tracked in
-						// go-kure/launcher#383.
-						"maxUnavailable": {Description: `Maximum pods unavailable during the update: a percentage string such as "25%" (at most 100%), or a positive integer such as 2. The API default is 1; 0 is never valid. No declared type because this schema vocabulary has no int-or-string union — an integer is accepted and carried through as an integer, not converted to a string.`},
+						"partition":      {Type: oam.PropertyTypeInteger, Description: "Ordinal below which pods are left untouched by a rolling update (canary partitioning). Must be >= 0; the API default is 0."},
+						"maxUnavailable": {Types: intOrStringTypes(), Description: `Maximum pods unavailable during the update: a percentage string such as "25%" (at most 100%), or a positive integer such as 2. The API default is 1; 0 is never valid. An integer is carried through as an integer, not converted to a string.`},
 					},
 				},
 			},

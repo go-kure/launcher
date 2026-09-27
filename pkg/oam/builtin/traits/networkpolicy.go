@@ -65,12 +65,12 @@ func (h *NetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 			},
 		},
 	}
-	// port carries no declared Type: it accepts a port number or a named-port
-	// string (intstr.IntOrString), and PropertySchema has no string-or-number
-	// union type -- an unset Type skips validatePropertyValue's type check and
-	// leaves both forms reachable, the same idiom `cpu`/`memory` use
-	// (builtin/components/schema.go) and daemonset's `maxUnavailable`/`maxSurge`
-	// (builtin/components/daemonset_spec.go). Declaring `port` explicitly here
+	// port is an integer/string union: it accepts a port number or a named-port
+	// string (intstr.IntOrString), published as Types (go-kure/launcher#383) like
+	// the rolling-update knobs in builtin/components. npPortNumber takes any
+	// numeric kind but refuses a fractional one, so integer (which admits an
+	// integral float) is the numeric member that narrows nothing it accepts.
+	// Declaring `port` explicitly here
 	// (rather than relying on AdditionalProperties, as before go-kure/launcher#440
 	// round 3, the port-schema-closure fix) lets AdditionalProperties default to
 	// false, so the schema layer
@@ -83,7 +83,7 @@ func (h *NetworkPolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 		Type:        oam.PropertyTypeObject,
 		Description: "A port (number or named port) with its protocol.",
 		Properties: map[string]oam.PropertySchema{
-			"port":     {Description: "A port number (1-65535) or a named port string."},
+			"port":     {Types: []oam.PropertyType{oam.PropertyTypeInteger, oam.PropertyTypeString}, Description: "A port number (1-65535) or a named port string."},
 			"protocol": {Type: oam.PropertyTypeString, Default: "TCP", Enum: []any{"TCP", "UDP", "SCTP"}, Description: "IP protocol for the port (TCP, UDP, or SCTP)."},
 		},
 	}

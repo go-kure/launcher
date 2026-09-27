@@ -481,18 +481,8 @@ func schemaDeploymentSpec() map[string]oam.PropertySchema {
 					Type:        oam.PropertyTypeObject,
 					Description: "RollingUpdate parameters. Only allowed when type is RollingUpdate — the API forbids it under Recreate, so this matches rather than tightens. May be omitted under RollingUpdate, leaving the API defaults. Both knobs may be non-zero at once; only both being zero is refused, since the update would never make progress.",
 					Properties: map[string]oam.PropertySchema{
-						// Neither declares a Type, mirroring schemaResources'
-						// cpu/memory quantities. Launcher's PropertyType set
-						// carries no int-or-string union, and declaring
-						// `string` would not merely understate the accepted
-						// set: property validation rejects a non-string
-						// outright, so the parser's integer branch could never
-						// be reached through a schema-validating consumer.
-						// Type "" skips that check and leaves both forms
-						// reachable; each Description carries the constraint.
-						// Tracked in go-kure/launcher#383.
-						"maxUnavailable": {Description: `Maximum pods that may be unavailable during the update: a percentage string such as "25%" (at most 100%), or a non-negative integer such as 2. The API default is 25%.`},
-						"maxSurge":       {Description: `Maximum pods that may be scheduled above the desired count during the update: a percentage string such as "25%", or a non-negative integer such as 2. The API default is 25%. Deliberately NOT capped at 100% — unlike maxUnavailable, the API permits surging past the desired count.`},
+						"maxUnavailable": {Types: intOrStringTypes(), Description: `Maximum pods that may be unavailable during the update: a percentage string such as "25%" (at most 100%), or a non-negative integer such as 2. The API default is 25%.`},
+						"maxSurge":       {Types: intOrStringTypes(), Description: `Maximum pods that may be scheduled above the desired count during the update: a percentage string such as "25%", or a non-negative integer such as 2. The API default is 25%. Deliberately NOT capped at 100% — unlike maxUnavailable, the API permits surging past the desired count.`},
 					},
 				},
 			},

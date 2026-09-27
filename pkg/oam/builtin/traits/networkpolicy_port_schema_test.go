@@ -17,9 +17,9 @@ import (
 // schema's own AdditionalProperties: true, which docs/oam/design-gvk.md's stability
 // promise treats as a real contract, not documentation.
 //
-// Fixed by declaring `port` explicitly (matching the `cpu`/`memory` and
-// `maxUnavailable`/`maxSurge` no-declared-Type idiom used elsewhere in this codebase)
-// so AdditionalProperties can default to false. This test exercises the real authored
+// Fixed by declaring `port` explicitly (since go-kure/launcher#383 as an
+// integer/string Types union) so AdditionalProperties can default to false. This
+// test exercises the real authored
 // pipeline (Transformer.ValidateAuthoredProperties with the actual NetworkPolicyHandler
 // registered, not a fixture), because that is where the schema layer's rejection -- and
 // its message, different from parseNPPort's own -- actually surfaces to an author.
@@ -68,8 +68,8 @@ func TestNetworkPolicyPortSchema_UnsupportedKeyRejectedAtSchemaLayer(t *testing.
 
 // TestNetworkPolicyPortSchema_KnownKeysStillAccepted is the control for the test above:
 // a schema tightened to reject `protcol` must not also reject the two keys it should
-// accept, `port` and `protocol` themselves -- including a bare numeric `port`, since
-// declaring it with no Type is exactly what has to keep both accepted forms reachable.
+// accept, `port` and `protocol` themselves -- including a bare numeric `port`, which
+// the integer member of its Types union has to keep reachable.
 func TestNetworkPolicyPortSchema_KnownKeysStillAccepted(t *testing.T) {
 	tr := oam.NewTransformer(nil, map[string]oam.TraitHandler{
 		"networkpolicy": &traits.NetworkPolicyHandler{},

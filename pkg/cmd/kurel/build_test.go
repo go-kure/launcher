@@ -612,6 +612,53 @@ func assertEnumMembersNonNull(t *testing.T, path string, node oam.PropertySchema
 	}
 }
 
+// TestBuiltinHandlerSchemaEveryNodeDeclaresItsType asserts that every node of every
+// built-in handler schema states its type exactly one way: a single Type, or a
+// Types union (go-kure/launcher#383). An untyped node skips property validation's
+// type check entirely, which is how the int-or-string and quantity leaves used to
+// publish themselves before the union existed; a node declaring both is a schema
+// error validatePropertyValue reports only once a value reaches it. Reading every
+// schema catches either without waiting for a document to exercise the leaf.
+func TestBuiltinHandlerSchemaEveryNodeDeclaresItsType(t *testing.T) {
+	for name, h := range builtinComponentHandlers() {
+		assertSchemaNodesTyped(t, "component", name, h)
+	}
+	for name, h := range builtinTraitHandlers() {
+		assertSchemaNodesTyped(t, "trait", name, h)
+	}
+	for name, r := range builtinTraitLoweringRules() {
+		assertSchemaNodesTyped(t, "trait", name, r)
+	}
+}
+
+func assertSchemaNodesTyped(t *testing.T, kind, name string, h any) {
+	t.Helper()
+	p, ok := h.(oam.PropertySchemaProvider)
+	if !ok {
+		return // TestNewBuiltinTransformer_HandlerSchemaParity already flags this.
+	}
+	schema := p.PropertySchema()
+	for _, k := range sortedSchemaKeys(schema) {
+		assertSchemaNodeTyped(t, fmt.Sprintf("%s %s.%s", kind, name, k), schema[k])
+	}
+}
+
+func assertSchemaNodeTyped(t *testing.T, path string, node oam.PropertySchema) {
+	t.Helper()
+	switch {
+	case node.Type == "" && len(node.Types) == 0:
+		t.Errorf("%s: declares neither Type nor Types, so property validation checks no type at all", path)
+	case node.Type != "" && len(node.Types) > 0:
+		t.Errorf("%s: declares both Type %q and Types %v", path, node.Type, node.Types)
+	}
+	for _, k := range sortedSchemaKeys(node.Properties) {
+		assertSchemaNodeTyped(t, path+"."+k, node.Properties[k])
+	}
+	if node.Items != nil {
+		assertSchemaNodeTyped(t, path+"[]", *node.Items)
+	}
+}
+
 // schemaEnumMemberMaxDepth mirrors pkg/oam's enumMemberMaxDepth.
 const schemaEnumMemberMaxDepth = 32
 
