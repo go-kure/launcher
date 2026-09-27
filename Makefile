@@ -386,14 +386,18 @@ verify-merge: ## Build and test a PR's merge ref (refs/pull/PR/merge), the tree 
 test-verify-merge: ## Self-test scripts/verify-merge.sh against a throwaway fixture repository
 	bash scripts/test/verify-merge-test.sh
 
+.PHONY: test-pin-impact
+test-pin-impact: ## Run scripts/check-pin-impact.sh's hermetic cases (stub curl, throwaway git repositories, no network)
+	bash scripts/test/run-tests.sh
+
 .PHONY: check
-check: lint vet test-short check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins, verify-merge self-test)
+check: lint vet test-short check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins, verify-merge self-test, pin-impact cases)
 
 .PHONY: precommit
-precommit: fmt tidy lint test check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync, tool pins, verify-merge self-test)
+precommit: fmt tidy lint test check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync, tool pins, verify-merge self-test, pin-impact cases)
 
 .PHONY: ci
-ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge ## Run comprehensive CI pipeline
+ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact ## Run comprehensive CI pipeline
 
 # =============================================================================
 # Cleanup

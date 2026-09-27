@@ -123,14 +123,14 @@ self-test (`make test-verify-merge`).
 | Job | Check Name | Timeout | Dependencies | Purpose |
 |-----|------------|---------|--------------|---------|
 | `changes` | `detect-changes` | 2 min | — | Path filter: `go:` and `docs:` outputs control downstream jobs |
-| `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint, tool-version parity (golangci-lint pin across Makefile/ci.yml/docs), govulncheck doc parity, verify-merge self-test; diff-based lint on PRs |
+| `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint, tool-version parity (golangci-lint pin across Makefile/ci.yml/docs), govulncheck doc parity, verify-merge self-test, `check-pin-impact.sh` cases (`make test-pin-impact`); diff-based lint on PRs |
 | `test` | `test` | 25 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
 | `security` | `Security` | 15 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `action-pins` | `action-pins` | 2 min | — | Fails if any third-party `uses:` ref is not pinned to a 40-char commit SHA (`go-kure/.github` composite action) |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) |
-| `pin-impact` | `pin-impact` | 3 min | — | Renders and gates on the real impact of a `go-kure/.github` pin bump: resolves each referenced action's `scripts/*.sh` (and their `source`d siblings), intersects against the compare diff, fails if a consumed path changed (PR only, go-kure/launcher#358) |
+| `pin-impact` | `pin-impact` | 3 min | — | Renders and gates on the real impact of a `go-kure/.github` pin bump: resolves each referenced action's `$GITHUB_ACTION_PATH` script (and the siblings those `source` or run), intersects against the compare diff, fails if a consumed path changed and refuses any shape it cannot resolve (PR only, go-kure/launcher#358) |
 | `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
 | `validate-manifests` | `validate-manifests` | 10 min | changes | `kurel build` + `flux schema validate` against the `default` (embedded) and `ecosystem` (schemas.fluxoperator.dev) catalogs for a representative `examples/*.yaml` subset; `continue-on-error: true`, not in `build`'s gate (go-kure/launcher#292) |
@@ -190,16 +190,155 @@ Runs on main and `release/*` branches only (not PRs):
   (`make validate-manifests`, same command locally). `continue-on-error: true` for its first cycle
   and excluded from `build`'s aggregation gate and `DEVELOPMENT.md`'s required-checks list —
   promoting it to required is a deliberate follow-up (go-kure/launcher#292)
-- **Pin-impact gate** — `pin-impact` (PR only) renders the real impact of a `go-kure/.github` pin
-  bump before merge: which actions it touches, which `scripts/*.sh` each resolves to (one level of
-  `source` included), intersected against the bump's actual diff. Fails closed on anything it can't
-  confidently resolve — an unrecognized `action.yml` shape (a nested `uses:` step, more than one
-  `run:` step, a `run:` step with no `scripts/*.sh` reference), an unrecognized or dot-segment
-  `source` expression, or a non-ahead compare — rather than under-reporting. A maintainer who has
-  reviewed a real hit and judged it safe adds the `pin-impact-ack` label to merge anyway — same
-  convention as `check-doc-gate`'s `docs-skip` label; there is no other override. Ported from
-  `go-kure/kure` (go-kure/kure#729) after go-kure/launcher#358 turned up the identical blind spot
-  here. **Rerun gotcha:** the `strip-ack` step only runs when the triggering event's action was
+- **Pin-impact gate** — `pin-impact` (PR only) renders a `go-kure/.github` pin bump's real effect
+  (which `scripts/*.sh` a referenced action actually runs, whether the compare touches any of them)
+  into the job summary and fails on a match, so a bump touching consumed code cannot merge
+  unreviewed. `scripts/check-pin-impact.sh` is a vendored copy of `go-kure/kure`'s, first ported
+  (go-kure/kure#729) after go-kure/launcher#358 turned up the identical blind spot here, and since
+  brought level with its hardened form (go-kure/kure#731). It follows three things, and nothing
+  else:
+  - **Pins.** It reads `uses: go-kure/.github/.github/actions/<subpath>@<sha>`, including nested
+    or dotted subpaths. It also reads the `ref: <sha>` in the `with:` mapping of a block-style
+    checkout whose same `with:` mapping holds `repository: go-kure/.github`, whatever the key
+    order. The repository name is matched case-insensitively and with or without a trailing `.git`
+    (`actions/checkout` clones `https://github.com/<repository>`, the same repository either way),
+    and the SHA may be written in either case. Keys are read as YAML reads them: `"uses":`,
+    `'ref':` and `repository :` are the plain keys, in a workflow and an `action.yml`.
+  - **Action scripts.** It follows each `$GITHUB_ACTION_PATH/<rel>.sh` or
+    `${GITHUB_ACTION_PATH}/<rel>.sh` in an action's single `run:` step, written as one whole word:
+    the path, at most a closing quote, then whitespace, `;&|)<>` or the line end. The word must be
+    the command run: at a line start or after a separator, optionally behind a shell keyword
+    (`if`, `then`, `else`, `elif`, `do`, `while`, `until` or `!`) and `exec`, `bash`, `sh`,
+    `source` or `.` with options. The path is resolved from the action's own directory, counting
+    its `..` hops.
+  - **Sibling scripts.** It follows, transitively, a whole line
+    `source "$SCRIPT_DIR/<name>.sh"` or `[exec] [bash|sh] "$SCRIPT_DIR/<name>.sh" [args]`. It
+    trusts only `SCRIPT_DIR` defined as exactly `$(dirname "$0")` or
+    `$(cd "$(dirname "$0")" && pwd)`, optionally with `&>/dev/null`, `>/dev/null`,
+    `>/dev/null 2>&1` or `2>/dev/null` before the `&&` and `pwd -P` for `pwd`, and either with
+    `"${BASH_SOURCE[0]}"` for `"$0"`. The definition may sit behind `declare -r`, `readonly` or
+    `export`; `cd --`, `dirname --`, `1>` for `>` and a space after `&>` or `>` are the same
+    definition. The run-when-executed guard `if [[ "${BASH_SOURCE[0]}" == "$0" ]]`
+    (also `!=`, `"${0}"` and `; then`), alone on its line, names no directory and is accepted.
+
+  It refuses rather than guesses on:
+  - **Pins.** Inconsistent pins. Any `go-kure/.github` reference in a `uses:` or `repository:`
+    context that yields no 40-hex pin: `@main`, a flow-mapping checkout, a checkout with a branch,
+    another expression or no `ref:`, and similar. Only two are exempt: a `ref:` that is exactly
+    `${{ steps.<id>.outputs.<name> }}` (the `docs-build` job's vendored-guard checkout, whose ref
+    the "Resolve pinned guard revision" step derives from the `check-forbidden-terms` pin), and a
+    job-level reusable-workflow call at a non-SHA ref. A reusable-workflow call pinned to a SHA, or
+    one inside a step, is refused. A `go-kure/.github` checkout step is also refused when it has a
+    `ref:` other than a key at the column of the `with:` mapping's first child (under `env:` or
+    another key, in a block scalar body, at the step's own level), a line that is no key the scan
+    parses (`a b:`, `a/b:`, the rest of a multi-line value), a value that does not end on its line
+    (an unterminated or escaped quote), more than one `ref:` in any letter case, or more than one
+    `with:`. A `repository: go-kure/.github` anywhere else in a step (under `env:`, deeper under
+    `with:`, at the step's own level) is refused too: it used to mark the step as that checkout,
+    so another repository's `ref:` in the same step was read as a pin.
+  - **Workflow YAML a line scan cannot read**, whatever it names. A `uses:` or `repository:`
+    value that is not whole on its own line: empty, continued on the next line, a block scalar,
+    an alias, anchor, tag or flow collection, or a quoted value with an escape (`\` in double
+    quotes, `''` in single quotes) or no closing quote. A `repository:` given as an expression
+    (`${{ github.repository_owner }}/.github`). A `uses` or `repository` key that does not start
+    its line (a flow mapping, a tagged or anchored key) or is not in lower case. A quoted key
+    with an escape sequence, and a `? ` complex key. A `uses:` expression is refused only when it
+    names `go-kure/.github`: GitHub does not evaluate expressions in `uses:`. Both
+    `.github/workflows/*.yml` and `*.yaml` are scanned.
+  - **Actions.** An action that is not a composite action (JavaScript or Docker), a `using` in a
+    flow mapping or not in lower case included. A nested `uses:`, quoted, in a flow mapping or in
+    any letter case, or more than one `run:` step (flow-mapping, quoted and `RUN:` steps counted;
+    the lines of a `run: |` body are text, not keys). A `github.action_path` expression. Any
+    `GITHUB_ACTION_PATH` mention that is not one whole `$GITHUB_ACTION_PATH/<path>` or
+    `${GITHUB_ACTION_PATH}/<path>` word (reassigned, cut down with `${GITHUB_ACTION_PATH%/*}`, a
+    bare trailing `/`, or a suffix after the path), and the runner's `_actions` directory by path.
+    In an action that mentions `GITHUB_ACTION_PATH`: `dirname`, `realpath`, `readlink`, a
+    parameter trim (`${name%...}`, `${name#...}`, `${name/...}`, `${name:offset}`), and a
+    `$GITHUB_ACTION_PATH/<path>` word other than as the command run (assigned, or passed as an
+    argument). A quoted key with an escape sequence, or a `? ` complex key. A non-`.sh` or
+    unaccounted-for script reference. Whether the runner reads `USES:`, `Using:` or `RUN:` as its
+    key is not established here, so each is taken as that key.
+  - **Paths.** A path that climbs above the repository root, or that has a `.`, `..` or empty
+    (`//`) segment where it cannot be normalised.
+  - **Scripts.** Any line using `$SCRIPT_DIR` in another shape, which includes `if !`, a wrapper
+    command, `$( )`, a pipe and a non-`.sh` sibling. Any `SCRIPT_DIR=` assignment other than the
+    trusted definitions. The word `SCRIPT_DIR` in any other form (`SCRIPT_DIR+=`,
+    `SCRIPT_DIR[0]=`, `read SCRIPT_DIR`, `for SCRIPT_DIR in`, `n=SCRIPT_DIR`). Name indirection:
+    `${!name}` (the array-keys form `${!name[@]}` is allowed), a `declare -n`, `local -n` or
+    `typeset -n` nameref, `eval`, and a `declare`, `typeset`, `local`, `export` or `readonly`
+    whose variable name holds a `$` or a backtick (`declare -g "$n+=/lib"`). Any other way of
+    computing the script's own directory (`dirname "$0"`, `${0%/*}`, `BASH_SOURCE`, `BASH_ARGV`,
+    a positional slice `${@:...}` or `${*:...}`, and `$_` or `${_}`, which holds the script's
+    path right after an exempted `$0` message). Any `$0` outside a message to stderr
+    (`echo "usage: $0 ..." >&2` or `1>&2`), a `sed -n '<lines>p' "$0"` read of the script itself
+    or an awk record (`f($0`, `, $0`, ` = $0`, `$0 ~`, `$0 !~`): `x=$0`, `a=($0)`, `printf -v`,
+    `read <<<"$0"`, a function argument or a message to another fd would carry the directory
+    under another name. A line naming `$GITHUB_ACTION_PATH` or the runner's `_actions`
+    directory. Any other `source` or script invocation at a command position, and a sibling that
+    cannot be fetched.
+  - **`$SCRIPT_DIR` that is not the script's own directory.** A file sourced from a script in
+    another directory that names `SCRIPT_DIR` at all, since it shares its caller's. A script run
+    as its own process that uses `$SCRIPT_DIR` before a trusted definition, since it reads an
+    inherited one. A relative definition, `$(dirname "$0")`, in any walked script while any walked
+    script changes the working directory (`cd`, `pushd` or `popd` outside a `$(cd` or `(cd`
+    subshell).
+  - **The compare.** A compare that is not `ahead` (a pin rollback or unrelated history), and a
+    file count near GitHub's ~300-file pagination cap.
+
+  It does not see the following. Its threat model is a trusted organisation's own files: it
+  catches shapes written by accident that would hide consumed code, not a determined adversary,
+  and a shape built to evade a line scan can still pass.
+  - A sibling reached without naming `$SCRIPT_DIR`, `$0` or the checkout: a hard-coded absolute
+    path, a name found on `PATH`, or a path assembled at run time (`/proc/self`, a variable filled
+    from a file).
+  - Job-level reusable-workflow calls at a non-SHA ref
+    (`go-kure/.github/.github/workflows/<file>.yml@main` here). They run at their own ref, so no
+    pin bump changes them.
+  - The order in which a script runs: a trusted `SCRIPT_DIR` definition inside a function or a
+    branch that never runs still counts as defining it for the lines below.
+  - A `,$0` outside awk, which is taken for an awk record (`for p in {x,$0}`).
+  - A `$0` message to stderr that is read back: the stderr exemption assumes stderr is not
+    redirected into a file or a capture (`exec 2>f`, `$(f 2>&1)`) that the script then reads.
+  - The script's path taken from the call stack with `caller`, which names no `$0`.
+  - An assignment through a name built at run time other than by a declaration builtin:
+    `printf -v "$n"`, `read "$n"`, `mapfile "$n"`. A consumed script assigns through
+    `printf -v "$destination"`, so refusing it would abort real runs.
+  - A declaration builtin not written as a plain word at a command position:
+    `\declare -g "$n+=/lib"`, `d=declare; $d -g …`, or one continued onto the next line with `\`.
+  - In an action's `run:` step, the action path carried past the command and cut to its directory
+    by a tool other than `dirname`, `realpath`, `readlink` or a trim (`sed`, `awk`, `cut`, a
+    Python one-liner). It can be carried by `$_` after the command, an array assignment
+    `x=("$GITHUB_ACTION_PATH/…")`, or an argument on a `\` continuation line.
+  - The action path read through a name built at run time
+    (`n=GITHUB_ACTION; n+=_PATH; "${!n}/…"`).
+
+  It also aborts, harmlessly but falsely, on:
+  - another directory derived from the script's own, such as
+    `ROOT=$(cd "$(dirname "$0")/.." && pwd)`. Following it would mean tracking an arbitrary
+    variable through every script that sources or inherits it, and real scripts reuse such names
+    for argument-derived paths;
+  - `uses:` or `repository:` text anywhere in a single-line workflow value
+    (`run: grep -n "repository:" ci.yml`, `with: { repository: foo/bar }`), and `ref:` text
+    anywhere in a `go-kure/.github` checkout step, and a ` #` inside a quoted value there (read
+    as a comment, which leaves the quote open);
+  - a second `repository: go-kure/.github` outside the `with:` mapping of a checkout that already
+    names it there, such as under `env:`;
+  - `${!prefix@}`, and `export SCRIPT_DIR` or `readonly SCRIPT_DIR` on a line of its own;
+  - `dirname`, `realpath`, `readlink` or a parameter trim anywhere in an action that mentions
+    `GITHUB_ACTION_PATH`, and a `$GITHUB_ACTION_PATH/<path>` command behind a wrapper (`env`,
+    `timeout`), an environment assignment (`VAR=1 "$GITHUB_ACTION_PATH/…"`), a shell option
+    (`bash --noprofile`), a `{ …; }` group or a `case` arm.
+
+  The refusal paths, plus the no-change, inert, affected and acknowledged outcomes, are pinned by
+  hermetic cases in `scripts/test/cases/` — the same cases, under the same file names, as
+  `go-kure/kure`'s — which the `lint` job runs on every push and merge-queue run, and on a PR
+  whenever its `go` path filter matches (a workflow change, this script or anything under
+  `scripts/test/` does) (`make test-pin-impact`, also part of `mise run verify` and
+  `make precommit`);
+  `scripts/test/pin-impact-lib.sh` stubs `curl` and builds a throwaway git repository per case,
+  so no case touches the network. A maintainer who has reviewed a real hit and judged it safe adds
+  the `pin-impact-ack` label to merge anyway — same convention as `check-doc-gate`'s `docs-skip`
+  label; there is no other override. **Rerun gotcha:** the `strip-ack` step only runs when the triggering event's action was
   `synchronize` or `reopened`; re-running a stale/failed run of one of *those* (`gh run rerun`, or
   the Actions UI) replays that same original action and silently strips a freshly-added
   `pin-impact-ack` again before the gate re-checks it, even though nothing was pushed. A rerun of an

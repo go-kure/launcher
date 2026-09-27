@@ -220,6 +220,7 @@ This will:
 - Check kure dependency sync
 - Check tool-version pins (golangci-lint, govulncheck) stay consistent across Makefile, CI and docs
 - Self-test `scripts/verify-merge.sh` against a throwaway fixture repository
+- Run `scripts/check-pin-impact.sh`'s hermetic cases (`scripts/test/cases/`; stub `curl`, no network)
 
 It builds the branch. A PR's CI builds the branch merged into `main`; to reproduce that tree
 locally, run `mise run verify-merge <n>` after pushing.
@@ -315,6 +316,7 @@ guard's shared-direct set.
 - `ci` - Run full CI pipeline
 - `verify-merge PR=<n>` - Build and test the PR's merge ref (`refs/pull/<n>/merge`), the tree its CI builds
 - `test-verify-merge` - Self-test `scripts/verify-merge.sh`
+- `test-pin-impact` - Run `scripts/check-pin-impact.sh`'s hermetic cases (`bash scripts/test/run-tests.sh`)
 
 ### Release
 - `release TYPE=<type>` - Preview release (dry-run); types: alpha, beta, rc, stable
