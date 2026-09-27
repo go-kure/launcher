@@ -201,11 +201,17 @@ type shorthandRawDoc struct {
 }
 
 // shorthandRawRule is the launcher-side stand-in for an intent-tier lowering rule:
-// it turns spec.hostname into a gateway expose trait. Because a raw rule's emitted
-// traits are sealed — the engine skips its own capability merge for them — the rule
-// must fold the capability rendering in itself, which is exactly why the shorthand
-// has to work with the rendering already inline.
-type shorthandRawRule struct{}
+// it turns spec.hostname into a gateway expose trait. A raw rule rewrites authored
+// input and does not lower, so it emits expose exactly as a person would author it —
+// hostnames only — and Transform merges the ClusterProfile's expose rendering in,
+// as it does for any authored expose.
+//
+// foldRendering reproduces what the rule did while LowerRaws sealed its output:
+// copy the capability rendering into the trait itself. Those keys are
+// platform-reserved on expose, so that output is now rejected.
+type shorthandRawRule struct {
+	foldRendering bool
+}
 
 var errUnexpectedRawDoc = stderrors.New("shorthandRawRule: unexpected decode target")
 
@@ -221,15 +227,16 @@ func (shorthandRawRule) DecodeDocument(raw []byte) (any, error) {
 	return &doc, nil
 }
 
-func (shorthandRawRule) LowerDocument(doc any, lctx oam.LoweringContext) (oam.LoweringResult, error) {
+func (r shorthandRawRule) LowerDocument(doc any, lctx oam.LoweringContext) (oam.LoweringResult, error) {
 	d, ok := doc.(*shorthandRawDoc)
 	if !ok {
 		return oam.LoweringResult{}, errUnexpectedRawDoc
 	}
-	rendering := lctx.Capabilities["expose"].Rendering
 	props := map[string]any{"hostnames": []any{d.Spec.Hostname}}
-	for k, v := range rendering {
-		props[k] = v
+	if r.foldRendering {
+		for k, v := range lctx.Capabilities["expose"].Rendering {
+			props[k] = v
+		}
 	}
 	return oam.LoweringResult{Documents: []oam.Application{{
 		APIVersion: oam.SupportedAPIVersion,
@@ -246,11 +253,8 @@ func (shorthandRawRule) LowerDocument(doc any, lctx oam.LoweringContext) (oam.Lo
 	}}}, nil
 }
 
-// The raw seam end to end: lower the authored bytes, parse what comes back, and
-// transform it. This is the path a consumer's intent-tier document takes, and it
-// reaches ExposeRule with the rendering already sealed into the trait.
-func TestExposeRule_Gateway_HostnamesShorthand_RawSeam(t *testing.T) {
-	raw := []byte(`apiVersion: ` + oam.SupportedAPIVersion + `
+// shorthandRawYAML is the authored ShorthandApp both raw-seam tests lower.
+const shorthandRawYAML = `apiVersion: ` + oam.SupportedAPIVersion + `
 kind: ShorthandApp
 metadata:
   name: myapp
@@ -258,27 +262,57 @@ metadata:
 spec:
   image: nginx:1.25
   hostname: shop.example.com
-`)
+`
 
-	tr := gatewayShorthandTransformer()
-	tr.RegisterRawDocumentLowering(shorthandRawRule{})
-
-	ctx := oam.TransformContext{Namespace: "default", Capabilities: gatewayCapability()}
-	lowered, err := tr.LowerRaws([]json.RawMessage{raw}, ctx)
+// lowerAndParseShorthand runs the consumer side of the raw seam up to Transform:
+// lower the authored bytes, then parse what comes back as an authored document,
+// admitting the types the transformer's in-transform rules claim (expose).
+func lowerAndParseShorthand(t *testing.T, tr *oam.Transformer, ctx oam.TransformContext) *oam.Application {
+	t.Helper()
+	lowered, err := tr.LowerRaws([]json.RawMessage{[]byte(shorthandRawYAML)}, ctx)
 	if err != nil {
 		t.Fatalf("LowerRaws: %v", err)
 	}
 	if len(lowered) != 1 {
 		t.Fatalf("lowered %d documents, want 1", len(lowered))
 	}
-
-	app, err := oam.Parse(lowered[0])
+	app, err := oam.ParseWithExtraTypes(lowered[0], nil, tr.LowerableTypes())
 	if err != nil {
-		t.Fatalf("Parse: %v", err)
+		t.Fatalf("ParseWithExtraTypes: %v\n%s", err, lowered[0])
 	}
-	cluster, err := tr.Transform(app, ctx)
+	return app
+}
+
+// The raw seam end to end: lower the authored bytes, parse what comes back, and
+// transform it. This is the path a consumer's intent-tier document takes. LowerRaws
+// hands back the expose trait the rule wrote, unlowered and unsealed, and Transform
+// merges the gateway rendering into it before ExposeRule runs.
+func TestExposeRule_Gateway_HostnamesShorthand_RawSeam(t *testing.T) {
+	tr := gatewayShorthandTransformer()
+	tr.RegisterRawDocumentLowering(shorthandRawRule{})
+
+	ctx := oam.TransformContext{Namespace: "default", Capabilities: gatewayCapability()}
+	cluster, err := tr.Transform(lowerAndParseShorthand(t, tr, ctx), ctx)
 	if err != nil {
 		t.Fatalf("Transform: %v", err)
 	}
 	assertShorthandRoute(t, httprouteFromCluster(t, cluster))
+}
+
+// The compatibility break of go-kure/launcher#357: a raw rule that folds the
+// capability rendering into the expose trait it emits (which the old seal accepted)
+// now writes platform-reserved keys into what Transform treats as authored input,
+// and fails loudly instead of rendering twice.
+func TestExposeRule_Gateway_HostnamesShorthand_RawSeam_FoldedRenderingIsPlatformReserved(t *testing.T) {
+	tr := gatewayShorthandTransformer()
+	tr.RegisterRawDocumentLowering(shorthandRawRule{foldRendering: true})
+
+	ctx := oam.TransformContext{Namespace: "default", Capabilities: gatewayCapability()}
+	_, err := tr.Transform(lowerAndParseShorthand(t, tr, ctx), ctx)
+	if err == nil {
+		t.Fatal("expected Transform to reject capability rendering a raw rule folded into expose")
+	}
+	if !stderrors.Is(err, oam.ErrPlatformReserved) {
+		t.Fatalf("expected oam.ErrPlatformReserved, got: %v", err)
+	}
 }

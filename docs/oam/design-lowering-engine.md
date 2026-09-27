@@ -76,7 +76,7 @@ Document-level 1→N (one authored document lowering into several) ships only at
 **raw** entry point today: `testRawRule` (`pkg/oam/lowering_raw_test.go:41-139`) emits
 `n` sibling `Application` documents from one raw document when its `emit` field is set,
 proving `LoweringResult.Documents` with more than one entry round-trips through the
-shared fixpoint (`runLowering`, `lowering.go:439`) correctly — each sibling gets its own
+raw round (`lowerRawRound`, `lowering_raw.go`) correctly — each sibling gets its own
 generated name via the shared `NameAllocator`, and the `slot`-keyed splice
 (`lowering_raw.go:101-121`) puts every emitted document back at its raw input's
 position. This is proven with a test-only rule, not a shipped built-in — no concrete
@@ -341,6 +341,23 @@ once, ahead of every one of its own parse call sites, rather than calling it per
 a document it rewrites then flows through the ordinary parse path and, if applicable,
 into entry point 1 above unchanged.
 
+**Raw-rule contract: a raw rule rewrites authored input; it does not lower.**
+`LowerRaws` runs each claimed document's raw rule for round 0 only and seals nothing
+(go-kure/launcher#357). What the rule emits is returned as ordinary `Application`
+bytes that re-enter the consumer's parse and `Transform` exactly as if a person had
+authored them: every in-transform rule (document, component, trait, policy) runs there,
+under the one `MaxLoweringDepth` budget of that `Transform` call, and ClusterProfile
+capability rendering is merged into every trait the output carries. The effective depth
+of a raw-entered document is therefore one raw round plus the `Transform` budget. A raw
+rule must emit what a person would write — an `expose` trait with only its hostnames,
+for example — and must not copy capability rendering into its output: a value in a
+`PlatformReserved` field is authored input to `Transform`, which rejects it with
+`ErrPlatformReserved`. Before #357, `LowerRaws` ran the whole fixpoint itself and
+sealed the traits it produced, but the seal is an unexported field that the caller's
+`yaml.Marshal` → parse round-trip drops, so `Transform` re-rendered those traits as
+authored anyway; running round 0 only makes the behaviour match what the round-trip
+already did.
+
 ### How the open questions were resolved
 
 Three questions were left open when this contract was first specified, ahead of
@@ -348,32 +365,28 @@ implementation. All three are answered by the shipped code:
 
 - **Can `RawDocumentLoweringRule` share `LoweringContext`/`Origin`
   provenance/`NameAllocator`/`MaxLoweringDepth` with the decoded-document rule types, or
-  does it need its own bounded fixpoint over raw bytes?** It shares them fully.
-  `runLowering` (`lowering.go:439`) is, by its own doc comment, "the ONE fixpoint
-  implementation in this package" — both entry points call it exactly once per
-  invocation, so one `NameAllocator`, one expansion chain, and one `MaxLoweringDepth`
-  budget are shared across every document in the call, siblings from different raw
-  inputs included. Round 0 for a raw-entered document (`lowerRawOnce`,
-  `lowering_raw.go:134-150`) decodes the bytes and calls the rule's `LowerDocument`
-  exactly as `lowerDocumentOnce`'s document-rule branch would; from round 1 on, every
-  descendant is an ordinary `*Application` and follows the identical path an
-  in-transform document does. `ctx TransformContext` is threaded through `LowerRaws`
-  precisely because of this sharing: rounds after round 0 can reach an ordinary
-  `TraitLoweringRule`/`ComponentLoweringRule`/`PolicyLoweringRule`, and a
-  `CapabilityAware` one among them needs `ctx.Capabilities` populated from an
-  already-evaluated `ClusterProfile` or it fails with `ErrMissingCapability` — a caller
-  that has not evaluated a profile yet passes what it has, and gets the same failure
-  the in-transform path would produce for the same input (`lowering_raw.go:36-41`).
+  does it need its own bounded fixpoint over raw bytes?** Neither, since
+  go-kure/launcher#357: a raw rule runs for round 0 only, so there is no raw fixpoint to
+  bound. `lowerRawRound` (`lowering_raw.go`) shares one `NameAllocator` across every
+  claimed document in the call (pass-through identities pre-reserved), so generated
+  names still cannot collide across siblings, and `lowerRawOnce` decodes the bytes and
+  calls the rule's `LowerDocument` exactly as `lowerDocumentOnce`'s document-rule branch
+  would. The rest of the fixpoint — `runLowering`, now reachable only from `Transform` —
+  runs when the consumer parses the output and hands it to `Transform`, with that call's
+  own `MaxLoweringDepth` budget and `LoweringContext`. A raw step appears in a
+  `LoweringError` chain as `rawdocument/<apiVersion>/<kind>`, but stamps no `Origin` on
+  its output: the round-trip through bytes would drop it. `ctx TransformContext` is
+  still passed to the raw rule, so a raw rule that reads `ctx.Capabilities` sees them,
+  but no ordinary rule runs inside `LowerRaws` any more, so `LowerRaws` itself no longer
+  needs an evaluated `ClusterProfile`.
 - **Should a document a raw-document rule emits be eligible to re-enter `LowerRaws`
   itself (a raw-to-raw fixpoint), or must it always land in base shape in one step?**
-  It must land in base shape in one step; there is no raw-to-raw re-entry. Only the
-  original seed entries built directly from `raws` carry a non-nil `raw` field
-  (`loweringDoc.raw`, `lowering.go:420`); every document `LowerDocument` emits at round
-  0 becomes an ordinary `*Application` in `next` (`runLowering`'s loop,
-  `lowering.go:449-479`), which subsequent rounds process via `lowerDocumentOnce`, never
-  `lowerRawOnce`, so `t.rawDocLoweringRules` is never consulted again for it. This
-  mirrors the `sealed` guard's constraint on entry point 1 (D5 above): an emitted
-  element does not re-enter the resolution mechanism it came from.
+  It must land in base shape in one step; there is no raw-to-raw re-entry.
+  `lowerRawRound` calls `lowerRawOnce` once per claimed seed and serialises what it
+  emits; nothing it emits is ever looked up in `t.rawDocLoweringRules` again. Each
+  emitted document must parse as an ordinary `Application` — `LowerRaws` checks its
+  metadata, its apiVersion group (below), and its component and policy schemas — and
+  its traits are validated when `Transform` sees them.
 - **What is the exact registration and dispatch shape for `RawDocumentLoweringRule`?**
   A lookup keyed on the sniffed `(apiVersion, kind)` pair. Registration is
   `t.rawDocLoweringRules map[rawDocRuleKey]RawDocumentLoweringRule` (`transform.go`,
@@ -399,12 +412,11 @@ implementation. All three are answered by the shipped code:
   group-blind on purpose — `rawDocKey` and the `NameAllocator` key on
   `(namespace, [kind,] name)` — because one call yields one output slice for one
   consumer, in which a triple names one resource whatever group it was authored under.
-  Each raw seed carries the one group its rule claims (`loweringDoc.apiVersion`),
-  inherited by every descendant; a settled document may carry `SupportedAPIVersion` or
-  that group (`validateSettled` validates it under `SupportedAPIVersion` otherwise
-  unchanged), and a rule emitting into any other group — unclaimed, or claimed by a
-  different rule — fails with a `LoweringError` against the authored document, whose
-  chain names the raw step as `rawdocument/<apiVersion>/<kind>`. The in-transform path
+  Each raw seed carries the one group its rule claims (`loweringDoc.apiVersion`); a
+  document its rule emits may carry `SupportedAPIVersion` or that group
+  (`checkLoweredAPIVersion`), and a rule emitting into any other group — unclaimed, or
+  claimed by a different rule — fails with a `LoweringError` against the authored
+  document, whose chain names the raw step as `rawdocument/<apiVersion>/<kind>`. The in-transform path
   is unaffected: it gates on `SupportedAPIVersion` before any rule runs, never consults
   this registry, and its seed carries no allowed group, so a `DocumentLoweringRule`
   emitting a raw-claimed group during `Transform` is rejected exactly as before.
