@@ -399,3 +399,27 @@ func TestValidate_TopologySpreadTrait(t *testing.T) {
 		}
 	}
 }
+
+// TestValidate_ForceReplaceTrait guards that standalone validation accepts the
+// force-replace trait, which ForceReplaceHandler ships (go-kure/launcher#406), on
+// a job component — the case it exists for.
+func TestValidate_ForceReplaceTrait(t *testing.T) {
+	app := &Application{
+		APIVersion: SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   Metadata{Name: "test-app"},
+		Spec: ApplicationSpec{
+			Components: []Component{
+				{
+					Name:       "migrate",
+					Type:       "job",
+					Properties: map[string]any{"image": "ghcr.io/example/migrate:v1.0.0"},
+					Traits:     []Trait{{Type: "force-replace"}},
+				},
+			},
+		},
+	}
+	if err := validate(app); err != nil {
+		t.Errorf("unexpected error for force-replace trait: %v", err)
+	}
+}

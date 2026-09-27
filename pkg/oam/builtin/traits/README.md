@@ -23,9 +23,10 @@ handler reads from merged properties (e.g. `networkPolicy`, `allowedHostnameWild
 (`additionalProperties`) rather than modeled field-by-field, but strictness-sensitive traits are
 **closed**: the `rbac` rule object and the `fluxcd-patches` patch item and its `target` selector
 enumerate their fields and set `additionalProperties: false` (unknown keys rejected), matching the
-downstream single-owner adoption of these builtins. `prune-protection` and
-`topology-spread` accept no properties of their own and so declare an empty schema (the
-engine-owned `scope`, legal on every trait, is still accepted). Every property (including nested object fields and
+downstream single-owner adoption of these builtins. `prune-protection`, `topology-spread` and
+`force-replace` accept no properties of their own and so declare an empty schema (the
+engine-owned `scope`, legal on every trait, is still accepted); for `prune-protection` and
+`force-replace` any other authored key is a build error. Every property (including nested object fields and
 array item schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler
 API Reference.
 
@@ -74,6 +75,13 @@ preflight reject every valid use of the trait.
 | `fluxcd-patches` | Appends `Kustomization.spec.patches` | `patches[]` (`patch`, `target`) |
 | `fluxcd-postbuild` | Sets `Kustomization.spec.postBuild` | `substitute`, `substituteFrom[]` |
 | `prune-protection` | Adds `kustomize.toolkit.fluxcd.io/prune: disabled` | (no properties) |
+| `force-replace` | Adds `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a `job`'s pod template). Replacing a Job re-runs it and stops any run in progress. Opt-in: without the trait no object carries the annotation. | (no properties) |
+
+`prune-protection` and `force-replace` annotate every object the component itself generates,
+including resources a layout-augmenting component adds (see "Decorator forwarding" below), and
+nothing another trait appends to the bundle. `force-replace` sets its annotation after the
+component's own `Generate` returns, so it reaches a `job`'s Job even though that component clears
+the Job's annotations while building it.
 
 ## Capability-aware traits
 
@@ -592,10 +600,11 @@ effect (the values `ConfigMap`, or the hook-group repartitioning) the moment any
 A straight forward alone would also bypass every decorator's own processing for the resources
 the augmenter adds: those are created inside `AugmentLayout`, after every decorator's `Generate`
 has returned. So after the inner `AugmentLayout` returns, `augmentingDecorator` calls the outer
-decorator's unexported `postAugmentLayout` hook when it implements one. `prune-protection` is the
-one decorator that does: it annotates every resource on the per-app layout and its child layouts
-with `kustomize.toolkit.fluxcd.io/prune: disabled`, so the `helmchart` values `ConfigMap` is
-protected along with the `HelmRelease`. kure's walker calls `AugmentLayout` only on a layout it
+decorator's unexported `postAugmentLayout` hook when it implements one. `prune-protection` and
+`force-replace` are the two decorators that do: each annotates every resource on the per-app layout
+and its child layouts with its own annotation (`kustomize.toolkit.fluxcd.io/prune: disabled`,
+`kustomize.toolkit.fluxcd.io/force: enabled`), so the `helmchart` values `ConfigMap` is covered
+along with the `HelmRelease`. kure's walker calls `AugmentLayout` only on a layout it
 seeded with that one application's `Generate` output, so the trait's narrow scope is unchanged —
 sibling applications in the same bundle are never on that layout. The hook runs at every level of
 a decorator chain, so trait order does not matter. The other decorators (`configmap`,

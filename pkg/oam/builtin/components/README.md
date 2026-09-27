@@ -1654,40 +1654,38 @@ not part of either change.
   rule this component shares with every workload kind; see "The main container
   is named after the component" under "Common config" above.
 
-  **Known limitation — a `job` component is not updatable in place.** A Job's pod
+  **Updating a `job` in place needs the `force-replace` trait.** A Job's pod
   template is immutable: `ValidateJobSpecUpdate` runs `validatePodTemplateUpdate`
   on every update, and the only carve-out is for scheduling directives on a
-  suspended Job. Changing this component's `image`, `command`, `env` or any other
-  pod-level property therefore produces an apply failure on the *second*
-  delivery, not a re-run — the first apply creates the Job, and every later one
-  is rejected while the Job object still exists.
+  suspended Job. By default, changing this component's `image`, `command`, `env`
+  or any other pod-level property therefore produces an apply failure on the
+  *second* delivery, not a re-run — the first apply creates the Job, and every
+  later one is rejected while the Job object still exists. That default is
+  deliberate and unchanged (go-kure/launcher#406): replacing a Job re-runs it, and
+  for long batch work a re-run should be the author's explicit choice.
 
-  Flux's force-replace mechanism is the annotation
-  `kustomize.toolkit.fluxcd.io/force: enabled` on the object, which
-  kustomize-controller reads as its apply `ForceSelector` — it deletes and
-  recreates the resource on an immutable-field error, and so re-runs the Job,
-  including any in-flight run. **Annotating the component does not put it there.**
-  `createJob` clears the generated Job's annotations wholesale (`job.Annotations
-  = nil` — a no-op since go-kure/launcher#361, because kure's `Create<Kind>`
-  constructors now return TypeMeta and identity only and stamp no annotation of
-  their own; the assignment is kept so the field stays empty whatever a future
-  constructor does), and this component has no annotation passthrough — a component's own annotations are read
-  only for tier classification. Three paths that do work today:
+  To opt in, add the **`force-replace` trait** (no properties) to the component.
+  It stamps `kustomize.toolkit.fluxcd.io/force: enabled` on every object the
+  component emits — the Job and, when generated, its ServiceAccount — which kustomize-controller
+  reads as its apply `ForceSelector`: on an immutable-field error it deletes and
+  recreates the object, so an update re-runs the Job, **stopping any run in
+  progress**. The Job keeps the component's name, so the auto health check below
+  still targets it. The trait sets the annotation after `createJob` returns,
+  which matters because `createJob` clears the generated Job's annotations
+  wholesale (`job.Annotations = nil` — a no-op since go-kure/launcher#361,
+  because kure's `Create<Kind>` constructors now return TypeMeta and identity
+  only; the assignment is kept so the field stays empty whatever a future
+  constructor does). **Annotating the component itself still does not reach the
+  Job**: this component has no annotation passthrough, and a component's own
+  annotations are read only for tier classification. See the
+  [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
+  catalogue.
 
-  - Add the annotation with the **`fluxcd-patches` trait**, whose patches are
-    emitted on the generated Flux Kustomization's `spec.patches` and so land on
-    the Job before it is applied. Target `kind: Job` with the component's name.
-    This is the in-package answer, and it is a no-op for a consumer that emits no
-    Kustomization.
-  - Set **`spec.force: true` on the enclosing Flux Kustomization**, which
-    kustomize-controller applies to every resource it reconciles. Coarser, and set
-    outside the package.
-  - **Delete the Job** before redelivering.
-
-  Choosing a default — including whether this component should emit the force
-  annotation itself — is a design decision rather than a parser fix, and is
-  tracked in go-kure/launcher#406. `cronjob` does not have this problem: a
-  CronJob's `jobTemplate` is mutable, and each run creates a fresh Job.
+  Outside the package, `spec.force: true` on the enclosing Flux Kustomization
+  has the same effect for every resource it reconciles, and deleting the Job
+  before redelivering avoids the error without either. `cronjob` does not have
+  this problem: a CronJob's `jobTemplate` is mutable, and each run creates a
+  fresh Job.
 
   `suspend: true` suppresses the **auto health check** the transform pipeline
   would otherwise synthesize, the same seam `deployment` uses for `paused: true`
