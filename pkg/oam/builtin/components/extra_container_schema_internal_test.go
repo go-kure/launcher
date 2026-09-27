@@ -1,6 +1,7 @@
 package components
 
 import (
+	"maps"
 	"slices"
 	"testing"
 
@@ -38,6 +39,20 @@ func TestContainerEntrySchemaMatchesParser(t *testing.T) {
 			slices.Sort(want)
 			if !slices.Equal(got, want) {
 				t.Errorf("entry keys = %v\nparser accepts %v", got, want)
+			}
+			// A volumeDevices item is itself a closed key set
+			// (go-kure/launcher#385), pinned to volumeDeviceKeys.
+			dev := item.Properties["volumeDevices"].Items
+			if dev == nil {
+				t.Fatal("volumeDevices has no Items")
+			}
+			if dev.AdditionalProperties {
+				t.Error("volumeDevices item schema is open (AdditionalProperties: true)")
+			}
+			gotDev := slices.Sorted(maps.Keys(dev.Properties))
+			wantDev := slices.Sorted(slices.Values(volumeDeviceKeys))
+			if !slices.Equal(gotDev, wantDev) {
+				t.Errorf("volumeDevices item keys = %v\nparser accepts %v", gotDev, wantDev)
 			}
 		})
 	}

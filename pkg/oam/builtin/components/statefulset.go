@@ -158,7 +158,16 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.Volumes = parsed.Volumes
 	config.VolumeMounts = parsed.Mounts
+	config.VolumeDevices = parsed.Devices
 	config.PVCs = parsed.PVCs
+	// The main container's devices come from two parsers here — the claim
+	// templates and `volumes` — each of which checks only its own entries.
+	vctMounts, vctDevices := claimTemplateMountsAndDevices(vcts)
+	if err := checkMainContainerDevicePaths(
+		append(vctMounts, parsed.Mounts...), append(vctDevices, parsed.Devices...),
+	); err != nil {
+		return nil, err
+	}
 
 	initContainers, err := parseInitContainers(props)
 	if err != nil {
@@ -177,6 +186,9 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 		return nil, err
 	}
 	config.Sidecars = sidecars
+	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, vcts), initContainers, sidecars); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := parsePodSpec(props, false)
 	if err != nil {
@@ -213,6 +225,7 @@ type StatefulsetConfig struct {
 	VolumeClaimTemplates []VolumeClaimTemplate
 	Volumes              []corev1.Volume
 	VolumeMounts         []corev1.VolumeMount
+	VolumeDevices        []corev1.VolumeDevice
 	PVCs                 []PVCConfig
 	InitContainers       []InitContainerConfig
 	Sidecars             []SidecarContainerConfig
@@ -346,13 +359,33 @@ func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, 
 	return objects, nil
 }
 
-func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.StatefulSet, error) {
-	// Claim-template mounts precede the authored volume mounts, as before.
-	mounts := make([]corev1.VolumeMount, 0, len(c.VolumeClaimTemplates)+len(c.VolumeMounts))
-	for _, vct := range c.VolumeClaimTemplates {
+// claimTemplateMountsAndDevices splits the claim templates into the main
+// container's filesystem mounts and, for a volumeMode: Block template
+// (go-kure/launcher#385), its raw block devices. Each template has exactly one
+// of MountPath and DevicePath (parseVolumeClaimTemplates).
+func claimTemplateMountsAndDevices(vcts []VolumeClaimTemplate) ([]corev1.VolumeMount, []corev1.VolumeDevice) {
+	var mounts []corev1.VolumeMount
+	var devices []corev1.VolumeDevice
+	for _, vct := range vcts {
+		if vct.DevicePath != "" {
+			devices = append(devices, corev1.VolumeDevice{Name: vct.Name, DevicePath: vct.DevicePath})
+			continue
+		}
 		mounts = append(mounts, corev1.VolumeMount{Name: vct.Name, MountPath: vct.MountPath})
 	}
+	return mounts, devices
+}
+
+func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.StatefulSet, error) {
+	// Claim-template mounts (and devices) precede the authored volume ones, as
+	// before.
+	vctMounts, vctDevices := claimTemplateMountsAndDevices(c.VolumeClaimTemplates)
+	mounts := make([]corev1.VolumeMount, 0, len(vctMounts)+len(c.VolumeMounts))
+	mounts = append(mounts, vctMounts...)
 	mounts = append(mounts, c.VolumeMounts...)
+	devices := make([]corev1.VolumeDevice, 0, len(vctDevices)+len(c.VolumeDevices))
+	devices = append(devices, vctDevices...)
+	devices = append(devices, c.VolumeDevices...)
 	var ports []corev1.ContainerPort
 	if c.Port > 0 {
 		ports = []corev1.ContainerPort{{Name: "tcp", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
@@ -370,6 +403,7 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 		Lifecycle:       c.Lifecycle,
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    mounts,
+		VolumeDevices:   devices,
 	})
 	if err != nil {
 		return nil, err

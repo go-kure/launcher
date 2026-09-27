@@ -192,6 +192,7 @@ type InitContainerConfig struct {
 	EnvFrom         []corev1.EnvFromSource
 	Resources       ResourceRequirements
 	VolumeMounts    []corev1.VolumeMount
+	VolumeDevices   []corev1.VolumeDevice
 	SecurityContext *corev1.SecurityContext
 	WorkingDir      string
 }
@@ -206,6 +207,7 @@ type SidecarContainerConfig struct {
 	EnvFrom         []corev1.EnvFromSource
 	Resources       ResourceRequirements
 	VolumeMounts    []corev1.VolumeMount
+	VolumeDevices   []corev1.VolumeDevice
 	Ports           []corev1.ContainerPort
 	SecurityContext *corev1.SecurityContext
 	WorkingDir      string
@@ -226,11 +228,11 @@ type SidecarContainerConfig struct {
 var (
 	initContainerPropertyKeys = []string{
 		"name", "image", "command", "args", "env", "envFrom", "resources",
-		"volumeMounts", "securityContext", "workingDir",
+		"volumeMounts", "volumeDevices", "securityContext", "workingDir",
 	}
 	sidecarPropertyKeys = []string{
 		"name", "image", "command", "args", "env", "envFrom", "resources",
-		"volumeMounts", "securityContext", "workingDir", "ports", "probes", "lifecycle",
+		"volumeMounts", "volumeDevices", "securityContext", "workingDir", "ports", "probes", "lifecycle",
 	}
 )
 
@@ -265,12 +267,18 @@ type PVCConfig struct {
 	// and BuildPVC.
 	StorageClass              string
 	StorageClassExplicitEmpty bool
+	// VolumeMode is the authored volumeMode, empty when unauthored so the
+	// claim leaves it unset and the apiserver defaults it to Filesystem.
+	VolumeMode corev1.PersistentVolumeMode
 }
 
-// ParsedVolumes holds the results of parsing volume definitions from OAM properties.
+// ParsedVolumes holds the results of parsing volume definitions from OAM
+// properties. A pvc volume authored with volumeMode: Block reaches the main
+// container through Devices, every other volume through Mounts.
 type ParsedVolumes struct {
 	Volumes []corev1.Volume
 	Mounts  []corev1.VolumeMount
+	Devices []corev1.VolumeDevice
 	PVCs    []PVCConfig
 }
 
@@ -2358,6 +2366,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 	}
 	seenNames := map[string]bool{}
 	seenMountPaths := map[string]bool{}
+	seenDevicePaths := map[string]bool{}
 	for i, v := range volList {
 		v = nullElem(v)
 		m, ok := v.(map[string]any)
@@ -2381,7 +2390,24 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 		if err != nil {
 			return result, err
 		}
-		if !mountPresent {
+		// devicePath: a pvc volume authored with volumeMode: Block reaches the
+		// container as a raw block device instead of a filesystem mount
+		// (go-kure/launcher#385, see block_volumes.go). Exactly one of the two
+		// paths is authored; the pvc case below pairs devicePath with the mode.
+		devicePath, devicePresent, err := parseStringField(m, "devicePath", fmt.Sprintf("volume %q: devicePath", volName))
+		if err != nil {
+			return result, err
+		}
+		if devicePresent && volType != "pvc" {
+			return result, errors.Errorf("volume %q: devicePath is only valid on a pvc volume with volumeMode: Block, not on type %q", volName, volType)
+		}
+		if mountPresent && devicePresent {
+			return result, errors.Errorf("volume %q: mountPath and devicePath are mutually exclusive; author mountPath for a filesystem volume or devicePath for a volumeMode: Block claim", volName)
+		}
+		if !mountPresent && !devicePresent {
+			if volType == "pvc" {
+				return result, errors.Errorf("volume %q: mountPath is required (or devicePath for a volumeMode: Block claim)", volName)
+			}
 			return result, errors.Errorf("volume %q: mountPath is required", volName)
 		}
 		// Every corev1.Volume.Name, regardless of source type, must be a
@@ -2406,10 +2432,25 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 		// source as above) — two volumes with distinct names but the same
 		// mountPath both build successfully here but only the first mount is
 		// honored once admission's own uniqueness check would apply.
-		if seenMountPaths[mountPath] {
-			return result, errors.Errorf("volume %q: duplicate mountPath %q", volName, mountPath)
+		// ValidateVolumeDevices applies the same rule to devicePaths, and also
+		// refuses a devicePath that is a mountPath in the same container.
+		if mountPresent {
+			if seenMountPaths[mountPath] {
+				return result, errors.Errorf("volume %q: duplicate mountPath %q", volName, mountPath)
+			}
+			if seenDevicePaths[mountPath] {
+				return result, errors.Errorf("volume %q: mountPath %q is already a devicePath in this container", volName, mountPath)
+			}
+			seenMountPaths[mountPath] = true
+		} else {
+			if seenDevicePaths[devicePath] {
+				return result, errors.Errorf("volume %q: duplicate devicePath %q", volName, devicePath)
+			}
+			if seenMountPaths[devicePath] {
+				return result, errors.Errorf("volume %q: devicePath %q is already a mountPath in this container", volName, devicePath)
+			}
+			seenDevicePaths[devicePath] = true
 		}
-		seenMountPaths[mountPath] = true
 		roPtr, err := parseBoolField(m, "readOnly", fmt.Sprintf("volume %q: readOnly", volName))
 		if err != nil {
 			return result, err
@@ -2472,7 +2513,18 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			}
 			result.Volumes = append(result.Volumes, vol)
 		case "pvc":
-			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "readOnly", "size", "storageClass", "accessModes"}, fmt.Sprintf("volume %q: pvc", volName)); err != nil {
+			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "devicePath", "volumeMode", "readOnly", "size", "storageClass", "accessModes"}, fmt.Sprintf("volume %q: pvc", volName)); err != nil {
+				return result, err
+			}
+			var volumeMode corev1.PersistentVolumeMode
+			if vm, present, err := parseStringField(m, "volumeMode", fmt.Sprintf("volume %q: volumeMode", volName)); err != nil {
+				return result, err
+			} else if present {
+				if volumeMode, err = parseVolumeModeValue(vm, fmt.Sprintf("volume %q: volumeMode", volName)); err != nil {
+					return result, err
+				}
+			}
+			if err := checkVolumeModePairing(fmt.Sprintf("volume %q", volName), volumeMode, mountPresent, devicePath); err != nil {
 				return result, err
 			}
 			size, present, err := parseStringField(m, "size", fmt.Sprintf("volume %q: PVC size", volName))
@@ -2516,6 +2568,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				StorageClass:              storageClass,
 				StorageClassExplicitEmpty: storageClassExplicitEmpty,
 				AccessModes:               accessModes,
+				VolumeMode:                volumeMode,
 			})
 		case "configMap":
 			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "readOnly", "configMapName"}, fmt.Sprintf("volume %q: configMap", volName)); err != nil {
@@ -2562,6 +2615,12 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			return result, errors.Errorf("volume %q: unrecognized type %q", volName, volType)
 		}
 
+		if devicePresent {
+			// readOnly stays on the pod volume's claim source above; a
+			// VolumeDevice has no readOnly of its own.
+			result.Devices = append(result.Devices, corev1.VolumeDevice{Name: volName, DevicePath: devicePath})
+			continue
+		}
 		result.Mounts = append(result.Mounts, corev1.VolumeMount{
 			Name:      volName,
 			MountPath: mountPath,
@@ -2735,6 +2794,9 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 			return nil, err
 		}
 		ic.VolumeMounts = mounts
+		if ic.VolumeDevices, err = parseVolumeDeviceList(m, label, mounts); err != nil {
+			return nil, err
+		}
 		sc, err := parseSecurityContext(m)
 		if err != nil {
 			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
@@ -2814,6 +2876,9 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 			return nil, err
 		}
 		sc.VolumeMounts = mounts
+		if sc.VolumeDevices, err = parseVolumeDeviceList(m, label, mounts); err != nil {
+			return nil, err
+		}
 		if rawPorts, ok := m["ports"].([]any); ok {
 			for j, rp := range rawPorts {
 				rp = nullElem(rp)
@@ -4410,6 +4475,7 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 	for _, m := range ic.VolumeMounts {
 		kubernetes.AddContainerVolumeMount(container, m)
 	}
+	container.VolumeDevices = copyVolumeDevices(ic.VolumeDevices)
 	container.EnvFrom = copyEnvFrom(ic.EnvFrom)
 	container.WorkingDir = ic.WorkingDir
 	return container, nil
@@ -4451,6 +4517,7 @@ func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error)
 	for _, m := range sc.VolumeMounts {
 		kubernetes.AddContainerVolumeMount(container, m)
 	}
+	container.VolumeDevices = copyVolumeDevices(sc.VolumeDevices)
 	container.EnvFrom = copyEnvFrom(sc.EnvFrom)
 	container.WorkingDir = sc.WorkingDir
 	// DeepCopy for the same reuse reason as copyEnvFrom: a probe and a hook
@@ -4491,6 +4558,10 @@ type VolumeClaimTemplate struct {
 	Size         string
 	AccessModes  []string
 	MountPath    string
+	// DevicePath is where a volumeMode: Block claim appears in the main
+	// container as a raw block device. Exactly one of MountPath and
+	// DevicePath is set (go-kure/launcher#385).
+	DevicePath string
 	// Spec carries the rest of the corev1.PersistentVolumeClaimSpec
 	// projection (volumeclaim_spec.go); the five fields above predate it and
 	// keep their own shorthand spellings.
@@ -4611,6 +4682,11 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 			return nil, err
 		}
 		vct.MountPath = mountPath
+		devicePath, _, err := parseStringField(m, "devicePath", entryLabel+": devicePath")
+		if err != nil {
+			return nil, err
+		}
+		vct.DevicePath = devicePath
 		accessModes, err := parseAccessModes(m)
 		if err != nil {
 			return nil, errors.Wrapf(err, "volumeClaimTemplate %q", vct.Name)
@@ -4619,8 +4695,14 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		if vct.Name == "" {
 			return nil, errors.New("volumeClaimTemplate entry missing required field 'name'")
 		}
-		if vct.MountPath == "" {
-			return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'mountPath'", vct.Name)
+		// Exactly one of mountPath and devicePath (go-kure/launcher#385); the
+		// devicePath ⇔ volumeMode: Block pairing is checked once the spec,
+		// which carries volumeMode, is parsed below.
+		if vct.MountPath == "" && vct.DevicePath == "" {
+			return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'mountPath' (or 'devicePath' for a volumeMode: Block claim)", vct.Name)
+		}
+		if vct.MountPath != "" && vct.DevicePath != "" {
+			return nil, errors.Errorf("%s: mountPath and devicePath are mutually exclusive; author mountPath for a filesystem claim or devicePath for a volumeMode: Block claim", entryLabel)
 		}
 		// sizeAuthored comes from parseStringField's `present`, which is false
 		// for an empty string (common.go, parseStringField): `size: ""` is not
@@ -4631,6 +4713,13 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 			return nil, err
 		}
 		vct.Spec = spec
+		var volumeMode corev1.PersistentVolumeMode
+		if spec.VolumeMode != nil {
+			volumeMode = *spec.VolumeMode
+		}
+		if err := checkVolumeModePairing(entryLabel, volumeMode, vct.MountPath != "", vct.DevicePath); err != nil {
+			return nil, err
+		}
 		// A requested size is still mandatory, but the claim-spec projection
 		// gives it a second, longer spelling. Either satisfies the requirement;
 		// parseVolumeClaimSpec has already rejected authoring both.
@@ -4699,7 +4788,19 @@ func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev
 	claim := kubernetes.CreatePersistentVolumeClaim(pvc.Name, namespace)
 	claim.Labels = maps.Clone(labels)
 	claim.Annotations = nil
+	// Only an authored mode is written: an unauthored one stays nil and the
+	// apiserver defaults it to Filesystem, so a document that never mentions
+	// volumeMode keeps a byte-identical claim. Validated here as well as in the
+	// parsers because the pvc trait builds its claim through this function.
 	claim.Spec.VolumeMode = nil
+	switch pvc.VolumeMode {
+	case "":
+	case corev1.PersistentVolumeFilesystem, corev1.PersistentVolumeBlock:
+		mode := pvc.VolumeMode
+		claim.Spec.VolumeMode = &mode
+	default:
+		return nil, errors.Errorf("PVC %q: volumeMode: invalid value %q, want Filesystem or Block", pvc.Name, pvc.VolumeMode)
+	}
 	claim.Spec.Resources = corev1.VolumeResourceRequirements{
 		Requests: corev1.ResourceList{corev1.ResourceStorage: qty},
 	}

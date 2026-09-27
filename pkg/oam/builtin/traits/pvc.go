@@ -53,6 +53,7 @@ func (h *PVCHandler) PropertySchema() map[string]oam.PropertySchema {
 			Description: "Access modes requested for the volume.",
 			Items:       &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: []any{"ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"}, Description: "A volume access mode (ReadWriteOnce, ReadOnlyMany, ReadWriteMany, or ReadWriteOncePod)."},
 		},
+		"volumeMode": {Type: oam.PropertyTypeString, Enum: []any{"Filesystem", "Block"}, Description: "The claim's volumeMode. Omitted leaves it unset, which the apiserver defaults to Filesystem; Block provisions a raw block device."},
 	}
 }
 
@@ -113,12 +114,30 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 		}
 	}
 
+	// volumeMode (go-kure/launcher#385) is read strictly, unlike the older keys
+	// above: a wrongly typed or unknown value is an error, not an unset mode.
+	// Omitted or null leaves the claim's mode unset.
+	var volumeMode corev1.PersistentVolumeMode
+	if v, present := props["volumeMode"]; present && v != nil {
+		s, ok := v.(string)
+		if !ok {
+			return nil, errors.Errorf("volumeMode: must be a string, got %T", v)
+		}
+		switch mode := corev1.PersistentVolumeMode(s); mode {
+		case corev1.PersistentVolumeFilesystem, corev1.PersistentVolumeBlock:
+			volumeMode = mode
+		default:
+			return nil, errors.Errorf("volumeMode: invalid value %q, want Filesystem or Block", s)
+		}
+	}
+
 	return &PVCTraitConfig{
 		Name:          name,
 		componentName: app.Name,
 		Size:          size,
 		StorageClass:  storageClass,
 		AccessModes:   accessModes,
+		VolumeMode:    volumeMode,
 	}, nil
 }
 
@@ -129,6 +148,8 @@ type PVCTraitConfig struct {
 	Size          string
 	StorageClass  string
 	AccessModes   []string
+	// VolumeMode is the authored volumeMode, empty when unauthored.
+	VolumeMode corev1.PersistentVolumeMode
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource
@@ -180,6 +201,7 @@ func (c *PVCTraitConfig) Generate(app *stack.Application) ([]*client.Object, err
 		Size:         c.Size,
 		StorageClass: c.StorageClass,
 		AccessModes:  c.AccessModes,
+		VolumeMode:   c.VolumeMode,
 	}, app.Namespace, labels)
 	if err != nil {
 		return nil, err

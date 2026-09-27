@@ -134,6 +134,7 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 	}
 	config.Volumes = parsed.Volumes
 	config.VolumeMounts = parsed.Mounts
+	config.VolumeDevices = parsed.Devices
 	config.PVCs = parsed.PVCs
 
 	initContainers, err := parseInitContainers(props)
@@ -141,6 +142,9 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, err
 	}
 	config.InitContainers = initContainers
+	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, nil); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := parsePodSpec(props, false)
 	if err != nil {
@@ -175,6 +179,7 @@ type DaemonsetConfig struct {
 	Tolerations     []corev1.Toleration
 	Volumes         []corev1.Volume
 	VolumeMounts    []corev1.VolumeMount
+	VolumeDevices   []corev1.VolumeDevice
 	InitContainers  []InitContainerConfig
 	PVCs            []PVCConfig
 	// PodSpec holds the shared pod-level properties (see parsePodSpec).
@@ -327,6 +332,7 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 		Lifecycle:       c.Lifecycle,
 		SecurityContext: c.SecurityContext,
 		VolumeMounts:    c.VolumeMounts,
+		VolumeDevices:   c.VolumeDevices,
 	})
 	if err != nil {
 		return nil, err

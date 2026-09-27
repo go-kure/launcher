@@ -23,13 +23,14 @@ import (
 // `resources`, `volumeMode`, `dataSourceRef` and `volumeAttributesClassName`.
 // The ninth, `volumeName`, is rejected: see volumeClaimTemplateRejectedKeys.
 //
-// `mountPath` is not part of the claim spec at all — it is this repo's own key,
-// driving the container VolumeMount that pairs with the claim.
+// `mountPath` and `devicePath` are not part of the claim spec at all — they
+// are this repo's own keys, driving the container VolumeMount (or, for a
+// volumeMode: Block claim, VolumeDevice) that pairs with the claim.
 
 // volumeClaimTemplatePropertyKeys is the accepted key set of one
 // `volumeClaimTemplates` entry, pinned by the schema/parser parity test.
 var volumeClaimTemplatePropertyKeys = []string{
-	"name", "size", "mountPath", "storageClass", "accessModes",
+	"name", "size", "mountPath", "devicePath", "storageClass", "accessModes",
 	"selector", "resources", "volumeMode", "dataSourceRef", "volumeAttributesClassName",
 }
 
@@ -60,7 +61,7 @@ var (
 // `dataSource` must stay empty.
 //
 // `volumeMount` is not a claim-spec field at all; the container mount is
-// authored as `mountPath` on the same entry.
+// authored as `mountPath` (or `devicePath`) on the same entry.
 var volumeClaimTemplateRejectedKeys = map[string]string{
 	"volumeName":  "pre-binding a claim template to a named PersistentVolume would point every replica at the same volume; omit it and let the provisioner bind each ordinal",
 	"dataSource":  "superseded by dataSourceRef, which the apiserver mirrors back into dataSource when dataSourceRef sets no namespace (and requires dataSource to stay empty when it does); author dataSourceRef instead",
@@ -134,21 +135,14 @@ func parseVolumeClaimSpec(m map[string]any, label string, sizeAuthored bool) (Vo
 	if v, present, err := parseStringField(m, "volumeMode", label+".volumeMode"); err != nil {
 		return VolumeClaimSpecConfig{}, err
 	} else if present {
-		mode := corev1.PersistentVolumeMode(v)
-		// Block is a valid PersistentVolumeMode that this handler cannot render.
-		// Every volumeClaimTemplates entry requires a `mountPath`
-		// (parseVolumeClaimTemplates) and the statefulset kind turns each one
-		// into a filesystem corev1.VolumeMount unconditionally; a Block volume
-		// must instead be consumed through `volumeDevices`/`devicePath`, which
-		// this handler does not emit. The two objects are validated separately,
-		// so nothing rejects the pair: the StatefulSet and its claims are
-		// created and the pods then fail at mount time. Rejecting here reports
-		// it at build time instead. Raw block support is go-kure/launcher#385.
-		if mode == corev1.PersistentVolumeBlock {
-			return VolumeClaimSpecConfig{}, errors.Errorf("%s.volumeMode: Block is not supported — this kind mounts every claim template at its `mountPath` as a filesystem, and a Block volume must be consumed through volumeDevices/devicePath instead. Omit volumeMode or set Filesystem", label)
-		}
-		if mode != corev1.PersistentVolumeFilesystem {
-			return VolumeClaimSpecConfig{}, errors.Errorf("%s.volumeMode: invalid value %q, want Filesystem", label, v)
+		// Both modes are accepted since go-kure/launcher#385. A Block claim
+		// template is consumed through `devicePath` rather than `mountPath`;
+		// parseVolumeClaimTemplates enforces that pairing once this spec is
+		// parsed (checkVolumeModePairing), so a Block claim can no longer be
+		// built next to a filesystem mount the pods would fail on.
+		mode, err := parseVolumeModeValue(v, label+".volumeMode")
+		if err != nil {
+			return VolumeClaimSpecConfig{}, err
 		}
 		c.VolumeMode = &mode
 	}
@@ -548,7 +542,7 @@ func schemaVolumeClaimSpec() map[string]oam.PropertySchema {
 				"limits":   {Type: oam.PropertyTypeObject, Description: "Upper bound on storage; honoured only by provisioners that implement it.", Properties: schemaClaimStorage("Upper bound on the volume's size. Must be positive — launcher rejects a non-positive limit as an authoring mistake, though the apiserver never reads this field.")},
 			},
 		},
-		"volumeMode": {Type: oam.PropertyTypeString, Enum: []any{"Filesystem"}, Description: "How the volume is consumed. Only Filesystem is accepted: this kind mounts every claim template at its `mountPath`, and the API's other mode, Block, must be consumed through volumeDevices/devicePath, which this kind does not emit (go-kure/launcher#385)."},
+		"volumeMode": {Type: oam.PropertyTypeString, Enum: []any{"Filesystem", "Block"}, Description: "How the volume is consumed. Filesystem (the apiserver default when omitted) pairs with `mountPath`; Block attaches the claim as a raw block device and pairs with `devicePath` — authoring either path with the other mode is rejected."},
 		"dataSourceRef": {
 			Type:        oam.PropertyTypeObject,
 			Description: "Object to populate the volume from — a VolumeSnapshot, another PVC, or a custom populator. When no `namespace` is set the apiserver mirrors this into the superseded `dataSource` field, which is why that one is not authorable here; when a `namespace` is set it does not mirror, and `dataSource` must stay empty.",
