@@ -56,28 +56,27 @@ type rawDocKey struct {
 // the bytes it carries are YAML, which every consumer of this seam decodes with a YAML
 // decoder and of which JSON is a subset.
 //
-// ctx is threaded through because the shared fixpoint's later rounds lower components,
-// traits and policies exactly as the in-transform path does and read ctx.Capabilities
-// there. A caller that has not yet evaluated a ClusterProfile passes what it has; a
-// trait rule declaring CapabilityRequired() then fails with ErrMissingCapability, the
-// same failure the in-transform path produces for the same input. Making capability
-// evaluation available at this seam is the consumer's problem, not this function's.
+// LowerRaws runs round 0 and nothing after it (go-kure/launcher#357): each claimed
+// document goes through its RawDocumentLoweringRule once, and what the rule emits is
+// returned as-is — no component, trait, policy or document rule runs on it here, and
+// nothing in it is sealed. The raw-rule contract follows from that: a raw rule
+// rewrites authored input; it does not lower. Its output re-enters the caller's parse
+// and Transform/TransformWithPolicy exactly as if a person had authored it, so every
+// in-transform rule, capability merge, platform-reserved check and post-settle
+// validation runs there, once, with the full MaxLoweringDepth budget. A rule that
+// copies ClusterProfile capability rendering into a trait it emits is therefore
+// writing platform-reserved values into authored input, and Transform rejects them
+// with ErrPlatformReserved; emit the trait as a person would write it and let
+// Transform merge the capability.
 //
-// KNOWN LIMITATION (round-9-batch-2 Codex finding, unfixed — no RawDocumentLoweringRule
-// ships in this package yet, so nothing currently triggers it): Trait.sealed is
-// unexported, so yaml.Marshal silently drops it from the returned bytes. If a claimed
-// raw document's shared fixpoint round (lowerRawOnce, then the ordinary
-// component/trait dispatch it feeds into) seals a synthesized terminal trait, that
-// seal is lost the moment this function serializes its output. A caller that re-parses
-// the returned bytes and then calls Transform/TransformWithPolicy on the SAME
-// Transformer will have applyTraits (transform.go) treat that trait as unsealed and
-// perform a second, redundant capability-rendering merge — or fail with
-// ErrMissingCapability for a capability the raw-lowering rule already accounted for.
-// Before registering a RawDocumentLoweringRule whose LowerDocument (directly or via a
-// component/trait-position rule dispatched during the same call) can emit a sealed
-// trait, this must be fixed: either preserve sealed state across the round-trip, or
-// defer all trait-position capability processing for a raw-entered document until the
-// caller's own post-parse Transform call.
+// ctx.Capabilities reaches the rule as LoweringContext.Capabilities, for a rule whose
+// rewrite depends on what the platform offers. It is not an invitation to render.
+//
+// What LowerRaws still checks itself, because the caller's parser cannot: each
+// claimed document's metadata, duplicate authored identities across the batch,
+// generated-name collisions (pass-through Applications included), the arity and
+// component/policy property schemas of what a rule emits, and that every emitted
+// document carries SupportedAPIVersion or the one group its rule was matched under.
 func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([]json.RawMessage, error) {
 	if len(t.rawDocLoweringRules) == 0 {
 		return raws, nil // raw-path analogue of the pointer-identity guarantee: nothing to do, nothing touched
@@ -87,11 +86,7 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 	seenKeys := make(map[rawDocKey]int, len(raws))
 	var seed []loweringDoc
 	// preReserved claims every pass-through document's own identity against the shared
-	// NameAllocator before any rule runs — see runLowering's preReserved parameter. A
-	// pass-through document is never decoded and never joins seed, so without this it
-	// would never touch the allocator at all: a claimed raw document's rule could then
-	// generate a child document sharing a pass-through's exact (namespace, name), and
-	// LowerRaws would return both, an undetected duplicate identity.
+	// NameAllocator before any rule runs — see lowerRawRound.
 	var preReserved []reservedIdentity
 	groups := t.rawClaimedGroups()
 	for i, raw := range raws {
@@ -200,8 +195,8 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 			// lctx — exactly as the kind probe supplies dispatch before decoding.
 			origin: origin,
 			slot:   i,
-			// The group this seed and every document descending from it may
-			// settle under besides SupportedAPIVersion — see loweringDoc.apiVersion.
+			// The group every document this seed's rule emits may carry besides
+			// SupportedAPIVersion — see loweringDoc.apiVersion.
 			// This is the registry key that matched (env.APIVersion), NOT a second
 			// call to the rule's RawDocumentAPIVersion() hook: a stateful rule could answer
 			// differently now than at registration and thereby authorize a group
@@ -213,15 +208,15 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		return raws, nil
 	}
 
-	settled, err := t.runLowering(seed, ctx, preReserved)
+	emitted, err := t.lowerRawRound(seed, ctx, preReserved)
 	if err != nil {
 		return nil, err
 	}
 
-	// Splice on slot — not on Origin, and not on position within settled. Group
+	// Splice on slot — not on Origin, and not on position within emitted. Group
 	// first, preserving each slot's own emission order.
 	bySlot := make(map[int][]loweringDoc, len(seed))
-	for _, d := range settled {
+	for _, d := range emitted {
 		bySlot[d.slot] = append(bySlot[d.slot], d)
 	}
 	out := make([]json.RawMessage, 0, len(raws))
@@ -241,16 +236,61 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 	return out, nil
 }
 
-// lowerRawOnce is round 0 for a raw-entered document: it decodes the bytes with the
-// registered rule's OWN target type, then calls that rule's LowerDocument — the same
-// two calls lowerDocumentOnce's document-rule branch makes, differing only in where
-// the decode target comes from. It always reports "changed": a raw seed entry is by
-// definition unfinished.
+// lowerRawRound is LowerRaws' whole engine: round 0 over every claimed seed, sharing
+// one NameAllocator so generated-name collisions are detected across the batch, and
+// then nothing — the emitted documents are not lowered further here (see LowerRaws).
+//
+// preReserved claims every pass-through document's own identity against the
+// allocator before any rule runs. A pass-through document is never decoded and never
+// joins seed, so it would otherwise never touch the allocator at all: a claimed raw
+// document's rule could then generate a child document sharing a pass-through's exact
+// (namespace, name) — the collision API used correctly — and LowerRaws would return
+// two Application entries with the same identity.
+//
+// Each emitted document must carry SupportedAPIVersion or the group its seed was
+// matched under (loweringDoc.apiVersion): a rule emitting into any other group is a
+// rule bug, reported here against the authored document rather than left to a caller's
+// parser that cannot say which rule produced it.
+func (t *Transformer) lowerRawRound(seed []loweringDoc, ctx TransformContext, preReserved []reservedIdentity) ([]loweringDoc, error) {
+	namer := NewNameAllocator()
+	for _, r := range preReserved {
+		if err := namer.Reserve(r.name, r.origin); err != nil {
+			return nil, &LoweringError{Origin: r.origin, Cause: err}
+		}
+	}
+	namer.round = 0
+
+	var chain []LoweringStep
+	out := make([]loweringDoc, 0, len(seed))
+	for _, d := range seed {
+		emitted, steps, err := t.lowerRawOnce(d, ctx, namer, 0)
+		chain = append(chain, steps...)
+		if err != nil {
+			return nil, &LoweringError{Origin: d.origin, Chain: chain, Cause: err}
+		}
+		for _, doc := range emitted {
+			if err := checkLoweredAPIVersion(doc, d.apiVersion); err != nil {
+				return nil, &LoweringError{Origin: d.origin, Chain: chain, Cause: err}
+			}
+			out = append(out, loweringDoc{doc: doc, origin: d.origin, slot: d.slot, apiVersion: d.apiVersion})
+		}
+	}
+	return out, nil
+}
+
+// lowerRawOnce is round 0 for a raw-entered document, and the only round LowerRaws
+// runs: it decodes the bytes with the registered rule's OWN target type, then calls
+// that rule's LowerDocument — the same two calls lowerDocumentOnce's document-rule
+// branch makes, differing only in where the decode target comes from.
+//
+// Nothing it returns is sealed or origin-stamped. Both are unexported and would not
+// survive LowerRaws' serialization, and neither is wanted: a raw rule rewrites
+// authored input, so its output is authored input to the caller's Transform, which
+// stamps provenance and applies capability rendering itself.
 //
 // lctx.Document is nil here, and a RawDocumentLoweringRule must not read it: the
 // document IS the decoded value passed as LowerDocument's first argument, and no
-// *Application form of it exists yet. From round 1 on, every descendant is an ordinary
-// *Application and lowerDocumentOnce populates lctx.Document as usual.
+// *Application form of it exists yet.
 func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *NameAllocator, round int) ([]*Application, []LoweringStep, error) {
 	decoded, err := d.rule.DecodeDocument(d.raw)
 	if err != nil {
@@ -267,74 +307,23 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 	if err := validatePositionResult(PositionDocument, d.origin, result); err != nil {
 		return nil, nil, err
 	}
-	// Rule is re-derived here — see Origin.Rule's doc comment. d.origin is the raw
-	// seed's own authored origin (lowerRawOnce is always round 0 for a raw entry — see
-	// the doc comment above — so d.origin never itself carries a prior Rule value).
-	// label is "rawdocument", not string(PositionDocument): d.rule is a
-	// RawDocumentLoweringRule, not a DocumentLoweringRule, and the LoweringStep this
-	// same function builds below (for the error-path chain) already used
-	// "rawdocument/"+d.origin.DocumentKind for exactly this distinction before
-	// Origin.Rule existed — the two provenance surfaces must agree on which rule
-	// produced a raw-entered document, not just on which POSITION-shaped
-	// LoweringResult it returned (both are validated as PositionDocument regardless).
-	// The type name is the registry pair "<apiVersion>/<kind>", not the kind alone:
-	// two raw rules may claim one kind under different groups, and the kind by itself
-	// would then not say which rule fired.
+	// The chain names a raw step "rawdocument/<apiVersion>/<kind>": label
+	// "rawdocument", not string(PositionDocument), because d.rule is a
+	// RawDocumentLoweringRule, not a DocumentLoweringRule (both are validated as
+	// PositionDocument regardless); and the registry pair, not the kind alone,
+	// because two raw rules may claim one kind under different groups.
 	ruleID := loweringRuleIdentity("rawdocument", d.apiVersion+"/"+d.origin.DocumentKind, d.rule)
 	emitted := make([]*Application, len(result.Documents))
 	names := make([]string, len(result.Documents))
 	for i := range result.Documents {
-		origin := d.origin
-		origin.Rule = ruleID
-		result.Documents[i].origin = &origin
 		emitted[i] = &result.Documents[i]
 		names[i] = result.Documents[i].Metadata.Name
+		// Component and policy properties are checked against their target's schema
+		// now, so a malformed emission is attributed to the authored raw document.
+		// Traits are not: a trait the rule wrote is authored input to Transform,
+		// which validates it — and enforces its platform-reserved keys — there.
 		if err := t.validateEmittedDocument(emitted[i]); err != nil {
 			return nil, nil, errors.Wrapf(err, "%s", d.origin)
-		}
-		// Round-12-batch-2 Codex finding (lowering_raw.go, "Seal traits emitted
-		// directly by raw rules"): lowerDocumentOnce's document-rule branch seals
-		// every freshly synthesized nested trait via sealNestedTraitsInDocument, but
-		// this raw-entry counterpart never did — a terminal trait nested inside a
-		// RawDocumentLoweringRule's emitted Application flowed through unsealed, so
-		// applyTraits later treated it as authored and merged capability rendering
-		// into it a second time (or rejected it for a capability it was never meant
-		// to require). Pass forwarded=nil (sealEmittedNestedTraits' documented "no
-		// such trait" case) to seal and validate every one, and stamp per-component/
-		// per-policy Origin at the same time — the identical Origin-doctrine gap
-		// round-12-batch-1 fixed for lowerDocumentOnce's own document-rule branch
-		// (lowering.go:729-757), safe unconditionally here for the same reason:
-		// origin.Document/DocumentKind/Namespace are the stable authored-root values
-		// already computed above.
-		//
-		// KNOWN LIMITATION (round-14 Codex finding "Preserve authored traits exposed
-		// by raw decoders", deferred — no RawDocumentLoweringRule ships in this
-		// package yet, so nothing currently triggers it): forwarded=nil is wrong for
-		// a rule whose DecodeDocument target embeds real, authored oam.Trait values
-		// (e.g. its own Traits field, decoded straight from YAML) that LowerDocument
-		// then copies unchanged into the emitted component. Unlike
-		// sealNestedTraitsInDocument's DocumentLoweringRule case, this function has
-		// no typed "original components" to pointer-compare against — decoded is
-		// `any`, defined entirely by the rule — so there is no forwarded slice to
-		// pass today. A rule that legitimately forwards an authored, capability-aware
-		// trait (e.g. expose) this way would have it wrongly sealed here, skipping
-		// the capability merge it still needs. Before registering a
-		// RawDocumentLoweringRule that forwards authored traits, this needs either an
-		// optional interface the decode target can implement to expose its forwarded
-		// traits (mirroring isForwardedTrait's pointer-identity check), or an
-		// equivalent mechanism — not a blanket forwarded=nil.
-		for j := range result.Documents[i].Spec.Components {
-			comp := &result.Documents[i].Spec.Components[j]
-			compOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: j, Rule: origin.Rule}
-			comp.origin = &compOrigin
-			if err := t.sealEmittedNestedTraits(comp, compOrigin, nil); err != nil {
-				return nil, nil, errors.Wrapf(err, "%s", d.origin)
-			}
-		}
-		for k := range result.Documents[i].Spec.Policies {
-			pol := &result.Documents[i].Spec.Policies[k]
-			polOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, PolicyName: pol.Name, Index: k, Rule: origin.Rule}
-			pol.origin = &polOrigin
 		}
 	}
 	step := LoweringStep{

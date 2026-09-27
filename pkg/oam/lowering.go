@@ -75,11 +75,10 @@ type Origin struct {
 	// carrying this Origin: "<label>/<type>" (e.g. "trait/expose"), suffixed with
 	// "@<version>" when the rule also implements ContractDescriber (handler.go) and
 	// declares a non-empty ContractMetadata().Version (e.g. "trait/expose@v1"). label
-	// is "document"/"component"/"trait"/"policy" (the Position the rule occupies) for
-	// every ordinary lowering rule, or "rawdocument" specifically for a
-	// RawDocumentLoweringRule dispatched via LowerRaws (lowering_raw.go) — matching
-	// the rule-class label LoweringStep.Rule already used for that path, so the two
-	// provenance surfaces agree on which rule produced a raw-entered document. ""
+	// is "document"/"component"/"trait"/"policy" (the Position the rule occupies).
+	// A RawDocumentLoweringRule never stamps an Origin: LowerRaws serializes its
+	// output as authored input, and only the LoweringStep.Rule of its step in a
+	// LoweringError chain names it, as "rawdocument/<apiVersion>/<kind>". ""
 	// means the element was never itself the direct output of a lowering rule
 	// invocation — it is exactly as authored, or a descendant carried through
 	// untouched (e.g. a component forwarded verbatim by a document rule — see
@@ -286,7 +285,8 @@ type LoweringContext struct {
 type NameAllocator struct {
 	taken map[string]nameClaim
 	// round is the fixpoint round currently being processed, set by runLowering
-	// before it dispatches any rule in that round. Recorded on every claim purely
+	// before it dispatches any rule in that round (lowerRawRound, which runs round 0
+	// only, sets 0). Recorded on every claim purely
 	// to make Reserve's error message more specific (same round vs. an earlier
 	// round) — see Reserve. It is NOT used to treat any repeat claim as a
 	// legitimate no-op: Origin carries no per-sibling discriminator (two elements
@@ -319,8 +319,8 @@ func NewNameAllocator() *NameAllocator {
 	return &NameAllocator{taken: make(map[string]nameClaim)}
 }
 
-// reservedIdentity is one pre-existing document identity runLowering claims against its
-// NameAllocator before any rule runs — see runLowering's preReserved parameter.
+// reservedIdentity is one pre-existing document identity lowerRawRound claims against
+// its NameAllocator before any rule runs — see lowerRawRound's preReserved parameter.
 type reservedIdentity struct {
 	name   string
 	origin Origin
@@ -477,6 +477,15 @@ type DocumentLoweringRule interface {
 // fields. Such a document cannot survive ParseWithExtraTypes at all, so this rule is
 // reachable ONLY from LowerRaws, which hands it the authored bytes and lets it choose
 // its own decode target.
+//
+// Contract: a raw rule rewrites authored input; it does not lower. LowerRaws runs it
+// once (round 0) and returns what it emits unsealed and otherwise untouched, and the
+// caller's parse and Transform then treat that output exactly as if a person had
+// authored it. Emit the Application a person would write — for example an expose
+// trait with only its hostnames — and let Transform run the in-transform rules and
+// merge ClusterProfile capability rendering. A rule that copies capability rendering
+// into what it emits is writing platform-reserved values into authored input, and
+// Transform rejects them with ErrPlatformReserved.
 //
 // This interface deliberately does NOT embed DocumentLoweringRule. The two
 // LowerDocument signatures differ, and Go forbids two methods of the same name on one
@@ -818,16 +827,15 @@ func (t *Transformer) LowerableTypes() LowerableTypes {
 	return lt
 }
 
-// loweringDoc is one in-flight document inside a fixpoint run.
+// loweringDoc is one in-flight document inside a lowering run.
 //
-// Exactly one of doc and raw is set. raw is non-nil only for a seed entry that
-// entered through LowerRaws and has not been decoded yet: its decode + first
-// LowerDocument call happens in round 0 of the loop below, the same round in
-// which an already-parsed document's own non-terminal-Kind dispatch happens.
-// There is deliberately no pre-round outside the loop, so a raw-entered document
-// gets exactly the same MaxLoweringDepth budget as an in-transform one.
+// Exactly one of doc and raw is set. raw is non-nil only for a LowerRaws seed entry
+// that has not been decoded yet; lowerRawRound decodes and lowers it in round 0, the
+// only round LowerRaws runs, and its output is a doc-carrying loweringDoc that is
+// serialized, never handed to runLowering. runLowering therefore only ever sees
+// doc-carrying entries.
 type loweringDoc struct {
-	doc  *Application            // set once parsed (in-transform) or decoded (round 0)
+	doc  *Application            // set once parsed (in-transform) or emitted by a raw rule
 	raw  []byte                  // set only on an undecoded LowerRaws seed entry
 	rule RawDocumentLoweringRule // the rule claiming raw's kind; set iff raw != nil
 
@@ -841,41 +849,25 @@ type loweringDoc struct {
 	// unique per raw input, whereas two raw inputs could share an Origin
 	// (same authored name and kind).
 	slot int
-	// apiVersion is the ONE API group, besides SupportedAPIVersion, this document
-	// may settle under: the registry key its raw seed was dispatched under (the
+	// apiVersion is the ONE API group, besides SupportedAPIVersion, a document a raw
+	// rule emits may carry: the registry key its raw seed was dispatched under (the
 	// envelope's apiVersion, never a re-evaluation of the rule's hook — that is
-	// evaluated exactly once, at registration), inherited verbatim by every
-	// descendant. Empty on the
-	// in-transform path, which is single-group by construction. Carried per
-	// document rather than read from the transformer's raw registry so a
-	// DocumentLoweringRule dispatched during Transform can never settle under a
-	// group that merely happens to be registered on the same Transformer for the
-	// raw entry point (see validateSettled).
+	// evaluated exactly once, at registration). Empty on the in-transform path,
+	// which is single-group by construction. Carried per document rather than read
+	// from the transformer's raw registry so a DocumentLoweringRule dispatched during
+	// Transform can never settle under a group that merely happens to be registered
+	// on the same Transformer for the raw entry point (see checkLoweredAPIVersion).
 	apiVersion string
 }
 
-// runLowering is the ONE fixpoint implementation in this package. Both entry points
-// call it exactly once per invocation, so one NameAllocator (D2), one expansion chain
-// and one MaxLoweringDepth budget (D7) are shared by every document in the call,
-// siblings from different raw inputs included. seed must be non-empty.
-//
-// preReserved claims every identity in it against namer before any rule runs. LowerRaws
-// uses this to register each pass-through document's own (namespace, name) — a document
-// it never decodes or hands to a rule, so it would otherwise never touch namer at all.
-// Without this, a claimed raw document's rule could generate a child document sharing a
-// pass-through document's exact identity: namer.Reserve would see no prior claim for
-// that key and let it through, and LowerRaws would then return two Application entries
-// with the same (namespace, name) — a real duplicate-identity output, not merely a
-// missed diagnostic, even though the generating rule used the collision API correctly.
-// t.lower has no pass-through concept (a single in-transform document has nothing else
-// in its batch to collide with), so it always passes nil.
-func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext, preReserved []reservedIdentity) ([]loweringDoc, error) {
+// runLowering is the in-transform fixpoint: t.lower calls it exactly once per
+// Transform, so one NameAllocator (D2), one expansion chain and one MaxLoweringDepth
+// budget (D7) are shared by every document the authored one expands into. seed must be
+// non-empty. LowerRaws does not use it: a raw rule's output is authored input to a
+// later Transform, which runs this fixpoint over it with a full budget of its own
+// (go-kure/launcher#357).
+func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext) ([]loweringDoc, error) {
 	namer := NewNameAllocator()
-	for _, r := range preReserved {
-		if err := namer.Reserve(r.name, r.origin); err != nil {
-			return nil, &LoweringError{Origin: r.origin, Cause: err}
-		}
-	}
 	var chain []LoweringStep
 	cur := seed
 	culprit := seed[0].origin // first document still expanding in the latest round
@@ -890,18 +882,7 @@ func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext, preR
 		next := make([]loweringDoc, 0, len(cur))
 		changed := false
 		for _, d := range cur {
-			var (
-				expanded   []*Application
-				docChanged bool
-				steps      []LoweringStep
-				err        error
-			)
-			if d.raw != nil {
-				expanded, steps, err = t.lowerRawOnce(d, ctx, namer, round)
-				docChanged = true
-			} else {
-				expanded, docChanged, steps, err = t.lowerDocumentOnce(d.doc, ctx, namer, round)
-			}
+			expanded, docChanged, steps, err := t.lowerDocumentOnce(d.doc, ctx, namer, round)
 			chain = append(chain, steps...)
 			if err != nil {
 				// Attribute to the document whose expansion actually failed, never
@@ -946,8 +927,9 @@ func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext, preR
 // a terminal type whether or not a CapabilityDefinition matches it.
 //
 // allowedAPIVersion is the one API group besides SupportedAPIVersion doc may settle
-// under (loweringDoc.apiVersion): the group its raw seed's rule claims, or "" on the
-// in-transform path.
+// under (loweringDoc.apiVersion). runLowering serves only the in-transform path, whose
+// seed carries none, so it is "" there; LowerRaws applies the same group rule to what
+// a raw rule emits through checkLoweredAPIVersion directly.
 func (t *Transformer) validateSettled(doc *Application, allowedAPIVersion string) error {
 	customTraitTypes := make(map[string]bool, len(t.capabilityDefs)+len(t.traitHandlers))
 	for name := range t.capabilityDefs {
@@ -978,33 +960,44 @@ func (t *Transformer) validateSettled(doc *Application, allowedAPIVersion string
 	for name := range t.componentHandlers {
 		customComponentTypes[name] = true
 	}
-	// A raw-entered document legitimately settles under the API group its
-	// RawDocumentLoweringRule claims (RawDocumentAPIVersioner): the consumer that
-	// owns that group is the one parsing LowerRaws' output, and it would reject
-	// SupportedAPIVersion exactly as this package rejects the consumer's group.
-	// validateWithExtraTypes enforces SupportedAPIVersion because it also serves
-	// authored input; for a settled document accept that ONE group as well,
-	// validating a shallow copy under SupportedAPIVersion so every other check
-	// runs unchanged. The allowed group travels with the document
-	// (loweringDoc.apiVersion), never from t.rawDocLoweringRules: the in-transform
-	// path passes "" and so stays exactly as strict as before — a
-	// DocumentLoweringRule dispatched during Transform that emits a foreign group
-	// is rejected here even when a raw rule for that group is registered on the
-	// same Transformer, and a raw rule claiming group G may settle only under G
-	// or SupportedAPIVersion, never under some other rule's group.
+	// Accept allowedAPIVersion as well as SupportedAPIVersion (checkLoweredAPIVersion),
+	// validating a shallow copy under SupportedAPIVersion so every other check runs
+	// unchanged — validateWithExtraTypes enforces SupportedAPIVersion because it also
+	// serves authored input.
+	if err := checkLoweredAPIVersion(doc, allowedAPIVersion); err != nil {
+		return err
+	}
 	if doc.APIVersion != SupportedAPIVersion {
-		if allowedAPIVersion == "" || doc.APIVersion != allowedAPIVersion {
-			want := fmt.Sprintf("expected %q", SupportedAPIVersion)
-			if allowedAPIVersion != "" {
-				want = fmt.Sprintf("expected %q or %q (the group the claiming RawDocumentLoweringRule declares)", SupportedAPIVersion, allowedAPIVersion)
-			}
-			return oamValidationError("apiVersion", fmt.Sprintf("unsupported apiVersion %q on lowered document, %s", doc.APIVersion, want))
-		}
 		normalized := *doc
 		normalized.APIVersion = SupportedAPIVersion
 		doc = &normalized
 	}
 	return validateWithExtraTypes(doc, customTraitTypes, customComponentTypes, LowerableTypes{})
+}
+
+// checkLoweredAPIVersion accepts a lowered document under SupportedAPIVersion or
+// allowedAPIVersion (loweringDoc.apiVersion) and rejects any other group. A document a
+// RawDocumentLoweringRule emits legitimately carries the API group that rule claims
+// (RawDocumentAPIVersioner): the consumer that owns that group is the one parsing
+// LowerRaws' output, and it would reject SupportedAPIVersion exactly as this package
+// rejects the consumer's group. The allowed group travels with the document, never
+// from t.rawDocLoweringRules: the in-transform path passes "" and so stays exactly as
+// strict as before — a DocumentLoweringRule dispatched during Transform that emits a
+// foreign group is rejected even when a raw rule for that group is registered on the
+// same Transformer, and a raw rule claiming group G may emit only G or
+// SupportedAPIVersion, never some other rule's group.
+func checkLoweredAPIVersion(doc *Application, allowedAPIVersion string) error {
+	if doc.APIVersion == SupportedAPIVersion {
+		return nil
+	}
+	if allowedAPIVersion != "" && doc.APIVersion == allowedAPIVersion {
+		return nil
+	}
+	want := fmt.Sprintf("expected %q", SupportedAPIVersion)
+	if allowedAPIVersion != "" {
+		want = fmt.Sprintf("expected %q or %q (the group the claiming RawDocumentLoweringRule declares)", SupportedAPIVersion, allowedAPIVersion)
+	}
+	return oamValidationError("apiVersion", fmt.Sprintf("unsupported apiVersion %q on lowered document, %s", doc.APIVersion, want))
 }
 
 // lower runs the recursive fixpoint expansion over app (D1/D2): every round, every
@@ -1025,7 +1018,7 @@ func (t *Transformer) lower(app *Application, ctx TransformContext) ([]*Applicat
 		origin: Origin{Document: app.Metadata.Name, DocumentKind: app.Kind, Namespace: app.Metadata.Namespace},
 		slot:   0,
 	}}
-	settled, err := t.runLowering(seed, ctx, nil)
+	settled, err := t.runLowering(seed, ctx)
 	if err != nil {
 		return nil, err
 	}

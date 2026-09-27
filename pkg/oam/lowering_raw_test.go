@@ -507,62 +507,113 @@ func TestLowerRaws_SlotSplicePreservesOrder(t *testing.T) {
 	}
 }
 
-// TestLowerRaws_MidLoopErrorNamesTheRightDocument proves per-document attribution for
-// the first failure mode: an error raised mid-fixpoint by a rule, in a round after
-// both raw inputs decoded and lowered successfully.
-func TestLowerRaws_MidLoopErrorNamesTheRightDocument(t *testing.T) {
+// parseLoweredOutput parses one LowerRaws output document the way a consumer does
+// before handing it to Transform: the ordinary strict parser, admitting the custom
+// trait handlers and the types the same transformer's in-transform rules claim.
+func parseLoweredOutput(t *testing.T, tr *Transformer, raw json.RawMessage) *Application {
+	t.Helper()
+	customTraits := make([]string, 0, len(tr.traitHandlers))
+	for name := range tr.traitHandlers {
+		customTraits = append(customTraits, name)
+	}
+	app, err := ParseWithExtraTypes(raw, customTraits, tr.LowerableTypes())
+	if err != nil {
+		t.Fatalf("LowerRaws output does not parse as an authored document: %v\n%s", err, raw)
+	}
+	return app
+}
+
+// TestLowerRaws_MidLoopErrorSurfacesInTransformForTheRightDocument proves that a rule
+// failure after round 0 is no longer LowerRaws' to report: LowerRaws runs raw rules
+// only, so a component-position rule reachable from its output runs when the consumer
+// transforms that output, and the failure names the document the consumer parsed.
+func TestLowerRaws_MidLoopErrorSurfacesInTransformForTheRightDocument(t *testing.T) {
 	tr := NewTransformer(nil, nil)
 	tr.RegisterRawDocumentLowering(testRawRule{kind: "GoodApp"})
 	tr.RegisterRawDocumentLowering(testRawRule{kind: "BoomApp", compType: "boom"})
 	tr.RegisterComponentLowering(boomComponentRule{})
 
-	_, err := tr.LowerRaws([]json.RawMessage{rawOfKind("GoodApp", "first"), rawOfKind("BoomApp", "second")}, TransformContext{})
+	out, err := tr.LowerRaws([]json.RawMessage{rawOfKind("GoodApp", "first"), rawOfKind("BoomApp", "second")}, TransformContext{})
+	if err != nil {
+		t.Fatalf("LowerRaws ran a component-position rule; it must stop after round 0: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 output documents, got %d", len(out))
+	}
+
+	if _, err := tr.lower(parseLoweredOutput(t, tr, out[0]), TransformContext{}); err != nil {
+		t.Fatalf("first document: unexpected lowering error: %v", err)
+	}
+	_, err = tr.lower(parseLoweredOutput(t, tr, out[1]), TransformContext{})
 	if err == nil {
-		t.Fatal("expected the second document's descendant to fail")
+		t.Fatal("expected the second document's component rule to fail in Transform")
 	}
 	var loweringErr *LoweringError
 	if !stderrors.As(err, &loweringErr) {
 		t.Fatalf("expected *LoweringError, got %T: %v", err, err)
 	}
-	if loweringErr.Origin.Document != "second" {
-		t.Fatalf("error attributed to document %q, want %q", loweringErr.Origin.Document, "second")
+	if loweringErr.Origin.Document != "second-1" {
+		t.Fatalf("error attributed to document %q, want %q", loweringErr.Origin.Document, "second-1")
 	}
 }
 
-// TestLowerRaws_SettledValidationNamesTheRightDocument proves per-document
-// attribution for the second failure mode: the post-settle validation pass. This is
-// the failure a batched validation pass could not attribute at all.
-func TestLowerRaws_SettledValidationNamesTheRightDocument(t *testing.T) {
+// TestLowerRaws_SettledValidationRunsInTransformForTheRightDocument proves the
+// post-settle validation pass belongs to Transform too: a raw rule's output that a
+// DocumentLoweringRule then lowers into an unsupported group passes LowerRaws and is
+// rejected when the consumer transforms it, attributed to that document alone.
+func TestLowerRaws_SettledValidationRunsInTransformForTheRightDocument(t *testing.T) {
 	tr := NewTransformer(nil, nil)
 	tr.RegisterRawDocumentLowering(testRawRule{kind: "GoodApp"})
 	tr.RegisterRawDocumentLowering(testRawRule{kind: "LeftoverApp", childKind: "StillHigher"})
+	tr.RegisterDocumentLowering(groupEmittingDocRule{kind: "StillHigher", apiVersion: "unrelated.example.com/v1"})
 
-	_, err := tr.LowerRaws([]json.RawMessage{rawOfKind("GoodApp", "first"), rawOfKind("LeftoverApp", "second")}, TransformContext{})
+	out, err := tr.LowerRaws([]json.RawMessage{rawOfKind("GoodApp", "first"), rawOfKind("LeftoverApp", "second")}, TransformContext{})
+	if err != nil {
+		t.Fatalf("LowerRaws ran a document-position rule; it must stop after round 0: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 output documents, got %d", len(out))
+	}
+
+	if _, err := tr.lower(parseLoweredOutput(t, tr, out[0]), TransformContext{}); err != nil {
+		t.Fatalf("first document: unexpected lowering error: %v", err)
+	}
+	_, err = tr.lower(parseLoweredOutput(t, tr, out[1]), TransformContext{})
 	if err == nil {
 		t.Fatal("expected the second document's settled output to fail validation")
+	}
+	if !strings.Contains(err.Error(), `unsupported apiVersion "unrelated.example.com/v1"`) {
+		t.Errorf("expected an unsupported-apiVersion error, got: %v", err)
 	}
 	var loweringErr *LoweringError
 	if !stderrors.As(err, &loweringErr) {
 		t.Fatalf("expected *LoweringError, got %T: %v", err, err)
 	}
-	if loweringErr.Origin.Document != "second" {
-		t.Fatalf("error attributed to document %q, want %q", loweringErr.Origin.Document, "second")
+	if loweringErr.Origin.Document != "second-1" {
+		t.Fatalf("error attributed to document %q, want %q", loweringErr.Origin.Document, "second-1")
 	}
 }
 
-// TestLowerRaws_DepthBudgetMatchesInTransform is the regression test for round-0
-// accounting: a raw document's decode+first-lower IS round 0 of the shared run, so
-// the raw path burns exactly the same round budget as the in-transform path. A
-// decode+lower pre-step outside the shared loop would give the raw path one round
-// more.
-func TestLowerRaws_DepthBudgetMatchesInTransform(t *testing.T) {
+// TestLowerRaws_DepthBudgetIsRoundZeroPlusTransform pins the depth accounting of the
+// raw path: LowerRaws spends exactly round 0 on a raw document, and its output then
+// gets the full MaxLoweringDepth budget in Transform, the same budget an authored
+// document gets. A raw rule is a rewrite of authored input, so it does not eat into
+// the Transform budget.
+func TestLowerRaws_DepthBudgetIsRoundZeroPlusTransform(t *testing.T) {
 	rawTr := NewTransformer(nil, nil)
 	rawTr.RegisterRawDocumentLowering(testRawRule{kind: "LoopApp", compType: "loopy"})
 	rawTr.RegisterComponentLowering(loopyRule{})
 
-	_, rawErr := rawTr.LowerRaws([]json.RawMessage{rawOfKind("LoopApp", "loopy-raw")}, TransformContext{})
+	out, err := rawTr.LowerRaws([]json.RawMessage{rawOfKind("LoopApp", "loopy-raw")}, TransformContext{})
+	if err != nil {
+		t.Fatalf("LowerRaws ran past round 0: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 output document, got %d", len(out))
+	}
+	_, rawErr := rawTr.lower(parseLoweredOutput(t, rawTr, out[0]), TransformContext{})
 	if rawErr == nil {
-		t.Fatal("expected the raw path to hit the depth limit")
+		t.Fatal("expected the raw path's Transform to hit the depth limit")
 	}
 
 	inTr := NewTransformer(nil, nil)
@@ -594,11 +645,11 @@ func TestLowerRaws_DepthBudgetMatchesInTransform(t *testing.T) {
 		t.Fatalf("in-transform path: expected ErrLoweringDepthExceeded, got: %v", inLowering.Cause)
 	}
 	if len(rawLowering.Chain) != len(inLowering.Chain) {
-		t.Fatalf("round budgets differ: raw path recorded %d rounds, in-transform path %d",
+		t.Fatalf("Transform budgets differ: raw output recorded %d rounds, authored document %d",
 			len(rawLowering.Chain), len(inLowering.Chain))
 	}
 	if len(rawLowering.Chain) != MaxLoweringDepth {
-		t.Fatalf("expected both paths to record %d rounds, got %d", MaxLoweringDepth, len(rawLowering.Chain))
+		t.Fatalf("expected both Transform runs to record %d rounds, got %d", MaxLoweringDepth, len(rawLowering.Chain))
 	}
 }
 
@@ -627,11 +678,12 @@ func TestLowerRaws_NoRawRulesRegistered_ReturnsInputUnchanged(t *testing.T) {
 // rawRuleWithNestedTrait is a RawDocumentLoweringRule that hard-codes an
 // already-populated nested Trait into the one component it emits — the raw-entry
 // analogue of documentWithNestedTraitRule (lowering_test.go), used to prove
-// lowerRawOnce seals a freshly synthesized nested trait exactly as
-// lowerDocumentOnce's document-rule branch already does.
+// lowerRawOnce leaves that trait unsealed, as if it had been authored.
 type rawRuleWithNestedTrait struct {
 	kind            string
 	nestedTraitType string
+	// nestedProps is the nested trait's properties; nil means {"orig": "value"}.
+	nestedProps map[string]any
 }
 
 func (r rawRuleWithNestedTrait) Kind() string { return r.kind }
@@ -648,6 +700,10 @@ func (r rawRuleWithNestedTrait) DecodeDocument(raw []byte) (any, error) {
 
 func (r rawRuleWithNestedTrait) LowerDocument(doc any, lctx LoweringContext) (LoweringResult, error) {
 	src := doc.(*testRawDoc)
+	props := r.nestedProps
+	if props == nil {
+		props = map[string]any{"orig": "value"}
+	}
 	return LoweringResult{Documents: []Application{{
 		APIVersion: SupportedAPIVersion,
 		Kind:       terminalDocumentKind,
@@ -656,22 +712,20 @@ func (r rawRuleWithNestedTrait) LowerDocument(doc any, lctx LoweringContext) (Lo
 			Name:       "web",
 			Type:       "webservice",
 			Properties: map[string]any{"image": src.Spec.Image},
-			Traits:     []Trait{{Type: r.nestedTraitType, Properties: map[string]any{"orig": "value"}}},
+			Traits:     []Trait{{Type: r.nestedTraitType, Properties: props}},
 		}}},
 	}}}, nil
 }
 
-// TestLowerRaws_NestedTraitInRawDocumentRuleOutput_IsSealed is the round-12-batch-2
-// Codex regression test (pullrequestreview-4937572399, "Seal traits emitted directly
-// by raw rules"): a RawDocumentLoweringRule hands back a whole *Application via
-// lowerRawOnce, and — before this fix — only validateEmittedDocument ran against it;
-// no code ever sealed a terminal trait the rule hard-coded into one of its
-// components, unlike lowerDocumentOnce's document-rule branch
-// (TestLower_NestedTraitInDocumentRuleOutput_IsSealed). Left unsealed, that trait
-// would be indistinguishable from an authored one and pick up a second, redundant
-// capability-rendering merge in applyTraits once the caller re-parses LowerRaws'
-// output and transforms it.
-func TestLowerRaws_NestedTraitInRawDocumentRuleOutput_IsSealed(t *testing.T) {
+// TestLowerRaws_NestedTraitInRawDocumentRuleOutput_IsNotSealed pins the raw-rule
+// contract (go-kure/launcher#357): a raw rule rewrites authored input, it does not
+// lower. A trait it writes into an emitted component is therefore left unsealed —
+// exactly what re-parsing LowerRaws' output yields anyway, since Trait.sealed is
+// unexported and never serialized — so Transform gives it the one capability merge
+// and platform-reserved check an authored trait gets. Sealing it here would be lost
+// on the round-trip and would only mislead a caller that inspects lowerRawOnce's
+// output directly.
+func TestLowerRaws_NestedTraitInRawDocumentRuleOutput_IsNotSealed(t *testing.T) {
 	tr := NewTransformer(
 		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
 		map[string]TraitHandler{"final": &stubTraitHandler{typ: "final"}},
@@ -692,14 +746,63 @@ func TestLowerRaws_NestedTraitInRawDocumentRuleOutput_IsSealed(t *testing.T) {
 	if len(web.Traits) != 1 {
 		t.Fatalf("emitted component's traits = %d, want 1", len(web.Traits))
 	}
-	nested := web.Traits[0]
-	if !nested.sealed {
-		t.Fatal("expected the nested trait to be sealed=true at raw-entry emission")
+	if web.Traits[0].sealed {
+		t.Fatal("expected the nested trait to stay unsealed at raw-entry emission, as if authored")
 	}
-	if _, ok := nested.Origin(); !ok {
-		t.Fatal("expected the nested trait to carry a stamped origin")
+}
+
+// reservedIntentRule is a TraitLoweringRule whose schema marks one property
+// platform-reserved — the shape of expose, whose controller fields may only come from
+// ClusterProfile capability rendering. It lowers to the terminal "final" trait.
+type reservedIntentRule struct{}
+
+func (reservedIntentRule) TraitType() string { return "reserved-intent" }
+
+func (reservedIntentRule) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{
+		"orig":           {Type: PropertyTypeString, Description: "Authored freely."},
+		"platformSecret": {Type: PropertyTypeString, PlatformReserved: true, Description: "Platform-supplied."},
 	}
-	if _, ok := web.Origin(); !ok {
-		t.Fatal("expected the emitted component to carry a stamped origin")
+}
+
+func (reservedIntentRule) LowerTrait(trait *Trait, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Traits: []Trait{{Type: "final", Properties: map[string]any{"orig": trait.Properties["orig"]}}}}, nil
+}
+
+// TestLowerRaws_RawRuleWritingPlatformReservedValueFailsInTransform is the breaking
+// half of go-kure/launcher#357. Under the old seal a raw rule could fold capability
+// rendering into a trait it emitted: the trait was lowered inside LowerRaws with its
+// platform-reserved check skipped. Now the trait leaves LowerRaws unsealed and
+// unlowered, so Transform treats the rule's value as authored and rejects it with
+// ErrPlatformReserved instead of accepting it silently.
+func TestLowerRaws_RawRuleWritingPlatformReservedValueFailsInTransform(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"final": &stubTraitHandler{typ: "final"}},
+	)
+	tr.RegisterTraitLowering(reservedIntentRule{})
+	tr.RegisterRawDocumentLowering(rawRuleWithNestedTrait{
+		kind:            "WebApplication",
+		nestedTraitType: "reserved-intent",
+		nestedProps:     map[string]any{"orig": "value", "platformSecret": "folded-in-by-the-rule"},
+	})
+
+	out, err := tr.LowerRaws([]json.RawMessage{rawWebApplication("shop")}, TransformContext{})
+	if err != nil {
+		t.Fatalf("LowerRaws: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 output document, got %d", len(out))
+	}
+
+	_, err = tr.Transform(parseLoweredOutput(t, tr, out[0]), TransformContext{Namespace: "default"})
+	if err == nil {
+		t.Fatal("expected Transform to reject the platform-reserved value a raw rule wrote")
+	}
+	if !stderrors.Is(err, ErrPlatformReserved) {
+		t.Fatalf("expected ErrPlatformReserved, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "platformSecret") {
+		t.Errorf("expected the error to name the reserved property, got: %v", err)
 	}
 }
