@@ -434,6 +434,84 @@ func TestTopologySpread_RefusesCapabilityRenderingKey(t *testing.T) {
 	}
 }
 
+// buildWithProfile runs the kurel build order for one component: the
+// ClusterProfile is evaluated first, then its evaluated capabilities feed the
+// transform (pkg/cmd/kurel build.go, EvaluateProfile then Transform).
+func buildWithProfile(t *testing.T, comp oam.Component, capabilities map[string]oam.CapabilityBinding) (*appsv1.Deployment, *oam.PolicyResult, error) {
+	t.Helper()
+	profile := &oam.ClusterProfile{Spec: oam.ClusterProfileSpec{Capabilities: capabilities}}
+	evaluated, err := topologySpreadTransformer().EvaluateProfile(profile)
+	if err != nil {
+		return nil, nil, err
+	}
+	return transformedDeploymentCtx(t, comp, oam.TransformContext{
+		Namespace:    "default",
+		Capabilities: evaluated.Spec.Capabilities,
+	})
+}
+
+// A capability rendering is merged into the trait's properties, and the trait
+// cannot tell a merged key from an authored one at Apply. For an engine-owned
+// key that matters: a `scope` in a rendering arrives after the engine already
+// chose the binding, so it selects nothing, and letting it through would build
+// with a platform value that silently does nothing. The rendering is therefore
+// refused where it is evaluated, naming the key and the capability it came
+// from — under the bare key and under a scoped one alike.
+func TestTopologySpread_RefusesRenderingKeysAtProfileEvaluation(t *testing.T) {
+	cases := []struct {
+		name, capability, key string
+	}{
+		{"engine-owned scope under the bare key", "topology-spread", "scope"},
+		{"engine-owned scope under a scoped key", "topology-spread.zone-b", "scope"},
+		{"non-engine key", "topology-spread", "maxSkew"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			comp := oam.Component{
+				Name: "api", Type: "deployment",
+				Properties: map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3},
+				Traits:     []oam.Trait{*topologySpreadTrait()},
+			}
+			_, _, err := buildWithProfile(t, comp, map[string]oam.CapabilityBinding{
+				tc.capability: {Rendering: map[string]any{tc.key: "zone-a"}},
+			})
+			if err == nil {
+				t.Fatalf("expected the build to fail for rendering key %q on capability %q, got none", tc.key, tc.capability)
+			}
+			if !strings.Contains(err.Error(), tc.key) {
+				t.Errorf("error should name the key %q, got: %v", tc.key, err)
+			}
+			if want := `capability "` + tc.capability + `"`; !strings.Contains(err.Error(), want) {
+				t.Errorf("error should name its source %s, got: %v", want, err)
+			}
+		})
+	}
+}
+
+// Profile evaluation accepts a topology-spread capability with no rendering,
+// and an authored `scope` still selects the scoped binding after it.
+func TestTopologySpread_ProfileEvaluationKeepsAuthoredScope(t *testing.T) {
+	comp := oam.Component{
+		Name: "api", Type: "deployment",
+		Properties: map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3},
+		Traits:     []oam.Trait{{Type: "topology-spread", Properties: map[string]any{"scope": "zone-a"}}},
+	}
+	dep, result, err := buildWithProfile(t, comp, map[string]oam.CapabilityBinding{
+		"topology-spread":        {},
+		"topology-spread.zone-a": {Rendering: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("build with an authored scope: %v", err)
+	}
+	if got, want := result.ConsumedCapabilities, []string{"topology-spread.zone-a"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("consumed capabilities %v, want %v", got, want)
+	}
+	want := []string{"kubernetes.io/hostname/DoNotSchedule", "topology.kubernetes.io/zone/ScheduleAnyway"}
+	if got := spreadKeys(dep.Spec.Template.Spec.TopologySpreadConstraints); !reflect.DeepEqual(got, want) {
+		t.Errorf("constraints %v, want %v", got, want)
+	}
+}
+
 // A component that generates no Deployment has nothing for the trait to act
 // on; that is an error rather than a silent no-op.
 func TestTopologySpread_NoDeploymentFails(t *testing.T) {

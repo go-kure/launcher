@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
@@ -44,6 +45,19 @@ func (h *TopologySpreadHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{}
 }
 
+// ValidateAndApplyDefaults rejects any key in a ClusterProfile capability
+// rendering for this no-rendering trait, at profile evaluation. It is the only
+// place a rendered engine-owned key (`scope`) can be told apart from an
+// authored one: the rendering is merged into the trait's properties before
+// Apply, after the engine already chose the "<type>.<scope>" binding, so a
+// rendered `scope` selects nothing and would otherwise build silently.
+func (h *TopologySpreadHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
+	if _, err := builtin.DecodeStrict[builtin.TopologySpreadRendering](rendering); err != nil {
+		return nil, errors.Wrap(err, "topology-spread rendering")
+	}
+	return rendering, nil
+}
+
 // Apply wraps app.Config with a topologySpreadConfig decorator. A property is
 // refused by name: the schema is empty, and a key that silently did nothing
 // would read as a knob the trait does not have. That covers a key merged in
@@ -51,8 +65,10 @@ func (h *TopologySpreadHandler) PropertySchema() map[string]oam.PropertySchema {
 //
 // The engine-owned keys (oam.IsEngineTraitProperty — today `scope`, which
 // selects the "<type>.<scope>" capability binding) are not the trait's: they
-// are legal on every trait and the engine has already consumed them by the
-// time Apply runs, so they are let through.
+// are legal on every authored trait and the engine has already consumed them
+// by the time Apply runs, so they are let through. Apply cannot tell an
+// authored `scope` from one merged in from a rendering; a rendered one is
+// refused earlier, by ValidateAndApplyDefaults at profile evaluation.
 func (h *TopologySpreadHandler) Apply(trait *oam.Trait, app *stack.Application, _ *stack.Bundle) error {
 	if trait != nil {
 		// Sorted, so a trait with several keys always names the same one.
