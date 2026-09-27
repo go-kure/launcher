@@ -61,6 +61,35 @@ func TestEmitOrAdopt(t *testing.T) {
 		}
 	})
 
+	// The first claimant gets no pass on its own name: changed content from the
+	// same origin is as much a collision as changed content from a sibling.
+	t.Run("different identity from the first claimant's own origin hard-fails", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			round int
+		}{
+			{"same round", 0},
+			{"later round", 1},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				n := NewNameAllocator()
+				if _, err := n.EmitOrAdopt("src", "helmrepository|https://one.example", a); err != nil {
+					t.Fatal(err)
+				}
+				n.round = tc.round
+				adopted, err := n.EmitOrAdopt("src", "helmrepository|https://two.example", a)
+				if err == nil {
+					t.Fatalf("same-origin claim with different content = (%v, nil), want an error", adopted)
+				}
+				for _, want := range []string{`"src"`, `component "a"`, "https://one.example", "https://two.example"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not contain %s", err, want)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("a Reserve claim is never adoptable, in either order", func(t *testing.T) {
 		n := NewNameAllocator()
 		if err := n.Reserve("taken", a); err != nil {
