@@ -330,8 +330,9 @@ Each of these used to render, and fail only when the manifest was applied.
 
 A peer must name something, and an `ipBlock` stands alone. These are the two
 structural rules the API server applies to a peer (`ValidateNetworkPolicyPeer`),
-and the parser applies them in the same words, after reading every null as
-absence (go-kure/launcher#470). Each row is shown as if authored on its own:
+and the parser applies them in the same words, after treating a null
+`podSelector`, `namespaceSelector` or `ipBlock` as absent (go-kure/launcher#470).
+Each row is shown as if authored on its own:
 
 ```yaml
 from:
