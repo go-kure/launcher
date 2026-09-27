@@ -4148,7 +4148,7 @@ func parseJobPodFailurePolicyConditionStatus(obj map[string]any, entryLabel stri
 		return "", errors.Errorf("%s.status: must be a string, got %T", entryLabel, raw)
 	}
 	// Deliberately stricter than upstream, whose defaulter fills an empty status
-	// too: only an absent key is defaulted, so an authored empty string — more
+	// too: only an absent or null key is defaulted, so an authored empty string — more
 	// likely a templating slip than a request for True — is refused rather than
 	// silently read as True.
 	if s == "" {
