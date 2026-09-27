@@ -127,8 +127,8 @@ assignment; nothing upstream of it supplies a default.
 | `ParseWithExtraTypes` | Parse allowing custom trait types **and** a `LowerableTypes` set — the document kinds, component types and trait types claimed by a transformer's registered lowering rules. |
 
 Standalone parsing validates each trait's `type` against this package's own allowlist
-of built-in trait types (the `security-context` trait is included, matching
-`SecurityContextHandler`);
+of built-in trait types (the `security-context` and `topology-spread` traits are
+included, matching `SecurityContextHandler` and `TopologySpreadHandler`);
 `ParseWithExtraTraitTypes` widens that allowlist with caller-supplied custom types.
 `ParseWithExtraTypes` widens it further with `Transformer.LowerableTypes()`, so a
 document authored in types that only a lowering rule understands parses ahead of the

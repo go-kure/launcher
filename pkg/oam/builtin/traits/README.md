@@ -23,8 +23,8 @@ handler reads from merged properties (e.g. `networkPolicy`, `allowedHostnameWild
 (`additionalProperties`) rather than modeled field-by-field, but strictness-sensitive traits are
 **closed**: the `rbac` rule object and the `fluxcd-patches` patch item and its `target` selector
 enumerate their fields and set `additionalProperties: false` (unknown keys rejected), matching the
-downstream single-owner adoption of these builtins. `prune-protection` accepts no
-properties and so declares an empty schema. Every property (including nested object fields and
+downstream single-owner adoption of these builtins. `prune-protection` and
+`topology-spread` accept no properties and so declare an empty schema. Every property (including nested object fields and
 array item schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler
 API Reference.
 
@@ -64,6 +64,7 @@ preflight reject every valid use of the trait.
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `configmap` | ConfigMap (+ optional volume mount) | `name`, `data`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, Job, or CronJob; any other component fails generation) |
+| `topology-spread` | (modifies the Deployment's PodSpec) | (no properties). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every Deployment the component generates, from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints, and a component that generates no Deployment (see below). |
 | `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`. Admitted on `webservice`, `worker` and `deployment` only. On any of them with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. |
 
 ### Operational (FluxCD)
@@ -477,6 +478,48 @@ same Linux-only controls for Windows pods. An override the author set
 Windows workload asking for `fsGroup` fails at `Generate` instead of emitting a
 manifest the API server refuses.
 
+## The topology-spread trait
+
+`topology-spread` makes launcher's default spread opinion available on a kind
+that carries none of its own. `webservice` and `worker` apply that opinion from
+their `topologySpread` property; `deployment` deliberately does not, and until
+this trait the only way to spread a `deployment` was to author the raw
+`topologySpreadConstraints`. The trait and the two role kinds share one
+definition, `components.BuildTopologySpreadConstraints`, so the output is
+identical:
+
+| effective replicas | constraints |
+|---|---|
+| 1 (or unset) | none |
+| 2 | `kubernetes.io/hostname`, `maxSkew: 1`, `DoNotSchedule` |
+| 3 or more | the above, plus `topology.kubernetes.io/zone`, `maxSkew: 1`, `ScheduleAnyway` |
+
+Each constraint's `labelSelector` is a copy of the Deployment's own
+`spec.selector.matchLabels` (`app: <component>` for every built-in kind).
+
+The replica count is the one the generated Deployment carries, which is the
+count **after** the environment policy ran: the transformer applies the policy
+to the component before any trait, and the decorator reads the object at
+`Generate` time. A document that authors no `replicas` under a policy
+defaulting to 3 therefore gets both constraints, the same as a `worker` would.
+A `scaler` HPA does not change the count the trait sees, as it does not for the
+role kinds.
+
+The trait is strict in three ways, each an error at build time:
+
+- **No properties.** Any key under the trait is refused by name.
+- **No merging.** A Deployment that already has `topologySpreadConstraints` is
+  refused rather than merged, whatever put them there: the raw property on
+  `deployment`, or the `topologySpread` default of `webservice`/`worker` at 2
+  or more replicas. Set `topologySpread: false` on a role kind to use the trait
+  instead. At one replica the role kinds produce no constraints, so there is
+  nothing to conflict with.
+- **A Deployment is required.** A component whose output contains no
+  Deployment (`statefulset`, `helmchart`, `manifests`, …) fails, rather than
+  carrying a trait that does nothing. A Deployment whose selector is not made
+  of `matchLabels` alone is refused too, since the spread selector could not
+  select exactly its pods; no built-in kind produces one.
+
 ## Decorator forwarding for layout-augmenting components
 
 A component config that also implements kure's `layout.LayoutAugmenter` (e.g. `helmchart` under
@@ -500,7 +543,7 @@ protected along with the `HelmRelease`. kure's walker calls `AugmentLayout` only
 seeded with that one application's `Generate` output, so the trait's narrow scope is unchanged —
 sibling applications in the same bundle are never on that layout. The hook runs at every level of
 a decorator chain, so trait order does not matter. The other decorators (`configmap`,
-`external-secret`, `security-context`) rewrite the workload their inner `Generate` returns and
+`external-secret`, `security-context`, `topology-spread`) rewrite the workload their inner `Generate` returns and
 have nothing to do for an augmenter-added resource, so they implement no hook.
 
 Every trait decorator also embeds `decoratorBase`, which forwards the optional

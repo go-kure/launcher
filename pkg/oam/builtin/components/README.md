@@ -914,6 +914,13 @@ What `deployment` *does* publish, and the role kinds do not, is the raw
 properties" immediately below. The two are not alternatives: the shorthand is
 an opinion, the raw shapes are the API.
 
+The default topology-spread opinion is still available on `deployment`, as an
+explicit opt-in rather than a kind default: the `topology-spread` trait (see
+the trait handlers README) applies the same
+`BuildTopologySpreadConstraints` the role kinds use, exported for that reason,
+from the Deployment's post-policy replica count. It refuses a Deployment that
+already carries raw `topologySpreadConstraints`, so the two never merge.
+
 #### Raw scheduling properties (`deployment` only)
 
 `deployment` publishes `affinity`, `tolerations` and

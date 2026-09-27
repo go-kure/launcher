@@ -413,7 +413,7 @@ func sortedPairs(m map[string]string) []string {
 }
 
 // TestBuildTopologySpreadConstraints_SelectorsAreDistinct guards the narrower
-// half of the fix inside buildTopologySpreadConstraints: the two constraints it
+// half of the fix inside BuildTopologySpreadConstraints: the two constraints it
 // returns for replicas>=3 used to share one *metav1.LabelSelector, so they could
 // not be edited apart even once their MatchLabels stopped aliasing the caller's
 // map.

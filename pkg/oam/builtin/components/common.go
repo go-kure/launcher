@@ -4348,9 +4348,17 @@ func selectorFrom(labels map[string]string) *metav1.LabelSelector {
 	return &metav1.LabelSelector{MatchLabels: maps.Clone(labels)}
 }
 
-// buildTopologySpreadConstraints returns topology spread constraints for
-// Deployments with multiple replicas. Returns nil when replicas <= 1.
-func buildTopologySpreadConstraints(replicas int32, selectorLabels map[string]string) []corev1.TopologySpreadConstraint {
+// BuildTopologySpreadConstraints returns launcher's default topology spread
+// constraints for a Deployment with the given replica count: nil at
+// replicas <= 1, a hostname spread (DoNotSchedule) from 2, and an added zone
+// spread (ScheduleAnyway) from 3. Each constraint gets its own label selector
+// over a copy of selectorLabels.
+//
+// It is the one definition of that opinion. The webservice and worker kinds
+// apply it from their `topologySpread` property, and the topology-spread trait
+// (pkg/oam/builtin/traits) applies it to any Deployment, which is why it is
+// exported.
+func BuildTopologySpreadConstraints(replicas int32, selectorLabels map[string]string) []corev1.TopologySpreadConstraint {
 	if replicas <= 1 {
 		return nil
 	}
