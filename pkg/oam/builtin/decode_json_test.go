@@ -185,6 +185,18 @@ type (
 	reachTagged struct {
 		reachLeaf `json:"values"`
 	}
+	// The decoder cannot set a field behind an unexported embedded pointer, and panics
+	// on a tagged one. The last two carry invalid tag names.
+	reachHiddenPtr struct{ *reachLeaf }
+	reachTaggedPtr struct {
+		*reachLeaf `json:"nested"`
+	}
+	reachBadTag struct {
+		Value string `json:"bad\\key"` //nolint:staticcheck // SA5008: the invalid name is the fixture
+	}
+	reachBadEmbed struct {
+		reachLeaf `json:"bad\\emb"` //nolint:staticcheck // SA5008: as above
+	}
 )
 
 // TestUnreachableJSONFields_FollowsDecoder: the check agrees with what the decoder accepts.
@@ -196,13 +208,30 @@ func TestUnreachableJSONFields_FollowsDecoder(t *testing.T) {
 		{reflect.TypeFor[reachDiamond](), nil, []string{"value"}},
 		{reflect.TypeFor[reachTagged](), []string{"values"}, []string{"values"}},
 		{reflect.TypeFor[reachTagged](), nil, nil},
+		{reflect.TypeFor[reachHiddenPtr](), nil, []string{"value"}},
+		{reflect.TypeFor[reachTaggedPtr](), nil, []string{"nested"}},
 	} {
 		if got := builtin.UnreachableJSONFields(tc.typ, tc.owned...); !slices.Equal(got, tc.want) {
 			t.Errorf("UnreachableJSONFields(%v, %v) = %v, want %v", tc.typ, tc.owned, got, tc.want)
 		}
 	}
+	// v1 encoding/json reaches these by Go name; the jsonv2-backed one refuses the field.
+	agreesWithDecoder[reachBadTag](t, "Value")
+	agreesWithDecoder[reachBadEmbed](t, "value")
 	if _, _, err := builtin.DecodeStrictJSON[reachDiamond](map[string]any{"value": "x"}); err == nil {
 		t.Error("the ambiguous key decoded; the diamond fixture no longer shows the gap")
+	}
+}
+
+// agreesWithDecoder: T's only key is reported exactly when DecodeStrictJSON refuses it.
+func agreesWithDecoder[T any](t *testing.T, key string) {
+	t.Helper()
+	var want []string
+	if _, _, err := builtin.DecodeStrictJSON[T](map[string]any{key: "x"}); err != nil {
+		want = []string{key}
+	}
+	if got := builtin.UnreachableJSONFields(reflect.TypeFor[T]()); !slices.Equal(got, want) {
+		t.Errorf("UnreachableJSONFields(%T) = %v, want %v", *new(T), got, want)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 
@@ -80,11 +81,14 @@ func isOwned(owned []string, key string) bool {
 	return slices.ContainsFunc(owned, func(o string) bool { return strings.EqualFold(o, key) })
 }
 
-// UnreachableJSONFields reports the fields of t (a struct, or a pointer to one),
-// embedded ones included, that an author cannot set through DecodeStrictJSON called
+// UnreachableJSONFields reports the json keys of t (a struct, or a pointer to one),
+// embedded ones included, that an author cannot use through DecodeStrictJSON called
 // with the same owned keys: a field tagged `json:"-"` (by Go name), a key encoding/json
-// itself refuses (an ambiguous promotion), and a key an owned key shadows. Each key is
+// itself refuses (an ambiguous promotion), a key an owned key shadows, and a key whose
+// field the decoder cannot set (behind an unexported embedded pointer). Each key is
 // probed against encoding/json, so the check cannot disagree with the decoder.
+// Known limit: the check is per key, not per field; a field hidden behind another
+// field under the same key (a shallower or case-insensitively equal one) is not reported.
 //
 // A terminal that decodes an external spec type asserts this is empty against an
 // explicit exclusion list, so an upstream field added under a name launcher already
@@ -125,6 +129,9 @@ func collectJSONKeys(t reflect.Type, path []reflect.Type, keys map[string]bool, 
 			continue
 		}
 		name, _, _ := strings.Cut(tag, ",")
+		if !validTagName(name) {
+			name = "" // v1 encoding/json falls back to the Go name (and flattens an embed)
+		}
 		ft := f.Type
 		if ft.Kind() == reflect.Pointer {
 			ft = ft.Elem()
@@ -139,11 +146,25 @@ func collectJSONKeys(t reflect.Type, path []reflect.Type, keys map[string]bool, 
 	}
 }
 
-// decodesKey reports whether a strict encoding/json decode into t accepts key.
-func decodesKey(t reflect.Type, key string) bool {
+// validTagName mirrors encoding/json's isValidTag (encode.go).
+func validTagName(s string) bool {
+	return s != "" && !strings.ContainsFunc(s, func(c rune) bool {
+		return !strings.ContainsRune("!#$%&()*+-./:;<=>?@[]^_{|}~ ", c) && !unicode.IsLetter(c) && !unicode.IsDigit(c)
+	})
+}
+
+// decodesKey reports whether a strict encoding/json decode into t accepts key and can
+// set its field. A panic (a tagged unexported embedded pointer) counts as unreachable.
+func decodesKey(t reflect.Type, key string) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
 	data, _ := json.Marshal(map[string]any{key: nil})
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	err := dec.Decode(reflect.New(t).Interface())
-	return err == nil || !strings.Contains(err.Error(), "unknown field "+strconv.Quote(key))
+	return err == nil || !strings.Contains(err.Error(), "unknown field "+strconv.Quote(key)) &&
+		!strings.Contains(err.Error(), "cannot set embedded pointer to unexported struct")
 }
