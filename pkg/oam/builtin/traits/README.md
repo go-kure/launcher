@@ -75,7 +75,7 @@ preflight reject every valid use of the trait.
 | `fluxcd-patches` | Appends `Kustomization.spec.patches` | `patches[]` (`patch`, `target`) |
 | `fluxcd-postbuild` | Sets `Kustomization.spec.postBuild` | `substitute`, `substituteFrom[]` |
 | `prune-protection` | Adds `kustomize.toolkit.fluxcd.io/prune: disabled` | (no properties) |
-| `force-replace` | Adds `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a `job`'s pod template). Replacing a Job re-runs it and stops any run in progress. Opt-in: without the trait no object carries the annotation. | (no properties) |
+| `force-replace` | Adds `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a `job`'s pod template). Replacing a Job re-runs it and stops any run in progress. Opt-in: without the trait launcher does not add the annotation. | (no properties) |
 
 `prune-protection` and `force-replace` annotate every object the component itself generates,
 including resources a layout-augmenting component adds (see "Decorator forwarding" below), and

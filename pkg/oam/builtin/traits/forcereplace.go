@@ -25,7 +25,7 @@ const (
 // (deletes and recreates) an object whose update would otherwise fail on an
 // immutable field — a Job's pod template being the case the trait exists for.
 // Replacing a Job re-runs it, stopping any run in progress. The trait takes no
-// properties and is opt-in: without it no object carries the annotation.
+// properties and is opt-in: without it launcher does not add the annotation.
 type ForceReplaceHandler struct{}
 
 // CanHandle returns true for the "force-replace" trait type.
