@@ -34,8 +34,9 @@ type PropertySchema struct {
 	// Type is the value type. Required unless Types is set; the two are mutually
 	// exclusive.
 	Type PropertyType `json:"type" yaml:"type"`
-	// Types declares a union: the value is accepted when it matches any one of the
-	// listed types, and is normalized as that single Type would normalize it. It is
+	// Types declares a union: the value is accepted when any one of the listed
+	// types accepts it as a single Type would, whatever the order they are listed
+	// in, and is normalized by the first listed type that accepts it. It is
 	// how a Kubernetes int-or-string field (intstr.IntOrString, e.g. a rolling
 	// update's maxUnavailable or a port) or a quantity (a string or a bare number)
 	// is published (go-kure/launcher#383).

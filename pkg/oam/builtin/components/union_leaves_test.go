@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -259,6 +260,54 @@ func TestUnionLeaves_IntegerAndStringPassBothPaths(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+}
+
+// TestUnionLeaves_EveryParserKindStillAccepted: publishing a leaf as a union must
+// not narrow what its parser accepted while the leaf was untyped. Every parser here
+// reads a bare number through oam.IntegerValue (toInt32 for the int-or-string
+// leaves, decodedQuantityString for the quantities), which takes every Go integer
+// kind — uintptr and named types included — and an integral float of any float
+// kind, so each of those must still pass both paths and render as 2 does. A Go
+// lowering rule is where these shapes come from, but the authored entry point takes
+// a map[string]any too, so both paths are held to it.
+func TestUnionLeaves_EveryParserKindStillAccepted(t *testing.T) {
+	type namedInt int32
+	type namedUint uint16
+	type namedPtr uintptr
+	type namedFloat float64
+	type namedString string
+	values := []any{
+		int8(2), int16(2), int32(2), int64(2), namedInt(2),
+		uint(2), uint8(2), uint16(2), uint32(2), uint64(2), uintptr(2), namedUint(2), namedPtr(2),
+		float32(2), float64(2), namedFloat(2),
+	}
+	for _, leaf := range unionLeaves {
+		for name, run := range map[string]func(string, map[string]any) ([]client.Object, error){
+			"authored": unionLeafAuthored,
+			"emitted":  unionLeafEmitted,
+		} {
+			for _, v := range values {
+				t.Run(fmt.Sprintf("%s/%s/%T", leaf.name, name, v), func(t *testing.T) {
+					objs, err := run(leaf.compType, leaf.props(v))
+					if err != nil {
+						t.Fatalf("%T(%v) rejected: %v", v, v, err)
+					}
+					if got := leaf.rendered(objs); got != "2" {
+						t.Errorf("rendered %q, want %q", got, "2")
+					}
+				})
+			}
+			t.Run(leaf.name+"/"+name+"/named string", func(t *testing.T) {
+				objs, err := run(leaf.compType, leaf.props(namedString(leaf.strForm)))
+				if err != nil {
+					t.Fatalf("named string %q rejected: %v", leaf.strForm, err)
+				}
+				if got := leaf.rendered(objs); got != leaf.strForm {
+					t.Errorf("rendered %q, want %q", got, leaf.strForm)
+				}
+			})
 		}
 	}
 }
