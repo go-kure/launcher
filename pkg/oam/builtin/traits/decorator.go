@@ -133,12 +133,26 @@ func (d decoratorBase) NonRWXClaim() string {
 // invalid duplicate-volume PodSpec instead of a clear error. hint names the
 // property the caller can change to resolve the collision (e.g. "rename the
 // secret via targetSecretName").
+//
+// The main container's raw block devices are checked by name too
+// (go-kure/launcher#385): a statefulset's volumeMode: Block claim template
+// has no entry in podSpec.Volumes, only a VolumeDevice, and a same-named
+// mount beside it is refused by ValidateVolumeDevices.
 func checkVolumeCollision(podSpec *corev1.PodSpec, name, source, hint string) error {
 	for _, v := range podSpec.Volumes {
 		if v.Name == name {
 			return errors.Errorf(
 				"%s: volume %q already exists on the workload; %s",
 				source, name, hint)
+		}
+	}
+	if len(podSpec.Containers) > 0 {
+		for _, vd := range podSpec.Containers[0].VolumeDevices {
+			if vd.Name == name {
+				return errors.Errorf(
+					"%s: volume %q already exists on the workload as a raw block device; %s",
+					source, name, hint)
+			}
 		}
 	}
 	return nil

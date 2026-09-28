@@ -76,9 +76,9 @@ func checkVolumeModePairing(label string, mode corev1.PersistentVolumeMode, hasM
 
 // parseVolumeDeviceList parses one init container's or sidecar's
 // `volumeDevices` list. mounts are that same container's parsed volumeMounts:
-// ValidateVolumeDevices refuses a devicePath that is also a mountPath in the
-// container, a devicePath repeated within the list, and a volume named in both
-// lists.
+// ValidateVolumeDevices refuses a volume name or a devicePath repeated within
+// the list, a devicePath that is also a mountPath in the container, and a
+// volume named in both lists.
 func parseVolumeDeviceList(m map[string]any, prefix string, mounts []corev1.VolumeMount) ([]corev1.VolumeDevice, error) {
 	list, present, err := parseObjectList(m, "volumeDevices")
 	if err != nil {
@@ -94,6 +94,7 @@ func parseVolumeDeviceList(m map[string]any, prefix string, mounts []corev1.Volu
 		mountNames[vm.Name] = true
 	}
 	seen := map[string]bool{}
+	seenNames := map[string]bool{}
 	var out []corev1.VolumeDevice
 	for i, dm := range list {
 		label := fmt.Sprintf("%s: volumeDevices[%d]", prefix, i)
@@ -111,6 +112,10 @@ func parseVolumeDeviceList(m map[string]any, prefix string, mounts []corev1.Volu
 		if err := checkDevicePath(devicePath, label); err != nil {
 			return nil, err
 		}
+		if seenNames[name] {
+			return nil, errors.Errorf("%s: volume %q is already listed under volumeDevices; a volume is attached as a device at most once per container", label, name)
+		}
+		seenNames[name] = true
 		if seen[devicePath] {
 			return nil, errors.Errorf("%s: duplicate devicePath %q", label, devicePath)
 		}
@@ -179,18 +184,29 @@ func checkContainerVolumeModes(modes map[string]bool, label string, mounts []cor
 	return nil
 }
 
-// checkMainContainerDevicePaths applies ValidateVolumeDevices' path rules to
-// the main container when its devices come from more than one parser — the
-// statefulset kind's claim templates and its `volumes`. Each parser checks its
-// own entries; this catches a devicePath repeated across the two, or one that
-// equals a mountPath from either.
-func checkMainContainerDevicePaths(mounts []corev1.VolumeMount, devices []corev1.VolumeDevice) error {
+// checkMainContainerVolumeDevices applies ValidateVolumeDevices' name and path
+// rules to the main container when its devices and mounts come from more than
+// one parser — the statefulset kind's claim templates and its `volumes`. Each
+// parser checks its own entries; this catches a device name or devicePath
+// repeated across the two, a device name that is also a mount name, and a
+// devicePath that equals a mountPath from either.
+func checkMainContainerVolumeDevices(mounts []corev1.VolumeMount, devices []corev1.VolumeDevice) error {
 	mountPaths := make(map[string]bool, len(mounts))
+	mountNames := make(map[string]bool, len(mounts))
 	for _, vm := range mounts {
 		mountPaths[vm.MountPath] = true
+		mountNames[vm.Name] = true
 	}
 	seen := make(map[string]bool, len(devices))
+	seenNames := make(map[string]bool, len(devices))
 	for _, d := range devices {
+		if seenNames[d.Name] {
+			return errors.Errorf("volume %q is attached as a device more than once in the main container; a claim template and a volume, or two claim templates, cannot share a name", d.Name)
+		}
+		seenNames[d.Name] = true
+		if mountNames[d.Name] {
+			return errors.Errorf("volume %q is both mounted and attached as a device in the main container; a volume is either mounted or attached as a device, not both — a claim template and a volume, or two claim templates, cannot share a name", d.Name)
+		}
 		if seen[d.DevicePath] {
 			return errors.Errorf("volume %q: duplicate devicePath %q", d.Name, d.DevicePath)
 		}

@@ -136,7 +136,10 @@ not the app — chooses the implementation:
   `VolumeMount.mountPath` in a container to be unique. The same applies, for both `external-secret`
   and `configmap`, to a path the workload's main container already uses as the `devicePath` of a
   raw block volume (`volumeMode: Block`): Kubernetes refuses a `devicePath` that is also a
-  `mountPath` in the same container.
+  `mountPath` in the same container. Both traits also refuse a volume name the main container
+  already attaches as a raw block device — a `statefulset` Block claim template has no pod volume
+  of its own, so the ordinary volume-name check would miss it — because Kubernetes refuses a
+  volume listed under both `volumeMounts` and `volumeDevices`.
 
 ## NetworkPolicy nulls: null, empty and absent
 

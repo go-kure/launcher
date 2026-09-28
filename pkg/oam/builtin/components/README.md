@@ -772,13 +772,16 @@ all seven kinds (`webservice`, `worker`, `deployment`, `statefulset`,
   be one. A `volumeMounts` name the component does not declare at all stays
   accepted, because the `configmap` and `external-secret` traits add their
   volumes after the component is generated — and neither adds a Block volume.
-- **Path rules** mirror `ValidateVolumeDevices`, per container: a
-  `devicePath` is unique, contains no `..` element, and is not also a
-  `mountPath`; a volume is not named in both `volumeMounts` and
-  `volumeDevices`. On `statefulset` this spans the claim templates and
-  `volumes` together. The `configmap` and `external-secret` traits likewise
-  refuse to mount at a path the main container already uses as a
-  `devicePath`.
+- **Name and path rules** mirror `ValidateVolumeDevices`, per container: a
+  volume is named at most once in `volumeDevices` and not in both
+  `volumeMounts` and `volumeDevices`; a `devicePath` is unique, contains no
+  `..` element, and is not also a `mountPath`. On `statefulset` this spans the
+  claim templates and `volumes` together, so a Block claim template cannot
+  share its name with a `volumes` entry or another claim template. The
+  `configmap` and `external-secret` traits likewise refuse a volume name the
+  main container already attaches as a device — including a Block claim
+  template, which has no pod volume of its own — and a mount at a path it
+  already uses as a `devicePath`.
 
 **Compatibility.** Additive: every new rejection concerns a Block volume,
 and no document could declare one before (a `volumes` pvc entry had no
