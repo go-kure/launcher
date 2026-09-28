@@ -82,6 +82,7 @@ func parseScopeOverrides(props map[string]any) (map[schema.GroupVersionKind]mani
 	}
 	overrides := make(map[schema.GroupVersionKind]manifest.ScopeResult, len(list))
 	for i, e := range list {
+		e = nullElem(e)
 		m, ok := e.(map[string]any)
 		if !ok {
 			return nil, nil, errors.Errorf("scopeOverrides[%d]: expected an object", i)

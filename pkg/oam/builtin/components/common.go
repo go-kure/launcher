@@ -767,6 +767,7 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 	}
 	var out []corev1.EnvFromSource
 	for i, item := range raw {
+		item = nullElem(item)
 		m, ok := item.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("envFrom[%d]: expected object, got %T", i, item)
@@ -1473,6 +1474,7 @@ func parseHTTPHeaders(raw map[string]any, key string) ([]corev1.HTTPHeader, erro
 	}
 	var out []corev1.HTTPHeader
 	for i, h := range headers {
+		h = nullElem(h)
 		hm, ok := h.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("httpHeaders[%d]: must be an object with name and value", i)
@@ -1992,6 +1994,17 @@ func isExplicitNull(value any) bool {
 	}
 }
 
+// nullElem returns an untyped nil for any explicit null, v otherwise. A list
+// reader reassigns each element through it before asserting the element's type,
+// so a typed-nil element takes the untyped null's refusal and its `got <nil>`
+// message instead of passing as an empty object (go-kure/launcher#465).
+func nullElem(v any) any {
+	if isExplicitNull(v) {
+		return nil
+	}
+	return v
+}
+
 // parseStorageClassField parses an optional PVC "storageClass" string,
 // distinguishing an authored empty string ("request no StorageClass") from an
 // absent key ("use the cluster default") — a distinction
@@ -2402,6 +2415,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 	seenNames := map[string]bool{}
 	seenMountPaths := map[string]bool{}
 	for i, v := range volList {
+		v = nullElem(v)
 		m, ok := v.(map[string]any)
 		if !ok {
 			return result, errors.Errorf("volumes[%d]: expected object, got %T", i, v)
@@ -2858,6 +2872,7 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 		sc.VolumeMounts = mounts
 		if rawPorts, ok := m["ports"].([]any); ok {
 			for j, rp := range rawPorts {
+				rp = nullElem(rp)
 				pm, ok := rp.(map[string]any)
 				if !ok {
 					return nil, errors.Errorf("sidecars[%d] %q: ports[%d]: expected object, got %T", i, sc.Name, j, rp)
@@ -2986,6 +3001,7 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 	var out []corev1.VolumeMount
 	seenMountPaths := map[string]bool{}
 	for i, v := range raw {
+		v = nullElem(v)
 		mm, ok := v.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("%s: volumeMounts[%d] expected object, got %T", prefix, i, v)
@@ -3691,6 +3707,7 @@ func parseJobSuccessPolicy(raw map[string]any) (*batchv1.SuccessPolicy, error) {
 	if !present {
 		return nil, errors.New("successPolicy.rules: required")
 	}
+	rulesRaw = nullElem(rulesRaw)
 	rules, ok := rulesRaw.([]any)
 	if !ok {
 		return nil, errors.Errorf("successPolicy.rules: must be an array, got %T", rulesRaw)
@@ -3698,6 +3715,7 @@ func parseJobSuccessPolicy(raw map[string]any) (*batchv1.SuccessPolicy, error) {
 	sp := &batchv1.SuccessPolicy{}
 	for i, entry := range rules {
 		label := fmt.Sprintf("successPolicy.rules[%d]", i)
+		entry = nullElem(entry)
 		obj, ok := entry.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("%s: must be an object, got %T", label, entry)
@@ -3918,6 +3936,7 @@ func parseJobPodFailurePolicy(raw map[string]any) (*batchv1.PodFailurePolicy, er
 	pfp := &batchv1.PodFailurePolicy{Rules: make([]batchv1.PodFailurePolicyRule, 0, len(rules))}
 	for i, entry := range rules {
 		label := fmt.Sprintf("podFailurePolicy.rules[%d]", i)
+		entry = nullElem(entry)
 		obj, ok := entry.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("%s: must be an object, got %T", label, entry)
@@ -4094,6 +4113,7 @@ func parseJobPodFailurePolicyOnPodConditions(raw any, label string) ([]batchv1.P
 	patterns := make([]batchv1.PodFailurePolicyOnPodConditionsPattern, 0, len(list))
 	for i, entry := range list {
 		entryLabel := fmt.Sprintf("%s[%d]", label, i)
+		entry = nullElem(entry)
 		obj, ok := entry.(map[string]any)
 		if !ok {
 			return nil, errors.Errorf("%s: must be an object, got %T", entryLabel, entry)
@@ -4569,6 +4589,7 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 	}
 	var vcts []VolumeClaimTemplate
 	for _, v := range vctList {
+		v = nullElem(v)
 		m, ok := v.(map[string]any)
 		if !ok {
 			return nil, errors.New("volumeClaimTemplates: each entry must be a mapping")

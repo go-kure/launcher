@@ -599,8 +599,8 @@ gets. The rule is the untyped answer, whatever it is:
 - **Refused, with the untyped message:** a list entry (`httproute` `parentRefs[]`,
   `rules[]`, `matches[]`, `headers[]`, `backendRefs[]`, `filters[]` and header-modifier
   entries; `ingress` `rules[]`, `paths[]`, `tls[]`; `external-secret` `data[]` and
-  `dataFrom[]`; `fluxcd-postbuild` `substituteFrom[]`; `rbac` `rules[]`;
-  `trafficSources[]`), and a required or typed-when-present block (the `httproute`
+  `dataFrom[]`; `fluxcd-postbuild` `substituteFrom[]`; `fluxcd-patches` `patches[]`;
+  `rbac` `rules[]`; `trafficSources[]`), and a required or typed-when-present block (the `httproute`
   filter blocks and their `backendRef`s, `ingress`/`httproute` `backendSelector`,
   `data[].remoteRef`, `certificate` `issuerRef`, `rbac` `apiGroups`/`resources`/`verbs`,
   `fluxcd-postbuild` `substitute`/`substituteFrom`, `fluxcd-patches` `patches`/`target`,
@@ -614,11 +614,15 @@ gets. The rule is the untyped answer, whatever it is:
   `accessModes`, which takes the `ReadWriteOnce` default; `expose` `annotations`, which
   used to panic when `sslRedirect` wrote into it).
 
-The remaining comma-ok assertions in these files are safe for one of three reasons:
-- a required key or entry check fires first with the same message for both shapes;
+Each remaining comma-ok assertion in these files is safe for one of three reasons:
+- a required list's `len == 0` check fires first with the same message for both
+  shapes (`httproute` `parentRefs`/`rules`, `ingress` `rules`/`paths`, `rbac` `rules`,
+  `certificate` `dnsNames`);
 - the value is filtered through `oam.IsNullValue` first (the `networkpolicy` trait
-  parser, via `nonNullObject`/`nonNullArray`);
-- a nil map or list only ranges, so both shapes produce the same parse.
+  parser via `nonNullObject`/`nonNullArray`, `trafficSources`, `backendSelector`);
+- a nil map is only read by key and a nil list only ranged, so both shapes parse the
+  same (`certificate` `privateKey`, `external-secret` `target`, `expose` `rules[]`, and
+  the optional string lists).
 
 `TestTypedNilSweep` and `TestTypedNilSweepFollowUp` pin each fixed site against the
 untyped answer.
