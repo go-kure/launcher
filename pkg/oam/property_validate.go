@@ -6,6 +6,7 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"strconv"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -453,7 +454,7 @@ func isIntegerValue(value any) bool {
 	rv := reflect.ValueOf(value)
 	switch rv.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		return true
 	case reflect.Float32, reflect.Float64:
 		f := rv.Float()
@@ -505,7 +506,7 @@ func normalizeIntegerValue(value any, path string) (any, error) {
 		return int(i), nil
 	case reflect.Int8, reflect.Int16:
 		return int(rv.Int()), nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		u := rv.Uint()
 		if u > math.MaxInt {
 			return value, errors.Errorf("%s: integer %d out of range (max %d)", path, u, math.MaxInt)
@@ -638,7 +639,7 @@ func IntegerValue(value any) (int64, bool) {
 	switch rv.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return rv.Int(), true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		u := rv.Uint()
 		if u > math.MaxInt64 {
 			return 0, false
@@ -657,6 +658,34 @@ func IntegerValue(value any) (int64, bool) {
 		return int64(f), true
 	default:
 		return 0, false
+	}
+}
+
+// IntegerInRange is IntegerValue bounded to lo..hi; its error names the true reason
+// (not a number, not whole, not finite, or out of range — beyond int64 included).
+func IntegerInRange(value any, lo, hi int64) (int64, error) {
+	outside := "must be an integer between %d and %d, got %s"
+	if n, ok := IntegerValue(value); ok {
+		if n < lo || n > hi {
+			return 0, errors.Errorf(outside, lo, hi, strconv.FormatInt(n, 10))
+		}
+		return n, nil
+	}
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return 0, errors.Errorf(outside, lo, hi, strconv.FormatUint(rv.Uint(), 10))
+	case reflect.Float32, reflect.Float64:
+		switch f := rv.Float(); {
+		case math.IsNaN(f) || math.IsInf(f, 0):
+			return 0, errors.Errorf("must be an integer, got %T %v (not finite)", value, value)
+		case f != math.Trunc(f):
+			return 0, errors.Errorf("must be an integer, got %T %v (not a whole number)", value, value)
+		default:
+			return 0, errors.Errorf(outside, lo, hi, strconv.FormatFloat(f, 'f', -1, 64))
+		}
+	default:
+		return 0, errors.Errorf("must be an integer, got %T", value)
 	}
 }
 

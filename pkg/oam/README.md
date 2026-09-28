@@ -420,7 +420,9 @@ does not fit rather than converting it. So a plain `int32` or `int64` from a low
 rule or a Go caller reads the same as the `int` the YAML decoder produces, and a
 value that would only fit after wrapping, like 2^32+80 for a port, is an error
 instead of port 80. An out-of-tree handler should read integers through it for the
-same reason.
+same reason. `IntegerInRange(value, lo, hi)` adds the target check and names the true
+refusal reason, so an overflow like `1e20` never reads as a type error; a capability
+`integer` property is checked with it too.
 
 ### What an explicit `null` means on the emitted path
 

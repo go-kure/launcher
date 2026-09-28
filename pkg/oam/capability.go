@@ -3,6 +3,7 @@ package oam
 import (
 	"bytes"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -223,15 +224,8 @@ func checkCapabilityValueType(v any, typeName string) error {
 			return errors.Errorf("expected string, got %T", v)
 		}
 	case "integer":
-		switch n := v.(type) {
-		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-			_ = n
-		case float64:
-			if n != float64(int64(n)) {
-				return errors.Errorf("expected integer, got non-integer float %v", n)
-			}
-		default:
-			return errors.Errorf("expected integer, got %T", v)
+		if _, err := IntegerInRange(v, math.MinInt64, math.MaxInt64); err != nil {
+			return err
 		}
 	case "boolean":
 		if _, ok := v.(bool); !ok {

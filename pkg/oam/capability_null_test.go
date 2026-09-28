@@ -246,3 +246,13 @@ func TestEvaluateProfile_UnsupportedCapabilityTypeIsRejected(t *testing.T) {
 		t.Fatal("a definition declaring an unsupported property type must be rejected when its rendering is applied")
 	}
 }
+
+// A capability integer accepts every integer kind, named or not (go-kure/launcher#525).
+func TestCapabilityIntegerType_EveryKind(t *testing.T) {
+	type count int32
+	for v, ok := range map[any]bool{count(30): true, float32(30): true, uintptr(30): true, uint64(1 << 63): false, 1e20: false} {
+		if err := checkCapabilityValueType(v, "integer"); (err == nil) != ok || err != nil && !strings.Contains(err.Error(), "between") {
+			t.Errorf("%T(%v): error = %v", v, v, err)
+		}
+	}
+}
