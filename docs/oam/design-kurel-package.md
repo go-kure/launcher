@@ -138,6 +138,7 @@ Ported from the downstream runtime. Each type maps to a `TraitHandler` in `pkg/o
 | `external-secret` | yes — `secretStoreRef` | ExternalSecrets ExternalSecret |
 | `configmap` | no | ConfigMap with optional volume mount |
 | `topology-spread` | no | Launcher-native (not ported from the downstream runtime): stamps launcher's default topology spread constraints — the `webservice`/`worker` `topologySpread` opinion — onto the component's Deployment from its post-policy replica count. Takes no properties and no capability rendering. |
+| `force-replace` | no | Launcher-native (not ported from the downstream runtime): opt-in; annotates the component's generated objects with `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a Job's pod template). Replacing a Job re-runs it. Takes no properties and no capability rendering. |
 | `scaler` | no | HPA + optional PDB |
 
 Traits that stay in the downstream runtime (not ported to launcher): `backup`, `fluxcd-postbuild`,
