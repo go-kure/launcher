@@ -135,6 +135,34 @@ func TestPostgresql_NullIsAbsence(t *testing.T) {
 	}
 }
 
+// TestPostgresql_BootstrapNullSiblingIsAbsent: recovery and pg_basebackup are
+// mutually exclusive, and a null or typed-nil sibling is absent for that check, as
+// for every other read. Before the strict reads a typed-nil sibling passed the
+// map assertion and counted as authored, refusing a valid bootstrap.
+func TestPostgresql_BootstrapNullSiblingIsAbsent(t *testing.T) {
+	siblings := map[string]func(b map[string]any, key string){
+		"omitted":   func(map[string]any, string) {},
+		"nil":       func(b map[string]any, key string) { b[key] = nil },
+		"typed nil": func(b map[string]any, key string) { b[key] = map[string]any(nil) },
+	}
+	for authored, sibling := range map[string]string{"recovery": "pg_basebackup", "pg_basebackup": "recovery"} {
+		for name, set := range siblings {
+			t.Run(authored+"/"+sibling+" "+name, func(t *testing.T) {
+				b := map[string]any{authored: map[string]any{"source": "src"}}
+				set(b, sibling)
+				cfg, err := postgresqlConfigFor(t, map[string]any{"bootstrap": b})
+				if err != nil {
+					t.Fatalf("bootstrap %v: %v", b, err)
+				}
+				got := map[string]string{"recovery": cfg.BootstrapRecoverySource, "pg_basebackup": cfg.BootstrapPgBasebackupSource}
+				if got[authored] != "src" || got[sibling] != "" {
+					t.Errorf("bootstrap %v: sources = %v, want only %s", b, got, authored)
+				}
+			})
+		}
+	}
+}
+
 // TestPostgresql_TypedNullMatchesOmitted: a typed nil in a scalar slot reads
 // exactly as an omitted key. storageSize used to count as authored because the
 // presence check was `props[key] != nil`, which a typed nil passes, so the 1Gi
@@ -331,6 +359,23 @@ func TestPostgresql_EmptyVersionIsKept(t *testing.T) {
 	}
 	if cfg.Version != "" {
 		t.Errorf("version \"\" read as %q, want it kept as authored", cfg.Version)
+	}
+}
+
+// TestPostgresql_EmptyStorageSizeIsKept pins what an authored `storageSize: ""` does
+// today, as before the strict reads: it is copied through as authored, and because it
+// was authored neither the "1Gi" fallback nor a policy default replaces it — unlike a
+// null or typed nil (see TestPostgresql_TypedNullMatchesOmitted).
+func TestPostgresql_EmptyStorageSizeIsKept(t *testing.T) {
+	pc := newPostgresqlApp(t, map[string]any{"storageSize": ""})
+	if pc.StorageSize != "" {
+		t.Errorf("storageSize \"\" read as %q, want it kept as authored", pc.StorageSize)
+	}
+	if err := stack.ApplicationConfig(pc).(oam.Enforceable).ApplyPolicy(&stubPolicy{defaultStorageSize: "20Gi"}); err != nil {
+		t.Fatalf("ApplyPolicy: %v", err)
+	}
+	if pc.StorageSize != "" {
+		t.Errorf("storageSize \"\" after policy = %q, want the authored value kept over the policy default", pc.StorageSize)
 	}
 }
 
