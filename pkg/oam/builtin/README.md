@@ -17,10 +17,12 @@ fields) are split off and returned to the caller, and the rest is JSON-decoded i
 rather than a dropped field; a number in an interface-typed field stays an exact `json.Number`.
 It decodes only: no defaulting, no semantic checks. It shares one limitation with
 `encoding/json`: unknown keys nested inside a type that has its own `UnmarshalJSON` are still
-dropped. `UnreachableJSONFields(type, owned...)` lists the spec fields an author cannot set that
+dropped. `UnreachableJSONFields(type, owned...)` lists the spec keys an author cannot use that
 way (tagged `json:"-"`, refused by `encoding/json` itself such as an ambiguously promoted key,
-or shadowed by an owned key), including embedded ones; each key is probed against
-`encoding/json`, so the list agrees with the decoder. A handler that decodes an external spec
+shadowed by an owned key, or behind an unexported embedded pointer the decoder cannot set),
+including embedded ones; each key is probed against `encoding/json`, so the list agrees with
+the decoder. The check is per key, not per field: a field hidden behind another field under the
+same key (a shallower one, or one equal ignoring case) is not reported. A handler that decodes an external spec
 type asserts that list is empty, against an explicit exclusion list, so an upstream field added
 under a name launcher already owns fails the test instead of silently becoming unreachable. The `cilium-networkpolicy` trait decodes its
 raw rules this way.
