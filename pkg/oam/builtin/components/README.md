@@ -1347,7 +1347,9 @@ not part of either change.
   workload named differently (a `deployment` named `api-server` behind a
   `service` named `api`). `ports` is the full `corev1.ServicePort` list, at
   least one entry: `port` (required), `targetPort` (a number or a container
-  port name; defaults to `port`), `protocol` (`TCP`, `UDP` or `SCTP`; defaults
+  port name, published as the `Types: [integer, string]` union
+  (go-kure/launcher#383), so a value of any other type is rejected by property
+  validation before the parser sees it; defaults to `port`), `protocol` (`TCP`, `UDP` or `SCTP`; defaults
   to `TCP`) and `name` (required once there is more than one port; names and
   port/protocol pairs must be unique). `type` is `ClusterIP` (default),
   `NodePort` or `LoadBalancer`; `ExternalName` is not offered, since it has no

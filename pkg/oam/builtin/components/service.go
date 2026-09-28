@@ -85,10 +85,12 @@ func (h *ServiceHandler) PropertySchema() map[string]oam.PropertySchema {
 				Properties: map[string]oam.PropertySchema{
 					"name": {Type: oam.PropertyTypeString, Description: "Port name (a DNS-1123 label). Required when the Service has more than one port."},
 					"port": {Type: oam.PropertyTypeInteger, Required: true, Description: "Port the Service exposes, 1-65535."},
-					// Typeless on purpose, like deployment's maxUnavailable: an
-					// int-or-string leaf, and launcher's PropertyType set has no
-					// union member yet (go-kure/launcher#383).
-					"targetPort": {Description: "Port on the selected pods: a number (1-65535) or a container port name. Defaults to port."},
+					// An int-or-string leaf, published as the integer/string union
+					// like deployment's maxUnavailable (go-kure/launcher#383).
+					// parseTargetPort reads the integer through toInt32, which
+					// refuses a fractional number, so integer (which admits an
+					// integral float) narrows nothing it accepts.
+					"targetPort": {Types: intOrStringTypes(), Description: "Port on the selected pods: a number (1-65535) or a container port name. Defaults to port."},
 					"protocol":   {Type: oam.PropertyTypeString, Default: string(corev1.ProtocolTCP), Enum: protoEnum, Description: "TCP, UDP or SCTP. Defaults to TCP. Only TCP ports receive a synthesized NetworkPolicy allow."},
 				},
 			},

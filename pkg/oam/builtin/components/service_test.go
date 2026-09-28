@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -167,6 +168,8 @@ func TestServiceHandler_Rejects(t *testing.T) {
 		{"port out of range", port(map[string]any{"port": 70000}), "ports[0].port: must be between 1 and 65535"},
 		{"targetPort out of range", port(map[string]any{"port": 80, "targetPort": 0}), "ports[0].targetPort: must be between 1 and 65535"},
 		{"targetPort invalid name", port(map[string]any{"port": 80, "targetPort": "not_a_port"}), "ports[0].targetPort: invalid port name"},
+		// Property validation refuses this first on a built document (union_leaves_test.go);
+		// the parser keeps its own check for callers that skip it, such as Endpoints.
 		{"targetPort wrong type", port(map[string]any{"port": 80, "targetPort": true}), "ports[0].targetPort: must be an integer or a port name"},
 		{"protocol invalid", port(map[string]any{"port": 80, "protocol": "HTTP"}), "ports[0].protocol: must be one of TCP, UDP, SCTP"},
 		{"name invalid", port(map[string]any{"port": 80, "name": "HTTP"}), "ports[0].name: invalid port name"},
@@ -427,8 +430,10 @@ func TestServiceHandler_PropertySchema(t *testing.T) {
 	if !item["port"].Required {
 		t.Error("ports[].port must be required")
 	}
-	if item["targetPort"].Type != "" {
-		t.Errorf("ports[].targetPort must be typeless (int or name), got %q", item["targetPort"].Type)
+	// targetPort is int-or-name: the integer/string Types union, with Type left empty so a
+	// consumer that does not read Types still accepts both forms (go-kure/launcher#383).
+	if tp := item["targetPort"]; tp.Type != "" || !slices.Equal(tp.Types, []oam.PropertyType{oam.PropertyTypeInteger, oam.PropertyTypeString}) {
+		t.Errorf("ports[].targetPort = Type %q, Types %v; want no Type and Types [integer string]", tp.Type, tp.Types)
 	}
 	if item["protocol"].Default != "TCP" {
 		t.Errorf("ports[].protocol default = %v, want TCP", item["protocol"].Default)

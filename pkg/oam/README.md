@@ -339,7 +339,7 @@ single `Type` would be (below). Members are two or more distinct scalar types (s
 number, boolean); `Type` and `Types` are mutually exclusive. A schema that sets both, or a malformed
 union, is a schema error reported as soon as a value reaches the leaf. Every Kubernetes
 `intstr.IntOrString` leaf — the rolling-update `maxUnavailable`/`maxSurge` knobs, the networkpolicy
-`port` — declares `integer`/`string`, and every `resource.Quantity` leaf (`cpu`, `memory`, a claim's
+`port`, the `service` kind's `ports[].targetPort` — declares `integer`/`string`, and every `resource.Quantity` leaf (`cpu`, `memory`, a claim's
 `storage`) declares `string`/`number`, because their parsers take a fractional number too. `Type`
 stays empty on a union leaf, so a schema consumer that does not read `Types` sees an untyped leaf and
 keeps accepting every member. A completeness test (`pkg/cmd/kurel`) enforces that every built-in

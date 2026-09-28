@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -32,6 +33,7 @@ func unionLeafTransformer() *oam.Transformer {
 		"daemonset":   &components.DaemonsetHandler{},
 		"statefulset": &components.StatefulsetHandler{},
 		"webservice":  &components.WebserviceHandler{},
+		"service":     &components.ServiceHandler{},
 	}, nil)
 }
 
@@ -114,7 +116,8 @@ type unionLeaf struct {
 	// props builds a fresh property map carrying v at the leaf; validation writes
 	// normalized values back, so no map is shared between runs.
 	props func(v any) map[string]any
-	// strForm is the leaf's string spelling: a percentage, or a quantity.
+	// strForm is the leaf's string spelling: a percentage, a quantity, or a port
+	// name.
 	strForm string
 	// rendered reads the leaf back off the generated objects.
 	rendered func(objs []client.Object) string
@@ -215,6 +218,15 @@ var unionLeaves = []unionLeaf{
 		},
 		rendered: func(objs []client.Object) string {
 			return firstOf[*appsv1.StatefulSet](objs).Spec.VolumeClaimTemplates[0].Spec.Resources.Requests.Storage().String()
+		},
+	},
+	{
+		name: "service ports[].targetPort", compType: "service", strForm: "https",
+		props: func(v any) map[string]any {
+			return map[string]any{"ports": []any{map[string]any{"port": 443, "targetPort": v}}}
+		},
+		rendered: func(objs []client.Object) string {
+			return firstOf[*corev1.Service](objs).Spec.Ports[0].TargetPort.String()
 		},
 	},
 }
