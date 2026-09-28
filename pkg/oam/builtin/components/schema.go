@@ -27,7 +27,8 @@ func accessModesEnum() []any {
 }
 
 // intOrStringTypes is the Types union an intstr.IntOrString leaf publishes: a
-// rolling update's maxUnavailable/maxSurge takes an integer or a percentage string
+// rolling update's maxUnavailable/maxSurge takes an integer or a percentage string,
+// and a service port's targetPort an integer or a container port name
 // (go-kure/launcher#383).
 func intOrStringTypes() []oam.PropertyType {
 	return []oam.PropertyType{oam.PropertyTypeInteger, oam.PropertyTypeString}
