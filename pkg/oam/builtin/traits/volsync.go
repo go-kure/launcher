@@ -111,9 +111,9 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 	}
 
 	if v, ok := props["pruneIntervalDays"]; ok {
-		pid, ok := yamlToInt(v)
-		if !ok {
-			return nil, errors.New("'pruneIntervalDays' must be a positive integer")
+		pid, err := coerceInt(v)
+		if err != nil {
+			return nil, errors.Errorf("'pruneIntervalDays': %w", err)
 		}
 		if pid <= 0 || pid > math.MaxInt32 {
 			return nil, errors.Errorf("'pruneIntervalDays' must be between 1 and %d", math.MaxInt32)
@@ -128,9 +128,9 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 			"monthly": &config.RetainMonthly,
 		} {
 			if v, ok := rawRetain[field]; ok {
-				n, ok := yamlToInt(v)
-				if !ok {
-					return nil, errors.Errorf("'retain.%s' must be a non-negative integer", field)
+				n, err := coerceInt(v)
+				if err != nil {
+					return nil, errors.Errorf("'retain.%s': %w", field, err)
 				}
 				if n < 0 || n > math.MaxInt32 {
 					return nil, errors.Errorf("'retain.%s' must be between 0 and %d", field, math.MaxInt32)
@@ -161,16 +161,6 @@ type VolsyncConfig struct {
 // ComponentName returns the OAM component this sub-app belongs to, for resource
 // provenance attribution.
 func (c *VolsyncConfig) ComponentName() string { return c.componentName }
-
-// yamlToInt converts a whole number of any Go integer kind, or an integral float,
-// to int. A fraction (e.g. 1.5) or a value int cannot hold is rejected.
-func yamlToInt(v any) (int, bool) {
-	n, ok := oam.IntegerValue(v)
-	if !ok || n < math.MinInt || n > math.MaxInt {
-		return 0, false
-	}
-	return int(n), true
-}
 
 // Generate creates a VolSync ReplicationSource resource.
 func (c *VolsyncConfig) Generate(app *stack.Application) ([]*client.Object, error) {

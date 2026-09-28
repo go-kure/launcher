@@ -1,8 +1,6 @@
 package traits
 
 import (
-	"math"
-
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -62,30 +60,30 @@ func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Applica
 	}
 
 	// minReplicas/maxReplicas are optional at parse time: a policy default may
-	// supply them. When present they must be whole numbers; the effective-value
-	// checks (>=1, max>=min, PDB) run in validateEffective after ApplyPolicy.
+	// supply them. When present they must be int32 whole numbers (coerceInt32); the
+	// effective-value checks (>=1, max>=min, PDB) run in validateEffective after ApplyPolicy.
 	if _, exists := props["minReplicas"]; exists {
-		minReplicas, ok := toInt32ForScaler(props["minReplicas"])
-		if !ok {
-			return nil, errors.New("minReplicas must be a whole number")
+		minReplicas, err := coerceInt32(props["minReplicas"])
+		if err != nil {
+			return nil, errors.Errorf("minReplicas: %w", err)
 		}
 		config.MinReplicas = minReplicas
 		config.explicitMinReplicas = true
 	}
 
 	if _, exists := props["maxReplicas"]; exists {
-		maxReplicas, ok := toInt32ForScaler(props["maxReplicas"])
-		if !ok {
-			return nil, errors.New("maxReplicas must be a whole number")
+		maxReplicas, err := coerceInt32(props["maxReplicas"])
+		if err != nil {
+			return nil, errors.Errorf("maxReplicas: %w", err)
 		}
 		config.MaxReplicas = maxReplicas
 		config.explicitMaxReplicas = true
 	}
 
 	if _, exists := props["cpuUtilization"]; exists {
-		cpu, ok := toInt32ForScaler(props["cpuUtilization"])
-		if !ok {
-			return nil, errors.New("cpuUtilization must be a whole number")
+		cpu, err := coerceInt32(props["cpuUtilization"])
+		if err != nil {
+			return nil, errors.Errorf("cpuUtilization: %w", err)
 		}
 		if cpu < 1 || cpu > 100 {
 			return nil, errors.Errorf("cpuUtilization must be between 1 and 100, got %d", cpu)
@@ -94,9 +92,9 @@ func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Applica
 	}
 
 	if _, exists := props["memoryUtilization"]; exists {
-		mem, ok := toInt32ForScaler(props["memoryUtilization"])
-		if !ok {
-			return nil, errors.New("memoryUtilization must be a whole number")
+		mem, err := coerceInt32(props["memoryUtilization"])
+		if err != nil {
+			return nil, errors.Errorf("memoryUtilization: %w", err)
 		}
 		if mem < 1 || mem > 100 {
 			return nil, errors.Errorf("memoryUtilization must be between 1 and 100, got %d", mem)
@@ -116,16 +114,6 @@ func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Applica
 	// minReplicas may still be filled by a policy default.
 
 	return config, nil
-}
-
-// toInt32ForScaler parses v as int32, requiring a whole number of any Go integer
-// kind (or an integral float) inside the int32 range.
-func toInt32ForScaler(v any) (int32, bool) {
-	n, ok := oam.IntegerValue(v)
-	if !ok || n < math.MinInt32 || n > math.MaxInt32 {
-		return 0, false
-	}
-	return int32(n), true
 }
 
 // nonRWXClaimer is implemented by component configs whose Deployment carries a
