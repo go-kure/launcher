@@ -152,4 +152,21 @@ func TestSynthesizedNetworkPolicies_ShareNoSelector(t *testing.T) {
 		}
 		assertNoSelectorAliasing(t, []*metav1.LabelSelector{ep, src}, generatedSelectors(t, cfg))
 	})
+
+	// A copy cloning only MatchLabels would still share MatchExpressions' Values.
+	t.Run("expression-bearing source", func(t *testing.T) {
+		src := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+			{Key: "tier", Operator: metav1.LabelSelectorOpIn, Values: []string{"edge"}},
+		}}
+		sources := []netpol.TrafficSource{{Namespace: "ingress", PodSelector: src}}
+		cfg := &componentAllowPolicyConfig{ComponentName: "web", Rules: []trafficRule{{Sources: sources, Ports: ports(80)}}}
+		for _, e := range generatedSelectors(t, cfg) {
+			if len(e.sel.MatchExpressions) > 0 {
+				e.sel.MatchExpressions[0].Values[0] = "mutated"
+			}
+		}
+		if got := src.MatchExpressions[0].Values[0]; got != "edge" {
+			t.Errorf("input selector's expression value = %q after editing the output, want edge", got)
+		}
+	})
 }
