@@ -77,6 +77,42 @@ func TestExternalAuth_MaxSizeFitsUint16(t *testing.T) {
 	}
 }
 
+// TestTraitIntegerReaders_OverflowIsARangeError: the scaler, certificate and volsync
+// readers called 1e20 and MaxUint64 "not a whole number"; they now report the range,
+// while a fraction still reports that it is not whole.
+func TestTraitIntegerReaders_OverflowIsARangeError(t *testing.T) {
+	app := stack.NewApplication("wrk", "default", nil)
+	scaler := func(f string) func(any) error {
+		return func(v any) error { _, err := (&ScalerHandler{}).parseProperties(map[string]any{f: v}, app); return err }
+	}
+	volsync := func(props func(any) map[string]any) func(any) error {
+		return func(v any) error {
+			p := props(v)
+			p["sourcePVC"], p["schedule"] = "data", "0 * * * *"
+			_, err := (&VolSyncHandler{}).parseProperties(p, app)
+			return err
+		}
+	}
+	for field, read := range map[string]func(any) error{
+		"minReplicas": scaler("minReplicas"), "maxReplicas": scaler("maxReplicas"),
+		"cpuUtilization": scaler("cpuUtilization"), "memoryUtilization": scaler("memoryUtilization"),
+		"privateKey.size": func(v any) error {
+			return parsePrivateKey(map[string]any{"privateKey": map[string]any{"size": v}}, &CertificateConfig{})
+		},
+		"'pruneIntervalDays'": volsync(func(v any) map[string]any { return map[string]any{"pruneIntervalDays": v} }),
+		"'retain.daily'": volsync(func(v any) map[string]any {
+			return map[string]any{"retain": map[string]any{"daily": v}}
+		}),
+	} {
+		for v, want := range map[any]string{1e20: "between", uint64(math.MaxUint64): "between", 2.5: "(not a whole number)"} {
+			if err := read(v); err == nil || !strings.Contains(err.Error(), field+": must be an integer") ||
+				!strings.Contains(err.Error(), want) {
+				t.Errorf("%s %T(%v): error = %v, want %q", field, v, v, err, want)
+			}
+		}
+	}
+}
+
 // TestRoutePorts_EveryIntegerKindAndNoSilentFallback covers the two path-level port
 // readers go-kure/launcher#525's sweep reached: an ingress rules[].paths[].port and an httproute
 // rules[].backendRefs[].port. Each reads every integer kind; an invalid value is an

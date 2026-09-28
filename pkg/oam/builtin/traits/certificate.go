@@ -182,9 +182,9 @@ func parsePrivateKey(props map[string]any, config *CertificateConfig) error {
 	}
 
 	if raw, exists := pk["size"]; exists {
-		size, ok := toInt32ForScaler(raw)
-		if !ok {
-			return errors.New("privateKey.size must be a whole number")
+		size, err := coerceInt32(raw)
+		if err != nil {
+			return errors.Errorf("privateKey.size: %w", err)
 		}
 		if size <= 0 {
 			return errors.Errorf("privateKey.size must be positive, got %d", size)
