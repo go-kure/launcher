@@ -2,9 +2,11 @@ package builtin
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -43,17 +45,17 @@ func DecodeStrict[T any](src map[string]any) (*T, error) {
 //
 // The rest is marshalled to JSON and decoded with DisallowUnknownFields, so a
 // misspelt or unsupported key, at any depth, is an error naming it, as is a value of
-// the wrong type.
+// the wrong type. Numbers in interface-typed fields decode as json.Number, exactly.
 //
 // Decoding is not defaulting and not validating: T comes back exactly as authored.
 // Known gap: encoding/json does not apply DisallowUnknownFields inside a type with
 // its own UnmarshalJSON, so unknown keys nested in such a field are still dropped.
-// Key matching is case-insensitive, as it always is in encoding/json.
+// Key matching is case-insensitive, as in encoding/json, and so is the owned split.
 func DecodeStrictJSON[T any](src map[string]any, owned ...string) (*T, map[string]any, error) {
 	rest := make(map[string]any, len(src))
 	split := make(map[string]any)
 	for k, v := range src {
-		if slices.Contains(owned, k) {
+		if isOwned(owned, k) {
 			split[k] = v
 			continue
 		}
@@ -66,6 +68,7 @@ func DecodeStrictJSON[T any](src map[string]any, owned ...string) (*T, map[strin
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
+	dec.UseNumber()
 	var out T
 	if err := dec.Decode(&out); err != nil {
 		return nil, nil, err
@@ -73,60 +76,74 @@ func DecodeStrictJSON[T any](src map[string]any, owned ...string) (*T, map[strin
 	return &out, split, nil
 }
 
-// UnreachableJSONFields reports the top-level fields of t (a struct, or a pointer to
-// one) that an author cannot set through DecodeStrictJSON called with the same owned
-// keys: a field tagged `json:"-"` (reported by its Go name) and a field whose json
-// key an owned key shadows (reported by that key, compared case-insensitively like
-// encoding/json does). Fields promoted from an embedded struct are included.
+func isOwned(owned []string, key string) bool {
+	return slices.ContainsFunc(owned, func(o string) bool { return strings.EqualFold(o, key) })
+}
+
+// UnreachableJSONFields reports the fields of t (a struct, or a pointer to one),
+// embedded ones included, that an author cannot set through DecodeStrictJSON called
+// with the same owned keys: a field tagged `json:"-"` (by Go name), a key encoding/json
+// itself refuses (an ambiguous promotion), and a key an owned key shadows. Each key is
+// probed against encoding/json, so the check cannot disagree with the decoder.
 //
 // A terminal that decodes an external spec type asserts this is empty against an
 // explicit exclusion list, so an upstream field added under a name launcher already
 // owns turns the test red instead of silently becoming unreachable.
 func UnreachableJSONFields(t reflect.Type, owned ...string) []string {
-	var out []string
-	collectUnreachable(t, owned, map[reflect.Type]bool{}, &out)
-	slices.Sort(out)
-	return out
-}
-
-// collectUnreachable walks t and its embedded structs. seen stops the walk at a
-// struct already visited, as encoding/json does: a type that embeds itself (or
-// a cycle of embeddings) otherwise recursed until the stack overflowed.
-func collectUnreachable(t reflect.Type, owned []string, seen map[reflect.Type]bool, out *[]string) {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	if t.Kind() != reflect.Struct || seen[t] {
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	var out []string
+	keys := map[string]bool{}
+	collectJSONKeys(t, nil, keys, &out)
+	for key := range keys {
+		if isOwned(owned, key) || !decodesKey(t, key) {
+			out = append(out, key)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// collectJSONKeys gathers the json key of every field of t and of the structs it
+// embeds. path holds only the current branch's embeddings, so a type that embeds
+// itself stops at the repeat while one embedded twice is walked on both branches.
+func collectJSONKeys(t reflect.Type, path []reflect.Type, keys map[string]bool, hidden *[]string) {
+	if slices.Contains(path, t) {
 		return
 	}
-	seen[t] = true
+	path = append(path, t)
 	for f := range t.Fields() {
 		tag := f.Tag.Get("json")
 		if tag == "-" {
 			if f.IsExported() {
-				*out = append(*out, f.Name)
+				*hidden = append(*hidden, f.Name)
 			}
 			continue
 		}
 		name, _, _ := strings.Cut(tag, ",")
-		if f.Anonymous && name == "" {
-			ft := f.Type
-			if ft.Kind() == reflect.Pointer {
-				ft = ft.Elem()
-			}
-			if ft.Kind() == reflect.Struct {
-				collectUnreachable(ft, owned, seen, out)
-				continue
-			}
+		ft := f.Type
+		if ft.Kind() == reflect.Pointer {
+			ft = ft.Elem()
 		}
-		if !f.IsExported() {
-			continue
-		}
-		if name == "" {
-			name = f.Name
-		}
-		if slices.ContainsFunc(owned, func(o string) bool { return strings.EqualFold(o, name) }) {
-			*out = append(*out, name)
+		embedded := f.Anonymous && ft.Kind() == reflect.Struct
+		switch {
+		case embedded && name == "":
+			collectJSONKeys(ft, path, keys, hidden)
+		case f.IsExported() || embedded:
+			keys[cmp.Or(name, f.Name)] = true
 		}
 	}
+}
+
+// decodesKey reports whether a strict encoding/json decode into t accepts key.
+func decodesKey(t reflect.Type, key string) bool {
+	data, _ := json.Marshal(map[string]any{key: nil})
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(reflect.New(t).Interface())
+	return err == nil || !strings.Contains(err.Error(), "unknown field "+strconv.Quote(key))
 }
