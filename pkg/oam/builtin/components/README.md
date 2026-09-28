@@ -2151,7 +2151,11 @@ element is refused (`tolerations[0]: must be an object, got <nil>`). Most
 callers then failed on a missing required field anyway. `tolerations` did not:
 an empty entry became an `Exists` toleration with no key, which tolerates
 **every** taint. The element is now normalised to a null first, so every caller
-refuses both shapes identically (go-kure/launcher#465).
+refuses both shapes identically (go-kure/launcher#465). The list readers that
+do not go through `parseObjectList` (`envFrom`, `httpHeaders`, `volumes`,
+`volumeMounts`, sidecar `ports`, the Job `successPolicy`/`podFailurePolicy` rules and
+`onPodConditions`, `volumeClaimTemplates`, `valuesFrom`, `scopeOverrides`) pass each
+element through `nullElem` first, for the same untyped refusal and message.
 
 ## Conventions
 

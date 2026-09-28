@@ -327,6 +327,12 @@ func TestTypedNilSweepFollowUp(t *testing.T) {
 			return (&RBACHandler{}).parseProperties(map[string]any{"rules": []any{map[string]any{
 				"apiGroups": v, "resources": []any{"pods"}, "verbs": []any{"get"}}}}, sweepApp())
 		}},
+		{"fluxcd-patches patches[0]", nilMap, func(v any) (any, error) {
+			bundle := &stack.Bundle{}
+			err := (&FluxCDPatchesHandler{}).Apply(&oam.Trait{Type: "fluxcd-patches",
+				Properties: map[string]any{"patches": []any{v}}}, sweepApp(), bundle)
+			return bundle.Patches, err
+		}},
 		{"certificate issuerRef", nilMap, func(v any) (any, error) {
 			return (&CertificateHandler{}).parseProperties(map[string]any{
 				"secretName": "tls", "issuerRef": v, "dnsNames": []any{"web.example.com"}}, sweepApp())

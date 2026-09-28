@@ -72,7 +72,7 @@ func (h *FluxCDPatchesHandler) Apply(trait *oam.Trait, _ *stack.Application, bun
 
 	for i, item := range items {
 		m, ok := item.(map[string]any)
-		if !ok {
+		if !ok || m == nil {
 			return errors.Errorf("fluxcd-patches: patch[%d] must be an object", i)
 		}
 

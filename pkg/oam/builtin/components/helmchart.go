@@ -153,6 +153,7 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 	}
 	if vfList, ok := props["valuesFrom"].([]any); ok {
 		for i, vf := range vfList {
+			vf = nullElem(vf)
 			m, ok := vf.(map[string]any)
 			if !ok {
 				return nil, errors.Errorf("valuesFrom[%d]: expected object, got %T", i, vf)
