@@ -1,6 +1,7 @@
 package builtin_test
 
 import (
+	"fmt"
 	"math"
 	"reflect"
 	"slices"
@@ -101,6 +102,19 @@ func TestDecodeStrictJSON_SplitsOwnedKeys(t *testing.T) {
 	if _, _, err := builtin.DecodeStrictJSON[helmv2.HelmReleaseSpec](src); err == nil {
 		t.Error("without owned keys named, valuesMode must be an unknown field")
 	}
+
+	// encoding/json folds case, so a case variant of an owned key must be split off too.
+	if spec, owned, err := builtin.DecodeStrictJSON[helmv2.HelmReleaseSpec](map[string]any{"Values": "leaks"}, "values"); err != nil || spec.Values != nil || !reflect.DeepEqual(owned, map[string]any{"Values": "leaks"}) {
+		t.Errorf("case variant of an owned key: owned = %v, err = %v; want it split off, not decoded", owned, err)
+	}
+}
+
+// TestDecodeStrictJSON_KeepsExactNumbers: an interface-typed field keeps a large int exact.
+func TestDecodeStrictJSON_KeepsExactNumbers(t *testing.T) {
+	spec, _, err := builtin.DecodeStrictJSON[struct{ Extra map[string]any }](map[string]any{"extra": map[string]any{"n": int64(9007199254740993)}})
+	if err != nil || fmt.Sprint(spec.Extra["n"]) != "9007199254740993" {
+		t.Errorf("DecodeStrictJSON = %v, %v; want extra.n 9007199254740993", spec, err)
+	}
 }
 
 func TestDecodeStrictJSON_NilSource(t *testing.T) {
@@ -154,6 +168,41 @@ type RecursiveEmbed struct {
 func TestUnreachableJSONFields_RecursiveEmbedding(t *testing.T) {
 	if got := builtin.UnreachableJSONFields(reflect.TypeFor[RecursiveEmbed](), "name"); !slices.Equal(got, []string{"name"}) {
 		t.Errorf("UnreachableJSONFields = %v, want [name]", got)
+	}
+}
+
+// encoding/json drops reachDiamond's value as ambiguous and accepts reachTagged's embed.
+type (
+	reachLeaf struct {
+		Value string `json:"value"`
+	}
+	reachLeft    struct{ reachLeaf }
+	reachRight   struct{ reachLeaf }
+	reachDiamond struct {
+		reachLeft
+		reachRight
+	}
+	reachTagged struct {
+		reachLeaf `json:"values"`
+	}
+)
+
+// TestUnreachableJSONFields_FollowsDecoder: the check agrees with what the decoder accepts.
+func TestUnreachableJSONFields_FollowsDecoder(t *testing.T) {
+	for _, tc := range []struct {
+		typ         reflect.Type
+		owned, want []string
+	}{
+		{reflect.TypeFor[reachDiamond](), nil, []string{"value"}},
+		{reflect.TypeFor[reachTagged](), []string{"values"}, []string{"values"}},
+		{reflect.TypeFor[reachTagged](), nil, nil},
+	} {
+		if got := builtin.UnreachableJSONFields(tc.typ, tc.owned...); !slices.Equal(got, tc.want) {
+			t.Errorf("UnreachableJSONFields(%v, %v) = %v, want %v", tc.typ, tc.owned, got, tc.want)
+		}
+	}
+	if _, _, err := builtin.DecodeStrictJSON[reachDiamond](map[string]any{"value": "x"}); err == nil {
+		t.Error("the ambiguous key decoded; the diamond fixture no longer shows the gap")
 	}
 }
 

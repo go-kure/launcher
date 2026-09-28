@@ -11,17 +11,18 @@ properties.
 `DecodeStrict` decodes through yaml.v3, which keys on yaml tags and otherwise on the lowercased
 Go field name, so it suits launcher's own schema types only. An external API type that carries
 json tags only (Flux, Cilium) is decoded with `DecodeStrictJSON[T](props, owned...)` instead:
-the launcher-owned keys named in `owned` are split off and returned to the caller, and the rest
-is JSON-decoded into `T` with `DisallowUnknownFields`, so a misspelt key at any depth or a
-wrongly typed value is an error rather than a dropped field. It decodes only: no defaulting, no
-semantic checks. It shares one limitation with `encoding/json`: unknown keys nested inside a
-type that has its own `UnmarshalJSON` are still dropped. `UnreachableJSONFields(type, owned...)`
-lists the spec fields an author cannot set that way (tagged `json:"-"`, or shadowed by an owned
-key), including fields promoted from embedded structs; like `encoding/json`, it visits each
-embedded struct type once, so a type that embeds itself is safe to pass. A handler that
-decodes an external spec type asserts that list is empty, against an
-explicit exclusion list, so an upstream field added under a name launcher already owns fails
-the test instead of silently becoming unreachable. The `cilium-networkpolicy` trait decodes its
+the launcher-owned keys named in `owned` (matched case-insensitively, as `encoding/json` matches
+fields) are split off and returned to the caller, and the rest is JSON-decoded into `T` with
+`DisallowUnknownFields`, so a misspelt key at any depth or a wrongly typed value is an error
+rather than a dropped field; a number in an interface-typed field stays an exact `json.Number`.
+It decodes only: no defaulting, no semantic checks. It shares one limitation with
+`encoding/json`: unknown keys nested inside a type that has its own `UnmarshalJSON` are still
+dropped. `UnreachableJSONFields(type, owned...)` lists the spec fields an author cannot set that
+way (tagged `json:"-"`, refused by `encoding/json` itself such as an ambiguously promoted key,
+or shadowed by an owned key), including embedded ones; each key is probed against
+`encoding/json`, so the list agrees with the decoder. A handler that decodes an external spec
+type asserts that list is empty, against an explicit exclusion list, so an upstream field added
+under a name launcher already owns fails the test instead of silently becoming unreachable. The `cilium-networkpolicy` trait decodes its
 raw rules this way.
 
 `VolSyncRendering` and `PVCRendering` carry platform-supplied storage-class defaults
