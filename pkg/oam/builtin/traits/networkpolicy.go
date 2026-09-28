@@ -737,7 +737,7 @@ func npPortNumber(value any, path string) (int32, bool, error) {
 	switch rv.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		n = rv.Int()
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		u := rv.Uint()
 		if u > math.MaxInt64 {
 			return 0, true, errors.Errorf("%s: 'port' %v is out of range (1-65535)", path, value)
