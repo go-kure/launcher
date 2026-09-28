@@ -42,6 +42,95 @@ func TestValidatePropertyValue_TypesUnionAcceptsAnyMember(t *testing.T) {
 	}
 }
 
+// TestValidatePropertyValue_TypesUnionDoesNotDependOnMemberOrder: a value is
+// accepted when ANY member validates it, not only the first member whose kind it
+// matches. 2^63 as a uint64 is integer-kinded but has no int representation, so the
+// integer member refuses it; the number member takes it, exactly as Type: number
+// does, whichever order the two are declared in.
+func TestValidatePropertyValue_TypesUnionDoesNotDependOnMemberOrder(t *testing.T) {
+	big := uint64(1) << 63
+	want, err := validatePropertyValue(PropertySchema{Type: PropertyTypeNumber}, big, "properties.leaf")
+	if err != nil {
+		t.Fatalf("Type: number refused %d: %v", big, err)
+	}
+	for _, types := range [][]PropertyType{
+		{PropertyTypeInteger, PropertyTypeNumber},
+		{PropertyTypeNumber, PropertyTypeInteger},
+	} {
+		t.Run(joinPropertyTypes(types), func(t *testing.T) {
+			got, err := validatePropertyValue(PropertySchema{Types: types}, big, "properties.leaf")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != want {
+				t.Errorf("got %T(%v), want %T(%v) as Type: number normalizes it", got, got, want, want)
+			}
+		})
+	}
+}
+
+// TestValidatePropertyValue_TypesUnionReportsTheKindMatchingMembersError: when the
+// only members whose kind the value matches all refuse it, the error is the first
+// such member's own — here the integer range error — rather than the generic
+// "expected one of", which would hide the real reason.
+func TestValidatePropertyValue_TypesUnionReportsTheKindMatchingMembersError(t *testing.T) {
+	_, err := validatePropertyValue(intOrString, uint64(1)<<63, "properties.leaf")
+	if err == nil {
+		t.Fatal("2^63 accepted under integer/string, want the integer member's range error")
+	}
+	if !strings.Contains(err.Error(), "out of range") || strings.Contains(err.Error(), "expected one of") {
+		t.Errorf("error = %v, want the integer member's range error", err)
+	}
+}
+
+// TestValidatePropertyValue_NumberAcceptsUintptr: uintptr is a Go integer kind like
+// any other, and IntegerValue — which every quantity parser reads a bare number
+// through — accepts it, so a number (and so a string/number quantity union) must
+// accept it too. A named uintptr is unnamed like every other named number.
+func TestValidatePropertyValue_NumberAcceptsUintptr(t *testing.T) {
+	type namedPtr uintptr
+	quantity := PropertySchema{Types: []PropertyType{PropertyTypeString, PropertyTypeNumber}}
+	for _, tc := range []struct {
+		name   string
+		schema PropertySchema
+		in     any
+	}{
+		{"number", PropertySchema{Type: PropertyTypeNumber}, uintptr(2)},
+		{"named uintptr under number", PropertySchema{Type: PropertyTypeNumber}, namedPtr(2)},
+		{"quantity union", quantity, uintptr(2)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := validatePropertyValue(tc.schema, tc.in, "properties.leaf")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != uintptr(2) {
+				t.Errorf("got %T(%v), want uintptr(2)", got, got)
+			}
+		})
+	}
+}
+
+// TestValidatePropertyValue_NumberEnumComparesUintptr: an Enum on a number leaf
+// compares a uintptr by value, whichever side holds it.
+func TestValidatePropertyValue_NumberEnumComparesUintptr(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		enum  []any
+		value any
+	}{
+		{"uintptr value, int member", []any{2}, uintptr(2)},
+		{"int value, uintptr member", []any{uintptr(2)}, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := PropertySchema{Type: PropertyTypeNumber, Enum: tc.enum}
+			if _, err := validatePropertyValue(schema, tc.value, "properties.leaf"); err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 // TestValidatePropertyValue_TypesUnionRejectsNonMembers: a value matching none
 // of the listed types fails at the schema layer, and the message names every
 // member so an author sees both accepted forms.

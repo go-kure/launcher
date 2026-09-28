@@ -334,8 +334,9 @@ parameters, capability rendering) reject them at decode time, so unifying the ty
 their accepted behavior.
 
 `Types` is the union idiom (go-kure/launcher#383): a leaf that accepts more than one scalar type
-lists them, and a value is accepted when it matches any member, normalised exactly as that member's
-single `Type` would be (below). Members are two or more distinct scalar types (string, integer,
+lists them, and a value is accepted when any member's single `Type` accepts it — whatever order the
+members are listed in — normalised exactly as the first member, in declared order, that accepts it
+would (below). Members are two or more distinct scalar types (string, integer,
 number, boolean); `Type` and `Types` are mutually exclusive. A schema that sets both, or a malformed
 union, is a schema error reported as soon as a value reaches the leaf. Every Kubernetes
 `intstr.IntOrString` leaf — the rolling-update `maxUnavailable`/`maxSurge` knobs, the networkpolicy

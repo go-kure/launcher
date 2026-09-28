@@ -377,10 +377,15 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 // single-typed leaf's reader does (an unsigned integer becomes int, a named string
 // becomes string, and so on).
 //
-// Members are tried in declared order and the first whose kind matches decides. A
-// member that matches by kind but still fails — an integer with no int
-// representation — reports its own error rather than falling through to the next
-// member, whose "expected" message would hide the real reason.
+// Every member whose kind the value matches is tried, in declared order, and the
+// first that validates decides the normalization — so acceptance never depends on
+// the order members are listed in, only which member normalizes a value two of them
+// accept (integer before number turns a uint16 into int; number first keeps it).
+// A member can match by kind and still refuse the value: 2^63 as a uint64 is an
+// integer with no int representation, which the number member still takes. Only
+// when every kind-matching member refuses is the value rejected, with the FIRST
+// such member's own error, since the "expected one of" message would hide the real
+// reason.
 //
 // The member list itself is checked first, since it is the schema that is wrong
 // when it fails: at least two distinct scalar types. An array or object member
@@ -400,10 +405,21 @@ func validateUnionValue(types []PropertyType, value any, path string) (any, erro
 		}
 		seen[typ] = true
 	}
+	var firstErr error
 	for _, typ := range types {
-		if unionMemberMatches[typ](value) {
-			return validatePropertyValue(PropertySchema{Type: typ}, value, path)
+		if !unionMemberMatches[typ](value) {
+			continue
 		}
+		normalized, err := validatePropertyValue(PropertySchema{Type: typ}, value, path)
+		if err == nil {
+			return normalized, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
+		return value, firstErr
 	}
 	return value, errors.Errorf("%s: expected one of %s, got %T", path, joinPropertyTypes(types), value)
 }
@@ -604,6 +620,7 @@ var predeclaredScalarTypes = map[reflect.Kind]reflect.Type{
 	reflect.Uint16:  reflect.TypeFor[uint16](),
 	reflect.Uint32:  reflect.TypeFor[uint32](),
 	reflect.Uint64:  reflect.TypeFor[uint64](),
+	reflect.Uintptr: reflect.TypeFor[uintptr](),
 	reflect.Float32: reflect.TypeFor[float32](),
 	reflect.Float64: reflect.TypeFor[float64](),
 }
@@ -957,12 +974,16 @@ func asStringValue(value any) (string, bool) {
 // since both fail to round-trip through the YAML/JSON a validated property eventually
 // serializes to. This mirrors isIntegerValue's existing !math.IsInf/NaN-via-Trunc
 // checks just above, which only ever applied to the integer path.
+//
+// Every integer kind isIntegerValue accepts is a number here too, uintptr included:
+// IntegerValue reads it, so a quantity parser takes it as a bare number, and a
+// string/number union leaf would otherwise refuse a value its parser accepts.
 func asFloatValue(value any) (float64, bool) {
 	rv := reflect.ValueOf(value)
 	switch rv.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return float64(rv.Int()), true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		return float64(rv.Uint()), true
 	case reflect.Float32, reflect.Float64:
 		f := rv.Float()
@@ -1086,7 +1107,7 @@ func asExactNumber(value any) (exactNumber, bool) {
 			return exactNumber{isInt: true, neg: true, mag: uint64(-(i + 1)) + 1}, true //nolint:gosec // i < 0, so -(i+1) >= 0
 		}
 		return exactNumber{isInt: true, mag: uint64(i)}, true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		return exactNumber{isInt: true, mag: rv.Uint()}, true
 	case reflect.Float32, reflect.Float64:
 		f := rv.Float()

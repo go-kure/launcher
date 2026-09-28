@@ -1,6 +1,7 @@
 package traits_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -124,6 +125,50 @@ func TestNetworkPolicyPort_IntegerAndNamedPortPassBothPaths(t *testing.T) {
 			want string
 		}{{2, "2"}, {"http", "http"}} {
 			t.Run(p.name+"/"+tc.want, func(t *testing.T) {
+				objs, err := p.run(tc.v)
+				if err != nil {
+					t.Fatalf("%T(%v) rejected: %v", tc.v, tc.v, err)
+				}
+				var np *networkingv1.NetworkPolicy
+				for _, o := range objs {
+					if v, ok := o.(*networkingv1.NetworkPolicy); ok {
+						np = v
+					}
+				}
+				if np == nil || len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 1 {
+					t.Fatalf("no NetworkPolicy with one ingress port generated: %+v", np)
+				}
+				if got := np.Spec.Ingress[0].Ports[0].Port.String(); got != tc.want {
+					t.Errorf("rendered port %q, want %q", got, tc.want)
+				}
+			})
+		}
+	}
+}
+
+// TestNetworkPolicyPort_EveryParserKindStillAccepted: publishing `port` as a union
+// must not narrow what parseNPPort accepted while the leaf was untyped.
+// npPortNumber classifies by reflect.Kind — every integer kind, uintptr and named
+// types included, and a whole number of any float kind — and npStringValue takes a
+// named string type, so each still passes both paths and renders unchanged.
+func TestNetworkPolicyPort_EveryParserKindStillAccepted(t *testing.T) {
+	type namedInt int32
+	type namedUint uint16
+	type namedPtr uintptr
+	type namedFloat float64
+	type namedString string
+	for _, p := range npPortPaths {
+		for _, tc := range []struct {
+			v    any
+			want string
+		}{
+			{int8(80), "80"}, {int16(80), "80"}, {int32(80), "80"}, {int64(80), "80"}, {namedInt(80), "80"},
+			{uint(80), "80"}, {uint8(80), "80"}, {uint16(80), "80"}, {uint32(80), "80"}, {uint64(80), "80"},
+			{uintptr(80), "80"}, {namedUint(80), "80"}, {namedPtr(80), "80"},
+			{float32(80), "80"}, {float64(80), "80"}, {namedFloat(80), "80"},
+			{namedString("http"), "http"},
+		} {
+			t.Run(fmt.Sprintf("%s/%T", p.name, tc.v), func(t *testing.T) {
 				objs, err := p.run(tc.v)
 				if err != nil {
 					t.Fatalf("%T(%v) rejected: %v", tc.v, tc.v, err)
