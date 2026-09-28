@@ -761,14 +761,11 @@ func parseExternalAuth(filterMap map[string]any, scope string) (*HTTPExternalAut
 	if rawFwd, ok := raw["forwardBody"].(map[string]any); ok {
 		fb := &HTTPForwardBody{}
 		if rawSize, ok := rawFwd["maxSize"]; ok {
-			size, err := coerceInt32(rawSize)
+			size, err := oam.IntegerInRange(rawSize, 0, math.MaxUint16)
 			if err != nil {
 				return nil, errors.Errorf("%s: externalAuth.forwardBody.maxSize: %w", scope, err)
 			}
-			if size < 0 {
-				return nil, errors.Errorf("%s: externalAuth.forwardBody.maxSize must be >= 0", scope)
-			}
-			fb.MaxSize = uint16(size) //nolint:gosec
+			fb.MaxSize = uint16(size) //nolint:gosec // bounded to 0..MaxUint16 above
 		}
 		ea.ForwardBody = fb
 	}
@@ -902,26 +899,14 @@ func parseRuleTimeouts(ruleMap map[string]any, ruleIdx int) (*HTTPRouteTimeouts,
 // would truncate 8080.5 to 8080 and wrap 2^32+80 to 80, both of which the callers'
 // own range checks would then accept (go-kure/launcher#525).
 func coerceInt32(v any) (int32, error) {
-	n, ok := oam.IntegerValue(v)
-	if !ok {
-		return 0, errors.Errorf("expected an integer, got %T (%v)", v, v)
-	}
-	if n < math.MinInt32 || n > math.MaxInt32 {
-		return 0, errors.Errorf("integer %d out of range (min %d, max %d)", n, math.MinInt32, math.MaxInt32)
-	}
-	return int32(n), nil
+	n, err := oam.IntegerInRange(v, math.MinInt32, math.MaxInt32)
+	return int32(n), err //nolint:gosec // bounded to int32 by IntegerInRange
 }
 
 // coerceInt is the untyped counterpart of coerceInt32.
 func coerceInt(v any) (int, error) {
-	n, ok := oam.IntegerValue(v)
-	if !ok {
-		return 0, errors.Errorf("expected an integer, got %T (%v)", v, v)
-	}
-	if n < math.MinInt || n > math.MaxInt {
-		return 0, errors.Errorf("integer %d out of range (min %d, max %d)", n, math.MinInt, math.MaxInt)
-	}
-	return int(n), nil
+	n, err := oam.IntegerInRange(v, math.MinInt, math.MaxInt)
+	return int(n), err
 }
 
 // isAllowedRedirectStatus matches the Gateway API enum for

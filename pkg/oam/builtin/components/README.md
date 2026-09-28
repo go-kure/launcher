@@ -1145,7 +1145,8 @@ rendering in `common.go`) read through `oam.IntegerValue`. So a `uint16` port or
 `int8` history limit from a lowering rule or a Go caller reads like the `int` a YAML
 literal decodes to. Each reader then checks the value against its own target (a port
 is 1–65535, a count fits `int32`) and refuses it with an error rather than truncating
-or wrapping (go-kure/launcher#525).
+or wrapping (go-kure/launcher#525). That includes the main and sidecar container
+ports; `daemonset`/`statefulset` still read `port: 0` as "no port".
 
 **Non-RWX volumes.** A `ReadWriteOnce` (or `ReadWriteOncePod`) claim cannot be
 held by an outgoing and an incoming pod at once, so the handler allows **at

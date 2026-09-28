@@ -34,7 +34,7 @@ func (h *WebserviceHandler) Endpoints(component *oam.Component) ([]netpol.Endpoi
 	// schema validation first, so a wrongly typed port must be refused here too
 	// rather than declared as the default 80.
 	port := int32(80)
-	if p, present, err := parseInt32Field(component.Properties, "port", "port"); err != nil {
+	if p, present, err := parsePortField(component.Properties, "port", "port", 1); err != nil {
 		return nil, err
 	} else if present {
 		port = p
@@ -90,7 +90,7 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 	config.Image = image
 
 	config.Port = 80
-	if p, present, err := parseInt32Field(props, "port", "port"); err != nil {
+	if p, present, err := parsePortField(props, "port", "port", 1); err != nil {
 		return nil, err
 	} else if present {
 		config.Port = p

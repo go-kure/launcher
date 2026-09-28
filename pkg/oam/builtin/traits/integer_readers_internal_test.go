@@ -65,6 +65,18 @@ func TestRequestRedirect_FractionalStatusCodeRefused(t *testing.T) {
 	}
 }
 
+// TestExternalAuth_MaxSizeFitsUint16: 65536 used to wrap to 0, 65537 to 1.
+func TestExternalAuth_MaxSizeFitsUint16(t *testing.T) {
+	for _, v := range []any{65535, 65536, 65537, -1, 1e20} {
+		ea, err := parseExternalAuth(map[string]any{"externalAuth": map[string]any{"protocol": "HTTP",
+			"backendRef": map[string]any{"name": "auth", "port": 8080}, "forwardBody": map[string]any{"maxSize": v}}}, "f")
+		if v == 65535 && (err != nil || ea.ForwardBody.MaxSize != 65535) || v != 65535 && (err == nil ||
+			!strings.Contains(err.Error(), "externalAuth.forwardBody.maxSize: must be an integer between 0 and 65535")) {
+			t.Errorf("maxSize %v = %v, %v", v, ea, err)
+		}
+	}
+}
+
 // TestRoutePorts_EveryIntegerKindAndNoSilentFallback covers the two path-level port
 // readers go-kure/launcher#525's sweep reached: an ingress rules[].paths[].port and an httproute
 // rules[].backendRefs[].port. Each reads every integer kind; an invalid value is an

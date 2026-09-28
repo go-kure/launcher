@@ -953,9 +953,9 @@ func parsePodSecurityContext(raw map[string]any, label string) (*corev1.PodSecur
 		}
 		groups := make([]int64, 0, len(arr))
 		for i, item := range arr {
-			g, ok := toInt64(item)
-			if !ok {
-				return nil, errors.Errorf("%s: must be an integer, got %T", indexedLabel(label+".supplementalGroups", i), item)
+			g, err := oam.IntegerInRange(item, math.MinInt64, math.MaxInt64)
+			if err != nil {
+				return nil, errors.Errorf("%s: %w", indexedLabel(label+".supplementalGroups", i), err)
 			}
 			if g < 0 {
 				return nil, errors.Errorf("%s: must not be negative, got %d", indexedLabel(label+".supplementalGroups", i), g)

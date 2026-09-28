@@ -93,7 +93,7 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, err
 	}
 	config.Args = args
-	if port, present, err := parseInt32Field(props, "port", "port"); err != nil {
+	if port, present, err := parsePortField(props, "port", "port", 0); err != nil {
 		return nil, err
 	} else if present {
 		config.Port = port
