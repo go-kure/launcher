@@ -392,7 +392,7 @@ wrapped. For routing ports this covers the trait-level `servicePort`, an ingress
 `rules[].paths[].port`, and an httproute `rules[].backendRefs[].port`: each must be
 1–65535, and an error names the field. A present-but-invalid path or backendRef
 `port` used to fall back to the component's port (ingress) or render as-is
-(httproute); it is now an error.
+(httproute); it is now an error. `externalAuth.forwardBody.maxSize` must fit uint16.
 
 Routing traits (`ingress`/`httproute`/`expose`) can surface platform-reserved
 `networkPolicy.trafficSources`, which the OAM layer collects to synthesize a

@@ -76,7 +76,7 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	config.Replicas = replicas
 	config.explicitReplicas = replicasAuthored
 
-	if p, present, err := parseInt32Field(props, "port", "port"); err != nil {
+	if p, present, err := parsePortField(props, "port", "port", 0); err != nil {
 		return nil, err
 	} else if present {
 		config.Port = p

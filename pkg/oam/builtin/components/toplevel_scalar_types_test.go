@@ -183,26 +183,48 @@ func TestPort_OutOfInt32RangeIsRejected(t *testing.T) {
 	for _, k := range []struct {
 		kind    string
 		handler oam.ComponentHandler
+		lo      string
 	}{
-		{"webservice", &components.WebserviceHandler{}},
-		{"daemonset", &components.DaemonsetHandler{}},
-		{"statefulset", &components.StatefulsetHandler{}},
+		{"webservice", &components.WebserviceHandler{}, "1"},
+		{"daemonset", &components.DaemonsetHandler{}, "0"},
+		{"statefulset", &components.StatefulsetHandler{}, "0"},
 	} {
 		for _, v := range []struct {
 			name  string
 			value any
 			want  string
 		}{
-			{"int", 5000000000, "port: must be an integer within int32 range, got 5000000000"},
-			{"negative int64", int64(-5000000000), "port: must be an integer within int32 range, got -5000000000"},
-			{"float64", float64(5000000000), "port: must be an integer within int32 range, got 5000000000"},
+			{"int", 5000000000, "5000000000"},
+			{"negative int64", int64(-5000000000), "-5000000000"},
+			{"float64", float64(5000000000), "5000000000"},
+			{"above 65535", 65536, "65536"},
+			{"negative", -1, "-1"},
 		} {
 			t.Run(k.kind+"/"+v.name, func(t *testing.T) {
+				want := "port: must be an integer between " + k.lo + " and 65535, got " + v.want
 				err := convert(k.handler, k.kind, withProp(imageBase, "port", v.value))
-				if err == nil || !strings.Contains(err.Error(), v.want) {
-					t.Fatalf("error = %v, want it to contain %q", err, v.want)
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %v, want it to contain %q", err, want)
 				}
 			})
 		}
+	}
+}
+
+// An integral value beyond int64 used to read as "must be an integer".
+func TestIntegerReaders_OverflowIsARangeError(t *testing.T) {
+	sidecar := []any{map[string]any{"name": "proxy", "image": "ghcr.io/org/proxy:v1", "ports": []any{map[string]any{"containerPort": 65536}}}}
+	for want, props := range map[string]map[string]any{
+		"replicas: must be an integer between -2147483648 and 2147483647, got 9223372036854775808":                                      withProp(imageBase, "replicas", uint64(1<<63)),
+		"securityContext.runAsUser: must be an integer between -9223372036854775808 and 9223372036854775807, got 100000000000000000000": withProp(imageBase, "securityContext", map[string]any{"runAsUser": 1e20}),
+		"containerPort: must be an integer between 1 and 65535, got 65536":                                                              withProp(imageBase, "sidecars", sidecar),
+	} {
+		if err := convert(&components.WebserviceHandler{}, "webservice", props); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to contain %q", err, want)
+		}
+	}
+	if err := convert(&components.CronjobHandler{}, "cronjob", withProp(cronBase, "successfulJobsHistoryLimit", 1e20)); err == nil ||
+		!strings.Contains(err.Error(), "successfulJobsHistoryLimit: must be an integer between 0 and 2147483647, got 100000000000000000000") {
+		t.Errorf("history limit 1e20: error = %v, want a range error", err)
 	}
 }

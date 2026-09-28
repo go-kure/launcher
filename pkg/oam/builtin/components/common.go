@@ -1477,12 +1477,7 @@ func parseHTTPHeaders(raw map[string]any, key string) ([]corev1.HTTPHeader, erro
 // which checks the name against the sidecar's own declared ports afterward
 // in checkNamedPortsDeclared).
 func parsePort(v any, namedPortsAllowed bool, matchName string) (intstr.IntOrString, error) {
-	if n, ok := oam.IntegerValue(v); ok {
-		return validateNumericPort(n)
-	}
 	switch p := v.(type) {
-	case float64:
-		return intstr.IntOrString{}, errors.Errorf("port must be an integer, got %v", p)
 	case string:
 		if p == "" {
 			return intstr.IntOrString{}, errors.Errorf("port must not be an empty string")
@@ -1506,7 +1501,11 @@ func parsePort(v any, namedPortsAllowed bool, matchName string) (intstr.IntOrStr
 		}
 		return intstr.FromString(p), nil
 	default:
-		return intstr.IntOrString{}, errors.Errorf("unsupported port type: %T", v)
+		n, err := oam.IntegerInRange(v, math.MinInt64, math.MaxInt64)
+		if err != nil {
+			return intstr.IntOrString{}, errors.Errorf("port: %w", err)
+		}
+		return validateNumericPort(n)
 	}
 }
 
@@ -1675,12 +1674,12 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 		if err := rejectUnknownKeys(sleep, []string{"seconds"}, "sleep"); err != nil {
 			return nil, err
 		}
-		seconds, ok := toInt64(sleep["seconds"])
-		if !ok {
-			return nil, errors.Errorf("sleep handler: seconds is required and must be an integer")
+		if _, present := authoredValue(sleep, "seconds"); !present {
+			return nil, errors.Errorf("sleep handler: seconds is required")
 		}
-		if seconds < 0 {
-			return nil, errors.Errorf("sleep handler: seconds must not be negative, got %d", seconds)
+		seconds, _, err := parseIntField(sleep, "seconds", "sleep handler: seconds", 0, math.MaxInt64)
+		if err != nil {
+			return nil, err
 		}
 		handler.Sleep = &corev1.SleepAction{Seconds: seconds}
 		return handler, nil
@@ -1763,54 +1762,34 @@ func parseBoolField(raw map[string]any, key, label string) (*bool, error) {
 	return &b, nil
 }
 
-// parseInt32Field mirrors parseBoolField for toInt32-convertible fields,
-// including its null-reads-as-absence contract. A whole number outside the
-// int32 range gets its own message: toInt32 refuses it with the same ok=false
-// as a wrong type, but "must be an integer, got int" would contradict itself.
+// parseInt32Field is parseIntField over the int32 range.
 func parseInt32Field(raw map[string]any, key, label string) (int32, bool, error) {
-	v, present := authoredValue(raw, key)
-	if !present {
-		return 0, false, nil
-	}
-	i, ok := toInt32(v)
-	if !ok {
-		if s, whole := wholeNumberString(v); whole {
-			return 0, false, errors.Errorf("%s: must be an integer within int32 range, got %s", label, s)
-		}
-		return 0, false, errors.Errorf("%s: must be an integer, got %T", label, v)
-	}
-	return i, true, nil
+	i, present, err := parseIntField(raw, key, label, math.MinInt32, math.MaxInt32)
+	return int32(i), present, err //nolint:gosec // bounded to int32 by parseIntField
 }
 
-// wholeNumberString reports whether v is a whole number of one of the kinds
-// toInt32/toInt64 read (any Go integer kind, or a finite integral float) and
-// renders it in plain decimal — never float64's exponent form, so a
-// JSON-decoded 5000000000 prints as authored rather than as 5e+09. A float64
-// beyond the int64 range still renders, as it did before the integer kinds were
-// widened (go-kure/launcher#525).
-func wholeNumberString(v any) (string, bool) {
-	if n, ok := v.(float64); ok {
-		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) {
-			return "", false
-		}
-		return strconv.FormatFloat(n, 'f', -1, 64), true
-	}
-	if n, ok := oam.IntegerValue(v); ok {
-		return strconv.FormatInt(n, 10), true
-	}
-	return "", false
+// parsePortField is parseIntField over the port range lo–65535. lo is 1, or 0
+// where the component reads an explicit 0 as "no port" (daemonset, statefulset).
+func parsePortField(raw map[string]any, key, label string, lo int64) (int32, bool, error) {
+	i, present, err := parseIntField(raw, key, label, lo, 65535)
+	return int32(i), present, err //nolint:gosec // bounded to lo..65535 by parseIntField
 }
 
-// parseInt64Field mirrors parseBoolField for toInt64-convertible fields,
-// including its null-reads-as-absence contract.
+// parseInt64Field is parseIntField over the int64 range.
 func parseInt64Field(raw map[string]any, key, label string) (int64, bool, error) {
+	return parseIntField(raw, key, label, math.MinInt64, math.MaxInt64)
+}
+
+// parseIntField mirrors parseBoolField, including its null-reads-as-absence
+// contract, for an integer in lo..hi; the error names the true refusal reason.
+func parseIntField(raw map[string]any, key, label string, lo, hi int64) (int64, bool, error) {
 	v, present := authoredValue(raw, key)
 	if !present {
 		return 0, false, nil
 	}
-	i, ok := toInt64(v)
-	if !ok {
-		return 0, false, errors.Errorf("%s: must be an integer, got %T", label, v)
+	i, err := oam.IntegerInRange(v, lo, hi)
+	if err != nil {
+		return 0, false, errors.Errorf("%s: %w", label, err)
 	}
 	return i, true, nil
 }
@@ -2812,11 +2791,11 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 					return nil, errors.Errorf("sidecars[%d] %q: ports[%d]: expected object, got %T", i, sc.Name, j, rp)
 				}
 				pname, _ := pm["name"].(string)
-				var port int32
-				if n, ok := toInt32(pm["containerPort"]); ok {
-					port = n
+				port, present, err := parsePortField(pm, "containerPort", fmt.Sprintf("sidecars[%d] %q: ports[%d]: containerPort", i, sc.Name, j), 1)
+				if err != nil {
+					return nil, err
 				}
-				if port == 0 {
+				if !present {
 					return nil, errors.Errorf("sidecars[%d] %q: ports[%d]: containerPort is required", i, sc.Name, j)
 				}
 				cp := corev1.ContainerPort{
@@ -3287,17 +3266,11 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 }
 
 func parseHistoryLimit(field string, v any) (int32, error) {
-	n, ok := oam.IntegerValue(v)
-	if !ok {
-		if f, isFloat := v.(float64); isFloat {
-			return 0, errors.Errorf("%s: must be an integer, got %g", field, f)
-		}
-		return 0, errors.Errorf("%s: must be an integer, got %T", field, v)
+	n, err := oam.IntegerInRange(v, 0, math.MaxInt32)
+	if err != nil {
+		return 0, errors.Errorf("%s: %w", field, err)
 	}
-	if n < 0 || n > math.MaxInt32 {
-		return 0, errors.Errorf("%s: must be between 0 and %d, got %d", field, math.MaxInt32, n)
-	}
-	return int32(n), nil
+	return int32(n), nil //nolint:gosec // bounded to 0..MaxInt32 above
 }
 
 // JobSpecConfig carries the batchv1.JobSpec fields shared by a cronjob's jobTemplate
@@ -3996,10 +3969,11 @@ func parseJobPodFailurePolicyOnExitCodes(obj map[string]any, label string) (*bat
 	seen := make(map[int32]bool, len(list))
 	req.Values = make([]int32, 0, len(list))
 	for i, entry := range list {
-		v, ok := toInt32(entry)
-		if !ok {
-			return nil, errors.Errorf("%s.values[%d]: must be an integer, got %T", label, i, entry)
+		n, err := oam.IntegerInRange(entry, math.MinInt32, math.MaxInt32)
+		if err != nil {
+			return nil, errors.Errorf("%s.values[%d]: %w", label, i, err)
 		}
+		v := int32(n) //nolint:gosec // bounded to int32 above
 		// A container that exits 0 succeeded and is excluded from the check
 		// before any operator is applied (the field doc on
 		// PodFailurePolicyOnExitCodesRequirement), so 0 under "In" names a
