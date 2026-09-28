@@ -160,10 +160,11 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	config.VolumeMounts = parsed.Mounts
 	config.VolumeDevices = parsed.Devices
 	config.PVCs = parsed.PVCs
-	// The main container's devices come from two parsers here — the claim
-	// templates and `volumes` — each of which checks only its own entries.
+	// The main container's devices and mounts come from two parsers here — the
+	// claim templates and `volumes` — each of which checks only its own
+	// entries.
 	vctMounts, vctDevices := claimTemplateMountsAndDevices(vcts)
-	if err := checkMainContainerDevicePaths(
+	if err := checkMainContainerVolumeDevices(
 		append(vctMounts, parsed.Mounts...), append(vctDevices, parsed.Devices...),
 	); err != nil {
 		return nil, err

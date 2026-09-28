@@ -358,8 +358,12 @@ func TestRawBlock_ExtraContainers_VolumeDeviceEntryRules(t *testing.T) {
 		{"not a list", map[string]any{"volumeDevices": map[string]any{"name": "disk"}}, "volumeDevices: must be"},
 		{"duplicate devicePath", map[string]any{"volumeDevices": []any{
 			map[string]any{"name": "disk", "devicePath": "/dev/b"},
-			map[string]any{"name": "disk", "devicePath": "/dev/b"},
+			map[string]any{"name": "disk2", "devicePath": "/dev/b"},
 		}}, `duplicate devicePath "/dev/b"`},
+		{"duplicate device name", map[string]any{"volumeDevices": []any{
+			map[string]any{"name": "disk", "devicePath": "/dev/a"},
+			map[string]any{"name": "disk", "devicePath": "/dev/b"},
+		}}, `volume "disk" is already listed under volumeDevices`},
 		{"devicePath repeats a mountPath", map[string]any{
 			"volumeMounts":  []any{map[string]any{"name": "other", "mountPath": "/dev/b"}},
 			"volumeDevices": []any{map[string]any{"name": "disk", "devicePath": "/dev/b"}},
@@ -473,6 +477,46 @@ func TestRawBlock_VolumeClaimTemplate_Rejections(t *testing.T) {
 		}})
 		wantErrContaining(t, err, `"/dev/xvda" is already a mountPath`)
 	})
+}
+
+// TestRawBlock_VolumeClaimTemplate_NameCollisions: the main container takes its
+// devices and mounts from both the claim templates and `volumes`, each parser
+// seeing only its own entries. ValidateVolumeDevices refuses a device name
+// listed twice, and one that is also a volumeMounts name, in the same
+// container.
+func TestRawBlock_VolumeClaimTemplate_NameCollisions(t *testing.T) {
+	k := statefulsetKind()
+	blockDisk := blockVCT(map[string]any{"devicePath": "/dev/xvda", "volumeMode": "Block"})
+	cases := []struct {
+		name    string
+		props   map[string]any
+		wantErr string
+	}{
+		{"Block claim template and a volumes mount", map[string]any{
+			"volumeClaimTemplates": []any{blockDisk},
+			"volumes":              []any{map[string]any{"name": "disk", "type": "emptyDir", "mountPath": "/data"}},
+		}, `volume "disk" is both mounted and attached as a device`},
+		{"Block claim template and a filesystem claim template", map[string]any{
+			"volumeClaimTemplates": []any{blockDisk, map[string]any{"name": "disk", "size": "1Gi", "mountPath": "/data"}},
+		}, `volume "disk" is both mounted and attached as a device`},
+		{"filesystem claim template and a Block pvc volume", map[string]any{
+			"volumeClaimTemplates": []any{map[string]any{"name": "disk", "size": "1Gi", "mountPath": "/data"}},
+			"volumes":              []any{blockPVCVolume(map[string]any{"devicePath": "/dev/xvda", "volumeMode": "Block"})},
+		}, `volume "disk" is both mounted and attached as a device`},
+		{"Block claim template and a Block pvc volume", map[string]any{
+			"volumeClaimTemplates": []any{blockDisk},
+			"volumes":              []any{blockPVCVolume(map[string]any{"devicePath": "/dev/xvdb", "volumeMode": "Block"})},
+		}, `volume "disk" is attached as a device more than once`},
+		{"two Block claim templates", map[string]any{
+			"volumeClaimTemplates": []any{blockDisk, blockVCT(map[string]any{"devicePath": "/dev/xvdb", "volumeMode": "Block"})},
+		}, `volume "disk" is attached as a device more than once`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := k.configure(t, tc.props)
+			wantErrContaining(t, err, tc.wantErr)
+		})
+	}
 }
 
 // TestRawBlock_VolumeClaimTemplate_ExtraContainers: the name→mode map takes
