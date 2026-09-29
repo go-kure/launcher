@@ -72,7 +72,12 @@ func (h *WebserviceHandler) PropertySchema() map[string]oam.PropertySchema {
 }
 
 // ToApplicationConfig converts an OAM webservice component to a WebserviceConfig.
+// The component name is its Service's name, so it is checked against the
+// Service-name rule first (validateComponentServiceName).
 func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	if err := validateComponentServiceName(component.Name); err != nil {
+		return nil, err
+	}
 	config := &WebserviceConfig{
 		Name:      component.Name,
 		Namespace: namespace,
@@ -339,8 +344,13 @@ func (c *WebserviceConfig) ServicePort() int32 { return c.Port }
 
 // Generate creates Kubernetes Deployment, Service, and ServiceAccount resources.
 // The ServiceAccount is omitted when serviceAccountName was authored (the pod
-// then runs as that pre-existing account).
+// then runs as that pre-existing account). The Service is named after the
+// Application, which a library caller builds itself, so that name is held to
+// the Service-name rule here too.
 func (c *WebserviceConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	if err := validateServiceName("name", app.Name); err != nil {
+		return nil, err
+	}
 	var err error
 	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 	if err != nil {

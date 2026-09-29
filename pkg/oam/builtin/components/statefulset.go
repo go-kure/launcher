@@ -30,7 +30,7 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"image":                {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
 		"replicas":             {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of StatefulSet pod replicas."},
 		"port":                 {Type: oam.PropertyTypeInteger, Description: "Container port to expose via the headless Service."},
-		"serviceName":          {Type: oam.PropertyTypeString, Description: "Name of the headless Service (defaults to the component name)."},
+		"serviceName":          {Type: oam.PropertyTypeString, Description: "Name of the headless Service (defaults to the component name). Must be a valid Service name, a DNS-1035 label."},
 		"env":                  schemaEnv(false),
 		"envFrom":              schemaEnvFrom(false),
 		"resources":            schemaResources(false),
@@ -82,11 +82,21 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 		config.Port = p
 	}
 
+	// serviceName is the headless Service's name, so it is held to the
+	// Service-name rule (validateServiceName) whether authored or defaulted to
+	// the component name; the error names whichever of the two it came from.
+	// The component name itself is not constrained once serviceName is set.
 	if sn, present, err := parseStringField(props, "serviceName", "serviceName"); err != nil {
 		return nil, err
 	} else if present {
+		if err := validateServiceName("serviceName", sn); err != nil {
+			return nil, err
+		}
 		config.ServiceName = sn
 	} else {
+		if err := validateComponentServiceName(component.Name); err != nil {
+			return nil, err
+		}
 		config.ServiceName = component.Name
 	}
 
@@ -329,8 +339,13 @@ func (c *StatefulsetConfig) ServicePort() int32 { return c.Port }
 func (c *StatefulsetConfig) BackendServiceName() string { return c.ServiceName }
 
 // Generate creates Kubernetes StatefulSet, headless Service, ServiceAccount, and any standalone PVCs.
-// The ServiceAccount is omitted when serviceAccountName was authored.
+// The ServiceAccount is omitted when serviceAccountName was authored. The
+// headless Service is named by ServiceName, which a library caller may set
+// itself, so that name is held to the Service-name rule here too.
 func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	if err := validateServiceName("serviceName", c.ServiceName); err != nil {
+		return nil, err
+	}
 	var err error
 	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 	if err != nil {

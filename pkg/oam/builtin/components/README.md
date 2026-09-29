@@ -151,7 +151,11 @@ after the component (`helmchart`, `manifests`, `passthrough`, …) keep acceptin
 a dotted or longer name, so the component-name rule itself is unchanged. `job` refused
 the name from its introduction; the other six gained the check in
 go-kure/launcher#407. Nothing that previously produced an applyable manifest is
-affected — such a document never did.
+affected — such a document never did. A kind that also names a Service after
+the component (`webservice`, `daemonset` with a `port`, `statefulset` without
+`serviceName`) refuses a dotted or longer name earlier, at conversion, by the
+stricter Service-name rule described under each kind in "Per-type highlights"
+(go-kure/launcher#546).
 
 Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
 `daemonset`, `cronjob`, `job`)
@@ -1381,6 +1385,17 @@ not part of either change.
   the container port and the Service port), letting a downstream platform synthesize generic
   app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
   Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
+  - **A `webservice` component name must be a valid Service name.** It always
+    emits a Service named after the component, and the API server validates
+    a Service's `metadata.name` as a DNS-1035 label: at most 63 characters,
+    lowercase letters, digits and `-`, starting with a letter and ending with
+    a letter or digit. That is stricter than the DNS-1123 subdomain every
+    component name already passes, so `api.v1`, a 64-character name and
+    `1api` are refused at conversion (`name: "1api" is not a valid Service
+    name, which must be a DNS-1035 label`) instead of building a manifest the
+    cluster rejects on apply (go-kure/launcher#546). `Generate` applies the
+    same rule to the Application name it is handed. `worker` emits no Service
+    and keeps accepting such a name, within the container-name rule above.
 - **deployment** — the kind-named Deployment (see "Deployment-level
   properties" above): the shared container-level, pod-level and
   `DeploymentSpec`-level surface, the last of which it now shares with
@@ -1445,6 +1460,19 @@ not part of either change.
   StatefulSetSpec-level and
   claim-template field sets are classified in "StatefulSet-level and
   claim-template properties" below.
+  - **The headless Service's name must be a valid Service name.** It is
+    `serviceName`, or the component name when that is not authored, and the
+    API server validates a Service's `metadata.name` as a DNS-1035 label: at
+    most 63 characters, lowercase letters, digits and `-`, starting with a
+    letter and ending with a letter or digit. Either source is checked at
+    conversion and the error names the one it came from (`serviceName:
+    "api.v1" is not a valid Service name, which must be a DNS-1035 label`, or
+    `name: "api.v1" …` for the default), instead of building a manifest the
+    cluster rejects on apply (go-kure/launcher#546). Only the Service's name
+    is held to this: with a valid `serviceName`, a component name such as
+    `1api` still builds, within the container-name rule above. `Generate`
+    applies the same rule to the config's `ServiceName`, so a config built
+    without a component name must set it.
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`/`tolerationSeconds`;
   `tolerationSeconds` and the toleration cross-field rules arrived with
   go-kure/launcher#412 via the shared parser — see "What `tolerations` changed
@@ -1455,6 +1483,17 @@ not part of either change.
   `minReadySeconds`, `revisionHistoryLimit`. `appsv1.DaemonSetSpec` has five
   fields; `template` is the pod projection above and `selector` is
   builder-managed, which leaves these three.
+
+  **With a `port`, the component name must be a valid Service name.** The
+  Service it adds is named after the component, and the API server validates a
+  Service's `metadata.name` as a DNS-1035 label: at most 63 characters,
+  lowercase letters, digits and `-`, starting with a letter and ending with a
+  letter or digit. So with `port` set, `api.v1`, a 64-character name and `1api`
+  are refused at conversion (`name: "1api" is not a valid Service name, which
+  must be a DNS-1035 label`) instead of building a manifest the cluster rejects
+  on apply (go-kure/launcher#546); `Generate` applies the same rule to the
+  Application name it is handed. Without a `port` no Service is emitted, and
+  such a name is held only to the container-name rule above.
 
   | Property | Type | Effect | Compatibility |
   |----------|------|--------|---------------|

@@ -98,6 +98,13 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 	} else if present {
 		config.Port = port
 	}
+	// A port adds a Service named after the component, so only then is the
+	// component name held to the Service-name rule (validateComponentServiceName).
+	if config.Port > 0 {
+		if err := validateComponentServiceName(component.Name); err != nil {
+			return nil, err
+		}
+	}
 	// namedPortsAllowed mirrors createContainer's own `c.Port > 0` guard below:
 	// the main container only gets a Name: "http" ContainerPort when a port
 	// was actually configured, so a probe/lifecycle port resolves only in
@@ -262,8 +269,15 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 
 // Generate creates a Kubernetes DaemonSet, optional Service, and ServiceAccount.
 // A Service is generated when Port > 0. The ServiceAccount is omitted when
-// serviceAccountName was authored.
+// serviceAccountName was authored. The Service is named after the Application,
+// which a library caller builds itself, so with a port that name is held to the
+// Service-name rule here too.
 func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	if c.Port > 0 {
+		if err := validateServiceName("name", app.Name); err != nil {
+			return nil, err
+		}
+	}
 	var err error
 	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 	if err != nil {

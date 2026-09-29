@@ -186,7 +186,7 @@ func (c *ServiceConfig) ServiceRoutingTarget(servicePorts []intstr.IntOrString) 
 // Generate creates the Service. Nothing else: the selected pods' workload
 // component owns their ServiceAccount.
 func (c *ServiceConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if err := validateServiceName(app.Name); err != nil {
+	if err := validateServiceName("name", app.Name); err != nil {
 		return nil, err
 	}
 	svc := kubernetes.CreateService(app.Name, app.Namespace)
@@ -215,11 +215,28 @@ func appendUniquePort(ports []intstr.IntOrString, p intstr.IntOrString) []intstr
 // characters, lowercase alphanumerics and '-', starting with a letter), which
 // is stricter than the DNS-1123 subdomain every component name already
 // passes: "api.v1", a 64-character name and "1api" all pass that check.
-func validateServiceName(name string) error {
+// field names where the value came from ("name" for the component name,
+// "serviceName" for statefulset's authored property), so the author can find
+// it. Every kind that emits a Service calls it: service, webservice, daemonset
+// (when it has a port) and statefulset (go-kure/launcher#546).
+func validateServiceName(field, name string) error {
 	if errs := validation.IsDNS1035Label(name); len(errs) > 0 {
-		return errors.Errorf("name: %q is not a valid Service name, which must be a DNS-1035 label: %s", name, strings.Join(errs, "; "))
+		return errors.Errorf("%s: %q is not a valid Service name, which must be a DNS-1035 label: %s", field, name, strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// validateComponentServiceName is validateServiceName at conversion, for a
+// workload kind that names its Service after the component. A nameless config
+// (converted without a component name, as a library caller may; see
+// generationServiceAccountName) is let through: its Generate checks the name it
+// actually emits, the Application's for webservice and daemonset, and refuses
+// statefulset's then-empty ServiceName.
+func validateComponentServiceName(name string) error {
+	if name == "" {
+		return nil
+	}
+	return validateServiceName("name", name)
 }
 
 // parseService reads a service component's properties, applying the defaults
@@ -227,7 +244,7 @@ func validateServiceName(name string) error {
 // name is the Service's name, so it is checked against the Service-name rule
 // first.
 func parseService(component *oam.Component) (*ServiceConfig, error) {
-	if err := validateServiceName(component.Name); err != nil {
+	if err := validateServiceName("name", component.Name); err != nil {
 		return nil, err
 	}
 	props := component.Properties

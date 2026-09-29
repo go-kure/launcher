@@ -17,29 +17,47 @@ import (
 
 // containerNameCases lists every workload handler whose main container is
 // named after the component, with the minimal properties that build it.
+//
+// serviceNamed marks a kind that always names a Service after the component
+// too (go-kure/launcher#546): the Service-name rule, a DNS-1035 label and so
+// stricter than the container name's DNS-1123 label, refuses a dotted or long
+// name at conversion, before the container is built. statefulset and daemonset
+// would too, so their properties keep the Service's name off the component
+// name (an authored serviceName) or emit no Service at all (no port).
 var containerNameCases = []struct {
-	typ     string
-	handler oam.ComponentHandler
-	props   map[string]any
+	typ          string
+	handler      oam.ComponentHandler
+	props        map[string]any
+	serviceNamed bool
 }{
-	{"webservice", &components.WebserviceHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}},
-	{"worker", &components.WorkerHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}},
-	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
+	{"webservice", &components.WebserviceHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, true},
+	{"worker", &components.WorkerHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
+	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
+	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "db"}, false},
+	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
+	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}, false},
+	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
 }
 
 // generateWorkload runs a component through ToApplicationConfig and Generate,
-// so the name checked is the one actually emitted, not the one parsed.
+// so the name checked is the one actually emitted, not the one parsed. A
+// conversion error is returned as is, for a serviceNamed kind's refusal.
 func generateWorkload(t *testing.T, h oam.ComponentHandler, name, typ string, props map[string]any) ([]*client.Object, error) {
 	t.Helper()
 	cfg, err := h.ToApplicationConfig(&oam.Component{Name: name, Type: typ, Properties: props}, "default")
 	if err != nil {
-		t.Fatalf("%s: ToApplicationConfig(%q): %v", typ, name, err)
+		return nil, err
 	}
 	return cfg.Generate(stack.NewApplication(name, "default", cfg))
+}
+
+// containerNameRefusal is what a refusal of name must mention: the container
+// rule, or for a serviceNamed kind the Service-name rule that refuses it first.
+func containerNameRefusal(serviceNamed bool, name string, containerRule ...string) []string {
+	if serviceNamed {
+		return []string{name, "is not a valid Service name", "DNS-1035 label"}
+	}
+	return append([]string{name, "container name", "DNS-1123 label"}, containerRule...)
 }
 
 // TestWorkloadHandlers_DottedComponentName_Refused pins go-kure/launcher#407.
@@ -56,7 +74,7 @@ func TestWorkloadHandlers_DottedComponentName_Refused(t *testing.T) {
 				t.Fatalf("Generate accepted the dotted component name 'batch.worker' for type %s, want a refusal — "+
 					"the emitted container name would be rejected at admission", tc.typ)
 			}
-			for _, want := range []string{"batch.worker", "container name", "DNS-1123 label"} {
+			for _, want := range containerNameRefusal(tc.serviceNamed, "batch.worker") {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error = %q, want it to mention %q", err, want)
 				}
@@ -78,7 +96,7 @@ func TestWorkloadHandlers_LongComponentName_Refused(t *testing.T) {
 				t.Fatalf("Generate accepted a 64-character component name for type %s, want a refusal — "+
 					"the emitted container name would be rejected at admission", tc.typ)
 			}
-			for _, want := range []string{name, "container name", "DNS-1123 label", "at most 63 characters"} {
+			for _, want := range containerNameRefusal(tc.serviceNamed, name, "at most 63 characters") {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error = %q, want it to mention %q", err, want)
 				}
