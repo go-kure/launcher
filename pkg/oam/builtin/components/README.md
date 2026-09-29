@@ -1484,16 +1484,17 @@ not part of either change.
   fields; `template` is the pod projection above and `selector` is
   builder-managed, which leaves these three.
 
-  **With a `port`, the component name must be a valid Service name.** The
+  **With `port > 0`, the component name must be a valid Service name.** The
   Service it adds is named after the component, and the API server validates a
   Service's `metadata.name` as a DNS-1035 label: at most 63 characters,
   lowercase letters, digits and `-`, starting with a letter and ending with a
-  letter or digit. So with `port` set, `api.v1`, a 64-character name and `1api`
+  letter or digit. So with `port > 0`, `api.v1`, a 64-character name and `1api`
   are refused at conversion (`name: "1api" is not a valid Service name, which
   must be a DNS-1035 label`) instead of building a manifest the cluster rejects
   on apply (go-kure/launcher#546); `Generate` applies the same rule to the
-  Application name it is handed. Without a `port` no Service is emitted, and
-  such a name is held only to the container-name rule above.
+  Application name it is handed. Without a `port` (or with `port: 0`) no
+  Service is emitted, and such a name is held only to the container-name rule
+  above.
 
   | Property | Type | Effect | Compatibility |
   |----------|------|--------|---------------|
