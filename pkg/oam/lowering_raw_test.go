@@ -806,3 +806,42 @@ func TestLowerRaws_RawRuleWritingPlatformReservedValueFailsInTransform(t *testin
 		t.Errorf("expected the error to name the reserved property, got: %v", err)
 	}
 }
+
+// TestLowerRaws_EmittedTraitShapeIsCheckedByValidateAuthoredProperties pins who checks
+// a trait a raw rule writes (go-kure/launcher#357): neither LowerRaws nor Transform,
+// but the caller's ValidateAuthoredProperties on the parsed output, as for any
+// authored document. A string where the schema declares a boolean passes LowerRaws,
+// parse and Transform — a handler reading it with a comma-ok assertion drops it
+// silently — and only that check rejects it.
+func TestLowerRaws_EmittedTraitShapeIsCheckedByValidateAuthoredProperties(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		map[string]TraitHandler{"scaler": sharedSchemaTrait{typ: "scaler", schema: map[string]PropertySchema{
+			"enablePDB": {Type: PropertyTypeBoolean, Description: "Generate a PodDisruptionBudget."},
+		}}},
+	)
+	tr.RegisterRawDocumentLowering(rawRuleWithNestedTrait{
+		kind:            "WebApplication",
+		nestedTraitType: "scaler",
+		nestedProps:     map[string]any{"enablePDB": "true"},
+	})
+
+	out, err := tr.LowerRaws([]json.RawMessage{rawWebApplication("shop")}, TransformContext{})
+	if err != nil {
+		t.Fatalf("LowerRaws checked an emitted trait's shape; that is the caller's check: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 output document, got %d", len(out))
+	}
+	if _, err := tr.Transform(parseLoweredOutput(t, tr, out[0]), TransformContext{Namespace: "default"}); err != nil {
+		t.Fatalf("Transform now shape-checks trait properties; update the raw-rule contract docs: %v", err)
+	}
+
+	err = tr.ValidateAuthoredProperties(parseLoweredOutput(t, tr, out[0]))
+	if err == nil {
+		t.Fatal("expected ValidateAuthoredProperties to reject the string enablePDB a raw rule wrote")
+	}
+	if !strings.Contains(err.Error(), `trait "scaler": properties.enablePDB`) {
+		t.Errorf("expected the error to name the trait property, got: %v", err)
+	}
+}

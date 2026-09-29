@@ -63,11 +63,13 @@ type rawDocKey struct {
 // rewrites authored input; it does not lower. Its output re-enters the caller's parse
 // and Transform/TransformWithPolicy exactly as if a person had authored it, so every
 // in-transform rule, capability merge, platform-reserved check and post-settle
-// validation runs there, once, with the full MaxLoweringDepth budget. A rule that
-// copies ClusterProfile capability rendering into a trait it emits is therefore
-// writing platform-reserved values into authored input, and Transform rejects them
-// with ErrPlatformReserved; emit the trait as a person would write it and let
-// Transform merge the capability.
+// validation runs there, once, with the full MaxLoweringDepth budget. Transform does
+// not shape-check authored trait properties: as for any authored document, the caller
+// runs ValidateAuthoredProperties on each parsed output document, after parameter
+// substitution, before Transform. A rule that copies ClusterProfile capability
+// rendering into a trait it emits is therefore writing platform-reserved values into
+// authored input, and Transform rejects them with ErrPlatformReserved; emit the trait
+// as a person would write it and let Transform merge the capability.
 //
 // ctx.Capabilities reaches the rule as LoweringContext.Capabilities, for a rule whose
 // rewrite depends on what the platform offers. It is not an invitation to render.
@@ -77,6 +79,8 @@ type rawDocKey struct {
 // generated-name collisions (pass-through Applications included), the arity and
 // component/policy property schemas of what a rule emits, and that every emitted
 // document carries SupportedAPIVersion or the one group its rule was matched under.
+// Emitted trait properties are not among them: that is the caller's
+// ValidateAuthoredProperties call, above.
 func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([]json.RawMessage, error) {
 	if len(t.rawDocLoweringRules) == 0 {
 		return raws, nil // raw-path analogue of the pointer-identity guarantee: nothing to do, nothing touched
@@ -320,8 +324,9 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 		names[i] = result.Documents[i].Metadata.Name
 		// Component and policy properties are checked against their target's schema
 		// now, so a malformed emission is attributed to the authored raw document.
-		// Traits are not: a trait the rule wrote is authored input to Transform,
-		// which validates it — and enforces its platform-reserved keys — there.
+		// Traits are not: a trait the rule wrote is authored input, so its property
+		// shapes are checked by the caller's ValidateAuthoredProperties (after
+		// parameter substitution) and its platform-reserved keys by Transform.
 		if err := t.validateEmittedDocument(emitted[i]); err != nil {
 			return nil, nil, errors.Wrapf(err, "%s", d.origin)
 		}

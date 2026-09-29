@@ -1251,8 +1251,8 @@ func validateEmittedProperties(handler any, props map[string]any, path string) e
 // every trait it does NOT skip as forwarded, so a freshly synthesized trait is still
 // validated — just after forwarding is known, not before. For a
 // RawDocumentLoweringRule (lowerRawOnce) there is no such pass: every trait it writes
-// is authored input to the caller's later Transform, which validates it there, with
-// capability rendering merged and platform-reserved keys enforced.
+// is authored input: the caller's ValidateAuthoredProperties checks its shape, and
+// its later Transform merges capability rendering and enforces platform-reserved keys.
 func (t *Transformer) validateEmittedDocument(app *Application) error {
 	for i := range app.Spec.Components {
 		if err := t.validateEmittedComponent(&app.Spec.Components[i]); err != nil {

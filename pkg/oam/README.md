@@ -234,7 +234,14 @@ itself, since no `CapabilityAware` in-transform rule runs inside it. Besides met
 `LowerRaws` checks duplicates and generated-name collisions across the call (pass-through
 identities included), rule arity, component and policy schemas of each emitted document,
 and that each emitted document's apiVersion is `SupportedAPIVersion` or the group its
-rule claims; emitted traits are validated when `Transform` sees them.
+rule claims. Emitted traits are not checked in `LowerRaws`, and `Transform` does not
+shape-check trait properties either (it enforces only their platform-reserved keys): like
+any authored document, each parsed output document must go through
+`ValidateAuthoredProperties`, after parameter substitution, before `Transform` (see its
+paragraph under Property schemas below). Without it, a raw rule's `enablePDB: "true"` on
+a trait whose schema declares a boolean builds cleanly and is silently dropped. Before
+go-kure/launcher#357 `LowerRaws` schema-checked emitted traits itself; a caller that
+relied on that must now add the `ValidateAuthoredProperties` call.
 
 `NameAllocator`'s generated-name collision detection (D2) is scoped by `Origin.Namespace`,
 not by name alone: two documents authored in different namespaces may generate the same

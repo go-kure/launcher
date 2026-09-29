@@ -356,11 +356,16 @@ of a raw-entered document is therefore one raw round plus the `Transform` budget
 rule must emit what a person would write — an `expose` trait with only its hostnames,
 for example — and must not copy capability rendering into its output: a value in a
 `PlatformReserved` field is authored input to `Transform`, which rejects it with
-`ErrPlatformReserved`. Before #357, `LowerRaws` ran the whole fixpoint itself and
-sealed the traits it produced, but the seal is an unexported field that the caller's
-`yaml.Marshal` → parse round-trip drops, so `Transform` re-rendered those traits as
-authored anyway; running round 0 only makes the behaviour match what the round-trip
-already did.
+`ErrPlatformReserved`. The shape of a trait the rule writes is checked by neither
+`LowerRaws` nor `Transform`, which enforces only its platform-reserved keys: as for
+any authored document, the consumer runs `ValidateAuthoredProperties` on each parsed
+output document, after parameter substitution, before `Transform`. Before #357,
+`LowerRaws` ran the whole fixpoint itself and sealed the traits it produced, but the
+seal is an unexported field that the caller's `yaml.Marshal` → parse round-trip drops,
+so `Transform` re-rendered those traits as authored anyway; running round 0 only makes
+the behaviour match what the round-trip already did. Sealing also schema-checked each
+emitted trait, so a consumer that relied on `LowerRaws` rejecting a mistyped trait
+property must now call `ValidateAuthoredProperties` itself.
 
 ### How the open questions were resolved
 
@@ -390,7 +395,7 @@ implementation. All three are answered by the shipped code:
   emits; nothing it emits is ever looked up in `t.rawDocLoweringRules` again. Each
   emitted document must parse as an ordinary `Application` — `LowerRaws` checks its
   metadata, its apiVersion group (below), and its component and policy schemas — and
-  its traits are validated when `Transform` sees them.
+  its traits are the consumer's `ValidateAuthoredProperties` call's to check, as above.
 - **What is the exact registration and dispatch shape for `RawDocumentLoweringRule`?**
   A lookup keyed on the sniffed `(apiVersion, kind)` pair. Registration is
   `t.rawDocLoweringRules map[rawDocRuleKey]RawDocumentLoweringRule` (`transform.go`,
