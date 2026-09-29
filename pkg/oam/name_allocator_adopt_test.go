@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func adoptOrigin(component, namespace string) Origin {
@@ -411,55 +409,49 @@ func TestLower_EmitOrAdopt_SharedOnlyExpansionFails(t *testing.T) {
 	}
 }
 
-// TestLowerRaws_EmitOrAdopt_ScopedToAuthoredDocument: LowerRaws runs every raw input
-// through one allocator but returns each settled document separately, so a matching
-// claim from another authored document in the same namespace must collide rather
-// than adopt — adopting would leave the second document without the element. In
-// disjoint namespaces the two claims never meet, and each document emits its own.
-func TestLowerRaws_EmitOrAdopt_ScopedToAuthoredDocument(t *testing.T) {
-	newTransformer := func() *Transformer {
-		tr := NewTransformer(nil, nil)
-		tr.RegisterRawDocumentLowering(testRawRule{kind: "WebApplication", compType: "image-source-user"})
-		tr.RegisterComponentLowering(imageSourceRule{})
-		return tr
+// TestLowerRaws_InTransformAdoptionRunsPerDocument: LowerRaws runs raw rules only, so
+// an in-transform rule's EmitOrAdopt claim never meets another document's in the
+// LowerRaws allocator. Two same-namespace documents whose rules would both emit
+// "shared-source" leave LowerRaws with that component unlowered, and each document's
+// own Transform, with a fresh allocator, emits its own shared element. The
+// cross-document refusal itself is covered at allocator level by TestEmitOrAdopt.
+func TestLowerRaws_InTransformAdoptionRunsPerDocument(t *testing.T) {
+	tr := NewTransformer(map[string]ComponentHandler{
+		"webservice": &pipelineComponentHandler{typ: "webservice"},
+		"worker":     &pipelineComponentHandler{typ: "worker"},
+	}, nil)
+	tr.RegisterRawDocumentLowering(testRawRule{kind: "WebApplication", compType: "image-source-user"})
+	tr.RegisterComponentLowering(imageSourceRule{})
+
+	out, err := tr.LowerRaws([]json.RawMessage{rawWebApplication("shop"), rawWebApplication("cart")}, TransformContext{})
+	if err != nil {
+		t.Fatalf("LowerRaws: %v", err)
 	}
-
-	t.Run("same namespace collides", func(t *testing.T) {
-		_, err := newTransformer().LowerRaws([]json.RawMessage{rawWebApplication("shop"), rawWebApplication("cart")}, TransformContext{})
-		if err == nil {
-			t.Fatal("a document adopted a shared element that exists only in another document")
+	if len(out) != 2 {
+		t.Fatalf("LowerRaws returned %d documents, want 2", len(out))
+	}
+	for _, raw := range out {
+		app := parseLoweredOutput(t, tr, raw)
+		if c := app.Spec.Components; len(c) != 1 || c[0].Type != "image-source-user" {
+			t.Fatalf("document %q components = %+v, want the one image-source-user component unlowered", app.Metadata.Name, c)
 		}
-		for _, want := range []string{`"shared-source"`, `in document "shop"`, `in document "cart"`} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error %q does not contain %s", err, want)
-			}
-		}
-	})
-
-	t.Run("disjoint namespaces each emit", func(t *testing.T) {
-		out, err := newTransformer().LowerRaws([]json.RawMessage{rawWebApplicationNS("shop", "prod"), rawWebApplicationNS("cart", "prod-2")}, TransformContext{})
+		// Transform returns a cluster, not the lowered document, so the shared element
+		// is observed as the stack application its component became.
+		cluster, err := tr.Transform(app, TransformContext{})
 		if err != nil {
-			t.Fatalf("LowerRaws: %v", err)
+			t.Fatalf("Transform %q: %v", app.Metadata.Name, err)
 		}
-		if len(out) != 2 {
-			t.Fatalf("LowerRaws returned %d documents, want 2", len(out))
-		}
-		for i, raw := range out {
-			var doc Application
-			if err := yaml.Unmarshal(raw, &doc); err != nil {
-				t.Fatalf("document %d: %v", i, err)
-			}
-			sources := 0
-			for _, c := range doc.Spec.Components {
-				if c.Name == "shared-source" {
-					sources++
-				}
-			}
-			if sources != 1 {
-				t.Errorf("document %q carries %d shared-source components, want 1", doc.Metadata.Name, sources)
+		names := bundleAppNames(cluster.Node.Bundle)
+		sources := 0
+		for _, n := range names {
+			if n == "shared-source" {
+				sources++
 			}
 		}
-	})
+		if sources != 1 {
+			t.Errorf("document %q transformed to applications %v, want exactly one shared-source", app.Metadata.Name, names)
+		}
+	}
 }
 
 func TestLower_EmitOrAdopt_DifferentContentCollides(t *testing.T) {

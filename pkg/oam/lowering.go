@@ -183,7 +183,9 @@ func (o Origin) sameAuthoredLocation(other Origin) bool {
 // components, traits or policies of one document match while elements of two different
 // documents never do. NameAllocator.EmitOrAdopt uses it to keep adoption inside one
 // document: each settled document is transformed on its own, so an element adopted from
-// another document would be missing from the adopter's output.
+// another document would be missing from the adopter's output. Only an allocator shared
+// across documents — LowerRaws' round-0 raw-rule claims, or a caller's own — can see a
+// claim from another document; Transform's holds one authored document's claims.
 func (o Origin) sameAuthoredDocument(other Origin) bool {
 	return o.Namespace == other.Namespace && o.Document == other.Document && o.DocumentKind == other.DocumentKind
 }
@@ -389,8 +391,12 @@ func (n *NameAllocator) Reserve(name string, origin Origin) error {
 // document, a name Reserve already holds, and an empty identity are all hard errors;
 // Reserve likewise still refuses a name claimed here. The cross-document case stays a
 // collision because every settled document is transformed on its own: an element
-// adopted from another document would be missing from the adopter's output. Keyed on
-// (namespace, name), like Reserve. Errors identify an identity only by a short
+// adopted from another document would be missing from the adopter's output. The engine
+// can only see it where one allocator spans documents: LowerRaws shares one across its
+// raw inputs for round-0 raw-rule claims, but in-transform rules run inside each
+// document's own Transform with a fresh allocator, so a name they generate is never
+// compared across documents — detecting that collision is the caller's responsibility.
+// Keyed on (namespace, name), like Reserve. Errors identify an identity only by a short
 // SHA-256 digest, never its text, so an identity may include sensitive inputs.
 //
 // Three constraints on the caller, none checked here. The element emitted under
