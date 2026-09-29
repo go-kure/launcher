@@ -152,7 +152,8 @@ runtime:
 | `fluxcd-postbuild` | no | Sets `postBuild` substitution on the Flux `Kustomization` of the component's bundle; bundle-wide, and the last component to set it wins |
 | `prune-protection` | no | Annotates the component's generated objects with `kustomize.toolkit.fluxcd.io/prune: disabled`, so Flux never garbage-collects them. Takes no properties. |
 
-`pkg/oam/builtin/traits/README.md` is the authoritative catalog, with every property. The one
+`pkg/oam/builtin/traits/README.md` is the authoritative trait catalog; its tables list each
+trait's key properties, not every accepted field. The one
 downstream trait with no launcher counterpart is `backup`, which depends on the downstream
 delivery pipeline and has no meaning in a static manifest build.
 
