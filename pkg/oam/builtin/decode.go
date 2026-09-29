@@ -99,7 +99,8 @@ func isOwned(owned []string, key string) bool {
 // the same way to encode and decode. What this cannot prove reachable is reported
 // too: a value that encodes like its zero, or any such field of a t with its own
 // MarshalJSON, MarshalText, UnmarshalJSON or UnmarshalText (promoted ones included),
-// or of a t whose encoding fails or panics.
+// or the AppendText, MarshalJSONTo or UnmarshalJSONFrom the jsonv2-backed encoding/json
+// also calls, or of a t whose encoding fails or panics.
 //
 // A terminal that decodes an external spec type asserts this is empty against an
 // explicit exclusion list, so an upstream field added under a name launcher already
@@ -184,26 +185,38 @@ func hasRival(fields []jsonField, f jsonField) bool {
 }
 
 // The methods that take encoding or decoding away from encoding/json's field selection.
+// AppendText is called only by the jsonv2-backed encoding/json (GOEXPERIMENT=jsonv2).
 var selfCoding = []reflect.Type{
 	reflect.TypeFor[json.Marshaler](),
 	reflect.TypeFor[encoding.TextMarshaler](),
+	reflect.TypeFor[encoding.TextAppender](),
 	reflect.TypeFor[json.Unmarshaler](),
 	reflect.TypeFor[encoding.TextUnmarshaler](),
 }
+
+// The json/v2 methods the jsonv2-backed encoding/json also calls. Their jsontext
+// signatures need the experiment to compile, so they are matched by name alone: a
+// same-named method with another signature is reported too, which errs on the safe side.
+var selfCodingByName = []string{"MarshalJSONTo", "UnmarshalJSONFrom"}
 
 // encodesField reports whether encoding/json selects the field at index of t: filling
 // that field alone on a fresh value must change t's encoding. It is false whenever
 // that cannot be shown, including behind an unexported embedded pointer (which the
 // decoder cannot set either), for a t that encodes or decodes itself (own or promoted
-// method), and when encoding fails or panics (a method reached through a nil embedded
-// pointer).
+// method, json/v2's MarshalJSONTo and UnmarshalJSONFrom included), and when encoding
+// fails or panics (a method reached through a nil embedded pointer).
 func encodesField(t reflect.Type, index []int) (ok bool) {
 	defer func() {
 		if recover() != nil {
 			ok = false
 		}
 	}()
-	if pt := reflect.PointerTo(t); slices.ContainsFunc(selfCoding, pt.Implements) {
+	pt := reflect.PointerTo(t)
+	named := func(name string) bool {
+		_, found := pt.MethodByName(name)
+		return found
+	}
+	if slices.ContainsFunc(selfCoding, pt.Implements) || slices.ContainsFunc(selfCodingByName, named) {
 		return false
 	}
 	root := reflect.New(t)
