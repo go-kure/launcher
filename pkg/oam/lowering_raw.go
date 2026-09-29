@@ -264,17 +264,17 @@ func (t *Transformer) lowerRawRound(seed []loweringDoc, ctx TransformContext, pr
 	}
 	namer.round = 0
 
-	var chain []LoweringStep
 	out := make([]loweringDoc, 0, len(seed))
 	for _, d := range seed {
+		// Seeds are independent authored documents, so an error's Chain is this
+		// seed's own steps only — never an earlier seed's (D7).
 		emitted, steps, err := t.lowerRawOnce(d, ctx, namer, 0)
-		chain = append(chain, steps...)
 		if err != nil {
-			return nil, &LoweringError{Origin: d.origin, Chain: chain, Cause: err}
+			return nil, &LoweringError{Origin: d.origin, Chain: steps, Cause: err}
 		}
 		for _, doc := range emitted {
 			if err := checkLoweredAPIVersion(doc, d.apiVersion); err != nil {
-				return nil, &LoweringError{Origin: d.origin, Chain: chain, Cause: err}
+				return nil, &LoweringError{Origin: d.origin, Chain: steps, Cause: err}
 			}
 			out = append(out, loweringDoc{doc: doc, origin: d.origin, slot: d.slot, apiVersion: d.apiVersion})
 		}

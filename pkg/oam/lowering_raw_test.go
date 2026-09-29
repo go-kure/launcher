@@ -557,6 +557,46 @@ func TestLowerRaws_MidLoopErrorSurfacesInTransformForTheRightDocument(t *testing
 	}
 }
 
+// TestLowerRaws_ErrorChainNamesOnlyTheFailingDocument proves a LowerRaws error's
+// Chain is the expansion chain of its own Origin (D7): an earlier, unrelated
+// document that lowered fine contributes no step to a later document's failure,
+// whether the rule itself fails or its emission is refused.
+func TestLowerRaws_ErrorChainNamesOnlyTheFailingDocument(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bad  RawDocumentLoweringRule
+		// steps is the failing document's own chain length: a failed rule emitted
+		// nothing, a refused emission records the step that produced it.
+		steps int
+	}{
+		{"rule error", testRawRule{kind: "BadApp", lowerErr: true}, 0},
+		{"emission refused", versionedRawRule{testRawRule: testRawRule{kind: "BadApp"}, apiVersion: SupportedAPIVersion, emitAPIVersion: "unrelated.example.com/v1"}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := NewTransformer(nil, nil)
+			tr.RegisterRawDocumentLowering(testRawRule{kind: "GoodApp"})
+			tr.RegisterRawDocumentLowering(tc.bad)
+
+			_, err := tr.LowerRaws([]json.RawMessage{rawOfKind("GoodApp", "first"), rawOfKind("BadApp", "second")}, TransformContext{})
+			var lerr *LoweringError
+			if !stderrors.As(err, &lerr) {
+				t.Fatalf("expected *LoweringError, got %T: %v", err, err)
+			}
+			if lerr.Origin.Document != "second" {
+				t.Fatalf("error attributed to document %q, want %q", lerr.Origin.Document, "second")
+			}
+			for _, s := range lerr.Chain {
+				if s.From != "second" {
+					t.Errorf("chain carries step %+v from another document; want only document %q's steps", s, "second")
+				}
+			}
+			if len(lerr.Chain) != tc.steps {
+				t.Errorf("chain has %d steps, want %d: %+v", len(lerr.Chain), tc.steps, lerr.Chain)
+			}
+		})
+	}
+}
+
 // TestLowerRaws_SettledValidationRunsInTransformForTheRightDocument proves the
 // post-settle validation pass belongs to Transform too: a raw rule's output that a
 // DocumentLoweringRule then lowers into an unsupported group passes LowerRaws and is
