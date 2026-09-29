@@ -149,7 +149,10 @@ not the app — chooses the implementation:
   `mountPath` in the same container. Both traits also refuse a volume name the main container
   already attaches as a raw block device — a `statefulset` Block claim template has no pod volume
   of its own, so the ordinary volume-name check would miss it — because Kubernetes refuses a
-  volume listed under both `volumeMounts` and `volumeDevices`.
+  volume listed under both `volumeMounts` and `volumeDevices`. A filesystem claim template has no
+  pod volume either, only a main-container mount, so both traits refuse a volume named like one
+  too: the StatefulSet controller replaces a pod volume named like a claim template with the
+  claim, and the ConfigMap or Secret would never be mounted.
 
 ## NetworkPolicy nulls: null, empty and absent
 
