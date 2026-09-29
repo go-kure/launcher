@@ -265,7 +265,7 @@ A caller that transforms several documents detects that collision with
 `CheckCrossDocumentCollisions`: it takes each document's identity and generated objects
 (a `GeneratedDocument` per document, including any objects a layout walk adds) and reports
 every object — keyed by API group, kind, namespace and name — that more than one document
-generates, naming both documents. Being keyed on the objects rather than on allocator claims,
+generates, once per object, naming every document that generates it. Being keyed on the objects rather than on allocator claims,
 it also catches two same-named authored components in one namespace, and a cluster-scoped
 object generated from documents in different namespaces. An object's namespace is read from
 the object, so pass objects as generated; an object with no kind is an error.
