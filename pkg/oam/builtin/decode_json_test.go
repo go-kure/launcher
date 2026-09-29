@@ -1,6 +1,7 @@
 package builtin_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -245,5 +246,72 @@ func TestUnreachableJSONFields_HelmReleaseSpec(t *testing.T) {
 	}
 	if got := builtin.UnreachableJSONFields(reflect.TypeFor[helmv2.HelmReleaseSpec](), "values"); !slices.Equal(got, []string{"values"}) {
 		t.Errorf("owning values: got %v, want [values]", got)
+	}
+}
+
+// Fields hidden behind another field under the same key: the key decodes, but lands
+// on the other field.
+type (
+	// The shallower promoted wins; reachInner's promoted is unreachable.
+	reachShallow struct {
+		reachInner
+		Promoted string `json:"promoted"`
+	}
+	// encoding/json drops the diamond's value as ambiguous, then folds the key "value"
+	// onto VALUE.
+	reachFolded struct {
+		reachLeft
+		reachRight
+		Upper string `json:"VALUE"`
+	}
+	// As reachShallow, behind an unexported embedded pointer the probe cannot allocate.
+	reachShadowPtr struct {
+		*reachLeaf
+		Value string `json:"value"`
+	}
+	// A leaf whose type refers to itself: filling it must terminate.
+	reachRecursiveLeaf struct {
+		reachNode
+		Next *reachNode `json:"next"`
+	}
+	reachNode struct {
+		Next     *reachNode  `json:"next"`
+		Children []reachNode `json:"children"`
+	}
+	// Its own MarshalJSON says nothing about field selection, so rivals are reported.
+	reachCustom struct {
+		reachInner
+		Promoted string `json:"promoted"`
+	}
+)
+
+func (c reachCustom) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]string{c.reachInner.Promoted, c.Promoted})
+}
+
+// TestUnreachableJSONFields_FieldLevel: a field whose key works but reaches another
+// field is reported by its Go field path.
+func TestUnreachableJSONFields_FieldLevel(t *testing.T) {
+	for _, tc := range []struct {
+		typ  reflect.Type
+		want []string
+	}{
+		{reflect.TypeFor[reachShallow](), []string{"reachInner.Promoted"}},
+		{reflect.TypeFor[reachFolded](), []string{"reachLeft.reachLeaf.Value", "reachRight.reachLeaf.Value"}},
+		{reflect.TypeFor[reachShadowPtr](), []string{"reachLeaf.Value"}},
+		{reflect.TypeFor[reachRecursiveLeaf](), []string{"reachNode.Next"}},
+		{reflect.TypeFor[reachCustom](), []string{"Promoted", "reachInner.Promoted"}},
+	} {
+		if got := builtin.UnreachableJSONFields(tc.typ); !slices.Equal(got, tc.want) {
+			t.Errorf("UnreachableJSONFields(%v) = %v, want %v", tc.typ, got, tc.want)
+		}
+	}
+
+	// The fixtures show the gap: each key decodes, onto the other field.
+	if s, _, err := builtin.DecodeStrictJSON[reachShallow](map[string]any{"promoted": "x"}); err != nil || s.Promoted != "x" || s.reachInner.Promoted != "" {
+		t.Errorf("reachShallow: %+v, %v; want promoted on the outer field", s, err)
+	}
+	if s, _, err := builtin.DecodeStrictJSON[reachFolded](map[string]any{"value": "x"}); err != nil || s.Upper != "x" {
+		t.Errorf("reachFolded: %+v, %v; want value folded onto VALUE", s, err)
 	}
 }
