@@ -30,7 +30,7 @@ package's production surface, not a spike-only detour that reverts before merge.
 
 Holds. `DocumentLoweringRule` / `ComponentLoweringRule` / `TraitLoweringRule` /
 `PolicyLoweringRule` (`lowering.go`) share one `LoweringResult` type, one
-fixpoint loop (`lowerDocumentBody`), and one `LoweringContext`. `loweringPositionRules`
+fixpoint loop (`runLowering`), and one `LoweringContext`. `loweringPositionRules`
 (`lowering.go`) is the only position-specific logic — a lookup table, not a
 branch per position in the engine body. The four positions did not need separate
 mechanisms; they needed a shared result type wide enough to express "this rule may
@@ -97,7 +97,7 @@ not resolve" for the still-unshipped API that would consume such a split.
 
 Holds, but the proof attempt found a real gap: the pre-existing doc comments on
 `IngressHandler`/`HTTPRouteHandler` already asserted `networkPolicy` was
-"platform-reserved" (their type doc comments in `ingress.go` and `httproute.go`), but nothing enforced it —
+"platform-reserved" (their `PropertySchema` doc comments in `ingress.go` and `httproute.go`), but nothing enforced it —
 ~18 tests in `networkpolicy_auto_test.go` author `networkPolicy` directly on those
 traits, bypassing any `ClusterProfile`, to exercise netpol synthesis without a
 capability round-trip. Marking the shared `schemaNetworkPolicy()` fragment
@@ -143,9 +143,10 @@ test proving the bypass is closed
 `pkg/oam/builtin/traits/ingress_platform_reserved_test.go`).
 
 `enforcePlatformReserved` (`property_validate.go`) runs at every point that merges
-capability rendering in: the trait-lowering branch (`lowerDocumentBody`, `lowering.go`,
-before `resolveCapability`), `applyTraits` (`transform.go`, before
-`resolveCapability`, inside the `!trait.sealed` guard), and symmetrically before a
+capability rendering in: the trait-lowering branch (`lowerDocumentBody`, `lowering.go`)
+and `applyTraits` (`transform.go`, inside the `!trait.sealed` guard) — both after
+`resolveCapability` and the missing-capability check, against the authored pre-merge
+`trait.Properties` — and symmetrically before a
 component handler's `ToApplicationConfig` (`createApplications`, `transform.go`) —
 though no component schema declares a reserved field today, so that call site is
 currently a no-op in practice. The proof: `webservice-expose-ingress/app.yaml` loses its
@@ -189,11 +190,12 @@ before this work. `validateProperties`/`validateObjectProperties`
 moment a rule emits an element, citing the **authored** origin first per D7) and a
 post-fixpoint whole-document pass with an **empty** `LowerableTypes`
 (called from `runLowering`; `validateSettled` itself, both in `lowering.go`,
-calls `validateWithExtraTypes(doc, customTraitTypes, LowerableTypes{})`) — any
-kind/component/trait type still present once the fixpoint has settled is, by
+calls `validateWithExtraTypes(doc, customTraitTypes, customComponentTypes, LowerableTypes{})`)
+— any kind/component/trait type still present once the fixpoint has settled is, by
 construction, not claimed by any registered rule (`LowerableTypes`'s own doc comment,
-`lowering.go`), so it is a non-terminating rule's leftover rather than a
-legitimate terminal type.
+`lowering.go`), so it is a non-terminating rule's leftover unless it is a registered
+terminal type: a trait or component handler, or a loaded `CapabilityDefinition`, which
+`customTraitTypes`/`customComponentTypes` admit.
 
 ## D5 — information closure, four inputs
 
@@ -221,8 +223,9 @@ output to one defining `expose` alone.
 ## D7 — recursion bound and provenance-first errors
 
 Both proposed defaults survived unchanged and ship as written. `MaxLoweringDepth = 9`
-(`lowering.go`) was never approached by any rule exercised so far — the deepest
-chain any test drives is three rounds. The bound exists for the pathological case (a
+(`lowering.go`) is not approached by any shipped rule; the boundary is covered by
+`TestLower_ExactlyMaxRealExpansions_Settles` (`pkg/oam/lowering_negative_test.go`),
+which drives eight real expansions plus the settling round, exactly the budget. The bound exists for the pathological case (a
 rule that keeps re-emitting a type another rule also claims) and `LoweringError` prints
 the **authored** `Origin` first, the `Cause` second, then the full `Chain` of
 `LoweringStep`s (`LoweringError` struct, `lowering.go`) — one of the negative

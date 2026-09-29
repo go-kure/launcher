@@ -465,9 +465,9 @@ func joinPropertyTypes(types []PropertyType) string {
 // the next round's input, so a rule-produced component arrives here already stripped
 // and a reserved null is never flagged. Latent today: all 11 PlatformReserved
 // declarations are on trait schemas — 8 written literally (builtin/traits/expose_rule.go
-// and ingress.go) plus the 3 schemaNetworkPolicy(true) calls at expose_rule.go:145,
-// ingress.go:132 and httproute.go:112 — and none on a component schema, since every
-// components-side schema*(reserved) call passes false. Which also means
+// and ingress.go) plus the 3 schemaNetworkPolicy(true) calls in the ExposeRule,
+// IngressHandler and HTTPRouteHandler PropertySchema methods — and none on a
+// component schema, since every components-side schema*(reserved) call passes false. Which also means
 // the component-side calls cannot currently fire at all, so their agreement with this
 // rule is vacuous rather than demonstrated. Tracked as go-kure/launcher#429, together
 // with the KNOWN LIMITATION at transform.go:637 that a rule-written reserved value is
