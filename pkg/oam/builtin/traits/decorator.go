@@ -174,6 +174,12 @@ func (d decoratorBase) ServiceRoutingTarget(servicePorts []intstr.IntOrString) (
 // (go-kure/launcher#385): a statefulset's volumeMode: Block claim template
 // has no entry in podSpec.Volumes, only a VolumeDevice, and a same-named
 // mount beside it is refused by ValidateVolumeDevices.
+//
+// So are the main container's mounts: a statefulset's filesystem claim
+// template likewise has no entry in podSpec.Volumes, only a VolumeMount, and
+// the StatefulSet controller replaces a pod volume named like a claim template
+// with the claim — the trait's ConfigMap or Secret would never be mounted.
+// Every other mount names a Volume, which the first loop already covers.
 func checkVolumeCollision(podSpec *corev1.PodSpec, name, source, hint string) error {
 	for _, v := range podSpec.Volumes {
 		if v.Name == name {
@@ -187,6 +193,13 @@ func checkVolumeCollision(podSpec *corev1.PodSpec, name, source, hint string) er
 			if vd.Name == name {
 				return errors.Errorf(
 					"%s: volume %q already exists on the workload as a raw block device; %s",
+					source, name, hint)
+			}
+		}
+		for _, vm := range podSpec.Containers[0].VolumeMounts {
+			if vm.Name == name {
+				return errors.Errorf(
+					"%s: volume %q already exists on the workload as a claim template; %s",
 					source, name, hint)
 			}
 		}

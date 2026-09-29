@@ -164,9 +164,11 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	// claim templates and `volumes` — each of which checks only its own
 	// entries.
 	vctMounts, vctDevices := claimTemplateMountsAndDevices(vcts)
-	if err := checkMainContainerVolumeDevices(
-		append(vctMounts, parsed.Mounts...), append(vctDevices, parsed.Devices...),
-	); err != nil {
+	mainMounts := append(vctMounts, parsed.Mounts...)
+	if err := checkMainContainerVolumeDevices(mainMounts, append(vctDevices, parsed.Devices...)); err != nil {
+		return nil, err
+	}
+	if err := checkClaimTemplateCollisions(vcts, parsed.Volumes, mainMounts); err != nil {
 		return nil, err
 	}
 
@@ -375,6 +377,40 @@ func claimTemplateMountsAndDevices(vcts []VolumeClaimTemplate) ([]corev1.VolumeM
 		mounts = append(mounts, corev1.VolumeMount{Name: vct.Name, MountPath: vct.MountPath})
 	}
 	return mounts, devices
+}
+
+// checkClaimTemplateCollisions refuses a claim template that shares its name
+// with another claim template or with a `volumes` entry, and a main-container
+// mountPath used twice across the claim templates and `volumes`. Each parser
+// checks only its own entries, and the apiserver does not catch the overlap
+// either: StatefulSet validation skips the pod template's volumes. The
+// StatefulSet controller keys claim templates by name, so of two sharing a name
+// only one claim is created, and it replaces a pod volume named like a template
+// with that template's claim, so the authored volume is never mounted. A
+// repeated mountPath is refused only when the controller creates the pods.
+// mounts is the main container's full mount list, claim templates first; the
+// Block (device) side is checkMainContainerVolumeDevices'.
+func checkClaimTemplateCollisions(vcts []VolumeClaimTemplate, volumes []corev1.Volume, mounts []corev1.VolumeMount) error {
+	names := make(map[string]bool, len(vcts))
+	for _, vct := range vcts {
+		if names[vct.Name] {
+			return errors.Errorf("volumeClaimTemplate %q: duplicate name; the StatefulSet controller creates one claim per template name, so one of the two would never be provisioned", vct.Name)
+		}
+		names[vct.Name] = true
+	}
+	for _, v := range volumes {
+		if names[v.Name] {
+			return errors.Errorf("volume %q has the same name as a claim template; the StatefulSet controller replaces a pod volume named like a claim template with the claim, so this volume would never be mounted. Rename one of them", v.Name)
+		}
+	}
+	paths := make(map[string]string, len(mounts))
+	for _, m := range mounts {
+		if other, dup := paths[m.MountPath]; dup {
+			return errors.Errorf("volume %q: duplicate mountPath %q, already used by %q", m.Name, m.MountPath, other)
+		}
+		paths[m.MountPath] = m.Name
+	}
+	return nil
 }
 
 func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.StatefulSet, error) {
