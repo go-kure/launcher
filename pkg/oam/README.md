@@ -261,7 +261,14 @@ every call belonging to the same run, so collisions between those calls are dete
 `LowerRaws` shares one allocator across its raw inputs, but only for round-0 raw-rule
 claims; in-transform rules run inside each document's own `Transform` with a fresh
 allocator, so a name an in-transform rule generates is never compared across documents.
-Detecting such a cross-document collision is the caller's responsibility.
+A caller that transforms several documents detects that collision with
+`CheckCrossDocumentCollisions`: it takes each document's identity and generated objects
+(a `GeneratedDocument` per document, including any objects a layout walk adds) and reports
+every object — keyed by API group, kind, namespace and name — that more than one document
+generates, naming both documents. Being keyed on the objects rather than on allocator claims,
+it also catches two same-named authored components in one namespace, and a cluster-scoped
+object generated from documents in different namespaces. An object's namespace is read from
+the object, so pass objects as generated; an object with no kind is an error.
 
 `Reserve`/`Name` fail on every repeat claim of a name, including one from the same content.
 Rules whose outputs share one derived object (two components pointing at the same chart

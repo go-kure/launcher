@@ -395,7 +395,8 @@ func (n *NameAllocator) Reserve(name string, origin Origin) error {
 // can only see it where one allocator spans documents: LowerRaws shares one across its
 // raw inputs for round-0 raw-rule claims, but in-transform rules run inside each
 // document's own Transform with a fresh allocator, so a name they generate is never
-// compared across documents — detecting that collision is the caller's responsibility.
+// compared across documents — a caller detects that collision with
+// CheckCrossDocumentCollisions over every document's generated objects.
 // Keyed on (namespace, name), like Reserve. Errors identify an identity only by a short
 // SHA-256 digest, never its text, so an identity may include sensitive inputs.
 //
