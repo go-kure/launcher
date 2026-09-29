@@ -310,6 +310,22 @@ type (
 		reachInner
 		Promoted string `json:"promoted"`
 	}
+	// As reachCustom, through AppendText, which the jsonv2-backed encoding/json calls.
+	reachAppendText struct {
+		reachInner
+		Promoted string `json:"promoted"`
+	}
+	// Stand-ins for json/v2's UnmarshalJSONFrom and MarshalJSONTo, whose jsontext
+	// signatures need GOEXPERIMENT=jsonv2 (decode_jsonv2_test.go has the real ones).
+	// These pin only that the methods are matched by name.
+	reachNamedDecodeFrom struct {
+		reachInner
+		Promoted string `json:"promoted"`
+	}
+	reachNamedEncodeTo struct {
+		reachInner
+		Promoted string `json:"promoted"`
+	}
 )
 
 func (c reachCustom) MarshalJSON() ([]byte, error) {
@@ -329,6 +345,14 @@ func (*reachDecoder) UnmarshalJSON([]byte) error { return nil }
 
 func (*reachTextDecode) UnmarshalText([]byte) error { return nil }
 
+func (a reachAppendText) AppendText(b []byte) ([]byte, error) {
+	return append(b, a.reachInner.Promoted+a.Promoted...), nil
+}
+
+func (*reachNamedDecodeFrom) UnmarshalJSONFrom() {}
+
+func (reachNamedEncodeTo) MarshalJSONTo() {}
+
 // TestUnreachableJSONFields_FieldLevel: a field whose key works but reaches another
 // field is reported by its Go field path.
 func TestUnreachableJSONFields_FieldLevel(t *testing.T) {
@@ -345,6 +369,9 @@ func TestUnreachableJSONFields_FieldLevel(t *testing.T) {
 		{reflect.TypeFor[reachSelfDecode](), []string{"Promoted", "reachInner.Promoted"}},
 		{reflect.TypeFor[reachPromotedDecode](), []string{"Promoted", "reachInner.Promoted"}},
 		{reflect.TypeFor[reachTextDecode](), []string{"Promoted", "reachInner.Promoted"}},
+		{reflect.TypeFor[reachAppendText](), []string{"Promoted", "reachInner.Promoted"}},
+		{reflect.TypeFor[reachNamedDecodeFrom](), []string{"Promoted", "reachInner.Promoted"}},
+		{reflect.TypeFor[reachNamedEncodeTo](), []string{"Promoted", "reachInner.Promoted"}},
 	} {
 		if got := builtin.UnreachableJSONFields(tc.typ); !slices.Equal(got, tc.want) {
 			t.Errorf("UnreachableJSONFields(%v) = %v, want %v", tc.typ, got, tc.want)

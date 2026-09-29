@@ -26,10 +26,11 @@ dominates, or one dropped as ambiguous whose key folds onto a field equal ignori
 reported by its Go field path, e.g. `Inner.Value`; such a field is checked by filling it alone
 and confirming `encoding/json` encodes it, and one the check cannot prove reachable is reported
 too, as is every such field of a type with its own (or a promoted) `MarshalJSON`, `MarshalText`,
-`UnmarshalJSON` or `UnmarshalText`. A handler that decodes an external spec
-type asserts that list is empty, against an explicit exclusion list, so an upstream field added
-under a name launcher already owns fails the test instead of silently becoming unreachable. The `cilium-networkpolicy` trait decodes its
-raw rules this way.
+`UnmarshalJSON` or `UnmarshalText`, or the `AppendText`, `MarshalJSONTo` or `UnmarshalJSONFrom`
+that the jsonv2-backed `encoding/json` (`GOEXPERIMENT=jsonv2`) also calls. A handler that
+decodes an external spec type asserts that list is empty, against an explicit exclusion list, so
+an upstream field added under a name launcher already owns fails the test instead of silently
+becoming unreachable. The `cilium-networkpolicy` trait decodes its raw rules this way.
 
 `VolSyncRendering` and `PVCRendering` carry platform-supplied storage-class defaults
 (`storageClassName`, plus `volumeSnapshotClassName` for volsync) that a ClusterProfile capability
