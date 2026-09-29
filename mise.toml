@@ -9,7 +9,7 @@ syft = "1.52.0"
 cosign = "2.6.5"
 hugo = "0.167.0"
 # Docs tooling: docs-map driver (yq) and rendered-site link checker (lychee)
-yq = "4.53.6"
+yq = "4.54.1"
 lychee = "0.24.2"
 # flux CLI, for the `flux schema validate` plugin used by `make validate-manifests`
 # (site/scripts/validate-manifests.sh installs/pins the `schema` plugin itself)
