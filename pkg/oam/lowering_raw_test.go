@@ -312,7 +312,7 @@ func TestLowerRaws_PassThroughDocumentBlocksGeneratedNameCollision(t *testing.T)
 
 // TestLowerRaws_PassThroughDifferentKindsSameNameNotCollision is the round-9 Codex
 // regression (review comment 3783532124): NameAllocator.Reserve keys on
-// (namespace, name) alone, with no kind component (lowering.go:222). The
+// (namespace, name) alone, with no kind component (see Reserve). The
 // dcbc759 preReserved fix (for the finding above) originally registered EVERY
 // pass-through document's identity regardless of kind, so two pass-through
 // resources of different kinds sharing a namespace/name — e.g. an

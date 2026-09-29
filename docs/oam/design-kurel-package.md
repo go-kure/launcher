@@ -127,7 +127,9 @@ Ported from the downstream runtime. Each type maps to a `ComponentHandler` imple
 
 ### 4.3 Supported trait types (Phase 1)
 
-Ported from the downstream runtime. Each type maps to a `TraitHandler` in `pkg/oam/builtin/`:
+Each type maps to a `TraitHandler` in `pkg/oam/builtin/traits/` — `expose` to a
+`TraitLoweringRule` there. Rows marked launcher-native were not ported from the downstream
+runtime:
 
 | type | requires capability | description |
 |---|---|---|
@@ -135,15 +137,24 @@ Ported from the downstream runtime. Each type maps to a `TraitHandler` in `pkg/o
 | `ingress` | no | Kubernetes Ingress |
 | `httproute` | no | Gateway API HTTPRoute |
 | `certificate` | yes — `issuerRef` | cert-manager Certificate |
-| `external-secret` | yes — `secretStoreRef` | ExternalSecrets ExternalSecret |
+| `external-secret` | no — the store comes from an optional `secretStoreRef` rendering or an authored `provider` | ExternalSecrets ExternalSecret |
+| `networkpolicy` | no | Kubernetes NetworkPolicy |
+| `cilium-networkpolicy` | no | CiliumNetworkPolicy |
+| `rbac` | no | Role/RoleBinding (or ClusterRole/ClusterRoleBinding) bound to the component's ServiceAccount |
+| `security-context` | no | Sets the pod and container security context for a PSA level |
+| `pvc` | no | PersistentVolumeClaim |
+| `volsync` | no | VolSync ReplicationSource |
 | `configmap` | no | ConfigMap with optional volume mount |
 | `topology-spread` | no | Launcher-native (not ported from the downstream runtime): stamps launcher's default topology spread constraints — the `webservice`/`worker` `topologySpread` opinion — onto the component's Deployment from its post-policy replica count. Takes no properties and no capability rendering. |
 | `force-replace` | no | Launcher-native (not ported from the downstream runtime): opt-in; annotates the component's generated objects with `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a Job's pod template). Replacing a Job re-runs it. Takes no properties and no capability rendering. |
 | `scaler` | no | HPA + optional PDB |
+| `fluxcd-patches` | no | Appends `patches` to the component's Flux `Kustomization` |
+| `fluxcd-postbuild` | no | Sets `postBuild` substitution on the component's Flux `Kustomization` |
+| `prune-protection` | no | Annotates the component's generated objects with `kustomize.toolkit.fluxcd.io/prune: disabled`, so Flux never garbage-collects them. Takes no properties. |
 
-Traits that stay in the downstream runtime (not ported to launcher): `backup`, `fluxcd-postbuild`,
-`fluxcd-patches`, `prune-protection`, `rbac`. These depend on the downstream delivery pipeline
-and have no meaning in a static manifest build.
+`pkg/oam/builtin/traits/README.md` is the authoritative catalog, with every property. The one
+downstream trait with no launcher counterpart is `backup`, which depends on the downstream
+delivery pipeline and has no meaning in a static manifest build.
 
 ### 4.4 OAM policies
 

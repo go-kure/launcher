@@ -234,15 +234,15 @@ typed struct all the way down.
 
 **The document envelope** — `apiVersion`, `kind`, `metadata`, `spec`, and every field of a
 component, trait or policy entry other than `properties` — is decoded into Go structs with
-`KnownFields(true)` (`ParseWithExtraTypes`, `pkg/oam/parser.go:99`). A misspelled `replicaz` at
+`KnownFields(true)` (`ParseWithExtraTypes`, `pkg/oam/parser.go`). A misspelled `replicaz` at
 the component level, or a stray `spec.traits`, fails there.
 
-**Authored `properties` maps** are not covered by that decoder. `Component.Properties`
-(`pkg/oam/types.go:44`), `Trait.Properties` (`:63`) and `ApplicationPolicy.Properties` (`:87`)
+**Authored `properties` maps** are not covered by that decoder. `Component.Properties`,
+`Trait.Properties` and `ApplicationPolicy.Properties` (`pkg/oam/types.go`)
 are each `map[string]any`, so YAML strictness stops at the envelope and any key at all decodes
 successfully. Those maps are instead checked against the handler's own declared
 `PropertySchema` by `Transformer.ValidateAuthoredProperties`, which the build calls immediately
-after parsing (`pkg/cmd/kurel/build.go:149`). An undeclared key is a build error naming the
+after parsing (`pkg/cmd/kurel/build.go`). An undeclared key is a build error naming the
 allowed fields; a declared key whose value has the wrong type is a build error too. An array- or
 object-typed value that validation had to rebuild in order to check it — a typed Go `[]string`
 or `map[string]string` normalised into `[]any`/`map[string]any` — is written back in place, so
@@ -265,7 +265,7 @@ when any member's single `Type` accepts it, and is normalised by the first membe
 that does.
 
 **Ordering is load-bearing.** The authored-properties check runs *after* `ResolveParameters`
-(`pkg/cmd/kurel/build.go:114`). In package mode an authored value may be a `${...}` placeholder,
+(`pkg/cmd/kurel/build.go`). In package mode an authored value may be a `${...}` placeholder,
 which is a bare string until substitution; type-checking before substitution would reject a
 document whose integer- or boolean-typed property is supplied by a parameter.
 
@@ -275,8 +275,8 @@ Neither is an oversight; both are places where launcher has no schema to check a
 inventing one would reject documents that are correct today.
 
 **Application policies.** `ApplicationPolicy` is "passed through to the runtime unchanged"
-(`pkg/oam/types.go:83`), and no production code registers a `PolicyHandler` —
-`Transformer.RegisterPolicy` (`pkg/oam/transform.go:295`) has no non-test caller. A policy's
+(`pkg/oam/types.go`), and no production code registers a `PolicyHandler` —
+`Transformer.RegisterPolicy` (`pkg/oam/transform.go`) has no non-test caller. A policy's
 properties therefore have no declared shape, and are not checked.
 
 **Trait types declared by a `CapabilityDefinition`.** A definition supplied via
@@ -292,7 +292,7 @@ checked here; it has nothing to apply it and fails later in the build.
 
 Not a carve-out — a property whose schema lives somewhere other than a handler. `scope` selects
 which `ClusterProfile` capability binding a trait resolves against: `buildCapabilityKey`
-(`pkg/oam/transform.go:985-991`) builds the key `"<traitType>.<scope>"` for **every** trait type,
+(`pkg/oam/transform.go`) builds the key `"<traitType>.<scope>"` for **every** trait type,
 falling back to the unscoped `"<traitType>"` when no scoped binding is declared. It is therefore
 legal on any trait, including the many whose handlers declare no such property — a `pvc` trait
 selecting a fast storage class is the worked example, and it built correctly long before the
@@ -307,14 +307,14 @@ the handler's own declaration winning when both describe the key, and without mu
 actually declares. The engine type-asserts `scope` to `string`, so the check declares it a string
 and rejects any other non-null type rather than letting it be silently ignored. An explicit
 `scope: null` stays accepted, like any absent optional property (`isNullValue` short-circuits
-ahead of the type switch, `pkg/oam/property_validate.go:108`), and resolves against the unscoped
+ahead of the type switch, `pkg/oam/property_validate.go`), and resolves against the unscoped
 binding exactly as omitting the key does.
 
 ### Required fields are checked at nested levels only
 
 `Required` on a *top-level* authored property is deliberately not enforced at parse time. A
 trait's top-level property map is merged with the ClusterProfile's capability rendering after
-parsing (`applyTraits` → `resolveCapability`, `pkg/oam/transform.go:845` and `:951`), so a
+parsing (`applyTraits` → `resolveCapability`, `pkg/oam/transform.go`), so a
 capability-aware trait may legitimately author a document in which the platform, not the
 author, supplies a required property. Enforcing `Required` before that merge would reject it.
 Nested `Required` — inside an object- or array-typed property — *is* enforced, because

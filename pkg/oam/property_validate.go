@@ -29,7 +29,7 @@ import (
 //	error; reservation is about the KEY being written.
 //
 // Reservation is checked on the authored surface; the component-side checks
-// (transform.go:649, lowering.go:1083) also run on rule-produced components, where a
+// (transform.go:649, lowering.go:1206) also run on rule-produced components, where a
 // reserved value is wrongly rejected as authored (KNOWN LIMITATION, transform.go:637;
 // see go-kure/launcher#429) and a reserved null has already been stripped.
 //
@@ -126,8 +126,8 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 		// On the AUTHORED surface the two rules never meet: enforcePlatformReserved
 		// runs upstream of any emission validation, so what it sees is what a user
 		// wrote. On the COMPONENT surface they do meet, and saying otherwise would be
-		// false — transform.go:649 and lowering.go:1083 run it on comp.Properties, and
-		// the lowering round loop (lowering.go:759) feeds each round's emitted
+		// false — transform.go:649 and lowering.go:1206 run it on comp.Properties, and
+		// the lowering round loop (runLowering, lowering.go) feeds each round's emitted
 		// documents back as the next round's input, so a rule-produced component
 		// reaches that check with its properties already stripped here and a reserved
 		// key set to null is never flagged. Latent rather than live: every
@@ -460,8 +460,8 @@ func joinPropertyTypes(types []PropertyType) string {
 //
 // On the AUTHORED surface the two rules do not meet: this runs upstream of any
 // emission validation, so what it sees is what a user wrote. On the COMPONENT surface
-// they do — transform.go:649 and lowering.go:1083 call this on comp.Properties, and
-// the lowering round loop (lowering.go:759) returns each round's emitted documents as
+// they do — transform.go:649 and lowering.go:1206 call this on comp.Properties, and
+// the lowering round loop (runLowering, lowering.go) returns each round's emitted documents as
 // the next round's input, so a rule-produced component arrives here already stripped
 // and a reserved null is never flagged. Latent today: all 11 PlatformReserved
 // declarations are on trait schemas — 8 written literally (builtin/traits/expose_rule.go

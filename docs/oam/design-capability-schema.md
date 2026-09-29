@@ -110,7 +110,7 @@ func decodeStrict[T any](src map[string]any) (*T, error) {
 
 Example implementation, the expose trait's real current handler (`ExposeRule`, a value
 receiver — not the `*ExposeHandler` this section originally showed; `ExposeHandler` was
-deleted and replaced by `ExposeRule`, `pkg/oam/builtin/traits/expose_rule.go:33,51`, when the
+deleted and replaced by `ExposeRule`, `pkg/oam/builtin/traits/expose_rule.go`, when the
 expose trait moved from a directly-dispatched `TraitHandler` to a `TraitLoweringRule`):
 
 ```go
@@ -134,7 +134,8 @@ func (ExposeRule) ValidateAndApplyDefaults(rendering map[string]any) (map[string
 ```
 
 (Simplified for illustration — the real method also validates several other
-`controllerType`-conditional fields; see `expose_rule.go:51-96` for the full body.)
+`controllerType`-conditional fields; see `ExposeRule.ValidateAndApplyDefaults` in
+`expose_rule.go` for the full body.)
 
 **Note on conditional constraints:** Mutual exclusivity and conditional required fields
 (e.g. "gatewayName is required when controllerType is gateway") are expressed as Go code
@@ -170,8 +171,8 @@ func (ExposeRule) PropertySchema() map[string]oam.PropertySchema {
 }
 ```
 
-(`expose_rule.go:111-138` has the full field list.) `PropertySchema.PlatformReserved` marks
-a field as capability-injected only (D3) — a concern the original `RenderingSchema()` design
+(`ExposeRule.PropertySchema` in `expose_rule.go` has the full field list.)
+`PropertySchema.PlatformReserved` marks a field as capability-injected only (D3) — a concern the original `RenderingSchema()` design
 never had, since it only ever covered rendering keys, not the full authored-property
 vocabulary.
 
