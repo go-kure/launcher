@@ -191,10 +191,11 @@ moment a rule emits an element, citing the **authored** origin first per D7) and
 post-fixpoint whole-document pass with an **empty** `LowerableTypes`
 (called from `runLowering`; `validateSettled` itself, both in `lowering.go`,
 calls `validateWithExtraTypes(doc, customTraitTypes, customComponentTypes, LowerableTypes{})`)
-— any kind/component/trait type still present once the fixpoint has settled is, by
-construction, not claimed by any registered rule (`LowerableTypes`'s own doc comment,
-`lowering.go`), so it is a non-terminating rule's leftover unless it is a registered
-terminal type: a trait or component handler, or a loaded `CapabilityDefinition`, which
+— a type that is only lowerable (admitted solely through `LowerableTypes`, per its own
+doc comment in `lowering.go`) must be gone once the fixpoint has settled, so one still
+present is a non-terminating rule's leftover. Terminal types stay admissible: the
+`Application` kind and the built-in component and trait types (`validate.go`), and the
+registered handler and loaded `CapabilityDefinition` types that
 `customTraitTypes`/`customComponentTypes` admit.
 
 ## D5 — information closure, four inputs
