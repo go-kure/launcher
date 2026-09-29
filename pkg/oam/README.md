@@ -250,8 +250,11 @@ fallback. A nil `Namer` is a contract violation by whoever built the `LoweringCo
 Code that drives a rule directly, outside the engine — a rule's own unit test in another
 module, a pre-pass, a golden-file or fixture harness — builds the `Namer` with
 `NewNameAllocator()` (the zero value is not usable) and shares that one allocator across
-every call belonging to the same run, as `LowerRaws` does, so cross-document collisions
-are detected.
+every call belonging to the same run, so collisions between those calls are detected.
+`LowerRaws` shares one allocator across its raw inputs, but only for round-0 raw-rule
+claims; in-transform rules run inside each document's own `Transform` with a fresh
+allocator, so a name an in-transform rule generates is never compared across documents.
+Detecting such a cross-document collision is the caller's responsibility.
 
 `Reserve`/`Name` fail on every repeat claim of a name, including one from the same content.
 Rules whose outputs share one derived object (two components pointing at the same chart
@@ -269,8 +272,10 @@ cannot see each other's output, so this is how they share one object instead of 
 different identity at the same name, the same identity claimed from another authored document
 (each settled document is transformed on its own, so it would lack the adopted element), an
 empty identity, and a name already held by `Reserve` stay hard errors, and `Reserve` still
-refuses a name claimed this way. Errors name an identity only by a short SHA-256 digest, never
-its text, so an identity may include sensitive inputs.
+refuses a name claimed this way. The cross-document refusal fires only where one allocator
+spans documents (`LowerRaws`' raw rules, or a caller's own shared allocator); within
+`Transform` every claim comes from one document. Errors name an identity only by a short
+SHA-256 digest, never its text, so an identity may include sensitive inputs.
 
 Three caller constraints the allocator does not check. The shared element must be of a terminal
 type, one no lowering rule claims: claims outlive the round, so a lowerable element could be

@@ -49,7 +49,11 @@ determined by an identity: a repeat claim with the same identity, from any eleme
 same authored document, adopts the element already emitted, while a different identity, the
 same identity from another authored document (settled documents are transformed one at a
 time, so it would lack the element), or a name first taken by a plain `Reserve` / `Name`,
-still collides; errors carry only a digest of each identity. Adoption is sound only for a
+still collides; errors carry only a digest of each identity. The engine sees a
+cross-document claim only where one allocator spans documents: `LowerRaws` shares one
+across its raw inputs for round-0 raw-rule claims, but in-transform rules run inside each
+document's own `Transform` with a fresh allocator, so a name they generate is never compared
+across documents; detecting that collision is the caller's job. Adoption is sound only for a
 terminal-type shared element (claims outlive the round, so a lowerable one could be
 replaced under another name behind an adopter), and it covers only that element: the
 adopting rule must still emit its own output, since an empty result remains a forbidden
