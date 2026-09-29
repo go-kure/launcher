@@ -25,7 +25,8 @@ the decoder. A field whose key works but lands on another field (one a shallower
 dominates, or one dropped as ambiguous whose key folds onto a field equal ignoring case) is
 reported by its Go field path, e.g. `Inner.Value`; such a field is checked by filling it alone
 and confirming `encoding/json` encodes it, and one the check cannot prove reachable is reported
-too. A handler that decodes an external spec
+too, as is every such field of a type with its own (or a promoted) `MarshalJSON`, `MarshalText`,
+`UnmarshalJSON` or `UnmarshalText`. A handler that decodes an external spec
 type asserts that list is empty, against an explicit exclusion list, so an upstream field added
 under a name launcher already owns fails the test instead of silently becoming unreachable. The `cilium-networkpolicy` trait decodes its
 raw rules this way.
