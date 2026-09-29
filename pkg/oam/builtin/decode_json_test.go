@@ -283,6 +283,14 @@ type (
 		reachInner
 		Promoted string `json:"promoted"`
 	}
+	// Encoding the zero value panics (time.Time's MarshalJSON, promoted through a nil
+	// embedded pointer), so the probe cannot run and both rivals are reported.
+	reachPanics struct {
+		reachInner
+		Promoted string     `json:"promoted"`
+		Stamp    reachStamp `json:"stamp,omitempty"`
+	}
+	reachStamp struct{ *time.Time }
 )
 
 func (c reachCustom) MarshalJSON() ([]byte, error) {
@@ -301,6 +309,7 @@ func TestUnreachableJSONFields_FieldLevel(t *testing.T) {
 		{reflect.TypeFor[reachShadowPtr](), []string{"reachLeaf.Value"}},
 		{reflect.TypeFor[reachRecursiveLeaf](), []string{"reachNode.Next"}},
 		{reflect.TypeFor[reachCustom](), []string{"Promoted", "reachInner.Promoted"}},
+		{reflect.TypeFor[reachPanics](), []string{"Promoted", "reachInner.Promoted"}},
 	} {
 		if got := builtin.UnreachableJSONFields(tc.typ); !slices.Equal(got, tc.want) {
 			t.Errorf("UnreachableJSONFields(%v) = %v, want %v", tc.typ, got, tc.want)
@@ -313,5 +322,8 @@ func TestUnreachableJSONFields_FieldLevel(t *testing.T) {
 	}
 	if s, _, err := builtin.DecodeStrictJSON[reachFolded](map[string]any{"value": "x"}); err != nil || s.Upper != "x" {
 		t.Errorf("reachFolded: %+v, %v; want value folded onto VALUE", s, err)
+	}
+	if s, _, err := builtin.DecodeStrictJSON[reachPanics](map[string]any{"promoted": "x"}); err != nil || s.Promoted != "x" {
+		t.Errorf("reachPanics: %+v, %v; want promoted on the outer field", s, err)
 	}
 }
