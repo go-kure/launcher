@@ -3,6 +3,7 @@ package builtin
 import (
 	"bytes"
 	"cmp"
+	"encoding"
 	"encoding/json"
 	"reflect"
 	"slices"
@@ -81,14 +82,23 @@ func isOwned(owned []string, key string) bool {
 	return slices.ContainsFunc(owned, func(o string) bool { return strings.EqualFold(o, key) })
 }
 
-// UnreachableJSONFields reports the json keys of t (a struct, or a pointer to one),
-// embedded ones included, that an author cannot use through DecodeStrictJSON called
-// with the same owned keys: a field tagged `json:"-"` (by Go name), a key encoding/json
-// itself refuses (an ambiguous promotion), a key an owned key shadows, and a key whose
-// field the decoder cannot set (behind an unexported embedded pointer). Each key is
-// probed against encoding/json, so the check cannot disagree with the decoder.
-// Known limit: the check is per key, not per field; a field hidden behind another
-// field under the same key (a shallower or case-insensitively equal one) is not reported.
+// UnreachableJSONFields reports the fields of t (a struct, or a pointer to one),
+// embedded ones included, that an author cannot set through DecodeStrictJSON called
+// with the same owned keys.
+//
+// A field whose key fails is reported by that key: tagged `json:"-"` (by Go name),
+// refused by encoding/json itself (an ambiguous promotion), shadowed by an owned key,
+// or one the decoder cannot set (behind an unexported embedded pointer). Each key is
+// probed against encoding/json, so this cannot disagree with the decoder.
+//
+// A field whose key works but lands on another field is reported by its Go field
+// path (Inner.Value): one a shallower field dominates, or one dropped as ambiguous
+// whose key then folds onto a field equal ignoring case. Only a field whose key
+// matches another's ignoring case is checked: it is filled alone on a fresh value, and
+// it is reachable when that changes the encoding, since encoding/json selects fields
+// the same way to encode and decode. What this cannot prove reachable is reported
+// too: a value that encodes like its zero, or any such field of a t with its own
+// MarshalJSON or MarshalText.
 //
 // A terminal that decodes an external spec type asserts this is empty against an
 // explicit exclusion list, so an upstream field added under a name launcher already
@@ -101,21 +111,38 @@ func UnreachableJSONFields(t reflect.Type, owned ...string) []string {
 		return nil
 	}
 	var out []string
-	keys := map[string]bool{}
-	collectJSONKeys(t, nil, keys, &out)
-	for key := range keys {
-		if isOwned(owned, key) || !decodesKey(t, key) {
-			out = append(out, key)
+	var fields []jsonField
+	collectJSONFields(t, nil, nil, "", &fields, &out)
+	refused := map[string]bool{}
+	for _, f := range fields {
+		if _, seen := refused[f.key]; !seen {
+			refused[f.key] = isOwned(owned, f.key) || !decodesKey(t, f.key)
+			if refused[f.key] {
+				out = append(out, f.key)
+			}
+		}
+	}
+	for _, f := range fields {
+		if !refused[f.key] && hasRival(fields, f) && !encodesField(t, f.index) {
+			out = append(out, f.path)
 		}
 	}
 	slices.Sort(out)
 	return slices.Compact(out)
 }
 
-// collectJSONKeys gathers the json key of every field of t and of the structs it
-// embeds. path holds only the current branch's embeddings, so a type that embeds
-// itself stops at the repeat while one embedded twice is walked on both branches.
-func collectJSONKeys(t reflect.Type, path []reflect.Type, keys map[string]bool, hidden *[]string) {
+// jsonField is a field encoding/json keys by name: its key, its reflect index from
+// the root, and its dotted Go path, the name it is reported by.
+type jsonField struct {
+	key   string
+	index []int
+	path  string
+}
+
+// collectJSONFields gathers every keyed field of t and of the structs it embeds.
+// path holds only the current branch's embeddings, so a type that embeds itself
+// stops at the repeat while one embedded twice is walked on both branches.
+func collectJSONFields(t reflect.Type, path []reflect.Type, index []int, prefix string, fields *[]jsonField, hidden *[]string) {
 	if slices.Contains(path, t) {
 		return
 	}
@@ -136,14 +163,102 @@ func collectJSONKeys(t reflect.Type, path []reflect.Type, keys map[string]bool, 
 		if ft.Kind() == reflect.Pointer {
 			ft = ft.Elem()
 		}
+		idx := append(slices.Clone(index), f.Index...)
 		embedded := f.Anonymous && ft.Kind() == reflect.Struct
 		switch {
 		case embedded && name == "":
-			collectJSONKeys(ft, path, keys, hidden)
+			collectJSONFields(ft, path, idx, prefix+f.Name+".", fields, hidden)
 		case f.IsExported() || embedded:
-			keys[cmp.Or(name, f.Name)] = true
+			*fields = append(*fields, jsonField{key: cmp.Or(name, f.Name), index: idx, path: prefix + f.Name})
 		}
 	}
+}
+
+// hasRival reports whether another field's key equals f's ignoring case, the only
+// way a key the decoder accepts can land on a field other than f.
+func hasRival(fields []jsonField, f jsonField) bool {
+	return slices.ContainsFunc(fields, func(o jsonField) bool {
+		return o.path != f.path && strings.EqualFold(o.key, f.key)
+	})
+}
+
+var (
+	jsonMarshaler = reflect.TypeFor[json.Marshaler]()
+	textMarshaler = reflect.TypeFor[encoding.TextMarshaler]()
+)
+
+// encodesField reports whether encoding/json selects the field at index of t: filling
+// that field alone on a fresh value must change t's encoding. It is false whenever
+// that cannot be shown, including behind an unexported embedded pointer (which the
+// decoder cannot set either) and for a t that encodes itself.
+func encodesField(t reflect.Type, index []int) bool {
+	if pt := reflect.PointerTo(t); pt.Implements(jsonMarshaler) || pt.Implements(textMarshaler) {
+		return false
+	}
+	root := reflect.New(t)
+	v := root.Elem()
+	for _, i := range index[:len(index)-1] {
+		v = v.Field(i)
+		if v.Kind() == reflect.Pointer {
+			if !v.CanSet() {
+				return false
+			}
+			v.Set(reflect.New(v.Type().Elem()))
+			v = v.Elem()
+		}
+	}
+	before, err := json.Marshal(root.Interface())
+	if err != nil || !fill(v.Field(index[len(index)-1])) {
+		return false
+	}
+	after, err := json.Marshal(root.Interface())
+	return err == nil && !bytes.Equal(before, after)
+}
+
+// fill sets v to a value other than its zero and reports whether it could. A struct
+// (possibly reached through an unexported embed) gets every field it can fill;
+// pointers, slices and maps get one zero element and are not descended into, so a
+// type that refers to itself terminates.
+func fill(v reflect.Value) bool {
+	if k := v.Kind(); k != reflect.Struct && k != reflect.Array && !v.CanSet() {
+		return false
+	}
+	switch v.Kind() {
+	case reflect.Struct:
+		filled := false
+		for i := range v.NumField() {
+			filled = fill(v.Field(i)) || filled
+		}
+		return filled
+	case reflect.Array:
+		return v.Len() > 0 && fill(v.Index(0))
+	case reflect.Pointer:
+		v.Set(reflect.New(v.Type().Elem()))
+	case reflect.Slice:
+		v.Set(reflect.MakeSlice(v.Type(), 1, 1))
+	case reflect.Map:
+		m := reflect.MakeMap(v.Type())
+		m.SetMapIndex(reflect.Zero(v.Type().Key()), reflect.Zero(v.Type().Elem()))
+		v.Set(m)
+	case reflect.Interface:
+		if v.NumMethod() != 0 {
+			return false
+		}
+		v.Set(reflect.ValueOf("x"))
+	case reflect.String:
+		v.SetString("x")
+	case reflect.Bool:
+		v.SetBool(true)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v.SetInt(1)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		v.SetUint(1)
+	case reflect.Float32, reflect.Float64:
+		v.SetFloat(1)
+	default:
+		return false
+	}
+	return true
 }
 
 // validTagName mirrors encoding/json's isValidTag (encode.go).

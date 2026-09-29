@@ -21,8 +21,11 @@ dropped. `UnreachableJSONFields(type, owned...)` lists the spec keys an author c
 way (tagged `json:"-"`, refused by `encoding/json` itself such as an ambiguously promoted key,
 shadowed by an owned key, or behind an unexported embedded pointer the decoder cannot set),
 including embedded ones; each key is probed against `encoding/json`, so the list agrees with
-the decoder. The check is per key, not per field: a field hidden behind another field under the
-same key (a shallower one, or one equal ignoring case) is not reported. A handler that decodes an external spec
+the decoder. A field whose key works but lands on another field (one a shallower field
+dominates, or one dropped as ambiguous whose key folds onto a field equal ignoring case) is
+reported by its Go field path, e.g. `Inner.Value`; such a field is checked by filling it alone
+and confirming `encoding/json` encodes it, and one the check cannot prove reachable is reported
+too. A handler that decodes an external spec
 type asserts that list is empty, against an explicit exclusion list, so an upstream field added
 under a name launcher already owns fails the test instead of silently becoming unreachable. The `cilium-networkpolicy` trait decodes its
 raw rules this way.
