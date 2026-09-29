@@ -291,11 +291,43 @@ type (
 		Stamp    reachStamp `json:"stamp,omitempty"`
 	}
 	reachStamp struct{ *time.Time }
+	// Its own UnmarshalJSON bypasses encoding/json's field selection when decoding,
+	// so an encoding says nothing about which rival a key reaches.
+	reachSelfDecode struct {
+		reachInner
+		Promoted string `json:"promoted"`
+	}
+	// As reachSelfDecode, with UnmarshalJSON promoted from an embedded type: it takes
+	// the whole object and sets neither rival.
+	reachPromotedDecode struct {
+		reachDecoder
+		reachInner
+		Promoted string `json:"promoted"`
+	}
+	reachDecoder struct{}
+	// As reachSelfDecode, through UnmarshalText.
+	reachTextDecode struct {
+		reachInner
+		Promoted string `json:"promoted"`
+	}
 )
 
 func (c reachCustom) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]string{c.reachInner.Promoted, c.Promoted})
 }
+
+func (s *reachSelfDecode) UnmarshalJSON(data []byte) error {
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	s.reachInner.Promoted = m["promoted"]
+	return nil
+}
+
+func (*reachDecoder) UnmarshalJSON([]byte) error { return nil }
+
+func (*reachTextDecode) UnmarshalText([]byte) error { return nil }
 
 // TestUnreachableJSONFields_FieldLevel: a field whose key works but reaches another
 // field is reported by its Go field path.
@@ -310,6 +342,9 @@ func TestUnreachableJSONFields_FieldLevel(t *testing.T) {
 		{reflect.TypeFor[reachRecursiveLeaf](), []string{"reachNode.Next"}},
 		{reflect.TypeFor[reachCustom](), []string{"Promoted", "reachInner.Promoted"}},
 		{reflect.TypeFor[reachPanics](), []string{"Promoted", "reachInner.Promoted"}},
+		{reflect.TypeFor[reachSelfDecode](), []string{"Promoted", "reachInner.Promoted"}},
+		{reflect.TypeFor[reachPromotedDecode](), []string{"Promoted", "reachInner.Promoted"}},
+		{reflect.TypeFor[reachTextDecode](), []string{"Promoted", "reachInner.Promoted"}},
 	} {
 		if got := builtin.UnreachableJSONFields(tc.typ); !slices.Equal(got, tc.want) {
 			t.Errorf("UnreachableJSONFields(%v) = %v, want %v", tc.typ, got, tc.want)
@@ -325,5 +360,12 @@ func TestUnreachableJSONFields_FieldLevel(t *testing.T) {
 	}
 	if s, _, err := builtin.DecodeStrictJSON[reachPanics](map[string]any{"promoted": "x"}); err != nil || s.Promoted != "x" {
 		t.Errorf("reachPanics: %+v, %v; want promoted on the outer field", s, err)
+	}
+	// A self-decoding root lands the key on the field its encoding does not select.
+	if s, _, err := builtin.DecodeStrictJSON[reachSelfDecode](map[string]any{"promoted": "x"}); err != nil || s.Promoted != "" || s.reachInner.Promoted != "x" {
+		t.Errorf("reachSelfDecode: %+v, %v; want promoted on the inner field", s, err)
+	}
+	if s, _, err := builtin.DecodeStrictJSON[reachPromotedDecode](map[string]any{"promoted": "x"}); err != nil || s.Promoted != "" || s.reachInner.Promoted != "" {
+		t.Errorf("reachPromotedDecode: %+v, %v; want neither rival set", s, err)
 	}
 }
