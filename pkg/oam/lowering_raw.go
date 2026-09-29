@@ -25,9 +25,8 @@ type documentEnvelope struct {
 	} `yaml:"metadata"`
 }
 
-// rawDocKey is the LowerRaws batch-duplicate-detection key. It is deliberately NOT
-// Origin: Origin (Document, DocumentKind — lowering.go) has no Namespace field, so
-// two raw inputs sharing a name and kind but authored in different namespaces are
+// rawDocKey is the LowerRaws batch-duplicate-detection key. It carries the namespace,
+// so two raw inputs sharing a name and kind but authored in different namespaces are
 // distinct Kubernetes-adjacent resources that must both be claimed and lowered, not
 // collapsed into one "duplicate" by a key that cannot tell them apart.
 //
@@ -118,7 +117,7 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 			// (see preReserved above), since a claimed raw document's rule could
 			// otherwise generate a same-named Application. Restricted to the
 			// terminal kind: NameAllocator.Reserve's key is (namespace, name) alone,
-			// with no kind component (lowering.go:222), and lowering only ever
+			// with no kind component (see Reserve), and lowering only ever
 			// PRODUCES Application documents (terminalDocumentKind) — so a
 			// same-named pass-through of any OTHER kind (e.g. a ClusterProfile
 			// sharing a name with an Application) is not a real identity collision
@@ -165,22 +164,19 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		}
 
 		origin := Origin{Document: env.Metadata.Name, DocumentKind: env.Kind, Namespace: env.Metadata.Namespace}
-		// NameAllocator.Reserve treats reserving a name for an EQUAL Origin as a
-		// no-op — correct within one document, where an identical Origin means
-		// "the same element asking twice", but wrong across raw inputs, where
-		// Origin deliberately excludes slot and two DIFFERENT authored documents
-		// can produce an identical Origin by sharing a name and kind. Left
-		// unchecked, two such inputs would have their generated child names
-		// silently treated as one shared reservation instead of a collision.
-		// Reject the duplicate here, before it ever reaches the shared
-		// NameAllocator, so Reserve's existing same-Origin-is-a-no-op rule never
-		// has to distinguish two different documents that happen to share an
-		// Origin — that case cannot reach it anymore.
+		// Two raw inputs sharing a namespace, kind and name are the same authored
+		// resource declared twice, and Origin deliberately excludes slot, so nothing
+		// downstream can tell them apart. Left unchecked, a generated-name
+		// collision between their children would be reported by the shared
+		// NameAllocator as one document colliding with itself (Reserve's
+		// same-location branch), and EmitOrAdopt would let the second adopt the
+		// first's shared element as if both were one document. A duplicate whose
+		// rule generates no name would pass silently. Reject it here instead,
+		// naming both input positions.
 		//
-		// The duplicate check itself keys on rawDocKey, not Origin: Origin has no
-		// Namespace field, so two raw inputs sharing a name and kind but authored
-		// in different namespaces are distinct resources, not duplicates of each
-		// other — see rawDocKey's doc comment.
+		// Two raw inputs sharing a name and kind but authored in different
+		// namespaces are distinct resources, not duplicates of each other — see
+		// rawDocKey's doc comment.
 		key := rawDocKey{namespace: env.Metadata.Namespace, kind: env.Kind, name: env.Metadata.Name}
 		if prior, dup := seenKeys[key]; dup {
 			return nil, &LoweringError{Origin: origin, Cause: errors.Errorf(

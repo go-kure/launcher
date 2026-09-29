@@ -29,9 +29,9 @@ package's production surface, not a spike-only detour that reverts before merge.
 ## D1 — one engine for all four positions
 
 Holds. `DocumentLoweringRule` / `ComponentLoweringRule` / `TraitLoweringRule` /
-`PolicyLoweringRule` (`lowering.go:180-235`) share one `LoweringResult` type, one
+`PolicyLoweringRule` (`lowering.go`) share one `LoweringResult` type, one
 fixpoint loop (`lowerDocumentBody`), and one `LoweringContext`. `loweringPositionRules`
-(`lowering.go:92-97`) is the only position-specific logic — a lookup table, not a
+(`lowering.go`) is the only position-specific logic — a lookup table, not a
 branch per position in the engine body. The four positions did not need separate
 mechanisms; they needed a shared result type wide enough to express "this rule may
 touch traits, components, and policies, but not documents" declaratively.
@@ -61,13 +61,13 @@ replaced under another name behind an adopter), and it covers only that element:
 adopting rule must still emit its own output, since an empty result remains a forbidden
 deletion. The document check sees only the authored `Origin`, so documents fanned out from
 one authored document are not told apart for adoption. `Origin` provenance
-(`lowering.go:46-52`) rides as unexported `origin *Origin` / `sealed bool` fields on
+(`lowering.go`) rides as unexported `origin *Origin` / `sealed bool` fields on
 `Trait`/`Component`/`ApplicationPolicy`/`Application` — yaml.v3 ignores unexported
 fields, so this cost nothing in the wire format, and value-copy semantics at existing
 call sites (`transform.go` cluster-building) preserve it without a pointer-keyed side
 table.
 
-`Origin` carries one field, `Rule` (`lowering.go:72-111`), that breaks its own
+`Origin` carries one field, `Rule` (`Origin.Rule`, `lowering.go`), that breaks its own
 "stamped once, copied verbatim" rule: every other field names the AUTHORED location
 and is fixed forever once stamped, but `Rule` names whichever lowering rule MOST
 RECENTLY produced the element, so it is deliberately re-derived at every hop rather
@@ -79,16 +79,16 @@ pointer-identity checks (`isForwardedComponent`, `isForwardedPolicy`,
 never itself the direct output of a rule invocation.
 
 Document-level 1→N (one authored document lowering into several) ships only at the
-**raw** entry point today: `testRawRule` (`pkg/oam/lowering_raw_test.go:41-139`) emits
+**raw** entry point today: `testRawRule` (`pkg/oam/lowering_raw_test.go`) emits
 `n` sibling `Application` documents from one raw document when its `emit` field is set,
 proving `LoweringResult.Documents` with more than one entry round-trips through the
 raw round (`lowerRawRound`, `lowering_raw.go`) correctly — each sibling gets its own
 generated name via the shared `NameAllocator`, and the `slot`-keyed splice
-(`lowering_raw.go:101-121`) puts every emitted document back at its raw input's
+(`LowerRaws`'s `bySlot` map, `lowering_raw.go`) puts every emitted document back at its raw input's
 position. This is proven with a test-only rule, not a shipped built-in — no concrete
 production rule in this repo emits more than one document yet. The in-transform
 document position (`DocumentLoweringRule`) is exercised for 1→1 renaming
-(`testDocRule`, `lowering_test.go:144-157`) but not for 1→N on this branch; see
+(`testDocRule`, `lowering_test.go`) but not for 1→N on this branch; see
 "Document-level splitting fragments cluster-wide passes" under Frictions below for what
 still blocks a real multi-cluster-output rule, and `TransformAll` under "What this does
 not resolve" for the still-unshipped API that would consume such a split.
@@ -97,7 +97,7 @@ not resolve" for the still-unshipped API that would consume such a split.
 
 Holds, but the proof attempt found a real gap: the pre-existing doc comments on
 `IngressHandler`/`HTTPRouteHandler` already asserted `networkPolicy` was
-"platform-reserved" (`ingress.go:79-81`, `httproute.go:64`), but nothing enforced it —
+"platform-reserved" (their type doc comments in `ingress.go` and `httproute.go`), but nothing enforced it —
 ~18 tests in `networkpolicy_auto_test.go` author `networkPolicy` directly on those
 traits, bypassing any `ClusterProfile`, to exercise netpol synthesis without a
 capability round-trip. Marking the shared `schemaNetworkPolicy()` fragment
@@ -132,21 +132,21 @@ rather than relying on a default.
 
 The same class of gap recurred once more before this branch was ready for review:
 `IngressHandler`'s own `allowedHostnameWildcard` property carried the identical
-"platform-reserved" doc-comment claim (`ingress.go:79-81`) without the
+"platform-reserved" doc-comment claim (`ingress.go`) without the
 `PlatformReserved: true` flag on its own schema entry, even after `ExposeRule`'s copy of
 the same key was correctly reserved — an author could bypass hostname-wildcard
 enforcement entirely by authoring the `ingress` trait directly instead of going through
 `expose`. Fixed the same way: `PropertySchema.PlatformReserved: true` added to
-`IngressHandler`'s `allowedHostnameWildcard` entry (`ingress.go:131`), with a regression
+`IngressHandler`'s `allowedHostnameWildcard` entry (`IngressHandler.PropertySchema`, `ingress.go`), with a regression
 test proving the bypass is closed
 (`TestIngressHandler_AllowedHostnameWildcard_InlineAuthoringRejected`,
 `pkg/oam/builtin/traits/ingress_platform_reserved_test.go`).
 
-`enforcePlatformReserved` (`property_validate.go:174`) runs at every point that merges
-capability rendering in: the trait-lowering branch (`lowering.go:661-670`, before
-`resolveCapability`), `applyTraits` (`transform.go:760-769`, before
+`enforcePlatformReserved` (`property_validate.go`) runs at every point that merges
+capability rendering in: the trait-lowering branch (`lowerDocumentBody`, `lowering.go`,
+before `resolveCapability`), `applyTraits` (`transform.go`, before
 `resolveCapability`, inside the `!trait.sealed` guard), and symmetrically before a
-component handler's `ToApplicationConfig` (`transform.go:517`, `createApplications`) —
+component handler's `ToApplicationConfig` (`createApplications`, `transform.go`) —
 though no component schema declares a reserved field today, so that call site is
 currently a no-op in practice. The proof: `webservice-expose-ingress/app.yaml` loses its
 inline `controllerType: ingress` line; `expected.yaml` is **byte-identical** because the
@@ -161,11 +161,11 @@ by design: a capability rendering schema describes what the platform *may set*, 
 "platform-reserved" is meaningless at that call site, exactly like
 `Enum`/`Properties`/`Items` already are.
 
-`RegisterTrait` (`transform.go:152-167`) has always panicked at registration time if a
+`RegisterTrait` (`transform.go`) has always panicked at registration time if a
 dispatchable `TraitHandler` implements `CapabilityAware` without also implementing
 `ValidateAndApplyDefaults`, because `EvaluateProfile`'s dispatch needs
 `ValidateAndApplyDefaults` to validate/default a capability-rendered binding before use.
-`RegisterTraitLowering` (`lowering.go:324-351`) lacked the equivalent assertion:
+`RegisterTraitLowering` (`lowering.go`) lacked the equivalent assertion:
 `EvaluateProfile`'s trait-lowering-rule fallback (`transform.go`) has the identical
 need — a `TraitLoweringRule` implementing `CapabilityAware` without
 `ValidateAndApplyDefaults` would have its capability rendering accepted unvalidated and
@@ -188,11 +188,11 @@ before this work. `validateProperties`/`validateObjectProperties`
 (`validateEmittedComponent`/`validateEmittedTrait`/`validateEmittedPolicy`, called the
 moment a rule emits an element, citing the **authored** origin first per D7) and a
 post-fixpoint whole-document pass with an **empty** `LowerableTypes`
-(call site `lowering.go:483`, `validateSettled` itself at `lowering.go:502-508`, which
+(called from `runLowering`; `validateSettled` itself, both in `lowering.go`,
 calls `validateWithExtraTypes(doc, customTraitTypes, LowerableTypes{})`) — any
 kind/component/trait type still present once the fixpoint has settled is, by
 construction, not claimed by any registered rule (`LowerableTypes`'s own doc comment,
-`lowering.go:366-370`), so it is a non-terminating rule's leftover rather than a
+`lowering.go`), so it is a non-terminating rule's leftover rather than a
 legitimate terminal type.
 
 ## D5 — information closure, four inputs
@@ -201,7 +201,7 @@ Holds for `expose`, and the port surfaced a design decision the original documen
 not spell out: **who performs the capability-rendering merge, the engine or the rule?**
 The answer that shipped is the engine — `lowerDocumentBody`'s trait branch merges
 capability rendering into the trait via `resolveCapability` *before* calling
-`LowerTrait` (`lowering.go:671-677`, mirroring `applyTraits`'s existing pre-merge for a
+`LowerTrait` (`lowering.go`, mirroring `applyTraits`'s existing pre-merge for a
 dispatchable `TraitHandler`) — so `ExposeRule.LowerTrait` reads `trait.Properties`
 exactly as the former `ExposeHandler.Apply` always did; the port from handler to rule is
 close to mechanical (`app.Name` → `lctx.Component.Name`, the two terminal handler calls
@@ -210,8 +210,8 @@ implied but did not state: **an emitted element cannot re-enter capability resol
 because that would introduce a fifth input (a *different* key's capability rendering,
 chosen by the emitted type rather than the authored one). The fix is the `sealed` field
 (`types.go`): every trait a `TraitLoweringRule` emits is marked `sealed = true`
-(`lowering.go:687`), and `applyTraits` skips its entire capability-processing block for
-a sealed trait (`transform.go:721-727`, `if !trait.sealed`).
+(`lowerDocumentBody`, `lowering.go`), and `applyTraits` skips its entire
+capability-processing block for a sealed trait (`transform.go`, `if !trait.sealed`).
 `TestExposeRule_SealedGuard_ExtraIngressCapabilityIgnored`
 (`pkg/cmd/kurel/expose_sealed_test.go`) proves the guard does something: it fails when
 the guard is removed (verified by hand) and passes with it in place, confirming a
@@ -221,11 +221,11 @@ output to one defining `expose` alone.
 ## D7 — recursion bound and provenance-first errors
 
 Both proposed defaults survived unchanged and ship as written. `MaxLoweringDepth = 9`
-(`lowering.go:40`) was never approached by any rule exercised so far — the deepest
+(`lowering.go`) was never approached by any rule exercised so far — the deepest
 chain any test drives is three rounds. The bound exists for the pathological case (a
 rule that keeps re-emitting a type another rule also claims) and `LoweringError` prints
 the **authored** `Origin` first, the `Cause` second, then the full `Chain` of
-`LoweringStep`s (`LoweringError` struct at `lowering.go:248-263`) — one of the negative
+`LoweringStep`s (`LoweringError` struct, `lowering.go`) — one of the negative
 tests specifically asserts a depth-limit failure prints all `MaxLoweringDepth` chain
 steps, not just the last one (`TestLower_DepthLimit_PrintsFullChain`,
 `pkg/oam/lowering_negative_test.go`). No change to either default was needed.
@@ -266,7 +266,7 @@ recorded here as *resolved* rather than *open*.
 
 The C1 no-op guarantee — zero lowering rules registered, `Transform`/
 `TransformWithPolicy` behave exactly as before — was verified twice:
-`TestLower_EmptyRegistry_ReturnsSamePointer` (`pkg/oam/lowering_test.go:12`) asserts
+`TestLower_EmptyRegistry_ReturnsSamePointer` (`pkg/oam/lowering_test.go`) asserts
 pointer identity on the returned document when no rule is registered, and
 `UPDATE_GOLDEN=1 go test ./pkg/cmd/kurel -run TestFixtures` followed by
 `git diff --exit-code pkg/cmd/kurel/testdata` produces **zero diff** across every
@@ -315,8 +315,7 @@ validated and needs no new machinery.
 
 For a document whose authored YAML already unmarshals into the base
 `Application`/`ApplicationSpec` shape, the engine runs downstream of `Parse`, reached
-through `Transform` (`pkg/oam/transform.go:369`) / `TransformWithPolicy`
-(`pkg/oam/transform.go:377`). `DocumentLoweringRule`/`ComponentLoweringRule`/
+through `Transform` / `TransformWithPolicy` (`pkg/oam/transform.go`). `DocumentLoweringRule`/`ComponentLoweringRule`/
 `TraitLoweringRule`/`PolicyLoweringRule` operate on a decoded `Application`, with
 `LoweringContext`, `Origin` provenance, `NameAllocator`, and the `MaxLoweringDepth`
 fixpoint bound all proven against it (D1–D7 above) and shipping on this branch. The
@@ -331,7 +330,7 @@ For a whole-noun higher-level kind that cannot survive the base parse, the engin
 also reachable *before* parsing: `(*Transformer).LowerRaws` operates on undecoded
 document bytes, run once per raw document ahead of a consumer's own parse fan-out,
 producing raw bytes that a standard `Application` parse can then accept. Shipped shape
-(`pkg/oam/lowering_raw.go:42`, differing from the pre-implementation proposal by being a
+(`pkg/oam/lowering_raw.go`, differing from the pre-implementation proposal by being a
 `*Transformer` method rather than a package function, and by taking a
 `TransformContext` — see below for why):
 
@@ -339,7 +338,7 @@ producing raw bytes that a standard `Application` parse can then accept. Shipped
 func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([]json.RawMessage, error)
 ```
 
-backed by `RawDocumentLoweringRule` (`lowering.go:201-217`), analogous in spirit to
+backed by `RawDocumentLoweringRule` (`lowering.go`), analogous in spirit to
 `DocumentLoweringRule` but operating on `kind`-sniffed raw bytes rather than a decoded
 `Application` — it cannot assume the input unmarshals into any type this package
 already knows, since the whole point is that it may not. A consumer calls `LowerRaws`

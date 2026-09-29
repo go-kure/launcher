@@ -57,8 +57,8 @@ type Origin struct {
 	DocumentKind string // authored kind, e.g. "WebApplication"
 	// Namespace is the authored document's metadata.namespace. It exists on Origin
 	// purely so two elements authored in DIFFERENT namespaces are never treated as
-	// the same Origin by identity/equality (NameAllocator.Reserve's prior.origin !=
-	// origin check, and LowerRaws' own duplicate-input check) — a name collision
+	// the same Origin by identity/equality (NameAllocator's (namespace, name) key and
+	// its sameAuthoredLocation check) — a name collision
 	// within one namespace is real, the identical collision across two disjoint
 	// namespaces is not. Deliberately excluded from String(): every existing
 	// caller of String() already identifies a document by name+kind, and adding
