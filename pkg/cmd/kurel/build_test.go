@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -487,6 +488,27 @@ func TestNewBuiltinTransformer_PublishesWorkerSchemaUnchanged(t *testing.T) {
 	}
 	if !bytes.Equal(append(got, '\n'), want) {
 		t.Error("the schema published for worker differs from the one the former handler published")
+	}
+}
+
+// TestNewBuiltinTransformer_PublishesPolicySchemas: every built-in policy handler's
+// schema is discoverable through HandlerSchemas().Policies, the same place a caller
+// finds component and trait schemas, and equals what the handler itself declares.
+func TestNewBuiltinTransformer_PublishesPolicySchemas(t *testing.T) {
+	published := newBuiltinTransformer().HandlerSchemas().Policies
+	for name, h := range builtinPolicyHandlers() {
+		got, ok := published[name]
+		if !ok {
+			t.Errorf("HandlerSchemas() publishes no schema for policy %q", name)
+			continue
+		}
+		want := h.(oam.PropertySchemaProvider).PropertySchema()
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("HandlerSchemas().Policies[%q] differs from the handler's PropertySchema()", name)
+		}
+	}
+	if len(published) != len(builtinPolicyHandlers()) {
+		t.Errorf("HandlerSchemas().Policies has %d entries, want %d", len(published), len(builtinPolicyHandlers()))
 	}
 }
 

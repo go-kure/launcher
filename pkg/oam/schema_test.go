@@ -148,6 +148,68 @@ func TestHandlerSchemas_IncludesComponentLoweringRules(t *testing.T) {
 	}
 }
 
+// plainPolicy is a stub PolicyHandler with no schema; schemaPolicy
+// (property_validate_test.go) is the schema-carrying one.
+type plainPolicy struct{ typ string }
+
+func (h plainPolicy) CanHandle(t string) bool                                 { return t == h.typ }
+func (h plainPolicy) Apply(*ApplicationPolicy, []string, *PolicyResult) error { return nil }
+
+// schemaPolicyLoweringRule is a stub PolicyLoweringRule that declares a property
+// schema — the policy-position counterpart of schemaLoweringRule above.
+type schemaPolicyLoweringRule struct{ typ string }
+
+func (r schemaPolicyLoweringRule) PolicyType() string { return r.typ }
+func (r schemaPolicyLoweringRule) LowerPolicy(*ApplicationPolicy, LoweringContext) (LoweringResult, error) {
+	return LoweringResult{}, nil
+}
+func (r schemaPolicyLoweringRule) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{
+		"targets": {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeString}, Description: "target components"},
+	}
+}
+
+// TestHandlerSchemas_IncludesPolicies: a policy claimed by a PolicyHandler or by a
+// PolicyLoweringRule publishes its schema in set.Policies, and nowhere else, exactly
+// as ValidateAuthoredProperties looks it up (handler first, then rule). Without it a
+// caller that registers the built-in policy handlers could not discover their
+// property surface through the transformer.
+func TestHandlerSchemas_IncludesPolicies(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterPolicy("reconciliation", schemaPolicy{typ: "reconciliation"})
+	tr.RegisterPolicy("plain", plainPolicy{typ: "plain"})
+	tr.RegisterPolicyLowering(schemaPolicyLoweringRule{typ: "spread"})
+
+	set := tr.HandlerSchemas()
+
+	if got := set.Policies["reconciliation"]["components"]; got.Type != PropertyTypeArray || !got.Required {
+		t.Errorf("reconciliation.components schema = %+v, policies = %v", got, set.Policies)
+	}
+	if got := set.Policies["spread"]["targets"]; got.Type != PropertyTypeArray || got.Items == nil || got.Items.Type != PropertyTypeString {
+		t.Errorf("spread.targets schema = %+v, policies = %v", got, set.Policies)
+	}
+	if _, ok := set.Policies["plain"]; ok {
+		t.Error("plain policy has no schema and must be omitted")
+	}
+	for _, name := range []string{"reconciliation", "spread"} {
+		if _, ok := set.Components[name]; ok {
+			t.Errorf("policy schema %q leaked into Components", name)
+		}
+		if _, ok := set.Traits[name]; ok {
+			t.Errorf("policy schema %q leaked into Traits", name)
+		}
+	}
+}
+
+// TestHandlerSchemas_MapsNonNil: every map is non-nil on an empty transformer, as
+// HandlerSchemas documents, so a caller can range or index without a nil check.
+func TestHandlerSchemas_MapsNonNil(t *testing.T) {
+	set := NewTransformer(nil, nil).HandlerSchemas()
+	if set.Components == nil || set.Traits == nil || set.Policies == nil {
+		t.Errorf("HandlerSchemas() on an empty transformer = %+v, want every map non-nil", set)
+	}
+}
+
 // --- ContractDescriber / HandlerContracts (R9): mirrors the PropertySchemaProvider /
 // HandlerSchemas tests above, including their two lowering-rule-registry regression
 // guards — HandlerContracts must cover the identical four registries HandlerSchemas

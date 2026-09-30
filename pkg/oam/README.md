@@ -421,9 +421,9 @@ union, is a schema error reported as soon as a value reaches the leaf. Every Kub
 `storage`) declares `string`/`number`, because their parsers take a fractional number too. `Type`
 stays empty on a union leaf, so a schema consumer that does not read `Types` sees an untyped leaf and
 keeps accepting every member. A completeness test (`pkg/cmd/kurel`) enforces that every built-in
-schema node declares exactly one of `Type` and `Types`. `Transformer.HandlerSchemas()` returns a `HandlerSchemaSet{ Components, Traits }`
-of every registered handler that declares one, so the downstream runtime's validator can check a component/trait's
-properties before the handler is invoked. Built-in examples: the `configmap` trait and the
+schema node declares exactly one of `Type` and `Types`. `Transformer.HandlerSchemas()` returns a `HandlerSchemaSet{ Components, Traits, Policies }`
+of every registered handler and lowering rule that declares one, so the downstream runtime's validator can check a
+component's, trait's or policy's properties before the handler is invoked. Built-in examples: the `configmap` trait and the
 `passthrough` component.
 
 `Description` is optional (`json:"description,omitempty"`) but every built-in property populates it —
@@ -703,8 +703,8 @@ existing registration mechanism; there is no separate contract registry.
 
 `Transformer.HandlerContracts()` returns a `HandlerContractSet{ Components, Traits }`
 of every registered component/trait handler, and every component/trait lowering
-rule, that implements `ContractDescriber` — the same four-registry coverage
-`HandlerSchemas()` provides (componentHandlers, traitHandlers,
+rule, that implements `ContractDescriber` — the same four component/trait
+registries `HandlerSchemas()` covers (componentHandlers, traitHandlers,
 componentLoweringRules, traitLoweringRules), for the identical reason: a type
 reachable only through a lowering rule must still publish its metadata.
 
