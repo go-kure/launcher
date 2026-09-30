@@ -236,11 +236,13 @@ var traitLabelFixtures = map[string]traitLabelFixture{
 }
 
 // TestComponentLabelInvariant_FixturesCoverRegistry: every registered component
-// type, trait handler and trait lowering rule has a fixture, and no fixture names
-// an unregistered type. A new emitter cannot join the registry without joining
-// the invariant test.
+// handler, component lowering rule, trait handler and trait lowering rule has a
+// fixture, and no fixture names an unregistered type. A new emitter cannot join
+// the registry without joining the invariant test.
 func TestComponentLabelInvariant_FixturesCoverRegistry(t *testing.T) {
 	wantComponents := slices.Sorted(maps.Keys(builtinComponentHandlers()))
+	wantComponents = append(wantComponents, slices.Collect(maps.Keys(builtinComponentLoweringRules()))...)
+	slices.Sort(wantComponents)
 	if got := slices.Sorted(maps.Keys(componentLabelFixtures)); !slices.Equal(got, wantComponents) {
 		t.Errorf("componentLabelFixtures covers %v, registry has %v — add a fixture for every registered component type", got, wantComponents)
 	}
