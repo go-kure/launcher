@@ -1590,12 +1590,12 @@ not part of either change.
   `podReplacementPolicy`, `managedBy`, `successPolicy`, `podFailurePolicy`.
   `suspend` on a cronjob
   is the **CronJobSpec** field, not the JobSpec one — see the `suspend` note in
-  "Common config". Every CronJobSpec-level and JobSpec-level field above is
-  presence-gated: omitting it never adds a key to the generated output, even
-  where the corresponding Kubernetes default (e.g. `concurrencyPolicy: Allow`)
-  would otherwise appear to have been authored. `restartPolicy` and the two
-  history limits are not: each is always written, taking `OnFailure`, 3 and 1
-  when omitted.
+  "Common config". Every CronJobSpec-level and JobSpec-level field above except
+  `restartPolicy` and the two history limits is presence-gated: omitting it
+  never adds a key to the generated output, even where the corresponding
+  Kubernetes default (e.g. `concurrencyPolicy: Allow`) would otherwise appear
+  to have been authored. Those three are always written, taking `OnFailure`, 3
+  and 1 when omitted.
   Known limitation: the plain 5-field `schedule` form accepts any 5
   whitespace-separated tokens with no per-field semantic check (e.g.
   `99 99 99 99 99` builds successfully here and is only rejected later, by
