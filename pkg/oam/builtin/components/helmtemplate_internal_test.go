@@ -227,11 +227,12 @@ metadata:
 }
 
 // multiEventHookJobChart renders a pre-install,pre-upgrade hook Job with
-// integer fields — backoffLimit: 0 and a container port — ahead of a hook-free
-// ConfigMap. yaml.v3 decodes a rendered integer as a Go int, which
-// runtime.DeepCopyJSONValue refuses with a panic, and a multi-event hook is the
-// object the grouping step deep-copies (cloneWithHookAnnotation). Shared with
-// the composite's TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields.
+// integer fields — backoffLimit: 3 and a container port — ahead of a hook-free
+// ConfigMap: go-kure/launcher#581's reproduction. yaml.v3 decodes a rendered
+// integer as a Go int, which runtime.DeepCopyJSONValue refuses with a panic,
+// and a multi-event hook is the object the grouping step deep-copies
+// (cloneWithHookAnnotation). Shared with the composite's
+// TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields.
 const multiEventHookJobChart = `apiVersion: batch/v1
 kind: Job
 metadata:
@@ -239,7 +240,7 @@ metadata:
   annotations:
     helm.sh/hook: pre-install,pre-upgrade
 spec:
-  backoffLimit: 0
+  backoffLimit: 3
   template:
     spec:
       restartPolicy: Never
@@ -286,20 +287,60 @@ func writtenYAML(t *testing.T, obj client.Object) string {
 	return string(data)
 }
 
-// TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields: a multi-event
-// hook Job with integer fields builds — no "cannot deep copy int" panic —
-// lands in the pre-install group, is deep-copyable, and is written exactly as
-// the same document decoded by yaml.v3 alone would be (an int and an int64
-// encode alike).
+// assertEmitsBackoffLimit3 checks go-kure/launcher#581's output point on the
+// emitted migrate Job of multiEventHookJobChart: spec.backoffLimit is still 3,
+// and kure writes it as `backoffLimit: 3` under spec.
+func assertEmitsBackoffLimit3(t *testing.T, where string, obj client.Object) {
+	t.Helper()
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		t.Fatalf("%s: object = %T, want *unstructured.Unstructured", where, obj)
+	}
+	if u.GetName() != "migrate" {
+		t.Fatalf("%s: object is %q, want the migrate Job", where, u.GetName())
+	}
+	if got, found, err := unstructured.NestedInt64(u.Object, "spec", "backoffLimit"); err != nil || !found || got != 3 {
+		t.Errorf("%s: spec.backoffLimit = %d (found %v, err %v), want 3", where, got, found, err)
+	}
+	if written := writtenYAML(t, obj); !strings.Contains(written, "\nspec:\n  backoffLimit: 3\n") {
+		t.Errorf("%s: written Job lacks spec.backoffLimit: 3:\n%s", where, written)
+	}
+}
+
+// generatedNames returns the names of objects, Generate's output, in order.
+func generatedNames(objects []*client.Object) []string {
+	names := make([]string, len(objects))
+	for i, o := range objects {
+		names[i] = (*o).GetName()
+	}
+	return names
+}
+
+// TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields pins the terminal
+// half of go-kure/launcher#581's acceptance: a rendered pre-install,pre-upgrade
+// Job with backoffLimit: 3 builds without panicking (yaml.v3's Go int used to
+// panic in the grouping copy: "cannot deep copy int"), lands in the pre-install
+// hook group, and emits backoffLimit: 3 unchanged — written exactly as the same
+// document decoded by yaml.v3 alone would be (an int and an int64 encode
+// alike). The composite half is
+// TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields.
 func TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields(t *testing.T) {
 	cfg := helmTemplateFixture(t, stubRender(multiEventHookJobChart))
 
-	if got, want := renderedNames(t, cfg), []string{"migrate", "main"}; !slices.Equal(got, want) {
-		t.Fatalf("execution order = %v, want %v", got, want)
+	// Builds: Generate and AugmentLayout both return, without a panic.
+	objects, err := cfg.Generate(nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
 	}
 	ml := &layout.ManifestLayout{Name: "myapp", Namespace: "team"}
 	if err := cfg.AugmentLayout(ml); err != nil {
 		t.Fatalf("AugmentLayout: %v", err)
+	}
+
+	// Lands in the pre-install hook group: first in execution order, and the
+	// sole object of the first child layout, the pre-install group.
+	if got, want := generatedNames(objects), []string{"migrate", "main"}; !slices.Equal(got, want) {
+		t.Fatalf("execution order = %v, want %v", got, want)
 	}
 	if len(ml.Children) != 2 {
 		t.Fatalf("ml.Children has %d entries, want 2 hook groups", len(ml.Children))
@@ -313,6 +354,10 @@ func TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields(t *testing.T) {
 	}
 	assertDeepCopyable(t, hook)
 
+	// Emits backoffLimit: 3 unchanged, from Generate and from the hook group.
+	assertEmitsBackoffLimit3(t, "Generate", *objects[0])
+	assertEmitsBackoffLimit3(t, "pre-install group", hook[0])
+
 	var plain map[string]any
 	if err := yaml.NewDecoder(strings.NewReader(multiEventHookJobChart)).Decode(&plain); err != nil {
 		t.Fatalf("decoding the Job with yaml.v3: %v", err)
@@ -322,10 +367,8 @@ func TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields(t *testing.T) {
 	if got != want {
 		t.Errorf("written Job =\n%s\nwant (the yaml.v3 decode written as is)\n%s", got, want)
 	}
-	for _, line := range []string{"backoffLimit: 0\n", "- containerPort: 8080\n"} {
-		if !strings.Contains(got, line) {
-			t.Errorf("written Job lacks %q:\n%s", line, got)
-		}
+	if !strings.Contains(got, "- containerPort: 8080\n") {
+		t.Errorf("written Job lacks its containerPort 8080:\n%s", got)
 	}
 }
 

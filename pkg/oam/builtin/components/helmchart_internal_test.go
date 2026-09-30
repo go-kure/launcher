@@ -1263,21 +1263,33 @@ metadata:
 	}
 }
 
-// TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields is the
-// composite's delivery: template counterpart of
-// TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields, on the same
-// chart: the decode both share must hand the grouping copy JSON-typed values,
-// or the build panics with "cannot deep copy int".
+// TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields pins
+// go-kure/launcher#581's acceptance on the helmchart composite's
+// delivery: template: a rendered pre-install,pre-upgrade Job with
+// backoffLimit: 3 builds without panicking (yaml.v3's Go int used to panic in
+// the grouping copy: "cannot deep copy int"), lands in the pre-install hook
+// group, and emits backoffLimit: 3 unchanged. The terminal half, on the same
+// chart, is TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields.
 func TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields(t *testing.T) {
 	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 		return []byte(multiEventHookJobChart), nil
 	})
-	if got, want := generateNames(t, cfg), []string{"migrate", "main"}; !slices.Equal(got, want) {
-		t.Fatalf("execution order = %v, want %v", got, want)
+
+	// Builds: Generate and AugmentLayout's template branch both return,
+	// without a panic.
+	objects, err := cfg.Generate(nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
 	}
 	ml := &layout.ManifestLayout{Name: "myapp", Namespace: "default/myapp"}
 	if err := cfg.augmentLayoutTemplate(ml); err != nil {
 		t.Fatalf("augmentLayoutTemplate: %v", err)
+	}
+
+	// Lands in the pre-install hook group: first in execution order, and the
+	// sole object of the first child layout, the pre-install group.
+	if got, want := generatedNames(objects), []string{"migrate", "main"}; !slices.Equal(got, want) {
+		t.Fatalf("execution order = %v, want %v", got, want)
 	}
 	if len(ml.Children) != 2 {
 		t.Fatalf("ml.Children has %d entries, want 2 hook groups", len(ml.Children))
@@ -1290,11 +1302,8 @@ func TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields(t *testing.T) 
 		t.Fatalf("Children[0] holds %v, want [migrate]", names)
 	}
 	assertDeepCopyable(t, hook)
-	job, ok := hook[0].(*unstructured.Unstructured)
-	if !ok {
-		t.Fatalf("Children[0].Resources[0] = %T, want *unstructured.Unstructured", hook[0])
-	}
-	if got, found, err := unstructured.NestedInt64(job.Object, "spec", "backoffLimit"); err != nil || !found || got != 0 {
-		t.Errorf("spec.backoffLimit = %d (found %v, err %v), want int64 0", got, found, err)
-	}
+
+	// Emits backoffLimit: 3 unchanged, from Generate and from the hook group.
+	assertEmitsBackoffLimit3(t, "Generate", *objects[0])
+	assertEmitsBackoffLimit3(t, "pre-install group", hook[0])
 }
