@@ -1,10 +1,14 @@
 package components
 
 import (
+	"encoding"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
+	"reflect"
 	"slices"
+	"strings"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	kurecnpg "github.com/go-kure/kure/pkg/kubernetes/cnpg"
@@ -91,7 +95,7 @@ func (h *CnpgClusterHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"description":               str("Description of this PostgreSQL cluster."),
 		"inheritedMetadata":         obj("Labels and annotations inherited by every object related to the Cluster."),
-		"imageName":                 str("Container image for the instances, by tag or digest. The operator's own default applies when omitted."),
+		"imageName":                 str("Container image for the instances, by tag or digest. The operator's own default applies when omitted. A policy registry allowlist applies to an authored image."),
 		"imageCatalogRef":           obj("Reference to an ImageCatalog or ClusterImageCatalog entry selecting the image by PostgreSQL major version."),
 		"imagePullPolicy":           str("Image pull policy: Always, Never or IfNotPresent."),
 		"schedulerName":             str("Kubernetes scheduler that places the instance pods."),
@@ -163,22 +167,27 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 
 	// Read ahead of the decode, with the helper every kind uses for replicas, so
 	// a non-integer or out-of-range value is refused by name and a negative one
-	// gets the same refusal postgresql's replicas does.
-	_, instancesAuthored, err := parseInt32Field(props, "instances", "instances")
-	if err != nil {
-		return nil, err
+	// gets the same refusal postgresql's replicas does. encoding/json matches
+	// field names case-insensitively, so "Instances" sets the field too: every
+	// spelling the decoder accepts is read, or an authored 0 in another
+	// spelling would count as unauthored and a default would replace it.
+	instancesAuthored := false
+	for _, key := range foldedFieldKeys(props, "instances") {
+		_, present, err := parseInt32Field(props, key, "instances")
+		if err != nil {
+			return nil, err
+		}
+		instancesAuthored = instancesAuthored || present
 	}
 
 	spec, _, err := builtin.DecodeStrictJSON[cnpgv1.ClusterSpec](props)
 	if err != nil {
 		return nil, errors.Wrap(err, "properties do not decode into a postgresql.cnpg.io/v1 ClusterSpec")
 	}
-	// encoding/json matches field names case-insensitively, so a key spelt
-	// differently from the published one ("Instances", "storage.Size") still
-	// sets the field. What was authored is therefore also read back from the
-	// decoded spec, or a policy default would overwrite a value the Cluster
-	// was about to carry. The map reading stays for the one value the decoded
-	// spec cannot distinguish from absence: an explicit storage size of "".
+	// What was authored is also read back from the decoded spec, the check that
+	// cannot drift from the decoder. The map reading stays for the values the
+	// decoded spec cannot distinguish from absence: instances 0 and a storage
+	// size of "".
 	if spec.Instances < 0 {
 		return nil, errors.Errorf("instances: must be >= 0, got %d", spec.Instances)
 	}
@@ -216,28 +225,59 @@ func decodedStorageRequest(sc *cnpgv1.StorageConfiguration) bool {
 // counts because CNPG writes a set size over the template's request, so a
 // policy default filled into size would silently replace an authored template
 // size.
+//
+// Each struct field is looked up in every spelling the decoder accepts
+// (foldedFieldKeys), so storage.Size: "" counts as authored exactly as
+// storage.size: "" does. The requests key is a ResourceList map key, which
+// encoding/json matches exactly, so "storage" there is read as spelt.
 func authoredStorageRequest(props map[string]any) bool {
-	storage, ok := props["storage"].(map[string]any)
-	if !ok {
-		return false
+	for _, storage := range foldedFieldMaps(props, "storage") {
+		for _, key := range foldedFieldKeys(storage, "size") {
+			if _, present := authoredValue(storage, key); present {
+				return true
+			}
+		}
+		for _, tmpl := range foldedFieldMaps(storage, "pvcTemplate") {
+			for _, res := range foldedFieldMaps(tmpl, "resources") {
+				for _, req := range foldedFieldMaps(res, "requests") {
+					if _, present := authoredValue(req, string(corev1.ResourceStorage)); present {
+						return true
+					}
+				}
+			}
+		}
 	}
-	if _, present := authoredValue(storage, "size"); present {
-		return true
+	return false
+}
+
+// foldedFieldKeys returns the keys of m that encoding/json decodes into the
+// struct field whose json name is field: the exact spelling first, then each
+// case-insensitive variant (strings.EqualFold, the folding encoding/json
+// uses) in sorted order. Authorship read off the raw map must consult all of
+// them, or a spelling the decoder accepted would count as unauthored.
+func foldedFieldKeys(m map[string]any, field string) []string {
+	var keys []string
+	if _, ok := m[field]; ok {
+		keys = append(keys, field)
 	}
-	tmpl, ok := storage["pvcTemplate"].(map[string]any)
-	if !ok {
-		return false
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		if k != field && strings.EqualFold(k, field) {
+			keys = append(keys, k)
+		}
 	}
-	res, ok := tmpl["resources"].(map[string]any)
-	if !ok {
-		return false
+	return keys
+}
+
+// foldedFieldMaps returns the object values of m under every spelling of
+// field (foldedFieldKeys). encoding/json merges them all into the one field.
+func foldedFieldMaps(m map[string]any, field string) []map[string]any {
+	var out []map[string]any
+	for _, k := range foldedFieldKeys(m, field) {
+		if sub, ok := m[k].(map[string]any); ok {
+			out = append(out, sub)
+		}
 	}
-	req, ok := res["requests"].(map[string]any)
-	if !ok {
-		return false
-	}
-	_, present := authoredValue(req, string(corev1.ResourceStorage))
-	return present
+	return out
 }
 
 // withoutNullsAtDepth applies the package's null contract ("A value that
@@ -248,8 +288,13 @@ func authoredStorageRequest(props map[string]any) bool {
 // become `work_mem: ""`) and a null array element as a zero-valued entry.
 //
 // A null object key is dropped; a null array element is refused with the same
-// message pkg/oam's property validator uses. The input is not modified. Keys
-// are visited in sorted order so the first refusal is deterministic.
+// message pkg/oam's property validator uses. A null is anything isExplicitNull
+// reports, typed nils included. A collection built in Go with a concrete type
+// (map[string]*string, []map[string]any) is walked too, through
+// withoutNullsInTyped: encoding/json serializes it like the untyped form, so
+// skipping it would let its nulls reach the decoder. The input is not
+// modified. Keys are visited in sorted order so the first refusal is
+// deterministic.
 func withoutNullsAtDepth(value any, path string) (any, error) {
 	switch v := value.(type) {
 	case map[string]any:
@@ -287,6 +332,54 @@ func withoutNullsAtDepth(value any, path string) (any, error) {
 		// A nil (or absent) property map decodes as an empty spec.
 		return map[string]any{}, nil
 	default:
+		return withoutNullsInTyped(value, path)
+	}
+}
+
+var (
+	jsonMarshalerType = reflect.TypeFor[json.Marshaler]()
+	textMarshalerType = reflect.TypeFor[encoding.TextMarshaler]()
+)
+
+// withoutNullsInTyped is withoutNullsAtDepth for a value of any other type. A
+// map with string keys is rebuilt as a map[string]any, a slice or array as an
+// []any, and a pointer is followed, each then walked with the same rules, so
+// map[string]*string{"work_mem": nil} loses its key and []*T{nil} is refused by
+// path. Values keep their own types, numbers included. Returned unchanged: a
+// byte slice or array (encoding/json writes []byte as a string, and a byte
+// holds no null), a type with its own JSON or text encoding (rebuilding it
+// would bypass that encoding), a map with non-string keys, a struct and a
+// scalar.
+func withoutNullsInTyped(value any, path string) (any, error) {
+	if isExplicitNull(value) {
+		return value, nil
+	}
+	rv := reflect.ValueOf(value)
+	if t := rv.Type(); t.Implements(jsonMarshalerType) || t.Implements(textMarshalerType) {
+		return value, nil
+	}
+	switch rv.Kind() {
+	case reflect.Map:
+		if rv.Type().Key().Kind() != reflect.String {
+			return value, nil
+		}
+		m := make(map[string]any, rv.Len())
+		for it := rv.MapRange(); it.Next(); {
+			m[it.Key().String()] = it.Value().Interface()
+		}
+		return withoutNullsAtDepth(m, path)
+	case reflect.Slice, reflect.Array:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return value, nil
+		}
+		s := make([]any, rv.Len())
+		for i := range s {
+			s[i] = rv.Index(i).Interface()
+		}
+		return withoutNullsAtDepth(s, path)
+	case reflect.Pointer:
+		return withoutNullsAtDepth(rv.Elem().Interface(), path)
+	default:
 		return value, nil
 	}
 }
@@ -318,7 +411,10 @@ type CnpgClusterConfig struct {
 // the workload kinds cap every claim they emit. The security gates that the
 // workload kinds apply to a container securityContext apply to the Cluster's
 // securityContext and podSecurityContext, which postgresql does not expose.
-// Neither addition can fire on a postgresql-shaped Cluster.
+// Neither can fire on a postgresql-shaped Cluster. The registry allowlist the
+// workload kinds apply to their image also applies to imageName when it is
+// set; postgresql does not enforce it, so this one addition can refuse a
+// postgresql-shaped Cluster whose image comes from a registry outside the list.
 func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	if p == nil {
 		return nil
@@ -371,6 +467,13 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	}
 	if err := c.enforceMaxStorage(p.MaxStorageSize()); err != nil {
 		return err
+	}
+	// Only an authored image is checked: without imageName the operator runs its
+	// own default image, which the document did not choose.
+	if c.Spec.ImageName != "" {
+		if err := enforceAllowedRegistries(c.Spec.ImageName, p.AllowedRegistries()); err != nil {
+			return errors.Wrap(err, "imageName")
+		}
 	}
 
 	if err := enforcePrivileged(c.Spec.SecurityContext, p.AllowPrivileged()); err != nil {

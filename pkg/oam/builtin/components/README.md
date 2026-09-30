@@ -2377,8 +2377,11 @@ not part of either change.
   `encoding/json` itself: the unknown-field error names the key but not its
   path, and a key differing from a declared one only in letter case is
   accepted as that field. The policy defaults below read what was authored
-  from the decoded spec as well as the property map, so such a key still
-  counts as authored and is not overwritten by a default.
+  from the decoded spec as well as from the property map, where every
+  spelling the decoder accepts is consulted, so such a key still counts as
+  authored and is not overwritten by a default — including the two values the
+  decoded spec cannot tell from absence, `instances: 0` and an empty
+  `storage.size`.
   It carries **no launcher opinions**: `Generate` emits the Cluster named after
   the component in the build namespace with exactly the authored spec, so an
   unauthored field is left for the operator's own default. `postgresql`'s
@@ -2386,15 +2389,19 @@ not part of either change.
   `enablePDB` from the replica count, a `1Gi` storage fallback, pod
   anti-affinity — are not made here. The one value it writes unasked is
   `instances: 1`, the CRD default, because `ClusterSpec.Instances` has no
-  `omitempty` and would otherwise serialize as `0`. The non-pointer
-  `affinity`, `resources` and `postgresql.syncReplicaElectionConstraint`
-  blocks serialize as empty objects when unauthored, as they do for
-  `postgresql`.
+  `omitempty` and would otherwise serialize as `0`. The non-pointer blocks
+  appear even when unauthored, as they do for `postgresql`: `affinity` and
+  `resources` as empty objects, and `postgresql` as
+  `syncReplicaElectionConstraint: {enabled: false}`, because that nested
+  field's `enabled` has no `omitempty`.
   Nulls follow "The null contract" below: a null is absence at every depth
   (typed or untyped), so a null map value is left out rather than decoded to
   an empty string, and a null array element is refused by path
-  (`env[0]: null is not a valid array element`). A negative `instances` is
-  refused before policy runs.
+  (`env[0]: null is not a valid array element`). That holds for collections
+  a caller builds in Go with concrete types too (`map[string]*string`,
+  `[]*T`), which are walked like their untyped form; a byte slice, a struct
+  and a type with its own JSON encoding are passed to the decoder as they
+  are. A negative `instances` is refused before policy runs.
   `ApplyPolicy` enforces the policy `postgresql` enforces, in the same order:
   the instance-count default when `instances` is not authored (an authored
   value wins even when it equals the fallback) and its maximum; the cpu and
@@ -2410,9 +2417,13 @@ not part of either change.
   also refuses `securityContext.privileged` and a `securityContext` or
   `podSecurityContext` `windowsOptions.hostProcess` unless the policy allows
   privileged workloads, and an added capability the policy forbids or leaves
-  off a non-empty allowlist. The registry
-  allowlist is not applied to `imageName` or `imageCatalogRef`, matching
-  `postgresql`. As for `postgresql`, generation refuses `hugepages-<size>`
+  off a non-empty allowlist. The registry allowlist the workload kinds apply
+  to their image applies to an authored `imageName`
+  (`imageName: image "…" is not from an allowed registry [...]`); an unset
+  `imageName` leaves the operator's default image, which is not checked, and
+  `imageCatalogRef` names a catalog object rather than an image, so it is not
+  checked either. `postgresql` does not enforce the allowlist on its image.
+  As for `postgresql`, generation refuses `hugepages-<size>`
   in `resources` without `cpu` or `memory` after policy defaults; the other
   resource-name rules of the shared parser are left to the API server.
   `Endpoints` declares the same primary endpoint as `postgresql`
