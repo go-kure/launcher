@@ -2,6 +2,7 @@ package components
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -28,25 +29,30 @@ func TestOptionalProperty_NullIsOmission(t *testing.T) {
 	const manifestYAML = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"
 	const sourceURL = "https://example.com/manifests.yaml"
 	cronjob := map[string]any{"image": "ghcr.io/org/job:v1.0.0", "schedule": "0 2 * * *"}
+	// typeErr is the key's own type refusal. A looser "any error" check would
+	// pass with the type check deleted: a map completionMode still meets the
+	// enum refusal, a map timeZone the empty-string one, and a map inline or
+	// url the exactly-one-source one.
 	cases := []struct {
-		kind string
-		h    handler
-		base map[string]any
-		key  string
+		kind    string
+		h       handler
+		base    map[string]any
+		key     string
+		typeErr string
 	}{
-		{"cronjob", &CronjobHandler{}, cronjob, "successfulJobsHistoryLimit"},
-		{"cronjob", &CronjobHandler{}, cronjob, "failedJobsHistoryLimit"},
-		{"cronjob", &CronjobHandler{}, cronjob, "timeZone"},
-		{"cronjob", &CronjobHandler{}, cronjob, "completionMode"},
-		{"job", &JobHandler{}, map[string]any{"image": "ghcr.io/org/job:v1.0.0"}, "completionMode"},
+		{"cronjob", &CronjobHandler{}, cronjob, "successfulJobsHistoryLimit", "successfulJobsHistoryLimit: must be an integer, got map"},
+		{"cronjob", &CronjobHandler{}, cronjob, "failedJobsHistoryLimit", "failedJobsHistoryLimit: must be an integer, got map"},
+		{"cronjob", &CronjobHandler{}, cronjob, "timeZone", "timeZone: must be a string, got map"},
+		{"cronjob", &CronjobHandler{}, cronjob, "completionMode", "completionMode: must be a string, got map"},
+		{"job", &JobHandler{}, map[string]any{"image": "ghcr.io/org/job:v1.0.0"}, "completionMode", "completionMode: must be a string, got map"},
 		{"passthrough", &PassthroughHandler{}, map[string]any{
 			"object": map[string]any{"apiVersion": "example.com/v1", "kind": "Widget", "metadata": map[string]any{"name": "w"}},
-		}, "clusterScoped"},
-		{"manifests", &ManifestsHandler{}, map[string]any{"inline": manifestYAML}, "scopeOverrides"},
-		{"manifests", &ManifestsHandler{}, map[string]any{"inline": manifestYAML}, "url"},
-		{"manifests", &ManifestsHandler{}, map[string]any{"url": sourceURL}, "inline"},
-		{"crd", &CRDHandler{}, map[string]any{"inline": crdYAML}, "url"},
-		{"crd", &CRDHandler{}, map[string]any{"url": sourceURL}, "inline"},
+		}, "clusterScoped", "'clusterScoped' must be a bool"},
+		{"manifests", &ManifestsHandler{}, map[string]any{"inline": manifestYAML}, "scopeOverrides", "scopeOverrides must be a list"},
+		{"manifests", &ManifestsHandler{}, map[string]any{"inline": manifestYAML}, "url", `property "url" must be a string`},
+		{"manifests", &ManifestsHandler{}, map[string]any{"url": sourceURL}, "inline", `property "inline" must be a YAML string`},
+		{"crd", &CRDHandler{}, map[string]any{"inline": crdYAML}, "url", `property "url" must be a string`},
+		{"crd", &CRDHandler{}, map[string]any{"url": sourceURL}, "inline", `property "inline" must be a YAML string`},
 	}
 	with := func(base map[string]any, key string, v any) map[string]any {
 		props := make(map[string]any, len(base)+1)
@@ -95,17 +101,20 @@ func TestOptionalProperty_NullIsOmission(t *testing.T) {
 			}
 			t.Run("wrong type still errors", func(t *testing.T) {
 				wrong := with(tc.base, tc.key, map[string]any{"x": "y"})
-				if _, err := tc.h.ToApplicationConfig(&oam.Component{Name: "c", Type: tc.kind, Properties: wrong}, "default"); err == nil {
-					t.Errorf("%s: a map value must still be refused as a wrong type", tc.key)
+				_, err := tc.h.ToApplicationConfig(&oam.Component{Name: "c", Type: tc.kind, Properties: wrong}, "default")
+				if err == nil || !strings.Contains(err.Error(), tc.typeErr) {
+					t.Errorf("%s: a map value must still be refused as a wrong type (%q), got %v", tc.key, tc.typeErr, err)
 				}
 			})
 		})
 	}
 }
 
-// parseResourceList and parseLabelMap are reached only by a library caller that
-// skips authored validation, which strips nested nulls first. They now read a
-// null entry as absence, as stringMapStrict already did, instead of refusing it.
+// parseResourceList and parseLabelMap now read a null entry as absence, as
+// stringMapStrict already did, instead of refusing it. Property validation
+// strips a null only under a declared key (`cpu`, `memory`), so a validated
+// document reaches these with one too — `resources.requests: {example.com/gpu:
+// null}` or `nodeSelector: {disk: null}` — not only a caller skipping validation.
 func TestResourceAndLabelMaps_NullEntryIsOmission(t *testing.T) {
 	for _, nv := range nullValues() {
 		t.Run("resources/"+nv.name, func(t *testing.T) {
