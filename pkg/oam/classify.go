@@ -46,6 +46,7 @@ func ComponentLabelKeyForDomain(domain string) string {
 // defaultTierMap maps OAM component types to their deployment tier.
 var defaultTierMap = map[string]Tier{
 	"postgresql":   TierServices,
+	"cnpg-cluster": TierServices,
 	"webservice":   TierApps,
 	"worker":       TierApps,
 	"cronjob":      TierApps,

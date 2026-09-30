@@ -437,7 +437,7 @@ spec:
 // one registry to the other (worker, go-kure/launcher#280) is not.
 func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 	wantHandlers := []string{
-		"crd", "cronjob", "daemonset", "deployment", "helmchart", "helmrelease", "helmtemplate", "job", "manifests",
+		"cnpg-cluster", "crd", "cronjob", "daemonset", "deployment", "helmchart", "helmrelease", "helmtemplate", "job", "manifests",
 		"oci", "passthrough", "postgresql", "service", "statefulset", "webservice",
 		// The kind-named Flux source components (go-kure/launcher#347).
 		"bucket", "gitrepository", "helmrepository", "ocirepository",

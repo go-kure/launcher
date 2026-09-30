@@ -1,0 +1,12 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres
+    type: cnpg-cluster
+    properties:
+      storage:
+        size: "10Gi"

@@ -1,0 +1,14 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  affinity: {}
+  instances: 1
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  resources: {}
+  storage:
+    size: 10Gi

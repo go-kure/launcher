@@ -25,6 +25,7 @@ var validComponentTypes = map[string]bool{
 	"worker":       true,
 	"deployment":   true,
 	"postgresql":   true,
+	"cnpg-cluster": true,
 	"cronjob":      true,
 	"job":          true,
 	"helmchart":    true,

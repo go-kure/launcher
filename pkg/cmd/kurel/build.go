@@ -261,6 +261,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"statefulset":  &components.StatefulsetHandler{},
 		"service":      &components.ServiceHandler{},
 		"postgresql":   &components.PostgresqlHandler{},
+		"cnpg-cluster": &components.CnpgClusterHandler{},
 		"helmchart":    &components.HelmchartHandler{},
 		"helmrelease":  &components.HelmReleaseHandler{},
 		"helmtemplate": &components.HelmTemplateHandler{},

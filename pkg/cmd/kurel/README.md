@@ -67,7 +67,10 @@ with and without it. The kind-named Flux source components — `helmrepository`,
 `ocirepository`, `gitrepository` and `bucket`, each emitting exactly one source
 CR (go-kure/launcher#347) — are registered in both `builtinComponentHandlers()`
 and `pkg/oam`'s component allowlist; the `flux-sources` fixture under
-`testdata/` builds all four.
+`testdata/` builds all four. The `cnpg-cluster` component — the full-fidelity,
+opinion-free projection of a CloudNativePG `Cluster` — is registered in
+`builtinComponentHandlers()` and `pkg/oam`'s component allowlist; the
+`cnpg-cluster-minimal` and `cnpg-cluster-full` fixtures build it.
 
 Because a lowering rule may claim types the parser would otherwise reject, `build`
 constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`
