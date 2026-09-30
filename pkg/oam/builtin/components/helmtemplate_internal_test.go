@@ -483,6 +483,93 @@ func TestHelmTemplateConfig_DroppedHookWithUnemittableValuesBuilds(t *testing.T)
 	}
 }
 
+// TestHelmTemplateConfig_DroppedHookWithNonStringMetadataKeyBuilds: a
+// non-string key in metadata or in its annotations makes yaml.v3 decode that
+// mapping to map[any]any, which unstructured's GetAnnotations cannot read. It
+// does not hide a dropped hook's helm.sh/hook annotation: the hook is dropped
+// and the rest is emitted.
+func TestHelmTemplateConfig_DroppedHookWithNonStringMetadataKeyBuilds(t *testing.T) {
+	const mainDoc = `---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+`
+	cases := []struct {
+		name, hook string
+	}{
+		{
+			name: "metadata key, test hook",
+			hook: `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-hook
+  1: x
+  annotations:
+    helm.sh/hook: test
+`,
+		},
+		{
+			name: "annotations key, pre-delete hook",
+			hook: `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: delete-hook
+  annotations:
+    helm.sh/hook: pre-delete
+    true: y
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := helmTemplateFixture(t, stubRender(tc.hook+mainDoc))
+			if got, want := renderedNames(t, cfg), []string{"main"}; !slices.Equal(got, want) {
+				t.Errorf("Generate emitted %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestHelmTemplateConfig_NonStringMetadataKeyWithoutDroppedHookIsABuildError:
+// the same non-string keys on a document with no hook, or with a hook grouping
+// keeps, still fail the build, naming the mapping that holds the key.
+func TestHelmTemplateConfig_NonStringMetadataKeyWithoutDroppedHookIsABuildError(t *testing.T) {
+	cases := []struct {
+		name, chart, path string
+	}{
+		{
+			name: "metadata key, no hook",
+			chart: `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stray
+  1: x
+`,
+			path: ".metadata:",
+		},
+		{
+			name: "annotations key, kept hook",
+			chart: `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stray
+  annotations:
+    helm.sh/hook: pre-install
+    true: y
+`,
+			path: ".metadata.annotations:",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := helmTemplateFixture(t, stubRender(tc.chart))
+			_, err := cfg.Generate(nil)
+			assertErrorMentions(t, err, "ConfigMap", tc.path, "not a string")
+		})
+	}
+}
+
 // TestHelmTemplateConfig_RendersOnce: Generate followed by AugmentLayout —
 // kure's layout walker's call order — renders the chart exactly once.
 func TestHelmTemplateConfig_RendersOnce(t *testing.T) {
