@@ -1255,12 +1255,13 @@ func TestHelmchartConfig_ValuesModeConfigMap_CarriesAppLabel(t *testing.T) {
 }
 
 // TestHelmchartConfig_ValuesModeConfigMap_LongNameProjectsAppLabel pins
-// go-kure/launcher#572 on the one component path a long name reaches the `app`
-// label through: a helmchart accepts any DNS-1123 subdomain (up to 253
-// characters), and its values ConfigMap is emitted only by AugmentLayout, which
-// `kurel build` never runs (it rejects valuesMode configMap), so the kurel-level
-// invariant test cannot see it. The label value is oam.ComponentLabelValue(name),
-// never the raw name.
+// go-kure/launcher#572 on the layout-only HelmChart path to the `app` label: a
+// helmchart accepts any DNS-1123 subdomain (up to 253 characters), and its
+// values ConfigMap is emitted only by AugmentLayout, which `kurel build` never
+// runs (it rejects valuesMode configMap), so the kurel-level invariant test
+// cannot see it — unlike the helmrelease values ConfigMap, which Generate emits
+// and that test covers. The label value is oam.ComponentLabelValue(name), never
+// the raw name.
 func TestHelmchartConfig_ValuesModeConfigMap_LongNameProjectsAppLabel(t *testing.T) {
 	name := "metrics." + strings.Repeat("long-helmchart-component-name.", 4) + "end"
 	if len(name) <= validation.LabelValueMaxLength {
