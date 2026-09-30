@@ -80,9 +80,30 @@ type rawDocKey struct {
 // document carries SupportedAPIVersion or the one group its rule was matched under.
 // Emitted trait properties are not among them: that is the caller's
 // ValidateAuthoredProperties call, above.
+//
+// LowerRaws drops the rule identity of what it emitted; LowerRawsWithSteps returns it.
 func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([]json.RawMessage, error) {
+	out, _, err := t.LowerRawsWithSteps(raws, ctx)
+	return out, err
+}
+
+// LowerRawsWithSteps is LowerRaws, also returning the lowering steps of a successful
+// call: one LoweringStep per claimed raw input, in input order. Each step's Rule is
+// the rule identity ("rawdocument/<apiVersion>/<kind>", suffixed "@<version>" when
+// the rule declares ContractMetadata().Version), From the authored document's
+// metadata.name and To the metadata.name of every document it emitted, so a caller
+// can attribute each output document to the rule that produced it — the identity a
+// LoweringError's Chain reports on failure, and which the returned bytes cannot
+// carry.
+//
+// From is a name, not a full identity: two claimed inputs of one kind and name in
+// different namespaces yield steps that differ only by their position in the slice,
+// which is the position of their inputs. A pass-through input has no step. When no
+// input is claimed, the steps are nil; on error, they are nil and the
+// LoweringError's Chain carries the failing document's steps.
+func (t *Transformer) LowerRawsWithSteps(raws []json.RawMessage, ctx TransformContext) ([]json.RawMessage, []LoweringStep, error) {
 	if len(t.rawDocLoweringRules) == 0 {
-		return raws, nil // raw-path analogue of the pointer-identity guarantee: nothing to do, nothing touched
+		return raws, nil, nil // raw-path analogue of the pointer-identity guarantee: nothing to do, nothing touched
 	}
 
 	claimed := make([]bool, len(raws))
@@ -149,16 +170,16 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		// same DNS-1123 gate ParseWithExtraTypes enforces for the in-transform
 		// path (validate.go:107-119).
 		if env.Metadata.Name == "" {
-			return nil, &LoweringError{Origin: Origin{DocumentKind: env.Kind}, Cause: errors.Errorf(
+			return nil, nil, &LoweringError{Origin: Origin{DocumentKind: env.Kind}, Cause: errors.Errorf(
 				"raw input %d: metadata.name is required", i)}
 		}
 		if errs := validation.IsDNS1123Subdomain(env.Metadata.Name); len(errs) > 0 {
-			return nil, &LoweringError{Origin: Origin{Document: env.Metadata.Name, DocumentKind: env.Kind}, Cause: errors.Errorf(
+			return nil, nil, &LoweringError{Origin: Origin{Document: env.Metadata.Name, DocumentKind: env.Kind}, Cause: errors.Errorf(
 				"raw input %d: metadata.name %q is not a valid DNS-1123 subdomain", i, env.Metadata.Name)}
 		}
 		if env.Metadata.Namespace != "" {
 			if errs := validation.IsDNS1123Subdomain(env.Metadata.Namespace); len(errs) > 0 {
-				return nil, &LoweringError{Origin: Origin{Document: env.Metadata.Name, DocumentKind: env.Kind, Namespace: env.Metadata.Namespace}, Cause: errors.Errorf(
+				return nil, nil, &LoweringError{Origin: Origin{Document: env.Metadata.Name, DocumentKind: env.Kind, Namespace: env.Metadata.Namespace}, Cause: errors.Errorf(
 					"raw input %d: metadata.namespace %q is not a valid DNS-1123 subdomain", i, env.Metadata.Namespace)}
 			}
 		}
@@ -179,7 +200,7 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		// rawDocKey's doc comment.
 		key := rawDocKey{namespace: env.Metadata.Namespace, kind: env.Kind, name: env.Metadata.Name}
 		if prior, dup := seenKeys[key]; dup {
-			return nil, &LoweringError{Origin: origin, Cause: errors.Errorf(
+			return nil, nil, &LoweringError{Origin: origin, Cause: errors.Errorf(
 				"duplicate authored document: raw input %d and raw input %d both name %q (kind %q, namespace %q)",
 				prior, i, env.Metadata.Name, env.Kind, env.Metadata.Namespace)}
 		}
@@ -205,12 +226,12 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		})
 	}
 	if len(seed) == 0 {
-		return raws, nil
+		return raws, nil, nil
 	}
 
-	emitted, err := t.lowerRawRound(seed, ctx, preReserved)
+	emitted, steps, err := t.lowerRawRound(seed, ctx, preReserved)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Splice on slot — not on Origin, and not on position within emitted. Group
@@ -228,12 +249,12 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 		for _, d := range bySlot[i] {
 			b, err := yaml.Marshal(d.doc)
 			if err != nil {
-				return nil, &LoweringError{Origin: d.origin, Cause: errors.Wrapf(err, "re-serialize lowered document %q", d.doc.Metadata.Name)}
+				return nil, nil, &LoweringError{Origin: d.origin, Cause: errors.Wrapf(err, "re-serialize lowered document %q", d.doc.Metadata.Name)}
 			}
 			out = append(out, b)
 		}
 	}
-	return out, nil
+	return out, steps, nil
 }
 
 // lowerRawRound is LowerRaws' whole engine: round 0 over every claimed seed, sharing
@@ -251,31 +272,36 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 // matched under (loweringDoc.apiVersion): a rule emitting into any other group is a
 // rule bug, reported here against the authored document rather than left to a caller's
 // parser that cannot say which rule produced it.
-func (t *Transformer) lowerRawRound(seed []loweringDoc, ctx TransformContext, preReserved []reservedIdentity) ([]loweringDoc, error) {
+//
+// On success it also returns every seed's steps, in seed order, which is input order
+// (LowerRawsWithSteps).
+func (t *Transformer) lowerRawRound(seed []loweringDoc, ctx TransformContext, preReserved []reservedIdentity) ([]loweringDoc, []LoweringStep, error) {
 	namer := NewNameAllocator()
 	for _, r := range preReserved {
 		if err := namer.Reserve(r.name, r.origin); err != nil {
-			return nil, &LoweringError{Origin: r.origin, Cause: err}
+			return nil, nil, &LoweringError{Origin: r.origin, Cause: err}
 		}
 	}
 	namer.round = 0
 
 	out := make([]loweringDoc, 0, len(seed))
+	all := make([]LoweringStep, 0, len(seed))
 	for _, d := range seed {
 		// Seeds are independent authored documents, so an error's Chain is this
 		// seed's own steps only — never an earlier seed's (D7).
 		emitted, steps, err := t.lowerRawOnce(d, ctx, namer, 0)
 		if err != nil {
-			return nil, &LoweringError{Origin: d.origin, Chain: steps, Cause: err}
+			return nil, nil, &LoweringError{Origin: d.origin, Chain: steps, Cause: err}
 		}
+		all = append(all, steps...)
 		for _, doc := range emitted {
 			if err := checkLoweredAPIVersion(doc, d.apiVersion); err != nil {
-				return nil, &LoweringError{Origin: d.origin, Chain: steps, Cause: err}
+				return nil, nil, &LoweringError{Origin: d.origin, Chain: steps, Cause: err}
 			}
 			out = append(out, loweringDoc{doc: doc, origin: d.origin, slot: d.slot, apiVersion: d.apiVersion})
 		}
 	}
-	return out, nil
+	return out, all, nil
 }
 
 // lowerRawOnce is round 0 for a raw-entered document, and the only round LowerRaws

@@ -378,6 +378,13 @@ once, ahead of every one of its own parse call sites, rather than calling it per
 a document it rewrites then flows through the ordinary parse path and, if applicable,
 into entry point 1 above unchanged.
 
+`LowerRawsWithSteps` is the same call returning the successful lowering's steps as well
+(go-kure/launcher#390): one `LoweringStep` per claimed input, in input order, naming the
+rule identity, the authored document and the documents it emitted. It exists because the
+per-element origin is unexported and does not survive the bytes `LowerRaws` returns, so on
+success a caller could not otherwise attribute an emitted document to its rule; on failure
+the same steps already arrive as a `LoweringError`'s `Chain`.
+
 **Raw-rule contract: a raw rule rewrites authored input; it does not lower.**
 `LowerRaws` runs each claimed document's raw rule for round 0 only and seals nothing
 (go-kure/launcher#357). What the rule emits is returned as ordinary `Application`
