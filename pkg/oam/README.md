@@ -353,6 +353,14 @@ it always names the immediate producer rather than the first rule in a multi-hop
 chain. `""` means the element was never itself the direct output of a lowering rule
 (authored as-is, or carried through untouched).
 
+A trait a rule synthesizes is sealed: its properties are final, and no
+`ClusterProfile` capability rendering is merged into it later. A trait a
+`ComponentLoweringRule` merely forwards stays an ordinary authored trait (unsealed,
+still capability-processed). Forwarding covers returning `comp.Traits` itself and
+returning unchanged copies of its elements inside a new slice, for example to add one
+synthesized trait next to the authored ones; a copy whose type or properties map the
+rule replaced counts as synthesized.
+
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the
 required `ClusterProfile` capability fails with `ErrMissingCapability`. A rule that

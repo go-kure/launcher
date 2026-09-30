@@ -1564,6 +1564,143 @@ func TestLower_ForwardedAuthoredTrait_NotSealed(t *testing.T) {
 	}
 }
 
+// prependingForwardingComponentRule retypes a component, forwards its authored traits
+// by value AND adds one trait of its own in front of them — the shape a built-in rule
+// that synthesizes a trait (the worker rule's topology-spread) needs. The extra
+// element forces a new slice, so no forwarded element is pointer-identical to an
+// authored one any more. edit, when set, changes each forwarded copy before it is
+// returned, so a test can prove that only an UNCHANGED copy counts as forwarded.
+type prependingForwardingComponentRule struct {
+	fromType, toType string
+	edit             func(*Trait)
+}
+
+func (r prependingForwardingComponentRule) ComponentType() string { return r.fromType }
+
+func (r prependingForwardingComponentRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
+	traits := append([]Trait{{Type: "topology-spread", Properties: map[string]any{}}}, comp.Traits...)
+	if r.edit != nil {
+		for i := 1; i < len(traits); i++ {
+			r.edit(&traits[i])
+		}
+	}
+	return LoweringResult{Components: []Component{{
+		Name:       comp.Name,
+		Type:       r.toType,
+		Properties: map[string]any{"image": "nginx"},
+		Traits:     traits,
+	}}}, nil
+}
+
+// TestLower_ForwardedTraitCopy_NotSealed extends TestLower_ForwardedAuthoredTrait_NotSealed
+// to a rule that forwards the authored traits by value inside a new slice
+// (prependingForwardingComponentRule). Pointer identity alone cannot see those
+// copies, so before forwardableTraits/Trait.forwardedFrom they were sealed as
+// synthesized, and a forwarded CapabilityAware trait silently skipped its
+// required-capability check.
+func TestLower_ForwardedTraitCopy_NotSealed(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+		nil,
+	)
+	tr.RegisterComponentLowering(prependingForwardingComponentRule{fromType: "wrapper", toType: "webservice"})
+	tr.RegisterTraitLowering(capAwareTraitLoweringRuleWithVAD{capAwareTraitLoweringRule{typ: "needs-cap"}})
+
+	app := makeApp("myapp", Component{
+		Name:   "app",
+		Type:   "wrapper",
+		Traits: []Trait{{Type: "needs-cap", Properties: map[string]any{}}},
+	})
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+
+	_, err := tr.lower(app, TransformContext{}) // no capabilities registered
+	if !stderrors.Is(err, ErrMissingCapability) {
+		t.Fatalf("expected ErrMissingCapability for the forwarded copy, got: %v", err)
+	}
+}
+
+// TestLower_ForwardedTraitCopy_SealsOnlySynthesized pins the classification itself:
+// the rule's own trait is sealed and origin-stamped, the forwarded copy is left
+// exactly as an authored trait (unsealed, unstamped), no forwarding mark survives
+// the rule invocation, and the authored document's own trait slice is never marked.
+func TestLower_ForwardedTraitCopy_SealsOnlySynthesized(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(prependingForwardingComponentRule{fromType: "wrapper", toType: "webservice"})
+
+	authored := []Trait{{Type: "configmap", Properties: map[string]any{"k": "v"}}}
+	app := makeApp("myapp", Component{Name: "app", Type: "wrapper", Traits: authored})
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+
+	settled, err := tr.lower(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if authored[0].forwardedFrom != nil {
+		t.Error("the authored trait slice was marked in place; forwardableTraits must mark a copy")
+	}
+	traits := settled[0].Spec.Components[0].Traits
+	if len(traits) != 2 {
+		t.Fatalf("settled traits = %d, want 2 (synthesized + forwarded)", len(traits))
+	}
+	synth, fwd := traits[0], traits[1]
+	if synth.Type != "topology-spread" || !synth.sealed {
+		t.Errorf("synthesized trait = %+v, want type topology-spread and sealed", synth)
+	}
+	if o, ok := synth.Origin(); !ok || o.Rule != "component/wrapper" {
+		t.Errorf("synthesized trait origin = %+v (stamped=%v), want Rule component/wrapper", o, ok)
+	}
+	if fwd.Type != "configmap" || fwd.sealed {
+		t.Errorf("forwarded trait = %+v, want type configmap and unsealed", fwd)
+	}
+	if _, ok := fwd.Origin(); ok {
+		t.Error("forwarded trait carries a stamped origin; a forwarded trait must stay unstamped like an authored one")
+	}
+	for i := range traits {
+		if traits[i].forwardedFrom != nil {
+			t.Errorf("trait %d still carries its forwarding mark after the rule invocation", i)
+		}
+	}
+}
+
+// TestLower_ChangedTraitCopy_IsSealed is the other half of the classification: a
+// copy the rule changed — a replaced Properties map or a new Type — is the rule's
+// own output even though it still carries the forwarding mark, and is sealed like
+// any other synthesized trait. Only an unchanged copy counts as forwarded.
+func TestLower_ChangedTraitCopy_IsSealed(t *testing.T) {
+	cases := map[string]func(*Trait){
+		"replaced properties": func(tr *Trait) { tr.Properties = map[string]any{"k": "v"} },
+		"new type":            func(tr *Trait) { tr.Type = "rbac" },
+	}
+	for name, edit := range cases {
+		t.Run(name, func(t *testing.T) {
+			tr := NewTransformer(nil, nil)
+			tr.RegisterComponentLowering(prependingForwardingComponentRule{fromType: "wrapper", toType: "webservice", edit: edit})
+
+			app := makeApp("myapp", Component{
+				Name:   "app",
+				Type:   "wrapper",
+				Traits: []Trait{{Type: "configmap", Properties: map[string]any{"k": "v"}}},
+			})
+			app.APIVersion = SupportedAPIVersion
+			app.Kind = terminalDocumentKind
+
+			settled, err := tr.lower(app, TransformContext{})
+			if err != nil {
+				t.Fatalf("lower: %v", err)
+			}
+			traits := settled[0].Spec.Components[0].Traits
+			if len(traits) != 2 {
+				t.Fatalf("settled traits = %d, want 2", len(traits))
+			}
+			if !traits[1].sealed {
+				t.Errorf("changed copy %+v was treated as forwarded; want it sealed", traits[1])
+			}
+		})
+	}
+}
+
 // renamingForwardingComponentRule renames a component (both Name and Type) while
 // forwarding its authored Traits unchanged via `Traits: comp.Traits` — the same
 // idiom forwardingComponentRule above uses, but renaming Name too, so the round-1

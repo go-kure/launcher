@@ -69,6 +69,12 @@ type Trait struct {
 	// output depend on a fifth input the information-closure rule does not allow.
 	// An authored trait is never sealed.
 	sealed bool
+	// forwardedFrom is set only while a ComponentLoweringRule runs: the engine
+	// hands the rule a marked copy of the component's traits (forwardableTraits,
+	// lowering.go), so a by-value copy the rule forwards is still recognised as
+	// forwarded rather than synthesized (isForwardedTrait). The engine clears it
+	// again once it has classified what the rule emitted.
+	forwardedFrom *Trait
 }
 
 // Origin returns the trait's authored provenance and whether the lowering engine ever
