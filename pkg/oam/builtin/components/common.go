@@ -3539,9 +3539,8 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 	}
 
 	// Every field in this function reads a null as omission, above and below
-	// this point alike, except completionMode above: its raw read has no
-	// isExplicitNull guard, so a null there is refused as a wrong type. The
-	// fields below were go-kure/launcher#344's, and got
+	// this point alike; completionMode above was the last raw read, until
+	// go-kure/launcher#570 moved it onto authoredValue. The fields below were go-kure/launcher#344's, and got
 	// that behaviour first via the optionalX wrappers; the JobSpec fields ABOVE
 	// are shared with the cronjob component and used to refuse a null, which was
 	// go-kure/launcher#394 — now closed by folding the null handling into the
