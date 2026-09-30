@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -397,7 +398,16 @@ func TestNewBuiltinTransformer_Registered(t *testing.T) {
 // are applied later, at emission.
 func TestBuiltinComponentHandlers_AcceptedByParser(t *testing.T) {
 	transformer := newBuiltinTransformer()
+	names := make([]string, 0, len(builtinComponentHandlers())+len(builtinComponentLoweringRules()))
 	for name := range builtinComponentHandlers() {
+		names = append(names, name)
+	}
+	// A type claimed by a component lowering rule (e.g. "worker") must be admitted
+	// just the same: the parser sees the authored document, before any rule runs.
+	for name := range builtinComponentLoweringRules() {
+		names = append(names, name)
+	}
+	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			doc := fmt.Sprintf(`apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
@@ -416,17 +426,21 @@ spec:
 }
 
 // TestBuiltinComponentHandlers_RegisteredTypes pins the set of component type
-// strings the CLI dispatches. The schema-parity and description tests below
-// iterate this map, so they say nothing about which entries it contains: a
-// handler dropped from the registry leaves them iterating one fewer entry and
-// still green, while every document using that type stops building. Each name
-// is also the user-facing contract published in the component docs, so a
-// rename is a document-format change, not an internal one.
+// strings the CLI accepts, split by the registry that claims each: a terminal
+// handler, or a component-position lowering rule. The schema-parity and
+// description tests below iterate these maps, so they say nothing about which
+// entries they contain: a type dropped from both leaves them iterating one fewer
+// entry and still green, while every document using that type stops building.
+// Each name is also the user-facing contract published in the component docs, so
+// a rename is a document-format change, not an internal one — moving a type from
+// one registry to the other (worker, go-kure/launcher#280) is not.
 func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
-	want := []string{
+	wantHandlers := []string{
 		"crd", "cronjob", "daemonset", "deployment", "helmchart", "helmrelease", "job", "manifests",
-		"oci", "passthrough", "postgresql", "service", "statefulset", "webservice", "worker",
+		"oci", "passthrough", "postgresql", "service", "statefulset", "webservice",
 	}
+	wantRules := []string{"worker"}
+
 	got := make([]string, 0, len(builtinComponentHandlers()))
 	for name, h := range builtinComponentHandlers() {
 		got = append(got, name)
@@ -435,8 +449,44 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		}
 	}
 	sort.Strings(got)
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("builtinComponentHandlers() registers %v, want %v", got, want)
+	if strings.Join(got, ",") != strings.Join(wantHandlers, ",") {
+		t.Errorf("builtinComponentHandlers() registers %v, want %v", got, wantHandlers)
+	}
+
+	got = got[:0]
+	for name, r := range builtinComponentLoweringRules() {
+		got = append(got, name)
+		if r.ComponentType() != name {
+			t.Errorf("lowering rule registered under %q claims ComponentType() %q", name, r.ComponentType())
+		}
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != strings.Join(wantRules, ",") {
+		t.Errorf("builtinComponentLoweringRules() registers %v, want %v", got, wantRules)
+	}
+}
+
+// TestNewBuiltinTransformer_PublishesWorkerSchemaUnchanged pins the schema
+// HandlerSchemas publishes for "worker" byte for byte against the one the former
+// WorkerHandler published, captured before worker became a lowering rule
+// (pkg/oam/builtin/components/testdata/worker-property-schema.json). The
+// components package pins the rule's own PropertySchema against the same file;
+// this pins what a consumer of the transformer actually reads.
+func TestNewBuiltinTransformer_PublishesWorkerSchemaUnchanged(t *testing.T) {
+	want, err := os.ReadFile("../../oam/builtin/components/testdata/worker-property-schema.json")
+	if err != nil {
+		t.Fatalf("reading the captured schema: %v", err)
+	}
+	published, ok := newBuiltinTransformer().HandlerSchemas().Components["worker"]
+	if !ok {
+		t.Fatal("HandlerSchemas() publishes no schema for worker")
+	}
+	got, err := json.MarshalIndent(published, "", "  ")
+	if err != nil {
+		t.Fatalf("encoding the schema: %v", err)
+	}
+	if !bytes.Equal(append(got, '\n'), want) {
+		t.Error("the schema published for worker differs from the one the former handler published")
 	}
 }
 
@@ -446,10 +496,11 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 // directly — the same source newBuiltinTransformer registers from — so a handler
 // added without a schema is caught by the type assertion below rather than being
 // silently dropped by HandlerSchemas(). This is the launcher-side guard for the
-// downstream parity gate. Also covers builtinTraitLoweringRules() (e.g. "expose"),
-// which is a trait-position lowering rule rather than a dispatchable TraitHandler —
-// HandlerSchemas() folds both sources into the same Traits map (transform.go), so
-// this test does too, or a rule-only trait's schema regression would go undetected.
+// downstream parity gate. Also covers builtinTraitLoweringRules() (e.g. "expose")
+// and builtinComponentLoweringRules() (e.g. "worker"), which are lowering rules
+// rather than dispatchable handlers — HandlerSchemas() folds each into the same
+// Traits/Components map as the handlers (transform.go), so this test does too, or
+// a rule-only type's schema regression would go undetected.
 func TestNewBuiltinTransformer_HandlerSchemaParity(t *testing.T) {
 	for name, h := range builtinComponentHandlers() {
 		assertExposesSchema(t, "component", name, h)
@@ -459,6 +510,9 @@ func TestNewBuiltinTransformer_HandlerSchemaParity(t *testing.T) {
 	}
 	for name, r := range builtinTraitLoweringRules() {
 		assertExposesSchema(t, "trait", name, r)
+	}
+	for name, r := range builtinComponentLoweringRules() {
+		assertExposesSchema(t, "component", name, r)
 	}
 }
 
@@ -493,6 +547,9 @@ func TestBuiltinHandlerSchemaDescriptions(t *testing.T) {
 	}
 	for name, r := range builtinTraitLoweringRules() {
 		assertSchemaDescribed(t, "trait", name, r)
+	}
+	for name, r := range builtinComponentLoweringRules() {
+		assertSchemaDescribed(t, "component", name, r)
 	}
 }
 
@@ -537,7 +594,7 @@ func sortedSchemaKeys(m map[string]oam.PropertySchema) []string {
 }
 
 // TestBuiltinHandlerSchemaEnumMembersHoldNoNull asserts that no built-in handler
-// declares an Enum member holding a null, at any depth. It iterates the same three
+// declares an Enum member holding a null, at any depth. It iterates the same four
 // registration maps as the description test above, so it covers exactly the schemas
 // that ship.
 //
@@ -580,6 +637,9 @@ func TestBuiltinHandlerSchemaEnumMembersHoldNoNull(t *testing.T) {
 	for name, r := range builtinTraitLoweringRules() {
 		assertSchemaEnumMembersNonNull(t, "trait", name, r)
 	}
+	for name, r := range builtinComponentLoweringRules() {
+		assertSchemaEnumMembersNonNull(t, "component", name, r)
+	}
 }
 
 // assertSchemaEnumMembersNonNull checks each of a handler's top-level PropertySchema
@@ -615,6 +675,9 @@ func TestBuiltinHandlerSchemaEveryNodeDeclaresItsType(t *testing.T) {
 	}
 	for name, r := range builtinTraitLoweringRules() {
 		assertSchemaNodesTyped(t, "trait", name, r)
+	}
+	for name, r := range builtinComponentLoweringRules() {
+		assertSchemaNodesTyped(t, "component", name, r)
 	}
 }
 

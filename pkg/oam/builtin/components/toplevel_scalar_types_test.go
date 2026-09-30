@@ -39,7 +39,7 @@ var wrongTopLevel = []struct {
 	{"daemonset", &components.DaemonsetHandler{}, imageBase, "port", "8080", "port: must be an integer, got string"},
 	{"statefulset", &components.StatefulsetHandler{}, imageBase, "port", "8080", "port: must be an integer, got string"},
 	{"webservice", &components.WebserviceHandler{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
-	{"worker", &components.WorkerHandler{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
+	{"worker", workerViaRule{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
 	{"cronjob", &components.CronjobHandler{}, cronBase, "restartPolicy", 1, "restartPolicy: must be a string, got int"},
 	{"statefulset", &components.StatefulsetHandler{}, imageBase, "serviceName", 3, "serviceName: must be a string, got int"},
 	{"oci", &components.OCIHandler{}, ociBase, "path", 3, "path: must be a string, got int"},

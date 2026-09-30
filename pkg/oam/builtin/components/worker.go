@@ -3,29 +3,73 @@ package components
 import (
 	"maps"
 
-	"github.com/go-kure/kure/pkg/kubernetes"
-	"github.com/go-kure/kure/pkg/stack"
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
-// WorkerHandler handles OAM worker components.
-type WorkerHandler struct{}
+// WorkerRule lowers a "worker" component (D1 component position,
+// oam.ComponentLoweringRule) into a terminal "deployment" component carrying
+// the same name. It is the first production component-position rule, and the
+// re-expression of the former WorkerHandler: worker was a Deployment with no
+// Service plus two of launcher's own opinions, and `deployment` is the
+// unopinionated projection of that same API kind, so what worker adds is
+// exactly the two opinions — and those are what this rule evaluates.
+//
+// LowerComponent first runs worker's full parse (parseWorker, the former
+// WorkerHandler.ToApplicationConfig sequence unchanged), so every input the
+// handler refused is still refused, first failure first, with the same cause
+// text. The handler's last check, that the `affinity` shorthand evaluates to
+// label selectors the API server accepts (topology key, node selector keys and
+// values), runs next on the raw shape the rule forwards, with the same text. It
+// then emits the authored properties to the deployment component, changing
+// only:
+//
+//   - `affinity`: the four-key shorthand is evaluated exactly as worker
+//     evaluated it (buildAffinity, over the component's own app label) and
+//     emitted as the raw corev1 shape `deployment` publishes; omitted when the
+//     shorthand evaluates to nothing.
+//   - `topologySpread`: removed. Unless it was explicitly false, the rule
+//     attaches a `topology-spread` trait instead — the trait that applies the
+//     same default constraints (BuildTopologySpreadConstraints) to the same
+//     post-policy replica count and the same selector.
+//
+// Keys worker does not declare are dropped rather than forwarded: worker's
+// parse never read them, while `deployment` would honor two of them
+// (`tolerations`, `topologySpreadConstraints`) and refuse the rest. The kurel
+// CLI refuses such keys before lowering in any case
+// (Transformer.ValidateAuthoredProperties); dropping them keeps a caller that
+// skips that validation exactly where it was.
+//
+// The authored traits are forwarded unchanged, and the synthesized
+// `topology-spread` goes in front of them: it is then the innermost trait
+// decorator, which is where worker applied its constraints — inside its own
+// Generate, before any trait saw the Deployment. An authored `topology-spread`
+// on a worker therefore still refuses with the same message whenever the
+// default already produced constraints, and still does nothing when it did
+// not. Annotations (the tier override, among others) are forwarded too.
+//
+// Everything past the parse is the deployment component's: ApplyPolicy,
+// NonRWXClaim, ServiceAccountName, EmitsAutoHealthCheck, labels and the
+// generated objects are the ones DeploymentConfig implements, which worker's
+// implementations matched line for line. A parse error surfaces through the
+// lowering engine, so it names the component's type and document
+// (`component "w" (type "worker") in document …: <cause>`) instead of the
+// former handler's `component "w": <cause>`; the cause text is unchanged.
+type WorkerRule struct{}
 
-// CanHandle returns true for worker component type.
-func (h *WorkerHandler) CanHandle(componentType string) bool {
-	return componentType == "worker"
-}
+// ComponentType claims the "worker" component type at the component lowering
+// position. build.go registers this rule via RegisterComponentLowering instead
+// of a dispatchable component handler, so "worker" is reachable only here.
+func (WorkerRule) ComponentType() string { return "worker" }
 
 // PropertySchema declares the worker component's user-facing properties. Like
-// webservice minus `port` (worker emits no Service).
-func (h *WorkerHandler) PropertySchema() map[string]oam.PropertySchema {
+// webservice minus `port` (worker emits no Service). Unchanged by the move to a
+// lowering rule: HandlerSchemas publishes a rule's schema exactly as it
+// publishes a handler's, and TestWorkerRule_PropertySchemaUnchanged pins it
+// byte for byte.
+func (WorkerRule) PropertySchema() map[string]oam.PropertySchema {
 	m := map[string]oam.PropertySchema{
 		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
 		"replicas":        {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of Deployment pod replicas."},
@@ -49,356 +93,144 @@ func (h *WorkerHandler) PropertySchema() map[string]oam.PropertySchema {
 	return m
 }
 
-// ToApplicationConfig converts an OAM worker component to a WorkerConfig.
-func (h *WorkerHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	config := &WorkerConfig{
-		Name:      component.Name,
-		Namespace: namespace,
+// LowerComponent validates comp as a worker and emits the equivalent
+// deployment component (see WorkerRule).
+func (r WorkerRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
+	opinions, err := parseWorker(comp.Properties)
+	if err != nil {
+		return oam.LoweringResult{}, err
 	}
 
-	props := component.Properties
+	schema := r.PropertySchema()
+	props := make(map[string]any, len(comp.Properties))
+	for k, v := range comp.Properties {
+		if _, declared := schema[k]; declared {
+			props[k] = v
+		}
+	}
+	delete(props, "topologySpread")
+	delete(props, "affinity")
+	if affinity := buildAffinity(opinions.affinity, appLabels(comp.Name)); affinity != nil {
+		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(affinity)
+		if err != nil {
+			return oam.LoweringResult{}, errors.Wrap(err, "affinity: converting the evaluated shorthand")
+		}
+		props["affinity"] = raw
+		// The deployment component validates the raw shape more strictly than
+		// the shorthand's own parse does (label-key and label-value syntax,
+		// which the API server enforces too). Checked here, as the former
+		// handler did, so a refusal names the shorthand the author wrote rather
+		// than a raw path they never did.
+		if _, err := parseRawAffinity(props); err != nil {
+			return oam.LoweringResult{}, errors.Wrap(err, "affinity: the shorthand evaluates to an affinity the API server would refuse")
+		}
+	}
+
+	traits := comp.Traits
+	if !opinions.topologySpreadDisabled {
+		traits = append([]oam.Trait{{Type: "topology-spread", Properties: map[string]any{}}}, comp.Traits...)
+	}
+
+	return oam.LoweringResult{Components: []oam.Component{{
+		Name:        comp.Name,
+		Type:        "deployment",
+		Properties:  props,
+		Traits:      traits,
+		Annotations: comp.Annotations,
+	}}}, nil
+}
+
+// workerOpinions is what parseWorker keeps: the two properties worker
+// evaluates itself rather than handing to the deployment component.
+type workerOpinions struct {
+	affinity               AffinityConfig
+	topologySpreadDisabled bool
+}
+
+// parseWorker runs the former WorkerHandler.ToApplicationConfig parse over
+// props, in its original order, so an invalid worker is refused with the same
+// first cause as before. Every other parsed value is discarded here — the
+// deployment component parses the forwarded properties again, with the same
+// helpers.
+func parseWorker(props map[string]any) (workerOpinions, error) {
+	var out workerOpinions
 
 	image, ok := props["image"].(string)
 	if !ok {
-		return nil, errors.New("required property 'image' missing or not a string")
+		return out, errors.New("required property 'image' missing or not a string")
 	}
 	if err := ValidateImageRef(image); err != nil {
-		return nil, err
+		return out, err
 	}
-	config.Image = image
-
-	replicas, replicasAuthored, err := parseReplicas(props, 1)
-	if err != nil {
-		return nil, err
+	if _, _, err := parseReplicas(props, 1); err != nil {
+		return out, err
 	}
-	config.Replicas = replicas
-	config.explicitReplicas = replicasAuthored
-
-	env, err := parseEnv(props)
-	if err != nil {
-		return nil, err
+	if _, err := parseEnv(props); err != nil {
+		return out, err
 	}
-	config.Env = env
-	envFrom, err := parseEnvFrom(props)
-	if err != nil {
-		return nil, err
+	if _, err := parseEnvFrom(props); err != nil {
+		return out, err
 	}
-	config.EnvFrom = envFrom
 	if resources, present, err := parseObjectField(props, "resources", "resources"); err != nil {
-		return nil, err
+		return out, err
 	} else if present {
-		r, err := parseResources(resources)
-		if err != nil {
-			return nil, errors.Wrap(err, "invalid resources configuration")
+		if _, err := parseResources(resources); err != nil {
+			return out, errors.Wrap(err, "invalid resources configuration")
 		}
-		config.Resources = r
 	}
-	command, err := parseCommand(props)
-	if err != nil {
-		return nil, err
+	if _, err := parseCommand(props); err != nil {
+		return out, err
 	}
-	config.Command = command
-	args, err := parseArgs(props)
-	if err != nil {
-		return nil, err
+	if _, err := parseArgs(props); err != nil {
+		return out, err
 	}
-	config.Args = args
 	// namedPortsAllowed=false: worker exposes no port property at all, so its
 	// main container never declares a ContainerPort for the kubelet to
 	// resolve a named probe/lifecycle port against.
-	probes, err := parseProbes(props, false, "")
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid probe configuration")
+	if _, err := parseProbes(props, false, ""); err != nil {
+		return out, errors.Wrap(err, "invalid probe configuration")
 	}
-	config.Probes = probes
-	lifecycle, err := parseLifecycle(props, false, "")
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid lifecycle configuration")
+	if _, err := parseLifecycle(props, false, ""); err != nil {
+		return out, errors.Wrap(err, "invalid lifecycle configuration")
 	}
-	config.Lifecycle = lifecycle
-	securityContext, err := parseSecurityContext(props)
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid securityContext configuration")
+	if _, err := parseSecurityContext(props); err != nil {
+		return out, errors.Wrap(err, "invalid securityContext configuration")
 	}
-	config.SecurityContext = securityContext
-	if workingDir, present, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
-		return nil, err
-	} else if present {
-		config.WorkingDir = workingDir
+	if _, _, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
+		return out, err
 	}
 
 	parsed, err := parseVolumes(props)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	config.Volumes = parsed.Volumes
-	config.VolumeMounts = parsed.Mounts
-	config.VolumeDevices = parsed.Devices
-	config.PVCs = parsed.PVCs
-
 	initContainers, err := parseInitContainers(props)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	config.InitContainers = initContainers
 	if ts, err := parseBoolField(props, "topologySpread", "topologySpread"); err != nil {
-		return nil, err
+		return out, err
 	} else if ts != nil && !*ts {
-		config.TopologySpreadDisabled = true
+		out.topologySpreadDisabled = true
 	}
 	affinity, err := parseAffinity(props)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	config.Affinity = affinity
+	out.affinity = affinity
 
 	sidecars, err := parseSidecars(props)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	config.Sidecars = sidecars
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
-		return nil, err
+		return out, err
 	}
-
-	podSpec, err := parsePodSpec(props, false)
-	if err != nil {
-		return nil, err
+	if _, err := parsePodSpec(props, false); err != nil {
+		return out, err
 	}
-	config.PodSpec = podSpec
-
-	depSpec, err := parseDeploymentSpec(props)
-	if err != nil {
-		return nil, err
+	if _, err := parseDeploymentSpec(props); err != nil {
+		return out, err
 	}
-	config.DeploymentSpec = depSpec
-
-	// The shorthand's own parse does not check label-key and label-value
-	// syntax, which the API server enforces on the affinity it evaluates to.
-	// Validated the way the deployment component validates a raw affinity, so
-	// a refusal names the shorthand the author wrote. Last, so every earlier
-	// refusal keeps its place.
-	if evaluated := buildAffinity(affinity, appLabels(component.Name)); evaluated != nil {
-		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(evaluated)
-		if err != nil {
-			return nil, errors.Wrap(err, "affinity: converting the evaluated shorthand")
-		}
-		if _, err := parseRawAffinity(map[string]any{"affinity": raw}); err != nil {
-			return nil, errors.Wrap(err, "affinity: the shorthand evaluates to an affinity the API server would refuse")
-		}
-	}
-
-	return config, nil
-}
-
-// WorkerConfig implements stack.ApplicationConfig for worker components.
-type WorkerConfig struct {
-	Name                   string
-	Namespace              string
-	Image                  string
-	Replicas               int32
-	Env                    []corev1.EnvVar
-	EnvFrom                []corev1.EnvFromSource
-	Resources              ResourceRequirements
-	Command                []string
-	Args                   []string
-	Probes                 ProbeConfig
-	Lifecycle              *corev1.Lifecycle
-	SecurityContext        *corev1.SecurityContext
-	WorkingDir             string
-	Volumes                []corev1.Volume
-	VolumeMounts           []corev1.VolumeMount
-	VolumeDevices          []corev1.VolumeDevice
-	PVCs                   []PVCConfig
-	InitContainers         []InitContainerConfig
-	Sidecars               []SidecarContainerConfig
-	TopologySpreadDisabled bool
-	Affinity               AffinityConfig
-	// PodSpec holds the shared pod-level properties (see parsePodSpec).
-	PodSpec PodSpecConfig
-	// DeploymentSpec holds the DeploymentSpec-level properties
-	// (see parseDeploymentSpec), shared with the deployment and webservice
-	// kinds — all three project appsv1.Deployment (go-kure/launcher#341).
-	DeploymentSpec   DeploymentSpecConfig
-	explicitReplicas bool
-}
-
-// EmitsAutoHealthCheck implements pkg/oam.autoHealthCheckEmitter: a paused
-// Deployment gets no synthesized readiness gate, for the reason spelled out on
-// DeploymentConfig.EmitsAutoHealthCheck — gating on a workload the document
-// told the controller not to roll out is not a health signal. The object is
-// still emitted and still applied by the enclosing Kustomization.
-func (c *WorkerConfig) EmitsAutoHealthCheck() bool {
-	return c.DeploymentSpec.Paused == nil || !*c.DeploymentSpec.Paused
-}
-
-// ServiceAccountName implements oam.ServiceAccountNamer: the authored
-// serviceAccountName, else the per-component ServiceAccount named after the
-// component.
-func (c *WorkerConfig) ServiceAccountName() string {
-	return effectiveServiceAccountName(c.PodSpec, c.Name)
-}
-
-// NonRWXClaim names the first claim that limits this Deployment to one pod
-// (the one applyNonRWXConstraint refuses more replicas on), or "" when none
-// does. The scaler trait reads it: its HPA scales this Deployment past the
-// authored replicas, so the same limit has to hold for maxReplicas.
-func (c *WorkerConfig) NonRWXClaim() string { return firstNonRWXPVC(c.PVCs) }
-
-// ApplyPolicy applies defaults then enforces limits from the policy.
-// Defaults are applied first so that enforced checks run on effective post-default values.
-func (c *WorkerConfig) ApplyPolicy(p oam.Policy) error {
-	if p == nil {
-		return nil
-	}
-
-	c.Replicas = applyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
-		return err
-	}
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
-		return err
-	}
-	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
-		return err
-	}
-	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
-		return err
-	}
-
-	if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
-		return err
-	}
-	if err := enforceMaxResources(c.Resources, p.MaxCPU(), p.MaxMemory()); err != nil {
-		return err
-	}
-	if err := enforceAllowedRegistries(c.Image, p.AllowedRegistries()); err != nil {
-		return err
-	}
-	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
-		return err
-	}
-	if err := enforceHostPathVolumes(c.Volumes, p.AllowHostPathVolumes()); err != nil {
-		return err
-	}
-	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {
-		return err
-	}
-	if err := enforcePodResources(c.PodSpec, p.MaxCPU(), p.MaxMemory()); err != nil {
-		return err
-	}
-	if err := enforcePodHostProcess(c.PodSpec, p.AllowPrivileged()); err != nil {
-		return err
-	}
-	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
-		return err
-	}
-	for i, ic := range c.InitContainers {
-		if err := enforceExtraContainer("initContainers", i, ic.Name, ic.Image,
-			ic.Resources, ic.SecurityContext, p); err != nil {
-			return err
-		}
-	}
-	for i, sc := range c.Sidecars {
-		if err := enforceExtraContainer("sidecars", i, sc.Name, sc.Image,
-			sc.Resources, sc.SecurityContext, p); err != nil {
-			return err
-		}
-	}
-	for _, pvc := range c.PVCs {
-		if err := enforceMaxStorageSize(pvc.Size, p.MaxStorageSize()); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// Generate creates a Kubernetes Deployment and ServiceAccount (no Service).
-// The ServiceAccount is omitted when serviceAccountName was authored.
-func (c *WorkerConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	var err error
-	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
-	if err != nil {
-		return nil, err
-	}
-	deployment, err := c.createDeployment(app)
-	if err != nil {
-		return nil, err
-	}
-
-	depObj := client.Object(deployment)
-
-	objects := []*client.Object{&depObj}
-	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
-		objects = append(objects, &saObj)
-	}
-	for _, pvc := range c.PVCs {
-		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
-		if err != nil {
-			return nil, err
-		}
-		pObj := client.Object(p)
-		objects = append(objects, &pObj)
-	}
-
-	return objects, nil
-}
-
-func (c *WorkerConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
-	// No Ports: worker exposes no port property (see parseProbes' namedPortsAllowed=false above).
-	container, err := buildMainContainer(app.Name, mainContainerInput{
-		Image:           c.Image,
-		Command:         c.Command,
-		Args:            c.Args,
-		Resources:       c.Resources,
-		Env:             c.Env,
-		EnvFrom:         c.EnvFrom,
-		Probes:          c.Probes,
-		WorkingDir:      c.WorkingDir,
-		Lifecycle:       c.Lifecycle,
-		SecurityContext: c.SecurityContext,
-		VolumeMounts:    c.VolumeMounts,
-		VolumeDevices:   c.VolumeDevices,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
-	dep.Labels = appLabels(app.Name)
-	dep.Annotations = nil
-	dep.Spec.Template.Labels = appLabels(app.Name)
-	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: appLabels(app.Name)}
-	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
-	if err := applyNonRWXConstraint(dep, app.Name, c.PVCs, c.Replicas, c.DeploymentSpec.Strategy); err != nil {
-		return nil, err
-	}
-	// After the constraint, for the reason given on DeploymentConfig's call
-	// site: the constraint reads the config rather than the object built so
-	// far, so the only strategy that can still reach this apply after a
-	// non-RWX claim is the Recreate the constraint just wrote.
-	c.DeploymentSpec.apply(dep)
-
-	var tscs []corev1.TopologySpreadConstraint
-	if !c.TopologySpreadDisabled {
-		tscs = BuildTopologySpreadConstraints(c.Replicas, appLabels(app.Name))
-	}
-	podSpec, err := buildPodSpec(podSpecInput{
-		Config:                    c.PodSpec,
-		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),
-		MainContainer:             container,
-		InitContainers:            c.InitContainers,
-		Sidecars:                  c.Sidecars,
-		Volumes:                   c.Volumes,
-		TopologySpreadConstraints: tscs,
-		Affinity:                  buildAffinity(c.Affinity, appLabels(app.Name)),
-	})
-	if err != nil {
-		return nil, err
-	}
-	dep.Spec.Template.Spec = podSpec
-
-	return dep, nil
+	return out, nil
 }

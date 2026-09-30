@@ -119,14 +119,21 @@ func TestBuiltinStringProperties_RejectNonStringOnAuthoredPath(t *testing.T) {
 		}
 	}
 
+	componentSchemas := map[string]map[string]oam.PropertySchema{}
 	for name, h := range builtinComponentHandlers() {
-		p, ok := h.(oam.PropertySchemaProvider)
-		if !ok {
-			continue // TestNewBuiltinTransformer_HandlerSchemaParity flags this.
+		if p, ok := h.(oam.PropertySchemaProvider); ok {
+			componentSchemas[name] = p.PropertySchema()
 		}
+	}
+	for name, r := range builtinComponentLoweringRules() {
+		if p, ok := r.(oam.PropertySchemaProvider); ok {
+			componentSchemas[name] = p.PropertySchema()
+		}
+	}
+	for name, schema := range componentSchemas {
 		check(t, "component "+name, func(props map[string]any) *oam.Application {
 			return authoredApp(oam.Component{Name: "c", Type: name, Properties: props})
-		}, p.PropertySchema())
+		}, schema)
 	}
 
 	// Traits need a host component; webservice with only its image is valid on its

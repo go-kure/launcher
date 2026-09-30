@@ -253,7 +253,6 @@ func loadSuppliedValues(opts *buildOptions) (map[string]any, error) {
 func builtinComponentHandlers() map[string]oam.ComponentHandler {
 	return map[string]oam.ComponentHandler{
 		"webservice":  &components.WebserviceHandler{},
-		"worker":      &components.WorkerHandler{},
 		"deployment":  &components.DeploymentHandler{},
 		"cronjob":     &components.CronjobHandler{},
 		"job":         &components.JobHandler{},
@@ -307,10 +306,31 @@ func builtinTraitLoweringRules() map[string]oam.TraitLoweringRule {
 	}
 }
 
+// builtinComponentLoweringRules returns the built-in component-position lowering
+// rules (oam.ComponentLoweringRule, D1) keyed by the component type they claim. It
+// is the single source of truth for component-lowering registration, shared by
+// newBuiltinTransformer and the handler-schema parity/description tests —
+// mirroring builtinTraitLoweringRules above so a rule added here is covered by
+// those tests exactly like a dispatchable handler is.
+func builtinComponentLoweringRules() map[string]oam.ComponentLoweringRule {
+	return map[string]oam.ComponentLoweringRule{
+		"worker": components.WorkerRule{},
+	}
+}
+
 // newBuiltinTransformer creates a Transformer pre-loaded with all supported
-// built-in component and trait handlers.
+// built-in component and trait handlers and lowering rules.
 func newBuiltinTransformer() *oam.Transformer {
 	t := oam.NewTransformer(builtinComponentHandlers(), nil)
+	// "worker" is a component-position lowering rule, not a dispatchable handler:
+	// it lowers into a terminal "deployment" component (plus a synthesized
+	// "topology-spread" trait) for DeploymentHandler/TopologySpreadHandler to
+	// dispatch on the next fixpoint round. It must not also appear in
+	// builtinComponentHandlers — RegisterComponentLowering panics on that
+	// collision.
+	for _, r := range builtinComponentLoweringRules() {
+		t.RegisterComponentLowering(r)
+	}
 	for name, h := range builtinTraitHandlers() {
 		t.RegisterBuiltinTrait(name, h)
 	}

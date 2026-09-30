@@ -1,6 +1,11 @@
 package components_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"maps"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,37 +17,203 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-func TestWorkerHandler_CanHandle(t *testing.T) {
-	h := &components.WorkerHandler{}
-	if !h.CanHandle("worker") {
-		t.Error("expected true for worker")
-	}
-	if h.CanHandle("webservice") {
-		t.Error("expected false for webservice")
+func TestWorkerRule_ComponentType(t *testing.T) {
+	if got := (components.WorkerRule{}).ComponentType(); got != "worker" {
+		t.Errorf("ComponentType() = %q, want worker", got)
 	}
 }
 
-// The affinity the shorthand evaluates to is validated the way the deployment
-// component validates a raw affinity: a label key or value the API server
-// would refuse is refused here, naming the shorthand. Before, such a document
-// built a manifest the API server rejected.
-func TestWorkerHandler_RefusesAnAffinityTheAPIServerWould(t *testing.T) {
+// TestWorkerRule_PropertySchemaUnchanged pins worker's published property
+// schema byte for byte. testdata/worker-property-schema.json was captured from
+// the former WorkerHandler.PropertySchema before worker became a lowering rule;
+// the move must not change what HandlerSchemas publishes for "worker". Every
+// PropertySchema field carries a json tag, so the encoding covers all of it.
+func TestWorkerRule_PropertySchemaUnchanged(t *testing.T) {
+	want, err := os.ReadFile("testdata/worker-property-schema.json")
+	if err != nil {
+		t.Fatalf("reading the captured schema: %v", err)
+	}
+	got, err := json.MarshalIndent(components.WorkerRule{}.PropertySchema(), "", "  ")
+	if err != nil {
+		t.Fatalf("encoding the schema: %v", err)
+	}
+	got = append(got, '\n')
+	if !bytes.Equal(got, want) {
+		t.Errorf("worker's property schema changed (%d bytes, want %d); it must stay byte-identical to the former handler's", len(got), len(want))
+	}
+}
+
+// lowerWorker runs WorkerRule.LowerComponent and returns its one emitted
+// component.
+func lowerWorker(t *testing.T, comp *oam.Component) oam.Component {
+	t.Helper()
+	res, err := components.WorkerRule{}.LowerComponent(comp, oam.LoweringContext{})
+	if err != nil {
+		t.Fatalf("LowerComponent: %v", err)
+	}
+	if len(res.Components) != 1 || len(res.Policies) != 0 || len(res.Traits) != 0 || len(res.Documents) != 0 {
+		t.Fatalf("LowerComponent emitted %+v, want exactly one component", res)
+	}
+	return res.Components[0]
+}
+
+// The emitted component is a deployment of the same name carrying the authored
+// properties, with the two opinions replaced: topologySpread removed and the
+// affinity shorthand evaluated into the raw corev1 shape. Annotations are
+// forwarded, the authored map is not written to, and a key worker does not
+// declare is dropped rather than handed to deployment.
+func TestWorkerRule_EmitsDeployment(t *testing.T) {
+	authored := map[string]any{
+		"image":          "ghcr.io/org/app:v1",
+		"replicas":       2,
+		"topologySpread": true,
+		"affinity": map[string]any{
+			"enablePodAntiAffinity": true,
+			"nodeSelector":          map[string]any{"disk": "ssd", "arch": "amd64"},
+		},
+		"env":         []any{map[string]any{"name": "A", "value": "b"}},
+		"tolerations": []any{map[string]any{"operator": "Exists"}},
+	}
+	before := maps.Clone(authored)
+	comp := &oam.Component{
+		Name: "app", Type: "worker", Properties: authored,
+		Annotations: map[string]string{"launcher.gokure.dev/tier": "infra"},
+	}
+	got := lowerWorker(t, comp)
+
+	if got.Name != "app" || got.Type != "deployment" {
+		t.Errorf("emitted %q (type %q), want app (type deployment)", got.Name, got.Type)
+	}
+	if !reflect.DeepEqual(got.Annotations, comp.Annotations) {
+		t.Errorf("annotations = %v, want the authored %v", got.Annotations, comp.Annotations)
+	}
+	if !reflect.DeepEqual(authored, before) {
+		t.Errorf("the authored properties were modified: %v", authored)
+	}
+	for _, k := range []string{"topologySpread", "tolerations"} {
+		if _, ok := got.Properties[k]; ok {
+			t.Errorf("emitted properties carry %q; want it removed", k)
+		}
+	}
+	for _, k := range []string{"image", "replicas", "env"} {
+		if !reflect.DeepEqual(got.Properties[k], authored[k]) {
+			t.Errorf("emitted %s = %v, want the authored %v", k, got.Properties[k], authored[k])
+		}
+	}
+	wantAffinity := map[string]any{
+		"nodeAffinity": map[string]any{
+			"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{
+				"nodeSelectorTerms": []any{map[string]any{"matchExpressions": []any{
+					map[string]any{"key": "arch", "operator": "In", "values": []any{"amd64"}},
+					map[string]any{"key": "disk", "operator": "In", "values": []any{"ssd"}},
+				}}},
+			},
+		},
+		"podAntiAffinity": map[string]any{
+			"preferredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
+				"weight": int64(100),
+				"podAffinityTerm": map[string]any{
+					"labelSelector": map[string]any{"matchLabels": map[string]any{"app": "app"}},
+					"topologyKey":   "kubernetes.io/hostname",
+				},
+			}},
+		},
+	}
+	if !reflect.DeepEqual(got.Properties["affinity"], wantAffinity) {
+		t.Errorf("emitted affinity = %#v\nwant %#v", got.Properties["affinity"], wantAffinity)
+	}
+}
+
+// A shorthand that evaluates to nothing (an absent block, or one that neither
+// enables anti-affinity nor selects nodes) emits no affinity at all.
+func TestWorkerRule_EmptyAffinityOmitted(t *testing.T) {
+	for name, props := range map[string]map[string]any{
+		"absent":   {"image": "ghcr.io/org/app:v1"},
+		"null":     {"image": "ghcr.io/org/app:v1", "affinity": nil},
+		"disabled": {"image": "ghcr.io/org/app:v1", "affinity": map[string]any{"enablePodAntiAffinity": false}},
+	} {
+		got := lowerWorker(t, &oam.Component{Name: "app", Type: "worker", Properties: props})
+		if _, ok := got.Properties["affinity"]; ok {
+			t.Errorf("%s: emitted affinity %v, want none", name, got.Properties["affinity"])
+		}
+	}
+}
+
+// topologySpread (absent, null or true) becomes a synthesized topology-spread
+// trait placed in front of the authored traits, which follow unchanged and in
+// order. topologySpread: false attaches nothing and forwards the authored trait
+// slice itself.
+func TestWorkerRule_TopologySpreadBecomesTrait(t *testing.T) {
+	authoredTraits := []oam.Trait{
+		{Type: "configmap", Properties: map[string]any{"name": "a"}},
+		{Type: "topology-spread", Properties: map[string]any{}},
+	}
+	for name, ts := range map[string]any{"absent": "absent", "null": nil, "true": true} {
+		props := map[string]any{"image": "ghcr.io/org/app:v1"}
+		if ts != "absent" {
+			props["topologySpread"] = ts
+		}
+		got := lowerWorker(t, &oam.Component{Name: "app", Type: "worker", Properties: props, Traits: authoredTraits})
+		if len(got.Traits) != 3 || got.Traits[0].Type != "topology-spread" || len(got.Traits[0].Properties) != 0 {
+			t.Fatalf("%s: traits = %+v, want a propertyless topology-spread followed by the two authored traits", name, got.Traits)
+		}
+		for i := range authoredTraits {
+			if !reflect.DeepEqual(got.Traits[i+1], authoredTraits[i]) {
+				t.Errorf("%s: trait %d = %+v, want the authored %+v", name, i+1, got.Traits[i+1], authoredTraits[i])
+			}
+		}
+	}
+
+	got := lowerWorker(t, &oam.Component{Name: "app", Type: "worker",
+		Properties: map[string]any{"image": "ghcr.io/org/app:v1", "topologySpread": false}, Traits: authoredTraits})
+	if len(got.Traits) != len(authoredTraits) || &got.Traits[0] != &authoredTraits[0] {
+		t.Errorf("topologySpread false: traits = %+v, want the authored slice forwarded as is", got.Traits)
+	}
+}
+
+// Every refusal is the former handler's, with the same cause text: the rule
+// runs worker's own parse before it emits anything.
+func TestWorkerRule_RefusesAsTheHandlerDid(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]any
+		want  string
+	}{
+		{"missing image", map[string]any{}, "required property 'image' missing or not a string"},
+		{"bad image", map[string]any{"image": "UPPER CASE"}, `image "UPPER CASE" rejected: could not parse reference: UPPER CASE`},
+		{"topologySpread not a bool", map[string]any{"image": "nginx:1", "topologySpread": "false"}, "topologySpread: must be a boolean, got string"},
+		{"bad anti-affinity type", map[string]any{"image": "nginx:1", "affinity": map[string]any{"podAntiAffinityType": "sometimes"}},
+			`affinity.podAntiAffinityType: invalid value "sometimes": must be "preferred" or "required"`},
+	}
+	for _, tc := range cases {
+		_, err := components.WorkerRule{}.LowerComponent(&oam.Component{Name: "app", Type: "worker", Properties: tc.props}, oam.LoweringContext{})
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+// The raw affinity shape the rule emits is validated the way the deployment
+// component validates it, which is stricter than the shorthand's own parse: a
+// label key or value the API server would refuse is refused here, naming the
+// shorthand, with the same text the former handler's check used.
+func TestWorkerRule_RefusesAnAffinityTheAPIServerWould(t *testing.T) {
 	cases := map[string]map[string]any{
 		"topologyKey":        {"enablePodAntiAffinity": true, "topologyKey": "not a key!"},
 		"nodeSelector key":   {"nodeSelector": map[string]any{"bad key!": "x"}},
 		"nodeSelector value": {"nodeSelector": map[string]any{"ok": "va lue"}},
 	}
 	for name, affinity := range cases {
-		_, err := (&components.WorkerHandler{}).ToApplicationConfig(&oam.Component{Name: "app", Type: "worker",
-			Properties: map[string]any{"image": "nginx:1", "affinity": affinity}}, "default")
+		_, err := components.WorkerRule{}.LowerComponent(&oam.Component{Name: "app", Type: "worker",
+			Properties: map[string]any{"image": "nginx:1", "affinity": affinity}}, oam.LoweringContext{})
 		if err == nil || !strings.HasPrefix(err.Error(), "affinity: the shorthand evaluates to an affinity the API server would refuse: ") {
 			t.Errorf("%s: err = %v, want the shorthand refusal", name, err)
 		}
 	}
 }
 
-func TestWorkerHandler_RequiredImage_Missing(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_RequiredImage_Missing(t *testing.T) {
+	h := workerViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name:       "app",
 		Type:       "worker",
@@ -53,8 +224,8 @@ func TestWorkerHandler_RequiredImage_Missing(t *testing.T) {
 	}
 }
 
-func TestWorkerHandler_Generate_NoService(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_Generate_NoService(t *testing.T) {
+	h := workerViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "backend",
 		Type: "worker",
@@ -94,8 +265,8 @@ func TestWorkerHandler_Generate_NoService(t *testing.T) {
 	}
 }
 
-func TestWorkerConfig_ApplyPolicy_MaxReplicas(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_MaxReplicas(t *testing.T) {
+	h := workerViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -115,8 +286,8 @@ func TestWorkerConfig_ApplyPolicy_MaxReplicas(t *testing.T) {
 	}
 }
 
-func TestWorkerConfig_ApplyPolicy_NilPolicy(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_NilPolicy(t *testing.T) {
+	h := workerViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -134,8 +305,8 @@ func TestWorkerConfig_ApplyPolicy_NilPolicy(t *testing.T) {
 	}
 }
 
-func TestWorkerHandler_WithSharedPodFields(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_WithSharedPodFields(t *testing.T) {
+	h := workerViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -185,7 +356,7 @@ func TestWorkerHandler_WithSharedPodFields(t *testing.T) {
 	t.Error("Deployment not found in output")
 }
 
-// TestWorkerHandler_NamedLifecyclePort_Error covers launcher#278 wave-11
+// TestWorker_NamedLifecyclePort_Error covers launcher#278 wave-11
 // finding 5: worker's main container never declares any port (there is no
 // `port` property at all — see PropertySchema above), so a named httpGet
 // port in `lifecycle`/`probes` can never resolve against it and is rejected
@@ -193,8 +364,8 @@ func TestWorkerHandler_WithSharedPodFields(t *testing.T) {
 // worker is the representative test for this fix — cronjob shares the same
 // portless shape and the same shared parsing path (parseProbes/
 // parseLifecycle's namedPortsAllowed parameter, common.go).
-func TestWorkerHandler_NamedLifecyclePort_Error(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_NamedLifecyclePort_Error(t *testing.T) {
+	h := workerViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -212,8 +383,8 @@ func TestWorkerHandler_NamedLifecyclePort_Error(t *testing.T) {
 	}
 }
 
-func TestWorkerHandler_NamedProbePort_Error(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_NamedProbePort_Error(t *testing.T) {
+	h := workerViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -231,8 +402,8 @@ func TestWorkerHandler_NamedProbePort_Error(t *testing.T) {
 	}
 }
 
-func TestWorkerHandler_NumericLifecyclePort_Accepted(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_NumericLifecyclePort_Accepted(t *testing.T) {
+	h := workerViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -254,8 +425,8 @@ func TestWorkerHandler_NumericLifecyclePort_Accepted(t *testing.T) {
 	}
 }
 
-func TestWorkerConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_PrivilegedDenied(t *testing.T) {
+	h := workerViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -275,11 +446,11 @@ func TestWorkerConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 	}
 }
 
-// TestWorkerConfig_ApplyPolicy_HostPathDenied is worker's sibling of
+// TestWorker_ApplyPolicy_HostPathDenied is worker's sibling of
 // TestWebserviceConfig_ApplyPolicy_HostPathDenied (launcher#284, P1) — the
 // same shared ApplyPolicy gap, same shared enforceHostPathVolumes fix.
-func TestWorkerConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_HostPathDenied(t *testing.T) {
+	h := workerViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -304,12 +475,12 @@ func TestWorkerConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
 	}
 }
 
-// TestWorkerConfig_ApplyPolicy_CapabilityAddDenied is worker's sibling of
+// TestWorker_ApplyPolicy_CapabilityAddDenied is worker's sibling of
 // TestWebserviceConfig_ApplyPolicy_CapabilityAddDenied (go-kure/launcher#305)
 // — the same shared ApplyPolicy gap, same shared enforceContainerCapabilities
 // fix.
-func TestWorkerConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
+	h := workerViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -331,12 +502,13 @@ func TestWorkerConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
 	}
 }
 
-// TestWorkerConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault is
+// TestWorker_ApplyPolicy_MaxResources_AgainstIntrinsicDefault is
 // worker's sibling of the two webservice
 // TestWebserviceConfig_ApplyPolicy_Max{CPU,Memory}_AgainstIntrinsicDefault
 // cases (launcher#251) — proving enforceMaxResources is actually wired into
-// WorkerConfig.ApplyPolicy, not just added to enforce.go.
-func TestWorkerConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testing.T) {
+// the ApplyPolicy a worker gets (DeploymentConfig's, since worker lowers into a
+// deployment component), not just added to enforce.go.
+func TestWorker_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testing.T) {
 	cases := []struct {
 		name   string
 		policy stubPolicy
@@ -346,7 +518,7 @@ func TestWorkerConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testin
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &components.WorkerHandler{}
+			h := workerViaRule{}
 			cfg, err := h.ToApplicationConfig(&oam.Component{
 				Name: "app",
 				Type: "worker",
@@ -374,8 +546,8 @@ func TestWorkerConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testin
 // (go-kure/launcher#312) — same shared ApplyPolicy gap, same
 // enforceExtraContainer fix.
 
-func TestWorkerConfig_ApplyPolicy_InitContainerResourcesDenied(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_InitContainerResourcesDenied(t *testing.T) {
+	h := workerViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -408,8 +580,8 @@ func TestWorkerConfig_ApplyPolicy_InitContainerResourcesDenied(t *testing.T) {
 	}
 }
 
-func TestWorkerConfig_ApplyPolicy_InitContainerRegistryDenied(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_InitContainerRegistryDenied(t *testing.T) {
+	h := workerViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -439,8 +611,8 @@ func TestWorkerConfig_ApplyPolicy_InitContainerRegistryDenied(t *testing.T) {
 	}
 }
 
-func TestWorkerConfig_ApplyPolicy_InitContainerPrivilegedDenied(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_InitContainerPrivilegedDenied(t *testing.T) {
+	h := workerViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -471,8 +643,8 @@ func TestWorkerConfig_ApplyPolicy_InitContainerPrivilegedDenied(t *testing.T) {
 	}
 }
 
-func TestWorkerConfig_ApplyPolicy_InitContainerCapabilitiesDenied(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_InitContainerCapabilitiesDenied(t *testing.T) {
+	h := workerViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -505,8 +677,8 @@ func TestWorkerConfig_ApplyPolicy_InitContainerCapabilitiesDenied(t *testing.T) 
 	}
 }
 
-func TestWorkerConfig_ApplyPolicy_SidecarResourcesDenied(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_SidecarResourcesDenied(t *testing.T) {
+	h := workerViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -539,8 +711,8 @@ func TestWorkerConfig_ApplyPolicy_SidecarResourcesDenied(t *testing.T) {
 	}
 }
 
-func TestWorkerConfig_ApplyPolicy_SidecarRegistryDenied(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_SidecarRegistryDenied(t *testing.T) {
+	h := workerViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -570,8 +742,8 @@ func TestWorkerConfig_ApplyPolicy_SidecarRegistryDenied(t *testing.T) {
 	}
 }
 
-func TestWorkerConfig_ApplyPolicy_SidecarPrivilegedDenied(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_SidecarPrivilegedDenied(t *testing.T) {
+	h := workerViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "worker",
@@ -602,8 +774,8 @@ func TestWorkerConfig_ApplyPolicy_SidecarPrivilegedDenied(t *testing.T) {
 	}
 }
 
-func TestWorkerConfig_ApplyPolicy_SidecarCapabilitiesDenied(t *testing.T) {
-	h := &components.WorkerHandler{}
+func TestWorker_ApplyPolicy_SidecarCapabilitiesDenied(t *testing.T) {
+	h := workerViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "worker",

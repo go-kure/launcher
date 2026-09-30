@@ -23,7 +23,7 @@ var replicaKinds = []struct {
 	props   map[string]any
 }{
 	{"webservice", &components.WebserviceHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}},
-	{"worker", &components.WorkerHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
+	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"postgresql", &components.PostgresqlHandler{}, map[string]any{}},
