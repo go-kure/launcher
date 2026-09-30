@@ -52,6 +52,9 @@ func parseManifestSource(props map[string]any) (*manifestSource, error) {
 	// otherwise report "not yet supported" or "unknown property" at random.
 	for _, k := range slices.Sorted(maps.Keys(props)) {
 		v := props[k]
+		if (k == "inline" || k == "url") && isExplicitNull(v) {
+			continue // an explicit null reads as omission
+		}
 		switch k {
 		case "inline":
 			str, ok := v.(string)

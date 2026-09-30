@@ -1024,7 +1024,11 @@ func parseResourceList(m map[string]any) (corev1.ResourceList, error) {
 	// validateHugePageQuantity, so map iteration order would otherwise decide
 	// which of several bad resource entries an author is told about.
 	for _, k := range slices.Sorted(maps.Keys(m)) {
-		v := m[k]
+		// An explicit null is absence, as in stringMapStrict.
+		v, present := authoredValue(m, k)
+		if !present {
+			continue
+		}
 		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
 			return nil, errors.Errorf("%s: invalid resource name: %s", k, strings.Join(errs, "; "))
 		}
@@ -3520,7 +3524,7 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 		cfg.TTLSecondsAfterFinished = &v
 	}
 
-	if raw, present := props["completionMode"]; present {
+	if raw, present := authoredValue(props, "completionMode"); present {
 		s, ok := raw.(string)
 		if !ok {
 			return cfg, errors.Errorf("completionMode: must be a string, got %T", raw)

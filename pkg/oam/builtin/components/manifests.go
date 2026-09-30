@@ -72,9 +72,21 @@ func (h *ManifestsHandler) ToApplicationConfig(component *oam.Component, namespa
 // isAPIGovernedScope) and one a CRD in the same source defines, which it must
 // agree with rather than override (see stampManifestNamespaces).
 func parseScopeOverrides(props map[string]any) (map[schema.GroupVersionKind]manifest.ScopeResult, map[string]any, error) {
-	raw, ok := props["scopeOverrides"]
-	if !ok {
+	if _, present := props["scopeOverrides"]; !present {
 		return nil, props, nil
+	}
+	srcProps := make(map[string]any, len(props))
+	for k, v := range props {
+		if k == "scopeOverrides" {
+			continue
+		}
+		srcProps[k] = v
+	}
+	// An explicit null, typed or untyped, reads as omission; the key is still
+	// removed so parseManifestSource does not refuse it as unknown.
+	raw, ok := authoredValue(props, "scopeOverrides")
+	if !ok {
+		return nil, srcProps, nil
 	}
 	list, ok := raw.([]any)
 	if !ok {
@@ -107,13 +119,6 @@ func parseScopeOverrides(props map[string]any) (map[schema.GroupVersionKind]mani
 			return nil, nil, errors.Errorf("scopeOverrides[%d]: scope %q is invalid; must be \"Cluster\" or \"Namespaced\"", i, scopeStr)
 		}
 		overrides[schema.FromAPIVersionAndKind(apiVersion, kind)] = scope
-	}
-	srcProps := make(map[string]any, len(props))
-	for k, v := range props {
-		if k == "scopeOverrides" {
-			continue
-		}
-		srcProps[k] = v
 	}
 	return overrides, srcProps, nil
 }

@@ -732,9 +732,14 @@ func parseLabelMap(raw map[string]any, label string) (map[string]string, error) 
 	}
 	slices.Sort(keys)
 	for _, k := range keys {
-		s, ok := raw[k].(string)
+		// An explicit null is absence, as in stringMapStrict.
+		v, present := authoredValue(raw, k)
+		if !present {
+			continue
+		}
+		s, ok := v.(string)
 		if !ok {
-			return nil, errors.Errorf("%s.%s: must be a string, got %T", label, k, raw[k])
+			return nil, errors.Errorf("%s.%s: must be a string, got %T", label, k, v)
 		}
 		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
 			return nil, errors.Errorf("%s: invalid label key %q: %s", label, k, strings.Join(errs, "; "))

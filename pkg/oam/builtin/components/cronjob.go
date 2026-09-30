@@ -152,7 +152,7 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	}
 
 	config.SuccessfulJobsHistoryLimit = 3
-	if raw, ok := props["successfulJobsHistoryLimit"]; ok {
+	if raw, ok := authoredValue(props, "successfulJobsHistoryLimit"); ok {
 		limit, err := parseHistoryLimit("successfulJobsHistoryLimit", raw)
 		if err != nil {
 			return nil, err
@@ -161,7 +161,7 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	}
 
 	config.FailedJobsHistoryLimit = 1
-	if raw, ok := props["failedJobsHistoryLimit"]; ok {
+	if raw, ok := authoredValue(props, "failedJobsHistoryLimit"); ok {
 		limit, err := parseHistoryLimit("failedJobsHistoryLimit", raw)
 		if err != nil {
 			return nil, err
@@ -204,7 +204,7 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	// time.LoadLocation for the same reason: LoadLocation("Local") succeeds
 	// (it returns the process's own local zone), but Kubernetes' own CronJob
 	// validation explicitly rejects "Local" as server-dependent.
-	if raw, present := props["timeZone"]; present {
+	if raw, present := authoredValue(props, "timeZone"); present {
 		tz, ok := raw.(string)
 		if !ok {
 			return nil, errors.Errorf("timeZone: must be a string, got %T", raw)
