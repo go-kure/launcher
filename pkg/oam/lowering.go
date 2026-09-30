@@ -1567,8 +1567,8 @@ func isForwardedTrait(trait *Trait, original []Trait) bool {
 // forwardableTraits returns a copy of traits with every element marked as the
 // origin of any by-value copy a component rule makes of it (Trait.forwardedFrom),
 // for isForwardedTrait. A copy, never the caller's slice: marking in place would
-// write into the authored document's backing array, which lower() never mutates.
-// Empty input is returned as is.
+// leave the mark on the authored document's own trait elements, outside the one
+// rule invocation it describes. Empty input is returned as is.
 func forwardableTraits(traits []Trait) []Trait {
 	if len(traits) == 0 {
 		return traits
