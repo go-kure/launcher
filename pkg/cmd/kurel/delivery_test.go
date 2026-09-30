@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 
@@ -629,6 +631,154 @@ func TestDeliveryEmptyBuild(t *testing.T) {
 		t.Errorf("empty artifact kustomization.yaml:\n%s\nwant:\n%s", kust, emptyArtifactKustomization)
 	}
 	checkDelivery(t, out, "empty", "", nil)
+}
+
+// collisionAppYAML is an application "shop", one reconciliation unit named
+// "shop" whose delivery objects are Kustomization and OCIRepository
+// flux-system/shop; %s is the application namespace and %s the components.
+const collisionAppYAML = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: %s
+spec:
+  components:
+%s`
+
+// ociShopComponent is an oci component named like the unit: it renders its
+// own OCIRepository and Kustomization "shop" in the application namespace.
+const ociShopComponent = `    - name: shop
+      type: oci
+      properties:
+        source:
+          url: oci://registry.example.com/manifests/shop
+        version: "1.0.0"
+`
+
+// configMapShopComponent is a webservice with a ConfigMap named like the unit.
+const configMapShopComponent = `    - name: web
+      type: webservice
+      properties:
+        image: ghcr.io/example/web:v1.0.0
+        port: 8080
+      traits:
+        - type: configmap
+          properties:
+            name: shop
+            data:
+              KEY: value
+`
+
+// TestDeliveryRefusesArtifactCollision checks that a build whose artifact
+// carries an object with a delivery object's identity is refused before
+// anything is written: an oci component named like its unit, in the Flux
+// namespace, renders the OCIRepository and Kustomization the delivery output
+// generates for that unit.
+func TestDeliveryRefusesArtifactCollision(t *testing.T) {
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", fmt.Sprintf(collisionAppYAML, "flux-system", ociShopComponent))
+	out := filepath.Join(t.TempDir(), "out")
+	stdout, err := runKurel(t, "build", appPath, "--profile", filepath.Join(deliveryTestdata, "cluster.yaml"),
+		"-o", out, "--oci-repository", testOCIRepository)
+	if err == nil {
+		t.Fatal("build accepted an artifact object with a delivery object's identity")
+	}
+	t.Logf("refused: %v", err)
+	for _, want := range []string{`artifact "shop"`, "flux-system/shop", "rename the component"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+	if stdout != "" {
+		t.Errorf("wrote to stdout before refusing:\n%s", stdout)
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Errorf("created the output directory before refusing (stat error %v)", err)
+	}
+}
+
+// TestCheckCollisions checks the identity checkCollisions compares: API group,
+// kind, exact namespace and name, not the version.
+func TestCheckCollisions(t *testing.T) {
+	obj := func(apiVersion, kind, namespace, name string) *client.Object {
+		u := &unstructured.Unstructured{}
+		u.SetAPIVersion(apiVersion)
+		u.SetKind(kind)
+		u.SetNamespace(namespace)
+		u.SetName(name)
+		o := client.Object(u)
+		return &o
+	}
+	flux := []*client.Object{
+		obj("kustomize.toolkit.fluxcd.io/v1", "Kustomization", "flux-system", "shop"),
+		obj("source.toolkit.fluxcd.io/v1", "OCIRepository", "flux-system", "shop"),
+	}
+	tests := []struct {
+		name    string
+		object  *client.Object
+		collide bool
+	}{
+		{"same Kustomization", obj("kustomize.toolkit.fluxcd.io/v1", "Kustomization", "flux-system", "shop"), true},
+		{"same OCIRepository at another version", obj("source.toolkit.fluxcd.io/v1beta2", "OCIRepository", "flux-system", "shop"), true},
+		{"other namespace", obj("kustomize.toolkit.fluxcd.io/v1", "Kustomization", "apps", "shop"), false},
+		{"no namespace", obj("kustomize.toolkit.fluxcd.io/v1", "Kustomization", "", "shop"), false},
+		{"other name", obj("kustomize.toolkit.fluxcd.io/v1", "Kustomization", "flux-system", "shop-db"), false},
+		{"other group, same kind", obj("kustomize.config.k8s.io/v1beta1", "Kustomization", "flux-system", "shop"), false},
+		{"other kind", obj("v1", "ConfigMap", "flux-system", "shop"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &deliveryOutput{
+				artifacts: []deliveryArtifact{{name: "shop", objects: []*client.Object{tt.object}}},
+				flux:      flux,
+			}
+			err := d.checkCollisions()
+			if tt.collide && err == nil {
+				t.Error("collision accepted")
+			}
+			if !tt.collide && err != nil {
+				t.Errorf("refused: %v", err)
+			}
+		})
+	}
+}
+
+// TestDeliveryAcceptsNearCollision checks artifact objects that share a
+// delivery object's name but not its identity: the same kinds in another
+// namespace, and another kind in the Flux namespace.
+func TestDeliveryAcceptsNearCollision(t *testing.T) {
+	tests := []struct {
+		name, namespace, components string
+	}{
+		{"same kinds, other namespace", "shop", ociShopComponent},
+		{"other kind, Flux namespace", "flux-system", configMapShopComponent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			appPath := writeTempFile(t, dir, "app.yaml", fmt.Sprintf(collisionAppYAML, tt.namespace, tt.components))
+			out := t.TempDir()
+			if _, err := runKurel(t, "build", appPath, "--profile", filepath.Join(deliveryTestdata, "cluster.yaml"),
+				"-o", out, "--oci-repository", testOCIRepository); err != nil {
+				t.Fatalf("delivery build refused: %v", err)
+			}
+			manifests, err := os.ReadFile(filepath.Join(out, "shop", artifactManifestsFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The near miss is really in the artifact: an object named "shop".
+			found := false
+			for _, o := range decodeDocs(t, manifests) {
+				md, _ := o["metadata"].(map[string]any)
+				if str(md["name"]) == "shop" {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("artifact holds no object named shop:\n%s", manifests)
+			}
+		})
+	}
 }
 
 // TestDeliveryFlagsAccepted checks --oci-repository and --oci-tag values the

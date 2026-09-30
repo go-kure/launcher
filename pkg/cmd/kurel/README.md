@@ -231,6 +231,12 @@ generated` and writes no `<app>.yaml` (one an earlier build wrote stays), but wi
 output: every bundle's artifact directory holds only the empty `kustomization.yaml`, and a
 `manifests.yaml` an earlier build left there is removed.
 
+A build is refused, before anything is written, when an artifact carries an object with
+the API group, kind, namespace and name of one of the generated `OCIRepository` or
+`Kustomization` objects — for example an `oci` component named like its bundle in an
+application whose namespace is `flux-system`: reconciling that artifact would overwrite
+its own source or `Kustomization`. Rename the component or the application.
+
 The flags are checked before the build reads anything, and each bundle's url before
 anything is written:
 
