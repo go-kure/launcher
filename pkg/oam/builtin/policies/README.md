@@ -143,8 +143,8 @@ Each handler then checks what it reads when the transform dispatches the policy:
 required property that is missing or empty, an empty `checks` list, an invalid duration,
 an unknown tier or component, a self-dependency or a cycle is an error. A caller that drives
 `Transform` without calling `ValidateAuthoredProperties` first gets only this second
-check, in which a key the handler does not read is ignored and a wrongly typed
-`reconciliation` value is skipped as if absent.
+check, in which a key the handler does not read is ignored. A wrongly typed value
+the handler does read is still an error there.
 
 ## What `kurel build` shows
 
