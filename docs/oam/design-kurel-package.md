@@ -161,22 +161,37 @@ delivery pipeline and has no meaning in a static manifest build.
 
 ### 4.4 OAM policies
 
-OAM Application policies are parsed and passed to the runtime unchanged. The runtime
-does not interpret any policy type in Phase 1 (policy application via `Enforceable` is
-wired in Phase 1 but uses `NoopPolicy` by default). Policy handling is activated in
-Phase 1 via the `--policy` flag.
+Each `spec.policies` entry is dispatched by `type` to a `PolicyHandler` in
+`pkg/oam/builtin/policies/`; a type with no handler fails the build with
+`no handler for policy type`. A policy shapes how the application is grouped and
+reconciled, not which objects it emits:
+
+| type | description |
+|---|---|
+| `dependency` | Orders components of this application: `rules[]` of `{component, dependsOn[]}`. Referenced components must exist; self-dependencies and cycles are rejected. Any rule switches the cluster to one bundle per component, wired with `dependsOn`. |
+| `placement` | Overrides a component's deployment tier: `component`, `tier` (`infra`, `services` or `apps`). |
+| `reconciliation` | Flux settings for every leaf bundle: `interval`, `retryInterval`, `timeout` (Go durations), `prune`, `wait`, `force`, `suspend`. At least one is required; at most one such policy per application. |
+| `health-checks` | Extra Flux health checks appended to every leaf bundle: `checks[]` of `{apiVersion, kind, name, namespace}`. Flux ignores them when `wait` is true. |
+
+`app-dependency` (ordering one application after others) is not built in: `kurel build`
+builds a single application and has nothing to order it against. A caller that
+orchestrates several applications registers its own handler for it.
 
 ```yaml
 spec:
   # ...
   policies:
-  - name: resource-limits
-    type: env-policy
+  - name: deploy-order
+    type: dependency
     properties:
-      # downstream-style EnvironmentPolicy fields
-      enforced:
-        maxReplicas: 5
+      rules:
+      - component: web
+        dependsOn: [db]
 ```
+
+These are distinct from the `Policy` interface (`options-policy-interface.md`), the
+environment constraints a caller passes in the transform context; `kurel build`
+uses `NoopPolicy` for that.
 
 ---
 

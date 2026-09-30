@@ -94,7 +94,11 @@ func (t Trait) Origin() (Origin, bool) {
 	return *t.origin, true
 }
 
-// ApplicationPolicy defines an application-level policy entry passed through to the runtime unchanged.
+// ApplicationPolicy defines an application-level policy entry. The transform
+// dispatches it by Type to the PolicyHandler registered for that type (see
+// Transformer.RegisterPolicy), which records its effect on the PolicyResult; a
+// type with no registered handler is a transform error. kurel registers the
+// built-in handlers in pkg/oam/builtin/policies.
 type ApplicationPolicy struct {
 	Name       string         `yaml:"name"`
 	Type       string         `yaml:"type"`

@@ -47,12 +47,15 @@ import (
 //     validateAuthoredTraitAgainst. A type with no registered handler or rule is
 //     passed over entirely, per the first bullet.
 //
-//   - Policies are passed over deliberately, and this one is a property of the
-//     model rather than a gap. ApplicationPolicy is documented pass-through
-//     (types.go), no production code registers a PolicyHandler at all, and a policy
-//     is handed to the runtime unchanged. Launcher declares no schema for any policy
-//     type, so there is nothing to check a policy's properties against and rejecting
-//     an undeclared key there would reject every policy ever written.
+//   - Policies are passed over. A policy's properties are checked only by the
+//     PolicyHandler registered for its type, when the transform dispatches it:
+//     the handler rejects a missing or malformed key it reads, but a key it does
+//     not read is ignored rather than rejected. That holds for the built-in
+//     policy handlers kurel registers (pkg/oam/builtin/policies) even though each
+//     declares a PropertySchema — the schema is published and enforced on
+//     emitted policies (validateEmittedPolicy), not on authored ones here. A
+//     policy type with no registered handler fails at transform time ("no
+//     handler for policy type"), not here.
 //
 // Returns the first error in a deterministic order (components in document order,
 // each component's own properties before its traits), so a document with several

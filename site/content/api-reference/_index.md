@@ -25,6 +25,7 @@ For the full Go API, see
 | [OAM Model](oam) | OAM data model, parser, and transform pipeline | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) |
 | [Component Handlers](oam-components) | Built-in component types (webservice, worker, cronjob, helmchart, helmrelease, helmtemplate, …) | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components) |
 | [Trait Handlers](oam-traits) | Built-in traits (ingress, certificate, scaler, externalsecret, …) | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits) |
+| [Policy Handlers](oam-policies) | Built-in application policies (dependency, placement, reconciliation, health-checks) | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies) |
 
 ## Libraries
 

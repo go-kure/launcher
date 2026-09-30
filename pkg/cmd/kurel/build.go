@@ -17,6 +17,7 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
+	"github.com/go-kure/launcher/pkg/oam/builtin/policies"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -319,8 +320,24 @@ func builtinComponentLoweringRules() map[string]oam.ComponentLoweringRule {
 	}
 }
 
+// builtinPolicyHandlers returns the built-in application policy handlers keyed
+// by policy type. It is the single source of truth for policy registration,
+// shared by newBuiltinTransformer and the handler-schema tests. app-dependency
+// is deliberately absent: it orders one application after others, and a
+// single-application build has nothing to order it against, so registering it
+// would accept the policy and silently drop it. It keeps failing with "no
+// handler for policy type" instead.
+func builtinPolicyHandlers() map[string]oam.PolicyHandler {
+	return map[string]oam.PolicyHandler{
+		"dependency":     &policies.DependencyHandler{},
+		"placement":      &policies.PlacementHandler{},
+		"reconciliation": &policies.ReconciliationSettingsHandler{},
+		"health-checks":  &policies.HealthChecksHandler{},
+	}
+}
+
 // newBuiltinTransformer creates a Transformer pre-loaded with all supported
-// built-in component and trait handlers and lowering rules.
+// built-in component, trait and policy handlers and lowering rules.
 func newBuiltinTransformer() *oam.Transformer {
 	t := oam.NewTransformer(builtinComponentHandlers(), nil)
 	// "worker" is a component-position lowering rule, not a dispatchable handler:
@@ -334,6 +351,9 @@ func newBuiltinTransformer() *oam.Transformer {
 	}
 	for name, h := range builtinTraitHandlers() {
 		t.RegisterBuiltinTrait(name, h)
+	}
+	for name, h := range builtinPolicyHandlers() {
+		t.RegisterPolicy(name, h)
 	}
 	// "expose" is a trait-position lowering rule (D5), not a dispatchable handler:
 	// it lowers into a terminal "ingress" or "httproute" trait for IngressHandler/

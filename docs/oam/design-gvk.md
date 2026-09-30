@@ -240,8 +240,8 @@ the component level, or a stray `spec.traits`, fails there.
 **Authored `properties` maps** are not covered by that decoder. `Component.Properties`,
 `Trait.Properties` and `ApplicationPolicy.Properties` (`pkg/oam/types.go`)
 are each `map[string]any`, so YAML strictness stops at the envelope and any key at all decodes
-successfully. Those maps are instead checked against the handler's own declared
-`PropertySchema` by `Transformer.ValidateAuthoredProperties`, which the build calls immediately
+successfully. The component and trait maps are instead checked against the handler's own declared
+`PropertySchema` (policies are a carve-out, below) by `Transformer.ValidateAuthoredProperties`, which the build calls immediately
 after parsing (`pkg/cmd/kurel/build.go`). An undeclared key is a build error naming the
 allowed fields; a declared key whose value has the wrong type is a build error too. An array- or
 object-typed value that validation had to rebuild in order to check it — a typed Go `[]string`
@@ -269,15 +269,16 @@ that does.
 which is a bare string until substitution; type-checking before substitution would reject a
 document whose integer- or boolean-typed property is supplied by a parameter.
 
-### Two deliberate carve-outs
+### Two carve-outs
 
-Neither is an oversight; both are places where launcher has no schema to check against, and
-inventing one would reject documents that are correct today.
-
-**Application policies.** `ApplicationPolicy` is "passed through to the runtime unchanged"
-(`pkg/oam/types.go`), and no production code registers a `PolicyHandler` —
-`Transformer.RegisterPolicy` (`pkg/oam/transform.go`) has no non-test caller. A policy's
-properties therefore have no declared shape, and are not checked.
+**Application policies.** `ValidateAuthoredProperties` does not walk `spec.policies`. A policy's
+properties are checked only by the `PolicyHandler` registered for its type, when the transform
+dispatches it (`Transformer.applyPolicies`, `pkg/oam/transform.go`): the handler rejects a
+missing or malformed key it reads, but a key it does not read is ignored rather than rejected.
+The built-in handlers `kurel build` registers (`dependency`, `placement`, `reconciliation`,
+`health-checks`, in `pkg/oam/builtin/policies`) each declare a `PropertySchema`; it is published
+and enforced on policies a lowering rule emits, but not on authored ones. A policy type with no
+registered handler fails the transform with `no handler for policy type`.
 
 **Trait types declared by a `CapabilityDefinition`.** A definition supplied via
 `--capability-def` declares that a trait type *exists*; it does not declare what properties that
@@ -425,7 +426,7 @@ Launcher's native model borrows the following OAM concepts:
 | Component type | Lowered by a registered `ComponentLoweringRule`, or dispatched to a registered `ComponentHandler` once lowering settles (see Two Axes of a Type) |
 | Trait | Same shape (type, properties); attached to components |
 | Trait type | Lowered by a registered `TraitLoweringRule`, or dispatched to a registered `TraitHandler` once lowering settles (see Two Axes of a Type) |
-| Policy | Present in Application spec; used for enforcement (Phase 1+) |
+| Policy | Same shape (name, type, properties) in `spec.policies`; lowered by a registered `PolicyLoweringRule`, or dispatched to a registered `PolicyHandler` (built-ins: `dependency`, `placement`, `reconciliation`, `health-checks`) |
 
 Concepts not adopted in Phase 0:
 - OAM `WorkloadDefinition` / `ComponentDefinition` / `TraitDefinition` — launcher
