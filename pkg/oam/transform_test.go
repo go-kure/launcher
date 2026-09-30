@@ -449,6 +449,75 @@ func TestTransform_MultiTier_UmbrellaHasNoWait(t *testing.T) {
 	}
 }
 
+func TestTransform_MultiTier_TierBundlesOrdered(t *testing.T) {
+	// go-kure/launcher#575: without a dependency policy, each tier bundle must
+	// still depend on the populated tier before it, skipping an empty tier.
+	tr := NewTransformer(
+		map[string]ComponentHandler{
+			"webservice": &pipelineComponentHandler{typ: "webservice"},
+			"daemonset":  &pipelineComponentHandler{typ: "daemonset"},
+			"postgresql": &pipelineComponentHandler{typ: "postgresql"},
+		},
+		nil,
+	)
+	tests := []struct {
+		name       string
+		components []Component
+		want       map[string][]string // tier bundle -> the bundles it depends on
+	}{
+		{
+			name: "three tiers",
+			components: []Component{
+				makeComponent("web", "webservice"),
+				makeComponent("db", "postgresql"),
+				makeComponent("log", "daemonset"),
+			},
+			want: map[string][]string{
+				"myapp-infra":    nil,
+				"myapp-services": {"myapp-infra"},
+				"myapp-apps":     {"myapp-services"},
+			},
+		},
+		{
+			name: "empty services tier",
+			components: []Component{
+				makeComponent("web", "webservice"),
+				makeComponent("log", "daemonset"),
+			},
+			want: map[string][]string{
+				"myapp-infra": nil,
+				"myapp-apps":  {"myapp-infra"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cluster, err := tr.Transform(makeApp("myapp", tt.components...), TransformContext{})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			children := cluster.Node.Bundle.Children
+			if len(children) != len(tt.want) {
+				t.Fatalf("got %d tier bundles, want %d", len(children), len(tt.want))
+			}
+			for _, b := range children {
+				want, ok := tt.want[b.Name]
+				if !ok {
+					t.Errorf("unexpected tier bundle %q", b.Name)
+					continue
+				}
+				var got []string
+				for _, dep := range b.DependsOn {
+					got = append(got, dep.Name)
+				}
+				if !slices.Equal(got, want) {
+					t.Errorf("%s dependsOn = %v, want %v", b.Name, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestTransform_DependencyPolicy_PerComponentBundles(t *testing.T) {
 	tr := NewTransformer(
 		map[string]ComponentHandler{

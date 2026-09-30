@@ -785,6 +785,12 @@ func (t *Transformer) buildHierarchicalCluster(app *Application, entries []compo
 		tierBundles = append(tierBundles, bundle)
 	}
 
+	// Deploy the tiers in order: each tier bundle depends on the populated tier
+	// before it, the same edge the dependency-aware path wires per component.
+	for i := 1; i < len(tierBundles); i++ {
+		tierBundles[i].DependsOn = append(tierBundles[i].DependsOn, tierBundles[i-1])
+	}
+
 	// No Wait: kure gives an umbrella one health check per child Kustomization,
 	// and Flux ignores health checks when wait is enabled.
 	umbrella := &stack.Bundle{
