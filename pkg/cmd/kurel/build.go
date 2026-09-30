@@ -89,7 +89,7 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		appDir = filepath.Dir(arg)
 	}
 
-	if err := resolveEnvironment(opts, appDir); err != nil {
+	if err := resolveEnvironment(opts, appDir, cmd.Flags()); err != nil {
 		return err
 	}
 

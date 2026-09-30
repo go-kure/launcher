@@ -2,11 +2,14 @@ package kurel
 
 import (
 	"bytes"
+	stderrors "errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/util/validation"
 
@@ -51,15 +54,23 @@ type environmentBinding struct {
 }
 
 // resolveEnvironment turns --environment into the --profile/--values it stands
-// for. It is a no-op when --environment is unset; the flag set already rejects
+// for. It is a no-op when --environment is not passed; the flag set already rejects
 // --environment combined with --profile or --values, so filling both fields here
-// never overrides an explicit flag.
-func resolveEnvironment(opts *buildOptions, appDir string) error {
-	if opts.environment == "" {
-		if opts.environmentsPath != "" {
+// never overrides an explicit flag. Presence is read from flags, not from the
+// values, so an explicitly empty --environment or --environments (an unset
+// variable in a wrapper script) is an error rather than silently ignored.
+func resolveEnvironment(opts *buildOptions, appDir string, flags *pflag.FlagSet) error {
+	if !flags.Changed("environment") {
+		if flags.Changed("environments") {
 			return errors.New("--environments requires --environment")
 		}
 		return nil
+	}
+	if opts.environment == "" {
+		return errors.New("--environment requires a non-empty name")
+	}
+	if flags.Changed("environments") && opts.environmentsPath == "" {
+		return errors.New("--environments requires a non-empty path")
 	}
 
 	path := opts.environmentsPath
@@ -97,6 +108,15 @@ func parseEnvironmentSet(data []byte) (*environmentSet, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&doc); err != nil {
 		return nil, errors.Wrap(err, "decoding")
+	}
+	// One document per file: a trailing `---` document would otherwise be skipped
+	// unread, silently dropping whatever it declares.
+	var extra yaml.Node
+	if err := dec.Decode(&extra); !stderrors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, errors.Wrap(err, "decoding")
+		}
+		return nil, errors.New("expected a single YAML document, found more than one")
 	}
 
 	if doc.APIVersion != oam.SupportedAPIVersion {
