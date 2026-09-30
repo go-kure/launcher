@@ -57,6 +57,13 @@ var defaultTierMap = map[string]Tier{
 	"crd":          TierApps,
 	"manifests":    TierApps,
 	"oci":          TierApps,
+
+	// The kind-named Flux source components (go-kure/launcher#347) sit with the
+	// oci and helmchart components that also emit Flux sources.
+	"helmrepository": TierApps,
+	"ocirepository":  TierApps,
+	"gitrepository":  TierApps,
+	"bucket":         TierApps,
 }
 
 // validTiers is the set of valid tier values for annotation validation.

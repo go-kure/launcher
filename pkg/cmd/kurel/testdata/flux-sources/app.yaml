@@ -1,0 +1,41 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: sources
+  namespace: sources
+spec:
+  components:
+    - name: podinfo-charts
+      type: helmrepository
+      properties:
+        url: https://stefanprodan.github.io/podinfo
+    - name: podinfo-oci-charts
+      type: helmrepository
+      properties:
+        url: oci://ghcr.io/stefanprodan/charts
+        type: oci
+    - name: podinfo-manifests
+      type: ocirepository
+      properties:
+        url: oci://ghcr.io/stefanprodan/manifests/podinfo
+        ref:
+          semver: ">=6.0.0"
+        interval: 10m
+    - name: podinfo-repo
+      type: gitrepository
+      properties:
+        url: https://github.com/stefanprodan/podinfo
+        ref:
+          branch: master
+        ignore: |
+          /*
+          !/kustomize
+    - name: artifacts
+      type: bucket
+      properties:
+        bucketName: artifacts
+        endpoint: minio.minio.svc.cluster.local:9000
+        insecure: true
+        secretRef:
+          name: minio-credentials
+        suspend: true

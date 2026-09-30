@@ -68,7 +68,8 @@ type TransformContext struct {
 }
 
 // fluxNamespaceSettable is implemented by ApplicationConfig types that emit
-// Flux CRDs (HelmRelease, HelmRepository, OCIRepository) and support per-request
+// Flux CRDs (HelmRelease, Kustomization, and the HelmRepository, OCIRepository,
+// GitRepository and Bucket sources) and support per-request
 // namespace re-stamping. Decorators that wrap such configs must also implement
 // this interface and forward the call.
 type fluxNamespaceSettable interface {
@@ -1094,6 +1095,15 @@ func detectCycles(deps map[string][]string) error {
 // HelmReleaseConfig vetoes for its own `suspend: true` the same way: a
 // suspended HelmRelease is not reconciled, so its Ready condition cannot report
 // on it.
+//
+// The kind-named Flux source components (go-kure/launcher#347) are listed: each
+// emits exactly one source CR whose Ready condition kstatus reads, so a
+// Kustomization that depends on a source waits until the source is ready. Each
+// vetoes its check for `suspend: true`, the same shape as job's veto: the
+// document tells source-controller not to reconcile. helmrepository also vetoes
+// for `type: oci`, which Flux treats as a static object with no artifact, so
+// there is no reconcile to wait on. The GVK is a *.toolkit.fluxcd.io kind, so
+// the check follows the CR to the Flux namespace when one is set.
 var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"webservice":  {"apps/v1", "Deployment"},
 	"worker":      {"apps/v1", "Deployment"},
@@ -1105,6 +1115,11 @@ var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"helmrelease": {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
 	"postgresql":  {"postgresql.cnpg.io/v1", "Cluster"},
 	"oci":         {"kustomize.toolkit.fluxcd.io/v1", "Kustomization"},
+
+	"helmrepository": {"source.toolkit.fluxcd.io/v1", "HelmRepository"},
+	"ocirepository":  {"source.toolkit.fluxcd.io/v1", "OCIRepository"},
+	"gitrepository":  {"source.toolkit.fluxcd.io/v1", "GitRepository"},
+	"bucket":         {"source.toolkit.fluxcd.io/v1", "Bucket"},
 }
 
 // postProcessFluxNamespace walks all leaf bundle applications and calls

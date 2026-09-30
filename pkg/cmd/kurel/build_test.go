@@ -439,7 +439,10 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 	wantHandlers := []string{
 		"crd", "cronjob", "daemonset", "deployment", "helmchart", "helmrelease", "helmtemplate", "job", "manifests",
 		"oci", "passthrough", "postgresql", "service", "statefulset", "webservice",
+		// The kind-named Flux source components (go-kure/launcher#347).
+		"bucket", "gitrepository", "helmrepository", "ocirepository",
 	}
+	sort.Strings(wantHandlers)
 	wantRules := []string{"worker"}
 
 	got := make([]string, 0, len(builtinComponentHandlers()))
