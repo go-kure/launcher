@@ -37,6 +37,12 @@ var validComponentTypes = map[string]bool{
 	"crd":          true,
 	"manifests":    true,
 	"oci":          true,
+
+	// The kind-named Flux source components (go-kure/launcher#347).
+	"helmrepository": true,
+	"ocirepository":  true,
+	"gitrepository":  true,
+	"bucket":         true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.

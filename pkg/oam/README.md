@@ -208,6 +208,13 @@ config accepts a Flux namespace, the check moves to that namespace with the obje
 in `defaultTierMap` at `TierApps`, like `helmchart`. It declines its check for
 `suspend: true` (below).
 
+The kind-named Flux source components `helmrepository`, `ocirepository`, `gitrepository` and
+`bucket` (go-kure/launcher#347) are listed, each with its own `source.toolkit.fluxcd.io/v1`
+GVK: each emits exactly one source CR, whose Ready condition kstatus reads, so a dependent
+Kustomization waits until the source is ready. Because the GVK is a `*.toolkit.fluxcd.io` kind
+and each config accepts a Flux namespace, the check moves to that namespace with the object.
+They sit in `defaultTierMap` at `TierApps`, like `oci` and `helmchart`.
+
 A listed type can still decline its check per document by implementing
 `EmitsAutoHealthCheck() bool`. `job` uses it for `suspend: true` — a suspended Job creates no
 pods, so it reaches neither `Complete` nor `Failed` and the wait would block for exactly as
@@ -216,7 +223,10 @@ for `paused: true`: the document instructs the workload not to progress, so wait
 not a health signal but a guaranteed timeout. `helmrelease` declines it for `suspend: true`
 too: helm-controller does not reconcile a suspended HelmRelease, and the Ready condition the
 check reads is written by a reconciliation, so a newly created suspended release never acquires
-one. The HelmRelease is still emitted; only the check is skipped.
+one. The HelmRelease is still emitted; only the check is skipped. The four Flux source components veto for their
+own `suspend: true` for the same reason — the document tells source-controller not to reconcile
+— and `helmrepository` also vetoes for `type: oci`, which Flux treats as a static object with
+no artifact, so there is no reconcile to wait on.
 
 ## Transform & extension
 

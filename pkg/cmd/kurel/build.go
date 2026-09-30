@@ -268,6 +268,11 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"crd":          &components.CRDHandler{},
 		"manifests":    &components.ManifestsHandler{},
 		"oci":          &components.OCIHandler{},
+
+		"helmrepository": &components.HelmRepositoryHandler{},
+		"ocirepository":  &components.OCIRepositoryHandler{},
+		"gitrepository":  &components.GitRepositoryHandler{},
+		"bucket":         &components.BucketHandler{},
 	}
 }
 

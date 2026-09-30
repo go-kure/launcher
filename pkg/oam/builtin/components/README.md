@@ -29,6 +29,12 @@ any depth (see its entry under "Per-type highlights"). Every property
 schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler API
 Reference.
 
+The kind-named Flux source components (`helmrepository`, `ocirepository`, `gitrepository`,
+`bucket`) reach the same strictness another way: each schema declares exactly the top-level keys
+of its source-controller spec type and leaves the nested Flux blocks open, and each handler
+decodes the whole property map strictly into that type, refusing an unknown or wrongly typed key
+at any depth (see their entry under "Per-type highlights").
+
 ## How to read the wrong-type notes below
 
 This document states wrong-type handling **per field**, and makes no blanket
@@ -64,6 +70,10 @@ reads it.
 | `helmrelease` | HelmRelease (+values ConfigMap) | Kind-named: the full Flux `HelmReleaseSpec` plus `valuesMode`, against an existing source. |
 | `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. The composite's `delivery: template`, authorable directly — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
+| `helmrepository` | HelmRepository | Kind-named: the full Flux `HelmRepositorySpec`, and nothing else. |
+| `ocirepository` | OCIRepository | Kind-named: the full Flux `OCIRepositorySpec`, with no Kustomization (compare `oci`). |
+| `gitrepository` | GitRepository | Kind-named: the full Flux `GitRepositorySpec`. |
+| `bucket` | Bucket | Kind-named: the full Flux `BucketSpec`. |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
 | `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
@@ -2163,6 +2173,65 @@ not part of either change.
   `oci://registry/my-artifact` are pulled from Docker Hub, so they are refused
   even when `ghcr.io` or `registry` is listed. No policy, or an empty
   allowlist, accepts every `oci://` url.
+- **helmrepository / ocirepository / gitrepository / bucket** — the kind-named terminals for
+  Flux's four fetching source kinds (go-kure/launcher#347, part of the Helm-family redesign
+  go-kure/launcher#336). Each component's properties are exactly the top-level JSON keys of its
+  source-controller spec type — `HelmRepositorySpec`, `OCIRepositorySpec`, `GitRepositorySpec`,
+  `BucketSpec`, in the version `go.mod` links — and a test ties each published schema to its
+  struct, so a bump that adds or drops a spec field fails the suite until the schema follows.
+  Each emits exactly one CR of its kind, named after the component, and nothing else: no
+  Kustomization (compare `oci`), no HelmRelease (compare `helmchart`), and no source dedup — two
+  components naming the same URL emit two CRs.
+
+  **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON` into the spec
+  type, with no launcher-owned keys. A key the struct does not declare, at any depth
+  (`secretRef.namespace`, a stray key in a GitRepository `include` entry), is refused by name, and
+  so is a wrongly typed value (`suspend: "yes"`, an unparsable duration). The schema keeps the
+  nested Flux blocks as open objects; the strict decode is what checks them. A reflection test
+  asserts, per kind, that no spec field is unreachable through that decode, against an explicit
+  exclusion list that is empty. Keys match case-insensitively, as in `encoding/json`; schema
+  validation, which a `kurel build` runs first, is exact.
+
+  **Checks and defaults.** Required: `url` on `helmrepository`, `ocirepository` and
+  `gitrepository`; `bucketName` and `endpoint` on `bucket`. A `url` must start with a scheme the
+  CRD's own pattern admits: `http://`, `https://` or `oci://` for `helmrepository`, and only
+  `oci://` under `type: oci`; `oci://` for `ocirepository`; `http://`, `https://` or `ssh://` for
+  `gitrepository`, so an scp-style `git@host:org/repo` is refused — write
+  `ssh://git@host/org/repo`. The CRD has no pattern for `endpoint`, so it is only required.
+  `interval` defaults to `60m` when unset (a zero duration counts as unset), the `helmchart`
+  composite's source default; a `helmrepository` with `type: oci` gets no default, since Flux
+  does not poll it, and its emitted `interval` reads `0s`, the value the Go type always writes.
+  Nothing else is checked or defaulted: enums (`type`, `provider`, `layerSelector.operation`,
+  `verify.mode`) and cross-field rules (a Bucket's `sts` against its `provider`,
+  `serviceAccountName` against `secretRef`) are left to the CRD's own admission.
+
+  **Policy.** `ApplyPolicy` checks the host the source is fetched from against the policy's
+  allowed registries (`AllowedRegistries`), with the same exact match `oci`, `crd` and
+  `manifests` apply: the `url` host for the three repositories, the `endpoint` host for `bucket`.
+  A port is part of the host, so `registry.local:5000` matches only an entry with that port. The
+  user of an `ssh://` URL is dropped (`ssh://git@github.com/org/repo` checks `github.com`);
+  userinfo on an `http://`, `https://` or `oci://` URL is not, so such a URL matches no entry and
+  is refused. An empty allowlist permits every host. Hosts a source reaches indirectly are not
+  checked: the chart URLs a Helm repository index advertises on other hosts (what
+  `passCredentials` exists for), and a Bucket's `sts.endpoint`.
+
+  **Namespace and references.** The CR lands in the Flux namespace when one is configured, else in
+  the application namespace (`SetFluxNamespace`). Every local reference it carries — `secretRef`,
+  `certSecretRef`, `proxySecretRef`, the Secret references under `verify` and `sts`,
+  `serviceAccountName`, a GitRepository `include` — resolves in the namespace the CR lands in, so
+  under a Flux namespace the objects it names must live there.
+
+  **Health check.** The inferred auto health check references the CR
+  (`source.toolkit.fluxcd.io/v1`, in the namespace the CR lands in). `suspend: true` skips it,
+  as `job` does for its own `suspend: true`, and so does a `helmrepository` with `type: oci`,
+  which Flux treats as a static object with no artifact to wait for.
+
+  **Compared with the `helmchart` composite's inline source** (`source.url`). The composite emits
+  a HelmRepository, or an OCIRepository for an `oci://` URL, carrying only `url`, `interval` and,
+  for OCI, a `ref.tag` from `version`; it shares one CR between components naming the same
+  source; and it does not check the URL host against the allowed registries. The source
+  components expose the whole spec (credentials, `type: oci`, `provider`, verification, …), check
+  the host, and never share a CR. These are deliberate deltas, not gaps.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.

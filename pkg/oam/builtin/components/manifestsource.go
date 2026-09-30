@@ -197,8 +197,27 @@ func enforceAllowedURLHosts(rawURL string, allowed []string) error {
 	return errors.Errorf("source registry %q is not in allowed registries %v", host, allowed)
 }
 
-// urlHost extracts the host from a URL with scheme (oci://, https://, http://).
+// urlHost extracts the host, port included, that a source URL or endpoint names.
+// For oci://, https:// and http:// the scheme is stripped and the host ends at
+// the first "/". For ssh:// (a GitRepository url) the host ends at the first "/",
+// "?" or "#", and the user is dropped at the last "@", both as net/url splits
+// them, so ssh://git@github.com/org/repo yields github.com. A value with no
+// scheme (a Bucket endpoint, host[:port]) is its own host.
+//
+// enforceAllowedURLHosts compares the result for equality with each allowlist
+// entry, so a value this does not reduce to a bare host — userinfo on an
+// oci://, https:// or http:// URL, an unknown scheme — matches no entry and is
+// refused: the check fails closed.
 func urlHost(rawURL string) string {
+	if rest, ok := strings.CutPrefix(rawURL, "ssh://"); ok {
+		if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+			rest = rest[:i]
+		}
+		if i := strings.LastIndex(rest, "@"); i >= 0 {
+			rest = rest[i+1:]
+		}
+		return rest
+	}
 	for _, scheme := range []string{"oci://", "https://", "http://"} {
 		if after, ok := strings.CutPrefix(rawURL, scheme); ok {
 			rawURL = after

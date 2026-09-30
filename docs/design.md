@@ -169,7 +169,7 @@ Launcher does **not** use the following kure packages. This is by design, not an
 |---|---|
 | `pkg/stack.ApplicationConfig` | Handler output interface — `ComponentHandler.ToApplicationConfig()` in `pkg/oam/handler.go` returns `stack.ApplicationConfig`, which is the bridge to kure's resource builders |
 | `pkg/kubernetes` | Kubernetes resource construction (Deployment, Service, etc.) |
-| `pkg/kubernetes/fluxcd` | GitOps delivery object generation (OCIRepository, Kustomization, HelmRelease) — used by the `oci`, `helmchart` and `helmrelease` component handlers |
+| `pkg/kubernetes/fluxcd` | GitOps delivery object generation (OCIRepository, Kustomization, HelmRelease, and the HelmRepository, GitRepository and Bucket sources) — used by the `oci`, `helmchart` and `helmrelease` component handlers and the kind-named Flux source handlers (`helmrepository`, `ocirepository`, `gitrepository`, `bucket`) |
 | `pkg/manifest` | CRD / manifest classification — used by the `crd` and `manifests` component handlers |
 | `pkg/stack/helm` | Helm chart handling — used by the `helmchart` and `helmtemplate` component handlers |
 | `pkg/stack/layout` | GitOps repo layout — used by trait decorators |
@@ -345,6 +345,7 @@ This monolithic layout is owned by launcher and is designed, but not yet generat
 - Generic `passthrough` component — emits arbitrary CRDs / non-standard objects with no per-type Go handler (#105)
 - Manifest-source components: `crd`, `manifests` — emit CRDs / arbitrary manifests from inline or http(s) URL sources, with scope-aware namespace stamping (classifier in kure `pkg/manifest`); for content authored as YAML rather than as typed component properties
 - `oci` source component — emits an `OCIRepository` source CR (URL+version dedup, flux-namespace placement) plus a per-component Flux `Kustomization`; for content already published as an OCI artifact, reconciled by Flux
+- Kind-named Flux source components: `helmrepository`, `ocirepository`, `gitrepository`, `bucket` — each a strict 1:1 projection of its source-controller spec, emitting exactly one source CR (no dedup, flux-namespace placement, fetch host constrained by the policy registry allowlist) (go-kure/launcher#347)
 
 **Phase 3 (complete): CLI integration** (#33)
 - `kurel build` — OAM mode (app.yaml + --profile cluster.yaml → manifests) (#51)

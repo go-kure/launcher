@@ -1,0 +1,57 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: podinfo-charts
+  namespace: sources
+spec:
+  interval: 1h0m0s
+  url: https://stefanprodan.github.io/podinfo
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: podinfo-oci-charts
+  namespace: sources
+spec:
+  interval: 0s
+  type: oci
+  url: oci://ghcr.io/stefanprodan/charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: podinfo-manifests
+  namespace: sources
+spec:
+  interval: 10m0s
+  ref:
+    semver: '>=6.0.0'
+  url: oci://ghcr.io/stefanprodan/manifests/podinfo
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: podinfo-repo
+  namespace: sources
+spec:
+  ignore: |
+    /*
+    !/kustomize
+  interval: 1h0m0s
+  ref:
+    branch: master
+  url: https://github.com/stefanprodan/podinfo
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: Bucket
+metadata:
+  name: artifacts
+  namespace: sources
+spec:
+  bucketName: artifacts
+  endpoint: minio.minio.svc.cluster.local:9000
+  insecure: true
+  interval: 1h0m0s
+  secretRef:
+    name: minio-credentials
+  suspend: true
