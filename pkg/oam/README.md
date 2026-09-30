@@ -31,6 +31,12 @@ parse → resolve parameters → transform (component + trait handlers) → mani
    `ComponentHandler` and each trait to its `TraitHandler`, merging the
    `ClusterProfile`'s capability choices.
 
+A multi-tier Application (no dependency policy) transforms into a tier umbrella bundle named
+after the Application, with one child bundle per populated tier. The umbrella leaves `Wait`
+unset: kure gives its Kustomization one health check per child Kustomization, and Flux
+ignores health checks when `wait` is enabled, so the umbrella is Ready only when every child
+Kustomization is.
+
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /
 `cilium-networkpolicy` traits are unaffected):
