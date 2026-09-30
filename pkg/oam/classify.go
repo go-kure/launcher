@@ -50,6 +50,7 @@ var defaultTierMap = map[string]Tier{
 	"worker":      TierApps,
 	"cronjob":     TierApps,
 	"helmchart":   TierApps,
+	"helmrelease": TierApps,
 	"daemonset":   TierInfra,
 	"statefulset": TierApps,
 	"crd":         TierApps,

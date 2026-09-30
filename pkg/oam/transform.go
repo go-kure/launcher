@@ -1077,6 +1077,7 @@ var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"daemonset":   {"apps/v1", "DaemonSet"},
 	"job":         {"batch/v1", "Job"},
 	"helmchart":   {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
+	"helmrelease": {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
 	"postgresql":  {"postgresql.cnpg.io/v1", "Cluster"},
 	"oci":         {"kustomize.toolkit.fluxcd.io/v1", "Kustomization"},
 }

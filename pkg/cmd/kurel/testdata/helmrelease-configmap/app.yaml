@@ -1,0 +1,27 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: podinfo
+  namespace: default
+spec:
+  components:
+    - name: podinfo
+      type: helmrelease
+      properties:
+        chart:
+          spec:
+            chart: podinfo
+            version: "6.7.1"
+            sourceRef:
+              kind: HelmRepository
+              name: podinfo
+        install:
+          crds: Create
+        valuesMode: configMap
+        values:
+          replicaCount: 2
+          ui:
+            message: hello
+        valuesFrom:
+          - kind: Secret
+            name: podinfo-credentials

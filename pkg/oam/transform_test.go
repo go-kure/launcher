@@ -1471,6 +1471,24 @@ func TestApplyAutoHealthChecks_OCIUsesFluxNamespace(t *testing.T) {
 	}
 }
 
+// TestApplyAutoHealthChecks_HelmReleaseKindRegistered pins the kind-named
+// "helmrelease" component (go-kure/launcher#327) into componentHealthCheckGVK:
+// its HelmRelease is a Flux control-plane CR relocated to the flux namespace,
+// so the inferred check follows it there, and stays in the app namespace when
+// no flux namespace is configured.
+func TestApplyAutoHealthChecks_HelmReleaseKindRegistered(t *testing.T) {
+	for _, tc := range []struct{ fluxNS, wantNS string }{{"flux-system", "flux-system"}, {"", "demo"}} {
+		app := stack.NewApplication("web", "demo", &fluxHCConfig{})
+		cluster := leafClusterWith(app)
+		applyAutoHealthChecks(cluster, helmchartEntryMap(app, "helmrelease"), nil, tc.fluxNS)
+
+		want := stack.HealthCheck{APIVersion: "helm.toolkit.fluxcd.io/v2", Kind: "HelmRelease", Name: "web", Namespace: tc.wantNS}
+		if hc := cluster.Node.Bundle.HealthChecks; len(hc) != 1 || hc[0] != want {
+			t.Errorf("flux namespace %q: health checks %+v, want [%+v]", tc.fluxNS, hc, want)
+		}
+	}
+}
+
 func TestApplyAutoHealthChecks_OCIEmptyFluxNamespaceUsesAppNamespace(t *testing.T) {
 	// With no flux namespace configured, the Kustomization stays in the app
 	// namespace, so the health check must follow it there.

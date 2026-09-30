@@ -169,7 +169,7 @@ Launcher does **not** use the following kure packages. This is by design, not an
 |---|---|
 | `pkg/stack.ApplicationConfig` | Handler output interface — `ComponentHandler.ToApplicationConfig()` in `pkg/oam/handler.go` returns `stack.ApplicationConfig`, which is the bridge to kure's resource builders |
 | `pkg/kubernetes` | Kubernetes resource construction (Deployment, Service, etc.) |
-| `pkg/kubernetes/fluxcd` | GitOps delivery object generation (OCIRepository, Kustomization) — used by the `oci` and `helmchart` component handlers |
+| `pkg/kubernetes/fluxcd` | GitOps delivery object generation (OCIRepository, Kustomization, HelmRelease) — used by the `oci`, `helmchart` and `helmrelease` component handlers |
 | `pkg/manifest` | CRD / manifest classification — used by the `crd` and `manifests` component handlers |
 | `pkg/stack/helm` | Helm chart handling — used by the `helmchart` component handler |
 | `pkg/stack/layout` | GitOps repo layout — used by trait decorators |
@@ -339,7 +339,7 @@ This monolithic layout is owned by launcher and is designed, but not yet generat
 - Validates the OAM parser → handler → kure pipeline end-to-end
 
 **Phase 2: Built-in handlers** (#32)
-- Component handlers: webservice, worker, deployment, postgresql, cronjob, job, helmchart, daemonset, statefulset, service (go-kure/launcher#48, go-kure/launcher#343, go-kure/launcher#344, go-kure/launcher#411)
+- Component handlers: webservice, worker, deployment, postgresql, cronjob, job, helmchart, helmrelease, daemonset, statefulset, service (go-kure/launcher#48, go-kure/launcher#343, go-kure/launcher#344, go-kure/launcher#411, go-kure/launcher#327)
 - Trait handlers — workload set: expose, certificate, external-secret, pvc, scaler (#49)
 - Trait handlers — network/infra set: ingress, httproute, configmap, networkpolicy, cilium-networkpolicy, volsync (#50)
 - Generic `passthrough` component — emits arbitrary CRDs / non-standard objects with no per-type Go handler (#105)

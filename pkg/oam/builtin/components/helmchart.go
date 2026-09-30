@@ -1159,8 +1159,20 @@ func hookGroupChildName(mlName string, i int, g helm.HookGroup) string {
 // both buildHelmRelease's ValuesReference and AugmentLayout's literal
 // resource — the same helper for both call sites so they cannot diverge.
 func valuesConfigMapName(name string) string {
-	const suffix = "-values"
-	maxPrefix := 253 - len(suffix) // 246
+	return boundedResourceName(name, "-values")
+}
+
+// boundedResourceName appends suffix to name and keeps the result a legal
+// DNS-1123 subdomain name (at most 253 bytes) for any valid component name
+// (validate.go admits DNS-1123 subdomains of up to 253 bytes). A name that
+// fits is name+suffix; one that does not keeps a truncated prefix of name, a
+// short digest of the full name, and suffix intact. valuesConfigMapName (this
+// composite) and helmReleaseValuesConfigMapName (the helmrelease terminal)
+// share it so both follow one scheme; suffix must itself be DNS-1123-legal,
+// start with "-" and end in an alphanumeric, and be short enough to leave room
+// for the digest.
+func boundedResourceName(name, suffix string) string {
+	maxPrefix := 253 - len(suffix)
 	if len(name) <= maxPrefix {
 		return name + suffix
 	}
