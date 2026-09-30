@@ -150,7 +150,7 @@ func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, 
 		}
 	}
 
-	return nil
+	return validateComponentLabelValues(app.Spec.Components)
 }
 
 // toTypeSet builds a membership set from a type-name slice. Returns nil for an empty

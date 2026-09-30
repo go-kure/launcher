@@ -3,6 +3,7 @@ package oam
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -47,7 +48,9 @@ const ComponentLabelDigestLength = 10
 // value only when both have the same trimmed prefix and the same 40-bit digest
 // — the untrimmed 52-character cuts may differ, e.g. only in a trailing '-'
 // versus '.' — or when one author deliberately names a component exactly like
-// another's projection.
+// another's projection. Validation rejects an Application in which either
+// happens (validateComponentLabelValues), so within one Application distinct
+// components always carry distinct label values.
 //
 // name must be a valid component name (a DNS-1123 subdomain); the result is
 // unspecified otherwise.
@@ -63,4 +66,25 @@ func ComponentLabelValue(name string) string {
 		return digest
 	}
 	return prefix + "-" + digest
+}
+
+// validateComponentLabelValues rejects an Application in which two components
+// share a ComponentLabelValue. The projection's output is itself a valid name
+// of 63 characters or fewer, which ComponentLabelValue returns unchanged, so a
+// component named exactly like another component's projection would carry the
+// same `app` label, and the selectors generated for either (a NetworkPolicy
+// podSelector, a PodDisruptionBudget, a Service) would also pick out the
+// other's pods. Distinct names are already enforced, so this only fails for
+// such a name, or for two long names whose trimmed prefix and 40-bit digest
+// both coincide. components must already have passed validateComponent.
+func validateComponentLabelValues(components []Component) error {
+	owner := make(map[string]string, len(components))
+	for _, c := range components {
+		v := ComponentLabelValue(c.Name)
+		if other, ok := owner[v]; ok {
+			return oamValidationError("name", fmt.Sprintf("components %q and %q share the component label value %q; rename one of them", other, c.Name, v))
+		}
+		owner[v] = c.Name
+	}
+	return nil
 }

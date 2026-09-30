@@ -111,6 +111,10 @@ It is a projection rather than a refusal because the label is an identifier, not
 name: several component types (`helmchart`, `manifests`, `oci`,
 `crd`, `passthrough`) and their traits accept a name over 63 characters. Object names are never
 projected.
+Because a projected value is itself a valid component name, validation rejects an Application
+in which two components share a `ComponentLabelValue` — a component named exactly like another
+component's projection, or two long names whose prefix and digest both coincide — since their
+`app` labels and every selector built from them would match both components' pods.
 
 One exception on the inbound side: a component whose config reports a routing target — the
 `service` kind, whose Service fronts pods another component owns — gets its

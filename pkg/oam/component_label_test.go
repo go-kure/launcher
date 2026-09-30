@@ -160,3 +160,82 @@ func TestComponentLabelValue_DistinctNamesSharingThePrefix(t *testing.T) {
 		t.Errorf("names differing only after character 63 project to the same value %q", ComponentLabelValue(c))
 	}
 }
+
+// collidingApplication renders the example from the review of
+// go-kure/launcher#588 as YAML: a long passthrough component with a
+// networkpolicy trait and, when collide is set, a second component named
+// exactly like the first one's projection.
+func collidingApplication(long string, collide bool) string {
+	doc := `apiVersion: ` + SupportedAPIVersion + `
+kind: Application
+metadata:
+  name: collision
+spec:
+  components:
+    - name: ` + long + `
+      type: passthrough
+      properties:
+        object:
+          apiVersion: example.com/v1
+          kind: Widget
+      traits:
+        - type: networkpolicy
+          properties: {}
+`
+	if collide {
+		doc += `    - name: ` + ComponentLabelValue(long) + `
+      type: passthrough
+      properties:
+        object:
+          apiVersion: example.com/v1
+          kind: Gadget
+`
+	}
+	return doc
+}
+
+// TestValidate_RejectsComponentNamedLikeAnotherProjection: a projected value is
+// itself a valid component name, returned unchanged, so a component named
+// exactly like another's projection would share its `app` label and the other's
+// NetworkPolicy selector would pick out its pods. Validation refuses the
+// Application; the same document without that component parses.
+func TestValidate_RejectsComponentNamedLikeAnotherProjection(t *testing.T) {
+	long := dottedName(t, 120)
+	if _, err := Parse([]byte(collidingApplication(long, false))); err != nil {
+		t.Fatalf("control: Parse without the colliding component: %v", err)
+	}
+	_, err := Parse([]byte(collidingApplication(long, true)))
+	if err == nil {
+		t.Fatalf("Parse accepted component %q next to %q, which projects onto it", ComponentLabelValue(long), long)
+	}
+	for _, want := range []string{long, ComponentLabelValue(long), "share the component label value"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err, want)
+		}
+	}
+}
+
+// TestValidateComponentLabelValues covers the check directly: distinct values
+// pass, and both collision shapes — a name equal to another's projection, and
+// two long names with the same projection — are refused.
+func TestValidateComponentLabelValues(t *testing.T) {
+	long := dottedName(t, 120)
+	names := func(ns ...string) []Component {
+		cs := make([]Component, len(ns))
+		for i, n := range ns {
+			cs[i] = Component{Name: n}
+		}
+		return cs
+	}
+	if err := validateComponentLabelValues(names("web", long, dottedName(t, 200))); err != nil {
+		t.Errorf("distinct label values: unexpected error %v", err)
+	}
+	if err := validateComponentLabelValues(names(long, "web", ComponentLabelValue(long))); err == nil {
+		t.Error("a name equal to another component's projection was accepted")
+	}
+	// Two long names whose values coincide cannot be built without a 40-bit
+	// digest collision; the same long name twice stands in for that shape.
+	if err := validateComponentLabelValues(names(long, long)); err == nil {
+		t.Error("two components with the same projected value were accepted")
+	}
+}
