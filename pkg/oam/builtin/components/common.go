@@ -995,6 +995,18 @@ func isHugePageResourceName(name corev1.ResourceName) bool {
 	return strings.HasPrefix(string(name), "hugepages-")
 }
 
+// hugePageSize parses the page size a "hugepages-<size>" name encodes, refusing
+// a name whose suffix is not a positive whole number of bytes. It depends on
+// the name alone, so parseResourceList runs it with the other name checks,
+// before a null entry is skipped.
+func hugePageSize(name corev1.ResourceName) (resource.Quantity, error) {
+	pageSize, err := resource.ParseQuantity(strings.TrimPrefix(string(name), "hugepages-"))
+	if err != nil || pageSize.Sign() <= 0 || pageSize.MilliValue()%1000 != 0 {
+		return resource.Quantity{}, errors.Errorf("%s: invalid hugepage resource name", name)
+	}
+	return pageSize, nil
+}
+
 // validateHugePageQuantity checks that q is an integer multiple of the page
 // size encoded in name's "hugepages-<size>" suffix (mirrors
 // helper.IsHugePageResourceValueDivisible) — Kubernetes rejects a hugepages
@@ -1002,9 +1014,9 @@ func isHugePageResourceName(name corev1.ResourceName) bool {
 // whole number of that specific page size (e.g. hugepages-2Mi: 3Mi is a
 // whole number of bytes but not a multiple of the 2Mi page size).
 func validateHugePageQuantity(name corev1.ResourceName, q resource.Quantity) error {
-	pageSize, err := resource.ParseQuantity(strings.TrimPrefix(string(name), "hugepages-"))
-	if err != nil || pageSize.Sign() <= 0 || pageSize.MilliValue()%1000 != 0 {
-		return errors.Errorf("%s: invalid hugepage resource name", name)
+	pageSize, err := hugePageSize(name)
+	if err != nil {
+		return err
 	}
 	if q.Value()%pageSize.Value() != 0 {
 		return errors.Errorf("%s: quantity %s must be an integer multiple of the page size %s", name, q.String(), pageSize.String())
@@ -1031,6 +1043,11 @@ func parseResourceList(m map[string]any) (corev1.ResourceList, error) {
 		}
 		if err := validateContainerResourceName(k); err != nil {
 			return nil, err
+		}
+		if isHugePageResourceName(corev1.ResourceName(k)) {
+			if _, err := hugePageSize(corev1.ResourceName(k)); err != nil {
+				return nil, err
+			}
 		}
 		// An explicit null is absence, as in stringMapStrict.
 		v, present := authoredValue(m, k)

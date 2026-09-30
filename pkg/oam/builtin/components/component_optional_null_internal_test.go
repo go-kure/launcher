@@ -152,8 +152,23 @@ func TestResourceAndLabelMaps_NullEntryIsOmission(t *testing.T) {
 	// refused before this change whatever its value, and still is.
 	for _, nv := range nullValues() {
 		t.Run("invalid key with null still errors/"+nv.name, func(t *testing.T) {
-			if _, err := parseResourceList(map[string]any{"bad name!": nv.val}); err == nil || !strings.Contains(err.Error(), "invalid resource name") {
-				t.Errorf("parseResourceList: got %v, want the invalid resource name refusal", err)
+			for name, want := range map[string]string{
+				"bad name!":            "invalid resource name",          // IsQualifiedName
+				"gpu":                  "must be a standard container",   // validateContainerResourceName
+				"example.com/requests": "",                               // a valid name: the null is skipped
+				"hugepages-bogus":      "invalid hugepage resource name", // hugePageSize
+				"hugepages-0":          "invalid hugepage resource name",
+			} {
+				_, err := parseResourceList(map[string]any{name: nv.val})
+				if want == "" {
+					if err != nil {
+						t.Errorf("parseResourceList(%q: null): %v, want the entry skipped", name, err)
+					}
+					continue
+				}
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("parseResourceList(%q: null): got %v, want %q", name, err, want)
+				}
 			}
 			if _, err := parseLabelMap(map[string]any{"in valid": nv.val}, "nodeSelector"); err == nil || !strings.Contains(err.Error(), "invalid label key") {
 				t.Errorf("parseLabelMap: got %v, want the invalid label key refusal", err)
