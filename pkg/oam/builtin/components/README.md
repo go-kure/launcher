@@ -1947,8 +1947,19 @@ not part of either change.
   `delivery: native` is unaffected. Known limitation, over-broad wording fixed: this list is the
   set of properties `delivery: template` rejects when **explicitly** authored — an inherited
   handler default (e.g. `valuesMode` with no property-level `configMap`) falls back to `inline`
-  rather than erroring (`pkg/oam/builtin/components/helmchart.go:275-284`); same over-broad-wording
+  rather than erroring (`pkg/oam/builtin/components/helmchart.go:276-285`); same over-broad-wording
   class `go-kure/launcher#319` already fixed elsewhere in this file.
+
+  **`interval` must be a duration Flux accepts** (go-kure/launcher#590; `oci` applies the same
+  check). `interval` (default `60m`) is emitted onto the source CR and the `HelmRelease`, whose
+  CRDs require `^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`: unsigned, in `ms`, `s`, `m` or `h`
+  (`10m`, `1h30m`, `1.5h`). `time.ParseDuration` alone would also accept `-5m` or `500us`,
+  which then failed at apply time; both are build errors now. The value is emitted as a
+  `metav1.Duration`, which serializes `Duration.String()` rather than the authored text, so
+  that form is checked too: `0.5ms` matches the pattern but is written as `500µs`, and is
+  refused as below Flux's millisecond resolution. In practice any value of `0s` or at least
+  `1ms` is accepted. The check lives in the internal `pkg/oam/internal/fluxduration`, shared
+  with the `reconciliation` policy.
 
   **`delivery: template` is the `helmtemplate` component's code path.** Its source checks,
   render, hook-group ordering and layout partition are one implementation shared with the
@@ -2173,6 +2184,9 @@ not part of either change.
   `oci://registry/my-artifact` are pulled from Docker Hub, so they are refused
   even when `ghcr.io` or `registry` is listed. No policy, or an empty
   allowlist, accepts every `oci://` url.
+  `interval` (default `60m`) must be a duration Flux accepts, checked exactly as
+  for `helmchart` (go-kure/launcher#590): see the `interval` paragraph under
+  **helmchart** above.
 - **helmrepository / ocirepository / gitrepository / bucket** — the kind-named terminals for
   Flux's four fetching source kinds (go-kure/launcher#347, part of the Helm-family redesign
   go-kure/launcher#336). Each component's properties are exactly the top-level JSON keys of its

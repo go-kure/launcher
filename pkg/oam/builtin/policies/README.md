@@ -89,7 +89,11 @@ policies:
 Sets Flux Kustomization reconciliation parameters on every leaf bundle of the
 application. `interval`, `retryInterval` and `timeout` must be durations Flux's
 Kustomization CRD accepts (`5m`, `1h30m`): unsigned, in `ms`, `s`, `m` or `h`, so a value
-such as `-5m` or `500ns` that Go would parse is still an error; `prune`, `wait`, `force` and `suspend` are booleans. A boolean left out
+such as `-5m` or `500ns` that Go would parse is still an error. The check is the one the
+`oci` and `helmchart` components use for their `interval` (the internal
+`pkg/oam/internal/fluxduration`), applied to the authored string only: unlike those
+components, the policy hands the string on unchanged rather than emitting it itself, so it
+does not check a re-serialized form; `prune`, `wait`, `force` and `suspend` are booleans. A boolean left out
 leaves the bundle's own value unchanged rather than forcing `false`. A property given
 with the wrong type (`interval: 5`, `prune: "true"`) is an error rather than ignored;
 `null` reads as absent. At least one property
