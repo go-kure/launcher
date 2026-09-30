@@ -894,10 +894,10 @@ type npPort struct {
 // Generate creates a Kubernetes NetworkPolicy resource.
 func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	np := kubernetes.CreateNetworkPolicy(c.componentName+"-allow", app.Namespace)
-	np.Labels = map[string]string{"app": c.componentName}
+	np.Labels = componentLabels(c.componentName)
 	np.Annotations = nil
 	np.Spec.PodSelector = metav1.LabelSelector{
-		MatchLabels: map[string]string{"app": c.componentName},
+		MatchLabels: componentLabels(c.componentName),
 	}
 
 	// policyTypes follows key presence; the rule loops emit nothing for an empty

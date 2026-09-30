@@ -44,7 +44,9 @@ type TransformContext struct {
 	// Domain. Validated as a Kubernetes qualified label key. Non-authorable platform input,
 	// like EgressPeers: a caller that injects trafficSources/EgressPeers must ensure its
 	// pods carry this label (the platform stamps the derived component label) or set this
-	// to a key its pods do carry (e.g. "app").
+	// to a key its pods do carry (e.g. "app"). The selector value is always
+	// ComponentLabelValue(component), so a platform stamping the label uses that function
+	// too, never the raw component name.
 	ComponentLabelKey string
 	// Domain is the label/annotation domain for derived platform keys (<domain>/tier,
 	// <domain>/component). Empty => DefaultDomain ("gokure.dev"). Non-authorable platform

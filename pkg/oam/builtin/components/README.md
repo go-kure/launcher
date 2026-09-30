@@ -140,7 +140,8 @@ schema validation (go-kure/launcher#453).
 **The main container is named after the component, so a workload component
 name must be a DNS-1123 *label*, not merely a subdomain.** A component name is
 validated as a DNS-1123 subdomain (`pkg/oam/validate.go`), which permits dots,
-and that name reaches `metadata.name` and the `app:` label unchanged — both
+and that name reaches `metadata.name` unchanged and the `app:` label through
+`oam.ComponentLabelValue` (the name itself at 63 characters or fewer) — both
 accept it. It also becomes the name of the pod's main container, and a
 container name is a DNS-1123 label, which forbids dots and allows at most 63
 characters where a subdomain allows 253. `batch.worker` would therefore build
@@ -2511,6 +2512,20 @@ customization the label rule above assumes — writes back into the config and r
 every later render, with the symptom surfacing on a different object than the one that was
 edited.
 
+### The `app` label
+
+Every `app` label and `app` selector this package emits is valued at
+`oam.ComponentLabelValue(<component>)`, never the raw component name — `appLabels` and
+`deploymentComponentLabels` call it, and nothing else writes the value. A component name
+is a DNS-1123 subdomain (up to 253 characters), a label value at most 63: the function
+returns a name of 63 characters or fewer unchanged, so every existing output is
+byte-identical, and projects a longer one onto a readable 52-character prefix plus `-` and
+a 10-hex-character sha256 digest (go-kure/launcher#572). The workload kinds and `service` never reach
+the projection, since their container name or Service name already refuses a name over 63
+characters; the `helmchart` values ConfigMap does. Object names are not projected. A custom handler
+that labels its objects by component uses the same function, so its selectors and the
+built-in traits' selectors (a PodDisruptionBudget, a NetworkPolicy `podSelector`) agree.
+
 ### Every spec field is this package's to write
 
 Since go-kure/launcher#361 this package builds against kure's release-1 builder
@@ -2526,7 +2541,8 @@ server-side default for it, so each handler assigns
 `&metav1.LabelSelector{MatchLabels: …}` from the same helper that produced
 `spec.template.metadata.labels` — `deploymentComponentLabels` for `deployment`,
 `appLabels` for `webservice`, `worker`, `statefulset` and `daemonset` (both
-return a fresh `{"app": <component>}` map, per the ownership rule above). This is
+return a fresh `{"app": <label value>}` map, per the ownership rule above, valued
+as [The `app` label](#the-app-label) describes). This is
 the one field the compiler cannot check: a selector that disagrees with the
 template labels compiles and is refused by the apiserver at apply time. `job` and
 `cronjob` are the deliberate exception — the Job controller fills `spec.selector`
@@ -2556,8 +2572,9 @@ A third delta from the same contract change is metadata rather than a default, b
 belongs in the same inventory: under `valuesMode:
 configMap` the generated values ConfigMap used to take an `app` label *and* an
 `app` annotation from the constructor, both valued at the ConfigMap's own name
-(`<component>-values`). It now carries the label only, valued at the component
-name (`<component>`), matching every other object this package emits. A consumer
+(`<component>-values`). It now carries the label only, valued at the component's
+label value (`<component>`, projected when the name exceeds 63 characters — see
+[The `app` label](#the-app-label)), matching every other object this package emits. A consumer
 selecting that ConfigMap by `app=<component>-values` must be repointed.
 
 The `obj.Annotations = nil`

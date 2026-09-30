@@ -4405,8 +4405,13 @@ func applyProbes(container *corev1.Container, probes ProbeConfig) {
 // or version labels on the workloads it emits — and a shared map turns one such
 // edit into an edit of everything reachable from it. Call this once per
 // assignment rather than hoisting the result into a variable used twice.
+//
+// The value is oam.ComponentLabelValue(name), never the raw component name: a
+// name may be up to 253 characters and a label value at most 63
+// (go-kure/launcher#572). Every label and selector built here goes through that
+// one function, so a selector always matches the labels it targets.
 func appLabels(name string) map[string]string {
-	return map[string]string{"app": name}
+	return map[string]string{"app": oam.ComponentLabelValue(name)}
 }
 
 // selectorFrom returns a label selector over its own copy of labels.

@@ -92,7 +92,9 @@ Property schemas section for what the check does and does not cover.
 
 kurel derives its platform label/annotation keys under the **`launcher.gokure.dev`**
 domain: the tier-override annotation is `launcher.gokure.dev/tier`, and synthesized
-NetworkPolicies select pods via `launcher.gokure.dev/component`. This is kurel's fixed
+NetworkPolicies select pods via `launcher.gokure.dev/component`, valued at the
+component's label value (the name itself at 63 characters or fewer, a projection beyond —
+`ComponentLabelValue` in the OAM model). This is kurel's fixed
 choice over the launcher library default (`gokure.dev`); other embedders set their own
 domain through `TransformContext.Domain`. See the
 [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the derivation

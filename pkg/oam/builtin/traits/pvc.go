@@ -195,7 +195,7 @@ func (c *PVCTraitConfig) Generate(app *stack.Application) ([]*client.Object, err
 		return nil, err
 	}
 
-	labels := map[string]string{"app": c.componentName}
+	labels := componentLabels(c.componentName)
 	pvc, err := components.BuildPVC(components.PVCConfig{
 		Name:         c.Name,
 		Size:         c.Size,

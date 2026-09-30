@@ -40,7 +40,7 @@ func (h *WebserviceHandler) Endpoints(component *oam.Component) ([]netpol.Endpoi
 		port = p
 	}
 	return []netpol.Endpoint{{
-		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": component.Name}},
+		PodSelector: selectorFrom(appLabels(component.Name)),
 		Ports:       []intstr.IntOrString{intstr.FromInt32(port)},
 	}}, nil
 }

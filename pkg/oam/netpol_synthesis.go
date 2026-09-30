@@ -106,8 +106,10 @@ func (c *componentAllowPolicyConfig) Generate(app *stack.Application) ([]*client
 	np := kubernetes.CreateNetworkPolicy(c.ComponentName+"-allow-ingress-traffic", app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
+	// The value is the component's label value, not its raw name: a name over 63
+	// characters is not a valid label value (go-kure/launcher#572).
 	np.Spec.PodSelector = metav1.LabelSelector{
-		MatchLabels: map[string]string{c.podSelectorKey(): c.ComponentName},
+		MatchLabels: map[string]string{c.podSelectorKey(): ComponentLabelValue(c.ComponentName)},
 	}
 	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
 
@@ -680,8 +682,9 @@ func (c *componentEgressPolicyConfig) Generate(app *stack.Application) ([]*clien
 	np := kubernetes.CreateNetworkPolicy(c.ComponentName+"-allow-egress-traffic", app.Namespace)
 	np.Labels = nil
 	np.Annotations = nil
+	// The component's label value, as on the inbound side (go-kure/launcher#572).
 	np.Spec.PodSelector = metav1.LabelSelector{
-		MatchLabels: map[string]string{c.podSelectorKey(): c.ComponentName},
+		MatchLabels: map[string]string{c.podSelectorKey(): ComponentLabelValue(c.ComponentName)},
 	}
 	np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}
 

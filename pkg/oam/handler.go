@@ -94,6 +94,9 @@ type SourceDeduplicatable interface {
 // ApplicationConfig types that expose the OAM component they were emitted for.
 // Consumers use it to attribute each emitted resource to its owning component
 // (e.g. a provenance label) without re-deriving the component from sub-app names.
+// ComponentName returns the raw component name, which may exceed the 63-character
+// label-value limit; a consumer writing it into a label or selector passes it
+// through ComponentLabelValue.
 type ComponentNamed interface {
 	ComponentName() string
 }
