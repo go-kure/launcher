@@ -1762,9 +1762,12 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 // parseObjectField, parseStorageClassField, and podspec.go's parseObjectList,
 // parseObjectListField and parseStringList) go through, so that "absent"
 // means the same thing at every call site that uses one. Not every read in
-// this package does: some parsers read a key raw, and those that do not test
-// isExplicitNull refuse an untyped null as a wrong type (a raw list read can
-// take a typed nil as empty; see "The null contract" in README.md).
+// this package does: some parsers read a key raw, and what a null does there
+// depends on the read. One that type-checks the value without testing
+// isExplicitNull refuses an untyped null as a wrong type; one that ignores a
+// failed assertion (helmchart.go's version and driftDetection, among others)
+// drops it as if absent. A typed nil passes an assertion to its own type, so a raw []any
+// read takes []any(nil) as an empty list; see "The null contract" in README.md.
 //
 // A key authored with no value (`updateStrategy:`) decodes to a present entry
 // holding nil. That is ABSENCE, not a present value of the wrong type, and the
@@ -1849,8 +1852,9 @@ func parseIntField(raw map[string]any, key, label string, lo, hi int64) (int64, 
 // opt back out rather than a malformed value. An explicit null is likewise
 // absence, per authoredValue above.
 //
-// A field where "" is a value uses parseRawStringField below or, for a volume's
-// storageClass, parseStorageClassField; both test presence with authoredValue.
+// parseRawStringField below, and parseStorageClassField for a volume's
+// storageClass, keep an explicit "" as a value instead; both test presence with
+// authoredValue. Not every field that keeps "" goes through one of them.
 func parseStringField(raw map[string]any, key, label string) (string, bool, error) {
 	v, present := authoredValue(raw, key)
 	if !present {
