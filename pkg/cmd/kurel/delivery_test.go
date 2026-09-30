@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
@@ -697,8 +698,203 @@ func TestDeliveryRefusesArtifactCollision(t *testing.T) {
 	}
 }
 
+// listMemberComponent is a manifests component whose inline manifest is the
+// envelope %s: kurel's own manifest parsing expands the outer ObjectsList, so
+// the artifact carries the envelope, with an OCIRepository flux-system/%s
+// somewhere inside it.
+const listMemberComponent = `    - name: wrapped
+      type: manifests
+      properties:
+        inline: |
+          apiVersion: example.com/v1
+          kind: ObjectsList
+          items:
+%s`
+
+// ociRepositoryItem is an OCIRepository flux-system/%s as a YAML sequence
+// item, indented by %s.
+const ociRepositoryItem = `%[2]s- apiVersion: source.toolkit.fluxcd.io/v1
+%[2]s  kind: OCIRepository
+%[2]s  metadata:
+%[2]s    name: %[1]s
+%[2]s    namespace: flux-system
+%[2]s  spec:
+%[2]s    interval: 1m
+%[2]s    url: oci://registry.example.com/other
+`
+
+// listEnvelopeItem is a %s envelope (apiVersion and kind) named "wrapped" as
+// a YAML sequence item, indented by %s, whose items follow.
+const listEnvelopeItem = `%[3]s- apiVersion: %[1]s
+%[3]s  kind: %[2]s
+%[3]s  metadata:
+%[3]s    name: wrapped
+%[3]s    namespace: flux-system
+%[3]s  items:
+`
+
+// listMemberComponents are the envelopes an artifact object can carry an
+// OCIRepository flux-system/<member> in, one component per shape.
+func listMemberComponents(member string) map[string]string {
+	const indent = "            "
+	return map[string]string{
+		// The review's reproducer: a v1 List, which kustomize expands.
+		"List": fmt.Sprintf(listMemberComponent,
+			fmt.Sprintf(listEnvelopeItem, "v1", "List", indent)+
+				fmt.Sprintf(ociRepositoryItem, member, indent+"    ")),
+		"nested List": fmt.Sprintf(listMemberComponent,
+			fmt.Sprintf(listEnvelopeItem, "v1", "List", indent)+
+				fmt.Sprintf(listEnvelopeItem, "v1", "List", indent+"    ")+
+				fmt.Sprintf(ociRepositoryItem, member, indent+"        ")),
+		// Not a *List kind: kustomize passes it through, and kustomize-
+		// controller's decoder expands it.
+		"items envelope of another kind": fmt.Sprintf(listMemberComponent,
+			fmt.Sprintf(listEnvelopeItem, "example.com/v1", "Bundle", indent)+
+				fmt.Sprintf(ociRepositoryItem, member, indent+"    ")),
+	}
+}
+
+// TestDeliveryRefusesListMemberCollision checks that the refusal covers an
+// object carried inside a list envelope, which reconciliation applies as its
+// members: the build is refused and writes nothing. The accepted control, a
+// member named like no delivery object, shows the envelope does reach the
+// artifact.
+func TestDeliveryRefusesListMemberCollision(t *testing.T) {
+	profile := filepath.Join(deliveryTestdata, "cluster.yaml")
+	for shape, component := range listMemberComponents("shop") {
+		t.Run(shape, func(t *testing.T) {
+			dir := t.TempDir()
+			appPath := writeTempFile(t, dir, "app.yaml", fmt.Sprintf(collisionAppYAML, "flux-system", component))
+			out := filepath.Join(t.TempDir(), "out")
+			stdout, err := runKurel(t, "build", appPath, "--profile", profile,
+				"-o", out, "--oci-repository", testOCIRepository)
+			if err == nil {
+				t.Fatal("build accepted a list member with a delivery object's identity")
+			}
+			t.Logf("refused: %v", err)
+			for _, want := range []string{`artifact "shop"`, "OCIRepository.source.toolkit.fluxcd.io flux-system/shop", "a member of list", "rename the component"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+			if stdout != "" {
+				t.Errorf("wrote to stdout before refusing:\n%s", stdout)
+			}
+			if _, err := os.Stat(out); !os.IsNotExist(err) {
+				t.Errorf("created the output directory before refusing (stat error %v)", err)
+			}
+		})
+	}
+	for shape, component := range listMemberComponents("other") {
+		t.Run("control/"+shape, func(t *testing.T) {
+			dir := t.TempDir()
+			appPath := writeTempFile(t, dir, "app.yaml", fmt.Sprintf(collisionAppYAML, "flux-system", component))
+			out := t.TempDir()
+			if _, err := runKurel(t, "build", appPath, "--profile", profile,
+				"-o", out, "--oci-repository", testOCIRepository); err != nil {
+				t.Fatalf("delivery build refused: %v", err)
+			}
+			manifests, err := os.ReadFile(filepath.Join(out, "shop", artifactManifestsFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(manifests), "name: other") || !strings.Contains(string(manifests), "items:") {
+				t.Errorf("artifact does not carry the envelope with its member:\n%s", manifests)
+			}
+		})
+	}
+}
+
+// TestListMembersCoverWhatReconciliationApplies checks listMembers against
+// what reconciling an artifact applies: the artifact built with kustomize,
+// then decoded the way kustomize-controller's ReadObjects
+// (github.com/fluxcd/pkg/ssa/utils) does, replacing each object whose items
+// field is an array by its items. Every applied object must be an artifact
+// object or one of listMembers' members.
+func TestListMembersCoverWhatReconciliationApplies(t *testing.T) {
+	obj := func(apiVersion, kind, name string) map[string]any {
+		return map[string]any{
+			"apiVersion": apiVersion, "kind": kind,
+			"metadata": map[string]any{"name": name, "namespace": "flux-system"},
+		}
+	}
+	list := func(apiVersion, kind string, items ...any) map[string]any {
+		o := obj(apiVersion, kind, "wrapped")
+		o["items"] = items
+		return o
+	}
+	oci := obj("source.toolkit.fluxcd.io/v1", "OCIRepository", "shop")
+	cm := obj("v1", "ConfigMap", "cm")
+	tests := []struct {
+		name   string
+		object map[string]any
+		// want is the applied identities, which the model below must produce.
+		want []string
+	}{
+		{"List", list("v1", "List", oci, cm), []string{"OCIRepository.source.toolkit.fluxcd.io flux-system/shop", "ConfigMap flux-system/cm"}},
+		{"nested List", list("v1", "List", list("v1", "List", oci)), []string{"OCIRepository.source.toolkit.fluxcd.io flux-system/shop"}},
+		{"custom *List kind", list("example.com/v1", "WidgetList", oci), []string{"OCIRepository.source.toolkit.fluxcd.io flux-system/shop"}},
+		{"items envelope of another kind", list("example.com/v1", "Bundle", oci), []string{"OCIRepository.source.toolkit.fluxcd.io flux-system/shop"}},
+		{"another kind inside a List", list("v1", "List", list("example.com/v1", "Bundle", oci)), []string{"OCIRepository.source.toolkit.fluxcd.io flux-system/shop"}},
+		{"List with null items", map[string]any{"apiVersion": "v1", "kind": "List", "metadata": map[string]any{"name": "wrapped"}, "items": nil}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := client.Object(&unstructured.Unstructured{Object: tt.object})
+			d := &deliveryOutput{artifacts: []deliveryArtifact{{name: "a", objects: []*client.Object{&o}}}}
+			out := t.TempDir()
+			if err := d.write(out, "app"); err != nil {
+				t.Fatal(err)
+			}
+			res, err := krusty.MakeKustomizer(krusty.MakeDefaultOptions()).Run(filesys.MakeFsOnDisk(), filepath.Join(out, "a"))
+			if err != nil {
+				t.Fatalf("kustomize build: %v", err)
+			}
+			var applied []string
+			for _, r := range res.Resources() {
+				m, err := r.Map()
+				if err != nil {
+					t.Fatal(err)
+				}
+				u := &unstructured.Unstructured{Object: m}
+				if !u.IsList() {
+					applied = append(applied, identityOf(u).String())
+					continue
+				}
+				if err := u.EachListItem(func(item k8sruntime.Object) error {
+					applied = append(applied, identityOf(item.(*unstructured.Unstructured)).String())
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			slices.Sort(applied)
+			want := slices.Clone(tt.want)
+			slices.Sort(want)
+			if !slices.Equal(applied, want) {
+				t.Fatalf("applied %q, want %q", applied, want)
+			}
+
+			members, err := listMembers(o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checked := map[string]bool{identityOf(o).String(): true}
+			for _, m := range members {
+				checked[identityOf(m).String()] = true
+			}
+			for _, id := range applied {
+				if !checked[id] {
+					t.Errorf("applied %s is not compared (compared: %v)", id, checked)
+				}
+			}
+		})
+	}
+}
+
 // TestCheckCollisions checks the identity checkCollisions compares: API group,
-// kind, exact namespace and name, not the version.
+// kind, exact namespace and name, not the version; and that it compares a list
+// envelope's members at every depth.
 func TestCheckCollisions(t *testing.T) {
 	obj := func(apiVersion, kind, namespace, name string) *client.Object {
 		u := &unstructured.Unstructured{}
@@ -709,9 +905,22 @@ func TestCheckCollisions(t *testing.T) {
 		o := client.Object(u)
 		return &o
 	}
+	list := func(apiVersion, kind string, items ...*client.Object) *client.Object {
+		u := (*obj(apiVersion, kind, "flux-system", "wrapped")).(*unstructured.Unstructured)
+		content := make([]any, 0, len(items))
+		for _, i := range items {
+			content = append(content, (*i).(*unstructured.Unstructured).Object)
+		}
+		u.Object["items"] = content
+		o := client.Object(u)
+		return &o
+	}
 	flux := []*client.Object{
 		obj("kustomize.toolkit.fluxcd.io/v1", "Kustomization", "flux-system", "shop"),
 		obj("source.toolkit.fluxcd.io/v1", "OCIRepository", "flux-system", "shop"),
+	}
+	source := func() *client.Object {
+		return obj("source.toolkit.fluxcd.io/v1", "OCIRepository", "flux-system", "shop")
 	}
 	tests := []struct {
 		name    string
@@ -725,6 +934,11 @@ func TestCheckCollisions(t *testing.T) {
 		{"other name", obj("kustomize.toolkit.fluxcd.io/v1", "Kustomization", "flux-system", "shop-db"), false},
 		{"other group, same kind", obj("kustomize.config.k8s.io/v1beta1", "Kustomization", "flux-system", "shop"), false},
 		{"other kind", obj("v1", "ConfigMap", "flux-system", "shop"), false},
+		{"List member", list("v1", "List", obj("v1", "ConfigMap", "flux-system", "cm"), source()), true},
+		{"nested List member", list("v1", "List", list("v1", "List", source())), true},
+		{"member of an items envelope of another kind", list("example.com/v1", "Bundle", source()), true},
+		{"List member in another namespace", list("v1", "List", obj("source.toolkit.fluxcd.io/v1", "OCIRepository", "apps", "shop")), false},
+		{"empty List", list("v1", "List"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
