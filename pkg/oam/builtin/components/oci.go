@@ -51,7 +51,7 @@ func (h *OCIHandler) PropertySchema() map[string]oam.PropertySchema {
 				Type:        oam.PropertyTypeObject,
 				Description: "One object Flux checks for readiness.",
 				Properties: map[string]oam.PropertySchema{
-					"apiVersion": {Type: oam.PropertyTypeString, Required: true, Description: "API version of the object, including its group (e.g. apps/v1)."},
+					"apiVersion": {Type: oam.PropertyTypeString, Required: true, Description: "API version of the object (e.g. apps/v1, or v1 for a core kind)."},
 					"kind":       {Type: oam.PropertyTypeString, Required: true, Description: "Kind of the object (e.g. Deployment)."},
 					"name":       {Type: oam.PropertyTypeString, Required: true, Description: "Name of the object."},
 					"namespace":  {Type: oam.PropertyTypeString, Description: "Namespace of the object; omit for a cluster-scoped kind."},
@@ -83,11 +83,13 @@ var ociHealthCheckKeys = []string{"apiVersion", "kind", "name", "namespace"}
 //	    name: my-workload                             # required
 //	    namespace: my-workload                        # optional; omit for a cluster-scoped kind
 //
-// wait and healthChecks are opt-in (go-kure/launcher#432): a document authoring
-// neither, wait: false, or an empty healthChecks list builds the same
-// Kustomization it always did. wait: true together with a non-empty
-// healthChecks is refused, because kustomize-controller ignores healthChecks
-// when wait is true.
+// wait and healthChecks are opt-in (go-kure/launcher#432): a document in which
+// neither requests anything — wait absent or false, and healthChecks absent,
+// null or empty — builds the same Kustomization it always did. wait: true
+// emits spec.wait even beside an empty healthChecks, and a non-empty
+// healthChecks emits its checks even beside wait: false. wait: true together
+// with a non-empty healthChecks is refused, because kustomize-controller
+// ignores healthChecks when wait is true.
 func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	cfg := &OCIConfig{
 		Name:      component.Name,
@@ -170,10 +172,9 @@ func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace str
 
 // parseOCIHealthChecks reads the optional `healthChecks` list. Absent, null or
 // empty yields nil. Each entry must be an object with only the keys in
-// ociHealthCheckKeys; apiVersion, kind and name are required non-empty
-// strings — without the group in apiVersion the entry does not identify the
-// object Flux is meant to check — and namespace is an optional string, left
-// out for a cluster-scoped kind.
+// ociHealthCheckKeys; apiVersion (e.g. apps/v1, or v1 for a core kind), kind
+// and name are required non-empty strings, and namespace is an optional
+// string, left out for a cluster-scoped kind.
 func parseOCIHealthChecks(props map[string]any) ([]meta.NamespacedObjectKindReference, error) {
 	entries, _, err := parseObjectList(props, "healthChecks")
 	if err != nil {
