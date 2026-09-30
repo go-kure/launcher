@@ -892,9 +892,10 @@ func TestListMembersCoverWhatReconciliationApplies(t *testing.T) {
 	}
 }
 
-// TestCheckCollisions checks the identity checkCollisions compares: API group,
-// kind, exact namespace and name, not the version; and that it compares a list
-// envelope's members at every depth.
+// TestCheckCollisions checks the identity checkCollisions compares against the
+// delivery objects: API group, kind, exact namespace and name, not the
+// version; and that it compares a list envelope's members at every depth, but
+// not the envelope itself.
 func TestCheckCollisions(t *testing.T) {
 	obj := func(apiVersion, kind, namespace, name string) *client.Object {
 		u := &unstructured.Unstructured{}
@@ -939,6 +940,14 @@ func TestCheckCollisions(t *testing.T) {
 		{"member of an items envelope of another kind", list("example.com/v1", "Bundle", source()), true},
 		{"List member in another namespace", list("v1", "List", obj("source.toolkit.fluxcd.io/v1", "OCIRepository", "apps", "shop")), false},
 		{"empty List", list("v1", "List"), false},
+		// An envelope is never applied, only its members are: an items
+		// envelope with the delivery Kustomization's own identity collides
+		// with nothing.
+		{"items envelope with a delivery object's identity", func() *client.Object {
+			o := list("kustomize.toolkit.fluxcd.io/v1", "Kustomization", obj("v1", "ConfigMap", "flux-system", "cm"))
+			(*o).SetName("shop")
+			return o
+		}(), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -952,6 +961,325 @@ func TestCheckCollisions(t *testing.T) {
 			}
 			if !tt.collide && err != nil {
 				t.Errorf("refused: %v", err)
+			}
+		})
+	}
+}
+
+// TestCheckCollisionsBetweenArtifacts checks that checkCollisions refuses an
+// object identity carried by two artifacts, or twice by one, and names where
+// each is carried.
+func TestCheckCollisionsBetweenArtifacts(t *testing.T) {
+	obj := func(apiVersion, kind, namespace, name string) *client.Object {
+		u := &unstructured.Unstructured{}
+		u.SetAPIVersion(apiVersion)
+		u.SetKind(kind)
+		u.SetNamespace(namespace)
+		u.SetName(name)
+		o := client.Object(u)
+		return &o
+	}
+	// list is an unnamed v1 List envelope, as list envelopes usually are.
+	list := func(items ...*client.Object) *client.Object {
+		content := make([]any, 0, len(items))
+		for _, i := range items {
+			content = append(content, (*i).(*unstructured.Unstructured).Object)
+		}
+		o := client.Object(&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1", "kind": "List", "items": content,
+		}})
+		return &o
+	}
+	nullList := func() *client.Object {
+		o := client.Object(&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1", "kind": "List", "items": nil,
+		}})
+		return &o
+	}
+	cm := func(namespace string) *client.Object { return obj("v1", "ConfigMap", namespace, "settings") }
+	tests := []struct {
+		name string
+		a, b []*client.Object
+		// want is the refusal's text, empty when the output is accepted.
+		want []string
+	}{
+		{"same object in two artifacts", []*client.Object{cm("shop")}, []*client.Object{cm("shop")},
+			[]string{`artifacts "a" and "b" both carry ConfigMap shop/settings`}},
+		{"same object at another version", []*client.Object{obj("example.com/v1", "Widget", "shop", "w")}, []*client.Object{obj("example.com/v2", "Widget", "shop", "w")},
+			[]string{`artifacts "a" and "b" both carry Widget.example.com shop/w`}},
+		{"same cluster-scoped object", []*client.Object{obj("v1", "Namespace", "", "shop")}, []*client.Object{obj("v1", "Namespace", "", "shop")},
+			[]string{`artifacts "a" and "b" both carry Namespace /shop`}},
+		{"a List member and an object", []*client.Object{cm("shop")}, []*client.Object{list(cm("shop"))},
+			[]string{`artifacts "a" and "b" both carry ConfigMap shop/settings (a member of list List /)`}},
+		{"same object twice in one artifact", []*client.Object{cm("shop"), cm("shop")}, nil,
+			[]string{`artifact "a" carries ConfigMap shop/settings twice`}},
+		{"a List member and an object in one artifact", []*client.Object{list(cm("shop")), cm("shop")}, nil,
+			[]string{`artifact "a" carries ConfigMap shop/settings twice (also as ConfigMap shop/settings (a member of list List /))`}},
+		{"other namespace", []*client.Object{cm("shop")}, []*client.Object{cm("other")}, nil},
+		{"other kind", []*client.Object{cm("shop")}, []*client.Object{obj("v1", "Secret", "shop", "settings")}, nil},
+		{"other group", []*client.Object{obj("example.com/v1", "Widget", "shop", "w")}, []*client.Object{obj("example.org/v1", "Widget", "shop", "w")}, nil},
+		{"unnamed List envelopes of other members", []*client.Object{list(cm("shop"))}, []*client.Object{list(cm("other"))}, nil},
+		// kustomize drops a *List with null items, so it applies nothing.
+		{"unnamed Lists with null items", []*client.Object{nullList()}, []*client.Object{nullList()}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &deliveryOutput{artifacts: []deliveryArtifact{{name: "a", objects: tt.a}, {name: "b", objects: tt.b}}}
+			err := d.checkCollisions()
+			if tt.want == nil {
+				if err != nil {
+					t.Errorf("refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q does not contain %q", err, w)
+				}
+			}
+		})
+	}
+}
+
+// TestKustomizeRefusesDuplicateArtifactObject pins the kustomize behaviour
+// checkCollisions relies on to refuse one object twice in one artifact: the
+// artifact, written without the check, does not build.
+func TestKustomizeRefusesDuplicateArtifactObject(t *testing.T) {
+	cm := func() *client.Object {
+		u := &unstructured.Unstructured{}
+		u.SetAPIVersion("v1")
+		u.SetKind("ConfigMap")
+		u.SetNamespace("shop")
+		u.SetName("settings")
+		o := client.Object(u)
+		return &o
+	}
+	d := &deliveryOutput{artifacts: []deliveryArtifact{{name: "a", objects: []*client.Object{cm(), cm()}}}}
+	out := t.TempDir()
+	if err := d.write(out, "app"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := krusty.MakeKustomizer(krusty.MakeDefaultOptions()).Run(filesys.MakeFsOnDisk(), filepath.Join(out, "a"))
+	if err == nil || !strings.Contains(err.Error(), "already registered id") {
+		t.Fatalf("kustomize build: %v, want the duplicate id refused", err)
+	}
+}
+
+// sharedConfigMapComponents are two components, %s and %s, of the given
+// types, each with a configmap trait "settings".
+const sharedConfigMapComponents = `    - name: %[1]s
+      type: %[2]s
+      properties:
+        image: ghcr.io/example/%[1]s:v1.0.0
+        port: 8080
+      traits:
+        - type: configmap
+          properties:
+            name: settings
+            data:
+              KEY: %[1]s
+    - name: %[3]s
+      type: %[4]s
+      properties:
+        image: ghcr.io/example/%[3]s:v1.0.0
+        port: 9090
+      traits:
+        - type: configmap
+          properties:
+            name: settings
+            data:
+              KEY: %[3]s
+`
+
+// TestDeliveryRefusesSharedArtifactObject checks, through the CLI, that a
+// build is refused before anything is written when two components render one
+// object: a configmap trait of one name on a daemonset (infra tier) and a
+// webservice (apps tier), whose objects go to two artifacts, or on two
+// webservices, whose objects go to one (the application has a single tier,
+// so a single unit, "shop").
+func TestDeliveryRefusesSharedArtifactObject(t *testing.T) {
+	tests := []struct {
+		name       string
+		components string
+		want       []string
+	}{
+		{"two artifacts", fmt.Sprintf(sharedConfigMapComponents, "agent", "daemonset", "web", "webservice"),
+			[]string{`"shop-infra"`, `"shop-apps"`, "both carry ConfigMap shop/settings", "rename one of the components or traits"}},
+		{"one artifact", fmt.Sprintf(sharedConfigMapComponents, "web", "webservice", "api", "webservice"),
+			[]string{`artifact "shop" carries ConfigMap shop/settings twice:`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			appPath := writeTempFile(t, t.TempDir(), "app.yaml", fmt.Sprintf(collisionAppYAML, "shop", tt.components))
+			out := filepath.Join(t.TempDir(), "out")
+			stdout, err := runKurel(t, "build", appPath, "--profile", filepath.Join(deliveryTestdata, "cluster.yaml"),
+				"-o", out, "--oci-repository", testOCIRepository)
+			if err == nil {
+				t.Fatal("build accepted one object rendered by two components")
+			}
+			t.Logf("refused: %v", err)
+			for _, w := range tt.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q does not contain %q", err, w)
+				}
+			}
+			if stdout != "" {
+				t.Errorf("wrote to stdout before refusing:\n%s", stdout)
+			}
+			if _, err := os.Stat(out); !os.IsNotExist(err) {
+				t.Errorf("created the output directory before refusing (stat error %v)", err)
+			}
+		})
+	}
+}
+
+// TestDeliveryAcceptsSharedNameInOtherNamespace checks the near miss of
+// TestDeliveryRefusesSharedArtifactObject: a ConfigMap "settings" in the
+// application namespace in the infra artifact, and one in another namespace
+// in the apps artifact, are two objects, and both are delivered.
+func TestDeliveryAcceptsSharedNameInOtherNamespace(t *testing.T) {
+	components := `    - name: agent
+      type: daemonset
+      properties:
+        image: ghcr.io/example/agent:v1.0.0
+      traits:
+        - type: configmap
+          properties:
+            name: settings
+    - name: extra
+      type: manifests
+      properties:
+        inline: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: settings
+            namespace: other
+`
+	appPath := writeTempFile(t, t.TempDir(), "app.yaml", fmt.Sprintf(collisionAppYAML, "shop", components))
+	out := t.TempDir()
+	if _, err := runKurel(t, "build", appPath, "--profile", filepath.Join(deliveryTestdata, "cluster.yaml"),
+		"-o", out, "--oci-repository", testOCIRepository); err != nil {
+		t.Fatalf("delivery build refused: %v", err)
+	}
+	for artifact, namespace := range map[string]string{"shop-infra": "shop", "shop-apps": "other"} {
+		manifests, err := os.ReadFile(filepath.Join(out, artifact, artifactManifestsFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, o := range decodeDocs(t, manifests) {
+			md, _ := o["metadata"].(map[string]any)
+			if str(o["kind"]) == "ConfigMap" && str(md["name"]) == "settings" && str(md["namespace"]) == namespace {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("artifact %s holds no ConfigMap %s/settings:\n%s", artifact, namespace, manifests)
+		}
+	}
+}
+
+// dnsName returns a valid DNS-1123 subdomain of n characters: 63-character
+// labels of 'a' joined by '.'.
+func dnsName(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = 'a'
+		if (i+1)%64 == 0 {
+			b[i] = '.'
+		}
+	}
+	return string(b)
+}
+
+// TestDeliveryRefusesOverlongFileName checks, through the CLI, the file name
+// limit on the delivery output: the flat application (one unit, named like
+// the application) builds with the longest name whose <app>.flux.yaml fits in
+// 255 bytes, and one character more is refused before anything is written,
+// though its url, <app>.yaml and artifact directory would all fit. The
+// hierarchical shape's longer unit names are refused before any write too.
+func TestDeliveryRefusesOverlongFileName(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(deliveryTestdata, "flat", "app.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hierarchical, err := os.ReadFile(filepath.Join(deliveryTestdata, "hierarchical", "app.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	longest := maxFileNameBytes - len(fluxFileName(""))
+	build := func(t *testing.T, app []byte, name, out string) error {
+		t.Helper()
+		appPath := writeTempFile(t, t.TempDir(), "app.yaml", strings.Replace(string(app), "name: shop", "name: "+name, 1))
+		_, err := runKurel(t, "build", appPath, "--profile", filepath.Join(deliveryTestdata, "cluster.yaml"),
+			"-o", out, "--oci-repository", testOCIRepository)
+		return err
+	}
+
+	t.Run("longest accepted", func(t *testing.T) {
+		out := t.TempDir()
+		name := dnsName(longest)
+		if err := build(t, data, name, out); err != nil {
+			t.Fatalf("refused: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(out, fluxFileName(name))); err != nil {
+			t.Errorf("Flux objects file not written: %v", err)
+		}
+	})
+	for _, tt := range []struct {
+		name, want string
+		app        []byte
+		length     int
+	}{
+		{"Flux objects file name", "shorten the application name to at most 245 characters", data, longest + 1},
+		{"unit names", "more than 255", hierarchical, longest},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "out")
+			err := build(t, tt.app, dnsName(tt.length), out)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error %v, want one containing %q", err, tt.want)
+			}
+			if _, err := os.Stat(out); !os.IsNotExist(err) {
+				t.Errorf("created the output directory before refusing (stat error %v)", err)
+			}
+		})
+	}
+}
+
+// TestCheckFileNames checks the file name limit on each name the delivery
+// output derives: <app>.flux.yaml and each artifact directory. write refuses
+// an over-long one before creating anything.
+func TestCheckFileNames(t *testing.T) {
+	tests := []struct {
+		name     string
+		app      string
+		artifact string
+		ok       bool
+	}{
+		{"both at the limit", strings.Repeat("a", maxFileNameBytes-len(fluxFileName(""))), strings.Repeat("a", maxFileNameBytes), true},
+		{"Flux objects file name over", strings.Repeat("a", maxFileNameBytes-len(fluxFileName(""))+1), "shop", false},
+		{"artifact directory name over", "shop", strings.Repeat("a", maxFileNameBytes+1), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &deliveryOutput{artifacts: []deliveryArtifact{{name: tt.artifact}}}
+			if err := d.checkFileNames(tt.app); (err == nil) != tt.ok {
+				t.Fatalf("checkFileNames: %v, want ok=%v", err, tt.ok)
+			}
+			if tt.ok {
+				return
+			}
+			out := filepath.Join(t.TempDir(), "out")
+			if err := d.write(out, tt.app); err == nil {
+				t.Fatal("write accepted the name")
+			}
+			if _, err := os.Stat(out); !os.IsNotExist(err) {
+				t.Errorf("write created the output directory before refusing (stat error %v)", err)
 			}
 		})
 	}
