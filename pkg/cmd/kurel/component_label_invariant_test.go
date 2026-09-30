@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -99,6 +101,11 @@ func boundaryLabelComponentName(t *testing.T) string {
 // componentLabelFixture renders one component type on its own.
 type componentLabelFixture struct {
 	props map[string]any
+	// propsFor, when set, replaces props: it builds them inside the running
+	// test, for a type whose properties must name something only the test can
+	// provide (helmtemplate's locally served chart). Both renders of the type
+	// use what it returns.
+	propsFor func(t *testing.T) map[string]any
 	// longRefusal is empty when the type accepts a name over 63 characters.
 	// Otherwise it is a substring of the refusal the type already gives such a
 	// name (go-kure/launcher#407 container name, go-kure/launcher#546 Service
@@ -125,6 +132,43 @@ func workloadProps(extra map[string]any) map[string]any {
 	return p
 }
 
+// helmtemplateLabelProps serves a one-template chart from a Helm repository
+// local to t and returns helmtemplate properties naming it: helmtemplate
+// renders its chart at build time.
+//
+// The chart renders one ConfigMap and no pods, and helmtemplate emits it as
+// rendered, generating no component-identity label of its own — so the fixture
+// is unlabelled and matches no pod selector. A chart's own labels and
+// selectors are the chart's contract, like an operator's, and out of scope; an
+// `app` label a chart authored would still be compared with the projection,
+// so this chart has none. It labels the ConfigMap with .Release.Name, the one
+// value through which a component name could reach a rendered label: the
+// render passes no release name, so it is kure's default ("release") whatever
+// the component is called, the 200-character name renders, and rendering with
+// the component name as the release name would fail here on the long name's
+// label value.
+func helmtemplateLabelProps(t *testing.T) map[string]any {
+	t.Helper()
+	chart := buildMinimalChartTar(t, "labelchart", "0.1.0", map[string]string{
+		"labelchart/templates/cm.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: label-cm\n" +
+			"  labels:\n    app.kubernetes.io/instance: {{ .Release.Name }}\ndata:\n  k: v\n",
+	})
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.yaml":
+			fmt.Fprint(w, helmIndexYAML("labelchart", "0.1.0", srvURL+"/labelchart-0.1.0.tgz"))
+		case "/labelchart-0.1.0.tgz":
+			w.Write(chart)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	return map[string]any{"chart": "labelchart", "version": "0.1.0", "source": map[string]any{"url": srvURL}}
+}
+
 var componentLabelFixtures = map[string]componentLabelFixture{
 	// replicas 3 with topologySpread and pod anti-affinity puts every scheduling
 	// selector the workload kinds build into the output.
@@ -142,6 +186,9 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"postgresql": {props: map[string]any{"version": "16", "storageSize": "10Gi"}},
 	"helmchart": {props: map[string]any{"version": "v1.17.2",
 		"source": map[string]any{"kind": "OCIRepository", "url": "oci://ghcr.io/example/charts/app"}}},
+	// Renders a locally served chart; helmtemplateLabelProps says why it is
+	// unlabelled, selects no pods and accepts the 200-character name.
+	"helmtemplate": {propsFor: helmtemplateLabelProps},
 	// valuesMode configMap with non-empty values emits the values ConfigMap,
 	// the one object of this type carrying an `app` label.
 	"helmrelease": {props: map[string]any{
@@ -262,7 +309,11 @@ func TestComponentLabelInvariant_ComponentTypes(t *testing.T) {
 	for _, typ := range slices.Sorted(maps.Keys(componentLabelFixtures)) {
 		fx := componentLabelFixtures[typ]
 		t.Run(typ, func(t *testing.T) {
-			app := labelInvariantApp(boundary, typ, fx.props, "", nil)
+			props := fx.props
+			if fx.propsFor != nil {
+				props = fx.propsFor(t)
+			}
+			app := labelInvariantApp(boundary, typ, props, "", nil)
 			docs := renderLabelInvariant(t, app)
 			n := checkComponentLabelInvariant(t, docs, boundary)
 			if fx.labelled {
@@ -272,7 +323,7 @@ func TestComponentLabelInvariant_ComponentTypes(t *testing.T) {
 				t.Errorf("%s at the boundary name matched %d pod selectors against its pod template, want at least %d", typ, n.selectors, fx.selectors)
 			}
 
-			app = labelInvariantApp(long, typ, fx.props, "", nil)
+			app = labelInvariantApp(long, typ, props, "", nil)
 			if fx.longRefusal != "" {
 				_, err := renderLabelInvariantErr(t, app)
 				if err == nil {
