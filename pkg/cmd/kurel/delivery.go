@@ -109,6 +109,14 @@ func validateDeliveryFlags(opts *buildOptions, repositorySet, tagSet bool) error
 // '_', '__' or a run of '-'.
 var ociPathComponent = regexp.MustCompile(`^[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*$`)
 
+// ociRegistryPattern is the distribution reference grammar's registry
+// (domainAndPort in github.com/distribution/reference): a DNS name or IPv4
+// address, or a bracketed IPv6 address, then an optional numeric port. It
+// requires a hostname, which an RFC 3986 authority does not: name.NewRegistry
+// accepts ":5000" and "registry.example.com:", neither of which a registry
+// can be reached at.
+var ociRegistryPattern = regexp.MustCompile(`^(?:(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])(?:\.(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]))*|\[[a-fA-F0-9:]+\])(?::[0-9]+)?$`)
+
 // ociTagPattern is the OCI distribution-spec tag grammar.
 var ociTagPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$`)
 
@@ -122,7 +130,8 @@ const ociRepositoryPathMax = 255
 // oci://<registry>[/<path>]. The registry is a host[:port] that names itself
 // explicitly — localhost, or containing '.' or ':' — because go-containerregistry,
 // which Flux parses the url with, resolves any other first segment against
-// Docker Hub. The path is '/'-separated distribution-spec components of at most
+// Docker Hub, and that has a hostname (ociRegistryPattern), so neither a
+// bare port nor an empty one names it. The path is '/'-separated distribution-spec components of at most
 // ociRepositoryPathMax characters, so no query, fragment, whitespace, empty
 // segment or uppercase letter reaches a generated url.
 func checkOCIRepository(ref string, requirePath bool) error {
@@ -136,6 +145,9 @@ func checkOCIRepository(ref string, requirePath bool) error {
 	}
 	if host != "localhost" && !strings.ContainsAny(host, ".:") {
 		return errors.Errorf("registry %q is not explicit (localhost, or a host containing '.' or ':'), so Flux would resolve it against Docker Hub", host)
+	}
+	if !ociRegistryPattern.MatchString(host) {
+		return errors.Errorf("registry %q must be a hostname, IPv4 address or bracketed IPv6 address, with an optional numeric port", host)
 	}
 	if _, err := name.NewRegistry(host, name.StrictValidation); err != nil {
 		return errors.Wrapf(err, "registry %q", host)

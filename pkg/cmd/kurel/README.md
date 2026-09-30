@@ -220,7 +220,7 @@ design's Launcher Layout (`docs/design.md` §11): one OCI artifact directory, on
   pulls `<oci-repository>/<bundle>` (at `--oci-tag` when set); each `Kustomization`
   references that source and builds the artifact root, `spec.path: ./`. The tier
   umbrella's `Kustomization` is Ready only when every child `Kustomization` is: it carries
-  one health check per child and no `wait` (Flux ignores health checks when `wait` is set).
+  one health check per child and no `wait` (Flux ignores health checks when `wait` is enabled).
 - `<dir>/<app>.yaml` — still written, unchanged: `-o` keeps its contract.
 
 Every object of the stdout build is in exactly one artifact, and the artifacts together
@@ -236,7 +236,9 @@ anything is written:
 
 - `--oci-repository` must be `oci://<registry>[/<path>]` (a trailing `/` is ignored). The
   registry is a `host[:port]` that names itself explicitly — `localhost`, or containing
-  `.` or `:` — because Flux resolves any other first segment against Docker Hub. The path
+  `.` or `:` — because Flux resolves any other first segment against Docker Hub. The host
+  is required: a DNS name, an IPv4 address or a bracketed IPv6 address, and a port is
+  numeric, so `oci://:5000/apps` or `oci://registry.example.com:/apps` is refused. The path
   is `/`-separated OCI distribution-spec components (lowercase letters and digits, joined
   by `.`, `_`, `__` or `-`), so a query, fragment, whitespace, empty segment or uppercase
   letter is refused. Each bundle's `<oci-repository>/<bundle>` must also stay within 255
