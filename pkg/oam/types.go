@@ -75,6 +75,14 @@ type Trait struct {
 	// forwarded rather than synthesized (isForwardedTrait). The engine clears it
 	// again once it has classified what the rule emitted.
 	forwardedFrom *Trait
+	// authoredIndex is the index a forwarded trait held in the traits slice the
+	// component rule was handed, recorded when the engine classifies it as forwarded
+	// (sealEmittedNestedTraits). A rule that adds a trait of its own ahead of the
+	// forwarded ones shifts their position in its output; the origin fallback in
+	// lowerDocumentBody reads this instead, so Origin.Index still names the authored
+	// slot. nil for a trait never forwarded that way. It is a hint for that
+	// fallback only: the trait stays unstamped, exactly as authored.
+	authoredIndex *int
 }
 
 // Origin returns the trait's authored provenance and whether the lowering engine ever

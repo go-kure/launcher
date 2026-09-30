@@ -1770,6 +1770,42 @@ func TestLower_ForwardedTraitOrigin_KeepsOriginalComponentIdentity(t *testing.T)
 	}
 }
 
+// TestLower_ForwardedTraitCopy_KeepsAuthoredIndex: a component rule that places a
+// trait of its own ahead of the authored ones it forwards (prependingForwardingComponentRule,
+// the shape WorkerRule has) shifts each forwarded trait's position in its output. The
+// origin a forwarded trait is later given must still name its authored slot, not the
+// shifted one, which would point at an authored traits[] entry that does not exist.
+func TestLower_ForwardedTraitCopy_KeepsAuthoredIndex(t *testing.T) {
+	var seen Origin
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(prependingForwardingComponentRule{fromType: "wrapper", toType: "webservice"})
+	tr.RegisterTraitLowering(originCaptureTraitRule{typ: "probe-trait", seen: &seen})
+
+	app := makeApp("myapp", Component{
+		Name: "app",
+		Type: "wrapper",
+		Traits: []Trait{
+			{Type: "configmap", Properties: map[string]any{}},
+			{Type: "probe-trait", Properties: map[string]any{}},
+		},
+	})
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+
+	settled, err := tr.lower(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if seen.TraitType != "probe-trait" || seen.Index != 1 {
+		t.Errorf("forwarded trait origin = %s index %d, want probe-trait index 1 (its authored slot, not its shifted position 2)", seen.TraitType, seen.Index)
+	}
+	for _, trait := range settled[0].Spec.Components[0].Traits {
+		if _, ok := trait.Origin(); ok && trait.Type == "configmap" {
+			t.Error("forwarded configmap trait carries a stamped origin; the index hint must leave it unstamped")
+		}
+	}
+}
+
 // malformedNestedComponentDocRule emits an Application whose one component already
 // carries a lowerable type (needs-image, registered separately as a
 // ComponentLoweringRule below) with malformed properties — a document-position rule

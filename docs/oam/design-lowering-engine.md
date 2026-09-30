@@ -85,6 +85,10 @@ unexported forwarding mark (`forwardableTraits`, `Trait.forwardedFrom`), and
 `isForwardedTrait` also accepts a copy that still carries its mark, its type and the
 very same properties map. A copy whose type or properties the rule replaced is the
 rule's own output and is sealed; the mark is cleared once the emission is classified.
+A forwarded trait also keeps the index it had in the slice the rule was handed
+(`Trait.authoredIndex`), because a rule that places its own trait first shifts the
+forwarded ones in its output: the origin it is given afterwards still names its
+authored `traits[]` slot. The trait itself stays unstamped.
 
 Document-level 1→N (one authored document lowering into several) ships only at the
 **raw** entry point today: `testRawRule` (`pkg/oam/lowering_raw_test.go`) emits
