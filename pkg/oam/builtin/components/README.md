@@ -2519,12 +2519,13 @@ Authored values are emitted as written: an authored `selector` on a `service` co
 replaces the generated one and is not projected, and a type that emits authored objects
 (`passthrough`, for one) adds no `app` label. A component name
 is a DNS-1123 subdomain (up to 253 characters), a label value at most 63: the function
-returns a name of 63 characters or fewer unchanged, so every existing output is
+returns a name of 63 characters or fewer unchanged, so output for those names is
 byte-identical, and projects a longer one onto a readable prefix of at most 52 characters
 (its first 52, with trailing `-` and `.` trimmed) plus `-` and
 a 10-hex-character sha256 digest (go-kure/launcher#572). The workload kinds and `service` never reach
 the projection, since their container name or Service name already refuses a name over 63
-characters; the `helmchart` and `helmrelease` values ConfigMaps do. Object names are not projected. A custom handler
+characters; the `helmchart` and `helmrelease` values ConfigMaps do (a `helmrelease` values
+ConfigMap that previously omitted `app` past 63 characters now carries the projected value). Object names are not projected. A custom handler
 that labels its objects by component uses the same function, so its selectors and the
 built-in traits' selectors (a PodDisruptionBudget, a NetworkPolicy `podSelector`) agree.
 
@@ -2541,8 +2542,9 @@ an explicit field assignment. Two consequences a reader needs:
 Deployment, StatefulSet and DaemonSet all require `spec.selector` and get no
 server-side default for it, so each handler assigns
 `&metav1.LabelSelector{MatchLabels: …}` from the same helper that produced
-`spec.template.metadata.labels` — `deploymentComponentLabels` for `deployment`,
-`appLabels` for `webservice`, `worker`, `statefulset` and `daemonset` (both
+`spec.template.metadata.labels` — `deploymentComponentLabels` for `deployment`
+and for `worker`, which lowers to a `deployment` component (its affinity selector
+uses `appLabels`), and `appLabels` for `webservice`, `statefulset` and `daemonset` (both
 return a fresh `{"app": <label value>}` map, per the ownership rule above, valued
 as [The `app` label](#the-app-label) describes). This is
 the one field the compiler cannot check: a selector that disagrees with the
