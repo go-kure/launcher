@@ -2469,14 +2469,16 @@ not part of either change.
   `resources` as empty objects, and `postgresql` as
   `syncReplicaElectionConstraint: {enabled: false}`, because that nested
   field's `enabled` has no `omitempty`.
-  Nulls follow "The null contract" below: a null is absence at every depth
-  (typed or untyped), so a null map value is left out rather than decoded to
-  an empty string, and a null array element is refused by path
-  (`env[0]: null is not a valid array element`). That holds for collections
-  a caller builds in Go with concrete types too (`map[string]*string`,
-  `[]*T`), which are walked like their untyped form; a byte slice, a struct
-  and a type with its own JSON encoding are passed to the decoder as they
-  are. A negative `instances` is refused before policy runs.
+  Nulls follow "The null contract" below, and a null is whatever serializes
+  to JSON null: the properties are marshalled with `encoding/json` and read
+  back before anything else looks at them, so a null map value is left out
+  rather than decoded to an empty string, and a null array element is
+  refused by path (`env[0]: null is not a valid array element`). Because the
+  reading is the serialization itself, a value a caller builds in Go reads
+  exactly as `encoding/json` writes it — a concrete collection type, a nil
+  behind a pointer, a `json.RawMessage` and a custom encoder included. A
+  value that does not serialize is refused. A negative `instances` is
+  refused before policy runs.
   `ApplyPolicy` enforces the policy `postgresql` enforces, in the same order:
   the instance-count default when `instances` is not authored (an authored
   value wins even when it equals the fallback) and its maximum; the cpu and

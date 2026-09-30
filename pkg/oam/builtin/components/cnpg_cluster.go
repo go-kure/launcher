@@ -1,13 +1,13 @@
 package components
 
 import (
-	"encoding"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
-	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -154,16 +154,16 @@ func (h *CnpgClusterHandler) PropertySchema() map[string]oam.PropertySchema {
 // ToApplicationConfig decodes an OAM cnpg-cluster component into a
 // CnpgClusterConfig.
 //
-// A null is absence at every depth, per the package's null contract (see
-// withoutNullsAtDepth): a null key is dropped before decoding, and a null array
+// A null is absence at every depth, per the package's null contract, and a
+// null is whatever serializes to JSON null: the properties are read as their
+// JSON serialization (jsonProperties), a null key is dropped and a null array
 // element is refused by path. Everything else is decoded strictly into
 // cnpgv1.ClusterSpec, so an unknown key or a wrongly typed value is an error.
 func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	normalized, err := withoutNullsAtDepth(component.Properties, "")
+	props, err := jsonProperties(component.Properties)
 	if err != nil {
 		return nil, err
 	}
-	props, _ := normalized.(map[string]any)
 
 	// Read ahead of the decode, with the helper every kind uses for replicas, so
 	// a non-integer or out-of-range value is refused by name and a negative one
@@ -173,7 +173,7 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	// spelling would count as unauthored and a default would replace it.
 	instancesAuthored := false
 	for _, key := range foldedFieldKeys(props, "instances") {
-		_, present, err := parseInt32Field(props, key, "instances")
+		_, present, err := parseInt32Field(map[string]any{key: jsonNumberValue(props[key])}, key, "instances")
 		if err != nil {
 			return nil, err
 		}
@@ -280,27 +280,75 @@ func foldedFieldMaps(m map[string]any, field string) []map[string]any {
 	return out
 }
 
+// jsonProperties returns props as encoding/json serializes them, with the
+// package's null contract applied. The contract defines null by serialization
+// ("A value that serializes to JSON null is absent, at every depth"), so the
+// properties are marshalled and decoded back rather than inspected in Go:
+// typed collections, pointers, json.RawMessage and custom encoders (pointer
+// receivers included, where encoding/json calls them) all come back as the
+// JSON the strict decode would have read, and a null is a plain nil. Numbers
+// decode as json.Number, which the strict decode re-marshals verbatim, so no
+// precision is lost. A value encoding/json cannot serialize is refused.
+func jsonProperties(props map[string]any) (map[string]any, error) {
+	data, err := json.Marshal(props)
+	if err != nil {
+		return nil, errors.Wrap(err, "properties do not serialize to JSON")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var tree any
+	if err := dec.Decode(&tree); err != nil {
+		return nil, errors.Wrap(err, "internal: decode the properties' own JSON")
+	}
+	normalized, err := withoutNullsAtDepth(tree, "")
+	if err != nil {
+		return nil, err
+	}
+	// A nil property map serializes to null; it reads as an empty map, which
+	// decodes as an empty spec.
+	out, _ := normalized.(map[string]any)
+	return out, nil
+}
+
+// jsonNumberValue returns a json.Number as the Go number the property parsers
+// accept: an int64 when it is one, else a uint64 (so an out-of-range refusal
+// quotes the integer exactly, not rounded), else a float64. A number
+// encoding/json wrote only fails Float64 when out of range, where the value is
+// ±Inf and the parser refuses it as not finite. Any other value is returned
+// unchanged.
+func jsonNumberValue(value any) any {
+	n, ok := value.(json.Number)
+	if !ok {
+		return value
+	}
+	if i, err := n.Int64(); err == nil {
+		return i
+	}
+	if u, err := strconv.ParseUint(n.String(), 10, 64); err == nil {
+		return u
+	}
+	f, _ := n.Float64()
+	return f
+}
+
 // withoutNullsAtDepth applies the package's null contract ("A value that
 // serializes to JSON null is absent, at every depth, on every path; a null is
-// never a member of any Items type") to a whole authored value before it is
-// decoded. The strict decode cannot do it: encoding/json reads a null map
-// value as the element's zero value (`parameters: {work_mem: null}` would
-// become `work_mem: ""`) and a null array element as a zero-valued entry.
+// never a member of any Items type") to a decoded JSON tree before the strict
+// decode. The strict decode cannot do it: encoding/json reads a null map value
+// as the element's zero value (`parameters: {work_mem: null}` would become
+// `work_mem: ""`) and a null array element as a zero-valued entry.
 //
-// A null object key is dropped; a null array element is refused with the same
-// message pkg/oam's property validator uses. A null is anything isExplicitNull
-// reports, typed nils included. A collection built in Go with a concrete type
-// (map[string]*string, []map[string]any) is walked too, through
-// withoutNullsInTyped: encoding/json serializes it like the untyped form, so
-// skipping it would let its nulls reach the decoder. The input is not
-// modified. Keys are visited in sorted order so the first refusal is
+// value is what jsonProperties decoded, so it holds only map[string]any,
+// []any, scalars and a plain nil for every null. A null object key is dropped;
+// a null array element is refused with the same message pkg/oam's property
+// validator uses. Keys are visited in sorted order so the first refusal is
 // deterministic.
 func withoutNullsAtDepth(value any, path string) (any, error) {
 	switch v := value.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(v))
 		for _, k := range slices.Sorted(maps.Keys(v)) {
-			if isExplicitNull(v[k]) {
+			if v[k] == nil {
 				continue
 			}
 			child := k
@@ -318,7 +366,7 @@ func withoutNullsAtDepth(value any, path string) (any, error) {
 		out := make([]any, len(v))
 		for i, e := range v {
 			elemPath := fmt.Sprintf("%s[%d]", path, i)
-			if isExplicitNull(e) {
+			if e == nil {
 				return nil, errors.Errorf("%s: null is not a valid array element", elemPath)
 			}
 			nv, err := withoutNullsAtDepth(e, elemPath)
@@ -328,57 +376,6 @@ func withoutNullsAtDepth(value any, path string) (any, error) {
 			out[i] = nv
 		}
 		return out, nil
-	case nil:
-		// A nil (or absent) property map decodes as an empty spec.
-		return map[string]any{}, nil
-	default:
-		return withoutNullsInTyped(value, path)
-	}
-}
-
-var (
-	jsonMarshalerType = reflect.TypeFor[json.Marshaler]()
-	textMarshalerType = reflect.TypeFor[encoding.TextMarshaler]()
-)
-
-// withoutNullsInTyped is withoutNullsAtDepth for a value of any other type. A
-// map with string keys is rebuilt as a map[string]any, a slice or array as an
-// []any, and a pointer is followed, each then walked with the same rules, so
-// map[string]*string{"work_mem": nil} loses its key and []*T{nil} is refused by
-// path. Values keep their own types, numbers included. Returned unchanged: a
-// byte slice or array (encoding/json writes []byte as a string, and a byte
-// holds no null), a type with its own JSON or text encoding (rebuilding it
-// would bypass that encoding), a map with non-string keys, a struct and a
-// scalar.
-func withoutNullsInTyped(value any, path string) (any, error) {
-	if isExplicitNull(value) {
-		return value, nil
-	}
-	rv := reflect.ValueOf(value)
-	if t := rv.Type(); t.Implements(jsonMarshalerType) || t.Implements(textMarshalerType) {
-		return value, nil
-	}
-	switch rv.Kind() {
-	case reflect.Map:
-		if rv.Type().Key().Kind() != reflect.String {
-			return value, nil
-		}
-		m := make(map[string]any, rv.Len())
-		for it := rv.MapRange(); it.Next(); {
-			m[it.Key().String()] = it.Value().Interface()
-		}
-		return withoutNullsAtDepth(m, path)
-	case reflect.Slice, reflect.Array:
-		if rv.Type().Elem().Kind() == reflect.Uint8 {
-			return value, nil
-		}
-		s := make([]any, rv.Len())
-		for i := range s {
-			s[i] = rv.Index(i).Interface()
-		}
-		return withoutNullsAtDepth(s, path)
-	case reflect.Pointer:
-		return withoutNullsAtDepth(rv.Elem().Interface(), path)
 	default:
 		return value, nil
 	}
