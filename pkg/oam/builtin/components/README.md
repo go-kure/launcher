@@ -2014,7 +2014,11 @@ not part of either change.
   always carries the values hash. Identical values hash alike whatever their key order, and
   any change to them renames the ConfigMap and so changes the HelmRelease's spec, which is
   what makes Flux upgrade the release on a values-only edit. The ConfigMap carries the label
-  `app: <component>` and no annotations. Empty or absent `values` generate no ConfigMap and
+  `app: <component>` and no annotations, but only when the component name is a legal label
+  value: a component name may be a DNS-1123 subdomain of up to 253 bytes, while a label value
+  is at most 63 characters, so a longer name yields a ConfigMap with no labels rather than
+  one the API server rejects. The same limit for the labels other component types write is
+  tracked in go-kure/launcher#572. Empty or absent `values` generate no ConfigMap and
   no entry. There is no handler-level default for `valuesMode`.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.

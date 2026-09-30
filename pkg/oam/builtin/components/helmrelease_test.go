@@ -367,8 +367,14 @@ func assertValuesConfigMap(t *testing.T, hr *helmv2.HelmRelease, cm *corev1.Conf
 	if cm.APIVersion != "v1" || cm.Kind != "ConfigMap" {
 		t.Errorf("ConfigMap TypeMeta %q %q", cm.APIVersion, cm.Kind)
 	}
-	if !reflect.DeepEqual(cm.Labels, map[string]string{"app": hr.Name}) || cm.Annotations != nil {
-		t.Errorf("ConfigMap metadata labels=%v annotations=%v", cm.Labels, cm.Annotations)
+	// The app label is written only when the component name is a legal label
+	// value; a longer name leaves the ConfigMap unlabelled.
+	var wantLabels map[string]string
+	if len(validation.IsValidLabelValue(hr.Name)) == 0 {
+		wantLabels = map[string]string{"app": hr.Name}
+	}
+	if !reflect.DeepEqual(cm.Labels, wantLabels) || cm.Annotations != nil {
+		t.Errorf("ConfigMap metadata labels=%v annotations=%v, want labels=%v", cm.Labels, cm.Annotations, wantLabels)
 	}
 	if len(cm.Data) != 1 {
 		t.Fatalf("ConfigMap data has %d keys, want 1", len(cm.Data))
@@ -459,24 +465,81 @@ func TestHelmReleaseHandler_IdenticalValuesHashAlike(t *testing.T) {
 	}
 }
 
+// assertLegalMetadata checks that every object cfg emits has a legal
+// DNS-1123 subdomain name and only legal label keys and values, the checks
+// the API server applies on create.
+func assertLegalMetadata(t *testing.T, cfg stack.ApplicationConfig) {
+	t.Helper()
+	objs, err := cfg.Generate(stack.NewApplication("x", "demo", cfg))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, o := range objs {
+		obj := *o
+		kind := obj.GetObjectKind().GroupVersionKind().Kind
+		if errs := validation.IsDNS1123Subdomain(obj.GetName()); len(errs) != 0 {
+			t.Errorf("%s name %q is not a DNS-1123 subdomain: %v", kind, obj.GetName(), errs)
+		}
+		for k, v := range obj.GetLabels() {
+			if errs := validation.IsQualifiedName(k); len(errs) != 0 {
+				t.Errorf("%s label key %q is invalid: %v", kind, k, errs)
+			}
+			if errs := validation.IsValidLabelValue(v); len(errs) != 0 {
+				t.Errorf("%s label %s value %q is invalid: %v", kind, k, v, errs)
+			}
+		}
+	}
+}
+
 // TestHelmReleaseHandler_MaxLengthNameStaysLegal: a 253-byte component name,
 // the longest validate.go admits, still yields a legal ConfigMap name that
-// carries the values hash, and the valuesFrom entry names it.
+// carries the values hash, the valuesFrom entry names it, and no emitted
+// object carries an illegal label: the name is too long to be a label value,
+// so the ConfigMap gets no app label.
 func TestHelmReleaseHandler_MaxLengthNameStaysLegal(t *testing.T) {
 	long := strings.Repeat("a", 60) + "." + strings.Repeat("b", 60) + "." + strings.Repeat("c", 60) + "." + strings.Repeat("d", 70)
 	if len(long) != 253 || len(validation.IsDNS1123Subdomain(long)) != 0 {
 		t.Fatalf("fixture name is %d bytes or invalid", len(long))
 	}
-	hr, cm := hrGenerate(t, hrConfig(t, long, configMapModeProps(map[string]any{"a": 1})), "")
+	cfg := hrConfig(t, long, configMapModeProps(map[string]any{"a": 1}))
+	assertLegalMetadata(t, cfg)
+	hr, cm := hrGenerate(t, cfg, "")
 	n := assertValuesConfigMap(t, hr, cm)
 	if len(n) > 253 {
 		t.Errorf("ConfigMap name is %d bytes", len(n))
+	}
+	if cm.Labels != nil {
+		t.Errorf("ConfigMap of a %d-byte name carries labels %v, want none", len(long), cm.Labels)
 	}
 	// Two long names sharing the kept prefix still differ.
 	other := long[:252] + "e"
 	hr2, cm2 := hrGenerate(t, hrConfig(t, other, configMapModeProps(map[string]any{"a": 1})), "")
 	if n2 := assertValuesConfigMap(t, hr2, cm2); n2 == n {
 		t.Errorf("distinct long names collided on %q", n)
+	}
+}
+
+// TestHelmReleaseHandler_ConfigMapAppLabelBoundary: the ConfigMap's app label
+// is the component name exactly when that name is a legal label value (at
+// most 63 characters), and absent past that limit.
+func TestHelmReleaseHandler_ConfigMapAppLabelBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		label bool
+	}{
+		{"web", true},
+		{strings.Repeat("a", 63), true},
+		{strings.Repeat("a", 30) + "." + strings.Repeat("b", 32), true},
+		{strings.Repeat("a", 64), false},
+	}
+	for _, tc := range cases {
+		cfg := hrConfig(t, tc.name, configMapModeProps(map[string]any{"a": 1}))
+		assertLegalMetadata(t, cfg)
+		_, cm := hrGenerate(t, cfg, "")
+		got, ok := cm.Labels["app"]
+		if ok != tc.label || (ok && got != tc.name) || len(cm.Labels) > 1 {
+			t.Errorf("%d-byte name: ConfigMap labels %v, want app label %v", len(tc.name), cm.Labels, tc.label)
+		}
 	}
 }
 
