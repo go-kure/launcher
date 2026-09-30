@@ -237,7 +237,12 @@ the API group, kind, namespace and name of one of the generated `OCIRepository` 
 application whose namespace is `flux-system`: reconciling that artifact would overwrite
 its own source or `Kustomization`. An object inside a list (an `items` array, at any
 depth) counts too, since reconciliation applies a list's members. Rename the component
-or the application.
+or the application. The same holds for one object (API group, kind, namespace and name)
+in two artifacts, such as `configmap` traits of one name on components in different
+tiers, whose `Kustomization`s would fight over it, or twice in one artifact, which
+kustomize refuses to build. A build is also refused when `<app>.flux.yaml` (an
+application name over 245 characters) or an artifact directory name would exceed the
+255-byte file name limit.
 
 The flags are checked before the build reads anything, and each bundle's url before
 anything is written:
@@ -266,6 +271,11 @@ Limits:
 - An artifact holds the same flat object list the stdout build emits: a `helmtemplate`
   component's (or `helmchart` `delivery: template`'s) Helm hook groups are not split
   into ordered sub-directories.
+- A namespaced object the build renders without `metadata.namespace` (for example from a
+  `helmtemplate` chart, or `helmchart` with `delivery: template`) is written as is. The
+  generated `Kustomization` sets no `targetNamespace`, so kustomize-controller refuses it
+  ("namespace not specified"). Rendering the chart with the release namespace is tracked
+  in [go-kure/launcher#602](https://github.com/go-kure/launcher/issues/602).
 
 ## Global flags
 

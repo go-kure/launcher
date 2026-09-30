@@ -294,47 +294,79 @@ func (id objectIdentity) String() string {
 	return kind + " " + id.namespace + "/" + id.name
 }
 
-// checkCollisions refuses an output in which an artifact carries an object
-// with the identity of a delivery object: reconciling that artifact would
-// apply it over the OCIRepository or Kustomization that reconciles it (or
-// another unit's), redirecting its source or fighting over its spec. The
-// delivery objects are named after reconciliation units by kure's naming and
-// are not renamed here, so the build is refused instead; the check covers
-// every artifact object alike, whatever component or trait rendered it.
+// checkCollisions refuses an output in which one object identity has two
+// owners, since every object reconciliation applies must be managed by
+// exactly one Flux Kustomization:
 //
-// Delivery objects never collide with each other: kure names each unit's
-// Kustomization after the unit's first bundle, and layout.IndexOrigins
-// refuses two bundles with one name, while GenerateFromLayout emits a source
-// shared by two units once and refuses two different definitions of it.
+//   - an artifact object with the identity of a delivery object: reconciling
+//     that artifact would apply it over the OCIRepository or Kustomization
+//     that reconciles it (or another unit's), redirecting its source or
+//     fighting over its spec. The delivery objects are named after
+//     reconciliation units by kure's naming and are not renamed here, so the
+//     build is refused instead;
+//   - an object in two artifacts (e.g. two components in different units with
+//     a configmap trait of one name): each unit's Kustomization would apply it,
+//     so they would overwrite each other's version and each would prune it
+//     when it leaves that unit;
+//   - an object twice in one artifact: kustomize refuses to build it ("may not
+//     add resource with an already registered id", Append in
+//     sigs.k8s.io/kustomize/api/resmap/reswrangler.go), so the Kustomization
+//     would never become Ready. Refusing it here names the object at build
+//     time, and also covers one object at two API versions, which kustomize
+//     would accept and apply twice.
+//
+// The check covers every artifact object alike, whatever component or trait
+// rendered it. Delivery objects never collide with each other: kure names
+// each unit's Kustomization after the unit's first bundle, and
+// layout.IndexOrigins refuses two bundles with one name, while
+// GenerateFromLayout emits a source shared by two units once and refuses two
+// different definitions of it.
 //
 // Namespaces are compared exactly. An artifact object with no namespace is
 // not read as the delivery objects' namespace: the generated Kustomizations
 // set no spec.targetNamespace and the artifact's kustomization.yaml no
 // namespace, and kustomize-controller's server-side apply refuses a namespaced
 // object without one ("namespace not specified"), so it is never applied as
-// the delivery object of that name.
+// the delivery object of that name. Two artifact objects with no namespace and
+// one kind and name are one object (a cluster-scoped one), or two that are
+// both refused at apply, so they are refused here either way.
 //
 // An artifact object that is a list envelope is applied as its members, so
-// every member is compared too (listMembers).
+// every member is compared too (listMembers), while the envelope itself,
+// never applied, owns nothing (isListEnvelope).
 func (d *deliveryOutput) checkCollisions() error {
 	delivery := make(map[objectIdentity]bool, len(d.flux))
 	for _, o := range d.flux {
 		delivery[identityOf(*o)] = true
 	}
+	owner := map[objectIdentity]ownership{}
 	for _, a := range d.artifacts {
 		for _, o := range a.objects {
-			id := identityOf(*o)
-			if delivery[id] {
-				return collisionError(a.name, id.String())
-			}
+			top := identityOf(*o)
 			members, err := listMembers(*o)
 			if err != nil {
-				return errors.Wrapf(err, "artifact %q: reading the list members of %s", a.name, id)
+				return errors.Wrapf(err, "artifact %q: reading the list members of %s", a.name, top)
 			}
-			for _, m := range members {
-				if mid := identityOf(m); delivery[mid] {
-					return collisionError(a.name, mid.String()+" (a member of list "+id.String()+")")
+			for i, m := range append([]client.Object{*o}, members...) {
+				id := identityOf(m)
+				object := id.String()
+				if i > 0 {
+					object += " (a member of list " + top.String() + ")"
 				}
+				content, err := objectContent(m)
+				if err != nil {
+					return errors.Wrapf(err, "artifact %q: reading %s", a.name, object)
+				}
+				if isListEnvelope(content) {
+					continue
+				}
+				if delivery[id] {
+					return collisionError(a.name, object)
+				}
+				if prev, ok := owner[id]; ok {
+					return duplicateError(prev, ownership{a.name, object})
+				}
+				owner[id] = ownership{a.name, object}
 			}
 		}
 	}
@@ -344,6 +376,42 @@ func (d *deliveryOutput) checkCollisions() error {
 func collisionError(artifact, object string) error {
 	return errors.Errorf("artifact %q carries %s, which is also a Flux delivery object this build generates: rename the component that renders it, or the application, so that no artifact object has a delivery object's kind, namespace and name",
 		artifact, object)
+}
+
+// ownership is the artifact that carries an object identity, and the object
+// as an error names it.
+type ownership struct{ artifact, object string }
+
+// duplicateError refuses one object identity carried twice: by two artifacts,
+// or twice by one.
+func duplicateError(first, second ownership) error {
+	also := ""
+	if first.object != second.object {
+		also = " (also as " + first.object + ")"
+	}
+	if first.artifact == second.artifact {
+		return errors.Errorf("artifact %q carries %s twice%s: kustomize refuses to build an artifact with one object in it twice; rename one of the components or traits that render it",
+			second.artifact, second.object, also)
+	}
+	return errors.Errorf("artifacts %q and %q both carry %s%s: the Flux Kustomization of each would apply and prune that one object; rename one of the components or traits that render it, so that each object belongs to one bundle",
+		first.artifact, second.artifact, second.object, also)
+}
+
+// isListEnvelope reports whether content is a list envelope, which
+// reconciliation replaces by its members and never applies itself: an object
+// whose items field is an array (ReadObjects expands it, whatever its kind),
+// or a *List kind with an items field (kustomize expands it, or drops it when
+// items is null).
+func isListEnvelope(content map[string]any) bool {
+	items, ok := content["items"]
+	if !ok {
+		return false
+	}
+	if _, isArray := items.([]any); isArray {
+		return true
+	}
+	kind, _ := content["kind"].(string)
+	return strings.HasSuffix(kind, "List")
 }
 
 // listMembers returns the objects o carries as a list envelope, at every
@@ -407,9 +475,42 @@ func objectContent(o client.Object) (map[string]any, error) {
 	return content, nil
 }
 
+// maxFileNameBytes is the longest file or directory name common filesystems
+// accept (NAME_MAX on ext4, XFS, Btrfs and tmpfs); a longer one fails with
+// ENAMETOOLONG.
+const maxFileNameBytes = 255
+
+// checkFileNames refuses, before anything is written, an output whose file
+// or directory names the filesystem would refuse partway through the write:
+// <appName>.flux.yaml, since a DNS-1123 subdomain may be 253 characters, and
+// each artifact directory, named by its unit (which generateDelivery's
+// per-bundle url check already bounds, as the unit name is part of the url's
+// path). The remaining names, manifests.yaml and kustomization.yaml, are
+// fixed.
+func (d *deliveryOutput) checkFileNames(appName string) error {
+	if n := len(fluxFileName(appName)); n > maxFileNameBytes {
+		return errors.Errorf("the Flux objects file name %q is %d bytes, more than the %d-byte file name limit: shorten the application name to at most %d characters",
+			fluxFileName(appName), n, maxFileNameBytes, maxFileNameBytes-len(fluxFileName("")))
+	}
+	for _, a := range d.artifacts {
+		if n := len(a.name); n > maxFileNameBytes {
+			return errors.Errorf("the artifact directory name %q is %d bytes, more than the %d-byte file name limit: shorten the application or component name",
+				a.name, n, maxFileNameBytes)
+		}
+	}
+	return nil
+}
+
+// fluxFileName is the name of the file the delivery objects are written to.
+func fluxFileName(appName string) string { return appName + ".flux.yaml" }
+
 // write writes the delivery output into dir. Unit and application names are
-// DNS-1123 subdomains (oam validation), so they are safe path segments.
+// DNS-1123 subdomains (oam validation), so they are safe path segments, and
+// checkFileNames bounds their length before the first write.
 func (d *deliveryOutput) write(dir, appName string) error {
+	if err := d.checkFileNames(appName); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return errors.Wrapf(err, "creating output directory %q", dir)
 	}
@@ -443,7 +544,7 @@ func (d *deliveryOutput) write(dir, appName string) error {
 	if err != nil {
 		return errors.Wrap(err, "encoding Flux delivery objects")
 	}
-	fluxPath := filepath.Join(dir, appName+".flux.yaml")
+	fluxPath := filepath.Join(dir, fluxFileName(appName))
 	//nolint:gosec // G703: appName is Metadata.Name, which parsing already required to
 	// be a DNS-1123 subdomain (no '/' or '..'), and dir is the operator's own
 	// --output flag — the same reasoning as writeOutputDir in build.go.
