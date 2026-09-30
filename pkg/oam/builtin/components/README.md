@@ -1921,6 +1921,12 @@ not part of either change.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.
+  An authored `version: ""` is refused by name (`version: must not be empty;
+  omit it to default to "16"`), with or without `imageName`: it used to be
+  kept as a value, so without `imageName` the cluster image was
+  `ghcr.io/cloudnative-pg/postgresql:` — an empty tag that only the image
+  pull rejected (go-kure/launcher#539). Only an omitted or null `version`
+  takes the default. `storageSize: ""` is still copied through as authored.
   `resources` forwards `cpu`/`memory` only — the CNPG builder it was
   written against had fields for nothing else, and the restriction was kept
   when kure retired that builder so that document validity did not change
