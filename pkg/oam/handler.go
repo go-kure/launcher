@@ -82,8 +82,9 @@ type ContractDescriber interface {
 // SourceDeduplicatable is an optional interface for ApplicationConfig types
 // that generate source CRDs (e.g. HelmRepository). The runtime uses it to
 // suppress duplicate source generation when multiple components share the
-// same source key (URL for HelmRepository, URL+version for OCIRepository);
-// first component wins.
+// same source key (URL for HelmRepository, URL+version for OCIRepository).
+// The component deployed first (earliest tier, then dependency order, then
+// document order) emits the source; every other one references it.
 type SourceDeduplicatable interface {
 	GetSourceKey() string
 	GetSourceRefName() string
