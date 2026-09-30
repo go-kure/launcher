@@ -180,9 +180,9 @@ func TestBuiltinDependencyPolicy_WiresTheBundleEdge(t *testing.T) {
 // TestBuiltinPlacementPolicy_RegroupsTheComponent proves the placement override is
 // consumed on its own, with no dependency policy: without it both webservices
 // share the apps tier and the cluster is a single flat bundle; with it, api moves
-// into the infra tier bundle and web stays in the apps tier bundle. It asserts
-// grouping only — tier bundles carry no ordering edge between them without a
-// dependency policy (go-kure/launcher#575).
+// into the infra tier bundle and web stays in the apps tier bundle, and the apps
+// tier bundle depends on the infra one, so the override also moves api earlier in
+// deployment order.
 func TestBuiltinPlacementPolicy_RegroupsTheComponent(t *testing.T) {
 	cluster, result, err := transformWithBuiltins(t, policyAppHeader+`    - name: api-first
       type: placement
@@ -203,6 +203,16 @@ func TestBuiltinPlacementPolicy_RegroupsTheComponent(t *testing.T) {
 	}
 	if got := bundleHolding(bundles, "web"); got != "shop-apps" {
 		t.Errorf("web is in bundle %q, want shop-apps (bundles: %v)", got, slices.Sorted(maps.Keys(bundles)))
+	}
+	infra, apps := bundles["shop-infra"], bundles["shop-apps"]
+	if infra == nil || apps == nil {
+		t.Fatalf("want tier bundles shop-infra and shop-apps, got %v", slices.Sorted(maps.Keys(bundles)))
+	}
+	if !slices.Contains(apps.DependsOn, infra) {
+		t.Errorf("shop-apps does not depend on shop-infra")
+	}
+	if len(infra.DependsOn) != 0 {
+		t.Errorf("shop-infra depends on %d bundle(s), want none", len(infra.DependsOn))
 	}
 }
 

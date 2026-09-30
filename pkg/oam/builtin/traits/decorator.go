@@ -45,8 +45,9 @@ type serviceRoutingTargeter interface {
 // (traits/rbac.go:88), nonRWXClaimer (traits/scaler.go:60), and
 // serviceRoutingTargeter (oam/netpol_synthesis.go:257). Enforceable and
 // SourceDeduplicatable are deliberately absent: the former is asserted only on
-// trait sub-apps (transform.go:912), the latter runs in phase 1 (transform.go:681),
-// so neither can see a decorator. A tenth, kure's layout.LayoutAugmenter, is
+// trait sub-apps (Transformer.applyTraits), the latter on component configs after
+// policies and before any trait runs (deduplicateSourceRefs in
+// Transformer.TransformWithPolicy), so neither can see a decorator. A tenth, kure's layout.LayoutAugmenter, is
 // forwarded separately — see wrapIfAugmenter below — because unlike these nine
 // it must NOT be present unconditionally.
 //
