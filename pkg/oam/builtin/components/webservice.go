@@ -342,6 +342,17 @@ func (c *WebserviceConfig) ApplyPolicy(p oam.Policy) error {
 // ServicePort returns the port exposed by the component's Service.
 func (c *WebserviceConfig) ServicePort() int32 { return c.Port }
 
+// ServicePortName returns "http", the name createService gives the Service's
+// one port, and true, so routing traits refuse an implicit backend addressed by
+// any other port name. With no port (a library caller's zero Port) it returns
+// "" and false.
+func (c *WebserviceConfig) ServicePortName() (string, bool) {
+	if c.Port <= 0 {
+		return "", false
+	}
+	return "http", true
+}
+
 // Generate creates Kubernetes Deployment, Service, and ServiceAccount resources.
 // The ServiceAccount is omitted when serviceAccountName was authored (the pod
 // then runs as that pre-existing account). The Service is named after the

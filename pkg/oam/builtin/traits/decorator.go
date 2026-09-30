@@ -113,8 +113,8 @@ func (d decoratorBase) BackendServiceName() string {
 // ServicePortName forwards the inner config's service port name
 // (servicePortNamer), or "" and false when the inner config does not know its
 // port names. Without this forward, a decorating trait declared before a
-// routing trait on a `service` component hides the port names, and an implicit
-// backend addressed by a later port's name slips past the first-port rule.
+// routing trait hides the port names, and an implicit backend addressed by a
+// name the component's Service port does not carry slips past the check.
 func (d decoratorBase) ServicePortName() (string, bool) {
 	if n, ok := d.Inner.(servicePortNamer); ok {
 		return n.ServicePortName()

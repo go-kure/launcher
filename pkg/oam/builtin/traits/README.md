@@ -154,6 +154,29 @@ not the app — chooses the implementation:
   too: the StatefulSet controller replaces a pod volume named like a claim template with the
   claim, and the ConfigMap or Secret would never be mounted.
 
+## Ingress implicit backend ports
+
+An `ingress` path with no `backend`, or with a `backend` naming the component's own
+Service, routes to the component's implicit backend: the one Service port the component
+exposes. A path may address it by number (`port`) or by name (`portName`), and either
+must be that port. Any other number is refused (`cannot route implicit backend to port
+N`), and so is any other name (`cannot route implicit backend to port "name"`), at build
+time instead of building an Ingress whose backend port cannot resolve
+(go-kure/launcher#545). The name each kind's Service gives that port:
+
+| Component kind | Implicit backend port name |
+|----------------|----------------------------|
+| `webservice` | `http` |
+| `statefulset` (with `port`) | `tcp` |
+| `daemonset` (with `port`) | `http` |
+| `service` | the first port's own `name` (so a later port's name is refused too) |
+
+A `backend` naming a different Service is explicit and its `port`/`portName` is not
+checked. A component that exposes no Service port — `statefulset`/`daemonset` without
+`port`, or a kind that generates no Service such as `helmchart` — has no implicit
+backend unless the trait sets `servicePort` (and optionally `serviceName`); that
+trait-level port carries no name, so a `portName` is not checked against it.
+
 ## NetworkPolicy nulls: null, empty and absent
 
 In a `networkpolicy` peer (`ingress[].from[]` / `egress[].to[]`), `podSelector`,
@@ -634,8 +657,8 @@ decorating trait declared before `scaler` must not hide the claim that caps
 `maxReplicas` at 1. The `serviceRoutingTargeter` forward keeps a decorated `service`
 component's synthesized ingress allow on its `selector` pods rather than on the component
 label, which none of its pods carry. The `servicePortNamer` forward keeps an `ingress` path's
-`portName` on a decorated `service` component held to the first port, the same rule a port
-number is held to. A config that implements none of them gets the zero
+`portName` on a decorated component held to its Service port's name (the first port, on a
+`service` component), the same rule a port number is held to. A config that implements none of them gets the zero
 answer (`nil`, `0`, `""`, `false`), which every reader treats as "not set".
 
 `augmentingDecorator` also forwards `oam.LayoutAugmentationCoverage`'s

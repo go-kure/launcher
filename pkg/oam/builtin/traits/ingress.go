@@ -27,10 +27,10 @@ type serviceBackendNamer interface {
 	BackendServiceName() string
 }
 
-// servicePortNamer is implemented by component configs that know their Service's port
-// names — the `service` kind (go-kure/launcher#411). ServicePortName returns the name of
-// the port ServicePort returns ("" when that port is unnamed) and true; decorators
-// (decoratorBase) always implement it and return false for an inner config that does not.
+// servicePortNamer is implemented by component configs that know their Service's port names:
+// every kind that generates a Service (go-kure/launcher#411, go-kure/launcher#545). ServicePortName
+// returns the name of the port ServicePort returns ("" when that port is unnamed) and true;
+// decorators (decoratorBase) always implement it and return false for an inner config that does not.
 type servicePortNamer interface {
 	ServicePortName() (string, bool)
 }

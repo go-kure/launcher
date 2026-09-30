@@ -1396,6 +1396,12 @@ not part of either change.
     cluster rejects on apply (go-kure/launcher#546). `Generate` applies the
     same rule to the Application name it is handed. `worker` emits no Service
     and keeps accepting such a name, within the container-name rule above.
+  - **An ingress `portName` on a `webservice` must be `http`.** The Service's
+    one port is named `http`, so an `ingress` path whose implicit backend is
+    this component's Service (no `backend`, or `backend` naming that Service)
+    and that addresses it by any other `portName` is refused at build time
+    (`cannot route implicit backend to port "name"`), just as a numbered
+    `port` other than the component's `port` is (go-kure/launcher#545).
 - **deployment** — the kind-named Deployment (see "Deployment-level
   properties" above): the shared container-level, pod-level and
   `DeploymentSpec`-level surface, the last of which it now shares with
@@ -1473,6 +1479,15 @@ not part of either change.
     `1api` still builds, within the container-name rule above. `Generate`
     applies the same rule to the config's `ServiceName`, so a config built
     without a component name must set it.
+  - **An ingress `portName` on a `statefulset` must be `tcp`.** With a `port`,
+    the headless Service's one port is named `tcp`, so an `ingress` path whose
+    implicit backend is this component's Service (no `backend`, or `backend`
+    naming the headless Service) and that addresses it by any other `portName`
+    is refused at build time (`cannot route implicit backend to port "name"`),
+    just as a numbered `port` other than the component's `port` is
+    (go-kure/launcher#545). Without a `port` there is no port name to check:
+    an implicit backend is refused unless the trait sets `servicePort` itself,
+    and that trait-level port carries no name to hold a `portName` to.
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`/`tolerationSeconds`;
   `tolerationSeconds` and the toleration cross-field rules arrived with
   go-kure/launcher#412 via the shared parser — see "What `tolerations` changed
@@ -1495,6 +1510,16 @@ not part of either change.
   Application name it is handed. Without a `port` (or with `port: 0`) no
   Service is emitted, and such a name is held only to the container-name rule
   above.
+
+  **With `port > 0`, an ingress `portName` must be `http`.** The added
+  Service's one port is named `http`, so an `ingress` path whose implicit
+  backend is this component's Service (no `backend`, or `backend` naming that
+  Service) and that addresses it by any other `portName` is refused at build
+  time (`cannot route implicit backend to port "name"`), just as a numbered
+  `port` other than the component's `port` is (go-kure/launcher#545). Without
+  a `port` there is no Service and no port name to check: an implicit backend
+  is refused unless the trait sets `servicePort` itself, and that trait-level
+  port carries no name to hold a `portName` to.
 
   | Property | Type | Effect | Compatibility |
   |----------|------|--------|---------------|
