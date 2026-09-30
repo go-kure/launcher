@@ -601,6 +601,11 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		}
 	}
 
+	// A shared source is emitted by the consumer that deploys first. Deciding this
+	// only now, with final tiers and dependencies known, keeps the owner from
+	// waiting on another consumer of its source, which would deadlock.
+	deduplicateSourceRefs(deploymentOrder(entries, policyResult.Dependencies))
+
 	// Phase 3: group by tier and build cluster.
 	tierGroups := groupByTier(entries)
 
@@ -705,7 +710,6 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		})
 	}
 
-	deduplicateSourceRefs(entries)
 	return entries, nil
 }
 
@@ -962,7 +966,8 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 
 // deduplicateSourceRefs suppresses duplicate source CRD generation when multiple
 // components share the same source key (URL for HelmRepository, URL+version for
-// OCIRepository); first component wins.
+// OCIRepository); the first component in the given order wins. Callers pass
+// deploymentOrder's result so the owner never waits on another consumer.
 func deduplicateSourceRefs(entries []componentEntry) {
 	seen := make(map[string]string) // sourceKey → sourceRefName
 	for _, entry := range entries {
@@ -980,6 +985,62 @@ func deduplicateSourceRefs(entries []componentEntry) {
 			seen[key] = dedup.GetSourceRefName()
 		}
 	}
+}
+
+// deploymentOrder returns entries in an order every Flux dependency the cluster
+// builders wire respects: a component follows the components it explicitly
+// depends on and every component of an earlier tier. Ties keep document order,
+// so an application with one tier and no dependencies comes back unchanged. On a
+// dependency cycle it returns document order; the cluster builder reports the
+// cycle.
+func deploymentOrder(entries []componentEntry, deps map[string][]string) []componentEntry {
+	pos := make(map[string]int, len(entries))
+	for i, e := range entries {
+		pos[e.component.Name] = i
+	}
+	rank := make(map[Tier]int, len(TierOrder))
+	for i, tier := range TierOrder {
+		rank[tier] = i
+	}
+
+	// Kahn's algorithm, always taking the earliest placeable entry in document order.
+	pending := make([]int, len(entries)) // predecessors not yet placed
+	successors := make([][]int, len(entries))
+	for i, e := range entries {
+		for _, name := range deps[e.component.Name] {
+			if j, ok := pos[name]; ok {
+				successors[j] = append(successors[j], i)
+				pending[i]++
+			}
+		}
+		for j, other := range entries {
+			if rank[other.tier] < rank[e.tier] {
+				successors[j] = append(successors[j], i)
+				pending[i]++
+			}
+		}
+	}
+
+	ordered := make([]componentEntry, 0, len(entries))
+	placed := make([]bool, len(entries))
+	for len(ordered) < len(entries) {
+		next := -1
+		for i := range entries {
+			if !placed[i] && pending[i] == 0 {
+				next = i
+				break
+			}
+		}
+		if next < 0 {
+			return entries
+		}
+		placed[next] = true
+		ordered = append(ordered, entries[next])
+		for _, s := range successors[next] {
+			pending[s]--
+		}
+	}
+	return ordered
 }
 
 // resolveCapability merges capability rendering into trait properties (rendering as
