@@ -168,8 +168,8 @@ reconciled, not which objects it emits:
 
 | type | description |
 |---|---|
-| `dependency` | Orders components of this application: `rules[]` of `{component, dependsOn[]}`. Referenced components must exist; self-dependencies and cycles are rejected. Any rule switches the cluster to one bundle per component, wired with `dependsOn`. |
-| `placement` | Overrides a component's deployment tier: `component`, `tier` (`infra`, `services` or `apps`). |
+| `dependency` | Orders components of this application: `rules[]` of `{component, dependsOn[]}`. Referenced components must exist; self-dependencies and cycles are rejected. Any rule switches the cluster to one bundle per component, wired with `dependsOn` plus edges to the preceding tier's bundles. Known limitation: a Helm repository shared by several components lands in the first one's bundle regardless of the graph, which can stall a dependency-ordered deployment (go-kure/launcher#576). |
+| `placement` | Overrides the tier a component is grouped into: `component`, `tier` (`infra`, `services` or `apps`). Tier bundles are ordered only when a `dependency` policy is present; otherwise placement changes grouping, not deployment order (go-kure/launcher#575). |
 | `reconciliation` | Flux settings for every leaf bundle: `interval`, `retryInterval`, `timeout` (Go durations), `prune`, `wait`, `force`, `suspend`. At least one is required; at most one such policy per application. |
 | `health-checks` | Extra Flux health checks appended to every leaf bundle: `checks[]` of `{apiVersion, kind, name, namespace}`. Flux ignores them when `wait` is true. |
 

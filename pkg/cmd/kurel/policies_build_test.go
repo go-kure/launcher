@@ -131,17 +131,37 @@ func TestBuildCommand_BuiltinPolicies(t *testing.T) {
 	}
 }
 
-// TestBuiltinPolicies_ShapeTheCluster checks that each registered handler's
-// result actually reaches the cluster tree: the dependency edge becomes a
-// bundle DependsOn, the reconciliation settings and the extra health check land
-// on every leaf bundle, and the placement override is recorded.
-func TestBuiltinPolicies_ShapeTheCluster(t *testing.T) {
-	cluster, result, err := transformWithBuiltins(t, allBuiltinPoliciesYAML)
+// bundleHolding returns the name of the leaf bundle carrying the application
+// named component, or "" when none does.
+func bundleHolding(bundles map[string]*stack.Bundle, component string) string {
+	for name, b := range bundles {
+		for _, a := range b.Applications {
+			if a.Name == component {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+// TestBuiltinDependencyPolicy_WiresTheBundleEdge proves the dependency handler's
+// edge on its own. Both components are webservices in the same tier and there is
+// no placement policy, so automatic cross-tier wiring (which only links a bundle
+// to the preceding tier's) cannot produce shop-web -> shop-api: the edge exists
+// only because the dependency policy declared it.
+func TestBuiltinDependencyPolicy_WiresTheBundleEdge(t *testing.T) {
+	cluster, result, err := transformWithBuiltins(t, policyAppHeader+`    - name: order
+      type: dependency
+      properties:
+        rules:
+          - component: web
+            dependsOn: [api]
+`)
 	if err != nil {
 		t.Fatalf("Transform: %v", err)
 	}
-	if got := result.TierOverrides["api"]; got != oam.TierInfra {
-		t.Errorf("TierOverrides[api] = %q, want %q", got, oam.TierInfra)
+	if len(result.TierOverrides) != 0 {
+		t.Fatalf("TierOverrides = %v, want none (the case must not rely on placement)", result.TierOverrides)
 	}
 
 	bundles := leafBundles(cluster.Node)
@@ -155,7 +175,54 @@ func TestBuiltinPolicies_ShapeTheCluster(t *testing.T) {
 	if slices.Contains(api.DependsOn, web) {
 		t.Errorf("shop-api depends on shop-web; the edge is reversed")
 	}
+}
 
+// TestBuiltinPlacementPolicy_RegroupsTheComponent proves the placement override is
+// consumed on its own, with no dependency policy: without it both webservices
+// share the apps tier and the cluster is a single flat bundle; with it, api moves
+// into the infra tier bundle and web stays in the apps tier bundle. It asserts
+// grouping only — tier bundles carry no ordering edge between them without a
+// dependency policy (go-kure/launcher#575).
+func TestBuiltinPlacementPolicy_RegroupsTheComponent(t *testing.T) {
+	cluster, result, err := transformWithBuiltins(t, policyAppHeader+`    - name: api-first
+      type: placement
+      properties:
+        component: api
+        tier: infra
+`)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	if result.HasDependencies() {
+		t.Fatalf("Dependencies = %v, want none (the case must not rely on a dependency policy)", result.Dependencies)
+	}
+
+	bundles := leafBundles(cluster.Node)
+	if got := bundleHolding(bundles, "api"); got != "shop-infra" {
+		t.Errorf("api is in bundle %q, want shop-infra (bundles: %v)", got, slices.Sorted(maps.Keys(bundles)))
+	}
+	if got := bundleHolding(bundles, "web"); got != "shop-apps" {
+		t.Errorf("web is in bundle %q, want shop-apps (bundles: %v)", got, slices.Sorted(maps.Keys(bundles)))
+	}
+}
+
+// TestBuiltinPolicies_ShapeTheCluster checks, with all four built-in policies in
+// one document, that the reconciliation settings and the extra health check land
+// on every leaf bundle and the placement override is recorded. The dependency and
+// placement effects are proven independently above.
+func TestBuiltinPolicies_ShapeTheCluster(t *testing.T) {
+	cluster, result, err := transformWithBuiltins(t, allBuiltinPoliciesYAML)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	if got := result.TierOverrides["api"]; got != oam.TierInfra {
+		t.Errorf("TierOverrides[api] = %q, want %q", got, oam.TierInfra)
+	}
+
+	bundles := leafBundles(cluster.Node)
+	if len(bundles) == 0 {
+		t.Fatal("cluster has no leaf bundles")
+	}
 	extra := stack.HealthCheck{APIVersion: "batch/v1", Kind: "Job", Name: "db-migrate", Namespace: "default"}
 	for name, b := range bundles {
 		if b.Interval != "5m" {
@@ -192,14 +259,14 @@ func TestBuildCommand_PolicyHandlerErrorsSurface(t *testing.T) {
 			wantSub: []string{`policy "loop"`, "circular dependency detected: api -> web -> api"},
 		},
 		{
-			name: "placement unknown tier",
+			name: "placement unknown component",
 			policies: `    - name: odd
       type: placement
       properties:
-        component: api
-        tier: edge
+        component: cache
+        tier: infra
 `,
-			wantSub: []string{`policy "odd"`, `unknown tier "edge"`},
+			wantSub: []string{`policy "odd"`, `unknown component "cache"`},
 		},
 		{
 			name: "reconciliation bad duration",
@@ -209,6 +276,65 @@ func TestBuildCommand_PolicyHandlerErrorsSurface(t *testing.T) {
         interval: often
 `,
 			wantSub: []string{`policy "flux"`, `interval "often" is not a valid duration`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, out, err := buildDocs(t, policyAppHeader+tc.policies)
+			if err == nil {
+				t.Fatalf("build succeeded, want an error\noutput:\n%s", out)
+			}
+			for _, s := range tc.wantSub {
+				if !strings.Contains(err.Error(), s) {
+					t.Errorf("error = %q, want to contain %q", err, s)
+				}
+			}
+		})
+	}
+}
+
+// TestBuildCommand_PolicyPropertiesAreChecked: an authored built-in policy is
+// checked against its handler's PropertySchema before the transform, so a
+// misspelt key or a wrongly typed value fails `kurel build` instead of being
+// dropped by a handler that never reads it. The reconciliation cases carry a
+// valid interval beside the bad key on purpose: alone, the bad key would trip the
+// handler's own "at least one reconciliation property" error, and the build
+// would fail without this check.
+func TestBuildCommand_PolicyPropertiesAreChecked(t *testing.T) {
+	cases := []struct {
+		name     string
+		policies string
+		wantSub  []string
+	}{
+		{
+			name: "reconciliation misspelt key",
+			policies: `    - name: flux
+      type: reconciliation
+      properties:
+        interval: 5m
+        prunee: true
+`,
+			wantSub: []string{`policy "flux" (type "reconciliation")`, `unsupported field "prunee"`},
+		},
+		{
+			name: "reconciliation wrongly typed value",
+			policies: `    - name: flux
+      type: reconciliation
+      properties:
+        interval: 5m
+        prune: "yes"
+`,
+			wantSub: []string{`policy "flux" (type "reconciliation")`, `properties.prune: expected boolean`},
+		},
+		{
+			name: "placement tier outside the enum",
+			policies: `    - name: odd
+      type: placement
+      properties:
+        component: api
+        tier: edge
+`,
+			wantSub: []string{`policy "odd" (type "placement")`, `properties.tier: value edge not in allowed set`},
 		},
 	}
 	for _, tc := range cases {

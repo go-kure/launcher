@@ -158,26 +158,94 @@ func TestValidateAuthoredProperties_ConsultsLoweringRuleSchemas(t *testing.T) {
 	}
 }
 
-// TestValidateAuthoredProperties_PoliciesArePassedOver is the deliberate carve-out,
-// pinned so a later reader does not "fix" it. ApplicationPolicy is documented
-// pass-through (types.go) and no production code registers a PolicyHandler, so
-// launcher declares no schema for any policy type. Checking policies here would
-// reject every policy ever written.
-//
-// The transformer used here DOES register a schema-carrying policy handler
-// (newSchemaTransformer registers schemaPolicy for "dependency"), so this asserts the
-// pass-over is by position, not by an accidental absence of a schema to find.
-func TestValidateAuthoredProperties_PoliciesArePassedOver(t *testing.T) {
-	app := &Application{
-		Spec: ApplicationSpec{
-			Policies: []ApplicationPolicy{
-				{Name: "p", Type: "dependency", Properties: map[string]any{"not-in-the-schema": true}},
-			},
+// TestValidateAuthoredProperties_Policies pins the policy position: an authored
+// policy is checked against the schema its registered PolicyHandler (or the
+// PolicyLoweringRule claiming its type) declares, so a misspelt or wrongly typed key
+// is a build error instead of a setting the handler never reads. newSchemaTransformer
+// registers schemaPolicy for "dependency"; the other types are registered per case.
+func TestValidateAuthoredProperties_Policies(t *testing.T) {
+	policyApp := func(pols ...ApplicationPolicy) *Application {
+		return &Application{Spec: ApplicationSpec{Policies: pols}}
+	}
+	tests := []struct {
+		name    string
+		app     *Application
+		wantErr string // "" means accept
+	}{
+		{
+			name: "undeclared policy property is rejected, with the allowed list",
+			app: policyApp(ApplicationPolicy{Name: "order", Type: "dependency",
+				Properties: map[string]any{"components": []any{"api"}, "componentz": []any{"web"}}}),
+			wantErr: `policy "order" (type "dependency"): properties: unsupported field "componentz" (allowed: components)`,
+		},
+		{
+			name: "declared policy property of the wrong type is rejected",
+			app: policyApp(ApplicationPolicy{Name: "order", Type: "dependency",
+				Properties: map[string]any{"components": "api"}}),
+			wantErr: `policy "order" (type "dependency"): properties.components: expected array, got string`,
+		},
+		{
+			name: "a policy matching its schema is accepted",
+			app: policyApp(ApplicationPolicy{Name: "order", Type: "dependency",
+				Properties: map[string]any{"components": []any{"api", "web"}}}),
+		},
+		{
+			// Same top-level rule as components: the handler reports a missing
+			// property it needs with its own message, at transform time.
+			name: "omitted top-level Required is accepted on a policy",
+			app:  policyApp(ApplicationPolicy{Name: "order", Type: "dependency", Properties: map[string]any{}}),
+		},
+		{
+			name: "a policy handler declaring no schema accepts anything",
+			app: policyApp(ApplicationPolicy{Name: "p", Type: "schemaless",
+				Properties: map[string]any{"anything": "at all"}}),
+		},
+		{
+			// The transform rejects it ("no handler for policy type"); there is no
+			// schema to check here.
+			name: "a policy type nothing is registered for is passed over",
+			app: policyApp(ApplicationPolicy{Name: "p", Type: "no-such-policy",
+				Properties: map[string]any{"anything": "at all"}}),
+		},
+		{
+			name: "a PolicyLoweringRule's schema is consulted when no handler claims the type",
+			app: policyApp(ApplicationPolicy{Name: "p", Type: "higher-dependency",
+				Properties: map[string]any{"ownr": "team-a"}}),
+			wantErr: `policy "p" (type "higher-dependency"): properties: unsupported field "ownr" (allowed: owner)`,
+		},
+		{
+			name: "policies are checked in document order",
+			app: policyApp(
+				ApplicationPolicy{Name: "first", Type: "dependency", Properties: map[string]any{"bad1": true}},
+				ApplicationPolicy{Name: "second", Type: "dependency", Properties: map[string]any{"bad2": true}},
+			),
+			wantErr: `policy "first"`,
+		},
+		{
+			name: "a component's error is reported before a policy's",
+			app: &Application{Spec: ApplicationSpec{
+				Components: []Component{{Name: "web", Type: "webservice", Properties: map[string]any{"badcomp": 1}}},
+				Policies:   []ApplicationPolicy{{Name: "order", Type: "dependency", Properties: map[string]any{"badpol": 1}}},
+			}},
+			wantErr: `unsupported field "badcomp"`,
 		},
 	}
 
-	if err := newSchemaTransformer().ValidateAuthoredProperties(app); err != nil {
-		t.Errorf("policies must be passed over, got %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := newSchemaTransformer()
+			tr.RegisterPolicy("schemaless", &stubPolicyHandler{typ: "schemaless"})
+			tr.RegisterPolicyLowering(requiredSchemaPolicyLoweringRule{typ: "higher-dependency"})
+			err := tr.ValidateAuthoredProperties(tc.app)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("expected no error, got %v", err)
+			case tc.wantErr != "" && err == nil:
+				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+			case tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr):
+				t.Errorf("error = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
 	}
 }
 

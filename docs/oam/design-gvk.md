@@ -240,10 +240,14 @@ the component level, or a stray `spec.traits`, fails there.
 **Authored `properties` maps** are not covered by that decoder. `Component.Properties`,
 `Trait.Properties` and `ApplicationPolicy.Properties` (`pkg/oam/types.go`)
 are each `map[string]any`, so YAML strictness stops at the envelope and any key at all decodes
-successfully. The component and trait maps are instead checked against the handler's own declared
-`PropertySchema` (policies are a carve-out, below) by `Transformer.ValidateAuthoredProperties`, which the build calls immediately
-after parsing (`pkg/cmd/kurel/build.go`). An undeclared key is a build error naming the
-allowed fields; a declared key whose value has the wrong type is a build error too. An array- or
+successfully. Those maps are instead checked against the handler's own declared
+`PropertySchema` by `Transformer.ValidateAuthoredProperties`, which the build calls immediately
+after parsing (`pkg/cmd/kurel/build.go`). For a policy, the handler is the `PolicyHandler`
+registered for its type, or the `PolicyLoweringRule` claiming it; the built-in handlers
+`kurel build` registers (`dependency`, `placement`, `reconciliation`, `health-checks`, in
+`pkg/oam/builtin/policies`) each declare one. A policy type with nothing registered for it is
+not checked here and fails the transform with `no handler for policy type`. An undeclared key
+is a build error naming the allowed fields; a declared key whose value has the wrong type is a build error too. An array- or
 object-typed value that validation had to rebuild in order to check it — a typed Go `[]string`
 or `map[string]string` normalised into `[]any`/`map[string]any` — is written back in place, so
 the handler downstream sees the shape that was actually checked. Scalars a library caller or a
@@ -269,16 +273,7 @@ that does.
 which is a bare string until substitution; type-checking before substitution would reject a
 document whose integer- or boolean-typed property is supplied by a parameter.
 
-### Two carve-outs
-
-**Application policies.** `ValidateAuthoredProperties` does not walk `spec.policies`. A policy's
-properties are checked only by the `PolicyHandler` registered for its type, when the transform
-dispatches it (`Transformer.applyPolicies`, `pkg/oam/transform.go`): the handler rejects a
-missing or malformed key it reads, but a key it does not read is ignored rather than rejected.
-The built-in handlers `kurel build` registers (`dependency`, `placement`, `reconciliation`,
-`health-checks`, in `pkg/oam/builtin/policies`) each declare a `PropertySchema`; it is published
-and enforced on policies a lowering rule emits, but not on authored ones. A policy type with no
-registered handler fails the transform with `no handler for policy type`.
+### One carve-out
 
 **Trait types declared by a `CapabilityDefinition`.** A definition supplied via
 `--capability-def` declares that a trait type *exists*; it does not declare what properties that
