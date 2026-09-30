@@ -21,6 +21,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -1250,6 +1251,58 @@ func TestHelmchartConfig_ValuesModeConfigMap_CarriesAppLabel(t *testing.T) {
 	}
 	if cm.Annotations != nil {
 		t.Errorf("ConfigMap annotations = %#v, want nil", cm.Annotations)
+	}
+}
+
+// TestHelmchartConfig_ValuesModeConfigMap_LongNameProjectsAppLabel pins
+// go-kure/launcher#572 on the one component path a long name reaches the `app`
+// label through: a helmchart accepts any DNS-1123 subdomain (up to 253
+// characters), and its values ConfigMap is emitted only by AugmentLayout, which
+// `kurel build` never runs (it rejects valuesMode configMap), so the kurel-level
+// invariant test cannot see it. The label value is oam.ComponentLabelValue(name),
+// never the raw name.
+func TestHelmchartConfig_ValuesModeConfigMap_LongNameProjectsAppLabel(t *testing.T) {
+	name := "metrics." + strings.Repeat("long-helmchart-component-name.", 4) + "end"
+	if len(name) <= validation.LabelValueMaxLength {
+		t.Fatalf("test name is %d characters, want more than %d", len(name), validation.LabelValueMaxLength)
+	}
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: name,
+		Type: "helmchart",
+		Properties: map[string]any{
+			"chart":      "kube-prometheus-stack",
+			"valuesMode": "configMap",
+			"values":     map[string]any{"replicaCount": 3},
+			"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+		},
+	}, "monitoring")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	aug, ok := cfg.(interface {
+		AugmentLayout(*layout.ManifestLayout) error
+	})
+	if !ok {
+		t.Fatal("configMap-mode config with non-empty Values does not implement LayoutAugmenter")
+	}
+	ml := &layout.ManifestLayout{}
+	if err := aug.AugmentLayout(ml); err != nil {
+		t.Fatalf("AugmentLayout: %v", err)
+	}
+	if len(ml.Resources) != 1 {
+		t.Fatalf("ml.Resources has %d entries, want exactly 1", len(ml.Resources))
+	}
+	cm, ok := ml.Resources[0].(*corev1.ConfigMap)
+	if !ok {
+		t.Fatalf("ml.Resources[0] = %T, want *corev1.ConfigMap", ml.Resources[0])
+	}
+	got := cm.Labels["app"]
+	if want := oam.ComponentLabelValue(name); got != want || len(cm.Labels) != 1 {
+		t.Errorf("ConfigMap labels = %#v, want exactly app=%q", cm.Labels, want)
+	}
+	if errs := validation.IsValidLabelValue(got); len(errs) > 0 {
+		t.Errorf("ConfigMap app label %q is not a valid label value: %v", got, errs)
 	}
 }
 

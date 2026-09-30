@@ -200,12 +200,12 @@ func (c *ScalerConfig) Generate(app *stack.Application) ([]*client.Object, error
 	// A label map per object, never one map shared between them: these leave
 	// the package on objects a caller owns and edits, and a shared map turns a
 	// label added to the HPA into a label on the PDB as well.
-	hpa := c.buildHPA(app, map[string]string{"app": c.componentName})
+	hpa := c.buildHPA(app, componentLabels(c.componentName))
 	hpaObj := client.Object(hpa)
 	resources = append(resources, &hpaObj)
 
 	if c.EnablePDB {
-		pdb := c.buildPDB(app, map[string]string{"app": c.componentName})
+		pdb := c.buildPDB(app, componentLabels(c.componentName))
 		pdbObj := client.Object(pdb)
 		resources = append(resources, &pdbObj)
 	}
@@ -234,7 +234,7 @@ func (c *ScalerConfig) buildPDB(app *stack.Application, labels map[string]string
 	pdb.Annotations = nil
 	kubernetes.SetPDBMinAvailable(pdb, intstr.FromString("50%"))
 	kubernetes.SetPDBSelector(pdb, &metav1.LabelSelector{
-		MatchLabels: map[string]string{"app": c.componentName},
+		MatchLabels: componentLabels(c.componentName),
 	})
 	return pdb
 }

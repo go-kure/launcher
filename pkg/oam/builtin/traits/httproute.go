@@ -1124,7 +1124,7 @@ type BackendRef struct {
 // Generate creates a Gateway API HTTPRoute resource.
 func (c *HTTPRouteConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	route := kubernetes.CreateHTTPRoute(app.Name, app.Namespace)
-	route.Labels = map[string]string{"app": c.componentName}
+	route.Labels = componentLabels(c.componentName)
 	route.Annotations = c.Annotations
 
 	for _, ref := range c.ParentRefs {

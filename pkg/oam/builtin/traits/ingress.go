@@ -485,12 +485,8 @@ type IngressTLS struct {
 
 // Generate creates a Kubernetes Ingress resource.
 func (c *IngressConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	labels := map[string]string{
-		"app": c.componentName,
-	}
-
 	ingress := kubernetes.CreateIngress(app.Name, app.Namespace)
-	ingress.Labels = labels
+	ingress.Labels = componentLabels(c.componentName)
 	ingress.Annotations = c.Annotations
 	if c.IngressClassName != "" {
 		kubernetes.SetIngressClassName(ingress, c.IngressClassName)

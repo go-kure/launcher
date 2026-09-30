@@ -93,6 +93,18 @@ matching `<domain>/component` on every rendered workload and helm-rendered pod �
 `ComponentLabelKey` to a label its pods do carry (e.g. `"app"`). A caller that injects
 `trafficSources`/`EgressPeers` without either will synthesize a policy that selects nothing.
 
+The selector **value** is `ComponentLabelValue(name)`, not the raw component name, and a
+platform stamping the label must use the same function. A component name is a DNS-1123
+subdomain (up to 253 characters), a label value at most 63: `ComponentLabelValue` returns a
+name of 63 characters or fewer unchanged and projects a longer one onto a readable 52-character
+prefix plus `-` and the first 10 hex characters of its sha256 (trailing `-`/`.` trimmed from the
+prefix). The projection is deterministic, so every label and selector derived from one component
+agrees. The built-in `app` label every component and trait emits uses the same function
+(go-kure/launcher#572). It is a projection rather than a refusal because the label is an
+identifier, not the object's name: several component types (`helmchart`, `manifests`, `oci`,
+`crd`, `passthrough`) and their traits accept a name over 63 characters. Object names are never
+projected.
+
 One exception on the inbound side: a component whose config reports a routing target — the
 `service` kind, whose Service fronts pods another component owns — gets its
 `{comp}-allow-ingress-traffic` policy on the Service's `selector` pods instead of the component
@@ -207,7 +219,7 @@ one. The HelmRelease is still emitted; only the check is skipped.
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
 | `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). |
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
-| `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. |
+| `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
 | `ServiceAccountNamer` | `ServiceAccountName() string` — the ServiceAccount a workload component's pods run as: the authored `serviceAccountName` when set, else the per-component account the handler generates (named after the component). Traits that bind identity to the workload (the `rbac` trait's binding subject) read this instead of assuming the component name. Implemented by every built-in workload kind config. |
 | `LayoutAugmentationCoverage` | `GenerateCoversAugmentLayout() bool` — for a config that also implements kure's `layout.LayoutAugmenter`, declare whether `Generate` alone already produces every resource `AugmentLayout` places into the layout. `kurel build` (which never walks a `layout.ManifestLayout`) uses this to fail closed: an augmenter that doesn't implement this interface, or that implements it and returns `false`, is rejected outright rather than silently dropping layout-level resources from the output. |
 

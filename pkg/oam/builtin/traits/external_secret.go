@@ -536,7 +536,7 @@ func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Objec
 		Name: c.StoreRefName,
 		Kind: c.StoreRefKind,
 	}
-	kubernetes.AddLabel(es, "app", c.componentName)
+	kubernetes.AddLabel(es, "app", oam.ComponentLabelValue(c.componentName))
 	externalsecrets.SetRefreshInterval(es, metav1.Duration{Duration: dur})
 
 	target := esv1.ExternalSecretTarget{Name: c.TargetSecretName}

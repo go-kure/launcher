@@ -378,9 +378,10 @@ func (c *DeploymentConfig) ApplyPolicy(p oam.Policy) error {
 // distinct maps here on purpose: a downstream merge into one of them — a trait
 // adding a label to object metadata, say — must not silently rewrite a
 // selector, which is immutable once the object exists and would change which
-// pods the Deployment owns.
+// pods the Deployment owns. The value is oam.ComponentLabelValue(name), as in
+// appLabels (go-kure/launcher#572).
 func deploymentComponentLabels(name string) map[string]string {
-	return map[string]string{"app": name}
+	return map[string]string{"app": oam.ComponentLabelValue(name)}
 }
 
 // Generate creates a Kubernetes Deployment and ServiceAccount (no Service).

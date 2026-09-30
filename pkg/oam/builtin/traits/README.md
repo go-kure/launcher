@@ -691,7 +691,9 @@ from sub-app names, which several handlers author from properties rather than
 auto-NetworkPolicy synthesis) delegates to the same accessor; auto-synthesized
 NetworkPolicies target that `<domain>/component` label by default (domain from
 `TransformContext.Domain`, library default `gokure.dev`;
-`TransformContext.ComponentLabelKey`-overridable).
+`TransformContext.ComponentLabelKey`-overridable). The accessor returns the raw name;
+the label and selector value is `oam.ComponentLabelValue` of it, which differs from
+the name only past 63 characters (see Conventions).
 
 ## Raw Cilium rules are decoded strictly
 
@@ -790,6 +792,18 @@ so a shared map turns a label added to the Role into a label on the RoleBinding,
 added to the HPA into a label on the PDB. The same rule and the reason behind it are in
 the Conventions section of the component handlers' README
 (`pkg/oam/builtin/components/README.md`).
+
+Every `app` label and `app` selector a trait emits — on the `configmap`, `pvc`, `rbac`,
+`scaler`, `ingress`, `httproute`, `networkpolicy` and `external-secret` objects, and
+the PodDisruptionBudget and NetworkPolicy `podSelector` that pick the component's
+pods — is valued at `oam.ComponentLabelValue(<component>)`, through the unexported
+`componentLabels` (`labels.go`); `external-secret` calls the function directly. It is
+the same function the component handlers label their pods with, so a trait's selector
+matches them. A component name may be up to 253 characters and a label value at most
+63; the function returns a name of 63 characters or fewer unchanged and projects a
+longer one onto a 52-character prefix plus a 10-hex-character digest
+(go-kure/launcher#572). A trait on a component whose type accepts a longer name (a
+`passthrough`, for one) reaches the projection; object names are never projected.
 
 The same holds for the traffic sources a routing trait retains (`TrafficSources()`):
 NetworkPolicy synthesis in `pkg/oam` gives every emitted peer, and every synthesized

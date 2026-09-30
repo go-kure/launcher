@@ -985,11 +985,13 @@ func (c *augmentingHelmchartConfig) AugmentLayout(ml *layout.ManifestLayout) err
 	// CreateConfigMap no longer stamps labels/annotations itself, so they
 	// are set here explicitly — matching every other ConfigMap this
 	// codebase emits (traits/configmap.go). The emitted metadata is not
-	// identical to beta.10's: the label is the component name rather than
-	// this ConfigMap's own name, and there is no `app` annotation. Both
-	// deltas are inventoried in the package README.
+	// identical to beta.10's: the label is the component's label value
+	// (appLabels: the component name, projected when it exceeds 63
+	// characters, go-kure/launcher#572) rather than this ConfigMap's own
+	// name, and there is no `app` annotation. Both deltas are inventoried in
+	// the package README.
 	cm := kubernetes.CreateConfigMap(valuesConfigMapName(c.Name), c.fluxNamespace())
-	cm.Labels = map[string]string{"app": c.Name}
+	cm.Labels = appLabels(c.Name)
 	cm.Annotations = nil
 	kubernetes.AddConfigMapData(cm, "values.yaml", string(b))
 	ml.Resources = append(ml.Resources, cm)
