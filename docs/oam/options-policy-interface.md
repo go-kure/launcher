@@ -87,7 +87,7 @@ type Enforceable interface {
 }
 ```
 
-Component config types (e.g. `WebserviceConfig`, `WorkerConfig`) implement this interface.
+Component config types (e.g. `WebserviceConfig`, `DeploymentConfig`) implement this interface.
 The transformer calls `ApplyPolicy` after parsing each component, passing the environment
 policy from the request.
 
