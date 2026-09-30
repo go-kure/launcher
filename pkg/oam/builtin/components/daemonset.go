@@ -208,6 +208,17 @@ func (c *DaemonsetConfig) ServiceAccountName() string {
 // implicit backend for ingress, httproute, and expose traits.
 func (c *DaemonsetConfig) ServicePort() int32 { return c.Port }
 
+// ServicePortName returns "http", the name createService gives the Service's
+// one port, and true, so routing traits refuse an implicit backend addressed by
+// any other port name. Without a port no Service is generated, so it returns ""
+// and false.
+func (c *DaemonsetConfig) ServicePortName() (string, bool) {
+	if c.Port <= 0 {
+		return "", false
+	}
+	return "http", true
+}
+
 // ApplyPolicy applies defaults then enforces limits from the policy.
 // DaemonSets don't have replicas, so only resource and registry limits apply.
 func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {

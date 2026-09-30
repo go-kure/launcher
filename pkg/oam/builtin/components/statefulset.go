@@ -335,6 +335,17 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 // ServicePort returns the port exposed by the component's headless Service, or 0 if no port is configured.
 func (c *StatefulsetConfig) ServicePort() int32 { return c.Port }
 
+// ServicePortName returns "tcp", the name createHeadlessService gives the
+// headless Service's one port, and true, so routing traits refuse an implicit
+// backend addressed by any other port name. Without a port the Service has
+// none, so it returns "" and false.
+func (c *StatefulsetConfig) ServicePortName() (string, bool) {
+	if c.Port <= 0 {
+		return "", false
+	}
+	return "tcp", true
+}
+
 // BackendServiceName returns the name of the Kubernetes Service the statefulset exposes.
 func (c *StatefulsetConfig) BackendServiceName() string { return c.ServiceName }
 
