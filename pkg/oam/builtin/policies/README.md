@@ -64,7 +64,9 @@ policies:
 
 Overrides the tier a component is classified into (by its type, or by the `<domain>/tier`
 annotation). The tier must be one of `infra`, `services`, `apps`, and the component must
-exist.
+exist. A second `placement` policy for the same component is an error if it names a
+different tier, rather than silently overriding the first; repeating the same tier is
+accepted.
 
 Placement changes which tier bundle holds the component, not when it is deployed. Without
 a `dependency` policy, an application spanning several tiers gets one bundle per tier
@@ -84,8 +86,9 @@ policies:
 ### `reconciliation`
 
 Sets Flux Kustomization reconciliation parameters on every leaf bundle of the
-application. `interval`, `retryInterval` and `timeout` must parse as Go durations
-(`5m`, `1h30m`); `prune`, `wait`, `force` and `suspend` are booleans. A boolean left out
+application. `interval`, `retryInterval` and `timeout` must be durations Flux's
+Kustomization CRD accepts (`5m`, `1h30m`): unsigned, in `ms`, `s`, `m` or `h`, so a value
+such as `-5m` or `500ns` that Go would parse is still an error; `prune`, `wait`, `force` and `suspend` are booleans. A boolean left out
 leaves the bundle's own value unchanged rather than forcing `false`. At least one property
 must be given, and at most one `reconciliation` policy is allowed per application.
 
