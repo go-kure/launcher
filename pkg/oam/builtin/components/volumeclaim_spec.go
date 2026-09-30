@@ -207,8 +207,7 @@ func parseStorageResourceList(m map[string]any, label string) (corev1.ResourceLi
 		// a null under an optional property as absent, so the document is
 		// schema-valid and must reach the requiredness error ("missing
 		// required field 'size' (or resources.requests.storage)") rather than a
-		// type error rendering the nil. Same rule, and the same ordering, as
-		// every other optional read on this branch.
+		// type error rendering the nil. The container-side parseResourceList does not.
 		if isExplicitNull(v) {
 			continue
 		}

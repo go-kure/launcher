@@ -981,9 +981,9 @@ func validateHugePageQuantity(name corev1.ResourceName, q resource.Quantity) err
 	return nil
 }
 
-// parseResourceList parses every string-valued entry of m as a
+// parseResourceList parses every entry of m (a string or number; else refused) as a
 // corev1.ResourceName -> resource.Quantity pair. Returns nil (not an empty
-// non-nil map) when m has no string-valued entries, so a caller comparing
+// non-nil map) when m is empty, so a caller comparing
 // against a zero-value ResourceRequirements{} still sees an absent section as
 // absent — matching applyDefaultQuantity's map-key-presence convention.
 func parseResourceList(m map[string]any) (corev1.ResourceList, error) {
@@ -1732,8 +1732,8 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 // parseObjectListField and parseStringList) go through, so that "absent"
 // means the same thing at every call site that uses one. Not every read in
 // this package does: some parsers read a key raw, and those that do not test
-// isExplicitNull themselves refuse an explicit null as a wrong type (see "The
-// null contract" in README.md).
+// isExplicitNull refuse an untyped null as a wrong type (a raw list read can
+// take a typed nil as empty; see "The null contract" in README.md).
 //
 // A key authored with no value (`updateStrategy:`) decodes to a present entry
 // holding nil. That is ABSENCE, not a present value of the wrong type, and the
@@ -1818,9 +1818,8 @@ func parseIntField(raw map[string]any, key, label string, lo, hi int64) (int64, 
 // opt back out rather than a malformed value. An explicit null is likewise
 // absence, per authoredValue above.
 //
-// parseStorageClassField below is the one optional string that must NOT
-// collapse "" into absence, and it reads raw[key] directly rather than
-// delegating here — see its own comment.
+// A field where "" is a value uses parseRawStringField below or, for a volume's
+// storageClass, parseStorageClassField; both test presence with authoredValue.
 func parseStringField(raw map[string]any, key, label string) (string, bool, error) {
 	v, present := authoredValue(raw, key)
 	if !present {
