@@ -229,9 +229,17 @@ func (t *Transformer) LowerRawsWithSteps(raws []json.RawMessage, ctx TransformCo
 		return raws, nil, nil
 	}
 
-	emitted, steps, err := t.lowerRawRound(seed, ctx, preReserved)
+	emitted, chains, err := t.lowerRawRound(seed, ctx, preReserved)
 	if err != nil {
 		return nil, nil, err
+	}
+	// Seeds are in input order, so concatenating their chains gives the steps in
+	// input order; chainBySlot attributes a re-serialization failure below.
+	var steps []LoweringStep
+	chainBySlot := make(map[int][]LoweringStep, len(seed))
+	for i, d := range seed {
+		steps = append(steps, chains[i]...)
+		chainBySlot[d.slot] = chains[i]
 	}
 
 	// Splice on slot — not on Origin, and not on position within emitted. Group
@@ -249,7 +257,7 @@ func (t *Transformer) LowerRawsWithSteps(raws []json.RawMessage, ctx TransformCo
 		for _, d := range bySlot[i] {
 			b, err := yaml.Marshal(d.doc)
 			if err != nil {
-				return nil, nil, &LoweringError{Origin: d.origin, Cause: errors.Wrapf(err, "re-serialize lowered document %q", d.doc.Metadata.Name)}
+				return nil, nil, &LoweringError{Origin: d.origin, Chain: chainBySlot[i], Cause: errors.Wrapf(err, "re-serialize lowered document %q", d.doc.Metadata.Name)}
 			}
 			out = append(out, b)
 		}
@@ -273,9 +281,9 @@ func (t *Transformer) LowerRawsWithSteps(raws []json.RawMessage, ctx TransformCo
 // rule bug, reported here against the authored document rather than left to a caller's
 // parser that cannot say which rule produced it.
 //
-// On success it also returns every seed's steps, in seed order, which is input order
+// On success it also returns each seed's own steps, indexed like seed
 // (LowerRawsWithSteps).
-func (t *Transformer) lowerRawRound(seed []loweringDoc, ctx TransformContext, preReserved []reservedIdentity) ([]loweringDoc, []LoweringStep, error) {
+func (t *Transformer) lowerRawRound(seed []loweringDoc, ctx TransformContext, preReserved []reservedIdentity) ([]loweringDoc, [][]LoweringStep, error) {
 	namer := NewNameAllocator()
 	for _, r := range preReserved {
 		if err := namer.Reserve(r.name, r.origin); err != nil {
@@ -285,15 +293,15 @@ func (t *Transformer) lowerRawRound(seed []loweringDoc, ctx TransformContext, pr
 	namer.round = 0
 
 	out := make([]loweringDoc, 0, len(seed))
-	all := make([]LoweringStep, 0, len(seed))
-	for _, d := range seed {
+	chains := make([][]LoweringStep, len(seed))
+	for i, d := range seed {
 		// Seeds are independent authored documents, so an error's Chain is this
 		// seed's own steps only — never an earlier seed's (D7).
 		emitted, steps, err := t.lowerRawOnce(d, ctx, namer, 0)
 		if err != nil {
 			return nil, nil, &LoweringError{Origin: d.origin, Chain: steps, Cause: err}
 		}
-		all = append(all, steps...)
+		chains[i] = steps
 		for _, doc := range emitted {
 			if err := checkLoweredAPIVersion(doc, d.apiVersion); err != nil {
 				return nil, nil, &LoweringError{Origin: d.origin, Chain: steps, Cause: err}
@@ -301,7 +309,7 @@ func (t *Transformer) lowerRawRound(seed []loweringDoc, ctx TransformContext, pr
 			out = append(out, loweringDoc{doc: doc, origin: d.origin, slot: d.slot, apiVersion: d.apiVersion})
 		}
 	}
-	return out, all, nil
+	return out, chains, nil
 }
 
 // lowerRawOnce is round 0 for a raw-entered document, and the only round LowerRaws
