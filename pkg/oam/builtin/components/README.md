@@ -2409,19 +2409,23 @@ not part of either change.
   behind a pointer, a `json.RawMessage` and a custom encoder included. A
   value that does not serialize is refused. A negative `instances` is
   refused before policy runs.
-  An authored `0` or `false` that the typed spec cannot carry is refused by
-  path (`managed.roles[0].connectionLimit: 0 cannot be carried by the
+  An authored `0` or `false` that the typed spec cannot carry, on a field
+  whose CRD default is not zero, is refused by path
+  (`managed.roles[0].connectionLimit: 0 cannot be carried by the
   CloudNativePG API types (the field is omitted when zero, so the operator
-  would apply its default)`). Many `ClusterSpec` fields are non-pointer and
+  would apply its default -1)`). These fields are non-pointer and
   `omitempty`, so the value is omitted when the Cluster is encoded and the
-  operator applies its CRD default instead: `managed.roles[].connectionLimit`
-  (default `-1`, unlimited), `postgresUID`/`postgresGID` (`26`),
-  `startDelay`, `stopDelay`, `switchoverDelay`,
-  `replicationSlots.updateInterval`. Fields whose default is itself zero,
-  such as `managed.roles[].login: false`, are refused too, since nothing
-  tells them apart; omit them instead. No field list is kept: the
-  decoded spec is encoded and every authored numeric zero or `false` absent
-  from that encoding is refused, so a field a CNPG bump adds is covered too.
+  operator applies its CRD default instead. For the linked CNPG version they
+  are `managed.roles[].connectionLimit` (default `-1`, unlimited),
+  `postgresUID` and `postgresGID` (`26`), `startDelay` (`3600`),
+  `stopDelay` (`1800`), `switchoverDelay` (`3600`),
+  `probes.liveness.isolationCheck.requestTimeout` and `.connectionTimeout`
+  (`1000`) and `replicationSlots.updateInterval` (`30`); a test derives the
+  set from the CNPG module's CRD and Go types, so a CNPG bump that changes it
+  fails CI. An explicit zero default on any other such field, such as
+  `managed.roles[].login: false`, `superuser: false`, `minSyncReplicas: 0`
+  or `monitoring.enablePodMonitor: false`, is accepted: it is omitted too,
+  and the field's absence means the same value.
   A `false` or `0` the type keeps (a pointer such as `enablePDB: false`,
   `instances: 0`, a quantity `cpu: 0`) is emitted as authored. An authored
   empty string is not refused — `storage.size: ""` keeps its meaning above —

@@ -100,13 +100,21 @@ upstream fields are non-pointer and `omitempty`, and some carry a non-zero CRD
 default (`managed.roles[].connectionLimit` defaults to `-1`, `postgresUID` to
 `26`): an authored `0` or `false` decodes into the field, is omitted when the
 object is encoded, and the API server applies the default. The kind refuses
-such a value by path rather than silently change it. It finds them without a
-field list: the decoded spec is encoded as the emitted object will be, and
-every authored numeric zero or `false` with nothing at the same path in that
-encoding is an error, so a field a dependency bump adds is covered too. An
-authored empty string is not refused (`storage.size: ""` is a supported
-value), and two spellings of one field in the same object (`size` and `Size`)
-are refused, since the decoder would keep only one.
+such a value by path rather than silently change it. The decoded spec is
+encoded as the emitted object will be, and an authored numeric zero or `false`
+with nothing at the same path in that encoding is an error when the path is
+in the kind's list of fields whose CRD default is not zero. On any other
+field the absent value means the same zero, so an explicit default such as
+`managed.roles[].login: false` or `minSyncReplicas: 0` is accepted with its
+meaning unchanged. A coverage test
+pins the list: it derives the set from the linked operator module itself —
+the CRD's scalar defaults that are not zero, crossed with the non-pointer
+`omitempty` fields of the Go spec type — and requires the list to equal it,
+default values included, so a dependency bump that adds, removes or changes
+such a field fails CI, naming it. An authored empty string is not refused
+(`storage.size: ""` is a supported value), and two spellings of one field in
+the same object (`size` and `Size`) are refused, since the decoder would keep
+only one.
 
 ### Policy lives on the kind
 

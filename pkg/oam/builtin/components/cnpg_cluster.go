@@ -48,7 +48,8 @@ const cnpgClusterDefaultInstances = 1
 // Deep blocks are published as open objects and decoded strictly into the
 // typed cnpgv1 structs (builtin.DecodeStrictJSON), so a misspelt key at any
 // depth or a wrongly typed value is refused rather than dropped, as is an
-// authored 0 or false the typed spec would omit (refuseUncarriedValues).
+// authored 0 or false the typed spec would omit and the operator would replace
+// with a non-zero default (refuseUncarriedValues).
 // TestCnpgClusterSchema_CoversClusterSpec keeps the published key set equal to
 // the upstream json tags.
 type CnpgClusterHandler struct{}
@@ -211,15 +212,33 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	}, nil
 }
 
+// cnpgClusterDefaultedZeroFields lists the ClusterSpec fields on which an
+// authored 0 or false would be silently replaced: non-pointer and omitempty,
+// so the value is omitted when the Cluster is encoded, with a CRD default that
+// is not zero, so the API server then applies that default instead. Each key
+// is a json path with [] for an array element; each value is the CRD default,
+// quoted in the refusal. A field whose default is itself zero or false
+// (minSyncReplicas), or that has none (managed.roles[].login), is not listed:
+// omitting its zero leaves the same value. TestCnpgClusterDefaultedZeroFields_MatchCRD derives this set
+// from the linked CloudNativePG module, so a bump that changes it fails CI.
+var cnpgClusterDefaultedZeroFields = map[string]string{
+	"managed.roles[].connectionLimit": "-1",
+	"postgresGID":                     "26",
+	"postgresUID":                     "26",
+	"probes.liveness.isolationCheck.connectionTimeout": "1000",
+	"probes.liveness.isolationCheck.requestTimeout":    "1000",
+	"replicationSlots.updateInterval":                  "30",
+	"startDelay":                                       "3600",
+	"stopDelay":                                        "1800",
+	"switchoverDelay":                                  "3600",
+}
+
 // refuseUncarriedValues refuses an authored value that the typed spec decodes
-// but the emitted Cluster would not carry. Many ClusterSpec fields are
-// non-pointer and omitempty, and some have a non-zero CRD default
-// (managed.roles[].connectionLimit, postgresUID, stopDelay, ...): an authored
-// 0 or false decodes into the field, is omitted when the Cluster is encoded,
-// and the API server then applies its default. Rather than a field list kept
-// in step with the upstream types, the spec is encoded as Generate's Cluster
-// will be and the authored tree (jsonProperties' output) is walked against it,
-// so any such field is covered, including one a CNPG bump adds.
+// but the emitted Cluster would not carry with its meaning: a 0 or false on a
+// cnpgClusterDefaultedZeroFields field, which the API server would replace
+// with the CRD default. The spec is encoded as Generate's Cluster will be and
+// the authored tree (jsonProperties' output) is walked against it, so a value
+// is refused only when it is actually missing from the encoding.
 //
 // Two spellings of one field in the same object are refused as well:
 // encoding/json keeps only one of them, dropping the other silently.
@@ -234,27 +253,32 @@ func refuseUncarriedValues(authored map[string]any, spec *cnpgv1.ClusterSpec) er
 	if err := dec.Decode(&encoded); err != nil {
 		return errors.Wrap(err, "internal: decode the encoded ClusterSpec")
 	}
-	return compareCarried(authored, encoded, "")
+	return compareCarried(authored, encoded, "", "")
 }
 
 // compareCarried walks authored against encoded, descending only where both
-// sides are objects or both are arrays (arrays align by index). A leaf present
-// in encoded in any spelling or type (a Quantity written as a number, say) is
-// carried. A leaf absent from encoded is refused when it is a numeric zero or
-// false. An authored empty string is not refused: storage.size "" is a value
-// the kind supports (authoredStorageRequest).
-func compareCarried(authored, encoded any, path string) error {
+// sides are objects or both are arrays (arrays align by index). path is the
+// authored spelling with indices, for the error; field is the same position in
+// the encoding's json names with [] for an index, the form
+// cnpgClusterDefaultedZeroFields is keyed by. A leaf present in encoded in any
+// spelling or type (a Quantity written as a number, say) is carried. A leaf
+// absent from encoded is refused when it is a numeric zero or false on a
+// cnpgClusterDefaultedZeroFields field; elsewhere omitting the zero leaves
+// the same value, and an authored empty string is not
+// refused at all (storage.size "" is a value the kind supports,
+// authoredStorageRequest).
+func compareCarried(authored, encoded any, path, field string) error {
 	switch a := authored.(type) {
 	case map[string]any:
 		e, ok := encoded.(map[string]any)
 		if !ok {
 			return nil
 		}
-		join := func(k string) string {
-			if path == "" {
+		join := func(base, k string) string {
+			if base == "" {
 				return k
 			}
-			return path + "." + k
+			return base + "." + k
 		}
 		// claimed maps an encoded key to the authored path that matched it.
 		// unmatched holds the authored keys with nothing in encoded: only a
@@ -263,17 +287,17 @@ func compareCarried(authored, encoded any, path string) error {
 		claimed := make(map[string]string, len(a))
 		var unmatched []string
 		for _, k := range slices.Sorted(maps.Keys(a)) {
-			child := join(k)
+			child := join(path, k)
 			ek, present := encodedKey(e, k)
 			if !present {
 				for _, prev := range unmatched {
 					if strings.EqualFold(prev, k) {
-						return errors.Errorf("%s: sets the same field as %s (field names match case-insensitively, so one value would be dropped)", child, join(prev))
+						return errors.Errorf("%s: sets the same field as %s (field names match case-insensitively, so one value would be dropped)", child, join(path, prev))
 					}
 				}
 				unmatched = append(unmatched, k)
-				if isOmittedZero(a[k]) {
-					return errors.Errorf("%s: %v cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default)", child, a[k])
+				if def, defaulted := defaultedZeroField(join(field, k)); defaulted && isOmittedZero(a[k]) {
+					return errors.Errorf("%s: %v cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default %s)", child, a[k], def)
 				}
 				continue
 			}
@@ -281,7 +305,7 @@ func compareCarried(authored, encoded any, path string) error {
 				return errors.Errorf("%s: sets the same field as %s (field names match case-insensitively, so one value would be dropped)", child, other)
 			}
 			claimed[ek] = child
-			if err := compareCarried(a[k], e[ek], child); err != nil {
+			if err := compareCarried(a[k], e[ek], child, join(field, ek)); err != nil {
 				return err
 			}
 		}
@@ -291,12 +315,26 @@ func compareCarried(authored, encoded any, path string) error {
 			return nil
 		}
 		for i := range min(len(a), len(e)) {
-			if err := compareCarried(a[i], e[i], fmt.Sprintf("%s[%d]", path, i)); err != nil {
+			if err := compareCarried(a[i], e[i], fmt.Sprintf("%s[%d]", path, i), field+"[]"); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// defaultedZeroField returns the CRD default of the
+// cnpgClusterDefaultedZeroFields entry at field, matched case-insensitively:
+// the parent segments are json names from the encoding, but the leaf is the
+// authored key, with nothing in the encoding to take its json name from, and
+// encoding/json folds field names.
+func defaultedZeroField(field string) (string, bool) {
+	for _, known := range slices.Sorted(maps.Keys(cnpgClusterDefaultedZeroFields)) {
+		if strings.EqualFold(known, field) {
+			return cnpgClusterDefaultedZeroFields[known], true
+		}
+	}
+	return "", false
 }
 
 // encodedKey returns the key of e that the authored key k was decoded into:
