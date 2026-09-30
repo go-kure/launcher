@@ -468,7 +468,8 @@ func (c *HelmchartConfig) ApplyPolicy(_ oam.Policy) error { return nil }
 // For HelmRepository: "helm:<url>". For OCIRepository: "oci:<url>:<version>".
 // Returns "" for Form B (reference) and for template delivery (no source CR emitted)
 // so the dedup loop skips this config.
-// First component wins when multiple components share the same source key.
+// When several components share a key, the transform picks the one deployed
+// first to emit the source (see oam.SourceDeduplicatable).
 func (c *HelmchartConfig) GetSourceKey() string {
 	if c.SourceURL == "" || c.Delivery == "template" {
 		return ""

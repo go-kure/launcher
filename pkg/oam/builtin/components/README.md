@@ -1899,6 +1899,9 @@ not part of either change.
 - **helmchart** — `chart`, `version`, `delivery` (`native`|`template`), `source`
   (inline `url` or `{name,kind}` ref), `values`/`valuesFrom`, `valuesMode`
   (`inline` default | `configMap`), `driftDetection`, `install.crds`/`upgrade.crds`.
+  Components whose inline `source.url` (plus `version` for OCI) match share one source
+  CR, emitted by the one deployed first — earliest tier, then `dependency` order, then
+  document order — and referenced by the others.
   `valuesMode: configMap` externalizes `values` into a literal `ConfigMap` resource
   — not a kustomize `configMapGenerator` (its hash-suffixed name has no HelmRelease
   entry in kustomize's built-in name-reference table to rewrite) — referenced from
