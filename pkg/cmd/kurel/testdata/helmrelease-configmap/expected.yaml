@@ -1,0 +1,38 @@
+apiVersion: v1
+data:
+  values.json: |-
+    {
+      "replicaCount": 2,
+      "ui": {
+        "message": "hello"
+      }
+    }
+kind: ConfigMap
+metadata:
+  labels:
+    app: podinfo
+  name: podinfo-values-3f4f090c42
+  namespace: default
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: podinfo
+  namespace: default
+spec:
+  chart:
+    spec:
+      chart: podinfo
+      sourceRef:
+        kind: HelmRepository
+        name: podinfo
+      version: 6.7.1
+  install:
+    crds: Create
+  interval: 1h0m0s
+  valuesFrom:
+  - kind: ConfigMap
+    name: podinfo-values-3f4f090c42
+    valuesKey: values.json
+  - kind: Secret
+    name: podinfo-credentials

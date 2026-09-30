@@ -262,6 +262,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"service":     &components.ServiceHandler{},
 		"postgresql":  &components.PostgresqlHandler{},
 		"helmchart":   &components.HelmchartHandler{},
+		"helmrelease": &components.HelmReleaseHandler{},
 		"passthrough": &components.PassthroughHandler{},
 		"crd":         &components.CRDHandler{},
 		"manifests":   &components.ManifestsHandler{},

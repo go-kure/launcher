@@ -20,7 +20,11 @@ entry, the four-key `affinity` shorthand) are a known gap, not the target shape;
 `volumeDevices` items beside them are closed. The
 `initContainers`/`sidecars` entries themselves are closed (go-kure/launcher#321, see "Common
 config"). The raw `corev1` `affinity` that `deployment` publishes is
-a different schema and is not part of that gap — it is modeled field-by-field. Every property
+a different schema and is not part of that gap — it is modeled field-by-field. `helmrelease`
+takes the other route to the same strictness: its schema declares exactly the top-level
+`HelmReleaseSpec` keys and leaves the nested Flux blocks open, and its handler decodes the
+whole property map strictly into `HelmReleaseSpec`, refusing an unknown or wrongly typed key at
+any depth (see its entry under "Per-type highlights"). Every property
 (including nested object fields and array item
 schemas at every depth) carries a `Description`, surfaced in the downstream runtime's generated Handler API
 Reference.
@@ -57,6 +61,7 @@ reads it.
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
+| `helmrelease` | HelmRelease (+values ConfigMap) | Kind-named: the full Flux `HelmReleaseSpec` plus `valuesMode`, against an existing source. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
 | `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected. |
@@ -1916,6 +1921,65 @@ not part of either change.
   actually emit a values `ConfigMap` (`emitsValuesConfigMap()`: `configMap` mode with non-empty
   `values`), same qualification as the over-broad-wording fix above, not an unconditional rejection
   of every `LayoutAugmenter`.
+- **helmrelease** — the kind-named terminal for Flux's `HelmRelease`
+  (go-kure/launcher#327, part of the Helm-family redesign go-kure/launcher#336). Its
+  properties are exactly the top-level JSON keys of `HelmReleaseSpec` in the
+  helm-controller API version `go.mod` links, plus one launcher-owned key, `valuesMode`;
+  a test ties the published schema to that struct, so a helm-controller bump that adds or
+  drops a spec field fails the suite until the schema follows. It creates no source:
+  `chart.spec.sourceRef` or `chartRef` names one that already exists.
+
+  **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON` into
+  `HelmReleaseSpec`, with `valuesMode` split off first. A key the struct does not declare,
+  at any depth (`chart.spec.chartVersion`, a stray key inside a `valuesFrom` entry), is refused
+  by name, and so is a wrongly typed value (`suspend: "yes"`, `maxHistory: "3"`, an
+  unparsable duration). The schema keeps the nested Flux blocks as open objects; the strict
+  decode is what checks them. A reflection test asserts that `valuesMode` shadows no spec
+  field, against an explicit, empty exclusion list. Known gap, inherited from the decoder:
+  inside a type with its own `UnmarshalJSON` unknown keys are not refused — `values` is the
+  case that matters, and it is open by design. Keys match case-insensitively, as in
+  `encoding/json`; schema validation, which a `kurel build` runs first, is exact.
+
+  **Defaults and checks.** `interval` defaults to `60m` when unset (a zero duration counts
+  as unset); Flux requires the field, and `60m` is the `helmchart` default. Exactly one of
+  `chart` and `chartRef` is required. `values` must be a JSON object; a non-finite number
+  (`.nan`, `.inf`) is a build error, never a panic. `valuesMode` is `inline` (the default)
+  or `configMap`. Nothing else is checked here: compared with the `helmchart` composite,
+  the enum checks on `driftDetection.mode`, `install.crds`, `upgrade.crds` and
+  `valuesFrom[].kind`, and the required `valuesFrom[].name`, are dropped and left to the
+  HelmRelease CRD's own admission, and there is no `releaseName` default — Flux's own
+  applies. These are deliberate deltas from the composite, not gaps.
+
+  **Identity and namespaces.** The HelmRelease is named after the component and lands in
+  the Flux namespace when one is configured, else in the application namespace
+  (`SetFluxNamespace`). Under a Flux namespace, a component that does not author
+  `targetNamespace` gets `spec.targetNamespace` set to the application namespace, so the
+  release still installs there rather than into the Flux namespace; an authored value wins.
+  Consequence: Flux then derives the default release name as `<targetNamespace>-<name>`
+  (`shop-web` for a component `web` in namespace `shop`), not `<name>`. Author
+  `releaseName` when a specific release name matters — for instance when taking over a
+  release installed under another name. Helm keeps its release state in the HelmRelease's
+  own namespace unless `storageNamespace` says otherwise (Flux's default). The inferred
+  auto health check references the HelmRelease where it lands.
+
+  **`valuesMode: configMap`.** With non-empty `values`, `Generate` itself returns a
+  ConfigMap beside the HelmRelease, in the HelmRelease's namespace (where Flux resolves
+  `valuesFrom`); `spec.values` is cleared, and a `valuesFrom` entry for the ConfigMap is
+  placed before the authored entries, so an authored entry wins on a shared key, as under
+  the composite. Unlike the composite, the component is no `LayoutAugmenter`: the
+  ConfigMap is ordinary `Generate` output, so `kurel build` emits it and a layout-walking
+  consumer does not move the component into a sub-layout. The values are serialized once,
+  as indented JSON with sorted keys (JSON is YAML, which is how Flux reads a values
+  reference), and those exact bytes are both stored, under the key `values.json` that the
+  `valuesFrom` entry names, and hashed into the ConfigMap's name:
+  `<component>-values-<first 10 hex digits of their sha256>`. A name that would exceed 253
+  bytes keeps a truncated prefix plus a short digest of the full component name, the same
+  scheme as the composite's values ConfigMap, so it is always a legal DNS-1123 subdomain and
+  always carries the values hash. Identical values hash alike whatever their key order, and
+  any change to them renames the ConfigMap and so changes the HelmRelease's spec, which is
+  what makes Flux upgrade the release on a values-only edit. The ConfigMap carries the label
+  `app: <component>` and no annotations. Empty or absent `values` generate no ConfigMap and
+  no entry. There is no handler-level default for `valuesMode`.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.
   `wait` and `healthChecks` are opt-in readiness settings for the delivery
