@@ -216,6 +216,12 @@ spec:
 `}},
 	"manifests": {props: map[string]any{"inline": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\ndata:\n  k: v\n"}},
 	"oci":       {props: map[string]any{"source": map[string]any{"url": "oci://registry.example.com/manifests/app"}, "version": "0.3.0"}},
+	// The kind-named Flux sources each emit one source CR named after the
+	// component: no `app` label, no pods, and a name up to a DNS-1123 subdomain.
+	"helmrepository": {props: map[string]any{"url": "https://charts.example.com"}},
+	"ocirepository":  {props: map[string]any{"url": "oci://registry.example.com/manifests/app", "ref": map[string]any{"tag": "v1.0.0"}}},
+	"gitrepository":  {props: map[string]any{"url": "https://git.example.com/app.git", "ref": map[string]any{"branch": "main"}}},
+	"bucket":         {props: map[string]any{"bucketName": "artifacts", "endpoint": "minio.example.com:9000"}},
 }
 
 // traitLabelFixture renders one trait on a host component.
