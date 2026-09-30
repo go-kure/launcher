@@ -276,7 +276,7 @@ type HandlerContractSet struct {
 // HandlerContracts returns the ContractMetadata of every registered component and
 // trait handler, and every component/trait lowering rule, that implements
 // ContractDescriber. Entries that do not implement it are omitted. The maps are
-// always non-nil. Covers all four registries HandlerSchemas covers, for the same
+// always non-nil. Covers the four component/trait registries HandlerSchemas covers, for the same
 // reason: a type reachable only through a lowering rule (e.g. "expose", claimed via
 // RegisterTraitLowering rather than RegisterBuiltinTrait) must still publish its
 // contract metadata here — otherwise a caller discovering contracts would see a gap

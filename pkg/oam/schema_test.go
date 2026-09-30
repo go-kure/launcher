@@ -212,8 +212,8 @@ func TestHandlerSchemas_MapsNonNil(t *testing.T) {
 
 // --- ContractDescriber / HandlerContracts (R9): mirrors the PropertySchemaProvider /
 // HandlerSchemas tests above, including their two lowering-rule-registry regression
-// guards — HandlerContracts must cover the identical four registries HandlerSchemas
-// does (transform.go), for the identical reason.
+// guards — HandlerContracts must cover the same four component/trait registries
+// HandlerSchemas does (transform.go), for the identical reason.
 
 // contractComponent is a stub ComponentHandler that declares contract metadata.
 type contractComponent struct{ typ string }

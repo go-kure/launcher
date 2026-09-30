@@ -200,6 +200,18 @@ func TestDependencyHandler_Errors(t *testing.T) {
 			wantSub:    "property 'rules' must be a list",
 		},
 		{
+			name:       "rules empty",
+			props:      map[string]any{"rules": []any{}},
+			components: []string{"web"},
+			wantSub:    "property 'rules' must not be empty",
+		},
+		{
+			name:       "rules typed nil",
+			props:      map[string]any{"rules": []any(nil)},
+			components: []string{"web"},
+			wantSub:    "property 'rules' must not be empty",
+		},
+		{
 			name:       "rule not a map",
 			props:      map[string]any{"rules": []any{"web"}},
 			components: []string{"web"},
@@ -228,6 +240,18 @@ func TestDependencyHandler_Errors(t *testing.T) {
 			props:      map[string]any{"rules": []any{map[string]any{"component": "web", "dependsOn": "db"}}},
 			components: []string{"web", "db"},
 			wantSub:    "rules[0].dependsOn must be a list",
+		},
+		{
+			name:       "dependsOn empty",
+			props:      map[string]any{"rules": []any{map[string]any{"component": "web", "dependsOn": []any{}}}},
+			components: []string{"web", "db"},
+			wantSub:    "rules[0].dependsOn must not be empty",
+		},
+		{
+			name:       "dependsOn typed nil",
+			props:      map[string]any{"rules": []any{map[string]any{"component": "web", "dependsOn": []any(nil)}}},
+			components: []string{"web", "db"},
+			wantSub:    "rules[0].dependsOn must not be empty",
 		},
 		{
 			name:       "dependsOn entry empty",
