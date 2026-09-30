@@ -61,38 +61,56 @@ func (h *ReconciliationSettingsHandler) PropertySchema() map[string]oam.Property
 }
 
 // parseReconciliationSettings extracts reconciliation settings from policy properties.
+// A present property of the wrong type is an error, not skipped: the handler can be
+// reached without ValidateAuthoredProperties having run (Transform called directly),
+// and skipping would silently discard a setting the author wrote. A null value and
+// an empty duration string still read as absent.
 func parseReconciliationSettings(policyName string, props map[string]any) (*oam.ReconciliationSettings, error) {
 	s := &oam.ReconciliationSettings{}
 
-	if v, ok := props["interval"].(string); ok && v != "" {
-		if err := validateDuration(policyName, "interval", v); err != nil {
+	for _, d := range []struct {
+		field string
+		dst   *string
+	}{
+		{"interval", &s.Interval},
+		{"retryInterval", &s.RetryInterval},
+		{"timeout", &s.Timeout},
+	} {
+		raw, present := props[d.field]
+		if !present || raw == nil {
+			continue
+		}
+		v, ok := raw.(string)
+		if !ok {
+			return nil, errors.Errorf("policy %q: %s must be a string duration, got %T", policyName, d.field, raw)
+		}
+		if v == "" {
+			continue
+		}
+		if err := validateDuration(policyName, d.field, v); err != nil {
 			return nil, err
 		}
-		s.Interval = v
+		*d.dst = v
 	}
-	if v, ok := props["retryInterval"].(string); ok && v != "" {
-		if err := validateDuration(policyName, "retryInterval", v); err != nil {
-			return nil, err
+
+	for _, b := range []struct {
+		field string
+		dst   **bool
+	}{
+		{"prune", &s.Prune},
+		{"wait", &s.Wait},
+		{"force", &s.Force},
+		{"suspend", &s.Suspend},
+	} {
+		raw, present := props[b.field]
+		if !present || raw == nil {
+			continue
 		}
-		s.RetryInterval = v
-	}
-	if v, ok := props["timeout"].(string); ok && v != "" {
-		if err := validateDuration(policyName, "timeout", v); err != nil {
-			return nil, err
+		v, ok := raw.(bool)
+		if !ok {
+			return nil, errors.Errorf("policy %q: %s must be a boolean, got %T", policyName, b.field, raw)
 		}
-		s.Timeout = v
-	}
-	if v, ok := props["prune"].(bool); ok {
-		s.Prune = &v
-	}
-	if v, ok := props["wait"].(bool); ok {
-		s.Wait = &v
-	}
-	if v, ok := props["force"].(bool); ok {
-		s.Force = &v
-	}
-	if v, ok := props["suspend"].(bool); ok {
-		s.Suspend = &v
+		*b.dst = &v
 	}
 
 	if s.Interval == "" && s.RetryInterval == "" && s.Timeout == "" &&
