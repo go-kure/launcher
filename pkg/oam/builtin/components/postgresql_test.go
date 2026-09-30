@@ -8,6 +8,7 @@ import (
 	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
 	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -60,39 +61,137 @@ func TestPostgresqlHandler_InvalidProvider(t *testing.T) {
 	}
 }
 
-func TestPostgresqlHandler_UnsupportedResourceName_Requests_Error(t *testing.T) {
-	h := &components.PostgresqlHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "db", Type: "postgresql",
-		Properties: map[string]any{
-			"resources": map[string]any{
-				"requests": map[string]any{"cpu": "500m", "nvidia.com/gpu": "1"},
+// TestPostgresqlConfig_Generate_ForwardsEveryResourceName pins go-kure/launcher#484: every
+// resource name the shared parser admits — not only cpu/memory — reaches the Cluster's
+// spec.resources, on both sides, with its authored quantity.
+func TestPostgresqlConfig_Generate_ForwardsEveryResourceName(t *testing.T) {
+	pc := newPostgresqlApp(t, map[string]any{
+		"resources": map[string]any{
+			"requests": map[string]any{
+				"cpu":               "500m",
+				"memory":            "1Gi",
+				"ephemeral-storage": "2Gi",
+				"hugepages-2Mi":     "4Mi",
+				"nvidia.com/gpu":    "1",
+			},
+			"limits": map[string]any{
+				"cpu":               "2",
+				"memory":            "4Gi",
+				"ephemeral-storage": "10Gi",
+				"hugepages-2Mi":     "4Mi",
+				"nvidia.com/gpu":    "1",
 			},
 		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for unsupported resource name in requests")
+	})
+	cluster := (*generatePostgresql(t, pc)[0]).(*cnpgv1.Cluster)
+	assertResourceList(t, "requests", cluster.Spec.Resources.Requests, map[corev1.ResourceName]string{
+		corev1.ResourceCPU:              "500m",
+		corev1.ResourceMemory:           "1Gi",
+		corev1.ResourceEphemeralStorage: "2Gi",
+		"hugepages-2Mi":                 "4Mi",
+		"nvidia.com/gpu":                "1",
+	})
+	assertResourceList(t, "limits", cluster.Spec.Resources.Limits, map[corev1.ResourceName]string{
+		corev1.ResourceCPU:              "2",
+		corev1.ResourceMemory:           "4Gi",
+		corev1.ResourceEphemeralStorage: "10Gi",
+		"hugepages-2Mi":                 "4Mi",
+		"nvidia.com/gpu":                "1",
+	})
+}
+
+// TestPostgresqlConfig_Generate_NonCPUMemoryOnlySide covers a side holding no cpu/memory
+// entry at all: it must still be emitted, and the unset side must stay absent.
+func TestPostgresqlConfig_Generate_NonCPUMemoryOnlySide(t *testing.T) {
+	pc := newPostgresqlApp(t, map[string]any{
+		"resources": map[string]any{
+			"limits": map[string]any{"ephemeral-storage": "10Gi"},
+		},
+	})
+	cluster := (*generatePostgresql(t, pc)[0]).(*cnpgv1.Cluster)
+	if cluster.Spec.Resources.Requests != nil {
+		t.Errorf("requests: expected absent, got %v", cluster.Spec.Resources.Requests)
 	}
-	if !strings.Contains(err.Error(), "nvidia.com/gpu") {
-		t.Errorf("expected error to name the unsupported resource, got: %v", err)
+	assertResourceList(t, "limits", cluster.Spec.Resources.Limits, map[corev1.ResourceName]string{
+		corev1.ResourceEphemeralStorage: "10Gi",
+	})
+}
+
+// TestPostgresqlHandler_ResourceName_SharedValidation_Error proves that dropping the
+// cpu/memory-only rejection did not drop validation: postgresql still refuses, by name,
+// everything the shared resources parser refuses for the other workload kinds.
+func TestPostgresqlHandler_ResourceName_SharedValidation_Error(t *testing.T) {
+	tests := []struct {
+		name      string
+		resources map[string]any
+		want      string
+	}{
+		{
+			name:      "extended request without limit",
+			resources: map[string]any{"requests": map[string]any{"nvidia.com/gpu": "1"}},
+			want:      "nvidia.com/gpu: limit must be set",
+		},
+		{
+			name: "extended request differs from limit",
+			resources: map[string]any{
+				"requests": map[string]any{"nvidia.com/gpu": "1"},
+				"limits":   map[string]any{"nvidia.com/gpu": "2"},
+			},
+			want: "nvidia.com/gpu: request 1 must equal limit 2",
+		},
+		{
+			name:      "fractional extended quantity",
+			resources: map[string]any{"limits": map[string]any{"nvidia.com/gpu": "500m"}},
+			want:      "whole numbers",
+		},
+		{
+			name:      "hugepages not a page multiple",
+			resources: map[string]any{"limits": map[string]any{"hugepages-2Mi": "3Mi"}},
+			want:      "integer multiple of the page size",
+		},
+		{
+			name:      "unqualified non-standard name",
+			resources: map[string]any{"limits": map[string]any{"gpu": "1"}},
+			want:      "gpu: must be a standard container resource",
+		},
+		{
+			name:      "ephemeral-storage request above limit",
+			resources: map[string]any{"requests": map[string]any{"ephemeral-storage": "2Gi"}, "limits": map[string]any{"ephemeral-storage": "1Gi"}},
+			want:      "ephemeral-storage: request 2Gi must not exceed limit 1Gi",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &components.PostgresqlHandler{}
+			_, err := h.ToApplicationConfig(&oam.Component{
+				Name: "db", Type: "postgresql",
+				Properties: map[string]any{"resources": tt.resources},
+			}, "default")
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.want)
+			}
+		})
 	}
 }
 
-func TestPostgresqlHandler_UnsupportedResourceName_Limits_Error(t *testing.T) {
-	h := &components.PostgresqlHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "db", Type: "postgresql",
-		Properties: map[string]any{
-			"resources": map[string]any{
-				"limits": map[string]any{"ephemeral-storage": "10Gi"},
-			},
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for unsupported resource name in limits")
+// assertResourceList checks got holds exactly the names in want, each with an equal quantity.
+func assertResourceList(t *testing.T, side string, got corev1.ResourceList, want map[corev1.ResourceName]string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("%s: got %d entries %v, want %d", side, len(got), got, len(want))
 	}
-	if !strings.Contains(err.Error(), "ephemeral-storage") {
-		t.Errorf("expected error to name the unsupported resource, got: %v", err)
+	for name, w := range want {
+		q, ok := got[name]
+		if !ok {
+			t.Errorf("%s: missing %s", side, name)
+			continue
+		}
+		if wq := resource.MustParse(w); q.Cmp(wq) != 0 {
+			t.Errorf("%s: %s = %s, want %s", side, name, q.String(), w)
+		}
 	}
 }
 

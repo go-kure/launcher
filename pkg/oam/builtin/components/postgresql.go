@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"sort"
 
 	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -131,26 +130,6 @@ func (h *PostgresqlHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
-// unsupportedResourceNames returns any resource name in rl other than cpu/memory, sorted for a
-// deterministic error message. The shared `resources` schema (schemaResources) accepts any named
-// resource — e.g. "ephemeral-storage", "nvidia.com/gpu" — for every workload kind, forwarded
-// directly onto a real corev1.Container for the seven direct workload kinds. postgresql forwards
-// cpu/memory only (cnpgResourceList): the CNPG builder it originally went through had fields for
-// nothing else, and the restriction was kept when that builder was retired so that document
-// validity did not change; lifting it is a separate, additive format change. Anything else would
-// be silently dropped when createCluster builds the CNPG Cluster; rejecting it here, at parse
-// time, surfaces that loudly instead.
-func unsupportedResourceNames(rl corev1.ResourceList) []string {
-	var names []string
-	for name := range rl {
-		if name != corev1.ResourceCPU && name != corev1.ResourceMemory {
-			names = append(names, string(name))
-		}
-	}
-	sort.Strings(names)
-	return names
-}
-
 // ToApplicationConfig converts an OAM postgresql component to a PostgresqlConfig.
 func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	config := &PostgresqlConfig{
@@ -216,15 +195,12 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	if resources, present, err := parseObjectField(props, "resources", "resources"); err != nil {
 		return nil, err
 	} else if present {
+		// Every name the shared parser admits (cpu, memory, ephemeral-storage,
+		// hugepages-<size>, qualified extended resources) is forwarded onto the
+		// Cluster's spec.resources by cnpgResourceList (go-kure/launcher#484).
 		r, err := parseResources(resources)
 		if err != nil {
 			return nil, errors.Wrap(err, "invalid resources configuration")
-		}
-		if extra := unsupportedResourceNames(r.Requests); len(extra) > 0 {
-			return nil, errors.Errorf("resources.requests: postgresql only supports cpu/memory, got unsupported name(s) %v", extra)
-		}
-		if extra := unsupportedResourceNames(r.Limits); len(extra) > 0 {
-			return nil, errors.Errorf("resources.limits: postgresql only supports cpu/memory, got unsupported name(s) %v", extra)
 		}
 		config.Resources = r
 	}
@@ -881,9 +857,11 @@ func (c *PostgresqlConfig) ApplyPolicy(p oam.Policy) error {
 		return err
 	}
 	// Direct form kept deliberately (not enforceMaxResources): createCluster
-	// forwards c.Resources' cpu/memory entries straight onto the Cluster spec
-	// (cnpgResourceList, below) and never calls buildResourceRequirements, so
-	// there is no intrinsic-default tier here for c.Resources to diverge from.
+	// forwards c.Resources straight onto the Cluster spec (cnpgResourceList,
+	// below) and never calls buildResourceRequirements, so there is no
+	// intrinsic-default tier here for c.Resources to diverge from. Only
+	// cpu/memory have a policy max; every other forwarded name is unbounded
+	// by policy, as for the other workload kinds.
 	if err := enforceMaxResource(quantityString(c.Resources.Requests, corev1.ResourceCPU), p.MaxCPU(), "cpu request"); err != nil {
 		return err
 	}
@@ -1089,19 +1067,15 @@ func (c *PostgresqlConfig) createCluster(app *stack.Application) (client.Object,
 	return cluster, nil
 }
 
-// cnpgResourceList copies the cpu and memory entries of rl, the only resource names the
-// postgresql component forwards (see unsupportedResourceNames). It returns nil when neither
-// is present so an unset side renders as absent.
+// cnpgResourceList deep-copies every entry of rl — each name the shared parser admitted, not
+// just cpu/memory (go-kure/launcher#484) — so the Cluster spec shares no Quantity state with
+// the config. It returns nil for an empty or nil list so an unset side renders as absent.
 func cnpgResourceList(rl corev1.ResourceList) corev1.ResourceList {
-	var out corev1.ResourceList
-	for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
-		q, ok := rl[name]
-		if !ok {
-			continue
-		}
-		if out == nil {
-			out = corev1.ResourceList{}
-		}
+	if len(rl) == 0 {
+		return nil
+	}
+	out := make(corev1.ResourceList, len(rl))
+	for name, q := range rl {
 		out[name] = q.DeepCopy()
 	}
 	return out
