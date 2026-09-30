@@ -1957,11 +1957,12 @@ not part of either change.
   as a static GitOps object would otherwise be reconciled on every apply, but it is silent data
   loss for a chart that relies on one of those hooks; `pkg/oam` has no logging channel to flag it.
   A rendered mapping with a key that is not a string (an unquoted `1:` or `true:`) is a build
-  error naming the object and the mapping, and so is an unquoted timestamp that RFC 3339 cannot
+  error naming the object and the mapping — the document's own top level (named `top level`)
+  as much as a mapping nested in it — and so is an unquoted timestamp that RFC 3339 cannot
   express (a UTC offset of 24 hours or more, such as `+24:00`), naming the object and the value's
   path: an emitted manifest is written through Go's JSON encoding, which refuses both. A document
   that one of the dropped hooks above carries is never written, so it is dropped with such a
-  value in it rather than refused.
+  key or value in it rather than refused.
   For a layout-walking consumer (the `layout.LayoutAugmenter` path, same mechanism as the
   `valuesMode: configMap` relocation above), more than one hook group makes `AugmentLayout` clear
   the component's flat `Resources` and replace them with one child `ManifestLayout` per group,

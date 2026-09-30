@@ -405,10 +405,40 @@ func TestHelmTemplateConfig_TimestampOutsideRFC3339IsABuildError(t *testing.T) {
 	assertErrorMentions(t, err, `ConfigMap "stamped"`, ".data.at", "timezone hour outside of range")
 }
 
+// topLevelNonStringKeyChart renders, after a hook-free ConfigMap, a hook-free
+// ConfigMap with an unquoted 1 and true among its own top-level keys, which
+// makes yaml.v3 decode that whole document to map[any]any. Shared with the
+// composite's TestGenerateTemplate_TopLevelNonStringKeyIsABuildError.
+const topLevelNonStringKeyChart = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stray-keys
+1: x
+true: y
+data:
+  key: value
+`
+
+// TestHelmTemplateConfig_TopLevelNonStringKeyIsABuildError: a rendered
+// document with a key that is not a string at its own top level fails the
+// build, naming the object and the top level, as the same key in a nested
+// mapping does. It is not skipped as a document that holds no object.
+func TestHelmTemplateConfig_TopLevelNonStringKeyIsABuildError(t *testing.T) {
+	cfg := helmTemplateFixture(t, stubRender(topLevelNonStringKeyChart))
+	_, err := cfg.Generate(nil)
+	assertErrorMentions(t, err, `ConfigMap "stray-keys"`, "top level", "not a string")
+}
+
 // droppedHooksUnemittableChart renders, beside a hook-free ConfigMap, a test
-// hook with a non-string mapping key and a pre-delete,post-delete hook with an
-// out-of-range timestamp. Hook grouping drops both hooks unwritten, so neither
-// value is ever emitted. Shared with the composite's
+// hook with a non-string mapping key, a pre-delete,post-delete hook with an
+// out-of-range timestamp, and a pre-rollback,test hook with non-string keys
+// at its own top level. Hook grouping drops all three hooks unwritten, so
+// none of those keys or values is ever emitted. Shared with the composite's
 // TestGenerateTemplate_DroppedHookWithUnemittableValuesBuilds.
 const droppedHooksUnemittableChart = `apiVersion: v1
 kind: ConfigMap
@@ -431,12 +461,21 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  name: rollback-hook
+  annotations:
+    helm.sh/hook: pre-rollback,test
+1: one
+true: yes
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
   name: main
 `
 
-// TestHelmTemplateConfig_DroppedHookWithUnemittableValuesBuilds: a value no
-// manifest can carry, inside a hook that grouping drops, does not fail the
-// build; the hook is dropped with it and the rest is emitted.
+// TestHelmTemplateConfig_DroppedHookWithUnemittableValuesBuilds: a key or
+// value no manifest can carry, inside a hook that grouping drops, does not
+// fail the build; the hook is dropped with it and the rest is emitted.
 func TestHelmTemplateConfig_DroppedHookWithUnemittableValuesBuilds(t *testing.T) {
 	cfg := helmTemplateFixture(t, stubRender(droppedHooksUnemittableChart))
 	if got, want := renderedNames(t, cfg), []string{"main"}; !slices.Equal(got, want) {

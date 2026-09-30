@@ -497,11 +497,15 @@ func hookGroupDir(g helm.HookGroup) string {
 
 // decodeKubeManifests decodes multi-doc YAML from RenderChart into Kubernetes objects.
 // Real YAML parse errors are returned immediately.
-// Non-map and empty documents are skipped defensively (kure filters NOTES.txt upstream).
+// A document that is not a mapping (a scalar, a sequence, or nil, as a
+// comment-only document decodes) and an empty mapping are skipped defensively
+// (kure filters NOTES.txt upstream).
 // Mapping documents without apiVersion/kind are an error (broken chart manifest).
 // Each object's content is converted in place to JSON types (toJSONTypes), so
-// the objects are safe to deep-copy. A document with a value that cannot be
-// emitted is an error, unless hook grouping would drop it unwritten
+// the objects are safe to deep-copy. A document with a key or value that
+// cannot be emitted is an error — including a key that is not a string at
+// its own top level, for which yaml.v3 decodes the whole document to
+// map[any]any — unless hook grouping would drop it unwritten
 // (hookDropsObject): then it is skipped, since nothing it holds is emitted.
 func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
@@ -514,27 +518,57 @@ func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 			}
 			return nil, errors.Wrapf(err, "decoding rendered manifest")
 		}
-		doc, ok := rawDoc.(map[string]any)
-		if !ok || len(doc) == 0 {
-			continue // defensive: skip non-map or empty documents
+		var doc map[string]any
+		var convErr error
+		switch d := rawDoc.(type) {
+		case map[string]any:
+			if len(d) == 0 {
+				continue // defensive: skip an empty document
+			}
+			doc = d
+		case map[any]any:
+			// Never empty: yaml.v3 decodes an empty mapping to map[string]any.
+			// The document cannot be emitted, but its string-keyed entries are
+			// read as any document's are, for the checks below and the error.
+			doc = stringKeyedEntries(d)
+			_, convErr = toJSONTypes(d, "")
+		default:
+			continue // defensive: skip a scalar, a sequence or a nil document
 		}
 		if doc["apiVersion"] == nil || doc["kind"] == nil {
-			return nil, errors.Errorf("rendered document is missing apiVersion or kind: %v", doc)
+			return nil, errors.Errorf("rendered document is missing apiVersion or kind: %v", rawDoc)
 		}
 		u := &unstructured.Unstructured{Object: doc}
 		// Read before converting: a failed conversion stops at the first value
 		// it cannot convert and leaves the document partly converted, in map
 		// iteration order.
 		hook := u.GetAnnotations()["helm.sh/hook"]
-		if _, err := toJSONTypes(doc, ""); err != nil {
+		if convErr == nil {
+			_, convErr = toJSONTypes(doc, "")
+		}
+		if convErr != nil {
 			if hookDropsObject(hook) {
 				continue
 			}
-			return nil, errors.Wrapf(err, "rendered %s %q", u.GetKind(), u.GetName())
+			return nil, errors.Wrapf(convErr, "rendered %s %q", u.GetKind(), u.GetName())
 		}
 		objects = append(objects, u)
 	}
 	return objects, nil
+}
+
+// stringKeyedEntries returns the entries of m, a document yaml.v3 decoded to
+// map[any]any, whose key is a string: the object's apiVersion, kind and
+// metadata, read through unstructured's accessors exactly as for a document
+// with string keys only. The values are shared with m, not copied.
+func stringKeyedEntries(m map[any]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if s, ok := k.(string); ok {
+			out[s] = v
+		}
+	}
+	return out
 }
 
 // toJSONTypes converts v, a value yaml.v3 decoded into any, to the types an
@@ -556,7 +590,8 @@ func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 //     string, bool and nil are kept.
 //
 // A mapping with a key that is not a string (map[any]any) is an error naming
-// its path: encoding/json cannot write one either. So is a time.Time that
+// its path — "top level" for the document itself, path "" — since
+// encoding/json cannot write one either. So is a time.Time that
 // MarshalJSON refuses because RFC 3339 cannot express it (a year outside
 // [0,9999], or a UTC offset of 24 hours or more, which the time.Parse behind
 // yaml.v3's timestamps accepts), and any other type.
@@ -595,6 +630,9 @@ func toJSONTypes(v any, path string) (any, error) {
 	case nil, bool, string, int64, float64:
 		return t, nil
 	case map[any]any:
+		if path == "" {
+			path = "top level"
+		}
 		return nil, errors.Errorf("%s: a mapping key that is not a string cannot be emitted", path)
 	default:
 		return nil, errors.Errorf("%s: a value of type %T cannot be emitted", path, v)
