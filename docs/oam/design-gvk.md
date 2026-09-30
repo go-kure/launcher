@@ -32,12 +32,16 @@ All launcher-native input files share a single API group and version:
 | `kurel.yaml` | `launcher.gokure.dev/v1alpha1` | `Package` |
 | `cluster.yaml` | `launcher.gokure.dev/v1alpha1` | `ClusterProfile` |
 | any `*.yaml` under a package's `definitions/` directory, or passed via `--capability-def` | `launcher.gokure.dev/v1alpha1` | `CapabilityDefinition` |
+| `environments.yaml` next to `app.yaml`, or passed via `--environments` | `launcher.gokure.dev/v1alpha1` | `EnvironmentSet` |
 
 These documents form one coherent API family. They are not split across groups or
 versions because they belong to the same ownership and lifecycle domain:
 `Application` is what to run, `Package` is how it is packaged, `ClusterProfile` is how
-the target platform resolves capabilities for it, and `CapabilityDefinition` declares the
-rendering schema for a custom (non-builtin) trait type.
+the target platform resolves capabilities for it, `CapabilityDefinition` declares the
+rendering schema for a custom (non-builtin) trait type, and `EnvironmentSet` names the
+profile+values pairs `kurel build --environment` selects between. `EnvironmentSet` is a
+deployer input read only by the `kurel` CLI, not part of a package; its format is
+described in the [kurel CLI reference](../../pkg/cmd/kurel/README.md#named-environments).
 
 ### Example document headers
 
@@ -321,7 +325,7 @@ capability rendering merges only at the top level.
 ## Document-Format Lifecycle
 
 `launcher.gokure.dev/v1alpha1` names a document *format* for `app.yaml`, `kurel.yaml`,
-`cluster.yaml`, and any `CapabilityDefinition` document. This section states what stays true
+`cluster.yaml`, any `CapabilityDefinition` document, and an `EnvironmentSet` document. This section states what stays true
 while that string is unchanged, and what must change it — binding on launcher itself, and
 relied on by any consumer that pins the version string, including a dialect that declares
 itself as extending it.

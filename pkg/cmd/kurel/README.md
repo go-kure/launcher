@@ -115,7 +115,9 @@ and precedence rules.
 
 | Flag | Description |
 |------|-------------|
-| `--profile` (required) | Path to the `ClusterProfile` YAML. |
+| `--profile` | Path to the `ClusterProfile` YAML. Required unless `--environment` is set; the two are mutually exclusive. |
+| `--environment` | Named environment whose profile and values stand in for `--profile`/`--values` (see [Named environments](#named-environments)). Mutually exclusive with `--profile` and `--values`. |
+| `--environments` | `EnvironmentSet` file declaring the `--environment` names (default: `environments.yaml` next to `app.yaml`). Requires `--environment`. |
 | `-o, --output` | Output directory (default: stdout). |
 | `-n, --namespace` | Namespace override. |
 | `--cluster-id` | Cluster identifier (default `local`). |
@@ -130,6 +132,45 @@ rejects any Application whose name fails `validation.IsDNS1123Subdomain` (see th
 [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s Parsing
 section) before `build` ever reaches the write step, so the filename can't carry a
 `/` or `..` path-traversal segment.
+
+### Named environments
+
+An environments file binds a name to a `ClusterProfile` and, optionally, a values
+file, so `kurel build --environment staging` replaces a script that pairs
+`--profile` with `--values` by hand (go-kure/launcher#291):
+
+```yaml
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: EnvironmentSet
+metadata:
+  name: my-app-environments   # optional
+spec:
+  environments:
+  - name: staging
+    profile: profiles/staging.yaml
+    values: values/staging.yaml
+  - name: prod
+    profile: profiles/prod.yaml
+    values: values/prod.yaml
+```
+
+`--environment <name>` behaves exactly as if the bound `--profile` and `--values` had
+been passed: the output is byte-identical to that invocation. Relative paths resolve
+against the environments file's own directory, not the working directory. Each name
+must be a unique DNS-1123 label; `profile` is required, `values` is optional (an
+Application without a `kurel.yaml` can still be bound to a profile, and a binding
+with `values` on such an Application fails the same way `--values` does). The file is
+strict-decoded, so an unknown field is an error.
+
+`--profile` or `--values` together with `--environment` is an error rather than an
+override, so a build never silently mixes an environment's half with an explicit
+flag. `--set` stays available and overrides the environment's values key by key, as
+it overrides `--values`.
+
+The file is a deployer input, deliberately separate from `kurel.yaml`: the package
+descriptor is the package author's public API, while the profile belongs to whoever
+operates the target cluster. Bindings carry no policy, constraint or limit model —
+they name a profile+values pair and nothing more.
 
 `build` collects objects directly from the transform result
 (`collectFromNode`/`collectFromBundle`) — it never constructs or walks a kure
@@ -177,4 +218,7 @@ kurel build ./app.yaml --profile profiles/minimal.yaml
 # Render a parameterized package to a directory with overrides
 kurel build ./mypackage --profile profiles/prod.yaml -o out/ \
   --values values.yaml --set replicas=3
+
+# Render the prod environment declared in ./mypackage/environments.yaml
+kurel build ./mypackage --environment prod -o out/
 ```

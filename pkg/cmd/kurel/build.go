@@ -35,6 +35,8 @@ type buildOptions struct {
 	setValues          []string // "key=value" strings from --set
 	capabilityDefPaths []string
 	strictCapabilities bool
+	environment        string // --environment: a name resolved to profilePath/valuesPath
+	environmentsPath   string // --environments: the file declaring those names
 }
 
 func newBuildCommand() *cobra.Command {
@@ -53,7 +55,7 @@ kurel.yaml for parameterized packages). Output is written to stdout (default) or
 		},
 	}
 
-	cmd.Flags().StringVar(&opts.profilePath, "profile", "", "path to ClusterProfile YAML (required)")
+	cmd.Flags().StringVar(&opts.profilePath, "profile", "", "path to ClusterProfile YAML (required unless --environment is set)")
 	cmd.Flags().StringVarP(&opts.outputDir, "output", "o", "", "output directory (default: stdout)")
 	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", "", "namespace override")
 	cmd.Flags().StringVar(&opts.clusterID, "cluster-id", "local", "cluster identifier")
@@ -62,7 +64,12 @@ kurel.yaml for parameterized packages). Output is written to stdout (default) or
 	cmd.Flags().StringArrayVar(&opts.capabilityDefPaths, "capability-def", nil, "CapabilityDefinition file (repeatable)")
 	cmd.Flags().BoolVar(&opts.strictCapabilities, "strict-capabilities", false, "error instead of warn on unvalidated custom capabilities")
 
-	_ = cmd.MarkFlagRequired("profile")
+	cmd.Flags().StringVar(&opts.environment, "environment", "", "named environment whose profile and values replace --profile/--values")
+	cmd.Flags().StringVar(&opts.environmentsPath, "environments", "", "EnvironmentSet file declaring --environment names (default: "+environmentsFileName+" next to app.yaml)")
+
+	cmd.MarkFlagsOneRequired("profile", "environment")
+	cmd.MarkFlagsMutuallyExclusive("profile", "environment")
+	cmd.MarkFlagsMutuallyExclusive("values", "environment")
 
 	return cmd
 }
@@ -80,6 +87,10 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	} else {
 		appPath = arg
 		appDir = filepath.Dir(arg)
+	}
+
+	if err := resolveEnvironment(opts, appDir); err != nil {
+		return err
 	}
 
 	appData, err := os.ReadFile(appPath)
