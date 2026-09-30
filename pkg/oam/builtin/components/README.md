@@ -2477,8 +2477,10 @@ not part of either change.
   rather than decoded to an empty string, and a null array element is
   refused by path (`env[0]: null is not a valid array element`). A lowering
   rule emits JSON-shaped values (string-keyed maps, slices, scalars) as for
-  every component, and the engine refuses a typed API struct in them before
-  the handler runs; because the reading is the serialization itself, a
+  every component; that is the supported contract, and the engine's schema
+  check refuses a typed API struct where it checks an object or array item
+  (for example an `env` entry), though not inside an open object's
+  undeclared keys. Because the reading is the serialization itself, a
   direct caller of the handler additionally has a value built in Go read
   exactly as `encoding/json` writes it — a concrete collection type, a nil
   behind a pointer, a `json.RawMessage` and a custom encoder included. A
