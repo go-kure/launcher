@@ -127,8 +127,12 @@ github.com/fluxcd/pkg/apis/kustomize v1.21.0 h1:dNR/mcuEdziBQKH2bG/B1X6MmASFv9ij
 github.com/fluxcd/pkg/apis/kustomize v1.21.0/go.mod h1:cN3wx9ZwzYkjYJ2ugTA7yjiW19IirZxiEwZhu4SFxyc=
 github.com/fluxcd/pkg/apis/meta v1.32.0 h1:jWuNuIziUM8NOrhZB7vovdFQ4wBYRNJoAn+XUoYlj1I=
 github.com/fluxcd/pkg/apis/meta v1.32.0/go.mod h1:bZmU0RbSwFzsCg9sgjhbSWxgSbUy+3Oh/s7qUCZjwPk=
+github.com/fluxcd/pkg/envsubst v1.7.1 h1:i5mJIcotEWS49Lm3Xa6mzI9+1WNNG+ysgOldCyUacOU=
+github.com/fluxcd/pkg/envsubst v1.7.1/go.mod h1:aoWeSIOamhqBZ3bHVj1GDwpdA10DXrI8yYbyjPiFly0=
 github.com/fluxcd/pkg/kustomize v1.39.0 h1:NIlAJtm1lyBP7i8gHf0zQ1crH8OLuLA2C8G/uWiWhEY=
 github.com/fluxcd/pkg/kustomize v1.39.0/go.mod h1:OCKAb5Tc0bFVpeclk/W0uWjjlB9dcLm/6XMvx69zu/4=
+github.com/fluxcd/pkg/sourceignore v0.18.0 h1:WU2tPKasG9AM7/H/LlqdjULyaSknnZBTrpHsDDtOuns=
+github.com/fluxcd/pkg/sourceignore v0.18.0/go.mod h1:mnH7rFFlEbMTclhz7JZP7tiHssKdXRNpCqnly2JGvaI=
 github.com/fluxcd/pkg/tar v1.2.0 h1:T6WFB5M0YRHktlrgdKNskqpdp76TVDdWTOeuWz33CFs=
 github.com/fluxcd/pkg/tar v1.2.0/go.mod h1:Wlalp5vIVe+BbckkKkqExKcoHAeeWJPAzwK7ONeFcS0=
 github.com/fluxcd/source-controller/api v1.9.5 h1:QwOqmw6/NqOXUR+kGmBJ18CEvthD8DNrSRTtjQG+bHQ=
@@ -147,8 +151,8 @@ github.com/go-errors/errors v1.5.1 h1:ZwEMSLRCapFLflTpT7NKaAc7ukJ8ZPEjzlxt8rPN8b
 github.com/go-errors/errors v1.5.1/go.mod h1:sIVyrIiJhuEF+Pj9Ebtd6P/rEYROXFi3BopGUQ5a5Og=
 github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
 github.com/go-jose/go-jose/v4 v4.1.4/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
-github.com/go-kure/kure v0.2.0-beta.13 h1:LSf8btrDJronK0xg5rqGs8ICgSuOB1zFHWe1pctNG/Y=
-github.com/go-kure/kure v0.2.0-beta.13/go.mod h1:d9fqjTf25gfqafbtrbrQdc5YIHOizZkZmPlGcavzERM=
+github.com/go-kure/kure v0.2.0-beta.14 h1:rZptSiVkvtq4hIMiFrxbOv1QvKzlGPjOuZdfeg68fVI=
+github.com/go-kure/kure v0.2.0-beta.14/go.mod h1:GfVwOYLf1PTiJNtfixNQ6NNIDQRbNOnX5RKFKcOhoas=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.4 h1:tG4xh9yMsRCAiodLVTxyrkzSZ9+o0L1Kg/+cPVcbP/8=
 github.com/go-logr/logr v1.4.4/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=

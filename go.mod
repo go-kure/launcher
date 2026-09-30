@@ -15,7 +15,7 @@ require (
 	github.com/fluxcd/helm-controller/api v1.6.4
 	github.com/fluxcd/kustomize-controller/api v1.9.5
 	github.com/fluxcd/source-controller/api v1.9.5
-	github.com/go-kure/kure v0.2.0-beta.13
+	github.com/go-kure/kure v0.2.0-beta.14
 	github.com/google/go-containerregistry v0.22.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

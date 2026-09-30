@@ -1046,33 +1046,28 @@ var _ oam.LayoutAugmentationCoverage = (*augmentingHelmchartConfig)(nil)
 // FluxIntegratedPerLayout placement) waits for each hook group to reconcile
 // healthy before the next.
 //
+// Each child's Namespace is the parent's path (ml.FullRepoPath()): kure's
+// FullRepoPath() joins Namespace and Name verbatim, so the child's directory
+// is "<parent>/<dirName>". A Namespace that already ended in the
+// child's own name would nest it twice (go-kure/kure#771).
+//
 // Children inherit the parent's Mode/FluxPlacement/FileNaming/FilePer — but
 // deliberately NOT ApplicationFileMode, left AppFileUnset on every child
 // regardless of the parent's own value. kure's walker sets only three of the
 // five layout-rule fields on the layout it hands the augmenter; a downstream
-// consumer's identical augmenter copies all five verbatim, carrying the same
-// latent dangling-reference risk this deviation avoids (fixing that other
-// copy is out of this repo's scope). kure's parent-side kustomization writer decides how
-// to reference a child from the child's own literal ApplicationFileMode
-// field alone, never resolved through a Config fallback: AppFileSingle makes
-// it emit a bare "<child.Name>.yaml" sibling-file reference, correct only
-// when the child writes its single file into the SAME directory as the
-// parent's own kustomization.yaml — true for kure's ordinary same-directory
-// children, false here, where the child's own recursive WriteToDisk call
-// places that file one directory deeper
-// (".../<parent>/<dirName>/<dirName>.yaml"), leaving the parent's
-// kustomization.yaml pointing at a file that was never written — a missing
-// resources: entry, breaking kubectl kustomize/Flux at that layout. Leaving
-// the child's field AppFileUnset instead sends the parent down the
-// directory-reference branch for any placement other than
-// FluxIntegratedPerLayout (which instead references a Flux Kustomization
-// YAML filename); either way, the child's own recursive write — whatever
-// ApplicationFileMode it resolves to via its own Config fallback — then
-// writes its own self-consistent kustomization.yaml one level down, which
-// the parent's reference correctly reaches. The child's FullRepoPath()
-// returns the composed namespace unchanged — kure's suffix-dedup
-// (namespace already ending in the child's own name) fires by design here,
-// the mechanism not a hazard.
+// consumer's identical augmenter copies all five verbatim, carrying the risk
+// this deviation avoids (fixing that other copy is out of this repo's
+// scope). kure reads a child's own literal ApplicationFileMode first, and an
+// AppFileSingle child is no directory: it writes one "<dirName>.yaml" into
+// its Namespace — the parent's own directory — which the parent's
+// kustomization.yaml then lists directly, and under FluxIntegratedPerLayout
+// kure's integrator gives such a child no Kustomization CR of its own, so
+// its DependsOn — the hook-group ordering — would be silently lost. Left
+// AppFileUnset, a child under FluxIntegratedPerLayout is pinned to a
+// directory by that integrator and gets its own Kustomization CR (spec.path
+// its FullRepoPath(), spec.dependsOn from DependsOn); under any other
+// placement the writer applies its own Config default to the child, exactly
+// as to a walked application layout.
 //
 // Residual gap, documented not fixed: two DIFFERENT Applications with a
 // same-named component still collide (component names are unique only
@@ -1094,7 +1089,7 @@ func (c *HelmchartConfig) augmentLayoutTemplate(ml *layout.ManifestLayout) error
 		dirName := hookGroupChildName(ml.Name, i, g)
 		child := &layout.ManifestLayout{
 			Name:          dirName,
-			Namespace:     parentPath + "/" + dirName,
+			Namespace:     parentPath,
 			Resources:     append([]client.Object(nil), g.Resources...),
 			Mode:          ml.Mode,
 			FluxPlacement: ml.FluxPlacement,
