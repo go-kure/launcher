@@ -49,8 +49,8 @@ const ComponentLabelDigestLength = 10
 // — the untrimmed 52-character cuts may differ, e.g. only in a trailing '-'
 // versus '.' — or when one author deliberately names a component exactly like
 // another's projection. Validation rejects an Application in which either
-// happens (validateComponentLabelValues), so within one Application distinct
-// components always carry distinct label values.
+// happens (validateComponentLabelValues), so within an Application that has
+// passed validation distinct components carry distinct label values.
 //
 // name must be a valid component name (a DNS-1123 subdomain); the result is
 // unspecified otherwise.
