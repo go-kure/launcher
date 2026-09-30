@@ -1294,7 +1294,7 @@ This three-tier effective-value enforcement applies to the seven kind
 components that call `buildResourceRequirements` on their main container
 (`webservice`, `worker`, `deployment`, `cronjob`, `job`, `statefulset`,
 `daemonset`).
-**`postgresql` is exempt**: `createCluster` copies the cpu/memory entries of
+**`postgresql` is exempt**: `createCluster` copies every entry of
 `c.Resources` straight onto the Cluster spec (`cnpgResourceList`) and never calls
 `buildResourceRequirements`, so it has no intrinsic tier for its existing
 direct-form checks to diverge from.
@@ -1927,14 +1927,14 @@ not part of either change.
   `ghcr.io/cloudnative-pg/postgresql:` — an empty tag that only the image
   pull rejected (go-kure/launcher#539). Only an omitted or null `version`
   takes the default. `storageSize: ""` is still copied through as authored.
-  `resources` forwards `cpu`/`memory` only — the CNPG builder it was
-  written against had fields for nothing else, and the restriction was kept
-  when kure retired that builder so that document validity did not change
-  (lifting it is a separate, additive format change) — so any other name authored under `requests`/`limits` (e.g.
-  `ephemeral-storage`, `nvidia.com/gpu`) is rejected with an explicit error
-  rather than silently dropped; the other seven workload kinds forward every
-  resource name directly onto the real `corev1.Container` and have no such
-  restriction.
+  `resources` forwards every name the shared parser admits — `cpu`, `memory`,
+  `ephemeral-storage`, `hugepages-<size>` and qualified extended resources
+  such as `nvidia.com/gpu`, under the same validation as the other seven
+  workload kinds — onto the Cluster's `spec.resources` `requests`/`limits`
+  unchanged (go-kure/launcher#484; until then any name other than
+  `cpu`/`memory` was rejected, so this is an additive change). Only
+  `cpu`/`memory` carry a policy default and maximum; CNPG-specific sizing
+  such as `ephemeralVolumesSizeLimit` is not derived from these entries.
   `affinity` takes the same four keys as the shared `affinity` property
   (`enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType`,
   `nodeSelector`) with the same defaults — `kubernetes.io/hostname` and
