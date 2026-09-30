@@ -115,6 +115,9 @@ func parseDependencyRules(props map[string]any) ([]dependencyRule, error) {
 	if !ok {
 		return nil, errors.New("property 'rules' must be a list")
 	}
+	if len(ruleList) == 0 {
+		return nil, errors.New("property 'rules' must not be empty")
+	}
 
 	var rules []dependencyRule
 	for i, rawRule := range ruleList {
@@ -136,6 +139,9 @@ func parseDependencyRules(props map[string]any) ([]dependencyRule, error) {
 		depList, ok := rawDeps.([]any)
 		if !ok {
 			return nil, errors.Errorf("rules[%d].dependsOn must be a list", i)
+		}
+		if len(depList) == 0 {
+			return nil, errors.Errorf("rules[%d].dependsOn must not be empty", i)
 		}
 
 		deps := make([]string, 0, len(depList))

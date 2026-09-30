@@ -20,7 +20,7 @@ handler also implements `oam.PropertySchemaProvider` (`PropertySchema()`), with 
 
 | `type` | Records | Properties |
 |--------|---------|------------|
-| `dependency` | `PolicyResult.Dependencies` | `rules[]` (required): `component` (required), `dependsOn[]` (required) |
+| `dependency` | `PolicyResult.Dependencies` | `rules[]` (required, non-empty): `component` (required), `dependsOn[]` (required, non-empty) |
 | `placement` | `PolicyResult.TierOverrides` | `component` (required), `tier` (required: `infra`, `services` or `apps`) |
 | `reconciliation` | `PolicyResult.ReconciliationSettings` | `interval`, `retryInterval`, `timeout`, `prune`, `wait`, `force`, `suspend` — at least one |
 | `health-checks` | `PolicyResult.HealthCheckOverrides` | `checks[]` (required, non-empty): `apiVersion`, `kind`, `name` (required), `namespace` |
@@ -141,7 +141,8 @@ a key the schema does not declare (`prunee: true`), a value of the wrong type
 property that is left out is not reported here; the handler reports it.
 
 Each handler then checks what it reads when the transform dispatches the policy: a
-required property that is missing or empty, an empty `checks` list, an invalid duration,
+required property that is missing or empty, an empty `rules`, `dependsOn` or `checks`
+list, an invalid duration,
 an unknown tier or component, a self-dependency or a cycle is an error. A caller that drives
 `Transform` without calling `ValidateAuthoredProperties` first gets only this second
 check, in which a key the handler does not read is ignored. A wrongly typed value
