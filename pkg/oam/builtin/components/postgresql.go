@@ -147,7 +147,8 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	// exceptions are affinity.topologyKey, read with parseStringField as
 	// parseAffinity reads it, and affinity.podAntiAffinityType, read through
 	// authoredValue directly (see each); required strings use parseStringField
-	// and a presence check. A null is absence throughout.
+	// and a presence check. A null is absence, except as a resource quantity
+	// (see parseResourceList).
 	config.Provider = "cnpg"
 	if provider, present, err := parseRawStringField(props, "provider", "provider"); err != nil {
 		return nil, err
