@@ -4,9 +4,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -78,7 +80,8 @@ func registerDeliveryFlags(cmd *cobra.Command, opts *buildOptions) {
 }
 
 // validateDeliveryFlags refuses --oci-tag without --oci-repository, an
-// --oci-repository that is not an oci:// URL, and --oci-repository without
+// --oci-repository that is not a valid oci:// repository URL (checkOCIRepository),
+// an --oci-tag that is not a valid OCI tag, and --oci-repository without
 // --output: the delivery output is a directory tree, which stdout cannot carry.
 func validateDeliveryFlags(opts *buildOptions, repositorySet, tagSet bool) error {
 	if !repositorySet {
@@ -87,13 +90,69 @@ func validateDeliveryFlags(opts *buildOptions, repositorySet, tagSet bool) error
 		}
 		return nil
 	}
-	rest, ok := strings.CutPrefix(opts.delivery.repository, ociScheme)
-	if !ok || strings.Trim(rest, "/") == "" {
-		return errors.Errorf("--%s %q must be an %s URL naming a registry and optional path prefix, e.g. %sregistry.example.com/apps",
+	if err := checkOCIRepository(strings.TrimRight(opts.delivery.repository, "/"), false); err != nil {
+		return errors.Wrapf(err, "--%s %q must be an %s URL naming a registry and optional path prefix, e.g. %sregistry.example.com/apps",
 			ociRepositoryFlag, opts.delivery.repository, ociScheme, ociScheme)
+	}
+	if tagSet && !ociTagPattern.MatchString(opts.delivery.tag) {
+		return errors.Errorf("--%s %q is not a valid OCI tag: it must match %s (up to 128 characters, starting with a letter, digit or '_')",
+			ociTagFlag, opts.delivery.tag, ociTagPattern)
 	}
 	if opts.outputDir == "" {
 		return errors.Errorf("--%s requires --output: the Flux delivery output is a directory tree (one artifact directory per bundle plus a Flux objects file) and cannot be written to stdout", ociRepositoryFlag)
+	}
+	return nil
+}
+
+// ociPathComponent is one '/'-separated component of an OCI
+// distribution-spec repository name: lowercase alphanumerics, joined by '.',
+// '_', '__' or a run of '-'.
+var ociPathComponent = regexp.MustCompile(`^[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*$`)
+
+// ociTagPattern is the OCI distribution-spec tag grammar.
+var ociTagPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$`)
+
+// ociRepositoryPathMax is the longest repository path (the part after the
+// registry) go-containerregistry's parser accepts.
+const ociRepositoryPathMax = 255
+
+// checkOCIRepository checks that ref, an oci:// URL without a trailing '/',
+// names an OCI repository (or, without requirePath, a repository prefix) that
+// Flux's source-controller resolves where the operator meant:
+// oci://<registry>[/<path>]. The registry is a host[:port] that names itself
+// explicitly — localhost, or containing '.' or ':' — because go-containerregistry,
+// which Flux parses the url with, resolves any other first segment against
+// Docker Hub. The path is '/'-separated distribution-spec components of at most
+// ociRepositoryPathMax characters, so no query, fragment, whitespace, empty
+// segment or uppercase letter reaches a generated url.
+func checkOCIRepository(ref string, requirePath bool) error {
+	rest, ok := strings.CutPrefix(ref, ociScheme)
+	if !ok {
+		return errors.Errorf("missing the %s scheme", ociScheme)
+	}
+	host, path, hasPath := strings.Cut(rest, "/")
+	if host == "" {
+		return errors.New("no registry")
+	}
+	if host != "localhost" && !strings.ContainsAny(host, ".:") {
+		return errors.Errorf("registry %q is not explicit (localhost, or a host containing '.' or ':'), so Flux would resolve it against Docker Hub", host)
+	}
+	if _, err := name.NewRegistry(host, name.StrictValidation); err != nil {
+		return errors.Wrapf(err, "registry %q", host)
+	}
+	if !hasPath {
+		if requirePath {
+			return errors.New("no repository path")
+		}
+		return nil
+	}
+	if len(path) > ociRepositoryPathMax {
+		return errors.Errorf("repository path is %d characters, more than %d", len(path), ociRepositoryPathMax)
+	}
+	for c := range strings.SplitSeq(path, "/") {
+		if !ociPathComponent.MatchString(c) {
+			return errors.Errorf("repository path component %q must match %s", c, ociPathComponent)
+		}
 	}
 	return nil
 }
@@ -157,10 +216,16 @@ func generateDelivery(cluster *stack.Cluster, opts deliveryOptions) (*deliveryOu
 		// into one directory share one artifact, so they must share one
 		// source. Under the default rules every bundle is its own unit.
 		unit := ix.UnitName(b)
+		url := base + "/" + unit
+		// The flags checked the prefix; the unit name appended to it can
+		// still push the path past its length limit.
+		if err := checkOCIRepository(url, true); err != nil {
+			return nil, errors.Wrapf(err, "bundle %q: artifact url %q", unit, url)
+		}
 		b.SourceRef = &stack.SourceRef{
 			Kind: "OCIRepository",
 			Name: unit,
-			URL:  base + "/" + unit,
+			URL:  url,
 			Tag:  opts.tag,
 		}
 	}

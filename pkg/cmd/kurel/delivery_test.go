@@ -3,7 +3,10 @@ package kurel
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -309,7 +312,8 @@ func artifactDirs(t *testing.T, out string) []string {
 // checkDelivery asserts the delivery invariants of one build in out, whose
 // application is appName and whose stdout build is stdout:
 //   - every artifact directory builds with kustomize (krusty) to exactly its
-//     manifests' objects; an artifact without objects has no manifests.yaml;
+//     manifests' objects (the same apiVersion/kind/namespace/name set); an
+//     artifact without objects has no manifests.yaml;
 //   - the artifacts partition the stdout build: every object is in exactly
 //     one artifact, and their union equals the stdout build's objects;
 //   - there is one Kustomization per artifact, named after it, with
@@ -342,8 +346,20 @@ func checkDelivery(t *testing.T, out, appName, tag string, stdout []byte) {
 		resMap, err := kustomizer.Run(filesys.MakeFsOnDisk(), adir)
 		if err != nil {
 			t.Errorf("artifact %s: kustomize build: %v", d, err)
-		} else if resMap.Size() != len(objs) {
-			t.Errorf("artifact %s: kustomize built %d objects, manifests.yaml holds %d", d, resMap.Size(), len(objs))
+		} else {
+			built := []string{}
+			for _, r := range resMap.Resources() {
+				built = append(built, strings.Join([]string{r.GetApiVersion(), r.GetKind(), r.GetNamespace(), r.GetName()}, "/"))
+			}
+			held := []string{}
+			for _, o := range objs {
+				held = append(held, objectID(o))
+			}
+			slices.Sort(built)
+			slices.Sort(held)
+			if !slices.Equal(built, held) {
+				t.Errorf("artifact %s: kustomize built %v, manifests.yaml holds %v", d, built, held)
+			}
 		}
 		for _, o := range objs {
 			id := objectID(o)
@@ -529,6 +545,139 @@ func TestDeliveryEmptyArtifactDropsStaleManifests(t *testing.T) {
 	}
 }
 
+// emptyAppYAML is an application whose only component renders no objects: a
+// helmtemplate component over a chart with no templates; %s is the chart
+// repository url.
+const emptyAppYAML = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: empty
+  namespace: empty
+spec:
+  components:
+    - name: nothing
+      type: helmtemplate
+      properties:
+        chart: emptychart
+        version: "0.1.0"
+        source:
+          url: %s
+`
+
+// TestDeliveryEmptyBuild checks that a build rendering no objects still writes
+// the delivery output — the bundle's empty artifact and its Flux objects —
+// and drops a manifests.yaml an earlier build left in that artifact, while the
+// same build without --oci-repository keeps its behaviour: a warning, and
+// nothing written.
+func TestDeliveryEmptyBuild(t *testing.T) {
+	chartBuf := buildMinimalChartTar(t, "emptychart", "0.1.0", map[string]string{
+		"emptychart/templates/NOTES.txt": "renders no objects\n",
+	})
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.yaml":
+			_, _ = fmt.Fprint(w, helmIndexYAML("emptychart", "0.1.0", srvURL+"/emptychart-0.1.0.tgz"))
+		case "/emptychart-0.1.0.tgz":
+			_, _ = w.Write(chartBuf)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", fmt.Sprintf(emptyAppYAML, srvURL))
+	profilePath := filepath.Join(deliveryTestdata, "cluster.yaml")
+
+	stdout, err := runKurel(t, "build", appPath, "--profile", profilePath)
+	if err != nil {
+		t.Fatalf("stdout build: %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout build of an empty application wrote:\n%s", stdout)
+	}
+
+	plain := filepath.Join(t.TempDir(), "out")
+	if _, err := runKurel(t, "build", appPath, "--profile", profilePath, "-o", plain); err != nil {
+		t.Fatalf("-o build without delivery: %v", err)
+	}
+	if _, err := os.Stat(plain); !os.IsNotExist(err) {
+		t.Errorf("-o build without delivery created %s (stat error %v)", plain, err)
+	}
+
+	out := t.TempDir()
+	stale := filepath.Join(out, "empty", artifactManifestsFile)
+	if err := os.MkdirAll(filepath.Dir(stale), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: stale\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runKurel(t, "build", appPath, "--profile", profilePath, "-o", out, "--oci-repository", testOCIRepository); err != nil {
+		t.Fatalf("delivery build: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale %s survived the build (stat error %v)", stale, err)
+	}
+	kust, err := os.ReadFile(filepath.Join(out, "empty", artifactKustomizationFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(kust) != emptyArtifactKustomization {
+		t.Errorf("empty artifact kustomization.yaml:\n%s\nwant:\n%s", kust, emptyArtifactKustomization)
+	}
+	checkDelivery(t, out, "empty", "", nil)
+}
+
+// TestDeliveryFlagsAccepted checks --oci-repository and --oci-tag values the
+// flag check must let through.
+func TestDeliveryFlagsAccepted(t *testing.T) {
+	tests := []struct {
+		name, repository, tag string
+		tagSet                bool
+	}{
+		{"registry and path", "oci://registry.example.com/apps", "", false},
+		{"registry only", "oci://registry.example.com", "", false},
+		{"trailing slash", "oci://registry.example.com/apps/", "", false},
+		{"nested path", "oci://registry.example.com/team/apps", "", false},
+		{"registry port", "oci://registry.example.com:5000/apps", "", false},
+		{"localhost", "oci://localhost/apps", "", false},
+		{"localhost port", "oci://localhost:5000/apps", "", false},
+		{"ip and port", "oci://10.0.0.1:5000/apps", "", false},
+		{"uppercase host", "oci://Registry.Example.com/apps", "", false},
+		{"component separators", "oci://registry.example.com/a.b/c_d/e__f/g--h", "", false},
+		{"semver tag", testOCIRepository, "v1.0.0", true},
+		{"underscore-led tag", testOCIRepository, "_latest", true},
+		{"tag of 128 characters", testOCIRepository, "v" + strings.Repeat("a", 127), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := &buildOptions{outputDir: "out", delivery: deliveryOptions{repository: tt.repository, tag: tt.tag}}
+			if err := validateDeliveryFlags(opts, true, tt.tagSet); err != nil {
+				t.Errorf("refused: %v", err)
+			}
+		})
+	}
+}
+
+// TestCheckOCIRepositoryBundleURL checks the per-bundle url check
+// generateDelivery applies after appending the bundle name: a path is
+// required, and it may not exceed the parser's length limit.
+func TestCheckOCIRepositoryBundleURL(t *testing.T) {
+	prefix := "oci://registry.example.com/"
+	if err := checkOCIRepository(prefix+strings.Repeat("a", ociRepositoryPathMax), true); err != nil {
+		t.Errorf("path of %d characters refused: %v", ociRepositoryPathMax, err)
+	}
+	if err := checkOCIRepository(prefix+strings.Repeat("a", ociRepositoryPathMax+1), true); err == nil {
+		t.Errorf("path of %d characters accepted", ociRepositoryPathMax+1)
+	}
+	if err := checkOCIRepository("oci://registry.example.com", true); err == nil {
+		t.Error("url without a repository path accepted")
+	}
+}
+
 // TestDeliveryDisabledWritesOnlyAppFile checks that -o without
 // --oci-repository writes exactly <app>.yaml, as before delivery existed.
 func TestDeliveryDisabledWritesOnlyAppFile(t *testing.T) {
@@ -564,6 +713,23 @@ func TestDeliveryFlagRefusals(t *testing.T) {
 		{"scheme only", []string{"-o", "OUT", "--oci-repository", "oci://"}, "must be an oci:// URL"},
 		{"scheme and slashes only", []string{"-o", "OUT", "--oci-repository", "oci:///"}, "must be an oci:// URL"},
 		{"explicitly empty", []string{"-o", "OUT", "--oci-repository="}, "must be an oci:// URL"},
+		{"query", []string{"-o", "OUT", "--oci-repository", "oci://registry.example.com/apps?oops"}, "must be an oci:// URL"},
+		{"fragment", []string{"-o", "OUT", "--oci-repository", "oci://registry.example.com/apps#frag"}, "must be an oci:// URL"},
+		{"whitespace in path", []string{"-o", "OUT", "--oci-repository", "oci://registry.example.com/my apps"}, "must be an oci:// URL"},
+		{"uppercase in path", []string{"-o", "OUT", "--oci-repository", "oci://registry.example.com/Apps"}, "must be an oci:// URL"},
+		{"empty path segment", []string{"-o", "OUT", "--oci-repository", "oci://registry.example.com//apps"}, "must be an oci:// URL"},
+		{"separator-led segment", []string{"-o", "OUT", "--oci-repository", "oci://registry.example.com/-apps"}, "must be an oci:// URL"},
+		{"query on registry", []string{"-o", "OUT", "--oci-repository", "oci://registry.example.com?oops"}, "must be an oci:// URL"},
+		{"userinfo", []string{"-o", "OUT", "--oci-repository", "oci://user@registry.example.com/apps"}, "must be an oci:// URL"},
+		{"non-numeric port", []string{"-o", "OUT", "--oci-repository", "oci://registry.example.com:port/apps"}, "must be an oci:// URL"},
+		{"implicit Docker Hub registry", []string{"-o", "OUT", "--oci-repository", "oci://registry/apps"}, "must be an oci:// URL"},
+		{"no registry", []string{"-o", "OUT", "--oci-repository", "oci:///apps"}, "must be an oci:// URL"},
+		{"tag with whitespace", []string{"-o", "OUT", "--oci-repository", testOCIRepository, "--oci-tag", "bad tag"}, "is not a valid OCI tag"},
+		{"dot-led tag", []string{"-o", "OUT", "--oci-repository", testOCIRepository, "--oci-tag", ".v1"}, "is not a valid OCI tag"},
+		{"tag with a colon", []string{"-o", "OUT", "--oci-repository", testOCIRepository, "--oci-tag", "v1:x"}, "is not a valid OCI tag"},
+		{"tag of 129 characters", []string{"-o", "OUT", "--oci-repository", testOCIRepository, "--oci-tag", "v" + strings.Repeat("a", 128)}, "is not a valid OCI tag"},
+		{"explicitly empty tag", []string{"-o", "OUT", "--oci-repository", testOCIRepository, "--oci-tag="}, "is not a valid OCI tag"},
+		{"bad tag without output", []string{"--oci-repository", testOCIRepository, "--oci-tag", "bad tag"}, "is not a valid OCI tag"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

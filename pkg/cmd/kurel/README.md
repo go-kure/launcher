@@ -125,8 +125,8 @@ and precedence rules.
 | `--set key=value` | Set a parameter value (repeatable; requires `kurel.yaml`). Scalars only: an `array` or `object` parameter set this way is refused; use `--values` or the parameter's default. |
 | `--capability-def` | Additional `CapabilityDefinition` file (repeatable). |
 | `--strict-capabilities` | Error (instead of warn) on unvalidated custom capabilities. |
-| `--oci-repository` | `oci://registry/prefix` URL: also write the Flux delivery output (below). Requires `--output`. |
-| `--oci-tag` | Tag the generated `OCIRepository` objects pull (`spec.ref.tag`). Unset leaves `spec.ref` out, so Flux pulls `latest`. Requires `--oci-repository`. |
+| `--oci-repository` | `oci://registry/prefix` URL: also write the Flux delivery output (below). Requires `--output`; the URL is checked as described there. |
+| `--oci-tag` | Tag the generated `OCIRepository` objects pull (`spec.ref.tag`); must be a valid OCI tag. Unset leaves `spec.ref` out, so Flux pulls `latest`. Requires `--oci-repository`. |
 
 With `--output`, the written file is named `<app.Metadata.Name>.yaml` inside that
 directory. `Metadata.Name` is safe to use unescaped here because parsing already
@@ -179,9 +179,10 @@ descriptor is the package author's public API, while the profile belongs to whoe
 operates the target cluster. Bindings carry no policy, constraint or limit model —
 they name a profile+values pair and nothing more.
 
-`build` collects objects directly from the transform result
-(`collectFromNode`/`collectFromBundle`) — it never constructs or walks a kure
-`layout.ManifestLayout`. A component whose config implements the optional
+`build` collects the manifests it outputs directly from the transform result
+(`collectFromNode`/`collectFromBundle`) — that collection never constructs or walks a kure
+`layout.ManifestLayout`. (Only the Flux delivery output below walks one, via
+`layout.WalkCluster`.) A component whose config implements the optional
 `layout.LayoutAugmenter` interface fails the build outright, naming the
 component, **unless** it also implements `oam.LayoutAugmentationCoverage` and
 its `GenerateCoversAugmentLayout()` returns `true` — meaning its plain
@@ -223,7 +224,22 @@ design's Launcher Layout (`docs/design.md` §11): one OCI artifact directory, on
 Every object of the stdout build is in exactly one artifact, and the artifacts together
 hold exactly the stdout build's objects. The layout-augmenter check above runs first, so
 a component it refuses fails the build before anything is written. Output is
-byte-identical across runs.
+byte-identical across runs. A build that renders no objects still warns `no resources
+generated` and writes no `<app>.yaml` (one an earlier build wrote stays), but with `--oci-repository` it writes the delivery
+output: every bundle's artifact directory holds only the empty `kustomization.yaml`, and a
+`manifests.yaml` an earlier build left there is removed.
+
+The flags are checked before the build reads anything, and each bundle's url before
+anything is written:
+
+- `--oci-repository` must be `oci://<registry>[/<path>]` (a trailing `/` is ignored). The
+  registry is a `host[:port]` that names itself explicitly — `localhost`, or containing
+  `.` or `:` — because Flux resolves any other first segment against Docker Hub. The path
+  is `/`-separated OCI distribution-spec components (lowercase letters and digits, joined
+  by `.`, `_`, `__` or `-`), so a query, fragment, whitespace, empty segment or uppercase
+  letter is refused. Each bundle's `<oci-repository>/<bundle>` must also stay within 255
+  characters of path.
+- `--oci-tag` must match the OCI tag grammar `[A-Za-z0-9_][A-Za-z0-9._-]{0,127}`.
 
 Limits:
 
