@@ -411,10 +411,6 @@ All notable changes to this project will be documented in this file.
 - Guard the second-render index in the aliasing control
 - Guard the new preferred-affinity test before indexing
 
-### Release
-
-- V0.1.0-alpha.22
-
 ## [0.1.0-alpha.21] - 2026-08-21
 
 ### Added
@@ -555,10 +551,6 @@ All notable changes to this project will be documented in this file.
 - Cover ContractDescriber/HandlerContracts and Origin.Rule identity
 - Fix vacuous assertion in untouched-component rule-identity test
 
-### Release
-
-- V0.1.0-alpha.21
-
 ## [0.1.0-alpha.20] - 2026-08-03
 
 ### Dependencies
@@ -571,10 +563,6 @@ All notable changes to this project will be documented in this file.
 - Bump grpc to v1.82.1 for GO-2026-6061
 - Decode raw Cilium rules strictly; bump kure to v0.2.0-beta.9
 
-### Release
-
-- V0.1.0-alpha.20
-
 ## [0.1.0-alpha.19] - 2026-07-15
 
 ### Added
@@ -586,10 +574,6 @@ All notable changes to this project will be documented in this file.
 - Distinct resource names for multi-endpoint endpoint-ingress policies
 - Resolve #227 backendRef retargeting across dependency/tier bundles
 - Only register components that own a Service as backendRef targets
-
-### Release
-
-- V0.1.0-alpha.19
 
 ## [0.1.0-alpha.18] - 2026-07-14
 
@@ -610,10 +594,6 @@ All notable changes to this project will be documented in this file.
 - Scan full tree for downstream refs on PRs (PR/merge-queue parity)
 - Fail fast on invalid egress peers
 - Preflight downstream-reference guard before every CI push
-
-### Release
-
-- V0.1.0-alpha.18
 
 ## [0.1.0-alpha.17] - 2026-07-13
 
@@ -647,20 +627,12 @@ All notable changes to this project will be documented in this file.
 - Harden kure-dep-sync guard per PR review
 - Always refresh remote-tracking base ref in kure-dep-sync guard
 
-### Release
-
-- V0.1.0-alpha.17
-
 ## [0.1.0-alpha.16] - 2026-07-11
 
 ### Added
 
 - Accept storageClassName + volumeSnapshotClassName via capability rendering
 - Synthesize per-component egress NetworkPolicy from a non-authorable input
-
-### Release
-
-- V0.1.0-alpha.16
 
 ## [0.1.0-alpha.15] - 2026-07-10
 
@@ -677,19 +649,11 @@ All notable changes to this project will be documented in this file.
 
 - Cover param aliases and document merge-key rejection
 
-### Release
-
-- V0.1.0-alpha.15
-
 ## [0.1.0-alpha.14] - 2026-07-09
 
 ### Added
 
 - Authored secretName override on ingress TLS
-
-### Release
-
-- V0.1.0-alpha.14
 
 ## [0.1.0-alpha.13] - 2026-07-09
 
@@ -707,20 +671,12 @@ All notable changes to this project will be documented in this file.
 
 - Accept security-context in validTraitTypes
 
-### Release
-
-- V0.1.0-alpha.13
-
 ## [0.1.0-alpha.12] - 2026-07-08
 
 ### Added
 
 - Add Description to PropertySchema + populate builtin handler descriptions
 - Hostnames shorthand + platform-default ssl-redirect
-
-### Release
-
-- V0.1.0-alpha.12
 
 ## [0.1.0-alpha.11] - 2026-07-07
 
@@ -733,10 +689,6 @@ All notable changes to this project will be documented in this file.
 
 - Document Policy defaults & enforcement in pkg/oam README
 
-### Release
-
-- V0.1.0-alpha.11
-
 ## [0.1.0-alpha.10] - 2026-07-04
 
 ### Documentation
@@ -746,10 +698,6 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Don't mark capability-injected fields as user-required in schemas
-
-### Release
-
-- V0.1.0-alpha.10
 
 ## [0.1.0-alpha.9] - 2026-07-03
 
@@ -765,10 +713,6 @@ All notable changes to this project will be documented in this file.
 
 - Refresh github-workflows.md Last Updated date
 - Note shared handler registration and property schemas
-
-### Release
-
-- V0.1.0-alpha.9
 
 ## [0.1.0-alpha.8] - 2026-07-02
 
@@ -800,10 +744,6 @@ All notable changes to this project will be documented in this file.
 ### Performance
 
 - Source-aware Go build cache, split by job purpose
-
-### Release
-
-- V0.1.0-alpha.8
 
 ## [0.1.0-alpha.7] - 2026-06-19
 
@@ -857,10 +797,6 @@ All notable changes to this project will be documented in this file.
 
 - Cover oci auto health-check GVK + flux namespace
 
-### Release
-
-- V0.1.0-alpha.5
-
 ## [0.1.0-alpha.4] - 2026-06-03
 
 ### Added
@@ -886,19 +822,11 @@ All notable changes to this project will be documented in this file.
 
 - Build linux-only release artifacts
 
-### Release
-
-- V0.1.0-alpha.4
-
 ## [0.1.0-alpha.3] - 2026-06-02
 
 ### Fixed
 
 - Emit the flux namespace for helmchart auto health checks (#234)
-
-### Release
-
-- V0.1.0-alpha.3
 
 ## [0.1.0-alpha.2] - 2026-05-30
 
@@ -909,10 +837,6 @@ All notable changes to this project will be documented in this file.
 - Revert volsync sub-app name to {sourcePVC}-backup
 - Accept inline secretStoreRef/provider in external-secret trait
 - Add FluxNamespace forwarding for configmap+helmchart combos
-
-### Release
-
-- V0.1.0-alpha.2
 
 ## [0.1.0-alpha.1] - 2026-05-29
 
@@ -946,10 +870,6 @@ All notable changes to this project will be documented in this file.
 - Change default HelmRelease interval from 10m to 60m
 - Deep-copy passthrough object so source properties are never mutated
 - Upgrade golang.org/x/net to v0.55.0 to address GO-2026-5026
-
-### Release
-
-- V0.1.0-alpha.1
 
 ## [0.1.0-alpha.0] - 2026-05-22
 
@@ -1058,9 +978,5 @@ All notable changes to this project will be documented in this file.
 
 - Expand builtin handler coverage to meet 80% threshold
 - Document prune-protection narrow scope; strict target validation in fluxcd-patches
-
-### Release
-
-- V0.1.0-alpha.0
 
 
