@@ -46,6 +46,8 @@ var wrongTopLevel = []struct {
 	{"oci", &components.OCIHandler{}, ociBase, "prune", "false", "prune: must be a boolean, got string"},
 	{"oci", &components.OCIHandler{}, ociBase, "interval", 10, "interval: must be a string, got int"},
 	{"oci", &components.OCIHandler{}, ociBase, "targetNamespace", true, "targetNamespace: must be a string, got bool"},
+	{"oci", &components.OCIHandler{}, ociBase, "wait", "false", "wait: must be a boolean, got string"},
+	{"oci", &components.OCIHandler{}, ociBase, "healthChecks", "apps/v1/Deployment/app", "healthChecks: must be an array, got string"},
 }
 
 func TestTopLevelOptional_WrongTypeIsRejected(t *testing.T) {

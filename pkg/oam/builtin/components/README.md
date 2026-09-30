@@ -1917,7 +1917,24 @@ not part of either change.
   `values`), same qualification as the over-broad-wording fix above, not an unconditional rejection
   of every `LayoutAugmenter`.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
-  `prune`, `interval`, `targetNamespace`.
+  `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.
+  `wait` and `healthChecks` are opt-in readiness settings for the delivery
+  Kustomization (go-kure/launcher#432); a document that authors neither builds
+  the same Kustomization byte for byte, and the default stays unset.
+  `wait: true` sets `spec.wait`, so Flux reports the Kustomization ready only
+  once everything it applied is ready; `false`, like an omitted key, emits
+  nothing. `healthChecks` is a list of `{apiVersion, kind, name, namespace}`
+  entries copied, in authored order, into `spec.healthChecks`. The component
+  delivers an opaque artifact, so the list is authored, never derived.
+  `apiVersion`, `kind` and `name` are required non-empty strings — without
+  the group in `apiVersion` the entry does not identify the object Flux is
+  meant to check — and `namespace` is optional, left out for a
+  cluster-scoped kind. Any other key in an entry is refused by name, a
+  wrongly typed field is a type error (`healthChecks[0].name: must be a
+  string, got int`), and an empty or null list emits nothing. `wait: true`
+  together with a non-empty `healthChecks` is refused: kustomize-controller
+  ignores `healthChecks` when `wait` is true, so the list would never be
+  checked. There is no `timeout` property; Flux's own default applies.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.
