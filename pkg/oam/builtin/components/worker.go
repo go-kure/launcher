@@ -8,6 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -171,6 +172,21 @@ func (h *WorkerHandler) ToApplicationConfig(component *oam.Component, namespace 
 		return nil, err
 	}
 	config.DeploymentSpec = depSpec
+
+	// The shorthand's own parse does not check label-key and label-value
+	// syntax, which the API server enforces on the affinity it evaluates to.
+	// Validated the way the deployment component validates a raw affinity, so
+	// a refusal names the shorthand the author wrote. Last, so every earlier
+	// refusal keeps its place.
+	if evaluated := buildAffinity(affinity, appLabels(component.Name)); evaluated != nil {
+		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(evaluated)
+		if err != nil {
+			return nil, errors.Wrap(err, "affinity: converting the evaluated shorthand")
+		}
+		if _, err := parseRawAffinity(map[string]any{"affinity": raw}); err != nil {
+			return nil, errors.Wrap(err, "affinity: the shorthand evaluates to an affinity the API server would refuse")
+		}
+	}
 
 	return config, nil
 }
