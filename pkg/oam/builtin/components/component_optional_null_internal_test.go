@@ -31,8 +31,8 @@ func TestOptionalProperty_NullIsOmission(t *testing.T) {
 	cronjob := map[string]any{"image": "ghcr.io/org/job:v1.0.0", "schedule": "0 2 * * *"}
 	// typeErr is the key's own type refusal. A looser "any error" check would
 	// pass with the type check deleted: a map completionMode still meets the
-	// enum refusal, a map timeZone the empty-string one, and a map inline or
-	// url the exactly-one-source one.
+	// enum refusal, a map timeZone the empty-string one, a map inline the
+	// exactly-one-source one, and a map url the url-scheme one.
 	cases := []struct {
 		kind    string
 		h       handler
