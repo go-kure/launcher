@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -1194,6 +1195,13 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// them by returning Traits: comp.Traits (or listing the same elements) is
 			// forwarding already-authored traits, not synthesizing new ones — see
 			// sealEmittedNestedTraits's forwarded-trait carve-out below.
+			//
+			// The rule gets its own copy, each element marked with where it came from
+			// (forwardableTraits), so a rule that forwards the authored traits AND adds
+			// one of its own — which needs a new slice, and so new element addresses —
+			// still has them recognised as forwarded. Copying also means no rule can
+			// write through comp.Traits into the authored document's backing array.
+			comp.Traits = forwardableTraits(comp.Traits)
 			originalTraits := comp.Traits
 			// D3: reject an authored value for a platform-reserved property before the
 			// rule runs — the same check the trait-lowering-rule dispatch below performs
@@ -1464,15 +1472,16 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 //
 // forwarded is the traits slice the component/trait had BEFORE this rule ran
 // (round-7 Codex finding, lowering.go:945). A rule that preserves attached authored
-// traits by returning them unchanged — e.g. `Traits: comp.Traits` — is not
-// synthesizing anything for them: those traits were never touched by the rule and
-// must undergo the SAME capability processing any other authored trait gets, either
-// via a registered TraitLoweringRule next round or via applyTraits at settle time.
-// Sealing them anyway would (per the reasoning above) skip that processing entirely,
-// silently dropping capability rendering for a forwarded CapabilityAware trait such
-// as expose. A trait found in forwarded, by pointer identity, is left untouched here
-// — no origin stamp, no seal, no emitted-trait validation — exactly as if it still
-// belonged to a component no rule had ever claimed.
+// traits by returning them unchanged — e.g. `Traits: comp.Traits`, or
+// `append([]Trait{synthesized}, comp.Traits...)` — is not synthesizing anything for
+// them: those traits were never touched by the rule and must undergo the SAME
+// capability processing any other authored trait gets, either via a registered
+// TraitLoweringRule next round or via applyTraits at settle time. Sealing them
+// anyway would (per the reasoning above) skip that processing entirely, silently
+// dropping capability rendering for a forwarded CapabilityAware trait such as expose.
+// A trait isForwardedTrait finds in forwarded is left untouched here — no origin
+// stamp, no seal, no emitted-trait validation — exactly as if it still belonged to a
+// component no rule had ever claimed.
 func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Origin, forwarded []Trait) error {
 	return t.sealNestedTraits(comp, parentOrigin, func(trait *Trait) bool {
 		return isForwardedTrait(trait, forwarded)
@@ -1505,7 +1514,12 @@ func (t *Transformer) sealNestedTraitsInDocument(comp *Component, parentOrigin O
 func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, isForwarded func(*Trait) bool) error {
 	for k := range comp.Traits {
 		trait := &comp.Traits[k]
-		if isForwarded(trait) {
+		forwarded := isForwarded(trait)
+		// The forwarding mark (forwardableTraits) has done its job once this
+		// emission is classified; clearing it keeps it from outliving the one rule
+		// invocation it describes.
+		trait.forwardedFrom = nil
+		if forwarded {
 			continue
 		}
 		nestedOrigin := parentOrigin
@@ -1520,20 +1534,57 @@ func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, isF
 	return nil
 }
 
-// isForwardedTrait reports whether trait is literally one of the elements of
-// original — i.e. the same Trait struct forwarded unchanged by a lowering rule,
-// rather than a new value the rule constructed. Pointer identity (not a value/deep
-// comparison) is deliberate: it matches exactly the `Traits: comp.Traits` idiom the
-// round-7 finding describes, without risking a false match against a rule that
-// legitimately constructs a NEW trait whose type and properties happen to equal an
-// authored one.
+// isForwardedTrait reports whether trait is one of the elements of original
+// forwarded unchanged by a lowering rule, rather than a new value the rule
+// constructed. Two shapes count:
+//
+//   - pointer identity: trait IS an element of original — the `Traits: comp.Traits`
+//     idiom the round-7 finding describes;
+//   - an unchanged by-value copy of one: trait carries the forwarding mark
+//     forwardableTraits put on that element, and still has its type and the very
+//     same properties map. This is what a rule produces when it forwards the
+//     authored traits and adds one of its own, since the extra element needs a new
+//     slice (`append([]Trait{synthesized}, comp.Traits...)`).
+//
+// Neither is a value/deep comparison, deliberately: a rule that constructs a NEW
+// trait whose type and properties happen to equal an authored one carries no mark
+// (the field is unexported, so a rule in another package cannot set it) and is
+// never mistaken for a forwarded one. A copy whose Type or Properties the rule
+// replaced is the rule's own output, and is sealed like any other.
 func isForwardedTrait(trait *Trait, original []Trait) bool {
 	for i := range original {
-		if trait == &original[i] {
+		o := &original[i]
+		if trait == o {
+			return true
+		}
+		if trait.forwardedFrom == o && trait.Type == o.Type && sameMap(trait.Properties, o.Properties) {
 			return true
 		}
 	}
 	return false
+}
+
+// forwardableTraits returns a copy of traits with every element marked as the
+// origin of any by-value copy a component rule makes of it (Trait.forwardedFrom),
+// for isForwardedTrait. A copy, never the caller's slice: marking in place would
+// write into the authored document's backing array, which lower() never mutates.
+// Empty input is returned as is.
+func forwardableTraits(traits []Trait) []Trait {
+	if len(traits) == 0 {
+		return traits
+	}
+	out := make([]Trait, len(traits))
+	copy(out, traits)
+	for i := range out {
+		out[i].forwardedFrom = &out[i]
+	}
+	return out
+}
+
+// sameMap reports whether a and b are the same map value (both nil, or one map
+// reached through two references) — identity, not equality of contents.
+func sameMap(a, b map[string]any) bool {
+	return reflect.ValueOf(a).UnsafePointer() == reflect.ValueOf(b).UnsafePointer()
 }
 
 // isForwardedComponent is isForwardedTrait's component-position counterpart, used

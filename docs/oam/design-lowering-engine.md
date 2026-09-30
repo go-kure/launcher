@@ -76,7 +76,15 @@ round-2 rule actually went on to produce. A component, policy, or trait a rule o
 *forwards* verbatim (rather than constructs) is exempted from that re-stamp via
 pointer-identity checks (`isForwardedComponent`, `isForwardedPolicy`,
 `isForwardedTrait`) and keeps whatever `Rule` it already carried — possibly `""`, if
-never itself the direct output of a rule invocation.
+never itself the direct output of a rule invocation. At the component position a
+forwarded trait may also be a by-value copy: a rule that forwards the authored traits
+and adds one of its own (the built-in `worker` rule synthesizes `topology-spread`)
+needs a new slice, so no element keeps its address. The engine therefore hands every
+`ComponentLoweringRule` a copy of the component's traits whose elements carry an
+unexported forwarding mark (`forwardableTraits`, `Trait.forwardedFrom`), and
+`isForwardedTrait` also accepts a copy that still carries its mark, its type and the
+very same properties map. A copy whose type or properties the rule replaced is the
+rule's own output and is sealed; the mark is cleared once the emission is classified.
 
 Document-level 1→N (one authored document lowering into several) ships only at the
 **raw** entry point today: `testRawRule` (`pkg/oam/lowering_raw_test.go`) emits
