@@ -23,8 +23,9 @@ import (
 // (the kind-named helmtemplate terminal) and HelmchartConfig under delivery:
 // template (the helmchart composite). Each embeds chartRender, which renders once
 // and caches the hook groups, and hands it its own renderer, its own chart
-// source and the component type its errors are prefixed with. Nothing below
-// depends on which of the two it serves.
+// source and the component type a render failure is prefixed with (a failure
+// to parse the rendered output is not prefixed; see chartRender.render).
+// Nothing below depends on which of the two it serves.
 
 // renderChartFunc is the chart renderer: kure's helm.RenderChart, or a stub
 // injected by a test. Variadic opts matches kure's RenderChart signature (kure
@@ -118,7 +119,9 @@ type chartRender struct {
 // AugmentLayout (partition, which repartitions the same groups into child
 // layouts) — kure's layout walker's usual call order — renders the chart over
 // the network exactly once. A render failure is reported as
-// `<componentType> "<name>": rendering chart`.
+// `<componentType> "<name>": rendering chart`. A failure to parse the rendered
+// output (parseChartManifests) is returned as is, with no component type or
+// name, under either caller.
 //
 // Known limitation: this call passes no release-identity opts, so kure renders with
 // its defaults, .Release.Name = "release" and .Release.Namespace = "default" (kure
