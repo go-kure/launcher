@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/pflag"
 )
 
 const testEnvironmentsYAML = `apiVersion: launcher.gokure.dev/v1alpha1
@@ -189,6 +191,11 @@ func TestBuildCommand_EnvironmentFlagConflicts(t *testing.T) {
 		{"profile and environment", []string{dir, "--environment", "staging", "--profile", profile}, "if any flags in the group"},
 		{"values and environment", []string{dir, "--environment", "staging", "--values", values}, "if any flags in the group"},
 		{"environments without environment", []string{dir, "--profile", profile, "--environments", filepath.Join(dir, environmentsFileName)}, "--environments requires --environment"},
+		// An explicitly empty value (an unset variable in a wrapper script) counts
+		// as passed, not as absent.
+		{"empty environments without environment", []string{dir, "--profile", profile, "--environments="}, "--environments requires --environment"},
+		{"empty environment", []string{dir, "--environment="}, "--environment requires a non-empty name"},
+		{"empty environments path", []string{dir, "--environment", "staging", "--environments="}, "--environments requires a non-empty path"},
 		{"unknown environment", []string{dir, "--environment", "qa"}, `environment "qa" is not declared`},
 	}
 	for _, tt := range tests {
@@ -221,6 +228,8 @@ func TestParseEnvironmentSet(t *testing.T) {
 		{"missing name", header + "spec:\n  environments:\n  - profile: dev.yaml\n", "name is required"},
 		{"invalid name", header + "spec:\n  environments:\n  - name: Dev_1\n    profile: dev.yaml\n", "not a DNS-1123 label"},
 		{"duplicate name", header + "spec:\n  environments:\n  - name: dev\n    profile: a.yaml\n  - name: dev\n    profile: b.yaml\n", `duplicate environment name "dev"`},
+		{"trailing document", testEnvironmentsYAML + "---\n" + header + "spec:\n  environments:\n  - name: dev\n    profile: dev.yaml\n", "expected a single YAML document"},
+		{"trailing malformed document", testEnvironmentsYAML + "---\nspec: [unclosed\n", "decoding"},
 		{"missing profile", header + "spec:\n  environments:\n  - name: dev\n    values: dev.yaml\n", "profile is required"},
 	}
 	for _, tt := range tests {
@@ -238,13 +247,27 @@ func TestParseEnvironmentSet(t *testing.T) {
 	}
 }
 
+// environmentFlags parses args into opts through a flag set carrying only the two
+// environment flags, so resolveEnvironment sees real flag presence.
+func environmentFlags(t *testing.T, opts *buildOptions, args ...string) *pflag.FlagSet {
+	t.Helper()
+	fs := pflag.NewFlagSet("build", pflag.ContinueOnError)
+	fs.StringVar(&opts.environment, "environment", "", "")
+	fs.StringVar(&opts.environmentsPath, "environments", "", "")
+	if err := fs.Parse(args); err != nil {
+		t.Fatal(err)
+	}
+	return fs
+}
+
 func TestResolveEnvironment_PathResolution(t *testing.T) {
 	dir := t.TempDir()
 	abs := filepath.Join(t.TempDir(), "abs-profile.yaml")
 	writeTempFile(t, dir, "envs.yaml", "apiVersion: launcher.gokure.dev/v1alpha1\nkind: EnvironmentSet\nspec:\n  environments:\n  - name: rel\n    profile: p.yaml\n    values: sub/v.yaml\n  - name: abs\n    profile: "+abs+"\n")
 
-	opts := &buildOptions{environment: "rel", environmentsPath: filepath.Join(dir, "envs.yaml")}
-	if err := resolveEnvironment(opts, "/unused"); err != nil {
+	envs := filepath.Join(dir, "envs.yaml")
+	opts := &buildOptions{}
+	if err := resolveEnvironment(opts, "/unused", environmentFlags(t, opts, "--environment", "rel", "--environments", envs)); err != nil {
 		t.Fatal(err)
 	}
 	if want := filepath.Join(dir, "p.yaml"); opts.profilePath != want {
@@ -254,8 +277,8 @@ func TestResolveEnvironment_PathResolution(t *testing.T) {
 		t.Errorf("valuesPath = %q, want %q", opts.valuesPath, want)
 	}
 
-	opts = &buildOptions{environment: "abs", environmentsPath: filepath.Join(dir, "envs.yaml")}
-	if err := resolveEnvironment(opts, "/unused"); err != nil {
+	opts = &buildOptions{}
+	if err := resolveEnvironment(opts, "/unused", environmentFlags(t, opts, "--environment", "abs", "--environments", envs)); err != nil {
 		t.Fatal(err)
 	}
 	if opts.profilePath != abs {

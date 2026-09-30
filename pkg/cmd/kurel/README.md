@@ -160,7 +160,9 @@ against the environments file's own directory, not the working directory. Each n
 must be a unique DNS-1123 label; `profile` is required, `values` is optional (an
 Application without a `kurel.yaml` can still be bound to a profile, and a binding
 with `values` on such an Application fails the same way `--values` does). The file is
-strict-decoded, so an unknown field is an error.
+strict-decoded and holds exactly one YAML document, so an unknown field or a trailing
+`---` document is an error. An explicitly empty `--environment=` or `--environments=`
+(an unset variable in a wrapper script) is also an error, never read as absent.
 
 `--profile` or `--values` together with `--environment` is an error rather than an
 override, so a build never silently mixes an environment's half with an explicit
