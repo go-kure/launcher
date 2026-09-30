@@ -208,7 +208,9 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 
 	if len(objects) == 0 {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warning: no resources generated")
-		return nil
+		// Every bundle still gets its (empty) artifact and Flux objects, so an
+		// earlier build's manifests do not survive; a no-op without delivery.
+		return writeDelivery(opts.outputDir, app.Metadata.Name, cluster, opts.delivery)
 	}
 
 	yamlBytes, err := kio.EncodeObjectsToYAML(objects)
