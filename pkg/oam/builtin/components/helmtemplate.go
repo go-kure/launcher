@@ -13,8 +13,11 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin"
 )
 
-// helmTemplateType is the helmtemplate component type, and the prefix of every
-// error its handler and config return.
+// helmTemplateType is the helmtemplate component type. It prefixes the errors
+// the handler and config raise themselves — property decoding and validation,
+// and a failed chart render — but not a failure to parse the rendered output,
+// which the shared render code returns unprefixed for this terminal and the
+// composite alike (chartRender.render).
 const helmTemplateType = "helmtemplate"
 
 // helmTemplateValuesKey is the one property the strict decode splits off: the
