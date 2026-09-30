@@ -180,14 +180,18 @@ and say so; silence here reads the same either way.
 `HelmRelease` GVK as `helmchart`: it always emits exactly one HelmRelease, whose Ready
 condition kstatus reads directly. Because the GVK is a `*.toolkit.fluxcd.io` kind and its
 config accepts a Flux namespace, the check moves to that namespace with the object. It sits
-in `defaultTierMap` at `TierApps`, like `helmchart`.
+in `defaultTierMap` at `TierApps`, like `helmchart`. It declines its check for
+`suspend: true` (below).
 
 A listed type can still decline its check per document by implementing
 `EmitsAutoHealthCheck() bool`. `job` uses it for `suspend: true` — a suspended Job creates no
 pods, so it reaches neither `Complete` nor `Failed` and the wait would block for exactly as
 long as the document asks it to stay suspended. This is the same shape as `deployment`'s veto
 for `paused: true`: the document instructs the workload not to progress, so waiting on it is
-not a health signal but a guaranteed timeout.
+not a health signal but a guaranteed timeout. `helmrelease` declines it for `suspend: true`
+too: helm-controller does not reconcile a suspended HelmRelease, and the Ready condition the
+check reads is written by a reconciliation, so a newly created suspended release never acquires
+one. The HelmRelease is still emitted; only the check is skipped.
 
 ## Transform & extension
 

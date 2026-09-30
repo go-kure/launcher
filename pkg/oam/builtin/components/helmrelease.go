@@ -77,7 +77,7 @@ func (h *HelmReleaseHandler) PropertySchema() map[string]oam.PropertySchema {
 		"chartRef":           object("HelmRelease spec.chartRef: a reference to an existing OCIRepository, ExternalArtifact or HelmChart source. Exactly one of chart and chartRef is required."),
 		"interval":           str("HelmRelease spec.interval as a duration (e.g. 10m, 1h30m); defaults to 60m when unset."),
 		"kubeConfig":         object("HelmRelease spec.kubeConfig: a kubeconfig reference for a remote cluster."),
-		"suspend":            boolean("HelmRelease spec.suspend: stop reconciling the release."),
+		"suspend":            boolean("HelmRelease spec.suspend: stop reconciling the release. true also suppresses the component's auto health check."),
 		"releaseName":        str("HelmRelease spec.releaseName. Flux's default applies when unset: <targetNamespace>-<name> when targetNamespace is set, else the component name."),
 		"targetNamespace":    str("HelmRelease spec.targetNamespace. When unset and a Flux namespace is configured, it is set to the application namespace."),
 		"storageNamespace":   str("HelmRelease spec.storageNamespace: where Helm stores release state."),
@@ -179,6 +179,23 @@ func (c *HelmReleaseConfig) ApplyPolicy(_ oam.Policy) error { return nil }
 // SetFluxNamespace moves the HelmRelease, and its values ConfigMap, to ns.
 // Satisfies pkg/oam.fluxNamespaceSettable.
 func (c *HelmReleaseConfig) SetFluxNamespace(ns string) { c.fluxNS = ns }
+
+// EmitsAutoHealthCheck vetoes the auto health check when the document sets
+// `suspend: true`, the same shape as deployment's veto for `paused: true` and
+// job's for `suspend: true`. HelmReleaseSpec.Suspend tells helm-controller to
+// suspend reconciliation of the release, and the Ready condition the check
+// reads is written by a reconciliation, so while the document keeps the
+// release suspended that condition cannot report on it — a newly created
+// suspended release never acquires one. Waiting on it is not a health signal:
+// either it blocks the enclosing Kustomization until it times out, on a state
+// the document asked for, or it passes without observing anything. Nothing
+// here claims which of the two a given controller version does; the reason
+// stands either way. The HelmRelease is still emitted and applied; only the
+// readiness gate on it is skipped, so `suspend: true` stays a usable way to
+// stage a release. Satisfies pkg/oam.autoHealthCheckEmitter.
+func (c *HelmReleaseConfig) EmitsAutoHealthCheck() bool {
+	return !c.Spec.Suspend
+}
 
 // fluxNamespace returns the namespace the HelmRelease and its values
 // ConfigMap land in.

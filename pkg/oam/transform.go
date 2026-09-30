@@ -82,7 +82,7 @@ type fluxNamespaceSettable interface {
 //     emits no HelmRelease.
 //   - the config emits the object, but the document instructs the workload not
 //     to progress, so a readiness gate on it is not a health signal. Deployment
-//     returns false for paused: true.
+//     returns false for paused: true, job and helmrelease for suspend: true.
 //
 // Decorators that wrap such configs must forward this call (mirroring
 // fluxNamespaceSettable). Configs that do not implement it are assumed to emit
@@ -1069,6 +1069,9 @@ func detectCycles(deps map[string][]string) error {
 // (fluxcd/kustomize-controller, checkHealth). The case that does need handling
 // is `suspend: true`, and JobConfig vetoes its own check there via
 // autoHealthCheckEmitter, exactly as deployment does for `paused: true`.
+// HelmReleaseConfig vetoes for its own `suspend: true` the same way: a
+// suspended HelmRelease is not reconciled, so its Ready condition cannot report
+// on it.
 var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"webservice":  {"apps/v1", "Deployment"},
 	"worker":      {"apps/v1", "Deployment"},
