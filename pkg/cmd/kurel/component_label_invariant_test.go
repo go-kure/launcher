@@ -19,13 +19,18 @@ import (
 
 // This file is the output-invariant guard for go-kure/launcher#572. A component
 // name is a DNS-1123 subdomain (up to 253 characters) while a label value is at
-// most 63, so every place a component name becomes a label value or a
-// label-selector value goes through oam.ComponentLabelValue. The test renders
-// every registered component type and every registered trait through the real
-// `kurel build` path and checks the emitted manifests, so a new emitter that
-// writes the raw name into a label — or a selector that stops agreeing with the
-// labels it targets — fails here. The fixture tables below are checked against
-// the registries (builtinComponentHandlers, builtinTraitHandlers,
+// most 63, so the component-identity labels and selectors launcher generates —
+// the `app` label, the `app` selectors that pick a component's pods, and the
+// synthesized NetworkPolicies' `<domain>/component` selector — take their value
+// from oam.ComponentLabelValue. Selectors an operator owns (a component type
+// that selects the pods an operator creates, by the operator's own label and
+// naming contract) are not component-identity labels and are out of scope here;
+// the fixtures below do not exercise them. The test renders every registered
+// component type and every registered trait through the real `kurel build` path
+// and checks the emitted manifests, so a new emitter that writes the raw name
+// into an `app` label — or a selector that stops agreeing with the labels it
+// targets — fails here. The fixture tables below are checked against the
+// registries (builtinComponentHandlers, builtinTraitHandlers,
 // builtinTraitLoweringRules), so a type registered without a fixture fails too.
 
 // labelInvariantProfile carries every capability a fixture below needs. The
@@ -258,8 +263,8 @@ func TestComponentLabelInvariant_ComponentTypes(t *testing.T) {
 			app := labelInvariantApp(boundary, typ, fx.props, "", nil)
 			docs := renderLabelInvariant(t, app)
 			n := checkComponentLabelInvariant(t, docs, boundary)
-			if fx.labelled && n.app == 0 {
-				t.Errorf("%s at the boundary name emitted no `app` label; the invariant check is vacuous for it", typ)
+			if fx.labelled {
+				requireAppLabel(t, n, typ+" at the boundary name")
 			}
 			if n.selectors < fx.selectors {
 				t.Errorf("%s at the boundary name matched %d pod selectors against its pod template, want at least %d", typ, n.selectors, fx.selectors)
@@ -278,8 +283,8 @@ func TestComponentLabelInvariant_ComponentTypes(t *testing.T) {
 			}
 			// A labelled type must keep its label past 63 characters too:
 			// omitting it would pass the value checks vacuously.
-			if n := checkComponentLabelInvariant(t, renderLabelInvariant(t, app), long); fx.labelled && n.app == 0 {
-				t.Errorf("%s with the 200-character name emitted no `app` label; the invariant check is vacuous for it", typ)
+			if n := checkComponentLabelInvariant(t, renderLabelInvariant(t, app), long); fx.labelled {
+				requireAppLabel(t, n, typ+" with the 200-character name")
 			}
 		})
 	}
@@ -299,9 +304,7 @@ func TestComponentLabelInvariant_Traits(t *testing.T) {
 			}
 			docs := renderLabelInvariant(t, labelInvariantApp(boundary, host, hostProps, trait, fx.props))
 			n := checkComponentLabelInvariant(t, docs, boundary)
-			if n.app == 0 {
-				t.Errorf("%s on a %s host emitted no `app` label; the invariant check is vacuous for it", trait, host)
-			}
+			requireAppLabel(t, n, fmt.Sprintf("%s on a %s host", trait, host))
 			if want := max(fx.selectors, 2); n.selectors < want {
 				t.Errorf("%s on a %s host matched %d pod selectors against its pod template, want at least %d", trait, host, n.selectors, want)
 			}
@@ -309,8 +312,8 @@ func TestComponentLabelInvariant_Traits(t *testing.T) {
 				return
 			}
 			docs = renderLabelInvariant(t, labelInvariantApp(long, "passthrough", passthroughHostProps, trait, fx.props))
-			if n := checkComponentLabelInvariant(t, docs, long); fx.longLabelled && n.app == 0 {
-				t.Errorf("%s on a long-named host emitted no `app` label; the projection path was not exercised", trait)
+			if n := checkComponentLabelInvariant(t, docs, long); fx.longLabelled {
+				requireAppLabel(t, n, trait+" on a long-named host")
 			}
 		})
 	}
@@ -348,16 +351,40 @@ func childMap(t *testing.T, m map[string]any, key string) map[string]any {
 	return c
 }
 
+// synthesizedPodSelector returns spec.podSelector of the emitted NetworkPolicy
+// that selects on the platform component key — the one NetworkPolicy synthesis
+// generates for a routed component.
+func synthesizedPodSelector(t *testing.T, docs []map[string]any) map[string]any {
+	t.Helper()
+	const componentKey = kurelDomain + "/component"
+	for _, d := range docs {
+		if d["kind"] != "NetworkPolicy" {
+			continue
+		}
+		spec, _ := d["spec"].(map[string]any)
+		sel, _ := spec["podSelector"].(map[string]any)
+		ml, _ := sel["matchLabels"].(map[string]any)
+		if _, ok := ml[componentKey]; ok {
+			return sel
+		}
+	}
+	t.Fatalf("no NetworkPolicy selecting on %s in the rendered output", componentKey)
+	return nil
+}
+
 // TestComponentLabelInvariant_RejectsBrokenSelectors: the invariant check
 // fails on selector shapes it once let through — a matchExpressions value it
-// never read and an expression it never evaluated — so a generated selector
-// carrying either cannot pass the guard. Each case breaks one emitted selector
-// of a real render and names the report it must produce.
+// never read, an expression it never evaluated, and a synthesized
+// component-key selector it skipped before validating or matching it — so a
+// generated selector carrying any of them cannot pass the guard. Each case
+// breaks one emitted selector of a real render and names the report it must
+// produce.
 func TestComponentLabelInvariant_RejectsBrokenSelectors(t *testing.T) {
 	boundary := boundaryLabelComponentName(t)
 	host, hostProps := webserviceHost()
 	scaler := traitLabelFixtures["scaler"]
 	netpol := traitLabelFixtures["networkpolicy"]
+	expose := traitLabelFixtures["expose"]
 	tooLong := strings.Repeat("v", 200)
 
 	cases := []struct {
@@ -420,6 +447,22 @@ func TestComponentLabelInvariant_RejectsBrokenSelectors(t *testing.T) {
 			},
 			want: []string{"from[0].podSelector.matchExpressions[0].values[0]", "is not a valid label value"},
 		},
+		{
+			name: "synthesized component selector with an invalid operator", trait: "expose", props: expose.props,
+			mutate: func(t *testing.T, docs []map[string]any) {
+				sel := synthesizedPodSelector(t, docs)
+				sel["matchExpressions"] = []any{map[string]any{"key": "tier", "operator": "Bogus", "values": []any{"backend"}}}
+			},
+			want: []string{"NetworkPolicy", "spec.podSelector", "is not a valid label selector"},
+		},
+		{
+			name: "synthesized component selector contradicts the pods", trait: "expose", props: expose.props,
+			mutate: func(t *testing.T, docs []map[string]any) {
+				sel := synthesizedPodSelector(t, docs)
+				sel["matchExpressions"] = []any{map[string]any{"key": "app", "operator": "NotIn", "values": []any{oam.ComponentLabelValue(boundary)}}}
+			},
+			want: []string{"NetworkPolicy", "spec.podSelector", "matches no pod template"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -440,6 +483,56 @@ func TestComponentLabelInvariant_RejectsBrokenSelectors(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestComponentLabelInvariant_SelectorsDoNotCountAsLabels: the vacuity check a
+// labelled fixture relies on counts emitted `app` labels, not selector values.
+// A trait output whose `app` labels are gone but whose selectors still carry the
+// projected value must fail it, or the label an emitter stopped writing would go
+// unnoticed.
+func TestComponentLabelInvariant_SelectorsDoNotCountAsLabels(t *testing.T) {
+	long := longLabelComponentName(t)
+	fx := traitLabelFixtures["networkpolicy"]
+	docs := renderLabelInvariant(t, labelInvariantApp(long, "passthrough", passthroughHostProps, "networkpolicy", fx.props))
+
+	var clean recordingReporter
+	requireAppLabel(&clean, checkComponentLabelInvariant(&clean, docs, long), "unbroken render")
+	if len(clean.errs) > 0 {
+		t.Fatalf("the unbroken render already fails: %v", clean.errs)
+	}
+
+	for _, d := range docs {
+		stripAppLabels(d)
+	}
+	sel := childMap(t, childMap(t, findDoc(t, docs, "NetworkPolicy"), "spec"), "podSelector")
+	if got := childMap(t, sel, "matchLabels")["app"]; got != oam.ComponentLabelValue(long) {
+		t.Fatalf("NetworkPolicy spec.podSelector app = %v, want the projected value still present", got)
+	}
+
+	var got recordingReporter
+	requireAppLabel(&got, checkComponentLabelInvariant(&got, docs, long), "stripped render")
+	if !slices.ContainsFunc(got.errs, func(e string) bool { return strings.Contains(e, "emitted no `app` label") }) {
+		t.Errorf("an output with selectors but no `app` label passed the vacuity check; reports: %v", got.errs)
+	}
+}
+
+// stripAppLabels deletes the `app` key from every map under a `labels` key in
+// obj, leaving selectors untouched.
+func stripAppLabels(obj any) {
+	switch v := obj.(type) {
+	case map[string]any:
+		for k, child := range v {
+			if m, ok := child.(map[string]any); ok && k == "labels" {
+				delete(m, "app")
+				continue
+			}
+			stripAppLabels(child)
+		}
+	case []any:
+		for _, child := range v {
+			stripAppLabels(child)
+		}
 	}
 }
 
@@ -526,18 +619,24 @@ type invariantReporter interface {
 //     come from that one function;
 //   - every selector that targets the component's pods (a workload's own
 //     selector and scheduling selectors, a Service, a PodDisruptionBudget, a
-//     NetworkPolicy) is a valid label selector that, evaluated whole
-//     (matchLabels and matchExpressions), matches a pod template's labels
-//     emitted with it.
+//     NetworkPolicy) is a valid label selector — checked for every such
+//     selector, before anything else — and, when the output carries pod
+//     templates, evaluated whole (matchLabels and matchExpressions), matches a
+//     pod template's labels emitted with it;
+//   - a synthesized NetworkPolicy selector on the platform component key is
+//     evaluated against the pod templates as the platform contract leaves them:
+//     with `<domain>/component` = oam.ComponentLabelValue(name) stamped on
+//     (TransformContext.ComponentLabelKey; kurel itself stamps nothing).
 //
-// It returns how many `app` values it saw and how many pod selectors it matched
-// against a pod template, so a caller can reject a vacuous pass.
+// It returns how many `app` labels it saw — label values only, never selector
+// values — and how many pod selectors it matched against a pod template, so a
+// caller can reject a vacuous pass.
 func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, name string) invariantCounts {
 	t.Helper()
 	want := oam.ComponentLabelValue(name)
 	const componentKey = kurelDomain + "/component"
-	appSeen, selectorsMatched := 0, 0
-	checkValue := func(where, key string, v any) {
+	appLabels, selectorsMatched := 0, 0
+	checkValue := func(where, key string, v any, label bool) {
 		s, ok := v.(string)
 		if !ok {
 			t.Errorf("%s: %s = %v (%T), want a string", where, key, v, v)
@@ -547,21 +646,27 @@ func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, na
 			t.Errorf("%s: %s = %q (%d characters) is not a valid label value: %v", where, key, s, len(s), errs)
 		}
 		if key == "app" || key == componentKey {
-			appSeen++
+			if label && key == "app" {
+				appLabels++
+			}
 			if s != want {
 				t.Errorf("%s: %s = %q, want oam.ComponentLabelValue(%d-character name) = %q", where, key, s, len(name), want)
 			}
 		}
 	}
 
-	var templates []labels.Set
+	var templates, stamped []labels.Set
 	for _, doc := range docs {
 		kind, _ := doc["kind"].(string)
 		md, _ := doc["metadata"].(map[string]any)
 		where := fmt.Sprintf("%s/%v", kind, md["name"])
 		walkLabelMaps(doc, where, checkValue)
 		if tl := podTemplateLabels(doc); tl != nil {
-			templates = append(templates, labelSet(tl))
+			set := labelSet(tl)
+			templates = append(templates, set)
+			withStamp := maps.Clone(set)
+			withStamp[componentKey] = want
+			stamped = append(stamped, withStamp)
 		}
 	}
 
@@ -574,24 +679,44 @@ func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, na
 				t.Errorf("%s: %s does not decode as a label selector: %v", where, ps.path, ps.err)
 				continue
 			}
-			if _, synthesized := ps.selector.MatchLabels[componentKey]; synthesized {
-				continue // the platform stamps this key; its value is checked against want above
-			}
-			if len(templates) == 0 {
-				continue // no pods in this output (e.g. a Service fronting another component)
-			}
-			selectorsMatched++
 			sel, err := metav1.LabelSelectorAsSelector(ps.selector)
 			if err != nil {
 				t.Errorf("%s: %s is not a valid label selector: %v", where, ps.path, err)
 				continue
 			}
-			if !slices.ContainsFunc(templates, func(tl labels.Set) bool { return sel.Matches(tl) }) {
-				t.Errorf("%s: %s %q matches no pod template emitted with it (templates: %v)", where, ps.path, sel.String(), templates)
+			if len(templates) == 0 {
+				continue // no pods in this output (e.g. a Service fronting another component)
+			}
+			candidates := templates
+			if kind == "NetworkPolicy" && selectsOnKey(ps.selector, componentKey) {
+				candidates = stamped
+			}
+			selectorsMatched++
+			if !slices.ContainsFunc(candidates, func(tl labels.Set) bool { return sel.Matches(tl) }) {
+				t.Errorf("%s: %s %q matches no pod template emitted with it (templates: %v)", where, ps.path, sel.String(), candidates)
 			}
 		}
 	}
-	return invariantCounts{app: appSeen, selectors: selectorsMatched}
+	return invariantCounts{appLabels: appLabels, selectors: selectorsMatched}
+}
+
+// selectsOnKey reports whether sel names key in its matchLabels or in any
+// matchExpressions requirement.
+func selectsOnKey(sel *metav1.LabelSelector, key string) bool {
+	if _, ok := sel.MatchLabels[key]; ok {
+		return true
+	}
+	return slices.ContainsFunc(sel.MatchExpressions, func(r metav1.LabelSelectorRequirement) bool { return r.Key == key })
+}
+
+// requireAppLabel reports a vacuous pass: output that must carry an `app`
+// label, of which the invariant check saw none. Only emitted labels count; a
+// selector carrying the value does not stand in for the label it targets.
+func requireAppLabel(t invariantReporter, n invariantCounts, what string) {
+	t.Helper()
+	if n.appLabels == 0 {
+		t.Errorf("%s emitted no `app` label; the invariant check is vacuous for it", what)
+	}
 }
 
 // labelSet converts decoded pod template labels to a labels.Set. A non-string
@@ -608,7 +733,11 @@ func labelSet(m map[string]any) labels.Set {
 
 // invariantCounts is what checkComponentLabelInvariant actually checked.
 type invariantCounts struct {
-	app       int // `app` and component-key values compared with the projection
+	// appLabels counts emitted `app` labels (maps under a `labels` key: object
+	// metadata and pod templates) compared with the projection. Selector values
+	// are compared too but not counted: a selector alone does not show that the
+	// label it targets was emitted.
+	appLabels int
 	selectors int // pod selectors compared with an emitted pod template
 }
 
@@ -617,14 +746,15 @@ type invariantCounts struct {
 // `matchExpressions` list (with the requirement's key), and for every value of
 // a Service's `spec.selector`, anywhere in obj — so the selectors nested in
 // scheduling terms, namespaceSelectors and NetworkPolicy peers are covered as
-// well as the top-level ones.
-func walkLabelMaps(obj any, where string, check func(where, key string, v any)) {
+// well as the top-level ones. label is true only for a value of a map under a
+// `labels` key, an emitted label rather than a selector value.
+func walkLabelMaps(obj any, where string, check func(where, key string, v any, label bool)) {
 	switch v := obj.(type) {
 	case map[string]any:
 		for k, child := range v {
 			if m, ok := child.(map[string]any); ok && (k == "labels" || k == "matchLabels") {
 				for lk, lv := range m {
-					check(where+"."+k, lk, lv)
+					check(where+"."+k, lk, lv, k == "labels")
 				}
 				continue
 			}
@@ -633,7 +763,7 @@ func walkLabelMaps(obj any, where string, check func(where, key string, v any)) 
 					em, _ := e.(map[string]any)
 					key, _ := em["key"].(string)
 					for j, ev := range asSlice(em["values"]) {
-						check(fmt.Sprintf("%s.%s[%d].values[%d]", where, k, i, j), key, ev)
+						check(fmt.Sprintf("%s.%s[%d].values[%d]", where, k, i, j), key, ev, false)
 					}
 				}
 				continue
@@ -644,7 +774,7 @@ func walkLabelMaps(obj any, where string, check func(where, key string, v any)) 
 			if spec, ok := v["spec"].(map[string]any); ok {
 				if sel, ok := spec["selector"].(map[string]any); ok {
 					for lk, lv := range sel {
-						check(where+".spec.selector", lk, lv)
+						check(where+".spec.selector", lk, lv, false)
 					}
 				}
 			}
