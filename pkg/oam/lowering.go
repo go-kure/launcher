@@ -546,7 +546,10 @@ type PolicyLoweringRule interface {
 	LowerPolicy(pol *ApplicationPolicy, lctx LoweringContext) (LoweringResult, error)
 }
 
-// LoweringStep is one edge of the expansion chain, for error reporting (D7).
+// LoweringStep is one edge of the expansion chain. A LoweringError carries the
+// failing element's chain (D7); LowerRawsWithSteps returns the steps of a
+// successful raw lowering, so a caller can attribute each emitted document to the
+// rule that produced it.
 type LoweringStep struct {
 	Rule     string // e.g. "trait/expose"
 	Position Position

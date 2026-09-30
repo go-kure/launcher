@@ -289,6 +289,18 @@ a trait whose schema declares a boolean builds cleanly and is silently dropped. 
 go-kure/launcher#357 `LowerRaws` schema-checked emitted traits itself; a caller that
 relied on that must now add the `ValidateAuthoredProperties` call.
 
+The returned bytes cannot say which rule produced them: the element origin is unexported
+and does not survive serialization. A caller that records provenance calls
+`LowerRawsWithSteps(raws, ctx) ([]json.RawMessage, []LoweringStep, error)` instead, which
+returns the same documents plus one `LoweringStep` per claimed input, in input order: `Rule`
+is the rule identity (`rawdocument/<apiVersion>/<kind>`, suffixed `@<version>` when the rule
+declares `ContractMetadata().Version`), `From` the authored `metadata.name` and `To` the
+`metadata.name` of each document it emitted. `From` is a name, not a full identity, so two
+claimed inputs of one kind and name in different namespaces are told apart only by their
+position. A pass-through input has no step; on error the steps are nil and the
+`LoweringError`'s `Chain` reports the failing document's steps. `LowerRaws` is
+`LowerRawsWithSteps` with the steps dropped.
+
 `NameAllocator`'s generated-name collision detection (D2) is scoped by `Origin.Namespace`,
 not by name alone: two documents authored in different namespaces may generate the same
 child name without colliding, since they lower to namespace-disjoint resources — the same
