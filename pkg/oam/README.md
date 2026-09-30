@@ -96,12 +96,15 @@ matching `<domain>/component` on every rendered workload and helm-rendered pod â
 The selector **value** is `ComponentLabelValue(name)`, not the raw component name, and a
 platform stamping the label must use the same function. A component name is a DNS-1123
 subdomain (up to 253 characters), a label value at most 63: `ComponentLabelValue` returns a
-name of 63 characters or fewer unchanged and projects a longer one onto a readable 52-character
-prefix plus `-` and the first 10 hex characters of its sha256 (trailing `-`/`.` trimmed from the
-prefix). The projection is deterministic, so every label and selector derived from one component
-agrees. The built-in `app` label every component and trait emits uses the same function
-(go-kure/launcher#572). It is a projection rather than a refusal because the label is an
-identifier, not the object's name: several component types (`helmchart`, `manifests`, `oci`,
+name of 63 characters or fewer unchanged and projects a longer one onto a readable prefix of at
+most 52 characters (its first 52, with trailing `-`/`.` trimmed) plus `-` and the first 10 hex
+characters of its sha256. The projection is deterministic, so every label and selector derived
+from one component agrees. The `app` label and selectors the built-in components and traits
+generate to identify a component use the same function (go-kure/launcher#572); authored labels
+and selectors (a `service` component's `selector`, a `networkpolicy` peer) are emitted as
+written, and a type that emits authored objects (`passthrough`, for one) adds no `app` label.
+It is a projection rather than a refusal because the label is an identifier, not the object's
+name: several component types (`helmchart`, `manifests`, `oci`,
 `crd`, `passthrough`) and their traits accept a name over 63 characters. Object names are never
 projected.
 
