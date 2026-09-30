@@ -37,7 +37,6 @@ spec:
             topologyKey: topology.kubernetes.io/zone
       containers:
       - image: ghcr.io/example/worker:v1.0.0
-        imagePullPolicy: IfNotPresent
         name: backend
         resources:
           limits:
