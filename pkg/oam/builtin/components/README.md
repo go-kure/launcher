@@ -2451,7 +2451,9 @@ not part of either change.
   (`storage.size: 5`) are refused rather than dropped. Two limits come from
   `encoding/json` itself: the unknown-field error names the key but not its
   path, and a key differing from a declared one only in letter case is
-  accepted as that field. The policy defaults below read what was authored
+  accepted as that field (two spellings of one field in the same object are
+  refused, since the decoder would keep only one: `storage.size: sets the
+  same field as storage.Size …`). The policy defaults below read what was authored
   from the decoded spec as well as from the property map, where every
   spelling the decoder accepts is consulted, so such a key still counts as
   authored and is not overwritten by a default — including the two values the
@@ -2473,12 +2475,33 @@ not part of either change.
   to JSON null: the properties are marshalled with `encoding/json` and read
   back before anything else looks at them, so a null map value is left out
   rather than decoded to an empty string, and a null array element is
-  refused by path (`env[0]: null is not a valid array element`). Because the
-  reading is the serialization itself, a value a caller builds in Go reads
+  refused by path (`env[0]: null is not a valid array element`). A lowering
+  rule emits JSON-shaped values (string-keyed maps, slices, scalars) as for
+  every component, and the engine refuses a typed API struct in them before
+  the handler runs; because the reading is the serialization itself, a
+  direct caller of the handler additionally has a value built in Go read
   exactly as `encoding/json` writes it — a concrete collection type, a nil
   behind a pointer, a `json.RawMessage` and a custom encoder included. A
   value that does not serialize is refused. A negative `instances` is
   refused before policy runs.
+  An authored `0` or `false` that the typed spec cannot carry is refused by
+  path (`managed.roles[0].connectionLimit: 0 cannot be carried by the
+  CloudNativePG API types (the field is omitted when zero, so the operator
+  would apply its default)`). Many `ClusterSpec` fields are non-pointer and
+  `omitempty`, so the value is omitted when the Cluster is encoded and the
+  operator applies its CRD default instead: `managed.roles[].connectionLimit`
+  (default `-1`, unlimited), `postgresUID`/`postgresGID` (`26`),
+  `startDelay`, `stopDelay`, `switchoverDelay`,
+  `replicationSlots.updateInterval`. Fields whose default is itself zero,
+  such as `managed.roles[].login: false`, are refused too, since nothing
+  tells them apart; omit them instead. No field list is kept: the
+  decoded spec is encoded and every authored numeric zero or `false` absent
+  from that encoding is refused, so a field a CNPG bump adds is covered too.
+  A `false` or `0` the type keeps (a pointer such as `enablePDB: false`,
+  `instances: 0`, a quantity `cpu: 0`) is emitted as authored. An authored
+  empty string is not refused — `storage.size: ""` keeps its meaning above —
+  so an empty string on a defaulted field such as `primaryUpdateStrategy` is
+  still omitted.
   `ApplyPolicy` enforces the policy `postgresql` enforces, in the same order:
   the instance-count default when `instances` is not authored (an authored
   value wins even when it equals the fallback) and its maximum; the cpu and

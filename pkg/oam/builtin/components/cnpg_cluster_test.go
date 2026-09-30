@@ -201,6 +201,68 @@ func TestCnpgClusterHandler_StrictDecode(t *testing.T) {
 	}
 }
 
+// TestCnpgClusterHandler_RefusesUncarriedValues: an authored 0 or false that
+// the typed spec decodes but omits when encoded (omitempty on a non-pointer
+// field) would reach the API server as absent and take the CRD default, so it
+// is refused by path rather than silently changed.
+func TestCnpgClusterHandler_RefusesUncarriedValues(t *testing.T) {
+	role := func(k string, v any) map[string]any {
+		return map[string]any{"managed": map[string]any{"roles": []any{map[string]any{"name": "a", k: v}}}}
+	}
+	const why = " cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default)"
+	for _, tt := range []struct {
+		name    string
+		props   map[string]any
+		wantErr string
+	}{
+		{"role connectionLimit", role("connectionLimit", 0), "managed.roles[0].connectionLimit: 0" + why},
+		{"case-variant key", role("ConnectionLimit", 0), "managed.roles[0].ConnectionLimit: 0" + why},
+		{"postgresUID", map[string]any{"postgresUID": 0}, "postgresUID: 0" + why},
+		{"stopDelay", map[string]any{"stopDelay": 0}, "stopDelay: 0" + why},
+		{"negative zero", map[string]any{"stopDelay": json.Number("-0")}, "stopDelay: -0" + why},
+		{"omitted false", role("login", false), "managed.roles[0].login: false" + why},
+		{"two spellings of one field", map[string]any{"storage": map[string]any{"size": "1Gi", "Size": "2Gi"}},
+			"storage.size: sets the same field as storage.Size (field names match case-insensitively, so one value would be dropped)"},
+		// The decoder keeps size "", which is omitted, so neither spelling is in
+		// the encoded Cluster and 2Gi would be lost without a trace.
+		{"two spellings, the kept one omitted", map[string]any{"storage": map[string]any{"size": "", "Size": "2Gi"}},
+			"storage.size: sets the same field as storage.Size (field names match case-insensitively, so one value would be dropped)"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := cnpgClusterErr(t, tt.props)
+			if err == nil || err.Error() != tt.wantErr {
+				t.Errorf("err = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+	t.Run("carried values are accepted and emitted", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{
+			"instances": 0,
+			"enablePDB": false,
+			"storage":   map[string]any{"size": ""},
+			"managed":   map[string]any{"roles": []any{map[string]any{"name": "a", "connectionLimit": 5}}},
+			"resources": map[string]any{"requests": map[string]any{"cpu": 0}},
+			"postgresql": map[string]any{
+				"parameters":                    map[string]any{"work_mem": "0", "Work_Mem": "8MB"},
+				"syncReplicaElectionConstraint": map[string]any{"enabled": false},
+			},
+		})
+		s := generateCnpgCluster(t, c).Spec
+		if s.Instances != 0 || s.EnablePDB == nil || *s.EnablePDB {
+			t.Errorf("instances/enablePDB = %d/%v, want the authored 0/false", s.Instances, s.EnablePDB)
+		}
+		if roles := s.Managed.Roles; len(roles) != 1 || roles[0].ConnectionLimit != 5 {
+			t.Errorf("roles = %+v, want connectionLimit 5", roles)
+		}
+		if q, ok := s.Resources.Requests[corev1.ResourceCPU]; !ok || !q.IsZero() {
+			t.Errorf("resources.requests.cpu = %v, want the authored 0", s.Resources.Requests)
+		}
+		if p := s.PostgresConfiguration.Parameters; p["work_mem"] != "0" || p["Work_Mem"] != "8MB" {
+			t.Errorf("parameters = %v; map keys are exact, not case-folded", p)
+		}
+	})
+}
+
 // TestCnpgClusterHandler_NullIsAbsence applies the package's null contract: a
 // null is absent at every depth, typed or untyped, and a null array element is
 // refused by path.
@@ -250,8 +312,9 @@ func TestCnpgClusterHandler_NullIsAbsence(t *testing.T) {
 			t.Error("the authored map lost its null key")
 		}
 	})
-	// A lowering rule assembles properties in Go, with concrete collection
-	// types; encoding/json serializes those like the untyped form.
+	// A direct caller of the handler may pass properties built in Go, with
+	// concrete collection types; encoding/json serializes those like the
+	// untyped form.
 	t.Run("typed map null value is dropped", func(t *testing.T) {
 		hundred := "100"
 		c := newCnpgCluster(t, map[string]any{
