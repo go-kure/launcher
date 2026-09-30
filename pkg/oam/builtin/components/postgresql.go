@@ -111,7 +111,7 @@ func (h *PostgresqlHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 	return map[string]oam.PropertySchema{
 		"provider":          {Type: oam.PropertyTypeString, Default: "cnpg", Enum: []any{"cnpg"}, Description: "Database provider (only cnpg is supported)."},
-		"version":           {Type: oam.PropertyTypeString, Default: "16", Description: "PostgreSQL major version for the cluster image."},
+		"version":           {Type: oam.PropertyTypeString, Default: "16", Description: "PostgreSQL major version for the cluster image. An empty string is refused; omit the property to take the default."},
 		"storageSize":       {Type: oam.PropertyTypeString, Default: "1Gi", Description: "Persistent storage size requested for each instance."},
 		"replicas":          {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of PostgreSQL instances in the cluster."},
 		"imageName":         {Type: oam.PropertyTypeString, Description: "Override for the container image (defaults to the CloudNativePG image for the version)."},
@@ -163,8 +163,9 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	// Every optional read below refuses a wrongly typed value by path instead of
 	// treating it as absent (go-kure/launcher#512). Strings go through
 	// parseRawStringField, which keeps an explicit "" as a value: the enums must
-	// still reach their switch to refuse it, and the free-form strings were always
-	// copied through as authored. A null is absence throughout.
+	// still reach their switch to refuse it, version refuses it by name, and the
+	// other free-form strings were always copied through as authored. A null is
+	// absence throughout.
 	config.Provider = "cnpg"
 	if provider, present, err := parseRawStringField(props, "provider", "provider"); err != nil {
 		return nil, err
@@ -177,10 +178,18 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 		}
 	}
 
+	// An authored "" is refused rather than read as omitted: it is more likely a
+	// templating slip than a request for the default, and kept as a value it
+	// formatted the default image with an empty tag, which only the image pull
+	// rejected (go-kure/launcher#539). Refused before imageName is read, so the
+	// document's validity does not depend on whether imageName overrides the tag.
 	config.Version = "16"
 	if version, present, err := parseRawStringField(props, "version", "version"); err != nil {
 		return nil, err
 	} else if present {
+		if version == "" {
+			return nil, errors.Errorf("version: must not be empty; omit it to default to %q", "16")
+		}
 		config.Version = version
 	}
 

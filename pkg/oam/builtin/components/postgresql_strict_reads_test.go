@@ -347,18 +347,31 @@ func TestPostgresql_EmptyEnsureIsRefused(t *testing.T) {
 	}
 }
 
-// TestPostgresql_EmptyVersionIsKept pins what an authored `version: ""` does today:
-// version is a free-form string, copied through as authored, so "" is a value and not
-// an omission — it does not take the "16" default, unlike a null (see
-// TestPostgresql_NullIsAbsence). This is the behaviour the handler had before the
-// strict reads; a change to it is a document-format decision, not a parser fix.
-func TestPostgresql_EmptyVersionIsKept(t *testing.T) {
-	cfg, err := postgresqlConfigFor(t, map[string]any{"version": ""})
-	if err != nil {
-		t.Fatalf("version \"\": %v", err)
+// TestPostgresql_EmptyVersionIsRefused covers go-kure/launcher#539: an authored
+// `version: ""` used to be copied through as authored, so without an imageName the
+// cluster image became `ghcr.io/cloudnative-pg/postgresql:` — an empty tag the image
+// pull rejects at runtime. It is now refused by name at build, and it is not read as
+// an omission either: an explicit empty value is more likely a templating slip than a
+// request for the "16" default, which only an omitted or null version takes (see
+// TestPostgresql_NullIsAbsence). The refusal does not depend on imageName.
+func TestPostgresql_EmptyVersionIsRefused(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]any
+	}{
+		{"default image", map[string]any{"version": ""}},
+		{"with imageName", map[string]any{"version": "", "imageName": "registry.example/postgresql:16.4"}},
 	}
-	if cfg.Version != "" {
-		t.Errorf("version \"\" read as %q, want it kept as authored", cfg.Version)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := postgresqlConfigFor(t, tc.props)
+			if err == nil {
+				t.Fatalf("props %v: an empty version was accepted (read as %q)", tc.props, cfg.Version)
+			}
+			if want := `version: must not be empty; omit it to default to "16"`; !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q, want it to contain %q", err, want)
+			}
+		})
 	}
 }
 
