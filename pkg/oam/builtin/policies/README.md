@@ -30,6 +30,7 @@ Orders components of the same application. Every component a rule names, on eith
 side, must exist in the application; a component may not depend on itself; and the graph
 must be acyclic. Several `dependency` policies accumulate into one graph, and the cycle
 check runs over all of it, so a cycle split across two policies is still rejected. A
+rejected policy records none of its edges, so the graph holds only accepted policies. A
 cycle is reported as the walk that reached it, which starts from the alphabetically first
 component with dependencies (`circular dependency detected: a -> b -> c -> a`), so the
 same document always gives the same message.
@@ -102,7 +103,8 @@ policies:
 
 Appends explicit Flux health-check entries to every leaf bundle, after the ones the
 transform generates for the workloads it knows how to check. `apiVersion`, `kind` and
-`name` are required; `namespace` is optional and left empty when omitted. Several
+`name` are required; `namespace` is optional and left empty when omitted, but a present
+`namespace` that is not a string is an error rather than read as omitted. Several
 `health-checks` policies accumulate in document order.
 
 ```yaml

@@ -168,6 +168,16 @@ func TestHealthChecksHandler_ApplyRejectsInvalidChecks(t *testing.T) {
 			}}},
 			wantError: "checks[0].name is required",
 		},
+		{
+			name: "namespace has wrong type",
+			properties: map[string]any{"checks": []any{map[string]any{
+				"apiVersion": "batch/v1",
+				"kind":       "Job",
+				"name":       "db-migrate",
+				"namespace":  7,
+			}}},
+			wantError: "checks[0].namespace must be a string",
+		},
 	}
 
 	h := &policies.HealthChecksHandler{}

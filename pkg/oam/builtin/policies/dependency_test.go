@@ -95,6 +95,63 @@ func TestDependencyHandler_AccumulatesAcrossPolicies(t *testing.T) {
 	}
 }
 
+// TestDependencyHandler_RejectedPolicyLeavesResultUnchanged: a policy whose
+// first rule is valid but whose later rule, or the accumulated cycle check,
+// fails records none of its edges, so a caller reusing the result does not
+// inherit dependencies from a policy that was rejected.
+func TestDependencyHandler_RejectedPolicyLeavesResultUnchanged(t *testing.T) {
+	cases := []struct {
+		name  string
+		rules []any
+	}{
+		{
+			name: "unknown component after a valid rule",
+			rules: []any{
+				map[string]any{"component": "b", "dependsOn": []any{"c"}},
+				map[string]any{"component": "missing", "dependsOn": []any{"a"}},
+			},
+		},
+		{
+			name: "self dependency after a valid rule",
+			rules: []any{
+				map[string]any{"component": "b", "dependsOn": []any{"c"}},
+				map[string]any{"component": "c", "dependsOn": []any{"c"}},
+			},
+		},
+		{
+			name: "cycle closed with the earlier policy",
+			rules: []any{
+				map[string]any{"component": "b", "dependsOn": []any{"c"}},
+				map[string]any{"component": "c", "dependsOn": []any{"a"}},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &policies.DependencyHandler{}
+			result := oam.NewPolicyResult()
+			components := []string{"a", "b", "c"}
+
+			first := &oam.ApplicationPolicy{Name: "first", Type: "dependency", Properties: map[string]any{
+				"rules": []any{map[string]any{"component": "a", "dependsOn": []any{"b"}}},
+			}}
+			if err := h.Apply(first, components, result); err != nil {
+				t.Fatalf("first: %v", err)
+			}
+
+			rejected := &oam.ApplicationPolicy{Name: "rejected", Type: "dependency", Properties: map[string]any{"rules": tc.rules}}
+			if err := h.Apply(rejected, components, result); err == nil {
+				t.Fatal("rejected policy: error = nil, want error")
+			}
+
+			want := map[string][]string{"a": {"b"}}
+			if !reflect.DeepEqual(result.Dependencies, want) {
+				t.Errorf("Dependencies = %v, want %v (only the accepted policy's edges)", result.Dependencies, want)
+			}
+		})
+	}
+}
+
 func TestDependencyHandler_Errors(t *testing.T) {
 	cases := []struct {
 		name       string

@@ -30,6 +30,10 @@ func (h *DependencyHandler) CanHandle(policyType string) bool {
 // component must exist in components, a component may not depend on itself, and
 // the accumulated graph — including edges recorded by an earlier dependency
 // policy on the same result — must be acyclic.
+//
+// The policy's edges are staged on a copy of result.Dependencies and committed only
+// once every rule and the cycle check have passed, so a rejected policy leaves
+// result exactly as it found it.
 func (h *DependencyHandler) Apply(policy *oam.ApplicationPolicy, components []string, result *oam.PolicyResult) error {
 	rules, err := parseDependencyRules(policy.Properties)
 	if err != nil {
@@ -37,6 +41,11 @@ func (h *DependencyHandler) Apply(policy *oam.ApplicationPolicy, components []st
 	}
 
 	componentSet := toSet(components)
+
+	staged := make(map[string][]string, len(result.Dependencies)+len(rules))
+	for component, deps := range result.Dependencies {
+		staged[component] = append([]string(nil), deps...)
+	}
 
 	for _, rule := range rules {
 		if !componentSet[rule.Component] {
@@ -52,13 +61,14 @@ func (h *DependencyHandler) Apply(policy *oam.ApplicationPolicy, components []st
 					policy.Name, rule.Component)
 			}
 		}
-		result.Dependencies[rule.Component] = append(result.Dependencies[rule.Component], rule.DependsOn...)
+		staged[rule.Component] = append(staged[rule.Component], rule.DependsOn...)
 	}
 
-	if err := detectCycles(result.Dependencies); err != nil {
+	if err := detectCycles(staged); err != nil {
 		return errors.Wrapf(err, "policy %q", policy.Name)
 	}
 
+	result.Dependencies = staged
 	return nil
 }
 
