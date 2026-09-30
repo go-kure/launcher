@@ -59,7 +59,7 @@ return errors.Errorf("invalid value: %s", val)
 
 - This open-source repo must not name downstream, closed-source platform consumers in source, docs, comments, tests, or identifiers — reword to a generic role (e.g. "a downstream consumer")
 - Org standard: `go-kure/.github` → `docs/standards.md` ("No Downstream References"); remediation runbook: `docs/no-downstream-references.md`
-- CI-enforced via the shared `go-kure/.github` `check-forbidden-terms` action, which scans `--full-tree` on every event (PR and merge queue alike); `scripts/release.sh` runs the byte-identical vendored copy (`site/scripts/check-forbidden-terms.sh`) as a release preflight. A legitimately unavoidable term needs an adjacent `allow-term:<word>` pragma
+- CI-enforced via the shared `go-kure/.github` `check-forbidden-terms` action, which scans `--full-tree` on every event (PR and merge queue alike); the shared Release workflow's release script runs the byte-identical vendored copy (`site/scripts/check-forbidden-terms.sh`) as a release preflight. A legitimately unavoidable term needs an adjacent `allow-term:<word>` pragma
 
 ### Commits
 
@@ -82,7 +82,7 @@ git push -u origin <type>/<description>
 gh pr create
 ```
 
-Required checks: `lint`, `test`, `build`. Merging goes through a GitHub merge queue (rebase method), which rebases and tests the merged result before landing — no manual rebasing needed. See `AGENTS.md` § Git Workflow for full details.
+Required checks: `lint`, `test`, `build`, `pr-review / AI Code Review`. Merging goes through a GitHub merge queue (rebase method), which rebases and tests the merged result before landing — no manual rebasing needed. See `AGENTS.md` § Git Workflow for full details.
 
 ## Quick Commands
 
