@@ -175,7 +175,7 @@ reconciled, not which objects it emits:
 | type | description |
 |---|---|
 | `dependency` | Orders components of this application: `rules[]` of `{component, dependsOn[]}`. Referenced components must exist; self-dependencies and cycles are rejected. Any rule switches the cluster to one bundle per component, wired with `dependsOn` plus edges to the preceding tier's bundles. A source shared by several components lands in the bundle of the one deployed first, so it never waits on another component that needs it. |
-| `placement` | Overrides the tier a component is grouped into: `component`, `tier` (`infra`, `services` or `apps`); a second placement of the same component in a different tier is an error. Tier bundles are ordered only when a `dependency` policy is present; otherwise placement changes grouping, not deployment order (go-kure/launcher#575). |
+| `placement` | Overrides the tier a component is grouped into: `component`, `tier` (`infra`, `services` or `apps`); a second placement of the same component in a different tier is an error. Tiers deploy in order (`infra`, `services`, `apps`), so placement changes both grouping and deployment order. |
 | `reconciliation` | Flux settings for every leaf bundle: `interval`, `retryInterval`, `timeout` (Flux durations: unsigned, units `ms`, `s`, `m`, `h`), `prune`, `wait`, `force`, `suspend`. At least one is required; at most one such policy per application. |
 | `health-checks` | Extra Flux health checks appended to every leaf bundle: `checks[]` of `{apiVersion, kind, name, namespace}`. Flux ignores them when `wait` is true. |
 

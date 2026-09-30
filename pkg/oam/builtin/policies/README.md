@@ -38,9 +38,9 @@ same document always gives the same message.
 
 When at least one rule is recorded, the transform builds one bundle per component and
 wires each rule's `dependsOn` as bundle dependencies, on top of automatic tier edges
-(each bundle depends on the bundles of the tier before it). This per-component path is
-the only one that orders tiers; without a `dependency` policy, tier bundles carry no
-dependency on each other (see [`placement`](#placement)).
+(each bundle depends on the bundles of the tier before it). Without a `dependency`
+policy, an application spanning several tiers gets one bundle per tier instead, each
+depending on the bundle of the populated tier before it.
 
 When several components share one Flux source (a `helmchart` repository, or an OCI
 source shared with `oci`), the transform emits it once, in the bundle of the sharing
@@ -69,11 +69,11 @@ exist. A second `placement` policy for the same component is an error if it name
 different tier, rather than silently overriding the first; repeating the same tier is
 accepted.
 
-Placement changes which tier bundle holds the component, not when it is deployed. Without
-a `dependency` policy, an application spanning several tiers gets one bundle per tier
-with no dependency between them, so the tiers are not deployed in order
-(go-kure/launcher#575). With a `dependency` policy the component's bundle depends on the
-bundles of the tier before its new one.
+Placement changes both which tier bundle holds the component and when it is deployed:
+tiers deploy in order, `infra`, then `services`, then `apps`. Without a `dependency`
+policy the component joins its new tier's bundle, which depends on the bundle of the
+populated tier before it. With a `dependency` policy the component's own bundle depends
+on the bundles of the tier before its new one.
 
 ```yaml
 policies:
