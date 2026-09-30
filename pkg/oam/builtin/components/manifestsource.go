@@ -214,13 +214,15 @@ func urlHost(rawURL string) string {
 // ociNamesRegistry reports whether an oci:// url names its registry explicitly:
 // its first path segment is localhost or contains "." or ":", and, with
 // requireRepository, a "/" and a non-empty repository path follow it. A value
-// without the oci:// scheme names none. The segment is not otherwise parsed:
-// userinfo or a query left in it matches no allowlist entry, so such a url is
-// still refused.
+// without the oci:// scheme names none. The segment is not otherwise parsed or
+// validated as an OCI reference: userinfo, a query or a fragment stays in the
+// compared segment, so it cannot match a plain registry entry, and Flux's own
+// parser rejects such a reference.
 //
 // This is the rule go-containerregistry's name.NewRepository — how Flux's
 // source-controller parses an OCIRepository url — uses to pick the registry:
-// anything else is a Docker Hub repository, whatever host urlHost returns.
+// without an explicit registry, an otherwise valid repository reference
+// resolves against Docker Hub, whatever host urlHost returns.
 func ociNamesRegistry(value string, requireRepository bool) bool {
 	rest, ok := strings.CutPrefix(value, "oci://")
 	if !ok {
