@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
+	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -325,6 +327,9 @@ func TestAugmentLayoutTemplate_SingleGroup_NoChildren(t *testing.T) {
 	if len(ml.Children) != 0 {
 		t.Errorf("ml.Children has %d entries, want 0 (a single hook group is a no-op)", len(ml.Children))
 	}
+	if ml.ApplicationFileMode != layout.AppFileUnset {
+		t.Errorf("ml.ApplicationFileMode = %v, want AppFileUnset (the directory pin applies only when partitioning)", ml.ApplicationFileMode)
+	}
 }
 
 func TestAugmentLayoutTemplate_MultiGroup_PartitionsAndChains(t *testing.T) {
@@ -366,6 +371,9 @@ metadata:
 	}
 	if ml.Resources != nil {
 		t.Errorf("ml.Resources = %v, want nil after partitioning", ml.Resources)
+	}
+	if ml.ApplicationFileMode != layout.AppFileSingle {
+		t.Errorf("ml.ApplicationFileMode = %v, want the caller's explicit AppFileSingle kept", ml.ApplicationFileMode)
 	}
 	if len(ml.Children) != 3 {
 		t.Fatalf("ml.Children has %d entries, want 3", len(ml.Children))
@@ -499,6 +507,160 @@ metadata:
 			}
 		}
 	}
+}
+
+// TestAugmentLayoutTemplate_WriteManifestUnderAppFileSingleDefault pins
+// go-kure/launcher#563: a hook-group helmchart walked by kure's WalkCluster
+// and written by WriteManifest with a Config-wide AppFileSingle default, under
+// a placement other than FluxIntegratedPerLayout. The partitioned component
+// layout must stay a directory (augmentLayoutTemplate pins its unset mode to
+// AppFilePerResource), so kure neither refuses it as an AppFileSingle layout
+// with children nor drops the children from the build: each hook group is
+// written as one file there and listed by that directory's
+// kustomization.yaml, and every rendered object is reachable from the root.
+func TestAugmentLayoutTemplate_WriteManifestUnderAppFileSingleDefault(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pre
+  annotations:
+    helm.sh/hook: pre-install
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: post
+  annotations:
+    helm.sh/hook: post-install
+`)
+	for _, placement := range []layout.FluxPlacement{layout.FluxSeparate, layout.FluxIntegratedPerBundle} {
+		t.Run(string(placement), func(t *testing.T) {
+			cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+				return raw, nil
+			})
+			app := stack.NewApplication("myapp", "default", wrapIfHelmchartAugmenter(cfg))
+			cluster := &stack.Cluster{
+				Name: "c",
+				Node: &stack.Node{
+					Name:   "apps",
+					Bundle: &stack.Bundle{Name: "apps", Applications: []*stack.Application{app}},
+				},
+			}
+			root, err := layout.WalkCluster(cluster, layout.LayoutRules{FluxPlacement: placement})
+			if err != nil {
+				t.Fatalf("WalkCluster: %v", err)
+			}
+			appLayout := findLayoutByName(root, "myapp")
+			if appLayout == nil {
+				t.Fatal("walked tree has no layout for the helmchart component")
+			}
+			if len(appLayout.Children) != 3 {
+				t.Fatalf("component layout has %d children, want 3 hook groups", len(appLayout.Children))
+			}
+			if appLayout.ApplicationFileMode != layout.AppFilePerResource {
+				t.Errorf("component layout ApplicationFileMode = %v, want AppFilePerResource", appLayout.ApplicationFileMode)
+			}
+
+			base := t.TempDir()
+			wcfg := layout.Config{ManifestsDir: "clusters", ApplicationFileMode: layout.AppFileSingle}
+			if err := layout.WriteManifest(base, wcfg, root); err != nil {
+				t.Fatalf("WriteManifest: %v", err)
+			}
+
+			appDir := filepath.Join(base, wcfg.ManifestsDir, appLayout.FullRepoPath())
+			listed := map[string]bool{}
+			for _, e := range kustomizationResources(t, appDir) {
+				listed[e] = true
+			}
+			for _, child := range appLayout.Children {
+				entry := child.Name + ".yaml"
+				if !listed[entry] {
+					t.Errorf("%s/kustomization.yaml does not list hook group file %q (listed: %v)", appDir, entry, listed)
+				}
+			}
+
+			got := reachableObjectNames(t, filepath.Join(base, wcfg.ManifestsDir, root.FullRepoPath()))
+			for _, name := range []string{"pre", "main", "post"} {
+				if !got[name] {
+					t.Errorf("object %q is not reachable from the root kustomization.yaml (reachable: %v)", name, got)
+				}
+			}
+		})
+	}
+}
+
+// findLayoutByName returns the first layout named name in ml's tree, or nil.
+func findLayoutByName(ml *layout.ManifestLayout, name string) *layout.ManifestLayout {
+	if ml == nil {
+		return nil
+	}
+	if ml.Name == name {
+		return ml
+	}
+	for _, c := range ml.Children {
+		if found := findLayoutByName(c, name); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+// kustomizationResources returns the resources entries of dir/kustomization.yaml.
+func kustomizationResources(t *testing.T, dir string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "kustomization.yaml"))
+	if err != nil {
+		t.Fatalf("read kustomization.yaml: %v", err)
+	}
+	var k struct {
+		Resources []string `yaml:"resources"`
+	}
+	if err := yaml.Unmarshal(data, &k); err != nil {
+		t.Fatalf("parse %s/kustomization.yaml: %v", dir, err)
+	}
+	return k.Resources
+}
+
+// reachableObjectNames follows dir's kustomization.yaml resources entries the
+// way a kustomize build does — a file entry adds its objects, a directory
+// entry adds that directory's own build — and returns every object name
+// reached. An entry that does not resolve on disk fails the test.
+func reachableObjectNames(t *testing.T, dir string) map[string]bool {
+	t.Helper()
+	names := map[string]bool{}
+	var build func(d string)
+	build = func(d string) {
+		for _, e := range kustomizationResources(t, d) {
+			p := filepath.Join(d, e)
+			fi, err := os.Stat(p)
+			if err != nil {
+				t.Errorf("%s/kustomization.yaml: resources entry %q does not resolve (%v)", d, e, err)
+				continue
+			}
+			if fi.IsDir() {
+				build(p)
+				continue
+			}
+			data, err := os.ReadFile(p)
+			if err != nil {
+				t.Fatalf("read %s: %v", p, err)
+			}
+			objs, err := decodeKubeManifests(data)
+			if err != nil {
+				t.Fatalf("decode %s: %v", p, err)
+			}
+			for _, o := range objs {
+				names[o.GetName()] = true
+			}
+		}
+	}
+	build(dir)
+	return names
 }
 
 func TestExcludedHookPhasesAreDropped(t *testing.T) {
