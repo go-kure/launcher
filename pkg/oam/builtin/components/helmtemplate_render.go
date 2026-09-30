@@ -542,7 +542,7 @@ func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 		// Read before converting: a failed conversion stops at the first value
 		// it cannot convert and leaves the document partly converted, in map
 		// iteration order.
-		hook := u.GetAnnotations()["helm.sh/hook"]
+		hook := hookAnnotation(doc)
 		if convErr == nil {
 			_, convErr = toJSONTypes(doc, "")
 		}
@@ -555,6 +555,29 @@ func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 		objects = append(objects, u)
 	}
 	return objects, nil
+}
+
+// hookAnnotation returns the helm.sh/hook annotation of doc, a decoded
+// document, or "" when it has none. Unlike unstructured's GetAnnotations, it
+// reads metadata and metadata.annotations as either map[string]any or the
+// map[any]any yaml.v3 decodes a mapping with a non-string key to, so such a
+// key cannot hide the hook that decides whether the document is dropped.
+func hookAnnotation(doc map[string]any) string {
+	hook, _ := stringKeyedValue(stringKeyedValue(doc["metadata"], "annotations"), "helm.sh/hook").(string)
+	return hook
+}
+
+// stringKeyedValue returns the value under key in m, a map[string]any or a
+// map[any]any, or nil when m is neither or has no such key.
+func stringKeyedValue(m any, key string) any {
+	switch t := m.(type) {
+	case map[string]any:
+		return t[key]
+	case map[any]any:
+		return t[key]
+	default:
+		return nil
+	}
 }
 
 // stringKeyedEntries returns the entries of m, a document yaml.v3 decoded to

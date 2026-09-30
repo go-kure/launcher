@@ -1962,7 +1962,8 @@ not part of either change.
   express (a UTC offset of 24 hours or more, such as `+24:00`), naming the object and the value's
   path: an emitted manifest is written through Go's JSON encoding, which refuses both. A document
   that one of the dropped hooks above carries is never written, so it is dropped with such a
-  key or value in it rather than refused.
+  key or value in it rather than refused — including a non-string key in its `metadata` or
+  `metadata.annotations` mapping, which does not hide the `helm.sh/hook` annotation.
   For a layout-walking consumer (the `layout.LayoutAugmenter` path, same mechanism as the
   `valuesMode: configMap` relocation above), more than one hook group makes `AugmentLayout` clear
   the component's flat `Resources` and replace them with one child `ManifestLayout` per group,
