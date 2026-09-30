@@ -353,7 +353,7 @@ metadata:
 
 	ml := &layout.ManifestLayout{
 		Name:                "myapp",
-		Namespace:           "team/myapp", // kure's walker always sets Namespace ending in Name (walker.go:492)
+		Namespace:           "team", // the enclosing layout's path, as kure's walker sets it
 		Resources:           []client.Object{&unstructured.Unstructured{}},
 		Mode:                layout.KustomizationExplicit,
 		FluxPlacement:       layout.FluxIntegratedPerLayout,
@@ -377,9 +377,12 @@ metadata:
 		if child.Name != wantNames[i] {
 			t.Errorf("Children[%d].Name = %q, want %q", i, child.Name, wantNames[i])
 		}
-		wantNS := ml.FullRepoPath() + "/" + wantNames[i]
-		if child.Namespace != wantNS {
-			t.Errorf("Children[%d].Namespace = %q, want %q", i, child.Namespace, wantNS)
+		if child.Namespace != "team/myapp" {
+			t.Errorf("Children[%d].Namespace = %q, want the parent path %q", i, child.Namespace, "team/myapp")
+		}
+		// One level below the component's directory, never nested twice.
+		if wantPath := "team/myapp/" + wantNames[i]; child.FullRepoPath() != wantPath {
+			t.Errorf("Children[%d].FullRepoPath() = %q, want %q", i, child.FullRepoPath(), wantPath)
 		}
 		if child.Mode != ml.Mode {
 			t.Errorf("Children[%d].Mode = %v, want %v", i, child.Mode, ml.Mode)
@@ -408,15 +411,18 @@ metadata:
 }
 
 // TestAugmentLayoutTemplate_ChildKustomizationReferencesResolveOnDisk exercises
-// the actual kure disk-writer, not just the in-memory ml/Children shape —
-// AppFileSingle on the pre-AugmentLayout parent is the exact value whose
-// verbatim inheritance into a child (a downstream consumer's
-// copy-all-five-fields approach) produces a dangling kustomization.yaml
-// resources: entry (see
-// augmentLayoutTemplate's doc comment). Pinning it specifically matters:
-// kure's own fallback default is AppFilePerResource, not AppFileSingle, so a
-// zero-valued fixture would take the same code path either way and this test
-// would pass regardless of whether the fix is present.
+// the actual kure disk-writer, not just the in-memory ml/Children shape: every
+// resources: entry of every kustomization.yaml written must resolve on disk,
+// and an entry naming a directory must reach that directory's own
+// kustomization.yaml. A child nested twice (its Namespace ending in its own
+// name, go-kure/kure#771) leaves only an empty intermediate directory there,
+// so a bare existence check would not catch it. The parent is an application
+// layout as kure's walker hands it to the augmenter: Namespace its parent
+// directory, ApplicationFileMode unset (directory mode). An AppFileSingle
+// root would write its kustomization.yaml into its Namespace instead of its
+// own directory, listing the children where they are not written, so it
+// cannot host them; the children's own AppFileUnset (never inherited from the
+// parent) is asserted in TestAugmentLayoutTemplate_MultiGroup_PartitionsAndChains.
 func TestAugmentLayoutTemplate_ChildKustomizationReferencesResolveOnDisk(t *testing.T) {
 	raw := []byte(`apiVersion: v1
 kind: ConfigMap
@@ -437,9 +443,8 @@ metadata:
 	})
 
 	ml := &layout.ManifestLayout{
-		Name:                "myapp",
-		Namespace:           "team/myapp",
-		ApplicationFileMode: layout.AppFileSingle,
+		Name:      "myapp",
+		Namespace: "team",
 	}
 	if err := cfg.augmentLayoutTemplate(ml); err != nil {
 		t.Fatalf("augmentLayoutTemplate: %v", err)
@@ -482,8 +487,15 @@ metadata:
 				continue
 			}
 			ref := filepath.Join(kdir, m[1])
-			if _, err := os.Stat(ref); err != nil {
+			fi, err := os.Stat(ref)
+			if err != nil {
 				t.Errorf("%s: resources entry %q does not resolve on disk (%v)", kf, m[1], err)
+				continue
+			}
+			if fi.IsDir() {
+				if _, err := os.Stat(filepath.Join(ref, "kustomization.yaml")); err != nil {
+					t.Errorf("%s: resources entry %q is a directory without its own kustomization.yaml (%v)", kf, m[1], err)
+				}
 			}
 		}
 	}

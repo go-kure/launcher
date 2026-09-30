@@ -1878,10 +1878,12 @@ not part of either change.
   For a layout-walking consumer (the `layout.LayoutAugmenter` path, same mechanism as the
   `valuesMode: configMap` relocation above), more than one hook group makes `AugmentLayout` clear
   the component's flat `Resources` and replace them with one child `ManifestLayout` per group,
-  named `<component>-NN-<phase-slug>` and chained via `DependsOn`, listing each child's preceding
-  sibling in the order kure's `helm.SplitByHookWeight` synthesizes from Helm's hook phases — a
-  combined install/upgrade ordering for GitOps reconciliation, not Helm's own per-operation
-  execution order (kure `pkg/stack/helm/hooks.go:28-36`). `DependsOn` is set on every child
+  named `<component>-NN-<phase-slug>`, written to its own directory `<component dir>/<child>`
+  (its `Namespace` is the component layout's own path, which kure joins with the child's name,
+  so a hook-group directory is never nested twice) and chained via `DependsOn`, listing each
+  child's preceding sibling in the order kure's `helm.SplitByHookWeight` synthesizes from Helm's
+  hook phases — a combined install/upgrade ordering for GitOps reconciliation, not Helm's own
+  per-operation execution order (kure `pkg/stack/helm/hooks.go:28-36`). `DependsOn` is set on every child
   regardless of placement, but kure's layout integrator only translates it into `spec.dependsOn`
   on a per-child Flux Kustomization CR under `FluxIntegratedPerLayout` placement (kure
   `pkg/stack/layout/manifest.go`'s `DependsOn` field doc); under coarser placement modes the
