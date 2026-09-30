@@ -5,6 +5,7 @@ import (
 	"time"
 
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	"github.com/fluxcd/pkg/apis/meta"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
@@ -42,8 +43,27 @@ func (h *OCIHandler) PropertySchema() map[string]oam.PropertySchema {
 		"prune":           {Type: oam.PropertyTypeBoolean, Default: true, Description: "Whether the Kustomization prunes resources removed from the source."},
 		"interval":        {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Go duration (default 60m)."},
 		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Namespace into which the Kustomization applies resources."},
+		"wait":            {Type: oam.PropertyTypeBoolean, Description: "Set the Kustomization's spec.wait: Flux waits for every resource it applies to become ready before reporting the Kustomization ready. Unset or false emits nothing. Cannot be combined with a non-empty healthChecks, which kustomize-controller ignores when wait is true."},
+		"healthChecks": {
+			Type:        oam.PropertyTypeArray,
+			Description: "Objects listed, in authored order, in the Kustomization's spec.healthChecks: Flux reports the Kustomization ready only once these are ready. The component delivers an opaque artifact, so the list is authored, never derived. An empty list emits nothing. Cannot be combined with wait: true.",
+			Items: &oam.PropertySchema{
+				Type:        oam.PropertyTypeObject,
+				Description: "One object Flux checks for readiness.",
+				Properties: map[string]oam.PropertySchema{
+					"apiVersion": {Type: oam.PropertyTypeString, Required: true, Description: "API version of the object, including its group (e.g. apps/v1)."},
+					"kind":       {Type: oam.PropertyTypeString, Required: true, Description: "Kind of the object (e.g. Deployment)."},
+					"name":       {Type: oam.PropertyTypeString, Required: true, Description: "Name of the object."},
+					"namespace":  {Type: oam.PropertyTypeString, Description: "Namespace of the object; omit for a cluster-scoped kind."},
+				},
+			},
+		},
 	}
 }
+
+// ociHealthCheckKeys is the accepted key set of one `healthChecks` entry, the
+// fields of Flux's NamespacedObjectKindReference. Any other key is refused.
+var ociHealthCheckKeys = []string{"apiVersion", "kind", "name", "namespace"}
 
 // ToApplicationConfig converts an OAM oci component to an OCIConfig.
 //
@@ -56,6 +76,18 @@ func (h *OCIHandler) PropertySchema() map[string]oam.PropertySchema {
 //	prune: true                                       # optional, default true
 //	interval: 60m                                     # optional, default 60m
 //	targetNamespace: my-workload                      # optional
+//	wait: false                                       # optional, no default; true sets spec.wait
+//	healthChecks:                                     # optional, not with wait: true; sets spec.healthChecks, in order
+//	  - apiVersion: apps/v1                           # required
+//	    kind: Deployment                              # required
+//	    name: my-workload                             # required
+//	    namespace: my-workload                        # optional; omit for a cluster-scoped kind
+//
+// wait and healthChecks are opt-in (go-kure/launcher#432): a document authoring
+// neither, wait: false, or an empty healthChecks list builds the same
+// Kustomization it always did. wait: true together with a non-empty
+// healthChecks is refused, because kustomize-controller ignores healthChecks
+// when wait is true.
 func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	cfg := &OCIConfig{
 		Name:      component.Name,
@@ -119,7 +151,67 @@ func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace str
 	}
 	cfg.TargetNamespace = targetNamespace
 
+	if w, err := parseBoolField(props, "wait", "wait"); err != nil {
+		return nil, err
+	} else if w != nil {
+		cfg.Wait = *w
+	}
+	healthChecks, err := parseOCIHealthChecks(props)
+	if err != nil {
+		return nil, err
+	}
+	cfg.HealthChecks = healthChecks
+	if cfg.Wait && len(cfg.HealthChecks) > 0 {
+		return nil, errors.New("oci: wait: true and healthChecks are mutually exclusive: kustomize-controller ignores healthChecks when wait is true, so the listed checks would never run; drop wait to check only the listed objects, or drop healthChecks to wait for everything applied")
+	}
+
 	return cfg, nil
+}
+
+// parseOCIHealthChecks reads the optional `healthChecks` list. Absent, null or
+// empty yields nil. Each entry must be an object with only the keys in
+// ociHealthCheckKeys; apiVersion, kind and name are required non-empty
+// strings — without the group in apiVersion the entry does not identify the
+// object Flux is meant to check — and namespace is an optional string, left
+// out for a cluster-scoped kind.
+func parseOCIHealthChecks(props map[string]any) ([]meta.NamespacedObjectKindReference, error) {
+	entries, _, err := parseObjectList(props, "healthChecks")
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	refs := make([]meta.NamespacedObjectKindReference, 0, len(entries))
+	for i, m := range entries {
+		label := indexedLabel("healthChecks", i)
+		if err := rejectUnknownKeys(m, ociHealthCheckKeys, label); err != nil {
+			return nil, err
+		}
+		apiVersion, err := requiredStringField(m, "apiVersion", label)
+		if err != nil {
+			return nil, err
+		}
+		kind, err := requiredStringField(m, "kind", label)
+		if err != nil {
+			return nil, err
+		}
+		name, err := requiredStringField(m, "name", label)
+		if err != nil {
+			return nil, err
+		}
+		namespace, _, err := parseStringField(m, "namespace", label+".namespace")
+		if err != nil {
+			return nil, err
+		}
+		refs = append(refs, meta.NamespacedObjectKindReference{
+			APIVersion: apiVersion,
+			Kind:       kind,
+			Name:       name,
+			Namespace:  namespace,
+		})
+	}
+	return refs, nil
 }
 
 // OCIConfig implements stack.ApplicationConfig for oci components.
@@ -134,6 +226,13 @@ type OCIConfig struct {
 	Prune           bool
 	Interval        string
 	TargetNamespace string
+
+	// Wait sets the Kustomization's spec.wait; false emits nothing.
+	Wait bool
+	// HealthChecks become the Kustomization's spec.healthChecks, in order.
+	// Never non-empty while Wait is true: kustomize-controller ignores
+	// healthChecks when wait is true, so ToApplicationConfig refuses the pair.
+	HealthChecks []meta.NamespacedObjectKindReference
 
 	// dedup state: when another component owns an identical OCIRepository,
 	// this config suppresses its own source CR and the Kustomization references
@@ -217,6 +316,16 @@ func (c *OCIConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
 	}
 	if c.TargetNamespace != "" {
 		kz.Spec.TargetNamespace = c.TargetNamespace
+	}
+	// kure has no Kustomization wait setter. spec.wait is omitempty, so false
+	// leaves the emitted document unchanged either way.
+	if c.Wait {
+		kz.Spec.Wait = true
+	}
+	// Appended one by one onto the fresh Kustomization's nil slice, so a render
+	// never shares a backing array with the config (Generate may run again).
+	for _, ref := range c.HealthChecks {
+		fluxcd.AddKustomizationHealthCheck(kz, ref)
 	}
 	obj := client.Object(kz)
 	objects = append(objects, &obj)

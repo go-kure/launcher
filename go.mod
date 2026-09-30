@@ -14,6 +14,7 @@ require (
 	github.com/external-secrets/external-secrets/apis v0.0.0-20260918141056-e8f12e1f1646
 	github.com/fluxcd/helm-controller/api v1.6.4
 	github.com/fluxcd/kustomize-controller/api v1.9.5
+	github.com/fluxcd/pkg/apis/meta v1.32.0
 	github.com/fluxcd/source-controller/api v1.9.5
 	github.com/go-kure/kure v0.2.0-beta.14
 	github.com/google/go-containerregistry v0.22.1
@@ -57,7 +58,6 @@ require (
 	github.com/fluxcd/notification-controller/api v1.9.4 // indirect
 	github.com/fluxcd/pkg/apis/acl v0.11.0 // indirect
 	github.com/fluxcd/pkg/apis/kustomize v1.21.0 // indirect
-	github.com/fluxcd/pkg/apis/meta v1.32.0 // indirect
 	github.com/fluxcd/source-watcher/api/v2 v2.2.4 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
