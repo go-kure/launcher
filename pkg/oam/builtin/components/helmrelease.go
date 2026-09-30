@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -292,7 +293,13 @@ func (c *HelmReleaseConfig) valuesConfigMap(hr *helmv2.HelmRelease) (*corev1.Con
 	name := helmReleaseValuesConfigMapName(c.Name, hex.EncodeToString(sum[:]))
 
 	cm := kubernetes.CreateConfigMap(name, hr.Namespace)
-	cm.Labels = map[string]string{"app": c.Name}
+	// A component name can be a 253-byte DNS-1123 subdomain, but a label
+	// value is at most 63 characters, so the app label is written only when
+	// the name is a legal label value; otherwise the API server would reject
+	// the ConfigMap.
+	if len(validation.IsValidLabelValue(c.Name)) == 0 {
+		cm.Labels = map[string]string{"app": c.Name}
+	}
 	kubernetes.AddConfigMapData(cm, helmReleaseValuesKey, string(data))
 
 	hr.Spec.ValuesFrom = append([]helmv2.ValuesReference{{
