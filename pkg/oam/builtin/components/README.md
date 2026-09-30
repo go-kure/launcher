@@ -1959,9 +1959,9 @@ not part of either change.
   A rendered mapping with a key that is not a string (an unquoted `1:` or `true:`) is a build
   error naming the object and the mapping, and so is an unquoted timestamp that RFC 3339 cannot
   express (a UTC offset of 24 hours or more, such as `+24:00`), naming the object and the value's
-  path: an emitted manifest is written through Go's JSON encoding, which refuses both. Both are
-  checked as each rendered document is decoded, before hook grouping, so a document that one of
-  the dropped hooks above carries is checked too.
+  path: an emitted manifest is written through Go's JSON encoding, which refuses both. A document
+  that one of the dropped hooks above carries is never written, so it is dropped with such a
+  value in it rather than refused.
   For a layout-walking consumer (the `layout.LayoutAugmenter` path, same mechanism as the
   `valuesMode: configMap` relocation above), more than one hook group makes `AugmentLayout` clear
   the component's flat `Resources` and replace them with one child `ManifestLayout` per group,

@@ -270,6 +270,62 @@ func TestDecodeKubeManifests_TimestampOutsideRFC3339IsAnError(t *testing.T) {
 	}
 }
 
+// TestDecodeKubeManifests_UnemittableDocumentOfADroppedHookIsSkipped: hook
+// grouping drops a document whose helm.sh/hook annotation is one of kure's
+// excluded phases, or a comma-separated list of nothing else, before
+// anything is written, so the values it holds were never refused: a
+// non-string mapping key or an out-of-range timestamp in it is skipped with
+// the document. Any other hook value is still refused. Each row's dropped
+// column is first checked against parseChartManifests on a valid document,
+// so the table cannot drift from what grouping actually drops.
+func TestDecodeKubeManifests_UnemittableDocumentOfADroppedHookIsSkipped(t *testing.T) {
+	const hooked = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: hooked\n  annotations:\n    helm.sh/hook: %q\n"
+	const mainDoc = "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: main\n"
+	unemittable := []struct{ name, body string }{
+		{"non-string key", "data:\n  1: one\n"},
+		{"out-of-range timestamp", "data:\n  at: 2001-12-14T21:59:43+24:00\n"},
+	}
+	for _, tc := range []struct {
+		hook    string
+		dropped bool
+	}{
+		{"test", true},
+		{"pre-delete", true},
+		{"post-rollback", true},
+		{"pre-delete,post-delete", true},
+		{" test , pre-rollback ", true},
+		{"test,pre-install", false},
+		{"post-install", false},
+		{" test", false},
+		{",", false},
+		{"", false},
+	} {
+		t.Run(fmt.Sprintf("%q", tc.hook), func(t *testing.T) {
+			groups, err := parseChartManifests([]byte(fmt.Sprintf(hooked, tc.hook)))
+			if err != nil {
+				t.Fatalf("parseChartManifests: %v", err)
+			}
+			if grouped := len(groups) > 0; grouped == tc.dropped {
+				t.Fatalf("hook grouping keeps the document = %v, but the row says dropped = %v", grouped, tc.dropped)
+			}
+			for _, u := range unemittable {
+				objects, err := decodeKubeManifests([]byte(fmt.Sprintf(hooked, tc.hook) + u.body + mainDoc))
+				if !tc.dropped {
+					assertErrorMentions(t, err, `ConfigMap "hooked"`, ".data")
+					continue
+				}
+				if err != nil {
+					t.Errorf("%s: decodeKubeManifests: %v", u.name, err)
+					continue
+				}
+				if names := resourceNames(objects); !slices.Equal(names, []string{"main"}) {
+					t.Errorf("%s: decoded %v, want [main]", u.name, names)
+				}
+			}
+		})
+	}
+}
+
 // TestToJSONTypes_TimeOutsideRFC3339IsAnError: every time.Time
 // time.Time.MarshalJSON refuses — a year outside [0,9999], a UTC offset of
 // 24 hours or more — is an error naming its path, as encoding/json's refusal
@@ -1420,4 +1476,15 @@ func TestGenerateTemplate_TimestampOutsideRFC3339IsABuildError(t *testing.T) {
 	cfg := helmchartTemplateFixture(stubRender(outOfRangeOffsetChart))
 	_, err := cfg.Generate(nil)
 	assertErrorMentions(t, err, `ConfigMap "stamped"`, ".data.at", "timezone hour outside of range")
+}
+
+// TestGenerateTemplate_DroppedHookWithUnemittableValuesBuilds is the
+// composite's delivery: template counterpart of
+// TestHelmTemplateConfig_DroppedHookWithUnemittableValuesBuilds, on the same
+// chart.
+func TestGenerateTemplate_DroppedHookWithUnemittableValuesBuilds(t *testing.T) {
+	cfg := helmchartTemplateFixture(stubRender(droppedHooksUnemittableChart))
+	if got, want := generateNames(t, cfg), []string{"main"}; !slices.Equal(got, want) {
+		t.Errorf("Generate emitted %v, want %v", got, want)
+	}
 }
