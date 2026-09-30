@@ -351,31 +351,37 @@ func childMap(t *testing.T, m map[string]any, key string) map[string]any {
 	return c
 }
 
-// synthesizedPodSelector returns spec.podSelector of the emitted NetworkPolicy
-// that selects on the platform component key — the one NetworkPolicy synthesis
-// generates for a routed component.
-func synthesizedPodSelector(t *testing.T, docs []map[string]any) map[string]any {
+// networkPolicyPodSelector returns spec.podSelector of the one emitted
+// NetworkPolicy that NetworkPolicy synthesis generated for the component called
+// name (synthesized true) or of the one it did not (synthesized false), as the
+// invariant check identifies them: by resource name. It fails the test unless
+// exactly one such policy is emitted, so a negative case cannot silently break
+// a policy of the other class.
+func networkPolicyPodSelector(t *testing.T, docs []map[string]any, name string, synthesized bool) map[string]any {
 	t.Helper()
-	const componentKey = kurelDomain + "/component"
+	var found []map[string]any
 	for _, d := range docs {
 		if d["kind"] != "NetworkPolicy" {
 			continue
 		}
-		spec, _ := d["spec"].(map[string]any)
-		sel, _ := spec["podSelector"].(map[string]any)
-		ml, _ := sel["matchLabels"].(map[string]any)
-		if _, ok := ml[componentKey]; ok {
-			return sel
+		md, _ := d["metadata"].(map[string]any)
+		objName, _ := md["name"].(string)
+		if slices.Contains(synthesizedNetworkPolicyNames(name), objName) == synthesized {
+			found = append(found, d)
 		}
 	}
-	t.Fatalf("no NetworkPolicy selecting on %s in the rendered output", componentKey)
-	return nil
+	if len(found) != 1 {
+		t.Fatalf("%d NetworkPolicies with synthesized=%v in the rendered output, want exactly 1", len(found), synthesized)
+	}
+	return childMap(t, childMap(t, found[0], "spec"), "podSelector")
 }
 
 // TestComponentLabelInvariant_RejectsBrokenSelectors: the invariant check
 // fails on selector shapes it once let through — a matchExpressions value it
-// never read, an expression it never evaluated, and a synthesized
-// component-key selector it skipped before validating or matching it — so a
+// never read, an expression it never evaluated, a synthesized component-key
+// selector it skipped before validating or matching it, and an authored
+// NetworkPolicy selector requiring the component key, which it once matched
+// against the stamped pod labels only a synthesized policy may assume — so a
 // generated selector carrying any of them cannot pass the guard. Each case
 // breaks one emitted selector of a real render and names the report it must
 // produce.
@@ -450,16 +456,30 @@ func TestComponentLabelInvariant_RejectsBrokenSelectors(t *testing.T) {
 		{
 			name: "synthesized component selector with an invalid operator", trait: "expose", props: expose.props,
 			mutate: func(t *testing.T, docs []map[string]any) {
-				sel := synthesizedPodSelector(t, docs)
+				sel := networkPolicyPodSelector(t, docs, boundary, true)
 				sel["matchExpressions"] = []any{map[string]any{"key": "tier", "operator": "Bogus", "values": []any{"backend"}}}
 			},
-			want: []string{"NetworkPolicy", "spec.podSelector", "is not a valid label selector"},
+			want: []string{boundary + "-allow-ingress-traffic", "spec.podSelector", "is not a valid label selector"},
 		},
 		{
 			name: "synthesized component selector contradicts the pods", trait: "expose", props: expose.props,
 			mutate: func(t *testing.T, docs []map[string]any) {
-				sel := synthesizedPodSelector(t, docs)
+				sel := networkPolicyPodSelector(t, docs, boundary, true)
 				sel["matchExpressions"] = []any{map[string]any{"key": "app", "operator": "NotIn", "values": []any{oam.ComponentLabelValue(boundary)}}}
+			},
+			want: []string{boundary + "-allow-ingress-traffic", "spec.podSelector", "matches no pod template"},
+		},
+		{
+			// An authored policy whose selector names the component key is still
+			// matched against the pods as emitted, which do not carry that key:
+			// only a policy synthesis generated gets the stamped templates.
+			name: "authored networkpolicy selector requires the component key", trait: "networkpolicy", props: netpol.props,
+			mutate: func(t *testing.T, docs []map[string]any) {
+				sel := networkPolicyPodSelector(t, docs, boundary, false)
+				if got := childMap(t, sel, "matchLabels")["app"]; got != oam.ComponentLabelValue(boundary) {
+					t.Fatalf("authored NetworkPolicy spec.podSelector app = %v, want the component's app selector kept", got)
+				}
+				sel["matchExpressions"] = []any{map[string]any{"key": kurelDomain + "/component", "operator": "Exists"}}
 			},
 			want: []string{"NetworkPolicy", "spec.podSelector", "matches no pod template"},
 		},
@@ -623,10 +643,14 @@ type invariantReporter interface {
 //     selector, before anything else — and, when the output carries pod
 //     templates, evaluated whole (matchLabels and matchExpressions), matches a
 //     pod template's labels emitted with it;
-//   - a synthesized NetworkPolicy selector on the platform component key is
+//   - the spec.podSelector of a NetworkPolicy that NetworkPolicy synthesis
+//     generated for this component — identified by its resource name
+//     (synthesizedNetworkPolicyNames), never by what its selector contains — is
 //     evaluated against the pod templates as the platform contract leaves them:
 //     with `<domain>/component` = oam.ComponentLabelValue(name) stamped on
-//     (TransformContext.ComponentLabelKey; kurel itself stamps nothing).
+//     (TransformContext.ComponentLabelKey; kurel itself stamps nothing). Every
+//     other NetworkPolicy, whatever keys it selects on, is evaluated against the
+//     pod templates as emitted.
 //
 // It returns how many `app` labels it saw — label values only, never selector
 // values — and how many pod selectors it matched against a pod template, so a
@@ -655,6 +679,7 @@ func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, na
 		}
 	}
 
+	synthesized := synthesizedNetworkPolicyNames(name)
 	var templates, stamped []labels.Set
 	for _, doc := range docs {
 		kind, _ := doc["kind"].(string)
@@ -688,7 +713,7 @@ func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, na
 				continue // no pods in this output (e.g. a Service fronting another component)
 			}
 			candidates := templates
-			if kind == "NetworkPolicy" && selectsOnKey(ps.selector, componentKey) {
+			if objName, _ := md["name"].(string); kind == "NetworkPolicy" && slices.Contains(synthesized, objName) {
 				candidates = stamped
 			}
 			selectorsMatched++
@@ -700,13 +725,19 @@ func checkComponentLabelInvariant(t invariantReporter, docs []map[string]any, na
 	return invariantCounts{appLabels: appLabels, selectors: selectorsMatched}
 }
 
-// selectsOnKey reports whether sel names key in its matchLabels or in any
-// matchExpressions requirement.
-func selectsOnKey(sel *metav1.LabelSelector, key string) bool {
-	if _, ok := sel.MatchLabels[key]; ok {
-		return true
-	}
-	return slices.ContainsFunc(sel.MatchExpressions, func(r metav1.LabelSelectorRequirement) bool { return r.Key == key })
+// synthesizedNetworkPolicyNames returns the resource names NetworkPolicy
+// synthesis gives the policies it generates to select the pods of the component
+// called name: the routing-derived ingress allow (retargeted onto the pods a
+// Service selector picks when the component routes through one) and the
+// dependency-derived egress allow (pkg/oam/netpol_synthesis.go). Stamping only
+// adds a label, so a retargeted selector that does not name the component key
+// matches a stamped template exactly when it matches the plain one. Object
+// names are the raw
+// component name — only label values are projected. The external-backend
+// policy (`{service}-allow-ingress-traffic`) selects another Service's pods, not
+// this component's, and is not one of them.
+func synthesizedNetworkPolicyNames(name string) []string {
+	return []string{name + "-allow-ingress-traffic", name + "-allow-egress-traffic"}
 }
 
 // requireAppLabel reports a vacuous pass: output that must carry an `app`

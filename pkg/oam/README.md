@@ -98,9 +98,10 @@ platform stamping the label must use the same function. A component name is a DN
 subdomain (up to 253 characters), a label value at most 63: `ComponentLabelValue` returns a
 name of 63 characters or fewer unchanged and projects a longer one onto a readable prefix of at
 most 52 characters (its first 52, with trailing `-`/`.` trimmed) plus `-` and the first 10 hex
-characters of its sha256. The projection is deterministic, so every label and selector derived
-from one component agrees. The `app` label and the `app` selectors the built-in components and
-traits generate to identify a component use the same function (go-kure/launcher#572); authored
+characters of its sha256. The projection is deterministic, so every component-identity label and
+selector that uses it gets the same value for one component. The `app` label and the `app`
+selectors the built-in components and traits generate to identify a component use the same
+function (go-kure/launcher#572); authored
 labels and selectors (a `service` component's `selector`, a `networkpolicy` peer) are emitted as
 written, and a type that emits authored objects (`passthrough`, for one) adds no `app` label.
 Selectors under an operator's own label and naming contract — the `postgresql` endpoints'
