@@ -781,11 +781,11 @@ func (t *Transformer) buildHierarchicalCluster(app *Application, entries []compo
 		tierBundles = append(tierBundles, bundle)
 	}
 
-	waitTrue := true
+	// No Wait: kure gives an umbrella one health check per child Kustomization,
+	// and Flux ignores health checks when wait is enabled.
 	umbrella := &stack.Bundle{
 		Name:     app.Metadata.Name,
 		Children: tierBundles,
-		Wait:     &waitTrue,
 	}
 	umbrella.InitializeUmbrella()
 	if err := umbrella.Validate(); err != nil {

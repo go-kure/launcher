@@ -23,7 +23,6 @@ spec:
   sourceRef:
     kind: OCIRepository
     name: shop
-  wait: true
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository

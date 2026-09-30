@@ -418,6 +418,36 @@ func TestTransform_MultiTier_Hierarchical(t *testing.T) {
 	}
 }
 
+// TestTransform_MultiTier_UmbrellaHasNoWait pins that the tier umbrella leaves
+// Wait unset. kure gives an umbrella Kustomization one health check per child
+// Kustomization, and kustomize-controller ignores health checks when wait is
+// enabled (api/v1 KustomizationSpec.Wait: "When enabled, the HealthChecks are
+// ignored"), so an umbrella with Wait would be Ready without its children.
+func TestTransform_MultiTier_UmbrellaHasNoWait(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{
+			"webservice": &pipelineComponentHandler{typ: "webservice"},
+			"daemonset":  &pipelineComponentHandler{typ: "daemonset"},
+		},
+		nil,
+	)
+	app := makeApp("myapp",
+		makeComponent("web", "webservice"), // TierApps
+		makeComponent("log", "daemonset"),  // TierInfra
+	)
+	cluster, err := tr.Transform(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	umbrella := cluster.Node.Bundle
+	if umbrella == nil || !umbrella.IsUmbrella() {
+		t.Fatal("expected umbrella bundle at root")
+	}
+	if umbrella.Wait != nil {
+		t.Errorf("umbrella Wait = %v, want nil: wait makes its child health checks inert", *umbrella.Wait)
+	}
+}
+
 func TestTransform_DependencyPolicy_PerComponentBundles(t *testing.T) {
 	tr := NewTransformer(
 		map[string]ComponentHandler{
