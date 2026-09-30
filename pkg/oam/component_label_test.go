@@ -216,8 +216,8 @@ func TestValidate_RejectsComponentNamedLikeAnotherProjection(t *testing.T) {
 }
 
 // TestValidateComponentLabelValues covers the check directly: distinct values
-// pass, and both collision shapes — a name equal to another's projection, and
-// two long names with the same projection — are refused.
+// pass, a name equal to another component's projection is refused, and a
+// repeated long name stands in for two long names with the same projection.
 func TestValidateComponentLabelValues(t *testing.T) {
 	long := dottedName(t, 120)
 	names := func(ns ...string) []Component {
