@@ -43,6 +43,7 @@
         "github.com/external-secrets/external-secrets/apis",
         "github.com/fluxcd/helm-controller/api",
         "github.com/fluxcd/kustomize-controller/api",
+        "github.com/fluxcd/pkg/apis/meta",
         "github.com/fluxcd/source-controller/api",
         "gopkg.in/yaml.v3",
         "k8s.io/api",
