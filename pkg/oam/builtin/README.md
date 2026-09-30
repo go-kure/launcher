@@ -48,6 +48,9 @@ is validated later, on the merged trait properties, by `parseTrafficSources` in
 `pkg/oam/builtin/traits`, not by `ExposeRendering` itself).
 
 These are internal schema types used by [`builtin/components`](components) and
-[`builtin/traits`](traits); they are not a user-facing API. See
+[`builtin/traits`](traits); they are not a user-facing API. The sibling
+[`builtin/policies`](policies) package holds the built-in application policy handlers
+(`dependency`, `placement`, `reconciliation`, `health-checks`); it declares its property
+schemas directly and uses none of these rendering types. See
 [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin) for the
 full exported surface. Full reference deferred (see #145 PR-B).

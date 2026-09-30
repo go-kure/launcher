@@ -220,14 +220,15 @@ one. The HelmRelease is still emitted; only the check is skipped.
 
 ## Transform & extension
 
-`NewTransformer(...)` builds a transformer from maps of component/trait handlers;
-`pkg/cmd/kurel` registers the built-ins. Extend the system by implementing:
+`NewTransformer(...)` builds a transformer from maps of component/trait handlers, and
+`RegisterPolicy(type, handler)` adds an application policy handler; `pkg/cmd/kurel` registers
+the built-ins. Extend the system by implementing:
 
 | Interface | Role |
 |-----------|------|
 | `ComponentHandler` | `CanHandle(type)` + `ToApplicationConfig(...)` — see [components](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components). |
 | `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits). |
-| `PolicyHandler` | Enforce/validate policies (`Enforceable`, `PolicyResult`). |
+| `PolicyHandler` | `CanHandle(type)` + `Apply(policy, components, result)` — validates one `spec.policies` entry and records its effect (tier overrides, dependency edges, extra health checks, reconciliation settings) on the shared `PolicyResult`; see [policies](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies). A policy type with no registered handler fails the transform. |
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
 | `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). |
@@ -480,12 +481,14 @@ is what rejects it — not a per-field check in each handler. A caller that driv
 `Transform` directly must therefore call `ValidateAuthoredProperties` first (after
 any parameter substitution) to get the same guarantee `kurel build` gives.
 
-Three positions are exempt, each because there is no schema to check against rather
-than by oversight: a type no handler and no lowering rule claims (rejected separately
-by the type allowlists and by `validateSettled`); a custom trait type from a
+Three positions are exempt: a type no handler and no lowering rule claims (rejected
+separately by the type allowlists and by `validateSettled`); a custom trait type from a
 `CapabilityDefinition`, which declares that the type *exists* but not what properties
-it accepts; and policies, which are documented pass-through and for which launcher
-declares no schema at all. Top-level `Required` is also deliberately not enforced
+it accepts; and policies. A policy's properties are checked only by the
+`PolicyHandler` registered for its type, when the transform dispatches it: the
+handler rejects a missing or malformed key it reads, but a key it does not read is
+ignored. The built-in policy handlers each declare a `PropertySchema`, which is
+enforced on policies a lowering rule emits but not on authored ones. Top-level `Required` is also deliberately not enforced
 here — `ClusterProfile` capability rendering merges into a trait's top-level property
 map after this runs, so a required property the platform supplies is legitimately
 absent from what the author wrote. Nested `Required`, inside an object the author did

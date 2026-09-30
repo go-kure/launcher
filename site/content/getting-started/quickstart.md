@@ -54,6 +54,8 @@ Kubernetes manifests (here a Deployment, Service, and ServiceAccount).
 
 - Add traits (ingress, certificate, scaler) — see the [Trait Handlers](../api-reference/oam-traits/).
 - Explore component types — see the [Component Handlers](../api-reference/oam-components/).
+- Order components or tune Flux reconciliation with application policies (dependency,
+  placement, reconciliation, health-checks) — see the [Policy Handlers](../api-reference/oam-policies/).
 - Parameterize a reusable package (`kurel.yaml`, `--values`, `--set`) — see the
   full [kurel CLI reference](../api-reference/kurel-cli/).
 - Browse runnable [Examples](examples/).

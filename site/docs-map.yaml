@@ -39,6 +39,9 @@ packages:
   - path: pkg/oam/builtin/traits
     readme: pkg/oam/builtin/traits/README.md
     mount: {target: api-reference/oam-traits.md, title: Trait Handlers, weight: 24, group: OAM, desc: "Built-in traits (ingress, certificate, scaler, externalsecret, …)"}
+  - path: pkg/oam/builtin/policies
+    readme: pkg/oam/builtin/policies/README.md
+    mount: {target: api-reference/oam-policies.md, title: Policy Handlers, weight: 26, group: OAM, desc: "Built-in application policies (dependency, placement, reconciliation, health-checks)"}
 
   # ─── Unmounted: internal support; not a user-facing API ───
   - path: pkg/oam/builtin

@@ -313,6 +313,7 @@ map and run `bash site/scripts/gen-docs-tables.sh`.
 | `pkg/oam/` | `api-reference/oam` | — |
 | `pkg/oam/builtin/components/` | `api-reference/oam-components` | — |
 | `pkg/oam/builtin/traits/` | `api-reference/oam-traits` | — |
+| `pkg/oam/builtin/policies/` | `api-reference/oam-policies` | — |
 | `.github/workflows/` | — | `contributing/github-workflows`, `contributing/releasing` |
 <!-- END GENERATED: reverse-mapping -->
 

@@ -491,7 +491,7 @@ func TestNewBuiltinTransformer_PublishesWorkerSchemaUnchanged(t *testing.T) {
 }
 
 // TestNewBuiltinTransformer_HandlerSchemaParity asserts that every registered
-// built-in component and trait handler exposes a PropertySchema (via the optional
+// built-in component, trait and policy handler exposes a PropertySchema (via the optional
 // oam.PropertySchemaProvider interface). It iterates the registration maps
 // directly — the same source newBuiltinTransformer registers from — so a handler
 // added without a schema is caught by the type assertion below rather than being
@@ -513,6 +513,9 @@ func TestNewBuiltinTransformer_HandlerSchemaParity(t *testing.T) {
 	}
 	for name, r := range builtinComponentLoweringRules() {
 		assertExposesSchema(t, "component", name, r)
+	}
+	for name, h := range builtinPolicyHandlers() {
+		assertExposesSchema(t, "policy", name, h)
 	}
 }
 
@@ -550,6 +553,9 @@ func TestBuiltinHandlerSchemaDescriptions(t *testing.T) {
 	}
 	for name, r := range builtinComponentLoweringRules() {
 		assertSchemaDescribed(t, "component", name, r)
+	}
+	for name, h := range builtinPolicyHandlers() {
+		assertSchemaDescribed(t, "policy", name, h)
 	}
 }
 
@@ -640,6 +646,9 @@ func TestBuiltinHandlerSchemaEnumMembersHoldNoNull(t *testing.T) {
 	for name, r := range builtinComponentLoweringRules() {
 		assertSchemaEnumMembersNonNull(t, "component", name, r)
 	}
+	for name, h := range builtinPolicyHandlers() {
+		assertSchemaEnumMembersNonNull(t, "policy", name, h)
+	}
 }
 
 // assertSchemaEnumMembersNonNull checks each of a handler's top-level PropertySchema
@@ -678,6 +687,9 @@ func TestBuiltinHandlerSchemaEveryNodeDeclaresItsType(t *testing.T) {
 	}
 	for name, r := range builtinComponentLoweringRules() {
 		assertSchemaNodesTyped(t, "component", name, r)
+	}
+	for name, h := range builtinPolicyHandlers() {
+		assertSchemaNodesTyped(t, "policy", name, h)
 	}
 }
 

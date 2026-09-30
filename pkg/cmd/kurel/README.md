@@ -37,9 +37,18 @@ source), alongside the built-in lowering rules: the trait-position ones
 component-position ones (`builtinComponentLoweringRules()` — currently just
 `worker`, registered via `RegisterComponentLowering`; it lowers a worker into a
 `deployment` component plus, unless `topologySpread: false`, a synthesized
-`topology-spread` trait). Every registered handler and rule declares a
-`PropertySchema` for its user-facing properties, so a component/trait's
-properties can be validated before dispatch. See
+`topology-spread` trait), and the built-in application policy handlers
+(`builtinPolicyHandlers()` — `dependency`, `placement`, `reconciliation` and
+`health-checks`, registered via `RegisterPolicy`). Every registered handler and rule
+declares a `PropertySchema` for its user-facing properties, so a component/trait's
+properties can be validated before dispatch; a policy's properties are validated by its
+handler when the transform dispatches it. A policy type with no built-in handler —
+including `app-dependency`, which orders one application after others and has nothing to
+order against in a single-application build — fails with `no handler for policy type`.
+Policies shape the bundle tree and its Flux settings, which `kurel build`'s manifest
+output does not include; see
+[Policy Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies).
+See
 [Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
 and [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
 for the full catalogue; the `deployment` component — the kind-named projection

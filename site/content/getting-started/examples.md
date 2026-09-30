@@ -33,6 +33,7 @@ kurel build examples/01-webservice-minimal.yaml \
 - [`custom-capability/`](https://github.com/go-kure/launcher/tree/main/examples/custom-capability)
   — extending kurel with a custom capability.
 
-See the [Component Handlers](../api-reference/oam-components/) and
-[Trait Handlers](../api-reference/oam-traits/) references for the full set of types
+See the [Component Handlers](../api-reference/oam-components/),
+[Trait Handlers](../api-reference/oam-traits/) and
+[Policy Handlers](../api-reference/oam-policies/) references for the full set of types
 and their properties.
