@@ -35,7 +35,7 @@ func (h *HelmRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"insecure":        fluxSourceBool("HelmRepository spec.insecure: allow a non-TLS registry (type oci only)."),
 		"timeout":         fluxSourceString("HelmRepository spec.timeout for the index fetch or OCI operations, as a duration."),
 		"suspend":         fluxSourceBool("HelmRepository spec.suspend: stop reconciling the repository. Also skips the auto health check."),
-		"accessFrom":      fluxSourceObject("HelmRepository spec.accessFrom: the cross-namespace access control list."),
+		"accessFrom":      fluxSourceObject("HelmRepository spec.accessFrom: a cross-namespace access control list. Projected as authored, but not enforced: Flux marks the field not implemented (provisional)."),
 		"type":            fluxSourceString("HelmRepository spec.type: default, or oci for an OCI registry of charts (a static object with no interval default and no auto health check)."),
 		"provider":        fluxSourceString("HelmRepository spec.provider for OCI authentication: generic, aws, azure or gcp (type oci only)."),
 	}

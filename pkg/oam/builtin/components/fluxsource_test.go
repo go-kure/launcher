@@ -455,7 +455,7 @@ func TestFluxSourceHandlers_ApplyPolicy(t *testing.T) {
 		{"gitrepository", "ssh://evil.example.com?@github.com/org/repo", []string{"github.com"}, false},
 		{"bucket", "minio.example.com:9000", []string{"minio.example.com:9000"}, true},
 		{"bucket", "minio.example.com:9000", []string{"minio.example.com"}, false},
-		{"bucket", "s3.amazonaws.com", []string{"s3.amazonaws.com"}, true},
+		{"bucket", "s3.amazonaws.com", []string{"s3.amazonaws.com"}, false}, // Amazon S3: see TestBucket_ApplyPolicyProvider
 		{"bucket", "https://account.blob.core.windows.net", []string{"account.blob.core.windows.net"}, true},
 		{"bucket", "evil.example.com", []string{"s3.amazonaws.com"}, false},
 	}
@@ -577,23 +577,45 @@ func TestFluxSourceHandlers_ApplyPolicyOCIRegistry(t *testing.T) {
 // TestBucket_ApplyPolicyProvider: Flux's gcp provider never reads endpoint — it
 // fetches from Google Cloud Storage's own host, storage.googleapis.com — so that
 // is the host a gcp Bucket is checked against. Every other provider (generic,
-// aws, azure, or none) fetches from endpoint, which stays the host checked.
+// aws, azure, or none) fetches from endpoint, which stays the host checked —
+// except that the S3 client behind generic, aws and none replaces an Amazon S3
+// endpoint's host with the S3 host of spec.region (or of the bucket's
+// discovered location), so under a non-empty allowlist such an endpoint is
+// refused, whatever its case, scheme or port, and so is a look-alike the
+// client's unescaped host patterns also match. No policy or an empty allowlist
+// permits every case.
 func TestBucket_ApplyPolicyProvider(t *testing.T) {
+	const (
+		field     = `bucket: endpoint: `
+		amazonWhy = `is treated as an Amazon S3 host (it contains "amazonaws"): Flux's S3 client fetches such a bucket not from endpoint`
+	)
 	cases := []struct {
-		name, provider, endpoint string
-		allowed                  []string
-		want                     string // empty: allowed; else a substring of the error
+		name, provider, endpoint, region string
+		allowed                          []string
+		want                             string // empty: allowed; else a substring of the error
 	}{
-		{"gcp, endpoint allowed but ignored", "gcp", "minio.example.com", []string{"minio.example.com"},
+		{"gcp, endpoint allowed but ignored", "gcp", "minio.example.com", "", []string{"minio.example.com"},
 			`bucket: provider gcp (Flux ignores endpoint): source registry "storage.googleapis.com" is not in allowed registries`},
-		{"gcp, storage host allowed", "gcp", "minio.example.com", []string{"storage.googleapis.com"}, ""},
-		{"gcp, storage host as endpoint", "gcp", "storage.googleapis.com", []string{"storage.googleapis.com"}, ""},
-		{"generic", "generic", "minio.example.com", []string{"minio.example.com"}, ""},
-		{"generic, storage host allowed", "generic", "minio.example.com", []string{"storage.googleapis.com"}, "bucket: endpoint: "},
-		{"aws", "aws", "s3.amazonaws.com", []string{"s3.amazonaws.com"}, ""},
-		{"azure", "azure", "https://account.blob.core.windows.net", []string{"account.blob.core.windows.net"}, ""},
-		{"azure, storage host allowed", "azure", "https://account.blob.core.windows.net", []string{"storage.googleapis.com"}, "bucket: endpoint: "},
-		{"no provider, storage host allowed", "", "minio.example.com", []string{"storage.googleapis.com"}, "bucket: endpoint: "},
+		{"gcp, storage host allowed", "gcp", "minio.example.com", "", []string{"storage.googleapis.com"}, ""},
+		{"gcp, storage host as endpoint", "gcp", "storage.googleapis.com", "", []string{"storage.googleapis.com"}, ""},
+		{"gcp, Amazon endpoint ignored", "gcp", "s3.amazonaws.com", "", []string{"storage.googleapis.com"}, ""},
+		{"generic", "generic", "minio.example.com", "", []string{"minio.example.com"}, ""},
+		{"generic, region on a non-Amazon endpoint", "generic", "minio.example.com", "cn-north-1", []string{"minio.example.com"}, ""},
+		{"generic, storage host allowed", "generic", "minio.example.com", "", []string{"storage.googleapis.com"}, "bucket: endpoint: "},
+		{"azure", "azure", "https://account.blob.core.windows.net", "", []string{"account.blob.core.windows.net"}, ""},
+		{"azure, storage host allowed", "azure", "https://account.blob.core.windows.net", "", []string{"storage.googleapis.com"}, "bucket: endpoint: "},
+		{"azure, Amazon endpoint checked as a host", "azure", "s3.amazonaws.com", "", []string{"s3.amazonaws.com"}, ""},
+		{"no provider, storage host allowed", "", "minio.example.com", "", []string{"storage.googleapis.com"}, "bucket: endpoint: "},
+
+		// Amazon S3 endpoints on the S3 client's path, each allowlisted exactly.
+		{"generic, region in another partition", "generic", "s3.us-gov-west-1.amazonaws.com", "cn-north-1",
+			[]string{"s3.us-gov-west-1.amazonaws.com"}, amazonWhy},
+		{"aws, global endpoint", "aws", "s3.amazonaws.com", "", []string{"s3.amazonaws.com"}, amazonWhy},
+		{"no provider, global endpoint", "", "s3.amazonaws.com", "", []string{"s3.amazonaws.com"}, amazonWhy},
+		{"generic, China partition", "generic", "s3.cn-north-1.amazonaws.com.cn", "", []string{"s3.cn-north-1.amazonaws.com.cn"}, amazonWhy},
+		{"aws, upper case", "aws", "S3.EU-WEST-1.AMAZONAWS.COM", "", []string{"S3.EU-WEST-1.AMAZONAWS.COM"}, amazonWhy},
+		{"generic, scheme and port", "generic", "https://s3.eu-west-1.amazonaws.com:443", "", []string{"s3.eu-west-1.amazonaws.com:443"}, amazonWhy},
+		{"generic, look-alike the client also matches", "generic", "s3.x-amazonaws.com", "", []string{"s3.x-amazonaws.com"}, amazonWhy},
 	}
 	k := fluxSourceKinds()[3]
 	for _, tc := range cases {
@@ -603,6 +625,9 @@ func TestBucket_ApplyPolicyProvider(t *testing.T) {
 			if tc.provider != "" {
 				props["provider"] = tc.provider
 			}
+			if tc.region != "" {
+				props["region"] = tc.region
+			}
 			cfg := fluxSrcConfig(t, k, props).(oam.Enforceable)
 			err := cfg.ApplyPolicy(fakeOCIPolicy{allowed: tc.allowed})
 			switch {
@@ -610,6 +635,11 @@ func TestBucket_ApplyPolicyProvider(t *testing.T) {
 				t.Errorf("allowed %v: %v, want allowed", tc.allowed, err)
 			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
 				t.Errorf("allowed %v: error = %v, want one containing %q", tc.allowed, err, tc.want)
+			case tc.want == amazonWhy && !strings.Contains(err.Error(), field):
+				t.Errorf("error %q does not name the component type and field", err)
+			}
+			if err := cfg.ApplyPolicy(nil); err != nil {
+				t.Errorf("nil policy: %v", err)
 			}
 			if err := cfg.ApplyPolicy(fakeOCIPolicy{}); err != nil {
 				t.Errorf("empty allowlist: %v", err)

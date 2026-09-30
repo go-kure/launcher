@@ -2213,7 +2213,7 @@ not part of either change.
   userinfo on an `http://`, `https://` or `oci://` URL is not, so such a URL matches no entry and
   is refused. An empty allowlist permits every host, and none of the rules below applies.
 
-  Two sources are not fetched from the host their field names, so the check follows Flux instead:
+  Some sources are not fetched from the host their field names, so the check follows Flux instead:
 
   - *An `oci://` URL must name its registry explicitly.* Flux parses an OCIRepository `url`, and a
     Helm OCI chart reference when it verifies the chart's signature, with go-containerregistry,
@@ -2227,13 +2227,22 @@ not part of either change.
     registry (`oci://ghcr.io`), since Flux appends the chart name to it.
   - *A `bucket` with `provider: gcp` is checked against `storage.googleapis.com`.* Flux's GCP
     client never reads `endpoint`; it uses Google Cloud Storage's own host. The `generic`, `aws`
-    and `azure` providers, and no provider, fetch from `endpoint`, which stays the host checked.
+    and `azure` providers, and no provider, fetch from `endpoint`, which stays the host checked,
+    except as the next rule says.
+  - *A `bucket` with an Amazon S3 `endpoint` is refused, unless its provider is `azure` or
+    `gcp`.* The S3 client behind `generic`, `aws` and no provider does not fetch from an Amazon
+    S3 endpoint: it contacts the S3 host of `region`, which may name any AWS region or partition,
+    or of the bucket's own location when `region` is unset, chosen at runtime. That host cannot
+    be checked, so under a non-empty allowlist the build fails, even when the allowlist lists the
+    endpoint. The test errs broad, since it fails closed: any `endpoint` containing `amazonaws`,
+    in any case, counts, because the client's own host patterns also match look-alikes such as
+    `s3.x-amazonaws.com`.
 
   Hosts a source reaches indirectly are not checked: the chart URLs a Helm repository index
   advertises on other hosts (what `passCredentials` exists for), a Bucket's `sts.endpoint`, the
-  token endpoints a `provider` authenticates against, and a proxy. Apart from a Bucket's `gcp`
-  provider, a `provider` or `insecure` setting changes how the source authenticates or which
-  scheme it uses, not which host it fetches from.
+  token endpoints a `provider` authenticates against, and a proxy. Apart from the two `bucket`
+  cases above, a `provider`, `region` or `insecure` setting changes how the source authenticates
+  or which scheme it uses, not which host it fetches from.
 
   **Namespace and references.** The CR lands in the Flux namespace when one is configured, else in
   the application namespace (`SetFluxNamespace`). Every local reference it carries — `secretRef`,
