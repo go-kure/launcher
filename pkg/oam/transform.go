@@ -1120,16 +1120,17 @@ func detectCycles(deps map[string][]string) error {
 // there is no reconcile to wait on. The GVK is a *.toolkit.fluxcd.io kind, so
 // the check follows the CR to the Flux namespace when one is set.
 var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
-	"webservice":  {"apps/v1", "Deployment"},
-	"worker":      {"apps/v1", "Deployment"},
-	"deployment":  {"apps/v1", "Deployment"},
-	"statefulset": {"apps/v1", "StatefulSet"},
-	"daemonset":   {"apps/v1", "DaemonSet"},
-	"job":         {"batch/v1", "Job"},
-	"helmchart":   {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
-	"helmrelease": {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
-	"postgresql":  {"postgresql.cnpg.io/v1", "Cluster"},
-	"oci":         {"kustomize.toolkit.fluxcd.io/v1", "Kustomization"},
+	"webservice":   {"apps/v1", "Deployment"},
+	"worker":       {"apps/v1", "Deployment"},
+	"deployment":   {"apps/v1", "Deployment"},
+	"statefulset":  {"apps/v1", "StatefulSet"},
+	"daemonset":    {"apps/v1", "DaemonSet"},
+	"job":          {"batch/v1", "Job"},
+	"helmchart":    {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
+	"helmrelease":  {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
+	"postgresql":   {"postgresql.cnpg.io/v1", "Cluster"},
+	"cnpg-cluster": {"postgresql.cnpg.io/v1", "Cluster"},
+	"oci":          {"kustomize.toolkit.fluxcd.io/v1", "Kustomization"},
 
 	"helmrepository": {"source.toolkit.fluxcd.io/v1", "HelmRepository"},
 	"ocirepository":  {"source.toolkit.fluxcd.io/v1", "OCIRepository"},

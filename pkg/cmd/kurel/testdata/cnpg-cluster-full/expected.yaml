@@ -1,0 +1,58 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+  bootstrap:
+    initdb:
+      dataChecksums: true
+      database: orders
+      owner: orders
+  description: orders database
+  enablePDB: false
+  env:
+  - name: TZ
+    value: UTC
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.2
+  inheritedMetadata:
+    labels:
+      team: orders
+  instances: 3
+  logLevel: info
+  managed:
+    roles:
+    - ensure: present
+      inRoles:
+      - pg_read_all_data
+      login: true
+      name: reporting
+  maxSyncReplicas: 1
+  minSyncReplicas: 1
+  monitoring:
+    enablePodMonitor: true
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: 256MB
+    pg_hba:
+    - host all all 10.0.0.0/8 scram-sha-256
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: supervised
+  resources:
+    limits:
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  storage:
+    size: 20Gi
+    storageClass: fast
+  walStorage:
+    size: 5Gi

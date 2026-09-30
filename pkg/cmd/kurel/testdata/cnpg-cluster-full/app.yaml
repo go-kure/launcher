@@ -1,0 +1,60 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres
+    type: cnpg-cluster
+    properties:
+      description: orders database
+      instances: 3
+      imageName: ghcr.io/cloudnative-pg/postgresql:17.2
+      enablePDB: false
+      primaryUpdateStrategy: supervised
+      primaryUpdateMethod: switchover
+      maxSyncReplicas: 1
+      minSyncReplicas: 1
+      logLevel: info
+      postgresql:
+        parameters:
+          max_connections: "200"
+          shared_buffers: 256MB
+        pg_hba:
+        - host all all 10.0.0.0/8 scram-sha-256
+      bootstrap:
+        initdb:
+          database: orders
+          owner: orders
+          dataChecksums: true
+      storage:
+        size: 20Gi
+        storageClass: fast
+      walStorage:
+        size: 5Gi
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          memory: 2Gi
+      affinity:
+        enablePodAntiAffinity: true
+        topologyKey: kubernetes.io/hostname
+        podAntiAffinityType: required
+      managed:
+        roles:
+        - name: reporting
+          ensure: present
+          login: true
+          inRoles:
+          - pg_read_all_data
+      monitoring:
+        enablePodMonitor: true
+      inheritedMetadata:
+        labels:
+          team: orders
+      env:
+      - name: TZ
+        value: UTC

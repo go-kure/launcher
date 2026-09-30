@@ -213,6 +213,9 @@ carries, or for `helmtemplate` whatever the chart it renders client-side carries
 HelmRelease), so there is no single GVK to name. When adding a component type, decide which
 group it falls in and say so; silence here reads the same either way. `helmtemplate`
 (go-kure/launcher#348) sits in `defaultTierMap` at `TierApps`, like `helmchart`.
+`cnpg-cluster` is listed: it emits one CloudNativePG `Cluster`, the same object
+`postgresql`'s check already targets, so it gets the same check (and, in `defaultTierMap`,
+the same `services` tier).
 
 `helmrelease` (go-kure/launcher#327) is listed, with the same `helm.toolkit.fluxcd.io/v2`
 `HelmRelease` GVK as `helmchart`: it always emits exactly one HelmRelease, whose Ready

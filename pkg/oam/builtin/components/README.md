@@ -75,6 +75,7 @@ reads it.
 | `gitrepository` | GitRepository | Kind-named: the full Flux `GitRepositorySpec`. |
 | `bucket` | Bucket | Kind-named: the full Flux `BucketSpec`. |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
+| `cnpg-cluster` | CNPG Cluster | Operator-CR kind component: the whole `postgresql.cnpg.io/v1` `ClusterSpec`, strictly decoded, with no launcher opinions — see below. |
 | `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. |
@@ -2438,6 +2439,65 @@ not part of either change.
   endpoint for the pooler (PgBouncer) pods (`cnpg.io/poolerName: <component-name>-pooler` on port
   `5432`), so a consumer that dials the pooler — whose pods carry a different label set and are not
   matched by the direct-cluster selector — also gets its connection synthesized.
+- **cnpg-cluster** — the operator-CR kind component for a CloudNativePG
+  `Cluster` (design: `docs/oam/design-operator-cr-components.md`). Its
+  properties are the `spec` of a `postgresql.cnpg.io/v1` `Cluster`, one schema
+  key per `ClusterSpec` json field: scalars are typed, and every structured
+  field is an open `object` or an `array` of open objects whose description
+  points at the upstream type. `ToApplicationConfig` decodes the whole property
+  map into `cnpgv1.ClusterSpec` with `builtin.DecodeStrictJSON`, so a key the
+  linked CNPG version does not declare, at any depth (`storage.sise`,
+  `bootstrap.initdb.databse`), and a value of the wrong type
+  (`storage.size: 5`) are refused rather than dropped. Two limits come from
+  `encoding/json` itself: the unknown-field error names the key but not its
+  path, and a key differing from a declared one only in letter case is
+  accepted as that field. The policy defaults below read what was authored
+  from the decoded spec as well as the property map, so such a key still
+  counts as authored and is not overwritten by a default.
+  It carries **no launcher opinions**: `Generate` emits the Cluster named after
+  the component in the build namespace with exactly the authored spec, so an
+  unauthored field is left for the operator's own default. `postgresql`'s
+  choices — an image from `version`, `primaryUpdateStrategy: unsupervised`,
+  `enablePDB` from the replica count, a `1Gi` storage fallback, pod
+  anti-affinity — are not made here. The one value it writes unasked is
+  `instances: 1`, the CRD default, because `ClusterSpec.Instances` has no
+  `omitempty` and would otherwise serialize as `0`. The non-pointer
+  `affinity`, `resources` and `postgresql.syncReplicaElectionConstraint`
+  blocks serialize as empty objects when unauthored, as they do for
+  `postgresql`.
+  Nulls follow "The null contract" below: a null is absence at every depth
+  (typed or untyped), so a null map value is left out rather than decoded to
+  an empty string, and a null array element is refused by path
+  (`env[0]: null is not a valid array element`). A negative `instances` is
+  refused before policy runs.
+  `ApplyPolicy` enforces the policy `postgresql` enforces, in the same order:
+  the instance-count default when `instances` is not authored (an authored
+  value wins even when it equals the fallback) and its maximum; the cpu and
+  memory request and limit defaults on `resources`, filling only unset
+  entries, and their maxima; and the storage-size default on `storage.size`
+  when neither `storage.size` nor `storage.pvcTemplate`'s storage request is
+  authored. Unlike `postgresql` there is no `1Gi` fallback: with no policy
+  default the size is left to the operator. The storage maximum applies to
+  every claim the Cluster creates — `storage`, `walStorage`, each
+  `tablespaces[i].storage` (either `size` or the `pvcTemplate` request) and
+  `ephemeralVolumeSource.volumeClaimTemplate` — and the error names the one
+  that exceeds it. Because this kind exposes the two security contexts, it
+  also refuses `securityContext.privileged` and a `securityContext` or
+  `podSecurityContext` `windowsOptions.hostProcess` unless the policy allows
+  privileged workloads, and an added capability the policy forbids or leaves
+  off a non-empty allowlist. The registry
+  allowlist is not applied to `imageName` or `imageCatalogRef`, matching
+  `postgresql`. As for `postgresql`, generation refuses `hugepages-<size>`
+  in `resources` without `cpu` or `memory` after policy defaults; the other
+  resource-name rules of the shared parser are left to the API server.
+  `Endpoints` declares the same primary endpoint as `postgresql`
+  (`cnpg.io/cluster: <component-name>` on port `5432`). The kind is in the
+  `services` tier and its auto health check targets the `Cluster`, as for
+  `postgresql`. `TestCnpgClusterSchema_CoversClusterSpec` pins the schema to
+  `ClusterSpec` by reflection: each json field is published with its type or
+  listed with a reason in `cnpgClusterExcludedFields` (empty today), and a
+  schema key with no field or a stale exclusion also fails, so a CNPG bump
+  that adds, removes or retypes a field names it.
 - **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
   Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
   consumers can attribute the emitted resource to its owning OAM component.
