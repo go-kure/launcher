@@ -405,6 +405,45 @@ func TestHelmTemplateConfig_TimestampOutsideRFC3339IsABuildError(t *testing.T) {
 	assertErrorMentions(t, err, `ConfigMap "stamped"`, ".data.at", "timezone hour outside of range")
 }
 
+// droppedHooksUnemittableChart renders, beside a hook-free ConfigMap, a test
+// hook with a non-string mapping key and a pre-delete,post-delete hook with an
+// out-of-range timestamp. Hook grouping drops both hooks unwritten, so neither
+// value is ever emitted. Shared with the composite's
+// TestGenerateTemplate_DroppedHookWithUnemittableValuesBuilds.
+const droppedHooksUnemittableChart = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-hook
+  annotations:
+    helm.sh/hook: test
+data:
+  1: one
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: delete-hook
+  annotations:
+    helm.sh/hook: pre-delete,post-delete
+data:
+  at: 2001-12-14T21:59:43+24:00
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+`
+
+// TestHelmTemplateConfig_DroppedHookWithUnemittableValuesBuilds: a value no
+// manifest can carry, inside a hook that grouping drops, does not fail the
+// build; the hook is dropped with it and the rest is emitted.
+func TestHelmTemplateConfig_DroppedHookWithUnemittableValuesBuilds(t *testing.T) {
+	cfg := helmTemplateFixture(t, stubRender(droppedHooksUnemittableChart))
+	if got, want := renderedNames(t, cfg), []string{"main"}; !slices.Equal(got, want) {
+		t.Errorf("Generate emitted %v, want %v", got, want)
+	}
+}
+
 // TestHelmTemplateConfig_RendersOnce: Generate followed by AugmentLayout —
 // kure's layout walker's call order — renders the chart exactly once.
 func TestHelmTemplateConfig_RendersOnce(t *testing.T) {

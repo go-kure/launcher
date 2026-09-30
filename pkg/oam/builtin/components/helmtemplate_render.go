@@ -332,6 +332,29 @@ var excludedHookPhases = map[string]bool{
 	"test":          true,
 }
 
+// hookDropsObject reports whether hook grouping drops, unwritten, an object
+// whose helm.sh/hook annotation is hook: kure's SplitByHookWeight drops one
+// whose whole annotation is an excludedHookPhases member (an exact match), and
+// normalizeHookAnnotationForGrouping has it drop one whose comma-separated
+// annotation has at least one non-empty token and nothing but excluded ones.
+func hookDropsObject(hook string) bool {
+	if !strings.Contains(hook, ",") {
+		return excludedHookPhases[hook]
+	}
+	sawToken := false
+	for _, tok := range strings.Split(hook, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		if !excludedHookPhases[tok] {
+			return false
+		}
+		sawToken = true
+	}
+	return sawToken
+}
+
 // normalizeHookAnnotationForGrouping returns a client.Object suitable for
 // handing to kure's helm.SplitByHookWeight for grouping-key determination.
 // Single-value and empty helm.sh/hook annotations are already correct under
@@ -477,7 +500,9 @@ func hookGroupDir(g helm.HookGroup) string {
 // Non-map and empty documents are skipped defensively (kure filters NOTES.txt upstream).
 // Mapping documents without apiVersion/kind are an error (broken chart manifest).
 // Each object's content is converted in place to JSON types (toJSONTypes), so
-// the objects are safe to deep-copy.
+// the objects are safe to deep-copy. A document with a value that cannot be
+// emitted is an error, unless hook grouping would drop it unwritten
+// (hookDropsObject): then it is skipped, since nothing it holds is emitted.
 func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	var objects []client.Object
@@ -497,7 +522,14 @@ func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 			return nil, errors.Errorf("rendered document is missing apiVersion or kind: %v", doc)
 		}
 		u := &unstructured.Unstructured{Object: doc}
+		// Read before converting: a failed conversion stops at the first value
+		// it cannot convert and leaves the document partly converted, in map
+		// iteration order.
+		hook := u.GetAnnotations()["helm.sh/hook"]
 		if _, err := toJSONTypes(doc, ""); err != nil {
+			if hookDropsObject(hook) {
+				continue
+			}
 			return nil, errors.Wrapf(err, "rendered %s %q", u.GetKind(), u.GetName())
 		}
 		objects = append(objects, u)
