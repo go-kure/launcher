@@ -23,6 +23,7 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
+	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
 // hrChart is the smallest valid chart block: a chart in an existing HelmRepository.
@@ -657,5 +658,112 @@ func TestTransform_HelmRelease_FluxNamespace(t *testing.T) {
 	walk(cluster.Node)
 	if !found {
 		t.Fatal("helmrelease application not found")
+	}
+}
+
+// TestHelmReleaseConfig_SuspendVetoesAutoHealthCheck pins the config half of
+// the suspend veto: `suspend: true` stops helm-controller reconciling the
+// release, so the Ready condition the synthesized check reads cannot report on
+// it, and the config declines the check. An unsuspended release, authored or
+// by omission (including an explicit null), keeps it.
+func TestHelmReleaseConfig_SuspendVetoesAutoHealthCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		suspend any
+		set     bool
+		want    bool
+	}{
+		{"suspend true vetoes the check", true, true, false},
+		{"suspend false keeps it", false, true, true},
+		{"suspend null keeps it", nil, true, true},
+		{"suspend unauthored keeps it", nil, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			props := map[string]any{"chart": hrChart()}
+			if tc.set {
+				props["suspend"] = tc.suspend
+			}
+			e, ok := hrConfig(t, "web", props).(interface{ EmitsAutoHealthCheck() bool })
+			if !ok {
+				t.Fatal("HelmReleaseConfig does not satisfy the autoHealthCheckEmitter shape the transform asserts on")
+			}
+			if got := e.EmitsAutoHealthCheck(); got != tc.want {
+				t.Errorf("EmitsAutoHealthCheck() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTransform_HelmRelease_SuspendSkipsAutoHealthCheck runs the transform
+// pipeline end to end: a suspended helmrelease component still emits its
+// HelmRelease but gets no synthesized HelmRelease health check, while an
+// unsuspended one does. The prune-protection case proves the veto survives a
+// trait decorator, which must forward it.
+func TestTransform_HelmRelease_SuspendSkipsAutoHealthCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		suspend bool
+		traits  []oam.Trait
+		wantHC  bool
+	}{
+		{"unsuspended keeps the check", false, nil, true},
+		{"suspended skips the check", true, nil, false},
+		{"unsuspended under prune-protection keeps the check", false, []oam.Trait{{Type: "prune-protection"}}, true},
+		{"suspended under prune-protection skips the check", true, []oam.Trait{{Type: "prune-protection"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := oam.NewTransformer(nil, nil)
+			tr.RegisterComponent("helmrelease", &components.HelmReleaseHandler{})
+			tr.RegisterBuiltinTrait("prune-protection", &traits.PruneProtectionHandler{})
+			props := map[string]any{"chart": hrChart()}
+			if tc.suspend {
+				props["suspend"] = true
+			}
+			app := &oam.Application{
+				Metadata: oam.Metadata{Name: "shop", Namespace: "shop"},
+				Spec: oam.ApplicationSpec{Components: []oam.Component{{
+					Name: "web", Type: "helmrelease", Properties: props, Traits: tc.traits,
+				}}},
+			}
+			cluster, err := tr.Transform(app, oam.TransformContext{FluxNamespace: "flux-system"})
+			if err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			var found bool
+			var checks []stack.HealthCheck
+			var walk func(*stack.Node)
+			walk = func(n *stack.Node) {
+				if n == nil {
+					return
+				}
+				if n.Bundle != nil {
+					checks = append(checks, n.Bundle.HealthChecks...)
+					for _, a := range n.Bundle.Applications {
+						if a.Name != "web" {
+							continue
+						}
+						found = true
+						hr, _ := hrGenerate(t, a.Config, "")
+						if hr.Spec.Suspend != tc.suspend {
+							t.Errorf("emitted HelmRelease suspend = %v, want %v", hr.Spec.Suspend, tc.suspend)
+						}
+					}
+				}
+				for _, c := range n.Children {
+					walk(c)
+				}
+			}
+			walk(cluster.Node)
+			if !found {
+				t.Fatal("helmrelease application not found")
+			}
+			want := stack.HealthCheck{APIVersion: "helm.toolkit.fluxcd.io/v2", Kind: "HelmRelease", Name: "web", Namespace: "flux-system"}
+			if got := slices.Contains(checks, want); got != tc.wantHC {
+				t.Errorf("health checks %+v: contains %+v = %v, want %v", checks, want, got, tc.wantHC)
+			}
+			if !tc.wantHC && len(checks) != 0 {
+				t.Errorf("suspended release: health checks %+v, want none", checks)
+			}
+		})
 	}
 }

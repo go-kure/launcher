@@ -1998,6 +1998,16 @@ not part of either change.
   own namespace unless `storageNamespace` says otherwise (Flux's default). The inferred
   auto health check references the HelmRelease where it lands.
 
+  **`suspend: true` suppresses the auto health check**
+  (`HelmReleaseConfig.EmitsAutoHealthCheck`), the same veto `job` applies for its own
+  `suspend: true` and `deployment` for `paused: true`. helm-controller does not reconcile a
+  suspended HelmRelease, and the Ready condition the check reads is written by a
+  reconciliation, so a newly created suspended release never acquires one: the check would
+  either hold the enclosing Kustomization until it times out, on a state the document asked
+  for, or pass without observing anything. The HelmRelease is still emitted and applied; only
+  the readiness gate on it is skipped, so `suspend: true` stays a usable way to stage a
+  release. Trait decorators forward the veto.
+
   **`valuesMode: configMap`.** With non-empty `values`, `Generate` itself returns a
   ConfigMap beside the HelmRelease, in the HelmRelease's namespace (where Flux resolves
   `valuesFrom`); `spec.values` is cleared, and a `valuesFrom` entry for the ConfigMap is
