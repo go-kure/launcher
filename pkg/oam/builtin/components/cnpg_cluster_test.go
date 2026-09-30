@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -183,6 +184,9 @@ func TestCnpgClusterHandler_StrictDecode(t *testing.T) {
 		{"wrong top-level scalar type", map[string]any{"enablePDB": "true"}, "cannot unmarshal string"},
 		{"non-integer instances", map[string]any{"instances": "3"}, "instances"},
 		{"negative instances", map[string]any{"instances": -1}, "instances: must be >= 0, got -1"},
+		{"fractional instances", map[string]any{"instances": 1.5}, "instances: must be an integer, got float64 1.5 (not a whole number)"},
+		{"out-of-range instances", map[string]any{"instances": int64(1) << 40}, "instances: must be an integer between -2147483648 and 2147483647, got 1099511627776"},
+		{"instances beyond int64", map[string]any{"instances": uint64(1) << 63}, "instances: must be an integer between -2147483648 and 2147483647, got 9223372036854775808"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -209,6 +213,11 @@ func TestCnpgClusterHandler_NullIsAbsence(t *testing.T) {
 			"env":       []any(nil),
 		})
 		if !reflect.DeepEqual(c.Spec, cnpgv1.ClusterSpec{Instances: 1}) {
+			t.Errorf("spec = %+v, want the empty-document spec", c.Spec)
+		}
+	})
+	t.Run("nil property map is the empty document", func(t *testing.T) {
+		if c := newCnpgCluster(t, nil); !reflect.DeepEqual(c.Spec, cnpgv1.ClusterSpec{Instances: 1}) {
 			t.Errorf("spec = %+v, want the empty-document spec", c.Spec)
 		}
 	})
@@ -276,13 +285,83 @@ func TestCnpgClusterHandler_NullIsAbsence(t *testing.T) {
 		}
 	})
 	t.Run("byte slice is not taken apart", func(t *testing.T) {
-		// encoding/json writes []byte as a base64 string; walked as an array it
+		// encoding/json writes []byte as a base64 string; read as an array it
 		// would become a list of numbers and fail to decode into a string.
 		c := newCnpgCluster(t, map[string]any{"description": []byte("hi")})
 		if c.Spec.Description != "aGk=" {
 			t.Errorf("description = %q, want the base64 string encoding/json writes", c.Spec.Description)
 		}
 	})
+	// Null is defined by serialization, so what the handler reads must be what
+	// encoding/json emits, whatever Go shape produced it.
+	t.Run("pointer-receiver encoder on a typed slice element is honoured", func(t *testing.T) {
+		env := []rewritingEnvVar{{Name: "TZ", Value: "UTC"}}
+		data, err := json.Marshal(env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var want []corev1.EnvVar
+		if err := json.Unmarshal(data, &want); err != nil {
+			t.Fatal(err)
+		}
+		if len(want) != 1 || want[0].Value != "encoded-UTC" {
+			t.Fatalf("json.Marshal = %s; the fixture no longer exercises the encoder", data)
+		}
+		c := newCnpgCluster(t, map[string]any{"env": env})
+		if !reflect.DeepEqual(c.Spec.Env, want) {
+			t.Errorf("env = %+v, want what encoding/json emits: %+v", c.Spec.Env, want)
+		}
+	})
+	t.Run("null behind a pointer is dropped as a map value", func(t *testing.T) {
+		var nilString *string
+		c := newCnpgCluster(t, map[string]any{
+			"postgresql": map[string]any{"parameters": map[string]any{"work_mem": &nilString, "max_connections": "100"}},
+		})
+		params := c.Spec.PostgresConfiguration.Parameters
+		if _, ok := params["work_mem"]; ok {
+			t.Errorf("parameters = %v; a value serializing to null must not become an empty string", params)
+		}
+		if params["max_connections"] != "100" {
+			t.Errorf("parameters = %v; sibling lost", params)
+		}
+	})
+	t.Run("null behind a pointer is refused as an array element", func(t *testing.T) {
+		var nilMap map[string]any
+		err := cnpgClusterErr(t, map[string]any{"env": []any{&nilMap}})
+		if err == nil || !strings.Contains(err.Error(), "env[0]: null is not a valid array element") {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("raw JSON null is absence", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{
+			"postgresql": map[string]any{"parameters": map[string]any{"work_mem": json.RawMessage("null")}},
+		})
+		if params := c.Spec.PostgresConfiguration.Parameters; len(params) != 0 {
+			t.Errorf("parameters = %v; a raw null value must be dropped", params)
+		}
+		err := cnpgClusterErr(t, map[string]any{"env": []any{json.RawMessage("null")}})
+		if err == nil || !strings.Contains(err.Error(), "env[0]: null is not a valid array element") {
+			t.Errorf("raw null element: err = %v", err)
+		}
+	})
+	t.Run("a value that does not serialize is refused", func(t *testing.T) {
+		for name, v := range map[string]any{"channel": make(chan int), "func": func() {}} {
+			err := cnpgClusterErr(t, map[string]any{"description": v})
+			if err == nil || !strings.Contains(err.Error(), "properties do not serialize to JSON") {
+				t.Errorf("%s: err = %v", name, err)
+			}
+		}
+	})
+}
+
+// rewritingEnvVar encodes through a pointer-receiver MarshalJSON that rewrites
+// its value, which encoding/json calls for an addressable slice element.
+type rewritingEnvVar struct {
+	Name, Value string
+}
+
+func (e *rewritingEnvVar) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]string{"name": e.Name, "value": "encoded-" + e.Value})
 }
 
 func TestCnpgClusterConfig_ApplyPolicy_Instances(t *testing.T) {

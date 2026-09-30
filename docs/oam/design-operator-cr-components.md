@@ -84,8 +84,13 @@ The component's `PropertySchema` mirrors the upstream spec type:
 Explicit nulls follow the package-wide null contract: a null is absence at every
 depth, and a null array element is an error naming its path. They are removed
 before the strict decode, so a null never reaches the operator as a zero value.
-Collections built in Go with concrete types, as a lowering rule may produce
-(`map[string]*string`, `[]*T`), are walked the same way.
+The contract defines a null as a value that serializes to JSON null, so the
+handler applies it to the serialization itself: the property map is marshalled
+with `encoding/json` and decoded back into plain maps, arrays and scalars before
+nulls are removed. Whatever Go shape a lowering rule produces — concrete
+collection types, nils behind pointers, raw JSON, custom encoders — is read
+exactly as it would be emitted, with no separate walk to keep in step with the
+encoder. A value that does not serialize is refused.
 
 ### Policy lives on the kind
 
