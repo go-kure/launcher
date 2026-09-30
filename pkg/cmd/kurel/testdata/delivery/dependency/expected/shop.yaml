@@ -1,0 +1,135 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: db
+  namespace: shop
+spec:
+  affinity: {}
+  enablePDB: false
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 1
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources: {}
+  storage:
+    size: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: cache
+  name: cache
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cache
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: cache
+    spec:
+      containers:
+      - image: ghcr.io/example/cache:v1.0.0
+        name: cache
+        ports:
+        - containerPort: 6379
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: cache
+  name: cache
+  namespace: shop
+spec:
+  ports:
+  - name: http
+    port: 6379
+    protocol: TCP
+    targetPort: 6379
+  selector:
+    app: cache
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: cache
+  name: cache
+  namespace: shop
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: api
+  name: api
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+      - image: ghcr.io/example/api:v1.0.0
+        name: api
+        ports:
+        - containerPort: 9090
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: api
+  name: api
+  namespace: shop
+spec:
+  ports:
+  - name: http
+    port: 9090
+    protocol: TCP
+    targetPort: 9090
+  selector:
+    app: api
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: api
+  name: api
+  namespace: shop
