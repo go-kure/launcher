@@ -2050,6 +2050,16 @@ not part of either change.
   together with a non-empty `healthChecks` is refused: kustomize-controller
   ignores `healthChecks` when `wait` is true, so the list would never be
   checked. There is no `timeout` property; Flux's own default applies.
+  Under a policy with a non-empty registry allowlist (`AllowedRegistries`),
+  `source.url` must name its registry explicitly — `oci://<registry>/<repository>`
+  with a non-empty repository and a registry that is `localhost` or contains
+  `.` or `:` — and that registry must match an allowlist entry exactly
+  (go-kure/launcher#580). Flux's source-controller parses the url with
+  go-containerregistry's `name.NewRepository`, which reads any other first
+  segment as part of a Docker Hub repository: `oci://ghcr.io` and
+  `oci://registry/my-artifact` are pulled from Docker Hub, so they are refused
+  even when `ghcr.io` or `registry` is listed. No policy, or an empty
+  allowlist, accepts every `oci://` url.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.

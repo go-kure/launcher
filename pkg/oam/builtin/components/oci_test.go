@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"strings"
 	"testing"
 
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
@@ -234,5 +235,65 @@ func TestOCIConfig_ApplyPolicy_RegistryAllowlist(t *testing.T) {
 
 	if err := mustOCIConfig(t, validOCIProps()).(oam.Enforceable).ApplyPolicy(nil); err != nil {
 		t.Errorf("nil policy must be a no-op, got %v", err)
+	}
+}
+
+// TestOCIConfig_ApplyPolicy_ExplicitRegistry pins go-kure/launcher#580: under
+// a non-empty allowlist the url must name its registry the way Flux's
+// source-controller (go-containerregistry name.NewRepository) reads it —
+// oci://<registry>/<repository> with a registry that is localhost or contains
+// "." or ":". Anything else is a Docker Hub repository, so matching its first
+// segment against the allowlist would authorize Docker Hub.
+func TestOCIConfig_ApplyPolicy_ExplicitRegistry(t *testing.T) {
+	cases := []struct {
+		name    string
+		url     string
+		allowed []string
+		wantErr string // substring; empty means accepted
+	}{
+		{"bare dotted host resolves to Docker Hub", "oci://ghcr.io", []string{"ghcr.io"}, "does not name its registry explicitly"},
+		{"empty repository after registry", "oci://ghcr.io/", []string{"ghcr.io"}, "does not name its registry explicitly"},
+		{"undotted first segment is a Docker Hub namespace", "oci://registry/my-artifact", []string{"registry"}, "does not name its registry explicitly"},
+		{"explicit registry listed", "oci://registry.example.com/x", []string{"registry.example.com"}, ""},
+		{"explicit registry not listed", "oci://registry.example.com/x", []string{"other.example"}, "not in allowed registries"},
+		{"host:port registry listed", "oci://registry.example:5000/org/app", []string{"registry.example:5000"}, ""},
+		{"localhost registry listed", "oci://localhost/app", []string{"localhost"}, ""},
+		{"bare localhost has no repository", "oci://localhost", []string{"localhost"}, "does not name its registry explicitly"},
+		{"empty allowlist permits a Docker Hub url", "oci://ghcr.io", nil, ""},
+		{"empty non-nil allowlist permits a Docker Hub url", "oci://registry/my-artifact", []string{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := validOCIProps()
+			props["source"] = map[string]any{"url": tc.url}
+			err := mustOCIConfig(t, props).(oam.Enforceable).ApplyPolicy(fakeOCIPolicy{allowed: tc.allowed})
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("ApplyPolicy(%q, %v): unexpected error %v", tc.url, tc.allowed, err)
+			case tc.wantErr != "" && err == nil:
+				t.Errorf("ApplyPolicy(%q, %v): want error containing %q, got nil", tc.url, tc.allowed, tc.wantErr)
+			case tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr):
+				t.Errorf("ApplyPolicy(%q, %v): error %q, want it to contain %q", tc.url, tc.allowed, err, tc.wantErr)
+			}
+		})
+	}
+
+	// A nil policy accepts a url that names no registry.
+	props := validOCIProps()
+	props["source"] = map[string]any{"url": "oci://ghcr.io"}
+	if err := mustOCIConfig(t, props).(oam.Enforceable).ApplyPolicy(nil); err != nil {
+		t.Errorf("nil policy must be a no-op, got %v", err)
+	}
+
+	// The refusal names the field, the value and the form to write.
+	props["source"] = map[string]any{"url": "oci://ghcr.io"}
+	err := mustOCIConfig(t, props).(oam.Enforceable).ApplyPolicy(fakeOCIPolicy{allowed: []string{"ghcr.io"}})
+	if err == nil {
+		t.Fatal("want refusal for oci://ghcr.io under [ghcr.io]")
+	}
+	for _, want := range []string{"oci: source.url", `"oci://ghcr.io"`, "Docker Hub", "oci://<registry>/<repository>", "localhost"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not contain %q", err, want)
+		}
 	}
 }
