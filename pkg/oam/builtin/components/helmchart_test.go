@@ -44,6 +44,75 @@ func TestHelmchartHandler_IntervalInvalid_Rejected(t *testing.T) {
 	}
 }
 
+// TestHelmchartHandler_IntervalFluxDuration: interval must be a duration the
+// Flux CRDs accept, not merely one time.ParseDuration accepts. A signed value or
+// a sub-millisecond unit used to build cleanly and fail at apply time, and so did
+// 0.5ms, which matches Flux's pattern but is emitted as 500µs.
+func TestHelmchartHandler_IntervalFluxDuration(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	component := func(interval string) *oam.Component {
+		return &oam.Component{
+			Name: "metrics",
+			Type: "helmchart",
+			Properties: map[string]any{
+				"chart":    "kube-prometheus-stack",
+				"interval": interval,
+				"source":   map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+			},
+		}
+	}
+	refused := []struct {
+		interval string
+		wantSub  string
+	}{
+		{"-5m", "must be a Flux duration"},
+		{"500us", "must be a Flux duration"},
+		{"1µs", "must be a Flux duration"},
+		{"0.5ms", `emitted as "500µs"`},
+	}
+	for _, tc := range refused {
+		t.Run("refused "+tc.interval, func(t *testing.T) {
+			_, err := h.ToApplicationConfig(component(tc.interval), "monitoring")
+			if err == nil {
+				t.Fatalf("interval %q: expected error, got nil", tc.interval)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) || !strings.Contains(err.Error(), "helmchart: interval") {
+				t.Errorf("interval %q: error = %q, want it to name helmchart: interval and contain %q", tc.interval, err, tc.wantSub)
+			}
+		})
+	}
+	for _, tc := range []struct{ interval, emitted string }{
+		{"10m", "10m0s"},
+		{"1h30m", "1h30m0s"},
+		{"1.5h", "1h30m0s"},
+	} {
+		t.Run("accepted "+tc.interval, func(t *testing.T) {
+			cfg, err := h.ToApplicationConfig(component(tc.interval), "monitoring")
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			objects, err := cfg.Generate(stack.NewApplication("metrics", "monitoring", cfg))
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			repo, ok := (*objects[0]).(*sourcev1.HelmRepository)
+			if !ok {
+				t.Fatalf("expected HelmRepository at objects[0], got %T", *objects[0])
+			}
+			hr, ok := (*objects[1]).(*helmv2.HelmRelease)
+			if !ok {
+				t.Fatalf("expected HelmRelease at objects[1], got %T", *objects[1])
+			}
+			if got := repo.Spec.Interval.Duration.String(); got != tc.emitted {
+				t.Errorf("HelmRepository interval = %q, want %q", got, tc.emitted)
+			}
+			if got := hr.Spec.Interval.Duration.String(); got != tc.emitted {
+				t.Errorf("HelmRelease interval = %q, want %q", got, tc.emitted)
+			}
+		})
+	}
+}
+
 // `values` is an open object, so its contents reach the handler exactly as
 // yaml.v3 decoded them. yaml.v3 resolves `.nan` to a non-finite float64, which
 // encoding/json refuses — and the kure setter that inlines the map panics on a
@@ -632,7 +701,7 @@ func TestHelmchartHandler_DeliveryTemplate_HandlerDefaultConfigMapFallsBackInlin
 	// Template delivery never calls buildHelmRelease (no HelmRelease is
 	// generated at all), so the forced-inline resolution has no HelmRelease
 	// field to inspect. Every delivery: template config is wrapped as a
-	// LayoutAugmenter, so what pins the helmchart.go:283 inline fallback
+	// LayoutAugmenter, so what pins the helmchart.go:284 inline fallback
 	// actually firing is no longer "not a LayoutAugmenter" — it is
 	// GenerateCoversAugmentLayout() == true: proof that Generate's own flat
 	// output already covers this config's AugmentLayout (nothing needs a

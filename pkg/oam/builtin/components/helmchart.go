@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
 )
 
 // HelmchartHandler handles OAM helmchart components.
@@ -58,7 +59,7 @@ func (h *HelmchartHandler) PropertySchema() map[string]oam.PropertySchema {
 		"chart":           {Type: oam.PropertyTypeString, Description: "Chart name within a HelmRepository source."},
 		"version":         {Type: oam.PropertyTypeString, Description: "Chart version to install."},
 		"delivery":        {Type: oam.PropertyTypeString, Default: "native", Enum: []any{"native", "template"}, Description: "Delivery mode: native emits a HelmRelease, template renders the chart client-side."},
-		"interval":        {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Go duration (default 60m)."},
+		"interval":        {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms (default 60m)."},
 		"releaseName":     {Type: oam.PropertyTypeString, Description: "Helm release name (defaults to the component name)."},
 		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Namespace into which the HelmRelease installs resources."},
 		"source":          {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true, Description: "Chart source: an inline url, or a reference (name/kind) to an existing source CR."},
@@ -86,8 +87,8 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 	cfg.Delivery, _ = props["delivery"].(string)
 	cfg.Interval, _ = props["interval"].(string)
 	if cfg.Interval != "" {
-		if _, err := time.ParseDuration(cfg.Interval); err != nil {
-			return nil, errors.Errorf("helmchart: interval %q is invalid: must be a valid Go duration (e.g. 10m, 1h30m)", cfg.Interval)
+		if err := validateFluxInterval("helmchart", cfg.Interval); err != nil {
+			return nil, err
 		}
 	}
 	cfg.ReleaseName, _ = props["releaseName"].(string)
@@ -622,6 +623,22 @@ func effectiveInterval(interval string) string {
 func parseDuration(s string) metav1.Duration {
 	d, _ := time.ParseDuration(s)
 	return metav1.Duration{Duration: d}
+}
+
+// validateFluxInterval refuses an authored interval the Flux CRDs this
+// component emits would reject at apply time. The interval reaches them through
+// parseDuration, as a metav1.Duration that serializes as Duration.String(), so
+// the emitted form is checked as well as the authored one.
+func validateFluxInterval(component, interval string) error {
+	err := fluxduration.ValidateEmitted(interval)
+	if err == nil {
+		return nil
+	}
+	var re *fluxduration.ResolutionError
+	if errors.As(err, &re) {
+		return errors.Errorf("%s: interval %q is invalid: it would be emitted as %q, below Flux's millisecond resolution (use 0s or at least 1ms)", component, interval, re.Emitted)
+	}
+	return errors.Errorf("%s: interval %q is invalid: must be a Flux duration (unsigned; units ms, s, m, h; e.g. 10m, 1h30m)", component, interval)
 }
 
 // augmentingHelmchartConfig wraps *HelmchartConfig to add AugmentLayout

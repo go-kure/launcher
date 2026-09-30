@@ -2,7 +2,6 @@ package components
 
 import (
 	"strings"
-	"time"
 
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	"github.com/fluxcd/pkg/apis/meta"
@@ -41,7 +40,7 @@ func (h *OCIHandler) PropertySchema() map[string]oam.PropertySchema {
 		"version":         {Type: oam.PropertyTypeString, Required: true, Description: "Artifact version to reconcile: a tag or sha256:<digest>."},
 		"path":            {Type: oam.PropertyTypeString, Default: "./", Description: "Path within the artifact that the Kustomization reconciles."},
 		"prune":           {Type: oam.PropertyTypeBoolean, Default: true, Description: "Whether the Kustomization prunes resources removed from the source."},
-		"interval":        {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Go duration (default 60m)."},
+		"interval":        {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms (default 60m)."},
 		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Namespace into which the Kustomization applies resources."},
 		"wait":            {Type: oam.PropertyTypeBoolean, Description: "Set the Kustomization's spec.wait: Flux waits for every resource it applies to become ready before reporting the Kustomization ready. Unset or false emits nothing. Cannot be combined with a non-empty healthChecks, which kustomize-controller ignores when wait is true."},
 		"healthChecks": {
@@ -143,8 +142,8 @@ func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace str
 	}
 	cfg.Interval = interval
 	if cfg.Interval != "" {
-		if _, err := time.ParseDuration(cfg.Interval); err != nil {
-			return nil, errors.Errorf("oci: interval %q is invalid: must be a valid Go duration (e.g. 10m, 1h30m)", cfg.Interval)
+		if err := validateFluxInterval("oci", cfg.Interval); err != nil {
+			return nil, err
 		}
 	}
 	targetNamespace, _, err := parseStringField(props, "targetNamespace", "targetNamespace")

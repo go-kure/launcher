@@ -144,6 +144,59 @@ func TestOCIHandler_DefaultInterval(t *testing.T) {
 	}
 }
 
+// TestOCIHandler_IntervalFluxDuration: interval must be a duration the Flux
+// CRDs accept, not merely one time.ParseDuration accepts. A signed value or a
+// sub-millisecond unit used to build cleanly and fail at apply time, and so did
+// 0.5ms, which matches Flux's pattern but is emitted as 500µs.
+func TestOCIHandler_IntervalFluxDuration(t *testing.T) {
+	h := &components.OCIHandler{}
+	refused := []struct {
+		interval string
+		wantSub  string
+	}{
+		{"-5m", "must be a Flux duration"},
+		{"500us", "must be a Flux duration"},
+		{"1µs", "must be a Flux duration"},
+		{"0.5ms", `emitted as "500µs"`},
+	}
+	for _, tc := range refused {
+		t.Run("refused "+tc.interval, func(t *testing.T) {
+			props := validOCIProps()
+			props["interval"] = tc.interval
+			_, err := h.ToApplicationConfig(ociComponent(props), "checkout")
+			if err == nil {
+				t.Fatalf("interval %q: expected error, got nil", tc.interval)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) || !strings.Contains(err.Error(), "oci: interval") {
+				t.Errorf("interval %q: error = %q, want it to name oci: interval and contain %q", tc.interval, err, tc.wantSub)
+			}
+		})
+	}
+	for _, tc := range []struct{ interval, emitted string }{
+		{"10m", "10m0s"},
+		{"1h30m", "1h30m0s"},
+		{"1.5h", "1h30m0s"},
+	} {
+		t.Run("accepted "+tc.interval, func(t *testing.T) {
+			props := validOCIProps()
+			props["interval"] = tc.interval
+			cfg := mustOCIConfig(t, props)
+			objs, err := cfg.Generate(stack.NewApplication("checkout", "checkout", cfg))
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			repo := (*objs[0]).(*sourcev1.OCIRepository)
+			kz := (*objs[1]).(*kustv1.Kustomization)
+			if got := repo.Spec.Interval.Duration.String(); got != tc.emitted {
+				t.Errorf("OCIRepository interval = %q, want %q", got, tc.emitted)
+			}
+			if got := kz.Spec.Interval.Duration.String(); got != tc.emitted {
+				t.Errorf("Kustomization interval = %q, want %q", got, tc.emitted)
+			}
+		})
+	}
+}
+
 func TestOCIHandler_PathPruneTargetNamespace_Override(t *testing.T) {
 	props := validOCIProps()
 	props["path"] = "./deploy"

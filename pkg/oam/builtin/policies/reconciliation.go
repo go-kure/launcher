@@ -1,11 +1,9 @@
 package policies
 
 import (
-	"regexp"
-	"time"
-
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
 )
 
 // ReconciliationSettingsHandler processes OAM reconciliation policies.
@@ -121,20 +119,19 @@ func parseReconciliationSettings(policyName string, props map[string]any) (*oam.
 	return s, nil
 }
 
-// fluxDuration is the pattern Flux's Kustomization CRD enforces on interval,
-// retryInterval and timeout (kustomize-controller api/v1, +kubebuilder:validation:Pattern).
-// time.ParseDuration alone is wider: it accepts a sign and the ns/us/µs units, which
-// the API server would reject at apply time.
-var fluxDuration = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`)
-
-// validateDuration checks that a duration string is one Flux accepts: parseable
-// as a Go duration, and within Flux's CRD pattern.
+// validateDuration checks that a duration string is one Flux's Kustomization CRD
+// accepts on interval, retryInterval and timeout: parseable as a Go duration, and
+// within Flux's CRD pattern (see package fluxduration). Only the authored form
+// is checked (fluxduration.Validate): the policy hands the string on unchanged,
+// and the form it is finally emitted in is decided downstream of launcher.
 func validateDuration(policyName, field, value string) error {
-	if _, err := time.ParseDuration(value); err != nil {
+	err := fluxduration.Validate(value)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, fluxduration.ErrForm):
+		return errors.Errorf("policy %q: %s %q is not a valid Flux duration (unsigned, units ms, s, m, h)", policyName, field, value)
+	default:
 		return errors.Wrapf(err, "policy %q: %s %q is not a valid duration", policyName, field, value)
 	}
-	if !fluxDuration.MatchString(value) {
-		return errors.Errorf("policy %q: %s %q is not a valid Flux duration (unsigned, units ms, s, m, h)", policyName, field, value)
-	}
-	return nil
 }
