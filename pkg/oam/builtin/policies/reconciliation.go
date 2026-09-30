@@ -1,6 +1,7 @@
 package policies
 
 import (
+	"regexp"
 	"time"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -45,13 +46,13 @@ func (h *ReconciliationSettingsHandler) Apply(policy *oam.ApplicationPolicy, _ [
 
 // PropertySchema declares the reconciliation policy's property surface. Every key
 // is individually optional, but the handler additionally requires at least one to
-// be present and that interval/retryInterval/timeout parse as Go durations —
+// be present and that interval/retryInterval/timeout are Flux durations —
 // neither constraint is expressible in this vocabulary.
 func (h *ReconciliationSettingsHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"interval":      {Type: oam.PropertyTypeString, Description: "Flux reconciliation interval as a Go duration (e.g. \"5m\")."},
-		"retryInterval": {Type: oam.PropertyTypeString, Description: "Interval to wait before retrying a failed reconciliation, as a Go duration."},
-		"timeout":       {Type: oam.PropertyTypeString, Description: "Timeout for apply/health-check operations, as a Go duration."},
+		"interval":      {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Flux duration: unsigned, units ms, s, m, h (e.g. \"5m\")."},
+		"retryInterval": {Type: oam.PropertyTypeString, Description: "Interval to wait before retrying a failed reconciliation, as a Flux duration."},
+		"timeout":       {Type: oam.PropertyTypeString, Description: "Timeout for apply/health-check operations, as a Flux duration."},
 		"prune":         {Type: oam.PropertyTypeBoolean, Description: "Enable garbage collection of resources removed from the source."},
 		"wait":          {Type: oam.PropertyTypeBoolean, Description: "Wait for all applied resources to become ready before reporting success. Flux ignores healthChecks when this is true."},
 		"force":         {Type: oam.PropertyTypeBoolean, Description: "Force re-creation of resources that cannot be updated in place (immutable-field changes)."},
@@ -102,10 +103,20 @@ func parseReconciliationSettings(policyName string, props map[string]any) (*oam.
 	return s, nil
 }
 
-// validateDuration checks that a duration string is parseable.
+// fluxDuration is the pattern Flux's Kustomization CRD enforces on interval,
+// retryInterval and timeout (kustomize-controller api/v1, +kubebuilder:validation:Pattern).
+// time.ParseDuration alone is wider: it accepts a sign and the ns/us/µs units, which
+// the API server would reject at apply time.
+var fluxDuration = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`)
+
+// validateDuration checks that a duration string is one Flux accepts: parseable
+// as a Go duration, and within Flux's CRD pattern.
 func validateDuration(policyName, field, value string) error {
 	if _, err := time.ParseDuration(value); err != nil {
 		return errors.Wrapf(err, "policy %q: %s %q is not a valid duration", policyName, field, value)
+	}
+	if !fluxDuration.MatchString(value) {
+		return errors.Errorf("policy %q: %s %q is not a valid Flux duration (unsigned, units ms, s, m, h)", policyName, field, value)
 	}
 	return nil
 }

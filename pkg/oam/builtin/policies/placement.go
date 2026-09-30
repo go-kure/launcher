@@ -25,7 +25,8 @@ func (h *PlacementHandler) CanHandle(policyType string) bool {
 }
 
 // Apply records the component's tier in result.TierOverrides. The tier must be
-// one of oam.TierOrder and the component must exist in components.
+// one of oam.TierOrder, the component must exist in components, and an earlier
+// placement policy on the same result may not have put it in a different tier.
 func (h *PlacementHandler) Apply(policy *oam.ApplicationPolicy, components []string, result *oam.PolicyResult) error {
 	component, ok := policy.Properties["component"].(string)
 	if !ok || component == "" {
@@ -45,6 +46,14 @@ func (h *PlacementHandler) Apply(policy *oam.ApplicationPolicy, components []str
 	componentSet := toSet(components)
 	if !componentSet[component] {
 		return errors.Errorf("policy %q references unknown component %q", policy.Name, component)
+	}
+
+	// A second placement for the same component is an error rather than a silent
+	// override, as for a second reconciliation policy; repeating the same tier is
+	// harmless and accepted.
+	if prev, placed := result.TierOverrides[component]; placed && prev != tier {
+		return errors.Errorf("policy %q: component %q is already placed in tier %q by an earlier placement policy, cannot also place it in %q",
+			policy.Name, component, prev, tier)
 	}
 
 	result.TierOverrides[component] = tier

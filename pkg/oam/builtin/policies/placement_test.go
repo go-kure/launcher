@@ -44,6 +44,49 @@ func TestPlacementHandler_ValidOverride(t *testing.T) {
 	}
 }
 
+// TestPlacementHandler_SecondPlacement: a second placement policy for the same
+// component is refused when it names a different tier, leaving the first tier in
+// place, and accepted when it repeats the same tier.
+func TestPlacementHandler_SecondPlacement(t *testing.T) {
+	place := func(name, tier string) *oam.ApplicationPolicy {
+		return &oam.ApplicationPolicy{Name: name, Type: "placement", Properties: map[string]any{
+			"component": "cache",
+			"tier":      tier,
+		}}
+	}
+	components := []string{"cache"}
+
+	t.Run("different tier", func(t *testing.T) {
+		h := &policies.PlacementHandler{}
+		result := oam.NewPolicyResult()
+		if err := h.Apply(place("first", "infra"), components, result); err != nil {
+			t.Fatalf("first: %v", err)
+		}
+		err := h.Apply(place("second", "apps"), components, result)
+		want := `policy "second": component "cache" is already placed in tier "infra" by an earlier placement policy, cannot also place it in "apps"`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %v, want %q", err, want)
+		}
+		if got := result.TierOverrides["cache"]; got != oam.Tier("infra") {
+			t.Errorf("tier override for cache = %q after the refused policy, want infra", got)
+		}
+	})
+
+	t.Run("same tier", func(t *testing.T) {
+		h := &policies.PlacementHandler{}
+		result := oam.NewPolicyResult()
+		if err := h.Apply(place("first", "services"), components, result); err != nil {
+			t.Fatalf("first: %v", err)
+		}
+		if err := h.Apply(place("second", "services"), components, result); err != nil {
+			t.Fatalf("second, same tier: %v", err)
+		}
+		if got := result.TierOverrides["cache"]; got != oam.Tier("services") {
+			t.Errorf("tier override for cache = %q, want services", got)
+		}
+	})
+}
+
 func TestPlacementHandler_Errors(t *testing.T) {
 	cases := []struct {
 		name    string

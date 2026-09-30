@@ -127,6 +127,31 @@ func TestReconciliationSettingsHandler_Errors(t *testing.T) {
 			props:   map[string]any{"timeout": "1x"},
 			wantSub: `timeout "1x" is not a valid duration`,
 		},
+		{
+			name:    "negative interval",
+			props:   map[string]any{"interval": "-5m"},
+			wantSub: `interval "-5m" is not a valid Flux duration`,
+		},
+		{
+			name:    "signed retryInterval",
+			props:   map[string]any{"retryInterval": "+1m"},
+			wantSub: `retryInterval "+1m" is not a valid Flux duration`,
+		},
+		{
+			name:    "timeout in nanoseconds",
+			props:   map[string]any{"timeout": "500ns"},
+			wantSub: `timeout "500ns" is not a valid Flux duration`,
+		},
+		{
+			name:    "interval in microseconds",
+			props:   map[string]any{"interval": "10us"},
+			wantSub: `interval "10us" is not a valid Flux duration`,
+		},
+		{
+			name:    "interval in µs",
+			props:   map[string]any{"interval": "10µs"},
+			wantSub: `interval "10µs" is not a valid Flux duration`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
