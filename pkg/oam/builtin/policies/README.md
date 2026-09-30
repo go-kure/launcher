@@ -108,7 +108,7 @@ policies:
 
 Appends explicit Flux health-check entries to every leaf bundle, after the ones the
 transform generates for the workloads it knows how to check. `apiVersion`, `kind` and
-`name` are required; `namespace` is optional and left empty when omitted, but a present
+`name` are required; `namespace` is optional and left empty when omitted or null, but a present
 `namespace` that is not a string is an error rather than read as omitted. Several
 `health-checks` policies accumulate in document order.
 

@@ -89,11 +89,11 @@ func parseHealthCheckEntries(policyName string, properties map[string]any) ([]st
 		apiVersion, _ := checkMap["apiVersion"].(string)
 		kind, _ := checkMap["kind"].(string)
 		name, _ := checkMap["name"].(string)
-		// namespace is optional, so an absent value is legitimately empty; a present
-		// value of the wrong type is not treated as absent, or the check would
+		// namespace is optional, so an absent or null value is legitimately empty; a
+		// present value of the wrong type is not treated as absent, or the check would
 		// silently target the implicit namespace instead of the one the author meant.
 		var namespace string
-		if rawNamespace, present := checkMap["namespace"]; present {
+		if rawNamespace, present := checkMap["namespace"]; present && !oam.IsNullValue(rawNamespace) {
 			if namespace, ok = rawNamespace.(string); !ok {
 				return nil, errors.Errorf("policy %q: checks[%d].namespace must be a string", policyName, i)
 			}

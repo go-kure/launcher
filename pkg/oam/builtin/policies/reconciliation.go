@@ -77,7 +77,7 @@ func parseReconciliationSettings(policyName string, props map[string]any) (*oam.
 		{"timeout", &s.Timeout},
 	} {
 		raw, present := props[d.field]
-		if !present || raw == nil {
+		if !present || oam.IsNullValue(raw) {
 			continue
 		}
 		v, ok := raw.(string)
@@ -103,7 +103,7 @@ func parseReconciliationSettings(policyName string, props map[string]any) (*oam.
 		{"suspend", &s.Suspend},
 	} {
 		raw, present := props[b.field]
-		if !present || raw == nil {
+		if !present || oam.IsNullValue(raw) {
 			continue
 		}
 		v, ok := raw.(bool)

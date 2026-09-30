@@ -79,6 +79,38 @@ func TestReconciliationSettingsHandler_UnsetStaysUnset(t *testing.T) {
 	}
 }
 
+// TestReconciliationSettingsHandler_NullReadsAsAbsent: an untyped or typed nil
+// beside a valid property is skipped, as launcher reads null everywhere else
+// (oam.IsNullValue), and the valid property still applies.
+func TestReconciliationSettingsHandler_NullReadsAsAbsent(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]any
+	}{
+		{"untyped nil duration", map[string]any{"interval": nil, "prune": true}},
+		{"typed nil string pointer", map[string]any{"interval": (*string)(nil), "prune": true}},
+		{"typed nil bool pointer", map[string]any{"wait": (*bool)(nil), "prune": true}},
+		{"typed nil map", map[string]any{"timeout": map[string]any(nil), "prune": true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &policies.ReconciliationSettingsHandler{}
+			result := oam.NewPolicyResult()
+			policy := &oam.ApplicationPolicy{Name: "recon", Type: "reconciliation", Properties: tc.props}
+			if err := h.Apply(policy, nil, result); err != nil {
+				t.Fatalf("Apply() error = %v, want the null read as absent", err)
+			}
+			s := result.ReconciliationSettings
+			if s == nil || s.Prune == nil || !*s.Prune {
+				t.Fatalf("settings = %+v, want prune=true applied", s)
+			}
+			if s.Interval != "" || s.Timeout != "" || s.Wait != nil {
+				t.Errorf("settings = %+v, want the null property left unset", s)
+			}
+		})
+	}
+}
+
 func TestReconciliationSettingsHandler_OnlyOnePerApplication(t *testing.T) {
 	h := &policies.ReconciliationSettingsHandler{}
 	result := oam.NewPolicyResult()
