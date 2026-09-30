@@ -118,15 +118,72 @@ func TestDecodeKubeManifests_ErrorOnMappingWithoutAPIVersion(t *testing.T) {
 	}
 }
 
+// TestDecodeKubeManifests_SkipsNonMapDoc: a document that is a scalar, nil
+// (null, ~, a comment alone, nothing at all) or an empty mapping carries no
+// object and is skipped; the document after it still decodes.
 func TestDecodeKubeManifests_SkipsNonMapDoc(t *testing.T) {
-	yaml := []byte("just a string\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm")
-	objects, err := decodeKubeManifests(yaml)
-	if err != nil {
-		t.Fatalf("decodeKubeManifests: %v", err)
+	for _, skipped := range []string{
+		"just a string\n",
+		"42\n",
+		"null\n",
+		"~\n",
+		"# a comment alone\n",
+		"",
+		"{}\n",
+	} {
+		t.Run(fmt.Sprintf("%q", skipped), func(t *testing.T) {
+			objects, err := decodeKubeManifests([]byte(skipped + "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm"))
+			if err != nil {
+				t.Fatalf("decodeKubeManifests: %v", err)
+			}
+			if names := resourceNames(objects); !slices.Equal(names, []string{"cm"}) {
+				t.Fatalf("decoded %v, want [cm] (the first document skipped)", names)
+			}
+		})
 	}
-	if len(objects) != 1 {
-		t.Fatalf("expected 1 object (scalar doc skipped), got %d", len(objects))
+}
+
+// TestDecodeKubeManifests_TopLevelNonStringKeyIsAnError: a key that is not a
+// string at a document's own top level makes yaml.v3 decode the whole
+// document to map[any]any, not a nested mapping only. That document is an
+// error naming the object and the top level, as a nested mapping's is, not
+// skipped as a document that holds no object; with no apiVersion or kind
+// among its string keys it is the missing-apiVersion error. The same key
+// quoted is a string, and the document decodes as any other.
+func TestDecodeKubeManifests_TopLevelNonStringKeyIsAnError(t *testing.T) {
+	const head = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"
+	const next = "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: next\n"
+	for _, key := range []string{"1: x", "true: y", "1.5: z", "~: n"} {
+		t.Run(key, func(t *testing.T) {
+			doc := head + key + "\n"
+			var plain any
+			if err := yaml.Unmarshal([]byte(doc), &plain); err != nil {
+				t.Fatalf("yaml.v3 decode: %v", err)
+			}
+			if _, ok := plain.(map[any]any); !ok {
+				t.Fatalf("yaml.v3 decodes the document to %T, want map[any]any; the case no longer pins a top-level non-string key", plain)
+			}
+			_, err := decodeKubeManifests([]byte(doc + next))
+			assertErrorMentions(t, err, `ConfigMap "cm"`, "top level", "not a string")
+		})
 	}
+	t.Run("no apiVersion or kind", func(t *testing.T) {
+		_, err := decodeKubeManifests([]byte("1: x\ntrue: y\n" + next))
+		assertErrorMentions(t, err, "missing apiVersion or kind")
+	})
+	t.Run("quoted key", func(t *testing.T) {
+		objects, err := decodeKubeManifests([]byte(head + "\"1\": x\n\"true\": y\n"))
+		if err != nil {
+			t.Fatalf("decodeKubeManifests: %v", err)
+		}
+		if len(objects) != 1 {
+			t.Fatalf("got %d objects, want 1", len(objects))
+		}
+		u := objects[0].(*unstructured.Unstructured)
+		if u.Object["1"] != "x" || u.Object["true"] != "y" {
+			t.Errorf(`top-level "1" = %#v, "true" = %#v, want "x" and "y"`, u.Object["1"], u.Object["true"])
+		}
+	})
 }
 
 // TestDecodeKubeManifests_JSONTypedAndWrittenUnchanged covers each Go type
@@ -273,17 +330,20 @@ func TestDecodeKubeManifests_TimestampOutsideRFC3339IsAnError(t *testing.T) {
 // TestDecodeKubeManifests_UnemittableDocumentOfADroppedHookIsSkipped: hook
 // grouping drops a document whose helm.sh/hook annotation is one of kure's
 // excluded phases, or a comma-separated list of nothing else, before
-// anything is written, so the values it holds were never refused: a
-// non-string mapping key or an out-of-range timestamp in it is skipped with
-// the document. Any other hook value is still refused. Each row's dropped
-// column is first checked against parseChartManifests on a valid document,
-// so the table cannot drift from what grouping actually drops.
+// anything is written, so the keys and values it holds were never refused: a
+// non-string mapping key, nested or at the document's own top level, or an
+// out-of-range timestamp in it is skipped with the document. Any other hook
+// value is still refused, naming where. Each row's dropped column is first
+// checked against parseChartManifests on a valid document, so the table
+// cannot drift from what grouping actually drops.
 func TestDecodeKubeManifests_UnemittableDocumentOfADroppedHookIsSkipped(t *testing.T) {
 	const hooked = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: hooked\n  annotations:\n    helm.sh/hook: %q\n"
 	const mainDoc = "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: main\n"
-	unemittable := []struct{ name, body string }{
-		{"non-string key", "data:\n  1: one\n"},
-		{"out-of-range timestamp", "data:\n  at: 2001-12-14T21:59:43+24:00\n"},
+	unemittable := []struct{ name, body, where string }{
+		{"non-string key", "data:\n  1: one\n", ".data"},
+		{"top-level non-string key", "1: one\n", "top level"},
+		{"top-level bool key", "true: yes\n", "top level"},
+		{"out-of-range timestamp", "data:\n  at: 2001-12-14T21:59:43+24:00\n", ".data.at"},
 	}
 	for _, tc := range []struct {
 		hook    string
@@ -311,7 +371,7 @@ func TestDecodeKubeManifests_UnemittableDocumentOfADroppedHookIsSkipped(t *testi
 			for _, u := range unemittable {
 				objects, err := decodeKubeManifests([]byte(fmt.Sprintf(hooked, tc.hook) + u.body + mainDoc))
 				if !tc.dropped {
-					assertErrorMentions(t, err, `ConfigMap "hooked"`, ".data")
+					assertErrorMentions(t, err, `ConfigMap "hooked"`, u.where)
 					continue
 				}
 				if err != nil {
@@ -1476,6 +1536,17 @@ func TestGenerateTemplate_TimestampOutsideRFC3339IsABuildError(t *testing.T) {
 	cfg := helmchartTemplateFixture(stubRender(outOfRangeOffsetChart))
 	_, err := cfg.Generate(nil)
 	assertErrorMentions(t, err, `ConfigMap "stamped"`, ".data.at", "timezone hour outside of range")
+}
+
+// TestGenerateTemplate_TopLevelNonStringKeyIsABuildError is the composite's
+// delivery: template counterpart of
+// TestHelmTemplateConfig_TopLevelNonStringKeyIsABuildError, on the same
+// chart: a key that is not a string at a rendered document's own top level
+// fails the build, naming the object and the top level.
+func TestGenerateTemplate_TopLevelNonStringKeyIsABuildError(t *testing.T) {
+	cfg := helmchartTemplateFixture(stubRender(topLevelNonStringKeyChart))
+	_, err := cfg.Generate(nil)
+	assertErrorMentions(t, err, `ConfigMap "stray-keys"`, "top level", "not a string")
 }
 
 // TestGenerateTemplate_DroppedHookWithUnemittableValuesBuilds is the
