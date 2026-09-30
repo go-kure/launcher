@@ -481,14 +481,18 @@ is what rejects it — not a per-field check in each handler. A caller that driv
 `Transform` directly must therefore call `ValidateAuthoredProperties` first (after
 any parameter substitution) to get the same guarantee `kurel build` gives.
 
-Three positions are exempt: a type no handler and no lowering rule claims (rejected
-separately by the type allowlists and by `validateSettled`); a custom trait type from a
+Authored policies are checked the same way, after every component, in document order:
+against the `PolicyHandler` registered for the type, else the `PolicyLoweringRule`
+claiming it. The built-in policy handlers each declare a `PropertySchema`, so a
+misspelt `reconciliation` key such as `prunee` is a build error rather than a
+setting the handler never reads.
+
+Three positions are exempt, each because there is no schema to check against: a
+component or trait type no handler and no lowering rule claims (rejected separately
+by the type allowlists and by `validateSettled`); a custom trait type from a
 `CapabilityDefinition`, which declares that the type *exists* but not what properties
-it accepts; and policies. A policy's properties are checked only by the
-`PolicyHandler` registered for its type, when the transform dispatches it: the
-handler rejects a missing or malformed key it reads, but a key it does not read is
-ignored. The built-in policy handlers each declare a `PropertySchema`, which is
-enforced on policies a lowering rule emits but not on authored ones. Top-level `Required` is also deliberately not enforced
+it accepts; and a policy type nothing is registered for, which the transform rejects
+with `no handler for policy type`. Top-level `Required` is also deliberately not enforced
 here — `ClusterProfile` capability rendering merges into a trait's top-level property
 map after this runs, so a required property the platform supplies is legitimately
 absent from what the author wrote. Nested `Required`, inside an object the author did

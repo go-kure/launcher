@@ -23,9 +23,9 @@ import (
 // property ever added to an existing component kind was technically breaking,
 // because a document could already have been authoring that key to no effect.
 
-// ValidateAuthoredProperties checks every authored component's and trait's
-// properties against the schema declared by whatever will consume them, so a
-// property no handler declares is a build error rather than a silent no-op.
+// ValidateAuthoredProperties checks every authored component's, trait's and
+// policy's properties against the schema declared by whatever will consume them,
+// so a property no handler declares is a build error rather than a silent no-op.
 //
 // Three positions are treated differently, each for a reason:
 //
@@ -47,19 +47,19 @@ import (
 //     validateAuthoredTraitAgainst. A type with no registered handler or rule is
 //     passed over entirely, per the first bullet.
 //
-//   - Policies are passed over. A policy's properties are checked only by the
-//     PolicyHandler registered for its type, when the transform dispatches it:
-//     the handler rejects a missing or malformed key it reads, but a key it does
-//     not read is ignored rather than rejected. That holds for the built-in
-//     policy handlers kurel registers (pkg/oam/builtin/policies) even though each
-//     declares a PropertySchema — the schema is published and enforced on
-//     emitted policies (validateEmittedPolicy), not on authored ones here. A
-//     policy type with no registered handler fails at transform time ("no
-//     handler for policy type"), not here.
+//   - A policy is checked against the schema of the PolicyHandler registered for
+//     its type, or of the PolicyLoweringRule claiming it — the same lookup
+//     validateEmittedPolicy uses. The built-in policy handlers kurel registers
+//     (pkg/oam/builtin/policies) each declare one, so a misspelt or wrongly typed
+//     key on a `dependency`, `placement`, `reconciliation` or `health-checks`
+//     policy is a build error rather than a setting the handler silently never
+//     reads. A handler that declares no schema accepts anything, as at the other
+//     positions, and a policy type with nothing registered for it is passed over
+//     here: the transform rejects it ("no handler for policy type").
 //
 // Returns the first error in a deterministic order (components in document order,
-// each component's own properties before its traits), so a document with several
-// problems always reports the same one.
+// each component's own properties before its traits, then policies in document
+// order), so a document with several problems always reports the same one.
 func (t *Transformer) ValidateAuthoredProperties(app *Application) error {
 	if app == nil {
 		return nil
@@ -74,6 +74,27 @@ func (t *Transformer) ValidateAuthoredProperties(app *Application) error {
 				return err
 			}
 		}
+	}
+	for i := range app.Spec.Policies {
+		if err := t.validateAuthoredPolicy(&app.Spec.Policies[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateAuthoredPolicy is validateAuthoredComponent for the policy position, with
+// validateEmittedPolicy's lookup: the registered PolicyHandler first, then a
+// PolicyLoweringRule claiming the type. Top-level Required is not enforced, exactly
+// as for components (see validateAuthoredProperties): each built-in handler already
+// rejects a missing property it needs, with a message written for that property.
+func (t *Transformer) validateAuthoredPolicy(pol *ApplicationPolicy) error {
+	path := fmt.Sprintf("policy %q (type %q): properties", pol.Name, pol.Type)
+	if h, ok := t.policyHandlers[pol.Type]; ok {
+		return validateAuthoredAgainst(h, pol.Properties, path)
+	}
+	if rule, ok := t.policyLoweringRules[pol.Type]; ok {
+		return validateAuthoredAgainst(rule, pol.Properties, path)
 	}
 	return nil
 }

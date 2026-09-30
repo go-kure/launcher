@@ -35,8 +35,17 @@ component with dependencies (`circular dependency detected: a -> b -> c -> a`), 
 same document always gives the same message.
 
 When at least one rule is recorded, the transform builds one bundle per component and
-wires each rule's `dependsOn` as bundle dependencies, on top of the automatic tier
-ordering (each bundle depends on the bundles of the tier before it).
+wires each rule's `dependsOn` as bundle dependencies, on top of automatic tier edges
+(each bundle depends on the bundles of the tier before it). This per-component path is
+the only one that orders tiers; without a `dependency` policy, tier bundles carry no
+dependency on each other (see [`placement`](#placement)).
+
+**Known limitation (go-kure/launcher#576).** When several Helm components share a chart
+repository, the transform emits that repository once, in the bundle of the first such
+component in document order, whatever the dependency graph says. If that component
+depends on another one using the same repository, the other component's bundle
+references a source that only appears after it is ready, and a fresh deployment of the
+rendered bundles does not progress.
 
 ```yaml
 policies:
@@ -55,6 +64,12 @@ policies:
 Overrides the tier a component is classified into (by its type, or by the `<domain>/tier`
 annotation). The tier must be one of `infra`, `services`, `apps`, and the component must
 exist.
+
+Placement changes which tier bundle holds the component, not when it is deployed. Without
+a `dependency` policy, an application spanning several tiers gets one bundle per tier
+with no dependency between them, so the tiers are not deployed in order
+(go-kure/launcher#575). With a `dependency` policy the component's bundle depends on the
+bundles of the tier before its new one.
 
 ```yaml
 policies:
@@ -109,15 +124,20 @@ checks are never evaluated — nor are the generated ones. Use one or the other.
 
 ## Validation
 
-Each handler checks the properties it reads when the transform dispatches the policy: a
-required property that is missing, empty or of the wrong type, an empty `checks` list,
-an invalid duration, an unknown tier or component, a self-dependency or a cycle is an
-error naming the policy. Two things are not checked. A key the handler does not read is
-ignored, not rejected. And a `reconciliation` property of the wrong type (`prune: "true"`)
-is skipped as if absent — an error only when nothing usable remains. `kurel build`'s
-authored-property check (`ValidateAuthoredProperties`) covers components and traits but
-not policies, so the declared `PropertySchema` is not applied to an authored policy; it is
-applied to a policy a lowering rule emits.
+Validation happens in two places, and both name the policy.
+
+`kurel build` first checks every authored policy's properties against its handler's
+`PropertySchema` (`Transformer.ValidateAuthoredProperties`, after components and traits):
+a key the schema does not declare (`prunee: true`), a value of the wrong type
+(`prune: "true"`) or a `tier` outside its allowed values is a build error. A required
+property that is left out is not reported here; the handler reports it.
+
+Each handler then checks what it reads when the transform dispatches the policy: a
+required property that is missing or empty, an empty `checks` list, an invalid duration,
+an unknown tier or component, a self-dependency or a cycle is an error. A caller that drives
+`Transform` without calling `ValidateAuthoredProperties` first gets only this second
+check, in which a key the handler does not read is ignored and a wrongly typed
+`reconciliation` value is skipped as if absent.
 
 ## What `kurel build` shows
 

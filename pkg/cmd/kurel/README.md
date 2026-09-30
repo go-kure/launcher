@@ -40,9 +40,9 @@ component-position ones (`builtinComponentLoweringRules()` — currently just
 `topology-spread` trait), and the built-in application policy handlers
 (`builtinPolicyHandlers()` — `dependency`, `placement`, `reconciliation` and
 `health-checks`, registered via `RegisterPolicy`). Every registered handler and rule
-declares a `PropertySchema` for its user-facing properties, so a component/trait's
-properties can be validated before dispatch; a policy's properties are validated by its
-handler when the transform dispatches it. A policy type with no built-in handler —
+declares a `PropertySchema` for its user-facing properties, so every authored
+component's, trait's and policy's properties are validated against it before dispatch
+(a misspelt policy key such as `prunee` fails the build). A policy type with no built-in handler —
 including `app-dependency`, which orders one application after others and has nothing to
 order against in a single-application build — fails with `no handler for policy type`.
 Policies shape the bundle tree and its Flux settings, which `kurel build`'s manifest
