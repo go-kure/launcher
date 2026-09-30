@@ -2,6 +2,7 @@ package oam
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -998,6 +999,177 @@ func TestTransform_HelmchartMixedDelivery_SameSourceURL(t *testing.T) {
 	}
 	if cfgNative.suppressed {
 		t.Error("native component should not be suppressed (first native component with this source key)")
+	}
+}
+
+// sharedSourceHandler hands every component of its type a dedupTrackingConfig
+// with the same source key, recording each config by component name.
+type sharedSourceHandler struct {
+	typ     string
+	configs map[string]*dedupTrackingConfig
+}
+
+func (h *sharedSourceHandler) CanHandle(t string) bool { return t == h.typ }
+func (h *sharedSourceHandler) ToApplicationConfig(c *Component, _ string) (stack.ApplicationConfig, error) {
+	cfg := &dedupTrackingConfig{name: c.Name, sourceKey: "helm:https://charts.example.com"}
+	h.configs[c.Name] = cfg
+	return cfg, nil
+}
+
+// sharedSourceTransformer registers webservice (apps tier) and daemonset (infra
+// tier) components that all share one source key.
+func sharedSourceTransformer() (*Transformer, map[string]*dedupTrackingConfig) {
+	configs := map[string]*dedupTrackingConfig{}
+	tr := NewTransformer(map[string]ComponentHandler{
+		"webservice": &sharedSourceHandler{typ: "webservice", configs: configs},
+		"daemonset":  &sharedSourceHandler{typ: "daemonset", configs: configs},
+	}, nil)
+	return tr, configs
+}
+
+// assertSourceOwner checks that owner emits the shared source and every other
+// component references it.
+func assertSourceOwner(t *testing.T, configs map[string]*dedupTrackingConfig, owner string) {
+	t.Helper()
+	for name, cfg := range configs {
+		if name == owner {
+			if cfg.suppressed {
+				t.Errorf("%s: source suppressed, want it to own the shared source", name)
+			}
+			continue
+		}
+		if !cfg.suppressed || cfg.sharedRef != owner {
+			t.Errorf("%s: suppressed=%v sharedRef=%q, want the source shared from %q", name, cfg.suppressed, cfg.sharedRef, owner)
+		}
+	}
+}
+
+func TestTransform_SharedSource_OwnedByDependency(t *testing.T) {
+	// go-kure/launcher#576: a is first in the document but depends on b, so a
+	// source in a's bundle would never be created before b waits on it.
+	tr, configs := sharedSourceTransformer()
+	tr.RegisterPolicy("dependency", &depWritingPolicyHandler{from: "a", to: "b"})
+	app := makeApp("myapp", makeComponent("a", "webservice"), makeComponent("b", "webservice"))
+	app.Spec.Policies = []ApplicationPolicy{{Name: "order", Type: "dependency"}}
+
+	if _, _, err := tr.TransformWithPolicy(app, TransformContext{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertSourceOwner(t, configs, "b")
+}
+
+func TestTransform_SharedSource_OwnedByEarliestTier(t *testing.T) {
+	// The apps-tier consumer comes first in the document, but the infra tier
+	// deploys first, so the infra consumer owns the source.
+	tr, configs := sharedSourceTransformer()
+	app := makeApp("myapp", makeComponent("web", "webservice"), makeComponent("log", "daemonset"))
+
+	if _, err := tr.Transform(app, TransformContext{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertSourceOwner(t, configs, "log")
+}
+
+func TestTransform_SharedSource_TierFromPlacement(t *testing.T) {
+	// A placement override moves the first consumer to the apps tier after
+	// classification; ownership follows the overridden tier.
+	tr, configs := sharedSourceTransformer()
+	tr.RegisterPolicy("placement", &tierOverridePolicyHandler{component: "log", tier: TierApps})
+	app := makeApp("myapp",
+		makeComponent("log", "daemonset"),
+		makeComponent("web", "webservice"),
+		makeComponent("agent", "daemonset"),
+	)
+	app.Spec.Policies = []ApplicationPolicy{{Name: "move", Type: "placement"}}
+
+	if _, _, err := tr.TransformWithPolicy(app, TransformContext{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertSourceOwner(t, configs, "agent")
+}
+
+func TestTransform_SharedSource_SingleTierKeepsDocumentOrder(t *testing.T) {
+	tr, configs := sharedSourceTransformer()
+	app := makeApp("myapp", makeComponent("a", "webservice"), makeComponent("b", "webservice"))
+
+	if _, err := tr.Transform(app, TransformContext{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertSourceOwner(t, configs, "a")
+}
+
+// tierOverridePolicyHandler records one placement tier override.
+type tierOverridePolicyHandler struct {
+	component string
+	tier      Tier
+}
+
+func (h *tierOverridePolicyHandler) CanHandle(t string) bool { return t == "placement" }
+func (h *tierOverridePolicyHandler) Apply(_ *ApplicationPolicy, _ []string, result *PolicyResult) error {
+	result.TierOverrides[h.component] = h.tier
+	return nil
+}
+
+func TestDeploymentOrder(t *testing.T) {
+	entry := func(name string, tier Tier) componentEntry {
+		return componentEntry{component: Component{Name: name}, tier: tier}
+	}
+	names := func(entries []componentEntry) []string {
+		out := make([]string, len(entries))
+		for i, e := range entries {
+			out[i] = e.component.Name
+		}
+		return out
+	}
+
+	tests := []struct {
+		name    string
+		entries []componentEntry
+		deps    map[string][]string
+		want    []string
+	}{
+		{
+			name:    "one tier, no dependencies keeps document order",
+			entries: []componentEntry{entry("a", TierApps), entry("b", TierApps), entry("c", TierApps)},
+			want:    []string{"a", "b", "c"},
+		},
+		{
+			name:    "tiers order before document position",
+			entries: []componentEntry{entry("app", TierApps), entry("svc", TierServices), entry("infra", TierInfra)},
+			want:    []string{"infra", "svc", "app"},
+		},
+		{
+			name:    "explicit dependency within a tier",
+			entries: []componentEntry{entry("a", TierApps), entry("b", TierApps), entry("c", TierApps)},
+			deps:    map[string][]string{"a": {"c"}},
+			want:    []string{"b", "c", "a"},
+		},
+		{
+			name:    "explicit dependency and tiers combine",
+			entries: []componentEntry{entry("a", TierApps), entry("db", TierServices), entry("b", TierApps)},
+			deps:    map[string][]string{"a": {"b"}},
+			want:    []string{"db", "b", "a"},
+		},
+		{
+			name:    "unknown dependency name is ignored",
+			entries: []componentEntry{entry("a", TierApps), entry("b", TierApps)},
+			deps:    map[string][]string{"a": {"missing"}},
+			want:    []string{"a", "b"},
+		},
+		{
+			name:    "cycle falls back to document order",
+			entries: []componentEntry{entry("a", TierApps), entry("b", TierApps)},
+			deps:    map[string][]string{"a": {"b"}, "b": {"a"}},
+			want:    []string{"a", "b"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := names(deploymentOrder(tt.entries, tt.deps))
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("deploymentOrder = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

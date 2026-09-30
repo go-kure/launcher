@@ -42,12 +42,12 @@ wires each rule's `dependsOn` as bundle dependencies, on top of automatic tier e
 the only one that orders tiers; without a `dependency` policy, tier bundles carry no
 dependency on each other (see [`placement`](#placement)).
 
-**Known limitation (go-kure/launcher#576).** When several Helm components share a chart
-repository, the transform emits that repository once, in the bundle of the first such
-component in document order, whatever the dependency graph says. If that component
-depends on another one using the same repository, the other component's bundle
-references a source that only appears after it is ready, and a fresh deployment of the
-rendered bundles does not progress.
+When several components share one Flux source (a `helmchart` repository, or an OCI
+source shared with `oci`), the transform emits it once, in the bundle of the sharing
+component deployed first: the one in the earliest tier, after the components it depends
+on, with document order breaking ties. That component depends on no other component
+sharing the source, so it never waits on a bundle that needs a source it has not yet
+created.
 
 ```yaml
 policies:
