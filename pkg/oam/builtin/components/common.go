@@ -1726,8 +1726,14 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 // wins when both are used together.
 
 // authoredValue answers "did the document supply a value for this key?" — the
-// single presence primitive every optional-field parser in this package goes
-// through, so that "absent" means the same thing at every call site.
+// presence primitive the shared optional-field helpers (parseBoolField,
+// parseIntField and its forms, parseStringField, parseRawStringField,
+// parseObjectField, parseStorageClassField, and podspec.go's parseObjectList,
+// parseObjectListField and parseStringList) go through, so that "absent"
+// means the same thing at every call site that uses one. Not every read in
+// this package does: some parsers read a key raw, and those that do not test
+// isExplicitNull themselves refuse an explicit null as a wrong type (see "The
+// null contract" in README.md).
 //
 // A key authored with no value (`updateStrategy:`) decodes to a present entry
 // holding nil. That is ABSENCE, not a present value of the wrong type, and the
@@ -3416,9 +3422,10 @@ var jobSpecPropertyKeys = []string{
 
 // parseJobSpec extracts the optional batchv1.JobSpec-level properties shared by
 // cronjob's jobTemplate and the job component (go-kure/launcher#344). Every field is
-// presence-gated (see JobSpecConfig's doc comment) via parseInt32Field/parseInt64Field,
-// with an explicit negative-value guard per numeric field (matching
-// parseHistoryLimit above). Beyond the per-field bounds, the cross-field checks in
+// presence-gated (see JobSpecConfig's doc comment). The numeric fields are read via
+// parseInt32Field/parseInt64Field, each with an explicit negative-value guard
+// (matching parseHistoryLimit above); completionMode, podReplacementPolicy and
+// managedBy are read raw, and successPolicy/podFailurePolicy via parseObjectField. Beyond the per-field bounds, the cross-field checks in
 // parseJobSpecIndexedFields catch what Kubernetes' own API server would otherwise
 // reject at apply time — every one of them ported from ValidateJobSpec in
 // k8s.io/kubernetes/pkg/apis/batch/validation at the pinned k8s.io/api v0.36.3.
@@ -3492,7 +3499,9 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 	}
 
 	// Every field in this function reads a null as omission, above and below
-	// this point alike. The fields below were go-kure/launcher#344's, and got
+	// this point alike, except completionMode above: its raw read has no
+	// isExplicitNull guard, so a null there is refused as a wrong type. The
+	// fields below were go-kure/launcher#344's, and got
 	// that behaviour first via the optionalX wrappers; the JobSpec fields ABOVE
 	// are shared with the cronjob component and used to refuse a null, which was
 	// go-kure/launcher#394 — now closed by folding the null handling into the

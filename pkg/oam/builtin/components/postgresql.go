@@ -161,11 +161,14 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	props := component.Properties
 
 	// Every optional read below refuses a wrongly typed value by path instead of
-	// treating it as absent (go-kure/launcher#512). Strings go through
+	// treating it as absent (go-kure/launcher#512). Optional strings go through
 	// parseRawStringField, which keeps an explicit "" as a value: the enums must
 	// still reach their switch to refuse it, version refuses it by name, and the
-	// other free-form strings were always copied through as authored. A null is
-	// absence throughout.
+	// other free-form strings were always copied through as authored. The
+	// exceptions are affinity.topologyKey, read with parseStringField as
+	// parseAffinity reads it, and affinity.podAntiAffinityType, read through
+	// authoredValue directly (see each); required strings use parseStringField
+	// and a presence check. A null is absence throughout.
 	config.Provider = "cnpg"
 	if provider, present, err := parseRawStringField(props, "provider", "provider"); err != nil {
 		return nil, err
@@ -701,7 +704,7 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 		// present with a nil value, which then failed the string assertion —
 		// treating a null sub-field as a type error, contradicting the nested-null-
 		// is-absence contract #444 established for every other sub-field in this
-		// block (and every other kind in the package).
+		// block.
 		if v, present := authoredValue(affinityRaw, "podAntiAffinityType"); present {
 			paat, isString := v.(string)
 			if !isString {
