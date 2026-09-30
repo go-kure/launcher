@@ -35,8 +35,9 @@ type buildOptions struct {
 	setValues          []string // "key=value" strings from --set
 	capabilityDefPaths []string
 	strictCapabilities bool
-	environment        string // --environment: a name resolved to profilePath/valuesPath
-	environmentsPath   string // --environments: the file declaring those names
+	environment        string          // --environment: a name resolved to profilePath/valuesPath
+	environmentsPath   string          // --environments: the file declaring those names
+	delivery           deliveryOptions // --oci-repository, --oci-tag (delivery.go)
 }
 
 func newBuildCommand() *cobra.Command {
@@ -63,6 +64,7 @@ kurel.yaml for parameterized packages). Output is written to stdout (default) or
 	cmd.Flags().StringArrayVar(&opts.setValues, "set", nil, "set a parameter value (key=value, repeatable)")
 	cmd.Flags().StringArrayVar(&opts.capabilityDefPaths, "capability-def", nil, "CapabilityDefinition file (repeatable)")
 	cmd.Flags().BoolVar(&opts.strictCapabilities, "strict-capabilities", false, "error instead of warn on unvalidated custom capabilities")
+	registerDeliveryFlags(cmd, opts)
 
 	cmd.Flags().StringVar(&opts.environment, "environment", "", "named environment whose profile and values replace --profile/--values")
 	cmd.Flags().StringVar(&opts.environmentsPath, "environments", "", "EnvironmentSet file declaring --environment names (default: "+environmentsFileName+" next to app.yaml)")
@@ -212,6 +214,10 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	yamlBytes, err := kio.EncodeObjectsToYAML(objects)
 	if err != nil {
 		return errors.Wrap(err, "encoding YAML output")
+	}
+
+	if err := writeDelivery(opts.outputDir, app.Metadata.Name, cluster, opts.delivery); err != nil {
+		return err
 	}
 
 	if opts.outputDir == "" {

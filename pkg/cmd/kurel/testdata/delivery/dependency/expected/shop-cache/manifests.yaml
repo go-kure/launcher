@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: cache
+  name: cache
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cache
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: cache
+    spec:
+      containers:
+      - image: ghcr.io/example/cache:v1.0.0
+        name: cache
+        ports:
+        - containerPort: 6379
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: cache
+  name: cache
+  namespace: shop
+spec:
+  ports:
+  - name: http
+    port: 6379
+    protocol: TCP
+    targetPort: 6379
+  selector:
+    app: cache
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: cache
+  name: cache
+  namespace: shop

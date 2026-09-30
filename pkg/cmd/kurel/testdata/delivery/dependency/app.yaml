@@ -1,0 +1,28 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  components:
+    - name: db
+      type: postgresql
+      properties:
+        version: "16"
+        storageSize: "10Gi"
+    - name: cache
+      type: webservice
+      properties:
+        image: ghcr.io/example/cache:v1.0.0
+        port: 6379
+    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        port: 9090
+  policies:
+    - name: order
+      type: dependency
+      properties:
+        dependsOn:
+          api: [cache]
