@@ -88,12 +88,14 @@ The contract defines a null as a value that serializes to JSON null, so the
 handler applies it to the serialization itself: the property map is marshalled
 with `encoding/json` and decoded back into plain maps, arrays and scalars before
 nulls are removed. A lowering rule emits the same JSON-shaped values as for
-every component (string-keyed maps, slices, scalars), which the engine checks
-against the schema before the handler runs; a typed API struct is refused
-there. The serialization read additionally makes a direct caller of the
-handler read exactly as it encodes — concrete collection types, nils behind
-pointers, raw JSON, custom encoders — with no separate walk to keep in step
-with the encoder. A value that does not serialize is refused.
+every component (string-keyed maps, slices, scalars); that is the supported
+contract. The engine checks them against the schema before the handler runs
+and refuses a typed API struct where the schema checks an object or array item,
+but it does not descend into an open object's undeclared keys, so the contract
+is not enforced at every depth. The serialization read additionally makes a
+direct caller of the handler read exactly as it encodes — concrete collection
+types, nils behind pointers, raw JSON, custom encoders — with no separate walk
+to keep in step with the encoder. A value that does not serialize is refused.
 
 The typed decode can also lose an authored value in the other direction. Many
 upstream fields are non-pointer and `omitempty`, and some carry a non-zero CRD
