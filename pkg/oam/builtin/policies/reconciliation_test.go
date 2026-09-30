@@ -108,9 +108,39 @@ func TestReconciliationSettingsHandler_Errors(t *testing.T) {
 			wantSub: "at least one reconciliation property must be specified",
 		},
 		{
-			name:    "only unreadable properties",
-			props:   map[string]any{"interval": "", "prune": "true"},
+			name:    "only an empty duration",
+			props:   map[string]any{"interval": ""},
 			wantSub: "at least one reconciliation property must be specified",
+		},
+		{
+			name:    "only null values",
+			props:   map[string]any{"interval": nil, "prune": nil},
+			wantSub: "at least one reconciliation property must be specified",
+		},
+		{
+			name:    "boolean given as a string",
+			props:   map[string]any{"interval": "", "prune": "true"},
+			wantSub: "prune must be a boolean, got string",
+		},
+		{
+			name:    "non-string interval beside a valid boolean",
+			props:   map[string]any{"interval": 5, "prune": true},
+			wantSub: "interval must be a string duration, got int",
+		},
+		{
+			name:    "non-string timeout beside a valid duration",
+			props:   map[string]any{"interval": "5m", "timeout": false},
+			wantSub: "timeout must be a string duration, got bool",
+		},
+		{
+			name:    "non-boolean wait beside a valid duration",
+			props:   map[string]any{"interval": "5m", "wait": "yes"},
+			wantSub: "wait must be a boolean, got string",
+		},
+		{
+			name:    "non-boolean suspend beside a valid boolean",
+			props:   map[string]any{"force": true, "suspend": 1},
+			wantSub: "suspend must be a boolean, got int",
 		},
 		{
 			name:    "invalid interval",
