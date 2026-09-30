@@ -62,6 +62,7 @@ reads it.
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
 | `helmrelease` | HelmRelease (+values ConfigMap) | Kind-named: the full Flux `HelmReleaseSpec` plus `valuesMode`, against an existing source. |
+| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. The composite's `delivery: template`, authorable directly — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
 | `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected. |
@@ -1937,8 +1938,13 @@ not part of either change.
   `delivery: native` is unaffected. Known limitation, over-broad wording fixed: this list is the
   set of properties `delivery: template` rejects when **explicitly** authored — an inherited
   handler default (e.g. `valuesMode` with no property-level `configMap`) falls back to `inline`
-  rather than erroring (`pkg/oam/builtin/components/helmchart.go:300-308`); same over-broad-wording
+  rather than erroring (`pkg/oam/builtin/components/helmchart.go:275-284`); same over-broad-wording
   class `go-kure/launcher#319` already fixed elsewhere in this file.
+
+  **`delivery: template` is the `helmtemplate` component's code path.** Its source checks,
+  render, hook-group ordering and layout partition are one implementation shared with the
+  kind-named `helmtemplate` terminal below (`helmtemplate_render.go`), so what this entry says
+  about template output holds for both.
 
   **`delivery: template` output is partitioned by Helm hook group.** Every rendered manifest
   carrying a `helm.sh/hook` annotation (or a standalone `helm.sh/hook-weight`) is grouped by
@@ -1982,7 +1988,7 @@ not part of either change.
   limitation: the child directory name's DNS-1123 truncation (mirroring `valuesConfigMapName`'s own
   `sha256`-prefixed truncation above) makes same-name collisions vanishingly unlikely *within* one
   Application, but two different Applications with a same-named component still collide — component
-  names are unique only within one Application (`pkg/oam/validate.go:193-196`), while emitted
+  names are unique only within one Application (`pkg/oam/validate.go:196-199`), while emitted
   Kustomization CRs for hook-group children share one controller namespace; a pre-existing gap
   (inherited from a downstream consumer's reference implementation) that this partitioning newly exposes, not one
   it introduces. `kurel build`'s flat output **accepts** `delivery: template` — its `Generate`
@@ -2062,6 +2068,64 @@ not part of either change.
   its projection past that, as [The `app` label](#the-app-label) describes (the same label
   as the composite's values ConfigMap). Empty or absent `values` generate no ConfigMap and
   no entry. There is no handler-level default for `valuesMode`.
+- **helmtemplate** — the kind-named terminal for a client-side Helm render
+  (go-kure/launcher#348, part of the Helm-family redesign go-kure/launcher#336): the
+  `helmchart` composite's `delivery: template` path, lifted out so it can be authored directly.
+  It fetches and renders the chart at build time and emits the rendered manifests. It creates
+  no source CR and no `HelmRelease`, so it carries no auto health check.
+
+  **Properties.** Exactly the keys that path reads, in the composite's shape. `source` is
+  required: `url` (required) is an `http://` or `https://` Helm repository URL, or an `oci://`
+  URL naming the chart; `kind` (optional, `HelmRepository` or `OCIRepository`) is inferred from
+  the scheme when unset — `oci://` is `OCIRepository`, anything else `HelmRepository` — and
+  must agree with it when set. `chart` is required for a `HelmRepository`; an `OCIRepository`'s
+  URL already names the chart, so there `chart` is not used, as under the composite. `version`
+  is required for an `OCIRepository`. `values` is an open object, the Helm values tree, and must
+  be representable as JSON: a non-finite number (`.nan`, `.inf`) is a build error. The source
+  checks are the composite's own, shared rather than copied.
+
+  **Decoding.** `values` is split off, and the rest of the property map is decoded with
+  `builtin.DecodeStrictJSON` into a closed struct, so any other key, at any depth, is refused by
+  name, as is a wrongly typed value. `values` itself reaches the render exactly as authored —
+  the same map, with the same YAML-decoded value types, that the composite hands the renderer —
+  rather than the strict decoder's `json.Number` re-reading, which a chart template comparing
+  a value with a number would treat differently. The schema declares the same keys, with
+  `source` closed to `url` and `kind`, and a test ties it to the struct. Keys match
+  case-insensitively in the handler, as in `encoding/json`; schema validation, which a
+  `kurel build` runs first, is exact.
+
+  **Refused outright.** Every `helmchart` property only its `delivery: native` reads —
+  `releaseName`, `targetNamespace`, `interval`, `driftDetection`, `install`, `upgrade`,
+  `valuesFrom`, `valuesMode` — the composite's own `delivery` switch, and a source reference
+  (`source.name`, `source.namespace`) are undeclared keys: schema validation refuses each, and so
+  does the strict decode. An `OCIRepository` source without `version` is refused by the handler.
+  The key itself is what is refused, whatever it holds: the composite, under
+  `delivery: template`, rejects `driftDetection` by its `mode` and `install`/`upgrade` by their
+  `crds`, and turns an inherited handler-level `valuesMode: configMap` default into `inline`;
+  the terminal has no handler-level default at all. As under the composite, the render uses
+  kure's release defaults (`.Release.Name` `release`, `.Release.Namespace` `default`), with no
+  way to set release identity.
+
+  **Output and hook-group layout.** The composite's `delivery: template` output, from the same
+  code. `Generate` returns every rendered object flat, in Helm hook execution order —
+  `pre-install, pre-upgrade, main, post-install, post-upgrade, <unknown, alphabetical>` — with a
+  multi-event annotation such as `pre-install,pre-upgrade` placed by its earliest phase, and
+  `pre-delete`/`post-delete`/`pre-rollback`/`post-rollback`/`test` objects dropped. For a
+  layout-walking consumer, a chart with more than one hook group gets one child layout per group
+  from `AugmentLayout`, named `<component>-NN-<phase-slug>`, written directly under the
+  component's own directory and chained via `DependsOn`, and the component layout is pinned to a
+  directory (`AppFilePerResource`) unless the caller set a mode; the `helmchart` entry above
+  carries the placement details and the residual cross-Application name-collision gap, which
+  applies here unchanged. Every `helmtemplate` component is a `LayoutAugmenter`, a hook-free
+  chart included, since the group count is known only after the render; its
+  `GenerateCoversAugmentLayout` is always true, so `kurel build`, which never walks a layout,
+  accepts it and emits `Generate`'s flat output.
+
+  **Relationship to `helmchart` and `helm`.** `helmchart` with `delivery: template` keeps its
+  authored surface and its output; both components run one render and partition
+  implementation. `helmtemplate` is the terminal the role-named `helm` lowering rule
+  (go-kure/launcher#349) is to emit for client-side rendering; that rule is not part of this
+  component. Retiring the composite is tracked separately in go-kure/launcher#350.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.
   `wait` and `healthChecks` are opt-in readiness settings for the delivery

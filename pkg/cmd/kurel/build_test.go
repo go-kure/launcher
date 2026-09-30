@@ -436,7 +436,7 @@ spec:
 // one registry to the other (worker, go-kure/launcher#280) is not.
 func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 	wantHandlers := []string{
-		"crd", "cronjob", "daemonset", "deployment", "helmchart", "helmrelease", "job", "manifests",
+		"crd", "cronjob", "daemonset", "deployment", "helmchart", "helmrelease", "helmtemplate", "job", "manifests",
 		"oci", "passthrough", "postgresql", "service", "statefulset", "webservice",
 	}
 	wantRules := []string{"worker"}
@@ -1119,6 +1119,122 @@ spec:
 	}
 	if !strings.Contains(got, "kustomize.toolkit.fluxcd.io/prune") || !strings.Contains(got, "disabled") {
 		t.Errorf("expected the prune-protection annotation in output, got:\n%s", got)
+	}
+}
+
+// TestBuildCommand_HelmtemplateComponent builds a document authoring the
+// kind-named helmtemplate component end to end — parser, authored-property
+// validation, handler, trait decoration, kurel build's LayoutAugmenter guard —
+// against a chart served locally. The chart has two hook groups, so the
+// component is a LayoutAugmenter the guard must let through (its Generate
+// covers AugmentLayout, also through the prune-protection decorator), and both
+// objects must reach the flat output in hook order.
+func TestBuildCommand_HelmtemplateComponent(t *testing.T) {
+	chartFiles := map[string]string{
+		"testchart/templates/cm.yaml":   "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test-cm\ndata:\n  key: value\n",
+		"testchart/templates/hook.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: pre-install-cm\n  annotations:\n    helm.sh/hook: pre-install\ndata:\n  key: value\n",
+		"testchart/templates/NOTES.txt": "chart: testchart\nversion: 0.1.0\n",
+	}
+	chartBuf := buildMinimalChartTar(t, "testchart", "0.1.0", chartFiles)
+
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.yaml":
+			fmt.Fprint(w, helmIndexYAML("testchart", "0.1.0", srvURL+"/testchart-0.1.0.tgz"))
+		case "/testchart-0.1.0.tgz":
+			w.Write(chartBuf)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	appYAML := fmt.Sprintf(`apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: testapp
+      type: helmtemplate
+      properties:
+        chart: testchart
+        version: "0.1.0"
+        source:
+          url: %s
+      traits:
+        - type: prune-protection
+`, srvURL)
+
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", appYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("build failed: %v\noutput: %s", err, out.String())
+	}
+
+	got := out.String()
+	hookIdx, mainIdx := strings.Index(got, "name: pre-install-cm"), strings.Index(got, "name: test-cm")
+	if hookIdx < 0 || mainIdx < 0 {
+		t.Fatalf("expected both rendered ConfigMaps in output, got:\n%s", got)
+	}
+	if hookIdx > mainIdx {
+		t.Errorf("the pre-install hook object must precede the main group in the output, got:\n%s", got)
+	}
+	if strings.Contains(got, "chart: testchart") {
+		t.Errorf("NOTES.txt content must not appear in output, got:\n%s", got)
+	}
+	if strings.Contains(got, "kind: HelmRelease") || strings.Contains(got, "kind: HelmRepository") {
+		t.Errorf("helmtemplate must emit neither a HelmRelease nor a source CR, got:\n%s", got)
+	}
+	if !strings.Contains(got, "kustomize.toolkit.fluxcd.io/prune") {
+		t.Errorf("expected the prune-protection annotation on the rendered objects, got:\n%s", got)
+	}
+}
+
+// TestBuildCommand_HelmtemplateCompositeOnlyPropertyRejected: a helmchart
+// property the terminal does not have is a build error naming it, before any
+// chart is fetched — authored-property validation runs first.
+func TestBuildCommand_HelmtemplateCompositeOnlyPropertyRejected(t *testing.T) {
+	appYAML := `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: testapp
+      type: helmtemplate
+      properties:
+        chart: testchart
+        releaseName: testapp
+        source:
+          url: https://charts.example.com
+`
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", appYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected build to reject releaseName on a helmtemplate component, got success, output:\n%s", out.String())
+	}
+	if !strings.Contains(err.Error(), `unsupported field "releaseName"`) {
+		t.Errorf("error should name the refused field, got: %v", err)
 	}
 }
 

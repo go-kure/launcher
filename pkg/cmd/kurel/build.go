@@ -252,20 +252,21 @@ func loadSuppliedValues(opts *buildOptions) (map[string]any, error) {
 // newBuiltinTransformer and the handler-schema parity test.
 func builtinComponentHandlers() map[string]oam.ComponentHandler {
 	return map[string]oam.ComponentHandler{
-		"webservice":  &components.WebserviceHandler{},
-		"deployment":  &components.DeploymentHandler{},
-		"cronjob":     &components.CronjobHandler{},
-		"job":         &components.JobHandler{},
-		"daemonset":   &components.DaemonsetHandler{},
-		"statefulset": &components.StatefulsetHandler{},
-		"service":     &components.ServiceHandler{},
-		"postgresql":  &components.PostgresqlHandler{},
-		"helmchart":   &components.HelmchartHandler{},
-		"helmrelease": &components.HelmReleaseHandler{},
-		"passthrough": &components.PassthroughHandler{},
-		"crd":         &components.CRDHandler{},
-		"manifests":   &components.ManifestsHandler{},
-		"oci":         &components.OCIHandler{},
+		"webservice":   &components.WebserviceHandler{},
+		"deployment":   &components.DeploymentHandler{},
+		"cronjob":      &components.CronjobHandler{},
+		"job":          &components.JobHandler{},
+		"daemonset":    &components.DaemonsetHandler{},
+		"statefulset":  &components.StatefulsetHandler{},
+		"service":      &components.ServiceHandler{},
+		"postgresql":   &components.PostgresqlHandler{},
+		"helmchart":    &components.HelmchartHandler{},
+		"helmrelease":  &components.HelmReleaseHandler{},
+		"helmtemplate": &components.HelmTemplateHandler{},
+		"passthrough":  &components.PassthroughHandler{},
+		"crd":          &components.CRDHandler{},
+		"manifests":    &components.ManifestsHandler{},
+		"oci":          &components.OCIHandler{},
 	}
 }
 

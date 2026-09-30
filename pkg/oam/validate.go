@@ -21,21 +21,22 @@ const SupportedAPIVersion = "launcher.gokure.dev/v1alpha1"
 
 // validComponentTypes is the Phase 2 set. Updated when Phase 2 handlers land.
 var validComponentTypes = map[string]bool{
-	"webservice":  true,
-	"worker":      true,
-	"deployment":  true,
-	"postgresql":  true,
-	"cronjob":     true,
-	"job":         true,
-	"helmchart":   true,
-	"helmrelease": true,
-	"daemonset":   true,
-	"statefulset": true,
-	"service":     true,
-	"passthrough": true,
-	"crd":         true,
-	"manifests":   true,
-	"oci":         true,
+	"webservice":   true,
+	"worker":       true,
+	"deployment":   true,
+	"postgresql":   true,
+	"cronjob":      true,
+	"job":          true,
+	"helmchart":    true,
+	"helmrelease":  true,
+	"helmtemplate": true,
+	"daemonset":    true,
+	"statefulset":  true,
+	"service":      true,
+	"passthrough":  true,
+	"crd":          true,
+	"manifests":    true,
+	"oci":          true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.

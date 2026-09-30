@@ -66,7 +66,7 @@ preflight reject every valid use of the trait.
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `configmap` | ConfigMap (+ optional volume mount) | `name`, `data`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, Job, or CronJob; any other component fails generation) |
-| `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; an authored engine-owned `scope` is accepted; a capability rendering carries no keys). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source), from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment; a Deployment passed through as raw, unstructured output (`passthrough`, `helmchart` templates) is not inspected (see below). |
+| `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; an authored engine-owned `scope` is accepted; a capability rendering carries no keys). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source), from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment; a Deployment passed through as raw, unstructured output (`passthrough`, `helmchart` or `helmtemplate` templates) is not inspected (see below). |
 | `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`. Admitted on `webservice`, `worker` and `deployment` only. On any of them with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. |
 
 ### Operational (FluxCD)
@@ -612,7 +612,7 @@ The trait is strict in five ways, each an error at build time:
   (`statefulset`, `daemonset`, a `manifests` source without a Deployment, …)
   fails, rather than carrying a trait that does nothing. A Deployment passed
   through as raw, unstructured output — a `passthrough` object, or one rendered
-  from `helmchart` templates — is not inspected, as for the other
+  from `helmchart` or `helmtemplate` templates — is not inspected, as for the other
   Deployment-decorating traits, so such a component fails the same way.
 - **A `matchLabels` selector is required.** A Deployment whose selector is
   missing, has no `matchLabels`, or also carries `matchExpressions` is refused,
@@ -626,7 +626,7 @@ The trait is strict in five ways, each an error at build time:
 ## Decorator forwarding for layout-augmenting components
 
 A component config that also implements kure's `layout.LayoutAugmenter` (e.g. `helmchart` under
-`valuesMode: configMap` or `delivery: template`) can carry any trait. `wrapIfAugmenter`
+`valuesMode: configMap` or `delivery: template`, or any `helmtemplate`) can carry any trait. `wrapIfAugmenter`
 (`decorator.go`) is the shared construction-site helper every trait decorator calls: if the
 wrapped inner config implements `layout.LayoutAugmenter`, it returns an `augmentingDecorator`
 wrapping the trait-specific decorator instead of the plain one, so the wrapper itself also
