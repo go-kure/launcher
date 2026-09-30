@@ -368,12 +368,9 @@ func assertValuesConfigMap(t *testing.T, hr *helmv2.HelmRelease, cm *corev1.Conf
 	if cm.APIVersion != "v1" || cm.Kind != "ConfigMap" {
 		t.Errorf("ConfigMap TypeMeta %q %q", cm.APIVersion, cm.Kind)
 	}
-	// The app label is written only when the component name is a legal label
-	// value; a longer name leaves the ConfigMap unlabelled.
-	var wantLabels map[string]string
-	if len(validation.IsValidLabelValue(hr.Name)) == 0 {
-		wantLabels = map[string]string{"app": hr.Name}
-	}
+	// The app label is the component's label value: the name itself at 63
+	// characters or fewer, its projection past that.
+	wantLabels := map[string]string{"app": oam.ComponentLabelValue(hr.Name)}
 	if !reflect.DeepEqual(cm.Labels, wantLabels) || cm.Annotations != nil {
 		t.Errorf("ConfigMap metadata labels=%v annotations=%v, want labels=%v", cm.Labels, cm.Annotations, wantLabels)
 	}
@@ -496,7 +493,7 @@ func assertLegalMetadata(t *testing.T, cfg stack.ApplicationConfig) {
 // the longest validate.go admits, still yields a legal ConfigMap name that
 // carries the values hash, the valuesFrom entry names it, and no emitted
 // object carries an illegal label: the name is too long to be a label value,
-// so the ConfigMap gets no app label.
+// so the ConfigMap's app label is its projection.
 func TestHelmReleaseHandler_MaxLengthNameStaysLegal(t *testing.T) {
 	long := strings.Repeat("a", 60) + "." + strings.Repeat("b", 60) + "." + strings.Repeat("c", 60) + "." + strings.Repeat("d", 70)
 	if len(long) != 253 || len(validation.IsDNS1123Subdomain(long)) != 0 {
@@ -509,8 +506,8 @@ func TestHelmReleaseHandler_MaxLengthNameStaysLegal(t *testing.T) {
 	if len(n) > 253 {
 		t.Errorf("ConfigMap name is %d bytes", len(n))
 	}
-	if cm.Labels != nil {
-		t.Errorf("ConfigMap of a %d-byte name carries labels %v, want none", len(long), cm.Labels)
+	if got := cm.Labels["app"]; got == long || len(validation.IsValidLabelValue(got)) != 0 {
+		t.Errorf("ConfigMap of a %d-byte name carries app label %q, want its legal projection", len(long), got)
 	}
 	// Two long names sharing the kept prefix still differ.
 	other := long[:252] + "e"
@@ -521,25 +518,36 @@ func TestHelmReleaseHandler_MaxLengthNameStaysLegal(t *testing.T) {
 }
 
 // TestHelmReleaseHandler_ConfigMapAppLabelBoundary: the ConfigMap's app label
-// is the component name exactly when that name is a legal label value (at
-// most 63 characters), and absent past that limit.
+// is the component name itself up to 63 characters, and past that limit the
+// name's oam.ComponentLabelValue projection, a legal label value that differs
+// from the name (go-kure/launcher#572).
 func TestHelmReleaseHandler_ConfigMapAppLabelBoundary(t *testing.T) {
 	cases := []struct {
-		name  string
-		label bool
+		name      string
+		projected bool
 	}{
-		{"web", true},
-		{strings.Repeat("a", 63), true},
-		{strings.Repeat("a", 30) + "." + strings.Repeat("b", 32), true},
-		{strings.Repeat("a", 64), false},
+		{"web", false},
+		{strings.Repeat("a", 63), false},
+		{strings.Repeat("a", 30) + "." + strings.Repeat("b", 32), false},
+		{strings.Repeat("a", 64), true},
+		{strings.Repeat("a", 60) + "." + strings.Repeat("b", 60) + "." + strings.Repeat("c", 78), true},
 	}
 	for _, tc := range cases {
 		cfg := hrConfig(t, tc.name, configMapModeProps(map[string]any{"a": 1}))
 		assertLegalMetadata(t, cfg)
 		_, cm := hrGenerate(t, cfg, "")
-		got, ok := cm.Labels["app"]
-		if ok != tc.label || (ok && got != tc.name) || len(cm.Labels) > 1 {
-			t.Errorf("%d-byte name: ConfigMap labels %v, want app label %v", len(tc.name), cm.Labels, tc.label)
+		want := tc.name
+		if tc.projected {
+			want = oam.ComponentLabelValue(tc.name)
+			if want == tc.name {
+				t.Fatalf("%d-byte name: projection returned the name unchanged", len(tc.name))
+			}
+		}
+		if got := cm.Labels["app"]; got != want || len(cm.Labels) != 1 {
+			t.Errorf("%d-byte name: ConfigMap labels %v, want only app=%q", len(tc.name), cm.Labels, want)
+		}
+		if errs := validation.IsValidLabelValue(cm.Labels["app"]); len(errs) != 0 {
+			t.Errorf("%d-byte name: app label %q is not a legal label value: %v", len(tc.name), cm.Labels["app"], errs)
 		}
 	}
 }
