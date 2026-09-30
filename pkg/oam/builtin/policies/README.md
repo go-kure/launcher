@@ -13,7 +13,8 @@ Handlers are registered with the transformer in `pkg/cmd/kurel` via
 `RegisterPolicy(type, handler)`, from `builtinPolicyHandlers()`. A policy type with no
 registered handler fails the transform with `no handler for policy type "<type>"`. Every
 handler also implements `oam.PropertySchemaProvider` (`PropertySchema()`), with a
-`Description` on every node, so a consumer can publish and check the property surface.
+`Description` on every node, so a consumer can publish and check the property surface;
+`Transformer.HandlerSchemas()` returns each registered policy's schema under `Policies`.
 
 ## Policy catalog
 

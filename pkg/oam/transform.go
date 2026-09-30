@@ -195,21 +195,25 @@ func (t *Transformer) RegisterTrait(typeName string, h TraitHandler) {
 }
 
 // HandlerSchemaSet is the set of property schemas declared by registered handlers,
-// keyed by handler type name. Component and trait schemas are kept separate so a
-// component and a trait that share a type name do not collide, and so consumers
-// (the downstream runtime's validator) know which registry a schema came from.
+// keyed by handler type name. Component, trait and policy schemas are kept
+// separate so types that share a name across registries do not collide, and so
+// consumers (the downstream runtime's validator) know which registry a schema
+// came from.
 type HandlerSchemaSet struct {
 	Components map[string]map[string]PropertySchema
 	Traits     map[string]map[string]PropertySchema
+	Policies   map[string]map[string]PropertySchema
 }
 
-// HandlerSchemas returns the property schemas of every registered component and
-// trait handler that implements PropertySchemaProvider. Handlers that do not
+// HandlerSchemas returns the property schemas of every registered component,
+// trait and policy handler, and every component, trait and policy lowering rule,
+// that implements PropertySchemaProvider. Handlers and rules that do not
 // implement it are omitted. The maps are always non-nil.
 func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 	set := HandlerSchemaSet{
 		Components: make(map[string]map[string]PropertySchema),
 		Traits:     make(map[string]map[string]PropertySchema),
+		Policies:   make(map[string]map[string]PropertySchema),
 	}
 	for name, h := range t.componentHandlers {
 		if p, ok := h.(PropertySchemaProvider); ok {
@@ -240,6 +244,20 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 	for name, r := range t.componentLoweringRules {
 		if p, ok := r.(PropertySchemaProvider); ok {
 			set.Components[name] = p.PropertySchema()
+		}
+	}
+	// Policies publish from both of their registries for the same reason:
+	// ValidateAuthoredProperties checks an authored policy against a handler's
+	// schema or, failing that, a policy lowering rule's, so a caller that
+	// validates or documents policies must be able to discover either.
+	for name, h := range t.policyHandlers {
+		if p, ok := h.(PropertySchemaProvider); ok {
+			set.Policies[name] = p.PropertySchema()
+		}
+	}
+	for name, r := range t.policyLoweringRules {
+		if p, ok := r.(PropertySchemaProvider); ok {
+			set.Policies[name] = p.PropertySchema()
 		}
 	}
 	return set
