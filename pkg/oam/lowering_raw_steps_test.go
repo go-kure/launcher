@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // versionedContractRawRule is a testRawRule that declares a contract version, so its
@@ -19,6 +21,14 @@ type versionedContractRawRule struct {
 
 func (r versionedContractRawRule) ContractMetadata() ContractMetadata {
 	return ContractMetadata{Family: r.kind, Version: r.version}
+}
+
+// unmarshalableValue fails yaml encoding with an error (not a panic), as a value
+// a raw rule writes into an unchecked trait can.
+type unmarshalableValue struct{}
+
+func (unmarshalableValue) MarshalYAML() (any, error) {
+	return nil, errors.New("unmarshalableValue: refused")
 }
 
 // outputNames reads metadata.name from each output document.
@@ -145,6 +155,27 @@ func TestLowerRawsWithSteps_NoStepsWithoutAClaimOrOnError(t *testing.T) {
 		}
 		if len(lerr.Chain) != 1 || lerr.Chain[0].From != "second" {
 			t.Fatalf("error chain = %+v, want the failing document's one step", lerr.Chain)
+		}
+	})
+
+	// A raw-emitted trait is not schema-checked here, so a value yaml cannot encode
+	// passes the emission checks and fails at re-serialization. The error still
+	// names the step that emitted it.
+	t.Run("re-serialization error", func(t *testing.T) {
+		tr := NewTransformer(nil, nil)
+		tr.RegisterRawDocumentLowering(testRawRule{kind: "GoodApp"})
+		tr.RegisterRawDocumentLowering(rawRuleWithNestedTrait{kind: "WebApplication", nestedTraitType: "anything",
+			nestedProps: map[string]any{"bad": unmarshalableValue{}}})
+		out, steps, err := tr.LowerRawsWithSteps([]json.RawMessage{rawOfKind("GoodApp", "first"), rawWebApplication("second")}, TransformContext{})
+		if out != nil || steps != nil {
+			t.Fatalf("got out=%v steps=%v on error, want both nil", out, steps)
+		}
+		var lerr *LoweringError
+		if !stderrors.As(err, &lerr) {
+			t.Fatalf("expected *LoweringError, got %T: %v", err, err)
+		}
+		if len(lerr.Chain) != 1 || lerr.Chain[0].From != "second" || !slices.Equal(lerr.Chain[0].To, []string{"second-lowered"}) {
+			t.Fatalf("error chain = %+v, want the step that emitted second-lowered", lerr.Chain)
 		}
 	})
 }
