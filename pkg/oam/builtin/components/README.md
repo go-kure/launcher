@@ -2514,12 +2514,16 @@ edited.
 
 ### The `app` label
 
-Every `app` label and `app` selector this package emits is valued at
-`oam.ComponentLabelValue(<component>)`, never the raw component name — `appLabels` and
-`deploymentComponentLabels` call it, and nothing else writes the value. A component name
+Every `app` label and `app` selector this package generates to identify a component is
+valued at `oam.ComponentLabelValue(<component>)`, never the raw component name —
+`appLabels` and `deploymentComponentLabels` call it, and nothing else writes the value.
+Authored values are emitted as written: an authored `selector` on a `service` component
+replaces the generated one and is not projected, and a type that emits authored objects
+(`passthrough`, for one) adds no `app` label. A component name
 is a DNS-1123 subdomain (up to 253 characters), a label value at most 63: the function
 returns a name of 63 characters or fewer unchanged, so every existing output is
-byte-identical, and projects a longer one onto a readable 52-character prefix plus `-` and
+byte-identical, and projects a longer one onto a readable prefix of at most 52 characters
+(its first 52, with trailing `-` and `.` trimmed) plus `-` and
 a 10-hex-character sha256 digest (go-kure/launcher#572). The workload kinds and `service` never reach
 the projection, since their container name or Service name already refuses a name over 63
 characters; the `helmchart` values ConfigMap does. Object names are not projected. A custom handler

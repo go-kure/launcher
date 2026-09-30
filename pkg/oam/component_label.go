@@ -14,7 +14,7 @@ import (
 const ComponentLabelDigestLength = 10
 
 // ComponentLabelValue returns the label value that identifies the component
-// named name: the value of the `app` label every built-in handler writes, of
+// named name: the value of the `app` label the built-in handlers generate, of
 // every selector that picks out a component's objects or pods by that label,
 // and of the `<domain>/component` selector the synthesized NetworkPolicies use.
 //
@@ -44,8 +44,9 @@ const ComponentLabelDigestLength = 10
 // to 253 characters: their object names allow it, and the label is an
 // identifier, not an address. The projection is deterministic, so the same name
 // renders the same value on every build, and two distinct names map to the same
-// value only through a 40-bit digest collision on a shared 52-character
-// prefix — or when one author deliberately names a component exactly like
+// value only when both have the same trimmed prefix and the same 40-bit digest
+// — the untrimmed 52-character cuts may differ, e.g. only in a trailing '-'
+// versus '.' — or when one author deliberately names a component exactly like
 // another's projection.
 //
 // name must be a valid component name (a DNS-1123 subdomain); the result is

@@ -793,15 +793,17 @@ added to the HPA into a label on the PDB. The same rule and the reason behind it
 the Conventions section of the component handlers' README
 (`pkg/oam/builtin/components/README.md`).
 
-Every `app` label and `app` selector a trait emits — on the `configmap`, `pvc`, `rbac`,
-`scaler`, `ingress`, `httproute`, `networkpolicy` and `external-secret` objects, and
-the PodDisruptionBudget and NetworkPolicy `podSelector` that pick the component's
-pods — is valued at `oam.ComponentLabelValue(<component>)`, through the unexported
-`componentLabels` (`labels.go`); `external-secret` calls the function directly. It is
+Every `app` label and `app` selector a trait generates to identify its component — on
+the `configmap`, `pvc`, `rbac`, `scaler`, `ingress`, `httproute`, `networkpolicy` and
+`external-secret` objects, and the PodDisruptionBudget and NetworkPolicy `podSelector`
+that pick the component's pods — is valued at `oam.ComponentLabelValue(<component>)`,
+through the unexported `componentLabels` (`labels.go`); `external-secret` calls the
+function directly. Authored selectors, such as a `networkpolicy` peer's `podSelector`,
+are emitted as written. It is
 the same function the component handlers label their pods with, so a trait's selector
 matches them. A component name may be up to 253 characters and a label value at most
 63; the function returns a name of 63 characters or fewer unchanged and projects a
-longer one onto a 52-character prefix plus a 10-hex-character digest
+longer one onto a prefix of at most 52 characters plus a 10-hex-character digest
 (go-kure/launcher#572). A trait on a component whose type accepts a longer name (a
 `passthrough`, for one) reaches the projection; object names are never projected.
 
