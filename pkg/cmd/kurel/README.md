@@ -127,7 +127,9 @@ child layouts, adding no resources) does opt in and builds normally — see the
 [Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
 helmchart section for both. Any other `LayoutAugmenter` that doesn't implement
 `oam.LayoutAugmentationCoverage` at all still fails closed, the same as before
-this opt-out existed.
+this opt-out existed. The kind-named `helmrelease` component is not a
+`LayoutAugmenter`: its `valuesMode: configMap` values `ConfigMap` is part of
+its plain `Generate` output, so `build` emits it alongside the HelmRelease.
 
 ## Global flags
 

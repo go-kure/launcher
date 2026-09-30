@@ -176,6 +176,12 @@ nothing for a health check to read. The other unlisted types — `passthrough`, 
 there is no single GVK to name. When adding a component type, decide which group it falls in
 and say so; silence here reads the same either way.
 
+`helmrelease` (go-kure/launcher#327) is listed, with the same `helm.toolkit.fluxcd.io/v2`
+`HelmRelease` GVK as `helmchart`: it always emits exactly one HelmRelease, whose Ready
+condition kstatus reads directly. Because the GVK is a `*.toolkit.fluxcd.io` kind and its
+config accepts a Flux namespace, the check moves to that namespace with the object. It sits
+in `defaultTierMap` at `TierApps`, like `helmchart`.
+
 A listed type can still decline its check per document by implementing
 `EmitsAutoHealthCheck() bool`. `job` uses it for `suspend: true` — a suspended Job creates no
 pods, so it reaches neither `Complete` nor `Failed` and the wait would block for exactly as
