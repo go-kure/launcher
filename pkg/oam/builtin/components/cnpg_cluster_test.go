@@ -203,24 +203,31 @@ func TestCnpgClusterHandler_StrictDecode(t *testing.T) {
 
 // TestCnpgClusterHandler_RefusesUncarriedValues: an authored 0 or false that
 // the typed spec decodes but omits when encoded (omitempty on a non-pointer
-// field) would reach the API server as absent and take the CRD default, so it
-// is refused by path rather than silently changed.
+// field) reaches the API server as absent. Where the CRD default is not zero
+// the operator would apply it instead, so the value is refused by path rather
+// than silently changed; where the default is zero or false the result is the
+// same and the value is accepted.
 func TestCnpgClusterHandler_RefusesUncarriedValues(t *testing.T) {
 	role := func(k string, v any) map[string]any {
 		return map[string]any{"managed": map[string]any{"roles": []any{map[string]any{"name": "a", k: v}}}}
 	}
-	const why = " cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default)"
+	why := func(def string) string {
+		return " cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default " + def + ")"
+	}
 	for _, tt := range []struct {
 		name    string
 		props   map[string]any
 		wantErr string
 	}{
-		{"role connectionLimit", role("connectionLimit", 0), "managed.roles[0].connectionLimit: 0" + why},
-		{"case-variant key", role("ConnectionLimit", 0), "managed.roles[0].ConnectionLimit: 0" + why},
-		{"postgresUID", map[string]any{"postgresUID": 0}, "postgresUID: 0" + why},
-		{"stopDelay", map[string]any{"stopDelay": 0}, "stopDelay: 0" + why},
-		{"negative zero", map[string]any{"stopDelay": json.Number("-0")}, "stopDelay: -0" + why},
-		{"omitted false", role("login", false), "managed.roles[0].login: false" + why},
+		{"role connectionLimit", role("connectionLimit", 0), "managed.roles[0].connectionLimit: 0" + why("-1")},
+		{"case-variant key", role("ConnectionLimit", 0), "managed.roles[0].ConnectionLimit: 0" + why("-1")},
+		{"case-variant parents", map[string]any{"Managed": map[string]any{"Roles": []any{map[string]any{"name": "a", "connectionLimit": 0}}}},
+			"Managed.Roles[0].connectionLimit: 0" + why("-1")},
+		{"postgresUID", map[string]any{"postgresUID": 0}, "postgresUID: 0" + why("26")},
+		{"stopDelay", map[string]any{"stopDelay": 0}, "stopDelay: 0" + why("1800")},
+		{"negative zero", map[string]any{"stopDelay": json.Number("-0")}, "stopDelay: -0" + why("1800")},
+		{"nested field", map[string]any{"replicationSlots": map[string]any{"updateInterval": 0}},
+			"replicationSlots.updateInterval: 0" + why("30")},
 		{"two spellings of one field", map[string]any{"storage": map[string]any{"size": "1Gi", "Size": "2Gi"}},
 			"storage.size: sets the same field as storage.Size (field names match case-insensitively, so one value would be dropped)"},
 		// The decoder keeps size "", which is omitted, so neither spelling is in
@@ -259,6 +266,24 @@ func TestCnpgClusterHandler_RefusesUncarriedValues(t *testing.T) {
 		}
 		if p := s.PostgresConfiguration.Parameters; p["work_mem"] != "0" || p["Work_Mem"] != "8MB" {
 			t.Errorf("parameters = %v; map keys are exact, not case-folded", p)
+		}
+	})
+	// Omitted, and the CRD default is the same zero or false (or there is none),
+	// so the Cluster means what was authored.
+	t.Run("zero defaults are accepted", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{
+			"minSyncReplicas": 0,
+			"failoverDelay":   0,
+			"monitoring":      map[string]any{"enablePodMonitor": false},
+			"managed":         map[string]any{"roles": []any{map[string]any{"name": "a", "login": false, "superuser": false}}},
+		})
+		s := generateCnpgCluster(t, c).Spec
+		// Monitoring compared whole: enablePodMonitor is deprecated upstream.
+		if s.MinSyncReplicas != 0 || s.FailoverDelay != 0 || !reflect.DeepEqual(s.Monitoring, &cnpgv1.MonitoringConfiguration{}) {
+			t.Errorf("minSyncReplicas/failoverDelay/monitoring = %d/%d/%+v, want the authored zeros", s.MinSyncReplicas, s.FailoverDelay, s.Monitoring)
+		}
+		if roles := s.Managed.Roles; len(roles) != 1 || roles[0].Login || roles[0].Superuser {
+			t.Errorf("roles = %+v, want login and superuser false", roles)
 		}
 	})
 }
