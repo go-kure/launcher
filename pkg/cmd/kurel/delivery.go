@@ -1,6 +1,7 @@
 package kurel
 
 import (
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kio "github.com/go-kure/kure/pkg/io"
@@ -310,6 +313,9 @@ func (id objectIdentity) String() string {
 // namespace, and kustomize-controller's server-side apply refuses a namespaced
 // object without one ("namespace not specified"), so it is never applied as
 // the delivery object of that name.
+//
+// An artifact object that is a list envelope is applied as its members, so
+// every member is compared too (listMembers).
 func (d *deliveryOutput) checkCollisions() error {
 	delivery := make(map[objectIdentity]bool, len(d.flux))
 	for _, o := range d.flux {
@@ -317,13 +323,88 @@ func (d *deliveryOutput) checkCollisions() error {
 	}
 	for _, a := range d.artifacts {
 		for _, o := range a.objects {
-			if id := identityOf(*o); delivery[id] {
-				return errors.Errorf("artifact %q carries %s, which is also a Flux delivery object this build generates: rename the component that renders it, or the application, so that no artifact object has a delivery object's kind, namespace and name",
-					a.name, id)
+			id := identityOf(*o)
+			if delivery[id] {
+				return collisionError(a.name, id.String())
+			}
+			members, err := listMembers(*o)
+			if err != nil {
+				return errors.Wrapf(err, "artifact %q: reading the list members of %s", a.name, id)
+			}
+			for _, m := range members {
+				if mid := identityOf(m); delivery[mid] {
+					return collisionError(a.name, mid.String()+" (a member of list "+id.String()+")")
+				}
 			}
 		}
 	}
 	return nil
+}
+
+func collisionError(artifact, object string) error {
+	return errors.Errorf("artifact %q carries %s, which is also a Flux delivery object this build generates: rename the component that renders it, or the application, so that no artifact object has a delivery object's kind, namespace and name",
+		artifact, object)
+}
+
+// listMembers returns the objects o carries as a list envelope, at every
+// depth: each object in its items array and, recursively, theirs. Nothing
+// applies a list envelope itself; reconciling an artifact applies its
+// members:
+//
+//   - kustomize replaces an object whose kind ends in "List" and that has an
+//     items field by its items, recursively (Factory.inlineAnyEmbeddedLists in
+//     sigs.k8s.io/kustomize/api/resource/factory.go);
+//   - kustomize-controller then decodes kustomize's output with
+//     ReadObjects (github.com/fluxcd/pkg/ssa/utils/object.go), which
+//     replaces any object whose items field is an array, whatever its kind,
+//     by its items.
+//
+// Expanding every items array at every depth covers both, and can only
+// compare more objects than are applied, never fewer. An item that is not an
+// object is skipped: kustomize and ReadObjects both refuse it, so it is never
+// applied.
+func listMembers(o client.Object) ([]client.Object, error) {
+	content, err := objectContent(o)
+	if err != nil {
+		return nil, err
+	}
+	items, ok := content["items"].([]any)
+	if !ok {
+		return nil, nil
+	}
+	var members []client.Object
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		member := &unstructured.Unstructured{Object: m}
+		nested, err := listMembers(member)
+		if err != nil {
+			return nil, err
+		}
+		members = append(members, member)
+		members = append(members, nested...)
+	}
+	return members, nil
+}
+
+// objectContent is o as its manifest encodes it: an unstructured object's own
+// content, otherwise o's JSON encoding decoded, which is how
+// kio.EncodeObjectsToYAML serializes a typed object.
+func objectContent(o client.Object) (map[string]any, error) {
+	if u, ok := o.(runtime.Unstructured); ok {
+		return u.UnstructuredContent(), nil
+	}
+	data, err := json.Marshal(o)
+	if err != nil {
+		return nil, errors.Wrap(err, "encoding the object")
+	}
+	var content map[string]any
+	if err := json.Unmarshal(data, &content); err != nil {
+		return nil, errors.Wrap(err, "decoding the object")
+	}
+	return content, nil
 }
 
 // write writes the delivery output into dir. Unit and application names are
