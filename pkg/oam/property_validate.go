@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -355,8 +356,9 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// missed it — and it asserted the rule this arm no longer implements. It has
 		// been retargeted to the rule below and renamed
 		// TestBuiltinHandlerSchemaEnumMembersHoldNoNull, walking the schemas that ship
-		// for a member holding a null. Nothing asserts the per-TYPE property any more,
-		// and this arm does not need it to be true.
+		// for a member holding a null through CheckEnumMembersHoldNoNull — a stricter,
+		// schema-less reading of this rule (go-kure/launcher#464). Nothing asserts the
+		// per-TYPE property any more, and this arm does not need it to be true.
 		for i, member := range schema.Enum {
 			if enumMemberHoldsStrippedNull(schema, member, 0) {
 				return value, errors.Errorf(
@@ -891,7 +893,8 @@ func exceedsEnumMemberDepth(v any, depth int) bool {
 // applies to a document value. It is the schema-less answer enumMemberHoldsStrippedNull
 // falls back to where a member cannot match whatever its nulls — see the Enum arm above
 // for why a member holding a null is a schema defect rather than a value that merely
-// fails to match.
+// fails to match. CheckEnumMembersHoldNoNull applies it to every member, which is
+// what makes that check stricter than the runtime arm.
 //
 // Exceeding enumMemberMaxDepth counts as "contains a null", not as clean: at that point
 // the member cannot be shown null-free, and the two failure modes are a loud schema
@@ -921,6 +924,69 @@ func containsNullValue(v any, depth int) bool {
 		return false
 	}
 	return false
+}
+
+// CheckEnumMembersHoldNoNull reports every Enum member declared on schema, or on any
+// schema nested under its Properties or Items, that holds a null anywhere: an untyped
+// nil, a typed nil (see IsNullValue), or either one at any depth inside a list or
+// string-keyed map. It returns nil when no member does. It is a static reading of a
+// schema a handler declares, for a caller — typically a test walking every schema it
+// ships — that wants a defective member found without waiting for a document to
+// validate against the property carrying it; it checks nothing else about the schema.
+//
+// It is deliberately STRICTER than the rule validatePropertyValue enforces at
+// runtime. The runtime Enum arm walks each member alongside its schema and refuses it
+// only for a null where the value's own null would have been stripped or rejected
+// (go-kure/launcher#481): a null under a key left to AdditionalProperties, inside an
+// element of an array with no Items, or below a schema with no Type is matchable
+// there, and accepted. This check does not read the schema around a member at all —
+// it applies containsNullValue, the runtime's schema-less fallback — so it reports
+// those nulls too. A schema it passes is never refused by the runtime's null rule; a
+// schema it fails may still validate. As at runtime, a member nesting past the
+// validator's depth bound counts as holding a null.
+//
+// Properties keys are visited in sorted order, so the report is deterministic. Each
+// member is named by its schema path — Properties keys joined by ".", "[]" for Items,
+// empty at schema itself — and its index in Enum. The walk over the schema is not
+// depth-bounded: schema must be a finite tree (a cyclic Items pointer never ends).
+func CheckEnumMembersHoldNoNull(schema PropertySchema) error {
+	var found []string
+	collectEnumMembersHoldingNull(schema, "", &found)
+	switch len(found) {
+	case 0:
+		return nil
+	case 1:
+		return errors.Errorf("schema declares an Enum member holding a null: %s", found[0])
+	default:
+		return errors.Errorf("schema declares %d Enum members holding a null:\n  %s",
+			len(found), strings.Join(found, "\n  "))
+	}
+}
+
+// collectEnumMembersHoldingNull appends to found every Enum member of schema and of
+// the schemas nested under it that containsNullValue reports, in the order
+// CheckEnumMembersHoldNoNull documents.
+func collectEnumMembersHoldingNull(schema PropertySchema, path string, found *[]string) {
+	for i, member := range schema.Enum {
+		if !containsNullValue(member, 0) {
+			continue
+		}
+		if path == "" {
+			*found = append(*found, fmt.Sprintf("Enum member %d", i))
+		} else {
+			*found = append(*found, fmt.Sprintf("%s: Enum member %d", path, i))
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(schema.Properties)) {
+		child := key
+		if path != "" {
+			child = path + "." + key
+		}
+		collectEnumMembersHoldingNull(schema.Properties[key], child, found)
+	}
+	if schema.Items != nil {
+		collectEnumMembersHoldingNull(*schema.Items, path+"[]", found)
+	}
 }
 
 // asArrayValue normalises any slice or array value to []any. A string is never an

@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -554,13 +553,15 @@ func sortedSchemaKeys(m map[string]oam.PropertySchema) []string {
 // declared members are not, so a member holding a null where the strip reaches can
 // never match.
 //
-// Deliberately STRICTER than the runtime arm: this walk does not read the schema, so it
-// also flags a null the runtime admits because normalization leaves it in place — under
-// an AdditionalProperties key, inside an element of an array with no Items, below a
-// schema with no Type (go-kure/launcher#481). No built-in schema declares a member
-// holding a null anywhere, so the stricter reading costs nothing today; a built-in
-// that needs one would have to relax this walk. Replacing this mirror with the
-// runtime's own check is go-kure/launcher#464.
+// The walk is pkg/oam's own CheckEnumMembersHoldNoNull, which reads every member
+// through the validator's containsNullValue rather than a copy of it here
+// (go-kure/launcher#464). It is deliberately STRICTER than the runtime arm: it does
+// not read the schema around a member, so it also flags a null the runtime admits
+// because normalization leaves it in place — under an AdditionalProperties key, inside
+// an element of an array with no Items, below a schema with no Type
+// (go-kure/launcher#481). No built-in schema declares a member holding a null
+// anywhere, so the stricter reading costs nothing today; a built-in that needs one
+// would have to stop using the stricter check here.
 //
 // Keyed per MEMBER, not per schema type, because that is what the validator does: an
 // Enum declared on an array- or object-typed node is legal and keeps matching, as long
@@ -581,8 +582,9 @@ func TestBuiltinHandlerSchemaEnumMembersHoldNoNull(t *testing.T) {
 	}
 }
 
-// assertSchemaEnumMembersNonNull walks a handler's top-level PropertySchema entries,
-// mirroring assertSchemaDescribed.
+// assertSchemaEnumMembersNonNull checks each of a handler's top-level PropertySchema
+// entries with oam.CheckEnumMembersHoldNoNull, which walks its nested Properties and
+// Items itself, mirroring assertSchemaDescribed.
 func assertSchemaEnumMembersNonNull(t *testing.T, kind, name string, h any) {
 	t.Helper()
 	p, ok := h.(oam.PropertySchemaProvider)
@@ -591,24 +593,9 @@ func assertSchemaEnumMembersNonNull(t *testing.T, kind, name string, h any) {
 	}
 	schema := p.PropertySchema()
 	for _, k := range sortedSchemaKeys(schema) {
-		assertEnumMembersNonNull(t, fmt.Sprintf("%s %s.%s", kind, name, k), schema[k])
-	}
-}
-
-// assertEnumMembersNonNull fails if node — or any nested Properties value or Items
-// schema, recursively — declares an Enum member holding a null.
-func assertEnumMembersNonNull(t *testing.T, path string, node oam.PropertySchema) {
-	t.Helper()
-	for i, member := range node.Enum {
-		if schemaValueHoldsNull(member, 0) {
-			t.Errorf("%s: PropertySchema declares Enum member %d holding a null — no built-in schema may, even where validatePropertyValue would admit it", path, i)
+		if err := oam.CheckEnumMembersHoldNoNull(schema[k]); err != nil {
+			t.Errorf("%s %s.%s: no built-in schema may hold a null in an Enum member, even where validatePropertyValue would admit it: %v", kind, name, k, err)
 		}
-	}
-	for _, k := range sortedSchemaKeys(node.Properties) {
-		assertEnumMembersNonNull(t, path+"."+k, node.Properties[k])
-	}
-	if node.Items != nil {
-		assertEnumMembersNonNull(t, path+"[]", *node.Items)
 	}
 }
 
@@ -656,69 +643,6 @@ func assertSchemaNodeTyped(t *testing.T, path string, node oam.PropertySchema) {
 	}
 	if node.Items != nil {
 		assertSchemaNodeTyped(t, path+"[]", *node.Items)
-	}
-}
-
-// schemaEnumMemberMaxDepth mirrors pkg/oam's enumMemberMaxDepth.
-const schemaEnumMemberMaxDepth = 32
-
-// schemaValueHoldsNull mirrors pkg/oam's containsNullValue, which is unexported and in
-// another package: the same nil-kind set, the same walk through slices/arrays and
-// string-keyed maps, and the same treatment of an over-deep member as null-bearing
-// rather than clean. containsNullValue is the runtime's schema-less fallback, not its
-// whole rule: the Enum arm walks each member alongside its schema
-// (enumMemberHoldsStrippedNull), so this mirror flags a superset of what the runtime
-// refuses — see the test's doc comment above.
-//
-// Drift here can only make this test miss a member the validator would reject, never
-// invent one beyond that superset: the runtime arm stays authoritative and pkg/oam's
-// own TestValidatePropertyValue_EnumMemberHoldingNullIsRejected and
-// TestValidatePropertyValue_EnumMemberNullWhereNothingStripsIt pin it directly.
-func schemaValueHoldsNull(v any, depth int) bool {
-	if schemaValueIsNull(v) {
-		return true
-	}
-	if depth >= schemaEnumMemberMaxDepth {
-		return true
-	}
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.Slice, reflect.Array:
-		for i := 0; i < rv.Len(); i++ {
-			if schemaValueHoldsNull(rv.Index(i).Interface(), depth+1) {
-				return true
-			}
-		}
-		return false
-	case reflect.Map:
-		// A non-string-keyed map is not an object to the validator, which stops
-		// walking it for the same reason.
-		if rv.Type().Key().Kind() != reflect.String {
-			return false
-		}
-		iter := rv.MapRange()
-		for iter.Next() {
-			if schemaValueHoldsNull(iter.Value().Interface(), depth+1) {
-				return true
-			}
-		}
-		return false
-	default:
-		return false
-	}
-}
-
-// schemaValueIsNull mirrors pkg/oam's isNullValue: an untyped nil, or a typed nil of
-// any kind that can hold one.
-func schemaValueIsNull(v any) bool {
-	if v == nil {
-		return true
-	}
-	switch rv := reflect.ValueOf(v); rv.Kind() {
-	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Chan, reflect.Func, reflect.Interface:
-		return rv.IsNil()
-	default:
-		return false
 	}
 }
 

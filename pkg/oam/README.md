@@ -573,6 +573,18 @@ of thing:
   because the runtime arm only fires once a document validates against the property
   carrying the `Enum`.
 
+  That walk is exported as `CheckEnumMembersHoldNoNull(schema PropertySchema) error`,
+  so a handler outside this package can assert the same of its own schemas. It
+  reports every `Enum` member — on the schema and on every schema nested under its
+  `Properties` (in sorted key order) or `Items` — that holds a null anywhere, named
+  by schema path and member index, and returns `nil` when none does. It is
+  deliberately **stricter** than the runtime arm: it does not read the schema around
+  a member, so it also reports the matchable nulls described above (under an
+  `AdditionalProperties` key, inside an array element with no `Items`, below a schema
+  with no `Type`). A schema it passes is never refused by the runtime's null rule; one
+  it fails may still validate. A member nesting past the validator's depth bound
+  counts as holding a null, as it does at runtime.
+
 Two things this deliberately does not do:
 
 - **It makes no exception for `PlatformReserved` keys.** Reservation
