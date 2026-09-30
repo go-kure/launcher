@@ -9,10 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	kureio "github.com/go-kure/kure/pkg/io"
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
+	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -220,6 +223,109 @@ metadata:
 	// its authored annotation.
 	if got := first.Resources[0].GetAnnotations()["helm.sh/hook"]; got != multiHook {
 		t.Errorf("emitted helm.sh/hook = %q, want the authored %q", got, multiHook)
+	}
+}
+
+// multiEventHookJobChart renders a pre-install,pre-upgrade hook Job with
+// integer fields — backoffLimit: 0 and a container port — ahead of a hook-free
+// ConfigMap. yaml.v3 decodes a rendered integer as a Go int, which
+// runtime.DeepCopyJSONValue refuses with a panic, and a multi-event hook is the
+// object the grouping step deep-copies (cloneWithHookAnnotation). Shared with
+// the composite's TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields.
+const multiEventHookJobChart = `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: migrate
+        image: registry.example.com/migrate:1.0.0
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: main
+`
+
+// assertDeepCopyable fails t for any object whose content holds a type
+// runtime.DeepCopyJSON does not accept — the JSON-typed content an
+// Unstructured promises every consumer that copies it.
+func assertDeepCopyable(t *testing.T, objs []client.Object) {
+	t.Helper()
+	for _, o := range objs {
+		u, ok := o.(*unstructured.Unstructured)
+		if !ok {
+			t.Fatalf("object = %T, want *unstructured.Unstructured", o)
+		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s %q is not deep-copyable: %v", u.GetKind(), u.GetName(), r)
+				}
+			}()
+			runtime.DeepCopyJSON(u.Object)
+		}()
+	}
+}
+
+// writtenYAML is obj as kure writes it into a manifest file.
+func writtenYAML(t *testing.T, obj client.Object) string {
+	t.Helper()
+	data, err := kureio.EncodeObjectsToYAML([]*client.Object{&obj})
+	if err != nil {
+		t.Fatalf("EncodeObjectsToYAML: %v", err)
+	}
+	return string(data)
+}
+
+// TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields: a multi-event
+// hook Job with integer fields builds — no "cannot deep copy int" panic —
+// lands in the pre-install group, is deep-copyable, and is written exactly as
+// the same document decoded by yaml.v3 alone would be (an int and an int64
+// encode alike).
+func TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields(t *testing.T) {
+	cfg := helmTemplateFixture(t, stubRender(multiEventHookJobChart))
+
+	if got, want := renderedNames(t, cfg), []string{"migrate", "main"}; !slices.Equal(got, want) {
+		t.Fatalf("execution order = %v, want %v", got, want)
+	}
+	ml := &layout.ManifestLayout{Name: "myapp", Namespace: "team"}
+	if err := cfg.AugmentLayout(ml); err != nil {
+		t.Fatalf("AugmentLayout: %v", err)
+	}
+	if len(ml.Children) != 2 {
+		t.Fatalf("ml.Children has %d entries, want 2 hook groups", len(ml.Children))
+	}
+	if name := ml.Children[0].Name; name != "myapp-00-pre-install" {
+		t.Fatalf("Children[0].Name = %q, want %q", name, "myapp-00-pre-install")
+	}
+	hook := ml.Children[0].Resources
+	if names := resourceNames(hook); !slices.Equal(names, []string{"migrate"}) {
+		t.Fatalf("Children[0] holds %v, want [migrate]", names)
+	}
+	assertDeepCopyable(t, hook)
+
+	var plain map[string]any
+	if err := yaml.NewDecoder(strings.NewReader(multiEventHookJobChart)).Decode(&plain); err != nil {
+		t.Fatalf("decoding the Job with yaml.v3: %v", err)
+	}
+	want := writtenYAML(t, &unstructured.Unstructured{Object: plain})
+	got := writtenYAML(t, hook[0])
+	if got != want {
+		t.Errorf("written Job =\n%s\nwant (the yaml.v3 decode written as is)\n%s", got, want)
+	}
+	for _, line := range []string{"backoffLimit: 0\n", "- containerPort: 8080\n"} {
+		if !strings.Contains(got, line) {
+			t.Errorf("written Job lacks %q:\n%s", line, got)
+		}
 	}
 }
 
