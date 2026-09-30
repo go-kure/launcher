@@ -100,7 +100,8 @@ type componentLabelFixture struct {
 	// name); the test pins that the refusal is unchanged.
 	longRefusal string
 	// labelled says the component's own output carries an `app` label, so the
-	// invariant is checked on at least one value rather than vacuously.
+	// invariant is checked on at least one value rather than vacuously — at
+	// the boundary name, and at the long name when the type accepts it.
 	labelled bool
 	// selectors is the minimum number of pod selectors the boundary render must
 	// match against its own pod template (0 for a type with no pods, or a Job
@@ -136,6 +137,12 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"postgresql": {props: map[string]any{"version": "16", "storageSize": "10Gi"}},
 	"helmchart": {props: map[string]any{"version": "v1.17.2",
 		"source": map[string]any{"kind": "OCIRepository", "url": "oci://ghcr.io/example/charts/app"}}},
+	// valuesMode configMap with non-empty values emits the values ConfigMap,
+	// the one object of this type carrying an `app` label.
+	"helmrelease": {props: map[string]any{
+		"chart": map[string]any{"spec": map[string]any{"chart": "app",
+			"sourceRef": map[string]any{"kind": "HelmRepository", "name": "example"}}},
+		"valuesMode": "configMap", "values": map[string]any{"replicaCount": 2}}, labelled: true},
 	"passthrough": {props: map[string]any{"object": map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "data": map[string]any{"k": "v"}}}},
 	"crd": {props: map[string]any{"inline": `apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -269,7 +276,11 @@ func TestComponentLabelInvariant_ComponentTypes(t *testing.T) {
 				}
 				return
 			}
-			checkComponentLabelInvariant(t, renderLabelInvariant(t, app), long)
+			// A labelled type must keep its label past 63 characters too:
+			// omitting it would pass the value checks vacuously.
+			if n := checkComponentLabelInvariant(t, renderLabelInvariant(t, app), long); fx.labelled && n.app == 0 {
+				t.Errorf("%s with the 200-character name emitted no `app` label; the invariant check is vacuous for it", typ)
+			}
 		})
 	}
 }

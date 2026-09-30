@@ -2058,11 +2058,9 @@ not part of either change.
   always carries the values hash. Identical values hash alike whatever their key order, and
   any change to them renames the ConfigMap and so changes the HelmRelease's spec, which is
   what makes Flux upgrade the release on a values-only edit. The ConfigMap carries the label
-  `app: <component>` and no annotations, but only when the component name is a legal label
-  value: a component name may be a DNS-1123 subdomain of up to 253 bytes, while a label value
-  is at most 63 characters, so a longer name yields a ConfigMap with no labels rather than
-  one the API server rejects. The same limit for the labels other component types write is
-  tracked in go-kure/launcher#572. Empty or absent `values` generate no ConfigMap and
+  `app: <label value>` and no annotations — the component name at 63 characters or fewer,
+  its projection past that, as [The `app` label](#the-app-label) describes (the same label
+  as the composite's values ConfigMap). Empty or absent `values` generate no ConfigMap and
   no entry. There is no handler-level default for `valuesMode`.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.
@@ -2526,7 +2524,7 @@ byte-identical, and projects a longer one onto a readable prefix of at most 52 c
 (its first 52, with trailing `-` and `.` trimmed) plus `-` and
 a 10-hex-character sha256 digest (go-kure/launcher#572). The workload kinds and `service` never reach
 the projection, since their container name or Service name already refuses a name over 63
-characters; the `helmchart` values ConfigMap does. Object names are not projected. A custom handler
+characters; the `helmchart` and `helmrelease` values ConfigMaps do. Object names are not projected. A custom handler
 that labels its objects by component uses the same function, so its selectors and the
 built-in traits' selectors (a PodDisruptionBudget, a NetworkPolicy `podSelector`) agree.
 
