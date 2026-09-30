@@ -148,4 +148,40 @@ func TestResourceAndLabelMaps_NullEntryIsOmission(t *testing.T) {
 			t.Error("parseLabelMap: a non-string value must still be refused")
 		}
 	})
+	// The null skip must not swallow the key check: an invalid name was
+	// refused before this change whatever its value, and still is.
+	for _, nv := range nullValues() {
+		t.Run("invalid key with null still errors/"+nv.name, func(t *testing.T) {
+			if _, err := parseResourceList(map[string]any{"bad name!": nv.val}); err == nil || !strings.Contains(err.Error(), "invalid resource name") {
+				t.Errorf("parseResourceList: got %v, want the invalid resource name refusal", err)
+			}
+			if _, err := parseLabelMap(map[string]any{"in valid": nv.val}, "nodeSelector"); err == nil || !strings.Contains(err.Error(), "invalid label key") {
+				t.Errorf("parseLabelMap: got %v, want the invalid label key refusal", err)
+			}
+		})
+	}
+}
+
+// A service selector whose every entry is null parses to an empty map, which
+// would otherwise replace the default selector and emit a selector-less
+// Service. It must meet the refusal `selector: {}` already gets.
+func TestServiceSelector_AllNullIsTheEmptySelectorRefusal(t *testing.T) {
+	const want = "selector: must name at least one label"
+	build := func(sel any) error {
+		_, err := (&ServiceHandler{}).ToApplicationConfig(&oam.Component{Name: "web", Type: "service", Properties: map[string]any{
+			"ports":    []any{map[string]any{"port": 8080}},
+			"selector": sel,
+		}}, "default")
+		return err
+	}
+	if err := build(map[string]any{}); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("selector: {} = %v, want %q", err, want)
+	}
+	for _, nv := range nullValues() {
+		t.Run(nv.name, func(t *testing.T) {
+			if err := build(map[string]any{"app": nv.val}); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("selector: {app: null} = %v, want %q", err, want)
+			}
+		})
+	}
 }
