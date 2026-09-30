@@ -241,6 +241,48 @@ func TestCnpgClusterHandler_NullIsAbsence(t *testing.T) {
 			t.Error("the authored map lost its null key")
 		}
 	})
+	// A lowering rule assembles properties in Go, with concrete collection
+	// types; encoding/json serializes those like the untyped form.
+	t.Run("typed map null value is dropped", func(t *testing.T) {
+		hundred := "100"
+		c := newCnpgCluster(t, map[string]any{
+			"postgresql": map[string]any{"parameters": map[string]*string{"work_mem": nil, "max_connections": &hundred}},
+		})
+		params := generateCnpgCluster(t, c).Spec.PostgresConfiguration.Parameters
+		if _, ok := params["work_mem"]; ok {
+			t.Errorf("parameters = %v; a typed null value must not become an empty string", params)
+		}
+		if params["max_connections"] != "100" {
+			t.Errorf("parameters = %v; sibling lost", params)
+		}
+	})
+	t.Run("typed slice null element is refused", func(t *testing.T) {
+		for name, roles := range map[string]any{
+			"slice of maps":            []map[string]any{{"name": "a"}, nil},
+			"slice of struct pointers": []*cnpgv1.RoleConfiguration{{Name: "a"}, nil},
+		} {
+			err := cnpgClusterErr(t, map[string]any{"managed": map[string]any{"roles": roles}})
+			if err == nil || !strings.Contains(err.Error(), "managed.roles[1]: null is not a valid array element") {
+				t.Errorf("%s: err = %v", name, err)
+			}
+		}
+	})
+	t.Run("typed slice without nulls decodes", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{
+			"managed": map[string]any{"roles": []*cnpgv1.RoleConfiguration{{Name: "a"}}},
+		})
+		if roles := c.Spec.Managed.Roles; len(roles) != 1 || roles[0].Name != "a" {
+			t.Errorf("roles = %+v", roles)
+		}
+	})
+	t.Run("byte slice is not taken apart", func(t *testing.T) {
+		// encoding/json writes []byte as a base64 string; walked as an array it
+		// would become a list of numbers and fail to decode into a string.
+		c := newCnpgCluster(t, map[string]any{"description": []byte("hi")})
+		if c.Spec.Description != "aGk=" {
+			t.Errorf("description = %q, want the base64 string encoding/json writes", c.Spec.Description)
+		}
+	})
 }
 
 func TestCnpgClusterConfig_ApplyPolicy_Instances(t *testing.T) {
@@ -372,6 +414,30 @@ func TestCnpgClusterConfig_ApplyPolicy_StorageDefault(t *testing.T) {
 			t.Errorf("size/instances = %q/%d, want the decoded 5Gi/2", c.Spec.StorageConfiguration.Size, c.Spec.Instances)
 		}
 	})
+	// The decoded spec cannot tell an authored "" size or 0 instances from
+	// absence, so the raw-map check itself must accept every spelling.
+	t.Run("case-variant empty size and zero instances count as authored", func(t *testing.T) {
+		for name, props := range map[string]map[string]any{
+			"storage.Size":         {"Instances": 0, "storage": map[string]any{"Size": ""}},
+			"Storage.size":         {"INSTANCES": 0, "Storage": map[string]any{"size": ""}},
+			"Storage.PvcTemplate":  {"instances": 0, "Storage": map[string]any{"PvcTemplate": map[string]any{"Resources": map[string]any{"Requests": map[string]any{"storage": "7Gi"}}}}},
+			"exact, for reference": {"instances": 0, "storage": map[string]any{"size": ""}},
+		} {
+			c := newCnpgCluster(t, props)
+			if err := c.ApplyPolicy(&stubPolicy{defaultStorageSize: "20Gi", defaultReplicas: int32ptr(3)}); err != nil {
+				t.Fatalf("%s: ApplyPolicy: %v", name, err)
+			}
+			if c.Spec.StorageConfiguration.Size != "" || c.Spec.Instances != 0 {
+				t.Errorf("%s: size/instances = %q/%d; a policy default replaced an authored value", name, c.Spec.StorageConfiguration.Size, c.Spec.Instances)
+			}
+		}
+	})
+	t.Run("case-variant non-integer instances is refused by name", func(t *testing.T) {
+		if err := cnpgClusterErr(t, map[string]any{"Instances": 1.5}); err == nil ||
+			!strings.HasPrefix(err.Error(), "instances: ") {
+			t.Errorf("err = %v", err)
+		}
+	})
 	t.Run("case-variant negative instances is refused", func(t *testing.T) {
 		if err := cnpgClusterErr(t, map[string]any{"Instances": -1}); err == nil ||
 			!strings.Contains(err.Error(), "instances: must be >= 0, got -1") {
@@ -453,6 +519,29 @@ func TestCnpgClusterConfig_ApplyPolicy_SecurityContext(t *testing.T) {
 			"podSecurityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}},
 		})
 		if err := c.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
+			t.Errorf("ApplyPolicy: %v", err)
+		}
+	})
+}
+
+func TestCnpgClusterConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
+	t.Run("imageName from a disallowed registry is refused", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{"imageName": "docker.io/library/postgres:16"})
+		err := c.ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}})
+		if want := `imageName: image "docker.io/library/postgres:16" is not from an allowed registry [ghcr.io]`; err == nil || err.Error() != want {
+			t.Errorf("err = %v, want %q", err, want)
+		}
+	})
+	t.Run("imageName from an allowed registry passes", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{"imageName": "ghcr.io/cloudnative-pg/postgresql:16"})
+		if err := c.ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}}); err != nil {
+			t.Errorf("ApplyPolicy: %v", err)
+		}
+	})
+	t.Run("unset imageName is not checked", func(t *testing.T) {
+		// The operator's default image is not one the document chose.
+		c := newCnpgCluster(t, map[string]any{})
+		if err := c.ApplyPolicy(&stubPolicy{allowedRegistries: []string{"registry.invalid"}}); err != nil {
 			t.Errorf("ApplyPolicy: %v", err)
 		}
 	})

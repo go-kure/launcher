@@ -84,6 +84,8 @@ The component's `PropertySchema` mirrors the upstream spec type:
 Explicit nulls follow the package-wide null contract: a null is absence at every
 depth, and a null array element is an error naming its path. They are removed
 before the strict decode, so a null never reaches the operator as a zero value.
+Collections built in Go with concrete types, as a lowering rule may produce
+(`map[string]*string`, `[]*T`), are walked the same way.
 
 ### Policy lives on the kind
 
@@ -95,8 +97,9 @@ today — the instance count default and maximum, the cpu and memory request and
 limit defaults and maxima, and the storage size default and maximum — plus the
 checks that follow from fields the curated component never exposed: the storage
 maximum on every claim the Cluster creates (`storage`, `walStorage`, each
-tablespace and the ephemeral volume template) and the privileged, capability and
-host-process refusals on the two security contexts.
+tablespace and the ephemeral volume template), the privileged, capability and
+host-process refusals on the two security contexts, and the registry allowlist
+the workload kinds apply to their image, on an authored `imageName`.
 
 A policy default never overrides an authored value, including an authored value
 equal to what the default would be. The kind therefore records which fields were
@@ -139,5 +142,9 @@ output is intended to stay identical.
 - Lowering `postgresql` onto `cnpg-cluster`, and the `enablePDB` trait: the
   follow-up change under go-kure/launcher#281.
 - `Pooler`, `Database` and `ObjectStore` kind components: go-kure/launcher#573.
-- The registry allowlist is not applied to `imageName` or `imageCatalogRef`,
-  matching `postgresql`, which does not apply it to its image either.
+- `postgresql` does not apply the registry allowlist to its image, while
+  `cnpg-cluster` applies it to `imageName`, so a lowered `postgresql` whose
+  image comes from a registry outside the list would be refused: the follow-up
+  change decides that. `imageCatalogRef` names a catalog object rather than an
+  image and is not checked, nor is the operator's default image when
+  `imageName` is unset.
