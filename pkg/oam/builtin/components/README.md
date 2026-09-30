@@ -300,7 +300,13 @@ overcommittable — a lower request than limit is fine, and either may be set
 without the other — but when both are present the request still must not
 *exceed* the limit, matching `validateResourceRequirements`'s
 request-vs-limit comparison for every resource name, not just the
-non-overcommitable set. No policy
+non-overcommitable set. Admission's "HugePages require cpu or memory" rule
+(a block naming a `hugepages-<size>` resource must also name cpu or memory,
+on either side) is not checked here, because a container's final resources
+always carry the cpu/memory requests `buildResourceRequirements` defaults in;
+it is checked where a block reaches the cluster without those defaults —
+`podResources` at parse time, and the postgresql Cluster's `resources` at
+generation time. No policy
 default/max hook exists for names other than cpu/memory
 today; the container-level `claims` list (Dynamic Resource Allocation) is
 deliberately not covered — it only *references* pod-level claims by name, and
@@ -826,7 +832,7 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 | `shareProcessNamespace` | bool | Mutually exclusive with `hostPID: true`. | additive |
 | `hostname`, `subdomain`, `setHostnameAsFQDN`, `hostnameOverride`, `hostAliases[]{ip,hostnames}` | naming | `hostname`/`subdomain` are DNS-1123 labels; `hostnameOverride` is a ≤64-char subdomain and cannot combine with `hostNetwork` or `setHostnameAsFQDN`. `hostAliases[].ip` is a plain IPv4/IPv6 literal, zone suffixes rejected as for `dnsConfig.nameservers`. | additive |
 | `podSecurityContext` | object | The full `corev1.PodSecurityContext` field set (`runAsUser`/`runAsGroup`/`runAsNonRoot`/`fsGroup`/`fsGroupChangePolicy`/`supplementalGroups`/`supplementalGroupsPolicy`/`sysctls`/`seLinuxOptions`/`seLinuxChangePolicy`/`seccompProfile`/`appArmorProfile`/`windowsOptions`), closed and validated like the container `securityContext`. `sysctls[].name` must match the sysctl grammar (≤253 characters of dot- or slash-separated lowercase alphanumeric segments) and be unique within the list. `windowsOptions.hostProcess: true` additionally requires `hostNetwork: true`, which upstream demands of any pod containing HostProcess containers. The `runAsUser: 0` / `runAsNonRoot: true` contradiction is judged per container on the *effective* values once the containers are assembled, not on this object alone — a container-level `runAsUser` overrides the pod-level one, so the pair is a valid document when every container names a non-root UID, and the deferred check also catches a container-level `runAsUser: 0` under a pod-level `runAsNonRoot`. **Partly policy-gated**: `windowsOptions.hostProcess: true` is rejected unless `AllowPrivileged()` allows it (a HostProcess pod runs with the node's own privileges, and upstream forces every container in it to be HostProcess too); every other field has no policy hook. | additive |
-| `imagePullSecrets[]{name}`, `enableServiceLinks`, `os{name}`, `hostUsers`, `readinessGates[]{conditionType}`, `resourceClaims[]{name, resourceClaimName \| resourceClaimTemplateName}`, `podResources{requests,limits}` | misc | `podResources` accepts only `cpu`, `memory` and `hugepages-<size>` (pod-level resources have no ephemeral-storage or extended resources); claim names must be unique and name exactly one source. `hostUsers: false` cannot combine with `hostPID` or `hostIPC` (upstream forbids both outright); it stays authorable alongside `hostNetwork`, which upstream forbids only on a cluster without user-namespace host-network support, so whether that pair is accepted is a property of the target cluster rather than of the document. **`podResources` is policy-gated**: its cpu and memory requests and limits are checked against `MaxCPU()`/`MaxMemory()`, the same budget the container `resources` are checked against. | additive |
+| `imagePullSecrets[]{name}`, `enableServiceLinks`, `os{name}`, `hostUsers`, `readinessGates[]{conditionType}`, `resourceClaims[]{name, resourceClaimName \| resourceClaimTemplateName}`, `podResources{requests,limits}` | misc | `podResources` accepts only `cpu`, `memory` and `hugepages-<size>` (pod-level resources have no ephemeral-storage or extended resources), and a `hugepages-<size>` entry needs `cpu` or `memory` in `requests` or `limits` (admission's "HugePages require cpu or memory"; pod-level resources get no defaults); claim names must be unique and name exactly one source. `hostUsers: false` cannot combine with `hostPID` or `hostIPC` (upstream forbids both outright); it stays authorable alongside `hostNetwork`, which upstream forbids only on a cluster without user-namespace host-network support, so whether that pair is accepted is a property of the target cluster rather than of the document. **`podResources` is policy-gated**: its cpu and memory requests and limits are checked against `MaxCPU()`/`MaxMemory()`, the same budget the container `resources` are checked against. | additive |
 
 Deliberately **not** accepted — each is rejected with an error naming the
 reason rather than silently ignored: `ephemeralContainers` (added to a running
@@ -1935,6 +1941,11 @@ not part of either change.
   `cpu`/`memory` was rejected, so this is an additive change). Only
   `cpu`/`memory` carry a policy default and maximum; CNPG-specific sizing
   such as `ephemeralVolumesSizeLimit` is not derived from these entries.
+  CNPG copies this block onto the instance pods unchanged and nothing
+  defaults cpu/memory into it except a policy, so generation refuses a block
+  that names `hugepages-<size>` without `cpu` or `memory` on either side
+  after policy defaults (`resources: hugepages require cpu or memory in
+  requests or limits`) — admission would refuse every instance pod.
   `affinity` takes the same four keys as the shared `affinity` property
   (`enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType`,
   `nodeSelector`) with the same defaults — `kubernetes.io/hostname` and

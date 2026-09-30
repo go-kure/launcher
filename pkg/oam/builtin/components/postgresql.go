@@ -938,6 +938,13 @@ func (c *PostgresqlConfig) createCluster(app *stack.Application) (client.Object,
 		}
 	}
 
+	// Checked here, on the resources the Cluster actually carries, rather than
+	// at parse time: ApplyPolicy may still default cpu/memory in, and CNPG
+	// copies this block onto the instance pods unchanged, so a hugepages-only
+	// block would build a Cluster whose pods admission always refuses.
+	if err := validateHugePagesHaveCPUOrMemory("resources", c.Resources.Requests, c.Resources.Limits); err != nil {
+		return nil, err
+	}
 	cluster.Spec.Resources = corev1.ResourceRequirements{
 		Requests: cnpgResourceList(c.Resources.Requests),
 		Limits:   cnpgResourceList(c.Resources.Limits),

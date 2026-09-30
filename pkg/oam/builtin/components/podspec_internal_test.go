@@ -413,6 +413,7 @@ func TestParsePodSpec_Errors(t *testing.T) {
 		{"resourceClaims both sources", map[string]any{"resourceClaims": []any{map[string]any{"name": "c", "resourceClaimName": "x", "resourceClaimTemplateName": "y"}}}, false, "exactly one of resourceClaimName or resourceClaimTemplateName"},
 		{"podResources ephemeral-storage", map[string]any{"podResources": map[string]any{"requests": map[string]any{"ephemeral-storage": "1Gi"}}}, false, "pod-level resources support only cpu, memory, and hugepages"},
 		{"podResources extended resource", map[string]any{"podResources": map[string]any{"limits": map[string]any{"nvidia.com/gpu": "1"}}}, false, "pod-level resources support only cpu, memory, and hugepages"},
+		{"podResources hugepages without cpu or memory", map[string]any{"podResources": map[string]any{"limits": map[string]any{"hugepages-2Mi": "4Mi"}}}, false, "podResources: hugepages require cpu or memory"},
 		{"podResources bad quantity", map[string]any{"podResources": map[string]any{"limits": map[string]any{"cpu": "lots"}}}, false, "invalid podResources configuration"},
 		{"podResources unknown key", map[string]any{"podResources": map[string]any{"requestz": map[string]any{"cpu": "1"}}}, false, `podResources: unrecognized key "requestz"`},
 		{"podResources requests not object", map[string]any{"podResources": map[string]any{"requests": "1"}}, false, "podResources.requests: must be an object"},
