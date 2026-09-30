@@ -518,13 +518,16 @@ func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 //     math.MaxUint64, becomes a json.Number of the same digits (int64 cannot
 //     hold it);
 //   - time.Time, its type for an unquoted timestamp, becomes the RFC 3339
-//     string encoding/json writes for it;
+//     string encoding/json writes for it (time.Time.MarshalJSON's);
 //   - float64 (also its type for an integer beyond math.MaxUint64, and for
 //     .inf and .nan, which encoding/json refuses to write, as before),
 //     string, bool and nil are kept.
 //
 // A mapping with a key that is not a string (map[any]any) is an error naming
-// its path: encoding/json cannot write one either. So is any other type.
+// its path: encoding/json cannot write one either. So is a time.Time that
+// MarshalJSON refuses because RFC 3339 cannot express it (a year outside
+// [0,9999], or a UTC offset of 24 hours or more, which the time.Parse behind
+// yaml.v3's timestamps accepts), and any other type.
 func toJSONTypes(v any, path string) (any, error) {
 	switch t := v.(type) {
 	case map[string]any:
@@ -550,7 +553,13 @@ func toJSONTypes(v any, path string) (any, error) {
 	case uint64:
 		return json.Number(strconv.FormatUint(t, 10)), nil
 	case time.Time:
-		return t.Format(time.RFC3339Nano), nil
+		// The string MarshalJSON writes, quotes removed: RFC 3339 text holds no
+		// character JSON escapes. Its refusal is what kure's writer met before.
+		b, err := t.MarshalJSON()
+		if err != nil {
+			return nil, errors.Wrapf(err, "%s: a timestamp outside RFC 3339 cannot be emitted", path)
+		}
+		return string(b[1 : len(b)-1]), nil
 	case nil, bool, string, int64, float64:
 		return t, nil
 	case map[any]any:
