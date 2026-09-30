@@ -432,6 +432,8 @@ func TestFluxSourceHandlers_Refuses(t *testing.T) {
 // TestFluxSourceHandlers_ApplyPolicy: the fetch host — url for the three
 // repositories (the user of an ssh:// URL dropped), endpoint for bucket — must
 // be in the policy's allowed registries; no policy or an empty list permits it.
+// An oci:// url's explicit-registry rule and a gcp Bucket's fixed host have
+// their own tests below.
 func TestFluxSourceHandlers_ApplyPolicy(t *testing.T) {
 	cases := []struct {
 		typ, value string
@@ -479,6 +481,140 @@ func TestFluxSourceHandlers_ApplyPolicy(t *testing.T) {
 		if err := cfg.ApplyPolicy(fakeOCIPolicy{}); err != nil {
 			t.Errorf("%s %q: empty allowlist: %v", tc.typ, tc.value, err)
 		}
+	}
+}
+
+// TestFluxSourceHandlers_ApplyPolicyOCIRegistry: under a non-empty allowlist an
+// oci:// url must name its registry explicitly — a first segment that is
+// localhost or contains "." or ":" — because go-containerregistry, which Flux
+// parses the url with, otherwise reads the whole reference as a Docker Hub
+// repository: oci://ghcr.io and oci://registry/my-artifact are pulled from
+// Docker Hub, whatever host the allowlist matched. An ocirepository url also
+// needs a repository path after the registry; a helmrepository url may stop at
+// the registry, since Flux appends the chart name, and the rule follows its url
+// scheme whatever its type. An explicit registry is matched exactly, as before;
+// no policy or an empty allowlist permits every url.
+func TestFluxSourceHandlers_ApplyPolicyOCIRegistry(t *testing.T) {
+	const (
+		implicit   = "does not name its registry explicitly"
+		notAllowed = "is not in allowed registries"
+	)
+	cases := []struct {
+		name, typ, url string
+		allowed        []string
+		want           string // empty: allowed; else a substring of the error
+	}{
+		// Host only: Flux reads oci://ghcr.io as index.docker.io/library/ghcr.io.
+		{"host only", "ocirepository", "oci://ghcr.io", []string{"ghcr.io"}, implicit},
+		{"host only, trailing slash", "ocirepository", "oci://ghcr.io/", []string{"ghcr.io"}, implicit},
+		{"host only", "helmrepository", "oci://ghcr.io", []string{"ghcr.io"}, ""},
+		{"host only, not allowed", "helmrepository", "oci://ghcr.io", []string{"quay.io"}, notAllowed},
+
+		// A single-label first segment is a Docker Hub namespace.
+		{"single label", "ocirepository", "oci://registry/my-artifact", []string{"registry"}, implicit},
+		{"single label", "helmrepository", "oci://registry/charts", []string{"registry"}, implicit},
+		{"single label host only", "helmrepository", "oci://registry", []string{"registry"}, implicit},
+
+		// Explicit registries, matched exactly; the port is part of the host.
+		{"localhost", "ocirepository", "oci://localhost/x", []string{"localhost"}, ""},
+		{"localhost with port", "ocirepository", "oci://localhost:5000/x", []string{"localhost:5000"}, ""},
+		{"localhost with port, entry without", "ocirepository", "oci://localhost:5000/x", []string{"localhost"}, notAllowed},
+		{"registry with port", "ocirepository", "oci://registry.example:5000/org/x", []string{"registry.example:5000"}, ""},
+		{"docker.io", "ocirepository", "oci://docker.io/library/x", []string{"docker.io"}, ""},
+		{"multi-segment path", "ocirepository", "oci://ghcr.io/org/team/x", []string{"ghcr.io"}, ""},
+		{"not allowed", "ocirepository", "oci://evil.example.com/org/x", []string{"ghcr.io"}, notAllowed},
+		{"localhost with port", "helmrepository", "oci://localhost:5000", []string{"localhost:5000"}, ""},
+		{"docker.io", "helmrepository", "oci://docker.io/org", []string{"docker.io"}, ""},
+
+		// Userinfo still fails closed, whichever way the first segment reads.
+		{"userinfo, explicit", "ocirepository", "oci://user@ghcr.io/org/x", []string{"ghcr.io"}, notAllowed},
+		{"userinfo, single label", "ocirepository", "oci://user@registry/x", []string{"registry"}, implicit},
+		{"userinfo with password", "helmrepository", "oci://user:pass@ghcr.io/charts", []string{"ghcr.io"}, notAllowed},
+	}
+	kinds := map[string]fluxSourceKind{}
+	for _, k := range fluxSourceKinds() {
+		kinds[k.typ] = k
+	}
+	for _, tc := range cases {
+		k := kinds[tc.typ]
+		// A helmrepository is checked by url scheme, so with and without type oci.
+		helmTypes := []string{""}
+		if tc.typ == "helmrepository" {
+			helmTypes = []string{sourcev1.HelmRepositoryTypeOCI, sourcev1.HelmRepositoryTypeDefault}
+		}
+		for _, helmType := range helmTypes {
+			name := tc.typ + "/" + tc.name
+			if helmType != "" {
+				name += "/type " + helmType
+			}
+			t.Run(name, func(t *testing.T) {
+				props := fluxSrcProps(t, k.minimal)
+				props["url"] = tc.url
+				if helmType != "" {
+					props["type"] = helmType
+				}
+				cfg := fluxSrcConfig(t, k, props).(oam.Enforceable)
+				err := cfg.ApplyPolicy(fakeOCIPolicy{allowed: tc.allowed})
+				switch {
+				case tc.want == "" && err != nil:
+					t.Errorf("url %q, allowed %v: %v, want allowed", tc.url, tc.allowed, err)
+				case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+					t.Errorf("url %q, allowed %v: error = %v, want one containing %q", tc.url, tc.allowed, err, tc.want)
+				case err != nil && !strings.Contains(err.Error(), tc.typ+": url: "):
+					t.Errorf("error %q does not name the component type and field", err)
+				}
+				if err := cfg.ApplyPolicy(nil); err != nil {
+					t.Errorf("url %q: nil policy: %v", tc.url, err)
+				}
+				if err := cfg.ApplyPolicy(fakeOCIPolicy{}); err != nil {
+					t.Errorf("url %q: empty allowlist: %v", tc.url, err)
+				}
+			})
+		}
+	}
+}
+
+// TestBucket_ApplyPolicyProvider: Flux's gcp provider never reads endpoint — it
+// fetches from Google Cloud Storage's own host, storage.googleapis.com — so that
+// is the host a gcp Bucket is checked against. Every other provider (generic,
+// aws, azure, or none) fetches from endpoint, which stays the host checked.
+func TestBucket_ApplyPolicyProvider(t *testing.T) {
+	cases := []struct {
+		name, provider, endpoint string
+		allowed                  []string
+		want                     string // empty: allowed; else a substring of the error
+	}{
+		{"gcp, endpoint allowed but ignored", "gcp", "minio.example.com", []string{"minio.example.com"},
+			`bucket: provider gcp (Flux ignores endpoint): source registry "storage.googleapis.com" is not in allowed registries`},
+		{"gcp, storage host allowed", "gcp", "minio.example.com", []string{"storage.googleapis.com"}, ""},
+		{"gcp, storage host as endpoint", "gcp", "storage.googleapis.com", []string{"storage.googleapis.com"}, ""},
+		{"generic", "generic", "minio.example.com", []string{"minio.example.com"}, ""},
+		{"generic, storage host allowed", "generic", "minio.example.com", []string{"storage.googleapis.com"}, "bucket: endpoint: "},
+		{"aws", "aws", "s3.amazonaws.com", []string{"s3.amazonaws.com"}, ""},
+		{"azure", "azure", "https://account.blob.core.windows.net", []string{"account.blob.core.windows.net"}, ""},
+		{"azure, storage host allowed", "azure", "https://account.blob.core.windows.net", []string{"storage.googleapis.com"}, "bucket: endpoint: "},
+		{"no provider, storage host allowed", "", "minio.example.com", []string{"storage.googleapis.com"}, "bucket: endpoint: "},
+	}
+	k := fluxSourceKinds()[3]
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := fluxSrcProps(t, k.minimal)
+			props["endpoint"] = tc.endpoint
+			if tc.provider != "" {
+				props["provider"] = tc.provider
+			}
+			cfg := fluxSrcConfig(t, k, props).(oam.Enforceable)
+			err := cfg.ApplyPolicy(fakeOCIPolicy{allowed: tc.allowed})
+			switch {
+			case tc.want == "" && err != nil:
+				t.Errorf("allowed %v: %v, want allowed", tc.allowed, err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Errorf("allowed %v: error = %v, want one containing %q", tc.allowed, err, tc.want)
+			}
+			if err := cfg.ApplyPolicy(fakeOCIPolicy{}); err != nil {
+				t.Errorf("empty allowlist: %v", err)
+			}
+		})
 	}
 }
 

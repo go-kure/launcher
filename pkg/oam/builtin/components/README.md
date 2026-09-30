@@ -2211,9 +2211,29 @@ not part of either change.
   A port is part of the host, so `registry.local:5000` matches only an entry with that port. The
   user of an `ssh://` URL is dropped (`ssh://git@github.com/org/repo` checks `github.com`);
   userinfo on an `http://`, `https://` or `oci://` URL is not, so such a URL matches no entry and
-  is refused. An empty allowlist permits every host. Hosts a source reaches indirectly are not
-  checked: the chart URLs a Helm repository index advertises on other hosts (what
-  `passCredentials` exists for), and a Bucket's `sts.endpoint`.
+  is refused. An empty allowlist permits every host, and none of the rules below applies.
+
+  Two sources are not fetched from the host their field names, so the check follows Flux instead:
+
+  - *An `oci://` URL must name its registry explicitly.* Flux parses an OCIRepository `url`, and a
+    Helm OCI chart reference when it verifies the chart's signature, with go-containerregistry,
+    which takes the first path segment as the registry only when a `/` follows it and it is
+    `localhost` or contains `.` or `:`; anything else is a Docker Hub repository. So
+    `oci://ghcr.io` and `oci://registry/app` are pulled from Docker Hub, whichever entry their
+    first segment matched. Under a non-empty allowlist such a URL is refused, with an error
+    asking for a qualified registry (`oci://docker.io/library/app`,
+    `oci://registry.example:5000/org/app`). An `ocirepository` `url` also needs a repository
+    path after the registry; a `helmrepository` `oci://` URL, of either `type`, may stop at the
+    registry (`oci://ghcr.io`), since Flux appends the chart name to it.
+  - *A `bucket` with `provider: gcp` is checked against `storage.googleapis.com`.* Flux's GCP
+    client never reads `endpoint`; it uses Google Cloud Storage's own host. The `generic`, `aws`
+    and `azure` providers, and no provider, fetch from `endpoint`, which stays the host checked.
+
+  Hosts a source reaches indirectly are not checked: the chart URLs a Helm repository index
+  advertises on other hosts (what `passCredentials` exists for), a Bucket's `sts.endpoint`, the
+  token endpoints a `provider` authenticates against, and a proxy. Apart from a Bucket's `gcp`
+  provider, a `provider` or `insecure` setting changes how the source authenticates or which
+  scheme it uses, not which host it fetches from.
 
   **Namespace and references.** The CR lands in the Flux namespace when one is configured, else in
   the application namespace (`SetFluxNamespace`). Every local reference it carries — `secretRef`,

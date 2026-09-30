@@ -26,7 +26,7 @@ func (h *OCIRepositoryHandler) CanHandle(componentType string) bool {
 // test ties this key set to the struct.
 func (h *OCIRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"url":                fluxSourceRequiredString("OCIRepository spec.url: an oci:// artifact repository URL. Its host must be in the policy's allowed registries when that list is non-empty."),
+		"url":                fluxSourceRequiredString("OCIRepository spec.url: an oci:// artifact repository URL. When the policy's allowed registries are non-empty, it must be oci://<registry>/<repository> with a registry that is localhost or contains . or : (Flux reads any other first segment as a Docker Hub namespace), and that registry must be in the list."),
 		"ref":                fluxSourceObject("OCIRepository spec.ref: the tag, semver range or digest to pull (Flux defaults to the latest tag)."),
 		"layerSelector":      fluxSourceObject("OCIRepository spec.layerSelector: which artifact layer to extract or copy."),
 		"provider":           fluxSourceString("OCIRepository spec.provider for authentication: generic, aws, azure or gcp."),
@@ -83,9 +83,11 @@ func (c *OCIRepositoryConfig) validate() error {
 }
 
 // ApplyPolicy rejects a url whose registry host is not in the policy's allowed
-// registries.
+// registries. Under a non-empty allowlist the url must name its registry
+// explicitly and a repository after it (enforceFluxSourceOCIHost): Flux reads
+// oci://ghcr.io, or oci://registry/app, as a Docker Hub repository.
 func (c *OCIRepositoryConfig) ApplyPolicy(p oam.Policy) error {
-	return enforceFluxSourceHost("ocirepository", "url", c.Spec.URL, p)
+	return enforceFluxSourceOCIHost("ocirepository", "url", c.Spec.URL, true, p)
 }
 
 // SetFluxNamespace moves the OCIRepository to ns. Satisfies
