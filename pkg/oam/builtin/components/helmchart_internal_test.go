@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/helm"
@@ -135,7 +136,9 @@ func TestDecodeKubeManifests_SkipsNonMapDoc(t *testing.T) {
 // time.Time), and the object must encode to the same JSON as the yaml.v3
 // decode alone — kure writes an object from its JSON encoding, so the written
 // file is unchanged. .inf and .nan stay float64, which encoding/json refuses
-// to write either way.
+// to write either way. Timestamps at the edges of RFC 3339's range become
+// the string time.Time.MarshalJSON writes; a five-digit year is no yaml.v3
+// timestamp (it parses exactly four digits) and stays a string.
 func TestDecodeKubeManifests_JSONTypedAndWrittenUnchanged(t *testing.T) {
 	cases := []struct {
 		scalar string
@@ -155,6 +158,9 @@ func TestDecodeKubeManifests_JSONTypedAndWrittenUnchanged(t *testing.T) {
 		{".nan", math.NaN()},
 		{"2001-12-14", "2001-12-14T00:00:00Z"},
 		{"2001-12-14t21:59:43.10-05:00", "2001-12-14T21:59:43.1-05:00"},
+		{"0000-01-01T00:00:00Z", "0000-01-01T00:00:00Z"},
+		{"9999-12-31T23:59:59.999999999+23:59", "9999-12-31T23:59:59.999999999+23:59"},
+		{"10000-01-01T00:00:00Z", "10000-01-01T00:00:00Z"},
 		{"!!binary aGVsbG8=", "hello"},
 		{"true", true},
 		{"null", nil},
@@ -217,6 +223,103 @@ func TestDecodeKubeManifests_NonStringMappingKeyIsAnError(t *testing.T) {
 	for _, want := range []string{`ConfigMap "cm"`, ".data", "not a string"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// assertErrorMentions fails t unless err is non-nil and its text contains
+// every one of wants.
+func assertErrorMentions(t *testing.T, err error, wants ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("got no error, want one mentioning %q", wants)
+	}
+	for _, want := range wants {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// TestDecodeKubeManifests_TimestampOutsideRFC3339IsAnError: Go's time.Parse,
+// which yaml.v3 parses an unquoted timestamp with, accepts a UTC offset hour
+// up to 24 and minute up to 60, so a rendered offset of 24 hours or more
+// decodes to a time.Time that RFC 3339 cannot express and
+// time.Time.MarshalJSON refuses. kure writes an object from its JSON
+// encoding, so such a manifest never built; the decode refuses it too,
+// naming the object and the path, instead of converting it to a string that
+// writes.
+func TestDecodeKubeManifests_TimestampOutsideRFC3339IsAnError(t *testing.T) {
+	for _, scalar := range []string{
+		"2001-12-14T21:59:43+24:00",
+		"2001-12-14T21:59:43-24:00",
+		"2001-12-14T21:59:43+23:60",
+	} {
+		t.Run(scalar, func(t *testing.T) {
+			doc := "apiVersion: example.com/v1\nkind: Thing\nmetadata:\n  name: t\nspec:\n  nested:\n    v: " + scalar + "\n"
+			var plain map[string]any
+			if err := yaml.Unmarshal([]byte(doc), &plain); err != nil {
+				t.Fatalf("yaml.v3 decode: %v", err)
+			}
+			if _, err := json.Marshal(plain); err == nil {
+				t.Fatalf("encoding/json writes the yaml.v3 decode of %s; the case no longer pins a refused timestamp", scalar)
+			}
+			_, err := decodeKubeManifests([]byte(doc))
+			assertErrorMentions(t, err, `Thing "t"`, ".spec.nested.v", "timezone hour outside of range")
+		})
+	}
+}
+
+// TestToJSONTypes_TimeOutsideRFC3339IsAnError: every time.Time
+// time.Time.MarshalJSON refuses — a year outside [0,9999], a UTC offset of
+// 24 hours or more — is an error naming its path, as encoding/json's refusal
+// to write it was. yaml.v3 only yields four-digit years (see
+// TestDecodeKubeManifests_JSONTypedAndWrittenUnchanged), so the year cases
+// are Go values.
+func TestToJSONTypes_TimeOutsideRFC3339IsAnError(t *testing.T) {
+	cases := []struct {
+		name string
+		v    time.Time
+		want string
+	}{
+		{"year 10000", time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC), "year outside of range"},
+		{"year -1", time.Date(-1, 12, 31, 0, 0, 0, 0, time.UTC), "year outside of range"},
+		{"offset +24:00", time.Date(2001, 12, 14, 21, 59, 43, 0, time.FixedZone("", 24*3600)), "timezone hour outside of range"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := json.Marshal(tc.v); err == nil {
+				t.Fatalf("encoding/json writes %v; the case no longer pins a refused time", tc.v)
+			}
+			_, err := toJSONTypes(map[string]any{"list": []any{tc.v}}, "")
+			assertErrorMentions(t, err, ".list[0]", tc.want)
+		})
+	}
+}
+
+// TestToJSONTypes_TimeIsItsMarshalJSONString: a time.Time
+// time.Time.MarshalJSON accepts becomes a string that encodes to exactly the
+// JSON MarshalJSON writes, so the written manifest is unchanged.
+func TestToJSONTypes_TimeIsItsMarshalJSONString(t *testing.T) {
+	for _, v := range []time.Time{
+		time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.FixedZone("", 23*3600+59*60)),
+		time.Date(2001, 12, 14, 21, 59, 43, 100000000, time.FixedZone("", -5*3600)),
+		time.Date(2001, 12, 14, 21, 59, 43, 0, time.Local),
+	} {
+		want, err := v.MarshalJSON()
+		if err != nil {
+			t.Fatalf("MarshalJSON(%v): %v", v, err)
+		}
+		got, err := toJSONTypes(v, "")
+		if err != nil {
+			t.Fatalf("toJSONTypes(%v): %v", v, err)
+		}
+		if _, ok := got.(string); !ok {
+			t.Fatalf("toJSONTypes(%v) = %#v (%T), want a string", v, got, got)
+		}
+		if gotJSON, err := json.Marshal(got); err != nil || string(gotJSON) != string(want) {
+			t.Errorf("toJSONTypes(%v) encodes to %s (err %v), want MarshalJSON's %s", v, gotJSON, err, want)
 		}
 	}
 }
@@ -1306,4 +1409,15 @@ func TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields(t *testing.T) 
 	// Emits backoffLimit: 3 unchanged, from Generate and from the hook group.
 	assertEmitsBackoffLimit3(t, "Generate", *objects[0])
 	assertEmitsBackoffLimit3(t, "pre-install group", hook[0])
+}
+
+// TestGenerateTemplate_TimestampOutsideRFC3339IsABuildError is the
+// composite's delivery: template counterpart of
+// TestHelmTemplateConfig_TimestampOutsideRFC3339IsABuildError, on the same
+// chart: a rendered timestamp RFC 3339 cannot express fails the build, as
+// kure's writer refused it.
+func TestGenerateTemplate_TimestampOutsideRFC3339IsABuildError(t *testing.T) {
+	cfg := helmchartTemplateFixture(stubRender(outOfRangeOffsetChart))
+	_, err := cfg.Generate(nil)
+	assertErrorMentions(t, err, `ConfigMap "stamped"`, ".data.at", "timezone hour outside of range")
 }

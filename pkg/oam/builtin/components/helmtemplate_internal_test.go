@@ -372,6 +372,39 @@ func TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields(t *testing.T) {
 	}
 }
 
+// outOfRangeOffsetChart renders a hook-free ConfigMap whose data value is an
+// unquoted timestamp with a UTC offset of 24 hours. yaml.v3 decodes it to a
+// time.Time that RFC 3339 cannot express, which time.Time.MarshalJSON — and so
+// kure's writer, which writes an object from its JSON encoding — refuses.
+// Shared with the composite's
+// TestGenerateTemplate_TimestampOutsideRFC3339IsABuildError.
+const outOfRangeOffsetChart = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stamped
+data:
+  at: 2001-12-14T21:59:43+24:00
+`
+
+// TestHelmTemplateConfig_TimestampOutsideRFC3339IsABuildError: a rendered
+// timestamp RFC 3339 cannot express fails the build, naming the object and
+// the path, as kure's writer refused the same document decoded by yaml.v3
+// alone. Converting the value must not turn it into a string that writes.
+func TestHelmTemplateConfig_TimestampOutsideRFC3339IsABuildError(t *testing.T) {
+	var plain map[string]any
+	if err := yaml.NewDecoder(strings.NewReader(outOfRangeOffsetChart)).Decode(&plain); err != nil {
+		t.Fatalf("decoding the ConfigMap with yaml.v3: %v", err)
+	}
+	var obj client.Object = &unstructured.Unstructured{Object: plain}
+	if _, err := kureio.EncodeObjectsToYAML([]*client.Object{&obj}); err == nil {
+		t.Fatal("kure writes the yaml.v3 decode as is; the chart no longer pins a refused timestamp")
+	}
+
+	cfg := helmTemplateFixture(t, stubRender(outOfRangeOffsetChart))
+	_, err := cfg.Generate(nil)
+	assertErrorMentions(t, err, `ConfigMap "stamped"`, ".data.at", "timezone hour outside of range")
+}
+
 // TestHelmTemplateConfig_RendersOnce: Generate followed by AugmentLayout —
 // kure's layout walker's call order — renders the chart exactly once.
 func TestHelmTemplateConfig_RendersOnce(t *testing.T) {
