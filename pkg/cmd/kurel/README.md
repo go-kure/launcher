@@ -129,9 +129,11 @@ would otherwise add, so skipping the layout walk loses nothing. The `helmchart`
 component with `valuesMode: configMap` (which needs a values `ConfigMap`
 emitted alongside it) does not opt in and still fails the build; `delivery:
 template` (which only repartitions `Generate`'s own flat output into hook-group
-child layouts, adding no resources) does opt in and builds normally — see the
+child layouts, adding no resources) does opt in and builds normally, and so does
+every kind-named `helmtemplate` component, which is that same path authored
+directly — see the
 [Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
-helmchart section for both. Any other `LayoutAugmenter` that doesn't implement
+helmchart and helmtemplate sections. Any other `LayoutAugmenter` that doesn't implement
 `oam.LayoutAugmentationCoverage` at all still fails closed, the same as before
 this opt-out existed. The kind-named `helmrelease` component is not a
 `LayoutAugmenter`: its `valuesMode: configMap` values `ConfigMap` is part of

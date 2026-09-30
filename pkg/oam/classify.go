@@ -45,17 +45,18 @@ func ComponentLabelKeyForDomain(domain string) string {
 
 // defaultTierMap maps OAM component types to their deployment tier.
 var defaultTierMap = map[string]Tier{
-	"postgresql":  TierServices,
-	"webservice":  TierApps,
-	"worker":      TierApps,
-	"cronjob":     TierApps,
-	"helmchart":   TierApps,
-	"helmrelease": TierApps,
-	"daemonset":   TierInfra,
-	"statefulset": TierApps,
-	"crd":         TierApps,
-	"manifests":   TierApps,
-	"oci":         TierApps,
+	"postgresql":   TierServices,
+	"webservice":   TierApps,
+	"worker":       TierApps,
+	"cronjob":      TierApps,
+	"helmchart":    TierApps,
+	"helmrelease":  TierApps,
+	"helmtemplate": TierApps,
+	"daemonset":    TierInfra,
+	"statefulset":  TierApps,
+	"crd":          TierApps,
+	"manifests":    TierApps,
+	"oci":          TierApps,
 }
 
 // validTiers is the set of valid tier values for annotation validation.

@@ -171,7 +171,7 @@ Launcher does **not** use the following kure packages. This is by design, not an
 | `pkg/kubernetes` | Kubernetes resource construction (Deployment, Service, etc.) |
 | `pkg/kubernetes/fluxcd` | GitOps delivery object generation (OCIRepository, Kustomization, HelmRelease) — used by the `oci`, `helmchart` and `helmrelease` component handlers |
 | `pkg/manifest` | CRD / manifest classification — used by the `crd` and `manifests` component handlers |
-| `pkg/stack/helm` | Helm chart handling — used by the `helmchart` component handler |
+| `pkg/stack/helm` | Helm chart handling — used by the `helmchart` and `helmtemplate` component handlers |
 | `pkg/stack/layout` | GitOps repo layout — used by trait decorators |
 | `pkg/errors` | Error types |
 | `pkg/io` | YAML parsing utilities |
@@ -339,7 +339,7 @@ This monolithic layout is owned by launcher and is designed, but not yet generat
 - Validates the OAM parser → handler → kure pipeline end-to-end
 
 **Phase 2: Built-in handlers** (#32)
-- Component handlers: webservice, worker, deployment, postgresql, cronjob, job, helmchart, helmrelease, daemonset, statefulset, service (go-kure/launcher#48, go-kure/launcher#343, go-kure/launcher#344, go-kure/launcher#411, go-kure/launcher#327)
+- Component handlers: webservice, worker, deployment, postgresql, cronjob, job, helmchart, helmrelease, helmtemplate, daemonset, statefulset, service (go-kure/launcher#48, go-kure/launcher#343, go-kure/launcher#344, go-kure/launcher#411, go-kure/launcher#327, go-kure/launcher#348)
 - Trait handlers — workload set: expose, certificate, external-secret, pvc, scaler (#49)
 - Trait handlers — network/infra set: ingress, httproute, configmap, networkpolicy, cilium-networkpolicy, volsync (#50)
 - Generic `passthrough` component — emits arbitrary CRDs / non-standard objects with no per-type Go handler (#105)

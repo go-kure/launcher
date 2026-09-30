@@ -194,10 +194,12 @@ before the wait finishes — by extracting TTL-bearing Jobs up front and passing
 
 `cronjob` stays absent, and for a reason that does not generalise to `job`: a CronJob owns
 no pods between schedules and carries no condition that ever reports completion, so there is
-nothing for a health check to read. The other unlisted types — `passthrough`, `crd` and
-`manifests` — are absent for a third reason: they emit whatever the document carries, so
-there is no single GVK to name. When adding a component type, decide which group it falls in
-and say so; silence here reads the same either way.
+nothing for a health check to read. The other unlisted types — `passthrough`, `crd`,
+`manifests` and `helmtemplate` — are absent for a third reason: they emit whatever the document
+carries, or for `helmtemplate` whatever the chart it renders client-side carries (and no
+HelmRelease), so there is no single GVK to name. When adding a component type, decide which
+group it falls in and say so; silence here reads the same either way. `helmtemplate`
+(go-kure/launcher#348) sits in `defaultTierMap` at `TierApps`, like `helmchart`.
 
 `helmrelease` (go-kure/launcher#327) is listed, with the same `helm.toolkit.fluxcd.io/v2`
 `HelmRelease` GVK as `helmchart`: it always emits exactly one HelmRelease, whose Ready
