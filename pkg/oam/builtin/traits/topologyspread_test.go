@@ -144,12 +144,12 @@ func TestTopologySpread_StampsDefaultConstraintsByReplicas(t *testing.T) {
 // same constraints it produces with the opinion on. This is the equivalence a
 // lowering rule that forwards `topologySpread` as this trait relies on.
 func TestTopologySpread_MatchesWorkerOpinion(t *testing.T) {
-	withOpinion, err := generateWithTopologySpreadless(t, &components.WorkerHandler{},
+	withOpinion, err := generateWithTopologySpreadless(t, workerViaRule{},
 		&oam.Component{Name: "api", Type: "worker", Properties: map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3}})
 	if err != nil {
 		t.Fatalf("worker with its own opinion: %v", err)
 	}
-	deps, err := generateWithTopologySpread(t, &components.WorkerHandler{},
+	deps, err := generateWithTopologySpread(t, workerViaRule{},
 		&oam.Component{Name: "api", Type: "worker", Properties: map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3, "topologySpread": false}}, nil)
 	if err != nil {
 		t.Fatalf("worker with topologySpread false plus the trait: %v", err)
@@ -198,8 +198,8 @@ func (p *replicasPolicy) DefaultReplicas() *int32 { return p.defaultReplicas }
 func topologySpreadTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
 		"deployment": &components.DeploymentHandler{},
-		"worker":     &components.WorkerHandler{},
 	}, nil)
+	tr.RegisterComponentLowering(components.WorkerRule{})
 	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
 	return tr
 }
@@ -332,17 +332,69 @@ func TestTopologySpread_RefusesExistingConstraints(t *testing.T) {
 
 	workerDefault := &oam.Component{Name: "api", Type: "worker",
 		Properties: map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 2}}
-	if _, err := generateWithTopologySpread(t, &components.WorkerHandler{}, workerDefault, nil); err == nil {
+	if _, err := generateWithTopologySpread(t, workerViaRule{}, workerDefault, nil); err == nil {
 		t.Error("worker with its default topologySpread: expected an error, got none")
 	} else if !strings.Contains(err.Error(), "topologySpread") {
 		t.Errorf("error should point at the component's own topologySpread, got: %v", err)
 	}
 }
 
+// Worker's topologySpread default reaches the Deployment through the whole
+// transformer — WorkerRule lowering worker into deployment plus a synthesized
+// topology-spread trait — exactly as the former worker handler applied it, and
+// an authored topology-spread trait on a worker behaves as it did: refused
+// with the same message once the default produced constraints, a no-op when it
+// produced none, and the one source of constraints when the default is off.
+func TestTopologySpread_WorkerThroughTheTransformer(t *testing.T) {
+	worker := func(replicas int, topologySpread any, traits ...oam.Trait) oam.Component {
+		props := map[string]any{"image": "ghcr.io/org/api:v1", "replicas": replicas}
+		if topologySpread != nil {
+			props["topologySpread"] = topologySpread
+		}
+		return oam.Component{Name: "api", Type: "worker", Properties: props, Traits: traits}
+	}
+	want := components.BuildTopologySpreadConstraints(3, map[string]string{"app": "api"})
+
+	for name, comp := range map[string]oam.Component{
+		"default":                      worker(3, nil),
+		"topologySpread false + trait": worker(3, false, *topologySpreadTrait()),
+	} {
+		dep, err := transformedDeployment(t, comp, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := dep.Spec.Template.Spec.TopologySpreadConstraints; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: constraints %v, want %v", name, spreadKeys(got), spreadKeys(want))
+		}
+	}
+
+	dep, err := transformedDeployment(t, worker(3, false), nil)
+	if err != nil {
+		t.Fatalf("topologySpread false: %v", err)
+	}
+	if got := dep.Spec.Template.Spec.TopologySpreadConstraints; len(got) != 0 {
+		t.Errorf("topologySpread false: constraints %v, want none", spreadKeys(got))
+	}
+
+	dep, err = transformedDeployment(t, worker(1, nil, *topologySpreadTrait()), nil)
+	if err != nil {
+		t.Fatalf("one replica + trait: %v", err)
+	}
+	if got := dep.Spec.Template.Spec.TopologySpreadConstraints; len(got) != 0 {
+		t.Errorf("one replica + trait: constraints %v, want none", spreadKeys(got))
+	}
+
+	_, err = transformedDeployment(t, worker(3, nil, *topologySpreadTrait()), nil)
+	const refusal = `topology-spread: Deployment "api" already carries 2 topologySpreadConstraints (authored on the component, or from its own topologySpread default); remove them, or set topologySpread: false, or drop the trait`
+	if err == nil || !strings.Contains(err.Error(), refusal) {
+		t.Errorf("default + trait at three replicas: err = %v, want the refusal %q", err, refusal)
+	}
+}
+
 // At one replica the role kinds' opinion produces no constraints, so there is
 // nothing to conflict with and the trait is a no-op rather than an error.
 func TestTopologySpread_SingleReplicaWorkerDefaultIsNoConflict(t *testing.T) {
-	deps, err := generateWithTopologySpread(t, &components.WorkerHandler{},
+	deps, err := generateWithTopologySpread(t, workerViaRule{},
 		&oam.Component{Name: "api", Type: "worker", Properties: map[string]any{"image": "ghcr.io/org/api:v1"}}, nil)
 	if err != nil {
 		t.Fatalf("worker at one replica: %v", err)

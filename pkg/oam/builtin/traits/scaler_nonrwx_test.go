@@ -23,9 +23,10 @@ import (
 func nonRWXScalerTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
 		"webservice": &components.WebserviceHandler{},
-		"worker":     &components.WorkerHandler{},
 		"deployment": &components.DeploymentHandler{},
 	}, nil)
+	tr.RegisterComponentLowering(components.WorkerRule{})
+	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
 	tr.RegisterBuiltinTrait("scaler", &traits.ScalerHandler{})
 	tr.RegisterBuiltinTrait("configmap", &traits.ConfigMapHandler{})
 	return tr
@@ -63,8 +64,12 @@ func transformOne(t *testing.T, kind string, props map[string]any, policy oam.Po
 
 func transformCluster(t *testing.T, kind string, props map[string]any, policy oam.Policy, trs ...oam.Trait) (*stack.Cluster, error) {
 	t.Helper()
+	// apiVersion and kind are set because worker is a lowering rule: once any
+	// rule is registered, the engine validates the settled document.
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "pkg", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "pkg", Namespace: "default"},
 		Spec: oam.ApplicationSpec{Components: []oam.Component{{
 			Name: "app", Type: kind, Properties: props, Traits: trs,
 		}}},

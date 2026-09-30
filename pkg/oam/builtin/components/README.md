@@ -53,7 +53,7 @@ reads it.
 | `type` | Produces | Summary |
 |--------|----------|---------|
 | `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. |
-| `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). |
+| `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). Lowered to a `deployment` component plus a `topology-spread` trait (`WorkerRule`) — see below. |
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
 | `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
@@ -1407,6 +1407,27 @@ not part of either change.
   the container port and the Service port), letting a downstream platform synthesize generic
   app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
   Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
+  - **`worker` is a component lowering rule, not a handler** (`WorkerRule`,
+    go-kure/launcher#280). It runs worker's own parse, then re-expresses the
+    component as a `deployment` of the same name: the authored properties are
+    forwarded, the four-key `affinity` shorthand is evaluated exactly as before
+    and forwarded as the raw `corev1` `affinity` (omitted when it evaluates to
+    nothing), and `topologySpread` becomes a synthesized `topology-spread`
+    trait placed before the authored traits (none when `topologySpread: false`).
+    Authored traits and annotations are forwarded unchanged. Worker's published
+    schema, its generated output and the `app: <component-name>` selector are
+    unchanged — every example and golden fixture builds byte-identically — and
+    the emitted component carries `Origin.Rule` `component/worker`. Two
+    differences are deliberate. A worker refused by its own parse now reads
+    `component "w" (type "worker") in document …: <cause>` (the lowering
+    engine's prefix) where it read `component "w": <cause>`; the cause is
+    unchanged. A trait-lowering error on a worker's trait gains one chain line
+    naming the `component/worker` step; a trait handler's error reads as before.
+    The former handler's affinity label-syntax check (see Common config) runs
+    in the rule, before the raw `affinity` is forwarded, with the same
+    `affinity: the shorthand evaluates to an affinity the API server would
+    refuse: …` text. Keys worker does not declare are dropped rather than forwarded to
+    `deployment`; `kurel build` refuses them before lowering anyway.
   - **A `webservice` component name must be a valid Service name.** It always
     emits a Service named after the component, and the API server validates
     a Service's `metadata.name` as a DNS-1035 label: at most 63 characters,

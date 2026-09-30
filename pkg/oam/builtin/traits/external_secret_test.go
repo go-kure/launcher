@@ -17,12 +17,13 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
-// newWorkerStubConfig builds a real components.WorkerConfig whose Generate
-// produces a Deployment with one container, for tests that need a genuine
-// workload-producing ApplicationConfig rather than a hand-rolled stub.
-func newWorkerStubConfig(t *testing.T) *components.WorkerConfig {
+// newWorkerStubConfig builds a real components.DeploymentConfig — what a worker
+// component lowers into — whose Generate produces a Deployment with one
+// container, for tests that need a genuine workload-producing ApplicationConfig
+// rather than a hand-rolled stub.
+func newWorkerStubConfig(t *testing.T) *components.DeploymentConfig {
 	t.Helper()
-	return &components.WorkerConfig{
+	return &components.DeploymentConfig{
 		Image:    "worker:v1",
 		Replicas: 1,
 	}

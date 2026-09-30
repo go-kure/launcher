@@ -72,7 +72,7 @@ type sharedKindHandler interface {
 func TestSharedNonRWXGuard_RWXCapableClaimIsNotConstrained(t *testing.T) {
 	kinds := map[string]sharedKindHandler{
 		"webservice": &components.WebserviceHandler{},
-		"worker":     &components.WorkerHandler{},
+		"worker":     workerViaRule{},
 	}
 	for kind, h := range kinds {
 		t.Run(kind+" keeps replicas above one", func(t *testing.T) {

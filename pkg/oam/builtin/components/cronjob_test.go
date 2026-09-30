@@ -416,7 +416,7 @@ func TestCronjobHandler_WithSharedPodFields(t *testing.T) {
 // finding 5 — the literal example the finding cited: cronjob has no `port`
 // property at all, so a named lifecycle httpGet port (`port: http`) can
 // never resolve against the main container and is rejected at parse time.
-// See TestWorkerHandler_NamedLifecyclePort_Error for the fuller set of cases
+// See TestWorker_NamedLifecyclePort_Error for the fuller set of cases
 // (probes, numeric-still-accepted) — cronjob shares the identical portless
 // shape and the same shared parsing path, so it is not repeated here.
 func TestCronjobHandler_NamedLifecyclePort_Error(t *testing.T) {

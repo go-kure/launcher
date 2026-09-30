@@ -38,7 +38,8 @@ func traitServiceRoute(traitType, serviceName string, servicePort int) oam.Trait
 func traitServiceTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(nil, nil)
 	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
-	tr.RegisterComponent("worker", &components.WorkerHandler{})
+	tr.RegisterComponentLowering(components.WorkerRule{})
+	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
 	tr.RegisterComponent("deployment", &components.DeploymentHandler{})
 	tr.RegisterComponent("statefulset", &components.StatefulsetHandler{})
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
@@ -62,9 +63,13 @@ func traitServiceSourceNamespace(traitType string) string {
 
 func transformTraitService(t *testing.T, traitType string, comps []oam.Component) *stack.Cluster {
 	t.Helper()
+	// apiVersion and kind are set because worker is a lowering rule: once any
+	// rule is registered, the engine validates the settled document.
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
-		Spec:     oam.ApplicationSpec{Components: comps},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec:       oam.ApplicationSpec{Components: comps},
 	}
 	cluster, _, err := traitServiceTransformer().TransformWithPolicy(app,
 		oam.TransformContext{Namespace: "default", Capabilities: traitServiceCapabilities(traitType)})

@@ -20,7 +20,7 @@ var roleKinds = []struct {
 	handler oam.ComponentHandler
 }{
 	{"webservice", &components.WebserviceHandler{}},
-	{"worker", &components.WorkerHandler{}},
+	{"worker", workerViaRule{}},
 }
 
 // roleKindDeployment builds one role-kind config and returns the Deployment it

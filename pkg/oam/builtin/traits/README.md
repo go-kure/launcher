@@ -562,7 +562,13 @@ their `topologySpread` property; `deployment` deliberately does not, and until
 this trait the only way to spread a `deployment` was to author the raw
 `topologySpreadConstraints`. The trait and the two role kinds share one
 definition, `components.BuildTopologySpreadConstraints`, so the output is
-identical:
+identical. `worker` goes further and applies its opinion through this very
+trait: its component lowering rule (`components.WorkerRule`,
+go-kure/launcher#280) emits a `deployment` and, unless `topologySpread: false`,
+attaches a synthesized `topology-spread` in front of the authored traits, so it
+is the innermost decorator — where the former worker handler applied the
+constraints. An authored `topology-spread` on a worker therefore meets the "no
+merging" rule below exactly as it did before.
 
 | effective replicas | constraints |
 |---|---|

@@ -636,9 +636,11 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		//
 		// KNOWN LIMITATION (round-4 finding #9 / round-14 Codex finding "Exempt
 		// synthesized components from authored-field enforcement", recurring,
-		// deferred both times — no ComponentLoweringRule ships in this package yet
-		// that populates a PlatformReserved property from LoweringContext.Capabilities,
-		// so nothing currently triggers it): unlike Trait, which carries a sealed
+		// deferred both times — the one production ComponentLoweringRule,
+		// builtin/components' WorkerRule, emits a `deployment` component, whose
+		// schema declares no PlatformReserved property, and no rule populates one
+		// from LoweringContext.Capabilities, so nothing currently triggers it):
+		// unlike Trait, which carries a sealed
 		// marker exempting a rule-synthesized trait from this same enforcement,
 		// Component has no equivalent provenance marker, so a future
 		// ComponentLoweringRule that legitimately writes a PlatformReserved property

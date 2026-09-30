@@ -1,0 +1,1920 @@
+{
+  "affinity": {
+    "type": "object",
+    "description": "Pod affinity and anti-affinity scheduling rules.",
+    "properties": {
+      "enablePodAntiAffinity": {
+        "type": "boolean",
+        "description": "Spread pods across nodes using pod anti-affinity."
+      },
+      "nodeSelector": {
+        "type": "object",
+        "description": "Node labels the pod must match to be scheduled.",
+        "additionalProperties": true
+      },
+      "podAntiAffinityType": {
+        "type": "string",
+        "description": "Whether anti-affinity is a soft preference or a hard requirement.",
+        "default": "preferred",
+        "enum": [
+          "preferred",
+          "required"
+        ]
+      },
+      "topologyKey": {
+        "type": "string",
+        "description": "Node topology key the anti-affinity rule is evaluated against.",
+        "default": "kubernetes.io/hostname"
+      }
+    }
+  },
+  "args": {
+    "type": "array",
+    "description": "A list of string values (e.g. command or args).",
+    "items": {
+      "type": "string",
+      "description": "A single string value."
+    }
+  },
+  "automountServiceAccountToken": {
+    "type": "boolean",
+    "description": "Whether the ServiceAccount token is mounted into the pod's containers."
+  },
+  "command": {
+    "type": "array",
+    "description": "A list of string values (e.g. command or args).",
+    "items": {
+      "type": "string",
+      "description": "A single string value."
+    }
+  },
+  "dnsConfig": {
+    "type": "object",
+    "description": "DNS parameters merged into the pod's resolver configuration according to dnsPolicy.",
+    "properties": {
+      "nameservers": {
+        "type": "array",
+        "description": "DNS server IP addresses (at most 3).",
+        "items": {
+          "type": "string",
+          "description": "A single nameserver IP: a plain IPv4 or IPv6 literal, never a zone-scoped address."
+        }
+      },
+      "options": {
+        "type": "array",
+        "description": "Resolver options.",
+        "items": {
+          "type": "object",
+          "description": "A single resolver option.",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Option name (e.g. \"ndots\").",
+              "required": true
+            },
+            "value": {
+              "type": "string",
+              "description": "Option value; omit for flag-style options."
+            }
+          }
+        }
+      },
+      "searches": {
+        "type": "array",
+        "description": "DNS search domains: at most 32 entries, and at most 2048 characters once joined with the separating spaces.",
+        "items": {
+          "type": "string",
+          "description": "A single search domain."
+        }
+      }
+    }
+  },
+  "dnsPolicy": {
+    "type": "string",
+    "description": "DNS policy for the pod. \"None\" requires dnsConfig.nameservers; use \"ClusterFirstWithHostNet\" together with hostNetwork to keep cluster DNS.",
+    "enum": [
+      "ClusterFirstWithHostNet",
+      "ClusterFirst",
+      "Default",
+      "None"
+    ]
+  },
+  "enableServiceLinks": {
+    "type": "boolean",
+    "description": "Whether information about services is injected into the pod's environment as Docker-style links. The API default is true."
+  },
+  "env": {
+    "type": "array",
+    "description": "Environment variables to set on the container.",
+    "items": {
+      "type": "object",
+      "description": "A single environment variable.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Environment variable name.",
+          "required": true
+        },
+        "value": {
+          "type": "string",
+          "description": "Literal value for the variable."
+        },
+        "valueFrom": {
+          "type": "object",
+          "description": "Source the value from another object. Exactly one of the five fields below may be set.",
+          "properties": {
+            "configMapKeyRef": {
+              "type": "object",
+              "description": "Select a key of a ConfigMap in the component's namespace.",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Key within the referenced object's data.",
+                  "required": true
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Name of the referenced object.",
+                  "required": true
+                },
+                "optional": {
+                  "type": "boolean",
+                  "description": "Whether the referenced object or key may be absent."
+                }
+              }
+            },
+            "fieldRef": {
+              "type": "object",
+              "description": "Select a field of the pod (e.g. metadata.name, status.podIP).",
+              "properties": {
+                "apiVersion": {
+                  "type": "string",
+                  "description": "Schema version the fieldPath is written in terms of; defaults to \"v1\"."
+                },
+                "fieldPath": {
+                  "type": "string",
+                  "description": "Path of the field to select (e.g. \"metadata.name\").",
+                  "required": true
+                }
+              }
+            },
+            "fileKeyRef": {
+              "type": "object",
+              "description": "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate).",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Key within the env file.",
+                  "required": true
+                },
+                "optional": {
+                  "type": "boolean",
+                  "description": "Whether the file or key may be absent."
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Path within the volume to the env file.",
+                  "required": true
+                },
+                "volumeName": {
+                  "type": "string",
+                  "description": "Name of the volume mount containing the env file.",
+                  "required": true
+                }
+              }
+            },
+            "resourceFieldRef": {
+              "type": "object",
+              "description": "Select a container resource request/limit (e.g. limits.cpu) as the value.",
+              "properties": {
+                "containerName": {
+                  "type": "string",
+                  "description": "Container to select the resource from; defaults to this container."
+                },
+                "divisor": {
+                  "type": "string",
+                  "description": "Output format divisor (e.g. \"1\", \"1Mi\"); defaults to \"1\"."
+                },
+                "resource": {
+                  "type": "string",
+                  "description": "Resource to select (e.g. \"limits.cpu\", \"requests.memory\").",
+                  "required": true
+                }
+              }
+            },
+            "secretKeyRef": {
+              "type": "object",
+              "description": "Select a key of a Secret in the component's namespace.",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Key within the referenced object's data.",
+                  "required": true
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Name of the referenced object.",
+                  "required": true
+                },
+                "optional": {
+                  "type": "boolean",
+                  "description": "Whether the referenced object or key may be absent."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "envFrom": {
+    "type": "array",
+    "description": "Bulk-import a ConfigMap's or Secret's keys as environment variables.",
+    "items": {
+      "type": "object",
+      "description": "A single envFrom source. Exactly one of configMapRef or secretRef must be set.",
+      "properties": {
+        "configMapRef": {
+          "type": "object",
+          "description": "Import every key of this ConfigMap.",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "ConfigMap name.",
+              "required": true
+            },
+            "optional": {
+              "type": "boolean",
+              "description": "Whether the ConfigMap may be absent."
+            }
+          }
+        },
+        "prefix": {
+          "type": "string",
+          "description": "Text prepended to each imported variable's name."
+        },
+        "secretRef": {
+          "type": "object",
+          "description": "Import every key of this Secret.",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Secret name.",
+              "required": true
+            },
+            "optional": {
+              "type": "boolean",
+              "description": "Whether the Secret may be absent."
+            }
+          }
+        }
+      }
+    }
+  },
+  "hostAliases": {
+    "type": "array",
+    "description": "Extra /etc/hosts entries injected into the pod.",
+    "items": {
+      "type": "object",
+      "description": "One IP with the hostnames that resolve to it.",
+      "properties": {
+        "hostnames": {
+          "type": "array",
+          "description": "Hostnames resolving to the IP; at least one.",
+          "required": true,
+          "items": {
+            "type": "string",
+            "description": "A single hostname (DNS-1123 subdomain)."
+          }
+        },
+        "ip": {
+          "type": "string",
+          "description": "IP address of the host file entry. A plain IPv4 or IPv6 literal: a zone-scoped address such as fe80::1%eth0 is rejected, as it is at admission.",
+          "required": true
+        }
+      }
+    }
+  },
+  "hostIPC": {
+    "type": "boolean",
+    "description": "Use the node's IPC namespace. Subject to the environment policy's AllowHostIPC flag."
+  },
+  "hostNetwork": {
+    "type": "boolean",
+    "description": "Use the node's network namespace. Subject to the environment policy's AllowHostNetwork flag."
+  },
+  "hostPID": {
+    "type": "boolean",
+    "description": "Use the node's PID namespace. Subject to the environment policy's AllowHostPID flag; mutually exclusive with shareProcessNamespace."
+  },
+  "hostUsers": {
+    "type": "boolean",
+    "description": "Use the host's user namespace (true, the default) or a new user namespace for the pod (false). false is incompatible with hostPID and hostIPC; whether it may be combined with hostNetwork depends on the cluster."
+  },
+  "hostname": {
+    "type": "string",
+    "description": "Hostname of the pod (a DNS-1123 label). Defaults to the pod's own name."
+  },
+  "hostnameOverride": {
+    "type": "string",
+    "description": "Fully overrides the pod's hostname (a DNS-1123 subdomain of at most 64 characters). Mutually exclusive with hostNetwork and setHostnameAsFQDN; requires the cluster's HostnameOverride feature gate."
+  },
+  "image": {
+    "type": "string",
+    "description": "Container image reference for the main container.",
+    "required": true
+  },
+  "imagePullSecrets": {
+    "type": "array",
+    "description": "Secrets in the component's namespace holding registry credentials for pulling the pod's images.",
+    "items": {
+      "type": "object",
+      "description": "A reference to one image-pull Secret.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the referenced object.",
+          "required": true
+        }
+      }
+    }
+  },
+  "initContainers": {
+    "type": "array",
+    "description": "Init containers run to completion, in order, before the main container starts.",
+    "items": {
+      "type": "object",
+      "description": "A single init container definition. Probes and lifecycle hooks are not accepted: Kubernetes forbids them on an init container.",
+      "properties": {
+        "args": {
+          "type": "array",
+          "description": "A list of string values (e.g. command or args).",
+          "items": {
+            "type": "string",
+            "description": "A single string value."
+          }
+        },
+        "command": {
+          "type": "array",
+          "description": "A list of string values (e.g. command or args).",
+          "items": {
+            "type": "string",
+            "description": "A single string value."
+          }
+        },
+        "env": {
+          "type": "array",
+          "description": "Environment variables to set on the container.",
+          "items": {
+            "type": "object",
+            "description": "A single environment variable.",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Environment variable name.",
+                "required": true
+              },
+              "value": {
+                "type": "string",
+                "description": "Literal value for the variable."
+              },
+              "valueFrom": {
+                "type": "object",
+                "description": "Source the value from another object. Exactly one of the five fields below may be set.",
+                "properties": {
+                  "configMapKeyRef": {
+                    "type": "object",
+                    "description": "Select a key of a ConfigMap in the component's namespace.",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "description": "Key within the referenced object's data.",
+                        "required": true
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "Name of the referenced object.",
+                        "required": true
+                      },
+                      "optional": {
+                        "type": "boolean",
+                        "description": "Whether the referenced object or key may be absent."
+                      }
+                    }
+                  },
+                  "fieldRef": {
+                    "type": "object",
+                    "description": "Select a field of the pod (e.g. metadata.name, status.podIP).",
+                    "properties": {
+                      "apiVersion": {
+                        "type": "string",
+                        "description": "Schema version the fieldPath is written in terms of; defaults to \"v1\"."
+                      },
+                      "fieldPath": {
+                        "type": "string",
+                        "description": "Path of the field to select (e.g. \"metadata.name\").",
+                        "required": true
+                      }
+                    }
+                  },
+                  "fileKeyRef": {
+                    "type": "object",
+                    "description": "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate).",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "description": "Key within the env file.",
+                        "required": true
+                      },
+                      "optional": {
+                        "type": "boolean",
+                        "description": "Whether the file or key may be absent."
+                      },
+                      "path": {
+                        "type": "string",
+                        "description": "Path within the volume to the env file.",
+                        "required": true
+                      },
+                      "volumeName": {
+                        "type": "string",
+                        "description": "Name of the volume mount containing the env file.",
+                        "required": true
+                      }
+                    }
+                  },
+                  "resourceFieldRef": {
+                    "type": "object",
+                    "description": "Select a container resource request/limit (e.g. limits.cpu) as the value.",
+                    "properties": {
+                      "containerName": {
+                        "type": "string",
+                        "description": "Container to select the resource from; defaults to this container."
+                      },
+                      "divisor": {
+                        "type": "string",
+                        "description": "Output format divisor (e.g. \"1\", \"1Mi\"); defaults to \"1\"."
+                      },
+                      "resource": {
+                        "type": "string",
+                        "description": "Resource to select (e.g. \"limits.cpu\", \"requests.memory\").",
+                        "required": true
+                      }
+                    }
+                  },
+                  "secretKeyRef": {
+                    "type": "object",
+                    "description": "Select a key of a Secret in the component's namespace.",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "description": "Key within the referenced object's data.",
+                        "required": true
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "Name of the referenced object.",
+                        "required": true
+                      },
+                      "optional": {
+                        "type": "boolean",
+                        "description": "Whether the referenced object or key may be absent."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "envFrom": {
+          "type": "array",
+          "description": "Bulk-import a ConfigMap's or Secret's keys as environment variables.",
+          "items": {
+            "type": "object",
+            "description": "A single envFrom source. Exactly one of configMapRef or secretRef must be set.",
+            "properties": {
+              "configMapRef": {
+                "type": "object",
+                "description": "Import every key of this ConfigMap.",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "ConfigMap name.",
+                    "required": true
+                  },
+                  "optional": {
+                    "type": "boolean",
+                    "description": "Whether the ConfigMap may be absent."
+                  }
+                }
+              },
+              "prefix": {
+                "type": "string",
+                "description": "Text prepended to each imported variable's name."
+              },
+              "secretRef": {
+                "type": "object",
+                "description": "Import every key of this Secret.",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Secret name.",
+                    "required": true
+                  },
+                  "optional": {
+                    "type": "boolean",
+                    "description": "Whether the Secret may be absent."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "image": {
+          "type": "string",
+          "description": "Container image reference.",
+          "required": true
+        },
+        "name": {
+          "type": "string",
+          "description": "Container name.",
+          "required": true
+        },
+        "resources": {
+          "type": "object",
+          "description": "Compute resource requests and limits for the container.",
+          "properties": {
+            "limits": {
+              "type": "object",
+              "description": "Maximum resources the container may use. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted.",
+              "properties": {
+                "cpu": {
+                  "type": "",
+                  "types": [
+                    "string",
+                    "number"
+                  ],
+                  "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+                },
+                "memory": {
+                  "type": "",
+                  "types": [
+                    "string",
+                    "number"
+                  ],
+                  "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+                }
+              },
+              "additionalProperties": true
+            },
+            "requests": {
+              "type": "object",
+              "description": "Minimum resources guaranteed to the container. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted.",
+              "properties": {
+                "cpu": {
+                  "type": "",
+                  "types": [
+                    "string",
+                    "number"
+                  ],
+                  "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+                },
+                "memory": {
+                  "type": "",
+                  "types": [
+                    "string",
+                    "number"
+                  ],
+                  "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "securityContext": {
+          "type": "object",
+          "description": "Container-level security context (runAsUser, capabilities, seccompProfile, …). Setting any field here opts this container out of a downstream platform's nil-only default backfill for ALL securityContext fields — see parseSecurityContext's doc comment.",
+          "properties": {
+            "allowPrivilegeEscalation": {
+              "type": "boolean",
+              "description": "Whether a process can gain more privileges than its parent."
+            },
+            "appArmorProfile": {
+              "type": "object",
+              "description": "AppArmor options for the container.",
+              "properties": {
+                "localhostProfile": {
+                  "type": "string",
+                  "description": "Profile loaded on the node; required (and only valid) when type is \"Localhost\"."
+                },
+                "type": {
+                  "type": "string",
+                  "description": "Which kind of AppArmor profile to apply.",
+                  "enum": [
+                    "Localhost",
+                    "RuntimeDefault",
+                    "Unconfined"
+                  ]
+                }
+              }
+            },
+            "capabilities": {
+              "type": "object",
+              "description": "Linux capabilities to add or drop.",
+              "properties": {
+                "add": {
+                  "type": "array",
+                  "description": "Capabilities to add (e.g. \"NET_BIND_SERVICE\").",
+                  "items": {
+                    "type": "string",
+                    "description": "A single capability name."
+                  }
+                },
+                "drop": {
+                  "type": "array",
+                  "description": "Capabilities to drop (e.g. \"ALL\").",
+                  "items": {
+                    "type": "string",
+                    "description": "A single capability name."
+                  }
+                }
+              }
+            },
+            "privileged": {
+              "type": "boolean",
+              "description": "Run the container in privileged mode. Subject to the environment policy's AllowPrivileged flag."
+            },
+            "procMount": {
+              "type": "string",
+              "description": "Procfs mount behavior for the container (Linux-only).",
+              "enum": [
+                "Default",
+                "Unmasked"
+              ]
+            },
+            "readOnlyRootFilesystem": {
+              "type": "boolean",
+              "description": "Whether the container's root filesystem is mounted read-only."
+            },
+            "runAsGroup": {
+              "type": "integer",
+              "description": "GID to run the container process as."
+            },
+            "runAsNonRoot": {
+              "type": "boolean",
+              "description": "Whether the container must run as a non-root user."
+            },
+            "runAsUser": {
+              "type": "integer",
+              "description": "UID to run the container process as."
+            },
+            "seLinuxOptions": {
+              "type": "object",
+              "description": "SELinux context to apply to the container.",
+              "properties": {
+                "level": {
+                  "type": "string",
+                  "description": "SELinux level label."
+                },
+                "role": {
+                  "type": "string",
+                  "description": "SELinux role label."
+                },
+                "type": {
+                  "type": "string",
+                  "description": "SELinux type label."
+                },
+                "user": {
+                  "type": "string",
+                  "description": "SELinux user label."
+                }
+              }
+            },
+            "seccompProfile": {
+              "type": "object",
+              "description": "Seccomp options for the container.",
+              "properties": {
+                "localhostProfile": {
+                  "type": "string",
+                  "description": "Profile file path relative to the kubelet's seccomp root; required (and only valid) when type is \"Localhost\"."
+                },
+                "type": {
+                  "type": "string",
+                  "description": "Which kind of seccomp profile to apply.",
+                  "enum": [
+                    "Localhost",
+                    "RuntimeDefault",
+                    "Unconfined"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "volumeDevices": {
+          "type": "array",
+          "description": "Raw block volumes to attach to this container, by the name of a `volumes` pvc entry or claim template authored with volumeMode: Block.",
+          "items": {
+            "type": "object",
+            "description": "A single raw block device.",
+            "properties": {
+              "devicePath": {
+                "type": "string",
+                "description": "Path in this container where the block device appears; unique within the container and distinct from every mountPath.",
+                "required": true
+              },
+              "name": {
+                "type": "string",
+                "description": "Name of the Block pod volume to attach.",
+                "required": true
+              }
+            }
+          }
+        },
+        "volumeMounts": {
+          "type": "array",
+          "description": "Pod volumes to mount into this container, by the name of a `volumes` entry.",
+          "items": {
+            "type": "object",
+            "description": "A single volume mount.",
+            "properties": {
+              "mountPath": {
+                "type": "string",
+                "description": "Path in this container where the volume is mounted; unique within the container.",
+                "required": true
+              },
+              "name": {
+                "type": "string",
+                "description": "Name of the pod volume to mount.",
+                "required": true
+              },
+              "readOnly": {
+                "type": "boolean",
+                "description": "Mount the volume read-only."
+              },
+              "subPath": {
+                "type": "string",
+                "description": "Sub-path within the volume to mount instead of its root."
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "workingDir": {
+          "type": "string",
+          "description": "Working directory for the container process."
+        }
+      }
+    }
+  },
+  "lifecycle": {
+    "type": "object",
+    "description": "Lifecycle hooks run by the kubelet around container start/stop (exec, httpGet, or sleep).",
+    "properties": {
+      "postStart": {
+        "type": "object",
+        "description": "Executed immediately after the container is created.",
+        "additionalProperties": true
+      },
+      "preStop": {
+        "type": "object",
+        "description": "Executed immediately before the container is terminated.",
+        "additionalProperties": true
+      }
+    }
+  },
+  "minReadySeconds": {
+    "type": "integer",
+    "description": "Seconds a new pod must be ready without any container crashing before it counts as available. Must be \u003e= 0; the API default is 0. Must stay below the effective progressDeadlineSeconds, whose own API default is 600."
+  },
+  "nodeName": {
+    "type": "string",
+    "description": "Bind the pod to this specific node, bypassing the scheduler. Must be a valid DNS-1123 subdomain."
+  },
+  "nodeSelector": {
+    "type": "object",
+    "description": "Node labels the pod must match to be scheduled (label key to label value).",
+    "additionalProperties": true
+  },
+  "os": {
+    "type": "object",
+    "description": "Operating system of the pod's containers.",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "OS name.",
+        "required": true,
+        "enum": [
+          "linux",
+          "windows"
+        ]
+      }
+    }
+  },
+  "paused": {
+    "type": "boolean",
+    "description": "Whether the deployment controller stops acting on template changes. Progress is not estimated while paused, which the API's own progressDeadlineSeconds documentation states. Authoring true also suppresses the automatic readiness check this component would otherwise synthesize, since gating on a workload the document told the controller not to roll out is not a health signal. The API default is false."
+  },
+  "podResources": {
+    "type": "object",
+    "description": "Pod-level compute resources shared by all containers (corev1.PodSpec.resources). Only cpu, memory and hugepages-\u003csize\u003e are valid here; requires the cluster's PodLevelResources feature gate. Distinct from the container-level `resources` property.",
+    "properties": {
+      "limits": {
+        "type": "object",
+        "description": "Maximum pod-level resources the pod as a whole may use. Only cpu, memory and hugepages-\u003csize\u003e keys are accepted; ephemeral-storage and extended resources are rejected.",
+        "properties": {
+          "cpu": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+          },
+          "memory": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+          }
+        },
+        "additionalProperties": true
+      },
+      "requests": {
+        "type": "object",
+        "description": "Minimum pod-level resources guaranteed to the pod as a whole. Only cpu, memory and hugepages-\u003csize\u003e keys are accepted; ephemeral-storage and extended resources are rejected.",
+        "properties": {
+          "cpu": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+          },
+          "memory": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "podSecurityContext": {
+    "type": "object",
+    "description": "Pod-level security context (corev1.PodSecurityContext) applying to all containers. Distinct from the container-level `securityContext` property, which takes precedence for its own fields.",
+    "properties": {
+      "appArmorProfile": {
+        "type": "object",
+        "description": "AppArmor options for all containers in the pod.",
+        "properties": {
+          "localhostProfile": {
+            "type": "string",
+            "description": "Profile loaded on the node; required (and only valid) when type is \"Localhost\"."
+          },
+          "type": {
+            "type": "string",
+            "description": "Which kind of AppArmor profile to apply.",
+            "enum": [
+              "Localhost",
+              "RuntimeDefault",
+              "Unconfined"
+            ]
+          }
+        }
+      },
+      "fsGroup": {
+        "type": "integer",
+        "description": "Supplemental group that owns volumes supporting ownership management."
+      },
+      "fsGroupChangePolicy": {
+        "type": "string",
+        "description": "When to change ownership/permissions of a volume to match fsGroup.",
+        "enum": [
+          "OnRootMismatch",
+          "Always"
+        ]
+      },
+      "runAsGroup": {
+        "type": "integer",
+        "description": "Primary GID for each container's entrypoint; a container-level runAsGroup takes precedence."
+      },
+      "runAsNonRoot": {
+        "type": "boolean",
+        "description": "Whether the containers must run as a non-root user. Judged per container against its effective runAsUser, so a pod-level runAsUser of 0 is only rejected for containers that do not override it."
+      },
+      "runAsUser": {
+        "type": "integer",
+        "description": "UID to run each container's entrypoint as; a container-level runAsUser takes precedence."
+      },
+      "seLinuxChangePolicy": {
+        "type": "string",
+        "description": "How the SELinux label is applied to the pod's volumes.",
+        "enum": [
+          "MountOption",
+          "Recursive"
+        ]
+      },
+      "seLinuxOptions": {
+        "type": "object",
+        "description": "SELinux context to apply to all containers in the pod.",
+        "properties": {
+          "level": {
+            "type": "string",
+            "description": "SELinux level label."
+          },
+          "role": {
+            "type": "string",
+            "description": "SELinux role label."
+          },
+          "type": {
+            "type": "string",
+            "description": "SELinux type label."
+          },
+          "user": {
+            "type": "string",
+            "description": "SELinux user label."
+          }
+        }
+      },
+      "seccompProfile": {
+        "type": "object",
+        "description": "Seccomp options for all containers in the pod.",
+        "properties": {
+          "localhostProfile": {
+            "type": "string",
+            "description": "Profile file path relative to the kubelet's seccomp root; required (and only valid) when type is \"Localhost\"."
+          },
+          "type": {
+            "type": "string",
+            "description": "Which kind of seccomp profile to apply.",
+            "enum": [
+              "Localhost",
+              "RuntimeDefault",
+              "Unconfined"
+            ]
+          }
+        }
+      },
+      "supplementalGroups": {
+        "type": "array",
+        "description": "Additional GIDs applied to the first process in each container.",
+        "items": {
+          "type": "integer",
+          "description": "A single supplemental group ID."
+        }
+      },
+      "supplementalGroupsPolicy": {
+        "type": "string",
+        "description": "How supplementalGroups combine with the container image's own group memberships.",
+        "enum": [
+          "Merge",
+          "Strict"
+        ]
+      },
+      "sysctls": {
+        "type": "array",
+        "description": "Namespaced kernel parameters to set for the pod.",
+        "items": {
+          "type": "object",
+          "description": "A single sysctl.",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Sysctl name (e.g. \"net.core.somaxconn\"): at most 253 characters of dot- or slash-separated lowercase alphanumeric segments, unique within the list.",
+              "required": true
+            },
+            "value": {
+              "type": "string",
+              "description": "Sysctl value.",
+              "required": true
+            }
+          }
+        }
+      },
+      "windowsOptions": {
+        "type": "object",
+        "description": "Windows-specific options applied to all containers (ignored on Linux).",
+        "properties": {
+          "gmsaCredentialSpec": {
+            "type": "string",
+            "description": "Inline GMSA credential spec contents (normally populated by the GMSA admission webhook)."
+          },
+          "gmsaCredentialSpecName": {
+            "type": "string",
+            "description": "Name of the GMSA credential spec to use."
+          },
+          "hostProcess": {
+            "type": "boolean",
+            "description": "Run the containers as Windows HostProcess containers; every container with no hostProcess of its own inherits this value. Requires hostNetwork: true. Policy-gated: true is rejected unless the environment policy allows privileged workloads."
+          },
+          "runAsUserName": {
+            "type": "string",
+            "description": "Windows user name to run the container entrypoint as."
+          }
+        }
+      }
+    }
+  },
+  "preemptionPolicy": {
+    "type": "string",
+    "description": "Whether the pod may preempt lower-priority pods. The API default is PreemptLowerPriority.",
+    "enum": [
+      "PreemptLowerPriority",
+      "Never"
+    ]
+  },
+  "priorityClassName": {
+    "type": "string",
+    "description": "Name of the PriorityClass the pod is scheduled with. The pod's numeric priority is derived from it by admission — `priority` itself is not authorable."
+  },
+  "probes": {
+    "type": "object",
+    "description": "Health probes for the container.",
+    "properties": {
+      "liveness": {
+        "type": "object",
+        "description": "Liveness probe determining when the container should be restarted.",
+        "additionalProperties": true
+      },
+      "readiness": {
+        "type": "object",
+        "description": "Readiness probe determining when the container can receive traffic.",
+        "additionalProperties": true
+      },
+      "startup": {
+        "type": "object",
+        "description": "Startup probe determining when the container has finished starting.",
+        "additionalProperties": true
+      }
+    }
+  },
+  "progressDeadlineSeconds": {
+    "type": "integer",
+    "description": "Seconds the deployment may make no progress before it is marked failed with ProgressDeadlineExceeded. Must be \u003e= 0 and strictly greater than the effective minReadySeconds. The API default is 600, and that default takes part in the comparison: authoring minReadySeconds \u003e= 600 without also raising this is refused, because the apiserver would refuse the defaulted pair."
+  },
+  "readinessGates": {
+    "type": "array",
+    "description": "Extra pod conditions that must be True before the pod counts as ready.",
+    "items": {
+      "type": "object",
+      "description": "A single readiness gate.",
+      "properties": {
+        "conditionType": {
+          "type": "string",
+          "description": "Pod condition type (a qualified name) that must be True.",
+          "required": true
+        }
+      }
+    }
+  },
+  "replicas": {
+    "type": "integer",
+    "description": "Number of Deployment pod replicas.",
+    "default": 1
+  },
+  "resourceClaims": {
+    "type": "array",
+    "description": "Dynamic Resource Allocation claims made available to the pod's containers (names must be unique).",
+    "items": {
+      "type": "object",
+      "description": "A single pod resource claim; exactly one of resourceClaimName or resourceClaimTemplateName must be set.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Claim name containers refer to (a DNS-1123 label).",
+          "required": true
+        },
+        "resourceClaimName": {
+          "type": "string",
+          "description": "Name of an existing ResourceClaim in the pod's namespace."
+        },
+        "resourceClaimTemplateName": {
+          "type": "string",
+          "description": "Name of a ResourceClaimTemplate a claim is created from per pod."
+        }
+      }
+    }
+  },
+  "resources": {
+    "type": "object",
+    "description": "Compute resource requests and limits for the container.",
+    "properties": {
+      "limits": {
+        "type": "object",
+        "description": "Maximum resources the container may use. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted.",
+        "properties": {
+          "cpu": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+          },
+          "memory": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+          }
+        },
+        "additionalProperties": true
+      },
+      "requests": {
+        "type": "object",
+        "description": "Minimum resources guaranteed to the container. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted.",
+        "properties": {
+          "cpu": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+          },
+          "memory": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "revisionHistoryLimit": {
+    "type": "integer",
+    "description": "Number of superseded ReplicaSets kept for rollback. Must be \u003e= 0; the API default is 10."
+  },
+  "runtimeClassName": {
+    "type": "string",
+    "description": "Name of the RuntimeClass the pod runs under. Pod overhead is derived from it by admission — `overhead` itself is not authorable."
+  },
+  "schedulerName": {
+    "type": "string",
+    "description": "Name of the scheduler that dispatches this pod; defaults to the default scheduler. Kubernetes does not constrain its form, so it is stored as authored — unlike nodeName and priorityClassName, which name API objects and are validated as DNS-1123 subdomains."
+  },
+  "schedulingGates": {
+    "type": "array",
+    "description": "Named gates that must all be removed before the scheduler considers the pod (gate names must be unique).",
+    "items": {
+      "type": "object",
+      "description": "A single scheduling gate.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the referenced object.",
+          "required": true
+        }
+      }
+    }
+  },
+  "schedulingGroup": {
+    "type": "object",
+    "description": "Gang-scheduling group the pod belongs to (requires the cluster's scheduling-group support).",
+    "properties": {
+      "podGroupName": {
+        "type": "string",
+        "description": "Name of the PodGroup this pod is scheduled together with.",
+        "required": true
+      }
+    }
+  },
+  "securityContext": {
+    "type": "object",
+    "description": "Container-level security context (runAsUser, capabilities, seccompProfile, …). Setting any field here opts this container out of a downstream platform's nil-only default backfill for ALL securityContext fields — see parseSecurityContext's doc comment.",
+    "properties": {
+      "allowPrivilegeEscalation": {
+        "type": "boolean",
+        "description": "Whether a process can gain more privileges than its parent."
+      },
+      "appArmorProfile": {
+        "type": "object",
+        "description": "AppArmor options for the container.",
+        "properties": {
+          "localhostProfile": {
+            "type": "string",
+            "description": "Profile loaded on the node; required (and only valid) when type is \"Localhost\"."
+          },
+          "type": {
+            "type": "string",
+            "description": "Which kind of AppArmor profile to apply.",
+            "enum": [
+              "Localhost",
+              "RuntimeDefault",
+              "Unconfined"
+            ]
+          }
+        }
+      },
+      "capabilities": {
+        "type": "object",
+        "description": "Linux capabilities to add or drop.",
+        "properties": {
+          "add": {
+            "type": "array",
+            "description": "Capabilities to add (e.g. \"NET_BIND_SERVICE\").",
+            "items": {
+              "type": "string",
+              "description": "A single capability name."
+            }
+          },
+          "drop": {
+            "type": "array",
+            "description": "Capabilities to drop (e.g. \"ALL\").",
+            "items": {
+              "type": "string",
+              "description": "A single capability name."
+            }
+          }
+        }
+      },
+      "privileged": {
+        "type": "boolean",
+        "description": "Run the container in privileged mode. Subject to the environment policy's AllowPrivileged flag."
+      },
+      "procMount": {
+        "type": "string",
+        "description": "Procfs mount behavior for the container (Linux-only).",
+        "enum": [
+          "Default",
+          "Unmasked"
+        ]
+      },
+      "readOnlyRootFilesystem": {
+        "type": "boolean",
+        "description": "Whether the container's root filesystem is mounted read-only."
+      },
+      "runAsGroup": {
+        "type": "integer",
+        "description": "GID to run the container process as."
+      },
+      "runAsNonRoot": {
+        "type": "boolean",
+        "description": "Whether the container must run as a non-root user."
+      },
+      "runAsUser": {
+        "type": "integer",
+        "description": "UID to run the container process as."
+      },
+      "seLinuxOptions": {
+        "type": "object",
+        "description": "SELinux context to apply to the container.",
+        "properties": {
+          "level": {
+            "type": "string",
+            "description": "SELinux level label."
+          },
+          "role": {
+            "type": "string",
+            "description": "SELinux role label."
+          },
+          "type": {
+            "type": "string",
+            "description": "SELinux type label."
+          },
+          "user": {
+            "type": "string",
+            "description": "SELinux user label."
+          }
+        }
+      },
+      "seccompProfile": {
+        "type": "object",
+        "description": "Seccomp options for the container.",
+        "properties": {
+          "localhostProfile": {
+            "type": "string",
+            "description": "Profile file path relative to the kubelet's seccomp root; required (and only valid) when type is \"Localhost\"."
+          },
+          "type": {
+            "type": "string",
+            "description": "Which kind of seccomp profile to apply.",
+            "enum": [
+              "Localhost",
+              "RuntimeDefault",
+              "Unconfined"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "serviceAccountName": {
+    "type": "string",
+    "description": "Name of an existing ServiceAccount the pod runs as. When set, the component's own per-component ServiceAccount is NOT generated, and identity-binding traits (rbac) target this account instead."
+  },
+  "setHostnameAsFQDN": {
+    "type": "boolean",
+    "description": "Set the pod's hostname to its fully qualified domain name. Mutually exclusive with hostnameOverride."
+  },
+  "shareProcessNamespace": {
+    "type": "boolean",
+    "description": "Share a single process namespace between all containers in the pod. Mutually exclusive with hostPID."
+  },
+  "sidecars": {
+    "type": "array",
+    "description": "Sidecar containers run alongside the main container for the pod's lifetime.",
+    "items": {
+      "type": "object",
+      "description": "A single sidecar container definition.",
+      "properties": {
+        "args": {
+          "type": "array",
+          "description": "A list of string values (e.g. command or args).",
+          "items": {
+            "type": "string",
+            "description": "A single string value."
+          }
+        },
+        "command": {
+          "type": "array",
+          "description": "A list of string values (e.g. command or args).",
+          "items": {
+            "type": "string",
+            "description": "A single string value."
+          }
+        },
+        "env": {
+          "type": "array",
+          "description": "Environment variables to set on the container.",
+          "items": {
+            "type": "object",
+            "description": "A single environment variable.",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Environment variable name.",
+                "required": true
+              },
+              "value": {
+                "type": "string",
+                "description": "Literal value for the variable."
+              },
+              "valueFrom": {
+                "type": "object",
+                "description": "Source the value from another object. Exactly one of the five fields below may be set.",
+                "properties": {
+                  "configMapKeyRef": {
+                    "type": "object",
+                    "description": "Select a key of a ConfigMap in the component's namespace.",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "description": "Key within the referenced object's data.",
+                        "required": true
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "Name of the referenced object.",
+                        "required": true
+                      },
+                      "optional": {
+                        "type": "boolean",
+                        "description": "Whether the referenced object or key may be absent."
+                      }
+                    }
+                  },
+                  "fieldRef": {
+                    "type": "object",
+                    "description": "Select a field of the pod (e.g. metadata.name, status.podIP).",
+                    "properties": {
+                      "apiVersion": {
+                        "type": "string",
+                        "description": "Schema version the fieldPath is written in terms of; defaults to \"v1\"."
+                      },
+                      "fieldPath": {
+                        "type": "string",
+                        "description": "Path of the field to select (e.g. \"metadata.name\").",
+                        "required": true
+                      }
+                    }
+                  },
+                  "fileKeyRef": {
+                    "type": "object",
+                    "description": "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate).",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "description": "Key within the env file.",
+                        "required": true
+                      },
+                      "optional": {
+                        "type": "boolean",
+                        "description": "Whether the file or key may be absent."
+                      },
+                      "path": {
+                        "type": "string",
+                        "description": "Path within the volume to the env file.",
+                        "required": true
+                      },
+                      "volumeName": {
+                        "type": "string",
+                        "description": "Name of the volume mount containing the env file.",
+                        "required": true
+                      }
+                    }
+                  },
+                  "resourceFieldRef": {
+                    "type": "object",
+                    "description": "Select a container resource request/limit (e.g. limits.cpu) as the value.",
+                    "properties": {
+                      "containerName": {
+                        "type": "string",
+                        "description": "Container to select the resource from; defaults to this container."
+                      },
+                      "divisor": {
+                        "type": "string",
+                        "description": "Output format divisor (e.g. \"1\", \"1Mi\"); defaults to \"1\"."
+                      },
+                      "resource": {
+                        "type": "string",
+                        "description": "Resource to select (e.g. \"limits.cpu\", \"requests.memory\").",
+                        "required": true
+                      }
+                    }
+                  },
+                  "secretKeyRef": {
+                    "type": "object",
+                    "description": "Select a key of a Secret in the component's namespace.",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "description": "Key within the referenced object's data.",
+                        "required": true
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "Name of the referenced object.",
+                        "required": true
+                      },
+                      "optional": {
+                        "type": "boolean",
+                        "description": "Whether the referenced object or key may be absent."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "envFrom": {
+          "type": "array",
+          "description": "Bulk-import a ConfigMap's or Secret's keys as environment variables.",
+          "items": {
+            "type": "object",
+            "description": "A single envFrom source. Exactly one of configMapRef or secretRef must be set.",
+            "properties": {
+              "configMapRef": {
+                "type": "object",
+                "description": "Import every key of this ConfigMap.",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "ConfigMap name.",
+                    "required": true
+                  },
+                  "optional": {
+                    "type": "boolean",
+                    "description": "Whether the ConfigMap may be absent."
+                  }
+                }
+              },
+              "prefix": {
+                "type": "string",
+                "description": "Text prepended to each imported variable's name."
+              },
+              "secretRef": {
+                "type": "object",
+                "description": "Import every key of this Secret.",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Secret name.",
+                    "required": true
+                  },
+                  "optional": {
+                    "type": "boolean",
+                    "description": "Whether the Secret may be absent."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "image": {
+          "type": "string",
+          "description": "Container image reference.",
+          "required": true
+        },
+        "lifecycle": {
+          "type": "object",
+          "description": "Lifecycle hooks run by the kubelet around container start/stop (exec, httpGet, or sleep).",
+          "properties": {
+            "postStart": {
+              "type": "object",
+              "description": "Executed immediately after the container is created.",
+              "additionalProperties": true
+            },
+            "preStop": {
+              "type": "object",
+              "description": "Executed immediately before the container is terminated.",
+              "additionalProperties": true
+            }
+          }
+        },
+        "name": {
+          "type": "string",
+          "description": "Container name.",
+          "required": true
+        },
+        "ports": {
+          "type": "array",
+          "description": "Ports the sidecar exposes. A named port is what the sidecar's own probes and lifecycle hooks may address by name.",
+          "items": {
+            "type": "object",
+            "description": "A single container port.",
+            "properties": {
+              "containerPort": {
+                "type": "integer",
+                "description": "Port number the sidecar listens on.",
+                "required": true
+              },
+              "name": {
+                "type": "string",
+                "description": "Port name, addressable by this sidecar's probes and lifecycle hooks."
+              },
+              "protocol": {
+                "type": "string",
+                "description": "Port protocol; defaults to TCP."
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "probes": {
+          "type": "object",
+          "description": "Health probes for the container.",
+          "properties": {
+            "liveness": {
+              "type": "object",
+              "description": "Liveness probe determining when the container should be restarted.",
+              "additionalProperties": true
+            },
+            "readiness": {
+              "type": "object",
+              "description": "Readiness probe determining when the container can receive traffic.",
+              "additionalProperties": true
+            },
+            "startup": {
+              "type": "object",
+              "description": "Startup probe determining when the container has finished starting.",
+              "additionalProperties": true
+            }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "description": "Compute resource requests and limits for the container.",
+          "properties": {
+            "limits": {
+              "type": "object",
+              "description": "Maximum resources the container may use. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted.",
+              "properties": {
+                "cpu": {
+                  "type": "",
+                  "types": [
+                    "string",
+                    "number"
+                  ],
+                  "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+                },
+                "memory": {
+                  "type": "",
+                  "types": [
+                    "string",
+                    "number"
+                  ],
+                  "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+                }
+              },
+              "additionalProperties": true
+            },
+            "requests": {
+              "type": "object",
+              "description": "Minimum resources guaranteed to the container. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted.",
+              "properties": {
+                "cpu": {
+                  "type": "",
+                  "types": [
+                    "string",
+                    "number"
+                  ],
+                  "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+                },
+                "memory": {
+                  "type": "",
+                  "types": [
+                    "string",
+                    "number"
+                  ],
+                  "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "securityContext": {
+          "type": "object",
+          "description": "Container-level security context (runAsUser, capabilities, seccompProfile, …). Setting any field here opts this container out of a downstream platform's nil-only default backfill for ALL securityContext fields — see parseSecurityContext's doc comment.",
+          "properties": {
+            "allowPrivilegeEscalation": {
+              "type": "boolean",
+              "description": "Whether a process can gain more privileges than its parent."
+            },
+            "appArmorProfile": {
+              "type": "object",
+              "description": "AppArmor options for the container.",
+              "properties": {
+                "localhostProfile": {
+                  "type": "string",
+                  "description": "Profile loaded on the node; required (and only valid) when type is \"Localhost\"."
+                },
+                "type": {
+                  "type": "string",
+                  "description": "Which kind of AppArmor profile to apply.",
+                  "enum": [
+                    "Localhost",
+                    "RuntimeDefault",
+                    "Unconfined"
+                  ]
+                }
+              }
+            },
+            "capabilities": {
+              "type": "object",
+              "description": "Linux capabilities to add or drop.",
+              "properties": {
+                "add": {
+                  "type": "array",
+                  "description": "Capabilities to add (e.g. \"NET_BIND_SERVICE\").",
+                  "items": {
+                    "type": "string",
+                    "description": "A single capability name."
+                  }
+                },
+                "drop": {
+                  "type": "array",
+                  "description": "Capabilities to drop (e.g. \"ALL\").",
+                  "items": {
+                    "type": "string",
+                    "description": "A single capability name."
+                  }
+                }
+              }
+            },
+            "privileged": {
+              "type": "boolean",
+              "description": "Run the container in privileged mode. Subject to the environment policy's AllowPrivileged flag."
+            },
+            "procMount": {
+              "type": "string",
+              "description": "Procfs mount behavior for the container (Linux-only).",
+              "enum": [
+                "Default",
+                "Unmasked"
+              ]
+            },
+            "readOnlyRootFilesystem": {
+              "type": "boolean",
+              "description": "Whether the container's root filesystem is mounted read-only."
+            },
+            "runAsGroup": {
+              "type": "integer",
+              "description": "GID to run the container process as."
+            },
+            "runAsNonRoot": {
+              "type": "boolean",
+              "description": "Whether the container must run as a non-root user."
+            },
+            "runAsUser": {
+              "type": "integer",
+              "description": "UID to run the container process as."
+            },
+            "seLinuxOptions": {
+              "type": "object",
+              "description": "SELinux context to apply to the container.",
+              "properties": {
+                "level": {
+                  "type": "string",
+                  "description": "SELinux level label."
+                },
+                "role": {
+                  "type": "string",
+                  "description": "SELinux role label."
+                },
+                "type": {
+                  "type": "string",
+                  "description": "SELinux type label."
+                },
+                "user": {
+                  "type": "string",
+                  "description": "SELinux user label."
+                }
+              }
+            },
+            "seccompProfile": {
+              "type": "object",
+              "description": "Seccomp options for the container.",
+              "properties": {
+                "localhostProfile": {
+                  "type": "string",
+                  "description": "Profile file path relative to the kubelet's seccomp root; required (and only valid) when type is \"Localhost\"."
+                },
+                "type": {
+                  "type": "string",
+                  "description": "Which kind of seccomp profile to apply.",
+                  "enum": [
+                    "Localhost",
+                    "RuntimeDefault",
+                    "Unconfined"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "volumeDevices": {
+          "type": "array",
+          "description": "Raw block volumes to attach to this container, by the name of a `volumes` pvc entry or claim template authored with volumeMode: Block.",
+          "items": {
+            "type": "object",
+            "description": "A single raw block device.",
+            "properties": {
+              "devicePath": {
+                "type": "string",
+                "description": "Path in this container where the block device appears; unique within the container and distinct from every mountPath.",
+                "required": true
+              },
+              "name": {
+                "type": "string",
+                "description": "Name of the Block pod volume to attach.",
+                "required": true
+              }
+            }
+          }
+        },
+        "volumeMounts": {
+          "type": "array",
+          "description": "Pod volumes to mount into this container, by the name of a `volumes` entry.",
+          "items": {
+            "type": "object",
+            "description": "A single volume mount.",
+            "properties": {
+              "mountPath": {
+                "type": "string",
+                "description": "Path in this container where the volume is mounted; unique within the container.",
+                "required": true
+              },
+              "name": {
+                "type": "string",
+                "description": "Name of the pod volume to mount.",
+                "required": true
+              },
+              "readOnly": {
+                "type": "boolean",
+                "description": "Mount the volume read-only."
+              },
+              "subPath": {
+                "type": "string",
+                "description": "Sub-path within the volume to mount instead of its root."
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "workingDir": {
+          "type": "string",
+          "description": "Working directory for the container process."
+        }
+      }
+    }
+  },
+  "strategy": {
+    "type": "object",
+    "description": "How pods are replaced when the pod template changes. Unset leaves the API default (RollingUpdate with maxUnavailable and maxSurge both 25%).",
+    "properties": {
+      "rollingUpdate": {
+        "type": "object",
+        "description": "RollingUpdate parameters. Only allowed when type is RollingUpdate — the API forbids it under Recreate, so this matches rather than tightens. May be omitted under RollingUpdate, leaving the API defaults. Both knobs may be non-zero at once; only both being zero is refused, since the update would never make progress.",
+        "properties": {
+          "maxSurge": {
+            "type": "",
+            "types": [
+              "integer",
+              "string"
+            ],
+            "description": "Maximum pods that may be scheduled above the desired count during the update: a percentage string such as \"25%\", or a non-negative integer such as 2. The API default is 25%. Deliberately NOT capped at 100% — unlike maxUnavailable, the API permits surging past the desired count."
+          },
+          "maxUnavailable": {
+            "type": "",
+            "types": [
+              "integer",
+              "string"
+            ],
+            "description": "Maximum pods that may be unavailable during the update: a percentage string such as \"25%\" (at most 100%), or a non-negative integer such as 2. The API default is 25%."
+          }
+        }
+      },
+      "type": {
+        "type": "string",
+        "description": "RollingUpdate replaces pods gradually; Recreate kills every existing pod before creating new ones. Required whenever strategy is authored at all — the API would default it to RollingUpdate, but a strategy object whose only meaning comes from defaulting is not worth writing.",
+        "required": true,
+        "enum": [
+          "Recreate",
+          "RollingUpdate"
+        ]
+      }
+    }
+  },
+  "subdomain": {
+    "type": "string",
+    "description": "Subdomain of the pod (a DNS-1123 label), giving the FQDN \u003chostname\u003e.\u003csubdomain\u003e.\u003cnamespace\u003e.svc.\u003ccluster domain\u003e."
+  },
+  "terminationGracePeriodSeconds": {
+    "type": "integer",
+    "description": "Seconds the pod is given to terminate gracefully after a delete request. Must be \u003e= 0; the API default is 30."
+  },
+  "topologySpread": {
+    "type": "boolean",
+    "description": "Whether default topology spread constraints are applied across nodes.",
+    "default": true
+  },
+  "volumes": {
+    "type": "array",
+    "description": "Volumes to attach and mount into the container.",
+    "items": {
+      "type": "object",
+      "description": "A single volume and its mount.",
+      "properties": {
+        "devicePath": {
+          "type": "string",
+          "description": "pvc only: path in the container where a volumeMode: Block claim appears as a raw block device. Authored instead of mountPath, and only together with volumeMode: Block."
+        },
+        "mountPath": {
+          "type": "string",
+          "description": "Path where the volume is mounted in the container. Required on every volume except a pvc with volumeMode: Block, which authors devicePath instead."
+        },
+        "name": {
+          "type": "string",
+          "description": "Volume name.",
+          "required": true
+        },
+        "readOnly": {
+          "type": "boolean",
+          "description": "Mount the volume read-only."
+        },
+        "type": {
+          "type": "string",
+          "description": "Volume source type.",
+          "enum": [
+            "hostPath",
+            "emptyDir",
+            "pvc",
+            "configMap",
+            "secret"
+          ]
+        },
+        "volumeMode": {
+          "type": "string",
+          "description": "pvc only: the claim's volumeMode. Filesystem (the apiserver default when omitted) pairs with mountPath; Block pairs with devicePath.",
+          "enum": [
+            "Filesystem",
+            "Block"
+          ]
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "workingDir": {
+    "type": "string",
+    "description": "Working directory for the container process."
+  }
+}

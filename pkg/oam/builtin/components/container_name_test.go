@@ -31,7 +31,7 @@ var containerNameCases = []struct {
 	serviceNamed bool
 }{
 	{"webservice", &components.WebserviceHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, true},
-	{"worker", &components.WorkerHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
+	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
 	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "db"}, false},
 	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},

@@ -13,18 +13,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // Pod-level scheduling on `worker`, exercised under a NON-NOOP environment
 // policy. The golden fixtures cannot reach this behaviour, so it is pinned here
 // or nowhere.
 //
-// worker's topology-spread opinion is evaluated inside Generate, from
-// c.Replicas (worker.go, createDeployment -> BuildTopologySpreadConstraints).
+// worker's topology-spread opinion is evaluated at Generate: WorkerRule
+// (worker.go) lowers it into a topology-spread trait, which reads the
+// Deployment's spec.replicas (topologyspread.go -> BuildTopologySpreadConstraints).
 // By then ApplyPolicy has already run — transform.go calls it on the config
 // ToApplicationConfig returned — and ApplyPolicy substitutes the environment
-// policy's DefaultReplicas for a document that authored none (worker.go ->
+// policy's DefaultReplicas for a document that authored none (deployment.go ->
 // applyDefaultReplicas, enforce.go). The opinion is therefore evaluated against
 // the EFFECTIVE replica count, and the number of constraints a worker gets is a
 // function of the policy, not of the document alone.
@@ -56,8 +56,9 @@ func workerSchedulingDoc() *oam.Component {
 	}
 }
 
-// buildWorkerDeployment runs the production sequence — parse, apply policy,
-// generate — and returns the emitted Deployment. A nil p uses oam.NoopPolicy,
+// buildWorkerDeployment runs the production sequence — lower (WorkerRule),
+// parse the emitted deployment, apply policy, generate with the synthesized
+// topology-spread trait, via workerViaRule — and returns the emitted Deployment. A nil p uses oam.NoopPolicy,
 // the same value TransformWithPolicy substitutes.
 func buildWorkerDeployment(t *testing.T, comp *oam.Component, p oam.Policy) *appsv1.Deployment {
 	t.Helper()
@@ -65,7 +66,7 @@ func buildWorkerDeployment(t *testing.T, comp *oam.Component, p oam.Policy) *app
 		p = &oam.NoopPolicy{}
 	}
 
-	h := &components.WorkerHandler{}
+	h := workerViaRule{}
 	cfg, err := h.ToApplicationConfig(comp, "default")
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
@@ -125,7 +126,7 @@ func topologyKeys(tscs []corev1.TopologySpreadConstraint) []string {
 // single label app=<name> and no match expressions.
 //
 // Exact, not "contains app=<name>": the generated pods carry only that one
-// label (worker.go, dep.Spec.Template.Labels = appLabels(app.Name)), so a
+// label (deployment.go, dep.Spec.Template.Labels = deploymentComponentLabels(app.Name)), so a
 // selector that additionally required, say, tier=<name> would select no pods at
 // all — the constraint silently stops constraining anything — while a
 // membership check on app alone still reads green.

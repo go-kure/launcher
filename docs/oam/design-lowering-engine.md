@@ -293,6 +293,22 @@ the gateway fixture) pass **without** `UPDATE_GOLDEN`, and all five
 `IngressHandler`/`HTTPRouteHandler.Apply` — reproducing byte-for-byte what the engine's
 fixpoint plus `applyTraits` does end to end.
 
+The worker-as-a-rule migration (`WorkerRule`, `pkg/oam/builtin/components/worker.go`;
+go-kure/launcher#280), the first production `ComponentLoweringRule`, re-ran it at the
+component position: every golden fixture and every example under every example
+profile builds byte-identically without `UPDATE_GOLDEN`, and worker's published
+property schema is pinned byte for byte against a capture of the former handler's
+(`testdata/worker-property-schema.json`). The handler-shaped worker tests are
+re-pointed through a `workerViaRule` adapter that runs `WorkerRule.LowerComponent`,
+the real `DeploymentHandler` and, when synthesized, the real `TopologySpreadHandler`.
+Two differences are deliberate and pinned. A worker refused by its own parse now
+carries the lowering engine's prefix (`component "w" (type "worker") in document …`)
+instead of the former `component "w":`, with the cause text unchanged. A
+trait-lowering error on a worker's trait carries one more chain line naming the
+`component/worker` step. The former handler's check that the `affinity` shorthand
+evaluates to label selectors the API server accepts runs in the rule, before the
+raw `affinity` is forwarded, with the same text.
+
 ## Entry-point contract: in-transform and raw-document
 
 The engine mechanics above (D1–D7) were first proven for documents that already

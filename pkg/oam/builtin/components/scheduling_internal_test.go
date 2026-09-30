@@ -78,7 +78,7 @@ func TestSchedulingKeysSurviveFragmentCopies(t *testing.T) {
 // affinity before this work.
 func TestOpinionatedKindsKeepAffinityShorthand(t *testing.T) {
 	cases := map[string]map[string]oam.PropertySchema{
-		"worker":      (&WorkerHandler{}).PropertySchema(),
+		"worker":      WorkerRule{}.PropertySchema(),
 		"statefulset": (&StatefulsetHandler{}).PropertySchema(),
 		"webservice":  (&WebserviceHandler{}).PropertySchema(),
 	}

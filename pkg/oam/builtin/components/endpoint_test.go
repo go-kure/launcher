@@ -38,13 +38,19 @@ func TestWebserviceHandler_Endpoints(t *testing.T) {
 	}
 }
 
-// TestWorkerHandler_NotEndpointProvider documents the #225 decision: worker declares no
-// in-cluster port and emits no Service, so it deliberately does not implement EndpointProvider
-// (ComponentEndpoints then returns (nil,nil) for a worker component).
-func TestWorkerHandler_NotEndpointProvider(t *testing.T) {
-	var h any = &components.WorkerHandler{}
-	if _, ok := h.(oam.EndpointProvider); ok {
-		t.Error("WorkerHandler should not implement oam.EndpointProvider (worker has no in-cluster port)")
+// TestWorker_NotEndpointProvider documents the #225 decision: worker declares no
+// in-cluster port and emits no Service, so it deliberately provides no endpoints
+// (ComponentEndpoints then returns (nil,nil) for a worker component). Worker is a
+// lowering rule now, so neither the rule nor the deployment handler it lowers
+// into may provide them.
+func TestWorker_NotEndpointProvider(t *testing.T) {
+	for name, v := range map[string]any{
+		"WorkerRule":        components.WorkerRule{},
+		"DeploymentHandler": &components.DeploymentHandler{},
+	} {
+		if _, ok := v.(oam.EndpointProvider); ok {
+			t.Errorf("%s should not implement oam.EndpointProvider (worker has no in-cluster port)", name)
+		}
 	}
 }
 
