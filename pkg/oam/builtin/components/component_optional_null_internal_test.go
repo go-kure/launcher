@@ -1,0 +1,142 @@
+package components
+
+import (
+	"reflect"
+	"testing"
+
+	"github.com/go-kure/kure/pkg/stack"
+
+	"github.com/go-kure/launcher/pkg/oam"
+)
+
+// go-kure/launcher#570: these optional top-level properties were read with a
+// bare lookup and then type-checked, so an explicit null passed the published
+// schema and authored validation (which leaves a top-level null in place) and
+// was then refused as a wrong type. Each now reads a null, typed or untyped, as
+// omission: the component builds exactly as one leaving the key out. Each case
+// is two-sided, as in common_null_presence_internal_test.go — a wrongly typed
+// value must still be refused, so deleting the type check would turn it red.
+//
+// With each read reverted to its bare lookup, every null subtest here fails
+// but one: scopeOverrides as a typed nil list. A `[]any(nil)` already passed
+// the old `.([]any)` assertion as an empty list, which builds the same config,
+// so that subtest does not discriminate; the other four null shapes do.
+func TestOptionalProperty_NullIsOmission(t *testing.T) {
+	type handler interface {
+		ToApplicationConfig(*oam.Component, string) (stack.ApplicationConfig, error)
+	}
+	const manifestYAML = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"
+	const sourceURL = "https://example.com/manifests.yaml"
+	cronjob := map[string]any{"image": "ghcr.io/org/job:v1.0.0", "schedule": "0 2 * * *"}
+	cases := []struct {
+		kind string
+		h    handler
+		base map[string]any
+		key  string
+	}{
+		{"cronjob", &CronjobHandler{}, cronjob, "successfulJobsHistoryLimit"},
+		{"cronjob", &CronjobHandler{}, cronjob, "failedJobsHistoryLimit"},
+		{"cronjob", &CronjobHandler{}, cronjob, "timeZone"},
+		{"cronjob", &CronjobHandler{}, cronjob, "completionMode"},
+		{"job", &JobHandler{}, map[string]any{"image": "ghcr.io/org/job:v1.0.0"}, "completionMode"},
+		{"passthrough", &PassthroughHandler{}, map[string]any{
+			"object": map[string]any{"apiVersion": "example.com/v1", "kind": "Widget", "metadata": map[string]any{"name": "w"}},
+		}, "clusterScoped"},
+		{"manifests", &ManifestsHandler{}, map[string]any{"inline": manifestYAML}, "scopeOverrides"},
+		{"manifests", &ManifestsHandler{}, map[string]any{"inline": manifestYAML}, "url"},
+		{"manifests", &ManifestsHandler{}, map[string]any{"url": sourceURL}, "inline"},
+		{"crd", &CRDHandler{}, map[string]any{"inline": crdYAML}, "url"},
+		{"crd", &CRDHandler{}, map[string]any{"url": sourceURL}, "inline"},
+	}
+	with := func(base map[string]any, key string, v any) map[string]any {
+		props := make(map[string]any, len(base)+1)
+		for k, e := range base {
+			props[k] = e
+		}
+		props[key] = v
+		return props
+	}
+	for _, tc := range cases {
+		t.Run(tc.kind+"/"+tc.key, func(t *testing.T) {
+			build := func(t *testing.T, props map[string]any) stack.ApplicationConfig {
+				t.Helper()
+				cfg, err := tc.h.ToApplicationConfig(&oam.Component{Name: "c", Type: tc.kind, Properties: props}, "default")
+				if err != nil {
+					t.Fatalf("ToApplicationConfig: %v", err)
+				}
+				// A manifests config holds its namespace-stamping hook as a
+				// closure, which reflect.DeepEqual never finds equal. It is
+				// built from the parsed scope overrides alone, which the
+				// scopeOverrides case below compares directly.
+				if mc, ok := cfg.(*manifestConfig); ok {
+					c := *mc
+					c.process = nil
+					return &c
+				}
+				return cfg
+			}
+			if tc.key == "scopeOverrides" {
+				for _, nv := range nullValues() {
+					overrides, srcProps, err := parseScopeOverrides(with(tc.base, tc.key, nv.val))
+					if err != nil || len(overrides) != 0 || !reflect.DeepEqual(srcProps, tc.base) {
+						t.Errorf("%s: parseScopeOverrides(null) = %v, %v, %v; want no overrides and the other properties",
+							nv.name, overrides, srcProps, err)
+					}
+				}
+			}
+			absent := build(t, tc.base)
+			for _, nv := range nullValues() {
+				t.Run(nv.name, func(t *testing.T) {
+					if got := build(t, with(tc.base, tc.key, nv.val)); !reflect.DeepEqual(got, absent) {
+						t.Errorf("%s: null built a different config than omitting the key:\n null:   %+v\n absent: %+v",
+							tc.key, got, absent)
+					}
+				})
+			}
+			t.Run("wrong type still errors", func(t *testing.T) {
+				wrong := with(tc.base, tc.key, map[string]any{"x": "y"})
+				if _, err := tc.h.ToApplicationConfig(&oam.Component{Name: "c", Type: tc.kind, Properties: wrong}, "default"); err == nil {
+					t.Errorf("%s: a map value must still be refused as a wrong type", tc.key)
+				}
+			})
+		})
+	}
+}
+
+// parseResourceList and parseLabelMap are reached only by a library caller that
+// skips authored validation, which strips nested nulls first. They now read a
+// null entry as absence, as stringMapStrict already did, instead of refusing it.
+func TestResourceAndLabelMaps_NullEntryIsOmission(t *testing.T) {
+	for _, nv := range nullValues() {
+		t.Run("resources/"+nv.name, func(t *testing.T) {
+			got, err := parseResourceList(map[string]any{"cpu": nv.val, "memory": "1Gi"})
+			if err != nil {
+				t.Fatalf("parseResourceList: %v", err)
+			}
+			want, err := parseResourceList(map[string]any{"memory": "1Gi"})
+			if err != nil {
+				t.Fatalf("parseResourceList: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("a null cpu = %v, want %v", got, want)
+			}
+		})
+		t.Run("labels/"+nv.name, func(t *testing.T) {
+			got, err := parseLabelMap(map[string]any{"disk": nv.val, "zone": "a"}, "nodeSelector")
+			if err != nil {
+				t.Fatalf("parseLabelMap: %v", err)
+			}
+			if want := map[string]string{"zone": "a"}; !reflect.DeepEqual(got, want) {
+				t.Errorf("a null disk = %v, want %v", got, want)
+			}
+		})
+	}
+	t.Run("wrong type still errors", func(t *testing.T) {
+		if _, err := parseResourceList(map[string]any{"cpu": true}); err == nil {
+			t.Error("parseResourceList: a bool quantity must still be refused")
+		}
+		if _, err := parseLabelMap(map[string]any{"disk": 1}, "nodeSelector"); err == nil {
+			t.Error("parseLabelMap: a non-string value must still be refused")
+		}
+	})
+}

@@ -56,7 +56,7 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 	}
 
 	clusterScoped := false
-	if raw, ok := props["clusterScoped"]; ok {
+	if raw, ok := authoredValue(props, "clusterScoped"); ok {
 		b, isBool := raw.(bool)
 		if !isBool {
 			return nil, errors.Errorf("passthrough component %q: 'clusterScoped' must be a bool", component.Name)
