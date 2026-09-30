@@ -117,6 +117,50 @@ func TestPostgresqlConfig_Generate_NonCPUMemoryOnlySide(t *testing.T) {
 	})
 }
 
+// TestPostgresqlConfig_Generate_HugePagesRequireCPUOrMemory pins admission's "HugePages
+// require cpu or memory" rule on the Cluster's resources, which CNPG copies onto the
+// instance pods unchanged. It is checked on the final resources, so a policy default or a
+// cpu/memory entry on the other side satisfies it.
+func TestPostgresqlConfig_Generate_HugePagesRequireCPUOrMemory(t *testing.T) {
+	hugeOnly := map[string]any{
+		"requests": map[string]any{"hugepages-2Mi": "4Mi"},
+		"limits":   map[string]any{"hugepages-2Mi": "4Mi"},
+	}
+
+	t.Run("hugepages alone is refused", func(t *testing.T) {
+		pc := newPostgresqlApp(t, map[string]any{"resources": hugeOnly})
+		_, err := pc.Generate(stack.NewApplication("db", "default", pc))
+		if err == nil || !strings.Contains(err.Error(), "resources: hugepages require cpu or memory") {
+			t.Fatalf("expected the hugepages cpu-or-memory error, got %v", err)
+		}
+	})
+
+	t.Run("policy default memory satisfies it", func(t *testing.T) {
+		pc := newPostgresqlApp(t, map[string]any{"resources": hugeOnly})
+		enforceable := stack.ApplicationConfig(pc).(oam.Enforceable)
+		if err := enforceable.ApplyPolicy(&stubPolicy{defaultMemoryRequest: "1Gi"}); err != nil {
+			t.Fatalf("ApplyPolicy: %v", err)
+		}
+		cluster := (*generatePostgresql(t, pc)[0]).(*cnpgv1.Cluster)
+		assertResourceList(t, "requests", cluster.Spec.Resources.Requests, map[corev1.ResourceName]string{
+			corev1.ResourceMemory: "1Gi",
+			"hugepages-2Mi":       "4Mi",
+		})
+	})
+
+	t.Run("cpu on the other side satisfies it", func(t *testing.T) {
+		pc := newPostgresqlApp(t, map[string]any{"resources": map[string]any{
+			"requests": map[string]any{"hugepages-2Mi": "4Mi"},
+			"limits":   map[string]any{"hugepages-2Mi": "4Mi", "cpu": "1"},
+		}})
+		cluster := (*generatePostgresql(t, pc)[0]).(*cnpgv1.Cluster)
+		assertResourceList(t, "limits", cluster.Spec.Resources.Limits, map[corev1.ResourceName]string{
+			corev1.ResourceCPU: "1",
+			"hugepages-2Mi":    "4Mi",
+		})
+	})
+}
+
 // TestPostgresqlHandler_ResourceName_SharedValidation_Error proves that dropping the
 // cpu/memory-only rejection did not drop validation: postgresql still refuses, by name,
 // everything the shared resources parser refuses for the other workload kinds.

@@ -427,6 +427,11 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 				}
 			}
 		}
+		// Pod-level resources get no defaults, so the authored block is the
+		// one admission sees.
+		if err := validateHugePagesHaveCPUOrMemory("podResources", rr.Requests, rr.Limits); err != nil {
+			return PodSpecConfig{}, err
+		}
 		if len(rr.Requests) > 0 || len(rr.Limits) > 0 {
 			ps.Resources = &rr.ResourceRequirements
 		}

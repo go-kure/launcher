@@ -918,6 +918,37 @@ func validateResourceRequestLimit(requests, limits corev1.ResourceList) error {
 	return nil
 }
 
+// validateHugePagesHaveCPUOrMemory applies real admission's "HugePages require
+// cpu or memory" rule (mirrors the end of validateResourceRequirements,
+// k8s.io/kubernetes/pkg/apis/core/validation/validation.go, which both
+// container and pod-level resources go through): a requirements block naming
+// any hugepages-<size> resource, in requests or limits, must also name cpu or
+// memory on either side. label prefixes the error with the field the author
+// wrote.
+//
+// It is not part of parseResources, because a container's final resources are
+// not its authored ones: buildResourceRequirements always adds cpu and memory
+// requests, so a container can never trip this rule. Callers run it only on a
+// block that reaches the cluster as authored or policy-defaulted — pod-level
+// podResources, and the postgresql Cluster's resources.
+func validateHugePagesHaveCPUOrMemory(label string, requests, limits corev1.ResourceList) error {
+	hasHugePages, hasCPUOrMemory := false, false
+	for _, rl := range []corev1.ResourceList{requests, limits} {
+		for name := range rl {
+			if isHugePageResourceName(name) {
+				hasHugePages = true
+			}
+			if name == corev1.ResourceCPU || name == corev1.ResourceMemory {
+				hasCPUOrMemory = true
+			}
+		}
+	}
+	if hasHugePages && !hasCPUOrMemory {
+		return errors.Errorf("%s: hugepages require cpu or memory in requests or limits", label)
+	}
+	return nil
+}
+
 // standardContainerResourceNames is the fixed set of unqualified (no "/")
 // resource names a container may request/limit directly, beyond the
 // hugepages-<size> family (mirrors standardContainerResources,
