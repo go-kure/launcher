@@ -265,7 +265,65 @@ func generateDelivery(cluster *stack.Cluster, opts deliveryOptions) (*deliveryOu
 		}
 		out.artifacts = append(out.artifacts, a)
 	}
+	if err := out.checkCollisions(); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// objectIdentity is what the API server tells two objects apart by: API
+// group, kind, namespace and name. The version is left out, since one object
+// served at two versions is still one object.
+type objectIdentity struct {
+	group, kind, namespace, name string
+}
+
+func identityOf(o client.Object) objectIdentity {
+	gvk := o.GetObjectKind().GroupVersionKind()
+	return objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: o.GetNamespace(), name: o.GetName()}
+}
+
+func (id objectIdentity) String() string {
+	kind := id.kind
+	if id.group != "" {
+		kind += "." + id.group
+	}
+	return kind + " " + id.namespace + "/" + id.name
+}
+
+// checkCollisions refuses an output in which an artifact carries an object
+// with the identity of a delivery object: reconciling that artifact would
+// apply it over the OCIRepository or Kustomization that reconciles it (or
+// another unit's), redirecting its source or fighting over its spec. The
+// delivery objects are named after reconciliation units by kure's naming and
+// are not renamed here, so the build is refused instead; the check covers
+// every artifact object alike, whatever component or trait rendered it.
+//
+// Delivery objects never collide with each other: kure names each unit's
+// Kustomization after the unit's first bundle, and layout.IndexOrigins
+// refuses two bundles with one name, while GenerateFromLayout emits a source
+// shared by two units once and refuses two different definitions of it.
+//
+// Namespaces are compared exactly. An artifact object with no namespace is
+// not read as the delivery objects' namespace: the generated Kustomizations
+// set no spec.targetNamespace and the artifact's kustomization.yaml no
+// namespace, and kustomize-controller's server-side apply refuses a namespaced
+// object without one ("namespace not specified"), so it is never applied as
+// the delivery object of that name.
+func (d *deliveryOutput) checkCollisions() error {
+	delivery := make(map[objectIdentity]bool, len(d.flux))
+	for _, o := range d.flux {
+		delivery[identityOf(*o)] = true
+	}
+	for _, a := range d.artifacts {
+		for _, o := range a.objects {
+			if id := identityOf(*o); delivery[id] {
+				return errors.Errorf("artifact %q carries %s, which is also a Flux delivery object this build generates: rename the component that renders it, or the application, so that no artifact object has a delivery object's kind, namespace and name",
+					a.name, id)
+			}
+		}
+	}
+	return nil
 }
 
 // write writes the delivery output into dir. Unit and application names are
