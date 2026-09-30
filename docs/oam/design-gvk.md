@@ -41,8 +41,9 @@ the target platform resolves capabilities for it, `CapabilityDefinition` declare
 rendering schema for a custom (non-builtin) trait type, and `EnvironmentSet` names the
 profile+values pairs `kurel build --environment` selects between. `EnvironmentSet` is a
 deployer input read only by the `kurel` CLI, not part of a package; its format is
-described in the [kurel CLI reference](https://pkg.go.dev/github.com/go-kure/launcher/pkg/cmd/kurel)'s
-Named environments section.
+described in the kurel CLI reference's
+[Named environments](https://github.com/go-kure/launcher/blob/main/pkg/cmd/kurel/README.md#named-environments)
+section.
 
 ### Example document headers
 
