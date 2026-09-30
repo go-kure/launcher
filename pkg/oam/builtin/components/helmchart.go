@@ -1069,6 +1069,23 @@ var _ oam.LayoutAugmentationCoverage = (*augmentingHelmchartConfig)(nil)
 // placement the writer applies its own Config default to the child, exactly
 // as to a walked application layout.
 //
+// The partitioned layout itself, when its own ApplicationFileMode is
+// AppFileUnset (always, for a layout kure's walker built), is pinned to
+// AppFilePerResource: it must stay a directory whose kustomization.yaml lists
+// the hook-group children. Left unset, kure's WriteManifest would give it the
+// writer's Config.ApplicationFileMode under every placement except
+// FluxIntegratedPerLayout, and under an AppFileSingle default a layout with
+// children is refused ("is AppFileSingle and has child layouts"). With the
+// pin, each child under such a default is written as one "<dirName>.yaml" in
+// this layout's directory and listed there. Everywhere else the pin changes
+// nothing: under FluxIntegratedPerLayout WriteManifest already resolves the
+// layout as a directory and kure's integrator pins an unset mode to
+// AppFilePerResource itself; WriteToDisk, WriteToTar and kure's Flux
+// generator compare the literal mode with AppFileSingle only, so
+// AppFilePerResource and AppFileUnset read the same there; and the walker's
+// single-tier flattening never absorbs a layout that has children. A caller
+// that sets the layout's mode explicitly keeps it.
+//
 // Residual gap, documented not fixed: two DIFFERENT Applications with a
 // same-named component still collide (component names are unique only
 // within one Application, but every emitted Kustomization CR shares one
@@ -1083,6 +1100,9 @@ func (c *HelmchartConfig) augmentLayoutTemplate(ml *layout.ManifestLayout) error
 		return nil
 	}
 	ml.Resources = nil
+	if ml.ApplicationFileMode == layout.AppFileUnset {
+		ml.ApplicationFileMode = layout.AppFilePerResource
+	}
 	parentPath := ml.FullRepoPath()
 	var prevName string
 	for i, g := range c.hookGroups {

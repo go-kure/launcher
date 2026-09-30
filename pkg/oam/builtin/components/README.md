@@ -1888,7 +1888,17 @@ not part of either change.
   on a per-child Flux Kustomization CR under `FluxIntegratedPerLayout` placement (kure
   `pkg/stack/layout/manifest.go`'s `DependsOn` field doc); under coarser placement modes the
   children's resources are aggregated instead, and reconciliation ordering between hook groups is
-  not separately enforced. A single-group chart's `AugmentLayout` is a no-op. Every `delivery: template`
+  not separately enforced. When it partitions, `AugmentLayout` also sets the component layout's
+  `ApplicationFileMode` to `AppFilePerResource` unless the caller already set one, so the component
+  stays a directory whose `kustomization.yaml` lists the children. Without that, a writer-wide
+  `AppFileSingle` default (kure `layout.Config.ApplicationFileMode`) would make kure's
+  `WriteManifest` refuse the tree under any placement but `FluxIntegratedPerLayout`: an
+  `AppFileSingle` layout writes no `kustomization.yaml`, so nothing would list its child layouts
+  (`go-kure/launcher#563`). The children carry no mode of their own, so under such a default each
+  hook group is written as one file, `<component dir>/<child>.yaml`, instead of a sub-directory,
+  and the component's `kustomization.yaml` lists it; under `FluxIntegratedPerLayout` kure's layout
+  integrator keeps every child a directory with its own Flux Kustomization, whatever the default.
+  A single-group chart's `AugmentLayout` is a no-op. Every `delivery: template`
   component becomes a `LayoutAugmenter` regardless of hook-group count — including a hook-free
   chart, since the wrap decision happens at config-construction time, before the network render
   that would reveal there is only one group — so even a hook-free templated chart now gets its own
