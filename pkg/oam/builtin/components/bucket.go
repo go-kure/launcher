@@ -1,6 +1,8 @@
 package components
 
 import (
+	"strings"
+
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
@@ -27,10 +29,10 @@ func (h *BucketHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"provider":           fluxSourceString("Bucket spec.provider: generic (S3-compatible, Flux's default), aws, gcp or azure. Flux's gcp provider ignores endpoint and fetches from storage.googleapis.com, which is then the host the policy's allowed registries must list."),
 		"bucketName":         fluxSourceRequiredString("Bucket spec.bucketName: the object storage bucket."),
-		"endpoint":           fluxSourceRequiredString("Bucket spec.endpoint: the object storage address, host[:port] or a URL as the provider expects. Except under provider gcp, its host must be in the policy's allowed registries when that list is non-empty."),
+		"endpoint":           fluxSourceRequiredString("Bucket spec.endpoint: the object storage address, host[:port] or a URL as the provider expects. Except under provider gcp, its host must be in the policy's allowed registries when that list is non-empty; such a list also refuses an Amazon S3 endpoint (any containing amazonaws) unless the provider is azure or gcp, since Flux's S3 client picks the host it contacts from region at runtime."),
 		"sts":                fluxSourceObject("Bucket spec.sts: a Security Token Service for temporary credentials (aws and generic providers). Its endpoint is not checked against the allowed registries."),
 		"insecure":           fluxSourceBool("Bucket spec.insecure: allow a non-TLS endpoint."),
-		"region":             fluxSourceString("Bucket spec.region of the endpoint."),
+		"region":             fluxSourceString("Bucket spec.region of the endpoint. With an Amazon S3 endpoint it selects the host Flux fetches from (see endpoint)."),
 		"prefix":             fluxSourceString("Bucket spec.prefix for server-side filtering of objects."),
 		"secretRef":          fluxSourceObject("Bucket spec.secretRef: the Secret holding the credentials, in the namespace the Bucket lands in."),
 		"serviceAccountName": fluxSourceString("Bucket spec.serviceAccountName for workload identity (gcp and aws providers)."),
@@ -95,12 +97,35 @@ const gcsHost = "storage.googleapis.com"
 // ApplyPolicy rejects a Bucket whose fetch host is not in the policy's allowed
 // registries: the endpoint host for the generic, aws and azure providers (and
 // none, which Flux treats as generic), and gcsHost for gcp, whose endpoint Flux
-// ignores.
+// ignores. Under a non-empty allowlist it also refuses an Amazon S3 endpoint on
+// the S3 client's path (every provider but gcp and azure), whose contacted host
+// cannot be checked (namesAmazonS3).
 func (c *BucketConfig) ApplyPolicy(p oam.Policy) error {
 	if c.Spec.Provider == sourcev1.BucketProviderGoogle {
 		return enforceFluxSourceHost("bucket", "provider gcp (Flux ignores endpoint)", gcsHost, p)
 	}
+	if c.Spec.Provider != sourcev1.BucketProviderAzure && p != nil && len(p.AllowedRegistries()) > 0 &&
+		namesAmazonS3(c.Spec.Endpoint) {
+		return errors.Errorf("bucket: endpoint: %q is treated as an Amazon S3 host (it contains \"amazonaws\"): "+
+			"Flux's S3 client fetches such a bucket not from endpoint but from the S3 host of spec.region, or of the bucket's "+
+			"location when region is unset, chosen at runtime, so the host cannot be checked against the allowed registries %v",
+			c.Spec.Endpoint, p.AllowedRegistries())
+	}
 	return enforceFluxSourceHost("bucket", "endpoint", c.Spec.Endpoint, p)
+}
+
+// namesAmazonS3 reports whether a Bucket endpoint may be one the S3 client
+// behind Flux's generic and aws providers (minio-go) treats as Amazon S3. For
+// such an endpoint that client replaces the host with the regional S3 host of
+// the bucket's region — spec.region, which may name any AWS region or
+// partition, else the location it discovers — so the endpoint an allowlist
+// admitted is not the host fetched from. It errs broad, since the refusal it
+// drives fails closed: the client's Amazon host patterns leave their dots
+// unescaped, so look-alikes such as s3.x-amazonaws.com match them too, and any
+// endpoint containing "amazonaws", in any case, counts. The whole value is
+// tested: an endpoint is host[:port], and the client refuses one with a path.
+func namesAmazonS3(endpoint string) bool {
+	return strings.Contains(strings.ToLower(endpoint), "amazonaws")
 }
 
 // SetFluxNamespace moves the Bucket to ns. Satisfies
