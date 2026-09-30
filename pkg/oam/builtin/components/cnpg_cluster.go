@@ -47,7 +47,8 @@ const cnpgClusterDefaultInstances = 1
 //
 // Deep blocks are published as open objects and decoded strictly into the
 // typed cnpgv1 structs (builtin.DecodeStrictJSON), so a misspelt key at any
-// depth or a wrongly typed value is refused rather than dropped.
+// depth or a wrongly typed value is refused rather than dropped, as is an
+// authored 0 or false the typed spec would omit (refuseUncarriedValues).
 // TestCnpgClusterSchema_CoversClusterSpec keeps the published key set equal to
 // the upstream json tags.
 type CnpgClusterHandler struct{}
@@ -195,6 +196,11 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	if !explicitInstances {
 		spec.Instances = cnpgClusterDefaultInstances
 	}
+	// Checked here, on the spec as decoded, because it is final for every
+	// authored value: ApplyPolicy only fills values the document left unset.
+	if err := refuseUncarriedValues(props, spec); err != nil {
+		return nil, err
+	}
 
 	return &CnpgClusterConfig{
 		Name:                component.Name,
@@ -203,6 +209,126 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 		explicitInstances:   explicitInstances,
 		explicitStorageSize: authoredStorageRequest(props) || decodedStorageRequest(&spec.StorageConfiguration),
 	}, nil
+}
+
+// refuseUncarriedValues refuses an authored value that the typed spec decodes
+// but the emitted Cluster would not carry. Many ClusterSpec fields are
+// non-pointer and omitempty, and some have a non-zero CRD default
+// (managed.roles[].connectionLimit, postgresUID, stopDelay, ...): an authored
+// 0 or false decodes into the field, is omitted when the Cluster is encoded,
+// and the API server then applies its default. Rather than a field list kept
+// in step with the upstream types, the spec is encoded as Generate's Cluster
+// will be and the authored tree (jsonProperties' output) is walked against it,
+// so any such field is covered, including one a CNPG bump adds.
+//
+// Two spellings of one field in the same object are refused as well:
+// encoding/json keeps only one of them, dropping the other silently.
+func refuseUncarriedValues(authored map[string]any, spec *cnpgv1.ClusterSpec) error {
+	data, err := json.Marshal(spec)
+	if err != nil {
+		return errors.Wrap(err, "internal: encode the decoded ClusterSpec")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var encoded any
+	if err := dec.Decode(&encoded); err != nil {
+		return errors.Wrap(err, "internal: decode the encoded ClusterSpec")
+	}
+	return compareCarried(authored, encoded, "")
+}
+
+// compareCarried walks authored against encoded, descending only where both
+// sides are objects or both are arrays (arrays align by index). A leaf present
+// in encoded in any spelling or type (a Quantity written as a number, say) is
+// carried. A leaf absent from encoded is refused when it is a numeric zero or
+// false. An authored empty string is not refused: storage.size "" is a value
+// the kind supports (authoredStorageRequest).
+func compareCarried(authored, encoded any, path string) error {
+	switch a := authored.(type) {
+	case map[string]any:
+		e, ok := encoded.(map[string]any)
+		if !ok {
+			return nil
+		}
+		join := func(k string) string {
+			if path == "" {
+				return k
+			}
+			return path + "." + k
+		}
+		// claimed maps an encoded key to the authored path that matched it.
+		// unmatched holds the authored keys with nothing in encoded: only a
+		// struct field can be omitted, so two of them that fold together are
+		// two spellings of one field, whichever value the decoder kept.
+		claimed := make(map[string]string, len(a))
+		var unmatched []string
+		for _, k := range slices.Sorted(maps.Keys(a)) {
+			child := join(k)
+			ek, present := encodedKey(e, k)
+			if !present {
+				for _, prev := range unmatched {
+					if strings.EqualFold(prev, k) {
+						return errors.Errorf("%s: sets the same field as %s (field names match case-insensitively, so one value would be dropped)", child, join(prev))
+					}
+				}
+				unmatched = append(unmatched, k)
+				if isOmittedZero(a[k]) {
+					return errors.Errorf("%s: %v cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default)", child, a[k])
+				}
+				continue
+			}
+			if other, dup := claimed[ek]; dup {
+				return errors.Errorf("%s: sets the same field as %s (field names match case-insensitively, so one value would be dropped)", child, other)
+			}
+			claimed[ek] = child
+			if err := compareCarried(a[k], e[ek], child); err != nil {
+				return err
+			}
+		}
+	case []any:
+		e, ok := encoded.([]any)
+		if !ok {
+			return nil
+		}
+		for i := range min(len(a), len(e)) {
+			if err := compareCarried(a[i], e[i], fmt.Sprintf("%s[%d]", path, i)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// encodedKey returns the key of e that the authored key k was decoded into:
+// k itself, else a case-insensitive match, the folding encoding/json applies
+// to struct field names. A Go map encodes every entry under the key it was
+// decoded from, so the exact lookup always hits for a map key and the fold is
+// reached only for a struct field.
+func encodedKey(e map[string]any, k string) (string, bool) {
+	if _, ok := e[k]; ok {
+		return k, true
+	}
+	for _, ek := range slices.Sorted(maps.Keys(e)) {
+		if strings.EqualFold(ek, k) {
+			return ek, true
+		}
+	}
+	return "", false
+}
+
+// isOmittedZero reports whether an authored leaf is a value omitempty drops:
+// false, or a number whose digits are all zero (0, -0, 0.0, 0e5), decided on
+// the literal so no float conversion can round a non-zero value to zero.
+func isOmittedZero(v any) bool {
+	switch x := v.(type) {
+	case bool:
+		return !x
+	case json.Number:
+		mantissa, _, _ := strings.Cut(strings.ToLower(x.String()), "e")
+		return strings.Trim(mantissa, "-0.") == ""
+	default:
+		return false
+	}
 }
 
 // decodedStorageRequest reports whether the decoded PGDATA storage block
@@ -283,10 +409,13 @@ func foldedFieldMaps(m map[string]any, field string) []map[string]any {
 // jsonProperties returns props as encoding/json serializes them, with the
 // package's null contract applied. The contract defines null by serialization
 // ("A value that serializes to JSON null is absent, at every depth"), so the
-// properties are marshalled and decoded back rather than inspected in Go:
-// typed collections, pointers, json.RawMessage and custom encoders (pointer
-// receivers included, where encoding/json calls them) all come back as the
-// JSON the strict decode would have read, and a null is a plain nil. Numbers
+// properties are marshalled and decoded back rather than inspected in Go: a
+// direct caller's typed collections, pointers, json.RawMessage and custom
+// encoders (pointer receivers included, where encoding/json calls them) all
+// come back as the JSON the strict decode would have read, and a null is a
+// plain nil. This serves a direct caller only: a lowering rule's output is
+// checked by the engine before dispatch, which accepts JSON-shaped values
+// (string-keyed maps, slices, scalars) and refuses a typed API struct. Numbers
 // decode as json.Number, which the strict decode re-marshals verbatim, so no
 // precision is lost. A value encoding/json cannot serialize is refused.
 func jsonProperties(props map[string]any) (map[string]any, error) {

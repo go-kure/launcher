@@ -87,10 +87,26 @@ before the strict decode, so a null never reaches the operator as a zero value.
 The contract defines a null as a value that serializes to JSON null, so the
 handler applies it to the serialization itself: the property map is marshalled
 with `encoding/json` and decoded back into plain maps, arrays and scalars before
-nulls are removed. Whatever Go shape a lowering rule produces — concrete
-collection types, nils behind pointers, raw JSON, custom encoders — is read
-exactly as it would be emitted, with no separate walk to keep in step with the
-encoder. A value that does not serialize is refused.
+nulls are removed. A lowering rule emits the same JSON-shaped values as for
+every component (string-keyed maps, slices, scalars), which the engine checks
+against the schema before the handler runs; a typed API struct is refused
+there. The serialization read additionally makes a direct caller of the
+handler read exactly as it encodes — concrete collection types, nils behind
+pointers, raw JSON, custom encoders — with no separate walk to keep in step
+with the encoder. A value that does not serialize is refused.
+
+The typed decode can also lose an authored value in the other direction. Many
+upstream fields are non-pointer and `omitempty`, and some carry a non-zero CRD
+default (`managed.roles[].connectionLimit` defaults to `-1`, `postgresUID` to
+`26`): an authored `0` or `false` decodes into the field, is omitted when the
+object is encoded, and the API server applies the default. The kind refuses
+such a value by path rather than silently change it. It finds them without a
+field list: the decoded spec is encoded as the emitted object will be, and
+every authored numeric zero or `false` with nothing at the same path in that
+encoding is an error, so a field a dependency bump adds is covered too. An
+authored empty string is not refused (`storage.size: ""` is a supported
+value), and two spellings of one field in the same object (`size` and `Size`)
+are refused, since the decoder would keep only one.
 
 ### Policy lives on the kind
 
@@ -153,3 +169,9 @@ output is intended to stay identical.
   change decides that. `imageCatalogRef` names a catalog object rather than an
   image and is not checked, nor is the operator's default image when
   `imageName` is unset.
+- `postgresql` forwards some blocks into the same typed structs without the
+  omitted-zero refusal, so an authored `0` or `false` there can still be
+  dropped; `postgresql` is unchanged here.
+- An authored empty string on an `omitempty` field with a CRD default (for
+  example `primaryUpdateStrategy: ""`) is still omitted, and the operator
+  applies its default; the refusal covers numbers and booleans only.
