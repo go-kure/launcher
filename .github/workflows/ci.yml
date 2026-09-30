@@ -4,7 +4,9 @@ on:
   push:
     branches: [main, develop, 'release/*']
   pull_request:
-    branches: [main, develop]
+    # No base-branch filter: a cherry-pick PR to a release/vX.Y branch needs
+    # the same required lint/test/build checks as a PR to main, or the
+    # release-branch ruleset can never be satisfied (docs/releasing.md).
     # No draft gate below (2026-08-19, GitLab mr-review parity) — every job runs
     # on a draft PR the same as a ready one, so ready_for_review buys nothing
     # here and is left out of the default set (opened, synchronize, reopened).
@@ -346,7 +348,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
     - name: Check action pins
-      uses: go-kure/.github/.github/actions/check-action-pins@d9fae7136af01adbe6eb26758b3c25814ffe5978 # main
+      uses: go-kure/.github/.github/actions/check-action-pins@4252fb3bf6524052b2ecd55480eb96d79ea2ff97 # main
 
   pin-impact:
     name: pin-impact
@@ -675,7 +677,7 @@ jobs:
         fi
 
     - name: Gate on reachable vulnerabilities
-      uses: go-kure/.github/.github/actions/govulncheck-gate@d9fae7136af01adbe6eb26758b3c25814ffe5978 # main
+      uses: go-kure/.github/.github/actions/govulncheck-gate@4252fb3bf6524052b2ecd55480eb96d79ea2ff97 # main
       with:
         report: govulncheck.json
         # Accepted-risk advisories: reachable under symbol scan but not exploitable in Launcher's use.
@@ -893,7 +895,7 @@ jobs:
     # Shared org action; always scans --full-tree so a PR and the merge queue see
     # identical results (go-kure/.github → docs/standards.md, scan-parity MUST rule).
     - name: Check for downstream references
-      uses: go-kure/.github/.github/actions/check-forbidden-terms@d9fae7136af01adbe6eb26758b3c25814ffe5978 # main
+      uses: go-kure/.github/.github/actions/check-forbidden-terms@4252fb3bf6524052b2ecd55480eb96d79ea2ff97 # main
 
     # Pinned to the SAME commit as the action above, not to 'main': the gate only
     # scans what that pinned SHA's script can see, so diffing the vendored copy
@@ -905,8 +907,9 @@ jobs:
     # bumping the pin above can no longer leave this one behind
     # (go-kure/launcher#298, go-kure/launcher#304).
     #
-    # The release script (scripts/release.sh) still calls the vendored copy of the
-    # guard; keep it byte-identical to the canonical so the release preflight can't rot.
+    # The shared Release workflow's release script still calls the vendored copy
+    # of the guard; keep it byte-identical to the canonical so the release
+    # preflight can't rot.
     - name: Resolve pinned guard revision
       id: guardrev
       run: |
@@ -944,6 +947,11 @@ jobs:
         path: .tmp/go-kure-dot-github
     - name: Diff vendored guard vs canonical
       run: diff -u .tmp/go-kure-dot-github/scripts/check-forbidden-terms.sh site/scripts/check-forbidden-terms.sh
+    # The release guide is written once, in go-kure/.github, and published by
+    # every repository that releases with the shared workflow; this copy is
+    # re-vendored by scripts/vendor-guard.sh at the same pin as the guard.
+    - name: Diff vendored release guide vs canonical
+      run: diff -u .tmp/go-kure-dot-github/standards/release-process.md docs/releasing.md
 
     - name: Read Hugo version from mise.toml
       id: hugo-version
@@ -1020,7 +1028,7 @@ jobs:
       run: echo "$HOME/bin" >> $GITHUB_PATH
 
     - name: Validate docs map (code↔docs sync)
-      uses: go-kure/.github/.github/actions/check-doc-sync@d9fae7136af01adbe6eb26758b3c25814ffe5978 # main
+      uses: go-kure/.github/.github/actions/check-doc-sync@4252fb3bf6524052b2ecd55480eb96d79ea2ff97 # main
 
     # Checks the YAML fences marked {check="build|snippet|template"} (unmarked
     # fences are not checked) — go-kure/launcher#442. Here rather than in `lint`
@@ -1109,7 +1117,7 @@ jobs:
       run: hugo --baseURL "/" --destination .linkcheck --quiet
 
     - name: Check internal links (rendered site)
-      uses: go-kure/.github/.github/actions/check-links@d9fae7136af01adbe6eb26758b3c25814ffe5978 # main
+      uses: go-kure/.github/.github/actions/check-links@4252fb3bf6524052b2ecd55480eb96d79ea2ff97 # main
       with:
         built-dir: site/.linkcheck
 
@@ -1167,7 +1175,7 @@ jobs:
       run: echo "$HOME/bin" >> $GITHUB_PATH
 
     - name: Enforce docs-with-code (Layer 3)
-      uses: go-kure/.github/.github/actions/check-doc-gate@d9fae7136af01adbe6eb26758b3c25814ffe5978 # main
+      uses: go-kure/.github/.github/actions/check-doc-gate@4252fb3bf6524052b2ecd55480eb96d79ea2ff97 # main
       with:
         base-ref: origin/${{ github.base_ref }}
         skip: ${{ contains(github.event.pull_request.labels.*.name, 'docs-skip') }}
@@ -1402,13 +1410,17 @@ jobs:
 
     - name: Analyze Go changes
       if: steps.changed-files.outputs.any_changed == 'true'
+      env:
+        BASE_REF: ${{ github.base_ref }}
       run: |
         echo "Changed Go-related files:"
         echo "${{ steps.changed-files.outputs.all_changed_files }}"
 
-        # Count lines of code changes
-        ADDED_LINES=$(git diff --numstat origin/main...HEAD | awk '{added+=$1} END {print added+0}')
-        REMOVED_LINES=$(git diff --numstat origin/main...HEAD | awk '{removed+=$2} END {print removed+0}')
+        # Count lines of code changes against the PR's own base, not main: a
+        # cherry-pick PR to a release/vX.Y branch would otherwise count every
+        # commit that branch does not share with main.
+        ADDED_LINES=$(git diff --numstat "origin/$BASE_REF...HEAD" | awk '{added+=$1} END {print added+0}')
+        REMOVED_LINES=$(git diff --numstat "origin/$BASE_REF...HEAD" | awk '{removed+=$2} END {print removed+0}')
 
         echo "Lines added: $ADDED_LINES"
         echo "Lines removed: $REMOVED_LINES"

@@ -61,7 +61,7 @@ The `main` branch is protected — all changes must go through pull requests.
    pass; `make verify-merge PR=<n>` gives pass/fail only, as make exits `2` on any failure). See
    `docs/github-workflows.md` § Which tree a PR run builds.
 
-4. **Pass required CI checks**: `lint`, `test`, `build`
+4. **Pass required CI checks**: `lint`, `test`, `build`, `pr-review / AI Code Review`
 
 5. **Merge** via the merge queue (linear history required — rebase, no merge commits)
 
@@ -69,7 +69,7 @@ The `main` branch is protected — all changes must go through pull requests.
 
 Enforced via the `main-protection` repository ruleset:
 
-- **Required status checks**: `lint`, `test`, `build`
+- **Required status checks**: `lint`, `test`, `build`, `pr-review / AI Code Review`
 - **Merge queue**: merging goes through a GitHub merge queue (rebase method) that rebases and tests the merged result before landing — no manual rebasing, no auto-rebase force-pushes
 - **Pull requests required**: all changes must go through a PR
 - **Conversation resolution**: all review threads must be resolved
@@ -77,6 +77,10 @@ Enforced via the `main-protection` repository ruleset:
 - **Force pushes**: disabled
 - **Branch deletion**: disabled
 - **Bypass actors**: `kure-release-bot` (GitHub App) — allowed to push release commits directly
+
+Release branches (`release/vX.Y`) have their own `release-protection` ruleset with the same rules,
+required checks and bot bypass, but no merge queue: a pull request must be up to date with the
+branch before it merges. See the Releasing page (`docs/releasing.md`).
 
 ## Development Workflow
 
@@ -231,28 +235,19 @@ The project uses GitHub Actions workflows:
 
 ### Main CI Pipeline (`.github/workflows/ci.yml`)
 
-- **Triggers**: Push to main/develop, PRs, merge_group (merge queue)
+- **Triggers**: Push to main/develop/`release/*`, PRs to any branch, merge_group (merge queue)
 - **Jobs**: validate (lint), test, security, coverage-check, build, cross-platform, analyze-changes
 - **Runner**: `autops-kube-kure` (self-hosted)
 
-### Release Pipeline (`.github/workflows/release-publish.yml`)
+### Release (`.github/workflows/release.yml`) and Release / Publish (`.github/workflows/release-publish.yml`)
 
-- **Triggers**: Version tags (`v*`); `workflow_dispatch` to re-publish an existing tag
-- **Jobs**: guard-tag-ref, then the shared publisher — test, validate (tag + changelog), goreleaser,
-  post-release (proxy refresh), deploy-docs
-- **Produces**: kurel binaries for linux × amd64/arm64 + checksums + SBOM + cosign signature
-
-### Creating a Release
-
-Releases are triggered by pushing a `vX.Y.Z` tag:
-
-1. Add the new section to `CHANGELOG.md`: `git cliff --unreleased --tag vX.Y.Z --prepend CHANGELOG.md`
-   (what `scripts/release.sh` runs). Never regenerate the whole file — that rewrites published sections.
-2. Commit the changelog: `git commit -m "chore: update CHANGELOG for vX.Y.Z"`
-3. Push to main and wait for CI to pass
-4. Tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
-
-The pushed tag triggers the release pipeline which runs GoReleaser to produce binaries and publish a GitHub release.
+Run **Release** from the Actions tab: pick the branch (`main`, or `release/vX.Y` for a patch), what
+to do (`release` by default), and tick **Dry run** for a preview. It makes the release commits and
+the tag, and **Release / Publish** then runs by itself on the tag. Nothing is tagged by hand. The
+Releasing page (`docs/releasing.md`, shared by every go-kure repository) explains every option,
+release branches, and what to do when a release fails. launcher's Publish produces the kurel
+binaries for linux × amd64/arm64, checksums, an SBOM per archive and a cosign signature of the
+checksums.
 
 ## Renovate Management
 
@@ -320,7 +315,8 @@ guard's shared-direct set.
 - `test-pin-impact` - Run `scripts/check-pin-impact.sh`'s hermetic cases (`bash scripts/test/run-tests.sh`)
 
 ### Release
-- `release TYPE=<type>` - Preview release (dry-run); types: alpha, beta, rc, stable
+No target releases or previews a release: run the **Release** workflow, with **Dry run** ticked for
+a preview (`docs/releasing.md`).
 - `release-snapshot` - Test GoReleaser locally (no tag, no publish)
 - `changelog-preview` - Preview unreleased entries (prints only; no target writes `CHANGELOG.md`)
 

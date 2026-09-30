@@ -141,7 +141,7 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   git checkout -b <type>/<description> main
   ```
 - **Branch prefixes**: `feat/`, `fix/`, `docs/`, `chore/`
-- **Required CI checks** that must pass: `lint`, `test`, `build`
+- **Required CI checks** that must pass: `lint`, `test`, `build`, `pr-review / AI Code Review`
 - **Merge queue**: merging goes through a GitHub merge queue (rebase method) that rebases and tests the merged result before landing — no manual rebasing needed
 - **Linear history** enforced — rebase only, no merge commits
 - **All conversations** must be resolved before merge
@@ -262,10 +262,10 @@ such reference to a generic role (e.g. "a downstream consumer" / "the downstream
 never introduce a new one. This is the go-kure organization "No Downstream References"
 standard (`go-kure/.github` → `docs/standards.md`), CI-enforced here via the shared
 `go-kure/.github` `check-forbidden-terms` action, which scans `--full-tree` on **every** event
-(pull request and merge queue alike) so the two never diverge; `scripts/release.sh` runs a
-byte-identical vendored copy (`site/scripts/check-forbidden-terms.sh`) as a release preflight. A
-legitimately unavoidable term takes an adjacent `allow-term:<word>` pragma. The remediation
-runbook is `go-kure/.github` → `docs/no-downstream-references.md`.
+(pull request and merge queue alike) so the two never diverge; the shared Release workflow's
+release script runs a byte-identical vendored copy (`site/scripts/check-forbidden-terms.sh`) as a
+release preflight. A legitimately unavoidable term takes an adjacent `allow-term:<word>` pragma.
+The remediation runbook is `go-kure/.github` → `docs/no-downstream-references.md`.
 
 ### Shared dependencies with kure (mandatory)
 
@@ -313,7 +313,7 @@ map and run `bash site/scripts/gen-docs-tables.sh`.
 | `pkg/oam/` | `api-reference/oam` | — |
 | `pkg/oam/builtin/components/` | `api-reference/oam-components` | — |
 | `pkg/oam/builtin/traits/` | `api-reference/oam-traits` | — |
-| `.github/workflows/` | — | `contributing/github-workflows` |
+| `.github/workflows/` | — | `contributing/github-workflows`, `contributing/releasing` |
 <!-- END GENERATED: reverse-mapping -->
 
 ## Security Considerations
@@ -384,7 +384,9 @@ The go-kure org governance, design documents, and community files are maintained
   - [OCI Artifact Layout](https://github.com/go-kure/.github/blob/main/docs/design/oci-layout.md) — layout tree conventions
 - **Standards**: [docs/standards.md](https://github.com/go-kure/.github/blob/main/docs/standards.md)
 - **Contributing**: [CONTRIBUTING.md](https://github.com/go-kure/.github/blob/main/CONTRIBUTING.md)
-- **Reusable workflows**: release, pr-review, claude — all hosted in go-kure/.github
+- **Reusable workflows**: release (`release.yml`, `release-publish.yml`), pr-review, claude — all
+  hosted in go-kure/.github. Releasing: `docs/releasing.md`, vendored from go-kure/.github's
+  `standards/release-process.md` by `scripts/vendor-guard.sh` — edit it there, never here
 - **Reusable workflow reference**: [go-kure/.github AGENTS.md](https://github.com/go-kure/.github/blob/main/AGENTS.md)
 
 ## Questions?

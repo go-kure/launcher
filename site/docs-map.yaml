@@ -77,9 +77,12 @@ extra_mounts:
   - {source: docs/oam/design-capability-schema.md, target: concepts/oam-capability-schema.md, title: Capability Schema, weight: 55}
   - {source: docs/oam/design-external-secret-data-shorthand.md, target: concepts/oam-external-secret-shorthand.md, title: External Secret Shorthand, weight: 80}
   - {source: DEVELOPMENT.md, target: contributing/guide.md, title: Development Guide, weight: 10}
+  # Vendored byte-identical from go-kure/.github's standards/release-process.md
+  # by scripts/vendor-guard.sh; edit it there, not here.
+  - {source: docs/releasing.md, target: contributing/releasing.md, title: Releasing, weight: 15}
   - {source: docs/github-workflows.md, target: contributing/github-workflows.md, title: GitHub Workflows, weight: 20}
   - {source: CHANGELOG.md, target: changelog/releases.md, title: Releases, weight: 10}
 
 # Extra reverse-map rows for non-package paths (no README mount, review-only).
 review_mappings:
-  - {change: "`.github/workflows/`", reference: "—", guides: "`contributing/github-workflows`"}
+  - {change: "`.github/workflows/`", reference: "—", guides: "`contributing/github-workflows`, `contributing/releasing`"}
