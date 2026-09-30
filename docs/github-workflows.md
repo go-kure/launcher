@@ -891,6 +891,12 @@ workflow_dispatch
         → triggers release-publish.yml (via tag push)
 ```
 
+The changelog step renders only the section for the version being cut
+(`git-cliff --unreleased --tag <version> --prepend CHANGELOG.md`) and inserts it below the header.
+Published sections are never regenerated, so a later `cliff.toml` change or a newly tagged commit
+cannot rewrite them (go-kure/launcher#561). No Makefile target or mise task writes `CHANGELOG.md`;
+`changelog-preview` only prints the unreleased entries.
+
 ### Requirements
 
 Secrets: `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY` (GitHub App token, so tag push triggers

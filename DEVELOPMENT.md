@@ -246,7 +246,8 @@ The project uses GitHub Actions workflows:
 
 Releases are triggered by pushing a `vX.Y.Z` tag:
 
-1. Update `CHANGELOG.md`: `make changelog` (or `git cliff -o CHANGELOG.md`)
+1. Add the new section to `CHANGELOG.md`: `git cliff --unreleased --tag vX.Y.Z --prepend CHANGELOG.md`
+   (what `scripts/release.sh` runs). Never regenerate the whole file — that rewrites published sections.
 2. Commit the changelog: `git commit -m "chore: update CHANGELOG for vX.Y.Z"`
 3. Push to main and wait for CI to pass
 4. Tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
@@ -321,8 +322,7 @@ guard's shared-direct set.
 ### Release
 - `release TYPE=<type>` - Preview release (dry-run); types: alpha, beta, rc, stable
 - `release-snapshot` - Test GoReleaser locally (no tag, no publish)
-- `changelog` - Generate CHANGELOG.md from git history
-- `changelog-preview` - Preview unreleased entries
+- `changelog-preview` - Preview unreleased entries (prints only; no target writes `CHANGELOG.md`)
 
 ## Active Linters
 

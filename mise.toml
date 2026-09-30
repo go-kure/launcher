@@ -79,10 +79,8 @@ depends = ["tidy", "lint", "test", "check-kure-dep-sync", "check-tool-versions",
 description = "Build and test a PR's merge ref, the tree its CI builds (mise run verify-merge <pr-number>)"
 run = "bash scripts/verify-merge.sh"
 
-[tasks.changelog]
-description = "Generate changelog from git history"
-run = "git cliff -o CHANGELOG.md"
-
+# No task writes CHANGELOG.md: scripts/release.sh prepends each release's
+# section and published sections are never regenerated (go-kure/launcher#561).
 [tasks.changelog-preview]
 description = "Preview changelog changes"
 run = "git cliff --unreleased"
