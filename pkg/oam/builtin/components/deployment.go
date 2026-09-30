@@ -94,11 +94,11 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	// Null as omission, applied to this kind's whole top-level surface rather
 	// than to the one field a review named: pkg/oam's property validator reads
 	// an explicit null under an optional property as absent
-	// (property_validate.go), while every typed helper answers "present?" with
-	// a bare map lookup, so the nil reaches its type check and comes back as a
-	// type error. `replicas: null`, `workingDir: null` and every other optional
-	// property here would otherwise be refused by the parser after the
-	// published schema accepted them.
+	// (property_validate.go), while the typed helpers, when this was written,
+	// answered "present?" with a bare map lookup, so the nil reached its type
+	// check and came back as a type error. The helpers have since moved onto
+	// authoredValue (go-kure/launcher#394); withoutExplicitNulls records why
+	// this strip is kept anyway.
 	//
 	// parseDeploymentSpec is deliberately given the AUTHORED map below, not
 	// this copy: it refuses the keys that must not appear at all (`selector`,
