@@ -249,12 +249,32 @@ type OCIConfig struct {
 
 // ApplyPolicy rejects a disallowed OCI registry host. It reads the allowlist
 // through the oam.Policy interface (AllowedRegistries) so any policy
-// implementation enforces correctly; an empty allowlist permits all hosts.
+// implementation enforces correctly; no policy, or an empty allowlist, permits
+// every url.
+//
+// Under a non-empty allowlist the url must name its registry explicitly
+// (ociNamesRegistry): oci://<registry>/<repository> with a non-empty
+// repository and a registry segment that is localhost or contains "." or ":".
+// Flux's source-controller parses the url with go-containerregistry's
+// name.NewRepository, which treats any other first segment as part of a Docker
+// Hub repository — oci://ghcr.io and oci://registry/app are pulled from Docker
+// Hub — so matching that segment against the allowlist would authorize a
+// registry the policy never listed. An explicit registry is then checked by
+// exact host match (enforceAllowedURLHosts).
 func (c *OCIConfig) ApplyPolicy(p oam.Policy) error {
 	if p == nil {
 		return nil
 	}
-	return enforceAllowedURLHosts(c.URL, p.AllowedRegistries())
+	allowed := p.AllowedRegistries()
+	if len(allowed) == 0 {
+		return nil
+	}
+	if !ociNamesRegistry(c.URL, true) {
+		return errors.Errorf("oci: source.url: %q does not name its registry explicitly, so Flux may resolve it against Docker Hub: "+
+			"under an allowed-registries policy write oci://<registry>/<repository> with a registry that is localhost or contains \".\" or \":\" "+
+			"(e.g. oci://docker.io/library/app, oci://registry.example:5000/org/app)", c.URL)
+	}
+	return enforceAllowedURLHosts(c.URL, allowed)
 }
 
 // GetSourceKey returns the dedup key for the OCIRepository source CR. Uses the

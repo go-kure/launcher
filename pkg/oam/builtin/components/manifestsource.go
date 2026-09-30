@@ -211,6 +211,28 @@ func urlHost(rawURL string) string {
 	return rawURL
 }
 
+// ociNamesRegistry reports whether an oci:// url names its registry explicitly:
+// its first path segment is localhost or contains "." or ":", and, with
+// requireRepository, a "/" and a non-empty repository path follow it. A value
+// without the oci:// scheme names none. The segment is not otherwise parsed:
+// userinfo or a query left in it matches no allowlist entry, so such a url is
+// still refused.
+//
+// This is the rule go-containerregistry's name.NewRepository — how Flux's
+// source-controller parses an OCIRepository url — uses to pick the registry:
+// anything else is a Docker Hub repository, whatever host urlHost returns.
+func ociNamesRegistry(value string, requireRepository bool) bool {
+	rest, ok := strings.CutPrefix(value, "oci://")
+	if !ok {
+		return false
+	}
+	registry, repository, _ := strings.Cut(rest, "/")
+	if requireRepository && repository == "" {
+		return false
+	}
+	return registry == "localhost" || strings.ContainsAny(registry, ".:")
+}
+
 // manifestConfig is the shared stack.ApplicationConfig behind the crd and
 // manifests components. It resolves a manifestSource and runs a per-type
 // `process` hook (CRD-only validation, or scope-aware namespace stamping).
