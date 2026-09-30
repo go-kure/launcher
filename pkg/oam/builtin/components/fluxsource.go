@@ -69,6 +69,38 @@ func enforceFluxSourceHost(typ, field, value string, p oam.Policy) error {
 	return errors.Wrapf(enforceAllowedURLHosts(value, p.AllowedRegistries()), "%s: %s", typ, field)
 }
 
+// enforceFluxSourceOCIHost is enforceFluxSourceHost for an oci:// url, whose
+// registry is not always its first path segment. go-containerregistry's
+// name.NewRepository — how source-controller parses an OCIRepository url, and
+// the parse behind a Helm OCI chart's signature verification — takes the first
+// segment as the registry only when a "/" follows it and it is localhost or
+// contains "." or ":"; otherwise the whole reference is a Docker Hub repository,
+// so oci://ghcr.io and oci://registry/app are pulled from Docker Hub, whatever
+// host the allowlist matched. The Helm registry client that pulls an OCI chart
+// always takes the first segment, so the two agree only on an explicit registry.
+//
+// Under a non-empty allowlist the url must therefore name its registry
+// explicitly (ociNamesRegistry), and is then checked like any other host. With
+// requireRepository — an OCIRepository url, which is the whole artifact
+// repository — a non-empty path must follow the registry; a HelmRepository url
+// may stop at the registry, since Flux appends the chart name to it. No policy,
+// or an empty allowlist, permits every url, as for the other sources.
+func enforceFluxSourceOCIHost(typ, field, value string, requireRepository bool, p oam.Policy) error {
+	if p == nil || len(p.AllowedRegistries()) == 0 {
+		return nil
+	}
+	if !ociNamesRegistry(value, requireRepository) {
+		form := "oci://<registry>[/<path>]"
+		if requireRepository {
+			form = "oci://<registry>/<repository>"
+		}
+		return errors.Errorf("%s: %s: %q does not name its registry explicitly, so Flux may resolve it against Docker Hub: "+
+			"under an allowed-registries policy write %s with a registry that is localhost or contains \".\" or \":\" "+
+			"(e.g. oci://docker.io/library/app, oci://registry.example:5000/org/app)", typ, field, value, form)
+	}
+	return enforceFluxSourceHost(typ, field, value, p)
+}
+
 // The PropertySchema building blocks of the four source components. Their
 // schemas declare every top-level key of the spec type, with nested Flux shapes
 // as open objects: the strict decode in ToApplicationConfig checks those.

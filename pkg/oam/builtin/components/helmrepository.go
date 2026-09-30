@@ -1,6 +1,8 @@
 package components
 
 import (
+	"strings"
+
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
@@ -25,7 +27,7 @@ func (h *HelmRepositoryHandler) CanHandle(componentType string) bool {
 // test ties this key set to the struct.
 func (h *HelmRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"url":             fluxSourceRequiredString("HelmRepository spec.url: an http://, https:// or oci:// URL, and oci:// when type is oci. Its host must be in the policy's allowed registries when that list is non-empty."),
+		"url":             fluxSourceRequiredString("HelmRepository spec.url: an http://, https:// or oci:// URL, and oci:// when type is oci. Its host must be in the policy's allowed registries when that list is non-empty; an oci:// URL must then also name its registry explicitly, as localhost or a host containing . or : (Flux reads any other first segment as a Docker Hub namespace)."),
 		"secretRef":       fluxSourceObject("HelmRepository spec.secretRef: the Secret holding the repository credentials, in the namespace the HelmRepository lands in."),
 		"certSecretRef":   fluxSourceObject("HelmRepository spec.certSecretRef: the Secret holding a client certificate and/or CA certificate."),
 		"passCredentials": fluxSourceBool("HelmRepository spec.passCredentials: pass the secretRef credentials to chart hosts other than the url's."),
@@ -88,8 +90,13 @@ func (c *HelmRepositoryConfig) validate() error {
 }
 
 // ApplyPolicy rejects a url whose host is not in the policy's allowed
-// registries.
+// registries. An oci:// url, whatever the type, must also name its registry
+// explicitly under a non-empty allowlist (enforceFluxSourceOCIHost); it may stop
+// at the registry, since Flux appends the chart name.
 func (c *HelmRepositoryConfig) ApplyPolicy(p oam.Policy) error {
+	if strings.HasPrefix(c.Spec.URL, "oci://") {
+		return enforceFluxSourceOCIHost("helmrepository", "url", c.Spec.URL, false, p)
+	}
 	return enforceFluxSourceHost("helmrepository", "url", c.Spec.URL, p)
 }
 

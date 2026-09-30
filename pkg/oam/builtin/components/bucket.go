@@ -25,9 +25,9 @@ func (h *BucketHandler) CanHandle(componentType string) bool {
 // ties this key set to the struct.
 func (h *BucketHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"provider":           fluxSourceString("Bucket spec.provider: generic (S3-compatible, Flux's default), aws, gcp or azure."),
+		"provider":           fluxSourceString("Bucket spec.provider: generic (S3-compatible, Flux's default), aws, gcp or azure. Flux's gcp provider ignores endpoint and fetches from storage.googleapis.com, which is then the host the policy's allowed registries must list."),
 		"bucketName":         fluxSourceRequiredString("Bucket spec.bucketName: the object storage bucket."),
-		"endpoint":           fluxSourceRequiredString("Bucket spec.endpoint: the object storage address, host[:port] or a URL as the provider expects. Its host must be in the policy's allowed registries when that list is non-empty."),
+		"endpoint":           fluxSourceRequiredString("Bucket spec.endpoint: the object storage address, host[:port] or a URL as the provider expects. Except under provider gcp, its host must be in the policy's allowed registries when that list is non-empty."),
 		"sts":                fluxSourceObject("Bucket spec.sts: a Security Token Service for temporary credentials (aws and generic providers). Its endpoint is not checked against the allowed registries."),
 		"insecure":           fluxSourceBool("Bucket spec.insecure: allow a non-TLS endpoint."),
 		"region":             fluxSourceString("Bucket spec.region of the endpoint."),
@@ -87,9 +87,19 @@ func (c *BucketConfig) validate() error {
 	return nil
 }
 
-// ApplyPolicy rejects an endpoint whose host is not in the policy's allowed
-// registries.
+// gcsHost is the host Flux's gcp Bucket provider fetches from: its client is
+// Google Cloud Storage's own, built without an endpoint option, so it reaches
+// the storage service's default host and never reads spec.endpoint.
+const gcsHost = "storage.googleapis.com"
+
+// ApplyPolicy rejects a Bucket whose fetch host is not in the policy's allowed
+// registries: the endpoint host for the generic, aws and azure providers (and
+// none, which Flux treats as generic), and gcsHost for gcp, whose endpoint Flux
+// ignores.
 func (c *BucketConfig) ApplyPolicy(p oam.Policy) error {
+	if c.Spec.Provider == sourcev1.BucketProviderGoogle {
+		return enforceFluxSourceHost("bucket", "provider gcp (Flux ignores endpoint)", gcsHost, p)
+	}
 	return enforceFluxSourceHost("bucket", "endpoint", c.Spec.Endpoint, p)
 }
 
