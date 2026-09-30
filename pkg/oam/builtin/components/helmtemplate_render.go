@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
@@ -412,7 +415,8 @@ func normalizeHookAnnotationForGrouping(obj client.Object) client.Object {
 // annotations map — untouched. The copy exists only to steer kure's
 // helm.SplitByHookWeight to the correct group; parseChartManifests swaps it
 // back out for the original object before returning, so the rewritten
-// annotation never reaches emitted output.
+// annotation never reaches emitted output. The deep copy relies on obj's
+// content being JSON-typed, which decodeKubeManifests guarantees.
 func cloneWithHookAnnotation(obj client.Object, ann map[string]string, newHook string) client.Object {
 	cp, _ := obj.DeepCopyObject().(client.Object)
 	newAnn := make(map[string]string, len(ann))
@@ -472,6 +476,8 @@ func hookGroupDir(g helm.HookGroup) string {
 // Real YAML parse errors are returned immediately.
 // Non-map and empty documents are skipped defensively (kure filters NOTES.txt upstream).
 // Mapping documents without apiVersion/kind are an error (broken chart manifest).
+// Each object's content is converted in place to JSON types (toJSONTypes), so
+// the objects are safe to deep-copy.
 func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	var objects []client.Object
@@ -490,9 +496,68 @@ func decodeKubeManifests(raw []byte) ([]client.Object, error) {
 		if doc["apiVersion"] == nil || doc["kind"] == nil {
 			return nil, errors.Errorf("rendered document is missing apiVersion or kind: %v", doc)
 		}
-		objects = append(objects, &unstructured.Unstructured{Object: doc})
+		u := &unstructured.Unstructured{Object: doc}
+		if _, err := toJSONTypes(doc, ""); err != nil {
+			return nil, errors.Wrapf(err, "rendered %s %q", u.GetKind(), u.GetName())
+		}
+		objects = append(objects, u)
 	}
 	return objects, nil
+}
+
+// toJSONTypes converts v, a value yaml.v3 decoded into any, to the types an
+// unstructured.Unstructured holds: those runtime.DeepCopyJSONValue accepts,
+// which panics on anything else ("cannot deep copy int"). Unstructured's
+// DeepCopy copies through it, so every copy of an object does, including the
+// grouping copy cloneWithHookAnnotation makes. Maps and slices are converted
+// in place. Each conversion encodes to the same JSON as the value it replaces,
+// and kure writes an object from its JSON encoding, so the written manifest is
+// unchanged:
+//   - int, yaml.v3's type for an integer that fits in an int64, becomes int64;
+//   - uint64, its type for an integer above math.MaxInt64 up to
+//     math.MaxUint64, becomes a json.Number of the same digits (int64 cannot
+//     hold it);
+//   - time.Time, its type for an unquoted timestamp, becomes the RFC 3339
+//     string encoding/json writes for it;
+//   - float64 (also its type for an integer beyond math.MaxUint64, and for
+//     .inf and .nan, which encoding/json refuses to write, as before),
+//     string, bool and nil are kept.
+//
+// A mapping with a key that is not a string (map[any]any) is an error naming
+// its path: encoding/json cannot write one either. So is any other type.
+func toJSONTypes(v any, path string) (any, error) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, e := range t {
+			c, err := toJSONTypes(e, path+"."+k)
+			if err != nil {
+				return nil, err
+			}
+			t[k] = c
+		}
+		return t, nil
+	case []any:
+		for i, e := range t {
+			c, err := toJSONTypes(e, fmt.Sprintf("%s[%d]", path, i))
+			if err != nil {
+				return nil, err
+			}
+			t[i] = c
+		}
+		return t, nil
+	case int:
+		return int64(t), nil
+	case uint64:
+		return json.Number(strconv.FormatUint(t, 10)), nil
+	case time.Time:
+		return t.Format(time.RFC3339Nano), nil
+	case nil, bool, string, int64, float64:
+		return t, nil
+	case map[any]any:
+		return nil, errors.Errorf("%s: a mapping key that is not a string cannot be emitted", path)
+	default:
+		return nil, errors.Errorf("%s: a value of type %T cannot be emitted", path, v)
+	}
 }
 
 // hookGroupChildName computes partition's dirName for hook group

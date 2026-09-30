@@ -1,10 +1,14 @@
 package components
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -121,6 +125,99 @@ func TestDecodeKubeManifests_SkipsNonMapDoc(t *testing.T) {
 	}
 	if len(objects) != 1 {
 		t.Fatalf("expected 1 object (scalar doc skipped), got %d", len(objects))
+	}
+}
+
+// TestDecodeKubeManifests_JSONTypedAndWrittenUnchanged covers each Go type
+// yaml.v3 yields for a scalar a chart can render: the decoded value, at the
+// top of spec, in a list and in a nested mapping, must be one
+// runtime.DeepCopyJSONValue accepts (it panics on yaml.v3's int, uint64 and
+// time.Time), and the object must encode to the same JSON as the yaml.v3
+// decode alone — kure writes an object from its JSON encoding, so the written
+// file is unchanged. .inf and .nan stay float64, which encoding/json refuses
+// to write either way.
+func TestDecodeKubeManifests_JSONTypedAndWrittenUnchanged(t *testing.T) {
+	cases := []struct {
+		scalar string
+		want   any
+	}{
+		{"0", int64(0)},
+		{"8080", int64(8080)},
+		{"-1", int64(-1)},
+		{"0x1F", int64(31)},
+		{"9223372036854775807", int64(math.MaxInt64)},
+		{"9223372036854775808", json.Number("9223372036854775808")},
+		{"18446744073709551615", json.Number("18446744073709551615")},
+		{"18446744073709551616", 1.8446744073709552e19},
+		{"1.5", 1.5},
+		{"1.0", 1.0},
+		{".inf", math.Inf(1)},
+		{".nan", math.NaN()},
+		{"2001-12-14", "2001-12-14T00:00:00Z"},
+		{"2001-12-14t21:59:43.10-05:00", "2001-12-14T21:59:43.1-05:00"},
+		{"!!binary aGVsbG8=", "hello"},
+		{"true", true},
+		{"null", nil},
+		{"text", "text"},
+	}
+	same := func(got, want any) bool {
+		g, gok := got.(float64)
+		w, wok := want.(float64)
+		if gok && wok && math.IsNaN(g) && math.IsNaN(w) {
+			return true
+		}
+		return reflect.DeepEqual(got, want)
+	}
+	for _, tc := range cases {
+		t.Run(tc.scalar, func(t *testing.T) {
+			doc := "apiVersion: example.com/v1\nkind: Thing\nmetadata:\n  name: t\nspec:\n  v: " + tc.scalar +
+				"\n  list:\n  - " + tc.scalar + "\n  nested:\n    v: " + tc.scalar + "\n"
+			objects, err := decodeKubeManifests([]byte(doc))
+			if err != nil {
+				t.Fatalf("decodeKubeManifests: %v", err)
+			}
+			if len(objects) != 1 {
+				t.Fatalf("got %d objects, want 1", len(objects))
+			}
+			u := objects[0].(*unstructured.Unstructured)
+			spec := u.Object["spec"].(map[string]any)
+			for where, got := range map[string]any{
+				"spec.v":        spec["v"],
+				"spec.list[0]":  spec["list"].([]any)[0],
+				"spec.nested.v": spec["nested"].(map[string]any)["v"],
+			} {
+				if !same(got, tc.want) {
+					t.Errorf("%s = %#v (%T), want %#v (%T)", where, got, got, tc.want, tc.want)
+				}
+			}
+			assertDeepCopyable(t, objects)
+
+			var plain map[string]any
+			if err := yaml.Unmarshal([]byte(doc), &plain); err != nil {
+				t.Fatalf("yaml.v3 decode: %v", err)
+			}
+			wantJSON, wantErr := json.Marshal(plain)
+			gotJSON, gotErr := json.Marshal(u.Object)
+			if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) || string(gotJSON) != string(wantJSON) {
+				t.Errorf("JSON = %s (err %v), want the yaml.v3 decode's %s (err %v)", gotJSON, gotErr, wantJSON, wantErr)
+			}
+		})
+	}
+}
+
+// TestDecodeKubeManifests_NonStringMappingKeyIsAnError: yaml.v3 decodes a
+// mapping with a non-string key to map[any]any, which
+// runtime.DeepCopyJSONValue panics on and encoding/json refuses to write. It
+// is an error naming the object and the mapping, not a later panic.
+func TestDecodeKubeManifests_NonStringMappingKeyIsAnError(t *testing.T) {
+	_, err := decodeKubeManifests([]byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\ndata:\n  1: one\n"))
+	if err == nil {
+		t.Fatal("expected an error for a mapping with a non-string key")
+	}
+	for _, want := range []string{`ConfigMap "cm"`, ".data", "not a string"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
 	}
 }
 
@@ -1163,5 +1260,41 @@ metadata:
 	}
 	if got := child.GetAnnotations()["helm.sh/hook"]; got != wantHook {
 		t.Errorf("AugmentLayout: multi's helm.sh/hook annotation = %q, want unchanged %q", got, wantHook)
+	}
+}
+
+// TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields is the
+// composite's delivery: template counterpart of
+// TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields, on the same
+// chart: the decode both share must hand the grouping copy JSON-typed values,
+// or the build panics with "cannot deep copy int".
+func TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields(t *testing.T) {
+	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+		return []byte(multiEventHookJobChart), nil
+	})
+	if got, want := generateNames(t, cfg), []string{"migrate", "main"}; !slices.Equal(got, want) {
+		t.Fatalf("execution order = %v, want %v", got, want)
+	}
+	ml := &layout.ManifestLayout{Name: "myapp", Namespace: "default/myapp"}
+	if err := cfg.augmentLayoutTemplate(ml); err != nil {
+		t.Fatalf("augmentLayoutTemplate: %v", err)
+	}
+	if len(ml.Children) != 2 {
+		t.Fatalf("ml.Children has %d entries, want 2 hook groups", len(ml.Children))
+	}
+	if name := ml.Children[0].Name; name != "myapp-00-pre-install" {
+		t.Fatalf("Children[0].Name = %q, want %q", name, "myapp-00-pre-install")
+	}
+	hook := ml.Children[0].Resources
+	if names := resourceNames(hook); !slices.Equal(names, []string{"migrate"}) {
+		t.Fatalf("Children[0] holds %v, want [migrate]", names)
+	}
+	assertDeepCopyable(t, hook)
+	job, ok := hook[0].(*unstructured.Unstructured)
+	if !ok {
+		t.Fatalf("Children[0].Resources[0] = %T, want *unstructured.Unstructured", hook[0])
+	}
+	if got, found, err := unstructured.NestedInt64(job.Object, "spec", "backoffLimit"); err != nil || !found || got != 0 {
+		t.Errorf("spec.backoffLimit = %d (found %v, err %v), want int64 0", got, found, err)
 	}
 }

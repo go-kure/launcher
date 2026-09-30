@@ -1956,6 +1956,9 @@ not part of either change.
   (kure does not surface them as static manifests) — mostly a bug fix, since a `test` Pod rendered
   as a static GitOps object would otherwise be reconciled on every apply, but it is silent data
   loss for a chart that relies on one of those hooks; `pkg/oam` has no logging channel to flag it.
+  A rendered mapping with a key that is not a string (an unquoted `1:` or `true:`) is a build
+  error naming the object and the mapping: an emitted manifest is written through JSON, whose
+  keys are strings.
   For a layout-walking consumer (the `layout.LayoutAugmenter` path, same mechanism as the
   `valuesMode: configMap` relocation above), more than one hook group makes `AugmentLayout` clear
   the component's flat `Resources` and replace them with one child `ManifestLayout` per group,
