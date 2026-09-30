@@ -92,6 +92,8 @@ func TestCnpgClusterSchema_Shape(t *testing.T) {
 			if p.Items == nil || p.Items.Type != oam.PropertyTypeObject || !p.Items.AdditionalProperties {
 				t.Errorf("%s: array items must be open objects", k)
 			}
+		default:
+			// Scalars carry no nested structure; the coverage test checks their type.
 		}
 	}
 	if d := schema["instances"].Default; d != 1 {
