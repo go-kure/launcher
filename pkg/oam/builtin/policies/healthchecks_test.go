@@ -64,6 +64,34 @@ func TestHealthChecksHandler_ApplyAppendsChecks(t *testing.T) {
 	}
 }
 
+// TestHealthChecksHandler_NullNamespaceReadsAsAbsent: a null namespace, untyped
+// or typed, is read as omitted and left empty, as launcher reads null elsewhere.
+func TestHealthChecksHandler_NullNamespaceReadsAsAbsent(t *testing.T) {
+	for name, ns := range map[string]any{
+		"untyped nil":              nil,
+		"typed nil string pointer": (*string)(nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := &policies.HealthChecksHandler{}
+			result := oam.NewPolicyResult()
+			policy := &oam.ApplicationPolicy{Name: "checks", Type: "health-checks", Properties: map[string]any{
+				"checks": []any{map[string]any{
+					"apiVersion": "batch/v1",
+					"kind":       "Job",
+					"name":       "db-migrate",
+					"namespace":  ns,
+				}},
+			}}
+			if err := h.Apply(policy, nil, result); err != nil {
+				t.Fatalf("Apply() error = %v, want the null namespace read as omitted", err)
+			}
+			if len(result.HealthCheckOverrides) != 1 || result.HealthCheckOverrides[0].Namespace != "" {
+				t.Errorf("HealthCheckOverrides = %#v, want one entry with an empty namespace", result.HealthCheckOverrides)
+			}
+		})
+	}
+}
+
 func TestHealthChecksHandler_ApplyRejectsInvalidChecks(t *testing.T) {
 	tests := []struct {
 		name       string
