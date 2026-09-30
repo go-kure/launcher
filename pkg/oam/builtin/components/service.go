@@ -264,12 +264,14 @@ func parseService(component *oam.Component) (*ServiceConfig, error) {
 	if raw, present, err := parseObjectField(props, "selector", "selector"); err != nil {
 		return nil, err
 	} else if present {
-		if len(raw) == 0 {
-			return nil, errors.New("selector: must name at least one label; a selector-less Service is not supported")
-		}
 		sel, err := parseLabelMap(raw, "selector")
 		if err != nil {
 			return nil, err
+		}
+		// Checked on the parsed map: parseLabelMap drops a null entry, so
+		// `selector: {app: null}` must meet the same refusal as `selector: {}`.
+		if len(sel) == 0 {
+			return nil, errors.New("selector: must name at least one label; a selector-less Service is not supported")
 		}
 		c.Selector = sel
 	}

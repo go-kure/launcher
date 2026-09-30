@@ -1024,16 +1024,18 @@ func parseResourceList(m map[string]any) (corev1.ResourceList, error) {
 	// validateHugePageQuantity, so map iteration order would otherwise decide
 	// which of several bad resource entries an author is told about.
 	for _, k := range slices.Sorted(maps.Keys(m)) {
-		// An explicit null is absence, as in stringMapStrict.
-		v, present := authoredValue(m, k)
-		if !present {
-			continue
-		}
+		// The name is checked before the null skip, so an invalid name is
+		// refused whatever its value rather than dropped with a null one.
 		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
 			return nil, errors.Errorf("%s: invalid resource name: %s", k, strings.Join(errs, "; "))
 		}
 		if err := validateContainerResourceName(k); err != nil {
 			return nil, err
+		}
+		// An explicit null is absence, as in stringMapStrict.
+		v, present := authoredValue(m, k)
+		if !present {
+			continue
 		}
 		s, ok := decodedQuantityString(v)
 		if !ok {

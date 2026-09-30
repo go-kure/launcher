@@ -732,7 +732,14 @@ func parseLabelMap(raw map[string]any, label string) (map[string]string, error) 
 	}
 	slices.Sort(keys)
 	for _, k := range keys {
-		// An explicit null is absence, as in stringMapStrict.
+		// The key is checked before the null skip, so an invalid key is refused
+		// whatever its value rather than dropped with a null one.
+		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
+			return nil, errors.Errorf("%s: invalid label key %q: %s", label, k, strings.Join(errs, "; "))
+		}
+		// An explicit null is absence, as in stringMapStrict. A caller that
+		// refuses an empty map checks the parsed result, not raw, so a map of
+		// nulls meets the same refusal as an empty one.
 		v, present := authoredValue(raw, k)
 		if !present {
 			continue
@@ -740,9 +747,6 @@ func parseLabelMap(raw map[string]any, label string) (map[string]string, error) 
 		s, ok := v.(string)
 		if !ok {
 			return nil, errors.Errorf("%s.%s: must be a string, got %T", label, k, v)
-		}
-		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
-			return nil, errors.Errorf("%s: invalid label key %q: %s", label, k, strings.Join(errs, "; "))
 		}
 		if errs := validation.IsValidLabelValue(s); len(errs) > 0 {
 			return nil, errors.Errorf("%s.%s: invalid label value %q: %s", label, k, s, strings.Join(errs, "; "))
