@@ -1279,6 +1279,11 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				traitOrigin = compOrigin
 				traitOrigin.TraitType = trait.Type
 				traitOrigin.Index = k
+				// A trait a component rule forwarded behind one of its own sits at a
+				// shifted k; its slot in the slice the rule was handed is the authored one.
+				if trait.authoredIndex != nil {
+					traitOrigin.Index = *trait.authoredIndex
+				}
 			}
 
 			rule, ok := t.traitLoweringRules[trait.Type]
@@ -1482,9 +1487,20 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 // A trait isForwardedTrait finds in forwarded is left untouched here — no origin
 // stamp, no seal, no emitted-trait validation — exactly as if it still belonged to a
 // component no rule had ever claimed.
+//
+// A forwarded trait also records the index it held in forwarded (Trait.authoredIndex)
+// unless an earlier forwarding already did, so a rule that places its own trait
+// ahead of the forwarded ones does not shift the Origin.Index they are later given.
 func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Origin, forwarded []Trait) error {
 	return t.sealNestedTraits(comp, parentOrigin, func(trait *Trait) bool {
-		return isForwardedTrait(trait, forwarded)
+		i := forwardedIndex(trait, forwarded)
+		if i < 0 {
+			return false
+		}
+		if trait.authoredIndex == nil {
+			trait.authoredIndex = &i
+		}
+		return true
 	})
 }
 
@@ -1552,16 +1568,22 @@ func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, isF
 // never mistaken for a forwarded one. A copy whose Type or Properties the rule
 // replaced is the rule's own output, and is sealed like any other.
 func isForwardedTrait(trait *Trait, original []Trait) bool {
+	return forwardedIndex(trait, original) >= 0
+}
+
+// forwardedIndex is isForwardedTrait returning which element of original trait was
+// forwarded from, or -1 when it is not forwarded.
+func forwardedIndex(trait *Trait, original []Trait) int {
 	for i := range original {
 		o := &original[i]
 		if trait == o {
-			return true
+			return i
 		}
 		if trait.forwardedFrom == o && trait.Type == o.Type && sameMap(trait.Properties, o.Properties) {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 // forwardableTraits returns a copy of traits with every element marked as the

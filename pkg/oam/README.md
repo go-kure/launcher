@@ -359,7 +359,8 @@ A trait a rule synthesizes is sealed: its properties are final, and no
 still capability-processed). Forwarding covers returning `comp.Traits` itself and
 returning unchanged copies of its elements inside a new slice, for example to add one
 synthesized trait next to the authored ones; a copy whose type or properties map the
-rule replaced counts as synthesized.
+rule replaced counts as synthesized. A forwarded trait's `Origin.Index` stays its
+authored slot even when the rule places its own trait ahead of it.
 
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the
