@@ -1939,16 +1939,26 @@ not part of either change.
   `valuesFrom` objects, which this repo does not control or vendor. If
   reconciliation does not pick it up immediately, trigger one explicitly:
   `flux reconcile helmrelease <name>`. Known limitation: `delivery: template`
-  rejects `releaseName`/`targetNamespace`/`valuesFrom`/`valuesMode: configMap`/
-  `interval`/`driftDetection`/`install.crds`/`upgrade.crds` outright (compile-time
-  validation error) rather than applying them — the client-side render always uses
-  kure's defaults (`.Release.Name`/`.Release.Namespace` = `release`/`default`), and
-  there is no way today to override release identity for a templated chart.
-  `delivery: native` is unaffected. Known limitation, over-broad wording fixed: this list is the
+  rejects `valuesFrom`/`valuesMode: configMap`/`interval`/`driftDetection`/
+  `install.crds`/`upgrade.crds` outright (compile-time validation error) rather than
+  applying them. `delivery: native` is unaffected. Known limitation, over-broad wording fixed: this list is the
   set of properties `delivery: template` rejects when **explicitly** authored — an inherited
   handler default (e.g. `valuesMode` with no property-level `configMap`) falls back to `inline`
-  rather than erroring (`pkg/oam/builtin/components/helmchart.go:276-285`); same over-broad-wording
+  rather than erroring (`ToApplicationConfig`'s `delivery: template` validation in
+  `pkg/oam/builtin/components/helmchart.go`); same over-broad-wording
   class `go-kure/launcher#319` already fixed elsewhere in this file.
+
+  **Release identity under `delivery: template`** (go-kure/launcher#602). The client-side render's
+  `.Release.Namespace` is `targetNamespace` when authored, else the application namespace —
+  never the Flux namespace, which only places control-plane CRs. Its `.Release.Name` is
+  `releaseName` when authored, else kure's default `release`. That default differs from
+  `delivery: native`, where Flux derives the release name from the HelmRelease (`<name>`, or
+  `<targetNamespace>-<name>` when a target namespace is set); author `releaseName` when a chart's
+  object names must match across the two. Both values are checked at build time because no
+  HelmRelease admission sees them: `releaseName` by Helm's own release-name rule (at most 53
+  characters, lowercase DNS-style), `targetNamespace` as a DNS-1123 label. The namespace only
+  reaches the chart as `.Release.Namespace`: nothing stamps `metadata.namespace` on rendered
+  objects, so a chart that leaves it unset still renders namespace-less objects.
 
   **`interval` must be a duration Flux accepts** (go-kure/launcher#590; `oci` applies the same
   check). `interval` (default `60m`) is emitted onto the source CR and the `HelmRelease`, whose
@@ -2124,7 +2134,8 @@ not part of either change.
   It fetches and renders the chart at build time and emits the rendered manifests. It creates
   no source CR and no `HelmRelease`, so it carries no auto health check.
 
-  **Properties.** Exactly the keys that path reads, in the composite's shape. `source` is
+  **Properties.** Exactly the keys that path reads except `releaseName` and `targetNamespace`, in
+  the composite's shape. `source` is
   required: `url` (required) is an `http://` or `https://` Helm repository URL, or an `oci://`
   URL naming the chart; `kind` (optional, `HelmRepository` or `OCIRepository`) is inferred from
   the scheme when unset — `oci://` is `OCIRepository`, anything else `HelmRepository` — and
@@ -2144,17 +2155,19 @@ not part of either change.
   case-insensitively in the handler, as in `encoding/json`; schema validation, which a
   `kurel build` runs first, is exact.
 
-  **Refused outright.** Every `helmchart` property only its `delivery: native` reads —
-  `releaseName`, `targetNamespace`, `interval`, `driftDetection`, `install`, `upgrade`,
+  **Refused outright.** Every other `helmchart` property — `releaseName`, `targetNamespace`, and
+  those only its `delivery: native` reads: `interval`, `driftDetection`, `install`, `upgrade`,
   `valuesFrom`, `valuesMode` — the composite's own `delivery` switch, and a source reference
   (`source.name`, `source.namespace`) are undeclared keys: schema validation refuses each, and so
   does the strict decode. An `OCIRepository` source without `version` is refused by the handler.
   The key itself is what is refused, whatever it holds: the composite, under
   `delivery: template`, rejects `driftDetection` by its `mode` and `install`/`upgrade` by their
   `crds`, and turns an inherited handler-level `valuesMode: configMap` default into `inline`;
-  the terminal has no handler-level default at all. As under the composite, the render uses
-  kure's release defaults (`.Release.Name` `release`, `.Release.Namespace` `default`), with no
-  way to set release identity.
+  the terminal has no handler-level default at all. The render's `.Release.Namespace` is the
+  application namespace and its `.Release.Name` is kure's default `release`, as under the
+  composite when neither `targetNamespace` nor `releaseName` is authored; the terminal declares
+  neither, so neither can be set. As there, nothing stamps `metadata.namespace` on rendered
+  objects.
 
   **Output and hook-group layout.** The composite's `delivery: template` output, from the same
   code. `Generate` returns every rendered object flat, in Helm hook execution order —

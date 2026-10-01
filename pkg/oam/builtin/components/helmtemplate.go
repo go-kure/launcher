@@ -62,10 +62,12 @@ func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 
 // helmTemplateProperties is the property surface the strict decode checks,
 // values excepted. Any key it does not declare, at any depth, is refused — in
-// particular every helmchart property that only the composite's delivery:
-// native reads (releaseName, targetNamespace, interval, driftDetection,
-// install, upgrade, valuesFrom, valuesMode), the composite's own delivery
-// switch, and a source reference (source.name, source.namespace).
+// particular the composite's release identity (releaseName, targetNamespace;
+// this terminal renders into the application namespace under kure's default
+// release name), every helmchart property that only the composite's delivery:
+// native reads (interval, driftDetection, install, upgrade, valuesFrom,
+// valuesMode), the composite's own delivery switch, and a source reference
+// (source.name, source.namespace).
 type helmTemplateProperties struct {
 	Source  *helmTemplateSource `json:"source"`
 	Chart   string              `json:"chart"`
@@ -85,7 +87,7 @@ type helmTemplateSource struct {
 // inferred from or checked against the URL scheme, chart required for a
 // HelmRepository, version required for an OCIRepository, values an object that
 // encodes as JSON.
-func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, _ string) (stack.ApplicationConfig, error) {
+func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	props, owned, err := builtin.DecodeStrictJSON[helmTemplateProperties](component.Properties, helmTemplateValuesKey)
 	if err != nil {
 		return nil, errors.Errorf("%s: properties do not decode: %w", helmTemplateType, err)
@@ -99,6 +101,7 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, _ st
 	}
 	cfg := &HelmTemplateConfig{
 		Name:        component.Name,
+		Namespace:   namespace,
 		SourceURL:   props.Source.URL,
 		SourceKind:  props.Source.Kind,
 		Chart:       props.Chart,
@@ -146,6 +149,10 @@ func helmTemplateValues(owned map[string]any) (map[string]any, error) {
 type HelmTemplateConfig struct {
 	// Name is the component name.
 	Name string
+	// Namespace is the application namespace, the render's .Release.Namespace;
+	// empty leaves kure's default, "default". The release name is always
+	// kure's default, "release": this terminal declares no releaseName.
+	Namespace string
 
 	// SourceURL is where the chart is fetched from: an http(s):// Helm
 	// repository URL, or an oci:// URL naming the chart.
@@ -195,7 +202,7 @@ func (c *HelmTemplateConfig) source() (chartSource, error) {
 	if _, err := json.Marshal(c.Values); err != nil {
 		return chartSource{}, errors.Errorf("%s: values is not representable as JSON: %w", helmTemplateType, err)
 	}
-	return chartSource{URL: c.SourceURL, Kind: kind, Chart: c.Chart, Version: c.Version, Values: c.Values}, nil
+	return chartSource{URL: c.SourceURL, Kind: kind, Chart: c.Chart, Version: c.Version, Values: c.Values, Namespace: c.Namespace}, nil
 }
 
 // ensureRendered checks c and renders its chart, once: Generate and
