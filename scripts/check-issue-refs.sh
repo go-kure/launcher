@@ -15,12 +15,15 @@
 # directory, and this script and its self-test.
 #
 # Rejected:
-#   bare     `#N` with 2 to 5 digits, not preceded by a letter, digit, `_` or `&`
-#            (so `(#227)`, `#227/#242`, `pre-#444` are caught; `&#1234;` is not)
-#   partial  `launcher#N` not preceded by `/`
+#   bare     `#N` with 2 to 5 digits, not preceded by a letter, digit, `_`, `&`
+#            or `%` (so `(#227)`, `#227/#242`, `pre-#444` are caught; the HTML
+#            entity `&#1234;` and the Go format verb `%#12x` are not)
+#   partial  `launcher#N` not preceded by `/` or by a letter, digit or `_`
 # A Markdown link target `](#...)` is an anchor, not a reference, and is ignored.
 #
-# Escape hatch: `allow-ref` anywhere on the same line exempts that line.
+# Escape hatch: `allow-ref` anywhere on the same line exempts that line. Needed
+# for an all-digit CSS colour such as `#123`, which no pattern can tell apart
+# from a reference.
 #
 # Not caught: a single-digit `#N` (prose such as "step #1" would trip it), and a
 # qualified `owner/repo#N` that names the wrong repository.
@@ -39,28 +42,27 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-BARE='(^|[^A-Za-z0-9_&])#[0-9]{2,5}([^A-Za-z0-9_]|$)'
-PART='(^|[^A-Za-z0-9_./-])launcher#[0-9]+'
+BARE='(^|[^A-Za-z0-9_&%])#[0-9]{2,5}([^A-Za-z0-9_]|$)'
+PART='(^|[^A-Za-z0-9_/])launcher#[0-9]+'
+
+hits="$(mktemp)"
+trap 'rm -f "$hits"' EXIT
 
 # git grep finds the candidate lines; the loop below drops anchors and pragmas.
-# Exit 1 from git grep means no candidate at all; anything above 1 is an error.
+# -z separates file name, line number and text with NUL, so a `:` in a file name
+# cannot shift the fields. Exit 1 means no candidate at all; above 1 is an error.
 rc=0
-candidates="$(git -C "$ROOT" grep --no-color -n -I -E -e "$BARE" -e "$PART" -- \
+git -C "$ROOT" grep -z --no-color -n -I -E -e "$BARE" -e "$PART" -- \
   '*.go' '*.md' '*.sh' '*.yml' '*.yaml' '*.toml' '*.json' \
   ':!CHANGELOG.md' ':!testdata/*' ':!*/testdata/*' \
-  ':!scripts/check-issue-refs.sh' ':!scripts/check-issue-refs-test.sh')" || rc=$?
+  ':!scripts/check-issue-refs.sh' ':!scripts/check-issue-refs-test.sh' >"$hits" || rc=$?
 if [[ "$rc" -gt 1 ]]; then
   echo "ERROR: git grep failed in $ROOT (exit $rc)" >&2
   exit 2
 fi
 
 found=0
-while IFS= read -r hit; do
-  [[ -n "$hit" ]] || continue
-  file="${hit%%:*}"
-  rest="${hit#*:}"
-  lineno="${rest%%:*}"
-  text="${rest#*:}"
+while IFS= read -r -d '' file && IFS= read -r -d '' lineno && IFS= read -r text; do
   [[ "$text" == *allow-ref* ]] && continue
   stripped="$text"
   while [[ "$stripped" =~ ^(.*)\]\(#[^\)]*\)(.*)$ ]]; do
@@ -70,7 +72,7 @@ while IFS= read -r hit; do
     echo "$file:$lineno: $text"
     found=$((found + 1))
   fi
-done <<<"$candidates"
+done <"$hits"
 
 if [[ "$found" -gt 0 ]]; then
   echo "" >&2

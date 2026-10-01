@@ -281,7 +281,8 @@ CI-enforced by the always-on `issue-refs` job (`make check-issue-refs`, also in 
 and a `launcher#N` not preceded by `/`, in tracked `*.go`, `*.md`, `*.sh`, `*.yml`, `*.yaml`,
 `*.toml` and `*.json` files. Exempt: `CHANGELOG.md` (generated from commit subjects), anything under
 a `testdata/` directory, and Markdown anchors `](#...)`. A line that is genuinely not a reference
-(a quoted error message, a fixture string) takes an `allow-ref` pragma anywhere on that line.
+(a quoted error message, a fixture string, an all-digit colour such as `#123`) takes an `allow-ref`
+pragma anywhere on that line.
 
 Known gaps — the guard does not catch these, so a reviewer must:
 
