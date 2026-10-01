@@ -35,7 +35,7 @@ packages:
     mount: {target: api-reference/oam.md, title: OAM Model, weight: 20, group: OAM, desc: "OAM data model, parser, and transform pipeline"}
   - path: pkg/oam/builtin/components
     readme: pkg/oam/builtin/components/README.md
-    mount: {target: api-reference/oam-components.md, title: Component Handlers, weight: 22, group: OAM, desc: "Built-in component types (webservice, worker, cronjob, helmchart, helmrelease, helmtemplate, …)"}
+    mount: {target: api-reference/oam-components.md, title: Component Handlers, weight: 22, group: OAM, desc: "Built-in component types (webservice, worker, cronjob, helm, helmrelease, helmtemplate, …)"}
   - path: pkg/oam/builtin/traits
     readme: pkg/oam/builtin/traits/README.md
     mount: {target: api-reference/oam-traits.md, title: Trait Handlers, weight: 24, group: OAM, desc: "Built-in traits (ingress, certificate, scaler, externalsecret, …)"}

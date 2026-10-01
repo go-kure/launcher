@@ -215,8 +215,10 @@ role-named; `expose` is lowerable and role-named. The layering the Helm-family r
 A name this rule produces is still subject to the reservation covenant above. One existing
 builtin predates the rule: `helmchart` is a role-level composite (a HelmRelease plus its
 source, or client-side rendered manifests), not a projection of the Flux `HelmChart` CR its
-name suggests. Its retirement and the reuse of the name for that CR are tracked in
-go-kure/launcher#350 and go-kure/launcher#351.
+name suggests. It is deprecated in favour of the role-named `helm`: every authored use
+warns, and it still builds unchanged. Its removal waits for the next document-format
+version, as Document-Format Lifecycle below requires (go-kure/launcher#350). The reuse of
+the name for the `HelmChart` CR (go-kure/launcher#351) waits for that removal.
 
 ---
 

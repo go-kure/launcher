@@ -67,7 +67,7 @@ reads it.
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` + a generated `helmrepository`/`ocirepository`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per URL within a document. See below. |
-| `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. The composite `helm` replaces (go-kure/launcher#350). |
+| `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | **Deprecated: use `helm`** (migration table below). Helm via Flux (`native`) or client-side `template`. |
 | `helmrelease` | HelmRelease (+values ConfigMap) | Kind-named: the full Flux `HelmReleaseSpec` plus `valuesMode`, against an existing source. |
 | `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. The composite's `delivery: template`, authorable directly — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
@@ -1960,7 +1960,39 @@ not part of either change.
 
   An authored component already named like a generated source fails the build
   as a duplicate component name.
-- **helmchart** — `chart`, `version`, `delivery` (`native`|`template`), `source`
+- **helmchart** — **Deprecated; use `helm`.** It still builds unchanged, and `kurel
+  build` prints `warning: component "<name>": type helmchart is deprecated: …` for
+  each authored helmchart component (the handler declares
+  `ContractMetadata.Deprecated`; see the pkg/oam README, "Contract metadata"). It is
+  removed together with the next document-format version, after at least one minor
+  release (`docs/oam/design-gvk.md`, "Document-Format Lifecycle"). To migrate,
+  change `type: helmchart` to `type: helm` and rename `delivery: native` to
+  `delivery: flux`; the other properties keep their names. The output then changes
+  only as this table says. `TestHelmParity` (`pkg/cmd/kurel`) pins it on three
+  fixture pairs, whose diffs are in `pkg/cmd/kurel/testdata/helm-parity/`:
+
+  | # | What changes with `helm` |
+  |---|---|
+  | 1 | The values ConfigMap name carries a values hash. |
+  | 2 | A generated source is named `<app>-source-<digest>`, not after the component. |
+  | 3 | `oci` and Helm-over-OCI components no longer share one OCIRepository. |
+  | 4 | The delivery value `native` is `flux`. |
+  | 5 | *(void)* `targetNamespace` under a Flux namespace: both default it to the application namespace (go-kure/launcher#625). |
+  | 6 | A generated source keeps its terminal's default interval, not the release interval. |
+  | 7 | No registration-time `valuesMode` default; `valuesMode` is forwarded only when authored. |
+  | 8 | Generated sources get the automatic source health check. |
+  | 9 | The registry allowlist applies to inline sources. |
+  | 10 | Generated sources deploy in the infra tier. A tier annotation on the component places only its release; the generated source stays in infra. |
+  | 11 | Template delivery refuses `releaseName` and `targetNamespace`. |
+  | 12 | `chart` is refused with an OCIRepository or HelmChart source. |
+  | 13 | `version` is refused with a referenced OCIRepository or HelmChart source. |
+  | 14 | `source.namespace` is refused together with `url`. |
+  | 15 | Unknown keys are refused at any depth of `source`, and so are two keys that differ only in case. |
+  | 16 | A generated OCIRepository sets `layerSelector` (the chart content layer, `copy`). |
+  | 17 | `placement` may keep a generated source only in infra, and a `dependency` rule may not make it wait. |
+  | 18 | Any other composite default or build-time check a terminal does not reproduce (strict decoding). |
+
+  `chart`, `version`, `delivery` (`native`|`template`), `source`
   (inline `url` or `{name,kind}` ref), `values`/`valuesFrom`, `valuesMode`
   (`inline` default | `configMap`), `driftDetection`, `install.crds`/`upgrade.crds`.
   With native delivery, components whose inline `source.url` (plus `version` for OCI) match share one source

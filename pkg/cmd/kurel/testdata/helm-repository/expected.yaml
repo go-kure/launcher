@@ -1,8 +1,7 @@
-warning: component "metrics": type helmchart is deprecated: use type helm; the helmchart migration table in pkg/oam/builtin/components/README.md lists what changes
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
-  name: metrics
+  name: monitoring-source-3d12addc9a
   namespace: default
 spec:
   interval: 1h0m0s
@@ -19,7 +18,7 @@ spec:
       chart: kube-prometheus-stack
       sourceRef:
         kind: HelmRepository
-        name: metrics
+        name: monitoring-source-3d12addc9a
       version: 69.3.2
   interval: 1h0m0s
   targetNamespace: monitoring

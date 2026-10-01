@@ -1,0 +1,16 @@
+--- helmchart
++++ helm
+@@ -2,5 +2,5 @@
+ kind: HelmRepository
+ metadata:
+-  name: metrics
++  name: monitoring-source-3d12addc9a
+   namespace: default
+ spec:
+@@ -19,5 +19,5 @@
+       sourceRef:
+         kind: HelmRepository
+-        name: metrics
++        name: monitoring-source-3d12addc9a
+       version: 69.3.2
+   interval: 1h0m0s

@@ -21,7 +21,7 @@ kurel build examples/01-webservice-minimal.yaml \
 | `05-worker-minimal` / `06-worker-with-traits` | background workers |
 | `07-cronjob-minimal` / `08-cronjob-full` | scheduled jobs |
 | `09-postgresql-minimal` / `10-postgresql-ha` | CloudNativePG databases |
-| `11-helmchart` | Helm chart via Flux |
+| `11-helm` | Helm chart via Flux |
 | `12-daemonset` / `13-statefulset` | node daemons and stateful workloads |
 | `14-full-stack` | a multi-component application |
 | `15-passthrough-minimal` | emit an arbitrary object verbatim |

@@ -37,6 +37,21 @@ func (h *HelmchartHandler) CanHandle(componentType string) bool {
 	return componentType == "helmchart"
 }
 
+// ContractMetadata marks helmchart deprecated in favour of the helm component type
+// (helm.go). It still builds unchanged; the transform warns once per authored
+// helmchart component. Removal waits for the next document-format version
+// (docs/oam/design-gvk.md, "Document-Format Lifecycle").
+func (h *HelmchartHandler) ContractMetadata() oam.ContractMetadata {
+	return oam.ContractMetadata{
+		Family:             "helmchart",
+		Version:            "v1",
+		Deprecated:         true,
+		DeprecationMessage: "use type helm; the helmchart migration table in pkg/oam/builtin/components/README.md lists what changes",
+	}
+}
+
+var _ oam.ContractDescriber = (*HelmchartHandler)(nil)
+
 // PropertySchema declares the helmchart component's user-facing properties. The
 // Helm `values` tree and the Flux-shaped source/driftDetection/install/upgrade
 // blocks are kept open (AdditionalProperties) rather than modeled field-by-field.
