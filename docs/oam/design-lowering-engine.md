@@ -161,11 +161,17 @@ and `applyTraits` (`transform.go`, inside the `!trait.sealed` guard) — both af
 `trait.Properties` — and symmetrically before a
 component handler's `ToApplicationConfig` (`createApplications`, `transform.go`) —
 though no component schema declares a reserved field today, so that call site is
-currently a no-op in practice. On the component side, a component a lowering rule
-synthesized (`Component.synthesized`, the counterpart of `Trait.sealed`) is exempt — only
-a component or trait rule whose input was checked (it declares a schema; a component rule
-whose input component is synthesized) synthesizes — a sealed trait is not checked input and
-skips the schema check, so a trait rule's output over one stays authored, schema or not;
+currently a no-op in practice. A sealed trait skips the capability merge but not D3:
+unless a lowering rule synthesized it (`Trait.synthesized`), it is checked as it
+stands before a schema-declaring trait rule runs over it and in `applyTraits`
+(go-kure/launcher#611), so a schema-less rule cannot copy an authored reserved value
+into a trait it emits. A component a lowering rule synthesized (`Component.synthesized`,
+the counterpart of `Trait.synthesized`) is exempt likewise — only a rule whose input was
+checked synthesizes: a component rule that declares a schema or whose input component is
+synthesized, or a trait rule whose input trait is synthesized or that declares a schema
+over an unsealed one, and the traits nested in what it emits share that classification.
+A sealed, unsynthesized trait that passes the check is still not checked input, so a
+trait rule's output over one stays authored, schema or not;
 a document rule's output is never synthesized, since nothing checks its whole input
 (go-kure/launcher#612), and a component it forwards keeps the classification it arrived
 with — and

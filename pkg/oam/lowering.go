@@ -1139,6 +1139,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 					comp.synthesized = false
 				}
 				comp.origin = &compOrigin
+				// The traits it built are never synthesized either, for the same reason.
 				if err := t.sealNestedTraitsInDocument(comp, compOrigin, originalComponents); err != nil {
 					return nil, false, nil, errors.Wrapf(err, "%s", origin)
 				}
@@ -1263,7 +1264,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
-				if err := t.sealEmittedNestedTraits(&result.Components[j], compOrigin, originalTraits); err != nil {
+				if err := t.sealEmittedNestedTraits(&result.Components[j], compOrigin, originalTraits, inputChecked); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
@@ -1324,6 +1325,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// merge here (a fifth input), mirroring applyTraits' identical guard
 			// (transform.go). Every capability-processing step below is skipped
 			// entirely for a sealed trait; its Properties are final.
+			p, declaresSchema := rule.(PropertySchemaProvider)
 			resolvedTrait := trait
 			matched := false
 			matchedKey := ""
@@ -1364,9 +1366,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				// capability rendering is merged in. applyTraits (transform.go, for a
 				// dispatchable handler) and createApplications (transform.go, for a
 				// component handler) perform the same check at their own merge points,
-				// alongside honoring Trait.sealed in applyTraits. Checked against
+				// alongside honoring Trait.synthesized in applyTraits. Checked against
 				// trait.Properties (the pre-merge original), not resolvedTrait.
-				if p, ok := rule.(PropertySchemaProvider); ok {
+				if declaresSchema {
 					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
 						return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 					}
@@ -1375,7 +1377,20 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				if matched && ctx.consumedCapabilities != nil {
 					ctx.consumedCapabilities[matchedKey] = struct{}{}
 				}
+			} else if declaresSchema && !trait.synthesized {
+				// D3 on a sealed trait no checked rule emitted (Trait.synthesized): a
+				// schema-less rule may have copied an authored reserved value into it.
+				// Its Properties are final, so they are checked as they stand.
+				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+				}
 			}
+			// This rule's output is synthesized only when its input was checked: the
+			// trait is itself synthesized, or the rule declares a schema and the trait
+			// is unsealed. A sealed trait the check above just passed stays
+			// unpromoted: it holds only what the rule's own schema reserves, not what
+			// the components or traits the rule emits reserve.
+			inputChecked := trait.synthesized || (declaresSchema && !trait.sealed)
 			lctx := LoweringContext{Document: doc, Component: &comp, Capabilities: ctx.Capabilities, Origin: traitOrigin, Namer: namer}
 			result, err := rule.LowerTrait(&resolvedTrait, lctx)
 			if err != nil {
@@ -1390,6 +1405,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			for j := range result.Traits {
 				result.Traits[j].origin = &traitOrigin
 				result.Traits[j].sealed = true
+				result.Traits[j].synthesized = inputChecked
 				names[j] = result.Traits[j].Type
 				if err := t.validateEmittedTrait(&result.Traits[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
@@ -1398,18 +1414,11 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			newTraits = append(newTraits, result.Traits...)
 			for j := range result.Components {
 				result.Components[j].origin = &traitOrigin
-				// Synthesized only when the trait was checked before the rule ran:
-				// the rule declares a schema and the trait is not sealed. trait.sealed
-				// is no proof of a check — every rule-emitted trait is sealed,
-				// including one a schema-less rule copied authored properties into —
-				// and a sealed trait skips the schema check above, so a declared
-				// schema proves nothing for it either.
-				_, declaresSchema := rule.(PropertySchemaProvider)
-				result.Components[j].synthesized = declaresSchema && !trait.sealed
+				result.Components[j].synthesized = inputChecked
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
-				if err := t.sealEmittedNestedTraits(&result.Components[j], traitOrigin, nil); err != nil {
+				if err := t.sealEmittedNestedTraits(&result.Components[j], traitOrigin, nil, inputChecked); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
 				// A trait-position rule may also emit Components (loweringPositionRules);
@@ -1490,7 +1499,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 	return changed, steps, nil
 }
 
-// sealEmittedNestedTraits stamps origin and seals every NEWLY SYNTHESIZED trait
+// sealEmittedNestedTraits stamps origin and seals every NEWLY BUILT trait
 // nested inside an emitted component (comp.Traits), the same treatment a
 // trait-position rule's directly-emitted Traits already get
 // (result.Traits[j].sealed = true, above). A component/trait-position rule
@@ -1526,8 +1535,11 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 // A forwarded trait also records the index it held in forwarded (Trait.authoredIndex)
 // unless an earlier forwarding already did, so a rule that places its own trait
 // ahead of the forwarded ones does not shift the Origin.Index they are later given.
-func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Origin, forwarded []Trait) error {
-	return t.sealNestedTraits(comp, parentOrigin, func(trait *Trait) bool {
+//
+// synthesized is the emitting rule's inputChecked: each trait sealed here gets it
+// as Trait.synthesized, the same marker the component it sits in carries.
+func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Origin, forwarded []Trait, synthesized bool) error {
+	return t.sealNestedTraits(comp, parentOrigin, synthesized, func(trait *Trait) bool {
 		i := forwardedIndex(trait, forwarded)
 		if i < 0 {
 			return false
@@ -1546,9 +1558,10 @@ func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Orig
 // e.g. by reorganizing doc.Spec.Components across several output documents. A single
 // []Trait forwarded slice cannot express "forwarded from one of N original
 // components", so this checks pointer identity against every original component's
-// own Traits slice instead of one.
+// own Traits slice instead of one. A trait sealed here is never synthesized: a
+// document rule's output stays authored (see the component loop in lowerDocumentOnce).
 func (t *Transformer) sealNestedTraitsInDocument(comp *Component, parentOrigin Origin, originalComponents []Component) error {
-	return t.sealNestedTraits(comp, parentOrigin, func(trait *Trait) bool {
+	return t.sealNestedTraits(comp, parentOrigin, false, func(trait *Trait) bool {
 		for i := range originalComponents {
 			if isForwardedTrait(trait, originalComponents[i].Traits) {
 				return true
@@ -1561,8 +1574,9 @@ func (t *Transformer) sealNestedTraitsInDocument(comp *Component, parentOrigin O
 // sealNestedTraits is the shared body: stamp origin and seal every trait in
 // comp.Traits that isForwarded reports false for — the "hard-coded by the emitting
 // rule, not forwarded from an authored input" traits sealEmittedNestedTraits' own doc
-// comment (above) describes.
-func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, isForwarded func(*Trait) bool) error {
+// comment (above) describes. Each one's Trait.synthesized is set to synthesized,
+// which also resets a by-value copy of a synthesized trait that the rule changed.
+func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, synthesized bool, isForwarded func(*Trait) bool) error {
 	for k := range comp.Traits {
 		trait := &comp.Traits[k]
 		forwarded := isForwarded(trait)
@@ -1578,6 +1592,7 @@ func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, isF
 		nestedOrigin.Index = k
 		trait.origin = &nestedOrigin
 		trait.sealed = true
+		trait.synthesized = synthesized
 		if err := t.validateEmittedTrait(trait); err != nil {
 			return err
 		}

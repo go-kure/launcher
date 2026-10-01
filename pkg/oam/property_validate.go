@@ -31,8 +31,9 @@ import (
 //
 // Reservation is checked on the authored surface only. A component is checked before
 // any rule can rewrite it, so before any strip; one a lowering rule synthesized
-// (Component.synthesized) is exempt, as a sealed trait is, so neither a reserved value
-// a rule wrote nor a reserved null stripped from rule output is judged as authored.
+// (Component.synthesized) is exempt, as a synthesized trait (Trait.synthesized) is, so
+// neither a reserved value a rule wrote nor a reserved null stripped from rule output
+// is judged as authored.
 //
 // Two boundaries the sentence deliberately does not cross. An empty object is NOT a
 // null and is NOT absent — an empty metav1.LabelSelector selects everything where an
@@ -465,7 +466,9 @@ func joinPropertyTypes(types []PropertyType) string {
 // (Component.synthesized) and by checking an authored one before any rule can rewrite
 // it — lowerDocumentBody before a ComponentLoweringRule,
 // enforceAuthoredComponentReservations before a DocumentLoweringRule,
-// createApplications otherwise. The exception is the output of a rule whose input was
+// createApplications otherwise. The trait surface works the same way: an unsealed
+// trait is checked before its capability merge, a sealed one only when a rule whose
+// input was not checked emitted it (Trait.synthesized false). The exception is the output of a rule whose input was
 // not checked: it stays authored and is checked here after emission validation, which
 // has already removed an explicit null (go-kure/launcher#609). No built-in component schema
 // declares a reserved property today: all 11 PlatformReserved declarations are on
@@ -1304,7 +1307,7 @@ func validateEmittedProperties(handler any, props map[string]any, path string) e
 //
 // Deliberately does NOT validate traits (round-12-batch-2 Codex finding,
 // lowering.go:717 as reviewed): at the point this runs, a document-rule branch has
-// not yet determined which of comp.Traits are freshly synthesized versus forwarded
+// not yet determined which of comp.Traits are freshly built versus forwarded
 // unchanged from an authored component (sealNestedTraitsInDocument, called
 // immediately after this in lowerDocumentOnce, is what tells the two apart). A
 // forwarded trait has not gone through capability rendering yet and is not meant to
@@ -1314,7 +1317,7 @@ func validateEmittedProperties(handler any, props map[string]any, path string) e
 // required" error. For a DocumentLoweringRule, trait validation instead happens in
 // the forwarding-aware pass lowerDocumentOnce runs immediately after this:
 // sealNestedTraits (via sealNestedTraitsInDocument) calls validateEmittedTrait on
-// every trait it does NOT skip as forwarded, so a freshly synthesized trait is still
+// every trait it does NOT skip as forwarded, so a freshly built trait is still
 // validated — just after forwarding is known, not before. For a
 // RawDocumentLoweringRule (lowerRawOnce) there is no such pass: every trait it writes
 // is authored input: the caller's ValidateAuthoredProperties checks its shape, and

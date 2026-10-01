@@ -50,13 +50,14 @@ type Component struct {
 	// its properties are the rule's own output, which may carry a PlatformReserved
 	// value the rule rendered from LoweringContext.Capabilities, so the D3 check on
 	// AUTHORED values (enforcePlatformReserved) does not apply to it — the component
-	// counterpart of Trait.sealed. The engine sets it at each emission site
+	// counterpart of Trait.synthesized. The engine sets it at each emission site
 	// (lowering.go); a rule in another package cannot, and an authored component is
 	// never synthesized. A rule's output is marked only when the rule's input was
-	// checked: the rule declares a schema (PropertySchemaProvider), or a component
-	// rule's input component is itself synthesized; any other rule's output is
-	// checked as authored. A sealed trait is not checked input and skips the schema
-	// check: a trait rule's output over one stays authored, schema or not. A
+	// checked: the rule declares a schema (PropertySchemaProvider), or its input
+	// component or trait is itself synthesized; any other rule's output is checked as
+	// authored. A trait rule's output over a sealed trait that is not synthesized
+	// stays authored, schema or not: the check its schema runs there covers the
+	// trait's own reserved keys, not those of what the rule emits. A
 	// document rule's output is never synthesized, since nothing checks its whole
 	// input (go-kure/launcher#612); a component it forwards (pointer-identical,
 	// isForwardedComponent) keeps the value it arrived with. What a user wrote is still
@@ -85,8 +86,18 @@ type Trait struct {
 	// rule's own deterministic output, so applyTraits must not merge a second
 	// ClusterProfile capability rendering into it — that would make the trait's
 	// output depend on a fifth input the information-closure rule does not allow.
-	// An authored trait is never sealed.
+	// An authored trait is never sealed. Sealing says nothing about whether the
+	// trait's content was checked; Trait.synthesized does.
 	sealed bool
+	// synthesized marks a sealed trait whose emitting rule's input was checked, the
+	// trait counterpart of Component.synthesized and set under the same rule at each
+	// emission site (lowering.go): its properties are the rule's own output, so the
+	// D3 check on authored values (enforcePlatformReserved) does not apply to it.
+	// Any other trait — authored, forwarded, or sealed by a rule whose input was not
+	// checked — is checked by D3 before a schema-declaring TraitLoweringRule
+	// (lowerDocumentBody) and in applyTraits. Every trait a document rule builds is
+	// unsynthesized (go-kure/launcher#612). Only a sealed trait is ever synthesized.
+	synthesized bool
 	// forwardedFrom is set only while a ComponentLoweringRule runs: the engine
 	// hands the rule a marked copy of the component's traits (forwardableTraits,
 	// lowering.go), so a by-value copy the rule forwards is still recognised as
