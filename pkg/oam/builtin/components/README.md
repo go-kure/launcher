@@ -1966,12 +1966,13 @@ not part of either change.
   policy.
 
   **A wrongly typed optional property is an error, not dropped** (go-kure/launcher#601).
-  `chart`, `version`, `delivery`, `interval`, `releaseName`, `targetNamespace` and the nested
+  `chart`, `version`, `delivery`, `valuesMode`, `interval`, `releaseName`, `targetNamespace` and the nested
   `driftDetection.mode`, `install.crds`, `upgrade.crds` must be strings; `driftDetection`,
   `install`, `upgrade` and `values` objects; `valuesFrom` an array whose entries carry string
   `kind`, `valuesKey` and `targetPath`. A present value of another type is refused, naming the
   field: `version: 7` used to build with no version, and `interval: 7` with the `60m` default.
-  A null or an empty string still reads as unset. Schema validation already refuses these in a
+  A null still reads as unset, and so does an empty string for a string property; an object
+  or array property refuses an empty string as the wrong type. Schema validation already refuses these in a
   `kurel build`; the handler check covers a handler called directly and a component a lowering
   rule builds in Go.
 
