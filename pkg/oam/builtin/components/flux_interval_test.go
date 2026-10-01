@@ -169,6 +169,7 @@ func TestHelmchartHandler_WrongTypeRefused(t *testing.T) {
 		{"chart", 7, "helmchart: chart: must be a string"},
 		{"version", 7, "helmchart: version: must be a string"},
 		{"delivery", 7, "helmchart: delivery: must be a string"},
+		{"valuesMode", 7, "helmchart: valuesMode: must be a string"},
 		{"interval", 7, "helmchart: interval: must be a string"},
 		{"releaseName", 7, "helmchart: releaseName: must be a string"},
 		{"targetNamespace", 7, "helmchart: targetNamespace: must be a string"},

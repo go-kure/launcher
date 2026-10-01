@@ -84,8 +84,10 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 
 	props := component.Properties
 
-	// Every optional read goes through the parse<X>Field family: a null or an
-	// empty string is absence, and a present value of the wrong type is an error
+	// Every optional read goes through the parse<X>Field family: a null is
+	// absence for every field, and an empty string for a string field (an object
+	// or array field refuses it as the wrong type); a present value of the wrong
+	// type is an error
 	// naming the field, never a silent fallback to the unset default
 	// (go-kure/launcher#601). Schema validation refuses these first in a
 	// kurel build; this covers a handler called directly and a component a
@@ -257,7 +259,11 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 	// A caller that DOES materialize schema defaults into props ahead of this
 	// call would make valuesModeExplicit see an inherited default as
 	// authored, silently defeating the template-delivery fallback below.
-	cfg.ValuesMode, _ = props["valuesMode"].(string)
+	valuesMode, _, err := parseStringField(props, "valuesMode", "helmchart: valuesMode")
+	if err != nil {
+		return nil, err
+	}
+	cfg.ValuesMode = valuesMode
 	valuesModeExplicit := cfg.ValuesMode != ""
 	if cfg.ValuesMode == "" {
 		cfg.ValuesMode = h.ValuesMode
