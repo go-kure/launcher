@@ -30,6 +30,12 @@
       "extractVersion": "^v(?<version>.*)$"
     },
     {
+      "description": "syft v1.53.0 is tagged upstream but anchore/syft published no release for it, so mise cannot download it (aqua 404) and every local mise run fails. Keep Renovate from proposing that version again; remove this rule once v1.53.0's release assets exist or a later syft version supersedes it.",
+      "matchManagers": ["mise"],
+      "matchDepNames": ["syft"],
+      "allowedVersions": "!/^1\\.53\\.0$/"
+    },
+    {
       "description": "Direct deps shared with the imported kure are never proposed here: launcher must not lead the kure release it imports (MVS pulls launcher up automatically, so only the 'ahead' direction needs control — see AGENTS.md § 'Shared dependencies with kure'). CI enforces this via site/scripts/check-kure-dep-sync.sh; this list mirrors that guard's current shared-direct set and must be updated together with go.mod changes that add or drop a shared direct dep — a dep missing here is still caught by the CI guard, just as a red PR instead of never being proposed. Correct sequence for these: land the kure bump, cut a kure release, bump the go-kure/kure require, take the shared dep together.",
       "enabled": false,
       "matchPackageNames": [
