@@ -153,7 +153,7 @@ func TestTransform_DocumentRuleTraitCopyReservedValueIsRejected(t *testing.T) {
 
 // TestLower_DocumentRuleTraitForwarding pins the classification at document
 // position: an unchanged copy and a pointer-forwarded component both leave the
-// trait unsealed and unstamped, no forwarding mark survives the rule invocation, and
+// trait unsealed and stamped with its authored location, no forwarding mark survives the rule invocation, and
 // a copy the rule changed is sealed as its own output.
 func TestLower_DocumentRuleTraitForwarding(t *testing.T) {
 	cases := map[string]struct {
@@ -178,8 +178,15 @@ func TestLower_DocumentRuleTraitForwarding(t *testing.T) {
 			if trait.sealed != tc.wantSealed {
 				t.Errorf("trait sealed = %v, want %v (%+v)", trait.sealed, tc.wantSealed, trait)
 			}
-			if _, stamped := trait.Origin(); stamped != tc.wantSealed {
-				t.Errorf("trait origin stamped = %v, want %v", stamped, tc.wantSealed)
+			// Either way the trait is stamped: a sealed one as this rule's output, a
+			// forwarded one with its authored location and no Rule.
+			wantRule := ""
+			if tc.wantSealed {
+				wantRule = "document/DocTraitCopy"
+			}
+			got, stamped := trait.Origin()
+			if !stamped || got.Component != "web" || got.ComponentType != "webservice" || got.TraitType != trait.Type || got.Index != 0 || got.Rule != wantRule {
+				t.Errorf("trait origin = %+v (stamped %v), want web/webservice %s index 0 with Rule %q", got, stamped, trait.Type, wantRule)
 			}
 			if trait.synthesized {
 				t.Error("a document rule's output is never synthesized")
@@ -381,5 +388,56 @@ func TestLower_DocumentRuleForwardedTraitCopy_KeepsAuthoredIndex(t *testing.T) {
 	}
 	if seen.TraitType != "probe-trait" || seen.Index != 1 {
 		t.Errorf("forwarded trait origin = %s index %d, want probe-trait index 1 (its authored slot, not its shifted position 2)", seen.TraitType, seen.Index)
+	}
+}
+
+// movingDocRule moves the first component's traits onto a new component "worker",
+// leaving the first one without traits. By value it rebuilds them behind one trait
+// of its own; by pointer it hands the new component the authored slice itself.
+type movingDocRule struct{ byValue bool }
+
+func (movingDocRule) Kind() string { return "Moving" }
+
+func (r movingDocRule) LowerDocument(doc *Application, _ LoweringContext) (LoweringResult, error) {
+	src := doc.Spec.Components[0]
+	traits := src.Traits
+	if r.byValue {
+		traits = append([]Trait{{Type: "topology-spread", Properties: map[string]any{}}}, src.Traits...)
+	}
+	stripped := src
+	stripped.Traits = nil
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name, Namespace: doc.Metadata.Namespace},
+		Spec: ApplicationSpec{Components: []Component{
+			stripped,
+			{Name: "worker", Type: "webservice", Properties: map[string]any{"image": "busybox"}, Traits: traits},
+		}},
+	}}}, nil
+}
+
+// TestLower_DocumentRuleMovedTraitKeepsSourceComponent: a trait a document rule
+// moves to another component, by copy or by pointer, keeps the authored component
+// and slot it came from in its origin, not the component it now sits on.
+func TestLower_DocumentRuleMovedTraitKeepsSourceComponent(t *testing.T) {
+	for name, byValue := range map[string]bool{"copy": true, "pointer": false} {
+		t.Run(name, func(t *testing.T) {
+			var seen Origin
+			tr := NewTransformer(nil, nil)
+			tr.RegisterDocumentLowering(movingDocRule{byValue: byValue})
+			tr.RegisterTraitLowering(originCaptureTraitRule{typ: "probe-trait", seen: &seen})
+
+			app := forwardingDocApp("configmap", map[string]any{})
+			app.Kind = "Moving"
+			app.Spec.Components[0].Traits = append(app.Spec.Components[0].Traits, Trait{Type: "probe-trait", Properties: map[string]any{}})
+
+			if _, err := tr.lower(app, TransformContext{}); err != nil {
+				t.Fatalf("lower: %v", err)
+			}
+			if seen.Component != "web" || seen.ComponentType != "webservice" || seen.TraitType != "probe-trait" || seen.Index != 1 {
+				t.Errorf("moved trait origin = %s/%s %s index %d, want web/webservice probe-trait index 1 (its authored component and slot)", seen.Component, seen.ComponentType, seen.TraitType, seen.Index)
+			}
+		})
 	}
 }

@@ -1650,18 +1650,31 @@ func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Orig
 // components", so this checks pointer identity against every original component's
 // own Traits slice instead of one. A trait sealed here is never synthesized: a
 // document rule's output stays authored (see the component loop in lowerDocumentOnce).
-// A forwarded trait records its slot in the original component's Traits
-// (Trait.authoredIndex) as sealEmittedNestedTraits does, so a rule that places a trait
-// of its own ahead of it does not shift its Origin.Index.
+// A forwarded trait that carries no origin yet is stamped with its authored location:
+// the component it came from and its slot in that component's Traits. The next
+// round's fallback would derive it from the emitting component instead, which names
+// the wrong component when the rule moved the trait to another one, and the wrong
+// slot when the rule placed a trait of its own ahead of it. It stays unsealed, with an
+// empty Rule, like any authored trait.
 func (t *Transformer) sealNestedTraitsInDocument(comp *Component, parentOrigin Origin, originalComponents []Component) error {
 	return t.sealNestedTraits(comp, parentOrigin, false, func(trait *Trait) bool {
 		for i := range originalComponents {
-			if k := forwardedIndex(trait, originalComponents[i].Traits); k >= 0 {
-				if trait.authoredIndex == nil {
-					trait.authoredIndex = &k
-				}
-				return true
+			src := &originalComponents[i]
+			k := forwardedIndex(trait, src.Traits)
+			if k < 0 {
+				continue
 			}
+			if trait.origin == nil {
+				authored, ok := src.Origin()
+				if !ok {
+					authored = Origin{Document: parentOrigin.Document, DocumentKind: parentOrigin.DocumentKind, Namespace: parentOrigin.Namespace, Component: src.Name, ComponentType: src.Type, Index: i}
+				}
+				authored.TraitType = trait.Type
+				authored.Index = k
+				authored.Rule = ""
+				trait.origin = &authored
+			}
+			return true
 		}
 		return false
 	})
