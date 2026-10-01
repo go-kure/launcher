@@ -339,7 +339,7 @@ func generatedNetworkPolicy(t *testing.T, cfg interface {
 	return np
 }
 
-// --- #239: external-backend synthesis is cluster-wide, not per-bundle ---
+// --- go-kure/launcher#239: external-backend synthesis is cluster-wide, not per-bundle ---
 
 // Two routers in DIFFERENT leaf bundles naming the same external Service (same namespace + selector)
 // must emit exactly ONE policy — a per-bundle accumulator would emit a duplicate resource id.
@@ -420,7 +420,7 @@ func TestSynthesizeNetworkPolicies_ExternalConflict_LeavesClusterUnmutated(t *te
 	}
 }
 
-// --- #242: backendRef retargeting resolves and emits across leaf bundles ---
+// --- go-kure/launcher#242: backendRef retargeting resolves and emits across leaf bundles ---
 
 // noopConfig is a minimal ApplicationConfig for a component that is neither a router nor emits a
 // policy of its own — it just occupies a bundle so it can be a cross-bundle backend target.
@@ -576,7 +576,7 @@ func TestSynthesizeNetworkPolicies_CrossBundle_UnresolvedNoSelector_LeavesAuthor
 }
 
 // A cross-bundle backendRef carrying an authored backendSelector now resolves to the component and
-// ignores the selector — component-label targeting wins (intended #239→#242 precedence).
+// ignores the selector — component-label targeting wins (intended go-kure/launcher#239→go-kure/launcher#242 precedence).
 func TestSynthesizeNetworkPolicies_CrossBundleBackendSelector_Ignored(t *testing.T) {
 	backend := stack.NewApplication("backend", "default", svcPortConfig{port: 9000}) // owns Service "backend"
 	router := stack.NewApplication("router-ingress", "default", &extBackendStub{

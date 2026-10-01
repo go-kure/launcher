@@ -26,7 +26,7 @@ const (
 // and constrained schemas. They are only meaningful for handler properties: the
 // two flat call sites (kurel parameters, capability rendering) reject them at
 // decode time so unifying the type does not silently widen accepted behavior
-// (see rejectUnsupportedSchemaKeys, flatschema.go, and adr#33).
+// (see rejectUnsupportedSchemaKeys and flatschema.go).
 //
 // AdditionalProperties defaults to false: a handler that accepts arbitrary keys
 // (an escape hatch, e.g. the passthrough component's `object`) sets it true.

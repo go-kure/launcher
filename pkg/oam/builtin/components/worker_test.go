@@ -356,7 +356,7 @@ func TestWorker_WithSharedPodFields(t *testing.T) {
 	t.Error("Deployment not found in output")
 }
 
-// TestWorker_NamedLifecyclePort_Error covers launcher#278 wave-11
+// TestWorker_NamedLifecyclePort_Error covers go-kure/launcher#278 wave-11
 // finding 5: worker's main container never declares any port (there is no
 // `port` property at all — see PropertySchema above), so a named httpGet
 // port in `lifecycle`/`probes` can never resolve against it and is rejected
@@ -447,7 +447,7 @@ func TestWorker_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 }
 
 // TestWorker_ApplyPolicy_HostPathDenied is worker's sibling of
-// TestWebserviceConfig_ApplyPolicy_HostPathDenied (launcher#284, P1) — the
+// TestWebserviceConfig_ApplyPolicy_HostPathDenied (go-kure/launcher#284, P1) — the
 // same shared ApplyPolicy gap, same shared enforceHostPathVolumes fix.
 func TestWorker_ApplyPolicy_HostPathDenied(t *testing.T) {
 	h := workerViaRule{}
@@ -505,7 +505,7 @@ func TestWorker_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
 // TestWorker_ApplyPolicy_MaxResources_AgainstIntrinsicDefault is
 // worker's sibling of the two webservice
 // TestWebserviceConfig_ApplyPolicy_Max{CPU,Memory}_AgainstIntrinsicDefault
-// cases (launcher#251) — proving enforceMaxResources is actually wired into
+// cases (go-kure/launcher#251) — proving enforceMaxResources is actually wired into
 // the ApplyPolicy a worker gets (DeploymentConfig's, since worker lowers into a
 // deployment component), not just added to enforce.go.
 func TestWorker_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testing.T) {

@@ -412,7 +412,7 @@ func TestCronjobHandler_WithSharedPodFields(t *testing.T) {
 	t.Error("CronJob not found")
 }
 
-// TestCronjobHandler_NamedLifecyclePort_Error covers launcher#278 wave-11
+// TestCronjobHandler_NamedLifecyclePort_Error covers go-kure/launcher#278 wave-11
 // finding 5 — the literal example the finding cited: cronjob has no `port`
 // property at all, so a named lifecycle httpGet port (`port: http`) can
 // never resolve against the main container and is rejected at parse time.
@@ -520,7 +520,7 @@ func TestCronjobConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 }
 
 // TestCronjobConfig_ApplyPolicy_HostPathDenied regression-tests the review
-// finding this fix was anchored at (launcher#284, P1): ApplyPolicy never
+// finding this fix was anchored at (go-kure/launcher#284, P1): ApplyPolicy never
 // checked a parsed hostPath volume against oam.Policy.AllowHostPathVolumes(),
 // so the default-deny policy (including NoopPolicy) did not actually stop a
 // hostPath volume from being authored on a CronJob.
@@ -625,7 +625,7 @@ func TestCronjobHandler_WithVolumes_EmptyDir(t *testing.T) {
 }
 
 // TestCronjobHandler_FileKeyRef_VolumeWiring regression-tests a review finding
-// (launcher#284): the cronjob handler exposed env[].valueFrom.fileKeyRef
+// (go-kure/launcher#284): the cronjob handler exposed env[].valueFrom.fileKeyRef
 // (shared via schemaEnv) without any way to declare the emptyDir volume its
 // volumeName must reference, so real Kubernetes admission's
 // validateFileKeyRefVolumes would reject every authored fileKeyRef with a
@@ -693,7 +693,7 @@ func TestCronjobHandler_FileKeyRef_VolumeWiring(t *testing.T) {
 }
 
 // TestCronjobHandler_PVC_NamespacedByComponent regression-tests a review
-// finding (launcher#284): the generated PersistentVolumeClaim object used
+// finding (go-kure/launcher#284): the generated PersistentVolumeClaim object used
 // the bare pod-local volume name verbatim, so two components in the same
 // namespace both authoring a "data" volume would emit two
 // PersistentVolumeClaim/data objects and collide. The PVC object's own name
@@ -772,7 +772,7 @@ func TestCronjobHandler_PVC_NamespacedByComponent(t *testing.T) {
 // TestCronjobConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault is
 // cronjob's sibling of the two webservice
 // TestWebserviceConfig_ApplyPolicy_Max{CPU,Memory}_AgainstIntrinsicDefault
-// cases (launcher#251) — proving enforceMaxResources is actually wired into
+// cases (go-kure/launcher#251) — proving enforceMaxResources is actually wired into
 // CronjobConfig.ApplyPolicy, not just added to enforce.go.
 func TestCronjobConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testing.T) {
 	cases := []struct {

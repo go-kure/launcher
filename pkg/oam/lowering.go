@@ -1069,7 +1069,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		// (LoweringContext.Document), so for a conforming rule the order is moot.
 		originalComponents := doc.Spec.Components
 		// Same snapshot, for the identical reason, on the policy side (C1 finding on
-		// PR #283: the policy loop below stamped Rule unconditionally while the
+		// PR go-kure/launcher#283: the policy loop below stamped Rule unconditionally while the
 		// component loop already guarded against exactly this).
 		originalPolicies := doc.Spec.Policies
 		lctx := LoweringContext{Document: doc, Capabilities: ctx.Capabilities, Origin: origin, Namer: namer}

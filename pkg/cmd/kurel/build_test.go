@@ -92,7 +92,7 @@ func TestBuildCommand_StdoutOutput(t *testing.T) {
 }
 
 // testCRDManifestsAppYAML exercises the launcher-native crd and manifests
-// component handlers (#237): an inline CRD plus an inline namespaced manifest
+// component handlers: an inline CRD plus an inline namespaced manifest
 // that omits metadata.namespace and must be stamped with the app namespace.
 const testCRDManifestsAppYAML = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application

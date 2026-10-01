@@ -96,7 +96,7 @@ func enforceMaxStorageSize(current, max string) error {
 // (e.g. "NET_ADMIN") — their only call site is
 // enforceCapabilityConstraints(authoredTraitTypes, policy) in transform.go,
 // operating on Component.Traits[].Type. Wiring securityContext.capabilities.
-// add/drop through those three methods, as suggested in a launcher#278 review
+// add/drop through those three methods, as suggested in a go-kure/launcher#278 review
 // round, would check container capability strings against a policy list of
 // trait-type names — always-fail or always-no-op depending on the data, never
 // correct. Container capabilities are enforced separately, by
@@ -288,7 +288,7 @@ func quantityString(rl corev1.ResourceList, name corev1.ResourceName) string {
 // package's intrinsic fallbacks (buildResourceRequirements — 100m cpu request,
 // 128Mi memory request, memory limit mirroring the memory request). Enforcing
 // against res directly let an omitted value ship above the cap, since the
-// intrinsic fallback is injected after ApplyPolicy runs (launcher#251).
+// intrinsic fallback is injected after ApplyPolicy runs (go-kure/launcher#251).
 //
 // Read-only: buildResourceRequirements deep-copies its maps, so the caller's
 // Resources are untouched and generated output is unchanged.

@@ -108,7 +108,7 @@ func TestParseEnv_FieldRef_InvalidAPIVersion_Error(t *testing.T) {
 }
 
 // TestParseEnv_FieldRef_NonStringAPIVersion_Error regression-tests a review
-// finding (launcher#284): a bare `m["apiVersion"].(string)` type assertion
+// finding (go-kure/launcher#284): a bare `m["apiVersion"].(string)` type assertion
 // treated a present-but-non-string apiVersion the same as absent, silently
 // leaving APIVersion unset (which Kubernetes then defaults to "v1") instead
 // of rejecting the malformed value.
@@ -318,7 +318,7 @@ func TestParseEnv_FileKeyRef_MutuallyExclusiveWithSecretKeyRef(t *testing.T) {
 }
 
 // TestParseEnv_FileKeyRef_InvalidVolumeName_Error regression-tests a review
-// finding (launcher#284): fileKeyRef.volumeName was copied into the Pod with
+// finding (go-kure/launcher#284): fileKeyRef.volumeName was copied into the Pod with
 // no shape validation, so a value like "bad/name" could never resolve to any
 // legal Pod volume (real admission's validateFileKeySelector requires it be a
 // valid DNS-1123 label, matching Volume.Name's own constraint).
@@ -371,7 +371,7 @@ func TestParseEnv_FileKeyRef_NonBoolOptional_Error(t *testing.T) {
 }
 
 // TestParseEnv_SecretKeyRef_NonBoolOptional_Error and its configMapKeyRef
-// sibling regression-test a review finding (launcher#284): a mistyped
+// sibling regression-test a review finding (go-kure/launcher#284): a mistyped
 // `optional: "true"` fell through the failed type assertion silently, so
 // Optional stayed nil (defaults to required) — turning a requested optional
 // dependency into a required one, the opposite of authored intent.
@@ -464,7 +464,7 @@ func TestParseEnvFrom_BothRefs_Error(t *testing.T) {
 	}
 }
 
-// TestParseEnvFrom_MalformedSecretRef_Error covers launcher#278 wave-12
+// TestParseEnvFrom_MalformedSecretRef_Error covers go-kure/launcher#278 wave-12
 // finding 2: a present-but-malformed secretRef (scalar, not an object) must
 // not be silently treated as absent — that would let a valid configMapRef
 // pass the "exactly one" check while quietly discarding the authored (but
@@ -716,7 +716,7 @@ func TestParseLifecycle_NonObject_Error(t *testing.T) {
 }
 
 // TestParseLifecycle_UnknownKey_Error regression-tests a review finding
-// (launcher#284): a misspelled hook name (e.g. `postStop` instead of
+// (go-kure/launcher#284): a misspelled hook name (e.g. `postStop` instead of
 // `preStop`) matched neither recognized key and was silently ignored,
 // returning nil, nil instead of rejecting the typo.
 func TestParseLifecycle_UnknownKey_Error(t *testing.T) {
@@ -964,7 +964,7 @@ func TestParseSecurityContext_SeccompRuntimeDefault_WithLocalhostProfile_Error(t
 }
 
 // TestParseSecurityContext_SeccompRuntimeDefault_NonStringLocalhostProfile_Error
-// regression-tests a review finding (launcher#284): a bare
+// regression-tests a review finding (go-kure/launcher#284): a bare
 // `spRaw["localhostProfile"].(string)` type assertion treated a
 // present-but-non-string localhostProfile the same as absent, silently
 // accepting the profile as if localhostProfile had never been authored,
@@ -1026,7 +1026,7 @@ func TestParseSecurityContext_AppArmorRuntimeDefault_WithLocalhostProfile_Error(
 
 // TestParseSecurityContext_AppArmorRuntimeDefault_NonStringLocalhostProfile_Error
 // is appArmorProfile's sibling of the seccompProfile regression test above —
-// same review finding (launcher#284), same fix (parseStringField).
+// same review finding (go-kure/launcher#284), same fix (parseStringField).
 func TestParseSecurityContext_AppArmorRuntimeDefault_NonStringLocalhostProfile_Error(t *testing.T) {
 	_, err := parseSecurityContext(map[string]any{
 		"securityContext": map[string]any{
@@ -1222,7 +1222,7 @@ func TestParseProbe_SuccessThreshold_StartupAboveOne_Error(t *testing.T) {
 	}
 }
 
-// --- round-1 codex-review regression tests (launcher#278) ------------------
+// --- round-1 codex-review regression tests (go-kure/launcher#278) ------------------
 
 func TestParseEnv_ValueAndValueFrom_MutuallyExclusive(t *testing.T) {
 	props := map[string]any{
@@ -1747,7 +1747,7 @@ func TestParseEnvFrom_InvalidSecretName_Error(t *testing.T) {
 }
 
 // TestParseEnvFrom_NonBoolOptional_Error regression-tests a review finding
-// (launcher#284): the same mistyped-optional-silently-dropped bug fixed for
+// (go-kure/launcher#284): the same mistyped-optional-silently-dropped bug fixed for
 // secretKeyRef/configMapKeyRef/fileKeyRef above also applied to envFrom's
 // configMapRef and secretRef.
 func TestParseEnvFrom_NonBoolOptional_Error(t *testing.T) {
@@ -1863,7 +1863,7 @@ func TestParseResources_QuotaAliasExtendedResource_Error(t *testing.T) {
 	}
 }
 
-// TestParseResources_KubernetesIOQualified_Error covers launcher#278 wave-12
+// TestParseResources_KubernetesIOQualified_Error covers go-kure/launcher#278 wave-12
 // finding 1: a name containing "kubernetes.io/" claims to be a native
 // resource, not an extended one, and must be rejected independently of the
 // separate "requests."-prefix check above — the two conditions are not an
@@ -1940,7 +1940,7 @@ func TestParsePort_ValidName_Accepted(t *testing.T) {
 	}
 }
 
-// TestParsePort_NamedPortsDisallowed_Error covers launcher#278 wave-11
+// TestParsePort_NamedPortsDisallowed_Error covers go-kure/launcher#278 wave-11
 // finding 5: a component kind whose main container never declares any port
 // (worker, cronjob) passes namedPortsAllowed=false, so even an otherwise
 // validly-formatted name like "http" is rejected — the kubelet has nothing
@@ -1962,7 +1962,7 @@ func TestParsePort_NamedPortsDisallowed_NumericStillAccepted(t *testing.T) {
 	}
 }
 
-// TestParsePort_MatchName_Mismatch_Error covers launcher#278 wave-12 finding
+// TestParsePort_MatchName_Mismatch_Error covers go-kure/launcher#278 wave-12 finding
 // 3: namedPortsAllowed=true is not enough — a syntactically valid name that
 // does not equal the component's own declared container port name is just
 // as unresolvable by the kubelet as a named port on a portless component.
@@ -1997,7 +1997,7 @@ func TestParsePort_MatchName_Empty_AnyNameAccepted(t *testing.T) {
 	}
 }
 
-// TestParseProbe_GRPCServiceTooLong_Error covers launcher#278 wave-12
+// TestParseProbe_GRPCServiceTooLong_Error covers go-kure/launcher#278 wave-12
 // finding 5: the shared grpc handler parser copies the service string
 // unbounded, but real probe admission (validateGRPCService) caps it at 63
 // characters.
@@ -2024,7 +2024,7 @@ func TestParseProbe_GRPCServiceMaxLength_Accepted(t *testing.T) {
 	}
 }
 
-// TestParseVolumes_InvalidName_Error covers launcher#278 wave-12 finding 4:
+// TestParseVolumes_InvalidName_Error covers go-kure/launcher#278 wave-12 finding 4:
 // every corev1.Volume.Name must be a valid DNS-1123 label regardless of
 // volume source type — an unvalidated name (e.g. containing "/") builds
 // successfully but is rejected at Pod admission.
@@ -2062,7 +2062,7 @@ func TestParseVolumes_ValidName_Accepted(t *testing.T) {
 }
 
 // TestParseVolumes_EmptyDir_NegativeSizeLimit_Error regression-tests a review
-// finding (launcher#284): resource.ParseQuantity accepts a syntactically
+// finding (go-kure/launcher#284): resource.ParseQuantity accepts a syntactically
 // valid negative quantity like "-1Gi", but real Kubernetes resource
 // validation rejects negative storage quantities — the build must reject it
 // here too rather than emitting a Pod admission will refuse.
@@ -2159,7 +2159,7 @@ func TestParseVolumeClaimTemplates_NegativeSize_Error(t *testing.T) {
 }
 
 // TestParseVolumeClaimTemplates_NonStringStorageClass_Error regression-tests
-// a review finding (launcher#284): a bare `m["storageClass"].(string)` type
+// a review finding (go-kure/launcher#284): a bare `m["storageClass"].(string)` type
 // assertion treated a present-but-non-string storageClass the same as
 // absent, silently building with the cluster default class instead of
 // rejecting the malformed value — same defect as parseVolumes' pvc case,
@@ -2182,7 +2182,7 @@ func TestParseVolumeClaimTemplates_NonStringStorageClass_Error(t *testing.T) {
 }
 
 // TestQualifyPVCNames_QualifiesObjectNameAndClaimRef regression-tests a
-// review finding (launcher#284): the generated PVC object reused the bare
+// review finding (go-kure/launcher#284): the generated PVC object reused the bare
 // pod-local volume name verbatim as its own Kubernetes object name, so two
 // components sharing the same pod-local name (e.g. both "data") would
 // collide on one PersistentVolumeClaim in the same namespace.
@@ -2226,7 +2226,7 @@ func TestQualifyPVCNames_NoPVCs_NoOp(t *testing.T) {
 }
 
 // TestQualifyPVCNames_Idempotent regression-tests a review finding
-// (launcher#284): each workload kind's Generate() mutates c.PVCs/c.Volumes in
+// (go-kure/launcher#284): each workload kind's Generate() mutates c.PVCs/c.Volumes in
 // place via `c.PVCs = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)`, so a
 // second Generate() call on the same component instance re-invokes this
 // function with already-qualified state. The prior implementation keyed
@@ -2269,7 +2269,7 @@ func TestQualifyPVCNames_Idempotent(t *testing.T) {
 }
 
 // TestQualifyPVCNames_NoCollisionAcrossHyphenatedNames regression-tests a
-// review finding (launcher#284): plain "<appName>-<localName>" concatenation
+// review finding (go-kure/launcher#284): plain "<appName>-<localName>" concatenation
 // is not collision-free when either component itself contains a hyphen —
 // appName "a-b" with localName "data", and appName "a" with localName
 // "b-data", both produced the same qualified name "a-b-data". The fix
@@ -2341,7 +2341,7 @@ func TestParseVolumeClaimTemplates_StorageClass_Accepted(t *testing.T) {
 }
 
 // TestParseVolumes_MistypedCollection_Error regression-tests a review
-// finding (launcher#284): the outer `props["volumes"].([]any)` assertion
+// finding (go-kure/launcher#284): the outer `props["volumes"].([]any)` assertion
 // silently treated a present-but-non-array volumes value as absent,
 // returning an empty ParsedVolumes instead of an error — mirrors
 // parseProbes' existing outer-level check for the analogous `probes`
@@ -2356,7 +2356,7 @@ func TestParseVolumes_MistypedCollection_Error(t *testing.T) {
 }
 
 // TestParseVolumes_NonObjectEntry_Error regression-tests a review finding
-// (launcher#284): a non-object entry in the volumes array (e.g. `volumes:
+// (go-kure/launcher#284): a non-object entry in the volumes array (e.g. `volumes:
 // [data]`) was silently skipped via `continue` instead of rejected,
 // building successfully with no volume or mount for the malformed entry.
 func TestParseVolumes_NonObjectEntry_Error(t *testing.T) {
@@ -2390,7 +2390,7 @@ func TestParseVolumes_UnrecognizedType_Error(t *testing.T) {
 }
 
 // TestParseVolumes_HostPath_RelativePath_Error regression-tests a review
-// finding (launcher#284): corev1.HostPathVolumeSource.Path has no defined
+// finding (go-kure/launcher#284): corev1.HostPathVolumeSource.Path has no defined
 // root to resolve a relative value against, and real admission rejects a
 // non-absolute hostPath.path — this schema only checked for an empty path,
 // so a relative one built successfully but was rejected at Pod admission.
@@ -2430,7 +2430,7 @@ func TestParseVolumes_HostPath_AbsolutePath_Accepted(t *testing.T) {
 }
 
 // TestParseVolumes_DuplicateName_Error regression-tests a review finding
-// (launcher#284): parseVolumes validated each volume's name individually but
+// (go-kure/launcher#284): parseVolumes validated each volume's name individually but
 // never tracked names across entries, so two volumes sharing a valid name
 // both built successfully into the Pod template — real admission
 // (validateVolumes' allNames.Has(vol.Name) check) rejects the duplicate.
@@ -2480,7 +2480,7 @@ func TestParseVolumes_DistinctNames_Accepted(t *testing.T) {
 }
 
 // TestParseVolumes_DuplicateMountPath_Error regression-tests a review
-// finding (launcher#284): parseVolumes tracked duplicate names but not
+// finding (go-kure/launcher#284): parseVolumes tracked duplicate names but not
 // duplicate mountPaths, so two volumes with distinct names sharing the same
 // mountPath both built into the Pod template — real admission
 // (ValidateVolumeMounts' mountpoints.Has(mnt.MountPath) check) requires
@@ -2506,7 +2506,7 @@ func TestParseVolumes_DuplicateMountPath_Error(t *testing.T) {
 }
 
 // TestParseVolumes_ReadOnly_NonBoolean_Error regression-tests a review
-// finding (launcher#284): `m["readOnly"].(bool)` silently defaulted a
+// finding (go-kure/launcher#284): `m["readOnly"].(bool)` silently defaulted a
 // present-but-non-boolean readOnly value (e.g. "true" as a string) to false,
 // installing a writable mount instead of rejecting the malformed value.
 func TestParseVolumes_ReadOnly_NonBoolean_Error(t *testing.T) {
@@ -2589,7 +2589,7 @@ func TestParseVolumeMountList_DuplicateMountPath_Error(t *testing.T) {
 }
 
 // TestParseProbes_MistypedProbesObject_Error regression-tests a review
-// finding (launcher#284): the outer `props["probes"].(map[string]any)`
+// finding (go-kure/launcher#284): the outer `props["probes"].(map[string]any)`
 // assertion silently treated a present-but-non-object probes value as
 // absent, returning a valid empty ProbeConfig instead of an error — mirrors
 // parseLifecycle's existing outer-level check for the analogous `lifecycle`
@@ -2619,7 +2619,7 @@ func TestParseProbes_MistypedIndividualProbe_Error(t *testing.T) {
 }
 
 // TestParseProbes_UnknownKey_Error regression-tests a review finding
-// (launcher#284): a misspelled probe kind (e.g. `live` instead of
+// (go-kure/launcher#284): a misspelled probe kind (e.g. `live` instead of
 // `liveness`) matched none of the three recognized keys and was silently
 // ignored, returning an empty ProbeConfig instead of rejecting the typo.
 func TestParseProbes_UnknownKey_Error(t *testing.T) {
@@ -2797,7 +2797,7 @@ func TestParseResources_StandardResource_MismatchedRequestLimit_Accepted(t *test
 }
 
 // TestParseSecurityContext_NonBoolHardeningField_Error regression-tests a
-// review finding (launcher#284): a quoted `"false"` for
+// review finding (go-kure/launcher#284): a quoted `"false"` for
 // allowPrivilegeEscalation (or any of its three sibling hardening flags)
 // used to fail the `.(bool)` type assertion silently, leaving the field unset
 // so the container fell back to Kubernetes's permissive default while
@@ -2818,7 +2818,7 @@ func TestParseSecurityContext_NonBoolHardeningField_Error(t *testing.T) {
 }
 
 // TestParseResources_StandardResource_RequestExceedsLimit_Error regression-
-// tests a review finding (launcher#284): standardContainerResourceNames
+// tests a review finding (go-kure/launcher#284): standardContainerResourceNames
 // (cpu/memory/ephemeral-storage) skipped all request-vs-limit comparison, so
 // a request greater than its limit (e.g. ephemeral-storage request 2Gi,
 // limit 1Gi) was accepted even though real admission's
@@ -2845,7 +2845,7 @@ func TestParseResources_StandardResource_RequestBelowLimit_Accepted(t *testing.T
 }
 
 // TestParseProbe_HTTPGet_MissingPath_Accepted and its siblings below
-// regression-test two rounds of the same review finding (launcher#284).
+// regression-test two rounds of the same review finding (go-kure/launcher#284).
 // Round 5's finding claimed a path must begin with "/" — false against the
 // real validateHTTPGetAction, which has no leading-slash check — but
 // investigating it surfaced that validateHTTPGetAction unconditionally
@@ -2928,7 +2928,7 @@ func TestParseLifecycleHandler_HTTPGet_NonStringPath_Error(t *testing.T) {
 }
 
 // TestParseLifecycleHandler_TCPSocket_WithOtherHandler_Error regression-tests
-// a review finding (launcher#284): parseLifecycleHandler's handler-count loop
+// a review finding (go-kure/launcher#284): parseLifecycleHandler's handler-count loop
 // only tracked httpGet/exec/sleep, so a hook pairing tcpSocket with a valid
 // exec counted as "single handler" and silently built the exec handler
 // alone, dropping the disallowed tcpSocket instead of rejecting the hook.
@@ -2952,7 +2952,7 @@ func TestParseLifecycleHandler_TCPSocket_Alone_Error(t *testing.T) {
 }
 
 // TestParseLifecycleHandler_MalformedTCPSocketWithOtherHandler_Error
-// regression-tests a review finding (launcher#284): the unconditional
+// regression-tests a review finding (go-kure/launcher#284): the unconditional
 // tcpSocket rejection used a bare `m["tcpSocket"].(map[string]any)` type
 // assertion, so an authored-but-malformed tcpSocket (e.g. a string) read as
 // absent and let a valid sibling handler win instead of being rejected.
@@ -2981,7 +2981,7 @@ func TestParseLifecycleHandler_MalformedHTTPGetWithValidExec_Error(t *testing.T)
 }
 
 // TestParseProbe_MalformedHTTPGetWithValidExec_Error regression-tests a
-// review finding (launcher#284): countProbeHandlers only counted keys whose
+// review finding (go-kure/launcher#284): countProbeHandlers only counted keys whose
 // value was already a valid map, so a malformed handler (e.g. httpGet: a
 // string) went uncounted and parseProbe's own handler-selection chain then
 // silently fell through to a valid sibling handler instead of rejecting the
@@ -3009,7 +3009,7 @@ func TestParseProbe_MalformedHandlerAlone_Error(t *testing.T) {
 }
 
 // TestParseProbe_ExecCommand_NonArray_Error regression-tests a review finding
-// (launcher#284): `execCmd["command"].([]any)` silently produced an empty
+// (go-kure/launcher#284): `execCmd["command"].([]any)` silently produced an empty
 // command on a present-but-wrong-type command value (e.g. a bare string
 // instead of an array), so parseProbe fell through to hasHandler=false and
 // returned (nil, nil) — silently discarding the authored exec probe instead
@@ -3061,7 +3061,7 @@ func TestParseProbe_ExecCommand_Valid_Accepted(t *testing.T) {
 }
 
 // TestParseProbe_TCPSocket_HostPreserved regression-tests a review finding
-// (launcher#284): the tcpSocket branch constructed corev1.TCPSocketAction
+// (go-kure/launcher#284): the tcpSocket branch constructed corev1.TCPSocketAction
 // from only its port, silently discarding an authored `host` — the kubelet
 // then always probed the Pod IP instead of the explicitly requested
 // endpoint, which can invert the health result. Mirrors the httpGet branch's
@@ -3090,7 +3090,7 @@ func TestParseProbe_TCPSocket_NonStringHost_Error(t *testing.T) {
 }
 
 // TestParseProbe_GRPC_NonStringService_Error regression-tests a review
-// finding (launcher#284): `grpc["service"].(string)` silently skipped a
+// finding (go-kure/launcher#284): `grpc["service"].(string)` silently skipped a
 // present-but-non-string service value, emitting a gRPC probe with no
 // service name (checks the overall server) instead of rejecting the
 // malformed value.
@@ -3104,7 +3104,7 @@ func TestParseProbe_GRPC_NonStringService_Error(t *testing.T) {
 }
 
 // TestParseProbe_HandlerlessObject_Error regression-tests a review finding
-// (launcher#284): an authored probe object with only timing fields and no
+// (go-kure/launcher#284): an authored probe object with only timing fields and no
 // handler (httpGet/tcpSocket/exec/grpc) returned (nil, nil) from parseProbe,
 // silently discarding the authored probe instead of rejecting it — real
 // admission (validateHandler's numHandlers == 0 check) requires exactly one
@@ -3119,7 +3119,7 @@ func TestParseProbe_HandlerlessObject_Error(t *testing.T) {
 }
 
 // TestParseLifecycle_NonObjectPostStart_Error and its preStop sibling
-// regression-test a review finding (launcher#284): `raw["postStart"].(map[string]any)`
+// regression-test a review finding (go-kure/launcher#284): `raw["postStart"].(map[string]any)`
 // silently no-ops when the key is present with a non-object value (e.g. a
 // string), so the build succeeded while silently dropping the authored hook.
 func TestParseLifecycle_NonObjectPostStart_Error(t *testing.T) {
@@ -3167,7 +3167,7 @@ func TestParseSecurityContext_BoolHardeningFields_Accepted(t *testing.T) {
 }
 
 // TestParseSecurityContext_NonIntUIDGIDField_Error regression-tests a review
-// finding (launcher#284, P1): a mistyped runAsUser (e.g. the quoted string
+// finding (go-kure/launcher#284, P1): a mistyped runAsUser (e.g. the quoted string
 // "1000") previously fell through toInt64's ok=false silently, leaving the
 // container to fall back to the image's own default user, which may be
 // root — the opposite of the hardening the author asked for. runAsGroup gets
@@ -3201,7 +3201,7 @@ func TestParseSecurityContext_UIDGIDFields_Accepted(t *testing.T) {
 }
 
 // TestParseSecurityContext_NonStringSELinuxField_Error regression-tests a
-// review finding (launcher#284): a non-string seLinuxOptions.type (e.g. the
+// review finding (go-kure/launcher#284): a non-string seLinuxOptions.type (e.g. the
 // number 123) previously fell through the failed type assertion silently; if
 // it was the only field authored, the entire SELinux context was discarded.
 // user/role/level get the identical fix as same-block siblings.
@@ -3238,7 +3238,7 @@ func TestParseSecurityContext_SELinuxOptions_Accepted(t *testing.T) {
 }
 
 // TestParseSecurityContext_NonArrayCapabilityField_Error regression-tests a
-// review finding (launcher#284): authoring capabilities.add/drop as a scalar
+// review finding (go-kure/launcher#284): authoring capabilities.add/drop as a scalar
 // (e.g. `drop: ALL`) instead of an array previously fell through the failed
 // type assertion silently, discarding the requested hardening entirely.
 func TestParseSecurityContext_NonArrayCapabilityField_Error(t *testing.T) {
@@ -3308,7 +3308,7 @@ func TestParseSecurityContext_EmptyCapabilityElement_Skipped(t *testing.T) {
 }
 
 // TestParseProbe_NonIntNumericField_Error regression-tests a review finding
-// (launcher#284, terminationGracePeriodSeconds specifically): every optional
+// (go-kure/launcher#284, terminationGracePeriodSeconds specifically): every optional
 // numeric probe field shared the same toInt64/toInt32 silent-skip idiom, so a
 // mistyped value was treated as though the field were absent — e.g. a
 // mistyped terminationGracePeriodSeconds silently fell back to the pod-level
@@ -3333,7 +3333,7 @@ func TestParseProbe_NonIntNumericField_Error(t *testing.T) {
 }
 
 // TestParseSecurityContext_UnknownKey_Error regression-tests a review finding
-// (launcher#284): a typo such as `readOnlyRootFileSystem` (wrong case) for
+// (go-kure/launcher#284): a typo such as `readOnlyRootFileSystem` (wrong case) for
 // `readOnlyRootFilesystem` matched none of the recognized fields, left `set`
 // false, and silently returned a nil security context instead of rejecting
 // the unrecognized key.
@@ -3349,7 +3349,7 @@ func TestParseSecurityContext_UnknownKey_Error(t *testing.T) {
 }
 
 // TestParseSecurityContext_PrivilegedWithAllowPrivilegeEscalationFalse_Error
-// regression-tests a review finding (launcher#284): corev1.SecurityContext's
+// regression-tests a review finding (go-kure/launcher#284): corev1.SecurityContext's
 // own field doc states AllowPrivilegeEscalation is always true once a
 // container runs privileged, so an authored `allowPrivilegeEscalation:
 // false` alongside `privileged: true` was accepted and emitted verbatim even
@@ -3367,7 +3367,7 @@ func TestParseSecurityContext_PrivilegedWithAllowPrivilegeEscalationFalse_Error(
 }
 
 // TestParseEnvFrom_UnknownKey_Error regression-tests a review finding
-// (launcher#284): a typo such as `prefx` for `prefix` matched none of the
+// (go-kure/launcher#284): a typo such as `prefx` for `prefix` matched none of the
 // three recognized keys and was silently ignored, emitting an unprefixed
 // import instead of rejecting the typo.
 func TestParseEnvFrom_UnknownKey_Error(t *testing.T) {
@@ -3385,7 +3385,7 @@ func TestParseEnvFrom_UnknownKey_Error(t *testing.T) {
 }
 
 // TestParseProbe_UnknownKey_Error regression-tests a review finding
-// (launcher#284): a typo such as `failureTreshold` for `failureThreshold`
+// (go-kure/launcher#284): a typo such as `failureTreshold` for `failureThreshold`
 // matched none of the recognized fields inside a single probe object —
 // parseProbes' own outer check validates only the readiness/liveness/startup
 // kind name, not the fields nested inside — so the generated probe silently
@@ -3415,7 +3415,7 @@ func TestParseProbe_HTTPGet_UnknownKey_Error(t *testing.T) {
 }
 
 // TestParseLifecycle_HTTPGet_UnknownKey_Error regression-tests a review
-// finding (launcher#284): a typo inside a lifecycle hook's httpGet handler
+// finding (go-kure/launcher#284): a typo inside a lifecycle hook's httpGet handler
 // (e.g. `pth` for `path`) matched none of the recognized fields and was
 // silently ignored — the outer lifecycle-key check (wave 19) validates only
 // postStart/preStop, not the fields nested inside httpGet — so Kubernetes
@@ -3434,7 +3434,7 @@ func TestParseLifecycle_HTTPGet_UnknownKey_Error(t *testing.T) {
 }
 
 // TestParseVolumes_MissingName_Error regression-tests a review finding
-// (launcher#284): an entry missing `name` entirely was silently skipped via
+// (go-kure/launcher#284): an entry missing `name` entirely was silently skipped via
 // `continue`, building with no volume or mount for the entry instead of
 // reporting the missing required field.
 func TestParseVolumes_MissingName_Error(t *testing.T) {
@@ -3452,7 +3452,7 @@ func TestParseVolumes_MissingName_Error(t *testing.T) {
 }
 
 // TestParseVolumes_MissingMountPath_Error regression-tests the review
-// finding cited above (launcher#284) directly: `{name: data, type:
+// finding cited above (go-kure/launcher#284) directly: `{name: data, type:
 // emptyDir}` with no mountPath silently built with no volume and no mount
 // for the entry.
 func TestParseVolumes_MissingMountPath_Error(t *testing.T) {
@@ -3542,7 +3542,7 @@ func TestParseVolumes_Secret_MissingName_Error(t *testing.T) {
 }
 
 // TestParseVolumes_EmptyDir_NonStringSizeLimit_Error regression-tests a
-// review finding on PR #284: sizeLimit used a bare `m["sizeLimit"].(string)`
+// review finding on PR go-kure/launcher#284: sizeLimit used a bare `m["sizeLimit"].(string)`
 // type assertion, so a present-but-non-string value (e.g. a YAML integer
 // like 1048576) failed the assertion and was silently treated as absent,
 // producing an emptyDir with no size limit at all instead of rejecting the
@@ -3566,7 +3566,7 @@ func TestParseVolumes_EmptyDir_NonStringSizeLimit_Error(t *testing.T) {
 }
 
 // TestParseVolumes_*_UnknownKey_Error below regression-test a review finding
-// (launcher#284): none of parseVolumes' per-type branches closed their field
+// (go-kure/launcher#284): none of parseVolumes' per-type branches closed their field
 // set with rejectUnknownKeys, so a typo'd field name (e.g. `sizeLmit` instead
 // of `sizeLimit`) was silently ignored rather than rejected — the author's
 // intended value never took effect and no error said why.
@@ -3784,7 +3784,7 @@ func TestParseLifecycleHandler_Sleep_UnknownKey_Error(t *testing.T) {
 }
 
 // TestParseResourceFieldRef_UnknownKey_Error regression-tests a review
-// finding (launcher#284): a typo such as `divisorr` for `divisor` matched
+// finding (go-kure/launcher#284): a typo such as `divisorr` for `divisor` matched
 // none of the recognized keys and was silently ignored, leaving Divisor at
 // its zero value — Kubernetes treats a zero divisor as the default of 1, so
 // the env value ends up expressed in the resource's base unit instead of the
@@ -3814,7 +3814,7 @@ func TestParseResourceFieldRef_Valid_Accepted(t *testing.T) {
 }
 
 // TestParseEnvFrom_ConfigMapRef_UnknownKey_Error and its secretRef sibling
-// below regression-test a review finding (launcher#284): the outer envFrom
+// below regression-test a review finding (go-kure/launcher#284): the outer envFrom
 // entry's unknown-key check (wave 20) did not extend to the nested
 // configMapRef/secretRef objects — a typo such as `optoinal` for `optional`
 // was silently ignored, leaving Optional unset (required) instead of the
@@ -3846,7 +3846,7 @@ func TestParseEnvFrom_SecretRef_UnknownKey_Error(t *testing.T) {
 }
 
 // TestParseEnv_SecretKeyRef_UnknownKey_Error regression-tests a review finding
-// (launcher#284): an extra, misspelled secretKeyRef key was previously
+// (go-kure/launcher#284): an extra, misspelled secretKeyRef key was previously
 // silently ignored by parseNameKey's own two-field read, which then failed
 // with the generic "name and key required" error instead of naming the
 // actual mistake.
@@ -3915,7 +3915,7 @@ func TestParseEnv_FileKeyRef_UnknownKey_Error(t *testing.T) {
 }
 
 // TestParseHTTPHeaders_UnknownKey_Error regression-tests a review finding
-// (launcher#284): a typo'd header key (e.g. `vaule` for `value`) was
+// (go-kure/launcher#284): a typo'd header key (e.g. `vaule` for `value`) was
 // previously silently ignored — value read as absent and defaulted to "",
 // masking the author's mistake instead of rejecting it.
 func TestParseHTTPHeaders_UnknownKey_Error(t *testing.T) {
@@ -3930,7 +3930,7 @@ func TestParseHTTPHeaders_UnknownKey_Error(t *testing.T) {
 }
 
 // TestParseLifecycleHandler_OuterUnknownKey_Error regression-tests a review
-// finding (launcher#284): a sibling key outside httpGet/exec/sleep/tcpSocket
+// finding (go-kure/launcher#284): a sibling key outside httpGet/exec/sleep/tcpSocket
 // (e.g. a typo'd timeoutSeconds) was previously invisible to this parser —
 // uncounted and never rejected, discarding the authored key silently.
 func TestParseLifecycleHandler_OuterUnknownKey_Error(t *testing.T) {
@@ -3960,7 +3960,7 @@ func TestParseLifecycleHandler_TCPSocket_StillSpecificError(t *testing.T) {
 }
 
 // TestParseAccessModes_NonArray_Error regression-tests a review finding
-// (launcher#284): a present-but-non-array accessModes value (e.g. a bare
+// (go-kure/launcher#284): a present-but-non-array accessModes value (e.g. a bare
 // string) previously fell through the `[]any` type assertion silently and
 // built with the ReadWriteOnce default instead of rejecting the malformed
 // input.
@@ -4013,7 +4013,7 @@ func TestParseAccessModes_Valid_Accepted(t *testing.T) {
 }
 
 // TestParseVolumes_PVC_NonStringStorageClass_Error regression-tests a review
-// finding (launcher#284): a bare `m["storageClass"].(string)` type assertion
+// finding (go-kure/launcher#284): a bare `m["storageClass"].(string)` type assertion
 // treated a present-but-non-string storageClass (e.g. a number) the same as
 // absent, silently building with the cluster default class instead of
 // rejecting the malformed value.
@@ -4072,7 +4072,7 @@ func TestParseVolumes_PVC_InvalidStorageClassName_Error(t *testing.T) {
 }
 
 // TestParseVolumes_PVC_ExplicitEmptyStorageClass_Preserved regression-tests a
-// review finding (launcher#284): parseStorageClassField's predecessor
+// review finding (go-kure/launcher#284): parseStorageClassField's predecessor
 // (parseStringField) treated an authored `storageClass: ""` the same as an
 // absent key, so BuildPVC never called SetPVCStorageClassName and the
 // generated claim's StorageClassName stayed nil (cluster default) instead of
@@ -4129,7 +4129,7 @@ func TestParseVolumes_PVC_AbsentStorageClass_LeavesNilPointer(t *testing.T) {
 }
 
 // TestParseAccessModes_ReadWriteOncePod_WithOtherMode_Error regression-tests
-// a review finding (launcher#284): Kubernetes admission rejects
+// a review finding (go-kure/launcher#284): Kubernetes admission rejects
 // ReadWriteOncePod combined with any other access mode (it must be the
 // claim's only mode) — every individual mode passed the old per-element loop
 // and both were emitted on the generated claim.
@@ -4151,7 +4151,7 @@ func TestParseAccessModes_ReadWriteOncePod_Alone_Accepted(t *testing.T) {
 }
 
 // TestParseSecurityContext_SysAdminCapability_WithPrivilegeEscalationFalse_Error
-// regression-tests a review finding (launcher#284): Kubernetes admission
+// regression-tests a review finding (go-kure/launcher#284): Kubernetes admission
 // (ValidateSecurityContext) rejects adding the literal capability
 // "CAP_SYS_ADMIN" alongside allowPrivilegeEscalation: false for a
 // newly-created pod — that capability always implies privilege escalation
@@ -4202,7 +4202,7 @@ func TestParseSecurityContext_UnprefixedSysAdminCapability_WithPrivilegeEscalati
 // a component passes emission validation and then fails to convert.
 //
 // These assertions were written against the five optionalX wrappers that used
-// to sit beside these helpers (go-kure/launcher#339, #381). go-kure/launcher#394
+// to sit beside these helpers (go-kure/launcher#339, go-kure/launcher#381). go-kure/launcher#394
 // folded the null handling into the helpers and removed the wrappers, so the
 // same assertions now bind all 162 production call sites of the eight helpers
 // instead of only the fields those two PRs introduced. 129 of those 162 are a

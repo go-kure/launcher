@@ -344,7 +344,7 @@ func synthesizedNetworkPolicy(t *testing.T, c *stack.Cluster, name string) *netw
 	return np
 }
 
-// #227: an httproute whose backendRef routes to a SEPARATE in-bundle backend component lands the
+// go-kure/launcher#227: an httproute whose backendRef routes to a SEPARATE in-bundle backend component lands the
 // synthesized ingress allow on the backend's pods + backendRef port, not the router's own. The
 // router itself (which has no self backend port) gets no empty self policy.
 func TestTransform_BackendRef_RetargetsToBackendComponent(t *testing.T) {
@@ -405,7 +405,7 @@ func TestTransform_BackendRef_RetargetsToBackendComponent(t *testing.T) {
 	}
 }
 
-// #227: a backendRef naming a Service with no owning component in the bundle is left authored —
+// go-kure/launcher#227: a backendRef naming a Service with no owning component in the bundle is left authored —
 // no synthesized policy for it, and no panic.
 func TestTransform_BackendRef_Unresolvable_LeavesAuthored(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
@@ -443,7 +443,7 @@ func TestTransform_BackendRef_Unresolvable_LeavesAuthored(t *testing.T) {
 	}
 }
 
-// #227: the ingress trait's external-backend path (collectIngressBackendTargets) also retargets,
+// go-kure/launcher#227: the ingress trait's external-backend path (collectIngressBackendTargets) also retargets,
 // including the named-port (PortName) branch that only the ingress collector exercises.
 func TestTransform_IngressBackendPath_RetargetsToBackend(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
@@ -502,7 +502,7 @@ func TestTransform_IngressBackendPath_RetargetsToBackend(t *testing.T) {
 	}
 }
 
-// #227: a backendRef naming a component whose Service name differs from its component name (e.g. a
+// go-kure/launcher#227: a backendRef naming a component whose Service name differs from its component name (e.g. a
 // statefulset's headless service) resolves via BackendServiceName() (the serviceBackendNamer
 // branch) — a break there would silently fall back to "authored".
 func TestTransform_BackendRef_ResolvesViaServiceName(t *testing.T) {
@@ -553,7 +553,7 @@ func TestTransform_BackendRef_ResolvesViaServiceName(t *testing.T) {
 	}
 }
 
-// #227: a self-referencing backendRef (the component's own service) is unchanged — the allow
+// go-kure/launcher#227: a self-referencing backendRef (the component's own service) is unchanged — the allow
 // stays on the exposing component.
 func TestTransform_BackendRef_SelfTarget_Unchanged(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
@@ -763,7 +763,7 @@ func TestTransform_IngressPeers_SynthesizesEndpointIngressNetworkPolicy(t *testi
 	}
 }
 
-// --- #239: external (non-component) routing backends with an explicit backendSelector ---
+// --- go-kure/launcher#239: external (non-component) routing backends with an explicit backendSelector ---
 
 // ingressExternalBackendApp builds a single-webservice app whose ingress trait routes to one
 // external backend path. selector nil omits backendSelector.
@@ -866,7 +866,7 @@ func TestTransform_ExternalBackend_HTTPRoute_WithSelector_SynthesizesNP(t *testi
 }
 
 // Without a backendSelector, an unresolvable external backend stays authored — no synthesized
-// policy (the pre-#239 behavior).
+// policy (the behavior before go-kure/launcher#239).
 func TestTransform_ExternalBackend_WithoutSelector_LeavesAuthored(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
 	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
@@ -1084,7 +1084,7 @@ func TestTransform_ExternalBackend_NameNoCollisionWhenComponentHasNoPolicy(t *te
 	}
 }
 
-// A backendSelector on a ref that resolves to a sibling in-bundle component is ignored — #227
+// A backendSelector on a ref that resolves to a sibling in-bundle component is ignored — go-kure/launcher#227
 // component-label targeting takes precedence and no error is raised.
 func TestTransform_ExternalBackend_SelectorOnSiblingComponent_Ignored(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
@@ -1120,7 +1120,7 @@ func TestTransform_ExternalBackend_SelectorOnSiblingComponent_Ignored(t *testing
 	}
 	np := synthesizedNetworkPolicy(t, cluster, "backend-allow-ingress-traffic")
 	if got := np.Spec.PodSelector.MatchLabels["gokure.dev/component"]; got != "backend" {
-		t.Errorf("selector = %v, want #227 component-label gokure.dev/component=backend (authored selector ignored)", np.Spec.PodSelector.MatchLabels)
+		t.Errorf("selector = %v, want go-kure/launcher#227 component-label gokure.dev/component=backend (authored selector ignored)", np.Spec.PodSelector.MatchLabels)
 	}
 	if clusterHasApp(cluster, "external-svc-allow-ingress-traffic") || clusterHasApp(cluster, "backend-allow-backend-ingress") {
 		t.Errorf("did not expect an external-backend policy for a resolvable ref; apps: %v", clusterAppNames(cluster))
@@ -1209,7 +1209,7 @@ func TestTransform_ExternalBackend_MultipleServices_DistinctNames(t *testing.T) 
 	}
 }
 
-// #242: a backendRef whose backend component lands in a DIFFERENT tier bundle (hierarchical cluster)
+// go-kure/launcher#242: a backendRef whose backend component lands in a DIFFERENT tier bundle (hierarchical cluster)
 // still retargets — the allow is synthesized on the backend's pods in the backend's tier bundle.
 func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)

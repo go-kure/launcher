@@ -1327,7 +1327,7 @@ func TestValidatePropertyValue_IntegerNormalization(t *testing.T) {
 		{int64(7), int64(7)},
 		{float64(7), float64(7)},
 		// A named type of a decoder-set kind becomes int, not its underlying type:
-		// toIngressPort (servicePort) accepts float64/int only (#428).
+		// toIngressPort (servicePort) accepts float64/int only (go-kure/launcher#428).
 		{namedInt(7), int(7)},
 		{namedInt32(-7), int(-7)},
 		{namedInt64(7), int(7)},
@@ -1436,7 +1436,7 @@ func TestValidatePropertyValue_NamedScalarNormalization(t *testing.T) {
 }
 
 // TestValidatePropertyValue_CompoundEnumAfterIntegerNormalization is the regression
-// the #418 write-back introduced and review caught: a value's nested integers are
+// the go-kure/launcher#418 write-back introduced and review caught: a value's nested integers are
 // normalized (uint16 -> int) before the Enum check, but declared members are left as
 // written, so a compound member holding uint16(80) stopped matching the same value
 // once compared by reflect.DeepEqual. Compound members are now compared element by

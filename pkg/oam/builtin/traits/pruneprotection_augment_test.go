@@ -160,7 +160,7 @@ func TestNonPruneDecorator_DoesNotAnnotateAugmentLayoutResources(t *testing.T) {
 }
 
 // TestPruneProtection_HelmchartValuesConfigMap_WalkCluster exercises the
-// concrete case #324 was filed for end to end through kure's real layout
+// concrete case go-kure/launcher#324 was filed for end to end through kure's real layout
 // walker: a helmchart component under valuesMode: configMap emits its values
 // ConfigMap only from AugmentLayout. With prune-protection on the component,
 // that ConfigMap must be annotated; a sibling application in the same bundle

@@ -944,7 +944,7 @@ type HTTPRouteConfig struct {
 	sources []netpol.TrafficSource
 	ports   []intstr.IntOrString
 	// backendTargets are external backendRef targets (refs naming a separate Service); they
-	// drive ingress-synthesis retargeting onto the backend's pods (#227).
+	// drive ingress-synthesis retargeting onto the backend's pods (go-kure/launcher#227).
 	backendTargets []netpol.BackendTarget
 }
 

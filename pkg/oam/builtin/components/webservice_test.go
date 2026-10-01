@@ -583,7 +583,7 @@ func TestWebserviceHandler_WithProbes_NamedPort(t *testing.T) {
 	}
 }
 
-// TestWebserviceHandler_NamedPort_Mismatch_Error covers launcher#278 wave-12
+// TestWebserviceHandler_NamedPort_Mismatch_Error covers go-kure/launcher#278 wave-12
 // finding 3: webservice always names its container port "http" — a
 // syntactically valid but different name is guaranteed unresolvable by the
 // kubelet and must be rejected, not accepted merely because a port exists.
@@ -1027,7 +1027,7 @@ func TestWebserviceConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 }
 
 // TestWebserviceConfig_ApplyPolicy_HostPathDenied regression-tests a review
-// finding (launcher#284, P1): ApplyPolicy never checked a parsed hostPath
+// finding (go-kure/launcher#284, P1): ApplyPolicy never checked a parsed hostPath
 // volume against oam.Policy.AllowHostPathVolumes(), so the default-deny
 // policy (including NoopPolicy) did not actually stop a hostPath volume from
 // being authored — a container-escape-adjacent gap, not merely a style one.
@@ -1096,7 +1096,7 @@ func TestWebserviceConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
 }
 
 // TestWebserviceConfig_ApplyPolicy_MaxCPU_AgainstIntrinsicDefault
-// regression-tests launcher#251: buildResourceRequirements' intrinsic 100m
+// regression-tests go-kure/launcher#251: buildResourceRequirements' intrinsic 100m
 // CPU / 128Mi memory request fallback is injected at Generate() time, after
 // ApplyPolicy runs — so enforcing maxima against the pre-fallback
 // c.Resources let an application that omitted spec.resources ship above the
@@ -1244,7 +1244,7 @@ func TestWebserviceConfig_ApplyPolicy_MaxMemory_RequestCheckedBeforeLimit(t *tes
 
 // TestWebserviceConfig_ApplyPolicy_MaxResources_OutputUnchanged proves the
 // fix is read-only: a config that passes policy still generates the exact
-// same intrinsic-default Resources it did before launcher#251.
+// same intrinsic-default Resources it did before go-kure/launcher#251.
 func TestWebserviceConfig_ApplyPolicy_MaxResources_OutputUnchanged(t *testing.T) {
 	h := &components.WebserviceHandler{}
 	component := &oam.Component{

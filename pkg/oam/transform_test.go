@@ -643,7 +643,7 @@ func TestTransformWithPolicy_ReturnsPolicyResult(t *testing.T) {
 	}
 }
 
-// --- Pipeline: PolicyResult.ConsumedCapabilities (#290) ---
+// --- Pipeline: PolicyResult.ConsumedCapabilities (go-kure/launcher#290) ---
 
 func TestConsumedCapabilities_DispatchPath(t *testing.T) {
 	tr := NewTransformer(
@@ -1620,7 +1620,7 @@ func TestTransform_BuiltinTrait_CapabilityResolved_NoDefinition_NoWarn(t *testin
 	}
 }
 
-// --- applyAutoHealthChecks namespace + delivery=template veto (#234) ---
+// --- applyAutoHealthChecks namespace + delivery=template veto ---
 
 // fluxHCConfig implements ApplicationConfig + fluxNamespaceSettable (like a
 // native helmchart whose HelmRelease is relocated to the flux namespace).

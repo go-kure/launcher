@@ -99,7 +99,7 @@ func TestParseProbes_NullIsOmission(t *testing.T) {
 		})
 	}
 
-	// The individual probe keys are named separately in #394's scope list, so
+	// The individual probe keys are named separately in go-kure/launcher#394's scope list, so
 	// they are pinned separately: `probes: {readiness: null}` is an authored
 	// probes block with one probe unset, which is a different document from
 	// `probes: null` and reaches a different comma-ok read.
@@ -195,7 +195,7 @@ func TestParseSecurityContext_NullIsOmission(t *testing.T) {
 		})
 	}
 
-	// capabilities is named in #394's scope list in its own right.
+	// capabilities is named in go-kure/launcher#394's scope list in its own right.
 	t.Run("nested capabilities null is omission", func(t *testing.T) {
 		got, err := parseSecurityContext(map[string]any{
 			"securityContext": map[string]any{"runAsNonRoot": true, "capabilities": nil},
@@ -235,7 +235,7 @@ func TestParseVolumes_NullIsOmission(t *testing.T) {
 		})
 	}
 
-	// #394 gives this exact pair as the distinction the fix must preserve:
+	// go-kure/launcher#394 gives this exact pair as the distinction the fix must preserve:
 	// `volumes:` is absence, `volumes: {name: data}` is a wrong type.
 	t.Run("wrong type still errors", func(t *testing.T) {
 		_, err := parseVolumes(map[string]any{"volumes": map[string]any{"name": "data"}})
@@ -272,7 +272,7 @@ func TestParseAccessModes_NullIsOmission(t *testing.T) {
 }
 
 // The six parsers below are a DIFFERENT six from the ones above, and they are
-// here because of how they arrived rather than because #394 named them.
+// here because of how they arrived rather than because go-kure/launcher#394 named them.
 //
 // While this branch was open, main landed its own null fix for env, command,
 // args, initContainers, sidecars and affinity, shaped as five optional*
@@ -290,7 +290,7 @@ func TestParseAccessModes_NullIsOmission(t *testing.T) {
 // nothing about the other five. These tests are that missing half — with the
 // substitution wrong, five of them go red.
 //
-// Each asserts #394's acceptance criterion directly rather than against a
+// Each asserts go-kure/launcher#394's acceptance criterion directly rather than against a
 // hand-written zero value: parsing `key: null` must produce exactly what parsing
 // a document WITHOUT the key produces. The absent-key result is computed here,
 // so it cannot drift from the parser.
@@ -551,7 +551,7 @@ func TestParseEnv_ValueFrom_TypedNilMap(t *testing.T) {
 	}
 }
 
-// The other half of #394's acceptance: a present-but-wrong-type value must still
+// The other half of go-kure/launcher#394's acceptance: a present-but-wrong-type value must still
 // error. Without this, deleting the type check outright would leave the table
 // above just as green.
 func TestInheritedParsers_WrongTypeStillErrors(t *testing.T) {

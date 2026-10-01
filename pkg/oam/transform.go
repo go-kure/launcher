@@ -59,7 +59,7 @@ type TransformContext struct {
 	// kurel path, where endpoint-ingress synthesis is a no-op.
 	IngressPeers map[string][]netpol.IngressPeer
 	// consumedCapabilities accumulates keys traits actually resolved against
-	// Capabilities (#290) — populated by resolveCapability's call sites, read back
+	// Capabilities (go-kure/launcher#290) — populated by resolveCapability's call sites, read back
 	// into PolicyResult.ConsumedCapabilities at the end of TransformWithPolicy.
 	// Internal only: nil on a caller-constructed ctx; TransformWithPolicy inits it.
 	// Reference type, so every by-value ctx copy through the pipeline shares one
@@ -95,7 +95,7 @@ type autoHealthCheckEmitter interface {
 }
 
 // Transformer is the core OAM runtime. Handlers are registered at startup;
-// Transform/TransformWithPolicy (added in #53) execute the pipeline.
+// Transform/TransformWithPolicy (added in go-kure/launcher#53) execute the pipeline.
 // Internal storage uses maps keyed by typeName for O(1) dispatch.
 //
 // Handlers registered via RegisterTrait are treated as custom for

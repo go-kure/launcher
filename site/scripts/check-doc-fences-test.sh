@@ -395,7 +395,7 @@ cp "$REPO_ROOT/examples/cluster-profiles/"*.yaml "$WORK/examples/cluster-profile
 cp "$REPO_ROOT/$QS" "$WORK/$QS"
 expect "quickstart: the real quickstart passes" 0 "" "$QS"
 
-# Re-introduce the #417 defect: `traits: []` as a sibling of `components:` inside
+# Re-introduce the go-kure/launcher#417 defect: `traits: []` as a sibling of `components:` inside
 # the marked Application fence. Assert the mutation landed, so a quickstart edit
 # that moves the fence cannot turn this case into a vacuous pass.
 awk '

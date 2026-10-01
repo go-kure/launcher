@@ -577,7 +577,7 @@ func TestDaemonsetHandler_ServicePortName_IsHttp(t *testing.T) {
 }
 
 // TestDaemonsetHandler_NamedProbePort_WithPort_Accepted and
-// TestDaemonsetHandler_NamedProbePort_WithoutPort_Error cover launcher#278
+// TestDaemonsetHandler_NamedProbePort_WithoutPort_Error cover go-kure/launcher#278
 // wave-11 finding 5: daemonset's main container is only named "http" when
 // `port` is set (see TestDaemonsetConfig_WithoutPort above) — so unlike
 // worker/cronjob, whether a named probe/lifecycle port resolves depends on
@@ -606,7 +606,7 @@ func TestDaemonsetHandler_NamedProbePort_WithPort_Accepted(t *testing.T) {
 	}
 }
 
-// TestDaemonsetHandler_NamedProbePort_Mismatch_Error covers launcher#278
+// TestDaemonsetHandler_NamedProbePort_Mismatch_Error covers go-kure/launcher#278
 // wave-12 finding 3: with a port configured, daemonset names it "http" —
 // "tcp" (statefulset's own name) is syntactically valid but not what this
 // container declares, so it must be rejected too.
@@ -725,7 +725,7 @@ func TestDaemonsetConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 }
 
 // TestDaemonsetConfig_ApplyPolicy_HostPathDenied is daemonset's sibling of
-// TestWebserviceConfig_ApplyPolicy_HostPathDenied (launcher#284, P1) — the
+// TestWebserviceConfig_ApplyPolicy_HostPathDenied (go-kure/launcher#284, P1) — the
 // same shared ApplyPolicy gap, same shared enforceHostPathVolumes fix.
 func TestDaemonsetConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
 	h := &components.DaemonsetHandler{}
@@ -783,7 +783,7 @@ func TestDaemonsetConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
 // TestDaemonsetConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault is
 // daemonset's sibling of the two webservice
 // TestWebserviceConfig_ApplyPolicy_Max{CPU,Memory}_AgainstIntrinsicDefault
-// cases (launcher#251) — proving enforceMaxResources is actually wired into
+// cases (go-kure/launcher#251) — proving enforceMaxResources is actually wired into
 // DaemonsetConfig.ApplyPolicy, not just added to enforce.go.
 func TestDaemonsetConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testing.T) {
 	cases := []struct {

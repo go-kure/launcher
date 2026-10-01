@@ -270,7 +270,7 @@ func TestSynthesizeEndpointIngress_MultiEndpoint(t *testing.T) {
 	}
 
 	// One NP must select the direct cluster pods, the other the pooler pods; both on port 5432.
-	// #238: the rendered NetworkPolicy *resource* names must also be distinct and sha-suffixed —
+	// go-kure/launcher#238: the rendered NetworkPolicy *resource* names must also be distinct and sha-suffixed —
 	// the earlier test asserted only the distinct Application (layout) names, so the resource-name
 	// collision that broke `kustomize build` slipped through. Collect np.Name here to assert both.
 	prefix := "pg-allow-endpoint-ingress-"
