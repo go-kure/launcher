@@ -4,6 +4,7 @@ import (
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	kurecnpg "github.com/go-kure/kure/pkg/kubernetes/cnpg"
 	"github.com/go-kure/kure/pkg/stack"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -162,6 +163,12 @@ func (c *CnpgPoolerConfig) ApplyPolicy(p oam.Policy) error {
 // Generate emits the Pooler: kure's identity-only constructor plus a deep copy
 // of the spec. The parse-time refusals are repeated on what is emitted, since
 // the config is exported and the Pooler is named from app.Name.
+//
+// A template that lists no containers is written with containers: []. The Go
+// type cannot omit the template's spec and encodes an unset list as null,
+// which the API server prunes before checking the CRD's required containers,
+// so a metadata-only template would be refused. To the operator an empty list
+// means what an omitted spec does: it adds its pgbouncer container either way.
 func (c *CnpgPoolerConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	if err := validateCnpgPoolerName(app.Name); err != nil {
 		return nil, err
@@ -171,6 +178,9 @@ func (c *CnpgPoolerConfig) Generate(app *stack.Application) ([]*client.Object, e
 	}
 	pooler := kurecnpg.CreatePooler(app.Name, app.Namespace)
 	c.Spec.DeepCopyInto(&pooler.Spec)
+	if t := pooler.Spec.Template; t != nil && t.Spec.Containers == nil {
+		t.Spec.Containers = []corev1.Container{}
+	}
 	obj := client.Object(pooler)
 	return []*client.Object{&obj}, nil
 }

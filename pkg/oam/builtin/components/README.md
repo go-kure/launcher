@@ -2603,6 +2603,11 @@ not part of either change.
   authored `pgbouncer.image`. The instance count is deliberately not policed:
   `postgresql` applies no policy to its pooler, so a maximum here would refuse,
   once `postgresql` lowers onto this kind, a document that builds today.
+  Pod-level errors name the template's own fields, as in `template.spec:
+  resources cpu limit "2" exceeds enforced maximum "1"`. A `template` that lists
+  no containers (labels only, say) is written with `containers: []`: the Go type
+  cannot omit the template's `spec`, the CRD requires `containers` once it is
+  present, and the operator adds its `pgbouncer` container either way.
   `Endpoints` declares the PgBouncer pods (`cnpg.io/poolerName:
   <component-name>` on port `5432`), byte-identical to `postgresql`'s pooler
   endpoint for a pooler named `<cluster>-pooler`.
@@ -2614,7 +2619,10 @@ not part of either change.
   no policy and no endpoint.
   `cnpg-objectstore` caps the cpu and memory requests and limits of the plugin
   sidecar it adds to every instance pod (`instanceSidecarConfiguration.resources`)
-  at the policy maxima, filling no default, and declares no endpoint.
+  at the policy maxima, filling no default, and declares no endpoint. It refuses
+  `configuration.serverName`, which the shared Barman type carries but the
+  plugin's CRD forbids on an ObjectStore: the server name is a plugin parameter
+  of the Cluster that uses the store.
 - **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
   Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
   consumers can attribute the emitted resource to its owning OAM component.

@@ -122,6 +122,7 @@ func TestCnpgObjectStoreHandler_Refusals(t *testing.T) {
 	}{
 		{"no configuration", map[string]any{}, "configuration.destinationPath: required"},
 		{"empty destination path", map[string]any{"configuration": map[string]any{"destinationPath": ""}}, "configuration.destinationPath: required"},
+		{"server name", map[string]any{"configuration": map[string]any{"destinationPath": "s3://b", "serverName": "db-v2"}}, "configuration.serverName: not allowed on an ObjectStore (set the serverName plugin parameter in the Cluster that uses it)"},
 		{"retention interval 0", map[string]any{
 			"configuration":                minimalObjectStore()["configuration"],
 			"instanceSidecarConfiguration": map[string]any{"retentionPolicyIntervalSeconds": 0},

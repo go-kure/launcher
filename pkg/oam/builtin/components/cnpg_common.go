@@ -164,11 +164,30 @@ func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) er
 	if err := enforceHostPathVolumes(ps.Volumes, p.AllowHostPathVolumes()); err != nil {
 		return errors.Wrap(err, label)
 	}
-	if err := enforcePodHostProcess(cfg, p.AllowPrivileged()); err != nil {
-		return errors.Wrap(err, label)
+	// The pod-level hostProcess and resources checks are enforcePodHostProcess
+	// and enforcePodResources, restated so their errors name the template's
+	// own fields rather than the workload kinds' podSecurityContext and
+	// podResources properties.
+	if sc := ps.SecurityContext; !p.AllowPrivileged() && sc != nil && sc.WindowsOptions != nil &&
+		sc.WindowsOptions.HostProcess != nil && *sc.WindowsOptions.HostProcess {
+		return errors.Errorf("%s.securityContext.windowsOptions.hostProcess is not allowed by environment policy", label)
 	}
-	if err := enforcePodResources(cfg, p.MaxCPU(), p.MaxMemory()); err != nil {
-		return errors.Wrap(err, label)
+	if r := ps.Resources; r != nil {
+		for _, c := range []struct {
+			list  corev1.ResourceList
+			name  corev1.ResourceName
+			max   string
+			label string
+		}{
+			{r.Requests, corev1.ResourceCPU, p.MaxCPU(), "resources cpu request"},
+			{r.Limits, corev1.ResourceCPU, p.MaxCPU(), "resources cpu limit"},
+			{r.Requests, corev1.ResourceMemory, p.MaxMemory(), "resources memory request"},
+			{r.Limits, corev1.ResourceMemory, p.MaxMemory(), "resources memory limit"},
+		} {
+			if err := enforceMaxResource(quantityString(c.list, c.name), c.max, c.label); err != nil {
+				return errors.Wrap(err, label)
+			}
+		}
 	}
 	check := func(kind string, i int, name, image string, res corev1.ResourceRequirements, sc *corev1.SecurityContext) error {
 		where := fmt.Sprintf("%s.%s[%d] %q", label, kind, i, name)
