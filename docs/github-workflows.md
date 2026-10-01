@@ -404,10 +404,14 @@ Runs on main and `release/*` branches only (not PRs):
 - **Push to main** (paths: `site/**`, `docs/**`, `*.md`, `CHANGELOG.md`, `DEVELOPMENT.md`,
   `scripts/gen-versions-toml.sh`)
 - **Manual dispatch** with inputs: `version_slot`, `version_label`, `set_latest`.
-  `version_slot` must be `dev` or start with `v` (e.g. `v0.1`), as one path segment. The deploy
-  step refuses any other slot, after the site has been built, because a root write replaces
-  everything under `launcher/` except `dev/` and the `v*/` slots. With `set_latest=true`,
-  `version_label` must be a release tag.
+  `version_slot` must be `dev` or start with `v` (e.g. `v0.1`), as one path segment, because a
+  root write replaces everything under `launcher/` except `dev/` and the `v*/` slots.
+  `version_label` must be `dev` or a release tag (`v0.1.0`, `v0.1.0-alpha.1`); with
+  `set_latest=true` it must be a release tag. `set_latest` must be `true` or `false`. The
+  `Determine version parameters` step checks all three before anything is built and fails the
+  run on any other value. The
+  inputs reach the shell only through environment variables, never as `${{ }}` expressions in a
+  `run:` script, so a value is never parsed as shell syntax.
 
 ### How It Works
 

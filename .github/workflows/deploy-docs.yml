@@ -49,18 +49,43 @@ jobs:
     - name: Install build tools
       run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make
 
+    # Dispatch inputs are bound to env vars, not interpolated into the run:
+    # script, so a value is passed as data and never parsed as shell syntax.
+    # Each is checked before it reaches GITHUB_OUTPUT: the slot by the rule the
+    # deploy-docs-push action applies (one path segment, dev or v*), the label
+    # as dev or a release tag, set_latest as true or false.
     - name: Determine version parameters
       id: version
+      env:
+        VERSION_SLOT: ${{ inputs.version_slot }}
+        VERSION_LABEL: ${{ inputs.version_label }}
+        SET_LATEST: ${{ inputs.set_latest }}
       run: |
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          echo "slot=${{ inputs.version_slot }}" >> $GITHUB_OUTPUT
-          echo "label=${{ inputs.version_label }}" >> $GITHUB_OUTPUT
-          echo "set_latest=${{ inputs.set_latest }}" >> $GITHUB_OUTPUT
+        if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+          if [[ ! "$VERSION_SLOT" =~ ^(dev|v[A-Za-z0-9._-]*)$ ]]; then
+            echo "::error::version_slot must be dev or one path segment starting with v (e.g. v0.1)"
+            exit 1
+          fi
+          if [[ ! "$VERSION_LABEL" =~ ^(dev|v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?)$ ]]; then
+            echo "::error::version_label must be dev or a release tag (e.g. v0.1.0, v0.1.0-alpha.23)"
+            exit 1
+          fi
+          if [[ "$SET_LATEST" != "true" && "$SET_LATEST" != "false" ]]; then
+            echo "::error::set_latest must be true or false"
+            exit 1
+          fi
+          {
+            echo "slot=$VERSION_SLOT"
+            echo "label=$VERSION_LABEL"
+            echo "set_latest=$SET_LATEST"
+          } >> "$GITHUB_OUTPUT"
         else
           # Push to main → dev build
-          echo "slot=dev" >> $GITHUB_OUTPUT
-          echo "label=dev" >> $GITHUB_OUTPUT
-          echo "set_latest=false" >> $GITHUB_OUTPUT
+          {
+            echo "slot=dev"
+            echo "label=dev"
+            echo "set_latest=false"
+          } >> "$GITHUB_OUTPUT"
         fi
 
     - name: Read Hugo version from mise.toml
@@ -128,15 +153,17 @@ jobs:
       run: bash site/scripts/inject-frontmatter.sh
 
     - name: Generate versions config overlay
-      run: bash scripts/gen-versions-toml.sh --version "${{ steps.version.outputs.label }}"
+      env:
+        VERSION_LABEL: ${{ steps.version.outputs.label }}
+      run: bash scripts/gen-versions-toml.sh --version "$VERSION_LABEL"
 
     - name: Build Hugo site (versioned slot)
       working-directory: site
       env:
         HUGO_CACHEDIR: ${{ runner.temp }}/hugo_cache
         HUGO_ENVIRONMENT: production
+        SLOT: ${{ steps.version.outputs.slot }}
       run: |
-        SLOT="${{ steps.version.outputs.slot }}"
         hugo --config hugo.toml,versions.toml --minify --baseURL "https://www.gokure.dev/launcher/${SLOT}/"
         # Save for deploy
         mv public public-slot
