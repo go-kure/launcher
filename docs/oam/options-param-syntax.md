@@ -163,7 +163,10 @@ replaces the placeholder with the full YAML node from values.yaml:
   `properties`. The substituted value is then validated by the consuming component's
   or trait's schema like any authored property
 - The replacement is not scanned again, so a `${…}` inside a supplied value stays literal
-- An `array`/`object` placeholder embedded in a larger string is an error
+- An `array`/`object` placeholder embedded in a larger string is an error, in the
+  application template and in another parameter's string default alike
+- An anchor on the placeholder stays on the substituted node, so an alias to it
+  resolves to the value
 
 **Inline string embedding** — when the placeholder is embedded in a larger string:
 - `name: "prefix-${name}-suffix"` → `name: "prefix-webservice-suffix"`

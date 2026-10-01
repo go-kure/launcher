@@ -325,7 +325,9 @@ replaced by the value's YAML list or map:
   no `items` or `properties`; the substituted value is then validated by the consuming
   component's or trait's schema like any authored property
 - The replacement is not scanned again: a `${…}` inside a supplied value stays literal
-- Embedding an `array`/`object` placeholder inside a larger string is an error
+- Embedding an `array`/`object` placeholder inside a larger string is an error, in the
+  application template and in another parameter's string default alike; an anchor on the
+  placeholder stays on the substituted node
 
 **Inline string embedding** — when `${name}` is embedded inside a larger string value:
 - `secretName: "${name}-tls"` → `secretName: "webservice-tls"` (always a string)
