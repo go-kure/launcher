@@ -55,6 +55,7 @@ expect "ownerless ref as link text" 1 "a.md:1:" a.md 'see [kure#539](https://git
 expect "ref beside a relative link" 1 "a.md:1:" a.md 'see [the section](design.md#12-foo) and kure#539'
 expect "ref in an indexed Go call" 1 "a.go:1:" a.go 'callbacks[i]("fixed in #227")'
 expect "ref after a URL" 1 "a.md:1:" a.md 'see https://example.com/x and #227'
+expect "ref after a single-quoted URL" 1 "x.sh:1:" x.sh "url='https://example.com/';#227"
 expect "ref after a percent sign" 1 "a.md:1:" a.md 'done to 100% #227 next'
 expect "bare ref at line start" 1 "notes.md:1:" notes.md '#123 is the tracking issue'
 expect "bare ref in a shell comment" 1 "x.sh:1:" x.sh '# Re-introduce the #417 defect'
