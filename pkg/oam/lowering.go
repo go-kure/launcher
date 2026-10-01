@@ -257,7 +257,8 @@ func validatePositionResult(pos Position, origin Origin, result LoweringResult) 
 // else — package state, the filesystem, the clock — that would violate the
 // information-closure rule.
 type LoweringContext struct {
-	// Document is the enclosing document as it stands at this round. Read-only: a
+	// Document is the enclosing document as it stands at this round (for a
+	// DocumentLoweringRule, the same copy passed to LowerDocument). Read-only: a
 	// rule must not mutate it or the element pointer it was handed. nil for a
 	// RawDocumentLoweringRule, whose document is the decoded value passed to
 	// LowerDocument and has no *Application form yet (lowering_raw.go).
@@ -1060,20 +1061,28 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		if err := t.enforceAuthoredReservations(doc, origin); err != nil {
 			return nil, false, nil, err
 		}
-		// Snapshot the components doc had BEFORE the rule ran: a rule that forwards
-		// one of them unchanged into its output (rather than constructing a fresh
-		// component) is forwarding its already-authored traits too, not synthesizing
-		// them — same reasoning as originalTraits below for the component-position
-		// case, extended to however many components the document rule forwards.
-		// Taken before LowerDocument, as this says; a rule must not mutate doc
-		// (LoweringContext.Document), so for a conforming rule the order is moot.
-		originalComponents := doc.Spec.Components
+		// The rule gets its own copy of doc: a new component slice whose traits are
+		// marked with where they came from (forwardableTraits), as the component-rule
+		// branch does, so a rule that rebuilds a component with a new Traits slice
+		// copied from the authored one still has those traits recognised as forwarded
+		// (go-kure/launcher#603). The copy also keeps a rule that writes through
+		// Spec.Components or a component's Traits from reaching the authored document.
+		input := documentRuleInput(doc)
+		// Snapshot the components the rule was handed BEFORE it ran: a rule that
+		// forwards one of them unchanged into its output (rather than constructing a
+		// fresh component) is forwarding its already-authored traits too, not
+		// synthesizing them — same reasoning as originalTraits below for the
+		// component-position case, extended to however many components the document
+		// rule forwards. Taken before LowerDocument, as this says; a rule must not
+		// mutate its input (LoweringContext.Document), so for a conforming rule the
+		// order is moot.
+		originalComponents := input.Spec.Components
 		// Same snapshot, for the identical reason, on the policy side (C1 finding on
 		// PR go-kure/launcher#283: the policy loop below stamped Rule unconditionally while the
 		// component loop already guarded against exactly this).
-		originalPolicies := doc.Spec.Policies
-		lctx := LoweringContext{Document: doc, Capabilities: ctx.Capabilities, Origin: origin, Namer: namer}
-		result, err := rule.LowerDocument(doc, lctx)
+		originalPolicies := input.Spec.Policies
+		lctx := LoweringContext{Document: input, Capabilities: ctx.Capabilities, Origin: origin, Namer: namer}
+		result, err := rule.LowerDocument(input, lctx)
 		if err != nil {
 			return nil, false, nil, errors.Wrapf(err, "%s", origin)
 		}
@@ -1727,6 +1736,23 @@ func forwardableTraits(traits []Trait) []Trait {
 		out[i].forwardedFrom = &out[i]
 	}
 	return out
+}
+
+// documentRuleInput returns the copy of doc a document rule is handed: the same
+// document with a new component slice, each component's traits passed through
+// forwardableTraits. Properties maps and policies are shared with doc, not copied:
+// a by-value forwarded trait is recognised by its very properties map (sameMap), and
+// a rule must not mutate its input in any case (LoweringContext.Document).
+func documentRuleInput(doc *Application) *Application {
+	input := *doc
+	if len(doc.Spec.Components) > 0 {
+		input.Spec.Components = make([]Component, len(doc.Spec.Components))
+		for i, comp := range doc.Spec.Components {
+			comp.Traits = forwardableTraits(comp.Traits)
+			input.Spec.Components[i] = comp
+		}
+	}
+	return &input
 }
 
 // sameMap reports whether a and b are the same map value (both nil, or one map
