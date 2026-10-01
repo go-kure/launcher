@@ -121,6 +121,12 @@ check-doc-fences: build-kurel ## Check the documentation's marked YAML fences (s
 	@bash site/scripts/check-doc-fences-test.sh
 	@bash site/scripts/check-doc-fences.sh
 
+# Self-test first, for the same reason (go-kure/launcher#400).
+.PHONY: check-issue-refs
+check-issue-refs: ## Reject bare #N and partial launcher#N references (self-test, then the tree)
+	@bash scripts/check-issue-refs-test.sh
+	@bash scripts/check-issue-refs.sh
+
 # =============================================================================
 # Testing
 # =============================================================================
@@ -391,13 +397,13 @@ test-pin-impact: ## Run scripts/check-pin-impact.sh's hermetic cases (stub curl,
 	bash scripts/test/run-tests.sh
 
 .PHONY: check
-check: lint vet test-short check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins, verify-merge self-test, pin-impact cases)
+check: lint vet test-short check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact check-issue-refs ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins, verify-merge self-test, pin-impact cases, issue refs)
 
 .PHONY: precommit
-precommit: fmt tidy lint test check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync, tool pins, verify-merge self-test, pin-impact cases)
+precommit: fmt tidy lint test check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact check-issue-refs ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync, tool pins, verify-merge self-test, pin-impact cases, issue refs)
 
 .PHONY: ci
-ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact ## Run comprehensive CI pipeline
+ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact check-issue-refs ## Run comprehensive CI pipeline
 
 # =============================================================================
 # Cleanup

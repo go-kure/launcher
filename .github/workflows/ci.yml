@@ -351,6 +351,20 @@ jobs:
     - name: Check action pins
       uses: go-kure/.github/.github/actions/check-action-pins@27e992335867858c0a7cc2dd2f48d1eabe5fb057 # main
 
+  # Always-on and whole-tree, so a PR and the merge queue get the same result
+  # (go-kure/launcher#400). Self-test first: a guard that cannot fail proves nothing.
+  issue-refs:
+    name: issue-refs
+    runs-on: autops-kube-kure
+    timeout-minutes: 2
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+    - name: Self-test the issue-reference guard
+      run: bash scripts/check-issue-refs-test.sh
+    - name: Check issue references
+      run: bash scripts/check-issue-refs.sh
+
   pin-impact:
     name: pin-impact
     runs-on: autops-kube-kure
@@ -1272,7 +1286,7 @@ jobs:
     name: build
     runs-on: autops-kube-kure
     timeout-minutes: 1
-    needs: [validate, test, build-binaries, docs-build, coverage-check, doc-gate, action-pins, security, pin-impact]
+    needs: [validate, test, build-binaries, docs-build, coverage-check, doc-gate, action-pins, security, pin-impact, issue-refs]
     if: always()
     steps:
     - name: Check build results
@@ -1286,7 +1300,8 @@ jobs:
         ap="${{ needs.action-pins.result }}"
         sc="${{ needs.security.result }}"
         pi="${{ needs.pin-impact.result }}"
-        for result in "$vl" "$tt" "$bb" "$db" "$cc" "$dg" "$ap" "$sc" "$pi"; do
+        ir="${{ needs.issue-refs.result }}"
+        for result in "$vl" "$tt" "$bb" "$db" "$cc" "$dg" "$ap" "$sc" "$pi" "$ir"; do
           if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
             echo "Required job failed or was cancelled (result: $result)"
             exit 1
