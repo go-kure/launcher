@@ -1198,6 +1198,9 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 				pol.origin = &polOrigin
 			}
 		}
+		for i := range result.Documents {
+			clearForwardingMarks(result.Documents[i].Spec.Components)
+		}
 		step := LoweringStep{Rule: origin.Rule, Position: PositionDocument, Round: round, From: doc.Metadata.Name, To: names}
 		return emitted, true, []LoweringStep{step}, nil
 	}
@@ -1333,6 +1336,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
+			clearForwardingMarks(result.Components)
 			// Only a component-position rule may emit a same-name sibling group: the
 			// one invocation is the group's boundary, so a name a different
 			// invocation, a trait or document rule, or an author repeats is still a
@@ -1510,8 +1514,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				// include them in the step's To — see the matching comment on the
 				// component-position block above.
 				names = append(names, result.Components[j].Name)
-				newComponents = append(newComponents, result.Components[j])
 			}
+			clearForwardingMarks(result.Components)
+			newComponents = append(newComponents, result.Components...)
 			for j := range result.Policies {
 				result.Policies[j].origin = &traitOrigin
 				if err := t.validateEmittedPolicy(&result.Policies[j]); err != nil {
@@ -1664,12 +1669,11 @@ func (t *Transformer) sealNestedTraitsInDocument(comp *Component, parentOrigin O
 func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, synthesized bool, isForwarded func(*Trait) bool) error {
 	for k := range comp.Traits {
 		trait := &comp.Traits[k]
-		forwarded := isForwarded(trait)
-		// The forwarding mark (forwardableTraits) has done its job once this
-		// emission is classified; clearing it keeps it from outliving the one rule
-		// invocation it describes.
-		trait.forwardedFrom = nil
-		if forwarded {
+		// The forwarding mark (forwardableTraits) stays until the caller has
+		// classified the rule's whole output (clearForwardingMarks): a rule may attach
+		// one slice of forwarded copies to several components, and every one of them
+		// must still see the mark.
+		if isForwarded(trait) {
 			continue
 		}
 		nestedOrigin := parentOrigin
@@ -1725,10 +1729,12 @@ func forwardedIndex(trait *Trait, original []Trait) int {
 // origin of any by-value copy a component rule makes of it (Trait.forwardedFrom),
 // for isForwardedTrait. A copy, never the caller's slice: marking in place would
 // leave the mark on the authored document's own trait elements, outside the one
-// rule invocation it describes. Empty input is returned as is.
+// rule invocation it describes. nil is returned as is; an empty slice gets its own
+// zero-capacity storage, so appending through the copy cannot reach spare capacity
+// the authored slice shares with another.
 func forwardableTraits(traits []Trait) []Trait {
-	if len(traits) == 0 {
-		return traits
+	if traits == nil {
+		return nil
 	}
 	out := make([]Trait, len(traits))
 	copy(out, traits)
@@ -1745,7 +1751,7 @@ func forwardableTraits(traits []Trait) []Trait {
 // a rule must not mutate its input in any case (LoweringContext.Document).
 func documentRuleInput(doc *Application) *Application {
 	input := *doc
-	if len(doc.Spec.Components) > 0 {
+	if doc.Spec.Components != nil {
 		input.Spec.Components = make([]Component, len(doc.Spec.Components))
 		for i, comp := range doc.Spec.Components {
 			comp.Traits = forwardableTraits(comp.Traits)
@@ -1753,6 +1759,17 @@ func documentRuleInput(doc *Application) *Application {
 		}
 	}
 	return &input
+}
+
+// clearForwardingMarks drops the forwarding mark from every trait of comps once a
+// rule's whole output has been classified, so it never outlives the one rule
+// invocation it describes.
+func clearForwardingMarks(comps []Component) {
+	for i := range comps {
+		for k := range comps[i].Traits {
+			comps[i].Traits[k].forwardedFrom = nil
+		}
+	}
 }
 
 // sameMap reports whether a and b are the same map value (both nil, or one map
