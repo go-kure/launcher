@@ -228,6 +228,48 @@ func TestSiblingGroup_KindlessObjectRefused(t *testing.T) {
 	}
 }
 
+// subAppTrait appends a sub-application named after its component, as builtin
+// traits do (<name>-rbac, <name>-ingress).
+type subAppTrait struct{}
+
+func (subAppTrait) CanHandle(t string) bool { return t == "sub" }
+func (subAppTrait) Apply(_ *Trait, app *stack.Application, b *stack.Bundle) error {
+	b.Applications = append(b.Applications, stack.NewApplication(app.Name+"-sub", app.Namespace, &siblingStub{}))
+	return nil
+}
+
+// TestSiblingGroup_TraitSubApplications: the same trait on two members would
+// create one sub-application name twice and is refused; on one member it passes.
+func TestSiblingGroup_TraitSubApplications(t *testing.T) {
+	sub := []Trait{{Type: "sub", Properties: map[string]any{}}}
+	for _, tc := range []struct {
+		name      string
+		onB, want string
+	}{
+		{name: "one member", want: ""},
+		{name: "two members", onB: "x", want: `traits on members "a" and "b" both create sub-application "web-sub"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := NewTransformer(map[string]ComponentHandler{"a": stubHandler("a", 0), "b": stubHandler("b", 0)},
+				map[string]TraitHandler{"sub": subAppTrait{}})
+			tr.RegisterComponentLowering(emitRule{"pair", func(c *Component) []Component {
+				b := Component{Name: c.Name, Type: "b", Properties: map[string]any{}}
+				if tc.onB != "" {
+					b.Traits = sub
+				}
+				return []Component{{Name: c.Name, Type: "a", Properties: map[string]any{}, Traits: sub}, b}
+			}})
+			_, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{})
+			if tc.want == "" && err != nil {
+				t.Fatalf("TransformWithPolicy: %v", err)
+			}
+			if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // copyTraitRule lowers a "copy" trait to a copy of its component retyped "c".
 type copyTraitRule struct{}
 
@@ -260,6 +302,9 @@ func TestSiblingGroup_ForwardingAcrossMembers(t *testing.T) {
 		t.Fatalf("bundle applications = %d, want the group's one application", len(apps))
 	}
 	cfg := apps[0].Config
+	if got := cfg.(ComponentNamed).ComponentName(); got != "web" {
+		t.Errorf("ComponentName = %q, want the group's web", got)
+	}
 	if got := cfg.(servicePortProvider).ServicePort(); got != 8080 {
 		t.Errorf("ServicePort = %d, want member b's 8080", got)
 	}

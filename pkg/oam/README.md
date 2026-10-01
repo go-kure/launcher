@@ -403,8 +403,9 @@ one tier, one bundle, one `dependency` node, one auto health check (for the firs
 member's kind) and one layout directory. Its application generates the members'
 objects in emission order. It answers every config contract the transform reads
 (Service port and port name, backend Service name, routing target, ServiceAccount,
-single-pod claim) from the one member that has a value, and gives the Flux
-namespace to every member that takes one.
+single-pod claim) from the one member that has a value, gives the Flux namespace
+to every member that takes one, and reports the group's name as its component
+name (`ComponentNamed`).
 
 Traits run per member, against that member's own config: the rule decides which
 member carries each trait. A routing trait (ingress, Gateway API routes) belongs on
@@ -414,7 +415,9 @@ The build refuses a group:
 - whose members fall in different tiers;
 - in which two members answer the same contract;
 - that has a member needing layout-level resources;
-- in which two members generate the same Kubernetes object.
+- in which two members generate the same Kubernetes object;
+- in which traits on two members create the same sub-application (the same trait on
+  both members derives one name, such as `web-rbac`, from the shared name).
 
 An authored duplicate name is still refused. So is a name repeated by different
 rule invocations, or by a trait or document rule, including a copy of a member.
