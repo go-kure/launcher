@@ -1192,6 +1192,11 @@ one is present (see "Non-RWX volumes"). `statefulset` is still excluded: besides
 standalone claims from `volumes`, emitted as PVCs as on the other kinds, it has
 per-pod claims from `volumeClaimTemplates`, so the question differs.
 
+**`deployment` reports its pod template labels** (`PodTemplateLabels`), so a
+same-name sibling group can tell that a `service` member selects this
+Deployment's own pods, which the group's component-label policy already
+covers (see `pkg/oam` "Same-name sibling groups").
+
 | Property | Type | Effect | Compatibility |
 |----------|------|--------|---------------|
 | `strategy` | object | `type` (**required when `strategy` is authored**) is `Recreate` or `RollingUpdate`; `rollingUpdate` may only accompany `RollingUpdate`, matching `ValidateDeploymentStrategy`, which marks it Forbidden under `Recreate`. Omitting `strategy` entirely writes nothing, leaving apiserver defaulting to supply `RollingUpdate` with 25%/25%. | additive |
@@ -1545,7 +1550,11 @@ not part of either change.
     policy for traffic routed to a `service` selects its `selector` pods — not
     the component label, which no pod carries — and opens the `targetPort` of
     each routed TCP port. A route that reaches only a UDP or SCTP port
-    synthesizes no policy.
+    synthesizes no policy. In a same-name sibling group whose `selector`
+    picks a sibling's own pods, the policy selects the component label
+    instead; `IdentityTargetPorts` reports whether that is the same set of
+    ports — every port's `targetPort` is its own number, never a name (see
+    `pkg/oam` "Same-name sibling groups").
   - It implements `oam.EndpointProvider`: one endpoint, the `selector` pods on
     every TCP `targetPort` (deduplicated). A Service with no TCP port declares
     none.
