@@ -55,7 +55,7 @@ packages:
   - path: pkg/oam/internal/fluxduration
     readme: pkg/oam/internal/fluxduration/README.md
     mounted: false
-    reason: "Internal Flux duration check shared by the oci and helmchart components and the reconciliation policy."
+    reason: "Internal Flux duration check shared by the Flux components and the reconciliation policy."
   - path: pkg/cmd/shared
     readme: pkg/cmd/shared/README.md
     mounted: false

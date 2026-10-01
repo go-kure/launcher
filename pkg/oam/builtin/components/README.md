@@ -2075,9 +2075,12 @@ not part of either change.
   must be a duration Flux accepts, checked as for `helmchart` (see its `interval` paragraph;
   go-kure/launcher#601): on the authored text, which also refuses a positive value that would
   decode to zero and be replaced by the default, and again in `Generate` on the decoded
-  duration's emitted form, for a config built directly. Its other duration fields (`timeout`,
-  the nested `chart.spec.interval` and per-action timeouts) are still left to the CRD
-  (go-kure/launcher#606). Exactly one of
+  duration's emitted form, for a config built directly. Its other duration fields are checked
+  the same way, in the same form (go-kure/launcher#606): `timeout`, `chart.spec.interval`,
+  `install.timeout`, `upgrade.timeout`, `test.timeout`, `rollback.timeout`,
+  `uninstall.timeout`, and `install.strategy.retryInterval` and
+  `upgrade.strategy.retryInterval`. A nested key matches case-insensitively at every level, as
+  the decode does. Exactly one of
   `chart` and `chartRef` is required. `values` must be a JSON object; a non-finite number
   (`.nan`, `.inf`) is a build error, never a panic. `valuesMode` is `inline` (the default)
   or `configMap`. Nothing else is checked here: compared with the `helmchart` composite,
@@ -2252,7 +2255,12 @@ not part of either change.
   does not poll it, and its emitted `interval` reads `0s`, the value the Go type always writes.
   A set `interval` must be a duration Flux accepts, checked exactly as on `helmrelease` above
   (go-kure/launcher#601); under `type: oci` too, where the CRD pattern still applies.
-  Other duration fields (`timeout`) are still left to the CRD (go-kure/launcher#606).
+  A set `timeout` is checked the same way, against the source CRDs' narrower pattern, which has
+  no `h` unit: `^([0-9]+(\.[0-9]+)?(ms|s|m))+$` (go-kure/launcher#606). **Known limitation:** a
+  `timeout` of an hour or more is refused, however it is authored. The value is emitted through a
+  `metav1.Duration`, which writes `Duration.String()`, so `60m` would go out as `1h0m0s` and be
+  rejected by the CRD at apply time; the build error says so and asks for a value below `1h`
+  (e.g. `59m`).
   Nothing else is checked or defaulted: enums (`type`, `provider`, `layerSelector.operation`,
   `verify.mode`) and cross-field rules (a Bucket's `sts` against its `provider`,
   `serviceAccountName` against `secretRef`) are left to the CRD's own admission.
