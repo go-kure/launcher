@@ -4,11 +4,13 @@ import (
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
+	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
 )
 
 // OCIRepositoryHandler handles the kind-named `ocirepository` component: a 1:1
@@ -16,6 +18,12 @@ import (
 // the component, and no Kustomization (that is what the `oci` component adds).
 // See fluxsource.go for what the source components share.
 type OCIRepositoryHandler struct{}
+
+// ociRepositoryDurations are OCIRepositorySpec's duration fields. timeout takes no h unit.
+var ociRepositoryDurations = []fluxDurationField[sourcev1.OCIRepositorySpec]{
+	{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *sourcev1.OCIRepositorySpec) *metav1.Duration { return &s.Interval }},
+	{path: []string{"timeout"}, form: fluxduration.SourceTimeout, get: func(s *sourcev1.OCIRepositorySpec) *metav1.Duration { return s.Timeout }},
+}
 
 // CanHandle returns true for the ocirepository component type.
 func (h *OCIRepositoryHandler) CanHandle(componentType string) bool {
@@ -36,7 +44,7 @@ func (h *OCIRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"certSecretRef":      fluxSourceObject("OCIRepository spec.certSecretRef: the Secret holding a client certificate and/or CA certificate."),
 		"proxySecretRef":     fluxSourceObject("OCIRepository spec.proxySecretRef: the Secret holding the proxy configuration."),
 		"interval":           fluxSourceString("OCIRepository spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
-		"timeout":            fluxSourceString("OCIRepository spec.timeout for remote operations, as a duration."),
+		"timeout":            fluxSourceString("OCIRepository spec.timeout for remote operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms, and below 1h."),
 		"ignore":             fluxSourceString("OCIRepository spec.ignore: exclusion patterns in .sourceignore format."),
 		"insecure":           fluxSourceBool("OCIRepository spec.insecure: allow a non-TLS registry."),
 		"suspend":            fluxSourceBool("OCIRepository spec.suspend: stop reconciling the source. Also skips the auto health check."),
@@ -52,7 +60,7 @@ func (h *OCIRepositoryHandler) ToApplicationConfig(component *oam.Component, nam
 	if err != nil {
 		return nil, errors.Errorf("ocirepository: properties do not decode as an OCIRepositorySpec: %w", err)
 	}
-	if err := checkAuthoredFluxInterval("ocirepository", component.Properties); err != nil {
+	if err := checkAuthoredFluxDurations("ocirepository", component.Properties, ociRepositoryDurations); err != nil {
 		return nil, err
 	}
 	cfg := &OCIRepositoryConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
@@ -82,7 +90,7 @@ type OCIRepositoryConfig struct {
 // validate holds the checks shared by the parse path and Generate, which
 // repeats them for a config built directly by a library caller.
 func (c *OCIRepositoryConfig) validate() error {
-	if err := checkFluxIntervalDuration("ocirepository", c.Spec.Interval); err != nil {
+	if err := checkFluxDurations("ocirepository", &c.Spec, ociRepositoryDurations); err != nil {
 		return err
 	}
 	return checkFluxSourceURL("ocirepository", "url", c.Spec.URL, "oci://")

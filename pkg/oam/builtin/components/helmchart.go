@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 	"time"
 
@@ -23,7 +21,6 @@ import (
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
 )
 
 // HelmchartHandler handles OAM helmchart components.
@@ -719,66 +716,6 @@ func effectiveInterval(interval string) string {
 func parseDuration(s string) metav1.Duration {
 	d, _ := time.ParseDuration(s)
 	return metav1.Duration{Duration: d}
-}
-
-// validateFluxInterval refuses an authored interval the Flux CRDs this
-// component emits would reject at apply time. The interval reaches them through
-// parseDuration, as a metav1.Duration that serializes as Duration.String(), so
-// the emitted form is checked as well as the authored one; that also refuses a
-// positive value too small for the duration type, which would be emitted as 0s.
-// Called at parse time (ToApplicationConfig) and again from Generate, which is
-// what covers a config built directly rather than parsed.
-func validateFluxInterval(component, interval string) error {
-	err := fluxduration.ValidateEmitted(interval)
-	if err == nil {
-		return nil
-	}
-	var re *fluxduration.ResolutionError
-	if errors.As(err, &re) {
-		return errors.Errorf("%s: interval %q is invalid: it would be emitted as %q, below Flux's millisecond resolution (use 0s or at least 1ms)", component, interval, re.Emitted)
-	}
-	return errors.Errorf("%s: interval %q is invalid: must be a Flux duration (unsigned; units ms, s, m, h; e.g. 10m, 1h30m)", component, interval)
-}
-
-// checkAuthoredFluxInterval is validateFluxInterval for a kind-named component
-// (helmrelease and the four Flux sources), whose properties decode strictly into
-// a Flux spec with interval a metav1.Duration (go-kure/launcher#601). The check
-// runs on the authored text, read from the property map, because the decoded
-// duration has lost it: a positive value below a nanosecond decodes to zero,
-// which Generate reads as unset and replaces with the default. Called after the
-// strict decode, so a present interval is JSON text; keys match
-// case-insensitively there, as in encoding/json, so every spelling is checked.
-// The text is read through the same JSON encoding the decode used, so a value
-// Go code built with a named string type is checked like a plain string.
-func checkAuthoredFluxInterval(component string, props map[string]any) error {
-	for _, k := range slices.Sorted(maps.Keys(props)) {
-		if !strings.EqualFold(k, "interval") {
-			continue
-		}
-		raw, err := json.Marshal(props[k])
-		if err != nil {
-			continue
-		}
-		var s string
-		if json.Unmarshal(raw, &s) != nil || s == "" {
-			continue
-		}
-		if err := validateFluxInterval(component, s); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// checkFluxIntervalDuration checks a decoded spec interval in the form it is
-// emitted, Duration.String(). It covers a config built directly rather than
-// parsed: a negative or sub-millisecond duration is emitted outside Flux's
-// pattern. Zero is unset, and Generate applies the default.
-func checkFluxIntervalDuration(component string, d metav1.Duration) error {
-	if d.Duration == 0 {
-		return nil
-	}
-	return validateFluxInterval(component, d.Duration.String())
 }
 
 // augmentingHelmchartConfig wraps *HelmchartConfig to add AugmentLayout

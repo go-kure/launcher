@@ -20,6 +20,7 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
+	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
 )
 
 // helmReleaseValuesModeKey is the one property the helmrelease component owns
@@ -47,6 +48,61 @@ const helmReleaseValuesHashLen = 10
 // values, the ConfigMap those values are moved into. It creates no source:
 // spec.chart or spec.chartRef names an existing one.
 type HelmReleaseHandler struct{}
+
+// helmReleaseDurations are HelmReleaseSpec's duration fields, nested ones
+// included. All take the same form.
+var helmReleaseDurations = []fluxDurationField[helmv2.HelmReleaseSpec]{
+	{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration { return &s.Interval }},
+	{path: []string{"timeout"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration { return s.Timeout }},
+	{path: []string{"chart", "spec", "interval"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration {
+		if s.Chart == nil {
+			return nil
+		}
+		return s.Chart.Spec.Interval
+	}},
+	{path: []string{"install", "timeout"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration {
+		if s.Install == nil {
+			return nil
+		}
+		return s.Install.Timeout
+	}},
+	{path: []string{"install", "strategy", "retryInterval"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration {
+		if s.Install == nil || s.Install.Strategy == nil {
+			return nil
+		}
+		return s.Install.Strategy.RetryInterval
+	}},
+	{path: []string{"upgrade", "timeout"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration {
+		if s.Upgrade == nil {
+			return nil
+		}
+		return s.Upgrade.Timeout
+	}},
+	{path: []string{"upgrade", "strategy", "retryInterval"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration {
+		if s.Upgrade == nil || s.Upgrade.Strategy == nil {
+			return nil
+		}
+		return s.Upgrade.Strategy.RetryInterval
+	}},
+	{path: []string{"test", "timeout"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration {
+		if s.Test == nil {
+			return nil
+		}
+		return s.Test.Timeout
+	}},
+	{path: []string{"rollback", "timeout"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration {
+		if s.Rollback == nil {
+			return nil
+		}
+		return s.Rollback.Timeout
+	}},
+	{path: []string{"uninstall", "timeout"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration {
+		if s.Uninstall == nil {
+			return nil
+		}
+		return s.Uninstall.Timeout
+	}},
+}
 
 // CanHandle returns true for the helmrelease component type.
 func (h *HelmReleaseHandler) CanHandle(componentType string) bool {
@@ -81,7 +137,7 @@ func (h *HelmReleaseHandler) PropertySchema() map[string]oam.PropertySchema {
 		"targetNamespace":    str("HelmRelease spec.targetNamespace. When unset and a Flux namespace is configured, it is set to the application namespace."),
 		"storageNamespace":   str("HelmRelease spec.storageNamespace: where Helm stores release state."),
 		"dependsOn":          objects("HelmRelease spec.dependsOn: releases that must be ready first.", "One dependency reference (name, namespace, readyExpr)."),
-		"timeout":            str("HelmRelease spec.timeout for Helm actions, as a duration."),
+		"timeout":            str("HelmRelease spec.timeout for Helm actions, as a Flux duration: unsigned, units ms, s, m, h; 0s or at least 1ms."),
 		"maxHistory":         {Type: oam.PropertyTypeInteger, Description: "HelmRelease spec.maxHistory: release revisions Helm keeps."},
 		"serviceAccountName": str("HelmRelease spec.serviceAccountName Helm impersonates."),
 		"persistentClient":   boolean("HelmRelease spec.persistentClient."),
@@ -112,7 +168,7 @@ func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, names
 	if err != nil {
 		return nil, errors.Errorf("helmrelease: properties do not decode as a HelmReleaseSpec: %w", err)
 	}
-	if err := checkAuthoredFluxInterval("helmrelease", component.Properties); err != nil {
+	if err := checkAuthoredFluxDurations("helmrelease", component.Properties, helmReleaseDurations); err != nil {
 		return nil, err
 	}
 	mode, err := helmReleaseValuesMode(owned)
@@ -220,7 +276,7 @@ func (c *HelmReleaseConfig) validate() error {
 	if (c.Spec.Chart == nil) == (c.Spec.ChartRef == nil) {
 		return errors.New("helmrelease: exactly one of chart and chartRef is required")
 	}
-	if err := checkFluxIntervalDuration("helmrelease", c.Spec.Interval); err != nil {
+	if err := checkFluxDurations("helmrelease", &c.Spec, helmReleaseDurations); err != nil {
 		return err
 	}
 	if _, err := helmReleaseValuesMap(c.Spec.Values); err != nil {

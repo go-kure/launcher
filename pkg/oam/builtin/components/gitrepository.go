@@ -4,17 +4,25 @@ import (
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
+	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
 )
 
 // GitRepositoryHandler handles the kind-named `gitrepository` component: a 1:1
 // projection of Flux's GitRepositorySpec. It emits one GitRepository named after
 // the component. See fluxsource.go for what the source components share.
 type GitRepositoryHandler struct{}
+
+// gitRepositoryDurations are GitRepositorySpec's duration fields. timeout takes no h unit.
+var gitRepositoryDurations = []fluxDurationField[sourcev1.GitRepositorySpec]{
+	{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *sourcev1.GitRepositorySpec) *metav1.Duration { return &s.Interval }},
+	{path: []string{"timeout"}, form: fluxduration.SourceTimeout, get: func(s *sourcev1.GitRepositorySpec) *metav1.Duration { return s.Timeout }},
+}
 
 // CanHandle returns true for the gitrepository component type.
 func (h *GitRepositoryHandler) CanHandle(componentType string) bool {
@@ -30,7 +38,7 @@ func (h *GitRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"provider":           fluxSourceString("GitRepository spec.provider for authentication: generic, aws, azure or github."),
 		"serviceAccountName": fluxSourceString("GitRepository spec.serviceAccountName that authenticates the clone (azure and aws providers)."),
 		"interval":           fluxSourceString("GitRepository spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
-		"timeout":            fluxSourceString("GitRepository spec.timeout for Git operations, as a duration."),
+		"timeout":            fluxSourceString("GitRepository spec.timeout for Git operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms, and below 1h."),
 		"ref":                fluxSourceObject("GitRepository spec.ref: the branch, tag, semver range, reference name or commit to check out."),
 		"verify":             fluxSourceObject("GitRepository spec.verify: commit signature verification."),
 		"proxySecretRef":     fluxSourceObject("GitRepository spec.proxySecretRef: the Secret holding the proxy configuration."),
@@ -59,7 +67,7 @@ func (h *GitRepositoryHandler) ToApplicationConfig(component *oam.Component, nam
 	if err != nil {
 		return nil, errors.Errorf("gitrepository: properties do not decode as a GitRepositorySpec: %w", err)
 	}
-	if err := checkAuthoredFluxInterval("gitrepository", component.Properties); err != nil {
+	if err := checkAuthoredFluxDurations("gitrepository", component.Properties, gitRepositoryDurations); err != nil {
 		return nil, err
 	}
 	cfg := &GitRepositoryConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
@@ -89,7 +97,7 @@ type GitRepositoryConfig struct {
 // validate holds the checks shared by the parse path and Generate, which
 // repeats them for a config built directly by a library caller.
 func (c *GitRepositoryConfig) validate() error {
-	if err := checkFluxIntervalDuration("gitrepository", c.Spec.Interval); err != nil {
+	if err := checkFluxDurations("gitrepository", &c.Spec, gitRepositoryDurations); err != nil {
 		return err
 	}
 	return checkFluxSourceURL("gitrepository", "url", c.Spec.URL, "http://", "https://", "ssh://")

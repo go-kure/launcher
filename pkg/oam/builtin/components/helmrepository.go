@@ -6,17 +6,25 @@ import (
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
+	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
 )
 
 // HelmRepositoryHandler handles the kind-named `helmrepository` component: a 1:1
 // projection of Flux's HelmRepositorySpec. It emits one HelmRepository named
 // after the component. See fluxsource.go for what the source components share.
 type HelmRepositoryHandler struct{}
+
+// helmRepositoryDurations are HelmRepositorySpec's duration fields. timeout takes no h unit.
+var helmRepositoryDurations = []fluxDurationField[sourcev1.HelmRepositorySpec]{
+	{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *sourcev1.HelmRepositorySpec) *metav1.Duration { return &s.Interval }},
+	{path: []string{"timeout"}, form: fluxduration.SourceTimeout, get: func(s *sourcev1.HelmRepositorySpec) *metav1.Duration { return s.Timeout }},
+}
 
 // CanHandle returns true for the helmrepository component type.
 func (h *HelmRepositoryHandler) CanHandle(componentType string) bool {
@@ -33,7 +41,7 @@ func (h *HelmRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"passCredentials": fluxSourceBool("HelmRepository spec.passCredentials: pass the secretRef credentials to chart hosts other than the url's."),
 		"interval":        fluxSourceString("HelmRepository spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero, except with type oci."),
 		"insecure":        fluxSourceBool("HelmRepository spec.insecure: allow a non-TLS registry (type oci only)."),
-		"timeout":         fluxSourceString("HelmRepository spec.timeout for the index fetch or OCI operations, as a duration."),
+		"timeout":         fluxSourceString("HelmRepository spec.timeout for the index fetch or OCI operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms, and below 1h."),
 		"suspend":         fluxSourceBool("HelmRepository spec.suspend: stop reconciling the repository. Also skips the auto health check."),
 		"accessFrom":      fluxSourceObject("HelmRepository spec.accessFrom: a cross-namespace access control list. Projected as authored, but not enforced: Flux marks the field not implemented (provisional)."),
 		"type":            fluxSourceString("HelmRepository spec.type: default, or oci for an OCI registry of charts (a static object with no interval default and no auto health check)."),
@@ -50,7 +58,7 @@ func (h *HelmRepositoryHandler) ToApplicationConfig(component *oam.Component, na
 	if err != nil {
 		return nil, errors.Errorf("helmrepository: properties do not decode as a HelmRepositorySpec: %w", err)
 	}
-	if err := checkAuthoredFluxInterval("helmrepository", component.Properties); err != nil {
+	if err := checkAuthoredFluxDurations("helmrepository", component.Properties, helmRepositoryDurations); err != nil {
 		return nil, err
 	}
 	cfg := &HelmRepositoryConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
@@ -86,7 +94,7 @@ func (c *HelmRepositoryConfig) isOCI() bool {
 // repeats them because this type and its fields are exported: a config built
 // directly by a library caller never went through ToApplicationConfig.
 func (c *HelmRepositoryConfig) validate() error {
-	if err := checkFluxIntervalDuration("helmrepository", c.Spec.Interval); err != nil {
+	if err := checkFluxDurations("helmrepository", &c.Spec, helmRepositoryDurations); err != nil {
 		return err
 	}
 	if c.isOCI() {
