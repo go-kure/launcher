@@ -56,12 +56,17 @@ expect "bare ref in a Go string" 1 "a.go:1:" a.go 't.Errorf("want #227 component
 expect "five-digit ref" 1 "a.md:1:" a.md 'tracked in #12345.'
 expect "bare ref in YAML" 1 "c.yaml:1:" c.yaml 'key: value # see #321'
 expect "ref beside an anchor" 1 "a.md:1:" a.md 'see [the section](#12-foo) and #99'
+expect "hyphen before a partial ref" 1 "a.go:1:" a.go '// the pre-launcher#278 shape'
+expect "dots before a partial ref" 1 "a.go:1:" a.go '// see ...launcher#278'
+expect "colon in the file name" 1 "a:b.md:1:" a:b.md 'see #99'
+expect "pragma-like file name" 1 "a:b:allow-ref.md:1:" a:b:allow-ref.md 'see #99'
 
 # ── must pass ────────────────────────────────────────────────────────────────
 expect "qualified launcher ref" 0 "" a.go '// fixed in (go-kure/launcher#227, go-kure/launcher#242)'
 expect "other repository" 0 "" a.md 'removal tracked in [go-kure/kure#539](https://github.com/go-kure/kure/issues/539)'
 expect "Markdown anchor" 0 "" a.md 'see [the section](#12-foo)'
 expect "HTML entity" 0 "" a.md 'a &#1234; entity'
+expect "Go format verb" 0 "" a.go 'fmt.Printf("%#12.6g", value)'
 expect "single digit" 0 "" a.md 'step #1 comes first'
 expect "hex colour" 0 "" a.md 'color: #abcdef and #12ab34'
 expect "six-digit number" 0 "" a.md 'id #123456'
