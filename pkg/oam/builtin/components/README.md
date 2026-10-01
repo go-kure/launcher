@@ -2213,6 +2213,18 @@ not part of either change.
   component. Retiring the composite is tracked separately in go-kure/launcher#350.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.
+  `targetNamespace` has no default (go-kure/launcher#622). Unset, the
+  Kustomization emits no `spec.targetNamespace` and each object in the
+  artifact keeps the namespace it carries; kustomize-controller does not fill
+  in its own namespace for an object that has none. Author `targetNamespace`
+  when the artifact contains namespaced objects without a namespace: they
+  otherwise fail at apply with `namespace not specified`, with or without a
+  Flux namespace. This deliberately differs from `helmchart` (`delivery:
+  native`) and `helmrelease`, which under a Flux namespace default
+  `targetNamespace` to the application namespace. A Kustomization's
+  `targetNamespace` sets or overrides the namespace of every namespaced object
+  it applies, Flux custom resources included, so a default would move the
+  objects of a deliberately multi-namespace artifact.
   `wait` and `healthChecks` are opt-in readiness settings for the delivery
   Kustomization (go-kure/launcher#432). A document in which neither requests
   anything — `wait` absent or `false`, and `healthChecks` absent, null or
