@@ -231,6 +231,11 @@ func TestParseEnvironmentSet(t *testing.T) {
 		{"trailing document", testEnvironmentsYAML + "---\n" + header + "spec:\n  environments:\n  - name: dev\n    profile: dev.yaml\n", "expected a single YAML document"},
 		{"trailing malformed document", testEnvironmentsYAML + "---\nspec: [unclosed\n", "decoding"},
 		{"missing profile", header + "spec:\n  environments:\n  - name: dev\n    values: dev.yaml\n", "profile is required"},
+		{"absolute profile", header + "spec:\n  environments:\n  - name: dev\n    profile: /etc/dev.yaml\n", "profile must be relative"},
+		{"absolute values", header + "spec:\n  environments:\n  - name: dev\n    profile: dev.yaml\n    values: /etc/dev.yaml\n", "values must be relative"},
+		{"profile backstep", header + "spec:\n  environments:\n  - name: dev\n    profile: ../dev.yaml\n", `profile must not contain ".."`},
+		{"values inner backstep", header + "spec:\n  environments:\n  - name: dev\n    profile: dev.yaml\n    values: sub/../../dev.yaml\n", `values must not contain ".."`},
+		{"dotted file name", header + "spec:\n  environments:\n  - name: dev\n    profile: ..dev.yaml\n", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -262,8 +267,7 @@ func environmentFlags(t *testing.T, opts *buildOptions, args ...string) *pflag.F
 
 func TestResolveEnvironment_PathResolution(t *testing.T) {
 	dir := t.TempDir()
-	abs := filepath.Join(t.TempDir(), "abs-profile.yaml")
-	writeTempFile(t, dir, "envs.yaml", "apiVersion: launcher.gokure.dev/v1alpha1\nkind: EnvironmentSet\nspec:\n  environments:\n  - name: rel\n    profile: p.yaml\n    values: sub/v.yaml\n  - name: abs\n    profile: "+abs+"\n")
+	writeTempFile(t, dir, "envs.yaml", "apiVersion: launcher.gokure.dev/v1alpha1\nkind: EnvironmentSet\nspec:\n  environments:\n  - name: rel\n    profile: p.yaml\n    values: sub/v.yaml\n  - name: bare\n    profile: p.yaml\n")
 
 	envs := filepath.Join(dir, "envs.yaml")
 	opts := &buildOptions{}
@@ -278,13 +282,26 @@ func TestResolveEnvironment_PathResolution(t *testing.T) {
 	}
 
 	opts = &buildOptions{}
-	if err := resolveEnvironment(opts, "/unused", environmentFlags(t, opts, "--environment", "abs", "--environments", envs)); err != nil {
+	if err := resolveEnvironment(opts, "/unused", environmentFlags(t, opts, "--environment", "bare", "--environments", envs)); err != nil {
 		t.Fatal(err)
-	}
-	if opts.profilePath != abs {
-		t.Errorf("profilePath = %q, want absolute %q unchanged", opts.profilePath, abs)
 	}
 	if opts.valuesPath != "" {
 		t.Errorf("valuesPath = %q, want empty for a profile-only environment", opts.valuesPath)
+	}
+}
+
+// An escaping path anywhere in the file fails the build, even when the selected
+// environment's own paths are contained: the whole document is validated.
+func TestResolveEnvironment_RejectsEscapingPath(t *testing.T) {
+	dir := t.TempDir()
+	writeTempFile(t, dir, "envs.yaml", "apiVersion: launcher.gokure.dev/v1alpha1\nkind: EnvironmentSet\nspec:\n  environments:\n  - name: ok\n    profile: p.yaml\n  - name: out\n    profile: ../p.yaml\n")
+
+	opts := &buildOptions{}
+	err := resolveEnvironment(opts, "/unused", environmentFlags(t, opts, "--environment", "ok", "--environments", filepath.Join(dir, "envs.yaml")))
+	if err == nil || !strings.Contains(err.Error(), `profile must not contain ".."`) {
+		t.Fatalf("error = %v, want the backstep rejection", err)
+	}
+	if opts.profilePath != "" {
+		t.Errorf("profilePath = %q, want unset after a rejected file", opts.profilePath)
 	}
 }
