@@ -2588,7 +2588,11 @@ not part of either change.
   `replication.synchronous.number` takes the handler default rather than
   being refused as a bad number. Two further shapes that used to vanish are now
   errors: a non-string `managedRoles[].inRoles` entry, and an
-  `externalClusters` entry without a `name`. `Endpoints` reads
+  `externalClusters` entry without a `name`. So is a managed role's
+  `connectionLimit: 0` (go-kure/launcher#659), as `cnpg-cluster` refuses it:
+  CloudNativePG omits a zero `connectionLimit` from the Cluster and applies its
+  default `-1`, so the role would deploy with no limit. A role that must not
+  connect sets `login: false` instead. `Endpoints` reads
   `pooler.enabled` the same way, so it refuses the wrong type instead of
   declaring no pooler endpoint.
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's

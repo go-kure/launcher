@@ -64,6 +64,35 @@ func TestPostgresqlHandler_InvalidProvider(t *testing.T) {
 	}
 }
 
+// TestPostgresqlHandler_ManagedRoleConnectionLimit pins go-kure/launcher#659: a zero
+// connectionLimit is refused, since CloudNativePG would omit it and apply its default
+// -1 (no limit); -1 and a positive limit are carried.
+func TestPostgresqlHandler_ManagedRoleConnectionLimit(t *testing.T) {
+	roleWithLimit := func(limit float64) map[string]any {
+		return map[string]any{"managedRoles": []any{
+			map[string]any{"name": "app_user", "login": true, "connectionLimit": limit},
+		}}
+	}
+	h := &components.PostgresqlHandler{}
+
+	_, err := h.ToApplicationConfig(&oam.Component{Name: "db", Type: "postgresql", Properties: roleWithLimit(0)}, "default")
+	want := "managedRoles[0].connectionLimit: 0 cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default -1, no limit); set login: false to keep the role from connecting"
+	if err == nil || err.Error() != want {
+		t.Errorf("connectionLimit 0: err = %v, want %q", err, want)
+	}
+
+	for _, limit := range []float64{-1, 5} {
+		cfg, err := h.ToApplicationConfig(&oam.Component{Name: "db", Type: "postgresql", Properties: roleWithLimit(limit)}, "default")
+		if err != nil {
+			t.Fatalf("connectionLimit %v: %v", limit, err)
+		}
+		got := cfg.(*components.PostgresqlConfig).ManagedRoles[0].ConnectionLimit
+		if got == nil || *got != int64(limit) {
+			t.Errorf("connectionLimit %v: stored %v", limit, got)
+		}
+	}
+}
+
 // TestPostgresqlConfig_Generate_ForwardsEveryResourceName pins go-kure/launcher#484: every
 // resource name the shared parser admits — not only cpu/memory — reaches the Cluster's
 // spec.resources, on both sides, with its authored quantity.
