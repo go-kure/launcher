@@ -42,6 +42,7 @@ func TestClassifyComponent_DefaultMap(t *testing.T) {
 		{"helmtemplate", TierApps},
 		{"statefulset", TierApps},
 		{"postgresql", TierServices},
+		{"cnpg-cluster", TierServices},
 		{"daemonset", TierInfra},
 		{"crd", TierApps},
 		{"manifests", TierApps},
