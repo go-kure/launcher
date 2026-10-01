@@ -1057,6 +1057,9 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		if origin == (Origin{}) {
 			origin = Origin{Document: doc.Metadata.Name, DocumentKind: doc.Kind, Namespace: doc.Metadata.Namespace}
 		}
+		if err := t.enforceAuthoredComponentReservations(doc, origin); err != nil {
+			return nil, false, nil, err
+		}
 		lctx := LoweringContext{Document: doc, Capabilities: ctx.Capabilities, Origin: origin, Namer: namer}
 		result, err := rule.LowerDocument(doc, lctx)
 		if err != nil {
@@ -1117,12 +1120,17 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 				// (possibly "", if never itself the direct output of an earlier
 				// rule) instead of being misattributed to this document rule.
 				compOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: j, Rule: origin.Rule}
+				// The same check decides Component.synthesized: a forwarded component
+				// keeps whatever it already was (authored, or synthesized by an earlier
+				// rule); anything else is this rule's output.
 				if isForwardedComponent(comp, originalComponents) {
 					if prior, ok := comp.Origin(); ok {
 						compOrigin.Rule = prior.Rule
 					} else {
 						compOrigin.Rule = ""
 					}
+				} else {
+					comp.synthesized = true
 				}
 				comp.origin = &compOrigin
 				if err := t.sealNestedTraitsInDocument(comp, compOrigin, originalComponents); err != nil {
@@ -1213,8 +1221,10 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// Round-9 Codex regression: this was missing here, so a ComponentLoweringRule
 			// — reachable via the same public RegisterComponentLowering extension point a
 			// TraitLoweringRule uses — could accept an authored platform-reserved value
-			// with no enforcement at all.
-			if p, ok := rule.(PropertySchemaProvider); ok {
+			// with no enforcement at all. A component an earlier rule synthesized is
+			// exempt (Component.synthesized): its properties are that rule's output, and
+			// what was authored in that rule's input was checked before it ran.
+			if p, ok := rule.(PropertySchemaProvider); ok && !comp.synthesized {
 				if err := enforcePlatformReserved(p.PropertySchema(), comp.Properties, "properties"); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
@@ -1235,6 +1245,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			names := make([]string, len(result.Components))
 			for j := range result.Components {
 				result.Components[j].origin = &compOrigin
+				result.Components[j].synthesized = true
 				names[j] = result.Components[j].Name
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
@@ -1374,6 +1385,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			newTraits = append(newTraits, result.Traits...)
 			for j := range result.Components {
 				result.Components[j].origin = &traitOrigin
+				result.Components[j].synthesized = true
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
@@ -1610,6 +1622,43 @@ func forwardableTraits(traits []Trait) []Trait {
 // reached through two references) — identity, not equality of contents.
 func sameMap(a, b map[string]any) bool {
 	return reflect.ValueOf(a).UnsafePointer() == reflect.ValueOf(b).UnsafePointer()
+}
+
+// enforceAuthoredComponentReservations runs the D3 check (enforcePlatformReserved) on
+// every component of doc that no lowering rule synthesized, against the schema that
+// component would later be checked against: its ComponentLoweringRule's when one is
+// registered (lowerDocumentBody's pre-rule check), else its dispatchable handler's
+// (createApplications). It runs before a DocumentLoweringRule because such a rule may
+// rebuild a component by value, and an emitted component that is not pointer-identical
+// to an input one (isForwardedComponent) is marked synthesized and exempt from both
+// later checks; without this, an authored reserved value could pass through a
+// document rule unchecked. A type with no schema reserves nothing here, and an unknown
+// type is the validator's business.
+func (t *Transformer) enforceAuthoredComponentReservations(doc *Application, docOrigin Origin) error {
+	for i := range doc.Spec.Components {
+		comp := &doc.Spec.Components[i]
+		if comp.synthesized {
+			continue
+		}
+		var provider any
+		if rule, ok := t.componentLoweringRules[comp.Type]; ok {
+			provider = rule
+		} else if h := t.findComponentHandler(comp.Type); h != nil {
+			provider = h
+		}
+		p, ok := provider.(PropertySchemaProvider)
+		if !ok {
+			continue
+		}
+		if err := enforcePlatformReserved(p.PropertySchema(), comp.Properties, "properties"); err != nil {
+			compOrigin, stamped := comp.Origin()
+			if !stamped {
+				compOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Namespace: docOrigin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: i}
+			}
+			return errors.Wrapf(err, "%s", compOrigin)
+		}
+	}
+	return nil
 }
 
 // isForwardedComponent is isForwardedTrait's component-position counterpart, used

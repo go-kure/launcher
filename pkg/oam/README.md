@@ -410,6 +410,16 @@ synthesized trait next to the authored ones; a copy whose type or properties map
 rule replaced counts as synthesized. A forwarded trait's `Origin.Index` stays its
 authored slot even when the rule places its own trait ahead of it.
 
+A component a rule emits is synthesized in the same sense: its properties are the
+rule's output, so a `PlatformReserved` value the rule rendered from
+`LoweringContext.Capabilities` is accepted rather than rejected as authored. A
+component a `DocumentLoweringRule` forwards — the same element of
+`doc.Spec.Components`, not a copy — stays authored. What a user wrote is checked
+before any rule can rewrite it: before a `ComponentLoweringRule` claims the
+component, and for every component of a document before its `DocumentLoweringRule`
+runs, so rebuilding a component by value does not launder an authored reserved
+value.
+
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the
 required `ClusterProfile` capability fails with `ErrMissingCapability`. A rule that
@@ -666,13 +676,10 @@ Two things this deliberately does not do:
   so reservation keeps treating an explicit null as *present* while the strip
   treats one as absent. Exempting reserved keys here would not have preserved the
   authored rule; it would only have handed a reserved null to the type check,
-  producing a loud rejection with the wrong reason. On the **component** surface
-  they do meet: the component-side checks also run on rule-produced components,
-  whose properties have already been through the strip, so a rule-emitted reserved
-  key set to null is never flagged. That is latent rather than live — every
-  `PlatformReserved` field declared today is on a trait schema, none on a component
-  schema, which also means those component-side checks cannot currently fire at
-  all. Tracked as `go-kure/launcher#429`.
+  producing a loud rejection with the wrong reason. The **component** surface keeps
+  the same separation: an authored component is checked before any rule can
+  rewrite it, and a component a rule emitted — whose properties are the ones the
+  strip touches — is exempt from reservation, as a sealed trait is.
 - **A key the schema does not declare is untouched**, including inside an object
   that sets `AdditionalProperties`. Nothing describes such a value, so nothing
   here can normalise it, and a null inside an opaque object still reaches the
