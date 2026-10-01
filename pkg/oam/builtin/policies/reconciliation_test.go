@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/policies"
+	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
 )
 
 func TestReconciliationSettingsHandler_CanHandle(t *testing.T) {
@@ -249,5 +250,64 @@ func TestReconciliationSettingsHandler_DurationErrorWrapsCause(t *testing.T) {
 	_, parseErr := time.ParseDuration("bogus")
 	if stderrors.Unwrap(err) == nil || stderrors.Unwrap(err).Error() != parseErr.Error() {
 		t.Errorf("error %q does not wrap the ParseDuration error %q", err, parseErr)
+	}
+}
+
+// TestReconciliationSettingsHandler_RefusesDurationsBelowFluxResolution guards
+// go-kure/launcher#621: a duration that is a Flux duration as authored but that
+// the generated Kustomization's metav1.Duration would emit outside Flux's pattern
+// (500µs) or as 0s for a positive value is refused, with the emitted form in the
+// message and the *fluxduration.ResolutionError in the chain.
+func TestReconciliationSettingsHandler_RefusesDurationsBelowFluxResolution(t *testing.T) {
+	cases := []struct {
+		field, value, emitted string
+	}{
+		{"interval", "0.5ms", "500µs"},
+		{"retryInterval", "0.0000000001ms", "0s"},
+		{"timeout", "0.999ms", "999µs"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.field+"="+tc.value, func(t *testing.T) {
+			h := &policies.ReconciliationSettingsHandler{}
+			result := oam.NewPolicyResult()
+			policy := &oam.ApplicationPolicy{Name: "recon", Type: "reconciliation", Properties: map[string]any{tc.field: tc.value}}
+			err := h.Apply(policy, nil, result)
+			if err == nil {
+				t.Fatalf("%s %q: expected an error", tc.field, tc.value)
+			}
+			want := `policy "recon": ` + tc.field + ` "` + tc.value + `" is invalid: "` + tc.value + `" is emitted as "` +
+				tc.emitted + `", below Flux's millisecond resolution (use 0s or at least 1ms)`
+			if err.Error() != want {
+				t.Errorf("error = %q, want %q", err, want)
+			}
+			var re *fluxduration.ResolutionError
+			if !stderrors.As(err, &re) || re.Value != tc.value || re.Emitted != tc.emitted {
+				t.Errorf("error %q: want a *fluxduration.ResolutionError{Value: %q, Emitted: %q} in its chain, got %+v", err, tc.value, tc.emitted, re)
+			}
+			if result.ReconciliationSettings != nil {
+				t.Error("a refused policy left ReconciliationSettings set")
+			}
+		})
+	}
+}
+
+// TestReconciliationSettingsHandler_AcceptsEmittableDurations: the emitted-form
+// check refuses nothing Flux accepts — zero, a whole millisecond, a fractional
+// millisecond at or above 1ms, and a compound duration all pass unchanged.
+func TestReconciliationSettingsHandler_AcceptsEmittableDurations(t *testing.T) {
+	for _, value := range []string{"0s", "1ms", "1.5ms", "1h30m"} {
+		h := &policies.ReconciliationSettingsHandler{}
+		result := oam.NewPolicyResult()
+		policy := &oam.ApplicationPolicy{Name: "recon", Type: "reconciliation", Properties: map[string]any{
+			"interval": value, "retryInterval": value, "timeout": value,
+		}}
+		if err := h.Apply(policy, nil, result); err != nil {
+			t.Errorf("%q: unexpected error: %v", value, err)
+			continue
+		}
+		s := result.ReconciliationSettings
+		if s.Interval != value || s.RetryInterval != value || s.Timeout != value {
+			t.Errorf("%q: durations = %q/%q/%q, want the authored value unchanged", value, s.Interval, s.RetryInterval, s.Timeout)
+		}
 	}
 }
