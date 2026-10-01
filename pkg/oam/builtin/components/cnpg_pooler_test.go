@@ -270,6 +270,15 @@ func TestCnpgPoolerConfig_ApplyPolicy(t *testing.T) {
 		{"hostPath volume",
 			tmpl(map[string]any{"containers": []any{}, "volumes": []any{map[string]any{"name": "h", "hostPath": map[string]any{"path": "/"}}}}),
 			&stubPolicy{}, `template.spec: volume "h": hostPath volumes are not allowed by environment policy`},
+		{"pod hostProcess",
+			tmpl(map[string]any{"containers": []any{}, "securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}}),
+			&stubPolicy{}, "template.spec.securityContext.windowsOptions.hostProcess is not allowed by environment policy"},
+		{"pod cpu limit above the maximum",
+			tmpl(map[string]any{"containers": []any{}, "resources": map[string]any{"limits": map[string]any{"cpu": "2"}}}),
+			&stubPolicy{maxCPU: "1"}, `template.spec: resources cpu limit "2" exceeds enforced maximum "1"`},
+		{"pod memory request above the maximum",
+			tmpl(map[string]any{"containers": []any{}, "resources": map[string]any{"requests": map[string]any{"memory": "2Gi"}}}),
+			&stubPolicy{maxMemory: "1Gi"}, `template.spec: resources memory request "2Gi" exceeds enforced maximum "1Gi"`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := newCnpgPooler(t, tt.props).ApplyPolicy(tt.policy)
@@ -322,6 +331,34 @@ func TestCnpgPoolerConfig_GenerateRevalidates(t *testing.T) {
 			_, err := c.Generate(stack.NewApplication(tt.app, "data", c))
 			if err == nil || !strings.Contains(err.Error(), tt.wantSub) {
 				t.Errorf("err = %v, want it to contain %q", err, tt.wantSub)
+			}
+		})
+	}
+}
+
+// TestCnpgPoolerConfig_Generate_TemplateWithoutContainers: a metadata-only
+// template serializes with containers: [] rather than null, which the API
+// server would prune before checking the CRD's required containers. An
+// authored container list is kept as written.
+func TestCnpgPoolerConfig_Generate_TemplateWithoutContainers(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		template map[string]any
+		want     string
+	}{
+		{"metadata only", map[string]any{"metadata": map[string]any{"labels": map[string]any{"team": "orders"}}}, `"containers":[]`},
+		{"empty spec", map[string]any{"spec": map[string]any{}}, `"containers":[]`},
+		{"authored container", map[string]any{"spec": map[string]any{"containers": []any{map[string]any{"name": "pgbouncer"}}}}, `"containers":[{"name":"pgbouncer"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := minimalPooler()
+			p["template"] = tt.template
+			raw, err := json.Marshal(generateCnpgPooler(t, newCnpgPooler(t, p)).Spec.Template)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if !strings.Contains(string(raw), tt.want) {
+				t.Errorf("template = %s, want it to contain %s", raw, tt.want)
 			}
 		})
 	}

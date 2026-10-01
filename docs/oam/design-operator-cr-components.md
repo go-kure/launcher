@@ -53,7 +53,12 @@ the API server would have applied. `DatabaseSpec` has the same shape one level
 down: the `ensure` of each schema, extension, fdw and server has no
 `omitempty` and a CRD default of `present`, so an unauthored one would reach the
 API server as `""`, which the CRD's enum refuses. `cnpg-database` writes
-`present` there. A second derived test pins these lists the same way as the
+`present` there. A `Pooler` template is the third case: its `spec` is not a
+pointer and `containers` has no `omitempty`, so a template that lists no
+containers would carry `containers: null`, which the API server prunes before
+checking the CRD's required list. `cnpg-pooler` writes `containers: []`, which
+the operator reads as it reads an omitted spec, adding its `pgbouncer`
+container. A second derived test pins these lists the same way as the
 omitted-zero list below: the CRD's scalar defaults crossed with the Go type's
 non-pointer fields without `omitempty`.
 
@@ -209,6 +214,11 @@ output is intended to stay identical.
 - An authored `ensure: ""` on a `Database` schema, extension, fdw or server is
   read as unset and written as `present`; the CRD's enum would refuse it as
   written.
+- The CRDs' validation rules (CEL) are left to the API server, except the
+  `ObjectStore`'s ban on `configuration.serverName`, which `cnpg-objectstore`
+  refuses because the shared Barman type invites it. `postgresql` still
+  forwards its `objectStore.serverName` into the `ObjectStore` it emits;
+  `postgresql` is unchanged here.
 - `postgresql` does not apply the registry allowlist to its image, while
   `cnpg-cluster` applies it to `imageName`, so a lowered `postgresql` whose
   image comes from a registry outside the list would be refused: the follow-up

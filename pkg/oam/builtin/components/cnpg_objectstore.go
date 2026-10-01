@@ -34,7 +34,7 @@ func (h *CnpgObjectStoreHandler) CanHandle(componentType string) bool {
 func (h *CnpgObjectStoreHandler) PropertySchema() map[string]oam.PropertySchema {
 	const ref = " Decoded strictly into the Barman Cloud plugin API type: see the ObjectStoreSpec reference in the plugin's documentation for its fields."
 	return map[string]oam.PropertySchema{
-		"configuration":                {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Required. The object store: destinationPath (required), endpointURL, serverName, the s3Credentials, azureCredentials or googleCredentials, and the wal and data backup settings." + ref},
+		"configuration":                {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Required. The object store: destinationPath (required), endpointURL, the s3Credentials, azureCredentials or googleCredentials, and the wal and data backup settings." + ref},
 		"retentionPolicy":              {Type: oam.PropertyTypeString, Description: "How long backups are kept, as <n><d|w|m> (for example 30d)."},
 		"instanceSidecarConfiguration": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Configuration of the plugin sidecar in the Cluster's instance pods: env, resources, retentionPolicyIntervalSeconds, additionalContainerArgs, logLevel. A policy cpu/memory maximum caps its resources." + ref},
 	}
@@ -78,10 +78,14 @@ type CnpgObjectStoreConfig struct {
 }
 
 // validate refuses a spec the ObjectStore CRD would refuse for a reason the
-// strict decode cannot see.
+// strict decode cannot see: no destination path, or a server name, which the
+// shared Barman type carries but the plugin's CRD forbids on an ObjectStore.
 func (c *CnpgObjectStoreConfig) validate() error {
 	if c.Spec.Configuration.DestinationPath == "" {
 		return errors.New("configuration.destinationPath: required (the object store path backups and WAL are written to)")
+	}
+	if c.Spec.Configuration.ServerName != "" {
+		return errors.New("configuration.serverName: not allowed on an ObjectStore (set the serverName plugin parameter in the Cluster that uses it)")
 	}
 	return nil
 }
