@@ -461,9 +461,9 @@ Runs on main and `release/*` branches only (not PRs):
    is still the highest stable tag (the same rule Publish uses) and the checkout is that tag's
    commit. If the label is no longer the highest stable tag, it deploys the slot and leaves the
    root untouched. If it is, but the label is not an existing tag or the checked-out commit is not
-   the tag's, the deploy fails and pushes nothing. For a dispatch from another ref, re-dispatch
-   with `--ref <label>`; for a label that is not a tag, dispatch again with an existing release
-   tag as the label.
+   the tag's, the deploy fails and pushes nothing. Dispatch again with an existing release tag as
+   both the ref and the label (`--ref <tag> -f version_label=<tag>`): the same tag when only the
+   ref was wrong, another existing one when the label was not a tag.
 
 **Credentials.** The launcher checkout sets `persist-credentials: false`: the repository is
 public, so the action's tag fetch needs no token, and no later step can read the job token from
