@@ -183,7 +183,8 @@ func TestCnpgClusterHandler_StrictDecode(t *testing.T) {
 		{"wrong nested type", map[string]any{"storage": map[string]any{"size": 5}}, "cannot unmarshal number"},
 		{"wrong top-level scalar type", map[string]any{"enablePDB": "true"}, "cannot unmarshal string"},
 		{"non-integer instances", map[string]any{"instances": "3"}, "instances"},
-		{"negative instances", map[string]any{"instances": -1}, "instances: must be >= 0, got -1"},
+		{"negative instances", map[string]any{"instances": -1}, "instances: must be >= 1, got -1"},
+		{"zero instances", map[string]any{"instances": 0}, "instances: must be >= 1, got 0"},
 		{"fractional instances", map[string]any{"instances": 1.5}, "instances: must be an integer, got float64 1.5 (not a whole number)"},
 		{"out-of-range instances", map[string]any{"instances": int64(1) << 40}, "instances: must be an integer between -2147483648 and 2147483647, got 1099511627776"},
 		{"instances beyond int64", map[string]any{"instances": uint64(1) << 63}, "instances: must be an integer between -2147483648 and 2147483647, got 9223372036854775808"},
@@ -244,7 +245,6 @@ func TestCnpgClusterHandler_RefusesUncarriedValues(t *testing.T) {
 	}
 	t.Run("carried values are accepted and emitted", func(t *testing.T) {
 		c := newCnpgCluster(t, map[string]any{
-			"instances": 0,
 			"enablePDB": false,
 			"storage":   map[string]any{"size": ""},
 			"managed":   map[string]any{"roles": []any{map[string]any{"name": "a", "connectionLimit": 5}}},
@@ -255,8 +255,8 @@ func TestCnpgClusterHandler_RefusesUncarriedValues(t *testing.T) {
 			},
 		})
 		s := generateCnpgCluster(t, c).Spec
-		if s.Instances != 0 || s.EnablePDB == nil || *s.EnablePDB {
-			t.Errorf("instances/enablePDB = %d/%v, want the authored 0/false", s.Instances, s.EnablePDB)
+		if s.EnablePDB == nil || *s.EnablePDB {
+			t.Errorf("enablePDB = %v, want the authored false", s.EnablePDB)
 		}
 		if roles := s.Managed.Roles; len(roles) != 1 || roles[0].ConnectionLimit != 5 {
 			t.Errorf("roles = %+v, want connectionLimit 5", roles)
@@ -478,6 +478,13 @@ func TestCnpgClusterConfig_ApplyPolicy_Instances(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
+	t.Run("a policy default below the CRD minimum is refused", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{})
+		err := c.ApplyPolicy(&stubPolicy{defaultReplicas: int32ptr(0)})
+		if err == nil || err.Error() != "instances: must be >= 1, got 0 from the policy default" {
+			t.Errorf("err = %v", err)
+		}
+	})
 	t.Run("maximum refuses a policy-defaulted count", func(t *testing.T) {
 		c := newCnpgCluster(t, map[string]any{})
 		if err := c.ApplyPolicy(&stubPolicy{defaultReplicas: int32ptr(4), maxReplicas: int32ptr(3)}); err == nil {
@@ -581,20 +588,20 @@ func TestCnpgClusterConfig_ApplyPolicy_StorageDefault(t *testing.T) {
 			t.Errorf("size/instances = %q/%d, want the decoded 5Gi/2", c.Spec.StorageConfiguration.Size, c.Spec.Instances)
 		}
 	})
-	// The decoded spec cannot tell an authored "" size or 0 instances from
-	// absence, so the raw-map check itself must accept every spelling.
-	t.Run("case-variant empty size and zero instances count as authored", func(t *testing.T) {
+	// The decoded spec cannot tell an authored "" size from absence, so the
+	// raw-map check itself must accept every spelling.
+	t.Run("case-variant empty size and authored instances count as authored", func(t *testing.T) {
 		for name, props := range map[string]map[string]any{
-			"storage.Size":         {"Instances": 0, "storage": map[string]any{"Size": ""}},
-			"Storage.size":         {"INSTANCES": 0, "Storage": map[string]any{"size": ""}},
-			"Storage.PvcTemplate":  {"instances": 0, "Storage": map[string]any{"PvcTemplate": map[string]any{"Resources": map[string]any{"Requests": map[string]any{"storage": "7Gi"}}}}},
-			"exact, for reference": {"instances": 0, "storage": map[string]any{"size": ""}},
+			"storage.Size":         {"Instances": 2, "storage": map[string]any{"Size": ""}},
+			"Storage.size":         {"INSTANCES": 2, "Storage": map[string]any{"size": ""}},
+			"Storage.PvcTemplate":  {"instances": 2, "Storage": map[string]any{"PvcTemplate": map[string]any{"Resources": map[string]any{"Requests": map[string]any{"storage": "7Gi"}}}}},
+			"exact, for reference": {"instances": 2, "storage": map[string]any{"size": ""}},
 		} {
 			c := newCnpgCluster(t, props)
 			if err := c.ApplyPolicy(&stubPolicy{defaultStorageSize: "20Gi", defaultReplicas: int32ptr(3)}); err != nil {
 				t.Fatalf("%s: ApplyPolicy: %v", name, err)
 			}
-			if c.Spec.StorageConfiguration.Size != "" || c.Spec.Instances != 0 {
+			if c.Spec.StorageConfiguration.Size != "" || c.Spec.Instances != 2 {
 				t.Errorf("%s: size/instances = %q/%d; a policy default replaced an authored value", name, c.Spec.StorageConfiguration.Size, c.Spec.Instances)
 			}
 		}
@@ -607,8 +614,19 @@ func TestCnpgClusterConfig_ApplyPolicy_StorageDefault(t *testing.T) {
 	})
 	t.Run("case-variant negative instances is refused", func(t *testing.T) {
 		if err := cnpgClusterErr(t, map[string]any{"Instances": -1}); err == nil ||
-			!strings.Contains(err.Error(), "instances: must be >= 0, got -1") {
+			!strings.Contains(err.Error(), "instances: must be >= 1, got -1") {
 			t.Errorf("err = %v", err)
+		}
+	})
+	// The decoded spec reads an authored 0 as absence, so only the raw-map
+	// read sees it; a case-variant spelling must reach the refusal too, not
+	// be replaced by a default.
+	t.Run("case-variant zero instances is refused", func(t *testing.T) {
+		for _, key := range []string{"Instances", "INSTANCES"} {
+			if err := cnpgClusterErr(t, map[string]any{key: 0}); err == nil ||
+				err.Error() != "instances: must be >= 1, got 0" {
+				t.Errorf("%s: err = %v", key, err)
+			}
 		}
 	})
 	t.Run("no fallback without a policy default", func(t *testing.T) {

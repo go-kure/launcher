@@ -168,11 +168,11 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	}
 
 	// Read ahead of the decode, with the helper every kind uses for replicas, so
-	// a non-integer or out-of-range value is refused by name and a negative one
-	// gets the same refusal postgresql's replicas does. encoding/json matches
-	// field names case-insensitively, so "Instances" sets the field too: every
-	// spelling the decoder accepts is read, or an authored 0 in another
-	// spelling would count as unauthored and a default would replace it.
+	// a non-integer or out-of-range value is refused by name. encoding/json
+	// matches field names case-insensitively, so "Instances" sets the field
+	// too: every spelling the decoder accepts is read, or an authored 0 in
+	// another spelling would count as unauthored, and a default would replace
+	// it instead of the refusal below.
 	instancesAuthored := false
 	for _, key := range foldedFieldKeys(props, "instances") {
 		_, present, err := parseInt32Field(map[string]any{key: jsonNumberValue(props[key])}, key, "instances")
@@ -190,10 +190,13 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	// cannot drift from the decoder. The map reading stays for the values the
 	// decoded spec cannot distinguish from absence: instances 0 and a storage
 	// size of "".
-	if spec.Instances < 0 {
-		return nil, errors.Errorf("instances: must be >= 0, got %d", spec.Instances)
-	}
 	explicitInstances := instancesAuthored || spec.Instances != 0
+	// The CRD declares Minimum=1 on ClusterSpec.Instances, so an authored 0
+	// would build a Cluster the API server refuses. Stricter than postgresql's
+	// replicas, which refuses only a negative count.
+	if explicitInstances && spec.Instances < 1 {
+		return nil, errors.Errorf("instances: must be >= 1, got %d", spec.Instances)
+	}
 	if !explicitInstances {
 		spec.Instances = cnpgClusterDefaultInstances
 	}
@@ -588,6 +591,14 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 		return errors.Errorf("instances %d is out of range", c.Spec.Instances)
 	}
 	instances := applyDefaultReplicas(int32(c.Spec.Instances), c.explicitInstances, p.DefaultReplicas()) //nolint:gosec // range checked above
+	// An authored count was checked at parse time; a policy default below the
+	// CRD's minimum is refused the same way rather than emitted.
+	if instances < 1 {
+		if !c.explicitInstances && p.DefaultReplicas() != nil {
+			return errors.Errorf("instances: must be >= 1, got %d from the policy default", instances)
+		}
+		return errors.Errorf("instances: must be >= 1, got %d", instances)
+	}
 	c.Spec.Instances = int(instances)
 	if err := applyDefaultQuantity(&c.Spec.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
 		return err
