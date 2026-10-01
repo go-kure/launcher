@@ -2214,12 +2214,13 @@ not part of either change.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.
   `targetNamespace` has no default (go-kure/launcher#622). Unset, the
-  Kustomization emits no `spec.targetNamespace` and each object in the
-  artifact keeps the namespace it carries; kustomize-controller does not fill
-  in its own namespace for an object that has none. Author `targetNamespace`
-  when the artifact contains namespaced objects without a namespace: they
-  otherwise fail at apply with `namespace not specified`, with or without a
-  Flux namespace. This deliberately differs from `helmchart` (`delivery:
+  Kustomization emits no `spec.targetNamespace` and each object keeps the
+  namespace the artifact's own kustomize build gives it: the one it carries,
+  or a `namespace` set in the artifact's `kustomization.yaml`.
+  kustomize-controller does not fill in its own namespace for an object that
+  still has none. Author `targetNamespace` when namespaced objects are left
+  without a namespace after that build: they otherwise fail at apply with
+  `namespace not specified`, with or without a Flux namespace. This deliberately differs from `helmchart` (`delivery:
   native`) and `helmrelease`, which under a Flux namespace default
   `targetNamespace` to the application namespace. A Kustomization's
   `targetNamespace` sets or overrides the namespace of every namespaced object
