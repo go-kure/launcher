@@ -86,10 +86,17 @@ func ClassifyComponent(c *Component) (Tier, error) {
 // (synthesized) component of one of these types deploys in TierInfra, the earliest tier:
 // the consumers keep their own tier, from an annotation or a placement policy, and a source
 // in a later tier than a consumer would never be applied, since that tier waits on the
-// consumer's health check. An authored source keeps defaultTierMap's tier.
+// consumer's health check. An authored source keeps defaultTierMap's tier, and a placement
+// policy cannot move a generated one out of TierInfra (TransformWithPolicy).
 var generatedSourceTypes = map[string]bool{
 	"helmrepository": true,
 	"ocirepository":  true,
+}
+
+// isGeneratedSource reports whether c is a Flux source a lowering rule emitted on its
+// consumers' behalf (generatedSourceTypes).
+func isGeneratedSource(c *Component) bool {
+	return c.synthesized && generatedSourceTypes[c.Type]
 }
 
 // ClassifyComponentWithDomain returns the deployment tier for the given component, reading
@@ -113,7 +120,7 @@ func ClassifyComponentWithDomain(c *Component, domain string) (Tier, error) {
 		}
 		return tier, nil
 	}
-	if c.synthesized && generatedSourceTypes[c.Type] {
+	if isGeneratedSource(c) {
 		return TierInfra, nil
 	}
 	if tier, ok := defaultTierMap[c.Type]; ok {

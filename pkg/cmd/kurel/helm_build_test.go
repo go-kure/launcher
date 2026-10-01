@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -175,6 +176,36 @@ func TestBuiltinHelm_PlacementInInfraBuilds(t *testing.T) {
 	}
 	if len(result.TierOverrides) == 0 {
 		t.Fatalf("TierOverrides empty; the case must exercise placement")
+	}
+	assertNoConsumerPrecedesSource(t, cluster)
+}
+
+// TestBuiltinHelm_PlacementCannotMoveGeneratedSource: a placement policy naming
+// the generated source may keep it in infra, but moving it to a later tier is
+// refused. Its consumer, placed in infra, would otherwise never become ready.
+func TestBuiltinHelm_PlacementCannotMoveGeneratedSource(t *testing.T) {
+	placement := func(tier string) string {
+		return `    - name: api-first
+      type: placement
+      properties:
+        component: api
+        tier: infra
+    - name: source-late
+      type: placement
+      properties:
+        component: ` + helmSharedSource() + `
+        tier: ` + tier + "\n"
+	}
+	_, _, err := transformWithBuiltins(t, helmAppHeader+helmDependsOn+placement("apps"))
+	if err == nil || !strings.Contains(err.Error(), "placement cannot move helmrepository "+strconv.Quote(helmSharedSource())+" to tier apps") {
+		t.Fatalf("Transform error = %v, want the generated source's placement refused", err)
+	}
+	cluster, result, err := transformWithBuiltins(t, helmAppHeader+helmDependsOn+placement("infra"))
+	if err != nil {
+		t.Fatalf("Transform with the source placed in infra: %v", err)
+	}
+	if result.TierOverrides[helmSharedSource()] != oam.TierInfra {
+		t.Fatalf("TierOverrides = %v, want the source placed in infra", result.TierOverrides)
 	}
 	assertNoConsumerPrecedesSource(t, cluster)
 }
