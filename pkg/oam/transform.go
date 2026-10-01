@@ -450,8 +450,9 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 	return &result, nil
 }
 
-// ComponentEndpoints returns the endpoints declared by the handler for comp.Type, or
-// (nil, nil) if comp is nil, no handler is registered, or the handler is not an
+// ComponentEndpoints returns the endpoints declared for comp.Type by its
+// ComponentLoweringRule, or by its handler when no rule claims the type, or (nil, nil)
+// if comp is nil, neither is registered, or the one registered is not an
 // EndpointProvider. It returns an error if a registered provider yields a malformed endpoint
 // (fail-fast: a broken handler surfaces early, not as a silent connectivity outage). Consumed
 // by a downstream platform to learn endpoint selectors when building its dependency graph.
@@ -459,7 +460,13 @@ func (t *Transformer) ComponentEndpoints(comp *Component) ([]netpol.Endpoint, er
 	if comp == nil {
 		return nil, nil
 	}
-	ep, ok := t.findComponentHandler(comp.Type).(EndpointProvider)
+	// A type is a rule or a handler, never both (RegisterComponent,
+	// RegisterComponentLowering), so this is never a choice.
+	var provider any = t.findComponentHandler(comp.Type)
+	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
+		provider = rule
+	}
+	ep, ok := provider.(EndpointProvider)
 	if !ok {
 		return nil, nil
 	}

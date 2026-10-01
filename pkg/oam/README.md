@@ -83,8 +83,8 @@ each a **separate** additive resource (the authored `networkpolicy` /
   operator-created pods (e.g. a CloudNativePG cluster's `cnpg.io/cluster` instance pods) that
   carry no component-provenance label. Fail-closed: each source must carry a namespace + a
   non-empty matchLabels pod selector (namespace-wide sources are dropped), and a policy with no
-  valid rule is not emitted. A component's endpoints are declared by its handler via the
-  optional `EndpointProvider` interface and read through `Transformer.ComponentEndpoints` — the
+  valid rule is not emitted. A component's endpoints are declared by its handler, or by
+  the `ComponentLoweringRule` claiming its type, via the optional `EndpointProvider` interface and read through `Transformer.ComponentEndpoints` — the
   producer half a downstream platform uses to learn the real selector (no hardcoding) and build
   its dependency graph. One policy is emitted **per distinct endpoint**: a single-endpoint
   component keeps the bare `{comp}-allow-endpoint-ingress` name, while a multi-endpoint component

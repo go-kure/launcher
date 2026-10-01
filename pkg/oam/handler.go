@@ -136,9 +136,9 @@ type LayoutAugmentationCoverage interface {
 	GenerateCoversAugmentLayout() bool
 }
 
-// EndpointProvider is an optional ComponentHandler interface: it declares the component's
-// in-cluster data-plane endpoints (selector + ports) that launcher knows deterministically
-// (e.g. an operator-managed database's instance pods). A downstream platform consumer calls
+// EndpointProvider is an optional ComponentHandler or ComponentLoweringRule interface: it
+// declares the component's in-cluster data-plane endpoints (selector + ports) that launcher
+// knows deterministically (e.g. an operator-managed database's instance pods). A downstream platform consumer calls
 // Transformer.ComponentEndpoints to learn these — to build its dependency graph and the
 // target-side allows it feeds back via TransformContext.IngressPeers — without hardcoding the
 // operator selector. It is not read by synthesis (synthesis emits from IngressPeers).
