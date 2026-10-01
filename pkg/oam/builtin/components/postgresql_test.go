@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1066,5 +1067,37 @@ func TestPostgresqlConfig_Generate_WithDatabaseExtensions(t *testing.T) {
 	}
 	if len(db.Spec.Extensions) != 2 {
 		t.Errorf("Extensions: expected 2, got %d", len(db.Spec.Extensions))
+	}
+}
+
+func TestPostgresqlHandler_NameBound(t *testing.T) {
+	h := &components.PostgresqlHandler{}
+	for _, name := range []string{"1db", "db.main", strings.Repeat("a", 51)} {
+		comp := &oam.Component{Name: name, Type: "postgresql"}
+		want := fmt.Sprintf("postgresql name %q: must be a DNS-1035 label of at most 50 characters (CloudNativePG rejects longer or dotted cluster names)", name)
+		if _, err := h.ToApplicationConfig(comp, "data"); err == nil || err.Error() != want {
+			t.Errorf("ToApplicationConfig(%q): err = %v, want %q", name, err, want)
+		}
+		if _, err := h.Endpoints(comp); err == nil || err.Error() != want {
+			t.Errorf("Endpoints(%q): err = %v, want %q", name, err, want)
+		}
+		// A config built without ToApplicationConfig is named by the application.
+		pc := newPostgresqlApp(t, map[string]any{})
+		if _, err := pc.Generate(stack.NewApplication(name, "data", pc)); err == nil || err.Error() != want {
+			t.Errorf("Generate(%q): err = %v, want %q", name, err, want)
+		}
+	}
+	longest := strings.Repeat("a", 50)
+	comp := &oam.Component{Name: longest, Type: "postgresql"}
+	cfg, err := h.ToApplicationConfig(comp, "data")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig(50 characters): %v", err)
+	}
+	if eps, err := h.Endpoints(comp); err != nil || eps[0].PodSelector.MatchLabels["cnpg.io/cluster"] != longest {
+		t.Errorf("Endpoints(50 characters) = %+v, %v", eps, err)
+	}
+	pc := cfg.(*components.PostgresqlConfig)
+	if _, err := pc.Generate(stack.NewApplication(longest, "data", pc)); err != nil {
+		t.Errorf("Generate(50 characters): %v", err)
 	}
 }

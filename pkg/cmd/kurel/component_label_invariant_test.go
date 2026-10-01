@@ -200,10 +200,11 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"statefulset": {props: workloadProps(map[string]any{"port": 5432, "affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: serviceNameRefusal, labelled: true, selectors: 3},
 	"service": {props: map[string]any{"ports": []any{map[string]any{"name": "http", "port": 80, "targetPort": 8080}}},
 		longRefusal: serviceNameRefusal, labelled: true},
-	"postgresql": {props: map[string]any{"version": "16", "storageSize": "10Gi"}},
-	// The Cluster's pods are created and labelled by the operator, so the
-	// component emits no `app` label and no pod selector of its own.
+	// The Cluster's pods are created and labelled by the operator, so these
+	// two components emit no `app` label and no pod selector of their own.
 	// CloudNativePG admits a Cluster name of at most 50 characters.
+	"postgresql": {props: map[string]any{"version": "16", "storageSize": "10Gi"},
+		nameBound: 50, longRefusal: "must be a DNS-1035 label of at most 50 characters"},
 	"cnpg-cluster": {props: map[string]any{"storage": map[string]any{"size": "10Gi"}},
 		nameBound: 50, longRefusal: "must be a DNS-1035 label of at most 50 characters"},
 	"helmchart": {props: map[string]any{"version": "v1.17.2",

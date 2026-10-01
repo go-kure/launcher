@@ -44,6 +44,17 @@ const (
 // PostgresqlHandler handles OAM postgresql components.
 type PostgresqlHandler struct{}
 
+// validatePostgresqlClusterName applies cnpg-cluster's Cluster-name rule
+// (validateCnpgClusterName) to a postgresql component, whose name becomes the
+// Cluster name and its cnpg.io/cluster selector value, and names this kind in
+// the error.
+func validatePostgresqlClusterName(name string) error {
+	if validateCnpgClusterName(name) != nil {
+		return errors.Errorf("postgresql name %q: must be a DNS-1035 label of at most %d characters (CloudNativePG rejects longer or dotted cluster names)", name, cnpgClusterNameMaxLength)
+	}
+	return nil
+}
+
 // CanHandle returns true for postgresql component type.
 func (h *PostgresqlHandler) CanHandle(componentType string) bool {
 	return componentType == "postgresql"
@@ -58,6 +69,11 @@ func (h *PostgresqlHandler) CanHandle(componentType string) bool {
 // because pooler pods carry a different label set and are not matched by the direct-cluster
 // selector.
 func (h *PostgresqlHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	// The selector carries the name verbatim, so a name the Cluster cannot
+	// have is refused here too, as cnpg-cluster refuses it.
+	if err := validatePostgresqlClusterName(component.Name); err != nil {
+		return nil, err
+	}
 	eps := []netpol.Endpoint{{
 		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: component.Name}},
 		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
@@ -133,6 +149,9 @@ func (h *PostgresqlHandler) PropertySchema() map[string]oam.PropertySchema {
 
 // ToApplicationConfig converts an OAM postgresql component to a PostgresqlConfig.
 func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	if err := validatePostgresqlClusterName(component.Name); err != nil {
+		return nil, err
+	}
 	config := &PostgresqlConfig{
 		Name:      component.Name,
 		Namespace: namespace,
@@ -928,6 +947,11 @@ func (c *PostgresqlConfig) Generate(app *stack.Application) ([]*client.Object, e
 }
 
 func (c *PostgresqlConfig) createCluster(app *stack.Application) (client.Object, error) {
+	// The Cluster is named from app.Name, so the parse-time name refusal is
+	// repeated for a config built without ToApplicationConfig.
+	if err := validatePostgresqlClusterName(app.Name); err != nil {
+		return nil, err
+	}
 	// Checked on the values the Cluster carries, so an authored value, a
 	// policy default and a directly built config are refused alike.
 	// ClusterSpec.Instances has Minimum=1, and CloudNativePG's webhook parses

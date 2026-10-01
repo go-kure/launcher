@@ -2345,6 +2345,14 @@ not part of either change.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.
+  The component name becomes the Cluster's name and its `cnpg.io/cluster`
+  endpoint selector, so it carries cnpg-cluster's name rule: a DNS-1035
+  label (no leading digit, no dot) of at most 50 characters. Any other name
+  is refused at parse time, when endpoints are collected and by `Generate`
+  (`postgresql name "db.main": must be a DNS-1035 label of at most 50
+  characters …`). **Behavior-changing** under `launcher.gokure.dev/v1alpha1`:
+  such a name used to build and was then refused by CloudNativePG at apply;
+  it is now refused at build (go-kure/launcher#615).
   An authored `version: ""` is refused by name (`version: must not be empty;
   omit it to default to "16"`), with or without `imageName`: it used to be
   kept as a value, so without `imageName` the cluster image was
