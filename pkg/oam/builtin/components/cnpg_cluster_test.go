@@ -841,7 +841,7 @@ func TestCnpgClusterHandler_Endpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Endpoints: %v", err)
 	}
-	want, err := (&components.PostgresqlHandler{}).Endpoints(&oam.Component{Name: "orders-db", Type: "postgresql"})
+	want, err := (postgresqlViaRule{}).Endpoints(&oam.Component{Name: "orders-db", Type: "postgresql"})
 	if err != nil {
 		t.Fatalf("postgresql Endpoints: %v", err)
 	}

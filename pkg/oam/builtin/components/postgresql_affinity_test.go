@@ -12,7 +12,7 @@ import (
 // failing the test — the rejection cases below assert on the error itself.
 func postgresqlConfigFor(t *testing.T, props map[string]any) (*components.PostgresqlConfig, error) {
 	t.Helper()
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name:       "db",
 		Type:       "postgresql",
@@ -21,7 +21,7 @@ func postgresqlConfigFor(t *testing.T, props map[string]any) (*components.Postgr
 	if err != nil {
 		return nil, err
 	}
-	return cfg.(*components.PostgresqlConfig), nil
+	return cfg.(*postgresqlViaRuleConfig).PostgresqlConfig, nil
 }
 
 // TestPostgresqlAffinity_WrongTypeIsRejected covers go-kure/launcher#448: every read in

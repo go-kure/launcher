@@ -8,7 +8,6 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // TestPostgresql_InheritedMetadataSharesNoMap is go-kure/launcher#396 part 2. The
@@ -17,7 +16,7 @@ import (
 // Generate from the same config returned different output than the first. Pointer
 // identity, not content: equal maps and one map read twice look the same by value.
 func TestPostgresql_InheritedMetadataSharesNoMap(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -30,7 +29,7 @@ func TestPostgresql_InheritedMetadataSharesNoMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
-	pc := cfg.(*components.PostgresqlConfig)
+	pc := cfg.(*postgresqlViaRuleConfig)
 
 	generate := func() *cnpgv1.Cluster {
 		t.Helper()

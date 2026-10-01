@@ -200,7 +200,7 @@ func TestCnpgPoolerHandler_NameBound(t *testing.T) {
 // an enabled pooler publishes for it, so a consumer's synthesized ingress
 // allow does not change when the pooler moves from one to the other.
 func TestCnpgPoolerHandler_EndpointMatchesPostgresqlPooler(t *testing.T) {
-	pg, err := (&components.PostgresqlHandler{}).Endpoints(&oam.Component{
+	pg, err := (postgresqlViaRule{}).Endpoints(&oam.Component{
 		Name: "orders-db", Type: "postgresql",
 		Properties: map[string]any{"pooler": map[string]any{"enabled": true}},
 	})

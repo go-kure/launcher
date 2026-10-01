@@ -604,6 +604,9 @@ type CnpgClusterConfig struct {
 
 	explicitInstances   bool
 	explicitStorageSize bool
+	// policyMaxStorageSize is the policy's maximum storage size as ApplyPolicy
+	// saw it, kept for ApplyPostgresqlDefaults, which fills a size after it.
+	policyMaxStorageSize string
 }
 
 // ApplyPolicy applies policy defaults, then enforces policy limits. The order
@@ -629,6 +632,7 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	if p == nil {
 		return nil
 	}
+	c.policyMaxStorageSize = p.MaxStorageSize()
 
 	if c.Spec.Instances > math.MaxInt32 || c.Spec.Instances < math.MinInt32 {
 		return errors.Errorf("instances %d is out of range", c.Spec.Instances)
@@ -716,6 +720,36 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 		if wo := psc.WindowsOptions; wo != nil && wo.HostProcess != nil && *wo.HostProcess {
 			return errors.New("podSecurityContext.windowsOptions.hostProcess is not allowed by environment policy")
 		}
+	}
+	return nil
+}
+
+// ApplyPostgresqlDefaults sets the values a postgresql component left to its
+// environment policy, on the Cluster after ApplyPolicy. It exists for the
+// synthesized trait the postgresql lowering rule attaches (engine-only, see
+// traits.PostgresqlDefaultsHandler) and is not an authoring surface: an
+// authored cnpg-cluster keeps the operator's defaults for both values.
+//
+//   - spec.enablePDB is set to instances > 1, read from the count the policy
+//     decided. A Cluster that already sets it is refused: two sources would
+//     decide one field.
+//   - spec.storage.size is set to postgresql's "1Gi" fallback when no storage
+//     spelling is set after the policy (not authored, no policy default), and
+//     the policy maximum ApplyPolicy saw is enforced on it with postgresql's
+//     text. ApplyPolicy cannot: the fallback is not a value the kind knows.
+func (c *CnpgClusterConfig) ApplyPostgresqlDefaults() error {
+	if c.Spec.EnablePDB != nil {
+		return errors.New("enablePDB is already set; the postgresql defaults decide it from the instance count")
+	}
+	enablePDB := c.Spec.Instances > 1
+	c.Spec.EnablePDB = &enablePDB
+
+	if size, _ := cnpgStorageRequest(&c.Spec.StorageConfiguration, "storage"); size == "" {
+		const fallback = "1Gi"
+		if err := enforceMaxStorageSize(fallback, c.policyMaxStorageSize); err != nil {
+			return err
+		}
+		c.Spec.StorageConfiguration.Size = fallback
 	}
 	return nil
 }

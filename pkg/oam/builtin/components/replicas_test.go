@@ -20,7 +20,7 @@ import (
 //
 // zeroRefused marks a kind whose emitted object cannot carry 0: a CNPG
 // Cluster's instances has Minimum=1, so postgresql parses 0 like every kind
-// and refuses it in Generate (go-kure/launcher#623).
+// and refuses it (go-kure/launcher#623) when it lowers onto the Cluster.
 var replicaKinds = []struct {
 	name        string
 	handler     oam.ComponentHandler
@@ -31,33 +31,17 @@ var replicaKinds = []struct {
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
 	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
-	{"postgresql", &components.PostgresqlHandler{}, map[string]any{}, true},
+	{"postgresql", postgresqlViaRule{}, map[string]any{}, true},
 }
 
-// replicasGenerateErr builds the kind, applies p when it is non-nil, and
-// returns Generate's error; ToApplicationConfig and ApplyPolicy must succeed.
-func replicasGenerateErr(t *testing.T, h oam.ComponentHandler, kind string, props map[string]any, p oam.Policy) error {
-	t.Helper()
-	cfg, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: kind, Properties: props}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	if p != nil {
-		if err := cfg.(oam.Enforceable).ApplyPolicy(p); err != nil {
-			t.Fatalf("ApplyPolicy: %v", err)
-		}
-	}
-	_, err = cfg.Generate(stack.NewApplication("app", "default", cfg))
-	return err
-}
-
-// expectZeroRefused asserts the zeroRefused kinds' Generate refusal of an
-// authored 0, the case the accepting tests below skip for them.
-func expectZeroRefused(t *testing.T, h oam.ComponentHandler, kind string, props map[string]any, p oam.Policy) {
+// expectZeroRefused asserts the zeroRefused kinds' refusal of an authored 0,
+// the case the accepting tests below skip for them. postgresql refuses it
+// when its rule lowers the component, so before ApplyPolicy and Generate.
+func expectZeroRefused(t *testing.T, h oam.ComponentHandler, kind string, props map[string]any, _ oam.Policy) {
 	t.Helper()
 	const want = "replicas: must be >= 1, got 0"
-	if err := replicasGenerateErr(t, h, kind, props, p); err == nil || err.Error() != want {
-		t.Errorf("Generate(replicas: 0) error = %v, want %q", err, want)
+	if _, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: kind, Properties: props}, "default"); err == nil || err.Error() != want {
+		t.Errorf("ToApplicationConfig(replicas: 0) error = %v, want %q", err, want)
 	}
 }
 

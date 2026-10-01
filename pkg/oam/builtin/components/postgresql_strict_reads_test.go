@@ -170,7 +170,7 @@ func TestPostgresql_BootstrapNullSiblingIsAbsent(t *testing.T) {
 // refused a typed nil as an invalid number.
 func TestPostgresql_TypedNullMatchesOmitted(t *testing.T) {
 	policy := &stubPolicy{defaultStorageSize: "20Gi"}
-	build := func(t *testing.T, props map[string]any) *components.PostgresqlConfig {
+	build := func(t *testing.T, props map[string]any) *postgresqlViaRuleConfig {
 		t.Helper()
 		pc := newPostgresqlApp(t, props)
 		if err := stack.ApplicationConfig(pc).(oam.Enforceable).ApplyPolicy(policy); err != nil {
@@ -180,10 +180,12 @@ func TestPostgresql_TypedNullMatchesOmitted(t *testing.T) {
 	}
 
 	t.Run("storageSize", func(t *testing.T) {
-		got := build(t, map[string]any{"storageSize": (*string)(nil)}).StorageSize
-		want := build(t, map[string]any{}).StorageSize
-		if got != want {
-			t.Errorf("typed-nil storageSize = %q, omitted = %q", got, want)
+		// Read off the Cluster after the policy: the policy default applies to
+		// the Cluster component the rule emits.
+		got := build(t, map[string]any{"storageSize": (*string)(nil)}).cluster().Spec.StorageConfiguration.Size
+		want := build(t, map[string]any{}).cluster().Spec.StorageConfiguration.Size
+		if got != want || want != "20Gi" {
+			t.Errorf("typed-nil storageSize = %q, omitted = %q, want both 20Gi", got, want)
 		}
 	})
 	t.Run("pooler.instances", func(t *testing.T) {
@@ -279,7 +281,7 @@ func TestPostgresql_EmptyEnumStillRefused(t *testing.T) {
 // "no pooler" — a NetworkPolicy endpoint missing for a pooler the build then refused
 // or, for a typed-nil pooler, never emitted.
 func TestPostgresql_EndpointsRefusesWrongTypedPooler(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.Endpoints(&oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{
 		"pooler": map[string]any{"enabled": "true"},
 	}})
@@ -300,7 +302,7 @@ func TestPostgresql_EndpointsRefusesWrongTypedPooler(t *testing.T) {
 // absent, it would declare no pooler endpoint for a document the config build then
 // refuses on the same value.
 func TestPostgresql_EndpointsRefusesWrongTypedPoolerEnvelope(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	cases := map[string]any{
 		"string": "x",
 		"bool":   true,
@@ -375,20 +377,23 @@ func TestPostgresql_EmptyVersionIsRefused(t *testing.T) {
 	}
 }
 
-// TestPostgresql_EmptyStorageSizeIsKept pins what an authored `storageSize: ""` does
-// today, as before the strict reads: it is copied through as authored, and because it
-// was authored neither the "1Gi" fallback nor a policy default replaces it — unlike a
-// null or typed nil (see TestPostgresql_TypedNullMatchesOmitted).
-func TestPostgresql_EmptyStorageSizeIsKept(t *testing.T) {
-	pc := newPostgresqlApp(t, map[string]any{"storageSize": ""})
+// TestPostgresql_EmptyStorageSizeIsRefused pins what an authored `storageSize: ""`
+// does: it is read as authored, so neither the "1Gi" fallback nor a policy default
+// replaces it — unlike a null or typed nil (see TestPostgresql_TypedNullMatchesOmitted)
+// — and the rule then refuses it. It used to build a Cluster with no storage size,
+// which CloudNativePG's webhook refuses ("Size not configured", cluster_webhook.go).
+func TestPostgresql_EmptyStorageSizeIsRefused(t *testing.T) {
+	comp := &oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{"storageSize": ""}}
+	pc, err := components.PostgresqlRule{}.Parse(comp)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
 	if pc.StorageSize != "" {
 		t.Errorf("storageSize \"\" read as %q, want it kept as authored", pc.StorageSize)
 	}
-	if err := stack.ApplicationConfig(pc).(oam.Enforceable).ApplyPolicy(&stubPolicy{defaultStorageSize: "20Gi"}); err != nil {
-		t.Fatalf("ApplyPolicy: %v", err)
-	}
-	if pc.StorageSize != "" {
-		t.Errorf("storageSize \"\" after policy = %q, want the authored value kept over the policy default", pc.StorageSize)
+	const want = "storageSize: must not be empty; omit it to take the policy default or 1Gi"
+	if _, err := (components.PostgresqlRule{}).LowerComponent(comp, oam.LoweringContext{Namer: oam.NewNameAllocator()}); err == nil || err.Error() != want {
+		t.Errorf("LowerComponent error = %v, want %q", err, want)
 	}
 }
 

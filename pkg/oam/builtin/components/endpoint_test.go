@@ -55,7 +55,7 @@ func TestWorker_NotEndpointProvider(t *testing.T) {
 }
 
 func TestPostgresqlHandler_Endpoints(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	eps, err := h.Endpoints(&oam.Component{Name: "orders-db", Type: "postgresql"})
 	if err != nil {
 		t.Fatalf("Endpoints: %v", err)
@@ -73,7 +73,7 @@ func TestPostgresqlHandler_Endpoints(t *testing.T) {
 }
 
 func TestPostgresqlHandler_Endpoints_Pooler(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 
 	// Pooler disabled (or absent) → only the direct-cluster endpoint.
 	eps, err := h.Endpoints(&oam.Component{Name: "orders-db", Type: "postgresql",

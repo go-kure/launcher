@@ -32,7 +32,7 @@ var resourceKinds = []struct {
 	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "0 2 * * *"}},
 	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"postgresql", &components.PostgresqlHandler{}, map[string]any{}},
+	{"postgresql", postgresqlViaRule{}, map[string]any{}},
 }
 
 // wrongResources is one wrongly typed value per shape an author plausibly writes,

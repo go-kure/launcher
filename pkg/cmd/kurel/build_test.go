@@ -463,14 +463,14 @@ spec:
 func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 	wantHandlers := []string{
 		"cnpg-cluster", "crd", "cronjob", "daemonset", "deployment", "helmchart", "helmrelease", "helmtemplate", "job", "manifests",
-		"oci", "passthrough", "postgresql", "service", "statefulset", "webservice",
+		"oci", "passthrough", "service", "statefulset", "webservice",
 		// The kind-named Flux source components (go-kure/launcher#347).
 		"bucket", "gitrepository", "helmrepository", "ocirepository",
 		// The CloudNativePG kind components beside cnpg-cluster (go-kure/launcher#573).
 		"cnpg-database", "cnpg-objectstore", "cnpg-pooler",
 	}
 	sort.Strings(wantHandlers)
-	wantRules := []string{"helm", "worker"}
+	wantRules := []string{"helm", "postgresql", "worker"}
 
 	got := make([]string, 0, len(builtinComponentHandlers()))
 	for name, h := range builtinComponentHandlers() {
@@ -518,6 +518,51 @@ func TestNewBuiltinTransformer_PublishesWorkerSchemaUnchanged(t *testing.T) {
 	}
 	if !bytes.Equal(append(got, '\n'), want) {
 		t.Error("the schema published for worker differs from the one the former handler published")
+	}
+}
+
+// TestNewBuiltinTransformer_PublishesPostgresqlSchemaUnchanged is
+// TestNewBuiltinTransformer_PublishesWorkerSchemaUnchanged for "postgresql",
+// against the schema the former PostgresqlHandler published
+// (pkg/oam/builtin/components/testdata/postgresql-property-schema.json).
+func TestNewBuiltinTransformer_PublishesPostgresqlSchemaUnchanged(t *testing.T) {
+	want, err := os.ReadFile("../../oam/builtin/components/testdata/postgresql-property-schema.json")
+	if err != nil {
+		t.Fatalf("reading the captured schema: %v", err)
+	}
+	published, ok := newBuiltinTransformer().HandlerSchemas().Components["postgresql"]
+	if !ok {
+		t.Fatal("HandlerSchemas() publishes no schema for postgresql")
+	}
+	got, err := json.MarshalIndent(published, "", "  ")
+	if err != nil {
+		t.Fatalf("encoding the schema: %v", err)
+	}
+	if !bytes.Equal(append(got, '\n'), want) {
+		t.Error("the schema published for postgresql differs from the one the former handler published")
+	}
+}
+
+// TestNewBuiltinTransformer_EngineTraitsAreNotPublished: the engine-only traits
+// are registered (a document using postgresql builds), are not among the traits a
+// document may author, and are left out of every listing a consumer reads.
+func TestNewBuiltinTransformer_EngineTraitsAreNotPublished(t *testing.T) {
+	tr := newBuiltinTransformer()
+	schemas := tr.HandlerSchemas().Traits
+	contracts := tr.HandlerContracts().Traits
+	for name := range builtinEngineTraits() {
+		if _, ok := builtinTraitHandlers()[name]; ok {
+			t.Errorf("engine-only trait %q is also in builtinTraitHandlers", name)
+		}
+		if _, ok := schemas[name]; ok {
+			t.Errorf("HandlerSchemas() publishes engine-only trait %q", name)
+		}
+		if _, ok := contracts[name]; ok {
+			t.Errorf("HandlerContracts() lists engine-only trait %q", name)
+		}
+	}
+	if _, ok := builtinEngineTraits()["cnpg-postgresql-defaults"]; !ok {
+		t.Error("builtinEngineTraits() does not register cnpg-postgresql-defaults, which the postgresql rule attaches")
 	}
 }
 

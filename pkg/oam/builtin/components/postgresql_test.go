@@ -15,11 +15,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 func TestPostgresqlHandler_CanHandle(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	if !h.CanHandle("postgresql") {
 		t.Error("expected CanHandle(postgresql) == true")
 	}
@@ -29,7 +28,7 @@ func TestPostgresqlHandler_CanHandle(t *testing.T) {
 }
 
 func TestPostgresqlHandler_Defaults(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name:       "db",
 		Type:       "postgresql",
@@ -38,7 +37,7 @@ func TestPostgresqlHandler_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
-	pc := cfg.(*components.PostgresqlConfig)
+	pc := cfg.(*postgresqlViaRuleConfig)
 	if pc.Provider != "cnpg" {
 		t.Errorf("Provider: got %q, want %q", pc.Provider, "cnpg")
 	}
@@ -54,7 +53,7 @@ func TestPostgresqlHandler_Defaults(t *testing.T) {
 }
 
 func TestPostgresqlHandler_InvalidProvider(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{"provider": "zalando"},
@@ -66,15 +65,16 @@ func TestPostgresqlHandler_InvalidProvider(t *testing.T) {
 
 // TestPostgresqlHandler_ManagedRoleConnectionLimit pins go-kure/launcher#659: a zero
 // connectionLimit is refused, since CloudNativePG would omit it and apply its default
-// -1 (no limit), at parse time and again by Generate for a directly built config;
-// -1 and a positive limit are carried.
+// -1 (no limit), when the rule lowers the component; -1 and a positive limit reach
+// the generated Cluster's managed role. The rule's own repeat of the refusal, for a
+// config built without Parse, is pinned in postgresql_lowering_internal_test.go.
 func TestPostgresqlHandler_ManagedRoleConnectionLimit(t *testing.T) {
 	roleWithLimit := func(limit float64) map[string]any {
 		return map[string]any{"managedRoles": []any{
 			map[string]any{"name": "app_user", "login": true, "connectionLimit": limit},
 		}}
 	}
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 
 	_, err := h.ToApplicationConfig(&oam.Component{Name: "db", Type: "postgresql", Properties: roleWithLimit(0)}, "default")
 	want := "managedRoles[0].connectionLimit: 0 cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default -1, no limit); set login: false to keep the role from connecting"
@@ -83,28 +83,15 @@ func TestPostgresqlHandler_ManagedRoleConnectionLimit(t *testing.T) {
 	}
 
 	for _, limit := range []float64{-1, 5} {
-		cfg, err := h.ToApplicationConfig(&oam.Component{Name: "db", Type: "postgresql", Properties: roleWithLimit(limit)}, "default")
-		if err != nil {
-			t.Fatalf("connectionLimit %v: %v", limit, err)
+		pc := newPostgresqlApp(t, roleWithLimit(limit))
+		cluster := (*generatePostgresql(t, pc)[0]).(*cnpgv1.Cluster)
+		if cluster.Spec.Managed == nil || len(cluster.Spec.Managed.Roles) != 1 {
+			t.Fatalf("connectionLimit %v: managed = %+v, want one role", limit, cluster.Spec.Managed)
 		}
-		got := cfg.(*components.PostgresqlConfig).ManagedRoles[0].ConnectionLimit
-		if got == nil || *got != int64(limit) {
-			t.Errorf("connectionLimit %v: stored %v", limit, got)
+		if got := cluster.Spec.Managed.Roles[0].ConnectionLimit; got != int64(limit) {
+			t.Errorf("connectionLimit %v: Cluster carries %d", limit, got)
 		}
 	}
-
-	t.Run("a directly built config", func(t *testing.T) {
-		zero := int64(0)
-		pc := &components.PostgresqlConfig{Replicas: 1, ManagedRoles: []components.ManagedRoleConfig{
-			{Name: "reader", Login: true},
-			{Name: "app_user", Login: true, ConnectionLimit: &zero},
-		}}
-		_, err := pc.Generate(stack.NewApplication("db", "default", pc))
-		wantDirect := strings.Replace(want, "managedRoles[0]", "managedRoles[1]", 1)
-		if err == nil || err.Error() != wantDirect {
-			t.Errorf("err = %v, want %q", err, wantDirect)
-		}
-	})
 }
 
 // TestPostgresqlConfig_Generate_ForwardsEveryResourceName pins go-kure/launcher#484: every
@@ -252,7 +239,7 @@ func TestPostgresqlHandler_ResourceName_SharedValidation_Error(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := &components.PostgresqlHandler{}
+			h := postgresqlViaRule{}
 			_, err := h.ToApplicationConfig(&oam.Component{
 				Name: "db", Type: "postgresql",
 				Properties: map[string]any{"resources": tt.resources},
@@ -286,7 +273,7 @@ func assertResourceList(t *testing.T, side string, got corev1.ResourceList, want
 }
 
 func TestPostgresqlHandler_PoolerValidation(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
@@ -310,7 +297,7 @@ func TestPostgresqlHandler_PoolerValidation(t *testing.T) {
 }
 
 func TestPostgresqlHandler_BootstrapMutualExclusion(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -326,7 +313,7 @@ func TestPostgresqlHandler_BootstrapMutualExclusion(t *testing.T) {
 }
 
 func TestPostgresqlHandler_BootstrapRecovery(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -346,7 +333,7 @@ func TestPostgresqlHandler_BootstrapRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
-	pc := cfg.(*components.PostgresqlConfig)
+	pc := cfg.(*postgresqlViaRuleConfig)
 	if pc.BootstrapRecoverySource != "backup-src" {
 		t.Errorf("BootstrapRecoverySource: got %q, want %q", pc.BootstrapRecoverySource, "backup-src")
 	}
@@ -362,7 +349,7 @@ func TestPostgresqlHandler_BootstrapRecovery(t *testing.T) {
 }
 
 func TestPostgresqlHandler_BootstrapRecovery_ConnectionParameters(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -382,7 +369,7 @@ func TestPostgresqlHandler_BootstrapRecovery_ConnectionParameters(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
-	pc := cfg.(*components.PostgresqlConfig)
+	pc := cfg.(*postgresqlViaRuleConfig)
 	if pc.BootstrapRecoverySource != "backup-cluster" {
 		t.Errorf("BootstrapRecoverySource: got %q", pc.BootstrapRecoverySource)
 	}
@@ -392,7 +379,7 @@ func TestPostgresqlHandler_BootstrapRecovery_ConnectionParameters(t *testing.T) 
 }
 
 func TestPostgresqlHandler_SynchronousValidation(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
@@ -420,7 +407,7 @@ func TestPostgresqlHandler_SynchronousValidation(t *testing.T) {
 }
 
 func TestPostgresqlHandler_ObjectStore_MissingDestinationPath(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -433,7 +420,7 @@ func TestPostgresqlHandler_ObjectStore_MissingDestinationPath(t *testing.T) {
 }
 
 func TestPostgresqlHandler_Databases_MissingName(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -448,7 +435,7 @@ func TestPostgresqlHandler_Databases_MissingName(t *testing.T) {
 }
 
 func TestPostgresqlHandler_Databases_MissingOwner(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -463,7 +450,7 @@ func TestPostgresqlHandler_Databases_MissingOwner(t *testing.T) {
 }
 
 func TestPostgresqlHandler_Databases_InvalidEnsure(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -478,7 +465,7 @@ func TestPostgresqlHandler_Databases_InvalidEnsure(t *testing.T) {
 }
 
 func TestPostgresqlHandler_Databases_InvalidReclaimPolicy(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -493,7 +480,7 @@ func TestPostgresqlHandler_Databases_InvalidReclaimPolicy(t *testing.T) {
 }
 
 func TestPostgresqlHandler_ManagedRoles_MissingName(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -508,7 +495,7 @@ func TestPostgresqlHandler_ManagedRoles_MissingName(t *testing.T) {
 }
 
 func TestPostgresqlHandler_ManagedRoles_InvalidEnsure(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -523,7 +510,7 @@ func TestPostgresqlHandler_ManagedRoles_InvalidEnsure(t *testing.T) {
 }
 
 func TestPostgresqlHandler_MonitoringCustomQueries_MissingName(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -541,7 +528,7 @@ func TestPostgresqlHandler_MonitoringCustomQueries_MissingName(t *testing.T) {
 }
 
 func TestPostgresqlHandler_MonitoringCustomQueries_MissingKey(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -559,7 +546,7 @@ func TestPostgresqlHandler_MonitoringCustomQueries_MissingKey(t *testing.T) {
 }
 
 func TestPostgresqlHandler_ValidProperties(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "postgresql",
 		Properties: map[string]any{
@@ -642,7 +629,7 @@ func TestPostgresqlHandler_ValidProperties(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
-	pc := cfg.(*components.PostgresqlConfig)
+	pc := cfg.(*postgresqlViaRuleConfig)
 	if pc.Version != "15" {
 		t.Errorf("Version: got %q", pc.Version)
 	}
@@ -837,19 +824,17 @@ func TestPostgresqlConfig_Generate_WithBootstrap(t *testing.T) {
 }
 
 // An externalClusters[].barmanObjectStore that does not fit the upstream Barman
-// configuration fails Generate, naming the external cluster, instead of being
-// dropped or half-applied.
-func TestPostgresqlConfig_Generate_ExternalClusterMalformedBarmanObjectStore(t *testing.T) {
-	pc := newPostgresqlApp(t, map[string]any{
+// configuration is refused when the rule builds the Cluster, naming the external
+// cluster, instead of being dropped or half-applied.
+func TestPostgresqlRule_ExternalClusterMalformedBarmanObjectStore(t *testing.T) {
+	_, err := postgresqlViaRule{}.ToApplicationConfig(&oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{
 		"externalClusters": []any{
 			map[string]any{
 				"name":              "x",
 				"barmanObjectStore": map[string]any{"destinationPath": float64(123)},
 			},
 		},
-	})
-	app := stack.NewApplication("db", "default", pc)
-	_, err := pc.Generate(app)
+	}}, "default")
 	if err == nil {
 		t.Fatal("expected an error for a malformed barmanObjectStore, got nil")
 	}
@@ -859,9 +844,9 @@ func TestPostgresqlConfig_Generate_ExternalClusterMalformedBarmanObjectStore(t *
 	}
 }
 
-func newPostgresqlApp(t *testing.T, props map[string]any) *components.PostgresqlConfig {
+func newPostgresqlApp(t *testing.T, props map[string]any) *postgresqlViaRuleConfig {
 	t.Helper()
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name:       "db",
 		Type:       "postgresql",
@@ -870,10 +855,10 @@ func newPostgresqlApp(t *testing.T, props map[string]any) *components.Postgresql
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
-	return cfg.(*components.PostgresqlConfig)
+	return cfg.(*postgresqlViaRuleConfig)
 }
 
-func generatePostgresql(t *testing.T, pc *components.PostgresqlConfig) []*client.Object {
+func generatePostgresql(t *testing.T, pc *postgresqlViaRuleConfig) []*client.Object {
 	t.Helper()
 	app := stack.NewApplication("db", "default", pc)
 	objs, err := pc.Generate(app)
@@ -997,6 +982,10 @@ func TestPostgresqlConfig_Generate_WithDatabase(t *testing.T) {
 	}
 }
 
+// The objects come in the order the rule emits their components: the Cluster and
+// the ObjectStore (one same-name sibling group, generated together), then the
+// Pooler, then the Databases. postgresql generated the Pooler before the
+// ObjectStore; the objects are the same.
 func TestPostgresqlConfig_Generate_CombinedOrder(t *testing.T) {
 	pc := newPostgresqlApp(t, map[string]any{
 		"pooler": map[string]any{"enabled": true},
@@ -1014,11 +1003,11 @@ func TestPostgresqlConfig_Generate_CombinedOrder(t *testing.T) {
 	if _, ok := (*objs[0]).(*cnpgv1.Cluster); !ok {
 		t.Errorf("objs[0]: expected *cnpgv1.Cluster, got %T", *objs[0])
 	}
-	if _, ok := (*objs[1]).(*cnpgv1.Pooler); !ok {
-		t.Errorf("objs[1]: expected *cnpgv1.Pooler, got %T", *objs[1])
+	if _, ok := (*objs[1]).(*barmanv1.ObjectStore); !ok {
+		t.Errorf("objs[1]: expected *barmanv1.ObjectStore, got %T", *objs[1])
 	}
-	if _, ok := (*objs[2]).(*barmanv1.ObjectStore); !ok {
-		t.Errorf("objs[2]: expected *barmanv1.ObjectStore, got %T", *objs[2])
+	if _, ok := (*objs[2]).(*cnpgv1.Pooler); !ok {
+		t.Errorf("objs[2]: expected *cnpgv1.Pooler, got %T", *objs[2])
 	}
 	if _, ok := (*objs[3]).(*cnpgv1.Database); !ok {
 		t.Errorf("objs[3]: expected *cnpgv1.Database, got %T", *objs[3])
@@ -1050,8 +1039,13 @@ func TestPostgresqlConfig_ApplyPolicy_DefaultsReplicas(t *testing.T) {
 	if err := enforceable.ApplyPolicy(p); err != nil {
 		t.Fatalf("ApplyPolicy: %v", err)
 	}
-	if pc.Replicas != 2 {
-		t.Errorf("Replicas after defaulting: got %d, want 2", pc.Replicas)
+	cluster := (*generatePostgresql(t, pc)[0]).(*cnpgv1.Cluster)
+	if cluster.Spec.Instances != 2 {
+		t.Errorf("instances after defaulting: got %d, want 2", cluster.Spec.Instances)
+	}
+	// enablePDB is decided from the count after the policy.
+	if cluster.Spec.EnablePDB == nil || !*cluster.Spec.EnablePDB {
+		t.Errorf("enablePDB = %v, want true for 2 instances", cluster.Spec.EnablePDB)
 	}
 }
 
@@ -1062,8 +1056,8 @@ func TestPostgresqlConfig_ApplyPolicy_DefaultsStorageSize(t *testing.T) {
 	if err := enforceable.ApplyPolicy(&stubPolicy{defaultStorageSize: "20Gi"}); err != nil {
 		t.Fatalf("ApplyPolicy: %v", err)
 	}
-	if pc.StorageSize != "20Gi" {
-		t.Errorf("StorageSize after defaulting: got %q, want 20Gi", pc.StorageSize)
+	if got := (*generatePostgresql(t, pc)[0]).(*cnpgv1.Cluster).Spec.StorageConfiguration.Size; got != "20Gi" {
+		t.Errorf("storage size after defaulting: got %q, want 20Gi", got)
 	}
 
 	// Authored storageSize wins over the policy default.
@@ -1071,8 +1065,8 @@ func TestPostgresqlConfig_ApplyPolicy_DefaultsStorageSize(t *testing.T) {
 	if err := stack.ApplicationConfig(authored).(oam.Enforceable).ApplyPolicy(&stubPolicy{defaultStorageSize: "20Gi"}); err != nil {
 		t.Fatalf("ApplyPolicy: %v", err)
 	}
-	if authored.StorageSize != "50Gi" {
-		t.Errorf("authored StorageSize: got %q, want 50Gi", authored.StorageSize)
+	if got := (*generatePostgresql(t, authored)[0]).(*cnpgv1.Cluster).Spec.StorageConfiguration.Size; got != "50Gi" {
+		t.Errorf("authored storage size: got %q, want 50Gi", got)
 	}
 
 	// NoopPolicy (no default) falls back to the "1Gi" handler default.
@@ -1080,8 +1074,8 @@ func TestPostgresqlConfig_ApplyPolicy_DefaultsStorageSize(t *testing.T) {
 	if err := stack.ApplicationConfig(fallback).(oam.Enforceable).ApplyPolicy(&oam.NoopPolicy{}); err != nil {
 		t.Fatalf("ApplyPolicy: %v", err)
 	}
-	if fallback.StorageSize != "1Gi" {
-		t.Errorf("fallback StorageSize: got %q, want 1Gi", fallback.StorageSize)
+	if got := (*generatePostgresql(t, fallback)[0]).(*cnpgv1.Cluster).Spec.StorageConfiguration.Size; got != "1Gi" {
+		t.Errorf("fallback storage size: got %q, want 1Gi", got)
 	}
 }
 
@@ -1143,7 +1137,7 @@ func TestPostgresqlConfig_Generate_WithDatabaseExtensions(t *testing.T) {
 }
 
 func TestPostgresqlHandler_NameBound(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	for _, name := range []string{"1db", "db.main", strings.Repeat("a", 51)} {
 		comp := &oam.Component{Name: name, Type: "postgresql"}
 		want := fmt.Sprintf("postgresql name %q: must be a DNS-1035 label of at most 50 characters (CloudNativePG rejects longer or dotted cluster names)", name)
@@ -1152,11 +1146,6 @@ func TestPostgresqlHandler_NameBound(t *testing.T) {
 		}
 		if _, err := h.Endpoints(comp); err == nil || err.Error() != want {
 			t.Errorf("Endpoints(%q): err = %v, want %q", name, err, want)
-		}
-		// A config built without ToApplicationConfig is named by the application.
-		pc := newPostgresqlApp(t, map[string]any{})
-		if _, err := pc.Generate(stack.NewApplication(name, "data", pc)); err == nil || err.Error() != want {
-			t.Errorf("Generate(%q): err = %v, want %q", name, err, want)
 		}
 	}
 	longest := strings.Repeat("a", 50)
@@ -1168,7 +1157,7 @@ func TestPostgresqlHandler_NameBound(t *testing.T) {
 	if eps, err := h.Endpoints(comp); err != nil || eps[0].PodSelector.MatchLabels["cnpg.io/cluster"] != longest {
 		t.Errorf("Endpoints(50 characters) = %+v, %v", eps, err)
 	}
-	pc := cfg.(*components.PostgresqlConfig)
+	pc := cfg.(*postgresqlViaRuleConfig)
 	if _, err := pc.Generate(stack.NewApplication(longest, "data", pc)); err != nil {
 		t.Errorf("Generate(50 characters): %v", err)
 	}
@@ -1178,7 +1167,7 @@ func TestPostgresqlHandler_NameBound(t *testing.T) {
 // "-pooler" suffix), so the longest admitted name must still give label values
 // the API server accepts on both.
 func TestPostgresqlHandler_Endpoints_LongestNameLabelValues(t *testing.T) {
-	h := &components.PostgresqlHandler{}
+	h := postgresqlViaRule{}
 	comp := &oam.Component{Name: strings.Repeat("a", 50), Type: "postgresql",
 		Properties: map[string]any{"pooler": map[string]any{"enabled": true}}}
 	eps, err := h.Endpoints(comp)

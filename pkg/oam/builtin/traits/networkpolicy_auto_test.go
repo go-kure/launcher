@@ -727,10 +727,15 @@ func TestTransform_ComponentLabelKey_Override(t *testing.T) {
 // (cnpg.io/cluster), not the component-label key.
 func TestTransform_IngressPeers_SynthesizesEndpointIngressNetworkPolicy(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("postgresql", &components.PostgresqlHandler{})
+	// postgresql lowers onto cnpg-cluster, with the engine-only defaults trait.
+	tr.RegisterComponentLowering(components.PostgresqlRule{})
+	tr.RegisterComponent("cnpg-cluster", &components.CnpgClusterHandler{})
+	tr.RegisterEngineTrait("cnpg-postgresql-defaults", &traits.PostgresqlDefaultsHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{Name: "orders-db", Type: "postgresql"}},
 		},
