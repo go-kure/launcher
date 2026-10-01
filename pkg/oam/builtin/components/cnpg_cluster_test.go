@@ -584,6 +584,16 @@ func TestCnpgClusterConfig_ApplyPolicy_StorageDefault(t *testing.T) {
 			t.Errorf("err = %v, want the invalid-quantity refusal", err)
 		}
 	})
+	t.Run("a non-positive default is refused", func(t *testing.T) {
+		for _, dflt := range []string{"0", "-1Gi"} {
+			c := newCnpgCluster(t, map[string]any{})
+			err := c.ApplyPolicy(&stubPolicy{defaultStorageSize: dflt})
+			want := fmt.Sprintf("policy default for storage.size: quantity must be positive, got %q", dflt)
+			if err == nil || err.Error() != want {
+				t.Errorf("default %q: err = %v, want %q", dflt, err, want)
+			}
+		}
+	})
 	t.Run("authored size wins", func(t *testing.T) {
 		c := newCnpgCluster(t, map[string]any{"storage": map[string]any{"size": "5Gi"}})
 		if err := c.ApplyPolicy(p); err != nil {
