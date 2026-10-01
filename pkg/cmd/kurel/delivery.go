@@ -28,6 +28,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack/layout"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // Flux delivery output (docs/design.md §11, "Launcher Layout"): with
@@ -203,7 +204,7 @@ type deliveryOutput struct {
 }
 
 // replayGeneration makes every application in the cluster generate once: the
-// build's own pass (collectFromNode) generates, and the delivery layout walk,
+// build's own pass (oam.GenerateApplications) generates, and the delivery layout walk,
 // which calls Application.Generate again, gets the objects of that pass back.
 // A component may hand out the objects it cached (the chart renderer does) and
 // a trait may change them in place, so a second generation could see the
@@ -235,7 +236,9 @@ func replayBundle(b *stack.Bundle) {
 
 // replayOf wraps cfg in a replayConfig that keeps the optional interfaces kure
 // checks on an application's config: stack.Validator (Application.Generate),
-// layout.LayoutAugmenter and layout.LayoutIntentAugmenter (the layout walker).
+// layout.LayoutAugmenter and layout.LayoutIntentAugmenter (the layout walker);
+// and oam.ComponentNamed, which names a trait sub-application's component in
+// the in-document collision check.
 func replayOf(cfg stack.ApplicationConfig) stack.ApplicationConfig {
 	r := &replayConfig{inner: cfg}
 	aug, ok := cfg.(layout.LayoutAugmenter)
@@ -264,6 +267,14 @@ func (r *replayConfig) Validate() error {
 		return v.Validate()
 	}
 	return nil
+}
+
+// ComponentName returns inner's component, or "" when inner does not name one.
+func (r *replayConfig) ComponentName() string {
+	if named, ok := r.inner.(oam.ComponentNamed); ok {
+		return named.ComponentName()
+	}
+	return ""
 }
 
 func (r *replayConfig) Generate(app *stack.Application) ([]*client.Object, error) {

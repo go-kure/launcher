@@ -55,7 +55,10 @@ across its raw inputs for round-0 raw-rule claims, but in-transform rules run in
 document's own `Transform` with a fresh allocator, so a name they generate is never compared
 across documents; a caller transforming several documents passes their generated objects to
 `CheckCrossDocumentCollisions` (`cross_document_collisions.go`), which reports every object
-more than one document generates, once per object, naming every such document. Adoption is sound only for a
+more than one document generates, once per object, naming every such document. Within one
+document, the object two of its applications generate is reported by
+`CheckInDocumentCollisions` (`in_document_collisions.go`) over `GenerateApplications`'
+output, naming both producers (go-kure/launcher#646). Adoption is sound only for a
 terminal-type shared element (claims outlive the round, so a lowerable one could be
 replaced under another name behind an adopter), and it covers only that element: the
 adopting rule must still emit its own output, since an empty result remains a forbidden

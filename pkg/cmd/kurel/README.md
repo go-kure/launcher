@@ -187,9 +187,13 @@ descriptor is the package author's public API, while the profile belongs to whoe
 operates the target cluster. Bindings carry no policy, constraint or limit model —
 they name a profile+values pair and nothing more.
 
-`build` collects the manifests it outputs directly from the transform result
-(`collectFromNode`/`collectFromBundle`) — that collection never constructs or walks a kure
-`layout.ManifestLayout`. (Only the Flux delivery output below walks one, via
+`build` generates the manifests it outputs directly from the transform result
+(`oam.GenerateApplications`), each application once, and refuses the document when two
+of its applications generate the same object (API group, kind, namespace and name): a
+component and another component's trait, two components, or two traits, which would each
+deploy that object, the last applied winning. The error names the object and both
+producers, and nothing is written (go-kure/launcher#646). That generation never
+constructs or walks a kure `layout.ManifestLayout`. (Only the Flux delivery output below walks one, via
 `layout.WalkCluster`.) A component whose config implements the optional
 `layout.LayoutAugmenter` interface fails the build outright, naming the
 component, **unless** it also implements `oam.LayoutAugmentationCoverage` and

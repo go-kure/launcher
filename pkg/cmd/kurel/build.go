@@ -204,10 +204,14 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		replayGeneration(cluster.Node)
 	}
 
-	objects, err := collectFromNode(cluster.Node)
+	apps, err := oam.GenerateApplications(cluster)
 	if err != nil {
 		return errors.Wrap(err, "generating manifests")
 	}
+	if err := oam.CheckInDocumentCollisions(apps); err != nil {
+		return errors.Wrapf(err, "application %q", app.Metadata.Name)
+	}
+	objects := generatedObjects(apps)
 
 	if len(objects) == 0 {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warning: no resources generated")
@@ -408,8 +412,8 @@ func newBuiltinTransformer() *oam.Transformer {
 // component's config implements layout.LayoutAugmenter without also
 // implementing oam.LayoutAugmentationCoverage returning true (e.g. a
 // helmchart component with valuesMode: configMap, which needs a generated
-// values ConfigMap emitted alongside it). collectFromNode/collectFromBundle
-// below never construct or walk a layout.ManifestLayout, so an augmenter's
+// values ConfigMap emitted alongside it). The build's generation
+// (oam.GenerateApplications) never constructs or walks a layout.ManifestLayout, so an augmenter's
 // resources are otherwise silently dropped — leaving, for the configMap
 // case, a HelmRelease whose valuesFrom reference points at a ConfigMap that
 // was never generated. Fail-closed default: a LayoutAugmenter that does not
@@ -434,7 +438,7 @@ func rejectLayoutAugmenters(node *stack.Node) error {
 	return nil
 }
 
-// rejectLayoutAugmentersInBundle mirrors collectFromBundle's umbrella/leaf
+// rejectLayoutAugmentersInBundle mirrors oam.GenerateApplications' umbrella/leaf
 // traversal so every Application this build would actually generate is checked.
 func rejectLayoutAugmentersInBundle(bundle *stack.Bundle) error {
 	if bundle == nil {
@@ -462,48 +466,14 @@ func rejectLayoutAugmentersInBundle(bundle *stack.Bundle) error {
 	return nil
 }
 
-// collectFromNode walks the node tree and collects all generated client.Objects
-// from leaf bundles.
-func collectFromNode(node *stack.Node) ([]*client.Object, error) {
-	if node == nil {
-		return nil, nil
+// generatedObjects flattens the generated applications into the build's output
+// order.
+func generatedObjects(apps []oam.GeneratedApplication) []*client.Object {
+	var objects []*client.Object
+	for _, app := range apps {
+		objects = append(objects, app.Objects...)
 	}
-	var all []*client.Object
-	if node.Bundle != nil {
-		objs, err := collectFromBundle(node.Bundle)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, objs...)
-	}
-	for _, child := range node.Children {
-		objs, err := collectFromNode(child)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, objs...)
-	}
-	return all, nil
-}
-
-// collectFromBundle collects generated objects from a bundle.
-// Umbrella bundles are recursed; leaf bundles are generated directly.
-func collectFromBundle(bundle *stack.Bundle) ([]*client.Object, error) {
-	if bundle == nil {
-		return nil, nil
-	}
-	if bundle.IsUmbrella() {
-		var all []*client.Object
-		for _, child := range bundle.Children {
-			objs, err := collectFromBundle(child)
-			if err != nil {
-				return nil, err
-			}
-			all = append(all, objs...)
-		}
-		return all, nil
-	}
-	return bundle.Generate()
+	return objects
 }
 
 func writeOutputDir(dir, appName string, data []byte) error {
