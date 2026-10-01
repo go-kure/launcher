@@ -847,9 +847,16 @@ implement: `Family`, `Version`, `RequiredCapabilityKeys` (the `ClusterProfile`
 capability keys an entity of this contract needs), `Deprecated`, and
 `DeprecationMessage`. It is primarily a discovery/documentation surface — the engine
 does not enforce any of these fields (`CapabilityAware.CapabilityRequired` is what the
-engine actually enforces). The one exception is `Version`: a lowering rule's `Version`
-is read to compose the `"@<version>"` suffix on `Origin.Rule` (see below); nothing
-else here is read or enforced. Consumers otherwise: schema publication, artifact
+engine actually enforces). Two fields are read. A lowering rule's `Version` composes
+the `"@<version>"` suffix on `Origin.Rule` (see below). `Deprecated` turns every
+authored component or trait of that type into one warning through the Transformer's
+warning handler (`SetWarningHandler`), in document order: `component "<name>": type
+<t> is deprecated[: <DeprecationMessage>]`, or `trait type <t>` for a trait. Both
+`Transform` and `TransformWithPolicy` warn; `LowerRaws` does not, because its output
+re-enters `Transform` as authored and warns there. The check reads the authored
+document before lowering, so a component a rule synthesizes never warns. A
+deprecation is never an error and never changes the output. Nothing else here is
+read or enforced. Consumers otherwise: schema publication, artifact
 provenance in a downstream consumer, and deprecation tooling. Metadata rides the
 existing registration mechanism; there is no separate contract registry.
 

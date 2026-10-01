@@ -42,10 +42,13 @@ type PropertySchemaProvider interface {
 // capability keys it requires, and deprecation status. It is primarily a discovery/
 // documentation surface — the engine does not enforce any of these fields
 // (CapabilityAware.CapabilityRequired is what the engine actually enforces;
-// RequiredCapabilityKeys here is declarative, for a consumer to introspect). The one
-// exception is Version: loweringRuleIdentity (lowering.go) reads it to compose the
+// RequiredCapabilityKeys here is declarative, for a consumer to introspect). Two
+// fields are read: Version, which loweringRuleIdentity (lowering.go) uses to compose the
 // "@<version>" suffix on Origin.Rule for a lowering rule that also implements
-// ContractDescriber — nothing else on this struct is read or enforced by the engine.
+// ContractDescriber; and Deprecated with DeprecationMessage, which the transform turns
+// into one warning per authored component or trait of that type, through the
+// Transformer's warning handler (never an error, never a change to the output).
+// Nothing else on this struct is read or enforced by the engine.
 type ContractMetadata struct {
 	// Family is the contract family this handler/rule belongs to, e.g. "webservice".
 	Family string
