@@ -279,14 +279,29 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 	}
 
 	// Parse source block
-	src, ok := props["source"].(map[string]any)
+	src, ok, err := parseObjectField(props, "source", "helmchart: source")
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, errors.New("helmchart: source is required")
 	}
-	srcURL, _ := src["url"].(string)
-	srcName, _ := src["name"].(string)
-	srcKind, _ := src["kind"].(string)
-	srcNamespace, _ := src["namespace"].(string)
+	var srcURL, srcName, srcKind, srcNamespace string
+	for _, f := range []struct {
+		key string
+		dst *string
+	}{
+		{"url", &srcURL},
+		{"name", &srcName},
+		{"kind", &srcKind},
+		{"namespace", &srcNamespace},
+	} {
+		s, _, err := parseStringField(src, f.key, "helmchart: source."+f.key)
+		if err != nil {
+			return nil, err
+		}
+		*f.dst = s
+	}
 
 	if srcURL != "" && srcName != "" {
 		return nil, errors.New("helmchart: source.url and source.name are mutually exclusive")
