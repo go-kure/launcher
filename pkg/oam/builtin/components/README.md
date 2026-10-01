@@ -2604,7 +2604,11 @@ not part of either change.
   authored `pgbouncer.image`. Generation runs the shared parser's
   request/limit and hugepages checks on the template's pod and container
   resources (`template.spec.containers[0] "pgbouncer": resources: cpu: request
-  2 must not exceed limit 1`), as `cnpg-cluster` does on its `resources`. The instance count is deliberately not policed:
+  2 must not exceed limit 1`), as `cnpg-cluster` does on its `resources`; the
+  other resource-name rules of the shared parser are left to the API server. A
+  template declaring `ephemeralContainers` is refused, as the workload kinds
+  refuse it: the operator copies the template into a Deployment, whose pod
+  template cannot carry them. The instance count is deliberately not policed:
   `postgresql` applies no policy to its pooler, so a maximum here would refuse,
   once `postgresql` lowers onto this kind, a document that builds today.
   Pod-level errors name the template's own fields, as in `template.spec:
@@ -2624,7 +2628,8 @@ not part of either change.
   `cnpg-objectstore` caps the cpu and memory requests and limits of the plugin
   sidecar it adds to every instance pod (`instanceSidecarConfiguration.resources`)
   at the policy maxima, filling no default, and declares no endpoint;
-  generation runs the same request/limit and hugepages checks on them. It refuses
+  generation runs the same request/limit and hugepages checks on them, leaving
+  the other resource-name rules to the API server. It refuses
   `configuration.serverName`, which the shared Barman type carries but the
   plugin's CRD forbids on an ObjectStore: the server name is a plugin parameter
   of the Cluster that uses the store.

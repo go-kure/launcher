@@ -150,10 +150,12 @@ func requireCnpgClusterRef(name string) error {
 // kinds apply to their pod to an operator CR's raw pod template, which the
 // operator copies into the pods it creates: host namespaces, hostPath volumes,
 // the storage maximum on a generic ephemeral volume's claim, the pod-level
-// hostProcess switch, pod-level resources, and, for every init, regular and
-// ephemeral container, the registry allowlist on an authored image, the cpu
-// and memory maxima, and the privileged, hostProcess and capability checks.
-// label prefixes each error with the template's path.
+// hostProcess switch, pod-level resources, and, for every init and regular
+// container, the registry allowlist on an authored image, the cpu and memory
+// maxima, and the privileged, hostProcess and capability checks. Ephemeral
+// containers are not policed here: a pod template cannot declare them, so the
+// caller refuses them outright. label prefixes each error with the template's
+// path.
 func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) error {
 	if ps == nil {
 		return nil
@@ -229,11 +231,6 @@ func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) er
 	}
 	for i, c := range ps.Containers {
 		if err := check("containers", i, c.Name, c.Image, c.Resources, c.SecurityContext); err != nil {
-			return err
-		}
-	}
-	for i, c := range ps.EphemeralContainers {
-		if err := check("ephemeralContainers", i, c.Name, c.Image, c.Resources, c.SecurityContext); err != nil {
 			return err
 		}
 	}
