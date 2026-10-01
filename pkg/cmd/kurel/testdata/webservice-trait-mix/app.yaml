@@ -1,0 +1,34 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    # Traits that act on the Deployment's side (affinity shorthand, default
+    # topology spread, scaler), on the Service's side (ingress
+    # and its synthesized inbound NetworkPolicy), and on every object
+    # (prune-protection, force-replace), interleaved in authored order.
+    - name: web
+      type: webservice
+      properties:
+        image: ghcr.io/example/web:v1.0.0
+        port: 8080
+        replicas: 2
+        affinity:
+          enablePodAntiAffinity: true
+          podAntiAffinityType: preferred
+          topologyKey: kubernetes.io/hostname
+      traits:
+        - type: prune-protection
+        - type: ingress
+          properties:
+            rules:
+              - host: web.example.com
+                paths:
+                  - path: /
+        - type: force-replace
+        - type: scaler
+          properties:
+            minReplicas: 2
+            maxReplicas: 4

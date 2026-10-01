@@ -1,0 +1,22 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    # An ingress path addressing the webservice's Service port by name, with
+    # the synthesized inbound NetworkPolicy opening that port on the pods.
+    - name: web
+      type: webservice
+      properties:
+        image: ghcr.io/example/web:v1.0.0
+        port: 8080
+      traits:
+        - type: ingress
+          properties:
+            rules:
+              - host: web.example.com
+                paths:
+                  - path: /
+                    portName: http
