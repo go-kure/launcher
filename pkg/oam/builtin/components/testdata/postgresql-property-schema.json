@@ -1,0 +1,153 @@
+{
+  "affinity": {
+    "type": "object",
+    "description": "Pod affinity and anti-affinity scheduling settings.",
+    "additionalProperties": true
+  },
+  "backup": {
+    "type": "object",
+    "description": "Barman object-store backup settings (retentionPolicy, destinationPath, endpointURL, secretName).",
+    "additionalProperties": true
+  },
+  "bootstrap": {
+    "type": "object",
+    "description": "Cluster bootstrap source (recovery or pg_basebackup).",
+    "additionalProperties": true
+  },
+  "databases": {
+    "type": "array",
+    "description": "Databases created and reconciled within the cluster.",
+    "items": {
+      "type": "object",
+      "description": "A single database definition.",
+      "additionalProperties": true
+    }
+  },
+  "externalClusters": {
+    "type": "array",
+    "description": "External clusters referenced for bootstrap or replica sources.",
+    "items": {
+      "type": "object",
+      "description": "A single external cluster definition.",
+      "additionalProperties": true
+    }
+  },
+  "imageName": {
+    "type": "string",
+    "description": "Override for the container image (defaults to the CloudNativePG image for the version)."
+  },
+  "inheritedMetadata": {
+    "type": "object",
+    "description": "Labels and annotations propagated to the generated resources.",
+    "additionalProperties": true
+  },
+  "managedRoles": {
+    "type": "array",
+    "description": "Database roles created and reconciled by the operator.",
+    "items": {
+      "type": "object",
+      "description": "A single managed role definition.",
+      "additionalProperties": true
+    }
+  },
+  "monitoring": {
+    "type": "object",
+    "description": "Monitoring settings, including the PodMonitor toggle and custom queries.",
+    "additionalProperties": true
+  },
+  "objectStore": {
+    "type": "object",
+    "description": "Barman Cloud ObjectStore settings for backups (destinationPath, endpointURL, secretName, retentionPolicy, serverName).",
+    "additionalProperties": true
+  },
+  "pooler": {
+    "type": "object",
+    "description": "PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters).",
+    "additionalProperties": true
+  },
+  "postgresql": {
+    "type": "object",
+    "description": "PostgreSQL server settings, including the parameters map.",
+    "additionalProperties": true
+  },
+  "provider": {
+    "type": "string",
+    "description": "Database provider (only cnpg is supported).",
+    "default": "cnpg",
+    "enum": [
+      "cnpg"
+    ]
+  },
+  "replicas": {
+    "type": "integer",
+    "description": "Number of PostgreSQL instances in the cluster.",
+    "default": 1
+  },
+  "replication": {
+    "type": "object",
+    "description": "Synchronous replication settings (method, number, dataDurability).",
+    "additionalProperties": true
+  },
+  "resources": {
+    "type": "object",
+    "description": "Compute resource requests and limits for the container.",
+    "properties": {
+      "limits": {
+        "type": "object",
+        "description": "Maximum resources the container may use. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted.",
+        "properties": {
+          "cpu": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+          },
+          "memory": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+          }
+        },
+        "additionalProperties": true
+      },
+      "requests": {
+        "type": "object",
+        "description": "Minimum resources guaranteed to the container. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted.",
+        "properties": {
+          "cpu": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+          },
+          "memory": {
+            "type": "",
+            "types": [
+              "string",
+              "number"
+            ],
+            "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "storageSize": {
+    "type": "string",
+    "description": "Persistent storage size requested for each instance.",
+    "default": "1Gi"
+  },
+  "version": {
+    "type": "string",
+    "description": "PostgreSQL major version for the cluster image. An empty string is refused; omit the property to take the default.",
+    "default": "16"
+  }
+}
