@@ -183,6 +183,19 @@ func (c *ServiceConfig) ServiceRoutingTarget(servicePorts []intstr.IntOrString) 
 	return selectorFrom(c.Selector), out
 }
 
+// IdentityTargetPorts reports whether every port, whatever its protocol, targets
+// its own port number. A sibling group reads it (pkg/oam identityPortMapper):
+// only then is a policy opening the routed Service ports on the selected pods
+// the same as one opening their target ports. A named targetPort is never one.
+func (c *ServiceConfig) IdentityTargetPorts() bool {
+	for _, p := range c.Ports {
+		if p.TargetPort.Type != intstr.Int || p.TargetPort.IntVal != p.Port {
+			return false
+		}
+	}
+	return len(c.Ports) > 0
+}
+
 // Generate creates the Service. Nothing else: the selected pods' workload
 // component owns their ServiceAccount.
 func (c *ServiceConfig) Generate(app *stack.Application) ([]*client.Object, error) {

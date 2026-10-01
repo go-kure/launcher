@@ -31,36 +31,50 @@ type serviceRoutingTargeter interface {
 	ServiceRoutingTarget(servicePorts []intstr.IntOrString) (*metav1.LabelSelector, []intstr.IntOrString)
 }
 
+// podTemplateLabeler and identityPortMapper mirror the oam contracts of the same
+// names locally (unexported cross-package). Decorators forward them so a sibling
+// group still tells a member routing to its own sibling's pods when a trait wraps
+// either member.
+type podTemplateLabeler interface {
+	PodTemplateLabels() map[string]string
+}
+
+type identityPortMapper interface {
+	IdentityTargetPorts() bool
+}
+
 // decoratorBase holds the wrapped ApplicationConfig and forwards every optional
 // interface a component config may satisfy. Trait decorators embed it so that an
 // N-deep wrap chain never hides an interface from a later trait or a post-build
 // phase.
 //
-// The nine forwarded interfaces are exactly those type-asserted on app.Config
+// The eleven forwarded interfaces are exactly those type-asserted on app.Config
 // AFTER traits run: stack.Validator (kure pkg/stack/application.go:51),
 // fluxNamespaceSettable (oam/transform.go:1092,1149), autoHealthCheckEmitter
 // (oam/transform.go:1137), servicePortProvider and serviceBackendNamer
 // (traits/ingress.go:41,53,62 and oam/netpol_synthesis.go:68,71),
 // servicePortNamer (traits/ingress.go:77), oam.ServiceAccountNamer
-// (traits/rbac.go:88), nonRWXClaimer (traits/scaler.go:60), and
-// serviceRoutingTargeter (oam/netpol_synthesis.go:257). Enforceable and
+// (traits/rbac.go:88), nonRWXClaimer (traits/scaler.go:60),
+// serviceRoutingTargeter (oam/netpol_synthesis.go:257), and podTemplateLabeler
+// and identityPortMapper (oam/sibling_group.go ServiceRoutingTarget). Enforceable and
 // SourceDeduplicatable are deliberately absent: the former is asserted only on
 // trait sub-apps (Transformer.applyTraits), the latter on component configs after
 // policies and before any trait runs (deduplicateSourceRefs in
 // Transformer.TransformWithPolicy), so neither can see a decorator. A tenth, kure's layout.LayoutAugmenter, is
-// forwarded separately — see wrapIfAugmenter below — because unlike these nine
+// forwarded separately — see wrapIfAugmenter below — because unlike these eleven
 // it must NOT be present unconditionally.
 //
 // Every method is defined unconditionally, so an embedding decorator ALWAYS
-// satisfies all nine. Call sites must therefore test the returned VALUE, not the
-// interface's presence. Six already do this correctly and must stay that way:
+// satisfies all eleven. Call sites must therefore test the returned VALUE, not the
+// interface's presence. Seven already do this correctly and must stay that way:
 // resolveServiceName (ingress.go) checks for a non-empty name,
 // checkImplicitPortName (ingress.go) checks the known flag, rbac.go's
 // binding subject falls back to the component name on "", the scaler treats
 // an empty claim name as "no claim limits the replicas",
 // applyAutoHealthChecks (oam/transform.go:1148-1152) gates its settable check on
-// isFluxControlPlaneGVK, and the NetworkPolicy synthesis treats a nil routing
-// selector as "not a routing targeter".
+// isFluxControlPlaneGVK, the NetworkPolicy synthesis treats a nil routing
+// selector as "not a routing targeter", and a sibling group's ServiceRoutingTarget
+// treats nil pod template labels as "runs no pods" and false as "remaps a port".
 type decoratorBase struct {
 	Inner stack.ApplicationConfig
 }
@@ -161,6 +175,27 @@ func (d decoratorBase) ServiceRoutingTarget(servicePorts []intstr.IntOrString) (
 	return nil, nil
 }
 
+// PodTemplateLabels forwards the inner config's pod template labels
+// (podTemplateLabeler), or nil when the inner config runs no pods. No trait
+// rewrites pod template labels, so the inner answer stays true of the decorated
+// output.
+func (d decoratorBase) PodTemplateLabels() map[string]string {
+	if l, ok := d.Inner.(podTemplateLabeler); ok {
+		return l.PodTemplateLabels()
+	}
+	return nil
+}
+
+// IdentityTargetPorts forwards the inner config's answer (identityPortMapper), or
+// false when the inner config is not one, which keeps a sibling group forwarding
+// the routing target as before.
+func (d decoratorBase) IdentityTargetPorts() bool {
+	if m, ok := d.Inner.(identityPortMapper); ok {
+		return m.IdentityTargetPorts()
+	}
+	return false
+}
+
 // checkVolumeCollision returns an error if podSpec already has a Volume named
 // name. Both ExternalSecretDecorator and ConfigMapDecorator add a Volume named
 // after their target resource (the Secret or ConfigMap), and decorators can
@@ -209,14 +244,15 @@ func checkVolumeCollision(podSpec *corev1.PodSpec, name, source, hint string) er
 }
 
 // decoratedConfig is the method set every decoratorBase-embedding decorator
-// satisfies unconditionally: Generate, plus decoratorBase's nine forwards
+// satisfies unconditionally: Generate, plus decoratorBase's eleven forwards
 // (Validate, SetFluxNamespace, EmitsAutoHealthCheck, ServicePort,
 // BackendServiceName, ServicePortName, ServiceAccountName, NonRWXClaim,
-// ServiceRoutingTarget). augmentingDecorator embeds this — not the narrower
+// ServiceRoutingTarget, PodTemplateLabels, IdentityTargetPorts).
+// augmentingDecorator embeds this — not the narrower
 // stack.ApplicationConfig — because embedding an interface-typed field
 // promotes only that interface's own declared method set, not the full
 // method set of the dynamic value stored in it: a field typed as plain
-// stack.ApplicationConfig would silently drop the nine decoratorBase forwards
+// stack.ApplicationConfig would silently drop the eleven decoratorBase forwards
 // the moment wrapIfAugmenter actually wraps, reintroducing Task 1's bug for
 // every future component whose inner config implements LayoutAugmenter.
 type decoratedConfig interface {
@@ -230,12 +266,14 @@ type decoratedConfig interface {
 	oam.ServiceAccountNamer
 	nonRWXClaimer
 	serviceRoutingTargeter
+	podTemplateLabeler
+	identityPortMapper
 }
 
 // augmentingDecorator adds AugmentLayout to an outer decorator only when the
 // wrapped inner config implements layout.LayoutAugmenter. See wrapIfAugmenter
 // for why this must be conditional rather than an unconditional forward like
-// decoratorBase's other nine methods, and see decoratedConfig for why this
+// decoratorBase's other eleven methods, and see decoratedConfig for why this
 // embeds that instead of stack.ApplicationConfig.
 type augmentingDecorator struct {
 	decoratedConfig
@@ -296,7 +334,7 @@ var _ oam.LayoutAugmentationCoverage = augmentingDecorator{}
 // PRESENCE, and that presence decides whether the app gets a per-app
 // sub-layout or merges into the parent's flat Resources (walker.go:473-505) —
 // a structural decision, not a side effect with a safe no-op default. So
-// unlike decoratorBase's other nine forwards, this one cannot be defined
+// unlike decoratorBase's other eleven forwards, this one cannot be defined
 // unconditionally: doing so would force every decorated component into
 // per-app sub-layout placement regardless of what its inner config wants.
 // Every trait decorator constructor must route its return value through this.

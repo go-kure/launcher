@@ -305,6 +305,14 @@ func (c *DeploymentConfig) ServiceAccountName() string {
 	return effectiveServiceAccountName(c.PodSpec, c.Name)
 }
 
+// PodTemplateLabels returns the labels createDeployment puts on the pod template.
+// A sibling group reads it (pkg/oam podTemplateLabeler) to tell a `service`
+// member selecting this Deployment's pods, which the group's component-label
+// policy already covers.
+func (c *DeploymentConfig) PodTemplateLabels() map[string]string {
+	return deploymentComponentLabels(c.Name)
+}
+
 // NonRWXClaim names the first claim that limits this Deployment to one pod
 // (the one applyNonRWXConstraint refuses more replicas on), or "" when none
 // does. The scaler trait reads it: its HPA scales this Deployment past the

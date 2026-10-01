@@ -193,7 +193,8 @@ func (e componentEntry) healthCheckConfig() stack.ApplicationConfig {
 //     ServiceAccountNamer, and the servicePortNamer and nonRWXClaimer contracts
 //     the builtin traits assert: the one member that answers a non-zero value.
 //     checkSiblingGroups refuses a group in which two members do, so the answer
-//     is never a choice.
+//     is never a choice. A routing target that selects another member's pods on
+//     ports mapped to themselves is answered as nil instead (ServiceRoutingTarget).
 //
 // Not forwarded, on purpose: Enforceable and SourceDeduplicatable run per member
 // in createApplications, before the group exists; trafficSourceCollector and
@@ -332,16 +333,73 @@ func (g *siblingGroupConfig) NonRWXClaim() string {
 	return ""
 }
 
-// ServiceRoutingTarget is the one member's routing target, or a nil selector.
+// ServiceRoutingTarget is the one member's routing target, or a nil selector. It
+// is also nil when that target selects another member's pods (selectsSibling) and
+// the member maps every port to itself by number (identityPortMapper): the routed
+// traffic then lands on the group's own pods, on the ports it was routed to, which
+// its component-label policy already opens — the policy one component deploying
+// them all synthesizes. A member remapping any port, or naming a targetPort, keeps
+// forwarding: that policy would open the Service port, not the one the pods
+// listen on.
 func (g *siblingGroupConfig) ServiceRoutingTarget(servicePorts []intstr.IntOrString) (*metav1.LabelSelector, []intstr.IntOrString) {
-	for _, m := range g.members {
+	for i, m := range g.members {
 		if rt, ok := m.Config.(serviceRoutingTargeter); ok {
 			if sel, ports := rt.ServiceRoutingTarget(servicePorts); sel != nil {
+				if id, ok := m.Config.(identityPortMapper); ok && id.IdentityTargetPorts() && g.selectsSibling(i, sel) {
+					return nil, nil
+				}
 				return sel, ports
 			}
 		}
 	}
 	return nil, nil
+}
+
+// selectsSibling reports whether sel, member i's routing target, selects the pods
+// of another member: its matchLabels are a non-empty subset of that member's pod
+// template labels (podTemplateLabeler) and it has no matchExpressions. An empty
+// selector selects every pod in the namespace, not the group's, so it never does.
+func (g *siblingGroupConfig) selectsSibling(i int, sel *metav1.LabelSelector) bool {
+	if len(sel.MatchLabels) == 0 || len(sel.MatchExpressions) > 0 {
+		return false
+	}
+	for j, m := range g.members {
+		if j == i {
+			continue
+		}
+		l, ok := m.Config.(podTemplateLabeler)
+		if !ok {
+			continue
+		}
+		labels := l.PodTemplateLabels()
+		subset := len(labels) > 0
+		for k, v := range sel.MatchLabels {
+			if got, ok := labels[k]; !ok || got != v {
+				subset = false
+				break
+			}
+		}
+		if subset {
+			return true
+		}
+	}
+	return false
+}
+
+// podTemplateLabeler is optionally implemented by a component config whose
+// workload runs pods: it returns the labels its pod template carries. A sibling
+// group reads it to tell a member's routing target that selects its own sibling's
+// pods (selectsSibling).
+type podTemplateLabeler interface {
+	PodTemplateLabels() map[string]string
+}
+
+// identityPortMapper is optionally implemented by a routing targeter: it reports
+// whether every port, whatever its protocol, targets its own port number. A
+// sibling group reads it before answering a routing target that selects its own
+// sibling's pods as nil (ServiceRoutingTarget).
+type identityPortMapper interface {
+	IdentityTargetPorts() bool
 }
 
 // siblingServicePortNamer and siblingNonRWXClaimer mirror the contracts the
