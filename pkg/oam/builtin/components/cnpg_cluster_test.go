@@ -326,6 +326,20 @@ func TestCnpgClusterHandler_NullIsAbsence(t *testing.T) {
 			t.Errorf("parameters = %v; sibling lost", params)
 		}
 	})
+	// The unknown-field decode of the unstripped tree sees declared nulls too;
+	// a type with its own UnmarshalJSON must still read one as absence.
+	t.Run("null on a custom-unmarshalled field is absence", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{
+			"resources":  map[string]any{"requests": map[string]any{"cpu": nil, "memory": "1Gi"}},
+			"monitoring": map[string]any{"metricsQueriesTTL": nil},
+		})
+		if _, ok := c.Spec.Resources.Requests[corev1.ResourceCPU]; ok {
+			t.Errorf("requests = %v; a null cpu must be absent", c.Spec.Resources.Requests)
+		}
+		if c.Spec.Monitoring == nil || c.Spec.Monitoring.MetricsQueriesTTL != nil {
+			t.Errorf("monitoring = %+v; a null metricsQueriesTTL must be absent", c.Spec.Monitoring)
+		}
+	})
 	t.Run("null array element is refused", func(t *testing.T) {
 		for name, elem := range map[string]any{"untyped": nil, "typed": map[string]any(nil)} {
 			err := cnpgClusterErr(t, map[string]any{
@@ -561,6 +575,13 @@ func TestCnpgClusterConfig_ApplyPolicy_StorageDefault(t *testing.T) {
 		}
 		if c.Spec.StorageConfiguration.Size != "20Gi" {
 			t.Errorf("size = %q, want 20Gi", c.Spec.StorageConfiguration.Size)
+		}
+	})
+	t.Run("an invalid default is refused", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{})
+		err := c.ApplyPolicy(&stubPolicy{defaultStorageSize: "lots"})
+		if err == nil || !strings.Contains(err.Error(), `policy default for storage.size: invalid quantity "lots"`) {
+			t.Errorf("err = %v, want the invalid-quantity refusal", err)
 		}
 	})
 	t.Run("authored size wins", func(t *testing.T) {

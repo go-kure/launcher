@@ -14,6 +14,7 @@ import (
 	kurecnpg "github.com/go-kure/kure/pkg/kubernetes/cnpg"
 	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -656,9 +657,14 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	}
 	// storage.size precedence: authored (either spelling) > policy default.
 	// Unlike postgresql there is no "1Gi" handler fallback; with neither, the
-	// field stays unset for the operator to validate.
-	if !c.explicitStorageSize && p.DefaultStorageSize() != "" {
-		c.Spec.StorageConfiguration.Size = p.DefaultStorageSize()
+	// field stays unset for the operator to validate. The default is a value
+	// the document did not write, so it is parsed here, as the cpu and memory
+	// defaults above are: with no maximum set, nothing else would.
+	if dflt := p.DefaultStorageSize(); !c.explicitStorageSize && dflt != "" {
+		if _, err := resource.ParseQuantity(dflt); err != nil {
+			return errors.Errorf("policy default for storage.size: invalid quantity %q: %w", dflt, err)
+		}
+		c.Spec.StorageConfiguration.Size = dflt
 	}
 
 	if maxInstances := p.MaxReplicas(); maxInstances != nil && instances > *maxInstances {
