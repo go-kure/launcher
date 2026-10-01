@@ -322,6 +322,94 @@ func TestSiblingGroup_TraitSubApplications(t *testing.T) {
 	}
 }
 
+// namedSubTrait appends a sub-application named <component>-<trait type>, so the
+// bundle's application order shows the order its traits were applied in.
+type namedSubTrait struct{}
+
+func (namedSubTrait) CanHandle(string) bool { return true }
+func (namedSubTrait) Apply(trait *Trait, app *stack.Application, b *stack.Bundle) error {
+	b.Applications = append(b.Applications, stack.NewApplication(app.Name+"-"+trait.Type, app.Namespace, &siblingStub{}))
+	return nil
+}
+
+// hopTraitRule lowers a "hop" trait to one "t-hop" trait of its own.
+type hopTraitRule struct{}
+
+func (hopTraitRule) TraitType() string { return "hop" }
+func (hopTraitRule) LowerTrait(*Trait, LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Traits: []Trait{{Type: "t-hop", Properties: map[string]any{}}}}, nil
+}
+
+// traitOrderApps transforms one authored "web" of type typ carrying traits of the
+// given types under rule, and returns the names of the applications its bundle
+// carries after the component's own.
+func traitOrderApps(t *testing.T, rule emitRule, traitTypes ...string) []string {
+	t.Helper()
+	handlers := map[string]TraitHandler{}
+	for _, typ := range []string{"t0", "t1", "own", "t-hop"} {
+		handlers[typ] = namedSubTrait{}
+	}
+	tr := NewTransformer(map[string]ComponentHandler{"a": stubHandler("a", 0), "b": stubHandler("b", 0)}, handlers)
+	tr.RegisterComponentLowering(rule)
+	tr.RegisterTraitLowering(hopTraitRule{})
+	authored := Component{Name: "web", Type: rule.typ}
+	for _, typ := range traitTypes {
+		authored.Traits = append(authored.Traits, Trait{Type: typ, Properties: map[string]any{}})
+	}
+	cluster, _, err := tr.TransformWithPolicy(siblingDoc(authored), TransformContext{})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	var names []string
+	for _, a := range cluster.Node.Bundle.Applications[1:] {
+		names = append(names, a.Name)
+	}
+	return names
+}
+
+// crossRule emits members a and b, handing a the authored trait at slot 1 and b
+// its own trait "own" followed by the authored trait at slot 0.
+var crossRule = emitRule{"cross", func(c *Component) []Component {
+	return []Component{
+		{Name: c.Name, Type: "a", Properties: map[string]any{}, Traits: []Trait{c.Traits[1]}},
+		{Name: c.Name, Type: "b", Properties: map[string]any{}, Traits: []Trait{{Type: "own", Properties: map[string]any{}}, c.Traits[0]}},
+	}
+}}
+
+// TestSiblingGroup_TraitsApplyInAuthoredOrder: a group applies its members'
+// traits as authored, not member by member — the rule's own trait first, then the
+// forwarded ones by authored slot — so trait sub-applications are ordered as one
+// component carrying the same traits orders them.
+func TestSiblingGroup_TraitsApplyInAuthoredOrder(t *testing.T) {
+	got := traitOrderApps(t, crossRule, "t0", "t1")
+	if want := []string{"web-own", "web-t0", "web-t1"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("trait sub-applications = %v, want %v", got, want)
+	}
+}
+
+// TestSiblingGroup_LoweredTraitKeepsAuthoredSlot: a forwarded trait a trait rule
+// lowers in a later round keeps the authored slot of the trait it replaced.
+func TestSiblingGroup_LoweredTraitKeepsAuthoredSlot(t *testing.T) {
+	got := traitOrderApps(t, crossRule, "t0", "hop")
+	if want := []string{"web-own", "web-t0", "web-t-hop"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("trait sub-applications = %v, want %v", got, want)
+	}
+}
+
+// TestSiblingGroup_SingleComponentTraitOrderUnchanged: the authored-order merge is
+// for groups only. A rule emitting one component applies its traits in the order
+// it placed them, its own trait after a forwarded one included.
+func TestSiblingGroup_SingleComponentTraitOrderUnchanged(t *testing.T) {
+	single := emitRule{"single", func(c *Component) []Component {
+		return []Component{{Name: c.Name, Type: "a", Properties: map[string]any{},
+			Traits: []Trait{c.Traits[0], {Type: "own", Properties: map[string]any{}}}}}
+	}}
+	got := traitOrderApps(t, single, "t0")
+	if want := []string{"web-t0", "web-own"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("trait sub-applications = %v, want %v", got, want)
+	}
+}
+
 // copyTraitRule lowers a "copy" trait to a copy of its component retyped "c".
 type copyTraitRule struct{}
 

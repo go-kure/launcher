@@ -1492,6 +1492,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				result.Traits[j].origin = &traitOrigin
 				result.Traits[j].sealed = true
 				result.Traits[j].synthesized = inputChecked
+				// A trait lowered from a forwarded one keeps its authored slot, so a
+				// sibling group still applies it in authored order (applyEntryTraits).
+				result.Traits[j].authoredIndex = trait.authoredIndex
 				names[j] = result.Traits[j].Type
 				if err := t.validateEmittedTrait(&result.Traits[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
