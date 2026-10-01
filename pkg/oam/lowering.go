@@ -1201,6 +1201,17 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 		docOrigin = Origin{Document: doc.Metadata.Name, DocumentKind: doc.Kind, Namespace: doc.Metadata.Namespace}
 	}
 
+	// Every component no rule synthesized is checked for reserved keys before any
+	// rule of this round runs: a rule may emit an element whose properties map is
+	// that of a component it was handed (LoweringContext.Component), and validating
+	// the emitted element strips an explicit null from both (go-kure/launcher#609).
+	// The schema and the exemption are the ones the later checks use, so this
+	// refuses nothing they would accept; it only runs before the strip can hide a
+	// null from them.
+	if err := t.enforceAuthoredComponentReservations(doc, docOrigin); err != nil {
+		return false, nil, err
+	}
+
 	changed := false
 	var steps []LoweringStep
 	newComponents := make([]Component, 0, len(doc.Spec.Components))
