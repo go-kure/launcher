@@ -122,7 +122,7 @@ jobs:
       run: echo "$HOME/bin" >> $GITHUB_PATH
 
     - name: Validate docs map (code↔docs sync)
-      uses: go-kure/.github/.github/actions/check-doc-sync@4252fb3bf6524052b2ecd55480eb96d79ea2ff97 # main
+      uses: go-kure/.github/.github/actions/check-doc-sync@27e992335867858c0a7cc2dd2f48d1eabe5fb057 # main
 
     - name: Inject front matter
       run: bash site/scripts/inject-frontmatter.sh
@@ -158,48 +158,19 @@ jobs:
         token: ${{ secrets.DEPLOY_TOKEN }}
         path: deploy-target
 
+    # Writes launcher/<slot>/ and, when set_latest is true, the launcher/ root,
+    # then commits and pushes. The root is written only if the label is still the
+    # highest stable tag at write time (tags fetched again); a push rejected
+    # because another slot's deploy moved the pages tip is redone on the new tip
+    # and retried.
     - name: Deploy to go-kure.github.io
-      run: |
-        cd deploy-target
-        SLOT="${{ steps.version.outputs.slot }}"
-        SET_LATEST="${{ steps.version.outputs.set_latest }}"
-
-        # Ensure deployment infrastructure files exist
-        echo "www.gokure.dev" > CNAME
-        touch .nojekyll
-
-        # --- Deploy versioned slot to launcher/{slot}/ ---
-        echo "Deploying to /launcher/${SLOT}/..."
-        mkdir -p launcher
-        rm -rf "launcher/${SLOT}"
-        cp -r ../site/public-slot "launcher/${SLOT}"
-
-        # --- Deploy to launcher/ root (latest stable) ---
-        if [[ "$SET_LATEST" == "true" ]]; then
-          echo "Deploying to /launcher/ (latest stable)..."
-          # Remove launcher/ root content but preserve version subdirectories
-          find launcher -maxdepth 1 -mindepth 1 \
-            -not -name 'dev' \
-            -not -name 'v*' \
-            -exec rm -rf {} +
-          cp -r ../site/public-root/* launcher/
-        fi
-
-        # Get launcher commit info for the deploy message
-        LAUNCHER_SHA=$(cd .. && git rev-parse --short HEAD)
-
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add -A
-        if git diff --staged --quiet; then
-          echo "No changes to deploy"
-        else
-          LABEL="${{ steps.version.outputs.label }}"
-          if [[ "$SET_LATEST" == "true" ]]; then
-            MSG="deploy: ${LABEL} → /launcher/${SLOT}/ + /launcher/ (latest) from launcher@${LAUNCHER_SHA}"
-          else
-            MSG="deploy: ${LABEL} → /launcher/${SLOT}/ from launcher@${LAUNCHER_SHA}"
-          fi
-          git commit -m "$MSG"
-          git push
-        fi
+      uses: go-kure/.github/.github/actions/deploy-docs-push@27e992335867858c0a7cc2dd2f48d1eabe5fb057 # main
+      with:
+        source-path: .
+        target-path: deploy-target
+        site-subdir: launcher
+        slot: ${{ steps.version.outputs.slot }}
+        label: ${{ steps.version.outputs.label }}
+        set-latest: ${{ steps.version.outputs.set_latest }}
+        slot-site: site/public-slot
+        root-site: site/public-root

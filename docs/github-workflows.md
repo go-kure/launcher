@@ -412,7 +412,11 @@ Runs on main and `release/*` branches only (not PRs):
 3. Runs `scripts/gen-versions-toml.sh` to generate versioned Hugo config overlay
 4. Builds the Hugo site targeting `https://www.gokure.dev/launcher/<slot>/`
 5. If `set_latest=true`, also builds at `https://www.gokure.dev/launcher/`
-6. Checks out `go-kure/go-kure.github.io` and deploys to the `launcher/` subdirectory
+6. Checks out `go-kure/go-kure.github.io` and deploys to the `launcher/` subdirectory through the
+   shared `deploy-docs-push` action from `go-kure/.github`. When `set_latest=true`, the action
+   fetches the tags again right before writing the root and writes `launcher/` only if the label
+   is still the highest stable tag (the same rule Publish uses). Otherwise it deploys the slot and
+   leaves the root untouched.
 
 ### Trigger Matrix
 
@@ -427,18 +431,23 @@ Runs on main and `release/*` branches only (not PRs):
 Per-slot group (`deploy-docs-<slot>`) with `cancel-in-progress: false` — two deploys **to the same
 slot** queue rather than cancel, so neither is dropped.
 
-**This does not serialise deploys to *different* slots, and they are not independent.** The group
-name includes the slot, so a `v1.2` deploy and a `v1.3` deploy sit in different groups and run at
-the same time. Both check out the same docs repository and both end in a plain `git push`, so the
-second to push fails non-fast-forward and its content is never applied — a real race, just not one
-this concurrency key can see. Sequence cross-slot deploys yourself: wait for the first to conclude
-before starting the second, as the recovery procedure on the Releasing page (`docs/releasing.md`)
-does.
+Deploys to *different* slots are not serialised: the group name includes the slot, so a `v1.2`
+deploy and a `v1.3` deploy run at the same time and push to the same docs repository. The
+`deploy-docs-push` action handles that race. When a push is rejected because the other deploy
+moved the pages branch, it starts again from the new tip, writes this deploy's slot again (keeping
+the other slot's content), re-checks the root decision, and pushes. It retries up to five
+attempts, then fails the deploy. Any other push failure fails the deploy immediately.
+
+Not covered: two deploys to the *same* slot are queued, not re-checked, so an older patch release
+deployed after a newer one still replaces that slot's content. A tag cut before this workflow
+version runs the deploy from its own ref, so its deploy uses the workflow as it was at that tag.
 
 ### Preservation
 
 Only the target slot is replaced. Other `launcher/v*/`, `launcher/dev/`, `CNAME`, and `.nojekyll`
-are preserved. The root `launcher/` files are only overwritten when `set_latest=true`.
+are preserved. The root `launcher/` files are only overwritten when `set_latest=true` and the label
+is still the highest stable tag when the deploy writes. A root write replaces everything directly
+under `launcher/` except `dev/` and the `v*/` slots.
 
 ### Authentication
 
