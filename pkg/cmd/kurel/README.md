@@ -34,12 +34,14 @@ All built-in component and trait handlers are registered automatically (via
 source), alongside the built-in lowering rules: the trait-position ones
 (`builtinTraitLoweringRules()` — currently just `expose`, registered via
 `RegisterBuiltinTraitLowering` rather than `RegisterBuiltinTrait`) and the
-component-position ones (`builtinComponentLoweringRules()` — currently just
-`worker`, registered via `RegisterComponentLowering`; it lowers a worker into a
+component-position ones (`builtinComponentLoweringRules()` — `worker` and
+`helm`, registered via `RegisterComponentLowering`). `worker` lowers to a
 `deployment` component plus, unless `topologySpread: false`, a synthesized
-`topology-spread` trait), and the built-in application policy handlers
-(`builtinPolicyHandlers()` — `dependency`, `placement`, `reconciliation` and
-`health-checks`, registered via `RegisterPolicy`). Every registered handler and rule
+`topology-spread` trait. `helm` lowers to a `helmrelease` (plus a generated
+`helmrepository` or `ocirepository` for an inline URL, shared within the document)
+or, under `delivery: template`, to a `helmtemplate`. The built-in application policy
+handlers are registered too (`builtinPolicyHandlers()` — `dependency`, `placement`,
+`reconciliation` and `health-checks`, registered via `RegisterPolicy`). Every registered handler and rule
 declares a `PropertySchema` for its user-facing properties, so every authored
 component's, trait's and policy's properties are validated against it before dispatch
 (a misspelt policy key such as `prunee` fails the build). A policy type with no built-in handler —
@@ -75,7 +77,7 @@ opinion-free projection of a CloudNativePG `Cluster` — is registered in
 Because a lowering rule may claim types the parser would otherwise reject, `build`
 constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`
 runs first, and its `LowerableTypes()` (the kinds/component-types/trait-types claimed
-by its registered lowering rules — `worker` and `expose` today) is passed into
+by its registered lowering rules — `worker`, `helm` and `expose` today) is passed into
 `oam.ParseWithExtraTypes` alongside the `--capability-def`-supplied custom trait
 types. See the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s
 Parsing and Lowering sections for the general mechanism.

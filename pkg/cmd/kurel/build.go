@@ -345,6 +345,7 @@ func builtinTraitLoweringRules() map[string]oam.TraitLoweringRule {
 func builtinComponentLoweringRules() map[string]oam.ComponentLoweringRule {
 	return map[string]oam.ComponentLoweringRule{
 		"worker": components.WorkerRule{},
+		"helm":   components.HelmRule{},
 	}
 }
 
@@ -371,7 +372,9 @@ func newBuiltinTransformer() *oam.Transformer {
 	// "worker" is a component-position lowering rule, not a dispatchable handler:
 	// it lowers into a terminal "deployment" component (plus a synthesized
 	// "topology-spread" trait) for DeploymentHandler/TopologySpreadHandler to
-	// dispatch on the next fixpoint round. It must not also appear in
+	// dispatch on the next fixpoint round. "helm" likewise lowers into the
+	// "helmrelease" or "helmtemplate" terminal, plus a generated Flux source for
+	// an inline URL. Neither may also appear in
 	// builtinComponentHandlers — RegisterComponentLowering panics on that
 	// collision.
 	for _, r := range builtinComponentLoweringRules() {

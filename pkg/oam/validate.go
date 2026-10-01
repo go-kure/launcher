@@ -29,6 +29,7 @@ var validComponentTypes = map[string]bool{
 	"cronjob":      true,
 	"job":          true,
 	"helmchart":    true,
+	"helm":         true,
 	"helmrelease":  true,
 	"helmtemplate": true,
 	"daemonset":    true,
