@@ -124,15 +124,15 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 		// No PlatformReserved exception, deliberately. Reservation governs what a user
 		// WROTE, so reporting it names the line an author actually typed.
 		//
-		// The two rules never meet: enforcePlatformReserved runs upstream of any
-		// emission validation, so what it sees is what a user wrote. That holds on
-		// the component surface too. An authored component is checked before the
-		// first rule that could rewrite it (lowerDocumentBody's pre-rule check,
-		// enforceAuthoredComponentReservations before a document rule) or, with no
-		// rule, in createApplications. A component a rule emitted, whose properties
-		// are stripped here, is either synthesized and exempt from all three, or —
-		// output of a rule whose input was not checked — checked after this strip,
-		// where a stripped null is simply absent.
+		// The two rules meet in one case only. enforcePlatformReserved otherwise runs
+		// upstream of any emission validation, so what it sees is what a user wrote.
+		// An authored component is checked before the first rule that could rewrite
+		// it (lowerDocumentBody's pre-rule check, enforceAuthoredComponentReservations
+		// before a document rule) or, with no rule, in createApplications. A
+		// component a rule emitted, whose properties are stripped here, is either
+		// synthesized and exempt from all three, or — output of a rule whose input
+		// was not checked — checked after this strip. That is the case where they
+		// meet: a stripped null is simply absent there (go-kure/launcher#609).
 		if isNullValue(props[key]) {
 			delete(props, key)
 			continue
@@ -459,12 +459,15 @@ func joinPropertyTypes(types []PropertyType) string {
 // Emitted-property validation normalizes an explicit null to absence
 // (validateObjectProperties, above) and does NOT exempt reserved keys from that.
 //
-// The two rules do not meet: this runs upstream of any emission validation, so what it
-// sees is what a user wrote. On the component surface the callers keep that true by
-// skipping a component a lowering rule synthesized (Component.synthesized) and by
-// checking an authored one before any rule can rewrite it — lowerDocumentBody before a
-// ComponentLoweringRule, enforceAuthoredComponentReservations before a
-// DocumentLoweringRule, createApplications otherwise. No built-in component schema
+// The two rules meet in one case only. Otherwise this runs upstream of any emission
+// validation, so what it sees is what a user wrote. On the component surface the
+// callers keep that true by skipping a component a lowering rule synthesized
+// (Component.synthesized) and by checking an authored one before any rule can rewrite
+// it — lowerDocumentBody before a ComponentLoweringRule,
+// enforceAuthoredComponentReservations before a DocumentLoweringRule,
+// createApplications otherwise. The exception is the output of a rule whose input was
+// not checked: it stays authored and is checked here after emission validation, which
+// has already removed an explicit null (go-kure/launcher#609). No built-in component schema
 // declares a reserved property today: all 11 PlatformReserved declarations are on
 // trait schemas — 8 written literally (builtin/traits/expose_rule.go and ingress.go)
 // plus the 3 schemaNetworkPolicy(true) calls in the ExposeRule, IngressHandler and

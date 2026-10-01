@@ -403,12 +403,15 @@ rule's output, so a `PlatformReserved` value the rule rendered from
 `LoweringContext.Capabilities` is accepted rather than rejected as authored. That
 holds only when the rule's input was checked before it ran: a
 `ComponentLoweringRule` or `TraitLoweringRule` that declares a schema
-(`PropertySchemaProvider`), or one whose input was itself rule output; and a
+(`PropertySchemaProvider`), or a `ComponentLoweringRule` whose input component is
+itself synthesized; and a
 `DocumentLoweringRule` only when every authored component of its input has a schema
 to be checked against. Output of any other rule stays authored and is checked like
 anything a user wrote, so a schema-less rule cannot pass a non-null authored reserved
 value through (an explicit `null` is stripped before that check,
-go-kure/launcher#609). A
+go-kure/launcher#609). A sealed trait is not checked input: every trait a rule
+emits is sealed, whether or not that rule's input was checked, so a schema-less
+`TraitLoweringRule` over a sealed trait still emits authored components. A
 component a `DocumentLoweringRule` forwards — the same element of
 `doc.Spec.Components`, not a copy — keeps the classification it arrived with:
 forwarding neither makes it synthesized nor resets it to authored. An authored
