@@ -453,6 +453,23 @@ func TestLowerRaws_RejectsInvalidDNS1123Name(t *testing.T) {
 	}
 }
 
+// TestLowerRaws_NamespaceMustBeDNS1123Label guards go-kure/launcher#616 on the raw-input
+// path: metadata.namespace follows the same DNS-1123 label rule as the in-transform path
+// (validate.go), so a dotted or over-63-character namespace is refused here too.
+func TestLowerRaws_NamespaceMustBeDNS1123Label(t *testing.T) {
+	for _, ns := range []string{"team.prod", strings.Repeat("a", 64)} {
+		tr := NewTransformer(nil, nil)
+		tr.RegisterRawDocumentLowering(testRawRule{kind: "WebApplication"})
+
+		raw := json.RawMessage("apiVersion: " + SupportedAPIVersion + "\nkind: WebApplication\nmetadata:\n  name: web\n  namespace: " + ns + "\nspec:\n  image: nginx:1.27\n")
+		_, err := tr.LowerRaws([]json.RawMessage{raw}, TransformContext{})
+		want := "metadata.namespace \"" + ns + "\" is not a valid DNS-1123 label (" + namespaceLabelRule + ")"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("namespace %q: error = %v, want it to contain %q", ns, err, want)
+		}
+	}
+}
+
 // TestLowerRaws_SlotSplicePreservesOrder proves output is spliced back on slot, not on
 // Origin and not on position within the settled set: two DIFFERENT lowered inputs
 // interleaved with pass-throughs, one emitting 2 documents and one emitting 1.
