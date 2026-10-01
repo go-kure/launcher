@@ -658,8 +658,9 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// properties are the rule's own output, which may carry a reserved value the
 		// rule rendered from LoweringContext.Capabilities. A rule's output is marked
 		// synthesized only when its input was already checked before that rule ran: a
-		// component or trait rule that declares a schema, or a component rule whose
-		// input component is itself synthesized. A component a document rule forwards
+		// component rule that declares a schema or receives a synthesized component,
+		// or a trait rule that declares a schema and receives an unsealed trait (a
+		// sealed trait skips the schema check). A component a document rule forwards
 		// unchanged keeps its classification. Any other rule output, including every
 		// component a document rule builds, is checked here like an authored component.
 		if p, ok := handler.(PropertySchemaProvider); ok && !component.synthesized {
