@@ -60,7 +60,7 @@ func (h *HelmchartHandler) PropertySchema() map[string]oam.PropertySchema {
 		"delivery":        {Type: oam.PropertyTypeString, Default: "native", Enum: []any{"native", "template"}, Description: "Delivery mode: native emits a HelmRelease, template renders the chart client-side."},
 		"interval":        {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms (default 60m)."},
 		"releaseName":     {Type: oam.PropertyTypeString, Description: "Helm release name. Native: spec.releaseName, Flux's default when unset. Template: .Release.Name for the client-side render, default release."},
-		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Namespace into which the release installs resources. Native: spec.targetNamespace. Template: .Release.Namespace for the client-side render, default the application namespace."},
+		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Namespace into which the release installs resources. Native: spec.targetNamespace, default the application namespace under a Flux namespace, else Flux's default (the HelmRelease's namespace). Template: .Release.Namespace for the client-side render, default the application namespace."},
 		"source":          {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true, Description: "Chart source: an inline url, or a reference (name/kind) to an existing source CR."},
 		"values":          openObject("Helm values tree passed to the release."),
 		"valuesMode":      {Type: oam.PropertyTypeString, Default: valuesModeDefault, Enum: []any{"inline", "configMap"}, Description: "How Helm values are delivered: inline sets HelmRelease.spec.values directly, configMap externalizes them into a referenced ConfigMap. Not supported under delivery: template."},
@@ -668,8 +668,16 @@ func (c *HelmchartConfig) buildHelmRelease() *helmv2.HelmRelease {
 	if c.ReleaseName != "" {
 		hr.Spec.ReleaseName = c.ReleaseName
 	}
-	if c.TargetNamespace != "" {
+	// Under a Flux namespace the HelmRelease no longer sits in the application
+	// namespace, and Flux installs a release into the HelmRelease's own
+	// namespace unless targetNamespace says otherwise. So the application
+	// namespace becomes the target unless one is authored, as on the
+	// helmrelease terminal (go-kure/launcher#610).
+	switch {
+	case c.TargetNamespace != "":
 		hr.Spec.TargetNamespace = c.TargetNamespace
+	case c.fluxNS != "":
+		hr.Spec.TargetNamespace = c.Namespace
 	}
 	if c.DriftMode != "" {
 		fluxcd.SetHelmReleaseDriftDetection(hr, fluxcd.CreateDriftDetection(helmv2.DriftDetectionMode(c.DriftMode)))

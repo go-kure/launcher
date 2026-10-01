@@ -151,11 +151,16 @@ func TestTransform_FluxNamespace_ReachesHelmRelease(t *testing.T) {
 		}
 		for _, objPtr := range objs {
 			obj := *objPtr
-			switch obj.(type) {
+			switch o := obj.(type) {
 			case *helmv2.HelmRelease, *sourcev1.HelmRepository:
 				found = true
 				if ns := obj.GetNamespace(); ns != "custom-flux" {
 					t.Errorf("%T.Namespace = %q, want %q", obj, ns, "custom-flux")
+				}
+				// The release still installs into the application namespace
+				// (go-kure/launcher#610).
+				if hr, ok := o.(*helmv2.HelmRelease); ok && hr.Spec.TargetNamespace != "default" {
+					t.Errorf("HelmRelease targetNamespace = %q, want the application namespace %q", hr.Spec.TargetNamespace, "default")
 				}
 			}
 		}
