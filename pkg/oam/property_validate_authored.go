@@ -64,6 +64,9 @@ func (t *Transformer) ValidateAuthoredProperties(app *Application) error {
 	if app == nil {
 		return nil
 	}
+	if err := t.enforceDocumentReservations(app); err != nil {
+		return err
+	}
 	for i := range app.Spec.Components {
 		comp := &app.Spec.Components[i]
 		if err := t.validateAuthoredComponent(comp); err != nil {
@@ -78,6 +81,50 @@ func (t *Transformer) ValidateAuthoredProperties(app *Application) error {
 	for i := range app.Spec.Policies {
 		if err := t.validateAuthoredPolicy(&app.Spec.Policies[i]); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// enforceDocumentReservations runs Transform's first D3 check (enforcePlatformReserved)
+// on app before ValidateAuthoredProperties validates it. It has to come first:
+// validation normalizes an explicit null under a nested declared object to absence
+// (validateObjectProperties), so a reserved key authored as {"config":{"locked":null}}
+// would be gone before Transform's own check could see it, and the document would be
+// accepted (go-kure/launcher#635).
+//
+// It reports exactly what Transform reports for a document whose only defect is a
+// reserved key. With lowering rules registered, that is the check at the start of the
+// first lowering round (enforceAuthoredReservations, before any rule ran, so the
+// LoweringError carries no chain); a non-terminal kind no rule claims is passed over,
+// as lowerDocumentOnce passes it over. With none, it is createApplications' component
+// check and then applyTraits' trait check, in that order, against the handlers they
+// dispatch to. Policies reserve nothing on either path.
+func (t *Transformer) enforceDocumentReservations(app *Application) error {
+	if t.hasLoweringRules() {
+		if app.Kind != terminalDocumentKind {
+			if _, ok := t.docLoweringRules[app.Kind]; !ok {
+				return nil
+			}
+		}
+		origin := Origin{Document: app.Metadata.Name, DocumentKind: app.Kind, Namespace: app.Metadata.Namespace}
+		if err := t.enforceAuthoredReservations(app, origin); err != nil {
+			return &LoweringError{Origin: origin, Cause: err}
+		}
+		return nil
+	}
+	for i := range app.Spec.Components {
+		comp := &app.Spec.Components[i]
+		if err := t.enforceComponentReservations(comp, "properties"); err != nil {
+			return &TransformError{Message: fmt.Sprintf("component %q", comp.Name), Cause: err}
+		}
+	}
+	for i := range app.Spec.Components {
+		comp := &app.Spec.Components[i]
+		for j := range comp.Traits {
+			if err := t.enforceTraitReservations(&comp.Traits[j], "properties"); err != nil {
+				return &TransformError{Message: fmt.Sprintf("component %q trait %q", comp.Name, comp.Traits[j].Type), Cause: err}
+			}
 		}
 	}
 	return nil
