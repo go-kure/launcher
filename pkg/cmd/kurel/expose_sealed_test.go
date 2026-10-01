@@ -40,11 +40,11 @@ func buildFixtureYAML(t *testing.T, appPath string, profileData []byte) []byte {
 	if err != nil {
 		t.Fatalf("Transform: %v", err)
 	}
-	objects, err := collectFromNode(cluster.Node)
+	apps, err := oam.GenerateApplications(cluster)
 	if err != nil {
-		t.Fatalf("collecting manifests: %v", err)
+		t.Fatalf("generating manifests: %v", err)
 	}
-	got, err := kio.EncodeObjectsToYAML(objects)
+	got, err := kio.EncodeObjectsToYAML(generatedObjects(apps))
 	if err != nil {
 		t.Fatalf("encoding YAML: %v", err)
 	}

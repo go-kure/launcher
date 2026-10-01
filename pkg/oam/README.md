@@ -371,6 +371,18 @@ it also catches two same-named authored components in one namespace, and a clust
 object generated from documents in different namespaces. An object's namespace is read from
 the object, so pass objects as generated; an object with no kind is an error.
 
+Nothing above compares the applications inside one document: a component and another
+component's trait, two components, or two traits can each generate the same object, and
+both pass `Transform` (go-kure/launcher#646). After transforming a document, generate it
+with `GenerateApplications(cluster)` and pass the result to `CheckInDocumentCollisions`. It
+returns each application's objects with its producer, generating each application once, in
+the order kure's own generation uses and with the bundle labels and annotations kure adds,
+so its objects replace a `Bundle.Generate` of the same cluster rather than add a second
+generation, which could differ from the first. The check reports every object, keyed as
+above, that more than one application generates, naming each producer as a component (a
+sibling group is one) or as a trait's sub-application and its component. A repeat within
+one application is not reported. `kurel build` runs both before it writes anything.
+
 `Reserve`/`Name` fail on every repeat claim of a name, including one from the same content.
 Rules whose outputs share one derived object (two components pointing at the same chart
 source, say) use the emit-or-adopt pair instead:

@@ -60,7 +60,7 @@ func (o objectIdentity) String() string {
 // so a namespaced object must carry its namespace and a cluster-scoped one none.
 // An object with no kind cannot be keyed and is an error; a nil entry, or a nil
 // object inside one, is skipped. An object repeated within one document is not
-// reported, since NameAllocator already guards one document's generated names.
+// reported here: CheckInDocumentCollisions compares one document's applications.
 // Each colliding object is reported once, naming every document that generates
 // it, in input order. Listing the same document twice is an error.
 func CheckCrossDocumentCollisions(docs []GeneratedDocument) error {
