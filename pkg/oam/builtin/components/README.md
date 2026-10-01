@@ -1965,6 +1965,16 @@ not part of either change.
   lives in the internal `pkg/oam/internal/fluxduration`, shared with the `reconciliation`
   policy.
 
+  **A wrongly typed optional property is an error, not dropped** (go-kure/launcher#601).
+  `chart`, `version`, `delivery`, `interval`, `releaseName`, `targetNamespace` and the nested
+  `driftDetection.mode`, `install.crds`, `upgrade.crds` must be strings; `driftDetection`,
+  `install`, `upgrade` and `values` objects; `valuesFrom` an array whose entries carry string
+  `kind`, `valuesKey` and `targetPath`. A present value of another type is refused, naming the
+  field: `version: 7` used to build with no version, and `interval: 7` with the `60m` default.
+  A null or an empty string still reads as unset. Schema validation already refuses these in a
+  `kurel build`; the handler check covers a handler called directly and a component a lowering
+  rule builds in Go.
+
   **`delivery: template` is the `helmtemplate` component's code path.** Its source checks,
   render, hook-group ordering and layout partition are one implementation shared with the
   kind-named `helmtemplate` terminal below (`helmtemplate_render.go`), so what this entry says
@@ -2049,7 +2059,13 @@ not part of either change.
   `encoding/json`; schema validation, which a `kurel build` runs first, is exact.
 
   **Defaults and checks.** `interval` defaults to `60m` when unset (a zero duration counts
-  as unset); Flux requires the field, and `60m` is the `helmchart` default. Exactly one of
+  as unset); Flux requires the field, and `60m` is the `helmchart` default. A set `interval`
+  must be a duration Flux accepts, checked as for `helmchart` (see its `interval` paragraph;
+  go-kure/launcher#601): on the authored text, which also refuses a positive value that would
+  decode to zero and be replaced by the default, and again in `Generate` on the decoded
+  duration's emitted form, for a config built directly. Its other duration fields (`timeout`,
+  the nested `chart.spec.interval` and per-action timeouts) are still left to the CRD
+  (go-kure/launcher#606). Exactly one of
   `chart` and `chartRef` is required. `values` must be a JSON object; a non-finite number
   (`.nan`, `.inf`) is a build error, never a panic. `valuesMode` is `inline` (the default)
   or `configMap`. Nothing else is checked here: compared with the `helmchart` composite,
@@ -2219,6 +2235,9 @@ not part of either change.
   `interval` defaults to `60m` when unset (a zero duration counts as unset), the `helmchart`
   composite's source default; a `helmrepository` with `type: oci` gets no default, since Flux
   does not poll it, and its emitted `interval` reads `0s`, the value the Go type always writes.
+  A set `interval` must be a duration Flux accepts, checked exactly as on `helmrelease` above
+  (go-kure/launcher#601); under `type: oci` too, where the CRD pattern still applies.
+  Other duration fields (`timeout`) are still left to the CRD (go-kure/launcher#606).
   Nothing else is checked or defaulted: enums (`type`, `provider`, `layerSelector.operation`,
   `verify.mode`) and cross-field rules (a Bucket's `sts` against its `provider`,
   `serviceAccountName` against `secretRef`) are left to the CRD's own admission.

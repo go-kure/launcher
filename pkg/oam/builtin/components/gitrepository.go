@@ -29,7 +29,7 @@ func (h *GitRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"secretRef":          fluxSourceObject("GitRepository spec.secretRef: the Secret holding the credentials, in the namespace the GitRepository lands in."),
 		"provider":           fluxSourceString("GitRepository spec.provider for authentication: generic, aws, azure or github."),
 		"serviceAccountName": fluxSourceString("GitRepository spec.serviceAccountName that authenticates the clone (azure and aws providers)."),
-		"interval":           fluxSourceString("GitRepository spec.interval as a duration (e.g. 10m); defaults to 60m when unset or zero."),
+		"interval":           fluxSourceString("GitRepository spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
 		"timeout":            fluxSourceString("GitRepository spec.timeout for Git operations, as a duration."),
 		"ref":                fluxSourceObject("GitRepository spec.ref: the branch, tag, semver range, reference name or commit to check out."),
 		"verify":             fluxSourceObject("GitRepository spec.verify: commit signature verification."),
@@ -59,6 +59,9 @@ func (h *GitRepositoryHandler) ToApplicationConfig(component *oam.Component, nam
 	if err != nil {
 		return nil, errors.Errorf("gitrepository: properties do not decode as a GitRepositorySpec: %w", err)
 	}
+	if err := checkAuthoredFluxInterval("gitrepository", component.Properties); err != nil {
+		return nil, err
+	}
 	cfg := &GitRepositoryConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -86,6 +89,9 @@ type GitRepositoryConfig struct {
 // validate holds the checks shared by the parse path and Generate, which
 // repeats them for a config built directly by a library caller.
 func (c *GitRepositoryConfig) validate() error {
+	if err := checkFluxIntervalDuration("gitrepository", c.Spec.Interval); err != nil {
+		return err
+	}
 	return checkFluxSourceURL("gitrepository", "url", c.Spec.URL, "http://", "https://", "ssh://")
 }
 

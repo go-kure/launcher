@@ -38,7 +38,7 @@ func (h *BucketHandler) PropertySchema() map[string]oam.PropertySchema {
 		"serviceAccountName": fluxSourceString("Bucket spec.serviceAccountName for workload identity (gcp and aws providers)."),
 		"certSecretRef":      fluxSourceObject("Bucket spec.certSecretRef: the Secret holding a client certificate and/or CA certificate (generic provider)."),
 		"proxySecretRef":     fluxSourceObject("Bucket spec.proxySecretRef: the Secret holding the proxy configuration."),
-		"interval":           fluxSourceString("Bucket spec.interval as a duration (e.g. 10m); defaults to 60m when unset or zero."),
+		"interval":           fluxSourceString("Bucket spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
 		"timeout":            fluxSourceString("Bucket spec.timeout for fetch operations, as a duration."),
 		"ignore":             fluxSourceString("Bucket spec.ignore: exclusion patterns in .sourceignore format."),
 		"suspend":            fluxSourceBool("Bucket spec.suspend: stop reconciling the source. Also skips the auto health check."),
@@ -52,6 +52,9 @@ func (h *BucketHandler) ToApplicationConfig(component *oam.Component, namespace 
 	spec, _, err := builtin.DecodeStrictJSON[sourcev1.BucketSpec](component.Properties)
 	if err != nil {
 		return nil, errors.Errorf("bucket: properties do not decode as a BucketSpec: %w", err)
+	}
+	if err := checkAuthoredFluxInterval("bucket", component.Properties); err != nil {
+		return nil, err
 	}
 	cfg := &BucketConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
@@ -80,6 +83,9 @@ type BucketConfig struct {
 // repeats them for a config built directly by a library caller. The CRD has no
 // pattern for endpoint, so only its presence is checked.
 func (c *BucketConfig) validate() error {
+	if err := checkFluxIntervalDuration("bucket", c.Spec.Interval); err != nil {
+		return err
+	}
 	if c.Spec.BucketName == "" {
 		return errors.New("bucket: bucketName is required")
 	}

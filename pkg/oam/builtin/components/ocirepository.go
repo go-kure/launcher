@@ -35,7 +35,7 @@ func (h *OCIRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"serviceAccountName": fluxSourceString("OCIRepository spec.serviceAccountName whose image pull secrets authenticate the pull."),
 		"certSecretRef":      fluxSourceObject("OCIRepository spec.certSecretRef: the Secret holding a client certificate and/or CA certificate."),
 		"proxySecretRef":     fluxSourceObject("OCIRepository spec.proxySecretRef: the Secret holding the proxy configuration."),
-		"interval":           fluxSourceString("OCIRepository spec.interval as a duration (e.g. 10m); defaults to 60m when unset or zero."),
+		"interval":           fluxSourceString("OCIRepository spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
 		"timeout":            fluxSourceString("OCIRepository spec.timeout for remote operations, as a duration."),
 		"ignore":             fluxSourceString("OCIRepository spec.ignore: exclusion patterns in .sourceignore format."),
 		"insecure":           fluxSourceBool("OCIRepository spec.insecure: allow a non-TLS registry."),
@@ -51,6 +51,9 @@ func (h *OCIRepositoryHandler) ToApplicationConfig(component *oam.Component, nam
 	spec, _, err := builtin.DecodeStrictJSON[sourcev1.OCIRepositorySpec](component.Properties)
 	if err != nil {
 		return nil, errors.Errorf("ocirepository: properties do not decode as an OCIRepositorySpec: %w", err)
+	}
+	if err := checkAuthoredFluxInterval("ocirepository", component.Properties); err != nil {
+		return nil, err
 	}
 	cfg := &OCIRepositoryConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
@@ -79,6 +82,9 @@ type OCIRepositoryConfig struct {
 // validate holds the checks shared by the parse path and Generate, which
 // repeats them for a config built directly by a library caller.
 func (c *OCIRepositoryConfig) validate() error {
+	if err := checkFluxIntervalDuration("ocirepository", c.Spec.Interval); err != nil {
+		return err
+	}
 	return checkFluxSourceURL("ocirepository", "url", c.Spec.URL, "oci://")
 }
 

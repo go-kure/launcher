@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -82,20 +84,52 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 
 	props := component.Properties
 
-	cfg.Chart, _ = props["chart"].(string)
-	cfg.Version, _ = props["version"].(string)
-	cfg.Delivery, _ = props["delivery"].(string)
-	cfg.Interval, _ = props["interval"].(string)
+	// Every optional read goes through the parse<X>Field family: a null or an
+	// empty string is absence, and a present value of the wrong type is an error
+	// naming the field, never a silent fallback to the unset default
+	// (go-kure/launcher#601). Schema validation refuses these first in a
+	// kurel build; this covers a handler called directly and a component a
+	// lowering rule builds in Go.
+	for _, f := range []struct {
+		key string
+		dst *string
+	}{
+		{"chart", &cfg.Chart},
+		{"version", &cfg.Version},
+		{"delivery", &cfg.Delivery},
+		{"interval", &cfg.Interval},
+		{"releaseName", &cfg.ReleaseName},
+		{"targetNamespace", &cfg.TargetNamespace},
+	} {
+		s, _, err := parseStringField(props, f.key, "helmchart: "+f.key)
+		if err != nil {
+			return nil, err
+		}
+		*f.dst = s
+	}
 	if cfg.Interval != "" {
 		if err := validateFluxInterval("helmchart", cfg.Interval); err != nil {
 			return nil, err
 		}
 	}
-	cfg.ReleaseName, _ = props["releaseName"].(string)
-	cfg.TargetNamespace, _ = props["targetNamespace"].(string)
 
-	if dd, ok := props["driftDetection"].(map[string]any); ok {
-		mode, _ := dd["mode"].(string)
+	dd, _, err := parseObjectField(props, "driftDetection", "helmchart: driftDetection")
+	if err != nil {
+		return nil, err
+	}
+	install, _, err := parseObjectField(props, "install", "helmchart: install")
+	if err != nil {
+		return nil, err
+	}
+	upgrade, _, err := parseObjectField(props, "upgrade", "helmchart: upgrade")
+	if err != nil {
+		return nil, err
+	}
+	if dd != nil {
+		mode, _, err := parseStringField(dd, "mode", "helmchart: driftDetection.mode")
+		if err != nil {
+			return nil, err
+		}
 		switch mode {
 		case "enabled", "warn", "disabled":
 			cfg.DriftMode = mode
@@ -105,8 +139,11 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 			return nil, errors.Errorf("helmchart: driftDetection.mode %q is invalid; must be enabled, warn, or disabled", mode)
 		}
 	}
-	if install, ok := props["install"].(map[string]any); ok {
-		crds, _ := install["crds"].(string)
+	if install != nil {
+		crds, _, err := parseStringField(install, "crds", "helmchart: install.crds")
+		if err != nil {
+			return nil, err
+		}
 		switch crds {
 		case "Skip", "Create", "CreateReplace":
 			cfg.InstallCRDs = crds
@@ -116,8 +153,11 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 			return nil, errors.Errorf("helmchart: install.crds %q is invalid; must be Skip, Create, or CreateReplace", crds)
 		}
 	}
-	if upgrade, ok := props["upgrade"].(map[string]any); ok {
-		crds, _ := upgrade["crds"].(string)
+	if upgrade != nil {
+		crds, _, err := parseStringField(upgrade, "crds", "helmchart: upgrade.crds")
+		if err != nil {
+			return nil, err
+		}
 		switch crds {
 		case "Skip", "Create", "CreateReplace":
 			cfg.UpgradeCRDs = crds
@@ -127,7 +167,11 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 			return nil, errors.Errorf("helmchart: upgrade.crds %q is invalid; must be Skip, Create, or CreateReplace", crds)
 		}
 	}
-	if vals, ok := props["values"].(map[string]any); ok {
+	vals, hasVals, err := parseObjectField(props, "values", "helmchart: values")
+	if err != nil {
+		return nil, err
+	}
+	if hasVals {
 		// values is an open object: property validation checks that the key is
 		// a map and stops there, so the contents arrive exactly as yaml.v3
 		// decoded them. yaml.v3 resolves `.nan` and `.inf` to non-finite
@@ -148,7 +192,11 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 		}
 		cfg.Values = vals
 	}
-	if vfList, ok := props["valuesFrom"].([]any); ok {
+	if raw, present := authoredValue(props, "valuesFrom"); present {
+		vfList, ok := raw.([]any)
+		if !ok {
+			return nil, errors.Errorf("helmchart: valuesFrom: must be an array, got %T", raw)
+		}
 		for i, vf := range vfList {
 			vf = nullElem(vf)
 			m, ok := vf.(map[string]any)
@@ -156,20 +204,27 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 				return nil, errors.Errorf("valuesFrom[%d]: expected object, got %T", i, vf)
 			}
 			vfc := helmv2.ValuesReference{}
-			vfc.Kind, _ = m["kind"].(string)
+			label := fmt.Sprintf("valuesFrom[%d]", i)
+			if vfc.Kind, _, err = parseRawStringField(m, "kind", label+".kind"); err != nil {
+				return nil, err
+			}
 			switch vfc.Kind {
 			case "ConfigMap", "Secret":
 				// ok
 			default:
 				return nil, errors.Errorf("valuesFrom[%d]: kind %q is invalid; must be ConfigMap or Secret", i, vfc.Kind)
 			}
-			name, err := requiredStringField(m, "name", fmt.Sprintf("valuesFrom[%d]", i))
+			name, err := requiredStringField(m, "name", label)
 			if err != nil {
 				return nil, err
 			}
 			vfc.Name = name
-			vfc.ValuesKey, _ = m["valuesKey"].(string)
-			vfc.TargetPath, _ = m["targetPath"].(string)
+			if vfc.ValuesKey, _, err = parseStringField(m, "valuesKey", label+".valuesKey"); err != nil {
+				return nil, err
+			}
+			if vfc.TargetPath, _, err = parseStringField(m, "targetPath", label+".targetPath"); err != nil {
+				return nil, err
+			}
 			cfg.ValuesFrom = append(cfg.ValuesFrom, vfc)
 		}
 	}
@@ -652,6 +707,39 @@ func validateFluxInterval(component, interval string) error {
 		return errors.Errorf("%s: interval %q is invalid: it would be emitted as %q, below Flux's millisecond resolution (use 0s or at least 1ms)", component, interval, re.Emitted)
 	}
 	return errors.Errorf("%s: interval %q is invalid: must be a Flux duration (unsigned; units ms, s, m, h; e.g. 10m, 1h30m)", component, interval)
+}
+
+// checkAuthoredFluxInterval is validateFluxInterval for a kind-named component
+// (helmrelease and the four Flux sources), whose properties decode strictly into
+// a Flux spec with interval a metav1.Duration (go-kure/launcher#601). The check
+// runs on the authored text, read from the property map, because the decoded
+// duration has lost it: a positive value below a nanosecond decodes to zero,
+// which Generate reads as unset and replaces with the default. Called after the
+// strict decode, so a present interval is a string; keys match
+// case-insensitively there, as in encoding/json, so every spelling is checked.
+func checkAuthoredFluxInterval(component string, props map[string]any) error {
+	for _, k := range slices.Sorted(maps.Keys(props)) {
+		if !strings.EqualFold(k, "interval") {
+			continue
+		}
+		if s, ok := props[k].(string); ok && s != "" {
+			if err := validateFluxInterval(component, s); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkFluxIntervalDuration checks a decoded spec interval in the form it is
+// emitted, Duration.String(). It covers a config built directly rather than
+// parsed: a negative or sub-millisecond duration is emitted outside Flux's
+// pattern. Zero is unset, and Generate applies the default.
+func checkFluxIntervalDuration(component string, d metav1.Duration) error {
+	if d.Duration == 0 {
+		return nil
+	}
+	return validateFluxInterval(component, d.Duration.String())
 }
 
 // augmentingHelmchartConfig wraps *HelmchartConfig to add AugmentLayout
