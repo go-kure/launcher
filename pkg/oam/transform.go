@@ -653,22 +653,13 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 
 		// D3: an authored value for a platform-reserved property is rejected before
 		// the handler ever sees it, symmetric with the trait-position enforcement in
-		// applyTraits/lowerDocumentBody.
-		//
-		// KNOWN LIMITATION (round-4 finding #9 / round-14 Codex finding "Exempt
-		// synthesized components from authored-field enforcement", recurring,
-		// deferred both times — the one production ComponentLoweringRule,
-		// builtin/components' WorkerRule, emits a `deployment` component, whose
-		// schema declares no PlatformReserved property, and no rule populates one
-		// from LoweringContext.Capabilities, so nothing currently triggers it):
-		// unlike Trait, which carries a sealed
-		// marker exempting a rule-synthesized trait from this same enforcement,
-		// Component has no equivalent provenance marker, so a future
-		// ComponentLoweringRule that legitimately writes a PlatformReserved property
-		// from ctx.Capabilities would have it rejected here as if the user had
-		// authored it directly. Fixing this needs a Component-level synthesized/
-		// authored marker (or equivalent) before such a rule can be registered.
-		if p, ok := handler.(PropertySchemaProvider); ok {
+		// applyTraits/lowerDocumentBody. A component a lowering rule synthesized
+		// (Component.synthesized) is exempt, as a sealed trait is in applyTraits: its
+		// properties are the rule's own output, which may carry a reserved value the
+		// rule rendered from LoweringContext.Capabilities. Whatever was authored in
+		// its input was already checked before that rule ran (lowerDocumentBody's
+		// pre-rule check, enforceAuthoredComponentReservations).
+		if p, ok := handler.(PropertySchemaProvider); ok && !component.synthesized {
 			if err := enforcePlatformReserved(p.PropertySchema(), component.Properties, "properties"); err != nil {
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 			}

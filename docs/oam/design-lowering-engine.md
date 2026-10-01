@@ -161,7 +161,11 @@ and `applyTraits` (`transform.go`, inside the `!trait.sealed` guard) — both af
 `trait.Properties` — and symmetrically before a
 component handler's `ToApplicationConfig` (`createApplications`, `transform.go`) —
 though no component schema declares a reserved field today, so that call site is
-currently a no-op in practice. The proof: `webservice-expose-ingress/app.yaml` loses its
+currently a no-op in practice. On the component side, a component a lowering rule
+synthesized (`Component.synthesized`, the counterpart of `Trait.sealed`) is exempt, and
+an authored component is checked before any rule can rewrite it: before a
+`ComponentLoweringRule` claims it (`lowerDocumentBody`) and before a
+`DocumentLoweringRule` runs (`enforceAuthoredComponentReservations`). The proof: `webservice-expose-ingress/app.yaml` loses its
 inline `controllerType: ingress` line; `expected.yaml` is **byte-identical** because the
 capability-supplied value was already sufficient — the authored line was redundant even
 before D3, and D3 makes that redundancy an error instead of a silent no-op. A third
