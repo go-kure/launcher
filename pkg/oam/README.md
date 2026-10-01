@@ -133,7 +133,8 @@ One exception on the inbound side: a component whose config reports a routing ta
 `{comp}-allow-ingress-traffic` policy on the Service's `selector` pods instead of the component
 label, with each routed Service port translated to its `targetPort`. A routed port that is not
 one of the Service's TCP ports is dropped (the rules are TCP), and a route left with no port
-synthesizes no policy.
+synthesizes no policy. A sibling group whose `service` member fronts its own sibling's pods on
+unmapped ports reports no routing target (see Same-name sibling groups below).
 
 Every synthesized `NetworkPolicy` carries **no labels and no annotations of its own** —
 only `metadata.name` and `metadata.namespace`, plus the spec. A consumer cannot select
@@ -448,7 +449,14 @@ orders them. It answers every config contract the transform reads
 (Service port and port name, backend Service name, routing target, ServiceAccount,
 single-pod claim) from the one member that has a value, gives the Flux namespace
 to every member that takes one, and reports the group's name as its component
-name (`ComponentNamed`).
+name (`ComponentNamed`). One exception: a member's routing target that selects
+another member's pods (its non-empty `matchLabels` are a subset of that member's
+pod template labels, with no `matchExpressions`) is not reported when every port of
+the routing member targets its own port number, whatever its protocol. The traffic
+then lands on the group's own pods, on the ports it was routed to, so the group
+keeps the inbound policy on its component label, as one component deploying both
+would. A member that remaps a port or names a `targetPort` still reports it, so the
+policy opens the port the pods listen on.
 
 Traits run per member, against that member's own config: the rule decides which
 member carries each trait. A routing trait (ingress, Gateway API routes) belongs on

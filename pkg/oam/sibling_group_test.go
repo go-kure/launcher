@@ -472,3 +472,80 @@ func TestSiblingGroup_ForwardingAcrossMembers(t *testing.T) {
 		}
 	}
 }
+
+// podsStub is a member running pods that carry labels (podTemplateLabeler).
+type podsStub struct {
+	siblingStub
+	labels map[string]string
+}
+
+func (s *podsStub) PodTemplateLabels() map[string]string { return s.labels }
+
+// identityStub is a routing member whose ports either all target themselves or
+// not (identityPortMapper).
+type identityStub struct {
+	siblingStub
+	identity bool
+}
+
+func (s *identityStub) IdentityTargetPorts() bool { return s.identity }
+
+// TestSiblingGroup_RoutingTargetOnOwnPods: a member routing to another member's
+// pods on ports mapped to themselves reports no routing target, so the group keeps
+// its component-label policy; every other routing target still forwards.
+func TestSiblingGroup_RoutingTargetOnOwnPods(t *testing.T) {
+	pods := &podsStub{labels: map[string]string{"app": "web", "tier": "front"}}
+	ports := []intstr.IntOrString{intstr.FromInt32(8080)}
+	cases := []struct {
+		name     string
+		selector *metav1.LabelSelector
+		identity bool
+		forwards bool
+	}{
+		{"subset on identity ports", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}, true, false},
+		{"whole label set", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web", "tier": "front"}}, true, false},
+		{"remapped port", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}, false, true},
+		{"not a subset", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "other"}}, true, true},
+		{"extra label", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web", "x": "y"}}, true, true},
+		{"empty matchLabels", &metav1.LabelSelector{}, true, true},
+		{"matchExpressions", &metav1.LabelSelector{
+			MatchLabels: map[string]string{"app": "web"},
+			MatchExpressions: []metav1.LabelSelectorRequirement{
+				{Key: "tier", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"front"}},
+			},
+		}, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			route := &identityStub{siblingStub: siblingStub{selector: tc.selector}, identity: tc.identity}
+			g := &siblingGroupConfig{members: []*stack.Application{
+				stack.NewApplication("web", "ns", pods),
+				stack.NewApplication("web", "ns", route),
+			}}
+			sel, got := g.ServiceRoutingTarget(ports)
+			if !tc.forwards {
+				if sel != nil || got != nil {
+					t.Errorf("ServiceRoutingTarget = (%v, %v), want (nil, nil)", sel, got)
+				}
+				return
+			}
+			if sel != tc.selector || len(got) != 1 || got[0] != ports[0] {
+				t.Errorf("ServiceRoutingTarget = (%v, %v), want the member's (%v, %v)", sel, got, tc.selector, ports)
+			}
+		})
+	}
+}
+
+// TestSiblingGroup_RoutingTargetWithoutPodLabeler: a routing target selecting pods
+// no member declares — its own sibling runs none — still forwards.
+func TestSiblingGroup_RoutingTargetWithoutPodLabeler(t *testing.T) {
+	sel := &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}
+	route := &identityStub{siblingStub: siblingStub{selector: sel}, identity: true}
+	g := &siblingGroupConfig{members: []*stack.Application{
+		stack.NewApplication("web", "ns", &siblingStub{}),
+		stack.NewApplication("web", "ns", route),
+	}}
+	if got, _ := g.ServiceRoutingTarget(nil); got != sel {
+		t.Errorf("ServiceRoutingTarget selector = %v, want the member's %v", got, sel)
+	}
+}

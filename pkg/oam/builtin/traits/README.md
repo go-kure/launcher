@@ -675,8 +675,9 @@ have nothing to do for an augmenter-added resource, so they implement no hook.
 Every trait decorator also embeds `decoratorBase`, which forwards the optional
 interfaces a component config may implement — `stack.Validator`,
 `fluxNamespaceSettable`, `autoHealthCheckEmitter`, `servicePortProvider`,
-`serviceBackendNamer`, `servicePortNamer`, `oam.ServiceAccountNamer`, `nonRWXClaimer` and
-`serviceRoutingTargeter` — so a decorated config keeps answering them. The `ServiceAccountNamer` forward is what keeps the
+`serviceBackendNamer`, `servicePortNamer`, `oam.ServiceAccountNamer`, `nonRWXClaimer`,
+`serviceRoutingTargeter`, `podTemplateLabeler` and `identityPortMapper` — so a decorated config
+keeps answering them. The `ServiceAccountNamer` forward is what keeps the
 `rbac` row above true once a second trait is present: without it a workload
 that authored `serviceAccountName` would stop reporting its account as soon as
 any trait wrapped it, and `rbac` would silently bind the per-component name
@@ -684,7 +685,9 @@ instead. The `nonRWXClaimer` forward does the same for the `scaler` row: a
 decorating trait declared before `scaler` must not hide the claim that caps
 `maxReplicas` at 1. The `serviceRoutingTargeter` forward keeps a decorated `service`
 component's synthesized ingress allow on its `selector` pods rather than on the component
-label, which none of its pods carry. The `servicePortNamer` forward keeps an `ingress` path's
+label, which none of its pods carry. The `podTemplateLabeler` and `identityPortMapper` forwards
+keep a sibling group able to tell a `service` member routing to its own `deployment` member's pods
+(see the sibling group section of `pkg/oam/README.md`) when a trait wraps either member. The `servicePortNamer` forward keeps an `ingress` path's
 `portName` on a decorated component held to its Service port's name (the first port, on a
 `service` component), the same rule a port number is held to. A config that implements none of them gets the zero
 answer (`nil`, `0`, `""`, `false`), which every reader treats as "not set".
