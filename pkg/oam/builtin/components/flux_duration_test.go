@@ -86,12 +86,12 @@ func TestKindNamedFluxComponents_DurationFields(t *testing.T) {
 		// authored-text check can see it.
 		{"0.0000000001ms", `emitted as "0s"`},
 	}
-	// A source timeout takes no h, and anything of an hour or more is
-	// emitted with one.
+	// A source timeout takes no h as authored. An hour or more authored in
+	// minutes or seconds is accepted: it is emitted in minutes
+	// (TestFluxSourceComponents_LongTimeoutEmittedInMinutes).
 	noHours := []refusal{
 		{"1h", "must be a Flux duration (unsigned; units ms, s, m;"},
-		{"60m", `emitted as "1h0m0s", and Flux takes no h unit on this field, so it must be below 1h`},
-		{"90m", `emitted as "1h30m0s"`},
+		{"1h30m", "must be a Flux duration (unsigned; units ms, s, m;"},
 	}
 	for _, c := range durationFieldCases() {
 		refused := common
@@ -100,7 +100,7 @@ func TestKindNamedFluxComponents_DurationFields(t *testing.T) {
 			accepted = append(accepted, "1h30m")
 		} else {
 			refused = append(append([]refusal{}, common...), noHours...)
-			accepted = append(accepted, "59m59s")
+			accepted = append(accepted, "59m59s", "60m", "90m", "3600s")
 		}
 		for _, tc := range refused {
 			t.Run(c.typ+"/"+c.name()+"/refused "+tc.value, func(t *testing.T) {
@@ -146,7 +146,8 @@ func TestKindNamedFluxComponents_NestedDurationKeysMatchCaseInsensitively(t *tes
 
 // TestKindNamedFluxConfigs_GenerateChecksDurationFields: a config built
 // directly, not parsed, is checked at Generate in the form each duration is
-// emitted, Duration.String().
+// emitted: Duration.String(), and for a source timeout of an hour or more, in
+// minutes.
 func TestKindNamedFluxConfigs_GenerateChecksDurationFields(t *testing.T) {
 	type field struct {
 		typ   string
@@ -193,12 +194,7 @@ func TestKindNamedFluxConfigs_GenerateChecksDurationFields(t *testing.T) {
 	}
 	for _, f := range fields {
 		refused := []time.Duration{-5 * time.Minute, 500 * time.Microsecond}
-		accepted := []time.Duration{0, 10 * time.Minute}
-		if f.hours {
-			accepted = append(accepted, 2*time.Hour)
-		} else {
-			refused = append(refused, time.Hour)
-		}
+		accepted := []time.Duration{0, 10 * time.Minute, time.Hour, 2 * time.Hour}
 		for _, d := range refused {
 			t.Run(f.typ+"/"+f.name+"/refused "+d.String(), func(t *testing.T) {
 				_, err := f.build(&metav1.Duration{Duration: d}).Generate(nil)

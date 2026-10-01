@@ -2269,11 +2269,13 @@ not part of either change.
   A set `interval` must be a duration Flux accepts, checked exactly as on `helmrelease` above
   (go-kure/launcher#601); under `type: oci` too, where the CRD pattern still applies.
   A set `timeout` is checked the same way, against the source CRDs' narrower pattern, which has
-  no `h` unit: `^([0-9]+(\.[0-9]+)?(ms|s|m))+$` (go-kure/launcher#606). **Known limitation:** a
-  `timeout` of an hour or more is refused, however it is authored. The value is emitted through a
-  `metav1.Duration`, which writes `Duration.String()`, so `60m` would go out as `1h0m0s` and be
-  rejected by the CRD at apply time; the build error says so and asks for a value below `1h`
-  (e.g. `59m`).
+  no `h` unit: `^([0-9]+(\.[0-9]+)?(ms|s|m))+$` (go-kure/launcher#606), so an authored `1h` is
+  refused. A `timeout` of an hour or more authored in minutes or seconds (`90m`, `3600s`) is
+  accepted and emitted with its hours folded into minutes: `90m0s`, `60m0s`
+  (go-kure/launcher#619). A `metav1.Duration` would write `Duration.String()`, `1h30m0s`, which
+  the CRD rejects, so such a source is emitted as an unstructured object carrying that text; a
+  `timeout` below an hour, or none, leaves the source emitted exactly as before. A config built
+  directly gets the same minutes form.
   Nothing else is checked or defaulted: enums (`type`, `provider`, `layerSelector.operation`,
   `verify.mode`) and cross-field rules (a Bucket's `sts` against its `provider`,
   `serviceAccountName` against `secretRef`) are left to the CRD's own admission.

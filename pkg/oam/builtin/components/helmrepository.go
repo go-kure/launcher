@@ -41,7 +41,7 @@ func (h *HelmRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"passCredentials": fluxSourceBool("HelmRepository spec.passCredentials: pass the secretRef credentials to chart hosts other than the url's."),
 		"interval":        fluxSourceString("HelmRepository spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero, except with type oci."),
 		"insecure":        fluxSourceBool("HelmRepository spec.insecure: allow a non-TLS registry (type oci only)."),
-		"timeout":         fluxSourceString("HelmRepository spec.timeout for the index fetch or OCI operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms, and below 1h."),
+		"timeout":         fluxSourceString("HelmRepository spec.timeout for the index fetch or OCI operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms. An hour or more is emitted in minutes, 90m as 90m0s."),
 		"suspend":         fluxSourceBool("HelmRepository spec.suspend: stop reconciling the repository. Also skips the auto health check."),
 		"accessFrom":      fluxSourceObject("HelmRepository spec.accessFrom: a cross-namespace access control list. Projected as authored, but not enforced: Flux marks the field not implemented (provisional)."),
 		"type":            fluxSourceString("HelmRepository spec.type: default, or oci for an OCI registry of charts (a static object with no interval default and no auto health check)."),
@@ -139,6 +139,5 @@ func (c *HelmRepositoryConfig) Generate(_ *stack.Application) ([]*client.Object,
 	if !c.isOCI() {
 		defaultFluxSourceInterval(&repo.Spec.Interval)
 	}
-	obj := client.Object(repo)
-	return []*client.Object{&obj}, nil
+	return emitFluxSource("helmrepository", repo, repo.Spec.Timeout)
 }

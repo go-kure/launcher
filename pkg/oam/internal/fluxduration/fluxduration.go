@@ -3,6 +3,7 @@ package fluxduration
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,7 +31,8 @@ var (
 	}
 	// SourceTimeout is the form of spec.timeout on the source-controller
 	// HelmRepository, OCIRepository, GitRepository and Bucket kinds: units ms, s
-	// and m, with no h.
+	// and m, with no h. A duration of an hour or more is emitted in minutes
+	// (Form.Format).
 	SourceTimeout = Form{
 		pattern: regexp.MustCompile(`^([0-9]+(\.[0-9]+)?(ms|s|m))+$`),
 		units:   "ms, s, m",
@@ -50,16 +52,16 @@ func (f Form) Describe() string {
 var ErrForm = errors.New("not a Flux duration: signed, or in a unit the field does not take")
 
 // ResolutionError reports a value that is itself a Flux duration but that is
-// not emitted as one, or not as the same value. A caller that emits the
-// duration through a metav1.Duration writes Duration.String(), not the authored
-// text. That switches to µs or ns below one millisecond: 0.5ms is written as
-// 500µs, which is outside Flux's pattern. And a positive value below
-// time.Duration's nanosecond resolution parses to zero: 0.0000000001ms is
-// written as 0s, which Flux accepts but is not the value authored.
+// not emitted as one, or not as the same value. A caller emits the parsed
+// duration in Form.Format, not as the authored text, and that switches to µs or
+// ns below one millisecond: 0.5ms is written as 500µs, which is outside Flux's
+// pattern. And a positive value below time.Duration's nanosecond resolution
+// parses to zero: 0.0000000001ms is written as 0s, which Flux accepts but is not
+// the value authored.
 type ResolutionError struct {
 	// Value is the authored duration.
 	Value string
-	// Emitted is the Duration.String() form a metav1.Duration serializes to.
+	// Emitted is the form the duration is emitted in (Form.Format).
 	Emitted string
 }
 
@@ -67,19 +69,20 @@ func (e *ResolutionError) Error() string {
 	return fmt.Sprintf("%q is emitted as %q, below Flux's millisecond resolution", e.Value, e.Emitted)
 }
 
-// HourError reports a value of an hour or more for a form without the h unit
-// (SourceTimeout). Duration.String() writes any such duration with an h, 60m as
-// 1h0m0s, which that form's pattern refuses, so it cannot be emitted through a
-// metav1.Duration at all.
-type HourError struct {
-	// Value is the authored duration.
-	Value string
-	// Emitted is the Duration.String() form a metav1.Duration serializes to.
-	Emitted string
-}
-
-func (e *HourError) Error() string {
-	return fmt.Sprintf("%q is emitted as %q, and this field takes no h unit: use a value below 1h", e.Value, e.Emitted)
+// Format returns the text d is emitted as under the form. That is
+// Duration.String(), which a metav1.Duration serializes to, except under a form
+// without h (SourceTimeout), where a duration of an hour or more has its hours
+// folded into its minutes: 1h30m0s is written as 90m0s. A caller emitting such a
+// duration has to write this text in place of the metav1.Duration's.
+func (f Form) Format(d time.Duration) string {
+	s := d.String()
+	if f.hours || d < time.Hour {
+		return s
+	}
+	// Duration.String() writes a duration of an hour or more as <h>h<m>m<s>s,
+	// so its seconds part follows the first m.
+	_, seconds, _ := strings.Cut(s, "m")
+	return strconv.FormatInt(int64(d/time.Minute), 10) + "m" + seconds
 }
 
 // Validate checks value as authored against Interval. See Form.Validate.
@@ -107,8 +110,8 @@ func (f Form) Validate(value string) error {
 // ValidateDuration does, and last that it is not 0s for a value authored as
 // anything but zero, which returns a *ResolutionError.
 //
-// Use it where the value reaches the output as a metav1.Duration, which
-// serializes through Duration.String().
+// Use it where the value reaches the output as a parsed duration, emitted in
+// Format rather than as the authored text.
 func (f Form) ValidateEmitted(value string) error {
 	d, err := f.parse(value)
 	if err != nil {
@@ -127,11 +130,9 @@ func (f Form) ValidateEmitted(value string) error {
 	return nil
 }
 
-// ValidateDuration checks d in the form a metav1.Duration emits it,
-// Duration.String(): it must match the form's pattern. A signed duration
-// returns ErrForm; one of an hour or more under a form without h, a
-// *HourError; one below a millisecond, a *ResolutionError. The errors' Value
-// is d.String().
+// ValidateDuration checks d in the form it is emitted in, Format: it must
+// match the form's pattern. A signed duration returns ErrForm; one below a
+// millisecond, a *ResolutionError, whose Value is d.String().
 //
 // Use it on a duration that was never authored as text, such as a field of a
 // config built directly.
@@ -140,14 +141,12 @@ func (f Form) ValidateDuration(d time.Duration) error {
 }
 
 func (f Form) validateDuration(value string, d time.Duration) error {
-	emitted := d.String()
+	emitted := f.Format(d)
 	switch {
 	case f.pattern.MatchString(emitted):
 		return nil
 	case d < 0:
 		return ErrForm
-	case !f.hours && d >= time.Hour:
-		return &HourError{Value: value, Emitted: emitted}
 	default:
 		return &ResolutionError{Value: value, Emitted: emitted}
 	}

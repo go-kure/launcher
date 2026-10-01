@@ -47,7 +47,7 @@ func (h *BucketHandler) PropertySchema() map[string]oam.PropertySchema {
 		"certSecretRef":      fluxSourceObject("Bucket spec.certSecretRef: the Secret holding a client certificate and/or CA certificate (generic provider)."),
 		"proxySecretRef":     fluxSourceObject("Bucket spec.proxySecretRef: the Secret holding the proxy configuration."),
 		"interval":           fluxSourceString("Bucket spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
-		"timeout":            fluxSourceString("Bucket spec.timeout for fetch operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms, and below 1h."),
+		"timeout":            fluxSourceString("Bucket spec.timeout for fetch operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms. An hour or more is emitted in minutes, 90m as 90m0s."),
 		"ignore":             fluxSourceString("Bucket spec.ignore: exclusion patterns in .sourceignore format."),
 		"suspend":            fluxSourceBool("Bucket spec.suspend: stop reconciling the source. Also skips the auto health check."),
 	}
@@ -160,6 +160,5 @@ func (c *BucketConfig) Generate(_ *stack.Application) ([]*client.Object, error) 
 	// A deep copy, so no render shares a pointer or slice with the config.
 	b.Spec = *c.Spec.DeepCopy()
 	defaultFluxSourceInterval(&b.Spec.Interval)
-	obj := client.Object(b)
-	return []*client.Object{&obj}, nil
+	return emitFluxSource("bucket", b, b.Spec.Timeout)
 }

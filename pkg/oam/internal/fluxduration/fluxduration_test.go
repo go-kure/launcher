@@ -103,12 +103,12 @@ func TestValidateEmitted(t *testing.T) {
 }
 
 // TestSourceTimeout_ValidateEmitted covers the form without h: an authored h is
-// outside the pattern, and any value of an hour or more, however authored, is
-// emitted with an h.
+// outside the pattern, and a value of an hour or more, authored without h, is
+// emitted in minutes and accepted.
 func TestSourceTimeout_ValidateEmitted(t *testing.T) {
 	cases := []struct {
 		value string
-		// want is "ok", "parse", "form", "resolution" or "hour" (*HourError).
+		// want is "ok", "parse", "form" or "resolution".
 		want    string
 		emitted string
 	}{
@@ -118,9 +118,11 @@ func TestSourceTimeout_ValidateEmitted(t *testing.T) {
 		{"500ms", "ok", ""},
 		{"0s", "ok", ""},
 
-		{"60m", "hour", "1h0m0s"},
-		{"3600s", "hour", "1h0m0s"},
-		{"90m", "hour", "1h30m0s"},
+		{"60m", "ok", ""},
+		{"3600s", "ok", ""},
+		{"90m", "ok", ""},
+		{"1440m", "ok", ""},
+		{"60m0.0005s", "ok", ""},
 
 		{"1h", "form", ""},
 		{"1h30m", "form", ""},
@@ -156,7 +158,8 @@ func TestValidateDuration(t *testing.T) {
 		{fluxduration.Interval, "interval 500µs", 500 * time.Microsecond, "resolution"},
 		{fluxduration.SourceTimeout, "timeout 59m", 59 * time.Minute, "ok"},
 		{fluxduration.SourceTimeout, "timeout zero", 0, "ok"},
-		{fluxduration.SourceTimeout, "timeout 1h", time.Hour, "hour"},
+		{fluxduration.SourceTimeout, "timeout 1h", time.Hour, "ok"},
+		{fluxduration.SourceTimeout, "timeout 25h", 25 * time.Hour, "ok"},
 		{fluxduration.SourceTimeout, "timeout negative 2h", -2 * time.Hour, "form"},
 		{fluxduration.SourceTimeout, "timeout 1ns", time.Nanosecond, "resolution"},
 	}
@@ -168,7 +171,50 @@ func TestValidateDuration(t *testing.T) {
 	}
 }
 
-// checkEmittedOutcome is checkOutcome plus the two typed emission errors, whose
+// TestFormat pins the text each form emits a duration as: Duration.String(),
+// except that SourceTimeout folds the hours of a duration of an hour or more
+// into its minutes. Every SourceTimeout text it gives for a non-negative
+// duration is inside that form's pattern and parses back to the duration.
+func TestFormat(t *testing.T) {
+	cases := []struct {
+		form fluxduration.Form
+		name string
+		d    time.Duration
+		want string
+	}{
+		{fluxduration.Interval, "interval 90m", 90 * time.Minute, "1h30m0s"},
+		{fluxduration.Interval, "interval 25h", 25 * time.Hour, "25h0m0s"},
+		{fluxduration.SourceTimeout, "timeout zero", 0, "0s"},
+		{fluxduration.SourceTimeout, "timeout 500ms", 500 * time.Millisecond, "500ms"},
+		{fluxduration.SourceTimeout, "timeout 59m", 59 * time.Minute, "59m0s"},
+		{fluxduration.SourceTimeout, "timeout 59m59.999s", time.Hour - time.Millisecond, "59m59.999s"},
+		{fluxduration.SourceTimeout, "timeout 1h", time.Hour, "60m0s"},
+		{fluxduration.SourceTimeout, "timeout 1h30m", 90 * time.Minute, "90m0s"},
+		{fluxduration.SourceTimeout, "timeout 1h30m0.5s", 90*time.Minute + 500*time.Millisecond, "90m0.5s"},
+		{fluxduration.SourceTimeout, "timeout 1h0m0.0005s", time.Hour + 500*time.Microsecond, "60m0.0005s"},
+		{fluxduration.SourceTimeout, "timeout 25h1m1s", 25*time.Hour + time.Minute + time.Second, "1501m1s"},
+		{fluxduration.SourceTimeout, "timeout negative 2h", -2 * time.Hour, "-2h0m0s"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.form.Format(tc.d)
+			if got != tc.want {
+				t.Fatalf("Format(%v) = %q, want %q", tc.d, got, tc.want)
+			}
+			if tc.d < 0 {
+				return
+			}
+			if err := tc.form.Validate(got); err != nil {
+				t.Errorf("Format(%v) = %q, outside the form: %v", tc.d, got, err)
+			}
+			if back, err := time.ParseDuration(got); err != nil || back != tc.d {
+				t.Errorf("Format(%v) = %q parses back as %v, %v", tc.d, got, back, err)
+			}
+		})
+	}
+}
+
+// checkEmittedOutcome is checkOutcome plus the typed emission error, whose
 // Value and Emitted must be value and emitted.
 func checkEmittedOutcome(t *testing.T, label string, err error, want, value, emitted string) {
 	t.Helper()
@@ -180,14 +226,6 @@ func checkEmittedOutcome(t *testing.T, label string, err error, want, value, emi
 		}
 		if re.Value != value || re.Emitted != emitted {
 			t.Errorf("ResolutionError = %+v, want Value %q, Emitted %q", re, value, emitted)
-		}
-	case "hour":
-		var he *fluxduration.HourError
-		if !stderrors.As(err, &he) {
-			t.Fatalf("%q: error = %v, want a *HourError", label, err)
-		}
-		if he.Value != value || he.Emitted != emitted {
-			t.Errorf("HourError = %+v, want Value %q, Emitted %q", he, value, emitted)
 		}
 	default:
 		checkOutcome(t, label, err, want)

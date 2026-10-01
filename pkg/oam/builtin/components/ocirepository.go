@@ -44,7 +44,7 @@ func (h *OCIRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"certSecretRef":      fluxSourceObject("OCIRepository spec.certSecretRef: the Secret holding a client certificate and/or CA certificate."),
 		"proxySecretRef":     fluxSourceObject("OCIRepository spec.proxySecretRef: the Secret holding the proxy configuration."),
 		"interval":           fluxSourceString("OCIRepository spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
-		"timeout":            fluxSourceString("OCIRepository spec.timeout for remote operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms, and below 1h."),
+		"timeout":            fluxSourceString("OCIRepository spec.timeout for remote operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms. An hour or more is emitted in minutes, 90m as 90m0s."),
 		"ignore":             fluxSourceString("OCIRepository spec.ignore: exclusion patterns in .sourceignore format."),
 		"insecure":           fluxSourceBool("OCIRepository spec.insecure: allow a non-TLS registry."),
 		"suspend":            fluxSourceBool("OCIRepository spec.suspend: stop reconciling the source. Also skips the auto health check."),
@@ -122,6 +122,5 @@ func (c *OCIRepositoryConfig) Generate(_ *stack.Application) ([]*client.Object, 
 	// A deep copy, so no render shares a pointer or slice with the config.
 	repo.Spec = *c.Spec.DeepCopy()
 	defaultFluxSourceInterval(&repo.Spec.Interval)
-	obj := client.Object(repo)
-	return []*client.Object{&obj}, nil
+	return emitFluxSource("ocirepository", repo, repo.Spec.Timeout)
 }
