@@ -9,6 +9,9 @@
 # Usage: bash scripts/check-issue-refs-test.sh
 # (invoked via `make check-issue-refs`, before the guard runs on the real tree)
 
+# Fixtures are literal file text, so a `${...}` in single quotes must not expand.
+# shellcheck disable=SC2016
+
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -54,6 +57,9 @@ expect "ownerless other repository" 1 "a.md:1:" a.md 'removal tracked in kure#53
 expect "ownerless ref as link text" 1 "a.md:1:" a.md 'see [kure#539](https://github.com/go-kure/kure/issues/539)'
 expect "ref beside a relative link" 1 "a.md:1:" a.md 'see [the section](design.md#12-foo) and kure#539'
 expect "ref in an indexed Go call" 1 "a.go:1:" a.go 'callbacks[i]("fixed in #227")'
+expect "unspaced ref in an indexed Go call" 1 "a.go:1:" a.go 'callbacks[i]("#227")'
+expect "unspaced partial ref in an indexed Go call" 1 "a.go:1:" a.go 'callbacks[i]("launcher#278")'
+expect "ref after a shell prefix trim" 1 "x.sh:1:" x.sh 'echo "${ports#80}" # see #227'
 expect "ref after a URL" 1 "a.md:1:" a.md 'see https://example.com/x and #227'
 expect "ref after a single-quoted URL" 1 "x.sh:1:" x.sh "url='https://example.com/';#227"
 expect "ref after a percent sign" 1 "a.md:1:" a.md 'done to 100% #227 next'
@@ -78,6 +84,9 @@ expect "link target with nested parentheses" 0 "" a.md 'see [section](design(v2)
 expect "bare URL with a numbered anchor" 0 "" a.md 'see https://example.com/page#12-foo'
 expect "root-page URL anchor" 0 "" a.md 'see https://example.com/#12-foo'
 expect "Go format verb with flags" 0 "" a.go 'fmt.Printf("%+#12.6g %-#8x", value, n)'
+expect "indexed Go format verbs" 0 "" a.go 'fmt.Printf("%#12[1]x %#12.6[1]x", value)'
+expect "shell prefix trim" 0 "" x.sh 'echo "${ports#80}"'
+expect "shell longest prefix trim" 0 "" x.sh 'x=${value##123}'
 expect "single-digit name#N" 0 "" a.go 't.Fatalf("resolve#2: %v", err)'
 expect "HTML entity" 0 "" a.md 'a &#1234; entity'
 expect "Go format verb" 0 "" a.go 'fmt.Printf("%#12.6g", value)'
