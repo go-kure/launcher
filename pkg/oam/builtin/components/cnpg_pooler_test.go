@@ -10,6 +10,7 @@ import (
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -149,6 +150,15 @@ func TestCnpgPoolerHandler_Refusals(t *testing.T) {
 		{"template ephemeral containers",
 			with("template", map[string]any{"spec": map[string]any{"containers": []any{}, "ephemeralContainers": []any{map[string]any{"name": "debug"}}}}),
 			"template.spec.ephemeralContainers: not supported"},
+		{"template activeDeadlineSeconds",
+			with("template", map[string]any{"spec": map[string]any{"containers": []any{}, "activeDeadlineSeconds": 60}}),
+			"template.spec.activeDeadlineSeconds: only Job pods may set activeDeadlineSeconds"},
+		{"template priority",
+			with("template", map[string]any{"spec": map[string]any{"containers": []any{}, "priority": 1000}}),
+			"template.spec.priority: not authorable"},
+		{"template overhead",
+			with("template", map[string]any{"spec": map[string]any{"containers": []any{}, "overhead": map[string]any{"cpu": "100m"}}}),
+			"template.spec.overhead: not authorable"},
 		{"two spellings of one field",
 			map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}, "type": "rw", "Type": "ro"},
 			"sets the same field as"},
@@ -329,6 +339,12 @@ func TestCnpgPoolerConfig_GenerateRevalidates(t *testing.T) {
 	ephemeral.Template = &cnpgv1.PodTemplateSpec{Spec: corev1.PodSpec{
 		EphemeralContainers: []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug"}}},
 	}}
+	withTemplate := func(ps corev1.PodSpec) cnpgv1.PoolerSpec {
+		s := *ok.DeepCopy()
+		s.Template = &cnpgv1.PodTemplateSpec{Spec: ps}
+		return s
+	}
+	deadline, priority := int64(60), int32(1000)
 	for _, tt := range []struct {
 		name, app string
 		spec      cnpgv1.PoolerSpec
@@ -339,6 +355,12 @@ func TestCnpgPoolerConfig_GenerateRevalidates(t *testing.T) {
 		{"cluster named like the pooler", "db", ok, "a pooler cannot have the same name as its cluster"},
 		{"no pgbouncer", "db-pooler", cnpgv1.PoolerSpec{Cluster: cnpgv1.LocalObjectReference{Name: "db"}}, "pgbouncer: required"},
 		{"template ephemeral containers", "db-pooler", ephemeral, "template.spec.ephemeralContainers: not supported"},
+		{"template activeDeadlineSeconds", "db-pooler", withTemplate(corev1.PodSpec{ActiveDeadlineSeconds: &deadline}),
+			"template.spec.activeDeadlineSeconds: only Job pods may set activeDeadlineSeconds"},
+		{"template priority", "db-pooler", withTemplate(corev1.PodSpec{Priority: &priority}), "template.spec.priority: not authorable"},
+		{"template overhead", "db-pooler",
+			withTemplate(corev1.PodSpec{Overhead: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}}),
+			"template.spec.overhead: not authorable"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &components.CnpgPoolerConfig{Name: tt.app, Namespace: "data", Spec: tt.spec}

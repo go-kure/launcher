@@ -122,7 +122,7 @@ type CnpgPoolerConfig struct {
 // refuse for a reason the strict decode cannot see: no cluster reference, a
 // cluster named like the pooler itself, or no pgbouncer block, and a template
 // the operator's Deployment could not carry: one declaring ephemeral
-// containers.
+// containers, activeDeadlineSeconds, priority or overhead.
 func (c *CnpgPoolerConfig) validate(name string) error {
 	if err := requireCnpgClusterRef(c.Spec.Cluster.Name); err != nil {
 		return err
@@ -133,11 +133,24 @@ func (c *CnpgPoolerConfig) validate(name string) error {
 	if c.Spec.PgBouncer == nil {
 		return errors.New("pgbouncer: required (an empty object selects PgBouncer's defaults)")
 	}
-	// As the workload kinds refuse it (podSpecRejectedKeys): the operator
-	// copies the template into its Deployment, whose pod template admission
-	// refuses ephemeral containers.
-	if t := c.Spec.Template; t != nil && len(t.Spec.EphemeralContainers) > 0 {
-		return errors.New("template.spec." + podSpecRejectedKeys["ephemeralContainers"])
+	// As the workload kinds refuse them (podSpecRejectedKeys,
+	// podSpecJobOnlyKeys): the operator copies the template into its
+	// Deployment, whose pod template admission refuses ephemeral containers and
+	// activeDeadlineSeconds, and whose pods the default Priority and
+	// RuntimeClass admission controllers refuse when they set priority or
+	// overhead.
+	if t := c.Spec.Template; t != nil {
+		ps := &t.Spec
+		switch {
+		case len(ps.EphemeralContainers) > 0:
+			return errors.New("template.spec." + podSpecRejectedKeys["ephemeralContainers"])
+		case ps.ActiveDeadlineSeconds != nil:
+			return errors.New("template.spec.activeDeadlineSeconds: " + podSpecJobOnlyReason)
+		case ps.Priority != nil:
+			return errors.New("template.spec." + podSpecRejectedKeys["priority"])
+		case len(ps.Overhead) > 0:
+			return errors.New("template.spec." + podSpecRejectedKeys["overhead"])
+		}
 	}
 	return nil
 }
