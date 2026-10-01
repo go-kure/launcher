@@ -79,11 +79,15 @@ var podSpecRejectedKeys = map[string]string{
 	"ephemeralContainers": "ephemeralContainers: not supported — ephemeral containers cannot be declared on a pod template; they are added to a running pod through its ephemeralcontainers subresource",
 	// corev1.PodSpec.Priority's doc comment: "When Priority Admission Controller
 	// is enabled, it prevents users from setting this field" — the controller
-	// is on by default and populates it from priorityClassName.
-	"priority": "priority: not authorable — the Priority admission controller (enabled by default) rejects pods that set it and derives it from priorityClassName instead; set priorityClassName",
+	// is on by default and populates it from priorityClassName. Its code is
+	// narrower than that comment: it forbids only a value that differs from
+	// the one it computes, so an authored priority can at best repeat it.
+	"priority": "priority: not authorable — the Priority admission controller (enabled by default) derives it from priorityClassName and rejects a pod whose value differs; set priorityClassName",
 	// corev1.PodSpec.Overhead's doc comment: "If the RuntimeClass admission
 	// controller is enabled, overhead must not be set in Pod create requests".
-	"overhead": "overhead: not authorable — the RuntimeClass admission controller (enabled by default) rejects pods that set it and derives it from the RuntimeClass; set runtimeClassName",
+	// Its code forbids only an overhead that differs from the RuntimeClass's
+	// (any overhead, when the RuntimeClass defines none).
+	"overhead": "overhead: not authorable — the RuntimeClass admission controller (enabled by default) derives it from the RuntimeClass and rejects a pod whose value differs; set runtimeClassName",
 	// corev1.PodSpec.DeprecatedServiceAccount: "Deprecated: Use serviceAccountName instead."
 	"serviceAccount": "serviceAccount: deprecated alias of serviceAccountName; use serviceAccountName",
 }

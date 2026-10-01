@@ -349,8 +349,10 @@ func TestParsePodSpec_Errors(t *testing.T) {
 		wantErr string
 	}{
 		{"ephemeralContainers rejected", map[string]any{"ephemeralContainers": []any{}}, true, "ephemeralContainers: not supported"},
-		{"priority rejected", map[string]any{"priority": 1000}, true, "priority: not authorable"},
-		{"overhead rejected", map[string]any{"overhead": map[string]any{}}, true, "overhead: not authorable"},
+		// The reason is pinned too: admission refuses only a value that differs
+		// from the derived one, not every authored value (go-kure/launcher#658).
+		{"priority rejected", map[string]any{"priority": 1000}, true, "priority: not authorable — the Priority admission controller (enabled by default) derives it from priorityClassName and rejects a pod whose value differs"},
+		{"overhead rejected", map[string]any{"overhead": map[string]any{}}, true, "overhead: not authorable — the RuntimeClass admission controller (enabled by default) derives it from the RuntimeClass and rejects a pod whose value differs"},
 		{"serviceAccount alias rejected", map[string]any{"serviceAccount": "x"}, true, "serviceAccount: deprecated alias"},
 		{"podActiveDeadlineSeconds on non-Job pods", map[string]any{"podActiveDeadlineSeconds": 10}, false, "only Job pods may set activeDeadlineSeconds"},
 		{"podActiveDeadlineSeconds zero", map[string]any{"podActiveDeadlineSeconds": 0}, true, "must be between 1 and"},

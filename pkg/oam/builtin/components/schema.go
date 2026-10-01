@@ -297,8 +297,8 @@ func schemaAppArmorProfile(scope string) oam.PropertySchema {
 // parsePodSpec rejects them if authored: `ephemeralContainers` (only settable
 // through a running pod's ephemeralcontainers subresource), `priority` and
 // `overhead` (populated by the Priority / RuntimeClass admission controllers
-// from priorityClassName / runtimeClassName; authoring them is rejected by
-// admission), `serviceAccount` (deprecated alias of serviceAccountName).
+// from priorityClassName / runtimeClassName, which reject a pod whose authored
+// value differs from the derived one), `serviceAccount` (deprecated alias of serviceAccountName).
 //
 // jobPods selects whether podSpecJobOnlyKeys (podActiveDeadlineSeconds) are
 // published: apps/v1 forbids activeDeadlineSeconds on Deployment, StatefulSet

@@ -121,8 +121,8 @@ type CnpgPoolerConfig struct {
 // validate refuses a spec the Pooler CRD or CloudNativePG's webhook would
 // refuse for a reason the strict decode cannot see: no cluster reference, a
 // cluster named like the pooler itself, or no pgbouncer block, and a template
-// the operator's Deployment could not carry: one declaring ephemeral
-// containers, activeDeadlineSeconds, priority or overhead.
+// declaring a pod field the workload kinds refuse: ephemeral containers,
+// activeDeadlineSeconds, priority or overhead.
 func (c *CnpgPoolerConfig) validate(name string) error {
 	if err := requireCnpgClusterRef(c.Spec.Cluster.Name); err != nil {
 		return err
@@ -136,9 +136,9 @@ func (c *CnpgPoolerConfig) validate(name string) error {
 	// As the workload kinds refuse them (podSpecRejectedKeys,
 	// podSpecJobOnlyKeys): the operator copies the template into its
 	// Deployment, whose pod template admission refuses ephemeral containers and
-	// activeDeadlineSeconds, and whose pods the default Priority and
-	// RuntimeClass admission controllers refuse when they set priority or
-	// overhead.
+	// activeDeadlineSeconds, and whose pods get priority and overhead from the
+	// default Priority and RuntimeClass admission controllers, which refuse a
+	// pod whose authored value differs from the one they derive.
 	if t := c.Spec.Template; t != nil {
 		ps := &t.Spec
 		switch {
