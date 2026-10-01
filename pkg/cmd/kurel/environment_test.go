@@ -354,3 +354,27 @@ func TestResolveEnvironment_Symlinks(t *testing.T) {
 		t.Errorf("profilePath = %q, want the resolved %q", opts.profilePath, real)
 	}
 }
+
+// A relative --environments path (kurel build . --environment dev) must accept a
+// link that stays inside, including one whose target is written as an absolute path.
+func TestResolveEnvironment_RelativeEnvironmentsPathWithAbsoluteLink(t *testing.T) {
+	dir := t.TempDir()
+	target := writeTempFile(t, dir, "p.yaml", "")
+	if err := os.Symlink(target, filepath.Join(dir, "link.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	writeTempFile(t, dir, "envs.yaml", "apiVersion: launcher.gokure.dev/v1alpha1\nkind: EnvironmentSet\nspec:\n  environments:\n  - name: dev\n    profile: link.yaml\n")
+	t.Chdir(dir)
+
+	opts := &buildOptions{}
+	if err := resolveEnvironment(opts, "/unused", environmentFlags(t, opts, "--environment", "dev", "--environments", "envs.yaml")); err != nil {
+		t.Fatalf("a contained absolute link must be accepted from a relative path: %v", err)
+	}
+	real, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.profilePath != real {
+		t.Errorf("profilePath = %q, want %q", opts.profilePath, real)
+	}
+}
