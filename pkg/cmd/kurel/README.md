@@ -251,8 +251,10 @@ reads as `default` and a namespace on a kind kustomize knows to be cluster-scope
 ignored), even resources
 kustomize-controller would not apply, such as two identical kustomize config
 `Kustomization`s. A build is also refused when `<app>.flux.yaml` (an
-application name over 245 characters) or an artifact directory name would exceed the
-255-byte file name limit, and when a generated `Kustomization` or `OCIRepository` duration
+application name over 245 characters) would exceed the 255-byte file name limit, when a
+reconciliation unit name (its artifact directory and its `OCIRepository` and
+`Kustomization` name, such as `<app>-services`) is not a DNS-1123 subdomain of at most 253
+characters, and when a generated `Kustomization` or `OCIRepository` duration
 is written outside Flux's duration pattern (units `ms`, `s`, `m`, `h`): durations are
 written in normalized form, so a `reconciliation` policy value that normalizes to
 microseconds or nanoseconds, such as `0.5ms` (written `500µs`), is refused. Use at
@@ -264,8 +266,9 @@ anything is written:
 - `--oci-repository` must be `oci://<registry>[/<path>]` (a trailing `/` is ignored). The
   registry is a `host[:port]` that names itself explicitly — `localhost`, or containing
   `.` or `:` — because Flux resolves any other first segment against Docker Hub. The host
-  is required: a DNS name, an IPv4 address or a bracketed IPv6 address, and a port is
-  numeric, so `oci://:5000/apps` or `oci://registry.example.com:/apps` is refused. The path
+  is required: a DNS name, an IPv4 address or a bracketed IPv6 address, and a port is a
+  number from 1 to 65535, so `oci://:5000/apps`, `oci://registry.example.com:/apps` or
+  `oci://registry.example.com:70000/apps` is refused. The path
   is `/`-separated OCI distribution-spec components (lowercase letters and digits, joined
   by `.`, `_`, `__` or `-`), so a query, fragment, whitespace, empty segment or uppercase
   letter is refused. Each bundle's `<oci-repository>/<bundle>` must also stay within 255
