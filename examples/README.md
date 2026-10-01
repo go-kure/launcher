@@ -125,4 +125,4 @@ transformer.SetCapabilityDefs(capDefs)
 The `passthrough` component type (see example 15) already emits arbitrary CRDs and
 non-standard objects with no Go handler. Broader config-driven extensibility — custom
 *traits* and template/plugin-rendered components without Go code — is tracked in
-[issue #102](https://github.com/go-kure/launcher/issues/102).
+[issue go-kure/launcher#102](https://github.com/go-kure/launcher/issues/102).

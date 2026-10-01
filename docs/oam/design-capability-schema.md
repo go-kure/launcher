@@ -1,6 +1,6 @@
 # Design: Capability Rendering Schema
 
-*Status: Final | Issue: [#60](https://github.com/go-kure/launcher/issues/60)*
+*Status: Final | Issue: [go-kure/launcher#60](https://github.com/go-kure/launcher/issues/60)*
 
 | Version | Date | Summary |
 |---|---|---|
@@ -365,7 +365,7 @@ attachment (what rendering values to inject); the definition is the schema docum
 keys are accepted). These are distinct concepts with distinct Go types.
 
 The rename from `CapabilityDefinition` → `CapabilityBinding` for the per-slot struct is
-tracked in [#45](https://github.com/go-kure/launcher/issues/45) and happens there, not in
+tracked in [go-kure/launcher#45](https://github.com/go-kure/launcher/issues/45) and happens there, not in
 this PR.
 
 ---
@@ -374,8 +374,8 @@ this PR.
 
 | Concern | Deferred to |
 |---|---|
-| `CapabilityDefinition` document kind implementation | Phase 3 follow-up implementation issue ([#66](https://github.com/go-kure/launcher/issues/66)) |
-| `CapabilityBinding` rename in `pkg/oam` | #45 (Phase 1) |
+| `CapabilityDefinition` document kind implementation | Phase 3 follow-up implementation issue ([go-kure/launcher#66](https://github.com/go-kure/launcher/issues/66)) |
+| `CapabilityBinding` rename in `pkg/oam` | go-kure/launcher#45 (Phase 1) |
 | App-facing property schema for custom traits | Future (schema-provider interface or separate document kinds) |
 | Plugin-style external handler dispatch | Phase 4+ |
 | Editor integration for `cluster.yaml` (schema publishing) | Phase 3+ (enabled by `PropertySchema()` output, published via `Transformer.HandlerSchemas()`) |

@@ -1,6 +1,6 @@
 # Design: Platform Profile — ClusterProfile
 
-*Status: Final | Issue: [#37](https://github.com/go-kure/launcher/issues/37)*
+*Status: Final | Issue: [go-kure/launcher#37](https://github.com/go-kure/launcher/issues/37)*
 
 | Version | Date | Summary |
 |---|---|---|

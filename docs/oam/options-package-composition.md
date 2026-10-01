@@ -1,25 +1,25 @@
 # Design: Package Composition — Optional Sections, Multi-Instance, Split Files
 
-*Status: **Final — deferred to Phase 2 (issue #39)** | Issue #36*
+*Status: **Final — deferred to Phase 2 (issue go-kure/launcher#39)** | Issue go-kure/launcher#36*
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1 | 2026-05-14 | Record decision (Phase 2 deferral); remove mechanism sections; keep background and open questions for #39 |
+| 1.1 | 2026-05-14 | Record decision (Phase 2 deferral); remove mechanism sections; keep background and open questions for go-kure/launcher#39 |
 | 1.0 | 2026-05-14 | Initial draft — compared kurel.yaml optional list (Option A) and inline include-if annotation (Option B) |
 
 **Decision:** No optional sections, multi-instance, or split-file support in Phase 1.
 Package authors publish always-on packages. Users who need deployment variants instantiate
-separate packages. Composition mechanism is designed in Phase 2 (issue #39).
+separate packages. Composition mechanism is designed in Phase 2 (issue go-kure/launcher#39).
 
 **Scope:** package-level composition decisions made before the Application is resolved.
 Runtime conditionality (e.g. "include this component only if another trait is present") is
-a Phase 2 concern and is tracked in issue #39.
+a Phase 2 concern and is tracked in issue go-kure/launcher#39.
 
 ---
 
 ## What is deferred
 
-The following questions are explicitly out of scope for Phase 1 and belong to issue #39:
+The following questions are explicitly out of scope for Phase 1 and belong to issue go-kure/launcher#39:
 
 1. **Optional traits** — a package may include a `certificate` trait or an `external-secret`
    trait that only applies when the user wants TLS or external secret injection. The user
@@ -35,7 +35,7 @@ The following questions are explicitly out of scope for Phase 1 and belong to is
 
 ---
 
-## Open questions for issue #39
+## Open questions for issue go-kure/launcher#39
 
 **Q1 — Where does optionality belong?**
 - Package metadata (`kurel.yaml` optional list) — keeps optionality in the public API surface

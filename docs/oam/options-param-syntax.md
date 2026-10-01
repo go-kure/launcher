@@ -1,6 +1,6 @@
 # Design: Parameter Syntax for Kurel Packages
 
-*Status: **Final — Option A selected** | Issue #36*
+*Status: **Final — Option A selected** | Issue go-kure/launcher#36*
 
 | Version | Date | Summary |
 |---|---|---|
@@ -18,7 +18,7 @@ manager; an explicit, machine-readable package API (schema, required fields, typ
 decided and is out of scope here.
 
 **Optionality and package composition** (optional traits, optional components,
-multi-instance components) are deferred to Phase 2 (issue #39).
+multi-instance components) are deferred to Phase 2 (issue go-kure/launcher#39).
 See `options-package-composition.md`.
 
 ---
