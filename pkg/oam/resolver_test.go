@@ -139,16 +139,93 @@ func TestResolveParameters_UnknownSuppliedKey(t *testing.T) {
 	}
 }
 
-func TestResolveParameters_NodeType_Rejected(t *testing.T) {
-	schema := []oam.ParameterDecl{{Name: "items", PropertySchema: oam.PropertySchema{Type: "array"}}}
-	_, err := oam.ResolveParameters([]byte("items: ${items}\n"), schema, map[string]any{
-		"items": []any{"a", "b"},
-	})
-	if err == nil {
-		t.Fatal("expected error: array node substitution is not implemented")
+// TestResolveParameters_NodeSubstitution: a full-value ${x} for an array or object
+// parameter becomes the value's own YAML list or map (go-kure/launcher#421).
+func TestResolveParameters_NodeSubstitution(t *testing.T) {
+	schema := []oam.ParameterDecl{
+		{Name: "env", PropertySchema: oam.PropertySchema{Type: "array"}},
+		{Name: "labels", PropertySchema: oam.PropertySchema{Type: "object"}},
 	}
-	if !strings.Contains(err.Error(), "items") {
-		t.Errorf("error should mention parameter name 'items', got: %v", err)
+	env := []any{map[string]any{"name": "LOG_LEVEL", "value": "debug"}, map[string]any{"name": "PORT", "value": "8080"}}
+	labels := map[string]any{"team": "web", "tier": "frontend"}
+	out := resolveOK(t, "spec:\n  env: ${env}  # the env list\n  labels: ${labels}\n", schema,
+		map[string]any{"env": env, "labels": labels})
+
+	spec := mustUnmarshal(t, out)["spec"].(map[string]any)
+	gotEnv, ok := spec["env"].([]any)
+	if !ok || len(gotEnv) != 2 {
+		t.Fatalf("env = %#v, want a 2-entry list\n%s", spec["env"], out)
+	}
+	if e, _ := gotEnv[1].(map[string]any); e["name"] != "PORT" || e["value"] != "8080" {
+		t.Errorf("env[1] = %#v, want {name: PORT, value: \"8080\"} (a string, not an int)", gotEnv[1])
+	}
+	gotLabels, ok := spec["labels"].(map[string]any)
+	if !ok || gotLabels["team"] != "web" || gotLabels["tier"] != "frontend" {
+		t.Errorf("labels = %#v, want {team: web, tier: frontend}", spec["labels"])
+	}
+	if !strings.Contains(string(out), "# the env list") {
+		t.Errorf("the placeholder's line comment was dropped:\n%s", out)
+	}
+}
+
+// TestResolveParameters_NodeSubstitution_NotRescanned: a ${...} inside a supplied
+// structured value is data, not a placeholder — the replacement is not walked again.
+func TestResolveParameters_NodeSubstitution_NotRescanned(t *testing.T) {
+	schema := []oam.ParameterDecl{
+		{Name: "args", PropertySchema: oam.PropertySchema{Type: "array"}},
+		{Name: "name", PropertySchema: oam.PropertySchema{Type: "string"}},
+	}
+	out := resolveOK(t, "args: ${args}\n", schema, map[string]any{
+		"args": []any{"--name=${name}"}, "name": "web",
+	})
+	args := mustUnmarshal(t, out)["args"].([]any)
+	if args[0] != "--name=${name}" {
+		t.Errorf("args[0] = %q, want the literal %q", args[0], "--name=${name}")
+	}
+}
+
+// TestResolveParameters_StructuredDefault: an array/object default is used as
+// written; a string default is refused rather than parsed as YAML.
+func TestResolveParameters_StructuredDefault(t *testing.T) {
+	schema := []oam.ParameterDecl{{Name: "env", PropertySchema: oam.PropertySchema{
+		Type: "array", Default: []any{map[string]any{"name": "A", "value": "1"}},
+	}}}
+	out := resolveOK(t, "env: ${env}\n", schema, nil)
+	if env, _ := mustUnmarshal(t, out)["env"].([]any); len(env) != 1 {
+		t.Errorf("env = %#v, want the 1-entry default list\n%s", mustUnmarshal(t, out)["env"], out)
+	}
+
+	schema = []oam.ParameterDecl{{Name: "env", PropertySchema: oam.PropertySchema{Type: "array", Default: "[a]"}}}
+	_, err := oam.ResolveParameters([]byte("env: ${env}\n"), schema, nil)
+	if err == nil || !strings.Contains(err.Error(), "is a string, not a list") {
+		t.Fatalf("expected a string-default refusal, got %v", err)
+	}
+}
+
+// TestResolveParameters_StructuredValueRefused: a supplied value of the wrong shape,
+// a --set string, or an inline use is an error naming the parameter.
+func TestResolveParameters_StructuredValueRefused(t *testing.T) {
+	cases := []struct {
+		name, typ, tmpl string
+		value           any
+		wantSub         string
+	}{
+		{"scalar for array", "array", "x: ${p}\n", 3, "not a list"},
+		{"map for array", "array", "x: ${p}\n", map[string]any{"a": "b"}, "is a map, not a list"},
+		{"null for array", "array", "x: ${p}\n", nil, "is null, not a list"},
+		{"list for object", "object", "x: ${p}\n", []any{"a"}, "is a list, not a map"},
+		{"null for object", "object", "x: ${p}\n", nil, "is null, not a map"},
+		{"--set string", "array", "x: ${p}\n", "a,b", "cannot be set with --set"},
+		{"inline use", "object", "x: \"prefix-${p}\"\n", map[string]any{"a": "b"}, "cannot be used in inline string substitution"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := []oam.ParameterDecl{{Name: "p", PropertySchema: oam.PropertySchema{Type: oam.PropertyType(tc.typ)}}}
+			_, err := oam.ResolveParameters([]byte(tc.tmpl), schema, map[string]any{"p": tc.value})
+			if err == nil || !strings.Contains(err.Error(), tc.wantSub) || !strings.Contains(err.Error(), `"p"`) {
+				t.Fatalf("expected an error naming \"p\" and containing %q, got %v", tc.wantSub, err)
+			}
+		})
 	}
 }
 

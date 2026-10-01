@@ -27,8 +27,9 @@ type PackageSpec struct {
 // drives default resolution — a default may reference only earlier parameters — so
 // this stays a list, not a map. The embedded PropertySchema is restricted to the
 // flat vocabulary (type/required/default/description); the rich fields are rejected
-// at decode time by UnmarshalYAML (flatschema.go). Accepted types are gated to
-// string/integer/boolean by validatePackage (array/object are not yet substitutable).
+// at decode time by UnmarshalYAML (flatschema.go). Accepted types are
+// string/integer/boolean/array/object (validatePackage); an array or object
+// parameter is substituted as a whole YAML node, and only its shape is checked.
 type ParameterDecl struct {
 	Name           string `yaml:"name"`
 	PropertySchema `yaml:",inline"`

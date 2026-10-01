@@ -4,6 +4,7 @@
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3 | 2026-10-01 | §6.1/§6.3: `array`/`object` parameter types with node substitution (shape only; string default refused). #421 |
 | 1.2 | 2026-07-10 | §6.1: unify parameter schema onto the shared `PropertySchema` vocabulary (flat subset; rich fields rejected at decode). adr#33 |
 | 1.1 | 2026-05-14 | Complete §6 (parameter syntax — Option A); fix GVK references; remove `backup` from Phase 1 trait table; fix §5 diagram label |
 | 1.0 | 2026-04-19 | Initial draft — parameter syntax section omitted pending decision |
@@ -261,8 +262,8 @@ Each parameter has a name, type, required flag, optional default, and optional d
 > shared `PropertySchema` vocabulary (the same type used by handler properties and capability
 > rendering). Parameters remain an *ordered list* — a default may reference only earlier
 > parameters — and are restricted to the flat subset: the rich `PropertySchema` fields (`enum`,
-> nested `properties`, `items`, `additionalProperties`) are rejected at decode time, and accepted
-> types stay `string`/`integer`/`boolean`. Unifying the type does not change the accepted wire format.
+> nested `properties`, `items`, `additionalProperties`) are rejected at decode time. Unifying the
+> type does not change the accepted wire format.
 
 ```yaml
 spec:
@@ -284,7 +285,9 @@ spec:
     default: "${name}-tls"   # may reference other parameters
 ```
 
-Supported types: `string`, `integer`, `boolean`.
+Supported types: `string`, `integer`, `boolean`, `array`, `object`. An `array` or `object`
+parameter carries a YAML list or map and is substituted as a whole node (6.3). Its default,
+if any, must be a list or map; a string default is refused, not parsed as YAML.
 
 ### 6.2 Placeholder syntax in app.yaml
 
@@ -315,6 +318,15 @@ replaces it with the typed value from the parameter declaration:
 - `image: "${image}"` → `image: "myregistry/app:v1.2.3"` (string)
 - `replicas: ${replicas}` → `replicas: 3` (integer, not string `"3"`)
 
+**Node substitution** — for an `array` or `object` parameter, a whole-value `${name}` is
+replaced by the value's YAML list or map:
+- `env: ${env}` → `env: [{name: LOG_LEVEL, value: info}]`
+- Only the shape (list or map) is checked against the parameter, since a parameter declares
+  no `items` or `properties`; the substituted value is then validated by the consuming
+  component's or trait's schema like any authored property
+- The replacement is not scanned again: a `${…}` inside a supplied value stays literal
+- Embedding an `array`/`object` placeholder inside a larger string is an error
+
 **Inline string embedding** — when `${name}` is embedded inside a larger string value:
 - `secretName: "${name}-tls"` → `secretName: "webservice-tls"` (always a string)
 
@@ -323,7 +335,7 @@ replaces it with the typed value from the parameter declaration:
 ```sh
 kurel build . --profile cluster.yaml --values values.yaml
 
-# --set flags — scalars only
+# --set flags — scalars only; supply array/object parameters with --values
 kurel build . --profile cluster.yaml \
     --set image=myregistry/app:v1.2.3 \
     --set replicas=3 \
