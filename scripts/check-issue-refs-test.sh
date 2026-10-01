@@ -50,6 +50,9 @@ expect "bare ref in a Go comment" 1 "a.go:2:" a.go $'package a\n// fixed in (#22
 expect "slash-joined pair" 1 "a.go:1:" a.go '// go-kure/launcher#227/#242 routing target'
 expect "pre- prefix" 1 "a.go:1:" a.go '// the pre-#444 assertion'
 expect "partial launcher ref" 1 "a.go:1:" a.go '// see launcher#278'
+expect "ownerless other repository" 1 "a.md:1:" a.md 'removal tracked in kure#539'
+expect "ownerless ref as link text" 1 "a.md:1:" a.md 'see [kure#539](https://github.com/go-kure/kure/issues/539)'
+expect "ref beside a relative link" 1 "a.md:1:" a.md 'see [the section](design.md#12-foo) and kure#539'
 expect "bare ref at line start" 1 "notes.md:1:" notes.md '#123 is the tracking issue'
 expect "bare ref in a shell comment" 1 "x.sh:1:" x.sh '# Re-introduce the #417 defect'
 expect "bare ref in a Go string" 1 "a.go:1:" a.go 't.Errorf("want #227 component label")'
@@ -65,6 +68,11 @@ expect "pragma-like file name" 1 "a:b:allow-ref.md:1:" a:b:allow-ref.md 'see #99
 expect "qualified launcher ref" 0 "" a.go '// fixed in (go-kure/launcher#227, go-kure/launcher#242)'
 expect "other repository" 0 "" a.md 'removal tracked in [go-kure/kure#539](https://github.com/go-kure/kure/issues/539)'
 expect "Markdown anchor" 0 "" a.md 'see [the section](#12-foo)'
+expect "relative link with a numbered anchor" 0 "" a.md 'see [x](file.md#12-foo) and [y](../foo.md#34-bar)'
+# A bare URL passes without stripping: its anchor follows a `/`-separated path
+# segment, which the ownerless rule treats like the owner in `owner/repo#N`.
+expect "bare URL with a numbered anchor" 0 "" a.md 'see https://example.com/page#12-foo'
+expect "single-digit name#N" 0 "" a.go 't.Fatalf("resolve#2: %v", err)'
 expect "HTML entity" 0 "" a.md 'a &#1234; entity'
 expect "Go format verb" 0 "" a.go 'fmt.Printf("%#12.6g", value)'
 expect "qualified name with a hyphen" 0 "" a.go '// see owner/kure-launcher#278'

@@ -72,7 +72,7 @@ description = "Run scripts/check-pin-impact.sh's hermetic cases (stub curl, thro
 run = "make test-pin-impact"
 
 [tasks.check-issue-refs]
-description = "Reject bare #N and partial launcher#N references (self-test, then the tree)"
+description = "Reject bare #N and ownerless repo#N references (self-test, then the tree)"
 run = "make check-issue-refs"
 
 [tasks.verify]

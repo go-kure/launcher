@@ -151,7 +151,7 @@ kure remains a standalone library with no dependency on launcher. Launcher impor
 
 ### What stays in kure
 
-`pkg/stack/generators/kurelpackage/` — historically a kure *generator* that produced kurel package structure from a kure Application. This package is now being removed from kure (unused by all known consumers; removal tracked in [kure#539](https://github.com/go-kure/kure/issues/539)). It does not move to launcher.
+`pkg/stack/generators/kurelpackage/` — historically a kure *generator* that produced kurel package structure from a kure Application. This package is now being removed from kure (unused by all known consumers; removal tracked in [go-kure/kure#539](https://github.com/go-kure/kure/issues/539)). It does not move to launcher.
 
 ### What launcher does not use from kure (intentional)
 
