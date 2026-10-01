@@ -38,7 +38,7 @@ func (h *GitRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"provider":           fluxSourceString("GitRepository spec.provider for authentication: generic, aws, azure or github."),
 		"serviceAccountName": fluxSourceString("GitRepository spec.serviceAccountName that authenticates the clone (azure and aws providers)."),
 		"interval":           fluxSourceString("GitRepository spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
-		"timeout":            fluxSourceString("GitRepository spec.timeout for Git operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms, and below 1h."),
+		"timeout":            fluxSourceString("GitRepository spec.timeout for Git operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms. An hour or more is emitted in minutes, 90m as 90m0s."),
 		"ref":                fluxSourceObject("GitRepository spec.ref: the branch, tag, semver range, reference name or commit to check out."),
 		"verify":             fluxSourceObject("GitRepository spec.verify: commit signature verification."),
 		"proxySecretRef":     fluxSourceObject("GitRepository spec.proxySecretRef: the Secret holding the proxy configuration."),
@@ -127,6 +127,5 @@ func (c *GitRepositoryConfig) Generate(_ *stack.Application) ([]*client.Object, 
 	// A deep copy, so no render shares a pointer or slice with the config.
 	repo.Spec = *c.Spec.DeepCopy()
 	defaultFluxSourceInterval(&repo.Spec.Interval)
-	obj := client.Object(repo)
-	return []*client.Object{&obj}, nil
+	return emitFluxSource("gitrepository", repo, repo.Spec.Timeout)
 }

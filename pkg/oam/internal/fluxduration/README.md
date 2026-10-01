@@ -30,24 +30,26 @@ units.
   it (its own error is returned unchanged otherwise), and it must match the
   pattern (`ErrForm` otherwise). The package-level `Validate` is
   `Interval.Validate`.
-- `Form.ValidateEmitted(value)` also checks the form the value is emitted in. A
-  caller that sets a `metav1.Duration` serializes `Duration.String()`, not the
-  authored text, and that switches to `µs` or `ns` below one millisecond: `0.5ms`
-  matches the pattern but is written as `500µs`, which Flux rejects. Such a value
-  returns a `*ResolutionError` carrying the emitted form. So does a positive value
-  below the nanosecond resolution of `time.Duration`, which `time.ParseDuration`
-  truncates to zero without an error: `0.0000000001ms` would be written as `0s`. A
-  value authored as zero (`0s`, `0ms`, `0h0m`, `0.000s`) is accepted. Under
-  `SourceTimeout`, a value of an hour or more returns a `*HourError`:
-  `Duration.String()` writes it with an `h` (`60m` as `1h0m0s`), which that pattern
-  refuses, so it cannot be emitted through a `metav1.Duration` at all. The
-  package-level `ValidateEmitted` is `Interval.ValidateEmitted`.
+- `Form.Format(d)` is the text a parsed duration is emitted as: `Duration.String()`,
+  which a `metav1.Duration` serializes to, except under `SourceTimeout`, where a
+  duration of an hour or more has its hours folded into its minutes (`1h30m0s` as
+  `90m0s`), since `Duration.String()` would write an `h` that pattern refuses. A
+  caller emitting such a duration writes this text in place of the
+  `metav1.Duration`'s.
+- `Form.ValidateEmitted(value)` also checks the form the value is emitted in,
+  `Form.Format`, not the authored text, and that switches to `µs` or `ns` below one
+  millisecond: `0.5ms` matches the pattern but is written as `500µs`, which Flux
+  rejects. Such a value returns a `*ResolutionError` carrying the emitted form. So
+  does a positive value below the nanosecond resolution of `time.Duration`, which
+  `time.ParseDuration` truncates to zero without an error: `0.0000000001ms` would be
+  written as `0s`. A value authored as zero (`0s`, `0ms`, `0h0m`, `0.000s`) is
+  accepted. The package-level `ValidateEmitted` is `Interval.ValidateEmitted`.
 - `Form.ValidateDuration(d)` checks a decoded duration's emitted form alone, for a
   config built directly rather than parsed: `ErrForm` for a negative one, and
-  `*HourError` or `*ResolutionError` as above.
+  `*ResolutionError` as above.
 
-In practice the accepted values are `0s` and anything of at least `1ms`, and below
-`1h` under `SourceTimeout`. The kind-named Flux components (`helmrelease`,
+In practice the accepted values are `0s` and anything of at least `1ms`; under
+`SourceTimeout`, as authored, without `h`. The kind-named Flux components (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`) check every duration
 field this way, and the `oci` and `helmchart` composites their `interval`, at parse
 time and again when the config generates its objects. The `reconciliation` policy

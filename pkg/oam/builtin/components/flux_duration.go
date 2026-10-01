@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
@@ -15,9 +18,11 @@ import (
 // The Flux duration checks the components share. A Flux CRD declares a pattern
 // on each of its duration fields, and the API server enforces it, so a value
 // outside it builds cleanly and is then rejected at apply time. Every duration
-// launcher emits goes out through a metav1.Duration, which serializes as
-// Duration.String() rather than the authored text, so the emitted form is
-// checked as well as the authored one (package fluxduration).
+// launcher emits goes out as the parsed duration, in fluxduration's
+// Form.Format rather than the authored text, so the emitted form is checked as
+// well as the authored one (package fluxduration). That is the
+// metav1.Duration's own Duration.String(), except for a source timeout of an
+// hour or more (emitFluxSource).
 
 // fluxDurationField is one Flux duration field of a kind-named component whose
 // properties decode strictly into the Flux spec S (go-kure/launcher#601,
@@ -61,10 +66,6 @@ func fluxDurationError(component, field, value string, form fluxduration.Form, e
 	var re *fluxduration.ResolutionError
 	if errors.As(err, &re) {
 		return errors.Errorf("%s: %s %q is invalid: it would be emitted as %q, below Flux's millisecond resolution (use 0s or at least 1ms)", component, field, value, re.Emitted)
-	}
-	var he *fluxduration.HourError
-	if errors.As(err, &he) {
-		return errors.Errorf("%s: %s %q is invalid: it would be emitted as %q, and Flux takes no h unit on this field, so it must be below 1h (use e.g. 59m)", component, field, value, he.Emitted)
 	}
 	return errors.Errorf("%s: %s %q is invalid: must be a Flux duration (%s)", component, field, value, form.Describe())
 }
@@ -117,11 +118,10 @@ func checkAuthoredFluxDuration(component string, props map[string]any, path []st
 }
 
 // checkFluxDurations checks each decoded field in the form it is emitted,
-// Duration.String(). It covers a config built directly rather than parsed: a
-// negative or sub-millisecond duration, or one of an hour or more under a form
-// without h, is emitted outside the field's pattern. Unset and zero are passed
-// over: Generate defaults a zero interval, and a set zero is emitted as 0s,
-// which every form accepts.
+// Form.Format. It covers a config built directly rather than parsed: a negative
+// or sub-millisecond duration is emitted outside the field's pattern. Unset and
+// zero are passed over: Generate defaults a zero interval, and a set zero is
+// emitted as 0s, which every form accepts.
 func checkFluxDurations[S any](component string, spec *S, fields []fluxDurationField[S]) error {
 	for _, f := range fields {
 		d := f.get(spec)
@@ -133,4 +133,27 @@ func checkFluxDurations[S any](component string, spec *S, fields []fluxDurationF
 		}
 	}
 	return nil
+}
+
+// emitFluxSource returns the source CR obj of the named component for Generate,
+// timeout being its spec.timeout. A metav1.Duration serializes as
+// Duration.String(), which writes an h from an hour on, and spec.timeout takes
+// no h (fluxduration.SourceTimeout). So a timeout of an hour or more goes out
+// as an unstructured copy of obj whose spec.timeout is in minutes, 90m0s for
+// 1h30m (go-kure/launcher#619). Every other source is emitted as the typed
+// object, as before.
+func emitFluxSource(component string, obj client.Object, timeout *metav1.Duration) ([]*client.Object, error) {
+	if timeout != nil {
+		if text := fluxduration.SourceTimeout.Format(timeout.Duration); text != timeout.Duration.String() {
+			m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+			if err != nil {
+				return nil, errors.Wrapf(err, "%s: convert the source to set spec.timeout %q", component, text)
+			}
+			if err := unstructured.SetNestedField(m, text, "spec", "timeout"); err != nil {
+				return nil, errors.Wrapf(err, "%s: set spec.timeout %q", component, text)
+			}
+			obj = &unstructured.Unstructured{Object: m}
+		}
+	}
+	return []*client.Object{&obj}, nil
 }
