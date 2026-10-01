@@ -1054,8 +1054,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		if origin == (Origin{}) {
 			origin = Origin{Document: doc.Metadata.Name, DocumentKind: doc.Kind, Namespace: doc.Metadata.Namespace}
 		}
-		inputChecked, err := t.enforceAuthoredComponentReservations(doc, origin)
-		if err != nil {
+		if err := t.enforceAuthoredComponentReservations(doc, origin); err != nil {
 			return nil, false, nil, err
 		}
 		// Snapshot the components doc had BEFORE the rule ran: a rule that forwards
@@ -1121,11 +1120,12 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 				// rule) instead of being misattributed to this document rule.
 				compOrigin := Origin{Document: origin.Document, DocumentKind: origin.DocumentKind, Namespace: origin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: j, Rule: origin.Rule}
 				// The same check decides Component.synthesized: a forwarded component
-				// keeps whatever it already was (authored, or synthesized by an earlier
-				// rule); anything else is this rule's output, marked synthesized only
-				// when every authored component of its input was checked against a
-				// schema (inputChecked). Otherwise the rule may have copied an
-				// unchecked authored value, which must then still be checked downstream.
+				// keeps whatever it already was; anything else is this rule's output
+				// and is authored. A document rule sees the whole document — trait and
+				// policy properties and metadata included — and nothing checks all of
+				// that before it runs, so its output is never synthesized: a by-value
+				// copy that carried the marker is reset, and every component it built
+				// is checked downstream as if a user wrote it.
 				if isForwardedComponent(comp, originalComponents) {
 					if prior, ok := comp.Origin(); ok {
 						compOrigin.Rule = prior.Rule
@@ -1133,7 +1133,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 						compOrigin.Rule = ""
 					}
 				} else {
-					comp.synthesized = inputChecked
+					comp.synthesized = false
 				}
 				comp.origin = &compOrigin
 				if err := t.sealNestedTraitsInDocument(comp, compOrigin, originalComponents); err != nil {
@@ -1645,17 +1645,12 @@ func sameMap(a, b map[string]any) bool {
 // every component of doc that no lowering rule synthesized, against the schema that
 // component would later be checked against: its ComponentLoweringRule's when one is
 // registered (lowerDocumentBody's pre-rule check), else its dispatchable handler's
-// (createApplications). It runs before a DocumentLoweringRule because such a rule may
-// rebuild a component by value, and an emitted component that is not pointer-identical
-// to an input one (isForwardedComponent) can be marked synthesized and exempt from both
-// later checks; without this, an authored reserved value could pass through a
-// document rule unchecked. A type with no schema reserves nothing here, and an unknown
-// type is the validator's business. It reports whether every authored component was
-// checked against a schema: only then does the document rule's output count as
-// synthesized (lowerDocumentOnce), since a component it skipped may carry an authored
-// reserved value the rule copies through.
-func (t *Transformer) enforceAuthoredComponentReservations(doc *Application, docOrigin Origin) (bool, error) {
-	checked := true
+// (createApplications). It runs before a DocumentLoweringRule, which may drop or
+// retype a component and so take it out of reach of those later checks. A type with
+// no schema reserves nothing here, and an unknown type is the validator's business.
+// A document rule's output is authored either way (lowerDocumentOnce) and is checked
+// downstream too.
+func (t *Transformer) enforceAuthoredComponentReservations(doc *Application, docOrigin Origin) error {
 	for i := range doc.Spec.Components {
 		comp := &doc.Spec.Components[i]
 		if comp.synthesized {
@@ -1669,7 +1664,6 @@ func (t *Transformer) enforceAuthoredComponentReservations(doc *Application, doc
 		}
 		p, ok := provider.(PropertySchemaProvider)
 		if !ok {
-			checked = false
 			continue
 		}
 		if err := enforcePlatformReserved(p.PropertySchema(), comp.Properties, "properties"); err != nil {
@@ -1677,10 +1671,10 @@ func (t *Transformer) enforceAuthoredComponentReservations(doc *Application, doc
 			if !stamped {
 				compOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Namespace: docOrigin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: i}
 			}
-			return false, errors.Wrapf(err, "%s", compOrigin)
+			return errors.Wrapf(err, "%s", compOrigin)
 		}
 	}
-	return checked, nil
+	return nil
 }
 
 // isForwardedComponent is isForwardedTrait's component-position counterpart, used

@@ -64,25 +64,40 @@ func (r rendersReservedComponentRule) LowerComponent(comp *Component, lctx Lower
 }
 
 // rendersReservedDocRule is the same at document position: it constructs a new
-// component and writes the reserved property from the capability rendering. next
-// is the kind of the document it emits; empty means the terminal kind.
-type rendersReservedDocRule struct{ next string }
+// component and writes the reserved property from the capability rendering. Unlike
+// the component and trait cases, its output stays authored.
+type rendersReservedDocRule struct{}
 
 func (rendersReservedDocRule) Kind() string { return "Rendering" }
 
-func (r rendersReservedDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
-	kind := r.next
-	if kind == "" {
-		kind = terminalDocumentKind
-	}
+func (rendersReservedDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
 	return LoweringResult{Documents: []Application{{
 		APIVersion: SupportedAPIVersion,
-		Kind:       kind,
+		Kind:       terminalDocumentKind,
 		Metadata:   Metadata{Name: doc.Metadata.Name, Namespace: doc.Metadata.Namespace},
 		Spec: ApplicationSpec{Components: []Component{{
 			Name:       "web",
 			Type:       "reserved-sink",
 			Properties: map[string]any{"image": "nginx", "networkPolicy": renderedNetworkPolicy(lctx)},
+		}}},
+	}}}, nil
+}
+
+// traitCopyingDocRule builds a reserved-sink component from the authored properties
+// of the first component's first trait, which nothing checks before a document rule.
+type traitCopyingDocRule struct{}
+
+func (traitCopyingDocRule) Kind() string { return "TraitCopying" }
+
+func (traitCopyingDocRule) LowerDocument(doc *Application, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name, Namespace: doc.Metadata.Namespace},
+		Spec: ApplicationSpec{Components: []Component{{
+			Name:       "web",
+			Type:       "reserved-sink",
+			Properties: doc.Spec.Components[0].Traits[0].Properties,
 		}}},
 	}}}, nil
 }
@@ -221,32 +236,30 @@ func TestTransform_ComponentRuleMayWriteReservedProperty(t *testing.T) {
 	}
 }
 
-// TestTransform_DocumentRuleMayWriteReservedProperty is the same at document
-// position: a component the rule constructed is synthesized.
-func TestTransform_DocumentRuleMayWriteReservedProperty(t *testing.T) {
+// TestTransform_DocumentRuleWrittenReservedPropertyIsRejected: a document rule's
+// output is never synthesized, since nothing checks its whole input (here an empty
+// document) before it runs. A reserved value it wrote is rejected, as on main.
+func TestTransform_DocumentRuleWrittenReservedPropertyIsRejected(t *testing.T) {
 	tr := reservedSinkTransformer()
 	tr.RegisterDocumentLowering(rendersReservedDocRule{})
 
 	app := &Application{APIVersion: SupportedAPIVersion, Kind: "Rendering", Metadata: Metadata{Name: "myapp", Namespace: "test"}}
-	if _, err := tr.Transform(app, netpolCapability()); err != nil {
-		t.Fatalf("a document-rule-written reserved property must be accepted, got: %v", err)
-	}
+	_, err := tr.Transform(app, netpolCapability())
+	expectPlatformReserved(t, err)
 }
 
-// TestTransform_DocumentRuleForwardingSynthesizedStaysSynthesized: forwarding keeps
-// the classification a component arrived with. A component the first document rule
-// synthesized, then forwarded unchanged by a second document rule, is still
-// synthesized, so neither the check before the second rule nor createApplications
-// treats its rule-written reserved value as authored.
-func TestTransform_DocumentRuleForwardingSynthesizedStaysSynthesized(t *testing.T) {
+// TestTransform_DocumentRuleCopyingAuthoredTraitIsRejected: the input component has a
+// schema and passes the pre-rule check, but the rule builds its output from an
+// authored trait's properties. That output stays authored, so the reserved value is
+// rejected at the handler.
+func TestTransform_DocumentRuleCopyingAuthoredTraitIsRejected(t *testing.T) {
 	tr := reservedSinkTransformer()
-	tr.RegisterDocumentLowering(rendersReservedDocRule{next: "Forwarding"})
-	tr.RegisterDocumentLowering(forwardingComponentsDocRule{kind: "Forwarding"})
+	tr.RegisterDocumentLowering(traitCopyingDocRule{})
 
-	app := &Application{APIVersion: SupportedAPIVersion, Kind: "Rendering", Metadata: Metadata{Name: "myapp", Namespace: "test"}}
-	if _, err := tr.Transform(app, netpolCapability()); err != nil {
-		t.Fatalf("a synthesized component forwarded by a later document rule must stay synthesized, got: %v", err)
-	}
+	app := singleComponentApp("TraitCopying", "reserved-sink", map[string]any{"image": "nginx"})
+	app.Spec.Components[0].Traits = []Trait{{Type: "anything", Properties: authoredNetworkPolicy()}}
+	_, err := tr.Transform(app, TransformContext{})
+	expectPlatformReserved(t, err)
 }
 
 // TestTransform_TraitRuleMayWriteReservedComponentProperty: a component a trait
@@ -299,11 +312,10 @@ func TestTransform_DocumentRuleForwardingAuthoredReservedIsRejected(t *testing.T
 	expectPlatformReserved(t, err)
 }
 
-// TestTransform_DocumentRuleCopyingAuthoredReservedIsRejected is the laundering case
-// enforceAuthoredComponentReservations closes: a document rule that rebuilds the
-// authored component by value emits a component that is not pointer-identical to its
-// input, so it is marked synthesized and exempt downstream. The authored reserved
-// value must still be rejected, before the rule runs.
+// TestTransform_DocumentRuleCopyingAuthoredReservedIsRejected: a document rule that
+// rebuilds the authored component by value emits a component that is not
+// pointer-identical to its input. The authored reserved value is rejected before the
+// rule runs (enforceAuthoredComponentReservations).
 func TestTransform_DocumentRuleCopyingAuthoredReservedIsRejected(t *testing.T) {
 	tr := reservedSinkTransformer()
 	tr.RegisterDocumentLowering(forwardingDocRule{kind: "Wrapper"})
