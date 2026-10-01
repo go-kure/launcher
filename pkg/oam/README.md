@@ -404,6 +404,25 @@ transformer (excluding raw-only rules, which are reachable only via `LowerRaws`)
 a caller to pass into `ParseWithExtraTypes` ahead of a transform that will lower them
 (see Parsing above).
 
+**Same-name sibling groups.** A `ComponentLoweringRule` may emit several components
+under one name, each of a distinct type that has a component handler (no lowering
+rule claims it). They form one sibling group, which deploys as a single component.
+Each member keeps its own config, policy defaults, traits and objects. The group has
+one tier, one bundle, one `dependency` node, one auto health check (for the first
+member's kind) and one layout directory. Its application generates the members'
+objects in emission order. It answers every config contract the transform or a trait
+reads (Service port and port name, backend Service name, routing target,
+ServiceAccount, single-pod claim) from the one member that has a value, and gives
+the Flux namespace to every member that takes one.
+
+The build refuses a group:
+- whose members fall in different tiers;
+- in which two members answer the same contract;
+- that has a member needing layout-level resources.
+
+An authored duplicate name is still refused. So is a name repeated by different
+rule invocations, or by a trait or document rule.
+
 Expansion runs to a **fixpoint**: every round, every current document's non-terminal
 kind, components, traits, and policies are lowered once via their registered rule (if
 any); the loop repeats until a round changes nothing, bounded by `MaxLoweringDepth`

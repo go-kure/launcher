@@ -144,7 +144,7 @@ func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, 
 	lowerableComponentTypes := toTypeSet(lowerable.ComponentTypes)
 	allTraitTypes := mergeTypeSets(customTraitTypes, lowerable.TraitTypes)
 
-	seenNames := make(map[string]bool)
+	seenNames := make(map[string]componentNameClaim)
 	for i, c := range app.Spec.Components {
 		if err := validateComponent(&c, i, seenNames, allTraitTypes, lowerableComponentTypes, customComponentTypes); err != nil {
 			return err
@@ -209,7 +209,15 @@ func mergeTypeSets(base map[string]bool, extra []string) map[string]bool {
 	return merged
 }
 
-func validateComponent(c *Component, index int, seenNames map[string]bool, customTraitTypes map[string]bool, lowerableComponentTypes map[string]bool, customComponentTypes map[string]bool) error {
+// componentNameClaim records the first component that took a name, so a repeat is
+// accepted only from another member of the same sibling group (group is nil for
+// every component that is not a member) of a type no member has yet.
+type componentNameClaim struct {
+	group *siblingGroup
+	types map[string]bool
+}
+
+func validateComponent(c *Component, index int, seenNames map[string]componentNameClaim, customTraitTypes map[string]bool, lowerableComponentTypes map[string]bool, customComponentTypes map[string]bool) error {
 	if c.Name == "" {
 		return oamValidationError("name", fmt.Sprintf("spec.components[%d].name is required", index))
 	}
@@ -218,10 +226,17 @@ func validateComponent(c *Component, index int, seenNames map[string]bool, custo
 		return oamValidationError("name", fmt.Sprintf("component name %q is not a valid DNS-1123 subdomain", c.Name))
 	}
 
-	if seenNames[c.Name] {
-		return oamValidationError("name", fmt.Sprintf("duplicate component name %q", c.Name))
+	// An authored component never carries a sibling group, so an authored
+	// duplicate is refused exactly as before; only members of one group, each of a
+	// distinct type, may share a name.
+	if claim, seen := seenNames[c.Name]; seen {
+		if claim.group == nil || claim.group != c.siblingGroup || claim.types[c.Type] {
+			return oamValidationError("name", fmt.Sprintf("duplicate component name %q", c.Name))
+		}
+		claim.types[c.Type] = true
+	} else {
+		seenNames[c.Name] = componentNameClaim{group: c.siblingGroup, types: map[string]bool{c.Type: true}}
 	}
-	seenNames[c.Name] = true
 
 	if c.Type == "" {
 		return oamValidationError("type", fmt.Sprintf("component %q missing type", c.Name))
