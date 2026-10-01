@@ -531,8 +531,10 @@ A schema field may also be marked `PlatformReserved`: its value may arrive only 
 `ClusterProfile` capability rendering, never authored inline. `enforcePlatformReserved`
 (`property_validate.go`) rejects an authored value for such a field — including an
 explicit `null` — before capability rendering is merged in, wrapping
-`ErrPlatformReserved`; it walks declared nested object fields too, so a reservation on
-an inner field is enforced wherever it is declared, not only at the top level.
+`ErrPlatformReserved`; it walks declared nested object fields and the items of a
+declared array of objects too (named `properties.items[0]`), so a reservation on an
+inner field is enforced wherever it is declared, not only at the top level
+(go-kure/launcher#635).
 `createApplications` and `applyTraits` (`transform.go`) run this check on the authored
 path, and the lowering engine runs it on a `TraitLoweringRule`'s input trait before
 capability rendering is resolved into it (see Lowering above).
@@ -567,6 +569,13 @@ each authored component and its traits in document order, looks up the same sche
 and checks the shape of every key it does. `kurel build` calls it immediately after
 parsing — and, in package mode, necessarily *after* `ResolveParameters`, because a
 `${...}` placeholder is a bare string until substituted.
+
+Before any of that, it runs `Transform`'s own reservation check
+(`enforcePlatformReserved`) over the document, with the same schemas and the same
+error text `Transform` would report for it. It has to come first: validation drops an
+explicit `null` under a nested declared object, so a reserved key authored as
+`config: {locked: null}` would otherwise be gone before `Transform` could refuse it
+(go-kure/launcher#635).
 
 The shape check is also the only place an authored scalar's *type* is enforced for
 every property (go-kure/launcher#325). Many built-in handlers read string properties
@@ -736,7 +745,8 @@ Two things this deliberately does not do:
 
 - **It makes no exception for `PlatformReserved` keys.** Reservation
   (`enforcePlatformReserved`) is a rule about what a user *wrote*. On the authored
-  surface the two rules never meet — it runs upstream of any emission validation —
+  surface the two rules never meet — it runs upstream of any emission validation, and
+  `ValidateAuthoredProperties` runs it before its own strip —
   so reservation keeps treating an explicit null as *present* while the strip
   treats one as absent. Exempting reserved keys here would not have preserved the
   authored rule; it would only have handed a reserved null to the type check,

@@ -131,7 +131,9 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 		// rule that could rewrite it or share its properties map
 		// (enforceAuthoredReservations at the start of every lowerDocumentBody round
 		// and before a document rule, lowerDocumentBody's pre-rule checks) and again
-		// in createApplications or applyTraits. A component or trait a rule emitted,
+		// in createApplications or applyTraits; ValidateAuthoredProperties, which
+		// strips a nested null here before Transform runs, checks the document first
+		// (enforceDocumentReservations, go-kure/launcher#635). A component or trait a rule emitted,
 		// whose properties are stripped here, is either synthesized and exempt, or —
 		// output of a rule whose input was not checked — checked by
 		// enforceEmittedComponentReservations or enforceEmittedTraitReservations
@@ -488,8 +490,9 @@ func joinPropertyTypes(types []PropertyType) string {
 // A key the schema does not declare is passed over: it is validateProperties' business,
 // and reporting it here would duplicate that message with a misleading reason.
 //
-// Nested declared objects are walked as well, so a reservation on an inner field is
-// enforced wherever it is declared rather than only at the top level. No schema
+// Nested declared objects are walked as well, and so are the items of a declared array
+// of objects (enforceReservedValue), so a reservation on an inner field is enforced
+// wherever it is declared rather than only at the top level (go-kure/launcher#635). No schema
 // declares a nested reserved field today; the walk exists so declaring one later is
 // enforcement, not documentation — the exact gap D3 was written to close.
 func enforcePlatformReserved(schema map[string]PropertySchema, props map[string]any, path string) error {
@@ -507,17 +510,46 @@ func enforcePlatformReserved(schema map[string]PropertySchema, props map[string]
 			return errors.Wrapf(ErrPlatformReserved,
 				"%s: %q is platform-reserved and may only be set via ClusterProfile capability rendering", path, key)
 		}
-		if field.Type != PropertyTypeObject || len(field.Properties) == 0 {
-			continue
-		}
-		obj, ok := asObjectValue(props[key])
-		if !ok {
-			// Not an object: validatePropertyValue reports the type mismatch.
-			continue
-		}
-		if err := enforcePlatformReserved(field.Properties, obj, path+"."+key); err != nil {
+		if err := enforceReservedValue(field, props[key], path+"."+key); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// enforceReservedValue is enforcePlatformReserved's descent into one declared value:
+// a declared object's fields, and each item of a declared array whose Items schema
+// can itself hold a reservation (an object, or an array of them), named by its index
+// as validatePropertyValue names it. The walk follows the schema, not the value, so
+// it ends at the schema's depth whatever the value holds.
+func enforceReservedValue(field PropertySchema, value any, path string) error {
+	switch field.Type {
+	case PropertyTypeObject:
+		if len(field.Properties) == 0 {
+			return nil
+		}
+		obj, ok := asObjectValue(value)
+		if !ok {
+			// Not an object: validatePropertyValue reports the type mismatch.
+			return nil
+		}
+		return enforcePlatformReserved(field.Properties, obj, path)
+	case PropertyTypeArray:
+		if field.Items == nil {
+			return nil
+		}
+		items, ok := asArrayValue(value)
+		if !ok {
+			// Not an array: validatePropertyValue reports the type mismatch.
+			return nil
+		}
+		for i, item := range items {
+			if err := enforceReservedValue(*field.Items, item, fmt.Sprintf("%s[%d]", path, i)); err != nil {
+				return err
+			}
+		}
+	default:
+		// A scalar declares nothing below itself to reserve.
 	}
 	return nil
 }
