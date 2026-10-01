@@ -2532,7 +2532,10 @@ not part of either change.
   default the size is left to the operator. A storage-size default that is
   not a quantity is refused (`policy default for storage.size: invalid
   quantity "lots"`), as an invalid cpu or memory default is, since with no
-  maximum set nothing else would parse it. The storage maximum applies to
+  maximum set nothing else would parse it. So is a zero or negative one
+  (`quantity must be positive, got "0"`): CloudNativePG's webhook only
+  parses the size, and the claims it creates would then fail the API
+  server's positive storage-request check. The storage maximum applies to
   every claim the Cluster creates — `storage`, `walStorage`, each
   `tablespaces[i].storage` (either `size` or the `pvcTemplate` request) and
   `ephemeralVolumeSource.volumeClaimTemplate` — and the error names the one

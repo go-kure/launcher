@@ -661,8 +661,15 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	// the document did not write, so it is parsed here, as the cpu and memory
 	// defaults above are: with no maximum set, nothing else would.
 	if dflt := p.DefaultStorageSize(); !c.explicitStorageSize && dflt != "" {
-		if _, err := resource.ParseQuantity(dflt); err != nil {
+		q, err := resource.ParseQuantity(dflt)
+		if err != nil {
 			return errors.Errorf("policy default for storage.size: invalid quantity %q: %w", dflt, err)
+		}
+		// CloudNativePG's webhook only parses the size, so a zero or negative
+		// one is admitted and its claims then fail the API server's positive
+		// storage-request check, the rule volumeclaim_spec.go applies.
+		if q.Sign() <= 0 {
+			return errors.Errorf("policy default for storage.size: quantity must be positive, got %q", dflt)
 		}
 		c.Spec.StorageConfiguration.Size = dflt
 	}
