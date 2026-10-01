@@ -193,8 +193,9 @@ func (e componentEntry) healthCheckConfig() stack.ApplicationConfig {
 //     ServiceAccountNamer, and the servicePortNamer and nonRWXClaimer contracts
 //     the builtin traits assert: the one member that answers a non-zero value.
 //     checkSiblingGroups refuses a group in which two members do, so the answer
-//     is never a choice. A routing target that selects another member's pods on
-//     ports mapped to themselves is answered as nil instead (ServiceRoutingTarget).
+//     is never a choice. Synthesis asks the group itself (routesToOwnPods)
+//     whether a routing target selects another member's pods on ports mapped
+//     to themselves, and then keeps the component label as the pod selector.
 //
 // Not forwarded, on purpose: Enforceable and SourceDeduplicatable run per member
 // in createApplications, before the group exists; trafficSourceCollector and
@@ -333,26 +334,37 @@ func (g *siblingGroupConfig) NonRWXClaim() string {
 	return ""
 }
 
-// ServiceRoutingTarget is the one member's routing target, or a nil selector. It
-// is also nil when that target selects another member's pods (selectsSibling) and
-// the member maps every port to itself by number (identityPortMapper): the routed
-// traffic then lands on the group's own pods, on the ports it was routed to, which
-// its component-label policy already opens — the policy one component deploying
-// them all synthesizes. A member remapping any port, or naming a targetPort, keeps
-// forwarding: that policy would open the Service port, not the one the pods
-// listen on.
+// ServiceRoutingTarget is the one member's routing target, or a nil selector.
 func (g *siblingGroupConfig) ServiceRoutingTarget(servicePorts []intstr.IntOrString) (*metav1.LabelSelector, []intstr.IntOrString) {
-	for i, m := range g.members {
+	for _, m := range g.members {
 		if rt, ok := m.Config.(serviceRoutingTargeter); ok {
 			if sel, ports := rt.ServiceRoutingTarget(servicePorts); sel != nil {
-				if id, ok := m.Config.(identityPortMapper); ok && id.IdentityTargetPorts() && g.selectsSibling(i, sel) {
-					return nil, nil
-				}
 				return sel, ports
 			}
 		}
 	}
 	return nil, nil
+}
+
+// routesToOwnPods reports whether the group's routing target selects another
+// member's pods (selectsSibling) and its member maps every port to itself by
+// number (identityPortMapper). The routed traffic then lands on the group's own
+// pods, on the ports it was routed to, so the synthesized inbound policy keeps the
+// group's component label (netpol_synthesis.go emitComponents) — the policy one
+// component deploying them all synthesizes — while its ports still go through
+// ServiceRoutingTarget: a named Service port becomes its number and a non-TCP one
+// is dropped. A member remapping any port, or naming a targetPort, does not: that
+// policy would open the Service port, not the one the pods listen on.
+func (g *siblingGroupConfig) routesToOwnPods() bool {
+	for i, m := range g.members {
+		if rt, ok := m.Config.(serviceRoutingTargeter); ok {
+			if sel, _ := rt.ServiceRoutingTarget(nil); sel != nil {
+				id, ok := m.Config.(identityPortMapper)
+				return ok && id.IdentityTargetPorts() && g.selectsSibling(i, sel)
+			}
+		}
+	}
+	return false
 }
 
 // selectsSibling reports whether sel, member i's routing target, selects the pods
@@ -396,8 +408,8 @@ type podTemplateLabeler interface {
 
 // identityPortMapper is optionally implemented by a routing targeter: it reports
 // whether every port, whatever its protocol, targets its own port number. A
-// sibling group reads it before answering a routing target that selects its own
-// sibling's pods as nil (ServiceRoutingTarget).
+// sibling group reads it to tell a routing target that selects its own sibling's
+// pods on the ports it was routed to (routesToOwnPods).
 type identityPortMapper interface {
 	IdentityTargetPorts() bool
 }

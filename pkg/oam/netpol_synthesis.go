@@ -307,7 +307,13 @@ func (r *npSynthesisRegistry) emitComponents(labelKey string) error {
 			if sel == nil {
 				continue // every routed port was unmatched or non-TCP: nothing a TCP allow may open
 			}
-			cfg = &backendIngressAllowPolicyConfig{PolicyName: policyName, PodSelector: sel, Rules: retargeted}
+			if g, ok := rt.(*siblingGroupConfig); ok && g.routesToOwnPods() {
+				// The routed traffic lands on the group's own pods on the same port numbers: keep
+				// the component label as one component deploying them all does (go-kure/launcher#280).
+				cfg = &componentAllowPolicyConfig{ComponentName: compName, Rules: retargeted, PodSelectorKey: labelKey}
+			} else {
+				cfg = &backendIngressAllowPolicyConfig{PolicyName: policyName, PodSelector: sel, Rules: retargeted}
+			}
 		}
 		// Key by namespace/name (not bare name) to preserve the go-kure/launcher#239 external-vs-component collision
 		// check and avoid future cross-namespace false positives.

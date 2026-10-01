@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -37,9 +38,17 @@ func (r ownPodsRule) LowerComponent(c *oam.Component, _ oam.LoweringContext) (oa
 	}}, nil
 }
 
-// ownPodsPolicy transforms one own-pods component "web" with an ingress trait (and
-// any extra service-member traits before it) and returns its synthesized policy.
+// ownPodsPolicy transforms one own-pods component "web" with an ingress trait on
+// path "/" (and any extra service-member traits before it) and returns its
+// synthesized policy.
 func ownPodsPolicy(t *testing.T, rule ownPodsRule, svcTraits ...oam.Trait) *networkingv1.NetworkPolicy {
+	t.Helper()
+	return synthesizedNetworkPolicy(t, ownPodsCluster(t, rule, map[string]any{"path": "/"}, svcTraits...), "web-allow-ingress-traffic")
+}
+
+// ownPodsCluster transforms one own-pods component "web" whose last trait is an
+// ingress on the given path.
+func ownPodsCluster(t *testing.T, rule ownPodsRule, path map[string]any, svcTraits ...oam.Trait) *stack.Cluster {
 	t.Helper()
 	tr := serviceKindTransformer()
 	tr.RegisterComponentLowering(rule)
@@ -49,7 +58,7 @@ func ownPodsPolicy(t *testing.T, rule ownPodsRule, svcTraits ...oam.Trait) *netw
 		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{Components: []oam.Component{{
 			Name: "web", Type: "own-pods",
-			Traits: append(svcTraits, ingressTrait(map[string]any{"path": "/"})),
+			Traits: append(svcTraits, ingressTrait(path)),
 		}}},
 	}
 	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{
@@ -58,7 +67,7 @@ func ownPodsPolicy(t *testing.T, rule ownPodsRule, svcTraits ...oam.Trait) *netw
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
-	return synthesizedNetworkPolicy(t, cluster, "web-allow-ingress-traffic")
+	return cluster
 }
 
 func assertAllow(t *testing.T, np *networkingv1.NetworkPolicy, wantSelector map[string]string, wantPort intstr.IntOrString) {
@@ -83,6 +92,24 @@ var (
 
 func TestSiblingGroup_OwnPodsOnIdentityPortsKeepComponentPolicy(t *testing.T) {
 	assertAllow(t, ownPodsPolicy(t, ownPodsRule{ports: identityPorts}), componentLabel, intstr.FromInt32(8080))
+}
+
+// The component label stays, but the ports still go through the Service: an
+// ingress naming the Service port opens its number, since the pods need not
+// carry a container port of that name.
+func TestSiblingGroup_OwnPodsNamedServicePortOpensItsNumber(t *testing.T) {
+	cluster := ownPodsCluster(t, ownPodsRule{ports: identityPorts}, map[string]any{"path": "/", "portName": "http"})
+	assertAllow(t, synthesizedNetworkPolicy(t, cluster, "web-allow-ingress-traffic"), componentLabel, intstr.FromInt32(8080))
+}
+
+// A route to a UDP-only Service opens nothing: the synthesized rules are TCP, and
+// a TCP allow on the UDP port would admit the wrong traffic.
+func TestSiblingGroup_OwnPodsUDPOnlyRouteSynthesizesNothing(t *testing.T) {
+	rule := ownPodsRule{ports: []any{map[string]any{"name": "dns", "port": 53, "protocol": "UDP"}}}
+	cluster := ownPodsCluster(t, rule, map[string]any{"path": "/", "port": 53})
+	if clusterHasApp(cluster, "web-allow-ingress-traffic") {
+		t.Errorf("expected no synthesized allow for a UDP-only route; apps: %v", clusterAppNames(cluster))
+	}
 }
 
 func TestSiblingGroup_OwnPodsOnRemappedPortsTargetSelectorPods(t *testing.T) {
