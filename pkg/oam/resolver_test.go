@@ -1,6 +1,7 @@
 package oam_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -181,6 +182,51 @@ func TestResolveParameters_NodeSubstitution_NotRescanned(t *testing.T) {
 	args := mustUnmarshal(t, out)["args"].([]any)
 	if args[0] != "--name=${name}" {
 		t.Errorf("args[0] = %q, want the literal %q", args[0], "--name=${name}")
+	}
+}
+
+// TestResolveParameters_NodeSubstitution_AnchorKept: an anchor on the placeholder
+// stays on the substituted node, so an alias to it resolves to the value.
+func TestResolveParameters_NodeSubstitution_AnchorKept(t *testing.T) {
+	for _, tc := range []struct {
+		typ   string
+		value any
+	}{
+		{"array", []any{"a", "b"}},
+		{"object", map[string]any{"k": "v"}},
+	} {
+		t.Run(tc.typ, func(t *testing.T) {
+			schema := []oam.ParameterDecl{{Name: "p", PropertySchema: oam.PropertySchema{Type: oam.PropertyType(tc.typ)}}}
+			out := resolveOK(t, "first: &shared ${p}\nsecond: *shared\n", schema, map[string]any{"p": tc.value})
+			m := mustUnmarshal(t, out)
+			if !reflect.DeepEqual(m["first"], tc.value) || !reflect.DeepEqual(m["second"], tc.value) {
+				t.Errorf("first = %#v, second = %#v, want both %#v\n%s", m["first"], m["second"], tc.value, out)
+			}
+		})
+	}
+}
+
+// TestResolveParameters_StringDefaultEmbedsStructuredRefused: a string default may
+// reference an earlier parameter, but not an array or object one — the same
+// refusal as an inline ${...} in the application template.
+func TestResolveParameters_StringDefaultEmbedsStructuredRefused(t *testing.T) {
+	for _, tc := range []struct {
+		typ   string
+		value any
+	}{
+		{"array", []any{"a"}},
+		{"object", map[string]any{"k": "v"}},
+	} {
+		t.Run(tc.typ, func(t *testing.T) {
+			schema := []oam.ParameterDecl{
+				{Name: "p", PropertySchema: oam.PropertySchema{Type: oam.PropertyType(tc.typ)}},
+				{Name: "label", PropertySchema: oam.PropertySchema{Type: "string", Default: "prefix-${p}"}},
+			}
+			_, err := oam.ResolveParameters([]byte("x: ${label}\n"), schema, map[string]any{"p": tc.value})
+			if err == nil || !strings.Contains(err.Error(), `"label" references "p"`) || !strings.Contains(err.Error(), "cannot be embedded in a string") {
+				t.Fatalf("expected a refusal naming label and p, got %v", err)
+			}
+		})
 	}
 }
 

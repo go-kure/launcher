@@ -194,6 +194,10 @@ func checkStructuredShape(v any, paramType string) error {
 func buildEffectiveValues(schema []ParameterDecl, coerced map[string]any) (map[string]any, error) {
 	effective := make(map[string]any, len(schema))
 	maps.Copy(effective, coerced)
+	types := make(map[string]PropertyType, len(schema))
+	for _, p := range schema {
+		types[p.Name] = p.Type
+	}
 
 	for _, p := range schema {
 		if _, ok := effective[p.Name]; ok {
@@ -237,6 +241,13 @@ func buildEffectiveValues(schema []ParameterDecl, coerced map[string]any) (map[s
 				return match
 			}
 			name := placeholderRE.FindStringSubmatch(match)[1]
+			if t := types[name]; t == "array" || t == "object" {
+				// The same refusal as an inline ${…} in the application template:
+				// a list or map has no string form to embed.
+				resolveErr = errors.Errorf(
+					"default for parameter %q references %q (type %s), which cannot be embedded in a string", p.Name, name, t)
+				return match
+			}
 			val, ok := effective[name]
 			if !ok {
 				resolveErr = errors.Errorf(
@@ -348,6 +359,9 @@ func substituteScalar(node *yaml.Node, schema map[string]*ParameterDecl, effecti
 			if err := repl.Encode(val); err != nil {
 				return errors.Wrapf(err, "parameter %q (type %s): encoding the value", name, decl.Type)
 			}
+			// The anchor stays on the node, so an alias to it resolves to the
+			// substituted value.
+			repl.Anchor = node.Anchor
 			repl.HeadComment, repl.LineComment, repl.FootComment = node.HeadComment, node.LineComment, node.FootComment
 			*node = repl
 		case "integer":

@@ -437,7 +437,8 @@ A kurel parameter's `Type` is `string`, `integer`, `boolean`, `array` or `object
 `object` parameter with the value's YAML list or map. With no `items` or `properties` to declare,
 the parameter checks only that shape (its default too, and a string default is refused); the
 substituted value is checked by `ValidateAuthoredProperties` against the consuming handler's schema
-like any authored property.
+like any authored property. Such a parameter cannot be embedded in a larger string, in the template
+or in another parameter's string default.
 
 `Types` is the union idiom (go-kure/launcher#383): a leaf that accepts more than one scalar type
 lists them, and a value is accepted when any member's single `Type` accepts it — whatever order the
