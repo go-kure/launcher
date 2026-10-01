@@ -23,10 +23,17 @@ type GeneratedApplication struct {
 // component's own application (or a sibling group, which deploys as one) by its
 // component, any other — a trait's sub-application — by its name and component.
 func (a GeneratedApplication) String() string {
-	if a.Component == "" || a.Component == a.Name {
+	if a.componentOrName() == a.Name {
 		return fmt.Sprintf("component %q", a.Name)
 	}
 	return fmt.Sprintf("sub-application %q of component %q", a.Name, a.Component)
+}
+
+func (a GeneratedApplication) componentOrName() string {
+	if a.Component == "" {
+		return a.Name
+	}
+	return a.Component
 }
 
 // GenerateApplications generates every application of a transformed document
@@ -78,12 +85,26 @@ func generateBundle(bundle *stack.Bundle, out *[]GeneratedApplication) error {
 		}
 		return nil
 	}
+	start := len(*out)
 	for _, app := range bundle.Applications {
 		objs, err := app.Generate()
 		if err != nil {
 			return err
 		}
-		for _, p := range objs {
+		component := app.Name
+		if named, ok := app.Config.(ComponentNamed); ok && named.ComponentName() != "" {
+			component = named.ComponentName()
+		}
+		// Copied at once, as Bundle.Generate appends each result at once: a config
+		// that reuses its result slice must not change an earlier application's.
+		objs = append([]*client.Object(nil), objs...)
+		*out = append(*out, GeneratedApplication{Name: app.Name, Component: component, Objects: objs})
+	}
+	// Merged after every application of the bundle has generated, as
+	// Bundle.Generate merges them: an application may change an object another
+	// one generated earlier.
+	for _, generated := range (*out)[start:] {
+		for _, p := range generated.Objects {
 			if p == nil || isNullValue(*p) {
 				continue
 			}
@@ -94,11 +115,6 @@ func generateBundle(bundle *stack.Bundle, out *[]GeneratedApplication) error {
 				(*p).SetAnnotations(withMissing((*p).GetAnnotations(), bundle.Annotations))
 			}
 		}
-		component := app.Name
-		if named, ok := app.Config.(ComponentNamed); ok && named.ComponentName() != "" {
-			component = named.ComponentName()
-		}
-		*out = append(*out, GeneratedApplication{Name: app.Name, Component: component, Objects: objs})
 	}
 	return nil
 }
@@ -173,11 +189,18 @@ func CheckInDocumentCollisions(apps []GeneratedApplication) error {
 }
 
 // applicationList names the applications at idx: "both A and B" for two, "A, B
-// and C" for more.
+// and C" for more. A name already used is repeated as "another application" —
+// a trait may carry its component's name, so two producers can read alike, and
+// which one is the component's own cannot be told from the cluster.
 func applicationList(apps []GeneratedApplication, idx []int) string {
 	names := make([]string, len(idx))
+	seen := map[string]bool{}
 	for k, i := range idx {
 		names[k] = apps[i].String()
+		if seen[names[k]] {
+			names[k] = fmt.Sprintf("another application %q of component %q", apps[i].Name, apps[i].componentOrName())
+		}
+		seen[apps[i].String()] = true
 	}
 	last := len(names) - 1
 	if last == 1 {
