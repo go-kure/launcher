@@ -309,6 +309,17 @@ func (c *OCIConfig) fluxNamespace() string {
 // Generate emits the OCIRepository (unless deduped away) and a per-component
 // Flux Kustomization referencing it. Both land in the Flux namespace.
 func (c *OCIConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
+	// Re-check at the emission boundary what ToApplicationConfig already checked
+	// at parse time. This type and its Interval field are exported, so a config
+	// built directly by a library consumer — never parsed — reaches
+	// parseDuration below, which discards the parse error: a signed or
+	// sub-millisecond value would be emitted in a form Flux rejects, and text
+	// that is no duration at all as 0s. Same shape as the re-checks at the top of
+	// (*HelmchartConfig).Generate.
+	if err := validateFluxInterval("oci", effectiveInterval(c.Interval)); err != nil {
+		return nil, err
+	}
+
 	var objects []*client.Object
 	interval := parseDuration(effectiveInterval(c.Interval))
 

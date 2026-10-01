@@ -22,6 +22,7 @@ func TestValidate(t *testing.T) {
 		// Inside the pattern: Validate checks the authored text only.
 		{"0.5ms", "ok"},
 		{"0.0001s", "ok"},
+		{"0.0000000001ms", "ok"},
 
 		{"-5m", "form"},
 		{"+5m", "form"},
@@ -57,10 +58,20 @@ func TestValidateEmitted(t *testing.T) {
 		{"1ms", "ok", ""},
 		{"0s", "ok", ""},
 		{"0.0015s", "ok", ""},
+		// Authored as zero, in every spelling: emitted as 0s, which is the value.
+		{"0ms", "ok", ""},
+		{"0h0m", "ok", ""},
+		{"0.000s", "ok", ""},
+		{"00.0h0ms", "ok", ""},
 
 		{"0.5ms", "resolution", "500µs"},
 		{"0.0001s", "resolution", "100µs"},
 		{"0.000001s", "resolution", "1µs"},
+		// Positive, but below time.Duration's nanosecond resolution:
+		// time.ParseDuration truncates it to zero without an error.
+		{"0.0000000001ms", "resolution", "0s"},
+		{"0.0000000001s", "resolution", "0s"},
+		{"0h0.0000000001s", "resolution", "0s"},
 
 		{"-5m", "form", ""},
 		{"+5m", "form", ""},

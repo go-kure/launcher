@@ -470,6 +470,16 @@ func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, er
 		return c.objects(), nil
 	}
 
+	// The same re-check for Interval, which is exported too. parseDuration
+	// below and in buildHelmRelease discards the parse error, so on a config
+	// built directly a signed or sub-millisecond value would be emitted in a
+	// form Flux rejects, and text that is no duration at all as 0s. Checked
+	// only on this native path (delivery: template emits no interval), and
+	// before both buildHelmRelease calls, which have no other caller.
+	if err := validateFluxInterval("helmchart", effectiveInterval(c.Interval)); err != nil {
+		return nil, err
+	}
+
 	var objects []*client.Object
 	interval := parseDuration(effectiveInterval(c.Interval))
 
@@ -628,7 +638,10 @@ func parseDuration(s string) metav1.Duration {
 // validateFluxInterval refuses an authored interval the Flux CRDs this
 // component emits would reject at apply time. The interval reaches them through
 // parseDuration, as a metav1.Duration that serializes as Duration.String(), so
-// the emitted form is checked as well as the authored one.
+// the emitted form is checked as well as the authored one; that also refuses a
+// positive value too small for the duration type, which would be emitted as 0s.
+// Called at parse time (ToApplicationConfig) and again from Generate, which is
+// what covers a config built directly rather than parsed.
 func validateFluxInterval(component, interval string) error {
 	err := fluxduration.ValidateEmitted(interval)
 	if err == nil {

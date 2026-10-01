@@ -23,6 +23,10 @@ units.
   that sets a `metav1.Duration` serializes `Duration.String()`, not the authored
   text, and that switches to `µs` or `ns` below one millisecond: `0.5ms` matches
   the pattern but is written as `500µs`, which Flux rejects. Such a value returns a
-  `*ResolutionError` carrying the emitted form. Used by the `oci` and `helmchart`
-  components for `interval`. In practice the accepted values are `0s` and anything
-  of at least `1ms`.
+  `*ResolutionError` carrying the emitted form. So does a positive value below the
+  nanosecond resolution of `time.Duration`, which `time.ParseDuration` truncates to
+  zero without an error: `0.0000000001ms` would be written as `0s`. A value authored
+  as zero (`0s`, `0ms`, `0h0m`, `0.000s`) is accepted. Used by the `oci` and
+  `helmchart` components for `interval`, at parse time and again when the config
+  generates its objects. In practice the accepted values are `0s` and anything of at
+  least `1ms`.

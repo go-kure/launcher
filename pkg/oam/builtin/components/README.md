@@ -1958,9 +1958,13 @@ not part of either change.
   which then failed at apply time; both are build errors now. The value is emitted as a
   `metav1.Duration`, which serializes `Duration.String()` rather than the authored text, so
   that form is checked too: `0.5ms` matches the pattern but is written as `500µs`, and is
-  refused as below Flux's millisecond resolution. In practice any value of `0s` or at least
-  `1ms` is accepted. The check lives in the internal `pkg/oam/internal/fluxduration`, shared
-  with the `reconciliation` policy.
+  refused as below Flux's millisecond resolution. A positive value too small for the duration
+  type (`0.0000000001ms`) is refused the same way rather than emitted as `0s`. In practice any
+  value of `0s` or at least `1ms` is accepted. The check also runs in `Generate`, so a
+  `HelmchartConfig` or `OCIConfig` built directly rather than parsed is refused as well, instead
+  of emitting an `interval` Flux rejects or, for text that is no duration, `0s`. The check
+  lives in the internal `pkg/oam/internal/fluxduration`, shared with the `reconciliation`
+  policy.
 
   **`delivery: template` is the `helmtemplate` component's code path.** Its source checks,
   render, hook-group ordering and layout partition are one implementation shared with the
