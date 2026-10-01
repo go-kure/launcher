@@ -58,15 +58,20 @@ func (r rendersReservedComponentRule) LowerComponent(comp *Component, lctx Lower
 }
 
 // rendersReservedDocRule is the same at document position: it constructs a new
-// component and writes the reserved property from the capability rendering.
-type rendersReservedDocRule struct{}
+// component and writes the reserved property from the capability rendering. next
+// is the kind of the document it emits; empty means the terminal kind.
+type rendersReservedDocRule struct{ next string }
 
 func (rendersReservedDocRule) Kind() string { return "Rendering" }
 
-func (rendersReservedDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
+func (r rendersReservedDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
+	kind := r.next
+	if kind == "" {
+		kind = terminalDocumentKind
+	}
 	return LoweringResult{Documents: []Application{{
 		APIVersion: SupportedAPIVersion,
-		Kind:       terminalDocumentKind,
+		Kind:       kind,
 		Metadata:   Metadata{Name: doc.Metadata.Name, Namespace: doc.Metadata.Namespace},
 		Spec: ApplicationSpec{Components: []Component{{
 			Name:       "web",
@@ -150,6 +155,22 @@ func TestTransform_DocumentRuleMayWriteReservedProperty(t *testing.T) {
 	}
 }
 
+// TestTransform_DocumentRuleForwardingSynthesizedStaysSynthesized: forwarding keeps
+// the classification a component arrived with. A component the first document rule
+// synthesized, then forwarded unchanged by a second document rule, is still
+// synthesized, so neither the check before the second rule nor createApplications
+// treats its rule-written reserved value as authored.
+func TestTransform_DocumentRuleForwardingSynthesizedStaysSynthesized(t *testing.T) {
+	tr := reservedSinkTransformer()
+	tr.RegisterDocumentLowering(rendersReservedDocRule{next: "Forwarding"})
+	tr.RegisterDocumentLowering(forwardingComponentsDocRule{kind: "Forwarding"})
+
+	app := &Application{APIVersion: SupportedAPIVersion, Kind: "Rendering", Metadata: Metadata{Name: "myapp", Namespace: "test"}}
+	if _, err := tr.Transform(app, netpolCapability()); err != nil {
+		t.Fatalf("a synthesized component forwarded by a later document rule must stay synthesized, got: %v", err)
+	}
+}
+
 // TestTransform_TraitRuleMayWriteReservedComponentProperty: a component a trait
 // rule emitted is synthesized too.
 func TestTransform_TraitRuleMayWriteReservedComponentProperty(t *testing.T) {
@@ -189,8 +210,9 @@ func TestTransform_AuthoredReservedComponentPropertyStillRejected(t *testing.T) 
 	expectPlatformReserved(t, err)
 }
 
-// TestTransform_DocumentRuleForwardingAuthoredReservedIsRejected: a component a
-// document rule forwards (the same element, isForwardedComponent) stays authored.
+// TestTransform_DocumentRuleForwardingAuthoredReservedIsRejected: an authored
+// component a document rule forwards (the same element, isForwardedComponent) stays
+// authored.
 func TestTransform_DocumentRuleForwardingAuthoredReservedIsRejected(t *testing.T) {
 	tr := reservedSinkTransformer()
 	tr.RegisterDocumentLowering(forwardingComponentsDocRule{kind: "Wrapper"})

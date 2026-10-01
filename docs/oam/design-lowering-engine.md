@@ -162,7 +162,8 @@ and `applyTraits` (`transform.go`, inside the `!trait.sealed` guard) — both af
 component handler's `ToApplicationConfig` (`createApplications`, `transform.go`) —
 though no component schema declares a reserved field today, so that call site is
 currently a no-op in practice. On the component side, a component a lowering rule
-synthesized (`Component.synthesized`, the counterpart of `Trait.sealed`) is exempt, and
+synthesized (`Component.synthesized`, the counterpart of `Trait.sealed`) is exempt — a
+document rule that forwards a component leaves that classification as it found it — and
 an authored component is checked before any rule can rewrite it: before a
 `ComponentLoweringRule` claims it (`lowerDocumentBody`) and before a
 `DocumentLoweringRule` runs (`enforceAuthoredComponentReservations`). The proof: `webservice-expose-ingress/app.yaml` loses its

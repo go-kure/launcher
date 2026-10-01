@@ -52,7 +52,10 @@ type Component struct {
 	// AUTHORED values (enforcePlatformReserved) does not apply to it — the component
 	// counterpart of Trait.sealed. The engine sets it at each emission site
 	// (lowering.go); a rule in another package cannot, and an authored component is
-	// never synthesized. What a user wrote is still checked before any rule can
+	// never synthesized. A component a document rule forwards (pointer-identical,
+	// isForwardedComponent) keeps the value it arrived with, so a component an
+	// earlier rule synthesized stays synthesized through a chain of document rules.
+	// What a user wrote is still checked before any rule can
 	// rewrite it: before a ComponentLoweringRule (lowerDocumentBody) and before a
 	// DocumentLoweringRule (enforceAuthoredComponentReservations).
 	synthesized bool

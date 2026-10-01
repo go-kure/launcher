@@ -402,7 +402,10 @@ A component a rule emits is synthesized in the same sense: its properties are th
 rule's output, so a `PlatformReserved` value the rule rendered from
 `LoweringContext.Capabilities` is accepted rather than rejected as authored. A
 component a `DocumentLoweringRule` forwards — the same element of
-`doc.Spec.Components`, not a copy — stays authored. What a user wrote is checked
+`doc.Spec.Components`, not a copy — keeps the classification it arrived with:
+forwarding neither makes it synthesized nor resets it to authored. An authored
+component stays authored, and one an earlier rule synthesized, then handed on
+through a chain of document rules, stays synthesized. What a user wrote is checked
 before any rule can rewrite it: before a `ComponentLoweringRule` claims the
 component, and for every component of a document before its `DocumentLoweringRule`
 runs, so rebuilding a component by value does not launder an authored reserved
