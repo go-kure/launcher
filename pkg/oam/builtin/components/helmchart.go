@@ -715,17 +715,25 @@ func validateFluxInterval(component, interval string) error {
 // runs on the authored text, read from the property map, because the decoded
 // duration has lost it: a positive value below a nanosecond decodes to zero,
 // which Generate reads as unset and replaces with the default. Called after the
-// strict decode, so a present interval is a string; keys match
+// strict decode, so a present interval is JSON text; keys match
 // case-insensitively there, as in encoding/json, so every spelling is checked.
+// The text is read through the same JSON encoding the decode used, so a value
+// Go code built with a named string type is checked like a plain string.
 func checkAuthoredFluxInterval(component string, props map[string]any) error {
 	for _, k := range slices.Sorted(maps.Keys(props)) {
 		if !strings.EqualFold(k, "interval") {
 			continue
 		}
-		if s, ok := props[k].(string); ok && s != "" {
-			if err := validateFluxInterval(component, s); err != nil {
-				return err
-			}
+		raw, err := json.Marshal(props[k])
+		if err != nil {
+			continue
+		}
+		var s string
+		if json.Unmarshal(raw, &s) != nil || s == "" {
+			continue
+		}
+		if err := validateFluxInterval(component, s); err != nil {
+			return err
 		}
 	}
 	return nil
