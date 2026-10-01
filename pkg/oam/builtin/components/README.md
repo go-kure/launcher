@@ -1914,6 +1914,12 @@ not part of either change.
     when authored: the rule has no registration-time default.
   - An inline `url` also emits the source: a `helmrepository` with only the URL
     for `http(s)://`, or an `ocirepository` with `ref.tag: <version>` for `oci://`.
+    The `ocirepository` also selects the Helm chart content layer
+    (`application/vnd.cncf.helm.chart.content.v1.tar+gzip`) with
+    `operation: copy`. Flux therefore passes the chart archive through unchanged.
+    By default it would extract and re-archive the chart, dropping files that its
+    ignore rules exclude (`*.zip`, `*.png`, ...) even when the chart reads them
+    with `.Files.Get`. `helmchart`'s generated OCIRepository has no layer selector.
     It is named `<document>-source-<digest>`, where the 10-hex digest is taken
     over the content identity: `helm:<url>`, or `oci:<url>:<version>`.
     Components of one document with the same identity share one source; the

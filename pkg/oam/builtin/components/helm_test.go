@@ -147,7 +147,13 @@ func TestHelmRule_FluxOCIRepository(t *testing.T) {
 	if source.Name != wantName {
 		t.Errorf("source name = %q, want %q", source.Name, wantName)
 	}
-	wantSource := map[string]any{"url": "oci://ghcr.io/example/charts/podinfo", "ref": map[string]any{"tag": "6.5.0"}}
+	wantSource := map[string]any{
+		"url": "oci://ghcr.io/example/charts/podinfo",
+		"ref": map[string]any{"tag": "6.5.0"},
+		// The chart layer is copied, not extracted and re-archived without the
+		// files Flux's ignore rules drop.
+		"layerSelector": map[string]any{"mediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip", "operation": "copy"},
+	}
 	if !reflect.DeepEqual(source.Properties, wantSource) {
 		t.Errorf("source properties = %v, want %v", source.Properties, wantSource)
 	}
