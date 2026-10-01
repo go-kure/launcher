@@ -1673,18 +1673,18 @@ func TestDeliveryRefusesOverlongFileName(t *testing.T) {
 		t.Fatal(err)
 	}
 	longest := maxFileNameBytes - len(fluxFileName(""))
-	build := func(t *testing.T, app []byte, name, out string) error {
+	build := func(t *testing.T, app []byte, name, repository, out string) error {
 		t.Helper()
 		appPath := writeTempFile(t, t.TempDir(), "app.yaml", strings.Replace(string(app), "name: shop", "name: "+name, 1))
 		_, err := runKurel(t, "build", appPath, "--profile", filepath.Join(deliveryTestdata, "cluster.yaml"),
-			"-o", out, "--oci-repository", testOCIRepository)
+			"-o", out, "--oci-repository", repository)
 		return err
 	}
 
 	t.Run("longest accepted", func(t *testing.T) {
 		out := t.TempDir()
 		name := dnsName(longest)
-		if err := build(t, data, name, out); err != nil {
+		if err := build(t, data, name, testOCIRepository, out); err != nil {
 			t.Fatalf("refused: %v", err)
 		}
 		if _, err := os.Stat(filepath.Join(out, fluxFileName(name))); err != nil {
@@ -1692,16 +1692,19 @@ func TestDeliveryRefusesOverlongFileName(t *testing.T) {
 		}
 	})
 	for _, tt := range []struct {
-		name, want string
-		app        []byte
-		length     int
+		name, want, repository string
+		app                    []byte
+		length                 int
 	}{
-		{"Flux objects file name", "shorten the application name to at most 245 characters", data, longest + 1},
-		{"unit names", "more than 255", hierarchical, longest},
+		{"Flux objects file name", "shorten the application name to at most 245 characters", testOCIRepository, data, longest + 1},
+		{"unit names", "more than 255", testOCIRepository, hierarchical, longest},
+		// Without a path prefix the url does not bound the unit name: the
+		// <app>-services unit is 254 characters, past metadata.name's 253.
+		{"unit name past 253 characters", "is not a DNS-1123 subdomain", "oci://registry.example.com", hierarchical, longest},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			out := filepath.Join(t.TempDir(), "out")
-			err := build(t, tt.app, dnsName(tt.length), out)
+			err := build(t, tt.app, dnsName(tt.length), tt.repository, out)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error %v, want one containing %q", err, tt.want)
 			}
@@ -1712,25 +1715,27 @@ func TestDeliveryRefusesOverlongFileName(t *testing.T) {
 	}
 }
 
-// TestCheckFileNames checks the file name limit on each name the delivery
-// output derives: <app>.flux.yaml and each artifact directory. write refuses
-// an over-long one before creating anything.
-func TestCheckFileNames(t *testing.T) {
+// TestCheckNames checks the limits on each name the delivery output derives:
+// the file name limit on <app>.flux.yaml, and the DNS-1123 subdomain rule on
+// each unit name, which is also the OCIRepository's and Kustomization's
+// metadata.name. write refuses a bad one before creating anything.
+func TestCheckNames(t *testing.T) {
 	tests := []struct {
 		name     string
 		app      string
 		artifact string
 		ok       bool
 	}{
-		{"both at the limit", strings.Repeat("a", maxFileNameBytes-len(fluxFileName(""))), strings.Repeat("a", maxFileNameBytes), true},
+		{"both at the limit", strings.Repeat("a", maxFileNameBytes-len(fluxFileName(""))), dnsName(253), true},
 		{"Flux objects file name over", strings.Repeat("a", maxFileNameBytes-len(fluxFileName(""))+1), "shop", false},
-		{"artifact directory name over", "shop", strings.Repeat("a", maxFileNameBytes+1), false},
+		{"unit name over 253 characters", "shop", dnsName(254), false},
+		{"unit name not a subdomain", "shop", "Shop", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := &deliveryOutput{artifacts: []deliveryArtifact{{name: tt.artifact}}}
-			if err := d.checkFileNames(tt.app); (err == nil) != tt.ok {
-				t.Fatalf("checkFileNames: %v, want ok=%v", err, tt.ok)
+			if err := d.checkNames(tt.app); (err == nil) != tt.ok {
+				t.Fatalf("checkNames: %v, want ok=%v", err, tt.ok)
 			}
 			if tt.ok {
 				return
@@ -1936,6 +1941,8 @@ func TestDeliveryFlagsAccepted(t *testing.T) {
 		{"uppercase host", "oci://Registry.Example.com/apps", "", false},
 		{"bracketed IPv6", "oci://[::1]/apps", "", false},
 		{"bracketed IPv6 and port", "oci://[::1]:5000/apps", "", false},
+		{"lowest port", "oci://registry.example.com:1/apps", "", false},
+		{"highest port", "oci://registry.example.com:65535/apps", "", false},
 		{"component separators", "oci://registry.example.com/a.b/c_d/e__f/g--h", "", false},
 		{"semver tag", testOCIRepository, "v1.0.0", true},
 		{"underscore-led tag", testOCIRepository, "_latest", true},
@@ -2017,6 +2024,9 @@ func TestDeliveryFlagRefusals(t *testing.T) {
 		{"port without hostname or path", []string{"-o", "OUT", "--oci-repository", "oci://:5000"}, "must be an oci:// URL"},
 		{"colon only", []string{"-o", "OUT", "--oci-repository", "oci://:/apps"}, "must be an oci:// URL"},
 		{"empty port", []string{"-o", "OUT", "--oci-repository", "oci://registry.example.com:/apps"}, "must be an oci:// URL"},
+		{"port zero", []string{"-o", "OUT", "--oci-repository", "oci://registry.example.com:0/apps"}, "not in the range 1-65535"},
+		{"port past the TCP range", []string{"-o", "OUT", "--oci-repository", "oci://registry.example.com:70000/apps"}, "not in the range 1-65535"},
+		{"IPv6 port past the TCP range", []string{"-o", "OUT", "--oci-repository", "oci://[::1]:65536"}, "not in the range 1-65535"},
 		{"unbracketed IPv6", []string{"-o", "OUT", "--oci-repository", "oci://::1/apps"}, "must be an oci:// URL"},
 		{"empty IPv6 brackets", []string{"-o", "OUT", "--oci-repository", "oci://[]:5000/apps"}, "must be an oci:// URL"},
 		{"empty host label", []string{"-o", "OUT", "--oci-repository", "oci://.example.com/apps"}, "must be an oci:// URL"},

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/kustomize/kyaml/resid"
 	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
@@ -156,6 +158,13 @@ func checkOCIRepository(ref string, requirePath bool) error {
 	}
 	if !ociRegistryPattern.MatchString(host) {
 		return errors.Errorf("registry %q must be a hostname, IPv4 address or bracketed IPv6 address, with an optional numeric port", host)
+	}
+	// The pattern takes any digits as a port; a port past the TCP range would
+	// only fail when source-controller connects.
+	if i := strings.LastIndex(host, ":"); i >= 0 && !strings.HasSuffix(host, "]") {
+		if port, err := strconv.Atoi(host[i+1:]); err != nil || port < 1 || port > 65535 {
+			return errors.Errorf("registry %q: port %q is not in the range 1-65535", host, host[i+1:])
+		}
 	}
 	if _, err := name.NewRegistry(host, name.StrictValidation); err != nil {
 		return errors.Wrapf(err, "registry %q", host)
@@ -819,22 +828,25 @@ func objectContent(o client.Object) (map[string]any, error) {
 // ENAMETOOLONG.
 const maxFileNameBytes = 255
 
-// checkFileNames refuses, before anything is written, an output whose file
-// or directory names the filesystem would refuse partway through the write:
-// <appName>.flux.yaml, since a DNS-1123 subdomain may be 253 characters, and
-// each artifact directory, named by its unit (which generateDelivery's
-// per-bundle url check already bounds, as the unit name is part of the url's
-// path). The remaining names, manifests.yaml and kustomization.yaml, are
+// checkNames refuses, before anything is written, an output with a name the
+// filesystem or the API server would refuse: <appName>.flux.yaml past the
+// file name limit, since a DNS-1123 subdomain may be 253 characters, and a
+// unit name that is not a DNS-1123 subdomain. A unit name is both an artifact
+// directory and the metadata.name of the unit's OCIRepository and
+// Kustomization; it joins authored names (<app>-<tier>), each a subdomain on
+// its own, so it can pass 253 characters even where the url check does not
+// bound it (a prefix without a path). A subdomain also fits the file name
+// limit. The remaining names, manifests.yaml and kustomization.yaml, are
 // fixed.
-func (d *deliveryOutput) checkFileNames(appName string) error {
+func (d *deliveryOutput) checkNames(appName string) error {
 	if n := len(fluxFileName(appName)); n > maxFileNameBytes {
 		return errors.Errorf("the Flux objects file name %q is %d bytes, more than the %d-byte file name limit: shorten the application name to at most %d characters",
 			fluxFileName(appName), n, maxFileNameBytes, maxFileNameBytes-len(fluxFileName("")))
 	}
 	for _, a := range d.artifacts {
-		if n := len(a.name); n > maxFileNameBytes {
-			return errors.Errorf("the artifact directory name %q is %d bytes, more than the %d-byte file name limit: shorten the application or component name",
-				a.name, n, maxFileNameBytes)
+		if errs := validation.IsDNS1123Subdomain(a.name); len(errs) > 0 {
+			return errors.Errorf("unit name %q (%d characters), the name of its artifact directory, OCIRepository and Kustomization, is not a DNS-1123 subdomain: %s; shorten the application or component name",
+				a.name, len(a.name), strings.Join(errs, "; "))
 		}
 	}
 	return nil
@@ -843,11 +855,12 @@ func (d *deliveryOutput) checkFileNames(appName string) error {
 // fluxFileName is the name of the file the delivery objects are written to.
 func fluxFileName(appName string) string { return appName + ".flux.yaml" }
 
-// write writes the delivery output into dir. Unit and application names are
-// DNS-1123 subdomains (oam validation), so they are safe path segments, and
-// checkFileNames bounds their length before the first write.
+// write writes the delivery output into dir. The application name is a
+// DNS-1123 subdomain (oam validation) and checkNames refuses a unit name that
+// is not one before the first write, so both are safe path segments of a
+// length the filesystem accepts.
 func (d *deliveryOutput) write(dir, appName string) error {
-	if err := d.checkFileNames(appName); err != nil {
+	if err := d.checkNames(appName); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
