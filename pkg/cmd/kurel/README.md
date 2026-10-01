@@ -209,8 +209,10 @@ design's Launcher Layout (`docs/design.md` §11): one OCI artifact directory, on
 
 - `<dir>/<bundle>/` — one flat directory per bundle, named by the bundle
   (reconciliation unit) name: `<app>` for a single-tier application; `<app>` (the tier
-  umbrella) plus one `<app>-<tier>` per populated tier for a multi-tier one. A tier
-  umbrella's children are siblings of it, never nested inside it. Each holds `manifests.yaml`
+  umbrella) plus one `<app>-<tier>` per populated tier for a multi-tier one; one
+  `<app>-<component>` per component, with no umbrella, for an application with a
+  `dependency` policy, whatever its tiers. A tier umbrella's children are siblings of it,
+  never nested inside it. Each holds `manifests.yaml`
   (exactly that bundle's objects, encoded as the stdout build encodes them) and a
   `kustomization.yaml` listing it. The tier umbrella renders no objects: its directory
   holds only a `kustomization.yaml` with `resources: []`.
