@@ -871,9 +871,10 @@ Deliberately **not** accepted — each is rejected with an error naming the
 reason rather than silently ignored: `ephemeralContainers` (added to a running
 pod through its `ephemeralcontainers` subresource, never on a template),
 `priority` and `overhead` (the Priority and RuntimeClass admission
-controllers, on by default, reject pods that set them and derive them from
-`priorityClassName`/`runtimeClassName`), and `serviceAccount` (deprecated alias
-of `serviceAccountName`).
+controllers, on by default, derive them from
+`priorityClassName`/`runtimeClassName` and reject a pod whose authored value
+differs, so authoring one can at best repeat the derived value), and
+`serviceAccount` (deprecated alias of `serviceAccountName`).
 
 Every kind config implements `oam.ServiceAccountNamer` (`pkg/oam/handler.go`),
 returning the authored `serviceAccountName` or, when unset, the component name
@@ -2769,8 +2770,9 @@ not part of either change.
   template declaring `ephemeralContainers`, `activeDeadlineSeconds`, `priority`
   or `overhead` is refused, as the workload kinds refuse them: the operator
   copies the template into a Deployment, whose pod template cannot carry the
-  first two and whose pods the default Priority and RuntimeClass admission
-  controllers refuse with the last two. The instance count is deliberately not policed:
+  first two and whose pods get the last two from the default Priority and
+  RuntimeClass admission controllers, which refuse an authored value that
+  differs from theirs. The instance count is deliberately not policed:
   `postgresql` applies no policy to its pooler, so a maximum here would refuse,
   once `postgresql` lowers onto this kind, a document that builds today.
   Pod-level errors name the template's own fields, as in `template.spec:

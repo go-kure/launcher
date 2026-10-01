@@ -163,8 +163,9 @@ template, and an authored `pgbouncer.image` gets the registry allowlist. A
 template declaring `ephemeralContainers`, `activeDeadlineSeconds`, `priority`
 or `overhead` is refused at parse, as the workload kinds refuse them: the
 operator copies the template into a Deployment, whose pod template cannot
-carry the first two and whose pods the default Priority and RuntimeClass
-admission controllers refuse with the last two. The instance count is not
+carry the first two and whose pods get the last two from the default Priority
+and RuntimeClass admission controllers, which refuse an authored value that
+differs from theirs. The instance count is not
 policed, neither by a replica default nor by a maximum: `postgresql` applies no
 policy to its pooler today, so a maximum on the kind would refuse, once
 `postgresql` lowers onto it, a document that builds today, and break the
