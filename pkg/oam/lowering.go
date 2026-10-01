@@ -1092,6 +1092,18 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 			result.Documents[i].origin = &origin
 			emitted[i] = &result.Documents[i]
 			names[i] = result.Documents[i].Metadata.Name
+			// A document rule's output is authored (the component loop below), except
+			// a component it forwarded that was already synthesized. Check the rest for
+			// reserved keys before validateEmittedDocument drops an explicit null.
+			for j := range result.Documents[i].Spec.Components {
+				comp := &result.Documents[i].Spec.Components[j]
+				if comp.synthesized && isForwardedComponent(comp, originalComponents) {
+					continue
+				}
+				if err := t.enforceEmittedComponentReservations(comp); err != nil {
+					return nil, false, nil, errors.Wrapf(err, "%s", origin)
+				}
+			}
 			if err := t.validateEmittedDocument(emitted[i]); err != nil {
 				return nil, false, nil, errors.Wrapf(err, "%s", origin)
 			}
@@ -1261,6 +1273,11 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				result.Components[j].origin = &compOrigin
 				result.Components[j].synthesized = inputChecked
 				names[j] = result.Components[j].Name
+				if !inputChecked {
+					if err := t.enforceEmittedComponentReservations(&result.Components[j]); err != nil {
+						return false, steps, errors.Wrapf(err, "%s", compOrigin)
+					}
+				}
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
@@ -1415,6 +1432,11 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			for j := range result.Components {
 				result.Components[j].origin = &traitOrigin
 				result.Components[j].synthesized = inputChecked
+				if !inputChecked {
+					if err := t.enforceEmittedComponentReservations(&result.Components[j]); err != nil {
+						return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+					}
+				}
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
@@ -1674,17 +1696,7 @@ func (t *Transformer) enforceAuthoredComponentReservations(doc *Application, doc
 		if comp.synthesized {
 			continue
 		}
-		var provider any
-		if rule, ok := t.componentLoweringRules[comp.Type]; ok {
-			provider = rule
-		} else if h := t.findComponentHandler(comp.Type); h != nil {
-			provider = h
-		}
-		p, ok := provider.(PropertySchemaProvider)
-		if !ok {
-			continue
-		}
-		if err := enforcePlatformReserved(p.PropertySchema(), comp.Properties, "properties"); err != nil {
+		if err := t.enforceComponentReservations(comp, "properties"); err != nil {
 			compOrigin, stamped := comp.Origin()
 			if !stamped {
 				compOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Namespace: docOrigin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: i}
@@ -1693,6 +1705,36 @@ func (t *Transformer) enforceAuthoredComponentReservations(doc *Application, doc
 		}
 	}
 	return nil
+}
+
+// enforceComponentReservations runs the D3 check (enforcePlatformReserved) on one
+// component, against the schema it would later be checked against: its
+// ComponentLoweringRule's when one is registered, else its dispatchable handler's. A
+// type with no schema reserves nothing, and an unknown type is the validator's
+// business. The caller decides whether the component is exempt (synthesized).
+func (t *Transformer) enforceComponentReservations(comp *Component, path string) error {
+	var provider any
+	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
+		provider = rule
+	} else if h := t.findComponentHandler(comp.Type); h != nil {
+		provider = h
+	}
+	p, ok := provider.(PropertySchemaProvider)
+	if !ok {
+		return nil
+	}
+	return enforcePlatformReserved(p.PropertySchema(), comp.Properties, path)
+}
+
+// enforceEmittedComponentReservations is the D3 check on a component a lowering rule
+// just emitted and did not synthesize. It runs before validateEmittedComponent or
+// validateEmittedDocument, because emission validation normalizes an explicit null to
+// absence: checked afterwards, an authored reserved key written as null that the
+// rule copied through would no longer be there to refuse (go-kure/launcher#609). A
+// non-null value is refused here too, earlier than the downstream check that would
+// otherwise catch it.
+func (t *Transformer) enforceEmittedComponentReservations(comp *Component) error {
+	return t.enforceComponentReservations(comp, fmt.Sprintf("emitted component %q (type %q): properties", comp.Name, comp.Type))
 }
 
 // isForwardedComponent is isForwardedTrait's component-position counterpart, used
