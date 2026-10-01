@@ -22,10 +22,7 @@ import (
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 
-	kio "github.com/go-kure/kure/pkg/io"
-
 	"github.com/go-kure/launcher/pkg/errors"
-	"github.com/go-kure/launcher/pkg/oam"
 )
 
 const (
@@ -39,16 +36,12 @@ const (
 type deliveryScenario struct {
 	name string
 	tag  string
-	// viaPolicy builds through buildWithDependencyPolicy instead of the CLI:
-	// kurel registers no policy handler, so a dependency-policy app (the
-	// per-component-bundle cluster shape) cannot be built through the command.
-	viaPolicy bool
 }
 
 var deliveryScenarios = []deliveryScenario{
-	{name: "flat"},                                       // one bundle, no --oci-tag
-	{name: "hierarchical", tag: "v1.0.0"},                // umbrella + one child per tier
-	{name: "dependency", tag: "v1.0.0", viaPolicy: true}, // per-component bundles with dependsOn
+	{name: "flat"},                        // one bundle, no --oci-tag
+	{name: "hierarchical", tag: "v1.0.0"}, // umbrella + one child per tier
+	{name: "dependency", tag: "v1.0.0"},   // per-component bundles with dependsOn, via the built-in dependency policy
 }
 
 // runKurel runs the kurel command with args and returns its stdout and the
@@ -71,9 +64,6 @@ func buildScenario(t *testing.T, s deliveryScenario, outDir string) []byte {
 	dir := filepath.Join(deliveryTestdata, s.name)
 	appPath := filepath.Join(dir, "app.yaml")
 	profilePath := filepath.Join(deliveryTestdata, "cluster.yaml")
-	if s.viaPolicy {
-		return buildWithDependencyPolicy(t, appPath, profilePath, outDir, deliveryOptions{repository: testOCIRepository, tag: s.tag})
-	}
 	args := []string{"build", appPath, "--profile", profilePath, "-o", outDir, "--oci-repository", testOCIRepository}
 	if s.tag != "" {
 		args = append(args, "--oci-tag", s.tag)
@@ -86,82 +76,6 @@ func buildScenario(t *testing.T, s deliveryScenario, outDir string) []byte {
 		t.Fatalf("stdout build of %s: %v", s.name, err)
 	}
 	return []byte(stdout)
-}
-
-// testDependencyPolicy is a "dependency" policy handler reading
-// properties.dependsOn: {component: [component, ...]}.
-type testDependencyPolicy struct{}
-
-func (testDependencyPolicy) CanHandle(policyType string) bool { return policyType == "dependency" }
-
-func (testDependencyPolicy) Apply(p *oam.ApplicationPolicy, _ []string, r *oam.PolicyResult) error {
-	deps, _ := p.Properties["dependsOn"].(map[string]any)
-	for from, v := range deps {
-		list, _ := v.([]any)
-		for _, to := range list {
-			name, _ := to.(string)
-			r.Dependencies[from] = append(r.Dependencies[from], name)
-		}
-	}
-	return nil
-}
-
-// buildWithDependencyPolicy is runBuild's pipeline (parse, validate, transform,
-// augmenter guard, collect, delivery, -o write) on a transformer that also has
-// a "dependency" policy handler. It returns the stdout build's bytes.
-func buildWithDependencyPolicy(t *testing.T, appPath, profilePath, outDir string, delivery deliveryOptions) []byte {
-	t.Helper()
-	appData, err := os.ReadFile(appPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tr := newBuiltinTransformer()
-	tr.RegisterPolicy("dependency", testDependencyPolicy{})
-	app, err := oam.ParseWithExtraTypes(appData, nil, tr.LowerableTypes())
-	if err != nil {
-		t.Fatalf("parsing %s: %v", appPath, err)
-	}
-	if err := tr.ValidateAuthoredProperties(app); err != nil {
-		t.Fatalf("validating %s: %v", appPath, err)
-	}
-	profileData, err := os.ReadFile(profilePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	profile, err := oam.ParseClusterProfile(profileData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	evaluated, err := tr.EvaluateProfile(profile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cluster, err := tr.Transform(app, oam.TransformContext{
-		ClusterID:    "local",
-		Capabilities: evaluated.Spec.Capabilities,
-		Domain:       kurelDomain,
-	})
-	if err != nil {
-		t.Fatalf("transforming %s: %v", appPath, err)
-	}
-	if err := rejectLayoutAugmenters(cluster.Node); err != nil {
-		t.Fatal(err)
-	}
-	objects, err := collectFromNode(cluster.Node)
-	if err != nil {
-		t.Fatal(err)
-	}
-	yamlBytes, err := kio.EncodeObjectsToYAML(objects)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := writeDelivery(outDir, app.Metadata.Name, cluster, delivery); err != nil {
-		t.Fatalf("writeDelivery: %v", err)
-	}
-	if err := writeOutputDir(outDir, app.Metadata.Name, yamlBytes); err != nil {
-		t.Fatal(err)
-	}
-	return yamlBytes
 }
 
 // readTree returns every regular file under root, keyed by slash path.

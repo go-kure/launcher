@@ -24,5 +24,6 @@ spec:
     - name: order
       type: dependency
       properties:
-        dependsOn:
-          api: [cache]
+        rules:
+          - component: api
+            dependsOn: [cache]
