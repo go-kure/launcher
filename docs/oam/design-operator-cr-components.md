@@ -58,9 +58,11 @@ pointer and `containers` has no `omitempty`, so a template that lists no
 containers would carry `containers: null`, which the API server prunes before
 checking the CRD's required list. `cnpg-pooler` writes `containers: []`, which
 the operator reads as it reads an omitted spec, adding its `pgbouncer`
-container. A second derived test pins these lists the same way as the
-omitted-zero list below: the CRD's scalar defaults crossed with the Go type's
-non-pointer fields without `omitempty`.
+container. A second derived test pins the scalar cases (`instances`, `ensure`)
+the same way as the omitted-zero list below: the CRD's scalar defaults crossed
+with the Go type's non-pointer fields without `omitempty`. The `containers`
+case is a list, outside that derivation, and is pinned by its own
+serialization test.
 
 A launcher opinion that depends on the post-policy object — `enablePDB` on only
 when there is more than one instance, for example — is not computed by the kind.
@@ -154,15 +156,20 @@ the workload kinds apply to their image, on an authored `imageName`.
 `cnpg-pooler` polices what the `Pooler` runs: its pod template gets the gates
 the workload kinds apply to their pod (host namespaces, hostPath volumes,
 privilege, host-process, capabilities, the registry allowlist on each authored
-container image and the cpu and memory maxima), and an authored
-`pgbouncer.image` gets the registry allowlist. The instance count is not
+container image and the cpu and memory maxima), plus the storage maximum on a
+generic ephemeral volume's claim, as `cnpg-cluster` caps its ephemeral volume
+template, and an authored `pgbouncer.image` gets the registry allowlist. The
+instance count is not
 policed, neither by a replica default nor by a maximum: `postgresql` applies no
 policy to its pooler today, so a maximum on the kind would refuse, once
 `postgresql` lowers onto it, a document that builds today, and break the
 identical-output promise below. `cnpg-objectstore` caps the cpu and memory of
 the plugin sidecar it adds to every instance pod
 (`instanceSidecarConfiguration.resources`). A `Database` runs nothing of its
-own, so `cnpg-database` applies no policy.
+own, so `cnpg-database` applies no policy. As `cnpg-cluster` does for its
+`resources`, both kinds run admission's request/limit and hugepages checks at
+generation on every resource block they emit for a pod or container, so a
+request above its limit is a build error rather than a refused pod.
 
 A policy default never overrides an authored value, including an authored value
 equal to what the default would be. The kind therefore records which fields were
