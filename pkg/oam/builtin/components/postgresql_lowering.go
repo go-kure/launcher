@@ -1,6 +1,7 @@
 package components
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -67,6 +68,7 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 	}
 
 	var dependents []string
+	poolerName := ""
 	if c.PoolerEnabled {
 		name, err := postgresqlChildName(lctx, comp.Name, "pooler", "pooler")
 		if err != nil {
@@ -78,25 +80,70 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 		}
 		out = append(out, oam.Component{Name: name, Type: "cnpg-pooler", Properties: props, Annotations: maps.Clone(comp.Annotations)})
 		dependents = append(dependents, name)
+		poolerName = name
 	}
 	for i, db := range c.Databases {
-		name, err := postgresqlChildName(lctx, comp.Name, db.Name, fmt.Sprintf("databases[%d] %q", i, db.Name))
-		if err != nil {
-			return oam.LoweringResult{}, err
+		var name string
+		if db.Name == "pooler" && poolerName != "" {
+			// A Database named like the Pooler is a different object of the
+			// same name, as postgresql emitted it: it joins the Pooler's
+			// same-name sibling group, which generates at the Pooler's position.
+			name = poolerName
+		} else {
+			if name, err = postgresqlChildName(lctx, comp.Name, db.Name, fmt.Sprintf("databases[%d] %q", i, db.Name)); err != nil {
+				return oam.LoweringResult{}, err
+			}
+			dependents = append(dependents, name)
 		}
 		props, err := specProperties(c.databaseSpec(comp.Name, db))
 		if err != nil {
 			return oam.LoweringResult{}, err
 		}
 		out = append(out, oam.Component{Name: name, Type: "cnpg-database", Properties: props, Annotations: maps.Clone(comp.Annotations)})
-		dependents = append(dependents, name)
 	}
 
 	policies, err := postgresqlDependencyPolicy(lctx, comp.Name, dependents)
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
+	forwardMemberTraits(out, comp.Traits, len(policies) > 0)
 	return oam.LoweringResult{Components: out, Policies: policies}, nil
+}
+
+// postgresqlObjectTraits are the authored trait types that decorate every
+// object the component generates, and postgresqlBundleTraits those that act on
+// the component's Flux Kustomization. Each applied to every object or to the
+// one bundle of a postgresql component; the rule keeps that by forwarding them
+// to the members it emits beside the Cluster.
+var (
+	postgresqlObjectTraits = map[string]bool{"prune-protection": true, "force-replace": true}
+	postgresqlBundleTraits = map[string]bool{"fluxcd-patches": true, "fluxcd-postbuild": true}
+)
+
+// forwardMemberTraits gives each component after the Cluster (out[0]) the
+// authored traits that covered its objects when postgresql generated them
+// itself: the object-decorating ones always, since each member's traits apply
+// to its own objects only; the bundle ones only when split is set (the rule
+// emitted a dependency policy, so the transformer lays out one bundle per
+// component) and only to the first member of each name, since a later
+// same-name sibling shares that member's bundle. Without split every
+// component of the tier shares the Cluster's bundle, which already carries
+// them.
+//
+// Each is a by-value copy of the authored element with the same properties
+// map, which the engine recognises as forwarded rather than built by the rule
+// (oam's isForwardedTrait): it keeps its authored classification and checks.
+func forwardMemberTraits(out []oam.Component, authored []oam.Trait, split bool) {
+	seen := map[string]bool{out[0].Name: true}
+	for i := 1; i < len(out); i++ {
+		ownBundle := split && !seen[out[i].Name]
+		seen[out[i].Name] = true
+		for _, t := range authored {
+			if postgresqlObjectTraits[t.Type] || (ownBundle && postgresqlBundleTraits[t.Type]) {
+				out[i].Traits = append(out[i].Traits, t)
+			}
+		}
+	}
 }
 
 // postgresqlChildName allocates the name of a component the rule emits beside
@@ -138,14 +185,28 @@ func postgresqlDependencyPolicy(lctx oam.LoweringContext, cluster string, depend
 	if len(dependents) == 0 || !documentOrdersComponents(lctx.Document) {
 		return nil, nil
 	}
-	name, err := lctx.Namer.Name(cluster, "dependencies", lctx.Origin)
-	if err != nil {
-		return nil, err
+	// The policy's name is an implementation detail no author refers to, so it
+	// takes the first of <cluster>-dependencies, <cluster>-dependencies-1, …
+	// that is free, rather than refusing a document that already uses one: a
+	// database named "dependencies" generates the first, and so may an
+	// authored component or policy.
+	used := map[string]bool{}
+	for _, d := range dependents {
+		used[d] = true
+	}
+	for _, other := range lctx.Document.Spec.Components {
+		used[other.Name] = true
 	}
 	for _, p := range lctx.Document.Spec.Policies {
-		if p.Name == name {
-			return nil, errors.Errorf("generates dependency policy %q, which is already the name of policy %q (type %q) in the document; rename the policy", name, p.Name, p.Type)
-		}
+		used[p.Name] = true
+	}
+	suffix := "dependencies"
+	for i := 1; used[cluster+"-"+suffix]; i++ {
+		suffix = fmt.Sprintf("dependencies-%d", i)
+	}
+	name, err := lctx.Namer.Name(cluster, suffix, lctx.Origin)
+	if err != nil {
+		return nil, err
 	}
 	rules := make([]any, 0, len(dependents))
 	for _, d := range dependents {
@@ -174,16 +235,70 @@ func documentOrdersComponents(doc *oam.Application) bool {
 // specProperties encodes an upstream spec as the property map of the kind
 // component that decodes it again: the JSON encoding the kind's strict decode
 // reads (jsonProperties), so the component builds the spec it was given.
+// Numbers are decoded exactly: an integer stays an int64, so one above 2^53
+// (an int64 field such as wal.maxParallel) is not rounded through a float64
+// into a value the kind's decode then refuses as overflowing.
 func specProperties(spec any) (map[string]any, error) {
 	data, err := json.Marshal(spec)
 	if err != nil {
 		return nil, errors.Wrap(err, "internal: encode the emitted spec")
 	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	var props map[string]any
-	if err := json.Unmarshal(data, &props); err != nil {
+	if err := dec.Decode(&props); err != nil {
 		return nil, errors.Wrap(err, "internal: decode the emitted spec")
 	}
+	if err := exactNumbers(props); err != nil {
+		return nil, err
+	}
 	return props, nil
+}
+
+// exactNumbers replaces each json.Number in v, in place, by an int64 when it is
+// an integer and a float64 otherwise, the types the property validators read.
+func exactNumbers(v any) error {
+	convert := func(n json.Number) (any, error) {
+		if i, err := n.Int64(); err == nil {
+			return i, nil
+		}
+		f, err := n.Float64()
+		if err != nil {
+			return nil, errors.Wrapf(err, "internal: decode the emitted number %s", n)
+		}
+		return f, nil
+	}
+	switch t := v.(type) {
+	case map[string]any:
+		for k, e := range t {
+			if n, ok := e.(json.Number); ok {
+				c, err := convert(n)
+				if err != nil {
+					return err
+				}
+				t[k] = c
+				continue
+			}
+			if err := exactNumbers(e); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for i, e := range t {
+			if n, ok := e.(json.Number); ok {
+				c, err := convert(n)
+				if err != nil {
+					return err
+				}
+				t[i] = c
+				continue
+			}
+			if err := exactNumbers(e); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // clusterSpec is the Cluster spec postgresql wrote, without the values the

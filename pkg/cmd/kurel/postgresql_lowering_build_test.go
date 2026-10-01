@@ -1,9 +1,260 @@
 package kurel
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 )
+
+// postgresqlMembersApp is a postgresql component emitting every member kind:
+// the Cluster, the ObjectStore under its name, the Pooler, a Database and a
+// Database named like the Pooler, followed by traitsYAML (indented for the
+// component's traits list) and policiesYAML (for spec.policies, or empty).
+func postgresqlMembersApp(traitsYAML, policiesYAML string) string {
+	return `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  components:
+    - name: db
+      type: postgresql
+      properties:
+        pooler:
+          enabled: true
+        objectStore:
+          destinationPath: s3://bucket/db/
+        databases:
+          - name: orders
+            owner: app
+          - name: pooler
+            owner: app
+      traits:
+` + traitsYAML + `    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        port: 9090
+` + policiesYAML
+}
+
+const postgresqlOrderPolicy = `  policies:
+    - name: order
+      type: dependency
+      properties:
+        rules:
+          - component: api
+            dependsOn: [db]
+`
+
+// TestBuild_PostgresqlObjectTraitsReachEveryObject: prune-protection and
+// force-replace annotate every object postgresql generates, as they did when
+// postgresql generated them itself; the rule forwards them to each member.
+func TestBuild_PostgresqlObjectTraitsReachEveryObject(t *testing.T) {
+	for _, tc := range []struct{ trait, key, value string }{
+		{"prune-protection", "kustomize.toolkit.fluxcd.io/prune", "disabled"},
+		{"force-replace", "kustomize.toolkit.fluxcd.io/force", "enabled"},
+	} {
+		t.Run(tc.trait, func(t *testing.T) {
+			docs, out, err := buildDocs(t, postgresqlMembersApp("        - type: "+tc.trait+"\n", ""))
+			if err != nil {
+				t.Fatalf("build failed: %v\noutput: %s", err, out)
+			}
+			kinds := map[string]int{}
+			for _, d := range docs {
+				api, _ := d["apiVersion"].(string)
+				if !strings.HasPrefix(api, "postgresql.cnpg.io/") && !strings.HasPrefix(api, "barmancloud.cnpg.io/") {
+					continue
+				}
+				kind, _ := d["kind"].(string)
+				kinds[kind]++
+				if v, ok := docAnnotation(d, tc.key); !ok || v != tc.value {
+					t.Errorf("%s %v: %s = %q (present %v), want %q", kind, d["metadata"], tc.key, v, ok, tc.value)
+				}
+			}
+			want := map[string]int{"Cluster": 1, "ObjectStore": 1, "Pooler": 1, "Database": 2}
+			for k, n := range want {
+				if kinds[k] != n {
+					t.Errorf("generated %d %s, want %d (all: %v)", kinds[k], k, n, kinds)
+				}
+			}
+		})
+	}
+}
+
+// TestBuild_PostgresqlBundleTraitsReachEveryBundle: under a dependency policy
+// the Pooler and each Database get bundles of their own, so fluxcd-patches and
+// fluxcd-postbuild, which used to act on the one bundle holding all of
+// postgresql's objects, reach each of those Kustomizations. The Database named
+// like the Pooler shares the Pooler's bundle, which carries the patch once.
+func TestBuild_PostgresqlBundleTraitsReachEveryBundle(t *testing.T) {
+	traits := `        - type: fluxcd-patches
+          properties:
+            patches:
+              - patch: |
+                  - op: add
+                    path: /metadata/labels/patched
+                    value: "yes"
+                target:
+                  group: postgresql.cnpg.io
+        - type: fluxcd-postbuild
+          properties:
+            substitute:
+              REGION: eu-west-1
+`
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", postgresqlMembersApp(traits, postgresqlOrderPolicy))
+	outDir := filepath.Join(dir, "out")
+	if _, err := runKurel(t, "build", appPath, "--profile", filepath.Join(deliveryTestdata, "cluster.yaml"),
+		"-o", outDir, "--oci-repository", testOCIRepository, "--oci-tag", "v1.0.0"); err != nil {
+		t.Fatalf("delivery build: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(outDir, "shop.flux.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ks := map[string]map[string]any{}
+	for _, raw := range strings.Split(string(data), "\n---\n") {
+		var obj map[string]any
+		if err := yaml.Unmarshal([]byte(raw), &obj); err != nil {
+			t.Fatalf("decoding %s: %v", raw, err)
+		}
+		if obj["kind"] != "Kustomization" {
+			continue
+		}
+		md, _ := obj["metadata"].(map[string]any)
+		name, _ := md["name"].(string)
+		ks[name], _ = obj["spec"].(map[string]any)
+	}
+	for _, name := range []string{"shop-db", "shop-db-pooler", "shop-db-orders"} {
+		spec, ok := ks[name]
+		if !ok {
+			t.Errorf("no Kustomization %s (have %v)", name, keysOf(ks))
+			continue
+		}
+		if patches, _ := spec["patches"].([]any); len(patches) != 1 {
+			t.Errorf("%s patches = %v, want the one authored patch", name, spec["patches"])
+		}
+		pb, _ := spec["postBuild"].(map[string]any)
+		if sub, _ := pb["substitute"].(map[string]any); sub["REGION"] != "eu-west-1" {
+			t.Errorf("%s postBuild = %v, want the authored substitute", name, spec["postBuild"])
+		}
+	}
+	if spec, ok := ks["shop-api"]; ok && (spec["patches"] != nil || spec["postBuild"] != nil) {
+		t.Errorf("shop-api got postgresql's bundle traits: %v", spec)
+	}
+}
+
+func keysOf[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// TestBuild_PostgresqlDatabaseNamedLikeThePooler: a Database named "pooler"
+// generates the Pooler's name; the two are different objects, as they were
+// when postgresql generated them, and the document builds, with or without
+// a dependency policy.
+func TestBuild_PostgresqlDatabaseNamedLikeThePooler(t *testing.T) {
+	for _, policies := range []string{"", postgresqlOrderPolicy} {
+		docs, out, err := buildDocs(t, postgresqlMembersApp("        - type: prune-protection\n", policies))
+		if err != nil {
+			t.Fatalf("build failed: %v\noutput: %s", err, out)
+		}
+		var named, order []string
+		for _, d := range docs {
+			md, _ := d["metadata"].(map[string]any)
+			if md["name"] == "db-pooler" {
+				named = append(named, d["kind"].(string))
+			}
+			if name, _ := md["name"].(string); strings.HasPrefix(name, "db") {
+				order = append(order, d["kind"].(string)+"/"+name)
+			}
+		}
+		if strings.Join(named, ",") != "Pooler,Database" {
+			t.Errorf("objects named db-pooler = %v, want the Pooler then the Database", named)
+		}
+		// The Database joins the Pooler's sibling group, so it comes right
+		// after the Pooler, ahead of the other Databases.
+		want := "Cluster/db,ObjectStore/db,Pooler/db-pooler,Database/db-pooler,Database/db-orders"
+		if got := strings.Join(order, ","); got != want {
+			t.Errorf("object order = %s, want %s", got, want)
+		}
+	}
+}
+
+// TestBuild_PostgresqlDependencyPolicyNameIsFree: the dependency policy the
+// rule emits takes the first free name, so a database named "dependencies" and
+// an authored policy named db-dependencies-1 do not refuse the document.
+func TestBuild_PostgresqlDependencyPolicyNameIsFree(t *testing.T) {
+	app := `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  components:
+    - name: db
+      type: postgresql
+      properties:
+        databases:
+          - name: dependencies
+            owner: app
+    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        port: 9090
+  policies:
+    - name: db-dependencies-1
+      type: dependency
+      properties:
+        rules:
+          - component: api
+            dependsOn: [db]
+`
+	if _, out, err := buildDocs(t, app); err != nil {
+		t.Fatalf("build failed: %v\noutput: %s", err, out)
+	}
+}
+
+// TestBuild_PostgresqlLargeIntegerSurvivesLowering: an integer field the
+// former typed decode accepted still builds, instead of rounding through a
+// float64 in the rule's encoding of the Cluster spec into a value the
+// cnpg-cluster decode refuses as overflowing. (The exact value on the
+// generated Cluster is pinned in the components package; the printed YAML is
+// the output serializer's.)
+func TestBuild_PostgresqlLargeIntegerSurvivesLowering(t *testing.T) {
+	app := `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  components:
+    - name: db
+      type: postgresql
+      properties:
+        bootstrap:
+          recovery:
+            source: origin
+        externalClusters:
+          - name: origin
+            barmanObjectStore:
+              destinationPath: s3://bucket/origin/
+              wal:
+                maxParallel: 9223372036854775807
+`
+	if _, out, err := buildDocs(t, app); err != nil {
+		t.Fatalf("build failed: %v\noutput: %s", err, out)
+	}
+}
 
 // TestBuild_PostgresqlDefaultsTraitIsEngineOnly: the trait the postgresql rule
 // attaches to its Cluster cannot be authored, on postgresql or on the

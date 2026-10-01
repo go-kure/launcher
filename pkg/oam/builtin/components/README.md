@@ -2492,23 +2492,35 @@ not part of either change.
   under the component's name, a `cnpg-objectstore` under the same name (one
   same-name sibling group) when `objectStore` is set, a `cnpg-pooler`
   `<name>-pooler` when `pooler.enabled`, and a `cnpg-database` `<name>-<db>`
-  per `databases` entry. `replicas` and `storageSize` are written to the
+  per `databases` entry (a database named `pooler` beside an enabled pooler
+  generates the Pooler's name and joins its same-name sibling group, as two
+  objects of different kinds). `replicas` and `storageSize` are written to the
   Cluster only when authored, so the policy applies to them exactly as
   before. The two values postgresql derived from the policy are set after
   it by the engine-only `cnpg-postgresql-defaults` trait the rule attaches
   to the Cluster ahead of the authored traits (`traits/README.md`):
   `enablePDB` (`instances > 1`) and the `1Gi` storage fallback, under the
   policy maximum with postgresql's text (`storageSize "1Gi" exceeds enforced
-  maximum "512Mi"`). Authored traits go to the Cluster only. When the
+  maximum "512Mi"`). Authored traits go to the Cluster, and those that
+  covered every object postgresql generated are forwarded to the other
+  members so they still do: `prune-protection` and `force-replace` to each
+  member, and `fluxcd-patches` and `fluxcd-postbuild` to each member with a
+  bundle of its own (below). When the
   document orders its components with a `dependency` policy that has a
   rule, the rule adds one making the Pooler and the Databases depend on
-  the Cluster (`<name>-dependencies`): that layout gives each component a
+  the Cluster, named `<name>-dependencies` or, when the document or a
+  database already uses that name, the first free `<name>-dependencies-<n>`:
+  that layout gives each component a
   bundle of its own. Without one it adds nothing, since any dependency edge
   switches the whole document to that layout.
   **Behavior-changing** under `launcher.gokure.dev/v1alpha1`
   (go-kure/launcher#281): with both `objectStore` and `pooler`, the objects
   now come in the order Cluster, ObjectStore, Pooler (was Cluster, Pooler,
-  ObjectStore; the objects are the same). A generated `<name>-pooler` or
+  ObjectStore; the objects are the same), and a Database named `pooler`
+  comes right after the Pooler, ahead of the other Databases. Under a
+  `dependency` policy the Pooler and the Databases are deployed from
+  bundles of their own, each after the Cluster's (was one bundle for all
+  of postgresql's objects). A generated `<name>-pooler` or
   `<name>-<db>` that is already the name of another component in the
   document is refused, naming both. The Cluster kind's policy checks now
   apply, under its field names: the registry allowlist on the image

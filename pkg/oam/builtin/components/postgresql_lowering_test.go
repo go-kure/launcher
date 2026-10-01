@@ -3,9 +3,12 @@ package components_test
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"reflect"
 	"testing"
+
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -78,9 +81,10 @@ func TestPostgresqlRule_Emission(t *testing.T) {
 	if len(traits) != 2 || traits[0].Type != "cnpg-postgresql-defaults" || traits[1].Type != "prune-protection" {
 		t.Errorf("Cluster traits = %+v, want the defaults trait then the authored one", traits)
 	}
+	// prune-protection decorates every object, so every member carries it.
 	for _, c := range res.Components[1:] {
-		if len(c.Traits) != 0 {
-			t.Errorf("%s %q carries traits %+v, want none", c.Type, c.Name, c.Traits)
+		if len(c.Traits) != 1 || c.Traits[0].Type != "prune-protection" {
+			t.Errorf("%s %q carries traits %+v, want the authored prune-protection", c.Type, c.Name, c.Traits)
 		}
 	}
 	for i, c := range res.Components {
@@ -111,7 +115,7 @@ func TestPostgresqlRule_InstancesAndStorageOnlyWhenAuthored(t *testing.T) {
 	}
 
 	authored := lowerPostgresql(t, &oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{"replicas": 3, "storageSize": "5Gi"}}, nil).Components[0].Properties
-	if authored["instances"] != float64(3) {
+	if authored["instances"] != int64(3) {
 		t.Errorf("instances = %#v, want 3", authored["instances"])
 	}
 	if storage, _ := authored["storage"].(map[string]any); storage["size"] != "5Gi" {
@@ -287,4 +291,25 @@ func TestCnpgClusterConfig_ApplyPostgresqlDefaults_EnablePDB(t *testing.T) {
 			t.Errorf("err = %v, want %q", err, want)
 		}
 	})
+}
+
+// An integer above 2^53 keeps its exact value from the authored property to
+// the generated Cluster: the rule's encoding of the spec does not round it
+// through a float64 into a value the Cluster's decode refuses.
+func TestPostgresqlRule_LargeIntegerReachesTheCluster(t *testing.T) {
+	pc := newPostgresqlApp(t, map[string]any{
+		"bootstrap": map[string]any{"recovery": map[string]any{"source": "origin"}},
+		"externalClusters": []any{map[string]any{
+			"name": "origin",
+			"barmanObjectStore": map[string]any{
+				"destinationPath": "s3://bucket/origin/",
+				"wal":             map[string]any{"maxParallel": int64(math.MaxInt64)},
+			},
+		}},
+	})
+	cluster := (*generatePostgresql(t, pc)[0]).(*cnpgv1.Cluster)
+	got := cluster.Spec.ExternalClusters[0].BarmanObjectStore.Wal.MaxParallel
+	if got != math.MaxInt64 {
+		t.Errorf("maxParallel = %d, want %d", got, int64(math.MaxInt64))
+	}
 }
