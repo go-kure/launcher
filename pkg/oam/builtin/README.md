@@ -53,4 +53,4 @@ These are internal schema types used by [`builtin/components`](components) and
 (`dependency`, `placement`, `reconciliation`, `health-checks`); it declares its property
 schemas directly and uses none of these rendering types. See
 [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin) for the
-full exported surface. Full reference deferred (see #145 PR-B).
+full exported surface. Full reference deferred (see go-kure/launcher#145 PR-B).

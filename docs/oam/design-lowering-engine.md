@@ -4,7 +4,7 @@ Validates the design set out in this project's OAM-levels research notes (decisi
 D1–D7). The mechanics below were first proven on a throwaway spike branch
 (`spike/oam-lowering-engine`, never merged, no PR); this document originally reported
 what running code found against each decision there. The production implementation
-this document now describes ships on `feat/oam-lowering-engine` (draft PR #274):
+this document now describes ships on `feat/oam-lowering-engine` (draft PR go-kure/launcher#274):
 `pkg/oam/lowering.go`, `pkg/oam/lowering_raw.go`, the `PlatformReserved`/
 `enforcePlatformReserved` enforcement, and `expose` as a registered `TraitLoweringRule`
 are all real code on this branch today, not spike-only prototypes. Where a spike-time
@@ -415,7 +415,7 @@ for example — and must not copy capability rendering into its output: a value 
 `ErrPlatformReserved`. The shape of a trait the rule writes is checked by neither
 `LowerRaws` nor `Transform`, which enforces only its platform-reserved keys: as for
 any authored document, the consumer runs `ValidateAuthoredProperties` on each parsed
-output document, after parameter substitution, before `Transform`. Before #357,
+output document, after parameter substitution, before `Transform`. Before go-kure/launcher#357,
 `LowerRaws` ran the whole fixpoint itself and sealed the traits it produced, but the
 seal is an unexported field that the caller's `yaml.Marshal` → parse round-trip drops,
 so `Transform` re-rendered those traits as authored anyway; running round 0 only makes

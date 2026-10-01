@@ -1,6 +1,6 @@
 # Design: Kurel Package Spec
 
-*Status: Final | Issue: [#36](https://github.com/go-kure/launcher/issues/36)*
+*Status: Final | Issue: [go-kure/launcher#36](https://github.com/go-kure/launcher/issues/36)*
 
 | Version | Date | Summary |
 |---|---|---|

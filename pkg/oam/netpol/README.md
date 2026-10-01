@@ -20,7 +20,7 @@ Package `netpol` contains shared types for automatic `NetworkPolicy` synthesis:
   Service (not the exposing component's own): a Service name + ports + an optional `PodSelector`.
   When the Service name resolves to a sibling component — **cluster-wide**, across leaf bundles in
   the same namespace — ingress synthesis retargets the `{comp}-allow-ingress-traffic` allow onto that
-  component's pods in the component's own bundle (#227/#242) and the `PodSelector` is
+  component's pods in the component's own bundle (go-kure/launcher#227, go-kure/launcher#242) and the `PodSelector` is
   ignored. When it does **not** resolve (a bare external Service), the selector is not inferable
   from the name: an explicit matchLabels `PodSelector` (the authored `backendSelector`) synthesizes
   a `{service}-allow-ingress-traffic` allow onto those pods, while a nil selector leaves the backend
