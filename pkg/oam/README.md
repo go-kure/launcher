@@ -287,7 +287,10 @@ itself, since no `CapabilityAware` in-transform rule runs inside it. Besides met
 `LowerRaws` checks duplicates and generated-name collisions across the call (pass-through
 identities included), rule arity, component and policy schemas of each emitted document,
 and that each emitted document's apiVersion is `SupportedAPIVersion` or the group its
-rule claims. Emitted traits are not checked in `LowerRaws`, and `Transform` does not
+rule claims. Emitted traits are not checked in `LowerRaws`. A component or policy is
+checked on its own copy of its properties, so checking it cannot strip a reserved
+`null` from a trait or another element that shares its map before `Transform` sees it
+(go-kure/launcher#626). `Transform` does not
 shape-check trait properties either (it enforces only their platform-reserved keys): like
 any authored document, each parsed output document must go through
 `ValidateAuthoredProperties`, after parameter substitution, before `Transform` (see its
@@ -430,11 +433,19 @@ nested in an emitted component gets the same classification as that component. A
 sees trait and policy properties and metadata too, which nothing checks before it
 runs (go-kure/launcher#612). Output of any other rule stays authored and is checked like
 anything a user wrote, so a schema-less rule cannot pass an authored reserved value
-through. Its components are checked for reserved keys as they are emitted, before
-emission validation strips an explicit `null`, so a reserved key written as `null` is
-refused here exactly as when authored directly (go-kure/launcher#609). A sealed trait that is not synthesized is checked as it
-stands: before a `TraitLoweringRule` that declares a schema runs over it, and when
-its handler applies it. A schema-less rule that copies an authored reserved value,
+through. Its components and traits — those it emits at trait position and those
+nested in the components it emits — are checked for reserved keys as they are
+emitted, before emission validation strips an explicit `null`, so a reserved key
+written as `null` is refused here exactly as when authored directly
+(go-kure/launcher#609, go-kure/launcher#626). Emission validation of any rule's output
+normalizes the element's own copy of its properties, never the map the rule emitted,
+so validating an element whose type does not reserve a key cannot strip that key's
+`null` from another element sharing the map (including one the rule forwarded), which
+may lower into one that does reserve it a round later. A trait such a rule only forwarded
+keeps its classification, as a forwarded component does. A sealed trait that is not
+synthesized is checked as it stands: as it is emitted, and again before a
+`TraitLoweringRule` that declares a schema runs over it and when its handler applies
+it. A schema-less rule that copies an authored reserved value,
 or renders one from capabilities, into a trait it emits is therefore rejected. A
 sealed trait that passes that check is still not checked input for what the rule
 emits: its schema covers the trait's own reserved keys, not those of the components
@@ -445,10 +456,10 @@ forwarding neither makes it synthesized nor resets it to authored. What a user w
 before any rule can rewrite it: before a `ComponentLoweringRule` claims the
 component, and for every component of a document before its `DocumentLoweringRule`
 runs, so rebuilding a component by value does not launder an authored reserved
-value. Every component no rule synthesized is also checked at the start of each
-lowering round, before any rule of that round runs, so a rule that emits an element
-sharing a component's properties map cannot have emission validation strip an
-authored `null` from it.
+value. Every component and every trait no rule synthesized is also checked at the
+start of each lowering round, before any rule of that round runs, so a rule that
+emits an element sharing a component's or trait's properties map cannot have
+emission validation strip an authored `null` from it.
 
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the
@@ -714,13 +725,13 @@ Two things this deliberately does not do:
   so reservation keeps treating an explicit null as *present* while the strip
   treats one as absent. Exempting reserved keys here would not have preserved the
   authored rule; it would only have handed a reserved null to the type check,
-  producing a loud rejection with the wrong reason. The **component** surface keeps
-  the same separation: an authored component is checked before any rule can
-  rewrite it. A component a rule emitted from checked input — whose properties are
-  the ones the strip touches — is exempt from reservation, as a synthesized trait is;
-  the output of a rule whose input was not checked stays authored, and its
-  components are checked as they are emitted, before the strip (see the
-  rule-output contract above).
+  producing a loud rejection with the wrong reason. The **component** and **trait**
+  surfaces keep the same separation: an authored component or trait is checked
+  before any rule can rewrite it. One a rule emitted from checked input — whose
+  properties are the ones the strip touches — is exempt from reservation; the output
+  of a rule whose input was not checked stays authored, and its components and
+  traits are checked as they are emitted, before the strip (see the rule-output
+  contract above).
 - **A key the schema does not declare is untouched**, including inside an object
   that sets `AdditionalProperties`. Nothing describes such a value, so nothing
   here can normalise it, and a null inside an opaque object still reaches the
