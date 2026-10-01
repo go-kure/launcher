@@ -380,8 +380,9 @@ the order kure's own generation uses and with the bundle labels and annotations 
 so its objects replace a `Bundle.Generate` of the same cluster rather than add a second
 generation, which could differ from the first. The check reports every object, keyed as
 above, that more than one application generates, naming each producer as a component (a
-sibling group is one) or as a trait's sub-application and its component. A repeat within
-one application is not reported. `kurel build` runs both before it writes anything.
+sibling group is one) or as a trait's sub-application and its component. A trait named
+after its own component reads like that component, so a second producer with the same name
+is named as another application of it. A repeat within one application is not reported. `kurel build` runs both before it writes anything.
 
 `Reserve`/`Name` fail on every repeat claim of a name, including one from the same content.
 Rules whose outputs share one derived object (two components pointing at the same chart
