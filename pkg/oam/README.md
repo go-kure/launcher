@@ -416,9 +416,9 @@ rule's output, so a `PlatformReserved` value the rule rendered from
 holds only when the rule's input was checked before it ran: a
 `ComponentLoweringRule` or `TraitLoweringRule` that declares a schema
 (`PropertySchemaProvider`), or a `ComponentLoweringRule` whose input component is
-itself synthesized; and a
-`DocumentLoweringRule` only when every authored component of its input has a schema
-to be checked against. Output of any other rule stays authored and is checked like
+itself synthesized. A `DocumentLoweringRule`'s output is never synthesized: the rule
+sees trait and policy properties and metadata too, which nothing checks before it
+runs (go-kure/launcher#612). Output of any other rule stays authored and is checked like
 anything a user wrote, so a schema-less rule cannot pass a non-null authored reserved
 value through (an explicit `null` is stripped before that check,
 go-kure/launcher#609). A sealed trait is not checked input: every trait a rule
@@ -427,9 +427,7 @@ skips the schema check, so a `TraitLoweringRule` over a sealed trait emits autho
 components whether or not it declares a schema. A
 component a `DocumentLoweringRule` forwards — the same element of
 `doc.Spec.Components`, not a copy — keeps the classification it arrived with:
-forwarding neither makes it synthesized nor resets it to authored. An authored
-component stays authored, and one an earlier rule synthesized, then handed on
-through a chain of document rules, stays synthesized. What a user wrote is checked
+forwarding neither makes it synthesized nor resets it to authored. What a user wrote is checked
 before any rule can rewrite it: before a `ComponentLoweringRule` claims the
 component, and for every component of a document before its `DocumentLoweringRule`
 runs, so rebuilding a component by value does not launder an authored reserved

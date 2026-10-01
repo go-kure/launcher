@@ -53,14 +53,13 @@ type Component struct {
 	// counterpart of Trait.sealed. The engine sets it at each emission site
 	// (lowering.go); a rule in another package cannot, and an authored component is
 	// never synthesized. A rule's output is marked only when the rule's input was
-	// checked: the rule declares a schema (PropertySchemaProvider), a component
-	// rule's input component is itself synthesized, or, for a document rule, every
-	// authored component had a schema; any other rule's output is checked as
-	// authored. A sealed trait is not checked input and skips the schema check: a
-	// trait rule's output over one stays authored, schema or not. A component a
-	// document rule forwards (pointer-identical, isForwardedComponent) keeps the
-	// value it arrived with, so a component an earlier rule synthesized stays
-	// synthesized through a chain of document rules. What a user wrote is still
+	// checked: the rule declares a schema (PropertySchemaProvider), or a component
+	// rule's input component is itself synthesized; any other rule's output is
+	// checked as authored. A sealed trait is not checked input and skips the schema
+	// check: a trait rule's output over one stays authored, schema or not. A
+	// document rule's output is never synthesized, since nothing checks its whole
+	// input (go-kure/launcher#612); a component it forwards (pointer-identical,
+	// isForwardedComponent) keeps the value it arrived with. What a user wrote is still
 	// checked before any rule can rewrite it: before a ComponentLoweringRule
 	// (lowerDocumentBody) and before a DocumentLoweringRule
 	// (enforceAuthoredComponentReservations).

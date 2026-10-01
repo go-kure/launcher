@@ -163,11 +163,12 @@ component handler's `ToApplicationConfig` (`createApplications`, `transform.go`)
 though no component schema declares a reserved field today, so that call site is
 currently a no-op in practice. On the component side, a component a lowering rule
 synthesized (`Component.synthesized`, the counterpart of `Trait.sealed`) is exempt — only
-a rule whose input was checked (it declares a schema; a component rule whose input
-component is synthesized; a document rule whose every authored component had a schema)
-synthesizes — a sealed trait is not checked input and skips the schema check, so a trait
-rule's output over one stays authored, schema or not — and a document rule
-that forwards a component leaves that classification as it found it — and
+a component or trait rule whose input was checked (it declares a schema; a component rule
+whose input component is synthesized) synthesizes — a sealed trait is not checked input and
+skips the schema check, so a trait rule's output over one stays authored, schema or not;
+a document rule's output is never synthesized, since nothing checks its whole input
+(go-kure/launcher#612), and a component it forwards keeps the classification it arrived
+with — and
 an authored component is checked before any rule can rewrite it: before a
 `ComponentLoweringRule` claims it (`lowerDocumentBody`) and before a
 `DocumentLoweringRule` runs (`enforceAuthoredComponentReservations`). The proof: `webservice-expose-ingress/app.yaml` loses its
