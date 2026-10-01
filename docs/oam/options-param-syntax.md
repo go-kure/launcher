@@ -4,6 +4,7 @@
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2 | 2026-10-01 | Node substitution for `array`/`object` parameters is implemented (#421): shape-checked values and defaults; a string default is refused |
 | 1.1 | 2026-05-14 | Record decision (Option A); remove Option B; add resolver behaviour section; correct env list claim |
 | 1.0 | 2026-04-19 | Initial draft — compared Option A (placeholders) and Option B (overlay) |
 
@@ -155,9 +156,14 @@ field, the resolver substitutes the typed value directly:
 **Node substitution** — when the parameter type is `array` or `object`, the resolver
 replaces the placeholder with the full YAML node from values.yaml:
 - `env: ${env}` → `env: [{name: LOG_LEVEL, value: info}, ...]` (list)
-- Requires a YAML-node-level resolver (not plain string replacement)
-- The existing prototype resolver does string substitution only; node substitution would
-  be an extension
+- The value must be a YAML list (`array`) or map (`object`), supplied with `--values` or
+  as the declared default; `--set` cannot supply one, and a string default is refused
+  rather than parsed as YAML
+- Only the shape is checked at the parameter: a parameter declares no `items` or
+  `properties`. The substituted value is then validated by the consuming component's
+  or trait's schema like any authored property
+- The replacement is not scanned again, so a `${…}` inside a supplied value stays literal
+- An `array`/`object` placeholder embedded in a larger string is an error
 
 **Inline string embedding** — when the placeholder is embedded in a larger string:
 - `name: "prefix-${name}-suffix"` → `name: "prefix-webservice-suffix"`
@@ -177,7 +183,8 @@ replaces the placeholder with the full YAML node from values.yaml:
   names, types, defaults, and descriptions.
 - Required parameters are schema-enforced: build fails immediately with a clear error if
   any required parameter is missing.
-- Node substitution for `array`/`object` parameters adds resolver implementation cost.
+- Node substitution for `array`/`object` parameters needs a YAML-node-level resolver,
+  not plain string replacement.
 
 ### Pros
 

@@ -315,13 +315,16 @@ func validateClusterProfile(profile *ClusterProfile) error {
 	return nil
 }
 
-// validParamTypes is the set of accepted ParameterDecl.Type values.
-// array and object are intentionally excluded: node substitution is not yet
-// implemented, so declaring those types would produce an unusable package.
+// validParamTypes is the set of accepted ParameterDecl.Type values. An array or
+// object parameter is substituted as a whole YAML node (ResolveParameters); only
+// its shape is checked here, since a parameter cannot declare items/properties —
+// the consuming handler's schema validates the content after substitution.
 var validParamTypes = map[string]bool{
 	"string":  true,
 	"integer": true,
 	"boolean": true,
+	"array":   true,
+	"object":  true,
 }
 
 // validatePackage performs semantic validation on a parsed Package.
@@ -348,7 +351,7 @@ func validatePackage(pkg *Package) error {
 		seenNames[p.Name] = true
 		if !validParamTypes[string(p.Type)] {
 			return packageValidationError("parameters", fmt.Sprintf(
-				"parameter %q has invalid type %q; supported types: string, integer, boolean", p.Name, p.Type))
+				"parameter %q has invalid type %q; supported types: string, integer, boolean, array, object", p.Name, p.Type))
 		}
 		if err := validateParamDefault(&p); err != nil {
 			return err
@@ -360,9 +363,18 @@ func validatePackage(pkg *Package) error {
 // validateParamDefault checks that a ParameterDecl.Default is compatible with
 // the declared Type. Defaults containing ${name} placeholder references are
 // deferred to build time (their referenced values are not yet known at parse
-// time); all other defaults are validated immediately.
+// time); all other defaults are validated immediately. An array or object default
+// must be a YAML list or map; a string default for those types is refused, with or
+// without placeholders, rather than parsed as YAML.
 func validateParamDefault(p *ParameterDecl) error {
 	if p.Default == nil {
+		return nil
+	}
+	if p.Type == "array" || p.Type == "object" {
+		if err := checkStructuredShape(p.Default, string(p.Type)); err != nil {
+			return packageValidationError("parameters",
+				fmt.Sprintf("parameter %q has a default that %s", p.Name, err.Error()))
+		}
 		return nil
 	}
 	defStr, isStr := p.Default.(string)

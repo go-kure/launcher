@@ -2,6 +2,7 @@ package oam_test
 
 import (
 	stderrors "errors"
+	"strings"
 	"testing"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -136,24 +137,55 @@ spec:
 	}
 }
 
-func TestParsePackage_RejectsArrayParamType(t *testing.T) {
-	input := `
+// TestParsePackage_StructuredParamTypes: array and object are parameter types
+// (go-kure/launcher#421). A default must have the declared shape, a list or a map;
+// a string default is refused, not parsed as YAML.
+func TestParsePackage_StructuredParamTypes(t *testing.T) {
+	pkg := func(param string) string {
+		return `
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: Package
 metadata:
   name: my-app
 spec:
   parameters:
-  - name: items
-    type: array
-`
-	_, err := oam.ParsePackage([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for unsupported param type 'array', got nil")
+` + param
 	}
-	var valErr *errors.ValidationError
-	if !stderrors.As(err, &valErr) {
-		t.Errorf("expected *errors.ValidationError, got %T: %v", err, err)
+	accepted := map[string]string{
+		"array, no default":   "  - name: items\n    type: array\n",
+		"object, no default":  "  - name: labels\n    type: object\n",
+		"array, list default": "  - name: items\n    type: array\n    default: [a, b]\n",
+		"array, empty list":   "  - name: items\n    type: array\n    default: []\n",
+		"object, map default": "  - name: labels\n    type: object\n    default: {team: web}\n",
+		"object, empty map":   "  - name: labels\n    type: object\n    default: {}\n",
+	}
+	for name, param := range accepted {
+		t.Run("accepted/"+name, func(t *testing.T) {
+			if _, err := oam.ParsePackage([]byte(pkg(param))); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+	refused := map[string]struct{ param, wantSub string }{
+		"array, map default":      {"  - name: items\n    type: array\n    default: {a: b}\n", "is a map, not a list"},
+		"array, string default":   {"  - name: items\n    type: array\n    default: \"[a, b]\"\n", "is a string, not a list"},
+		"array, placeholder":      {"  - name: items\n    type: array\n    default: \"${other}\"\n", "is a string, not a list"},
+		"array, scalar default":   {"  - name: items\n    type: array\n    default: 3\n", "not a list"},
+		"object, list default":    {"  - name: labels\n    type: object\n    default: [a]\n", "is a list, not a map"},
+		"object, string default":  {"  - name: labels\n    type: object\n    default: \"team: web\"\n", "is a string, not a map"},
+		"unknown type still gone": {"  - name: n\n    type: number\n", "supported types: string, integer, boolean, array, object"},
+	}
+	for name, tc := range refused {
+		t.Run("refused/"+name, func(t *testing.T) {
+			_, err := oam.ParsePackage([]byte(pkg(tc.param)))
+			if err == nil || !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("expected an error containing %q, got %v", tc.wantSub, err)
+			}
+			var valErr *errors.ValidationError
+			if !stderrors.As(err, &valErr) {
+				t.Errorf("expected *errors.ValidationError, got %T: %v", err, err)
+			}
+		})
 	}
 }
 

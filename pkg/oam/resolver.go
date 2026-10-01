@@ -147,9 +147,45 @@ func coerceValue(v any, decl *ParameterDecl) (any, error) {
 		if _, isStr := v.(string); isStr {
 			return nil, errors.Errorf("parameter %q (type %s) cannot be set with --set; use --values to supply a structured value", decl.Name, decl.Type)
 		}
+		if err := checkStructuredShape(v, string(decl.Type)); err != nil {
+			return nil, errors.Errorf("parameter %q (type %s): the value %s", decl.Name, decl.Type, err.Error())
+		}
 		return v, nil
 	}
 	return v, nil
+}
+
+// checkStructuredShape reports whether v has the shape an array (a YAML list) or
+// object (a YAML map) parameter needs. Only the shape is checked: a parameter
+// declares no items/properties, and the consuming handler's schema validates the
+// content once the value is substituted.
+func checkStructuredShape(v any, paramType string) error {
+	var ok bool
+	want := "a list"
+	switch paramType {
+	case "array":
+		_, ok = v.([]any)
+	case "object":
+		_, ok = v.(map[string]any)
+		want = "a map"
+	default:
+		return nil
+	}
+	if ok {
+		return nil
+	}
+	switch v.(type) {
+	case nil:
+		return errors.Errorf("is null, not %s", want)
+	case string:
+		return errors.Errorf("is a string, not %s", want)
+	case []any:
+		return errors.Errorf("is a list, not %s", want)
+	case map[string]any:
+		return errors.Errorf("is a map, not %s", want)
+	default:
+		return errors.Errorf("is a %T, not %s", v, want)
+	}
 }
 
 // buildEffectiveValues resolves parameter defaults in declaration order.
@@ -165,6 +201,16 @@ func buildEffectiveValues(schema []ParameterDecl, coerced map[string]any) (map[s
 		}
 		if p.Default == nil {
 			continue // no default; optional param left unset
+		}
+
+		if p.Type == "array" || p.Type == "object" {
+			// A structured default is used as written; a string default is refused
+			// (validatePackage does the same), never parsed as YAML.
+			if err := checkStructuredShape(p.Default, string(p.Type)); err != nil {
+				return nil, errors.Errorf("default for parameter %q (type %s) %s", p.Name, p.Type, err.Error())
+			}
+			effective[p.Name] = p.Default
+			continue
 		}
 
 		defStr, isStr := p.Default.(string)
@@ -276,7 +322,8 @@ func substituteNodes(node *yaml.Node, schema map[string]*ParameterDecl, effectiv
 }
 
 // substituteScalar handles placeholder substitution for a single scalar yaml.Node.
-// Full-value scalars (entire value is ${name}) are type-promoted to integer/boolean.
+// Full-value scalars (entire value is ${name}) are type-promoted to integer/boolean,
+// and replaced by a YAML list or map for an array/object parameter.
 // Inline substitutions (${name} embedded in a larger string) always produce a string.
 // String values are always emitted with DoubleQuotedStyle for safe YAML serialization —
 // this correctly handles characters like :, #, ", \, and newlines.
@@ -294,9 +341,15 @@ func substituteScalar(node *yaml.Node, schema map[string]*ParameterDecl, effecti
 		}
 		switch decl.Type {
 		case "array", "object":
-			return errors.Errorf(
-				"parameter %q has type %s; node substitution is not yet implemented "+
-					"(use --values to supply structured values)", name, decl.Type)
+			// Node substitution: the scalar is replaced by the value's own YAML list
+			// or map. The walk does not descend into the replacement, so a ${...}
+			// inside a supplied value stays literal (see Step 6 in ResolveParameters).
+			var repl yaml.Node
+			if err := repl.Encode(val); err != nil {
+				return errors.Wrapf(err, "parameter %q (type %s): encoding the value", name, decl.Type)
+			}
+			repl.HeadComment, repl.LineComment, repl.FootComment = node.HeadComment, node.LineComment, node.FootComment
+			*node = repl
 		case "integer":
 			node.Value = fmt.Sprintf("%v", val)
 			node.Tag = "!!int"

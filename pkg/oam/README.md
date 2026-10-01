@@ -432,6 +432,13 @@ single schema vocabulary — the same type also backs `kurel.yaml` parameters (`
 parameters, capability rendering) reject them at decode time, so unifying the type does not widen
 their accepted behavior.
 
+A kurel parameter's `Type` is `string`, `integer`, `boolean`, `array` or `object`
+(go-kure/launcher#421). `ResolveParameters` replaces a whole-value `${name}` for an `array` or
+`object` parameter with the value's YAML list or map. With no `items` or `properties` to declare,
+the parameter checks only that shape (its default too, and a string default is refused); the
+substituted value is checked by `ValidateAuthoredProperties` against the consuming handler's schema
+like any authored property.
+
 `Types` is the union idiom (go-kure/launcher#383): a leaf that accepts more than one scalar type
 lists them, and a value is accepted when any member's single `Type` accepts it — whatever order the
 members are listed in — normalised exactly as the first member, in declared order, that accepts it
