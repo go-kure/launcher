@@ -149,7 +149,7 @@ func (e componentEntry) healthCheckConfig() stack.ApplicationConfig {
 }
 
 // siblingGroupConfig is the one ApplicationConfig a sibling group deploys as. It
-// generates each member's application in emission order and answers every
+// generates its members' objects primary objects first (Generate) and answers every
 // optional config interface the engine type-asserts on a deployed component's
 // config after traits ran, by asking the members. Traits themselves never see it:
 // applyTraits hands each trait its own member's application, so the rule places a
@@ -185,21 +185,33 @@ type siblingGroupConfig struct {
 	types []string
 }
 
-// Generate returns the members' objects, member by member in emission order. Two
-// members generating the same Kubernetes object (API group, kind, namespace and
-// name) is refused: the group would deploy one object twice with two contents —
-// for example a statefulset member's headless Service and a service member's
+// Generate returns each member's first object, member by member in emission
+// order, then every member's remaining objects, member by member in the same
+// order. A member's first object is its primary one (the workload, the Service),
+// so a group of a deployment and a service generates Deployment, Service, then the
+// Deployment's ServiceAccount and claims — the order one component generating all
+// of them uses, which keeps a component re-expressed as a group byte-identical.
+// Two members generating the same Kubernetes object (API group, kind, namespace
+// and name) is refused: the group would deploy one object twice with two contents
+// — for example a statefulset member's headless Service and a service member's
 // Service, both named after the group. An object without a kind cannot be
 // compared and is refused, as CheckCrossDocumentCollisions refuses one.
 func (g *siblingGroupConfig) Generate(*stack.Application) ([]*client.Object, error) {
-	var objs []*client.Object
+	var heads, tails []*client.Object
 	owner := make(map[objectIdentity]string)
 	for i, m := range g.members {
 		out, err := m.Generate()
 		if err != nil {
 			return nil, err
 		}
-		for _, p := range out {
+		split := len(out)
+		for j, p := range out {
+			if p == nil || isNullValue(*p) {
+				continue
+			}
+			if split == len(out) {
+				split = j + 1
+			}
 			if p == nil || isNullValue(*p) {
 				continue
 			}
@@ -216,9 +228,10 @@ func (g *siblingGroupConfig) Generate(*stack.Application) ([]*client.Object, err
 			}
 			owner[id] = g.types[i]
 		}
-		objs = append(objs, out...)
+		heads = append(heads, out[:split]...)
+		tails = append(tails, out[split:]...)
 	}
-	return objs, nil
+	return append(heads, tails...), nil
 }
 
 // SetFluxNamespace sets the per-request Flux namespace on every member that takes one.
