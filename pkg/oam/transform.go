@@ -654,13 +654,13 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// D3: an authored value for a platform-reserved property is rejected before
 		// the handler ever sees it, symmetric with the trait-position enforcement in
 		// applyTraits/lowerDocumentBody. A component a lowering rule synthesized
-		// (Component.synthesized) is exempt, as a sealed trait is in applyTraits: its
-		// properties are the rule's own output, which may carry a reserved value the
+		// (Component.synthesized) is exempt, as a synthesized trait is in applyTraits:
+		// its properties are the rule's own output, which may carry a reserved value the
 		// rule rendered from LoweringContext.Capabilities. A rule's output is marked
 		// synthesized only when its input was already checked before that rule ran: a
 		// component rule that declares a schema or receives a synthesized component,
-		// or a trait rule that declares a schema and receives an unsealed trait (a
-		// sealed trait skips the schema check). A component a document rule forwards
+		// or a trait rule that receives a synthesized trait or declares a schema and
+		// receives an unsealed one. A component a document rule forwards
 		// unchanged keeps its classification. Any other rule output, including every
 		// component a document rule builds, is checked here like an authored component.
 		if p, ok := handler.(PropertySchemaProvider); ok && !component.synthesized {
@@ -873,6 +873,7 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 			// information-closure rule does not allow a second, different-key merge
 			// here (a fifth input). So every capability-processing step below is
 			// skipped entirely for a sealed trait; the trait's Properties are final.
+			// Sealing does not exempt it from D3: only a synthesized one is exempt.
 			resolved := trait
 			matched := false
 			matchedKey := ""
@@ -916,6 +917,16 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 
 				if matched && ctx.consumedCapabilities != nil {
 					ctx.consumedCapabilities[matchedKey] = struct{}{}
+				}
+			} else if p, ok := handler.(PropertySchemaProvider); ok && !trait.synthesized {
+				// D3 on a sealed trait no checked rule emitted (Trait.synthesized): a
+				// schema-less rule may have copied an authored reserved value into it.
+				// Its Properties are final, so they are checked as they stand.
+				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
+					return &TransformError{
+						Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
+						Cause:   err,
+					}
 				}
 			}
 			prevLen := len(bundle.Applications)

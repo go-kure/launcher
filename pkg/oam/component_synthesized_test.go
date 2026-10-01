@@ -142,8 +142,8 @@ func (passThroughTraitRule) LowerTrait(trait *Trait, _ LoweringContext) (Lowerin
 }
 
 // schemaPassThroughTraitRule declares a schema that reserves networkPolicy, and
-// copies the trait properties into a component it emits. For a sealed trait the
-// schema is never checked, so the declaration alone proves nothing.
+// copies the trait properties into a component it emits. Over a sealed trait that
+// is not synthesized, the schema is still checked before the rule runs.
 type schemaPassThroughTraitRule struct{}
 
 func (schemaPassThroughTraitRule) TraitType() string { return "pass-through-sidecar" }
@@ -374,11 +374,11 @@ func TestTransform_SchemaLessTraitRuleOverSealedTraitIsRejected(t *testing.T) {
 	expectPlatformReserved(t, err)
 }
 
-// TestTransform_SchemaTraitRuleOverSealedTraitIsRejected: a trait rule that
-// declares a schema has it checked only for an unsealed trait. Over a sealed trait
-// a schema-less component rule filled with authored properties, the check never
-// runs, so the component the rule emits is not synthesized and the handler rejects
-// the authored reserved value.
+// TestTransform_SchemaTraitRuleOverSealedTraitIsRejected: a schema-less component
+// rule fills a sealed trait with authored properties, so the trait is not
+// synthesized. A trait rule that declares a schema has that schema checked against
+// it before it runs (go-kure/launcher#611), and the authored reserved value is
+// rejected there.
 func TestTransform_SchemaTraitRuleOverSealedTraitIsRejected(t *testing.T) {
 	tr := reservedSinkTransformer()
 	tr.RegisterComponentLowering(traitWrappingComponentRule{})
@@ -386,6 +386,12 @@ func TestTransform_SchemaTraitRuleOverSealedTraitIsRejected(t *testing.T) {
 
 	_, err := tr.Transform(singleComponentApp("Application", "trait-wrapping", authoredNetworkPolicy()), TransformContext{})
 	expectPlatformReserved(t, err)
+	// Since go-kure/launcher#611 the sealed trait is checked before the
+	// schema-declaring rule runs, so the refusal names the trait, not only the
+	// component createApplications would have named.
+	if msg := err.Error(); !strings.Contains(msg, `trait "pass-through-sidecar" on component "web"`) {
+		t.Errorf("expected the refusal at the trait rule, naming the trait, got: %v", msg)
+	}
 }
 
 // TestTransform_DocumentRuleCopyingUncheckedComponentIsRejected: before a document

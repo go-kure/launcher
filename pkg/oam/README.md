@@ -401,30 +401,36 @@ it always names the immediate producer rather than the first rule in a multi-hop
 chain. `""` means the element was never itself the direct output of a lowering rule
 (authored as-is, or carried through untouched).
 
-A trait a rule synthesizes is sealed: its properties are final, and no
+A trait a rule builds is sealed: its properties are final, and no
 `ClusterProfile` capability rendering is merged into it later. A trait a
 `ComponentLoweringRule` merely forwards stays an ordinary authored trait (unsealed,
 still capability-processed). Forwarding covers returning `comp.Traits` itself and
 returning unchanged copies of its elements inside a new slice, for example to add one
-synthesized trait next to the authored ones; a copy whose type or properties map the
-rule replaced counts as synthesized. A forwarded trait's `Origin.Index` stays its
+trait of its own next to the authored ones; a copy whose type or properties map the
+rule replaced counts as built by the rule. A forwarded trait's `Origin.Index` stays its
 authored slot even when the rule places its own trait ahead of it.
 
-A component a rule emits is synthesized in the same sense: its properties are the
-rule's output, so a `PlatformReserved` value the rule rendered from
+Sealing says nothing about whether the trait's content was checked. A component or
+trait a rule emits is synthesized when its properties are the rule's own output from
+checked input, so a `PlatformReserved` value the rule rendered from
 `LoweringContext.Capabilities` is accepted rather than rejected as authored. That
 holds only when the rule's input was checked before it ran: a
-`ComponentLoweringRule` or `TraitLoweringRule` that declares a schema
-(`PropertySchemaProvider`), or a `ComponentLoweringRule` whose input component is
-itself synthesized. A `DocumentLoweringRule`'s output is never synthesized: the rule
+`ComponentLoweringRule` that declares a schema (`PropertySchemaProvider`) or whose
+input component is itself synthesized, or a `TraitLoweringRule` that declares a
+schema over an unsealed trait or whose input trait is itself synthesized. A trait
+nested in an emitted component gets the same classification as that component. A
+`DocumentLoweringRule`'s output is never synthesized: the rule
 sees trait and policy properties and metadata too, which nothing checks before it
 runs (go-kure/launcher#612). Output of any other rule stays authored and is checked like
 anything a user wrote, so a schema-less rule cannot pass a non-null authored reserved
 value through (an explicit `null` is stripped before that check,
-go-kure/launcher#609). A sealed trait is not checked input: every trait a rule
-emits is sealed, whether or not that rule's input was checked, and a sealed trait
-skips the schema check, so a `TraitLoweringRule` over a sealed trait emits authored
-components whether or not it declares a schema. A
+go-kure/launcher#609). A sealed trait that is not synthesized is checked as it
+stands: before a `TraitLoweringRule` that declares a schema runs over it, and when
+its handler applies it. A schema-less rule that copies an authored reserved value,
+or renders one from capabilities, into a trait it emits is therefore rejected. A
+sealed trait that passes that check is still not checked input for what the rule
+emits: its schema covers the trait's own reserved keys, not those of the components
+or traits the rule builds, so that rule's output stays authored. A
 component a `DocumentLoweringRule` forwards — the same element of
 `doc.Spec.Components`, not a copy — keeps the classification it arrived with:
 forwarding neither makes it synthesized nor resets it to authored. What a user wrote is checked
@@ -700,7 +706,7 @@ Two things this deliberately does not do:
   producing a loud rejection with the wrong reason. The **component** surface keeps
   the same separation: an authored component is checked before any rule can
   rewrite it. A component a rule emitted from checked input — whose properties are
-  the ones the strip touches — is exempt from reservation, as a sealed trait is;
+  the ones the strip touches — is exempt from reservation, as a synthesized trait is;
   the output of a rule whose input was not checked stays authored and is checked
   after the strip (see the rule-output contract above).
 - **A key the schema does not declare is untouched**, including inside an object
