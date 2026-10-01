@@ -53,7 +53,8 @@ jobs:
     # script, so a value is passed as data and never parsed as shell syntax.
     # Each is checked before it reaches GITHUB_OUTPUT: the slot by the rule the
     # deploy-docs-push action applies (one path segment, dev or v*), the label
-    # as dev or a release tag, set_latest as true or false.
+    # as dev or a release tag (a release tag only with set_latest true),
+    # set_latest as true or false.
     - name: Determine version parameters
       id: version
       env:
@@ -72,6 +73,10 @@ jobs:
           fi
           if [[ "$SET_LATEST" != "true" && "$SET_LATEST" != "false" ]]; then
             echo "::error::set_latest must be true or false"
+            exit 1
+          fi
+          if [[ "$SET_LATEST" == "true" && "$VERSION_LABEL" == "dev" ]]; then
+            echo "::error::set_latest=true needs a release tag as version_label, not dev"
             exit 1
           fi
           {
