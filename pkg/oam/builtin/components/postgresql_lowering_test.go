@@ -162,6 +162,43 @@ func TestPostgresqlRule_RefusesGeneratedNameCollision(t *testing.T) {
 	}
 }
 
+// A database name repeated in the list is refused at parse time, naming both
+// entries: each entry is one Database object, so the repeat was one object
+// authored twice (the Flux build refused it; kubectl kept the last).
+func TestPostgresqlRule_RefusesRepeatedDatabaseName(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		props map[string]any
+		want  string
+	}{
+		{
+			"orders",
+			map[string]any{"databases": []any{
+				map[string]any{"name": "orders", "owner": "app"},
+				map[string]any{"name": "billing", "owner": "app"},
+				map[string]any{"name": "orders", "owner": "app"},
+			}},
+			`databases[2]: repeats the name "orders" of databases[0]; each database is one object`,
+		},
+		{
+			"pooler, with the pooler enabled",
+			map[string]any{"pooler": map[string]any{"enabled": true}, "databases": []any{
+				map[string]any{"name": "pooler", "owner": "app"},
+				map[string]any{"name": "pooler", "owner": "app"},
+			}},
+			`databases[1]: repeats the name "pooler" of databases[0]; each database is one object`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			comp := oam.Component{Name: "db", Type: "postgresql", Properties: tc.props}
+			_, err := components.PostgresqlRule{}.LowerComponent(&comp, oam.LoweringContext{Namer: oam.NewNameAllocator()})
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // The rule orders the Pooler and the Databases after the Cluster with a
 // dependency policy only when the document already orders its components: any
 // dependency edge switches the transform to one bundle per component, which
