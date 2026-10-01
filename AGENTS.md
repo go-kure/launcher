@@ -414,7 +414,7 @@ The go-kure org governance, design documents, and community files are maintained
   - [OCI Artifact Layout](https://github.com/go-kure/.github/blob/main/docs/design/oci-layout.md) — layout tree conventions
 - **Standards**: [docs/standards.md](https://github.com/go-kure/.github/blob/main/docs/standards.md)
 - **Contributing**: [CONTRIBUTING.md](https://github.com/go-kure/.github/blob/main/CONTRIBUTING.md)
-- **Reusable workflows**: release (`release.yml`, `release-publish.yml`), pr-review, claude — all
+- **Reusable workflows**: release (`release.yml`, `release-publish.yml`, `release-state.yml`), pr-review, claude — all
   hosted in go-kure/.github. Releasing: `docs/releasing.md`, vendored from go-kure/.github's
   `standards/release-process.md` by `scripts/vendor-guard.sh` — edit it there, never here
 - **Reusable workflow reference**: [go-kure/.github AGENTS.md](https://github.com/go-kure/.github/blob/main/AGENTS.md)
