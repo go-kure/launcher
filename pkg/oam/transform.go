@@ -656,9 +656,10 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// applyTraits/lowerDocumentBody. A component a lowering rule synthesized
 		// (Component.synthesized) is exempt, as a sealed trait is in applyTraits: its
 		// properties are the rule's own output, which may carry a reserved value the
-		// rule rendered from LoweringContext.Capabilities. Whatever was authored in
-		// its input was already checked before that rule ran (lowerDocumentBody's
-		// pre-rule check, enforceAuthoredComponentReservations).
+		// rule rendered from LoweringContext.Capabilities. A rule's output is marked
+		// synthesized only when its input was already checked before that rule ran
+		// (lowerDocumentBody's pre-rule check, enforceAuthoredComponentReservations);
+		// a schema-less rule's output is checked here like an authored component.
 		if p, ok := handler.(PropertySchemaProvider); ok && !component.synthesized {
 			if err := enforcePlatformReserved(p.PropertySchema(), component.Properties, "properties"); err != nil {
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}

@@ -45,9 +45,15 @@ func netpolCapability() TransformContext {
 // rendersReservedComponentRule lowers a "renders-reserved" component into the
 // component type named by target, writing the reserved property itself from the
 // capability rendering — the case createApplications' former KNOWN LIMITATION named.
+// It declares a schema, so its authored input is checked before it runs and its
+// output counts as synthesized.
 type rendersReservedComponentRule struct{ target string }
 
 func (rendersReservedComponentRule) ComponentType() string { return "renders-reserved" }
+
+func (rendersReservedComponentRule) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{}
+}
 
 func (r rendersReservedComponentRule) LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error) {
 	return LoweringResult{Components: []Component{{
@@ -82,16 +88,78 @@ func (r rendersReservedDocRule) LowerDocument(doc *Application, lctx LoweringCon
 }
 
 // rendersReservedTraitRule is the same at trait position: a trait rule may emit a
-// whole component, here one carrying the reserved property.
+// whole component, here one carrying the reserved property. It declares a schema too.
 type rendersReservedTraitRule struct{}
 
 func (rendersReservedTraitRule) TraitType() string { return "renders-reserved-sidecar" }
+
+func (rendersReservedTraitRule) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{}
+}
 
 func (rendersReservedTraitRule) LowerTrait(_ *Trait, lctx LoweringContext) (LoweringResult, error) {
 	return LoweringResult{Components: []Component{{
 		Name:       "sidecar",
 		Type:       "reserved-sink",
 		Properties: map[string]any{"image": "envoy", "networkPolicy": renderedNetworkPolicy(lctx)},
+	}}}, nil
+}
+
+// passThroughComponentRule declares no schema and copies its authored properties
+// into a reserved-sink component: nothing checked them before it ran, so its output
+// is not synthesized.
+type passThroughComponentRule struct{}
+
+func (passThroughComponentRule) ComponentType() string { return "pass-through" }
+
+func (passThroughComponentRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: comp.Name, Type: "reserved-sink", Properties: comp.Properties}}}, nil
+}
+
+// passThroughTraitRule is the same at trait position: no schema, and it copies the
+// authored trait properties into a component it emits.
+type passThroughTraitRule struct{}
+
+func (passThroughTraitRule) TraitType() string { return "pass-through-sidecar" }
+
+func (passThroughTraitRule) LowerTrait(trait *Trait, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: "web", Type: "reserved-sink", Properties: trait.Properties}}}, nil
+}
+
+// replacingComponentsDocRule replaces doc.Spec.Components with a fresh slice holding
+// a component that carries the rule-written reserved value, and emits that slice.
+// The elements are new, so they are this rule's output, not forwarded input.
+type replacingComponentsDocRule struct{}
+
+func (replacingComponentsDocRule) Kind() string { return "Replacing" }
+
+func (replacingComponentsDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
+	doc.Spec.Components = []Component{{
+		Name:       "web",
+		Type:       "reserved-sink",
+		Properties: map[string]any{"image": "nginx", "networkPolicy": renderedNetworkPolicy(lctx)},
+	}}
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name, Namespace: doc.Metadata.Namespace},
+		Spec:       ApplicationSpec{Components: doc.Spec.Components},
+	}}}, nil
+}
+
+// retypingDocRule rebuilds the first component by value as a reserved-sink,
+// copying its authored properties.
+type retypingDocRule struct{}
+
+func (retypingDocRule) Kind() string { return "Retyping" }
+
+func (retypingDocRule) LowerDocument(doc *Application, _ LoweringContext) (LoweringResult, error) {
+	comp := doc.Spec.Components[0]
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name, Namespace: doc.Metadata.Namespace},
+		Spec:       ApplicationSpec{Components: []Component{{Name: comp.Name, Type: "reserved-sink", Properties: comp.Properties}}},
 	}}}, nil
 }
 
@@ -244,4 +312,56 @@ func TestLower_DocumentRuleChecksAuthoredComponentAgainstItsLoweringRule(t *test
 
 	_, err := tr.lower(singleComponentApp("Wrapper", "reserving-component", authoredNetworkPolicy()), TransformContext{})
 	expectPlatformReserved(t, err)
+}
+
+// TestTransform_SchemaLessComponentRulePassThroughIsRejected: a ComponentLoweringRule
+// that declares no schema had nothing check its authored input, so the component it
+// emits is not synthesized, and an authored reserved value it copied through is
+// rejected at the handler.
+func TestTransform_SchemaLessComponentRulePassThroughIsRejected(t *testing.T) {
+	tr := reservedSinkTransformer()
+	tr.RegisterComponentLowering(passThroughComponentRule{})
+
+	_, err := tr.Transform(singleComponentApp("Application", "pass-through", authoredNetworkPolicy()), TransformContext{})
+	expectPlatformReserved(t, err)
+}
+
+// TestTransform_SchemaLessTraitRulePassThroughIsRejected is the same at trait
+// position: a schema-less trait rule's emitted component is not synthesized.
+func TestTransform_SchemaLessTraitRulePassThroughIsRejected(t *testing.T) {
+	tr := reservedSinkTransformer()
+	tr.RegisterTraitLowering(passThroughTraitRule{})
+
+	app := singleComponentApp("Application", "reserved-sink", map[string]any{"image": "nginx"})
+	app.Spec.Components[0].Name = "main"
+	app.Spec.Components[0].Traits = []Trait{{Type: "pass-through-sidecar", Properties: authoredNetworkPolicy()}}
+	_, err := tr.Transform(app, TransformContext{})
+	expectPlatformReserved(t, err)
+}
+
+// TestTransform_DocumentRuleCopyingUncheckedComponentIsRejected: before a document
+// rule, a component whose type has no schema is not checked, so the rule's output is
+// not synthesized and an authored reserved value it copied into a reserved-sink is
+// rejected at the handler.
+func TestTransform_DocumentRuleCopyingUncheckedComponentIsRejected(t *testing.T) {
+	tr := reservedSinkTransformer()
+	tr.RegisterComponentLowering(passThroughComponentRule{})
+	tr.RegisterDocumentLowering(retypingDocRule{})
+
+	_, err := tr.Transform(singleComponentApp("Retyping", "pass-through", authoredNetworkPolicy()), TransformContext{})
+	expectPlatformReserved(t, err)
+}
+
+// TestTransform_DocumentRuleReplacingComponentsIsSynthesized: the forwarded-component
+// snapshot is taken before the rule runs, so a rule that replaces
+// doc.Spec.Components with fresh elements and emits them is recognised as having
+// produced them, and the reserved value it wrote is accepted.
+func TestTransform_DocumentRuleReplacingComponentsIsSynthesized(t *testing.T) {
+	tr := reservedSinkTransformer()
+	tr.RegisterDocumentLowering(replacingComponentsDocRule{})
+
+	app := &Application{APIVersion: SupportedAPIVersion, Kind: "Replacing", Metadata: Metadata{Name: "myapp", Namespace: "test"}}
+	if _, err := tr.Transform(app, netpolCapability()); err != nil {
+		t.Fatalf("components a document rule put in place of the input's must be synthesized, got: %v", err)
+	}
 }
