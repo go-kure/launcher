@@ -281,9 +281,9 @@ CI-enforced by the always-on `issue-refs` job (`make check-issue-refs`, also in 
 and an ownerless `name#N` of two to five digits (`launcher#N`, `kure#N`, also `pre-launcher#N`),
 in tracked `*.go`, `*.md`, `*.sh`, `*.yml`, `*.yaml`, `*.toml` and `*.json` files. Exempt:
 `CHANGELOG.md` (generated from commit subjects) and anything under a `testdata/` directory.
-Ignored within a line: a Markdown link target `](...)` without whitespace (so `](#12-foo)` and
-`](design.md#12-foo)` pass), a URL (`https://example.com/#12-foo`) and a printf verb with the `#`
-flag (`%+#12.6g`). A line that is genuinely not a reference (a quoted error
+Ignored within a line: a Markdown link target `](...)` without whitespace or quotes (so `](#12-foo)`
+and `](design.md#12-foo)` pass), a URL (`https://example.com/#12-foo`), a printf verb with the `#`
+flag (`%+#12.6g`, `%#12[1]x`) and a shell prefix trim (`${port#80}`). A line that is genuinely not a reference (a quoted error
 message, a fixture string, an all-digit colour such as `#123`) takes an `allow-ref` pragma
 anywhere on that line.
 
@@ -291,6 +291,8 @@ Known gaps — the guard does not catch these, so a reviewer must:
 
 - a single-digit `#N` or `name#N`, left alone because prose such as "step #1" or a message such
   as "resolve#2" would trip it;
+- an ownerless reference to an all-numeric repository name (`123#456`), left alone because
+  digits on both sides of `#` also occur in ordinary text;
 - any `owner/repo#N` passes, so a reference qualified with the wrong owner or repository is not
   caught.
 
