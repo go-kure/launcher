@@ -158,7 +158,7 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 		return nil, err
 	}
 	config.Args = args
-	ports, err := parseMainContainerPorts(props)
+	ports, err := parseContainerPorts(props)
 	if err != nil {
 		return nil, err
 	}
@@ -216,6 +216,9 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.Sidecars = sidecars
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
+		return nil, err
+	}
+	if err := checkPodPortNames(ports, sidecars); err != nil {
 		return nil, err
 	}
 
@@ -506,13 +509,20 @@ var containerPortProtocols = []corev1.Protocol{corev1.ProtocolTCP, corev1.Protoc
 // container's corev1.ContainerPort list, without the node-binding hostPort and
 // hostIP.
 func schemaMainContainerPorts() oam.PropertySchema {
+	return schemaContainerPorts("Ports the main container declares. A named port is what the main container's probes and lifecycle hooks may address by name. Names and containerPort/protocol pairs must be unique; a name must also be unique across the pod's containers.")
+}
+
+// schemaContainerPorts describes one container's `ports` list, the main
+// container's or a sidecar's (schemaSidecars): the entries parseContainerPorts
+// reads, under description.
+func schemaContainerPorts(description string) oam.PropertySchema {
 	protoEnum := make([]any, 0, len(containerPortProtocols))
 	for _, p := range containerPortProtocols {
 		protoEnum = append(protoEnum, string(p))
 	}
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeArray,
-		Description: "Ports the main container declares. A named port is what the main container's probes and lifecycle hooks may address by name. Names and containerPort/protocol pairs must be unique.",
+		Description: description,
 		Items: &oam.PropertySchema{
 			Type:        oam.PropertyTypeObject,
 			Description: "One container port.",
@@ -525,13 +535,15 @@ func schemaMainContainerPorts() oam.PropertySchema {
 	}
 }
 
-// parseMainContainerPorts reads deployment's `ports`: each entry's keys,
-// containerPort range, name syntax and protocol are checked as the API server
-// checks a container port, and a repeated name is refused as it refuses one. A
-// repeated containerPort/protocol pair is refused too, which the API server
-// only warns about: the second entry declares nothing the first did not. An
-// absent or empty list declares no ports.
-func parseMainContainerPorts(props map[string]any) ([]corev1.ContainerPort, error) {
+// parseContainerPorts reads one container's `ports` from raw: deployment's main
+// container or a sidecar (parseSidecars). Each entry's keys, containerPort
+// range, name syntax and protocol are checked as the API server checks a
+// container port, and a repeated name is refused as it refuses one. A repeated
+// containerPort/protocol pair is refused too, which the API server only warns
+// about: the second entry declares nothing the first did not. An absent or
+// empty list declares no ports. A name repeated in another container of the
+// pod is checkPodPortNames' to refuse.
+func parseContainerPorts(props map[string]any) ([]corev1.ContainerPort, error) {
 	entries, _, err := parseObjectList(props, "ports")
 	if err != nil {
 		return nil, err

@@ -27,7 +27,9 @@ func TestWorkerRule_ComponentType(t *testing.T) {
 // schema byte for byte. testdata/worker-property-schema.json was captured from
 // the former WorkerHandler.PropertySchema before worker became a lowering rule;
 // the move must not change what HandlerSchemas publishes for "worker". Every
-// PropertySchema field carries a json tag, so the encoding covers all of it.
+// PropertySchema field carries a json tag, so the encoding covers all of it. A
+// deliberate change to a schema worker shares updates the capture with it:
+// go-kure/launcher#660 closed the sidecar port entry and added its protocol enum.
 func TestWorkerRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/worker-property-schema.json")
 	if err != nil {

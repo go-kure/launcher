@@ -1545,26 +1545,31 @@
         },
         "ports": {
           "type": "array",
-          "description": "Ports the sidecar exposes. A named port is what the sidecar's own probes and lifecycle hooks may address by name.",
+          "description": "Ports the sidecar exposes. A named port is what the sidecar's own probes and lifecycle hooks may address by name. Names and containerPort/protocol pairs must be unique; a name must also be unique across the pod's containers.",
           "items": {
             "type": "object",
-            "description": "A single container port.",
+            "description": "One container port.",
             "properties": {
               "containerPort": {
                 "type": "integer",
-                "description": "Port number the sidecar listens on.",
+                "description": "Port number the container listens on, 1-65535.",
                 "required": true
               },
               "name": {
                 "type": "string",
-                "description": "Port name, addressable by this sidecar's probes and lifecycle hooks."
+                "description": "Port name (an IANA service name: at most 15 lowercase alphanumerics and '-', with at least one letter)."
               },
               "protocol": {
                 "type": "string",
-                "description": "Port protocol; defaults to TCP."
+                "description": "TCP, UDP or SCTP. Defaults to TCP.",
+                "default": "TCP",
+                "enum": [
+                  "TCP",
+                  "UDP",
+                  "SCTP"
+                ]
               }
-            },
-            "additionalProperties": true
+            }
           }
         },
         "probes": {

@@ -202,6 +202,9 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, vcts), initContainers, sidecars); err != nil {
 		return nil, err
 	}
+	if err := checkPodPortNames(config.mainContainerPorts(), sidecars); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := parsePodSpec(props, false)
 	if err != nil {
@@ -439,6 +442,15 @@ func checkClaimTemplateCollisions(vcts []VolumeClaimTemplate, volumes []corev1.V
 	return nil
 }
 
+// mainContainerPorts is the main container's port, named "tcp", or none when
+// no port is configured.
+func (c *StatefulsetConfig) mainContainerPorts() []corev1.ContainerPort {
+	if c.Port <= 0 {
+		return nil
+	}
+	return []corev1.ContainerPort{{Name: "tcp", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
+}
+
 func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.StatefulSet, error) {
 	// Claim-template mounts (and devices) precede the authored volume ones, as
 	// before.
@@ -449,16 +461,12 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	devices := make([]corev1.VolumeDevice, 0, len(vctDevices)+len(c.VolumeDevices))
 	devices = append(devices, vctDevices...)
 	devices = append(devices, c.VolumeDevices...)
-	var ports []corev1.ContainerPort
-	if c.Port > 0 {
-		ports = []corev1.ContainerPort{{Name: "tcp", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
-	}
 	container, err := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
 		Command:         c.Command,
 		Args:            c.Args,
 		Resources:       c.Resources,
-		Ports:           ports,
+		Ports:           c.mainContainerPorts(),
 		Env:             c.Env,
 		EnvFrom:         c.EnvFrom,
 		Probes:          c.Probes,
