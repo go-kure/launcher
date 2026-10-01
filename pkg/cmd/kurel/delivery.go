@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/spf13/cobra"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -258,6 +261,9 @@ func generateDelivery(cluster *stack.Cluster, opts deliveryOptions) (*deliveryOu
 		}
 		out.flux = append(out.flux, &objs[i])
 	}
+	if err := out.checkDurations(); err != nil {
+		return nil, err
+	}
 
 	for _, l := range ix.Units() {
 		bundles := l.OriginBundles()
@@ -277,6 +283,80 @@ func generateDelivery(cluster *stack.Cluster, opts deliveryOptions) (*deliveryOu
 		return nil, err
 	}
 	return out, nil
+}
+
+// fluxDurationPattern is the pattern Flux's CRDs put on a duration field:
+// Kustomization spec.interval, spec.retryInterval and spec.timeout
+// (kustomize-controller api/v1 kustomization_types.go) and OCIRepository
+// spec.interval (source-controller api/v1 ocirepository_types.go). It is the
+// pattern pkg/oam/internal/fluxduration checks authored durations against;
+// that package is internal to pkg/oam, so kurel cannot import it.
+var fluxDurationPattern = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`)
+
+// ociTimeoutPattern is OCIRepository spec.timeout's narrower pattern, which
+// has no h unit (source-controller api/v1 ocirepository_types.go).
+var ociTimeoutPattern = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?(ms|s|m))+$`)
+
+// durationField is one metav1.Duration field of a generated delivery object.
+// value is nil when the field is unset, which leaves it out of the output.
+type durationField struct {
+	path    string
+	value   *metav1.Duration
+	pattern *regexp.Regexp
+}
+
+// deliveryDurations returns every metav1.Duration field of a generated
+// delivery object. GenerateFromLayout emits only Kustomizations and the
+// sources their SourceRefs name, and generateDelivery names an OCIRepository
+// for every bundle, so any other type is refused rather than left unchecked.
+func deliveryDurations(o client.Object) ([]durationField, error) {
+	switch o := o.(type) {
+	case *kustv1.Kustomization:
+		return []durationField{
+			{"spec.interval", &o.Spec.Interval, fluxDurationPattern},
+			{"spec.retryInterval", o.Spec.RetryInterval, fluxDurationPattern},
+			{"spec.timeout", o.Spec.Timeout, fluxDurationPattern},
+		}, nil
+	case *sourcev1.OCIRepository:
+		return []durationField{
+			{"spec.interval", &o.Spec.Interval, fluxDurationPattern},
+			{"spec.timeout", o.Spec.Timeout, ociTimeoutPattern},
+		}, nil
+	}
+	return nil, errors.Errorf("unexpected delivery object type %T: its duration fields are not checked", o)
+}
+
+// checkDurations refuses an output with a delivery object whose duration
+// Flux's CRD would refuse. A metav1.Duration is written as Duration.String(),
+// not as authored, and that form leaves Flux's pattern below one millisecond:
+// a reconciliation policy's interval of 0.5ms, which the policy accepts as
+// authored, is written as 500µs. A written 0s is left alone, also for a
+// positive value below one nanosecond that time.ParseDuration truncates to
+// zero: metav1.Duration unmarshals with time.ParseDuration too, so Flux would
+// read that authored text as zero as well.
+func (d *deliveryOutput) checkDurations() error {
+	for _, o := range d.flux {
+		fields, err := deliveryDurations(*o)
+		if err != nil {
+			return errors.Wrapf(err, "%s", identityOf(*o))
+		}
+		for _, f := range fields {
+			if f.value == nil {
+				continue
+			}
+			emitted := f.value.Duration.String()
+			if f.pattern.MatchString(emitted) {
+				continue
+			}
+			why := ""
+			if f.value.Duration > 0 && f.value.Duration < time.Millisecond {
+				why = ": it is below Flux's millisecond resolution, so it is written in µs or ns; use at least 1ms"
+			}
+			return errors.Errorf("delivery object %s: %s is written as %q, which Flux's duration pattern %s refuses%s",
+				identityOf(*o), f.path, emitted, f.pattern, why)
+		}
+	}
+	return nil
 }
 
 // objectIdentity is what the API server tells two objects apart by: API
