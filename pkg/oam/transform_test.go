@@ -1551,6 +1551,23 @@ func TestApplyAutoHealthChecks_DeploymentKindRegistered(t *testing.T) {
 	}
 }
 
+// TestApplyAutoHealthChecks_CnpgClusterKindRegistered pins the kind-named
+// "cnpg-cluster" component (go-kure/launcher#281) into componentHealthCheckGVK.
+// The Cluster is an application-namespace CR, not a Flux control-plane one, so
+// the check stays in the app namespace even when a flux namespace is set. A
+// type missing from the map is skipped silently and every golden stays
+// byte-identical, because health checks live on the bundle.
+func TestApplyAutoHealthChecks_CnpgClusterKindRegistered(t *testing.T) {
+	app := stack.NewApplication("db", "demo", &plainHCConfig{})
+	cluster := leafClusterWith(app)
+	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "cnpg-cluster"), nil, "flux-system")
+
+	want := stack.HealthCheck{APIVersion: "postgresql.cnpg.io/v1", Kind: "Cluster", Name: "db", Namespace: "demo"}
+	if hc := cluster.Node.Bundle.HealthChecks; len(hc) != 1 || hc[0] != want {
+		t.Errorf("health checks %+v, want [%+v]", hc, want)
+	}
+}
+
 // TestApplyAutoHealthChecks_JobKindRegistered pins the "job" component type into
 // componentHealthCheckGVK (go-kure/launcher#344). A Job is a run-to-completion
 // workload, so the check does not wait on a steady ready state — kstatus reads
