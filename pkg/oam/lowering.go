@@ -1066,8 +1066,8 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		// component) is forwarding its already-authored traits too, not synthesizing
 		// them — same reasoning as originalTraits below for the component-position
 		// case, extended to however many components the document rule forwards.
-		// Taken before LowerDocument, so a rule that replaces doc.Spec.Components
-		// with a fresh slice and emits it is not mistaken for one that forwards.
+		// Taken before LowerDocument, as this says; a rule must not mutate doc
+		// (LoweringContext.Document), so for a conforming rule the order is moot.
 		originalComponents := doc.Spec.Components
 		// Same snapshot, for the identical reason, on the policy side (C1 finding on
 		// PR #283: the policy loop below stamped Rule unconditionally while the
