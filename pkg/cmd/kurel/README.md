@@ -117,7 +117,7 @@ and precedence rules.
 |------|-------------|
 | `--profile` (required) | Path to the `ClusterProfile` YAML. |
 | `-o, --output` | Output directory (default: stdout). |
-| `-n, --namespace` | Namespace override. |
+| `-n, --namespace` | Namespace override; must be a DNS-1123 label (at most 63 characters, no dots), like `metadata.namespace`. |
 | `--cluster-id` | Cluster identifier (default `local`). |
 | `--values` | Path to a values YAML file (requires a `kurel.yaml` package). |
 | `--set key=value` | Set a parameter value (repeatable; requires `kurel.yaml`). |

@@ -295,6 +295,31 @@ func TestBuildCommand_NamespaceOverride(t *testing.T) {
 	}
 }
 
+// TestBuildCommand_NamespaceOverrideMustBeDNS1123Label guards go-kure/launcher#616: a
+// --namespace value the apiserver would refuse (dotted, or over 63 characters) fails the
+// build, and the error a CLI user sees names the value, not a Go field.
+func TestBuildCommand_NamespaceOverrideMustBeDNS1123Label(t *testing.T) {
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", testAppYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath, "--namespace", "team.prod"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected an error for --namespace team.prod, output: %s", out.String())
+	}
+	want := `transforming application: namespace "team.prod" is not a valid DNS-1123 label ` +
+		`(a Kubernetes namespace is at most 63 lowercase letters, digits or '-', starts and ends with a letter or digit, and contains no dots)`
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
 // kurel resolves the tier annotation under the launcher.gokure.dev domain (not the library
 // default gokure.dev). A component annotated launcher.gokure.dev/tier with an invalid value
 // must therefore fail the build — proving Domain is wired to kurelDomain. With the default

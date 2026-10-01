@@ -29,8 +29,8 @@ type TransformContext struct {
 	Environment   string
 	AppVersion    string
 	TeamID        string
-	Namespace     string // overrides OAM metadata.namespace when set
-	FluxNamespace string // Flux control-plane namespace; "" means use component namespace
+	Namespace     string // overrides OAM metadata.namespace when set; a DNS-1123 label
+	FluxNamespace string // Flux control-plane namespace; "" means use component namespace; a DNS-1123 label
 	Policy        Policy
 	Capabilities  map[string]CapabilityBinding
 	// EgressPeers carries downstream-supplied, graph-derived egress destinations keyed
@@ -523,6 +523,15 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		if errs := validation.IsQualifiedName(ctx.ComponentLabelKey); len(errs) > 0 {
 			return nil, nil, errors.Errorf("invalid TransformContext.ComponentLabelKey %q: %s", ctx.ComponentLabelKey, strings.Join(errs, "; "))
 		}
+	}
+	// The namespace override (kurel build --namespace) and the Flux namespace are stamped
+	// onto metadata.namespace as given, so both must be DNS-1123 labels. The messages name
+	// the value as a CLI reader knows it, not the field.
+	if err := checkNamespaceLabel("namespace", ctx.Namespace); err != nil {
+		return nil, nil, err
+	}
+	if err := checkNamespaceLabel("flux namespace", ctx.FluxNamespace); err != nil {
+		return nil, nil, err
 	}
 
 	// authoredTraitTypes is captured BEFORE t.lower() runs (F7): a Policy that

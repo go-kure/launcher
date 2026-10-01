@@ -178,9 +178,9 @@ func (t *Transformer) LowerRawsWithSteps(raws []json.RawMessage, ctx TransformCo
 				"raw input %d: metadata.name %q is not a valid DNS-1123 subdomain", i, env.Metadata.Name)}
 		}
 		if env.Metadata.Namespace != "" {
-			if errs := validation.IsDNS1123Subdomain(env.Metadata.Namespace); len(errs) > 0 {
+			if errs := validation.IsDNS1123Label(env.Metadata.Namespace); len(errs) > 0 {
 				return nil, nil, &LoweringError{Origin: Origin{Document: env.Metadata.Name, DocumentKind: env.Kind, Namespace: env.Metadata.Namespace}, Cause: errors.Errorf(
-					"raw input %d: metadata.namespace %q is not a valid DNS-1123 subdomain", i, env.Metadata.Namespace)}
+					"raw input %d: metadata.namespace %q is not a valid DNS-1123 label (%s)", i, env.Metadata.Namespace, namespaceLabelRule)}
 			}
 		}
 

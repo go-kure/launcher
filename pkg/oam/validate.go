@@ -130,9 +130,9 @@ func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, 
 	}
 
 	if app.Metadata.Namespace != "" {
-		if errs := validation.IsDNS1123Subdomain(app.Metadata.Namespace); len(errs) > 0 {
-			return oamValidationError("metadata.namespace", fmt.Sprintf("metadata.namespace %q is not a valid DNS-1123 subdomain",
-				app.Metadata.Namespace))
+		if errs := validation.IsDNS1123Label(app.Metadata.Namespace); len(errs) > 0 {
+			return oamValidationError("metadata.namespace", fmt.Sprintf("metadata.namespace %q is not a valid DNS-1123 label (%s)",
+				app.Metadata.Namespace, namespaceLabelRule))
 		}
 	}
 
@@ -158,6 +158,23 @@ func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, 
 	}
 
 	return validateComponentLabelValues(app.Spec.Components)
+}
+
+// namespaceLabelRule spells out the Kubernetes namespace rule (a DNS-1123 label) in every
+// namespace refusal, so a reader who wrote a dotted or over-long namespace learns why it is
+// refused; the apiserver would refuse the same namespace.
+const namespaceLabelRule = "a Kubernetes namespace is at most 63 lowercase letters, digits or '-', starts and ends with a letter or digit, and contains no dots"
+
+// checkNamespaceLabel refuses a set namespace that is not a DNS-1123 label. what names the
+// value as its reader knows it ("namespace", "flux namespace"); "" passes.
+func checkNamespaceLabel(what, namespace string) error {
+	if namespace == "" {
+		return nil
+	}
+	if errs := validation.IsDNS1123Label(namespace); len(errs) > 0 {
+		return errors.Errorf("%s %q is not a valid DNS-1123 label (%s)", what, namespace, namespaceLabelRule)
+	}
+	return nil
 }
 
 // toTypeSet builds a membership set from a type-name slice. Returns nil for an empty

@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -326,6 +327,43 @@ func TestValidate_NamespaceInvalidDNS1123(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not a valid DNS-1123") {
 		t.Errorf("error = %q, want to contain 'not a valid DNS-1123'", err.Error())
+	}
+}
+
+// TestValidate_NamespaceMustBeDNS1123Label guards go-kure/launcher#616: a Kubernetes
+// namespace is a DNS-1123 label, so a dotted or over-63-character namespace — both valid
+// subdomains — is refused, while a 63-character label is accepted.
+func TestValidate_NamespaceMustBeDNS1123Label(t *testing.T) {
+	cases := []struct {
+		namespace string
+		wantErr   bool
+	}{
+		{namespace: "team.prod", wantErr: true},
+		{namespace: strings.Repeat("a", 64), wantErr: true},
+		{namespace: strings.Repeat("a", 63), wantErr: false},
+	}
+	for _, tc := range cases {
+		app := &Application{
+			APIVersion: SupportedAPIVersion,
+			Kind:       "Application",
+			Metadata:   Metadata{Name: "test-app", Namespace: tc.namespace},
+			Spec: ApplicationSpec{
+				Components: []Component{
+					{Name: "web", Type: "webservice", Properties: map[string]any{"image": "nginx:1.25"}},
+				},
+			},
+		}
+		err := validate(app)
+		if !tc.wantErr {
+			if err != nil {
+				t.Errorf("namespace %q: unexpected error: %v", tc.namespace, err)
+			}
+			continue
+		}
+		want := fmt.Sprintf("metadata.namespace %q is not a valid DNS-1123 label (%s)", tc.namespace, namespaceLabelRule)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("namespace %q: error = %v, want it to contain %q", tc.namespace, err, want)
+		}
 	}
 }
 
