@@ -731,6 +731,114 @@ func TestDeliveryRefusesListMemberCollision(t *testing.T) {
 	}
 }
 
+// clusterScopedAppYAML is an application "shop" split by a dependency policy
+// into artifacts shop-a and shop-b, each carrying, inside nested envelopes, a
+// Namespace written with a namespace: %s/%s in shop-a, %s/%s in shop-b
+// (namespace/name).
+const clusterScopedAppYAML = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  components:
+    - name: a
+      type: manifests
+      properties:
+        inline: |
+          apiVersion: example.com/v1
+          kind: ObjectsList
+          items:
+            - apiVersion: example.com/v1
+              kind: Bundle
+              metadata:
+                name: wrapped-a
+                namespace: shop
+              items:
+                - apiVersion: v1
+                  kind: Namespace
+                  metadata:
+                    name: %[2]s
+                    namespace: %[1]s
+                    labels:
+                      owner: a
+    - name: b
+      type: manifests
+      properties:
+        inline: |
+          apiVersion: example.com/v1
+          kind: ObjectsList
+          items:
+            - apiVersion: example.com/v1
+              kind: Bundle
+              metadata:
+                name: wrapped-b
+                namespace: shop
+              items:
+                - apiVersion: v1
+                  kind: Namespace
+                  metadata:
+                    name: %[4]s
+                    namespace: %[3]s
+                    labels:
+                      owner: b
+  policies:
+    - name: order
+      type: dependency
+      properties:
+        rules:
+          - component: b
+            dependsOn: [a]
+`
+
+// TestDeliveryRefusesClusterScopedCollision checks, through the CLI, that two
+// artifacts carrying one cluster-scoped object are refused before anything is
+// written even when each writes it with a different namespace: the API server
+// clears a cluster-scoped object's namespace, so both Kustomizations would
+// manage the one Namespace. The control, two Namespaces of different names, is
+// delivered.
+func TestDeliveryRefusesClusterScopedCollision(t *testing.T) {
+	profile := filepath.Join(deliveryTestdata, "cluster.yaml")
+	t.Run("one Namespace in two namespaces", func(t *testing.T) {
+		appPath := writeTempFile(t, t.TempDir(), "app.yaml",
+			fmt.Sprintf(clusterScopedAppYAML, "first", "shared", "second", "shared"))
+		out := filepath.Join(t.TempDir(), "out")
+		stdout, err := runKurel(t, "build", appPath, "--profile", profile, "-o", out, "--oci-repository", testOCIRepository)
+		if err == nil {
+			t.Fatal("build accepted one Namespace in two artifacts")
+		}
+		t.Logf("refused: %v", err)
+		for _, want := range []string{`artifacts "shop-a" and "shop-b" both carry Namespace /shared`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not contain %q", err, want)
+			}
+		}
+		if stdout != "" {
+			t.Errorf("wrote to stdout before refusing:\n%s", stdout)
+		}
+		if _, err := os.Stat(out); !os.IsNotExist(err) {
+			t.Errorf("created the output directory before refusing (stat error %v)", err)
+		}
+	})
+	t.Run("control: two Namespaces", func(t *testing.T) {
+		appPath := writeTempFile(t, t.TempDir(), "app.yaml",
+			fmt.Sprintf(clusterScopedAppYAML, "first", "shared-a", "second", "shared-b"))
+		out := t.TempDir()
+		if _, err := runKurel(t, "build", appPath, "--profile", profile, "-o", out, "--oci-repository", testOCIRepository); err != nil {
+			t.Fatalf("delivery build refused: %v", err)
+		}
+		for artifact, name := range map[string]string{"shop-a": "shared-a", "shop-b": "shared-b"} {
+			manifests, err := os.ReadFile(filepath.Join(out, artifact, artifactManifestsFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(manifests), "name: "+name) {
+				t.Errorf("artifact %s does not carry Namespace %s:\n%s", artifact, name, manifests)
+			}
+		}
+	})
+}
+
 // readObjects is kustomize-controller's decoder, ReadObjects in
 // github.com/fluxcd/pkg/ssa v0.76.2 (utils/object.go:44-77, with
 // IsKubernetesObject and IsKustomization from utils/is.go:71-82 inlined),
@@ -1054,6 +1162,11 @@ func TestCheckCollisionsBetweenArtifacts(t *testing.T) {
 			[]string{`artifacts "a" and "b" both carry Widget.example.com shop/w`}},
 		{"same cluster-scoped object", []*client.Object{obj("v1", "Namespace", "", "shop")}, []*client.Object{obj("v1", "Namespace", "", "shop")},
 			[]string{`artifacts "a" and "b" both carry Namespace /shop`}},
+		// The API server clears a cluster-scoped object's namespace.
+		{"same cluster-scoped object written in two namespaces", []*client.Object{obj("v1", "Namespace", "first", "shop")}, []*client.Object{list(obj("v1", "Namespace", "second", "shop"))},
+			[]string{`artifacts "a" and "b" both carry Namespace /shop (a member of list List /)`}},
+		// A kind kustomize's built-in schema does not know keeps its namespace.
+		{"unknown kind in two namespaces", []*client.Object{obj("example.com/v1", "Cluster", "first", "c")}, []*client.Object{obj("example.com/v1", "Cluster", "second", "c")}, nil},
 		{"a List member and an object", []*client.Object{cm("shop")}, []*client.Object{list(cm("shop"))},
 			[]string{`artifacts "a" and "b" both carry ConfigMap shop/settings (a member of list List /)`}},
 		{"same object twice in one artifact", []*client.Object{cm("shop"), cm("shop")}, nil,

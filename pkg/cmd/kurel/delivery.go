@@ -329,8 +329,9 @@ func deliveryDurations(o client.Object) ([]durationField, error) {
 // checkDurations refuses an output with a delivery object whose duration
 // Flux's CRD would refuse. A metav1.Duration is written as Duration.String(),
 // not as authored, and that form leaves Flux's pattern below one millisecond:
-// a reconciliation policy's interval of 0.5ms, which the policy accepts as
-// authored, is written as 500µs. A written 0s is left alone, also for a
+// an interval of 0.5ms is written as 500µs. The reconciliation policy refuses
+// such a value itself; this is the delivery path's own check, whatever set the
+// duration. A written 0s is left alone, also for a
 // positive value below one nanosecond that time.ParseDuration truncates to
 // zero: metav1.Duration unmarshals with time.ParseDuration too, so Flux would
 // read that authored text as zero as well.
@@ -366,9 +367,19 @@ type objectIdentity struct {
 	group, kind, namespace, name string
 }
 
+// identityOf leaves the namespace out for a kind kustomize's built-in OpenAPI
+// schema knows to be cluster-scoped (resid.Gvk.IsClusterScoped, as
+// kustomizeResID reads it): the API server clears metadata.namespace on a
+// cluster-scoped object, so a Namespace written with two different namespaces
+// is still one object. A cluster-scoped kind the schema does not know, such
+// as a CRD's, keeps its namespace.
 func identityOf(o client.Object) objectIdentity {
 	gvk := o.GetObjectKind().GroupVersionKind()
-	return objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: o.GetNamespace(), name: o.GetName()}
+	namespace := o.GetNamespace()
+	if resid.NewGvk(gvk.Group, gvk.Version, gvk.Kind).IsClusterScoped() {
+		namespace = ""
+	}
+	return objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: namespace, name: o.GetName()}
 }
 
 func (id objectIdentity) String() string {
@@ -406,7 +417,8 @@ func (id objectIdentity) String() string {
 // GenerateFromLayout emits a source shared by two units once and refuses two
 // different definitions of it.
 //
-// Namespaces are compared exactly. An artifact object with no namespace is
+// Namespaces are compared exactly, except that identityOf leaves the namespace
+// out for a kind known to be cluster-scoped. An artifact object with no namespace is
 // not read as the delivery objects' namespace: the generated Kustomizations
 // set no spec.targetNamespace and the artifact's kustomization.yaml no
 // namespace, and kustomize-controller's server-side apply refuses a namespaced
