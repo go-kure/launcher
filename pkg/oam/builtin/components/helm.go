@@ -196,10 +196,7 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, error) {
 // emitted the same one).
 func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmProperties, passthrough map[string]any) (oam.LoweringResult, error) {
 	src := props.Source
-	release := make(map[string]any, len(passthrough)+2)
-	for k, v := range passthrough {
-		release[k] = v
-	}
+	release := maps.Clone(passthrough)
 	if props.ValuesMode != "" {
 		release["valuesMode"] = props.ValuesMode
 	}

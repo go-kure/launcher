@@ -245,7 +245,9 @@ a tier annotation or a `placement` policy may move them into `infra`. A source i
 tier than its consumer would never be applied, because each tier waits on the health checks
 of the tier before it, including the consumer's. In the earliest tier, the source never
 follows a consumer, and a consumer that shares its tier is retried by helm-controller until
-the source is ready. An authored source keeps `defaultTierMap`'s tier.
+the source is ready. A `placement` policy naming the generated source may only keep it in
+`infra`; `TransformWithPolicy` refuses any other tier. An authored source keeps
+`defaultTierMap`'s tier.
 
 A listed type can still decline its check per document by implementing
 `EmitsAutoHealthCheck() bool`. `job` uses it for `suspend: true` — a suspended Job creates no
