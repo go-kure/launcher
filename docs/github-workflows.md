@@ -92,13 +92,20 @@ concurrency:
 validate-manifests  ← kurel build + flux-schema validate (non-blocking, not in `build`'s gate)
 
 PR-only jobs (parallel, non-blocking):
-┌─────────────────┐  ┌────────────┐  ┌─────────────┐
-│ analyze-changes │  │ docs-build │  │ pin-impact  │  ← still feeds `build`
-└─────────────────┘  └────────────┘  └─────────────┘
+┌─────────────────┐  ┌────────────┐
+│ analyze-changes │  │ docs-build │
+└─────────────────┘  └────────────┘
+
+PR and merge-queue job (no needs):
+┌─────────────┐
+│ pin-impact  │  ← still feeds `build`
+└─────────────┘
 ```
 
 On `merge_group` events (merge queue), `lint`/`test`/`build` run against the queue's
-temporary branch — the merged result — before the PR is allowed to land.
+temporary branch — the merged result — before the PR is allowed to land. `pin-impact` is skipped
+on a push; on a merge-queue run it checks only that the merged tree's `go-kure/.github` pins agree
+(see the pin-impact gate below).
 
 ### Which tree a PR run builds
 
@@ -143,7 +150,7 @@ self-test (`make test-verify-merge`).
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) |
-| `pin-impact` | `pin-impact` | 3 min | — | Renders and gates on the real impact of a `go-kure/.github` pin bump: resolves each referenced action's `$GITHUB_ACTION_PATH` script (and the siblings those `source` or run), intersects against the compare diff, fails if a consumed path changed and refuses any shape it cannot resolve (PR only, go-kure/launcher#358) |
+| `pin-impact` | `pin-impact` | 3 min | — | On a merge-queue run, only checks that every `go-kure/.github` reference in the merged tree pins the same commit. On a PR, renders and gates on the real impact of a `go-kure/.github` pin bump: resolves each referenced action's `$GITHUB_ACTION_PATH` script (and the siblings those `source` or run), intersects against the compare diff, fails if a consumed path changed and refuses any shape it cannot resolve (go-kure/launcher#358) |
 | `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
 | `validate-manifests` | `validate-manifests` | 10 min | changes | `kurel build` + `flux schema validate` against the `default` (embedded) and `ecosystem` (schemas.fluxoperator.dev) catalogs for a representative `examples/*.yaml` subset; `continue-on-error: true`, not in `build`'s gate (go-kure/launcher#292) |
@@ -204,7 +211,7 @@ Runs on main and `release/*` branches only (not PRs):
   (`make validate-manifests`, same command locally). `continue-on-error: true` for its first cycle
   and excluded from `build`'s aggregation gate and `DEVELOPMENT.md`'s required-checks list —
   promoting it to required is a deliberate follow-up (go-kure/launcher#292)
-- **Pin-impact gate** — `pin-impact` (PR only) renders a `go-kure/.github` pin bump's real effect
+- **Pin-impact gate** — `pin-impact` renders, on a PR, a `go-kure/.github` pin bump's real effect
   (which `scripts/*.sh` a referenced action actually runs, whether the compare touches any of them)
   into the job summary and fails on a match, so a bump touching consumed code cannot merge
   unreviewed. The old pins are read from the first parent of the checked-out test merge, the base
@@ -346,8 +353,8 @@ Runs on main and `release/*` branches only (not PRs):
     `timeout`), an environment assignment (`VAR=1 "$GITHUB_ACTION_PATH/…"`), a shell option
     (`bash --noprofile`), a `{ …; }` group or a `case` arm.
 
-  The refusal paths, plus the no-change, inert, affected and acknowledged outcomes, are pinned by
-  hermetic cases in `scripts/test/cases/` — the same cases, under the same file names, as
+  The refusal paths, plus the no-change, inert, affected and acknowledged outcomes and the
+  merge-queue mode, are pinned by hermetic cases in `scripts/test/cases/` — the same cases, under the same file names, as
   `go-kure/kure`'s — which the `lint` job runs on every push and merge-queue run, and on a PR
   whenever its `go` path filter matches (a workflow change, this script or anything under
   `scripts/test/` does) (`make test-pin-impact`, also part of `mise run verify` and
@@ -364,7 +371,14 @@ Runs on main and `release/*` branches only (not PRs):
   repo, so it never runs at all on a fork PR — but that's moot, since the gate separately forces
   `PIN_IMPACT_ACK=false` unconditionally on forks; a fork PR has no acknowledgment path regardless
   of labels. Add (or re-add) the label rather than rerunning, on a same-repo PR; full writeup in
-  `go-kure/.github`'s `docs/standards.md` § "Pin-impact-ack"
+  `go-kure/.github`'s `docs/standards.md` § "Pin-impact-ack". **In the merge queue** the job runs
+  `check-pin-impact.sh --consistency` instead. It checks only that every `go-kure/.github`
+  reference in the merged tree pins the same commit. It reads no base, fetches nothing and has no
+  label override. Two PRs that each passed on their own can combine into mixed pins: one adds a
+  reference at the old pin while the other bumps the rest. On `main`, that tree is every later
+  PR's base, and the gate refuses an inconsistent base before it reads the label, so it would
+  refuse the repair PR too (go-kure/kure#951). The queue now ejects the PR instead; rebase it onto
+  `main` and align its pins. The impact itself is still checked only on the PR (go-kure/kure#730)
 - **Path filtering** — `dorny/paths-filter` skips jobs when unrelated files change
 - **Diff-based lint** — on PRs, lint only checks new/changed lines (`--new-from-rev`)
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages, guarded by

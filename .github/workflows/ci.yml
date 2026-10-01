@@ -288,11 +288,12 @@ jobs:
     - name: Self-test verify-merge
       run: make test-verify-merge
 
-    # The pin-impact job runs scripts/check-pin-impact.sh only on a PR, and only
-    # a go-kure/.github pin bump reaches its fail-closed paths, so those paths
-    # would otherwise go unexercised until a real bump hit one. These cases
-    # exercise its refusal paths, plus the no-change, inert, affected and
-    # acknowledged outcomes. Hermetic: pin-impact-lib.sh stubs curl and builds a throwaway
+    # The pin-impact job runs scripts/check-pin-impact.sh's impact check only on
+    # a PR, and only a go-kure/.github pin bump reaches its fail-closed paths, so
+    # those paths would otherwise go unexercised until a real bump hit one. These
+    # cases exercise its refusal paths, plus the no-change, inert, affected and
+    # acknowledged outcomes, and the merge-queue consistency mode. Hermetic:
+    # pin-impact-lib.sh stubs curl and builds a throwaway
     # git repository per case; no network.
     - name: Run check-pin-impact cases
       run: make test-pin-impact
@@ -357,19 +358,21 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    # PR-only: needs a base-ref diff, which merge_group events don't carry
-    # the same way pull_request events do. By the time a PR reaches the
-    # merge queue this job has already gated it via `build` against the same
-    # base it will actually merge onto — usually no new information from a
-    # merge_group re-run. The gap this doesn't cover isn't limited to two
-    # PRs sharing a queue batch: any push to main (a shared-action reference
-    # added, or a script gaining a new `source`) between this PR's last
-    # `pull_request` run and its merge_group run is invisible here too, even
-    # at the documented batch size of one — re-running here needs deriving
-    # the merge group's own base/head from `github.event.merge_group.*`
-    # rather than `github.base_ref`, which this job doesn't do today.
-    # Tracked: go-kure/kure#730.
-    if: github.event_name == 'pull_request'
+    # The impact check is PR-only: it needs a base-ref diff, which
+    # merge_group events don't carry the same way pull_request events do. By
+    # the time a PR reaches the merge queue this job has already gated it via
+    # `build`, against the base its last `pull_request` run merged onto. That
+    # is not necessarily the base it lands on: any push to main (a
+    # shared-action reference added, or a script gaining a new `source`)
+    # between that run and its merge_group run is invisible to the impact
+    # check, even at the documented batch size of one — re-running it here
+    # needs deriving the merge group's own base/head from
+    # `github.event.merge_group.*` rather than `github.base_ref`, which this
+    # job doesn't do (go-kure/kure#730, closed as not planned). On
+    # merge_group the job runs only the consistency step at its end, which
+    # needs no base: it refuses the one combination that would wedge every
+    # later PR, pins that no longer agree (go-kure/kure#951).
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -417,6 +420,7 @@ jobs:
       run: gh pr edit "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" --remove-label pin-impact-ack
 
     - name: Render and gate on go-kure/.github pin impact
+      if: github.event_name == 'pull_request'
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -463,6 +467,19 @@ jobs:
           BASE_SHA="$(git rev-parse 'HEAD^1')"
         fi
         ./scripts/check-pin-impact.sh --base-ref "$BASE_SHA" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+    # The queue builds one entry at a time, so this tree is what lands on
+    # main. Two PRs that each passed the impact step can still combine into
+    # a tree whose go-kure/.github references pin two commits: one adds a
+    # reference at the old pin while the other bumps the rest. Landed, that
+    # tree is every later PR's base, and the impact step refuses an
+    # inconsistent base before any ack applies, the repair PR included
+    # (go-kure/kure#951). This step refuses that tree here instead. It reads
+    # no base and fetches nothing, and no label overrides it.
+    - name: Check go-kure/.github pins agree in the merged tree
+      if: github.event_name == 'merge_group'
+      shell: bash
+      run: ./scripts/check-pin-impact.sh --consistency 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
 
   # =============================================================================
   # Stage 2: Tests and Security (parallel with lint)
