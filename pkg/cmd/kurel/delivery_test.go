@@ -1530,7 +1530,9 @@ const sharedConfigMapComponents = `    - name: %[1]s
 // so a single unit, "shop"); and a configmap trait on a daemonset with the
 // same ConfigMap inside a list envelope in the apps artifact. The first two
 // are refused by the in-document check (go-kure/launcher#646) before the
-// delivery layout is built, naming both producers; the envelope member is not
+// delivery layout is built, naming both producers (which pins replayConfig's
+// ComponentName forward: without it each trait reads as component "settings");
+// the envelope member is not
 // an object either producer generates, so the delivery check refuses it.
 func TestDeliveryRefusesSharedArtifactObject(t *testing.T) {
 	tests := []struct {
