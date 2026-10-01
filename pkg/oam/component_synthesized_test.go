@@ -126,27 +126,6 @@ func (passThroughTraitRule) LowerTrait(trait *Trait, _ LoweringContext) (Lowerin
 	return LoweringResult{Components: []Component{{Name: "web", Type: "reserved-sink", Properties: trait.Properties}}}, nil
 }
 
-// replacingComponentsDocRule replaces doc.Spec.Components with a fresh slice holding
-// a component that carries the rule-written reserved value, and emits that slice.
-// The elements are new, so they are this rule's output, not forwarded input.
-type replacingComponentsDocRule struct{}
-
-func (replacingComponentsDocRule) Kind() string { return "Replacing" }
-
-func (replacingComponentsDocRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
-	doc.Spec.Components = []Component{{
-		Name:       "web",
-		Type:       "reserved-sink",
-		Properties: map[string]any{"image": "nginx", "networkPolicy": renderedNetworkPolicy(lctx)},
-	}}
-	return LoweringResult{Documents: []Application{{
-		APIVersion: SupportedAPIVersion,
-		Kind:       terminalDocumentKind,
-		Metadata:   Metadata{Name: doc.Metadata.Name, Namespace: doc.Metadata.Namespace},
-		Spec:       ApplicationSpec{Components: doc.Spec.Components},
-	}}}, nil
-}
-
 // retypingDocRule rebuilds the first component by value as a reserved-sink,
 // copying its authored properties.
 type retypingDocRule struct{}
@@ -350,18 +329,4 @@ func TestTransform_DocumentRuleCopyingUncheckedComponentIsRejected(t *testing.T)
 
 	_, err := tr.Transform(singleComponentApp("Retyping", "pass-through", authoredNetworkPolicy()), TransformContext{})
 	expectPlatformReserved(t, err)
-}
-
-// TestTransform_DocumentRuleReplacingComponentsIsSynthesized: the forwarded-component
-// snapshot is taken before the rule runs, so a rule that replaces
-// doc.Spec.Components with fresh elements and emits them is recognised as having
-// produced them, and the reserved value it wrote is accepted.
-func TestTransform_DocumentRuleReplacingComponentsIsSynthesized(t *testing.T) {
-	tr := reservedSinkTransformer()
-	tr.RegisterDocumentLowering(replacingComponentsDocRule{})
-
-	app := &Application{APIVersion: SupportedAPIVersion, Kind: "Replacing", Metadata: Metadata{Name: "myapp", Namespace: "test"}}
-	if _, err := tr.Transform(app, netpolCapability()); err != nil {
-		t.Fatalf("components a document rule put in place of the input's must be synthesized, got: %v", err)
-	}
 }

@@ -406,8 +406,9 @@ holds only when the rule's input was checked before it ran: a
 (`PropertySchemaProvider`), or one whose input was itself rule output; and a
 `DocumentLoweringRule` only when every authored component of its input has a schema
 to be checked against. Output of any other rule stays authored and is checked like
-anything a user wrote, so a schema-less rule cannot pass an authored reserved value
-through. A
+anything a user wrote, so a schema-less rule cannot pass a non-null authored reserved
+value through (an explicit `null` is stripped before that check,
+go-kure/launcher#609). A
 component a `DocumentLoweringRule` forwards — the same element of
 `doc.Spec.Components`, not a copy — keeps the classification it arrived with:
 forwarding neither makes it synthesized nor resets it to authored. An authored
