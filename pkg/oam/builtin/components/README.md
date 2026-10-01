@@ -1948,12 +1948,25 @@ not part of either change.
   `pkg/oam/builtin/components/helmchart.go`); same over-broad-wording
   class `go-kure/launcher#319` already fixed elsewhere in this file.
 
+  **Namespaces under `delivery: native`** (go-kure/launcher#610). The HelmRelease, its source
+  CR and its values `ConfigMap` land in the Flux namespace when one is configured, else in the application namespace
+  (`SetFluxNamespace`). Under a Flux namespace, a component that does not author
+  `targetNamespace` gets `spec.targetNamespace` set to the application namespace, so the release
+  installs there rather than into the Flux namespace, as on the `helmrelease` terminal; an
+  authored value wins. Consequence: Flux then derives the default release name as
+  `<targetNamespace>-<name>` (`shop-web` for a component `web` in namespace `shop`), not `<name>`,
+  while Helm keeps its release state in the HelmRelease's own namespace. Before this, such a
+  release installed into the Flux namespace under the name `<name>`, so a release installed
+  that way changes namespace and name. To keep it where it is, author `targetNamespace` as the
+  Flux namespace; to keep only its name, author `releaseName`.
+
   **Release identity under `delivery: template`** (go-kure/launcher#602). The client-side render's
   `.Release.Namespace` is `targetNamespace` when authored, else the application namespace —
   never the Flux namespace, which only places control-plane CRs. Its `.Release.Name` is
   `releaseName` when authored, else kure's default `release`. That default differs from
   `delivery: native`, where Flux derives the release name from the HelmRelease (`<name>`, or
-  `<targetNamespace>-<name>` when a target namespace is set); author `releaseName` when a chart's
+  `<targetNamespace>-<name>` when a target namespace is set, as it always is under a Flux
+  namespace); author `releaseName` when a chart's
   object names must match across the two. Both values are checked at build time because no
   HelmRelease admission sees them: `releaseName` by Helm's own release-name rule (at most 53
   characters, lowercase DNS-style), `targetNamespace` as a DNS-1123 label. The namespace only
