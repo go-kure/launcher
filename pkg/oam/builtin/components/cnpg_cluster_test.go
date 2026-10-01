@@ -789,6 +789,27 @@ func TestCnpgClusterHandler_Endpoints(t *testing.T) {
 	}
 }
 
+// TestCnpgClusterConfig_GenerateRevalidates pins the emission-boundary repeat
+// of the two parse-time refusals, for a config built directly in Go, which
+// never passes through ToApplicationConfig.
+func TestCnpgClusterConfig_GenerateRevalidates(t *testing.T) {
+	t.Run("name CloudNativePG refuses", func(t *testing.T) {
+		c := &components.CnpgClusterConfig{Name: "db.main", Namespace: "data", Spec: cnpgv1.ClusterSpec{Instances: 1}}
+		_, err := c.Generate(stack.NewApplication("db.main", "data", c))
+		want := `cnpg-cluster name "db.main": must be a DNS-1035 label of at most 50 characters (CloudNativePG rejects longer or dotted cluster names)`
+		if err == nil || err.Error() != want {
+			t.Errorf("err = %v, want %q", err, want)
+		}
+	})
+	t.Run("instances below the CRD minimum", func(t *testing.T) {
+		c := &components.CnpgClusterConfig{Name: "db", Namespace: "data"}
+		_, err := c.Generate(stack.NewApplication("db", "data", c))
+		if err == nil || err.Error() != "instances: must be >= 1, got 0" {
+			t.Errorf("err = %v, want the instances refusal", err)
+		}
+	})
+}
+
 // TestCnpgClusterHandler_NameBound pins the Cluster-name bound CloudNativePG's
 // admission webhook enforces (a DNS-1035 label of at most 50 characters) on
 // both entry points: the parse, and the endpoint selector, which copies the

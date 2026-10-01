@@ -2369,10 +2369,10 @@ not part of either change.
   component name becomes the Cluster's name and its `cnpg.io/cluster`
   endpoint selector, so it must be what CloudNativePG's admission webhook
   admits: a DNS-1035 label (no leading digit, no dot) of at most 50
-  characters. Any other name is refused at parse time and when endpoints are
-  collected (`cnpg-cluster name "db.main": must be a DNS-1035 label of at
-  most 50 characters …`), although other kinds accept DNS-1123 subdomains
-  of up to 253. Its
+  characters. Any other name is refused at parse time, when endpoints are
+  collected and by `Generate` (`cnpg-cluster name "db.main": must be a
+  DNS-1035 label of at most 50 characters …`), although other kinds accept
+  DNS-1123 subdomains of up to 253. Its
   properties are the `spec` of a `postgresql.cnpg.io/v1` `Cluster`, one schema
   key per `ClusterSpec` json field: scalars are typed, and every structured
   field is an open `object` or an `array` of open objects whose description
@@ -2422,6 +2422,9 @@ not part of either change.
   any spelling, is refused before policy runs (`instances: must be >= 1,
   got 0`): the CRD's minimum is 1, so the API server would refuse the
   Cluster. A policy instance-count default below 1 is refused the same way.
+  `Generate` repeats the name and instance-count refusals on what it emits,
+  so a `CnpgClusterConfig` built in Go without `ToApplicationConfig` cannot
+  produce a Cluster the operator or the API server rejects for either.
   An authored `0` or `false` that the typed spec cannot carry, on a field
   whose CRD default is not zero, is refused by path
   (`managed.roles[0].connectionLimit: 0 cannot be carried by the

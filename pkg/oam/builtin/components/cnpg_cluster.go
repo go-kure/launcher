@@ -764,6 +764,16 @@ func cnpgStorageRequest(sc *cnpgv1.StorageConfiguration, path string) (string, s
 // of the spec, so the generated object shares no pointer, map or slice with
 // the config and a second Generate is unaffected by edits to the first result.
 func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	// The config is exported, so a caller can build it without
+	// ToApplicationConfig. The two parse-time refusals that guard what
+	// CloudNativePG admits are repeated on what is emitted, as the workload
+	// kinds repeat their name check: the Cluster is named from app.Name.
+	if err := validateCnpgClusterName(app.Name); err != nil {
+		return nil, err
+	}
+	if c.Spec.Instances < 1 {
+		return nil, errors.Errorf("instances: must be >= 1, got %d", c.Spec.Instances)
+	}
 	// As in postgresql, checked on the resources the Cluster actually carries:
 	// CNPG copies this block onto the instance pods unchanged, so a
 	// hugepages-only block would build a Cluster whose pods admission refuses.
