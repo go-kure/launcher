@@ -643,42 +643,175 @@ func TestHelmchartHandler_DeliveryTemplate_ValuesFromRejected(t *testing.T) {
 	}
 }
 
-func TestHelmchartHandler_DeliveryTemplate_ReleaseNameRejected(t *testing.T) {
-	h := &components.HelmchartHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "metrics",
-		Type: "helmchart",
-		Properties: map[string]any{
-			"chart":       "kube-prometheus-stack",
-			"delivery":    "template",
-			"releaseName": "my-release",
-			"source": map[string]any{
-				"url": "https://prometheus-community.github.io/helm-charts",
-			},
-		},
-	}, "monitoring")
-	if err == nil {
-		t.Fatal("expected error: template delivery does not support releaseName")
+// identityChart renders one ConfigMap named and namespaced from the release
+// identity, and one with no metadata.namespace at all.
+var identityChart = map[string]string{
+	"identity.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Release.Name }}-cm\n  namespace: {{ .Release.Namespace }}\ndata:\n  k: v\n",
+	"bare.yaml":     "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: bare\ndata:\n  k: v\n",
+}
+
+// renderedIdentity generates cfg and returns the identity ConfigMap's name and
+// namespace, failing if the bare ConfigMap gained a namespace: nothing stamps
+// metadata.namespace after the render.
+func renderedIdentity(t *testing.T, cfg stack.ApplicationConfig) (name, namespace string) {
+	t.Helper()
+	objs, err := cfg.Generate(stack.NewApplication("app", "ignored", cfg))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	found := false
+	for _, o := range objs {
+		if (*o).GetName() == "bare" {
+			if ns := (*o).GetNamespace(); ns != "" {
+				t.Errorf("bare ConfigMap namespace = %q, want none (no stamping)", ns)
+			}
+			continue
+		}
+		name, namespace, found = (*o).GetName(), (*o).GetNamespace(), true
+	}
+	if !found {
+		t.Fatalf("identity ConfigMap not rendered; got %d objects", len(objs))
+	}
+	return name, namespace
+}
+
+func TestHelmchartHandler_DeliveryTemplate_ReleaseIdentity(t *testing.T) {
+	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", identityChart)
+	tests := []struct {
+		name          string
+		props         map[string]any
+		fluxNamespace string
+		wantName      string
+		wantNamespace string
+	}{
+		{name: "defaults", wantName: "release-cm", wantNamespace: "monitoring"},
+		{name: "releaseName", props: map[string]any{"releaseName": "my-release"}, wantName: "my-release-cm", wantNamespace: "monitoring"},
+		{name: "targetNamespace", props: map[string]any{"targetNamespace": "other-ns"}, wantName: "release-cm", wantNamespace: "other-ns"},
+		{name: "both", props: map[string]any{"releaseName": "my-release", "targetNamespace": "other-ns"}, wantName: "my-release-cm", wantNamespace: "other-ns"},
+		{name: "flux namespace is not the release namespace", fluxNamespace: "flux-system", wantName: "release-cm", wantNamespace: "monitoring"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			props := map[string]any{
+				"chart":    "testchart",
+				"version":  "0.1.0",
+				"delivery": "template",
+				"source":   map[string]any{"url": srvURL},
+			}
+			maps.Copy(props, tt.props)
+			h := &components.HelmchartHandler{}
+			cfg, err := h.ToApplicationConfig(&oam.Component{Name: "metrics", Type: "helmchart", Properties: props}, "monitoring")
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			if tt.fluxNamespace != "" {
+				setter, ok := cfg.(interface{ SetFluxNamespace(string) })
+				if !ok {
+					t.Fatal("helmchart config does not implement SetFluxNamespace")
+				}
+				setter.SetFluxNamespace(tt.fluxNamespace)
+			}
+			gotName, gotNamespace := renderedIdentity(t, cfg)
+			if gotName != tt.wantName || gotNamespace != tt.wantNamespace {
+				t.Errorf("rendered %s/%s, want %s/%s", gotNamespace, gotName, tt.wantNamespace, tt.wantName)
+			}
+		})
 	}
 }
 
-func TestHelmchartHandler_DeliveryTemplate_TargetNamespaceRejected(t *testing.T) {
+// TestHelmchartConfig_DeliveryTemplate_DirectNoNamespace: a config built
+// directly with no Namespace keeps kure's defaults rather than passing an
+// empty namespace to the render.
+func TestHelmchartConfig_DeliveryTemplate_DirectNoNamespace(t *testing.T) {
+	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", identityChart)
+	cfg := &components.HelmchartConfig{
+		Name:       "metrics",
+		Chart:      "testchart",
+		Version:    "0.1.0",
+		Delivery:   "template",
+		SourceURL:  srvURL,
+		SourceKind: "HelmRepository",
+	}
+	gotName, gotNamespace := renderedIdentity(t, cfg)
+	if gotName != "release-cm" || gotNamespace != "default" {
+		t.Errorf("rendered %s/%s, want default/release-cm", gotNamespace, gotName)
+	}
+}
+
+func TestHelmchartHandler_DeliveryTemplate_InvalidReleaseIdentityRejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		props   map[string]any
+		wantErr string
+	}{
+		{name: "releaseName uppercase", props: map[string]any{"releaseName": "My-Release"}, wantErr: "releaseName"},
+		{name: "releaseName over 53", props: map[string]any{"releaseName": strings.Repeat("a", 54)}, wantErr: "releaseName"},
+		{name: "targetNamespace dotted", props: map[string]any{"targetNamespace": "other.ns"}, wantErr: "targetNamespace"},
+		{name: "targetNamespace over 63", props: map[string]any{"targetNamespace": strings.Repeat("a", 64)}, wantErr: "targetNamespace"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			props := map[string]any{
+				"chart":    "kube-prometheus-stack",
+				"delivery": "template",
+				"source":   map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+			}
+			maps.Copy(props, tt.props)
+			h := &components.HelmchartHandler{}
+			_, err := h.ToApplicationConfig(&oam.Component{Name: "metrics", Type: "helmchart", Properties: props}, "monitoring")
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want one naming %s", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestHelmchartConfig_DeliveryTemplate_DirectInvalidReleaseName: a config
+// built directly skips ToApplicationConfig, so the render re-checks the
+// identity before fetching anything.
+func TestHelmchartConfig_DeliveryTemplate_DirectInvalidReleaseName(t *testing.T) {
+	cfg := &components.HelmchartConfig{
+		Name:        "metrics",
+		Chart:       "testchart",
+		Delivery:    "template",
+		SourceURL:   "http://127.0.0.1:1",
+		SourceKind:  "HelmRepository",
+		ReleaseName: "Bad_Name",
+	}
+	_, err := cfg.Generate(stack.NewApplication("app", "ns", cfg))
+	if err == nil || !strings.Contains(err.Error(), "releaseName") {
+		t.Fatalf("err = %v, want a releaseName refusal", err)
+	}
+}
+
+// TestHelmchartConfig_DeliveryNative_ReleaseIdentityUnchanged: native delivery
+// still sets spec.releaseName/targetNamespace only when authored.
+func TestHelmchartConfig_DeliveryNative_ReleaseIdentityUnchanged(t *testing.T) {
 	h := &components.HelmchartHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
+	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "metrics",
 		Type: "helmchart",
 		Properties: map[string]any{
-			"chart":           "kube-prometheus-stack",
-			"delivery":        "template",
-			"targetNamespace": "other-ns",
-			"source": map[string]any{
-				"url": "https://prometheus-community.github.io/helm-charts",
-			},
+			"chart":  "kube-prometheus-stack",
+			"source": map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
 		},
 	}, "monitoring")
-	if err == nil {
-		t.Fatal("expected error: template delivery does not support targetNamespace")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
 	}
+	objs, err := cfg.Generate(stack.NewApplication("app", "monitoring", cfg))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, o := range objs {
+		if hr, ok := (*o).(*helmv2.HelmRelease); ok {
+			if hr.Spec.ReleaseName != "" || hr.Spec.TargetNamespace != "" {
+				t.Errorf("spec.releaseName=%q targetNamespace=%q, want both unset", hr.Spec.ReleaseName, hr.Spec.TargetNamespace)
+			}
+			return
+		}
+	}
+	t.Fatal("no HelmRelease generated")
 }
 
 func TestHelmchartHandler_DeliveryTemplate_IntervalRejected(t *testing.T) {

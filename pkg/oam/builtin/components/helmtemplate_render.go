@@ -15,7 +15,9 @@ import (
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
+	chartutil "helm.sh/helm/v4/pkg/chart/v2/util"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -33,20 +35,58 @@ import (
 // renderChartFunc is the chart renderer: kure's helm.RenderChart, or a stub
 // injected by a test. Variadic opts matches kure's RenderChart signature (kure
 // v0.2.0-beta.10+, helm.RenderOption) so that helm.RenderChart itself
-// satisfies it without a wrapper; chartRender.render does not pass any opts
-// yet (see its doc comment).
+// satisfies it without a wrapper; chartRender.render passes the release
+// identity through it (chartSource.renderOptions).
 type renderChartFunc = func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error)
 
 // chartSource is what one client-side render fetches: an inline chart source
 // whose Kind inlineChartSourceKind has already resolved and checked against
-// URL's scheme, the chart name within a HelmRepository, the chart version, and
-// the values tree handed to the render as-is.
+// URL's scheme, the chart name within a HelmRepository, the chart version, the
+// values tree handed to the render as-is, and the release identity the render
+// uses: ReleaseName and Namespace become .Release.Name and .Release.Namespace,
+// and each, when empty, leaves kure's default ("release", "default") in place.
 type chartSource struct {
-	URL     string
-	Kind    string // "HelmRepository" or "OCIRepository"
-	Chart   string
-	Version string
-	Values  map[string]any
+	URL         string
+	Kind        string // "HelmRepository" or "OCIRepository"
+	Chart       string
+	Version     string
+	Values      map[string]any
+	ReleaseName string
+	Namespace   string
+}
+
+// renderOptions turns the release identity into kure render options, one per
+// non-empty field. The namespace only sets .Release.Namespace: kure stamps no
+// metadata.namespace, so a chart that omits it still renders namespace-less
+// objects.
+func (s chartSource) renderOptions() []helm.RenderOption {
+	var opts []helm.RenderOption
+	if s.ReleaseName != "" {
+		opts = append(opts, helm.WithReleaseName(s.ReleaseName))
+	}
+	if s.Namespace != "" {
+		opts = append(opts, helm.WithNamespace(s.Namespace))
+	}
+	return opts
+}
+
+// checkReleaseIdentity checks an authored release name and target namespace
+// for a client-side render, which no HelmRelease CRD admission ever sees: the
+// release name by Helm's own rule (chartutil.ValidateReleaseName: at most 53
+// characters, lowercase DNS-style), the namespace as a DNS-1123 label. An
+// empty value is not authored and passes.
+func checkReleaseIdentity(componentType, releaseName, targetNamespace string) error {
+	if releaseName != "" {
+		if err := chartutil.ValidateReleaseName(releaseName); err != nil {
+			return errors.Errorf("%s: releaseName %q: %w", componentType, releaseName, err)
+		}
+	}
+	if targetNamespace != "" {
+		if errs := validation.IsDNS1123Label(targetNamespace); len(errs) > 0 {
+			return errors.Errorf("%s: targetNamespace: invalid namespace %q: %s", componentType, targetNamespace, strings.Join(errs, "; "))
+		}
+	}
+	return nil
 }
 
 // chartURL is the location handed to the renderer: a HelmRepository's base URL
@@ -126,15 +166,9 @@ type chartRender struct {
 // output (parseChartManifests) is returned as is, with no component type or
 // name, under either caller.
 //
-// Known limitation: this call passes no release-identity opts, so kure renders with
-// its defaults, .Release.Name = "release" and .Release.Namespace = "default" (kure
-// pkg/stack/helm/render.go). Neither caller lets a document set either: the helmchart
-// composite rejects releaseName/targetNamespace outright for delivery: template, and
-// the helmtemplate terminal does not declare them, so its strict decode refuses them —
-// the rejection, not a silent drop, is today's behavior for a chart that needs
-// .Release.Name/.Release.Namespace. kure now exposes helm.WithReleaseName/
-// helm.WithNamespace (kure v0.2.0-beta.10+); wiring them through and relaxing those
-// rejections is a follow-up, not attempted here.
+// The render uses src's release identity (chartSource.renderOptions), which
+// each caller decides. Nothing stamps metadata.namespace afterwards, so a chart
+// that leaves it unset renders namespace-less objects whatever the namespace.
 func (r *chartRender) render(renderFn renderChartFunc, componentType, name string, src chartSource) error {
 	if r.rendered {
 		return nil
@@ -142,7 +176,7 @@ func (r *chartRender) render(renderFn renderChartFunc, componentType, name strin
 	if renderFn == nil {
 		renderFn = helm.RenderChart
 	}
-	raw, err := renderFn(src.chartURL(), src.Version, src.Values)
+	raw, err := renderFn(src.chartURL(), src.Version, src.Values, src.renderOptions()...)
 	if err != nil {
 		return errors.Wrapf(err, "%s %q: rendering chart", componentType, name)
 	}

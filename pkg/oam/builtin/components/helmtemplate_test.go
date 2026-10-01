@@ -414,3 +414,22 @@ func TestHelmTemplate_MatchesCompositeTemplateDelivery(t *testing.T) {
 		t.Errorf("children's union differs from Generate's output:\n  union:    %#v\n  Generate: %#v", union, gen)
 	}
 }
+
+// TestHelmTemplate_ReleaseNamespaceIsApplicationNamespace: the render's
+// .Release.Namespace is the namespace the handler is given, and the release
+// name stays kure's default — the terminal declares no releaseName.
+func TestHelmTemplate_ReleaseNamespaceIsApplicationNamespace(t *testing.T) {
+	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", identityChart)
+	cfg, err := htParse(map[string]any{
+		"chart":   "testchart",
+		"version": "0.1.0",
+		"source":  map[string]any{"url": srvURL},
+	})
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	gotName, gotNamespace := renderedIdentity(t, cfg)
+	if gotName != "release-cm" || gotNamespace != "demo" {
+		t.Errorf("rendered %s/%s, want demo/release-cm", gotNamespace, gotName)
+	}
+}

@@ -62,8 +62,8 @@ func (h *HelmchartHandler) PropertySchema() map[string]oam.PropertySchema {
 		"version":         {Type: oam.PropertyTypeString, Description: "Chart version to install."},
 		"delivery":        {Type: oam.PropertyTypeString, Default: "native", Enum: []any{"native", "template"}, Description: "Delivery mode: native emits a HelmRelease, template renders the chart client-side."},
 		"interval":        {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms (default 60m)."},
-		"releaseName":     {Type: oam.PropertyTypeString, Description: "Helm release name (defaults to the component name)."},
-		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Namespace into which the HelmRelease installs resources."},
+		"releaseName":     {Type: oam.PropertyTypeString, Description: "Helm release name. Native: spec.releaseName, Flux's default when unset. Template: .Release.Name for the client-side render, default release."},
+		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Namespace into which the release installs resources. Native: spec.targetNamespace. Template: .Release.Namespace for the client-side render, default the application namespace."},
 		"source":          {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true, Description: "Chart source: an inline url, or a reference (name/kind) to an existing source CR."},
 		"values":          openObject("Helm values tree passed to the release."),
 		"valuesMode":      {Type: oam.PropertyTypeString, Default: valuesModeDefault, Enum: []any{"inline", "configMap"}, Description: "How Helm values are delivered: inline sets HelmRelease.spec.values directly, configMap externalizes them into a referenced ConfigMap. Not supported under delivery: template."},
@@ -359,11 +359,8 @@ func (h *HelmchartHandler) ToApplicationConfig(component *oam.Component, namespa
 			// template-delivery component under a configMap-default handler.
 			cfg.ValuesMode = "inline"
 		}
-		if cfg.ReleaseName != "" {
-			return nil, errors.New("helmchart: delivery: template does not support releaseName")
-		}
-		if cfg.TargetNamespace != "" {
-			return nil, errors.New("helmchart: delivery: template does not support targetNamespace")
+		if err := checkReleaseIdentity("helmchart: delivery: template", cfg.ReleaseName, cfg.TargetNamespace); err != nil {
+			return nil, err
 		}
 		if cfg.Interval != "" {
 			return nil, errors.New("helmchart: delivery: template does not support interval")
@@ -639,16 +636,29 @@ func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, er
 
 // ensureRendered renders the chart client-side for delivery: template, once,
 // through the chartRender this config shares with the helmtemplate terminal —
-// see chartRender.render for the caching and for the release-identity
-// limitation ToApplicationConfig's delivery: template validation above
-// accounts for.
+// see chartRender.render for the caching. The release namespace is
+// TargetNamespace, else the application namespace — never the Flux namespace,
+// which only places control-plane CRs — and the release name is ReleaseName
+// only when authored: kure's default "release" stays otherwise, unlike native
+// delivery, where Flux derives a default from the HelmRelease. The identity is
+// checked again here because this type and its fields are exported, so a
+// config built directly never went through ToApplicationConfig.
 func (c *HelmchartConfig) ensureRendered() error {
+	if err := checkReleaseIdentity("helmchart: delivery: template", c.ReleaseName, c.TargetNamespace); err != nil {
+		return err
+	}
+	namespace := c.TargetNamespace
+	if namespace == "" {
+		namespace = c.Namespace
+	}
 	return c.render(c.renderChart, "helmchart", c.Name, chartSource{
-		URL:     c.SourceURL,
-		Kind:    c.SourceKind,
-		Chart:   c.Chart,
-		Version: c.Version,
-		Values:  c.Values,
+		URL:         c.SourceURL,
+		Kind:        c.SourceKind,
+		Chart:       c.Chart,
+		Version:     c.Version,
+		Values:      c.Values,
+		ReleaseName: c.ReleaseName,
+		Namespace:   namespace,
 	})
 }
 
