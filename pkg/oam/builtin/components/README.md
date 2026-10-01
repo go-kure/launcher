@@ -2454,7 +2454,10 @@ not part of either change.
   entries, and their maxima; and the storage-size default on `storage.size`
   when neither `storage.size` nor `storage.pvcTemplate`'s storage request is
   authored. Unlike `postgresql` there is no `1Gi` fallback: with no policy
-  default the size is left to the operator. The storage maximum applies to
+  default the size is left to the operator. A storage-size default that is
+  not a quantity is refused (`policy default for storage.size: invalid
+  quantity "lots"`), as an invalid cpu or memory default is, since with no
+  maximum set nothing else would parse it. The storage maximum applies to
   every claim the Cluster creates — `storage`, `walStorage`, each
   `tablespaces[i].storage` (either `size` or the `pvcTemplate` request) and
   `ephemeralVolumeSource.volumeClaimTemplate` — and the error names the one
