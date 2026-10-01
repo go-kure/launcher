@@ -1552,9 +1552,11 @@ not part of either change.
     each routed TCP port. A route that reaches only a UDP or SCTP port
     synthesizes no policy. In a same-name sibling group whose `selector`
     picks a sibling's own pods, the policy selects the component label
-    instead; `IdentityTargetPorts` reports whether that is the same set of
-    ports — every port's `targetPort` is its own number, never a name (see
-    `pkg/oam` "Same-name sibling groups").
+    instead, but only when `IdentityTargetPorts` is true: the Service has at
+    least one port and every port, whatever its protocol, has a numeric
+    `targetPort` equal to its own `port`. Otherwise it keeps the `selector`.
+    Either way the routed ports are translated to their `targetPort` and
+    only TCP ones are opened (see `pkg/oam` "Same-name sibling groups").
   - It implements `oam.EndpointProvider`: one endpoint, the `selector` pods on
     every TCP `targetPort` (deduplicated). A Service with no TCP port declares
     none.
