@@ -235,8 +235,10 @@ A build is refused, before anything is written, when an artifact carries an obje
 the API group, kind, namespace and name of one of the generated `OCIRepository` or
 `Kustomization` objects — for example an `oci` component named like its bundle in an
 application whose namespace is `flux-system`: reconciling that artifact would overwrite
-its own source or `Kustomization`. An object inside a list (an `items` array, at any
-depth) counts too, since reconciliation applies a list's members. Rename the component
+its own source or `Kustomization`. An object inside a list counts too when reconciliation
+applies it: kustomize expands a `*List` kind's `items` at any depth, then kustomize-controller
+expands one more `items` array of any kind and applies its members as they are, while a
+list either one expands is not applied itself. Rename the component
 or the application. The same holds for one object (API group, kind, namespace and name)
 in two artifacts, such as `configmap` traits of one name on components in different
 tiers, whose `Kustomization`s would fight over it, or twice in one artifact, which

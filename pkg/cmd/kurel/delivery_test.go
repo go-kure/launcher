@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
@@ -751,6 +753,12 @@ func listMemberComponents(member string) map[string]string {
 		"items envelope of another kind": fmt.Sprintf(listMemberComponent,
 			fmt.Sprintf(listEnvelopeItem, "example.com/v1", "Bundle", indent)+
 				fmt.Sprintf(ociRepositoryItem, member, indent+"    ")),
+		// A member with an items array of its own: kustomize-controller's
+		// decoder expands only the outer envelope, so it applies the member.
+		"member with an empty items array": fmt.Sprintf(listMemberComponent,
+			fmt.Sprintf(listEnvelopeItem, "example.com/v1", "Bundle", indent)+
+				fmt.Sprintf(ociRepositoryItem, member, indent+"    ")+
+				indent+"      items: []\n"),
 	}
 }
 
@@ -805,97 +813,191 @@ func TestDeliveryRefusesListMemberCollision(t *testing.T) {
 	}
 }
 
-// TestListMembersCoverWhatReconciliationApplies checks listMembers against
-// what reconciling an artifact applies: the artifact built with kustomize,
-// then decoded the way kustomize-controller's ReadObjects
-// (github.com/fluxcd/pkg/ssa/utils) does, replacing each object whose items
-// field is an array by its items. Every applied object must be an artifact
-// object or one of listMembers' members.
-func TestListMembersCoverWhatReconciliationApplies(t *testing.T) {
+// readObjects is kustomize-controller's decoder, ReadObjects in
+// github.com/fluxcd/pkg/ssa v0.76.2 (utils/object.go:44-77, with
+// IsKubernetesObject and IsKustomization from utils/is.go:71-82 inlined),
+// copied: the module is not a dependency of this one.
+func readObjects(r io.Reader) ([]*unstructured.Unstructured, error) {
+	reader := yamlutil.NewYAMLOrJSONDecoder(r, 2048)
+	objects := make([]*unstructured.Unstructured, 0)
+	for {
+		obj := &unstructured.Unstructured{}
+		err := reader.Decode(obj)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return objects, err
+		}
+		if obj.IsList() {
+			err = obj.EachListItem(func(item k8sruntime.Object) error {
+				objects = append(objects, item.(*unstructured.Unstructured))
+				return nil
+			})
+			if err != nil {
+				return objects, err
+			}
+			continue
+		}
+		isKubernetesObject := obj.GetName() != "" && obj.GetKind() != "" && obj.GetAPIVersion() != ""
+		isKustomization := strings.ToLower(obj.GetKind()) == "kustomization" &&
+			strings.HasPrefix(obj.GetAPIVersion(), "kustomize.config.k8s.io/")
+		if isKubernetesObject && !isKustomization {
+			objects = append(objects, obj)
+		}
+	}
+	return objects, nil
+}
+
+// TestAppliedObjectsMatchReconciliation checks that appliedObjects, the set
+// checkCollisions gives ownership to, is exactly what reconciling an artifact
+// applies: the artifact built with kustomize (krusty), and kustomize's output
+// decoded with kustomize-controller's ReadObjects (readObjects). Both are
+// compared as multisets of identities, and against want, for every shape; a
+// shape kustomize refuses to build must be refused by appliedObjects too.
+func TestAppliedObjectsMatchReconciliation(t *testing.T) {
 	obj := func(apiVersion, kind, name string) map[string]any {
 		return map[string]any{
 			"apiVersion": apiVersion, "kind": kind,
 			"metadata": map[string]any{"name": name, "namespace": "flux-system"},
 		}
 	}
+	with := func(o map[string]any, key string, value any) map[string]any {
+		c := maps.Clone(o)
+		c[key] = value
+		return c
+	}
 	list := func(apiVersion, kind string, items ...any) map[string]any {
-		o := obj(apiVersion, kind, "wrapped")
-		o["items"] = items
-		return o
+		return with(obj(apiVersion, kind, "wrapped"), "items", items)
 	}
 	oci := obj("source.toolkit.fluxcd.io/v1", "OCIRepository", "shop")
 	cm := obj("v1", "ConfigMap", "cm")
+	const (
+		ociID     = "OCIRepository.source.toolkit.fluxcd.io flux-system/shop"
+		cmID      = "ConfigMap flux-system/cm"
+		bundleID  = "Bundle.example.com flux-system/wrapped"
+		widgetsID = "WidgetList.example.com flux-system/wrapped"
+	)
 	tests := []struct {
 		name   string
 		object map[string]any
-		// want is the applied identities, which the model below must produce.
-		want []string
+		// want is the applied identities; wantErr that kustomize refuses
+		// the artifact.
+		want    []string
+		wantErr bool
 	}{
-		{"List", list("v1", "List", oci, cm), []string{"OCIRepository.source.toolkit.fluxcd.io flux-system/shop", "ConfigMap flux-system/cm"}},
-		{"nested List", list("v1", "List", list("v1", "List", oci)), []string{"OCIRepository.source.toolkit.fluxcd.io flux-system/shop"}},
-		{"custom *List kind", list("example.com/v1", "WidgetList", oci), []string{"OCIRepository.source.toolkit.fluxcd.io flux-system/shop"}},
-		{"items envelope of another kind", list("example.com/v1", "Bundle", oci), []string{"OCIRepository.source.toolkit.fluxcd.io flux-system/shop"}},
-		{"another kind inside a List", list("v1", "List", list("example.com/v1", "Bundle", oci)), []string{"OCIRepository.source.toolkit.fluxcd.io flux-system/shop"}},
-		{"List with null items", map[string]any{"apiVersion": "v1", "kind": "List", "metadata": map[string]any{"name": "wrapped"}, "items": nil}, nil},
+		{name: "plain object", object: oci, want: []string{ociID}},
+		{name: "List", object: list("v1", "List", oci, cm), want: []string{ociID, cmID}},
+		{name: "nested List", object: list("v1", "List", list("v1", "List", oci)), want: []string{ociID}},
+		{name: "custom *List kind", object: list("example.com/v1", "WidgetList", oci), want: []string{ociID}},
+		{name: "*List kind without items", object: obj("example.com/v1", "WidgetList", "wrapped"), want: []string{widgetsID}},
+		{name: "List with null items", object: with(obj("v1", "List", "wrapped"), "items", nil)},
+		{name: "List with an empty item", object: list("v1", "List", map[string]any{}, oci), want: []string{ociID}},
+		{name: "items envelope of another kind", object: list("example.com/v1", "Bundle", oci), want: []string{ociID}},
+		{name: "another kind inside a List", object: list("v1", "List", list("example.com/v1", "Bundle", oci)), want: []string{ociID}},
+		// The review's reproducer: the decoder expands the Bundle one level
+		// and applies the OCIRepository as it is, items and all.
+		{name: "member with an empty items array", object: list("example.com/v1", "Bundle", with(oci, "items", []any{})), want: []string{ociID}},
+		{name: "envelope of another kind inside another", object: list("example.com/v1", "Bundle", list("example.com/v1", "Bundle", oci)), want: []string{bundleID}},
+		// Kept by kustomize, then expanded to nothing by the decoder.
+		{name: "object with an empty items array", object: with(oci, "items", []any{})},
+		{name: "List member with an empty items array", object: list("v1", "List", with(oci, "items", []any{}))},
+		{name: "object with items that are not an array", object: with(oci, "items", "x"), want: []string{ociID}},
+		// Built by kustomize, then dropped by the decoder.
+		{name: "object without an apiVersion", object: with(cm, "apiVersion", "")},
+		{name: "kustomize config Kustomization", object: obj("kustomize.config.k8s.io/v1beta1", "Kustomization", "k")},
+		// A member the decoder expands is applied whatever it lacks.
+		{name: "member without an apiVersion", object: list("example.com/v1", "Bundle", with(cm, "apiVersion", "")), want: []string{"ConfigMap flux-system/cm"}},
+		{name: "List with items that are not an array", object: with(obj("v1", "List", "wrapped"), "items", "x"), wantErr: true},
+		{name: "List with an item that is not an object", object: list("v1", "List", "x"), wantErr: true},
 	}
+	// Each shape is built alone, and beside a companion ConfigMap: kustomize
+	// reads a manifests.yaml whose only document is a List through a reader
+	// that unwraps it, and any other through inlineAnyEmbeddedLists. Both
+	// yield the same members; only the second refuses a malformed List, so a
+	// refused shape is built beside the companion only.
+	companion := obj("v1", "ConfigMap", "companion")
+	const companionID = "ConfigMap flux-system/companion"
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			o := client.Object(&unstructured.Unstructured{Object: tt.object})
-			d := &deliveryOutput{artifacts: []deliveryArtifact{{name: "a", objects: []*client.Object{&o}}}}
-			out := t.TempDir()
-			if err := d.write(out, "app"); err != nil {
-				t.Fatal(err)
+		for _, beside := range []bool{false, true} {
+			if tt.wantErr && !beside {
+				continue
 			}
-			res, err := krusty.MakeKustomizer(krusty.MakeDefaultOptions()).Run(filesys.MakeFsOnDisk(), filepath.Join(out, "a"))
-			if err != nil {
-				t.Fatalf("kustomize build: %v", err)
+			name := tt.name
+			objects := []map[string]any{tt.object}
+			want := slices.Clone(tt.want)
+			if beside {
+				name += "/beside another object"
+				objects = append(objects, companion)
+				want = append(want, companionID)
 			}
-			var applied []string
-			for _, r := range res.Resources() {
-				m, err := r.Map()
+			t.Run(name, func(t *testing.T) {
+				var artifact []*client.Object
+				var model []string
+				var checkErr error
+				for _, content := range objects {
+					o := client.Object(&unstructured.Unstructured{Object: content})
+					artifact = append(artifact, &o)
+					applied, err := appliedObjects(o)
+					if err != nil {
+						checkErr = err
+					}
+					for _, m := range applied {
+						model = append(model, identityOf(m.object).String())
+					}
+				}
+				d := &deliveryOutput{artifacts: []deliveryArtifact{{name: "a", objects: artifact}}}
+				out := t.TempDir()
+				if err := d.write(out, "app"); err != nil {
+					t.Fatal(err)
+				}
+				res, err := krusty.MakeKustomizer(krusty.MakeDefaultOptions()).Run(filesys.MakeFsOnDisk(), filepath.Join(out, "a"))
+				if tt.wantErr {
+					if err == nil {
+						t.Error("kustomize built the artifact")
+					}
+					if checkErr == nil {
+						t.Error("appliedObjects accepted what kustomize refuses")
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("kustomize build: %v", err)
+				}
+				if checkErr != nil {
+					t.Fatalf("appliedObjects: %v", checkErr)
+				}
+				built, err := res.AsYaml()
 				if err != nil {
 					t.Fatal(err)
 				}
-				u := &unstructured.Unstructured{Object: m}
-				if !u.IsList() {
+				decoded, err := readObjects(bytes.NewReader(built))
+				if err != nil {
+					t.Fatalf("ReadObjects: %v", err)
+				}
+				var applied []string
+				for _, u := range decoded {
 					applied = append(applied, identityOf(u).String())
-					continue
 				}
-				if err := u.EachListItem(func(item k8sruntime.Object) error {
-					applied = append(applied, identityOf(item.(*unstructured.Unstructured)).String())
-					return nil
-				}); err != nil {
-					t.Fatal(err)
+				for _, s := range [][]string{applied, model, want} {
+					slices.Sort(s)
 				}
-			}
-			slices.Sort(applied)
-			want := slices.Clone(tt.want)
-			slices.Sort(want)
-			if !slices.Equal(applied, want) {
-				t.Fatalf("applied %q, want %q", applied, want)
-			}
-
-			members, err := listMembers(o)
-			if err != nil {
-				t.Fatal(err)
-			}
-			checked := map[string]bool{identityOf(o).String(): true}
-			for _, m := range members {
-				checked[identityOf(m).String()] = true
-			}
-			for _, id := range applied {
-				if !checked[id] {
-					t.Errorf("applied %s is not compared (compared: %v)", id, checked)
+				if !slices.Equal(applied, want) {
+					t.Errorf("reconciliation applies %q, want %q", applied, want)
 				}
-			}
-		})
+				if !slices.Equal(model, applied) {
+					t.Errorf("appliedObjects gives ownership to %q, reconciliation applies %q", model, applied)
+				}
+			})
+		}
 	}
 }
 
 // TestCheckCollisions checks the identity checkCollisions compares against the
 // delivery objects: API group, kind, exact namespace and name, not the
-// version; and that it compares a list envelope's members at every depth, but
-// not the envelope itself.
+// version; and that it compares exactly what reconciliation applies: the
+// members of an envelope it expands, not the envelope, and a member with an
+// items array of its own as itself.
 func TestCheckCollisions(t *testing.T) {
 	obj := func(apiVersion, kind, namespace, name string) *client.Object {
 		u := &unstructured.Unstructured{}
@@ -923,6 +1025,12 @@ func TestCheckCollisions(t *testing.T) {
 	source := func() *client.Object {
 		return obj("source.toolkit.fluxcd.io/v1", "OCIRepository", "flux-system", "shop")
 	}
+	// sourceWithItems is the delivery source with an empty items array.
+	sourceWithItems := func() *client.Object {
+		o := source()
+		(*o).(*unstructured.Unstructured).Object["items"] = []any{}
+		return o
+	}
 	tests := []struct {
 		name    string
 		object  *client.Object
@@ -948,6 +1056,14 @@ func TestCheckCollisions(t *testing.T) {
 			(*o).SetName("shop")
 			return o
 		}(), false},
+		// kustomize-controller's decoder expands one level only, so a
+		// member with an items array of its own is applied as itself.
+		{"member with an empty items array", list("example.com/v1", "Bundle", sourceWithItems()), true},
+		{"List member with an items array inside an envelope", list("v1", "List", list("example.com/v1", "Bundle", sourceWithItems())), true},
+		// kustomize keeps it and the decoder expands it to nothing.
+		{"delivery object's identity with an empty items array", sourceWithItems(), false},
+		// The inner envelope is applied as itself, so its member is not.
+		{"member of an envelope inside another", list("example.com/v1", "Bundle", list("example.com/v1", "Bundle", source())), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -997,6 +1113,17 @@ func TestCheckCollisionsBetweenArtifacts(t *testing.T) {
 		return &o
 	}
 	cm := func(namespace string) *client.Object { return obj("v1", "ConfigMap", namespace, "settings") }
+	// envelope is an unnamed items envelope that is not a *List kind.
+	envelope := func(items ...*client.Object) *client.Object {
+		o := list(items...)
+		(*o).(*unstructured.Unstructured).SetAPIVersion("example.com/v1")
+		(*o).(*unstructured.Unstructured).SetKind("Bundle")
+		return o
+	}
+	withItems := func(o *client.Object) *client.Object {
+		(*o).(*unstructured.Unstructured).Object["items"] = []any{}
+		return o
+	}
 	tests := []struct {
 		name string
 		a, b []*client.Object
@@ -1015,6 +1142,8 @@ func TestCheckCollisionsBetweenArtifacts(t *testing.T) {
 			[]string{`artifact "a" carries ConfigMap shop/settings twice`}},
 		{"a List member and an object in one artifact", []*client.Object{list(cm("shop")), cm("shop")}, nil,
 			[]string{`artifact "a" carries ConfigMap shop/settings twice (also as ConfigMap shop/settings (a member of list List /))`}},
+		{"a member with an empty items array and an object", []*client.Object{cm("shop")}, []*client.Object{envelope(withItems(cm("shop")))},
+			[]string{`artifacts "a" and "b" both carry ConfigMap shop/settings (a member of list Bundle.example.com /)`}},
 		{"other namespace", []*client.Object{cm("shop")}, []*client.Object{cm("other")}, nil},
 		{"other kind", []*client.Object{cm("shop")}, []*client.Object{obj("v1", "Secret", "shop", "settings")}, nil},
 		{"other group", []*client.Object{obj("example.com/v1", "Widget", "shop", "w")}, []*client.Object{obj("example.org/v1", "Widget", "shop", "w")}, nil},
@@ -1099,7 +1228,8 @@ const sharedConfigMapComponents = `    - name: %[1]s
 // object: a configmap trait of one name on a daemonset (infra tier) and a
 // webservice (apps tier), whose objects go to two artifacts, or on two
 // webservices, whose objects go to one (the application has a single tier,
-// so a single unit, "shop").
+// so a single unit, "shop"); and a configmap trait on a daemonset with the
+// same ConfigMap inside a list envelope in the apps artifact.
 func TestDeliveryRefusesSharedArtifactObject(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1110,6 +1240,38 @@ func TestDeliveryRefusesSharedArtifactObject(t *testing.T) {
 			[]string{`"shop-infra"`, `"shop-apps"`, "both carry ConfigMap shop/settings", "rename one of the components or traits"}},
 		{"one artifact", fmt.Sprintf(sharedConfigMapComponents, "web", "webservice", "api", "webservice"),
 			[]string{`artifact "shop" carries ConfigMap shop/settings twice:`}},
+		// The apps artifact carries the ConfigMap as the member of an
+		// envelope, with an empty items array of its own:
+		// kustomize-controller's decoder expands only the envelope, so it
+		// applies the ConfigMap there too.
+		{"two artifacts, one as a member with an empty items array", `    - name: agent
+      type: daemonset
+      properties:
+        image: ghcr.io/example/agent:v1.0.0
+      traits:
+        - type: configmap
+          properties:
+            name: settings
+    - name: wrapped
+      type: manifests
+      properties:
+        inline: |
+          apiVersion: example.com/v1
+          kind: ObjectsList
+          items:
+            - apiVersion: example.com/v1
+              kind: Bundle
+              metadata:
+                name: wrapped
+                namespace: shop
+              items:
+                - apiVersion: v1
+                  kind: ConfigMap
+                  metadata:
+                    name: settings
+                    namespace: shop
+                  items: []
+`, []string{`"shop-infra"`, `"shop-apps"`, "both carry ConfigMap shop/settings (a member of list Bundle.example.com shop/wrapped)"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
