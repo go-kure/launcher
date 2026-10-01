@@ -224,3 +224,124 @@ func TestLower_DocumentRuleDoesNotWriteThroughToAuthoredDocument(t *testing.T) {
 		})
 	}
 }
+
+// sharedTraitCopyDocRule copies the first component's traits once and attaches that
+// one new slice to two components it emits.
+type sharedTraitCopyDocRule struct{}
+
+func (sharedTraitCopyDocRule) Kind() string { return "SharedTraitCopy" }
+
+func (sharedTraitCopyDocRule) LowerDocument(doc *Application, _ LoweringContext) (LoweringResult, error) {
+	shared := append([]Trait(nil), doc.Spec.Components[0].Traits...)
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name, Namespace: doc.Metadata.Namespace},
+		Spec: ApplicationSpec{Components: []Component{
+			{Name: "web", Type: "webservice", Traits: shared},
+			{Name: "web2", Type: "webservice", Traits: shared},
+		}},
+	}}}, nil
+}
+
+// sharedTraitCopyComponentRule is the component-position counterpart.
+type sharedTraitCopyComponentRule struct{}
+
+func (sharedTraitCopyComponentRule) ComponentType() string { return "shared-trait-copy" }
+
+func (sharedTraitCopyComponentRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	shared := append([]Trait(nil), comp.Traits...)
+	return LoweringResult{Components: []Component{
+		{Name: "web", Type: "webservice", Traits: shared},
+		{Name: "web2", Type: "webservice", Traits: shared},
+	}}, nil
+}
+
+// TestLower_SharedForwardedTraitCopyStaysUnsealed: a rule may attach one slice of
+// forwarded copies to several components. The forwarding mark must survive until
+// the rule's whole output is classified, or every component after the first seals
+// the shared trait as the rule's own.
+func TestLower_SharedForwardedTraitCopyStaysUnsealed(t *testing.T) {
+	cases := map[string]struct {
+		register func(*Transformer)
+		app      *Application
+	}{
+		"document rule": {
+			register: func(tr *Transformer) { tr.RegisterDocumentLowering(sharedTraitCopyDocRule{}) },
+			app: func() *Application {
+				app := forwardingDocApp("configmap", map[string]any{"k": "v"})
+				app.Kind = "SharedTraitCopy"
+				return app
+			}(),
+		},
+		"component rule": {
+			register: func(tr *Transformer) { tr.RegisterComponentLowering(sharedTraitCopyComponentRule{}) },
+			app: func() *Application {
+				app := forwardingDocApp("configmap", map[string]any{"k": "v"})
+				app.Kind = terminalDocumentKind
+				app.Spec.Components[0].Type = "shared-trait-copy"
+				return app
+			}(),
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			tr := NewTransformer(nil, nil)
+			tc.register(tr)
+
+			settled, err := tr.lower(tc.app, TransformContext{})
+			if err != nil {
+				t.Fatalf("lower: %v", err)
+			}
+			comps := settled[0].Spec.Components
+			if len(comps) != 2 {
+				t.Fatalf("settled components = %d, want 2", len(comps))
+			}
+			for _, comp := range comps {
+				trait := comp.Traits[0]
+				if trait.sealed || trait.forwardedFrom != nil {
+					t.Errorf("component %q: shared forwarded trait = %+v, want unsealed with no mark left", comp.Name, trait)
+				}
+			}
+		})
+	}
+}
+
+// appendingDocRule appends a trait to the first component of the document it was
+// handed (a mutation LoweringContext.Document forbids) and forwards the components.
+type appendingDocRule struct{}
+
+func (appendingDocRule) Kind() string { return "Appending" }
+
+func (appendingDocRule) LowerDocument(doc *Application, _ LoweringContext) (LoweringResult, error) {
+	doc.Spec.Components[0].Traits = append(doc.Spec.Components[0].Traits, Trait{Type: "configmap", Properties: map[string]any{"k": "appended"}})
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name, Namespace: doc.Metadata.Namespace},
+		Spec:       ApplicationSpec{Components: doc.Spec.Components},
+	}}}, nil
+}
+
+// TestLower_DocumentRuleCopyDetachesEmptyTraitSlices: an empty authored trait slice
+// may share spare capacity with another component's traits. The copy the rule is
+// handed gives it its own storage, so appending through it cannot overwrite the
+// other component's authored trait.
+func TestLower_DocumentRuleCopyDetachesEmptyTraitSlices(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterDocumentLowering(appendingDocRule{})
+
+	backing := []Trait{{Type: "configmap", Properties: map[string]any{"k": "v"}}}
+	app := forwardingDocApp("configmap", map[string]any{"k": "v"})
+	app.Kind = "Appending"
+	app.Spec.Components = []Component{
+		{Name: "web", Type: "webservice", Traits: backing[:0]},
+		{Name: "web2", Type: "webservice", Traits: backing},
+	}
+	if _, err := tr.lower(app, TransformContext{}); err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if got := app.Spec.Components[1].Traits[0].Properties["k"]; got != "v" {
+		t.Errorf("the second authored component's trait was overwritten through the first one's spare capacity: k = %v", got)
+	}
+}
