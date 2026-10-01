@@ -458,8 +458,11 @@ Runs on main and `release/*` branches only (not PRs):
 6. Checks out `go-kure/go-kure.github.io` and deploys to the `launcher/` subdirectory through the
    shared `deploy-docs-push` action from `go-kure/.github`. When `set_latest=true`, the action
    fetches the tags again right before writing the root and writes `launcher/` only if the label
-   is still the highest stable tag (the same rule Publish uses). Otherwise it deploys the slot and
-   leaves the root untouched.
+   is still the highest stable tag (the same rule Publish uses) and the checkout is that tag's
+   commit. If the label is no longer the highest stable tag, it deploys the slot and leaves the
+   root untouched. If it is, but the label is not an existing tag or the checked-out commit is not
+   the tag's (a dispatch from another ref), the deploy fails and pushes nothing: re-dispatch with
+   `--ref <label>`.
 
 **Credentials.** The launcher checkout sets `persist-credentials: false`: the repository is
 public, so the action's tag fetch needs no token, and no later step can read the job token from
@@ -496,8 +499,9 @@ version runs the deploy from its own ref, so its deploy uses the workflow as it 
 ### Preservation
 
 Only the target slot is replaced. Other `launcher/v*/`, `launcher/dev/`, `CNAME`, and `.nojekyll`
-are preserved. The root `launcher/` files are only overwritten when `set_latest=true` and the label
-is still the highest stable tag when the deploy writes. A root write replaces everything directly
+are preserved. The root `launcher/` files are only overwritten when `set_latest=true`, the label
+is still the highest stable tag when the deploy writes, and the deploy's checkout is that tag's
+commit (otherwise the deploy fails, see How It Works). A root write replaces everything directly
 under `launcher/` except `dev/` and the `v*/` slots.
 
 ### Authentication
