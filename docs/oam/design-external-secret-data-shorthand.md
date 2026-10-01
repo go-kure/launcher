@@ -54,7 +54,7 @@ parsing would silently *rewrite meaning*: a typo'd `remteRef:` would be ignored,
 parser would see `remoteRef` absent, derive `<namespace>/<secretName>`, and the app
 would fetch the **wrong secret path** — discovered at runtime, in-cluster, on auth
 material. Strict rejection is the only safe complement to defaulting-by-absence, and
-it matches the downstream strict-mode charter and the #323 reject-over-ignore pins. There
+it matches the downstream strict-mode charter and its reject-over-ignore pins. There
 are no existing users to grandfather; the opsmaster fixtures conform.
 
 The error names the *supported* fields rather than calling the key a "typo", because
@@ -81,7 +81,7 @@ cases in `external_secret_test.go`.
   extension to add then.
 - **Parser-only string form** (accept string, don't model it in the schema). The
   schema is the SSOT the downstream validator consumes; letting it under-describe accepted
-  input reverses the #235 schema-SSOT direction and makes the generated handler
+  input reverses the downstream schema-SSOT direction and makes the generated handler
   reference narrower than reality.
 
 ## Schema impact
