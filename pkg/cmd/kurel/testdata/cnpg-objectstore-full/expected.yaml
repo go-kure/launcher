@@ -1,0 +1,36 @@
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: postgres-backups
+  namespace: default
+spec:
+  configuration:
+    data:
+      compression: gzip
+      jobs: 2
+    destinationPath: s3://backups/postgres
+    endpointURL: https://s3.example.com
+    s3Credentials:
+      accessKeyId:
+        key: ACCESS_KEY_ID
+        name: backup-creds
+      secretAccessKey:
+        key: SECRET_ACCESS_KEY
+        name: backup-creds
+    serverName: postgres-v2
+    wal:
+      compression: gzip
+      maxParallel: 4
+  instanceSidecarConfiguration:
+    env:
+    - name: TZ
+      value: UTC
+    logLevel: info
+    resources:
+      limits:
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    retentionPolicyIntervalSeconds: 3600
+  retentionPolicy: 30d

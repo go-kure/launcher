@@ -466,6 +466,8 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"oci", "passthrough", "postgresql", "service", "statefulset", "webservice",
 		// The kind-named Flux source components (go-kure/launcher#347).
 		"bucket", "gitrepository", "helmrepository", "ocirepository",
+		// The CloudNativePG kind components beside cnpg-cluster (go-kure/launcher#573).
+		"cnpg-database", "cnpg-objectstore", "cnpg-pooler",
 	}
 	sort.Strings(wantHandlers)
 	wantRules := []string{"worker"}

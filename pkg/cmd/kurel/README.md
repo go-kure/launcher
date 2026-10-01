@@ -70,7 +70,10 @@ and `pkg/oam`'s component allowlist; the `flux-sources` fixture under
 `testdata/` builds all four. The `cnpg-cluster` component — the full-fidelity,
 opinion-free projection of a CloudNativePG `Cluster` — is registered in
 `builtinComponentHandlers()` and `pkg/oam`'s component allowlist; the
-`cnpg-cluster-minimal` and `cnpg-cluster-full` fixtures build it.
+`cnpg-cluster-minimal` and `cnpg-cluster-full` fixtures build it. Its siblings
+`cnpg-pooler`, `cnpg-database` and `cnpg-objectstore` (one CloudNativePG
+`Pooler`, `Database` or Barman Cloud `ObjectStore` each) are registered the same
+way; the `cnpg-<kind>-minimal` and `cnpg-<kind>-full` fixtures build each.
 
 Because a lowering rule may claim types the parser would otherwise reject, `build`
 constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`

@@ -2,6 +2,9 @@
 
 Status: accepted (go-kure/launcher#281). First instance: the `cnpg-cluster`
 component, a projection of the CloudNativePG `postgresql.cnpg.io/v1` `Cluster`.
+go-kure/launcher#573 adds `cnpg-pooler` (`Pooler`), `cnpg-database`
+(`Database`) and `cnpg-objectstore` (the Barman Cloud plugin's
+`barmancloud.cnpg.io/v1` `ObjectStore`).
 
 ## Problem
 
@@ -33,8 +36,10 @@ Split the two concerns into two layers:
 
 Each component emits one object of one kind. `cnpg-cluster` emits one `Cluster`
 and nothing else; a pooler, a database or an object store is a separate kind
-component (go-kure/launcher#573), wired together by the author or by a semantic
-component's lowering rule. One kind per component keeps a component's schema
+component (`cnpg-pooler`, `cnpg-database`, `cnpg-objectstore`), wired together
+by the author or by a semantic component's lowering rule: the `Pooler` and the
+`Database` name their `Cluster` in `cluster.name`, and a `Cluster` names its
+`ObjectStore` in its plugin configuration. One kind per component keeps a component's schema
 equal to one upstream type, so the coverage test below has a single target.
 
 ### No launcher opinions on the kind
@@ -44,7 +49,13 @@ is left unset so the operator's own default applies. The one exception is a
 field the upstream Go type cannot leave unset: `ClusterSpec.instances` is an
 `int` without `omitempty`, so an unauthored value would serialize as `0`. The
 kind writes the CRD's documented default (`1`) there instead, which is the value
-the API server would have applied.
+the API server would have applied. `DatabaseSpec` has the same shape one level
+down: the `ensure` of each schema, extension, fdw and server has no
+`omitempty` and a CRD default of `present`, so an unauthored one would reach the
+API server as `""`, which the CRD's enum refuses. `cnpg-database` writes
+`present` there. A second derived test pins these lists the same way as the
+omitted-zero list below: the CRD's scalar defaults crossed with the Go type's
+non-pointer fields without `omitempty`.
 
 A launcher opinion that depends on the post-policy object — `enablePDB` on only
 when there is more than one instance, for example — is not computed by the kind.
@@ -135,6 +146,19 @@ tablespace and the ephemeral volume template), the privileged, capability and
 host-process refusals on the two security contexts, and the registry allowlist
 the workload kinds apply to their image, on an authored `imageName`.
 
+`cnpg-pooler` polices what the `Pooler` runs: its pod template gets the gates
+the workload kinds apply to their pod (host namespaces, hostPath volumes,
+privilege, host-process, capabilities, the registry allowlist on each authored
+container image and the cpu and memory maxima), and an authored
+`pgbouncer.image` gets the registry allowlist. The instance count is not
+policed, neither by a replica default nor by a maximum: `postgresql` applies no
+policy to its pooler today, so a maximum on the kind would refuse, once
+`postgresql` lowers onto it, a document that builds today, and break the
+identical-output promise below. `cnpg-objectstore` caps the cpu and memory of
+the plugin sidecar it adds to every instance pod
+(`instanceSidecarConfiguration.resources`). A `Database` runs nothing of its
+own, so `cnpg-database` applies no policy.
+
 A policy default never overrides an authored value, including an authored value
 equal to what the default would be. The kind therefore records which fields were
 authored before it fills any default.
@@ -145,7 +169,11 @@ The kind component implements `oam.EndpointProvider`, declaring the pods a
 consumer connects to. `cnpg-cluster` declares the primary endpoint
 (`cnpg.io/cluster: <component-name>` on port `5432`), the same one `postgresql`
 declares, so a synthesized ingress allow does not change when a component moves
-from one to the other.
+from one to the other. `cnpg-pooler` declares its PgBouncer pods
+(`cnpg.io/poolerName: <component-name>` on port `5432`); `postgresql` names its
+`Pooler` `<component-name>-pooler`, so a `cnpg-pooler` of that name declares the
+identical endpoint, which a test pins byte for byte. `cnpg-database` and
+`cnpg-objectstore` run no pods and declare no endpoint.
 
 ### Semantic components as lowering rules
 
@@ -175,7 +203,12 @@ output is intended to stay identical.
 
 - Lowering `postgresql` onto `cnpg-cluster`, and the `enablePDB` trait: the
   follow-up change under go-kure/launcher#281.
-- `Pooler`, `Database` and `ObjectStore` kind components: go-kure/launcher#573.
+- Health checks for `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore`: their
+  status carries no condition kstatus reads, so a check would report the object
+  ready without waiting on anything. `postgresql` checks only its `Cluster`.
+- An authored `ensure: ""` on a `Database` schema, extension, fdw or server is
+  read as unset and written as `present`; the CRD's enum would refuse it as
+  written.
 - `postgresql` does not apply the registry allowlist to its image, while
   `cnpg-cluster` applies it to `imageName`, so a lowered `postgresql` whose
   image comes from a registry outside the list would be refused: the follow-up

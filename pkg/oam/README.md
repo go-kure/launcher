@@ -221,7 +221,11 @@ group it falls in and say so; silence here reads the same either way. `helmtempl
 (go-kure/launcher#348) sits in `defaultTierMap` at `TierApps`, like `helmchart`.
 `cnpg-cluster` is listed: it emits one CloudNativePG `Cluster`, the same object
 `postgresql`'s check already targets, so it gets the same check (and, in `defaultTierMap`,
-the same `services` tier).
+the same `services` tier). `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore`
+(go-kure/launcher#573) are absent for a fourth reason: their `Pooler`, `Database` and
+`ObjectStore` statuses carry no condition kstatus reads, so a check would report them ready
+without waiting on anything — `postgresql`, which emits the same kinds, checks only its
+`Cluster`. They sit in the `services` tier with `cnpg-cluster`.
 
 `helmrelease` (go-kure/launcher#327) is listed, with the same `helm.toolkit.fluxcd.io/v2`
 `HelmRelease` GVK as `helmchart`: it always emits exactly one HelmRelease, whose Ready

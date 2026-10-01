@@ -76,6 +76,9 @@ reads it.
 | `bucket` | Bucket | Kind-named: the full Flux `BucketSpec`. |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
 | `cnpg-cluster` | CNPG Cluster | Operator-CR kind component: the whole `postgresql.cnpg.io/v1` `ClusterSpec`, strictly decoded, with no launcher opinions — see below. |
+| `cnpg-pooler` | CNPG Pooler | Operator-CR kind component: the whole `PoolerSpec`, strictly decoded — see below. |
+| `cnpg-database` | CNPG Database | Operator-CR kind component: the whole `DatabaseSpec`, strictly decoded — see below. |
+| `cnpg-objectstore` | Barman Cloud ObjectStore | Operator-CR kind component: the whole `barmancloud.cnpg.io/v1` `ObjectStoreSpec`, strictly decoded — see below. |
 | `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared (`clusterScoped` opt); a list is rejected. |
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. |
@@ -2569,6 +2572,49 @@ not part of either change.
   listed with a reason in `cnpgClusterExcludedFields` (empty today), and a
   schema key with no field or a stale exclusion also fails, so a CNPG bump
   that adds, removes or retypes a field names it.
+- **cnpg-pooler**, **cnpg-database**, **cnpg-objectstore** — the operator-CR
+  kind components for a CloudNativePG `Pooler` and `Database` and a Barman
+  Cloud plugin `ObjectStore` (`barmancloud.cnpg.io/v1`), built on the
+  `cnpg-cluster` recipe: one schema key per json field of `PoolerSpec`,
+  `DatabaseSpec` or `ObjectStoreSpec`, the whole property map decoded strictly
+  into that type under the same null contract, the same refusal of an
+  authored `0` or `false` the type cannot carry (for the linked versions only
+  `instanceSidecarConfiguration.retentionPolicyIntervalSeconds`, default
+  `1800`, on the ObjectStore) and of two spellings of one field, and the same
+  reflection tests pinning the schema and both derived lists to the linked
+  modules. `Generate` emits one object named after the component in the build
+  namespace with the authored spec, and repeats the parse-time refusals. All
+  three are in the `services` tier and carry no auto health check: their status
+  has no condition kstatus reads. The fields each CRD requires are refused when
+  unauthored or empty, by path: `cluster.name` and `pgbouncer` on the Pooler
+  (`pgbouncer: {}` selects PgBouncer's defaults); `cluster.name`, `name` and
+  `owner` on the Database; `configuration.destinationPath` on the ObjectStore.
+  A `cluster.name` must be a name CloudNativePG admits for a Cluster (a DNS-1035
+  label of at most 50 characters).
+  `cnpg-pooler` writes no type or instance count of its own, so the operator's
+  defaults (`rw`, `1`) apply. Its component name is the Pooler's name and its
+  Service's, so it must be a DNS-1035 label of at most 63 characters, and a
+  pooler named like its cluster is refused, as CloudNativePG's webhook does.
+  `ApplyPolicy` applies the workload kinds' pod gates to `template.spec` (host
+  namespaces, hostPath volumes, privilege, host-process, capabilities, the
+  registry allowlist on each authored container image, cpu and memory maxima;
+  errors name the container, as in `template.spec.containers[0] "pgbouncer": cpu
+  limit "2" exceeds enforced maximum "1"`) and the registry allowlist to an
+  authored `pgbouncer.image`. The instance count is deliberately not policed:
+  `postgresql` applies no policy to its pooler, so a maximum here would refuse,
+  once `postgresql` lowers onto this kind, a document that builds today.
+  `Endpoints` declares the PgBouncer pods (`cnpg.io/poolerName:
+  <component-name>` on port `5432`), byte-identical to `postgresql`'s pooler
+  endpoint for a pooler named `<cluster>-pooler`.
+  `cnpg-database` also refuses the names the CRD reserves (`postgres`,
+  `template0`, `template1`). The `ensure` of each schema, extension, fdw and
+  server has no `omitempty` but a CRD default of `present`, so `Generate` writes
+  `present` where it is unauthored or empty, as the API server would have; a
+  test derives that list from the CRD too. A Database runs nothing, so it has
+  no policy and no endpoint.
+  `cnpg-objectstore` caps the cpu and memory requests and limits of the plugin
+  sidecar it adds to every instance pod (`instanceSidecarConfiguration.resources`)
+  at the policy maxima, filling no default, and declares no endpoint.
 - **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
   Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
   consumers can attribute the emitted resource to its owning OAM component.

@@ -1,0 +1,10 @@
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: postgres-backups
+  namespace: default
+spec:
+  configuration:
+    destinationPath: s3://backups/postgres
+  instanceSidecarConfiguration:
+    resources: {}

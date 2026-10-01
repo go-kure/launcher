@@ -1,0 +1,31 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres-orders
+    type: cnpg-database
+    properties:
+      cluster:
+        name: postgres
+      name: orders
+      owner: orders
+      ensure: present
+      template: template0
+      encoding: UTF8
+      localeProvider: icu
+      icuLocale: en-US
+      isTemplate: false
+      allowConnections: true
+      connectionLimit: 50
+      tablespace: pg_default
+      databaseReclaimPolicy: delete
+      schemas:
+      - name: reporting
+        owner: orders
+      extensions:
+      - name: pgvector
+        ensure: present
+        version: "0.8.0"

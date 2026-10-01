@@ -1,0 +1,40 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres-backups
+    type: cnpg-objectstore
+    properties:
+      configuration:
+        destinationPath: s3://backups/postgres
+        endpointURL: https://s3.example.com
+        serverName: postgres-v2
+        s3Credentials:
+          accessKeyId:
+            name: backup-creds
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: backup-creds
+            key: SECRET_ACCESS_KEY
+        wal:
+          compression: gzip
+          maxParallel: 4
+        data:
+          compression: gzip
+          jobs: 2
+      retentionPolicy: 30d
+      instanceSidecarConfiguration:
+        retentionPolicyIntervalSeconds: 3600
+        logLevel: info
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
+        env:
+        - name: TZ
+          value: UTC
