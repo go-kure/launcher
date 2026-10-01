@@ -895,11 +895,25 @@ func (t *Transformer) buildDependencyAwareCluster(app *Application, entries []co
 // OAM inline values take precedence. Policy enforcement is applied to configs
 // added by each trait.
 func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bundle *stack.Bundle, ctx TransformContext) error {
-	var targets []componentEntry
 	for _, e := range entries {
-		targets = append(targets, e.traitTargets()...)
+		// For a sibling group: each trait-created sub-application's name and the
+		// member type whose trait created it (see the check after Apply).
+		var groupTraitApps map[string]string
+		if len(e.members) > 0 {
+			groupTraitApps = make(map[string]string)
+		}
+		if err := t.applyEntryTraits(app, e, groupTraitApps, bundle, ctx); err != nil {
+			return err
+		}
 	}
-	for _, entry := range targets {
+	return nil
+}
+
+// applyEntryTraits applies the traits of one entry — each member's own, for a
+// collapsed sibling group (traitTargets). groupTraitApps is non-nil exactly for a
+// group.
+func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, groupTraitApps map[string]string, bundle *stack.Bundle, ctx TransformContext) error {
+	for _, entry := range e.traitTargets() {
 		for _, trait := range app.Spec.Components[entry.index].Traits {
 			handler := t.findTraitHandler(trait.Type)
 			if handler == nil {
@@ -976,6 +990,17 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 			}
 
 			for _, newApp := range bundle.Applications[prevLen:] {
+				// Members share the group's name, so traits on two members that
+				// derive a sub-application name from it (web-rbac, web-ingress)
+				// would deploy one name twice.
+				if groupTraitApps != nil {
+					if prev, dup := groupTraitApps[newApp.Name]; dup && prev != entry.component.Type {
+						return &TransformError{Message: fmt.Sprintf(
+							"sibling group %q: traits on members %q and %q both create sub-application %q; carry the trait on one member",
+							entry.component.Name, prev, entry.component.Type, newApp.Name)}
+					}
+					groupTraitApps[newApp.Name] = entry.component.Type
+				}
 				if enforceable, ok := newApp.Config.(Enforceable); ok {
 					if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
 						return &ViolationError{Component: entry.component.Name, Cause: err}

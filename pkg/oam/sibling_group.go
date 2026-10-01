@@ -139,6 +139,8 @@ func (e componentEntry) healthCheckConfig() stack.ApplicationConfig {
 //     postProcessFluxNamespace): set on every member.
 //   - autoHealthCheckEmitter (applyAutoHealthChecks): the primary member's
 //     answer, since the health check names the primary's kind.
+//   - ComponentNamed (for consumers attributing objects to their component):
+//     the group's name, which every member shares.
 //   - servicePortProvider, serviceBackendNamer, serviceRoutingTargeter
 //     (netpol_synthesis.go componentServiceName and the routing registry),
 //     ServiceAccountNamer, and the servicePortNamer and nonRWXClaimer contracts
@@ -206,6 +208,9 @@ func (g *siblingGroupConfig) SetFluxNamespace(ns string) {
 		}
 	}
 }
+
+// ComponentName is the group's name, which every member shares (ComponentNamed).
+func (g *siblingGroupConfig) ComponentName() string { return g.members[0].Name }
 
 // EmitsAutoHealthCheck answers for the primary member, whose kind the health check names.
 func (g *siblingGroupConfig) EmitsAutoHealthCheck() bool {
