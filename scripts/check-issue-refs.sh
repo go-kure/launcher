@@ -57,7 +57,7 @@ PART='(^|[^A-Za-z0-9_./-])[A-Za-z0-9_.-]*[A-Za-z][A-Za-z0-9_.-]*#[0-9]{2,5}([^A-
 
 # Strippers: group 1 is the text before the match, the last group the text after.
 LINK='^(.*)\]\(([^()[:space:]]|\([^()[:space:]]*\))*\)(.*)$'
-URL='^(.*)[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]<>()"`]*(.*)$'
+URL='^(.*)[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]<>()"'"'"'`]*(.*)$'
 VERB='^(.*)%[-+ 0]*#[-+ #0]*[0-9]*(\.[0-9]+)?[A-Za-z](.*)$'
 
 hits="$(mktemp)"
