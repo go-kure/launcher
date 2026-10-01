@@ -165,7 +165,8 @@ func parseWorker(props map[string]any) (workerOpinions, error) {
 	if _, _, err := parseReplicas(props, 1); err != nil {
 		return out, err
 	}
-	if _, err := parseEnv(props); err != nil {
+	env, err := parseEnv(props)
+	if err != nil {
 		return out, err
 	}
 	if _, err := parseEnvFrom(props); err != nil {
@@ -228,6 +229,9 @@ func parseWorker(props map[string]any) (workerOpinions, error) {
 	}
 	// The main container declares no ports, so only sidecars can collide.
 	if err := checkPodPortNames(nil, sidecars); err != nil {
+		return out, err
+	}
+	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, sidecars); err != nil {
 		return out, err
 	}
 	if _, err := parsePodSpec(props, false); err != nil {

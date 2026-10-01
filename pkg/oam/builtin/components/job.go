@@ -220,6 +220,9 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, nil); err != nil {
 		return nil, err
 	}
+	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, nil); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := parsePodSpec(props, true)
 	if err != nil {

@@ -297,6 +297,9 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, nil); err != nil {
 		return nil, err
 	}
+	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, nil); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := parsePodSpec(props, true)
 	if err != nil {

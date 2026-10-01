@@ -205,6 +205,11 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	if err := checkPodPortNames(config.mainContainerPorts(), sidecars); err != nil {
 		return nil, err
 	}
+	// Claim templates are left out on purpose: they are persistentVolumeClaim
+	// volumes, never emptyDir, so the API server refuses a fileKeyRef naming one.
+	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, sidecars); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := parsePodSpec(props, false)
 	if err != nil {

@@ -221,6 +221,9 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := checkPodPortNames(ports, sidecars); err != nil {
 		return nil, err
 	}
+	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, sidecars); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := parsePodSpec(props, false)
 	if err != nil {
