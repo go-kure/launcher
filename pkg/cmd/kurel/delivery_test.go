@@ -1582,8 +1582,6 @@ func TestDeliveryAcceptsNearCollision(t *testing.T) {
 	}
 }
 
-// TestDeliveryFlagsAccepted checks --oci-repository and --oci-tag values the
-// flag check must let through.
 // reconciliationAppYAML is the flat fixture's application (one bundle, shop)
 // with a reconciliation policy setting interval, retryInterval and timeout all
 // to duration.
@@ -1604,10 +1602,11 @@ func reconciliationAppYAML(t *testing.T, duration string) string {
 }
 
 // TestDeliveryRefusesSubMillisecondDuration checks, through the CLI, that a
-// reconciliation policy duration the policy accepts as authored but that a
-// Kustomization writes outside Flux's duration pattern (0.5ms is written as
-// 500µs) is refused before anything is written, and that the near misses at
-// and above one millisecond are delivered as authored.
+// reconciliation policy duration a Kustomization would write outside Flux's
+// duration pattern (0.5ms is written as 500µs) is refused before anything is
+// written, and that the near misses at and above one millisecond are delivered
+// as authored. The reconciliation policy refuses it first; checkDurations,
+// covered by TestCheckDurations, is the delivery path's own check.
 func TestDeliveryRefusesSubMillisecondDuration(t *testing.T) {
 	profile := filepath.Join(deliveryTestdata, "cluster.yaml")
 	t.Run("0.5ms refused", func(t *testing.T) {
@@ -1617,7 +1616,7 @@ func TestDeliveryRefusesSubMillisecondDuration(t *testing.T) {
 		if err == nil {
 			t.Fatal("delivery build accepted a 0.5ms reconciliation interval")
 		}
-		for _, want := range []string{"Kustomization.kustomize.toolkit.fluxcd.io flux-system/shop", "spec.interval", `"500µs"`, "millisecond resolution"} {
+		for _, want := range []string{`"0.5ms"`, `"500µs"`, "millisecond resolution"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("error %q does not contain %q", err, want)
 			}
@@ -1717,6 +1716,8 @@ func TestCheckDurations(t *testing.T) {
 	}
 }
 
+// TestDeliveryFlagsAccepted checks --oci-repository and --oci-tag values the
+// flag check must let through.
 func TestDeliveryFlagsAccepted(t *testing.T) {
 	tests := []struct {
 		name, repository, tag string
