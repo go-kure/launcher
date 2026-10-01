@@ -2505,14 +2505,18 @@ not part of either change.
   covered every object postgresql generated are forwarded to the other
   members so they still do: `prune-protection` and `force-replace` to each
   member, and `fluxcd-patches` and `fluxcd-postbuild` to each member with a
-  bundle of its own (below). When the
-  document orders its components with a `dependency` policy that has a
-  rule, the rule adds one making the Pooler and the Databases depend on
-  the Cluster, named `<name>-dependencies` or, when the document or a
-  database already uses that name, the first free `<name>-dependencies-<n>`:
-  that layout gives each component a
-  bundle of its own. Without one it adds nothing, since any dependency edge
-  switches the whole document to that layout.
+  bundle of its own (below). Policies that name the postgresql component
+  are extended to the members the same way. A `placement` of it is repeated
+  for each member, so they stay in the Cluster's tier and, without a
+  dependency policy, in its bundle. When the document orders its components
+  with a `dependency` policy that has a rule, the rule adds one making the
+  Pooler and the Databases depend on the Cluster, and every component the
+  document makes depend on the postgresql component depend on them too:
+  that layout gives each component a bundle of its own. Without one it adds
+  no edge, since any dependency edge switches the whole document to that
+  layout. The policies it adds are named `<name>-dependencies` and
+  `<member>-placement`, or, when a policy of the document already uses the
+  name, the first free one with `-<n>` appended.
   **Behavior-changing** under `launcher.gokure.dev/v1alpha1`
   (go-kure/launcher#281): with both `objectStore` and `pooler`, the objects
   now come in the order Cluster, ObjectStore, Pooler (was Cluster, Pooler,

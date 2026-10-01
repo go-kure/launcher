@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
 
 	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -102,11 +103,9 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 		out = append(out, oam.Component{Name: name, Type: "cnpg-database", Properties: props, Annotations: maps.Clone(comp.Annotations)})
 	}
 
-	policies, err := postgresqlDependencyPolicy(lctx, comp.Name, dependents)
-	if err != nil {
-		return oam.LoweringResult{}, err
-	}
-	forwardMemberTraits(out, comp.Traits, len(policies) > 0)
+	policies := postgresqlMemberPolicies(lctx, comp.Name, dependents)
+	split := slices.ContainsFunc(policies, func(p oam.ApplicationPolicy) bool { return p.Type == "dependency" })
+	forwardMemberTraits(out, comp.Traits, split)
 	return oam.LoweringResult{Components: out, Policies: policies}, nil
 }
 
@@ -168,51 +167,123 @@ func postgresqlChildName(lctx oam.LoweringContext, cluster, suffix, what string)
 	return name, nil
 }
 
-// postgresqlDependencyPolicy returns a dependency policy making each of the
-// dependents (the Pooler and the Databases) wait for the Cluster, or nothing.
+// postgresqlMemberPolicies returns the policies that keep the members (the
+// components the rule emits beside the Cluster: the Pooler and the Databases,
+// one per name) where postgresql's own objects were. A policy names a component;
+// what the document's policies say about the postgresql component by its name
+// covered all of its objects, and now reaches only the Cluster's.
 //
-// It is emitted only when the document already orders its components with a
-// dependency policy that has a rule. That is when the transformer lays out one
-// bundle per component and orders the bundles by those edges; the Pooler and
-// the Databases are then bundles of their own, in the Cluster's tier, which
-// gets no automatic edge to them. Without such a policy every component of a
-// tier shares one bundle, so the objects apply together, as postgresql's did.
-// Emitting the policy unconditionally would break that: any dependency edge
-// switches the whole document to the per-component layout
-// (PolicyResult.HasDependencies), so a postgresql component with a pooler would
-// change the layout of a document that never asked for ordering.
-func postgresqlDependencyPolicy(lctx oam.LoweringContext, cluster string, dependents []string) ([]oam.ApplicationPolicy, error) {
-	if len(dependents) == 0 || !documentOrdersComponents(lctx.Document) {
-		return nil, nil
+//   - A placement of the component is repeated for every member, so the members
+//     stay in the Cluster's tier (and, without a dependency policy, in its
+//     bundle).
+//   - Under a dependency policy, the members wait for the Cluster, and every
+//     component the document makes wait for the postgresql component waits for
+//     the members too (postgresqlDependencyRules).
+//
+// The names are implementation details no author refers to, so each takes the
+// first of <base>, <base>-1, … that no policy of the document, and none this
+// call already named, uses, rather than refusing the document. They are not
+// claimed through lctx.Namer: a policy generates no object, and its name must
+// be unique only among policies (the settled document's validation refuses a
+// duplicate). Sharing the Namer's namespace with generated component names
+// would refuse a valid document whose database, or another component's,
+// generates the same name, depending on which rule ran first. Two calls cannot
+// name the same policy either: each base is a component's own name followed by
+// "-dependencies" or "-placement".
+func postgresqlMemberPolicies(lctx oam.LoweringContext, cluster string, members []string) []oam.ApplicationPolicy {
+	if len(members) == 0 || lctx.Document == nil {
+		return nil
 	}
-	// The policy's name is an implementation detail no author refers to, so it
-	// takes the first of <cluster>-dependencies, <cluster>-dependencies-1, …
-	// that is free, rather than refusing a document that already uses one: a
-	// database named "dependencies" generates the first, and so may an
-	// authored component or policy.
 	used := map[string]bool{}
-	for _, d := range dependents {
-		used[d] = true
-	}
-	for _, other := range lctx.Document.Spec.Components {
-		used[other.Name] = true
-	}
 	for _, p := range lctx.Document.Spec.Policies {
 		used[p.Name] = true
 	}
-	suffix := "dependencies"
-	for i := 1; used[cluster+"-"+suffix]; i++ {
-		suffix = fmt.Sprintf("dependencies-%d", i)
+	free := func(base string) string {
+		name := base
+		for i := 1; used[name]; i++ {
+			name = fmt.Sprintf("%s-%d", base, i)
+		}
+		used[name] = true
+		return name
 	}
-	name, err := lctx.Namer.Name(cluster, suffix, lctx.Origin)
-	if err != nil {
-		return nil, err
+	var out []oam.ApplicationPolicy
+	if rules := postgresqlDependencyRules(lctx.Document, cluster, members); rules != nil {
+		out = append(out, oam.ApplicationPolicy{Name: free(cluster + "-dependencies"), Type: "dependency", Properties: map[string]any{"rules": rules}})
 	}
-	rules := make([]any, 0, len(dependents))
-	for _, d := range dependents {
-		rules = append(rules, map[string]any{"component": d, "dependsOn": []any{cluster}})
+	for _, tier := range postgresqlPlacementTiers(lctx.Document, cluster) {
+		for _, m := range members {
+			out = append(out, oam.ApplicationPolicy{Name: free(m + "-placement"), Type: "placement", Properties: map[string]any{"component": m, "tier": tier}})
+		}
 	}
-	return []oam.ApplicationPolicy{{Name: name, Type: "dependency", Properties: map[string]any{"rules": rules}}}, nil
+	return out
+}
+
+// postgresqlDependencyRules returns the dependency rules for the members, or
+// nil.
+//
+// They are emitted only when the document already orders its components with a
+// dependency policy that has a rule. That is when the transformer lays out one
+// bundle per component and orders the bundles by those edges; the members are
+// then bundles of their own, which gets them no automatic edge from or to the
+// Cluster's. Without such a policy every component of a tier shares one bundle,
+// so the objects apply together, as postgresql's did. Emitting edges
+// unconditionally would break that: any dependency edge switches the whole
+// document to the per-component layout (PolicyResult.HasDependencies), so a
+// postgresql component with a pooler would change the layout of a document that
+// never asked for ordering.
+//
+// Each member waits for the Cluster. Each component an authored rule makes wait
+// for the postgresql component also waits for every member, as it waited for
+// the one bundle of all of postgresql's objects.
+func postgresqlDependencyRules(doc *oam.Application, cluster string, members []string) []any {
+	if !documentOrdersComponents(doc) {
+		return nil
+	}
+	rules := make([]any, 0, len(members))
+	for _, m := range members {
+		rules = append(rules, map[string]any{"component": m, "dependsOn": []any{cluster}})
+	}
+	seen := map[string]bool{}
+	for _, p := range doc.Spec.Policies {
+		if p.Type != "dependency" {
+			continue
+		}
+		authored, _ := p.Properties["rules"].([]any)
+		for _, r := range authored {
+			rule, _ := r.(map[string]any)
+			component, _ := rule["component"].(string)
+			dependsOn, _ := rule["dependsOn"].([]any)
+			if component == "" || seen[component] || !slices.Contains(dependsOn, any(cluster)) {
+				continue
+			}
+			seen[component] = true
+			onMembers := make([]any, 0, len(members))
+			for _, m := range members {
+				onMembers = append(onMembers, m)
+			}
+			rules = append(rules, map[string]any{"component": component, "dependsOn": onMembers})
+		}
+	}
+	return rules
+}
+
+// postgresqlPlacementTiers returns the tiers the document's placement policies
+// put the postgresql component in, each once, in policy order. A malformed
+// placement is skipped: the placement handler refuses the authored policy
+// itself.
+func postgresqlPlacementTiers(doc *oam.Application, cluster string) []string {
+	var tiers []string
+	for _, p := range doc.Spec.Policies {
+		if p.Type != "placement" {
+			continue
+		}
+		component, _ := p.Properties["component"].(string)
+		tier, _ := p.Properties["tier"].(string)
+		if component == cluster && tier != "" && !slices.Contains(tiers, tier) {
+			tiers = append(tiers, tier)
+		}
+	}
+	return tiers
 }
 
 // documentOrdersComponents reports whether doc carries a dependency policy with

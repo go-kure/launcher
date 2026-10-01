@@ -1,6 +1,7 @@
 package kurel
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,6 +51,116 @@ const postgresqlOrderPolicy = `  policies:
           - component: api
             dependsOn: [db]
 `
+
+// deliveryKustomizations runs a delivery build of app and returns the spec of
+// each Flux Kustomization it writes, by name.
+func deliveryKustomizations(t *testing.T, app string) map[string]map[string]any {
+	t.Helper()
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", app)
+	outDir := filepath.Join(dir, "out")
+	if _, err := runKurel(t, "build", appPath, "--profile", filepath.Join(deliveryTestdata, "cluster.yaml"),
+		"-o", outDir, "--oci-repository", testOCIRepository, "--oci-tag", "v1.0.0"); err != nil {
+		t.Fatalf("delivery build: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(outDir, "shop.flux.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ks := map[string]map[string]any{}
+	for _, raw := range strings.Split(string(data), "\n---\n") {
+		var obj map[string]any
+		if err := yaml.Unmarshal([]byte(raw), &obj); err != nil {
+			t.Fatalf("decoding %s: %v", raw, err)
+		}
+		if obj["kind"] != "Kustomization" {
+			continue
+		}
+		md, _ := obj["metadata"].(map[string]any)
+		name, _ := md["name"].(string)
+		ks[name], _ = obj["spec"].(map[string]any)
+	}
+	return ks
+}
+
+// dependsOnNames lists the Kustomizations spec depends on, in order.
+func dependsOnNames(spec map[string]any) []string {
+	deps, _ := spec["dependsOn"].([]any)
+	names := make([]string, 0, len(deps))
+	for _, d := range deps {
+		m, _ := d.(map[string]any)
+		name, _ := m["name"].(string)
+		names = append(names, name)
+	}
+	return names
+}
+
+const postgresqlPlacementPolicy = `    - name: where
+      type: placement
+      properties:
+        component: db
+        tier: apps
+`
+
+// TestBuild_PostgresqlPlacementReachesEveryMember: a placement of the
+// postgresql component placed all of its objects; the rule repeats it for each
+// member. Without a dependency policy the objects stay in one bundle, as they
+// were; with one, the members' bundles are in the Cluster's tier, so the tier
+// order adds no edge back to them (it made a cycle) and fluxcd-postbuild
+// reaches each of them.
+func TestBuild_PostgresqlPlacementReachesEveryMember(t *testing.T) {
+	postbuild := `        - type: fluxcd-patches
+          properties:
+            patches:
+              - patch: |
+                  - op: add
+                    path: /metadata/labels/patched
+                    value: "yes"
+                target:
+                  group: postgresql.cnpg.io
+        - type: fluxcd-postbuild
+          properties:
+            substitute:
+              REGION: eu-west-1
+`
+	t.Run("without a dependency policy", func(t *testing.T) {
+		ks := deliveryKustomizations(t, postgresqlMembersApp(postbuild, "  policies:\n"+postgresqlPlacementPolicy))
+		if len(ks) != 1 || ks["shop"] == nil {
+			t.Fatalf("Kustomizations = %v, want the one bundle shop", keysOf(ks))
+		}
+		// The members share the Cluster's bundle, which carries the patch once.
+		if patches, _ := ks["shop"]["patches"].([]any); len(patches) != 1 {
+			t.Errorf("shop patches = %v, want the one authored patch", ks["shop"]["patches"])
+		}
+	})
+	t.Run("with a dependency policy", func(t *testing.T) {
+		ks := deliveryKustomizations(t, postgresqlMembersApp(postbuild, postgresqlOrderPolicy+postgresqlPlacementPolicy))
+		for _, name := range []string{"shop-db", "shop-db-pooler", "shop-db-orders"} {
+			pb, _ := ks[name]["postBuild"].(map[string]any)
+			if sub, _ := pb["substitute"].(map[string]any); sub["REGION"] != "eu-west-1" {
+				t.Errorf("%s postBuild = %v, want the authored substitute (have %v)", name, ks[name]["postBuild"], keysOf(ks))
+			}
+		}
+	})
+}
+
+// TestBuild_PostgresqlDependentWaitsForEveryMember: a component made to wait
+// for the postgresql component waited for the one bundle of all its objects;
+// it now waits for each member's bundle too, also when it shares the tier, so
+// no tier order adds those edges.
+func TestBuild_PostgresqlDependentWaitsForEveryMember(t *testing.T) {
+	policies := postgresqlOrderPolicy + `    - name: where
+      type: placement
+      properties:
+        component: api
+        tier: services
+`
+	ks := deliveryKustomizations(t, postgresqlMembersApp("        - type: prune-protection\n", policies))
+	got := strings.Join(dependsOnNames(ks["shop-api"]), ",")
+	if want := "shop-db,shop-db-pooler,shop-db-orders"; got != want {
+		t.Errorf("shop-api dependsOn = %s, want %s", got, want)
+	}
+}
 
 // TestBuild_PostgresqlObjectTraitsReachEveryObject: prune-protection and
 // force-replace annotate every object postgresql generates, as they did when
@@ -106,30 +217,7 @@ func TestBuild_PostgresqlBundleTraitsReachEveryBundle(t *testing.T) {
             substitute:
               REGION: eu-west-1
 `
-	dir := t.TempDir()
-	appPath := writeTempFile(t, dir, "app.yaml", postgresqlMembersApp(traits, postgresqlOrderPolicy))
-	outDir := filepath.Join(dir, "out")
-	if _, err := runKurel(t, "build", appPath, "--profile", filepath.Join(deliveryTestdata, "cluster.yaml"),
-		"-o", outDir, "--oci-repository", testOCIRepository, "--oci-tag", "v1.0.0"); err != nil {
-		t.Fatalf("delivery build: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(outDir, "shop.flux.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ks := map[string]map[string]any{}
-	for _, raw := range strings.Split(string(data), "\n---\n") {
-		var obj map[string]any
-		if err := yaml.Unmarshal([]byte(raw), &obj); err != nil {
-			t.Fatalf("decoding %s: %v", raw, err)
-		}
-		if obj["kind"] != "Kustomization" {
-			continue
-		}
-		md, _ := obj["metadata"].(map[string]any)
-		name, _ := md["name"].(string)
-		ks[name], _ = obj["spec"].(map[string]any)
-	}
+	ks := deliveryKustomizations(t, postgresqlMembersApp(traits, postgresqlOrderPolicy))
 	for _, name := range []string{"shop-db", "shop-db-pooler", "shop-db-orders"} {
 		spec, ok := ks[name]
 		if !ok {
@@ -190,37 +278,66 @@ func TestBuild_PostgresqlDatabaseNamedLikeThePooler(t *testing.T) {
 }
 
 // TestBuild_PostgresqlDependencyPolicyNameIsFree: the dependency policy the
-// rule emits takes the first free name, so a database named "dependencies" and
-// an authored policy named db-dependencies-1 do not refuse the document.
+// rule emits takes the first name no policy of the document uses, and only
+// policies count: a generated component of the same name, from this
+// postgresql component or another one lowered before or after it, does not
+// refuse the document.
 func TestBuild_PostgresqlDependencyPolicyNameIsFree(t *testing.T) {
-	app := `apiVersion: launcher.gokure.dev/v1alpha1
-kind: Application
-metadata:
-  name: shop
-  namespace: shop
-spec:
-  components:
-    - name: db
-      type: postgresql
-      properties:
-        databases:
-          - name: dependencies
-            owner: app
-    - name: api
+	const api = `    - name: api
       type: webservice
       properties:
         image: ghcr.io/example/api:v1.0.0
         port: 9090
-  policies:
-    - name: db-dependencies-1
-      type: dependency
-      properties:
-        rules:
-          - component: api
-            dependsOn: [db]
 `
-	if _, out, err := buildDocs(t, app); err != nil {
-		t.Fatalf("build failed: %v\noutput: %s", err, out)
+	const dbWithDatabase = `    - name: db
+      type: postgresql
+      properties:
+        databases:
+          - name: %s
+            owner: app
+`
+	const dbaWithPooler = `    - name: db-a
+      type: postgresql
+      properties:
+        pooler:
+          enabled: true
+`
+	policy := func(name, rules string) string {
+		return "    - name: " + name + "\n      type: dependency\n      properties:\n        rules:\n" + rules
+	}
+	apiOnDB := "          - component: api\n            dependsOn: [db]\n"
+	dbaOnDB := "          - component: db-a\n            dependsOn: [db]\n"
+	for _, tc := range []struct {
+		name, components, policies string
+	}{
+		{
+			name:       "authored policies take the first names",
+			components: fmt.Sprintf(dbWithDatabase, "orders") + api,
+			policies:   policy("db-dependencies", apiOnDB) + policy("db-dependencies-1", "          - component: api\n            dependsOn: [db-orders]\n"),
+		},
+		{
+			name:       "a database of the same component",
+			components: fmt.Sprintf(dbWithDatabase, "dependencies") + api,
+			policies:   policy("order", apiOnDB),
+		},
+		{
+			name:       "a database of a component lowered after it",
+			components: dbaWithPooler + fmt.Sprintf(dbWithDatabase, "a-dependencies"),
+			policies:   policy("order", dbaOnDB),
+		},
+		{
+			name:       "a database of a component lowered before it",
+			components: fmt.Sprintf(dbWithDatabase, "a-dependencies") + dbaWithPooler,
+			policies:   policy("order", dbaOnDB),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app := "apiVersion: launcher.gokure.dev/v1alpha1\nkind: Application\nmetadata:\n  name: shop\n  namespace: shop\nspec:\n  components:\n" +
+				tc.components + "  policies:\n" + tc.policies
+			if _, out, err := buildDocs(t, app); err != nil {
+				t.Fatalf("build failed: %v\noutput: %s", err, out)
+			}
+		})
 	}
 }
 
