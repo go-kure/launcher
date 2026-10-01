@@ -5,7 +5,7 @@ golangci-lint = "2.14.0"
 git-cliff = "2.14.2"
 goreleaser = "2.18.2"
 # Required for GoReleaser SBOM generation and signing
-syft = "1.53.0"
+syft = "1.52.0"
 cosign = "2.6.5"
 hugo = "0.167.0"
 # Docs tooling: docs-map driver (yq) and rendered-site link checker (lychee)
