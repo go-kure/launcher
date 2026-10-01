@@ -1,9 +1,11 @@
 package components
 
 import (
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // TestEnforceContainerCapabilities covers enforceContainerCapabilities'
@@ -140,5 +142,41 @@ func TestEnforceContainerCapabilities_NilSecurityContext(t *testing.T) {
 	sc := &corev1.SecurityContext{}
 	if err := enforceContainerCapabilities(sc, nil, []string{"NET_ADMIN"}); err != nil {
 		t.Errorf("expected no error for nil Capabilities, got %v", err)
+	}
+}
+
+// TestApplyDefaultQuantity covers the policy-default tier's quantity checks
+// (go-kure/launcher#628): a negative default is refused for every resource the
+// handlers default, zero and positive defaults are applied, and an authored
+// value is kept without the default ever being read.
+func TestApplyDefaultQuantity(t *testing.T) {
+	names := []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory}
+	for _, name := range names {
+		t.Run(string(name), func(t *testing.T) {
+			for _, dflt := range []string{"-1", "-500m", "-128Mi"} {
+				var rl corev1.ResourceList
+				err := applyDefaultQuantity(&rl, name, dflt)
+				if err == nil || !strings.Contains(err.Error(), "quantity must not be negative") {
+					t.Errorf("default %q: error = %v, want the negative-quantity refusal", dflt, err)
+				}
+				if rl != nil {
+					t.Errorf("default %q: list = %v, want nothing written", dflt, rl)
+				}
+			}
+			for _, dflt := range []string{"0", "250m", "64Mi"} {
+				var rl corev1.ResourceList
+				if err := applyDefaultQuantity(&rl, name, dflt); err != nil {
+					t.Fatalf("default %q: unexpected error %v", dflt, err)
+				}
+				got, want := rl[name], resource.MustParse(dflt)
+				if _, ok := rl[name]; !ok || got.Cmp(want) != 0 {
+					t.Errorf("default %q: list[%s] = %v, want %s", dflt, name, rl, dflt)
+				}
+			}
+			authored := corev1.ResourceList{name: resource.MustParse("1")}
+			if err := applyDefaultQuantity(&authored, name, "-1"); err != nil {
+				t.Errorf("an authored value must win without reading the default, got %v", err)
+			}
+		})
 	}
 }
