@@ -883,10 +883,12 @@ func TestCnpgClusterConfig_GenerateRevalidates(t *testing.T) {
 	})
 }
 
-// TestCnpgClusterConfig_Generate_StorageSizes pins the refusal of a storage
-// request that does not parse or is not positive, on every volume the Cluster
-// asks CNPG to create and in either spelling, whether authored or from a
-// policy default (go-kure/launcher#623). An unset size is left to the operator.
+// TestCnpgClusterConfig_Generate_StorageSizes pins Generate's refusal of an
+// authored storage request that does not parse or is not positive, on each
+// kind of volume the Cluster asks CNPG to create, in both spellings for
+// storage and walStorage (go-kure/launcher#623). A policy default is refused
+// earlier, in ApplyPolicy (TestCnpgClusterConfig_ApplyPolicy_StorageDefault).
+// An unset size is left to the operator.
 func TestCnpgClusterConfig_Generate_StorageSizes(t *testing.T) {
 	tmpl := func(size string) map[string]any {
 		return map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": size}}}
@@ -901,6 +903,7 @@ func TestCnpgClusterConfig_Generate_StorageSizes(t *testing.T) {
 		{"authored size not a quantity", map[string]any{"storage": map[string]any{"size": "lots"}}, `storage.size: invalid quantity "lots"`},
 		{"pvcTemplate request zero", map[string]any{"storage": map[string]any{"pvcTemplate": tmpl("0")}}, `storage.pvcTemplate.resources.requests.storage: quantity must be positive, got "0"`},
 		{"walStorage size negative", map[string]any{"walStorage": map[string]any{"size": "-1Gi"}}, `walStorage.size: quantity must be positive, got "-1Gi"`},
+		{"walStorage pvcTemplate request negative", map[string]any{"walStorage": map[string]any{"pvcTemplate": tmpl("-1Gi")}}, `walStorage.pvcTemplate.resources.requests.storage: quantity must be positive, got "-1Gi"`},
 		{"tablespace size zero", map[string]any{"tablespaces": []any{map[string]any{"name": "t1", "storage": map[string]any{"size": "0"}}}}, `tablespaces[0].storage.size: quantity must be positive, got "0"`},
 		{"ephemeral claim request zero", map[string]any{"ephemeralVolumeSource": map[string]any{"volumeClaimTemplate": map[string]any{"spec": tmpl("0")}}}, `ephemeralVolumeSource.volumeClaimTemplate.spec.resources.requests.storage: quantity must be positive, got "0"`},
 	}
