@@ -11,7 +11,6 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -101,13 +100,11 @@ func TestExposeRule_Gateway_HostnamesAndRules(t *testing.T) {
 }
 
 // gatewayShorthandTransformer builds the engine as the real pipeline assembles it
-// for this trait: the webservice component handler, the httproute trait handler the
-// lowered expose trait dispatches to, and ExposeRule itself.
+// for this trait: the webservice lowering rule and its member kinds, the httproute
+// trait handler the lowered expose trait dispatches to, and ExposeRule itself.
 func gatewayShorthandTransformer() *oam.Transformer {
-	tr := oam.NewTransformer(
-		map[string]oam.ComponentHandler{"webservice": &components.WebserviceHandler{}},
-		nil,
-	)
+	tr := oam.NewTransformer(nil, nil)
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 	tr.RegisterBuiltinTraitLowering(traits.ExposeRule{})
 	return tr

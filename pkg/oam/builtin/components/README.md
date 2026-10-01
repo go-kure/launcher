@@ -59,7 +59,7 @@ reads it.
 
 | `type` | Produces | Summary |
 |--------|----------|---------|
-| `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. |
+| `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. Lowered to a same-name `deployment` and `service` pair plus a `topology-spread` trait (`WebserviceRule`) — see below. |
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). Lowered to a `deployment` component plus a `topology-spread` trait (`WorkerRule`) — see below. |
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
@@ -1460,7 +1460,7 @@ not part of either change.
   `affinity` shorthand, and on `webservice` the `port` that drives the Service.
   Note the shorthand is what they keep — neither publishes the raw `corev1`
   `affinity`/`topologySpreadConstraints` that `deployment` does.
-  The `webservice` handler implements the optional `oam.EndpointProvider`: it declares its own
+  The `webservice` rule implements the optional `oam.EndpointProvider`: it declares its own
   pods (`app: <component-name>`) on the declared `port` (its single `port` property drives both
   the container port and the Service port), letting a downstream platform synthesize generic
   app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
@@ -1486,6 +1486,42 @@ not part of either change.
     `affinity: the shorthand evaluates to an affinity the API server would
     refuse: …` text. Keys worker does not declare are dropped rather than forwarded to
     `deployment`; `kurel build` refuses them before lowering anyway.
+  - **`webservice` is a component lowering rule, not a handler**
+    (`WebserviceRule`, go-kure/launcher#280). It runs webservice's own parse,
+    then re-expresses the component as a same-name sibling group (see `pkg/oam`
+    "Same-name sibling groups"): a `deployment` and then a `service`, both named
+    after the component, deployed as one component — one tier, one bundle, one
+    health check. The `deployment` member gets the authored properties
+    webservice declares except `port`, `topologySpread` and `affinity`, plus
+    the main container's one port `{name: http, containerPort: <port>}`; the
+    `affinity` shorthand and `topologySpread` are handled as on `worker`. The
+    `service` member gets one port `{name: http, port: <port>}` and the default
+    selector `app: <component-name>`. Annotations go to both members. Each
+    authored trait is forwarded unchanged, in authored order, to the member it
+    acts on: `expose`, `ingress` and `httproute` go to the `service`;
+    `prune-protection` and `force-replace` go to both; every other trait goes
+    to the `deployment`. That includes the bundle traits (`fluxcd-patches`,
+    `fluxcd-postbuild`), which act on the group's one Kustomization, and any
+    trait type an extension registered, since the `deployment` member holds the
+    pods. Webservice's published schema and its generated objects are
+    unchanged, in the handler's order (Deployment, Service, ServiceAccount,
+    claims). Each emitted component carries `Origin.Rule`
+    `component/webservice`. Four differences are deliberate. A refusal from
+    webservice's own parse gains the lowering engine's prefix, as on `worker`;
+    the cause is unchanged. The synthesized inbound NetworkPolicy opens an
+    ingress `portName: http` as the port's number, where the handler opened the
+    name `http`, which the container port also carried; the pods admitted are
+    the same. Likewise, an ingress path on another component whose `backend`
+    names a webservice's Service by `portName` opens that port's number on the
+    webservice's pods, translated as on a `service` component. A route on
+    another component whose `backend` names a webservice's Service on a port
+    that Service does not expose (`port: 9090` on a webservice whose `port` is
+    8080) no longer opens that port on the webservice's pods: the `service`
+    member opens only its own declared ports, as a `service` component does.
+    The route was already broken, since the Service has no such port to
+    forward. Webservice is no longer a handler a library caller converts with
+    directly, so the nameless-config fallback the handlers keep does not apply
+    to it: the engine only lowers a named component.
   - **A `webservice` component name must be a valid Service name.** It always
     emits a Service named after the component, and the API server validates
     a Service's `metadata.name` as a DNS-1035 label: at most 63 characters,

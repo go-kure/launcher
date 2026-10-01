@@ -6,7 +6,8 @@ metadata:
 spec:
   components:
     # An ingress path addressing the webservice's Service port by name, with
-    # the synthesized inbound NetworkPolicy opening that port on the pods.
+    # the synthesized inbound NetworkPolicy opening that port's number on the
+    # pods.
     - name: web
       type: webservice
       properties:

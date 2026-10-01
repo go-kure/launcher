@@ -25,7 +25,7 @@ var resourceKinds = []struct {
 	handler oam.ComponentHandler
 	props   map[string]any
 }{
-	{"webservice", &components.WebserviceHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}},
+	{"webservice", webserviceViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}},
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
@@ -118,7 +118,7 @@ func TestContainerEntryResources_WrongTypeIsRejected(t *testing.T) {
 		for _, tc := range wrongResources {
 			t.Run(e.key+"/"+tc.name, func(t *testing.T) {
 				entry := map[string]any{"name": "setup", "image": "busybox:1", "resources": tc.value}
-				err := convert(&components.WebserviceHandler{}, "webservice", withProp(base, e.key, []any{entry}))
+				err := convert(webserviceViaRule{}, "webservice", withProp(base, e.key, []any{entry}))
 				if err == nil {
 					t.Fatalf("%s entry resources=%#v converted without error; the container would carry no requests or limits", e.key, tc.value)
 				}
@@ -139,12 +139,12 @@ func TestContainerEntryResources_WellFormedIsKept(t *testing.T) {
 				"requests": map[string]any{"cpu": "100m"},
 				"limits":   map[string]any{"memory": "64Mi"},
 			}}
-			cfg, err := (&components.WebserviceHandler{}).ToApplicationConfig(
+			cfg, err := webserviceViaRule{}.ToApplicationConfig(
 				&oam.Component{Name: "app", Type: "webservice", Properties: withProp(base, e.key, []any{entry})}, "default")
 			if err != nil {
 				t.Fatalf("ToApplicationConfig: %v", err)
 			}
-			wc := cfg.(*components.WebserviceConfig)
+			wc := cfg.(*webserviceViaRuleConfig)
 			var r components.ResourceRequirements
 			switch e.key {
 			case "initContainers":

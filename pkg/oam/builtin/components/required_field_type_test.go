@@ -49,7 +49,7 @@ type requiredFieldSite struct {
 }
 
 func runWebservice(props map[string]any) error {
-	_, err := (&components.WebserviceHandler{}).ToApplicationConfig(
+	_, err := webserviceViaRule{}.ToApplicationConfig(
 		&oam.Component{Name: "app", Type: "webservice", Properties: props}, "default")
 	return err
 }

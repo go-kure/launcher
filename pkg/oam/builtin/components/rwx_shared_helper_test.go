@@ -7,7 +7,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // The non-RWX guard lives in one helper shared by webservice, worker and
@@ -71,7 +70,7 @@ type sharedKindHandler interface {
 
 func TestSharedNonRWXGuard_RWXCapableClaimIsNotConstrained(t *testing.T) {
 	kinds := map[string]sharedKindHandler{
-		"webservice": &components.WebserviceHandler{},
+		"webservice": webserviceViaRule{},
 		"worker":     workerViaRule{},
 	}
 	for kind, h := range kinds {

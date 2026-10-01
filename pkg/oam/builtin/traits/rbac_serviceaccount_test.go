@@ -7,7 +7,6 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -27,7 +26,7 @@ func TestRBACHandler_Apply_BindsAuthoredServiceAccount(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := (&components.WebserviceHandler{}).ToApplicationConfig(&oam.Component{
+			cfg, err := webserviceViaRule{}.ToApplicationConfig(&oam.Component{
 				Name: "api", Type: "webservice", Properties: tc.props,
 			}, "default")
 			if err != nil {

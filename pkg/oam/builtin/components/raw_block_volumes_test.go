@@ -35,7 +35,7 @@ type blockKind struct {
 
 func blockKinds() []blockKind {
 	return []blockKind{
-		{"webservice", &components.WebserviceHandler{}, map[string]any{}, true},
+		{"webservice", webserviceViaRule{}, map[string]any{}, true},
 		{"worker", workerViaRule{}, map[string]any{}, true},
 		{"deployment", &components.DeploymentHandler{}, map[string]any{}, true},
 		{"statefulset", &components.StatefulsetHandler{}, map[string]any{}, true},

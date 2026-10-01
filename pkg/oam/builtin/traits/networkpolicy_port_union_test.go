@@ -10,7 +10,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -39,10 +38,11 @@ func npPortTraitProps(port any) map[string]any {
 }
 
 func npPortTransformer() *oam.Transformer {
-	return oam.NewTransformer(
-		map[string]oam.ComponentHandler{"webservice": &components.WebserviceHandler{}},
+	tr := oam.NewTransformer(nil,
 		map[string]oam.TraitHandler{"networkpolicy": &traits.NetworkPolicyHandler{}},
 	)
+	registerWebservice(tr)
+	return tr
 }
 
 func npPortApp(comp oam.Component) *oam.Application {

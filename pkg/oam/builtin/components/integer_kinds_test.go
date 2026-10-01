@@ -9,7 +9,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // validateThenRenderDeployment runs the authored-property check over a one-component
@@ -18,7 +17,7 @@ import (
 // rendered Deployment.
 func validateThenRenderDeployment(t *testing.T, props map[string]any) (*appsv1.Deployment, error) {
 	t.Helper()
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"webservice": h}, nil)
 	app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{
 		{Name: "app", Type: "webservice", Properties: props},
@@ -33,7 +32,7 @@ func validateThenRenderDeployment(t *testing.T, props map[string]any) (*appsv1.D
 // checks, so a reader that only knows some integer kinds renders correctly behind
 // it; a handler called directly, as Transform's callers and the lowering engine
 // do, sees the authored Go kind and must read it too.
-func renderDeployment(t *testing.T, h *components.WebserviceHandler, comp *oam.Component) *appsv1.Deployment {
+func renderDeployment(t *testing.T, h webserviceViaRule, comp *oam.Component) *appsv1.Deployment {
 	t.Helper()
 	cfg, err := h.ToApplicationConfig(comp, "default")
 	if err != nil {
@@ -90,7 +89,7 @@ func TestIntegerProperty_EveryGoIntegerKindReachesTheReader(t *testing.T) {
 		// go-kure/launcher#525: without validation in front, the reader itself
 		// must handle the kind.
 		"handler-only": func(t *testing.T, props map[string]any) *appsv1.Deployment {
-			return renderDeployment(t, &components.WebserviceHandler{},
+			return renderDeployment(t, webserviceViaRule{},
 				&oam.Component{Name: "app", Type: "webservice", Properties: props})
 		},
 	}

@@ -33,7 +33,7 @@ func unionLeafTransformer() *oam.Transformer {
 		"deployment":  &components.DeploymentHandler{},
 		"daemonset":   &components.DaemonsetHandler{},
 		"statefulset": &components.StatefulsetHandler{},
-		"webservice":  &components.WebserviceHandler{},
+		"webservice":  webserviceViaRule{},
 		"service":     &components.ServiceHandler{},
 	}, nil)
 }

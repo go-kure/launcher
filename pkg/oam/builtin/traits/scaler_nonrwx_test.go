@@ -22,9 +22,10 @@ import (
 
 func nonRWXScalerTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
-		"webservice": &components.WebserviceHandler{},
 		"deployment": &components.DeploymentHandler{},
+		"service":    &components.ServiceHandler{},
 	}, nil)
+	tr.RegisterComponentLowering(components.WebserviceRule{})
 	tr.RegisterComponentLowering(components.WorkerRule{})
 	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
 	tr.RegisterBuiltinTrait("scaler", &traits.ScalerHandler{})

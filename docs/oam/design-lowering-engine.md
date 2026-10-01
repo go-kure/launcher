@@ -332,6 +332,27 @@ trait-lowering error on a worker's trait carries one more chain line naming the
 evaluates to label selectors the API server accepts runs in the rule, before the
 raw `affinity` is forwarded, with the same text.
 
+The webservice-as-a-rule migration (`WebserviceRule`,
+`pkg/oam/builtin/components/webservice.go`; go-kure/launcher#280) is the first rule
+that lowers one component into a same-name sibling group: a `deployment` and a
+`service`, deployed as one component (`pkg/oam` "Same-name sibling groups"). Each
+authored trait goes to the member it acts on: the routing traits to the `service`,
+the object decorators to both, and everything else, the bundle traits and an
+extension's traits included, to the `deployment`. Webservice's published property
+schema is pinned byte for byte against a capture of the former handler's
+(`testdata/webservice-property-schema.json`), and the handler-shaped tests are
+re-pointed through a `webserviceViaRule` adapter that runs
+`WebserviceRule.LowerComponent`, the real `DeploymentHandler` and `ServiceHandler`,
+and, when synthesized, the real `TopologySpreadHandler`. Every golden fixture and
+example builds byte-identically except one, `webservice-ingress-portname`: an ingress
+`portName: http` now opens the Service port's number on the synthesized inbound
+NetworkPolicy, where the handler opened the name `http`. The `service` member
+translates a routed port name to its `targetPort`, as a `service` component does;
+the pods admitted are the same. A route on another component whose `backend` names
+a webservice's Service on a port that Service does not expose no longer opens that
+port on the webservice's pods; the route was already broken. A parse refusal carries
+the lowering engine's prefix, as on `worker`.
+
 ## Entry-point contract: in-transform and raw-document
 
 The engine mechanics above (D1–D7) were first proven for documents that already

@@ -8,7 +8,7 @@ import (
 )
 
 func TestWebserviceHandler_Endpoints(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 
 	tests := []struct {
 		name     string

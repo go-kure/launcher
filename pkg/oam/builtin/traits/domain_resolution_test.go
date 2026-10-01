@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -15,7 +14,9 @@ import (
 // ingressTrafficSourcesCapabilities supplies it via capability rendering.
 func ingressTrafficSourcesApp() *oam.Application {
 	return &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "web",
@@ -49,7 +50,7 @@ func ingressTrafficSourcesCapabilities() map[string]oam.CapabilityBinding {
 
 func domainTestTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 	return tr
 }

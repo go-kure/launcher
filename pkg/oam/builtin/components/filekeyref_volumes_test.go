@@ -16,7 +16,7 @@ var fileKeyRefKinds = []struct {
 	required map[string]any
 	sidecars bool
 }{
-	{"webservice", &components.WebserviceHandler{}, nil, true},
+	{"webservice", webserviceViaRule{}, nil, true},
 	{"worker", workerViaRule{}, nil, true},
 	{"deployment", &components.DeploymentHandler{}, nil, true},
 	{"statefulset", &components.StatefulsetHandler{}, nil, true},

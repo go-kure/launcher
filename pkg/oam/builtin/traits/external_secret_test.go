@@ -287,16 +287,14 @@ func TestExternalSecretHandler_NoStoreRef_Error(t *testing.T) {
 // Capability-only path: secretStoreRef comes exclusively from the ClusterProfile capability
 // rendering and is merged into trait properties before Apply is called.
 func TestExternalSecretHandler_CapabilityOnly(t *testing.T) {
-	transformer := oam.NewTransformer(
-		map[string]oam.ComponentHandler{
-			"webservice": &components.WebserviceHandler{},
-		},
-		nil,
-	)
+	transformer := oam.NewTransformer(nil, nil)
+	registerWebservice(transformer)
 	transformer.RegisterBuiltinTrait("external-secret", &traits.ExternalSecretHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name: "api",
@@ -373,16 +371,14 @@ func TestExternalSecretHandler_CapabilityOnly(t *testing.T) {
 
 // Inline secretStoreRef overrides the capability rendering (inline wins).
 func TestExternalSecretHandler_InlineOverridesCapability_Real(t *testing.T) {
-	transformer := oam.NewTransformer(
-		map[string]oam.ComponentHandler{
-			"webservice": &components.WebserviceHandler{},
-		},
-		nil,
-	)
+	transformer := oam.NewTransformer(nil, nil)
+	registerWebservice(transformer)
 	transformer.RegisterBuiltinTrait("external-secret", &traits.ExternalSecretHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "api",

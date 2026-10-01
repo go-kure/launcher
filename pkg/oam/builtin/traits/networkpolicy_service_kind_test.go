@@ -13,7 +13,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -24,9 +23,7 @@ import (
 
 func serviceKindTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("service", &components.ServiceHandler{})
-	tr.RegisterComponent("deployment", &components.DeploymentHandler{})
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr) // also registers "service" and "deployment"
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 	tr.RegisterBuiltinTrait("prune-protection", &traits.PruneProtectionHandler{})
@@ -85,7 +82,9 @@ func assertSelectorTargetedAllow(t *testing.T, np *networkingv1.NetworkPolicy, s
 
 func TestTransform_ServiceKind_IngressTargetsSelectorPodsOnTargetPort(t *testing.T) {
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{Components: []oam.Component{
 			apiServerComponent(),
 			apiServiceComponent(ingressTrait(map[string]any{"path": "/"})),
@@ -106,7 +105,9 @@ func TestTransform_ServiceKind_IngressTargetsSelectorPodsOnTargetPort(t *testing
 // A trait decorator wrapping the service config must not hide the retargeting.
 func TestTransform_ServiceKind_DecoratedStillTargetsSelectorPods(t *testing.T) {
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{Components: []oam.Component{
 			apiServerComponent(),
 			apiServiceComponent(
@@ -128,7 +129,9 @@ func TestTransform_ServiceKind_DecoratedStillTargetsSelectorPods(t *testing.T) {
 // the service's selector pods on the targetPort.
 func TestTransform_ServiceKind_BackendRefRetargetsToSelectorPods(t *testing.T) {
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{Components: []oam.Component{
 			{
 				Name:       "router",
@@ -161,7 +164,9 @@ func TestTransform_ServiceKind_BackendRefRetargetsToSelectorPods(t *testing.T) {
 // second port without an explicit backend is refused.
 func TestTransform_ServiceKind_NonFirstPortNeedsExplicitBackend(t *testing.T) {
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{Components: []oam.Component{
 			apiServerComponent(),
 			apiServiceComponent(ingressTrait(map[string]any{"path": "/", "port": 53})),
@@ -198,7 +203,9 @@ func TestTransform_ServiceKind_ImplicitBackendPortName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			app := &oam.Application{
-				Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+				APIVersion: oam.SupportedAPIVersion,
+				Kind:       "Application",
+				Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 				Spec: oam.ApplicationSpec{Components: []oam.Component{
 					apiServerComponent(),
 					apiServiceComponent(tt.traits...),
@@ -237,7 +244,9 @@ func TestTransform_ServiceKind_SelfNamedBackendIsImplicit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			app := &oam.Application{
-				Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+				APIVersion: oam.SupportedAPIVersion,
+				Kind:       "Application",
+				Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 				Spec: oam.ApplicationSpec{Components: []oam.Component{
 					apiServerComponent(),
 					apiServiceComponent(tt.trait),
@@ -293,7 +302,9 @@ func TestDecorator_AugmentingWrapForwardsServiceKindInterfaces(t *testing.T) {
 // allow: the rules are TCP, and a TCP allow on a UDP targetPort would admit the wrong traffic.
 func TestTransform_ServiceKind_UDPOnlyRouteSynthesizesNothing(t *testing.T) {
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{Components: []oam.Component{
 			{
 				Name:       "router",

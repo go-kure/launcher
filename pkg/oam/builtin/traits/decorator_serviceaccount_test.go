@@ -8,7 +8,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -61,7 +60,7 @@ func TestDecorator_ServiceAccountNamerDefault(t *testing.T) {
 // of the forward: a configmap trait wraps the workload first, then rbac reads
 // the effective account through the decorator and still binds the authored one.
 func TestRBACHandler_BindsAuthoredAccountThroughDecorator(t *testing.T) {
-	cfg, err := (&components.WebserviceHandler{}).ToApplicationConfig(&oam.Component{
+	cfg, err := webserviceViaRule{}.ToApplicationConfig(&oam.Component{
 		Name: "api", Type: "webservice",
 		Properties: map[string]any{"image": "ghcr.io/org/api:v1", "serviceAccountName": "shared-sa"},
 	}, "default")

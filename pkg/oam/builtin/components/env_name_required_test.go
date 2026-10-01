@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // An env entry without a name used to be skipped by parseEnv's own guard (a
@@ -23,23 +22,23 @@ import (
 // buildWebservice runs a single webservice component through
 // ValidateAuthoredProperties and then ToApplicationConfig, returning the first
 // error either reports, or the converted config.
-func buildWebservice(t *testing.T, props map[string]any) (*components.WebserviceConfig, error) {
+func buildWebservice(t *testing.T, props map[string]any) (*webserviceViaRuleConfig, error) {
 	t.Helper()
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
-		"webservice": &components.WebserviceHandler{},
+		"webservice": webserviceViaRule{},
 	}, nil)
 	comp := oam.Component{Name: "app", Type: "webservice", Properties: props}
 	app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{comp}}}
 	if err := tr.ValidateAuthoredProperties(app); err != nil {
 		return nil, err
 	}
-	cfg, err := (&components.WebserviceHandler{}).ToApplicationConfig(&comp, "default")
+	cfg, err := webserviceViaRule{}.ToApplicationConfig(&comp, "default")
 	if err != nil {
 		return nil, err
 	}
-	ws, ok := cfg.(*components.WebserviceConfig)
+	ws, ok := cfg.(*webserviceViaRuleConfig)
 	if !ok {
-		t.Fatalf("ToApplicationConfig returned %T, want *components.WebserviceConfig", cfg)
+		t.Fatalf("ToApplicationConfig returned %T, want *webserviceViaRuleConfig", cfg)
 	}
 	return ws, nil
 }
@@ -128,7 +127,7 @@ func TestEnvName_TopLevelMissingNameRejectedByHandler(t *testing.T) {
 		"image": "ghcr.io/org/app:v1",
 		"env":   []any{map[string]any{"name": "KEEP", "value": "a"}, map[string]any{"value": "x"}},
 	}}
-	_, err := (&components.WebserviceHandler{}).ToApplicationConfig(comp, "default")
+	_, err := webserviceViaRule{}.ToApplicationConfig(comp, "default")
 	if err == nil {
 		t.Fatal("env[1] without a name converted cleanly")
 	}

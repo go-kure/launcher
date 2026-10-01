@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -16,7 +15,9 @@ import (
 // IngressHandler directly.
 func ingressWildcardApp(wildcard string) *oam.Application {
 	return &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "web",
@@ -39,7 +40,7 @@ func ingressWildcardApp(wildcard string) *oam.Application {
 
 func ingressWildcardTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 	return tr
 }
