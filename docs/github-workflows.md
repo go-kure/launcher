@@ -147,11 +147,12 @@ self-test (`make test-verify-merge`).
 | `test` | `test` | 25 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
 | `security` | `Security` | 15 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `action-pins` | `action-pins` | 2 min | — | Fails if any third-party `uses:` ref is not pinned to a 40-char commit SHA (`go-kure/.github` composite action) |
+| `issue-refs` | `issue-refs` | 2 min | — | Self-tests then runs `scripts/check-issue-refs.sh` over the whole tracked tree: rejects a bare `#N` or a partial `launcher#N` reference (go-kure/launcher#400; `make check-issue-refs`) |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) |
 | `pin-impact` | `pin-impact` | 3 min | — | On a merge-queue run, only checks that every `go-kure/.github` reference in the merged tree pins the same commit. On a PR, renders and gates on the real impact of a `go-kure/.github` pin bump: resolves each referenced action's `$GITHUB_ACTION_PATH` script (and the siblings those `source` or run), intersects against the compare diff, fails if a consumed path changed and refuses any shape it cannot resolve (go-kure/launcher#358) |
-| `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact | Aggregation gate |
+| `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact, issue-refs | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
 | `validate-manifests` | `validate-manifests` | 10 min | changes | `kurel build` + `flux schema validate` against the `default` (embedded) and `ecosystem` (schemas.fluxoperator.dev) catalogs for a representative `examples/*.yaml` subset; `continue-on-error: true`, not in `build`'s gate (go-kure/launcher#292) |
 | `analyze-changes` | `Analyze Changes` | 5 min | — | Changed files summary, breaking change warning for pkg/ (PR only) |
@@ -204,6 +205,16 @@ Runs on main and `release/*` branches only (not PRs):
   quickstart with `traits: []` re-introduced at spec level (go-kure/launcher#417) — so a gate that
   can no longer fail goes red as well. Marker syntax: `DEVELOPMENT.md` § "Checking documentation
   YAML fences"
+- **Issue-reference guard** — `issue-refs` runs `make check-issue-refs`'s two steps
+  (go-kure/launcher#400): the self-test (`scripts/check-issue-refs-test.sh`, fixtures that must
+  fail and must pass, each in a throwaway git repository), then `scripts/check-issue-refs.sh` on
+  the tracked `*.go`, `*.md`, `*.sh`, `*.yml`, `*.yaml`, `*.toml` and `*.json` files. It rejects a
+  bare `#N` of two to five digits and a `launcher#N` without its owner, because neither names a
+  repository that `go doc`, pkg.go.dev or a reader in another repository can resolve. It scans the
+  whole tree rather than the changed lines, and has no path filter, so a PR and the merge queue
+  get the same result. Exempt: `CHANGELOG.md` (generated from commit subjects), anything under a
+  `testdata/` directory, Markdown anchors `](#...)`, and any line carrying `allow-ref`.
+  Convention and known gaps: `AGENTS.md` § "Issue references"
 - **Manifest schema validation** — `validate-manifests` builds a representative subset of
   `examples/*.yaml` via `kurel build` and validates the output against
   [fluxcd/flux-schema](https://github.com/fluxcd/flux-schema)'s `default` (embedded) catalog plus
