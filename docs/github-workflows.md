@@ -213,8 +213,8 @@ Runs on main and `release/*` branches only (not PRs):
   because neither is a reference that `go doc`, pkg.go.dev or GitHub can resolve or link. It
   scans the whole tree rather than the changed lines, and has no path filter, so a PR and the
   merge queue get the same result. Exempt: `CHANGELOG.md` (generated from commit subjects),
-  anything under a `testdata/` directory, Markdown link targets `](...)`, and any line carrying
-  `allow-ref`.
+  anything under a `testdata/` directory, and any line carrying `allow-ref`; within a line,
+  Markdown link targets `](...)`, URLs and printf verbs with the `#` flag are ignored.
   Convention and known gaps: `AGENTS.md` § "Issue references"
 - **Manifest schema validation** — `validate-manifests` builds a representative subset of
   `examples/*.yaml` via `kurel build` and validates the output against
