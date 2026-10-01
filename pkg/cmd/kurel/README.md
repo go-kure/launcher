@@ -253,8 +253,9 @@ kustomize-controller would not apply, such as two identical kustomize config
 application name over 245 characters) or an artifact directory name would exceed the
 255-byte file name limit, and when a generated `Kustomization` or `OCIRepository` duration
 is written outside Flux's duration pattern (units `ms`, `s`, `m`, `h`): durations are
-written in normalized form, so a `reconciliation` policy value below one millisecond,
-such as `0.5ms` (written `500µs`), is refused. Use at least `1ms`.
+written in normalized form, so a `reconciliation` policy value that normalizes to
+microseconds or nanoseconds, such as `0.5ms` (written `500µs`), is refused. Use at
+least `1ms`. A zero duration is written `0s` and is accepted.
 
 The flags are checked before the build reads anything, and each bundle's url before
 anything is written:
