@@ -47,7 +47,7 @@ type environmentSetSpec struct {
 // environmentBinding is one named profile+values pair. Profile is required; Values
 // is optional so an application without a kurel.yaml can still be bound to an
 // environment. Both paths are relative to the environments file's directory and may
-// not leave it (see validateBindingPath).
+// not leave it, textually (validateBindingPath) or through a symlink (containedPath).
 type environmentBinding struct {
 	Name    string `yaml:"name"`
 	Profile string `yaml:"profile"`
@@ -94,12 +94,39 @@ func resolveEnvironment(opts *buildOptions, appDir string, flags *pflag.FlagSet)
 			opts.environment, path, strings.Join(doc.names(), ", "))
 	}
 
-	baseDir := filepath.Dir(path)
-	opts.profilePath = filepath.Join(baseDir, binding.Profile)
+	baseDir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return errors.Wrapf(err, "resolving the directory of environments file %q", path)
+	}
+	profilePath, err := containedPath(baseDir, opts.environment, "profile", binding.Profile)
+	if err != nil {
+		return err
+	}
+	opts.profilePath = profilePath
 	if binding.Values != "" {
-		opts.valuesPath = filepath.Join(baseDir, binding.Values)
+		valuesPath, err := containedPath(baseDir, opts.environment, "values", binding.Values)
+		if err != nil {
+			return err
+		}
+		opts.valuesPath = valuesPath
 	}
 	return nil
+}
+
+// containedPath joins rel onto baseDir (already symlink-free), resolves symlinks,
+// and rejects a target outside baseDir. validateBindingPath only checks the text of
+// the path; a symlink such as profiles -> /elsewhere passes that check, so the
+// resolved target is what gets checked and returned for build to read.
+func containedPath(baseDir, env, field, rel string) (string, error) {
+	target, err := filepath.EvalSymlinks(filepath.Join(baseDir, rel))
+	if err != nil {
+		return "", errors.Wrapf(err, "environment %q: resolving %s %q", env, field, rel)
+	}
+	inner, err := filepath.Rel(baseDir, target)
+	if err != nil || inner == ".." || strings.HasPrefix(inner, ".."+string(filepath.Separator)) {
+		return "", errors.Errorf("environment %q: %s %q resolves outside the environments file's directory", env, field, rel)
+	}
+	return target, nil
 }
 
 // parseEnvironmentSet decodes an EnvironmentSet document in strict mode and validates it.

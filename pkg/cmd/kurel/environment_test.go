@@ -269,15 +269,26 @@ func TestResolveEnvironment_PathResolution(t *testing.T) {
 	dir := t.TempDir()
 	writeTempFile(t, dir, "envs.yaml", "apiVersion: launcher.gokure.dev/v1alpha1\nkind: EnvironmentSet\nspec:\n  environments:\n  - name: rel\n    profile: p.yaml\n    values: sub/v.yaml\n  - name: bare\n    profile: p.yaml\n")
 
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTempFile(t, dir, "p.yaml", "")
+	writeTempFile(t, filepath.Join(dir, "sub"), "v.yaml", "")
+	// Resolved paths are symlink-free, so compare against the canonical directory.
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	envs := filepath.Join(dir, "envs.yaml")
 	opts := &buildOptions{}
 	if err := resolveEnvironment(opts, "/unused", environmentFlags(t, opts, "--environment", "rel", "--environments", envs)); err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(dir, "p.yaml"); opts.profilePath != want {
+	if want := filepath.Join(real, "p.yaml"); opts.profilePath != want {
 		t.Errorf("profilePath = %q, want %q", opts.profilePath, want)
 	}
-	if want := filepath.Join(dir, "sub", "v.yaml"); opts.valuesPath != want {
+	if want := filepath.Join(real, "sub", "v.yaml"); opts.valuesPath != want {
 		t.Errorf("valuesPath = %q, want %q", opts.valuesPath, want)
 	}
 
@@ -303,5 +314,43 @@ func TestResolveEnvironment_RejectsEscapingPath(t *testing.T) {
 	}
 	if opts.profilePath != "" {
 		t.Errorf("profilePath = %q, want unset after a rejected file", opts.profilePath)
+	}
+}
+
+// The text of a path can stay inside the environments file's directory while a
+// symlink on it leads outside; the resolved target is what must stay inside.
+func TestResolveEnvironment_Symlinks(t *testing.T) {
+	outside := t.TempDir()
+	writeTempFile(t, outside, "p.yaml", "")
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "profiles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTempFile(t, filepath.Join(dir, "profiles"), "p.yaml", "")
+	if err := os.Symlink(outside, filepath.Join(dir, "out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "profiles"), filepath.Join(dir, "in")); err != nil {
+		t.Fatal(err)
+	}
+	writeTempFile(t, dir, "envs.yaml", "apiVersion: launcher.gokure.dev/v1alpha1\nkind: EnvironmentSet\nspec:\n  environments:\n  - name: in\n    profile: in/p.yaml\n  - name: out\n    profile: profiles/p.yaml\n    values: out/p.yaml\n")
+	envs := filepath.Join(dir, "envs.yaml")
+
+	opts := &buildOptions{}
+	err := resolveEnvironment(opts, "/unused", environmentFlags(t, opts, "--environment", "out", "--environments", envs))
+	if err == nil || !strings.Contains(err.Error(), `values "out/p.yaml" resolves outside`) {
+		t.Fatalf("error = %v, want the symlink escape rejected", err)
+	}
+
+	opts = &buildOptions{}
+	if err := resolveEnvironment(opts, "/unused", environmentFlags(t, opts, "--environment", "in", "--environments", envs)); err != nil {
+		t.Fatalf("a symlink that stays inside must be accepted: %v", err)
+	}
+	real, err := filepath.EvalSymlinks(filepath.Join(dir, "profiles", "p.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.profilePath != real {
+		t.Errorf("profilePath = %q, want the resolved %q", opts.profilePath, real)
 	}
 }
