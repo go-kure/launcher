@@ -18,7 +18,9 @@
 #   bare     `#N` with 2 to 5 digits, not preceded by a letter, digit, `_`, `&`
 #            or `%` (so `(#227)`, `#227/#242`, `pre-#444` are caught; the HTML
 #            entity `&#1234;` and the Go format verb `%#12x` are not)
-#   partial  `launcher#N` not preceded by `/` or by a letter, digit or `_`
+#   partial  a repository name ending in `launcher`, then `#N`, with no `owner/`
+#            before it (so `launcher#278`, `pre-launcher#278` and `...launcher#278`
+#            are caught; `go-kure/launcher#278` and `owner/kure-launcher#278` are not)
 # A Markdown link target `](#...)` is an anchor, not a reference, and is ignored.
 #
 # Escape hatch: `allow-ref` anywhere on the same line exempts that line. Needed
@@ -37,13 +39,13 @@ ROOT="."
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --root) ROOT="${2:-}"; [[ -n "$ROOT" ]] || { echo "ERROR: --root needs a directory" >&2; exit 2; }; shift 2 ;;
-    -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^# Exit:/p' "$0"; exit 0 ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
 BARE='(^|[^A-Za-z0-9_&%])#[0-9]{2,5}([^A-Za-z0-9_]|$)'
-PART='(^|[^A-Za-z0-9_/])launcher#[0-9]+'
+PART='(^|[^A-Za-z0-9_./-])[A-Za-z0-9_.-]*launcher#[0-9]+'
 
 hits="$(mktemp)"
 trap 'rm -f "$hits"' EXIT

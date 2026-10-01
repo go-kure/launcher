@@ -67,6 +67,8 @@ expect "other repository" 0 "" a.md 'removal tracked in [go-kure/kure#539](https
 expect "Markdown anchor" 0 "" a.md 'see [the section](#12-foo)'
 expect "HTML entity" 0 "" a.md 'a &#1234; entity'
 expect "Go format verb" 0 "" a.go 'fmt.Printf("%#12.6g", value)'
+expect "qualified name with a hyphen" 0 "" a.go '// see owner/kure-launcher#278'
+expect "qualified name with a dot" 0 "" a.go '// see owner/foo.launcher#278'
 expect "single digit" 0 "" a.md 'step #1 comes first'
 expect "hex colour" 0 "" a.md 'color: #abcdef and #12ab34'
 expect "six-digit number" 0 "" a.md 'id #123456'
