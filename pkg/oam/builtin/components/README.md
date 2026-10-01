@@ -2475,7 +2475,11 @@ not part of either change.
   `imageCatalogRef` names a catalog object rather than an image, so it is not
   checked either. `postgresql` does not enforce the allowlist on its image.
   As for `postgresql`, generation refuses `hugepages-<size>`
-  in `resources` without `cpu` or `memory` after policy defaults; the other
+  in `resources` without `cpu` or `memory` after policy defaults. It also
+  applies the shared parser's request/limit cross-check there
+  (`resources: cpu: request 2 must not exceed limit 1`; hugepages and
+  extended resources need a limit equal to the request), so a policy default
+  limit below an authored request is refused as well. The other
   resource-name rules of the shared parser are left to the API server.
   `Endpoints` declares the same primary endpoint as `postgresql`
   (`cnpg.io/cluster: <component-name>` on port `5432`). The kind is in the
