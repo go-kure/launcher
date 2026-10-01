@@ -17,16 +17,48 @@ import (
 // but deployment fell back to the default when the value was not an integer,
 // so `replicas: "3"` silently built one replica, and a negative value was
 // carried through to an object the apiserver refuses.
+//
+// zeroRefused marks a kind whose emitted object cannot carry 0: a CNPG
+// Cluster's instances has Minimum=1, so postgresql parses 0 like every kind
+// and refuses it in Generate (go-kure/launcher#623).
 var replicaKinds = []struct {
-	name    string
-	handler oam.ComponentHandler
-	props   map[string]any
+	name        string
+	handler     oam.ComponentHandler
+	props       map[string]any
+	zeroRefused bool
 }{
-	{"webservice", &components.WebserviceHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}},
-	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"postgresql", &components.PostgresqlHandler{}, map[string]any{}},
+	{"webservice", &components.WebserviceHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, false},
+	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
+	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
+	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
+	{"postgresql", &components.PostgresqlHandler{}, map[string]any{}, true},
+}
+
+// replicasGenerateErr builds the kind, applies p when it is non-nil, and
+// returns Generate's error; ToApplicationConfig and ApplyPolicy must succeed.
+func replicasGenerateErr(t *testing.T, h oam.ComponentHandler, kind string, props map[string]any, p oam.Policy) error {
+	t.Helper()
+	cfg, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: kind, Properties: props}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	if p != nil {
+		if err := cfg.(oam.Enforceable).ApplyPolicy(p); err != nil {
+			t.Fatalf("ApplyPolicy: %v", err)
+		}
+	}
+	_, err = cfg.Generate(stack.NewApplication("app", "default", cfg))
+	return err
+}
+
+// expectZeroRefused asserts the zeroRefused kinds' Generate refusal of an
+// authored 0, the case the accepting tests below skip for them.
+func expectZeroRefused(t *testing.T, h oam.ComponentHandler, kind string, props map[string]any, p oam.Policy) {
+	t.Helper()
+	const want = "replicas: must be >= 1, got 0"
+	if err := replicasGenerateErr(t, h, kind, props, p); err == nil || err.Error() != want {
+		t.Errorf("Generate(replicas: 0) error = %v, want %q", err, want)
+	}
 }
 
 func replicaProps(base map[string]any, replicas any, authored bool) map[string]any {
@@ -134,6 +166,10 @@ func TestReplicas_AcceptedOnEveryKind(t *testing.T) {
 	for _, k := range replicaKinds {
 		for _, tc := range cases {
 			t.Run(k.name+"/"+tc.name, func(t *testing.T) {
+				if k.zeroRefused && tc.want == 0 {
+					expectZeroRefused(t, k.handler, k.name, replicaProps(k.props, tc.value, tc.authored), nil)
+					return
+				}
 				got := generatedReplicas(t, k.handler, k.name, replicaProps(k.props, tc.value, tc.authored), nil)
 				if got != tc.want {
 					t.Errorf("replicas = %d, want %d", got, tc.want)
@@ -165,6 +201,10 @@ func TestReplicas_PolicyDefaultRespectsPresenceOnEveryKind(t *testing.T) {
 	for _, k := range replicaKinds {
 		for _, tc := range cases {
 			t.Run(k.name+"/"+tc.name, func(t *testing.T) {
+				if k.zeroRefused && tc.want == 0 {
+					expectZeroRefused(t, k.handler, k.name, replicaProps(k.props, tc.value, tc.authored), policy)
+					return
+				}
 				got := generatedReplicas(t, k.handler, k.name, replicaProps(k.props, tc.value, tc.authored), policy)
 				if got != tc.want {
 					t.Errorf("replicas = %d, want %d", got, tc.want)
