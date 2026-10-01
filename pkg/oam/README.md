@@ -429,9 +429,10 @@ nested in an emitted component gets the same classification as that component. A
 `DocumentLoweringRule`'s output is never synthesized: the rule
 sees trait and policy properties and metadata too, which nothing checks before it
 runs (go-kure/launcher#612). Output of any other rule stays authored and is checked like
-anything a user wrote, so a schema-less rule cannot pass a non-null authored reserved
-value through (an explicit `null` is stripped before that check,
-go-kure/launcher#609). A sealed trait that is not synthesized is checked as it
+anything a user wrote, so a schema-less rule cannot pass an authored reserved value
+through. Its components are checked for reserved keys as they are emitted, before
+emission validation strips an explicit `null`, so a reserved key written as `null` is
+refused here exactly as when authored directly (go-kure/launcher#609). A sealed trait that is not synthesized is checked as it
 stands: before a `TraitLoweringRule` that declares a schema runs over it, and when
 its handler applies it. A schema-less rule that copies an authored reserved value,
 or renders one from capabilities, into a trait it emits is therefore rejected. A
@@ -714,8 +715,9 @@ Two things this deliberately does not do:
   the same separation: an authored component is checked before any rule can
   rewrite it. A component a rule emitted from checked input — whose properties are
   the ones the strip touches — is exempt from reservation, as a synthesized trait is;
-  the output of a rule whose input was not checked stays authored and is checked
-  after the strip (see the rule-output contract above).
+  the output of a rule whose input was not checked stays authored, and its
+  components are checked as they are emitted, before the strip (see the
+  rule-output contract above).
 - **A key the schema does not declare is untouched**, including inside an object
   that sets `AdditionalProperties`. Nothing describes such a value, so nothing
   here can normalise it, and a null inside an opaque object still reaches the
