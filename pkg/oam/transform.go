@@ -604,14 +604,21 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 
-	// Apply placement tier overrides before grouping. A generated source stays in
-	// infra (isGeneratedSource): a consumer in an earlier tier would never become
-	// ready, and the source's later tier would wait on it forever.
+	// Apply placement tier overrides before grouping. A generated source
+	// (isGeneratedSource) deploys first and waits on nothing: placed in a later
+	// tier, or made to depend on another component, it could follow one of its
+	// own consumers, which would then never become ready and hold it back forever.
 	for i, entry := range entries {
-		if tier, ok := policyResult.TierOverrides[entry.component.Name]; ok {
-			if isGeneratedSource(&entry.component) && tier != TierInfra {
+		tier, overridden := policyResult.TierOverrides[entry.component.Name]
+		if isGeneratedSource(&entry.component) {
+			if overridden && tier != TierInfra {
 				return nil, nil, errors.Errorf("placement cannot move %s %q to tier %s: a source a lowering rule generates deploys in infra, before every consumer", entry.component.Type, entry.component.Name, tier)
 			}
+			if deps := policyResult.Dependencies[entry.component.Name]; len(deps) > 0 {
+				return nil, nil, errors.Errorf("dependency cannot make %s %q wait on %s: a source a lowering rule generates deploys first, before every consumer", entry.component.Type, entry.component.Name, strings.Join(deps, ", "))
+			}
+		}
+		if overridden {
 			entries[i].tier = tier
 		}
 	}

@@ -86,8 +86,9 @@ func ClassifyComponent(c *Component) (Tier, error) {
 // (synthesized) component of one of these types deploys in TierInfra, the earliest tier:
 // the consumers keep their own tier, from an annotation or a placement policy, and a source
 // in a later tier than a consumer would never be applied, since that tier waits on the
-// consumer's health check. An authored source keeps defaultTierMap's tier, and a placement
-// policy cannot move a generated one out of TierInfra (TransformWithPolicy).
+// consumer's health check. An authored source keeps defaultTierMap's tier. A placement
+// policy cannot move a generated one out of TierInfra, and a dependency rule cannot make it
+// wait on another component (TransformWithPolicy).
 var generatedSourceTypes = map[string]bool{
 	"helmrepository": true,
 	"ocirepository":  true,

@@ -210,6 +210,98 @@ func TestBuiltinHelm_PlacementCannotMoveGeneratedSource(t *testing.T) {
 	assertNoConsumerPrecedesSource(t, cluster)
 }
 
+// TestBuiltinHelm_DependencyCannotDelayGeneratedSource pins the dependency
+// counterpart of the placement refusal. With the consumer placed in infra
+// beside the source, no cross-tier edge closes a cycle, so a rule making the
+// source wait on that consumer would deadlock silently rather than fail.
+func TestBuiltinHelm_DependencyCannotDelayGeneratedSource(t *testing.T) {
+	apiInInfra := `    - name: api-first
+      type: placement
+      properties:
+        component: api
+        tier: infra
+`
+	sourceWaits := helmDependsOn + `          - component: ` + helmSharedSource() + `
+            dependsOn: [api]
+` + apiInInfra
+	_, _, err := transformWithBuiltins(t, helmAppHeader+sourceWaits)
+	if err == nil || !strings.Contains(err.Error(), "dependency cannot make helmrepository "+strconv.Quote(helmSharedSource())+" wait on api") {
+		t.Fatalf("Transform error = %v, want the generated source's dependency refused", err)
+	}
+	cluster, _, err := transformWithBuiltins(t, helmAppHeader+helmDependsOn+apiInInfra)
+	if err != nil {
+		t.Fatalf("Transform with only a consumer depending: %v", err)
+	}
+	assertNoConsumerPrecedesSource(t, cluster)
+}
+
+// appsSourceRule emits a helmrepository annotated into the apps tier, which a
+// custom lowering rule may do; the built-in helm rule's sources carry no
+// annotation. It declares a schema, so its output counts as synthesized.
+type appsSourceRule struct{}
+
+func (appsSourceRule) ComponentType() string { return "apps-source" }
+
+func (appsSourceRule) PropertySchema() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{}
+}
+
+func (appsSourceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
+	return oam.LoweringResult{Components: []oam.Component{{
+		Name:        comp.Name + "-src",
+		Type:        "helmrepository",
+		Properties:  map[string]any{"url": "https://charts.example.com"},
+		Annotations: map[string]string{oam.TierAnnotationKey(kurelDomain): string(oam.TierApps)},
+	}}}, nil
+}
+
+// TestBuiltinHelm_PlacementKeepsGeneratedSourceInInfra pins that a placement the
+// refusal accepts still applies: placing an annotated generated source in infra
+// moves it there, so an infra consumer depending on it builds without a
+// cross-tier cycle.
+func TestBuiltinHelm_PlacementKeepsGeneratedSourceInInfra(t *testing.T) {
+	const app = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    - name: lib
+      type: apps-source
+    - name: api
+      type: webservice
+      properties:
+        image: nginx:1.27
+  policies:
+    - name: order
+      type: dependency
+      properties:
+        rules:
+          - component: api
+            dependsOn: [lib-src]
+    - name: api-first
+      type: placement
+      properties:
+        component: api
+        tier: infra
+    - name: source-first
+      type: placement
+      properties:
+        component: lib-src
+        tier: infra
+`
+	transformer := newBuiltinTransformer()
+	transformer.RegisterComponentLowering(appsSourceRule{})
+	parsed, err := oam.ParseWithExtraTypes([]byte(app), nil, transformer.LowerableTypes())
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	if _, _, err := transformer.TransformWithPolicy(parsed, oam.TransformContext{Domain: kurelDomain}); err != nil {
+		t.Fatalf("Transform with the generated source placed in infra: %v", err)
+	}
+}
+
 // TestBuildCommand_HelmSourceNameTakenByAuthoredComponent pins what happens
 // when an authored component already carries the name the rule generates for a
 // source (go-kure/launcher#349, Q5): the build fails, naming the duplicate,
