@@ -70,6 +70,30 @@ func TestWebserviceHandler_CanHandle(t *testing.T) {
 	}
 }
 
+// The affinity the shorthand evaluates to is validated the way the deployment
+// component validates a raw affinity, as on worker: a label key or value the
+// API server would refuse is refused here, naming the shorthand. Before, such
+// a document built a manifest the API server rejected.
+func TestWebserviceHandler_RefusesAnAffinityTheAPIServerWould(t *testing.T) {
+	cases := map[string]map[string]any{
+		"topologyKey":        {"enablePodAntiAffinity": true, "topologyKey": "not a key!"},
+		"nodeSelector key":   {"nodeSelector": map[string]any{"bad key!": "x"}},
+		"nodeSelector value": {"nodeSelector": map[string]any{"ok": "va lue"}},
+	}
+	for name, affinity := range cases {
+		_, err := (&components.WebserviceHandler{}).ToApplicationConfig(&oam.Component{Name: "app", Type: "webservice",
+			Properties: map[string]any{"image": "nginx:1", "affinity": affinity}}, "default")
+		if err == nil || !strings.HasPrefix(err.Error(), "affinity: the shorthand evaluates to an affinity the API server would refuse: ") {
+			t.Errorf("%s: err = %v, want the shorthand refusal", name, err)
+		}
+	}
+	// A valid shorthand still builds.
+	if _, err := (&components.WebserviceHandler{}).ToApplicationConfig(&oam.Component{Name: "app", Type: "webservice",
+		Properties: map[string]any{"image": "nginx:1", "affinity": map[string]any{"enablePodAntiAffinity": true}}}, "default"); err != nil {
+		t.Errorf("valid shorthand refused: %v", err)
+	}
+}
+
 func TestWebserviceHandler_RequiredImage_Missing(t *testing.T) {
 	h := &components.WebserviceHandler{}
 	component := &oam.Component{
