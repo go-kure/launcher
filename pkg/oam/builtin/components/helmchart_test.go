@@ -391,8 +391,19 @@ func TestHelmchartHandler_OCIRepository_Generate(t *testing.T) {
 		t.Fatalf("expected 2 objects (OCIRepository + HelmRelease), got %d", len(objects))
 	}
 
-	if _, ok := (*objects[0]).(*sourcev1.OCIRepository); !ok {
+	repo, ok := (*objects[0]).(*sourcev1.OCIRepository)
+	if !ok {
 		t.Errorf("objects[0]: expected *sourcev1.OCIRepository, got %T", *objects[0])
+	} else {
+		// The chart layer is copied as-is, not extracted and re-archived
+		// through Flux's ignore rules (go-kure/launcher#665).
+		want := sourcev1.OCILayerSelector{
+			MediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
+			Operation: sourcev1.OCILayerCopy,
+		}
+		if repo.Spec.LayerSelector == nil || *repo.Spec.LayerSelector != want {
+			t.Errorf("layerSelector = %+v, want %+v", repo.Spec.LayerSelector, want)
+		}
 	}
 	hr, ok := (*objects[1]).(*helmv2.HelmRelease)
 	if !ok {
@@ -928,6 +939,35 @@ func TestHelmchartHandler_DeliveryTemplate_HandlerDefaultConfigMapFallsBackInlin
 	}
 	if !cov.GenerateCoversAugmentLayout() {
 		t.Error("GenerateCoversAugmentLayout() = false, want true (inherited handler default resolved to inline, so AugmentLayout adds nothing)")
+	}
+}
+
+// TestHelmchartGetSourceKey_OCIChartKey: a helmchart OCI source keys apart from
+// the oci component's "oci:<url>:<version>", so the two never share one
+// OCIRepository: the chart one copies its layer, the oci one extracts it.
+func TestHelmchartGetSourceKey_OCIChartKey(t *testing.T) {
+	h := &components.HelmchartHandler{}
+	cfg, err := h.ToApplicationConfig(&oam.Component{
+		Name: "cert-manager",
+		Type: "helmchart",
+		Properties: map[string]any{
+			"version": "v1.17.2",
+			"source": map[string]any{
+				"kind": "OCIRepository",
+				"url":  "oci://ghcr.io/cert-manager/charts/cert-manager",
+			},
+		},
+	}, "cert-manager")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	s, ok := cfg.(interface{ GetSourceKey() string })
+	if !ok {
+		t.Fatal("HelmchartConfig does not implement GetSourceKey")
+	}
+	want := "oci-chart:oci://ghcr.io/cert-manager/charts/cert-manager:v1.17.2"
+	if got := s.GetSourceKey(); got != want {
+		t.Errorf("GetSourceKey() = %q, want %q", got, want)
 	}
 }
 

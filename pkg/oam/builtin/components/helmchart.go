@@ -480,7 +480,10 @@ type HelmchartConfig struct {
 func (c *HelmchartConfig) ApplyPolicy(_ oam.Policy) error { return nil }
 
 // GetSourceKey returns the dedup key for Form A sources.
-// For HelmRepository: "helm:<url>". For OCIRepository: "oci:<url>:<version>".
+// For HelmRepository: "helm:<url>". For OCIRepository: "oci-chart:<url>:<version>",
+// never the oci component's "oci:<url>:<version>": this OCIRepository copies the
+// chart layer and the oci component's extracts manifests, so one shared object
+// cannot serve both.
 // Returns "" for Form B (reference) and for template delivery (no source CR emitted)
 // so the dedup loop skips this config.
 // When several components share a key, the transform picks the one deployed
@@ -490,7 +493,7 @@ func (c *HelmchartConfig) GetSourceKey() string {
 		return ""
 	}
 	if c.SourceKind == "OCIRepository" {
-		return "oci:" + c.SourceURL + ":" + c.Version
+		return "oci-chart:" + c.SourceURL + ":" + c.Version
 	}
 	return "helm:" + c.SourceURL
 }
@@ -588,6 +591,14 @@ func (c *HelmchartConfig) Generate(app *stack.Application) ([]*client.Object, er
 				repo := fluxcd.CreateOCIRepository(c.Name, c.fluxNamespace())
 				repo.Spec.URL = c.SourceURL
 				repo.Spec.Interval = interval
+				// Copy the chart layer as-is, as helm's generated source does.
+				// Flux's default extracts it and re-archives it without the
+				// files its ignore rules exclude (*.zip, *.png, ...), which a
+				// chart may still read with .Files.Get.
+				repo.Spec.LayerSelector = &sourcev1.OCILayerSelector{
+					MediaType: helmChartContentMediaType,
+					Operation: sourcev1.OCILayerCopy,
+				}
 				if c.Version != "" {
 					fluxcd.SetOCIRepositoryReference(repo, &sourcev1.OCIRepositoryRef{Tag: c.Version})
 				}

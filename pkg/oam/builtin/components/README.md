@@ -1933,7 +1933,7 @@ not part of either change.
     `operation: copy`. Flux therefore passes the chart archive through unchanged.
     By default it would extract and re-archive the chart, dropping files that its
     ignore rules exclude (`*.zip`, `*.png`, ...) even when the chart reads them
-    with `.Files.Get`. `helmchart`'s generated OCIRepository has no layer selector.
+    with `.Files.Get`. `helmchart`'s generated OCIRepository selects the same layer.
     It is named `<document>-source-<digest>`, where the 10-hex digest is taken
     over the content identity: `helm:<url>`, or `oci:<url>:<version>`.
     Components of one document with the same identity share one source; the
@@ -1986,7 +1986,7 @@ not part of either change.
   |---|---|
   | 1 | The values ConfigMap name carries a values hash. |
   | 2 | A generated source is named `<app>-source-<digest>`, not after the component. |
-  | 3 | `oci` and Helm-over-OCI components no longer share one OCIRepository. |
+  | 3 | *(void)* `oci` and Helm-over-OCI components: neither shares an OCIRepository with the other (go-kure/launcher#665). |
   | 4 | The delivery value `native` is `flux`. |
   | 5 | *(void)* `targetNamespace` under a Flux namespace: both default it to the application namespace (go-kure/launcher#625). |
   | 6 | A generated source keeps its terminal's default interval, not the release interval. |
@@ -1999,7 +1999,7 @@ not part of either change.
   | 13 | `version` is refused with a referenced OCIRepository or HelmChart source. |
   | 14 | `source.namespace` is refused together with `url`. |
   | 15 | Unknown keys are refused at any depth of `source`, and so are two keys that differ only in case. |
-  | 16 | A generated OCIRepository sets `layerSelector` (the chart content layer, `copy`). |
+  | 16 | *(void)* A generated OCIRepository: both set `layerSelector` (the chart content layer, `copy`) (go-kure/launcher#665). |
   | 17 | `placement` may keep a generated source only in infra, and a `dependency` rule may not make it wait. |
   | 18 | Any other composite default or build-time check a terminal does not reproduce (strict decoding). |
 
@@ -2008,7 +2008,13 @@ not part of either change.
   (`inline` default | `configMap`), `driftDetection`, `install.crds`/`upgrade.crds`.
   With native delivery, components whose inline `source.url` (plus `version` for OCI) match share one source
   CR, emitted by the one deployed first — earliest tier, then `dependency` order, then
-  document order — and referenced by the others.
+  document order — and referenced by the others. An OCI chart source is never shared
+  with an `oci` component naming the same artifact: the generated OCIRepository
+  selects the Helm chart content layer with `operation: copy`, so Flux passes the
+  chart archive through unchanged instead of extracting it and re-archiving it
+  without the files its ignore rules exclude (`*.zip`, `*.png`, ...), which a chart
+  may read with `.Files.Get`; the `oci` component's extracts the layer, so each
+  gets its own.
   `valuesMode: configMap` externalizes `values` into a literal `ConfigMap` resource
   — not a kustomize `configMapGenerator` (its hash-suffixed name has no HelmRelease
   entry in kustomize's built-in name-reference table to rewrite) — referenced from
@@ -2456,8 +2462,8 @@ not part of either change.
 
   **Compared with the `helmchart` composite's inline source** (`source.url`). The composite emits
   a HelmRepository, or an OCIRepository for an `oci://` URL, carrying only `url`, `interval` and,
-  for OCI, a `ref.tag` from `version`; it shares one CR between components naming the same
-  source; and it does not check the URL host against the allowed registries. The source
+  for OCI, a `ref.tag` from `version` and a `layerSelector` copying the Helm chart content
+  layer; it shares one CR between components naming the same source; and it does not check the URL host against the allowed registries. The source
   components expose the whole spec (credentials, `type: oci`, `provider`, verification, …), check
   the host, and never share a CR. These are deliberate deltas, not gaps.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`

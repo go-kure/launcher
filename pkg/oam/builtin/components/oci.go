@@ -276,11 +276,12 @@ func (c *OCIConfig) ApplyPolicy(p oam.Policy) error {
 	return enforceAllowedURLHosts(c.URL, allowed)
 }
 
-// GetSourceKey returns the dedup key for the OCIRepository source CR. Uses the
-// same form as helmchart's OCIRepository ("oci:<url>:<version>") so an oci
-// component and a helmchart-over-OCI sharing one artifact dedup together.
+// GetSourceKey returns the dedup key for the OCIRepository source CR,
+// "oci:<url>:<version>", shared only by oci components naming one artifact.
 // The component deployed first emits the shared source (see
-// oam.SourceDeduplicatable).
+// oam.SourceDeduplicatable). A helmchart-over-OCI on the same artifact keys
+// its own source differently: it copies the chart layer instead of
+// extracting it.
 func (c *OCIConfig) GetSourceKey() string {
 	return "oci:" + c.URL + ":" + c.Version
 }
