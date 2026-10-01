@@ -500,8 +500,10 @@ version runs the deploy from its own ref, so its deploy uses the workflow as it 
 Only the target slot is replaced. Other `launcher/v*/`, `launcher/dev/`, `CNAME`, and `.nojekyll`
 are preserved. The root `launcher/` files are only overwritten when `set_latest=true`, the label
 is still the highest stable tag when the deploy writes, and the deploy's checkout is that tag's
-commit (otherwise the deploy fails, see How It Works). A root write replaces everything directly
-under `launcher/` except `dev/` and the `v*/` slots.
+commit. When the label ranks highest but is not an existing tag, or its tag is not the
+checked-out commit, the deploy fails (see How It Works); when it does not rank highest, the slot
+still deploys. A root write replaces everything directly under `launcher/` except `dev/` and the
+`v*/` slots.
 
 ### Authentication
 
