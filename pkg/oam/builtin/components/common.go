@@ -473,7 +473,7 @@ func validateRelativePath(label, path string) error {
 // Closing it needs threading the parsed volume set (name plus source type)
 // through parseEnv's call chain (or a post-hoc validation pass once env and
 // volumes are both parsed) — out of scope for this shared-schema-fidelity
-// PR; see the launcher#278 ledger.
+// PR; see the go-kure/launcher#278 ledger.
 func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 	if err := rejectUnknownKeys(m, []string{"volumeName", "path", "key", "optional"}, "fileKeyRef"); err != nil {
 		return nil, err
@@ -1980,7 +1980,7 @@ func parseObjectField(raw map[string]any, key, label string) (map[string]any, bo
 //
 // Five optionalX wrappers used to sit here doing that job for the subset of
 // fields introduced by go-kure/launcher#339
-// and #381; they became exact duplicates of the helpers they wrapped and were
+// and go-kure/launcher#381; they became exact duplicates of the helpers they wrapped and were
 // removed, because a wrapper whose doc says "X with an explicit null read as
 // omission" tells the next reader that plain X does NOT handle null, which is
 // now false. Callers use the helpers directly.

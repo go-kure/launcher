@@ -128,7 +128,7 @@ func TestPostgresqlAffinity_AbsenceAndDefaults(t *testing.T) {
 		if got, want := cfg.AffinityTopologyKey, "kubernetes.io/hostname"; got != want {
 			t.Errorf("AffinityTopologyKey = %q, want %q", got, want)
 		}
-		// Before #448 this was "" — the handler set no default, so an omitted
+		// Before go-kure/launcher#448 this was "" — the handler set no default, so an omitted
 		// podAntiAffinityType reached the emitted cluster as an empty string while every
 		// other kind emitted "preferred".
 		if got, want := cfg.AffinityPodAntiAffinityType, "preferred"; got != want {
@@ -219,7 +219,7 @@ func TestPostgresqlAffinity_NullEnvelopeIsAbsent(t *testing.T) {
 // builds identically to omitting the key" for every other kind in this package. A null
 // sub-field here must therefore take the same default an omitted sub-field takes,
 // checked against TestPostgresqlAffinity_AbsenceAndDefaults's "empty block" defaults —
-// not be rejected, which was this test's pre-#444 assertion.
+// not be rejected, which was this test's assertion before go-kure/launcher#444.
 func TestPostgresqlAffinity_NullSubFieldsTakeTheirDefault(t *testing.T) {
 	empty, err := postgresqlConfigFor(t, map[string]any{"affinity": map[string]any{}})
 	if err != nil {
@@ -273,7 +273,7 @@ func TestPostgresqlAffinity_NullPodAntiAffinityTypeIsNotEmptyString(t *testing.T
 // wrongly-typed nodeSelector CONTAINER by name and then handed its CONTENTS to the
 // former lenient string-map reader, which dropped every non-string value without a
 // word — so `nodeSelector: {rack: 3}` reached the emitted cluster as a nodeSelector
-// with no rack constraint, which is the exact failure #448 is about.
+// with no rack constraint, which is the exact failure go-kure/launcher#448 is about.
 func TestPostgresqlAffinity_NodeSelectorValuesMustBeStrings(t *testing.T) {
 	_, err := postgresqlConfigFor(t, map[string]any{
 		"affinity": map[string]any{

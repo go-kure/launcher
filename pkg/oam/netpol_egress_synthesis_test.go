@@ -210,7 +210,7 @@ func TestComponentEgressPolicyConfig_Generate_SkipsEmptyPortPeer(t *testing.T) {
 	}
 }
 
-// --- fail-fast on invalid egress peers (#224) ---
+// --- fail-fast on invalid egress peers (go-kure/launcher#224) ---
 
 // TestSynthesizeEgress_ErrorsOnInvalidSelector is the loud layer: a ported peer with a nil,
 // empty-matchLabels, or expression-bearing selector fails the build rather than emitting a

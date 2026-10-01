@@ -4,7 +4,7 @@
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1 | 2026-07-10 | §3.2: rendering vocabulary is the shared `PropertySchema` type (flat subset; rich fields rejected at decode). adr#33 |
+| 1.1 | 2026-07-10 | §3.2: rendering vocabulary is the shared `PropertySchema` type (flat subset; rich fields rejected at decode). |
 | 1.0 | 2026-05-16 | Initial — records built-in struct pattern and custom CapabilityDefinition plan |
 
 ---
@@ -271,7 +271,7 @@ The `CapabilityDefinition` document kind will be added in Phase 2/3. It declares
 rendering schema for a custom capability in the same vocabulary used by `kurel.yaml`
 parameters (`type`, `required`, `default`, `description`).
 
-> **Schema vocabulary (adr#33).** Internally that vocabulary is the shared `PropertySchema`
+> **Schema vocabulary.** Internally that vocabulary is the shared `PropertySchema`
 > type, restricted here to its flat subset: the rich fields (`enum`, nested `properties`,
 > `items`, `additionalProperties`) are rejected at decode time, so capability rendering does
 > not silently gain nested or enum semantics. The accepted wire format below is unchanged.

@@ -35,7 +35,7 @@ type trafficRule struct {
 
 // serviceBackendNamer is optionally implemented by a component config whose Kubernetes Service
 // name differs from its component name (e.g. a statefulset's headless service). Used to resolve
-// an expose backendRef (a Service name) back to the sibling component that owns it (#227).
+// an expose backendRef (a Service name) back to the sibling component that owns it (go-kure/launcher#227).
 type serviceBackendNamer interface {
 	BackendServiceName() string
 }
@@ -62,7 +62,7 @@ type serviceRoutingTargeter interface {
 // A component is a valid backendRef target only if it declares an explicit BackendServiceName or a
 // positive ServicePort; a Service-less component (e.g. a worker, or a daemonset with no port) owns
 // no Service, so its name must NOT enter serviceToComponent — otherwise it would shadow a bare
-// external Service of the same name (misrouting a #239 backendSelector target) or fabricate a false
+// external Service of the same name (misrouting a go-kure/launcher#239 backendSelector target) or fabricate a false
 // R3 ambiguity against another component's real Service name.
 func componentServiceName(app *stack.Application) (string, bool) {
 	if sn, ok := app.Config.(serviceBackendNamer); ok && sn.BackendServiceName() != "" {
@@ -156,7 +156,7 @@ func appendIngressTrafficRules(np *networkingv1.NetworkPolicy, rules []trafficRu
 }
 
 // backendIngressAllowPolicyConfig is the ApplicationConfig for an auto-generated NetworkPolicy that
-// allows ingress to an EXTERNAL routing backend — a bare Service with no owning OAM component (#239).
+// allows ingress to an EXTERNAL routing backend — a bare Service with no owning OAM component (go-kure/launcher#239).
 // Unlike componentAllowPolicyConfig it selects an explicit, authored pod selector (the backend's
 // pods) rather than a component-label key, and takes an explicit resource name. Like the inbound
 // family (and unlike endpoint-ingress), it permits namespace-wide sources, since routing
@@ -204,8 +204,8 @@ func synthesizeNetworkPolicies(cluster *stack.Cluster, componentMap map[string]c
 	// Synthesis is entirely CLUSTER-wide (not per-bundle): components of one Application share a
 	// namespace but are split across leaf bundles (dependency-aware: one per component; hierarchical:
 	// one per tier). Resolving a backendRef to its sibling component, and merging a router's injected
-	// allow onto that component's own bundle, therefore requires cluster-wide lookups (#242) — the
-	// same model #239 uses for external backends.
+	// allow onto that component's own bundle, therefore requires cluster-wide lookups (go-kure/launcher#242) — the
+	// same model go-kure/launcher#239 uses for external backends.
 	reg := newNPSynthesisRegistry()
 	if err := reg.buildLookups(cluster, componentMap); err != nil {
 		return err
@@ -240,7 +240,8 @@ func synthesizeNetworkPolicies(cluster *stack.Cluster, componentMap map[string]c
 // buildLookups populates the registry's cluster-wide read-only maps: appToBundle (via a leaf-bundle
 // walk), componentPlacement (each component's own bundle + namespace), and serviceToComponent (each
 // component's Service name → its name). It fails fast (R3) when two components resolve to the same
-// Service name — an ambiguous #227/#242 routing target must error, not silently misroute.
+// Service name — an ambiguous routing target (go-kure/launcher#227, go-kure/launcher#242) must
+// error, not silently misroute.
 func (r *npSynthesisRegistry) buildLookups(cluster *stack.Cluster, componentMap map[string]componentEntry) error {
 	appToBundle := map[*stack.Application]*stack.Bundle{}
 	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
@@ -308,7 +309,7 @@ func (r *npSynthesisRegistry) emitComponents(labelKey string) error {
 			}
 			cfg = &backendIngressAllowPolicyConfig{PolicyName: policyName, PodSelector: sel, Rules: retargeted}
 		}
-		// Key by namespace/name (not bare name) to preserve the #239 external-vs-component collision
+		// Key by namespace/name (not bare name) to preserve the go-kure/launcher#239 external-vs-component collision
 		// check and avoid future cross-namespace false positives.
 		r.emitted[ce.namespace+"/"+policyName] = struct{}{}
 		r.queue(ce.bundle, stack.NewApplication(policyName, ce.namespace, cfg))
@@ -358,14 +359,15 @@ type pendingSynthApp struct {
 
 // componentPlacement records where a component's synthesized inbound policy must land: its own leaf
 // bundle and namespace. Built cluster-wide so a router in one bundle can inject an allow onto a
-// backend component in another bundle (#242).
+// backend component in another bundle (go-kure/launcher#242).
 type componentPlacement struct {
 	bundle    *stack.Bundle
 	namespace string
 }
 
 // componentInboundEntry accumulates one component's inbound-policy inputs CLUSTER-wide: its own
-// routing collectors plus rules injected by backendRefs from routers in any bundle (#227/#242).
+// routing collectors plus rules injected by backendRefs from routers in any bundle
+// (go-kure/launcher#227, go-kure/launcher#242).
 // bundle/namespace are the component's own (set once), so the merged {comp}-allow-ingress-traffic
 // policy is emitted exactly once in the component's bundle regardless of walk order.
 type componentInboundEntry struct {
@@ -381,7 +383,7 @@ type componentInboundEntry struct {
 type npSynthesisRegistry struct {
 	serviceToComponent map[string]string                 // svc name → component name (cluster-wide, ambiguity-checked)
 	componentPlacement map[string]componentPlacement     // component name → its own bundle + namespace
-	routingTargets     map[string]serviceRoutingTargeter // component name → where its routed traffic lands (#411)
+	routingTargets     map[string]serviceRoutingTargeter // component name → where its routed traffic lands (go-kure/launcher#411)
 	components         map[string]*componentInboundEntry
 	componentOrder     []string
 	emitted            map[string]struct{}              // namespace/name of every synthesized policy
@@ -467,15 +469,15 @@ func (r *npSynthesisRegistry) emitExternalBackends() error {
 // backendRefTargetCollector is optionally implemented by routing trait configs (IngressConfig,
 // HTTPRouteConfig) that can route to a separate backend Service via expose backendRefs. It
 // surfaces those external targets so ingress synthesis can land the allow on the backend's own
-// pods instead of the exposing component's (#227).
+// pods instead of the exposing component's (go-kure/launcher#227).
 type backendRefTargetCollector interface {
 	BackendTargets() []netpol.BackendTarget
 }
 
 // synthesizeForBundle accumulates one leaf bundle's routing collectors into the cluster-wide
 // registry (reg): each component's own collectors, plus rules injected onto a backend component
-// (resolved cluster-wide, landing on the backend's OWN bundle — #242) or onto an external bare
-// Service (#239). It never emits — emitComponents/emitExternalBackends do that after the whole
+// (resolved cluster-wide, landing on the backend's OWN bundle — go-kure/launcher#242) or onto an external bare
+// Service (go-kure/launcher#239). It never emits — emitComponents/emitExternalBackends do that after the whole
 // cluster is walked, so nothing is appended to any bundle until every bundle validates.
 func synthesizeForBundle(bundle *stack.Bundle, reg *npSynthesisRegistry) error {
 	if bundle == nil {
@@ -494,8 +496,9 @@ func synthesizeForBundle(bundle *stack.Bundle, reg *npSynthesisRegistry) error {
 		}
 		reg.components[routerComp].collectors = append(reg.components[routerComp].collectors, col)
 
-		// #227/#242: an external backendRef routes to a separate backend. Retarget its allow onto the
-		// backend component's pods, resolved cluster-wide so the backend may live in another bundle.
+		// go-kure/launcher#227, go-kure/launcher#242: an external backendRef routes to a separate
+		// backend. Retarget its allow onto the backend component's pods, resolved cluster-wide so
+		// the backend may live in another bundle.
 		bt, ok := appPtr.Config.(backendRefTargetCollector)
 		if !ok {
 			continue
@@ -523,7 +526,7 @@ func synthesizeForBundle(bundle *stack.Bundle, reg *npSynthesisRegistry) error {
 				bce.injected = append(bce.injected, trafficRule{Sources: sources, Ports: target.Ports})
 				continue
 			}
-			// #239: external bare Service. Synthesize only with an explicit, valid authored selector;
+			// go-kure/launcher#239: external bare Service. Synthesize only with an explicit, valid authored selector;
 			// otherwise leave authored (no name-based inference). Accumulate cluster-wide so a Service
 			// named across bundles is deduped/merged and a cross-bundle selector conflict is caught.
 			if target.PodSelector == nil || !matchLabelsSelectorValid(target.PodSelector) {
@@ -1123,7 +1126,7 @@ func endpointKey(e netpol.Endpoint) string {
 
 // endpointIngressPolicyName returns the NetworkPolicy name for a component's endpoint-ingress
 // policy. A single-endpoint component keeps the bare "{comp}-allow-endpoint-ingress" name
-// (back-compat with #213). When a component exposes more than one distinct endpoint (multi=true,
+// (back-compat with go-kure/launcher#213). When a component exposes more than one distinct endpoint (multi=true,
 // e.g. a postgresql cluster plus its pooler), every policy is suffixed with a short content hash
 // of the endpoint so the names are distinct and — because the hash is derived from the endpoint's
 // own selector+ports, not its position — stable across unrelated endpoint additions.

@@ -197,7 +197,7 @@ func TestApplyDefinitionSchema_UntypedPropertyAcceptsAnyDefault(t *testing.T) {
 }
 
 func TestCheckCapabilityValueType_UnsupportedTypeIsRejected(t *testing.T) {
-	// Before #431 this switch had no default arm and fell off the end returning
+	// Before go-kure/launcher#431 this switch had no default arm and fell off the end returning
 	// nil, so a property declaring any type outside the flat vocabulary accepted
 	// EVERY value.
 	for _, typeName := range []string{"array", "object", "number", "String"} {

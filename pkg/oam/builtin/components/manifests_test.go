@@ -86,7 +86,7 @@ func TestManifestsHandler_UnknownGVKWithNamespacePasses(t *testing.T) {
 	}
 }
 
-// --- scopeOverrides (launcher#141) ---
+// --- scopeOverrides (go-kure/launcher#141) ---
 
 // clusterWidgetYAML is a fictitious cluster-scoped custom resource kind kure
 // will never register — the fixture for "a CRD installed out of band, so its

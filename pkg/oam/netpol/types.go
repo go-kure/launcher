@@ -44,7 +44,7 @@ type EgressPeer struct {
 // Service does NOT resolve to a sibling in-bundle component: the selector is not inferable from the
 // Service name, so an external bare Service carrying an explicit selector is synthesized onto those
 // pods, while a nil selector leaves the backend authored. When the Service resolves to a sibling
-// component (#227), the component-label targeting takes precedence and PodSelector is ignored.
+// component (go-kure/launcher#227), the component-label targeting takes precedence and PodSelector is ignored.
 type BackendTarget struct {
 	ServiceName string
 	Ports       []intstr.IntOrString

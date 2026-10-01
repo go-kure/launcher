@@ -200,7 +200,7 @@ func collectHTTPRoutePorts(config *HTTPRouteConfig, selfServiceName string) []in
 
 // collectIngressBackendTargets returns the external backend targets of an ingress trait: paths
 // naming a Service other than the component's own, grouped by (service name, backendSelector) with
-// their ports. These drive ingress-synthesis retargeting (#227 for in-bundle components, #239 for
+// their ports. These drive ingress-synthesis retargeting (go-kure/launcher#227 for in-bundle components, go-kure/launcher#239 for
 // external Services carrying an explicit selector). A path naming no backend of its own routes to
 // the trait's Service, which is external when a trait-level serviceName names a Service other than
 // the component's own (go-kure/launcher#399). Returns an error when one Service name is given two different non-nil

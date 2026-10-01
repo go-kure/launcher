@@ -1,6 +1,6 @@
 # Design spike: external-secret `data[]` shorthand
 
-Status: accepted (launcher#199). Companion downstream: a downstream runtime's
+Status: accepted (go-kure/launcher#199). Companion downstream: a downstream runtime's
 external-secret migration.
 
 ## Problem
@@ -9,7 +9,7 @@ External-secret `data[]` entries are the single largest authored-OAM boilerplate
 the reference scenario — ~390 removable lines, 58% of the external-secret volume
 (measured in the downstream migration review). Each entry authors 4 lines
 (`secretKey` + `remoteRef.{key,property}`), but the values are near-perfectly
-derivable. Across all 130 `data` entries in opsmaster's 37 external-secret blocks:
+derivable. Across all 130 `data` entries in a downstream consumer's 37 external-secret blocks:
 
 - `remoteRef.property == secretKey` — 130/130 (100%)
 - `remoteRef.key == "<namespace>/<secretName>"` — 126/130 (97%)
@@ -55,11 +55,11 @@ parser would see `remoteRef` absent, derive `<namespace>/<secretName>`, and the 
 would fetch the **wrong secret path** — discovered at runtime, in-cluster, on auth
 material. Strict rejection is the only safe complement to defaulting-by-absence, and
 it matches the downstream strict-mode charter and its reject-over-ignore pins. There
-are no existing users to grandfather; the opsmaster fixtures conform.
+are no existing users to grandfather; that consumer's fixtures conform.
 
 The error names the *supported* fields rather than calling the key a "typo", because
 ExternalSecrets' `RemoteRef` carries fields this handler does not model
-(`conversionStrategy`, `metadataPolicy` — unused by opsmaster); an author reaching for
+(`conversionStrategy`, `metadataPolicy` — unused by that consumer); an author reaching for
 a real-but-unhandled field gets an accurate message.
 
 ### Edge cases (the 4/130 non-conforming)

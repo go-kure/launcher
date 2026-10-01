@@ -862,7 +862,7 @@ func TestLower_StrictCapabilities_MissingDefinitionRejected(t *testing.T) {
 	}
 }
 
-// --- Pipeline: PolicyResult.ConsumedCapabilities, lowering path (#290) ---
+// --- Pipeline: PolicyResult.ConsumedCapabilities, lowering path (go-kure/launcher#290) ---
 
 // consumedCapNoopIngressHandler is a trivial no-op TraitHandler for "ingress" —
 // capAwareTraitLoweringRule.LowerTrait unconditionally emits a terminal
@@ -1315,7 +1315,7 @@ func (r forwardingComponentsDocRule) LowerDocument(doc *Application, lctx Loweri
 }
 
 // TestLower_DocumentRule_ForwardedComponent_KeepsEmptyRule is the regression guard for
-// a codex round-1 review finding on launcher#277 ("A document rule overwrites Rule on
+// a codex round-1 review finding on go-kure/launcher#277 ("A document rule overwrites Rule on
 // components it merely forwards"): Origin.Rule's own doc comment names "a component
 // forwarded verbatim by a document rule" as the canonical example of an element that
 // keeps Rule == "" (never itself the direct output of a lowering rule invocation), but
@@ -1374,7 +1374,7 @@ func (r forwardingPoliciesDocRule) LowerDocument(doc *Application, lctx Lowering
 }
 
 // TestLower_DocumentRule_ForwardedPolicy_KeepsEmptyRule is the regression guard for the
-// C1 codex finding on launcher#277 PR #283 (pullrequestreview thread on
+// C1 codex finding on go-kure/launcher#277 PR go-kure/launcher#283 (pullrequestreview thread on
 // lowering.go:869, filed after the /gmr loop's own termination — the review bot fires
 // on undraft, so no pre-undraft comment check could have seen it): the policy loop in
 // lowerDocumentOnce's document-rule branch stamped Rule unconditionally, missing the
@@ -2009,7 +2009,7 @@ func TestLower_PolicyRule_SeesPreRoundComponentSnapshot(t *testing.T) {
 }
 
 // TestLower_LoweringStep_MatchesVersionedOrigin is the regression guard for the C4
-// codex finding on launcher#277 PR #283 (surfaced by the bot's re-review of this PR's
+// codex finding on go-kure/launcher#277 PR go-kure/launcher#283 (surfaced by the bot's re-review of this PR's
 // own push, at commit cd20257 — a third review trigger beyond "open"/"mark ready"):
 // loweringRuleIdentity's "@<version>" suffix is computed once and stamped onto
 // Origin.Rule, but every LoweringStep{Rule: ...} construction site (document,

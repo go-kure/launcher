@@ -86,7 +86,7 @@ func TestExposeRule_Ingress_SecretNameNoIssuerRejected(t *testing.T) {
 }
 
 // Present-but-wrong-typed / empty secretName is rejected, not silently defaulted to
-// <component>-tls (the #199 lesson: absence-defaulting + lenient parse hides a typo).
+// <component>-tls (the go-kure/launcher#199 lesson: absence-defaulting + lenient parse hides a typo).
 func TestExposeRule_Ingress_SecretNameWrongType(t *testing.T) {
 	cases := map[string]any{"int": 12345, "empty": ""}
 	for name, val := range cases {

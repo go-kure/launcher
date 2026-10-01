@@ -111,7 +111,7 @@ func TestExternalSecret_DataShorthand_ExplicitBackCompat(t *testing.T) {
 	assertData(t, es.Spec.Data[0], "X", "p", "k/path")
 }
 
-// Mixed list mirroring an opsmaster block: derived entries + the outlier with an
+// Mixed list mirroring a downstream consumer's block: derived entries + the outlier with an
 // explicit key that differs from <ns>/<secretName>.
 func TestExternalSecret_DataShorthand_MixedWithOutlier(t *testing.T) {
 	es := esFromData(t, []any{

@@ -5,7 +5,7 @@
 | Version | Date | Summary |
 |---|---|---|
 | 1.3 | 2026-10-01 | §6.1/§6.3: `array`/`object` parameter types with node substitution (shape only; string default refused). go-kure/launcher#421 |
-| 1.2 | 2026-07-10 | §6.1: unify parameter schema onto the shared `PropertySchema` vocabulary (flat subset; rich fields rejected at decode). adr#33 |
+| 1.2 | 2026-07-10 | §6.1: unify parameter schema onto the shared `PropertySchema` vocabulary (flat subset; rich fields rejected at decode). |
 | 1.1 | 2026-05-14 | Complete §6 (parameter syntax — Option A); fix GVK references; remove `backup` from Phase 1 trait table; fix §5 diagram label |
 | 1.0 | 2026-04-19 | Initial draft — parameter syntax section omitted pending decision |
 
@@ -259,7 +259,7 @@ is parsed or dispatched to handlers. For the full design rationale see
 
 Each parameter has a name, type, required flag, optional default, and optional description.
 
-> **Schema vocabulary (adr#33).** Internally a parameter is `ParameterDecl` = `name` plus the
+> **Schema vocabulary.** Internally a parameter is `ParameterDecl` = `name` plus the
 > shared `PropertySchema` vocabulary (the same type used by handler properties and capability
 > rendering). Parameters remain an *ordered list* — a default may reference only earlier
 > parameters — and are restricted to the flat subset: the rich `PropertySchema` fields (`enum`,

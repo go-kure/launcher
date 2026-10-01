@@ -21,7 +21,7 @@ type PolicyResult struct {
 	ReconciliationSettings *ReconciliationSettings
 	// ConsumedCapabilities is the sorted, deduped capability keys this app's traits
 	// actually resolved against ctx.Capabilities — the authoritative replacement for
-	// a downstream consumer's own interim candidate-key derivation (#290). Nil when no
+	// a downstream consumer's own interim candidate-key derivation (go-kure/launcher#290). Nil when no
 	// trait consumed anything (AppDependsOn's nil-until-populated convention).
 	ConsumedCapabilities []string
 }

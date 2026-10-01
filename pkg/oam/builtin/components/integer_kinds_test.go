@@ -122,7 +122,7 @@ func checkReplicasAndPort(t *testing.T, d *appsv1.Deployment, replicas, port any
 	}
 }
 
-// TestIntegerProperty_OutOfRangeIsAValidationError pins the other half of #418: an
+// TestIntegerProperty_OutOfRangeIsAValidationError pins the other half of go-kure/launcher#418: an
 // unsigned value that no signed reader can hold is a build error naming the field,
 // not a silent default or a wrapped-around negative.
 func TestIntegerProperty_OutOfRangeIsAValidationError(t *testing.T) {

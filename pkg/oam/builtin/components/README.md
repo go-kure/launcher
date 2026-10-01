@@ -1315,7 +1315,7 @@ tiers, in precedence order:
 
 `oam.Policy.MaxCPU()`/`MaxMemory()` are enforced against the *effective*
 value — what `Generate()` will actually emit, after all three tiers — not
-just the authored/policy-defaulted `resources` field. Prior to launcher#251
+just the authored/policy-defaulted `resources` field. Prior to go-kure/launcher#251
 the enforcement check ran before the intrinsic tier was computed, so an
 application that omitted `spec.resources` entirely could ship a Deployment
 whose 100m CPU / 128Mi memory intrinsic defaults exceeded the enforced

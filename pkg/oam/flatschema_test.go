@@ -11,7 +11,7 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 )
 
-// --- kurel parameters: rich fields rejected by key presence (adr#33) ---
+// --- kurel parameters: rich fields rejected by key presence ---
 
 // packageWithParamField builds a Package document with a single string parameter
 // carrying one extra field line (e.g. `enum: []`).

@@ -38,7 +38,7 @@ func TestWebserviceHandler_Endpoints(t *testing.T) {
 	}
 }
 
-// TestWorker_NotEndpointProvider documents the #225 decision: worker declares no
+// TestWorker_NotEndpointProvider documents the go-kure/launcher#225 decision: worker declares no
 // in-cluster port and emits no Service, so it deliberately provides no endpoints
 // (ComponentEndpoints then returns (nil,nil) for a worker component). Worker is a
 // lowering rule now, so neither the rule nor the deployment handler it lowers

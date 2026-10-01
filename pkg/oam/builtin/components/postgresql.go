@@ -644,10 +644,11 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 	// satisfied the same assertion with a nil map, reported present, and
 	// switched pod anti-affinity ON with every default — a scheduling
 	// constraint nobody authored, from a value no document can distinguish
-	// from the first. go-kure/launcher#394/#444 folded both null shapes into
-	// authoredValue, which every helper (including parseObjectField) now
-	// routes through, so parseObjectField reads both as absence directly —
-	// the dedicated optionalObject wrapper this call used is removed.
+	// from the first. go-kure/launcher#394 and go-kure/launcher#444 folded
+	// both null shapes into authoredValue, which every helper (including
+	// parseObjectField) now routes through, so parseObjectField reads both
+	// as absence directly — the dedicated optionalObject wrapper this call
+	// used is removed.
 	affinityRaw, affinityPresent, err := parseObjectField(props, "affinity", "affinity")
 	if err != nil {
 		return nil, err
@@ -680,7 +681,7 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 		// map lookup: the raw lookup reports `podAntiAffinityType: null` as
 		// present with a nil value, which then failed the string assertion —
 		// treating a null sub-field as a type error, contradicting the nested-null-
-		// is-absence contract #444 established for every other sub-field in this
+		// is-absence contract go-kure/launcher#444 established for every other sub-field in this
 		// block.
 		if v, present := authoredValue(affinityRaw, "podAntiAffinityType"); present {
 			paat, isString := v.(string)

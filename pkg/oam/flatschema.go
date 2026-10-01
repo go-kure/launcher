@@ -18,7 +18,6 @@ import (
 // UnmarshalYAML bypasses the parent decoder's KnownFields, so these allow-sets
 // restore that strictness by key presence (not by decoded value, which cannot
 // distinguish an omitted field from a zero value like `additionalProperties: false`).
-// See adr#33.
 var (
 	kurelParamKeys = map[string]struct{}{
 		"name": {}, "type": {}, "required": {}, "default": {}, "description": {},

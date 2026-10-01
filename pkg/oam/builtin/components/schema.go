@@ -216,7 +216,7 @@ func schemaLifecycle(reserved bool) oam.PropertySchema {
 // built-in call site in this package passes false today (nothing here decides
 // that securityContext should be platform-managed — that decision, if ever
 // made, belongs to a consumer-side call site, not this shared fragment; see
-// R5 in the launcher#278 ledger). The parameter exists so a future call site
+// R5 in the go-kure/launcher#278 ledger). The parameter exists so a future call site
 // CAN say otherwise without this fragment silently drifting underneath it.
 func schemaSecurityContext(reserved bool) oam.PropertySchema {
 	return oam.PropertySchema{
