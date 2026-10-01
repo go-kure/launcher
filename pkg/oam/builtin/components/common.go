@@ -3001,7 +3001,7 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 			return nil, errors.Errorf("%s: invalid lifecycle configuration: %w", label, err)
 		}
 		sc.Lifecycle = lifecycle
-		if err := checkNamedPortsDeclared(sc.Probes, sc.Lifecycle, sc.Ports); err != nil {
+		if err := checkNamedPortsDeclared(sc.Probes, sc.Lifecycle, sc.Ports, "this sidecar"); err != nil {
 			return nil, errors.Errorf("%s: %w", label, err)
 		}
 		out = append(out, sc)
@@ -3009,15 +3009,17 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 	return out, nil
 }
 
-// checkNamedPortsDeclared rejects a probe or lifecycle hook on a sidecar that
-// addresses a named port the sidecar does not itself declare. The kubelet
+// checkNamedPortsDeclared rejects a probe or lifecycle hook on a container that
+// addresses a named port the container does not itself declare. The kubelet
 // resolves a named httpGet/tcpSocket port only against the ports of the
 // container the probe or hook belongs to, so an undeclared name builds but
 // never resolves — the same rule parsePort enforces for a main container
-// against its single declared name, widened to a sidecar's whole port list.
+// against its single declared name, widened to a whole port list: a sidecar's,
+// or the deployment kind's main container's. container names it in the error
+// ("this sidecar", "the main container").
 // A grpc port is always numeric (parseProbe rejects a named one), so only the
 // httpGet and tcpSocket handlers can carry a name.
-func checkNamedPortsDeclared(probes ProbeConfig, lc *corev1.Lifecycle, ports []corev1.ContainerPort) error {
+func checkNamedPortsDeclared(probes ProbeConfig, lc *corev1.Lifecycle, ports []corev1.ContainerPort, container string) error {
 	var names []string
 	for _, p := range ports {
 		if p.Name != "" {
@@ -3029,9 +3031,9 @@ func checkNamedPortsDeclared(probes ProbeConfig, lc *corev1.Lifecycle, ports []c
 			return nil
 		}
 		if len(names) == 0 {
-			return errors.Errorf("%s: named port %q is not supported here: this sidecar declares no named ports for the kubelet to resolve the name against — use a numeric port, or name one of its ports", where, port.StrVal)
+			return errors.Errorf("%s: named port %q is not supported here: %s declares no named ports for the kubelet to resolve the name against — use a numeric port, or name one of its ports", where, port.StrVal, container)
 		}
-		return errors.Errorf("%s: named port %q does not match any port this sidecar declares (%s): the kubelet resolves a named port only against a name the container itself declares", where, port.StrVal, strings.Join(names, ", "))
+		return errors.Errorf("%s: named port %q does not match any port %s declares (%s): the kubelet resolves a named port only against a name the container itself declares", where, port.StrVal, container, strings.Join(names, ", "))
 	}
 	for _, p := range []struct {
 		kind  string

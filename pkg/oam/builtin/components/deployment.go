@@ -1,13 +1,16 @@
 package components
 
 import (
+	"fmt"
 	"maps"
+	"strings"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -27,7 +30,9 @@ import (
 // is launcher's own opinions: there is no `port` (and so no Service), no
 // default topology-spread constraint and no four-key `affinity` shorthand,
 // none of which are DeploymentSpec fields. A workload wanting launcher to
-// create its Service uses webservice.
+// create its Service uses webservice. The main container's `ports` list is
+// published (go-kure/launcher#280): container ports are a PodSpec field, and
+// declaring them emits no Service.
 //
 // The routing traits (expose, ingress, httproute) are accepted on this kind but
 // are not self-sufficient here, because no Service is emitted. `expose` lowers
@@ -58,6 +63,7 @@ func (h *DeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 		"resources":       schemaResources(false),
 		"command":         schemaStringArray(),
 		"args":            schemaStringArray(),
+		"ports":           schemaMainContainerPorts(),
 		"probes":          schemaProbes(false),
 		"lifecycle":       schemaLifecycle(false),
 		"securityContext": schemaSecurityContext(false),
@@ -152,19 +158,32 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 		return nil, err
 	}
 	config.Args = args
-	// namedPortsAllowed=false: this kind publishes no port property, so its
-	// main container never declares a ContainerPort for the kubelet to
-	// resolve a named probe/lifecycle port against.
-	probes, err := parseProbes(props, false, "")
+	ports, err := parseMainContainerPorts(props)
+	if err != nil {
+		return nil, err
+	}
+	config.Ports = ports
+	// A named probe/lifecycle port resolves only against a name the main
+	// container itself declares. With no `ports`, namedPortsAllowed=false keeps
+	// the outright refusal every portless kind gives. With `ports`, any
+	// syntactically valid name is admitted here and then checked against the
+	// declared names, as parseSidecars does for a sidecar's own list.
+	namedPorts := len(ports) > 0
+	probes, err := parseProbes(props, namedPorts, "")
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid probe configuration")
 	}
 	config.Probes = probes
-	lifecycle, err := parseLifecycle(props, false, "")
+	lifecycle, err := parseLifecycle(props, namedPorts, "")
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid lifecycle configuration")
 	}
 	config.Lifecycle = lifecycle
+	if namedPorts {
+		if err := checkNamedPortsDeclared(probes, lifecycle, ports, "the main container"); err != nil {
+			return nil, err
+		}
+	}
 	securityContext, err := parseSecurityContext(props)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid securityContext configuration")
@@ -237,15 +256,17 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 
 // DeploymentConfig implements stack.ApplicationConfig for deployment components.
 type DeploymentConfig struct {
-	Name            string
-	Namespace       string
-	Image           string
-	Replicas        int32
-	Env             []corev1.EnvVar
-	EnvFrom         []corev1.EnvFromSource
-	Resources       ResourceRequirements
-	Command         []string
-	Args            []string
+	Name      string
+	Namespace string
+	Image     string
+	Replicas  int32
+	Env       []corev1.EnvVar
+	EnvFrom   []corev1.EnvFromSource
+	Resources ResourceRequirements
+	Command   []string
+	Args      []string
+	// Ports are the main container's declared ports (parseMainContainerPorts).
+	Ports           []corev1.ContainerPort
 	Probes          ProbeConfig
 	Lifecycle       *corev1.Lifecycle
 	SecurityContext *corev1.SecurityContext
@@ -417,13 +438,12 @@ func (c *DeploymentConfig) Generate(app *stack.Application) ([]*client.Object, e
 }
 
 func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
-	// No Ports: this kind publishes no port property (see parseProbes'
-	// namedPortsAllowed=false above).
 	container, err := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
 		Command:         c.Command,
 		Args:            c.Args,
 		Resources:       c.Resources,
+		Ports:           c.Ports,
 		Env:             c.Env,
 		EnvFrom:         c.EnvFrom,
 		Probes:          c.Probes,
@@ -477,6 +497,89 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	dep.Spec.Template.Spec = podSpec
 
 	return dep, nil
+}
+
+// containerPortProtocols is the set of container port protocols the API accepts.
+var containerPortProtocols = []corev1.Protocol{corev1.ProtocolTCP, corev1.ProtocolUDP, corev1.ProtocolSCTP}
+
+// schemaMainContainerPorts describes deployment's `ports` property: the main
+// container's corev1.ContainerPort list, without the node-binding hostPort and
+// hostIP.
+func schemaMainContainerPorts() oam.PropertySchema {
+	protoEnum := make([]any, 0, len(containerPortProtocols))
+	for _, p := range containerPortProtocols {
+		protoEnum = append(protoEnum, string(p))
+	}
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeArray,
+		Description: "Ports the main container declares. A named port is what the main container's probes and lifecycle hooks may address by name. Names and containerPort/protocol pairs must be unique.",
+		Items: &oam.PropertySchema{
+			Type:        oam.PropertyTypeObject,
+			Description: "One container port.",
+			Properties: map[string]oam.PropertySchema{
+				"containerPort": {Type: oam.PropertyTypeInteger, Required: true, Description: "Port number the container listens on, 1-65535."},
+				"name":          {Type: oam.PropertyTypeString, Description: "Port name (an IANA service name: at most 15 lowercase alphanumerics and '-', with at least one letter)."},
+				"protocol":      {Type: oam.PropertyTypeString, Default: string(corev1.ProtocolTCP), Enum: protoEnum, Description: "TCP, UDP or SCTP. Defaults to TCP."},
+			},
+		},
+	}
+}
+
+// parseMainContainerPorts reads deployment's `ports`: each entry's keys,
+// containerPort range, name syntax and protocol are checked as the API server
+// checks a container port, and a repeated name is refused as it refuses one. A
+// repeated containerPort/protocol pair is refused too, which the API server
+// only warns about: the second entry declares nothing the first did not. An
+// absent or empty list declares no ports.
+func parseMainContainerPorts(props map[string]any) ([]corev1.ContainerPort, error) {
+	entries, _, err := parseObjectList(props, "ports")
+	if err != nil {
+		return nil, err
+	}
+	var out []corev1.ContainerPort
+	names := map[string]bool{}
+	pairs := map[string]bool{}
+	for i, m := range entries {
+		label := indexedLabel("ports", i)
+		if err := rejectUnknownKeys(m, []string{"containerPort", "name", "protocol"}, label); err != nil {
+			return nil, err
+		}
+		port, present, err := parsePortField(m, "containerPort", label+".containerPort", 1)
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			return nil, errors.Errorf("%s.containerPort: required", label)
+		}
+		cp := corev1.ContainerPort{ContainerPort: port, Protocol: corev1.ProtocolTCP}
+		if name, present, err := parseStringField(m, "name", label+".name"); err != nil {
+			return nil, err
+		} else if present {
+			if errs := validation.IsValidPortName(name); len(errs) > 0 {
+				return nil, errors.Errorf("%s.name: invalid port name %q: %s", label, name, strings.Join(errs, "; "))
+			}
+			if names[name] {
+				return nil, errors.Errorf("%s.name: duplicate port name %q", label, name)
+			}
+			names[name] = true
+			cp.Name = name
+		}
+		if proto, present, err := parseStringField(m, "protocol", label+".protocol"); err != nil {
+			return nil, err
+		} else if present {
+			if !containsValue(containerPortProtocols, corev1.Protocol(proto)) {
+				return nil, errors.Errorf("%s.protocol: must be one of %s, got %q", label, joinValues(containerPortProtocols), proto)
+			}
+			cp.Protocol = corev1.Protocol(proto)
+		}
+		pair := fmt.Sprintf("%d/%s", cp.ContainerPort, cp.Protocol)
+		if pairs[pair] {
+			return nil, errors.Errorf("%s: duplicate port %s", label, pair)
+		}
+		pairs[pair] = true
+		out = append(out, cp)
+	}
+	return out, nil
 }
 
 // (applyNonRWXConstraint is shared by every kind that projects a Deployment;
