@@ -345,8 +345,9 @@ func (t *Transformer) SetStrictCapabilities(strict bool) {
 	t.strictCapabilities = strict
 }
 
-// SetWarningHandler sets the callback invoked when a non-fatal capability warning is emitted.
-// If nil, warnings are silently dropped.
+// SetWarningHandler sets the callback invoked when a non-fatal warning is emitted: a
+// capability warning, or an authored component or trait whose type is deprecated
+// (ContractMetadata.Deprecated). If nil, warnings are silently dropped.
 func (t *Transformer) SetWarningHandler(h func(string)) {
 	t.warnHandler = h
 }
@@ -546,6 +547,11 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	// against the wrong input — a policy control deciding on synthesized detail
 	// instead of the authored line it is meant to police.
 	authoredTraitTypes := collectTraitTypes(app)
+
+	// Deprecation is read from the authored document for the same reason: a
+	// component a lowering rule synthesizes was not written by anyone, so it never
+	// warns.
+	t.warnDeprecatedTypes(app)
 
 	// Run the lowering fixpoint (D1/D2, lowering.go) before anything else: a
 	// registered TraitLoweringRule (e.g. "expose", pkg/oam/builtin/traits) must
@@ -1407,6 +1413,56 @@ func walkLeafBundle(bundle *stack.Bundle, fn func(*stack.Bundle)) {
 	for _, child := range bundle.Children {
 		walkLeafBundle(child, fn)
 	}
+}
+
+// warnDeprecatedTypes passes one warning per authored component, and per authored
+// trait, whose type's registered handler or lowering rule declares
+// ContractMetadata.Deprecated, in document order. It never fails the build and never
+// changes the output.
+func (t *Transformer) warnDeprecatedTypes(app *Application) {
+	if t.warnHandler == nil {
+		return
+	}
+	for _, comp := range app.Spec.Components {
+		if md, ok := t.componentContract(comp.Type); ok && md.Deprecated {
+			t.warnHandler(deprecationWarning(fmt.Sprintf("component %q: type %s", comp.Name, comp.Type), md.DeprecationMessage))
+		}
+		for _, trait := range comp.Traits {
+			if md, ok := t.traitContract(trait.Type); ok && md.Deprecated {
+				t.warnHandler(deprecationWarning(fmt.Sprintf("component %q: trait type %s", comp.Name, trait.Type), md.DeprecationMessage))
+			}
+		}
+	}
+}
+
+// componentContract returns the ContractMetadata of the handler or lowering rule
+// registered for a component type; a type is registered as one or the other.
+func (t *Transformer) componentContract(typeName string) (ContractMetadata, bool) {
+	if h, ok := t.componentHandlers[typeName].(ContractDescriber); ok {
+		return h.ContractMetadata(), true
+	}
+	if r, ok := t.componentLoweringRules[typeName].(ContractDescriber); ok {
+		return r.ContractMetadata(), true
+	}
+	return ContractMetadata{}, false
+}
+
+// traitContract is componentContract for a trait type.
+func (t *Transformer) traitContract(typeName string) (ContractMetadata, bool) {
+	if h, ok := t.traitHandlers[typeName].(ContractDescriber); ok {
+		return h.ContractMetadata(), true
+	}
+	if r, ok := t.traitLoweringRules[typeName].(ContractDescriber); ok {
+		return r.ContractMetadata(), true
+	}
+	return ContractMetadata{}, false
+}
+
+func deprecationWarning(subject, message string) string {
+	if message == "" {
+		return subject + " is deprecated"
+	}
+	return subject + " is deprecated: " + message
 }
 
 // collectTraitTypes returns the unique trait types used across all components.
