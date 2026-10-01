@@ -119,8 +119,8 @@ and precedence rules.
 | `-o, --output` | Output directory (default: stdout). |
 | `-n, --namespace` | Namespace override. |
 | `--cluster-id` | Cluster identifier (default `local`). |
-| `--values` | Path to a values YAML file (requires a `kurel.yaml` package). |
-| `--set key=value` | Set a parameter value (repeatable; requires `kurel.yaml`). |
+| `--values` | Path to a values YAML file (requires a `kurel.yaml` package). The only flag that can supply an `array` or `object` parameter. |
+| `--set key=value` | Set a parameter value (repeatable; requires `kurel.yaml`). Scalars only: an `array` or `object` parameter set this way is refused; use `--values` or the parameter's default. |
 | `--capability-def` | Additional `CapabilityDefinition` file (repeatable). |
 | `--strict-capabilities` | Error (instead of warn) on unvalidated custom capabilities. |
 

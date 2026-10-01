@@ -4,7 +4,7 @@
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.3 | 2026-10-01 | §6.1/§6.3: `array`/`object` parameter types with node substitution (shape only; string default refused). #421 |
+| 1.3 | 2026-10-01 | §6.1/§6.3: `array`/`object` parameter types with node substitution (shape only; string default refused). go-kure/launcher#421 |
 | 1.2 | 2026-07-10 | §6.1: unify parameter schema onto the shared `PropertySchema` vocabulary (flat subset; rich fields rejected at decode). adr#33 |
 | 1.1 | 2026-05-14 | Complete §6 (parameter syntax — Option A); fix GVK references; remove `backup` from Phase 1 trait table; fix §5 diagram label |
 | 1.0 | 2026-04-19 | Initial draft — parameter syntax section omitted pending decision |
