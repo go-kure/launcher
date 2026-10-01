@@ -16,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -32,6 +33,24 @@ import (
 // It is also postgresql's `replicas` default, which keeps the two kinds' policy
 // behaviour identical.
 const cnpgClusterDefaultInstances = 1
+
+// cnpgClusterNameMaxLength is the longest Cluster name the CloudNativePG
+// admission webhook accepts (internal/webhook/v1/cluster_webhook.go in the
+// linked v1.30.1, which also requires a DNS-1035 label). A component name is a
+// DNS-1123 subdomain of up to 253 characters, so without this check a name the
+// operator refuses would build, and one over 63 characters would also be copied
+// into the cnpg.io/cluster endpoint selector, past the label-value limit.
+const cnpgClusterNameMaxLength = 50
+
+// validateCnpgClusterName refuses a component name CloudNativePG would refuse
+// as the Cluster's name: not a DNS-1035 label (a leading digit or a dot), or
+// longer than cnpgClusterNameMaxLength.
+func validateCnpgClusterName(name string) error {
+	if len(validation.IsDNS1035Label(name)) > 0 || len(name) > cnpgClusterNameMaxLength {
+		return errors.Errorf("cnpg-cluster name %q: must be a DNS-1035 label of at most %d characters (CloudNativePG rejects longer or dotted cluster names)", name, cnpgClusterNameMaxLength)
+	}
+	return nil
+}
 
 // CnpgClusterHandler handles OAM cnpg-cluster components: the kind-named,
 // full-fidelity projection of a CloudNativePG postgresql.cnpg.io/v1 Cluster.
@@ -64,6 +83,11 @@ func (h *CnpgClusterHandler) CanHandle(componentType string) bool {
 // PostgreSQL port. It is the same primary endpoint postgresql publishes; the
 // pooler endpoint belongs to a Pooler, which this kind does not emit.
 func (h *CnpgClusterHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	// Refused here as well as at parse time: endpoints are collected
+	// separately, and the name is copied into the selector verbatim.
+	if err := validateCnpgClusterName(component.Name); err != nil {
+		return nil, err
+	}
 	return []netpol.Endpoint{{
 		PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{cnpgClusterLabel: component.Name}},
 		Ports:       []intstr.IntOrString{intstr.FromInt32(postgresqlPort)},
@@ -160,9 +184,13 @@ func (h *CnpgClusterHandler) PropertySchema() map[string]oam.PropertySchema {
 // null is whatever serializes to JSON null: the properties are read as their
 // JSON serialization (jsonProperties), a null key is dropped and a null array
 // element is refused by path. Everything else is decoded strictly into
-// cnpgv1.ClusterSpec, so an unknown key or a wrongly typed value is an error.
+// cnpgv1.ClusterSpec, so an unknown key or a wrongly typed value is an error;
+// an unknown key is an error even when its value is null.
 func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	props, err := jsonProperties(component.Properties)
+	if err := validateCnpgClusterName(component.Name); err != nil {
+		return nil, err
+	}
+	props, raw, err := jsonProperties(component.Properties)
 	if err != nil {
 		return nil, err
 	}
@@ -184,6 +212,16 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 
 	spec, _, err := builtin.DecodeStrictJSON[cnpgv1.ClusterSpec](props)
 	if err != nil {
+		return nil, errors.Wrap(err, "properties do not decode into a postgresql.cnpg.io/v1 ClusterSpec")
+	}
+	// The null strip drops a null key at any depth, including one the type
+	// does not declare, so a misspelt key authored as null (`storage: {sise:
+	// null}`) would vanish. The package's null contract stops at declared keys
+	// (pkg/oam/property_validate.go), so the unstripped tree is decoded too,
+	// for its unknown-field refusal only: a null on a known field decodes as a
+	// no-op, and a null array element was refused by the strip, so this adds
+	// no other refusal.
+	if _, _, err := builtin.DecodeStrictJSON[cnpgv1.ClusterSpec](raw); err != nil {
 		return nil, errors.Wrap(err, "properties do not decode into a postgresql.cnpg.io/v1 ClusterSpec")
 	}
 	// What was authored is also read back from the decoded spec, the check that
@@ -459,25 +497,29 @@ func foldedFieldMaps(m map[string]any, field string) []map[string]any {
 // (string-keyed maps, slices, scalars) and refuses a typed API struct. Numbers
 // decode as json.Number, which the strict decode re-marshals verbatim, so no
 // precision is lost. A value encoding/json cannot serialize is refused.
-func jsonProperties(props map[string]any) (map[string]any, error) {
+//
+// It also returns the same tree before the strip (raw), whose null keys the
+// caller still needs to check against the type's declared fields.
+func jsonProperties(props map[string]any) (stripped, raw map[string]any, err error) {
 	data, err := json.Marshal(props)
 	if err != nil {
-		return nil, errors.Wrap(err, "properties do not serialize to JSON")
+		return nil, nil, errors.Wrap(err, "properties do not serialize to JSON")
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	var tree any
 	if err := dec.Decode(&tree); err != nil {
-		return nil, errors.Wrap(err, "internal: decode the properties' own JSON")
+		return nil, nil, errors.Wrap(err, "internal: decode the properties' own JSON")
 	}
 	normalized, err := withoutNullsAtDepth(tree, "")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// A nil property map serializes to null; it reads as an empty map, which
 	// decodes as an empty spec.
-	out, _ := normalized.(map[string]any)
-	return out, nil
+	stripped, _ = normalized.(map[string]any)
+	raw, _ = tree.(map[string]any)
+	return stripped, raw, nil
 }
 
 // jsonNumberValue returns a json.Number as the Go number the property parsers

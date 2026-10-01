@@ -2365,7 +2365,14 @@ not part of either change.
   `5432`), so a consumer that dials the pooler — whose pods carry a different label set and are not
   matched by the direct-cluster selector — also gets its connection synthesized.
 - **cnpg-cluster** — the operator-CR kind component for a CloudNativePG
-  `Cluster` (design: `docs/oam/design-operator-cr-components.md`). Its
+  `Cluster` (design: `docs/oam/design-operator-cr-components.md`). The
+  component name becomes the Cluster's name and its `cnpg.io/cluster`
+  endpoint selector, so it must be what CloudNativePG's admission webhook
+  admits: a DNS-1035 label (no leading digit, no dot) of at most 50
+  characters. Any other name is refused at parse time and when endpoints are
+  collected (`cnpg-cluster name "db.main": must be a DNS-1035 label of at
+  most 50 characters …`), although other kinds accept DNS-1123 subdomains
+  of up to 253. Its
   properties are the `spec` of a `postgresql.cnpg.io/v1` `Cluster`, one schema
   key per `ClusterSpec` json field: scalars are typed, and every structured
   field is an open `object` or an `array` of open objects whose description
@@ -2399,7 +2406,10 @@ not part of either change.
   to JSON null: the properties are marshalled with `encoding/json` and read
   back before anything else looks at them, so a null map value is left out
   rather than decoded to an empty string, and a null array element is
-  refused by path (`env[0]: null is not a valid array element`). A lowering
+  refused by path (`env[0]: null is not a valid array element`). The
+  contract covers declared keys only: a key the CNPG type does not declare
+  is refused as an unknown field even when its value is null
+  (`storage: {sise: null}`), not dropped with the null. A lowering
   rule emits JSON-shaped values (string-keyed maps, slices, scalars) as for
   every component; that is the supported contract, and the engine's schema
   check refuses a typed API struct where it checks an object or array item

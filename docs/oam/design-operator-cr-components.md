@@ -84,6 +84,9 @@ The component's `PropertySchema` mirrors the upstream spec type:
 Explicit nulls follow the package-wide null contract: a null is absence at every
 depth, and a null array element is an error naming its path. They are removed
 before the strict decode, so a null never reaches the operator as a zero value.
+The contract stops at declared keys, so the unstripped tree is decoded strictly
+as well, and a key the operator type does not declare is refused as an unknown
+field even when its value is null.
 The contract defines a null as a value that serializes to JSON null, so the
 handler applies it to the serialization itself: the property map is marshalled
 with `encoding/json` and decoded back into plain maps, arrays and scalars before

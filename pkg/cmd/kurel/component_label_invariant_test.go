@@ -84,6 +84,7 @@ func longLabelComponentName(t *testing.T) string {
 }
 
 // boundaryLabelComponentName is a 63-character name that every component type
+// without a shorter name bound of its own (componentLabelFixture.nameBound)
 // accepts: a DNS-1035 label, so also a valid Service and container name. It is
 // the longest name whose label value is the name itself.
 func boundaryLabelComponentName(t *testing.T) string {
@@ -94,6 +95,17 @@ func boundaryLabelComponentName(t *testing.T) string {
 	}
 	if errs := validation.IsDNS1035Label(name); len(errs) > 0 {
 		t.Fatalf("boundary test name %q is not a DNS-1035 label: %v", name, errs)
+	}
+	return name
+}
+
+// boundedLabelComponentName is a DNS-1035 name of exactly n characters, for a
+// type whose own name bound is below the 63-character boundary.
+func boundedLabelComponentName(t *testing.T, n int) string {
+	t.Helper()
+	name := "a" + strings.Repeat("b", n-2) + "c"
+	if errs := validation.IsDNS1035Label(name); len(errs) > 0 || len(name) != n {
+		t.Fatalf("bounded test name %q (%d characters, want %d) is not a DNS-1035 label: %v", name, len(name), n, errs)
 	}
 	return name
 }
@@ -111,6 +123,11 @@ type componentLabelFixture struct {
 	// name (go-kure/launcher#407 container name, go-kure/launcher#546 Service
 	// name); the test pins that the refusal is unchanged.
 	longRefusal string
+	// nameBound, when set, is a name bound of the type's own below 63
+	// characters. The type is rendered at a DNS-1035 name of exactly that
+	// length instead of the 63-character boundary, which must then be refused
+	// with longRefusal like the long name.
+	nameBound int
 	// labelled says the component's own output carries an `app` label, so the
 	// invariant is checked on at least one value rather than vacuously — at
 	// the boundary name, and at the long name when the type accepts it.
@@ -186,7 +203,9 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"postgresql": {props: map[string]any{"version": "16", "storageSize": "10Gi"}},
 	// The Cluster's pods are created and labelled by the operator, so the
 	// component emits no `app` label and no pod selector of its own.
-	"cnpg-cluster": {props: map[string]any{"storage": map[string]any{"size": "10Gi"}}},
+	// CloudNativePG admits a Cluster name of at most 50 characters.
+	"cnpg-cluster": {props: map[string]any{"storage": map[string]any{"size": "10Gi"}},
+		nameBound: 50, longRefusal: "must be a DNS-1035 label of at most 50 characters"},
 	"helmchart": {props: map[string]any{"version": "v1.17.2",
 		"source": map[string]any{"kind": "OCIRepository", "url": "oci://ghcr.io/example/charts/app"}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
@@ -322,9 +341,17 @@ func TestComponentLabelInvariant_ComponentTypes(t *testing.T) {
 			if fx.propsFor != nil {
 				props = fx.propsFor(t)
 			}
-			app := labelInvariantApp(boundary, typ, props, "", nil)
+			name := boundary
+			if fx.nameBound > 0 {
+				_, err := renderLabelInvariantErr(t, labelInvariantApp(boundary, typ, props, "", nil))
+				if err == nil || !strings.Contains(err.Error(), fx.longRefusal) || !strings.Contains(err.Error(), boundary) {
+					t.Fatalf("%s at the 63-character boundary: err = %v, want a refusal mentioning %q and the name", typ, err, fx.longRefusal)
+				}
+				name = boundedLabelComponentName(t, fx.nameBound)
+			}
+			app := labelInvariantApp(name, typ, props, "", nil)
 			docs := renderLabelInvariant(t, app)
-			n := checkComponentLabelInvariant(t, docs, boundary)
+			n := checkComponentLabelInvariant(t, docs, name)
 			if fx.labelled {
 				requireAppLabel(t, n, typ+" at the boundary name")
 			}
