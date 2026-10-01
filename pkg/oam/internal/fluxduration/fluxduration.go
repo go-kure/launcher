@@ -1,34 +1,28 @@
-// Package fluxduration checks a duration string against the form Flux's CRDs
-// accept on their duration fields.
-//
-// Flux declares that form as a +kubebuilder:validation:Pattern on the Interval
-// field of the source-controller v1 OCIRepositorySpec and HelmRepositorySpec,
-// the helm-controller v2 HelmReleaseSpec and the kustomize-controller v1
-// KustomizationSpec, at the API versions go.mod pins. The API server enforces
-// it, so a value outside it builds cleanly and is then rejected at apply time.
-// time.ParseDuration alone is wider: it accepts a sign and the ns, us and µs
-// units.
 package fluxduration
 
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
 
-// pattern is the Flux CRD pattern quoted above.
+// pattern is the Flux CRD pattern the package documentation describes.
 var pattern = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`)
 
 // ErrForm reports a value that time.ParseDuration accepts but that is outside
 // Flux's pattern: signed, or in the ns, us or µs unit.
 var ErrForm = errors.New("not a Flux duration: unsigned, units ms, s, m, h")
 
-// ResolutionError reports a value that is itself a Flux duration but whose
-// emitted form is not. A caller that emits the duration through a
-// metav1.Duration writes Duration.String(), not the authored text, and that
-// switches to µs or ns below one millisecond: 0.5ms is written as 500µs.
+// ResolutionError reports a value that is itself a Flux duration but that is
+// not emitted as one, or not as the same value. A caller that emits the
+// duration through a metav1.Duration writes Duration.String(), not the authored
+// text. That switches to µs or ns below one millisecond: 0.5ms is written as
+// 500µs, which is outside Flux's pattern. And a positive value below
+// time.Duration's nanosecond resolution parses to zero: 0.0000000001ms is
+// written as 0s, which Flux accepts but is not the value authored.
 type ResolutionError struct {
 	// Value is the authored duration.
 	Value string
@@ -51,9 +45,10 @@ func Validate(value string) error {
 	return err
 }
 
-// ValidateEmitted checks value as Validate does, and then that the parsed
-// duration's String() form also matches Flux's pattern, returning a
-// *ResolutionError when it does not.
+// ValidateEmitted checks value as Validate does, and then the parsed duration's
+// String() form: it must also match Flux's pattern, and it must not be 0s for
+// a value authored as anything but zero. Either failure returns a
+// *ResolutionError.
 //
 // Use it where the value reaches the output as a metav1.Duration, which
 // serializes through Duration.String().
@@ -62,7 +57,15 @@ func ValidateEmitted(value string) error {
 	if err != nil {
 		return err
 	}
-	if emitted := d.String(); !pattern.MatchString(emitted) {
+	emitted := d.String()
+	if !pattern.MatchString(emitted) {
+		return &ResolutionError{Value: value, Emitted: emitted}
+	}
+	// time.ParseDuration truncates below one nanosecond without an error, so a
+	// positive value can parse to zero. Inside the pattern the only digits are
+	// the number parts, so a value authored as zero ("0s", "0h0m", "0.000s")
+	// has no digit other than 0.
+	if d == 0 && strings.ContainsAny(value, "123456789") {
 		return &ResolutionError{Value: value, Emitted: emitted}
 	}
 	return nil

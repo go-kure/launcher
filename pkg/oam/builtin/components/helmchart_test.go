@@ -69,6 +69,8 @@ func TestHelmchartHandler_IntervalFluxDuration(t *testing.T) {
 		{"500us", "must be a Flux duration"},
 		{"1µs", "must be a Flux duration"},
 		{"0.5ms", `emitted as "500µs"`},
+		// Positive, but truncated to zero by time.ParseDuration.
+		{"0.0000000001ms", `emitted as "0s"`},
 	}
 	for _, tc := range refused {
 		t.Run("refused "+tc.interval, func(t *testing.T) {
@@ -111,6 +113,86 @@ func TestHelmchartHandler_IntervalFluxDuration(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The same check on a config built directly rather than parsed. HelmchartConfig
+// and its Interval field are exported, so ToApplicationConfig's parse-time check
+// is not on this path; without Generate's own check the interval is converted
+// with its parse error discarded, and a signed value is emitted as written
+// while text that is no duration at all is emitted as 0s.
+func TestHelmchartConfig_IntervalCheckedAtGenerate(t *testing.T) {
+	config := func(interval string) *components.HelmchartConfig {
+		return &components.HelmchartConfig{
+			Name:       "metrics",
+			Chart:      "kube-prometheus-stack",
+			SourceURL:  "https://prometheus-community.github.io/helm-charts",
+			SourceKind: "HelmRepository",
+			Interval:   interval,
+		}
+	}
+	for _, tc := range []struct {
+		interval string
+		wantSub  string
+	}{
+		{"-5m", "must be a Flux duration"},
+		{"500us", "must be a Flux duration"},
+		{"5minutes", "must be a Flux duration"},
+		{"0.5ms", `emitted as "500µs"`},
+		{"0.0000000001ms", `emitted as "0s"`},
+	} {
+		t.Run("refused "+tc.interval, func(t *testing.T) {
+			objects, err := config(tc.interval).Generate(nil)
+			if err == nil {
+				t.Fatalf("interval %q: expected error, got nil and %d object(s)", tc.interval, len(objects))
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) || !strings.Contains(err.Error(), "helmchart: interval") {
+				t.Errorf("interval %q: error = %q, want it to name helmchart: interval and contain %q", tc.interval, err, tc.wantSub)
+			}
+		})
+	}
+	for _, tc := range []struct{ name, interval, emitted string }{
+		{"valid", "10m", "10m0s"},
+		{"zero", "0s", "0s"},
+		{"empty (default)", "", "1h0m0s"},
+	} {
+		t.Run("accepted "+tc.name, func(t *testing.T) {
+			objects, err := config(tc.interval).Generate(nil)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if len(objects) != 2 {
+				t.Fatalf("expected 2 objects (HelmRepository + HelmRelease), got %d", len(objects))
+			}
+			repo, ok := (*objects[0]).(*sourcev1.HelmRepository)
+			if !ok {
+				t.Fatalf("expected HelmRepository at objects[0], got %T", *objects[0])
+			}
+			hr, ok := (*objects[1]).(*helmv2.HelmRelease)
+			if !ok {
+				t.Fatalf("expected HelmRelease at objects[1], got %T", *objects[1])
+			}
+			if got := repo.Spec.Interval.Duration.String(); got != tc.emitted {
+				t.Errorf("HelmRepository interval = %q, want %q", got, tc.emitted)
+			}
+			if got := hr.Spec.Interval.Duration.String(); got != tc.emitted {
+				t.Errorf("HelmRelease interval = %q, want %q", got, tc.emitted)
+			}
+		})
+	}
+	// A Form B config (an existing source, so only the HelmRelease is emitted)
+	// goes through the same check.
+	t.Run("refused on a source reference", func(t *testing.T) {
+		cfg := &components.HelmchartConfig{
+			Name:          "metrics",
+			Chart:         "kube-prometheus-stack",
+			SourceRefName: "prometheus-community",
+			SourceRefKind: "HelmRepository",
+			Interval:      "-5m",
+		}
+		if _, err := cfg.Generate(nil); err == nil || !strings.Contains(err.Error(), "helmchart: interval") {
+			t.Errorf("error = %v, want one naming helmchart: interval", err)
+		}
+	})
 }
 
 // `values` is an open object, so its contents reach the handler exactly as
