@@ -345,3 +345,41 @@ func TestLower_DocumentRuleCopyDetachesEmptyTraitSlices(t *testing.T) {
 		t.Errorf("the second authored component's trait was overwritten through the first one's spare capacity: k = %v", got)
 	}
 }
+
+// prependingDocRule rebuilds the first component with one trait of its own ahead of
+// by-value copies of the authored traits.
+type prependingDocRule struct{}
+
+func (prependingDocRule) Kind() string { return "Prepending" }
+
+func (prependingDocRule) LowerDocument(doc *Application, _ LoweringContext) (LoweringResult, error) {
+	comp := doc.Spec.Components[0]
+	comp.Traits = append([]Trait{{Type: "topology-spread", Properties: map[string]any{}}}, comp.Traits...)
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name, Namespace: doc.Metadata.Namespace},
+		Spec:       ApplicationSpec{Components: []Component{comp}},
+	}}}, nil
+}
+
+// TestLower_DocumentRuleForwardedTraitCopy_KeepsAuthoredIndex is
+// TestLower_ForwardedTraitCopy_KeepsAuthoredIndex at document position: a forwarded
+// copy behind a trait the rule placed ahead of it keeps its authored Origin.Index.
+func TestLower_DocumentRuleForwardedTraitCopy_KeepsAuthoredIndex(t *testing.T) {
+	var seen Origin
+	tr := NewTransformer(nil, nil)
+	tr.RegisterDocumentLowering(prependingDocRule{})
+	tr.RegisterTraitLowering(originCaptureTraitRule{typ: "probe-trait", seen: &seen})
+
+	app := forwardingDocApp("configmap", map[string]any{})
+	app.Kind = "Prepending"
+	app.Spec.Components[0].Traits = append(app.Spec.Components[0].Traits, Trait{Type: "probe-trait", Properties: map[string]any{}})
+
+	if _, err := tr.lower(app, TransformContext{}); err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if seen.TraitType != "probe-trait" || seen.Index != 1 {
+		t.Errorf("forwarded trait origin = %s index %d, want probe-trait index 1 (its authored slot, not its shifted position 2)", seen.TraitType, seen.Index)
+	}
+}
