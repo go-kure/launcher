@@ -968,12 +968,13 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 	return nil
 }
 
-// applyEntryTraits applies the traits of one entry — each member's own, for a
-// collapsed sibling group (traitTargets). groupTraitApps is non-nil exactly for a
-// group.
+// applyEntryTraits applies the traits of one entry — each member's own, on that
+// member's application and in authored order, for a collapsed sibling group
+// (traitSteps). groupTraitApps is non-nil exactly for a group.
 func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, groupTraitApps map[string]string, bundle *stack.Bundle, ctx TransformContext) error {
-	for _, entry := range e.traitTargets() {
-		for _, trait := range app.Spec.Components[entry.index].Traits {
+	for _, step := range e.traitSteps(app) {
+		entry := step.entry
+		for _, trait := range step.traits {
 			handler := t.findTraitHandler(trait.Type)
 			if handler == nil {
 				return &TransformError{Message: fmt.Sprintf("no handler for trait type %q", trait.Type)}

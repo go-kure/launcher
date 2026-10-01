@@ -118,8 +118,10 @@ type Trait struct {
 	// (sealEmittedNestedTraits). A rule that adds a trait of its own ahead of the
 	// forwarded ones shifts their position in its output; the origin fallback in
 	// lowerDocumentBody reads this instead, so Origin.Index still names the authored
-	// slot. nil for a trait never forwarded that way. It is a hint for that
-	// fallback only: the trait stays unstamped, exactly as authored.
+	// slot. A trait rule's output over a forwarded trait inherits it, and a sibling
+	// group applies its members' traits in that order (applyEntryTraits). nil for a
+	// trait never forwarded that way, nor lowered from one. It does not stamp the
+	// trait: a forwarded trait stays unstamped, exactly as authored.
 	authoredIndex *int
 }
 

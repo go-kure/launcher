@@ -129,14 +129,40 @@ func checkSiblingTiers(entries []componentEntry, overrides map[string]Tier) erro
 	return nil
 }
 
-// traitTargets returns the entries whose traits applyTraits dispatches: the
-// members of a collapsed sibling group, each with its own traits and its own
-// application, or the entry itself.
-func (e componentEntry) traitTargets() []componentEntry {
-	if len(e.members) > 0 {
-		return e.members
+// traitStep is traits applyEntryTraits applies, in order, on one entry's
+// application: the entry itself, or one member of a collapsed sibling group, each
+// with its own traits and its own application.
+type traitStep struct {
+	entry  componentEntry
+	traits []Trait
+}
+
+// traitSteps returns the traits applyEntryTraits applies, in order: an entry's own
+// traits in slice order, or, for a collapsed sibling group, every member's traits
+// merged into authored order. The rule's own traits (no authored slot) come first,
+// in member order, then the traits it forwarded, ascending by the slot each held in
+// the component the rule was handed (Trait.authoredIndex); a trait forwarded to two
+// members applies on each, in member order. Applied member by member instead, a
+// group's trait sub-applications would follow its members rather than the authored
+// traits, and a component re-expressed as a group would not stay byte-identical.
+func (e componentEntry) traitSteps(app *Application) []traitStep {
+	if len(e.members) == 0 {
+		return []traitStep{{entry: e, traits: app.Spec.Components[e.index].Traits}}
 	}
-	return []componentEntry{e}
+	var steps []traitStep
+	for _, m := range e.members {
+		for _, trait := range app.Spec.Components[m.index].Traits {
+			steps = append(steps, traitStep{entry: m, traits: []Trait{trait}})
+		}
+	}
+	sort.SliceStable(steps, func(i, j int) bool {
+		a, b := steps[i].traits[0].authoredIndex, steps[j].traits[0].authoredIndex
+		if a == nil || b == nil {
+			return a == nil && b != nil
+		}
+		return *a < *b
+	})
+	return steps
 }
 
 // healthCheckConfig is the config whose object the auto health check names: the

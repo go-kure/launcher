@@ -452,7 +452,12 @@ name (`ComponentNamed`).
 
 Traits run per member, against that member's own config: the rule decides which
 member carries each trait. A routing trait (ingress, Gateway API routes) belongs on
-the member that owns the Service; a workload trait on the workload member.
+the member that owns the Service; a workload trait on the workload member. The
+group applies its members' traits in authored order, not member by member: the
+rule's own traits first, in member order, then the traits it forwarded, by the
+slot each held among the authored traits (a forwarded trait a trait rule lowers
+later keeps that slot). Trait sub-applications are therefore ordered as for one
+component carrying the same traits.
 
 The build refuses a group:
 - whose members fall in different tiers, unless a placement policy places the
