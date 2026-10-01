@@ -165,8 +165,8 @@ currently a no-op in practice. On the component side, a component a lowering rul
 synthesized (`Component.synthesized`, the counterpart of `Trait.sealed`) is exempt — only
 a rule whose input was checked (it declares a schema; a component rule whose input
 component is synthesized; a document rule whose every authored component had a schema)
-synthesizes — a sealed trait is not checked input, so a schema-less trait rule's output
-stays authored — and a document rule
+synthesizes — a sealed trait is not checked input and skips the schema check, so a trait
+rule's output over one stays authored, schema or not — and a document rule
 that forwards a component leaves that classification as it found it — and
 an authored component is checked before any rule can rewrite it: before a
 `ComponentLoweringRule` claims it (`lowerDocumentBody`) and before a

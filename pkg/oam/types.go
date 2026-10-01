@@ -56,8 +56,8 @@ type Component struct {
 	// checked: the rule declares a schema (PropertySchemaProvider), a component
 	// rule's input component is itself synthesized, or, for a document rule, every
 	// authored component had a schema; any other rule's output is checked as
-	// authored. A sealed trait is not checked input: a schema-less trait rule's
-	// output stays authored. A component a
+	// authored. A sealed trait is not checked input and skips the schema check: a
+	// trait rule's output over one stays authored, schema or not. A component a
 	// document rule forwards (pointer-identical, isForwardedComponent) keeps the
 	// value it arrived with, so a component an earlier rule synthesized stays
 	// synthesized through a chain of document rules. What a user wrote is still
