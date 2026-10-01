@@ -704,7 +704,14 @@ jobs:
         #   through generated deepcopy boilerplate and package registration/init paths, never a
         #   reconciler. No upstream fix in the Go vuln DB (Fixed in: N/A), and the apis module is
         #   untagged so no bump can clear it — see docs/github-workflows.md.
-        allowlist: 'GO-2026-5377'
+        # GO-2026-6596: Cilium HTTPRoute cross-namespace redirect (CVE-2026-56742), fixed upstream in
+        #   1.17.17, 1.18.11 and 1.19.5; the 1.20 line Launcher pins is not affected. The unreviewed
+        #   vuln DB report adds an "introduced 0" range with no fix as a placeholder for the
+        #   unmappable 1.18.0-1.18.11 range, which flags every version, and lists no symbols, so any
+        #   reached cilium function matches. Launcher reaches only the CRD API types and package init
+        #   (via kure's cilium builders), never Gateway API translation. Remove once the vuln DB
+        #   report is corrected (the "introduced 0" placeholder range dropped) — go-kure/launcher#675.
+        allowlist: 'GO-2026-5377 GO-2026-6596'
 
     # Default-branch only: a PR's or merge-queue run's own cache entry is dead the moment it
     # merges (GitHub scopes a cache to the branch that wrote it and its descendants), so saving
