@@ -2,6 +2,7 @@ package components_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -180,6 +181,11 @@ func TestCnpgClusterHandler_StrictDecode(t *testing.T) {
 		{"misspelt nested key", map[string]any{"storage": map[string]any{"sise": "1Gi"}}, `unknown field "sise"`},
 		{"misspelt deep key", map[string]any{"bootstrap": map[string]any{"initdb": map[string]any{"databse": "app"}}}, `unknown field "databse"`},
 		{"unknown key in an array item", map[string]any{"managed": map[string]any{"roles": []any{map[string]any{"name": "a", "logn": true}}}}, `unknown field "logn"`},
+		// The null strip stops at declared keys: a misspelling authored as null
+		// is still refused, not dropped with the null.
+		{"null unknown top-level key", map[string]any{"replicas": nil}, `unknown field "replicas"`},
+		{"null misspelt nested key", map[string]any{"storage": map[string]any{"sise": nil}}, `unknown field "sise"`},
+		{"null unknown key in an array item", map[string]any{"managed": map[string]any{"roles": []any{map[string]any{"name": "a", "logn": nil}}}}, `unknown field "logn"`},
 		{"wrong nested type", map[string]any{"storage": map[string]any{"size": 5}}, "cannot unmarshal number"},
 		{"wrong top-level scalar type", map[string]any{"enablePDB": "true"}, "cannot unmarshal string"},
 		{"non-integer instances", map[string]any{"instances": "3"}, "instances"},
@@ -780,5 +786,32 @@ func TestCnpgClusterHandler_Endpoints(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].PodSelector.MatchLabels["cnpg.io/cluster"] != "orders-db" || got[0].Ports[0].IntVal != 5432 {
 		t.Errorf("endpoints = %+v, want cnpg.io/cluster=orders-db on 5432", got)
+	}
+}
+
+// TestCnpgClusterHandler_NameBound pins the Cluster-name bound CloudNativePG's
+// admission webhook enforces (a DNS-1035 label of at most 50 characters) on
+// both entry points: the parse, and the endpoint selector, which copies the
+// name into the cnpg.io/cluster label verbatim. Each refused name is a valid
+// component name (a DNS-1123 subdomain), so nothing earlier refuses it.
+func TestCnpgClusterHandler_NameBound(t *testing.T) {
+	h := &components.CnpgClusterHandler{}
+	for _, name := range []string{"1db", "db.main", strings.Repeat("a", 51)} {
+		comp := &oam.Component{Name: name, Type: "cnpg-cluster"}
+		want := fmt.Sprintf("cnpg-cluster name %q: must be a DNS-1035 label of at most 50 characters (CloudNativePG rejects longer or dotted cluster names)", name)
+		if _, err := h.ToApplicationConfig(comp, "data"); err == nil || err.Error() != want {
+			t.Errorf("ToApplicationConfig(%q): err = %v, want %q", name, err, want)
+		}
+		if _, err := h.Endpoints(comp); err == nil || err.Error() != want {
+			t.Errorf("Endpoints(%q): err = %v, want %q", name, err, want)
+		}
+	}
+	longest := strings.Repeat("a", 50)
+	comp := &oam.Component{Name: longest, Type: "cnpg-cluster"}
+	if _, err := h.ToApplicationConfig(comp, "data"); err != nil {
+		t.Errorf("ToApplicationConfig(50 characters): %v", err)
+	}
+	if eps, err := h.Endpoints(comp); err != nil || eps[0].PodSelector.MatchLabels["cnpg.io/cluster"] != longest {
+		t.Errorf("Endpoints(50 characters) = %+v, %v", eps, err)
 	}
 }
