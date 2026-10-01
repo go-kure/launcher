@@ -12,6 +12,7 @@ import (
 	kurecnpg "github.com/go-kure/kure/pkg/kubernetes/cnpg"
 	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -838,6 +839,11 @@ func (c *PostgresqlConfig) ApplyPolicy(p oam.Policy) error {
 	}
 
 	c.Replicas = applyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
+	// The CRD declares Minimum=1 on ClusterSpec.Instances, so a policy default
+	// below it is refused rather than emitted, as cnpg-cluster refuses it.
+	if !c.explicitReplicas && p.DefaultReplicas() != nil && c.Replicas < 1 {
+		return errors.Errorf("replicas: must be >= 1, got %d from the policy default", c.Replicas)
+	}
 	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
 		return err
 	}
@@ -853,8 +859,18 @@ func (c *PostgresqlConfig) ApplyPolicy(p oam.Policy) error {
 	// StorageSize precedence: authored > policy default > "1Gi" handler default.
 	// The parse-time fallback is already "1Gi", so let a policy default override it
 	// only when the user did not author a value.
-	if !c.explicitStorageSize && p.DefaultStorageSize() != "" {
-		c.StorageSize = p.DefaultStorageSize()
+	// The default is a value the document did not write, so it is parsed here,
+	// as the cpu and memory defaults above are: with no maximum set, nothing
+	// else would before the Cluster is built.
+	if dflt := p.DefaultStorageSize(); !c.explicitStorageSize && dflt != "" {
+		q, err := resource.ParseQuantity(dflt)
+		if err != nil {
+			return errors.Errorf("policy default for storageSize: invalid quantity %q: %w", dflt, err)
+		}
+		if q.Sign() <= 0 {
+			return errors.Errorf("policy default for storageSize: quantity must be positive, got %q", dflt)
+		}
+		c.StorageSize = dflt
 	}
 
 	if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
@@ -912,6 +928,24 @@ func (c *PostgresqlConfig) Generate(app *stack.Application) ([]*client.Object, e
 }
 
 func (c *PostgresqlConfig) createCluster(app *stack.Application) (client.Object, error) {
+	// Checked on the values the Cluster carries, so an authored value, a
+	// policy default and a directly built config are refused alike.
+	// ClusterSpec.Instances has Minimum=1, and CloudNativePG's webhook parses
+	// only the size, so a zero or negative one is admitted and its claims then
+	// fail the API server's positive storage-request check (see BuildPVC).
+	if c.Replicas < 1 {
+		return nil, errors.Errorf("replicas: must be >= 1, got %d", c.Replicas)
+	}
+	if c.StorageSize != "" {
+		q, err := resource.ParseQuantity(c.StorageSize)
+		if err != nil {
+			return nil, errors.Errorf("storageSize: invalid quantity %q: %w", c.StorageSize, err)
+		}
+		if q.Sign() <= 0 {
+			return nil, errors.Errorf("storageSize: quantity must be positive, got %q", c.StorageSize)
+		}
+	}
+
 	imageName := c.ImageName
 	if imageName == "" {
 		imageName = fmt.Sprintf("ghcr.io/cloudnative-pg/postgresql:%s", c.Version)

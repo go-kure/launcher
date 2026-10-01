@@ -3,6 +3,7 @@ package components_test
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -870,6 +871,54 @@ func TestCnpgClusterConfig_GenerateRevalidates(t *testing.T) {
 		if err == nil || err.Error() != "instances: must be >= 1, got 0" {
 			t.Errorf("err = %v, want the instances refusal", err)
 		}
+	})
+	t.Run("instances above the int32 range", func(t *testing.T) {
+		over := int64(math.MaxInt32) + 1
+		c := &components.CnpgClusterConfig{Name: "db", Namespace: "data", Spec: cnpgv1.ClusterSpec{Instances: int(over)}}
+		_, err := c.Generate(stack.NewApplication("db", "data", c))
+		want := fmt.Sprintf("instances: must be <= %d, got %d", math.MaxInt32, over)
+		if err == nil || err.Error() != want {
+			t.Errorf("err = %v, want %q", err, want)
+		}
+	})
+}
+
+// TestCnpgClusterConfig_Generate_StorageSizes pins the refusal of a storage
+// request that does not parse or is not positive, on every volume the Cluster
+// asks CNPG to create and in either spelling, whether authored or from a
+// policy default (go-kure/launcher#623). An unset size is left to the operator.
+func TestCnpgClusterConfig_Generate_StorageSizes(t *testing.T) {
+	tmpl := func(size string) map[string]any {
+		return map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": size}}}
+	}
+	refused := []struct {
+		name  string
+		props map[string]any
+		want  string
+	}{
+		{"authored size zero", map[string]any{"storage": map[string]any{"size": "0"}}, `storage.size: quantity must be positive, got "0"`},
+		{"authored size negative", map[string]any{"storage": map[string]any{"size": "-1Gi"}}, `storage.size: quantity must be positive, got "-1Gi"`},
+		{"authored size not a quantity", map[string]any{"storage": map[string]any{"size": "lots"}}, `storage.size: invalid quantity "lots"`},
+		{"pvcTemplate request zero", map[string]any{"storage": map[string]any{"pvcTemplate": tmpl("0")}}, `storage.pvcTemplate.resources.requests.storage: quantity must be positive, got "0"`},
+		{"walStorage size negative", map[string]any{"walStorage": map[string]any{"size": "-1Gi"}}, `walStorage.size: quantity must be positive, got "-1Gi"`},
+		{"tablespace size zero", map[string]any{"tablespaces": []any{map[string]any{"name": "t1", "storage": map[string]any{"size": "0"}}}}, `tablespaces[0].storage.size: quantity must be positive, got "0"`},
+		{"ephemeral claim request zero", map[string]any{"ephemeralVolumeSource": map[string]any{"volumeClaimTemplate": map[string]any{"spec": tmpl("0")}}}, `ephemeralVolumeSource.volumeClaimTemplate.spec.resources.requests.storage: quantity must be positive, got "0"`},
+	}
+	for _, tc := range refused {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newCnpgCluster(t, tc.props)
+			_, err := c.Generate(stack.NewApplication("db", "data", c))
+			if err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+				t.Errorf("err = %v, want it to start with %q", err, tc.want)
+			}
+		})
+	}
+	t.Run("positive sizes and an unset size build", func(t *testing.T) {
+		generateCnpgCluster(t, newCnpgCluster(t, map[string]any{}))
+		generateCnpgCluster(t, newCnpgCluster(t, map[string]any{
+			"storage":    map[string]any{"size": "1Gi"},
+			"walStorage": map[string]any{"pvcTemplate": tmpl("500Mi")},
+		}))
 	})
 }
 

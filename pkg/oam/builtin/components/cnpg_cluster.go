@@ -720,19 +720,20 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	return nil
 }
 
-// enforceMaxStorage caps the effective request of every volume the Cluster
-// asks CNPG to create. The error names the spelling the value came from.
-func (c *CnpgClusterConfig) enforceMaxStorage(maxSize string) error {
-	if maxSize == "" {
-		return nil
-	}
-	type volume struct {
-		size, label string
-	}
-	vols := []volume{}
+// cnpgVolume is the effective storage request of one volume the Cluster asks
+// CNPG to create, with the spelling that supplied it.
+type cnpgVolume struct {
+	size, label string
+}
+
+// storageVolumes lists every volume the Cluster asks CNPG to create that
+// carries a storage request. A StorageConfiguration with neither spelling set
+// is absent: its size is left to the operator.
+func (c *CnpgClusterConfig) storageVolumes() []cnpgVolume {
+	vols := []cnpgVolume{}
 	add := func(sc *cnpgv1.StorageConfiguration, path string) {
 		if size, label := cnpgStorageRequest(sc, path); size != "" {
-			vols = append(vols, volume{size, label})
+			vols = append(vols, cnpgVolume{size, label})
 		}
 	}
 	add(&c.Spec.StorageConfiguration, "storage")
@@ -742,12 +743,39 @@ func (c *CnpgClusterConfig) enforceMaxStorage(maxSize string) error {
 	}
 	if evs := c.Spec.EphemeralVolumeSource; evs != nil && evs.VolumeClaimTemplate != nil {
 		if q, ok := evs.VolumeClaimTemplate.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
-			vols = append(vols, volume{q.String(), "ephemeralVolumeSource.volumeClaimTemplate.spec.resources.requests.storage"})
+			vols = append(vols, cnpgVolume{q.String(), "ephemeralVolumeSource.volumeClaimTemplate.spec.resources.requests.storage"})
 		}
 	}
-	for _, v := range vols {
+	return vols
+}
+
+// enforceMaxStorage caps the effective request of every volume the Cluster
+// asks CNPG to create. The error names the spelling the value came from.
+func (c *CnpgClusterConfig) enforceMaxStorage(maxSize string) error {
+	if maxSize == "" {
+		return nil
+	}
+	for _, v := range c.storageVolumes() {
 		if err := enforceMaxResource(v.size, maxSize, v.label); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// validateStorageSizes refuses a volume whose effective request does not parse
+// or is not positive. CloudNativePG's webhook parses only storage.size, so a
+// zero or negative size, or any bad template request, is admitted and its
+// claims then fail the API server's positive storage-request check, the rule
+// BuildPVC applies to a claim.
+func (c *CnpgClusterConfig) validateStorageSizes() error {
+	for _, v := range c.storageVolumes() {
+		q, err := resource.ParseQuantity(v.size)
+		if err != nil {
+			return errors.Errorf("%s: invalid quantity %q: %w", v.label, v.size, err)
+		}
+		if q.Sign() <= 0 {
+			return errors.Errorf("%s: quantity must be positive, got %q", v.label, v.size)
 		}
 	}
 	return nil
@@ -778,7 +806,7 @@ func cnpgStorageRequest(sc *cnpgv1.StorageConfiguration, path string) (string, s
 // the config and a second Generate is unaffected by edits to the first result.
 func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	// The config is exported, so a caller can build it without
-	// ToApplicationConfig. The two parse-time refusals that guard what
+	// ToApplicationConfig. The parse-time refusals that guard what
 	// CloudNativePG admits are repeated on what is emitted, as the workload
 	// kinds repeat their name check: the Cluster is named from app.Name.
 	if err := validateCnpgClusterName(app.Name); err != nil {
@@ -786,6 +814,14 @@ func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, 
 	}
 	if c.Spec.Instances < 1 {
 		return nil, errors.Errorf("instances: must be >= 1, got %d", c.Spec.Instances)
+	}
+	if c.Spec.Instances > math.MaxInt32 {
+		return nil, errors.Errorf("instances: must be <= %d, got %d", math.MaxInt32, c.Spec.Instances)
+	}
+	// Storage sizes are checked here, on the effective requests, so an
+	// authored size and a policy default are refused alike.
+	if err := c.validateStorageSizes(); err != nil {
+		return nil, err
 	}
 	// As in postgresql, checked on the resources the Cluster actually carries:
 	// CNPG copies this block onto the instance pods unchanged, so a

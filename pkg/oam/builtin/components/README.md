@@ -2346,6 +2346,19 @@ not part of either change.
   `ghcr.io/cloudnative-pg/postgresql:` — an empty tag that only the image
   pull rejected (go-kure/launcher#539). Only an omitted or null `version`
   takes the default. `storageSize: ""` is still copied through as authored.
+  Any other storage size the Cluster would carry, authored or from the
+  policy default, must parse and be positive (`storageSize: quantity must be
+  positive, got "0"`): CloudNativePG's webhook parses only the size, so a
+  zero or negative one was admitted and its claims failed the API server's
+  positive storage-request check. A policy storage-size default is checked
+  when it is applied (`policy default for storageSize: invalid quantity
+  "lots"`), as the cpu/memory defaults are. The instance count must be at
+  least 1, the CRD's minimum: a replicas policy default of 0 is refused
+  (`replicas: must be >= 1, got 0 from the policy default`), and so is an
+  authored `replicas: 0` at generation (`replicas: must be >= 1, got 0`).
+  **Behavior-changing** under `launcher.gokure.dev/v1alpha1`: an authored
+  `replicas: 0` or a non-positive `storageSize` used to build and was then
+  refused at apply; it is now refused at build (go-kure/launcher#623).
   `resources` forwards every name the shared parser admits — `cpu`, `memory`,
   `ephemeral-storage`, `hugepages-<size>` and qualified extended resources
   such as `nvidia.com/gpu`, under the same validation as the other seven
@@ -2498,8 +2511,17 @@ not part of either change.
   got 0`): the CRD's minimum is 1, so the API server would refuse the
   Cluster. A policy instance-count default below 1 is refused the same way.
   `Generate` repeats the name and instance-count refusals on what it emits,
-  so a `CnpgClusterConfig` built in Go without `ToApplicationConfig` cannot
-  produce a Cluster the operator or the API server rejects for either.
+  the count's upper bound (`instances: must be <= 2147483647, got …`)
+  included, so a `CnpgClusterConfig` built in Go without
+  `ToApplicationConfig` cannot produce a Cluster the operator or the API
+  server rejects for either. It also refuses any storage request the
+  Cluster carries that does not parse or is not positive, authored or from
+  a policy default, on every claim the storage maximum below covers
+  (`storage.size: quantity must be positive, got "0"`;
+  `walStorage.pvcTemplate.resources.requests.storage: …`): CloudNativePG's
+  webhook parses only `storage.size`, so such a Cluster was admitted and its
+  claims then failed the API server's positive storage-request check
+  (go-kure/launcher#623). An unset size is still left to the operator.
   An authored `0` or `false` that the typed spec cannot carry, on a field
   whose CRD default is not zero, is refused by path
   (`managed.roles[0].connectionLimit: 0 cannot be carried by the
