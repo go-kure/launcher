@@ -241,8 +241,9 @@ its own source or `Kustomization`. An object inside a list counts too when recon
 applies it: kustomize expands a `*List` kind's `items` at any depth, then kustomize-controller
 expands one more `items` array of any kind and applies its members as they are, while a
 list either one expands is not applied itself. Rename the component
-or the application. The same holds for one object (API group, kind, namespace and name)
-in two artifacts, such as `configmap` traits of one name on components in different
+or the application. The same holds for one object (API group, kind, namespace and name,
+where a namespace on a kind kustomize knows to be cluster-scoped is ignored, as the API
+server ignores it) in two artifacts, such as `configmap` traits of one name on components in different
 tiers, whose `Kustomization`s would fight over it, or twice in one artifact. An artifact
 kustomize would refuse to build is refused too: one that carries two resources with one
 kustomize resource id (API group, version, kind, name and namespace, where no namespace
