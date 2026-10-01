@@ -1142,6 +1142,10 @@ func TestCheckCollisionsBetweenArtifacts(t *testing.T) {
 			[]string{`artifact "a" carries ConfigMap shop/settings twice`}},
 		{"a List member and an object in one artifact", []*client.Object{list(cm("shop")), cm("shop")}, nil,
 			[]string{`artifact "a" carries ConfigMap shop/settings twice (also as ConfigMap shop/settings (a member of list List /))`}},
+		// kustomize builds it (TestCheckKustomizeBuilds), and reconciling it
+		// would apply the one object twice.
+		{"same object at two versions in one artifact", []*client.Object{obj("example.com/v1", "Widget", "shop", "w"), obj("example.com/v2", "Widget", "shop", "w")}, nil,
+			[]string{`artifact "a" carries Widget.example.com shop/w twice: reconciling it would apply that one object twice`}},
 		{"a member with an empty items array and an object", []*client.Object{cm("shop")}, []*client.Object{envelope(withItems(cm("shop")))},
 			[]string{`artifacts "a" and "b" both carry ConfigMap shop/settings (a member of list Bundle.example.com /)`}},
 		{"other namespace", []*client.Object{cm("shop")}, []*client.Object{cm("other")}, nil},
@@ -1174,7 +1178,7 @@ func TestCheckCollisionsBetweenArtifacts(t *testing.T) {
 }
 
 // TestKustomizeRefusesDuplicateArtifactObject pins the kustomize behaviour
-// checkCollisions relies on to refuse one object twice in one artifact: the
+// checkKustomizeBuilds mirrors to refuse one object twice in one artifact: the
 // artifact, written without the check, does not build.
 func TestKustomizeRefusesDuplicateArtifactObject(t *testing.T) {
 	cm := func() *client.Object {
@@ -1195,6 +1199,181 @@ func TestKustomizeRefusesDuplicateArtifactObject(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "already registered id") {
 		t.Fatalf("kustomize build: %v, want the duplicate id refused", err)
 	}
+}
+
+// TestCheckKustomizeBuilds checks that checkKustomizeBuilds refuses exactly
+// the artifacts kustomize refuses to build for a duplicate resource id: each
+// row's artifact is written without the check and built with kustomize
+// (krusty), and the check must refuse it if and only if kustomize does,
+// naming the id kustomize names.
+func TestCheckKustomizeBuilds(t *testing.T) {
+	obj := func(apiVersion, kind, namespace, name string) map[string]any {
+		md := map[string]any{"name": name}
+		if namespace != "" {
+			md["namespace"] = namespace
+		}
+		o := map[string]any{"kind": kind, "metadata": md}
+		if apiVersion != "" {
+			o["apiVersion"] = apiVersion
+		}
+		return o
+	}
+	envelope := func(apiVersion, kind string, items ...map[string]any) map[string]any {
+		o := obj(apiVersion, kind, "shop", "wrapped")
+		content := make([]any, 0, len(items))
+		for _, i := range items {
+			content = append(content, i)
+		}
+		o["items"] = content
+		return o
+	}
+	const kustomizeConfig = "kustomize.config.k8s.io/v1beta1"
+	kustomization := func(apiVersion, namespace string) map[string]any {
+		return obj(apiVersion, "Kustomization", namespace, "duplicate")
+	}
+	cm := func(namespace string) map[string]any { return obj("v1", "ConfigMap", namespace, "settings") }
+	tests := []struct {
+		name    string
+		objects []map[string]any
+		// id is the resource id kustomize refuses to add twice; empty when
+		// kustomize builds the artifact.
+		id string
+	}{
+		// The review's reproducer: both are dropped by kustomize-controller's
+		// decoder, so neither owns an identity in checkCollisions.
+		{"identical kustomize config Kustomizations",
+			[]map[string]any{kustomization(kustomizeConfig, "shop"), kustomization(kustomizeConfig, "shop")},
+			"Kustomization.v1beta1.kustomize.config.k8s.io/duplicate.shop"},
+		{"identical objects without an apiVersion",
+			[]map[string]any{obj("", "ConfigMap", "shop", "cm"), obj("", "ConfigMap", "shop", "cm")},
+			"ConfigMap.[noVer].[noGrp]/cm.shop"},
+		{"identical ConfigMaps", []map[string]any{cm("shop"), cm("shop")}, "ConfigMap.v1.[noGrp]/settings.shop"},
+		{"a List member and an object", []map[string]any{envelope("v1", "List", cm("shop")), cm("shop")},
+			"ConfigMap.v1.[noGrp]/settings.shop"},
+		// kustomize reads no namespace as "default" and ignores a
+		// cluster-scoped kind's namespace.
+		{"no namespace and the default namespace", []map[string]any{cm(""), cm("default")},
+			"ConfigMap.v1.[noGrp]/settings.default"},
+		{"a cluster-scoped kind in two namespaces",
+			[]map[string]any{obj("v1", "Namespace", "a", "shop"), obj("v1", "Namespace", "b", "shop")},
+			"Namespace.v1.[noGrp]/shop.b"},
+		// Near misses: one name, another kustomize resource id.
+		{"kustomize config Kustomizations in two namespaces",
+			[]map[string]any{kustomization(kustomizeConfig, "shop"), kustomization(kustomizeConfig, "apps")}, ""},
+		{"kustomize config Kustomizations at two versions",
+			[]map[string]any{kustomization(kustomizeConfig, "shop"), kustomization("kustomize.config.k8s.io/v1alpha1", "shop")}, ""},
+		{"one object at two API versions",
+			[]map[string]any{obj("example.com/v1", "Widget", "shop", "w"), obj("example.com/v2", "Widget", "shop", "w")}, ""},
+		{"a namespaced kind in two namespaces", []map[string]any{cm("shop"), cm("apps")}, ""},
+		// kustomize reads an items envelope that is not a *List kind as one
+		// resource; checkCollisions refuses its two members.
+		{"two members of an envelope of another kind",
+			[]map[string]any{envelope("example.com/v1", "Bundle", cm("shop"), cm("shop"))}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var artifact []*client.Object
+			for _, content := range tt.objects {
+				o := client.Object(&unstructured.Unstructured{Object: content})
+				artifact = append(artifact, &o)
+			}
+			d := &deliveryOutput{artifacts: []deliveryArtifact{{name: "a", objects: artifact}}}
+			checkErr := d.checkKustomizeBuilds()
+			out := t.TempDir()
+			if err := d.write(out, "app"); err != nil {
+				t.Fatal(err)
+			}
+			_, buildErr := krusty.MakeKustomizer(krusty.MakeDefaultOptions()).Run(filesys.MakeFsOnDisk(), filepath.Join(out, "a"))
+			if tt.id == "" {
+				if buildErr != nil {
+					t.Fatalf("kustomize build: %v", buildErr)
+				}
+				if checkErr != nil {
+					t.Errorf("refused what kustomize builds: %v", checkErr)
+				}
+				return
+			}
+			if buildErr == nil || !strings.Contains(buildErr.Error(), "already registered id: "+tt.id) {
+				t.Fatalf("kustomize build: %v, want %s refused as a duplicate", buildErr, tt.id)
+			}
+			if checkErr == nil {
+				t.Fatal("accepted what kustomize refuses")
+			}
+			for _, want := range []string{`artifact "a" would not build under kustomize`, tt.id} {
+				if !strings.Contains(checkErr.Error(), want) {
+					t.Errorf("error %q does not contain %q", checkErr, want)
+				}
+			}
+		})
+	}
+}
+
+// kustomizationsComponent is a manifests component whose inline manifests are
+// two kustomize config Kustomizations "duplicate", in namespaces %s and %s.
+const kustomizationsComponent = `    - name: configs
+      type: manifests
+      properties:
+        inline: |
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          metadata:
+            name: duplicate
+            namespace: %s
+          ---
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          metadata:
+            name: duplicate
+            namespace: %s
+`
+
+// TestDeliveryRefusesKustomizeDuplicate checks, through the CLI, that a build
+// whose artifact kustomize would refuse for a duplicate resource id is refused
+// before anything is written, though kustomize-controller's decoder would drop
+// both objects: two identical kustomize config Kustomizations. The near miss,
+// the two in different namespaces, is delivered, and its artifact builds.
+func TestDeliveryRefusesKustomizeDuplicate(t *testing.T) {
+	profile := filepath.Join(deliveryTestdata, "cluster.yaml")
+	t.Run("identical", func(t *testing.T) {
+		appPath := writeTempFile(t, t.TempDir(), "app.yaml",
+			fmt.Sprintf(collisionAppYAML, "shop", fmt.Sprintf(kustomizationsComponent, "shop", "shop")))
+		out := filepath.Join(t.TempDir(), "out")
+		stdout, err := runKurel(t, "build", appPath, "--profile", profile, "-o", out, "--oci-repository", testOCIRepository)
+		if err == nil {
+			t.Fatal("build accepted an artifact kustomize refuses")
+		}
+		t.Logf("refused: %v", err)
+		for _, want := range []string{`artifact "shop" would not build under kustomize`,
+			"Kustomization.v1beta1.kustomize.config.k8s.io/duplicate.shop"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not contain %q", err, want)
+			}
+		}
+		if stdout != "" {
+			t.Errorf("wrote to stdout before refusing:\n%s", stdout)
+		}
+		if _, err := os.Stat(out); !os.IsNotExist(err) {
+			t.Errorf("created the output directory before refusing (stat error %v)", err)
+		}
+	})
+	t.Run("near miss in two namespaces", func(t *testing.T) {
+		appPath := writeTempFile(t, t.TempDir(), "app.yaml",
+			fmt.Sprintf(collisionAppYAML, "shop", fmt.Sprintf(kustomizationsComponent, "shop", "apps")))
+		out := t.TempDir()
+		if _, err := runKurel(t, "build", appPath, "--profile", profile, "-o", out, "--oci-repository", testOCIRepository); err != nil {
+			t.Fatalf("delivery build refused: %v", err)
+		}
+		manifests, err := os.ReadFile(filepath.Join(out, "shop", artifactManifestsFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(manifests), "name: duplicate"); n != 2 {
+			t.Errorf("artifact carries %d Kustomizations named duplicate, want 2:\n%s", n, manifests)
+		}
+		if _, err := krusty.MakeKustomizer(krusty.MakeDefaultOptions()).Run(filesys.MakeFsOnDisk(), filepath.Join(out, "shop")); err != nil {
+			t.Errorf("kustomize build of the artifact: %v", err)
+		}
+	})
 }
 
 // sharedConfigMapComponents are two components, %s and %s, of the given
@@ -1239,7 +1418,7 @@ func TestDeliveryRefusesSharedArtifactObject(t *testing.T) {
 		{"two artifacts", fmt.Sprintf(sharedConfigMapComponents, "agent", "daemonset", "web", "webservice"),
 			[]string{`"shop-infra"`, `"shop-apps"`, "both carry ConfigMap shop/settings", "rename one of the components or traits"}},
 		{"one artifact", fmt.Sprintf(sharedConfigMapComponents, "web", "webservice", "api", "webservice"),
-			[]string{`artifact "shop" carries ConfigMap shop/settings twice:`}},
+			[]string{`artifact "shop" would not build under kustomize: it carries ConfigMap shop/settings twice`, "ConfigMap.v1.[noGrp]/settings.shop"}},
 		// The apps artifact carries the ConfigMap as the member of an
 		// envelope, with an empty items array of its own:
 		// kustomize-controller's decoder expands only the envelope, so it

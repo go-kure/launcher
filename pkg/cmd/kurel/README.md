@@ -241,8 +241,13 @@ expands one more `items` array of any kind and applies its members as they are, 
 list either one expands is not applied itself. Rename the component
 or the application. The same holds for one object (API group, kind, namespace and name)
 in two artifacts, such as `configmap` traits of one name on components in different
-tiers, whose `Kustomization`s would fight over it, or twice in one artifact, which
-kustomize refuses to build. A build is also refused when `<app>.flux.yaml` (an
+tiers, whose `Kustomization`s would fight over it, or twice in one artifact. An artifact
+kustomize would refuse to build is refused too: one that carries two resources with one
+kustomize resource id (API group, version, kind, name and namespace, where no namespace
+reads as `default` and a namespace on a kind kustomize knows to be cluster-scoped is
+ignored), even resources
+kustomize-controller would not apply, such as two identical kustomize config
+`Kustomization`s. A build is also refused when `<app>.flux.yaml` (an
 application name over 245 characters) or an artifact directory name would exceed the
 255-byte file name limit.
 
