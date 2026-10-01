@@ -1086,24 +1086,24 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		// live in result.Documents), so this correctly names the rule that just fired,
 		// not whatever rule (if any) produced the input doc.
 		origin.Rule = loweringRuleIdentity(string(PositionDocument), doc.Kind, rule)
+		// A document rule's output is authored (the component loop below), except a
+		// component it forwarded that was already synthesized. Check the rest of every
+		// emitted document for reserved keys before validateEmittedDocument drops an
+		// explicit null from any of them.
+		forwardedSynthesized := func(comp *Component) bool {
+			return comp.synthesized && isForwardedComponent(comp, originalComponents)
+		}
+		for i := range result.Documents {
+			if err := t.enforceEmittedComponentReservations(result.Documents[i].Spec.Components, origin.Rule, forwardedSynthesized); err != nil {
+				return nil, false, nil, errors.Wrapf(err, "%s", origin)
+			}
+		}
 		emitted := make([]*Application, len(result.Documents))
 		names := make([]string, len(result.Documents))
 		for i := range result.Documents {
 			result.Documents[i].origin = &origin
 			emitted[i] = &result.Documents[i]
 			names[i] = result.Documents[i].Metadata.Name
-			// A document rule's output is authored (the component loop below), except
-			// a component it forwarded that was already synthesized. Check the rest for
-			// reserved keys before validateEmittedDocument drops an explicit null.
-			for j := range result.Documents[i].Spec.Components {
-				comp := &result.Documents[i].Spec.Components[j]
-				if comp.synthesized && isForwardedComponent(comp, originalComponents) {
-					continue
-				}
-				if err := t.enforceEmittedComponentReservations(comp); err != nil {
-					return nil, false, nil, errors.Wrapf(err, "%s", origin)
-				}
-			}
 			if err := t.validateEmittedDocument(emitted[i]); err != nil {
 				return nil, false, nil, errors.Wrapf(err, "%s", origin)
 			}
@@ -1268,16 +1268,16 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// itself still saw its INPUT's prior identity; only the OUTPUT stamped
 			// below carries this invocation's own.
 			compOrigin.Rule = loweringRuleIdentity(string(PositionComponent), comp.Type, rule)
+			if !inputChecked {
+				if err := t.enforceEmittedComponentReservations(result.Components, compOrigin.Rule, nil); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", compOrigin)
+				}
+			}
 			names := make([]string, len(result.Components))
 			for j := range result.Components {
 				result.Components[j].origin = &compOrigin
 				result.Components[j].synthesized = inputChecked
 				names[j] = result.Components[j].Name
-				if !inputChecked {
-					if err := t.enforceEmittedComponentReservations(&result.Components[j]); err != nil {
-						return false, steps, errors.Wrapf(err, "%s", compOrigin)
-					}
-				}
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
@@ -1418,6 +1418,13 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			}
 			// Rule is re-derived here — see Origin.Rule's doc comment.
 			traitOrigin.Rule = loweringRuleIdentity(string(PositionTrait), trait.Type, rule)
+			// Before the emitted traits are validated too: they may share a
+			// properties map with an emitted component.
+			if !inputChecked {
+				if err := t.enforceEmittedComponentReservations(result.Components, traitOrigin.Rule, nil); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+				}
+			}
 			names := make([]string, len(result.Traits))
 			for j := range result.Traits {
 				result.Traits[j].origin = &traitOrigin
@@ -1432,11 +1439,6 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			for j := range result.Components {
 				result.Components[j].origin = &traitOrigin
 				result.Components[j].synthesized = inputChecked
-				if !inputChecked {
-					if err := t.enforceEmittedComponentReservations(&result.Components[j]); err != nil {
-						return false, steps, errors.Wrapf(err, "%s", traitOrigin)
-					}
-				}
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
@@ -1726,15 +1728,28 @@ func (t *Transformer) enforceComponentReservations(comp *Component, path string)
 	return enforcePlatformReserved(p.PropertySchema(), comp.Properties, path)
 }
 
-// enforceEmittedComponentReservations is the D3 check on a component a lowering rule
-// just emitted and did not synthesize. It runs before validateEmittedComponent or
-// validateEmittedDocument, because emission validation normalizes an explicit null to
-// absence: checked afterwards, an authored reserved key written as null that the
-// rule copied through would no longer be there to refuse (go-kure/launcher#609). A
-// non-null value is refused here too, earlier than the downstream check that would
-// otherwise catch it.
-func (t *Transformer) enforceEmittedComponentReservations(comp *Component) error {
-	return t.enforceComponentReservations(comp, fmt.Sprintf("emitted component %q (type %q): properties", comp.Name, comp.Type))
+// enforceEmittedComponentReservations is the D3 check on the components one lowering
+// rule invocation just emitted and did not synthesize; exempt, when set, names the
+// ones it did. It must run on the whole result before any of it is validated,
+// because emission validation normalizes an explicit null to absence in place:
+// checked afterwards, an authored reserved key written as null that the rule copied
+// through would no longer be there to refuse (go-kure/launcher#609). That includes a
+// properties map the rule shares between two emitted elements, which validating the
+// first would strip for the second. A non-null value is refused here too, earlier
+// than the downstream check that would otherwise catch it. rule is the emitting
+// rule's identity (loweringRuleIdentity), which Origin's string form omits.
+func (t *Transformer) enforceEmittedComponentReservations(comps []Component, rule string, exempt func(*Component) bool) error {
+	for i := range comps {
+		comp := &comps[i]
+		if exempt != nil && exempt(comp) {
+			continue
+		}
+		path := fmt.Sprintf("component %q (type %q) emitted by rule %s: properties", comp.Name, comp.Type, rule)
+		if err := t.enforceComponentReservations(comp, path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // isForwardedComponent is isForwardedTrait's component-position counterpart, used

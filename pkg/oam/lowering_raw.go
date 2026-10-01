@@ -347,6 +347,15 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 	// PositionDocument regardless); and the registry pair, not the kind alone,
 	// because two raw rules may claim one kind under different groups.
 	ruleID := loweringRuleIdentity("rawdocument", d.apiVersion+"/"+d.origin.DocumentKind, d.rule)
+	// Every component the rule wrote is authored input, and its reserved keys are
+	// checked first, in every emitted document: validateEmittedDocument drops an
+	// explicit null before the document is serialized, and Transform would then
+	// never see it (go-kure/launcher#609).
+	for i := range result.Documents {
+		if err := t.enforceEmittedComponentReservations(result.Documents[i].Spec.Components, ruleID, nil); err != nil {
+			return nil, nil, errors.Wrapf(err, "%s", d.origin)
+		}
+	}
 	emitted := make([]*Application, len(result.Documents))
 	names := make([]string, len(result.Documents))
 	for i := range result.Documents {
@@ -357,14 +366,6 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 		// Traits are not: a trait the rule wrote is authored input, so its property
 		// shapes are checked by the caller's ValidateAuthoredProperties (after
 		// parameter substitution) and its platform-reserved keys by Transform.
-		// Components are authored input too, and their reserved keys are checked
-		// first: validateEmittedDocument drops an explicit null before the document
-		// is serialized, and Transform would then never see it (go-kure/launcher#609).
-		for j := range emitted[i].Spec.Components {
-			if err := t.enforceEmittedComponentReservations(&emitted[i].Spec.Components[j]); err != nil {
-				return nil, nil, errors.Wrapf(err, "%s", d.origin)
-			}
-		}
 		if err := t.validateEmittedDocument(emitted[i]); err != nil {
 			return nil, nil, errors.Wrapf(err, "%s", d.origin)
 		}
