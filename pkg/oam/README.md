@@ -487,12 +487,17 @@ chain. `""` means the element was never itself the direct output of a lowering r
 
 A trait a rule builds is sealed: its properties are final, and no
 `ClusterProfile` capability rendering is merged into it later. A trait a
-`ComponentLoweringRule` merely forwards stays an ordinary authored trait (unsealed,
-still capability-processed). Forwarding covers returning `comp.Traits` itself and
-returning unchanged copies of its elements inside a new slice, for example to add one
-trait of its own next to the authored ones; a copy whose type or properties map the
-rule replaced counts as built by the rule. A forwarded trait's `Origin.Index` stays its
-authored slot even when the rule places its own trait ahead of it.
+`ComponentLoweringRule` or `DocumentLoweringRule` merely forwards stays an ordinary
+authored trait (unsealed, still capability-processed). Forwarding covers returning
+`comp.Traits` itself and returning unchanged copies of its elements inside a new
+slice, for example to add one trait of its own next to the authored ones or, in a
+document rule, to rebuild a component around the authored traits; a copy whose type
+or properties map the rule replaced counts as built by the rule. A forwarded trait's
+`Origin.Index` stays its authored slot even when the rule places its own trait ahead
+of it. A `DocumentLoweringRule` is handed a copy of the document whose component and
+trait slices are its own, so neither the rule nor the engine's stamping of what it
+forwards writes through to the authored document; properties maps are shared, and a
+rule still must not mutate them.
 
 Sealing says nothing about whether the trait's content was checked. A component or
 trait a rule emits is synthesized when its properties are the rule's own output from
@@ -524,8 +529,8 @@ or renders one from capabilities, into a trait it emits is therefore rejected. A
 sealed trait that passes that check is still not checked input for what the rule
 emits: its schema covers the trait's own reserved keys, not those of the components
 or traits the rule builds, so that rule's output stays authored. A
-component a `DocumentLoweringRule` forwards — the same element of
-`doc.Spec.Components`, not a copy — keeps the classification it arrived with:
+component a `DocumentLoweringRule` forwards — the same element of the
+`doc.Spec.Components` it was handed, not a copy — keeps the classification it arrived with:
 forwarding neither makes it synthesized nor resets it to authored. What a user wrote is checked
 before any rule can rewrite it: before a `ComponentLoweringRule` claims the
 component, and for every component of a document before its `DocumentLoweringRule`
