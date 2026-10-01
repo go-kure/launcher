@@ -2,6 +2,7 @@ package components_test
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -885,15 +886,42 @@ func TestPostgresqlConfig_Generate_WithObjectStore(t *testing.T) {
 	if len(cluster.Spec.Plugins) == 0 {
 		t.Fatal("cluster.Spec.Plugins: expected at least 1 entry")
 	}
-	if cluster.Spec.Plugins[0].Name != "barman-cloud.barmancloud.cnpg.io" {
+	// The name the barman-cloud plugin registers with CNPG, and the parameter it
+	// reads the ObjectStore name from.
+	if cluster.Spec.Plugins[0].Name != "barman-cloud.cloudnative-pg.io" {
 		t.Errorf("Plugins[0].Name: got %q", cluster.Spec.Plugins[0].Name)
 	}
-	if cluster.Spec.Plugins[0].Parameters["objectStoreName"] != "db" {
-		t.Errorf("Plugins[0].Parameters[objectStoreName]: got %q", cluster.Spec.Plugins[0].Parameters["objectStoreName"])
+	want := map[string]string{"barmanObjectName": "db"}
+	if !reflect.DeepEqual(cluster.Spec.Plugins[0].Parameters, want) {
+		t.Errorf("Plugins[0].Parameters = %v, want %v", cluster.Spec.Plugins[0].Parameters, want)
 	}
 
 	if _, ok := (*objs[1]).(*barmanv1.ObjectStore); !ok {
 		t.Errorf("objs[1]: expected *barmanv1.ObjectStore, got %T", *objs[1])
+	}
+}
+
+// The ObjectStore CRD forbids configuration.serverName, so an authored
+// objectStore.serverName goes onto the plugin entry, where the plugin reads it.
+func TestPostgresqlConfig_Generate_ObjectStoreServerName(t *testing.T) {
+	pc := newPostgresqlApp(t, map[string]any{
+		"objectStore": map[string]any{
+			"destinationPath": "s3://my-bucket/postgres/",
+			"serverName":      "my-server",
+		},
+	})
+	objs := generatePostgresql(t, pc)
+	if len(objs) != 2 {
+		t.Fatalf("expected 2 objects, got %d", len(objs))
+	}
+	cluster := (*objs[0]).(*cnpgv1.Cluster)
+	want := map[string]string{"barmanObjectName": "db", "serverName": "my-server"}
+	if len(cluster.Spec.Plugins) != 1 || !reflect.DeepEqual(cluster.Spec.Plugins[0].Parameters, want) {
+		t.Fatalf("Plugins = %+v, want one entry with parameters %v", cluster.Spec.Plugins, want)
+	}
+	store := (*objs[1]).(*barmanv1.ObjectStore)
+	if store.Spec.Configuration.ServerName != "" {
+		t.Errorf("ObjectStore configuration.serverName = %q, want empty", store.Spec.Configuration.ServerName)
 	}
 }
 

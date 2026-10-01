@@ -31,12 +31,13 @@ const (
 	postgresqlPort      = 5432
 )
 
-// barmanCloudPluginName is the CNPG plugin entry that archives WAL to a Barman Cloud
-// ObjectStore. s3AccessKeyIDKey and s3SecretAccessKeyKey are the keys read from a
-// backup/objectStore credentials Secret. kure's retired config-struct layer injected all
-// three; launcher's output has always carried them, so they are written explicitly here.
+// barmanCloudPluginName is the name the barman-cloud plugin registers with CNPG, and so
+// the Cluster's plugin entry that archives WAL to a Barman Cloud ObjectStore.
+// s3AccessKeyIDKey and s3SecretAccessKeyKey are the keys read from a backup/objectStore
+// credentials Secret. kure's retired config-struct layer injected all three; launcher's
+// output has always carried them, so they are written explicitly here.
 const (
-	barmanCloudPluginName = "barman-cloud.barmancloud.cnpg.io"
+	barmanCloudPluginName = "barman-cloud.cloudnative-pg.io"
 	s3AccessKeyIDKey      = "ACCESS_KEY_ID"
 	s3SecretAccessKeyKey  = "SECRET_ACCESS_KEY"
 )
@@ -1085,13 +1086,19 @@ func (c *PostgresqlConfig) createCluster(app *stack.Application) (client.Object,
 	}
 
 	// An objectStore component archives WAL through the barman-cloud plugin, pointed
-	// at the ObjectStore createObjectStore emits under the same name.
+	// at the ObjectStore createObjectStore emits under the same name. The plugin reads
+	// the store from barmanObjectName and the server name from serverName (defaulting
+	// to the Cluster name); the ObjectStore CRD forbids a serverName of its own.
 	if c.ObjectStore != nil {
 		isWALArchiver := true
+		params := map[string]string{"barmanObjectName": app.Name}
+		if c.ObjectStore.ServerName != "" {
+			params["serverName"] = c.ObjectStore.ServerName
+		}
 		cluster.Spec.Plugins = []cnpgv1.PluginConfiguration{{
 			Name:          barmanCloudPluginName,
 			IsWALArchiver: &isWALArchiver,
-			Parameters:    map[string]string{"objectStoreName": app.Name},
+			Parameters:    params,
 		}}
 	}
 
@@ -1218,7 +1225,6 @@ func (c *PostgresqlConfig) createObjectStore(app *stack.Application) client.Obje
 		Configuration: barmanapi.BarmanObjectStoreConfiguration{
 			DestinationPath: c.ObjectStore.DestinationPath,
 			EndpointURL:     c.ObjectStore.EndpointURL,
-			ServerName:      c.ObjectStore.ServerName,
 		},
 		RetentionPolicy: c.ObjectStore.RetentionPolicy,
 	}

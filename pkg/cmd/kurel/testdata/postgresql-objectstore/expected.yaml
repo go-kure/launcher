@@ -10,9 +10,10 @@ spec:
   instances: 1
   plugins:
   - isWALArchiver: true
-    name: barman-cloud.barmancloud.cnpg.io
+    name: barman-cloud.cloudnative-pg.io
     parameters:
-      objectStoreName: postgres
+      barmanObjectName: postgres
+      serverName: postgres-v2
   postgresql:
     syncReplicaElectionConstraint:
       enabled: false

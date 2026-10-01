@@ -2561,6 +2561,17 @@ not part of either change.
   "The null contract" below: the key is left out, not refused. The same
   holds for `nodeSelector` values in both affinity readers, which share the
   helper.
+  An `objectStore` block emits a barman-cloud `ObjectStore` named after the
+  component and a WAL-archiver entry on the Cluster for the plugin
+  `barman-cloud.cloudnative-pg.io`, whose `barmanObjectName` parameter names
+  that store. An authored `objectStore.serverName` becomes that entry's
+  `serverName` parameter, where the plugin reads it (it defaults to the
+  Cluster name); the ObjectStore CRD forbids a `configuration.serverName`.
+  Until go-kure/launcher#643 the entry named a plugin CloudNativePG does not
+  register (`barman-cloud.barmancloud.cnpg.io`) under a key the plugin does
+  not read (`objectStoreName`), and `serverName` went on the ObjectStore,
+  which the API server refused. No document is newly refused; only the
+  emitted output changes.
   Every other optional property the handler reads goes through the same
   presence-reporting helpers (go-kure/launcher#512): `provider`, `version`,
   `storageSize`, `imageName`, the `backup`, `monitoring`, `pooler`,
@@ -3186,8 +3197,9 @@ The values that layer used to inject are written explicitly, so the emitted
 manifests are unchanged byte for byte: `enablePDB` (true only for more than one
 instance), `primaryUpdateStrategy: unsupervised`, the `ACCESS_KEY_ID` /
 `SECRET_ACCESS_KEY` key names on backup and objectStore credentials, the
-`barman-cloud.barmancloud.cnpg.io` WAL-archiver plugin entry when an `objectStore`
-is declared, the pooler `type` (`rw` unless `ro` was authored) and its always-present
+barman-cloud WAL-archiver plugin entry when an `objectStore` is declared (its
+plugin name and parameters were corrected afterwards by go-kure/launcher#643),
+the pooler `type` (`rw` unless `ro` was authored) and its always-present
 `pgbouncer` block, and `ensure: present` on every extension not authored `absent`.
 The layer's guards are kept too: `inheritedMetadata`, `managed`, `bootstrap`,
 `postgresql.synchronous` and the credential references are omitted when their input

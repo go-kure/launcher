@@ -41,9 +41,10 @@ spec:
       name: legacy_user
   plugins:
   - isWALArchiver: true
-    name: barman-cloud.barmancloud.cnpg.io
+    name: barman-cloud.cloudnative-pg.io
     parameters:
-      objectStoreName: postgres
+      barmanObjectName: postgres
+      serverName: postgres
   postgresql:
     syncReplicaElectionConstraint:
       enabled: false
@@ -84,7 +85,6 @@ spec:
       secretAccessKey:
         key: SECRET_ACCESS_KEY
         name: postgres-backup-creds
-    serverName: postgres
   instanceSidecarConfiguration:
     resources: {}
   retentionPolicy: 14d
