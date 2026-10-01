@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/stack"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -224,7 +226,8 @@ func TestBuiltinHelm_FluxNamespace(t *testing.T) {
 			}
 		}
 	}
-	var sawSource bool
+	var sources []string
+	releases := map[string]*helmv2.HelmRelease{}
 	for _, o := range objs {
 		kind := o.GetObjectKind().GroupVersionKind().Kind
 		if kind != "HelmRepository" && kind != "HelmRelease" {
@@ -233,9 +236,36 @@ func TestBuiltinHelm_FluxNamespace(t *testing.T) {
 		if o.GetNamespace() != "flux-system" {
 			t.Errorf("%s %s is in namespace %q, want flux-system", kind, o.GetName(), o.GetNamespace())
 		}
-		sawSource = sawSource || kind == "HelmRepository"
+		switch obj := o.(type) {
+		case *sourcev1.HelmRepository:
+			sources = append(sources, obj.Name)
+		case *helmv2.HelmRelease:
+			releases[obj.Name] = obj
+		default:
+			t.Fatalf("%s %s has Go type %T", kind, o.GetName(), o)
+		}
 	}
-	if !sawSource {
-		t.Fatalf("no HelmRepository generated")
+	if want := []string{helmSharedSource()}; !slices.Equal(sources, want) {
+		t.Fatalf("HelmRepositories = %v, want %v", sources, want)
+	}
+	for _, name := range []string{"api", "web"} {
+		hr, ok := releases[name]
+		if !ok {
+			t.Errorf("no HelmRelease %s generated", name)
+			continue
+		}
+		// The release is installed into the application namespace, and reads
+		// the source beside it in the Flux namespace.
+		if hr.Spec.TargetNamespace != "default" {
+			t.Errorf("HelmRelease %s targetNamespace = %q, want default", name, hr.Spec.TargetNamespace)
+		}
+		if hr.Spec.Chart == nil {
+			t.Errorf("HelmRelease %s has no chart template", name)
+			continue
+		}
+		ref := hr.Spec.Chart.Spec.SourceRef
+		if ref.Kind != "HelmRepository" || ref.Name != helmSharedSource() || (ref.Namespace != "" && ref.Namespace != "flux-system") {
+			t.Errorf("HelmRelease %s sourceRef = %+v, want HelmRepository %s in flux-system", name, ref, helmSharedSource())
+		}
 	}
 }

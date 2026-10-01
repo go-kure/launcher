@@ -20,6 +20,10 @@ const helmType = "helm"
 // a generated source's name carries.
 const helmSourceDigestLen = 10
 
+// helmChartContentMediaType is the media type of a Helm chart's content layer
+// in an OCI artifact; a generated OCIRepository selects it.
+const helmChartContentMediaType = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+
 // helmPassthroughKeys are the helm properties forwarded verbatim to the
 // helmrelease terminal under delivery: flux. They are split off before the
 // strict decode, so their shape is the terminal's to check, and none of them
@@ -284,8 +288,14 @@ func helmGeneratedSource(lctx oam.LoweringContext, kind, url, version string) (o
 		source.Type = "helmrepository"
 		source.Properties = map[string]any{"url": url}
 	default: // OCIRepository, the only other kind inlineChartSourceKind returns
+		// Copy the chart layer as-is: Flux's default extracts the first layer and
+		// re-archives it without the files its ignore rules exclude (*.zip,
+		// *.png, ...), which a chart may read with .Files.Get.
 		source.Type = "ocirepository"
-		source.Properties = map[string]any{"url": url}
+		source.Properties = map[string]any{"url": url, "layerSelector": map[string]any{
+			"mediaType": helmChartContentMediaType,
+			"operation": "copy",
+		}}
 		if version != "" {
 			source.Properties["ref"] = map[string]any{"tag": version}
 		}
