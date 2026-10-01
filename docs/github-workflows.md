@@ -403,7 +403,11 @@ Runs on main and `release/*` branches only (not PRs):
 
 - **Push to main** (paths: `site/**`, `docs/**`, `*.md`, `CHANGELOG.md`, `DEVELOPMENT.md`,
   `scripts/gen-versions-toml.sh`)
-- **Manual dispatch** with inputs: `version_slot`, `version_label`, `set_latest`
+- **Manual dispatch** with inputs: `version_slot`, `version_label`, `set_latest`.
+  `version_slot` must be `dev` or start with `v` (e.g. `v0.1`), as one path segment. The deploy
+  step refuses any other slot, after the site has been built, because a root write replaces
+  everything under `launcher/` except `dev/` and the `v*/` slots. With `set_latest=true`,
+  `version_label` must be a release tag.
 
 ### How It Works
 
