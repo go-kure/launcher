@@ -787,7 +787,7 @@ own check now covers a caller that hands properties to a handler without it,
 which previously got the default. The out-of-enum error now reads
 `affinity.podAntiAffinityType: invalid value …` rather than
 `invalid podAntiAffinityType …`).
-On `worker` only, the affinity the shorthand evaluates to is also validated the way the
+On `worker`, the affinity the shorthand evaluates to is also validated the way the
 `deployment` component validates a raw `affinity`, so a `topologyKey`, or a
 `nodeSelector` key or value, that is not valid label syntax is refused
 (`affinity: the shorthand evaluates to an affinity the API server would
@@ -799,6 +799,12 @@ check runs after every other worker property is parsed, so an earlier refusal
 keeps its place. A component name longer than 63 characters stays refused;
 when the shorthand enables pod anti-affinity, whose label selector carries
 the name, this check now refuses it before the container-name check does.
+`webservice` validates the evaluated shorthand the same way, with the same
+message, as the last step of its parse, under the same pre-release exception
+(a `fix(format)` change of its own): such a webservice document also built
+before, into a Deployment the API server rejects. A webservice's name is
+checked against the Service-name rule first, so an over-long name is refused
+there, before this check.
 
 ### Raw block volumes (`volumeMode: Block`)
 
