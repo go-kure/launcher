@@ -1296,6 +1296,13 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
+			// Only a component-position rule may emit a same-name sibling group: the
+			// one invocation is the group's boundary, so a name a different
+			// invocation, a trait or document rule, or an author repeats is still a
+			// duplicate (validateComponent).
+			if err := t.stampSiblingGroups(result.Components); err != nil {
+				return false, steps, errors.Wrapf(err, "%s", compOrigin)
+			}
 			newComponents = append(newComponents, result.Components...)
 			for j := range result.Policies {
 				result.Policies[j].origin = &compOrigin

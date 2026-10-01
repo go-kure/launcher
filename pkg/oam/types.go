@@ -65,6 +65,15 @@ type Component struct {
 	// (lowerDocumentBody) and before a DocumentLoweringRule
 	// (enforceAuthoredComponentReservations).
 	synthesized bool
+	// siblingGroup marks a member of a same-name sibling group: components that
+	// one ComponentLoweringRule invocation emitted under one name, each of a
+	// distinct terminal type (stampSiblingGroups, lowering.go). Members share the
+	// pointer, so it survives every copy of the component. The duplicate-name check
+	// (validateComponent) accepts a repeated name only between members of one
+	// group, and the transform collapses each group into one entry
+	// (collapseSiblingGroups, sibling_group.go). The engine alone sets it: an
+	// authored component, and any other rule's output, never carries one.
+	siblingGroup *siblingGroup
 }
 
 // Origin returns the component's authored provenance and whether the lowering engine

@@ -494,6 +494,10 @@ type componentEntry struct {
 	component Component
 	app       *stack.Application
 	tier      Tier
+	// members is set only on a collapsed sibling group (collapseSiblingGroups):
+	// the group's own entries, in emission order. index and component are then
+	// the first member's, and app is the group's one application.
+	members []componentEntry
 }
 
 // Transform converts an OAM Application to a kure Cluster.
@@ -580,6 +584,12 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	if err != nil {
 		return nil, nil, err
 	}
+	// A same-name sibling group a lowering rule emitted becomes one entry here,
+	// before anything keyed by component name runs (go-kure/launcher#280).
+	entries, err = collapseSiblingGroups(entries, namespace)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// Phase 1.5: validate capability constraints declared by the Policy. Uses
 	// authoredTraitTypes (captured before t.lower() ran), not a fresh
@@ -613,6 +623,11 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		cluster, err = t.buildHierarchicalCluster(app, entries, tierGroups, ctx)
 	}
 	if err != nil {
+		return nil, nil, err
+	}
+	// Traits have now wrapped what they wrap, so a sibling group's members are
+	// checked as phase 4 will read them through the group's config.
+	if err := checkSiblingGroups(entries); err != nil {
 		return nil, nil, err
 	}
 
@@ -870,7 +885,11 @@ func (t *Transformer) buildDependencyAwareCluster(app *Application, entries []co
 // OAM inline values take precedence. Policy enforcement is applied to configs
 // added by each trait.
 func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bundle *stack.Bundle, ctx TransformContext) error {
-	for _, entry := range entries {
+	var targets []componentEntry
+	for _, e := range entries {
+		targets = append(targets, e.traitTargets()...)
+	}
+	for _, entry := range targets {
 		for _, trait := range app.Spec.Components[entry.index].Traits {
 			handler := t.findTraitHandler(trait.Type)
 			if handler == nil {
@@ -1201,9 +1220,12 @@ func applyAutoHealthChecks(cluster *stack.Cluster, componentMap map[string]compo
 			// (configmap/prune-protection) implement fluxNamespaceSettable even
 			// when wrapping a workload whose Deployment stays in the app namespace,
 			// so the settable check alone is too broad.
+			// A sibling group's config takes the namespace for every member, so
+			// whether the checked object follows it is the primary member's answer:
+			// the check names the primary's kind.
 			ns := app.Namespace
 			if fluxNamespace != "" && isFluxControlPlaneGVK(gvk.APIVersion) {
-				if _, settable := app.Config.(fluxNamespaceSettable); settable {
+				if _, settable := entry.healthCheckConfig().(fluxNamespaceSettable); settable {
 					ns = fluxNamespace
 				}
 			}

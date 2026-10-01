@@ -77,14 +77,25 @@ func ComponentLabelValue(name string) string {
 // other's pods. Distinct names are already enforced, so this only fails for
 // such a name, or for two long names whose trimmed prefix and 40-bit digest
 // both coincide. components must already have passed validateComponent.
+//
+// The members of one sibling group share their name, and so the label, by
+// design: they deploy as one component (go-kure/launcher#280), and a selector
+// picking out the group's pods is the point, not a collision.
 func validateComponentLabelValues(components []Component) error {
-	owner := make(map[string]string, len(components))
+	type labelOwner struct {
+		name  string
+		group *siblingGroup
+	}
+	owner := make(map[string]labelOwner, len(components))
 	for _, c := range components {
 		v := ComponentLabelValue(c.Name)
 		if other, ok := owner[v]; ok {
-			return oamValidationError("name", fmt.Sprintf("components %q and %q share the component label value %q; rename one of them", other, c.Name, v))
+			if other.group != nil && other.group == c.siblingGroup {
+				continue
+			}
+			return oamValidationError("name", fmt.Sprintf("components %q and %q share the component label value %q; rename one of them", other.name, c.Name, v))
 		}
-		owner[v] = c.Name
+		owner[v] = labelOwner{name: c.Name, group: c.siblingGroup}
 	}
 	return nil
 }
