@@ -62,7 +62,7 @@ reads it.
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). Lowered to a `deployment` component plus a `topology-spread` trait (`WorkerRule`) — see below. |
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
-| `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
+| `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
 | `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`. Emits nothing else — see below. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
@@ -1005,7 +1005,8 @@ none of those is a `DeploymentSpec` field, and a kind named after the API kind
 should project the API kind rather than launcher's opinions about it. A
 workload that wants launcher to create its Service uses `webservice`. This is
 the reversible direction: adding a property later is additive, removing one is
-breaking.
+breaking. Its `ports` list (below) is that kind of addition: container ports
+are a `PodSpec` field, and declaring them emits no Service.
 
 What `deployment` *does* publish, and the role kinds do not, is the raw
 `corev1` form of the same three scheduling concerns — see "Raw scheduling
@@ -1018,6 +1019,16 @@ the trait handlers README) applies the same
 `BuildTopologySpreadConstraints` the role kinds use, exported for that reason,
 from the Deployment's post-policy replica count. It refuses a Deployment that
 already carries raw `topologySpreadConstraints`, so the two never merge.
+
+#### Main container ports (`deployment` only)
+
+`deployment` publishes `ports`, the main container's `corev1.ContainerPort` list
+(go-kure/launcher#280). It declares container ports only: the kind still emits
+no Service (use `webservice`, or a `service` component, for one).
+
+| property | type | notes | compat |
+|---|---|---|---|
+| `ports` | array | Each entry is `containerPort` (required, 1–65535), `name` (an IANA service name, as the API server checks a container port name) and `protocol` (`TCP`/`UDP`/`SCTP`, default `TCP`); any other key, `hostPort` and `hostIP` included, is refused. Names must be unique, as the API server requires. A repeated `containerPort`/`protocol` pair is refused too, which the API server only warns about: the second entry declares nothing new. The same number on two protocols is two ports. An absent, null or empty list declares no ports. A probe or lifecycle hook may address a declared port by name; a name the main container does not declare is refused, since the kubelet resolves it only against that container's own ports. Without `ports`, a named probe or hook port is refused with the same message as before. | additive |
 
 #### Raw scheduling properties (`deployment` only)
 

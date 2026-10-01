@@ -109,8 +109,9 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		// own-key increase and not the collision this guard exists to catch —
 		// none of the three appears in podSpecPropertyKeys or
 		// deploymentSpecPropertyKeys, which is exactly why the merged count
-		// rises by three rather than staying flat.
-		{"deployment", (&DeploymentHandler{}).PropertySchema(), 17, deploymentSpecPropertyKeys, false},
+		// rises by three rather than staying flat. 18 since go-kure/launcher#280
+		// added the main container's `ports`, likewise in neither shared list.
+		{"deployment", (&DeploymentHandler{}).PropertySchema(), 18, deploymentSpecPropertyKeys, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
