@@ -535,6 +535,17 @@ start of each lowering round, before any rule of that round runs, so a rule that
 emits an element sharing a component's or trait's properties map cannot have
 emission validation strip an authored `null` from it.
 
+**Engine-only traits.** `RegisterEngineTrait(type, handler)` registers a trait
+handler that only a lowering rule may attach: it dispatches like any built-in
+trait, but a trait of that type that is not synthesized — authored, or emitted by a
+rule whose input nothing checked — is refused, by `ValidateAuthoredProperties` and
+again at dispatch (`trait type "…" is engine-only: a lowering rule attaches it, and
+a document may not author it`). It is left out of `HandlerSchemas` and
+`HandlerContracts`, so nothing publishes it as something to author. The built-in
+one is `cnpg-postgresql-defaults`, which the `postgresql` rule attaches to the
+`cnpg-cluster` it emits to set the values postgresql derives after the policy
+(go-kure/launcher#281).
+
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the
 required `ClusterProfile` capability fails with `ErrMissingCapability`. A rule that

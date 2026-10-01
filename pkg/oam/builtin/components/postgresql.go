@@ -3,19 +3,12 @@ package components
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 
 	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
-	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	machineryapi "github.com/cloudnative-pg/machinery/pkg/api"
-	barmanv1 "github.com/cloudnative-pg/plugin-barman-cloud/api/v1"
-	kurecnpg "github.com/go-kure/kure/pkg/kubernetes/cnpg"
-	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -42,8 +35,46 @@ const (
 	s3SecretAccessKeyKey  = "SECRET_ACCESS_KEY"
 )
 
-// PostgresqlHandler handles OAM postgresql components.
-type PostgresqlHandler struct{}
+// PostgresqlRule is the component lowering rule for the "postgresql" component
+// type (oam.ComponentLoweringRule). It re-expresses postgresql through the
+// CloudNativePG kind components (docs/oam/design-operator-cr-components.md):
+//
+//   - a `cnpg-cluster` component named like the postgresql component, carrying
+//     the Cluster spec postgresql used to write, minus the two values that
+//     depend on the environment policy: spec.enablePDB and, when storageSize
+//     was not authored, spec.storage.size;
+//   - a `cnpg-objectstore` of the same name when objectStore is set, a member
+//     of the same same-name sibling group as the Cluster;
+//   - a `cnpg-pooler` named `<name>-pooler` when pooler.enabled is true;
+//   - a `cnpg-database` named `<name>-<database>` for each databases entry;
+//   - when the document already orders its components with a dependency
+//     policy, a dependency policy making the pooler and the databases wait for
+//     the Cluster (see dependencyPolicy).
+//
+// LowerComponent first runs postgresql's full parse (Parse, the former
+// handler's sequence unchanged), so every input the handler refused is still
+// refused with the same cause text. A refusal now surfaces through the
+// lowering engine, so it names the component's type and document
+// (`component "db" (type "postgresql") in document …: <cause>`).
+//
+// The two policy-dependent values are written after the policy ran, by the
+// engine-only `cnpg-postgresql-defaults` trait the rule attaches in front of
+// the authored traits: lowering runs before the environment policy, and the
+// Cluster's policy defaults (instances, storage.size) apply only to values the
+// document left unset. The trait calls CnpgClusterConfig.ApplyPostgresqlDefaults.
+//
+// The authored traits are forwarded unchanged to the `cnpg-cluster`
+// component; the annotations go to every component the rule emits.
+type PostgresqlRule struct{}
+
+// ComponentType claims the "postgresql" component type at the component
+// lowering position. build.go registers this rule via RegisterComponentLowering
+// instead of a dispatchable component handler.
+func (PostgresqlRule) ComponentType() string { return "postgresql" }
+
+// postgresqlDefaultsTrait is the engine-only trait the rule attaches to the
+// Cluster it emits (traits.PostgresqlDefaultsHandler).
+const postgresqlDefaultsTrait = "cnpg-postgresql-defaults"
 
 // validatePostgresqlClusterName applies cnpg-cluster's Cluster-name rule
 // (validateCnpgClusterName) to a postgresql component, whose name becomes the
@@ -56,11 +87,6 @@ func validatePostgresqlClusterName(name string) error {
 	return nil
 }
 
-// CanHandle returns true for postgresql component type.
-func (h *PostgresqlHandler) CanHandle(componentType string) bool {
-	return componentType == "postgresql"
-}
-
 // Endpoints implements oam.EndpointProvider: a postgresql component's data-plane endpoints are
 // the CNPG cluster's instance pods (labelled cnpg.io/cluster=<cluster name>, which equals the
 // OAM component name) on the PostgreSQL port and, when the component declares a pooler, the
@@ -69,7 +95,11 @@ func (h *PostgresqlHandler) CanHandle(componentType string) bool {
 // hardcoding the operator selectors; a consumer that dials the pooler needs the second endpoint
 // because pooler pods carry a different label set and are not matched by the direct-cluster
 // selector.
-func (h *PostgresqlHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+//
+// The endpoints are the authored component's: the pooler endpoint names the
+// Pooler the rule emits (`<name>-pooler`), which carries its own endpoint as a
+// cnpg-pooler as well.
+func (PostgresqlRule) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
 	// The selector carries the name verbatim, so a name the Cluster cannot
 	// have is refused here too, as cnpg-cluster refuses it.
 	if err := validatePostgresqlClusterName(component.Name); err != nil {
@@ -112,8 +142,9 @@ func poolerEnabled(component *oam.Component) (bool, error) {
 // PropertySchema declares the postgresql component's top-level user-facing
 // properties. The CNPG-shaped sub-objects (backup, pooler, bootstrap, databases,
 // …) are deep and K8s-adjacent, so they are kept open (AdditionalProperties)
-// rather than modeled field-by-field.
-func (h *PostgresqlHandler) PropertySchema() map[string]oam.PropertySchema {
+// rather than modeled field-by-field. Unchanged by the move to a lowering
+// rule: TestPostgresqlRule_PropertySchemaUnchanged pins it byte for byte.
+func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 	// The CNPG-shaped sub-objects are kept open; each reuses the same open shape
 	// but carries its own description, so a per-key helper supplies the prose.
 	openObj := func(desc string) oam.PropertySchema {
@@ -148,14 +179,16 @@ func (h *PostgresqlHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
-// ToApplicationConfig converts an OAM postgresql component to a PostgresqlConfig.
-func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+// Parse is postgresql's full parse, the former handler's ToApplicationConfig
+// sequence unchanged: it validates component as a postgresql component and
+// returns what it authored, with postgresql's defaults filled in. LowerComponent
+// runs it first; it is exported for the tests that pin the parse.
+func (PostgresqlRule) Parse(component *oam.Component) (*PostgresqlConfig, error) {
 	if err := validatePostgresqlClusterName(component.Name); err != nil {
 		return nil, err
 	}
 	config := &PostgresqlConfig{
-		Name:      component.Name,
-		Namespace: namespace,
+		Name: component.Name,
 	}
 
 	props := component.Properties
@@ -803,10 +836,11 @@ type DatabaseExtension struct {
 	Ensure string
 }
 
-// PostgresqlConfig implements stack.ApplicationConfig for postgresql components.
+// PostgresqlConfig is what PostgresqlRule.Parse reads from a postgresql
+// component, with postgresql's defaults filled in. The rule builds the specs of
+// the components it emits from it.
 type PostgresqlConfig struct {
 	Name        string
-	Namespace   string
 	Provider    string
 	Version     string
 	StorageSize string
@@ -853,303 +887,6 @@ type PostgresqlConfig struct {
 
 	explicitReplicas    bool
 	explicitStorageSize bool
-}
-
-// ApplyPolicy applies defaults then enforces limits from the policy.
-// Faithful port of the downstream runtime's PostgresqlConfig.ApplyPolicy: enforces replicas, resources, storageSize only.
-func (c *PostgresqlConfig) ApplyPolicy(p oam.Policy) error {
-	if p == nil {
-		return nil
-	}
-
-	c.Replicas = applyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
-	// The CRD declares Minimum=1 on ClusterSpec.Instances, so a policy default
-	// below it is refused rather than emitted, as cnpg-cluster refuses it.
-	if !c.explicitReplicas && p.DefaultReplicas() != nil && c.Replicas < 1 {
-		return errors.Errorf("replicas: must be >= 1, got %d from the policy default", c.Replicas)
-	}
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
-		return err
-	}
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
-		return err
-	}
-	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
-		return err
-	}
-	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
-		return err
-	}
-	// StorageSize precedence: authored > policy default > "1Gi" handler default.
-	// The parse-time fallback is already "1Gi", so let a policy default override it
-	// only when the user did not author a value.
-	// The default is a value the document did not write, so it is parsed here,
-	// as the cpu and memory defaults above are: with no maximum set, nothing
-	// else would before the Cluster is built.
-	if dflt := p.DefaultStorageSize(); !c.explicitStorageSize && dflt != "" {
-		q, err := resource.ParseQuantity(dflt)
-		if err != nil {
-			return errors.Errorf("policy default for storageSize: invalid quantity %q: %w", dflt, err)
-		}
-		if q.Sign() <= 0 {
-			return errors.Errorf("policy default for storageSize: quantity must be positive, got %q", dflt)
-		}
-		c.StorageSize = dflt
-	}
-
-	if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
-		return err
-	}
-	// Direct form kept deliberately (not enforceMaxResources): createCluster
-	// forwards c.Resources straight onto the Cluster spec (cnpgResourceList,
-	// below) and never calls buildResourceRequirements, so there is no
-	// intrinsic-default tier here for c.Resources to diverge from. Only
-	// cpu/memory have a policy max; every other forwarded name is unbounded
-	// by policy, as for the other workload kinds.
-	if err := enforceMaxResource(quantityString(c.Resources.Requests, corev1.ResourceCPU), p.MaxCPU(), "cpu request"); err != nil {
-		return err
-	}
-	if err := enforceMaxResource(quantityString(c.Resources.Limits, corev1.ResourceCPU), p.MaxCPU(), "cpu limit"); err != nil {
-		return err
-	}
-	if err := enforceMaxResource(quantityString(c.Resources.Requests, corev1.ResourceMemory), p.MaxMemory(), "memory request"); err != nil {
-		return err
-	}
-	if err := enforceMaxResource(quantityString(c.Resources.Limits, corev1.ResourceMemory), p.MaxMemory(), "memory limit"); err != nil {
-		return err
-	}
-	if err := enforceMaxStorageSize(c.StorageSize, p.MaxStorageSize()); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// Generate creates CloudNative-PG resources: Cluster, optional Pooler, ObjectStore, and Database CRs.
-func (c *PostgresqlConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	cluster, err := c.createCluster(app)
-	if err != nil {
-		return nil, err
-	}
-	resources := []*client.Object{&cluster}
-
-	if c.PoolerEnabled {
-		pooler := c.createPooler(app)
-		resources = append(resources, &pooler)
-	}
-
-	if c.ObjectStore != nil {
-		os := c.createObjectStore(app)
-		resources = append(resources, &os)
-	}
-
-	for _, db := range c.Databases {
-		dbRes := c.createDatabase(app, db)
-		resources = append(resources, &dbRes)
-	}
-
-	return resources, nil
-}
-
-func (c *PostgresqlConfig) createCluster(app *stack.Application) (client.Object, error) {
-	// The Cluster is named from app.Name, so the parse-time name refusal is
-	// repeated for a config built without ToApplicationConfig.
-	if err := validatePostgresqlClusterName(app.Name); err != nil {
-		return nil, err
-	}
-	// Checked on the values the Cluster carries, so an authored value, a
-	// policy default and a directly built config are refused alike.
-	// ClusterSpec.Instances has Minimum=1, and CloudNativePG's webhook parses
-	// only the size, so a zero or negative one is admitted and its claims then
-	// fail the API server's positive storage-request check (see BuildPVC).
-	if c.Replicas < 1 {
-		return nil, errors.Errorf("replicas: must be >= 1, got %d", c.Replicas)
-	}
-	if c.StorageSize != "" {
-		q, err := resource.ParseQuantity(c.StorageSize)
-		if err != nil {
-			return nil, errors.Errorf("storageSize: invalid quantity %q: %w", c.StorageSize, err)
-		}
-		if q.Sign() <= 0 {
-			return nil, errors.Errorf("storageSize: quantity must be positive, got %q", c.StorageSize)
-		}
-	}
-
-	imageName := c.ImageName
-	if imageName == "" {
-		imageName = fmt.Sprintf("ghcr.io/cloudnative-pg/postgresql:%s", c.Version)
-	}
-
-	// kure's generated constructor carries identity only; every spec value below is
-	// written here. enablePDB (from the instance count) and primaryUpdateStrategy
-	// were injected by kure's retired config-struct layer and are kept explicit so
-	// the emitted Cluster is unchanged.
-	enablePDB := c.Replicas > 1
-	cluster := kurecnpg.CreateCluster(app.Name, app.Namespace)
-	cluster.Spec = cnpgv1.ClusterSpec{
-		Instances:             int(c.Replicas),
-		ImageName:             imageName,
-		EnablePDB:             &enablePDB,
-		PrimaryUpdateStrategy: cnpgv1.PrimaryUpdateStrategyUnsupervised,
-		StorageConfiguration:  cnpgv1.StorageConfiguration{Size: c.StorageSize},
-	}
-
-	// Left nil when both maps are empty: a non-nil empty block renders
-	// `inheritedMetadata: {}`. Cloned, never the config's own maps: a caller
-	// editing the generated Cluster would otherwise edit the config, and the next
-	// Generate would differ from this one (go-kure/launcher#396).
-	if len(c.InheritedLabels) > 0 || len(c.InheritedAnnotations) > 0 {
-		cluster.Spec.InheritedMetadata = &cnpgv1.EmbeddedObjectMetadata{
-			Labels:      maps.Clone(c.InheritedLabels),
-			Annotations: maps.Clone(c.InheritedAnnotations),
-		}
-	}
-
-	// Checked here, on the resources the Cluster actually carries, rather than
-	// at parse time: ApplyPolicy may still default cpu/memory in, and CNPG
-	// copies this block onto the instance pods unchanged, so a hugepages-only
-	// block would build a Cluster whose pods admission always refuses.
-	if err := validateHugePagesHaveCPUOrMemory("resources", c.Resources.Requests, c.Resources.Limits); err != nil {
-		return nil, err
-	}
-	cluster.Spec.Resources = corev1.ResourceRequirements{
-		Requests: cnpgResourceList(c.Resources.Requests),
-		Limits:   cnpgResourceList(c.Resources.Limits),
-	}
-
-	if c.BackupRetentionPolicy != "" || c.BackupDestinationPath != "" {
-		bos := &barmanapi.BarmanObjectStoreConfiguration{
-			DestinationPath: c.BackupDestinationPath,
-			EndpointURL:     c.BackupEndpointURL,
-		}
-		if c.BackupSecretName != "" {
-			bos.AWS = s3Credentials(c.BackupSecretName)
-		}
-		cluster.Spec.Backup = &cnpgv1.BackupConfiguration{
-			RetentionPolicy:   c.BackupRetentionPolicy,
-			BarmanObjectStore: bos,
-		}
-	}
-
-	if c.MonitoringEnabled {
-		mon := &cnpgv1.MonitoringConfiguration{EnablePodMonitor: true} //nolint:staticcheck // SA1019: EnablePodMonitor is still the only upstream opt-in for operator-created PodMonitors
-		for _, cq := range c.MonitoringCustomQueries {
-			mon.CustomQueriesConfigMap = append(mon.CustomQueriesConfigMap, cnpgv1.ConfigMapKeySelector{
-				LocalObjectReference: machineryapi.LocalObjectReference{Name: cq.Name},
-				Key:                  cq.Key,
-			})
-		}
-		cluster.Spec.Monitoring = mon
-	}
-
-	// ToApplicationConfig refuses both sources together; recovery still wins here
-	// to match the retired builder should that guard ever move.
-	switch {
-	case c.BootstrapRecoverySource != "":
-		cluster.Spec.Bootstrap = &cnpgv1.BootstrapConfiguration{
-			Recovery: &cnpgv1.BootstrapRecovery{Source: c.BootstrapRecoverySource},
-		}
-	case c.BootstrapPgBasebackupSource != "":
-		cluster.Spec.Bootstrap = &cnpgv1.BootstrapConfiguration{
-			PgBaseBackup: &cnpgv1.BootstrapPgBaseBackup{Source: c.BootstrapPgBasebackupSource},
-		}
-	}
-
-	if len(c.ExternalClusters) > 0 {
-		ecs := make([]cnpgv1.ExternalCluster, 0, len(c.ExternalClusters))
-		for _, ec := range c.ExternalClusters {
-			ext := cnpgv1.ExternalCluster{
-				Name:                 ec.Name,
-				ConnectionParameters: ec.ConnectionParameters,
-			}
-			if ec.BarmanObjectStore != nil {
-				bos, err := toBarmanObjectStore(ec.BarmanObjectStore)
-				if err != nil {
-					return nil, errors.Wrapf(err, "external cluster %q", ec.Name)
-				}
-				ext.BarmanObjectStore = bos
-			}
-			ecs = append(ecs, ext)
-		}
-		cluster.Spec.ExternalClusters = ecs
-	}
-
-	if len(c.PostgresqlParameters) > 0 {
-		cluster.Spec.PostgresConfiguration.Parameters = c.PostgresqlParameters
-	}
-	if c.SynchronousMethod != "" {
-		sync := &cnpgv1.SynchronousReplicaConfiguration{
-			Method: cnpgv1.SynchronousReplicaConfigurationMethod(c.SynchronousMethod),
-			Number: int(c.SynchronousNumber),
-		}
-		if c.SynchronousDataDurability != "" {
-			sync.DataDurability = cnpgv1.DataDurabilityLevel(c.SynchronousDataDurability)
-		}
-		cluster.Spec.PostgresConfiguration.Synchronous = sync
-	}
-
-	// An objectStore component archives WAL through the barman-cloud plugin, pointed
-	// at the ObjectStore createObjectStore emits under the same name. The plugin reads
-	// the store from barmanObjectName and the server name from serverName (defaulting
-	// to the Cluster name); the ObjectStore CRD forbids a serverName of its own.
-	if c.ObjectStore != nil {
-		isWALArchiver := true
-		params := map[string]string{"barmanObjectName": app.Name}
-		if c.ObjectStore.ServerName != "" {
-			params["serverName"] = c.ObjectStore.ServerName
-		}
-		cluster.Spec.Plugins = []cnpgv1.PluginConfiguration{{
-			Name:          barmanCloudPluginName,
-			IsWALArchiver: &isWALArchiver,
-			Parameters:    params,
-		}}
-	}
-
-	if c.AffinityEnabled {
-		// Always written, false included: CNPG reads a nil enablePodAntiAffinity
-		// as enabled.
-		enablePAA := c.AffinityEnablePodAntiAffinity
-		cluster.Spec.Affinity = cnpgv1.AffinityConfiguration{
-			EnablePodAntiAffinity: &enablePAA,
-			TopologyKey:           c.AffinityTopologyKey,
-			PodAntiAffinityType:   c.AffinityPodAntiAffinityType,
-			NodeSelector:          c.AffinityNodeSelector,
-		}
-	}
-
-	for i, role := range c.ManagedRoles {
-		// The parse-time refusal is repeated for a config built without
-		// ToApplicationConfig.
-		if role.ConnectionLimit != nil && *role.ConnectionLimit == 0 {
-			return nil, postgresqlZeroConnectionLimit(fmt.Sprintf("managedRoles[%d]", i))
-		}
-		rc := cnpgv1.RoleConfiguration{
-			Name:        role.Name,
-			Comment:     role.Comment,
-			Login:       role.Login,
-			Superuser:   role.Superuser,
-			CreateDB:    role.CreateDB,
-			CreateRole:  role.CreateRole,
-			Replication: role.Replication,
-			Inherit:     role.Inherit,
-			InRoles:     role.InRoles,
-		}
-		// A nil limit stays 0 (omitempty) so the operator applies its own default.
-		if role.ConnectionLimit != nil {
-			rc.ConnectionLimit = *role.ConnectionLimit
-		}
-		// Only "absent" is written; "present" and unset leave the field for the
-		// operator to default.
-		if role.Ensure == "absent" {
-			rc.Ensure = cnpgv1.EnsureAbsent
-		}
-		if role.PasswordSecret != "" {
-			rc.PasswordSecret = &cnpgv1.LocalObjectReference{Name: role.PasswordSecret}
-		}
-		kurecnpg.AddClusterManagedRole(cluster, rc)
-	}
-
-	return cluster, nil
 }
 
 // postgresqlZeroConnectionLimit refuses a managed role's connectionLimit of 0.
@@ -1201,80 +938,4 @@ func toBarmanObjectStore(m map[string]any) (*barmanapi.BarmanObjectStoreConfigur
 		return nil, errors.Wrap(err, "unmarshal barman object store")
 	}
 	return &bos, nil
-}
-
-func (c *PostgresqlConfig) createPooler(app *stack.Application) client.Object {
-	// pgbouncer is required upstream (no omitempty), so it is always set, empty
-	// when nothing is authored.
-	pgBouncer := &cnpgv1.PgBouncerSpec{}
-	if c.PoolerPoolMode != "" {
-		pgBouncer.PoolMode = cnpgv1.PgBouncerPoolMode(c.PoolerPoolMode)
-	}
-	if len(c.PoolerParameters) > 0 {
-		pgBouncer.Parameters = c.PoolerParameters
-	}
-
-	// Anything other than "ro" is written as rw, the value launcher has always
-	// emitted for an unset type.
-	poolerType := cnpgv1.PoolerTypeRW
-	if c.PoolerType == "ro" {
-		poolerType = cnpgv1.PoolerTypeRO
-	}
-
-	pooler := kurecnpg.CreatePooler(app.Name+"-pooler", app.Namespace)
-	pooler.Spec = cnpgv1.PoolerSpec{
-		Cluster:   cnpgv1.LocalObjectReference{Name: app.Name},
-		Type:      poolerType,
-		PgBouncer: pgBouncer,
-	}
-	// A non-positive count is omitted so the operator default applies.
-	if c.PoolerInstances > 0 {
-		instances := c.PoolerInstances
-		pooler.Spec.Instances = &instances
-	}
-	return pooler
-}
-
-func (c *PostgresqlConfig) createObjectStore(app *stack.Application) client.Object {
-	store := kurecnpg.CreateObjectStore(app.Name, app.Namespace)
-	store.Spec = barmanv1.ObjectStoreSpec{
-		Configuration: barmanapi.BarmanObjectStoreConfiguration{
-			DestinationPath: c.ObjectStore.DestinationPath,
-			EndpointURL:     c.ObjectStore.EndpointURL,
-		},
-		RetentionPolicy: c.ObjectStore.RetentionPolicy,
-	}
-	if c.ObjectStore.SecretName != "" {
-		kurecnpg.SetObjectStoreS3Credentials(store, s3Credentials(c.ObjectStore.SecretName))
-	}
-	return store
-}
-
-func (c *PostgresqlConfig) createDatabase(app *stack.Application, db DatabaseEntry) client.Object {
-	database := kurecnpg.CreateDatabase(app.Name+"-"+db.Name, app.Namespace)
-	database.Spec = cnpgv1.DatabaseSpec{
-		ClusterRef: corev1.LocalObjectReference{Name: app.Name},
-		Name:       db.Name,
-		Owner:      db.Owner,
-	}
-	// Only the non-default values are written; "present"/"retain" and unset leave
-	// the field for the operator to default.
-	if db.Ensure == "absent" {
-		database.Spec.Ensure = cnpgv1.EnsureAbsent
-	}
-	if db.ReclaimPolicy == "delete" {
-		database.Spec.ReclaimPolicy = cnpgv1.DatabaseReclaimDelete
-	}
-	// An extension's ensure is always written — present unless authored absent —
-	// matching what launcher has always emitted.
-	for _, ext := range db.Extensions {
-		ensure := cnpgv1.EnsurePresent
-		if ext.Ensure == "absent" {
-			ensure = cnpgv1.EnsureAbsent
-		}
-		kurecnpg.AddDatabaseExtension(database, cnpgv1.ExtensionSpec{
-			DatabaseObjectSpec: cnpgv1.DatabaseObjectSpec{Name: ext.Name, Ensure: ensure},
-		})
-	}
-	return database
 }

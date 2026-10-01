@@ -34,10 +34,14 @@ All built-in component and trait handlers are registered automatically (via
 source), alongside the built-in lowering rules: the trait-position ones
 (`builtinTraitLoweringRules()` — currently just `expose`, registered via
 `RegisterBuiltinTraitLowering` rather than `RegisterBuiltinTrait`) and the
-component-position ones (`builtinComponentLoweringRules()` — `worker` and
-`helm`, registered via `RegisterComponentLowering`). `worker` lowers to a
-`deployment` component plus, unless `topologySpread: false`, a synthesized
-`topology-spread` trait. `helm` lowers to a `helmrelease` (plus a generated
+component-position ones (`builtinComponentLoweringRules()` — `worker`,
+`postgresql` and `helm`, registered via `RegisterComponentLowering`). `worker`
+lowers to a `deployment` component plus, unless `topologySpread: false`, a
+synthesized `topology-spread` trait. `postgresql` lowers to a `cnpg-cluster`
+(plus `cnpg-objectstore`, `cnpg-pooler` and one `cnpg-database` per database
+when authored) carrying the engine-only `cnpg-postgresql-defaults` trait, which
+is registered from `builtinEngineTraits()` via `RegisterEngineTrait`: only a rule
+may attach it, and it is not published in the handler schemas. `helm` lowers to a `helmrelease` (plus a generated
 `helmrepository` or `ocirepository` for an inline URL, shared within the document)
 or, under `delivery: template`, to a `helmtemplate`. The built-in application policy
 handlers are registered too (`builtinPolicyHandlers()` — `dependency`, `placement`,

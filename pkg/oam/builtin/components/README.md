@@ -757,7 +757,7 @@ an explicit `enablePodAntiAffinity: true`; authoring the block without it just
 supplies the two defaults above, and omitting the block entirely leaves
 `topologyKey`/`podAntiAffinityType` empty rather than defaulted (the defaults
 are applied by `parseAffinity` only once the block is present, unlike the
-`postgresql` handler, which also tracks whether the block was authored at all).
+`postgresql` component, which also tracks whether the block was authored at all).
 Each of the four sub-fields is read with a presence-reporting helper, so a
 sub-field authored with the wrong type is **rejected by name**
 (`affinity.topologyKey: must be a string, got float64`) rather than
@@ -774,7 +774,7 @@ refused by name, and an explicitly authored `podAntiAffinityType: ""` is an
 error rather than a fall back to `preferred` — the empty string reaches the
 enum check instead of being read as an absent key. An authored
 `topologyKey: ""`, by contrast, *does* fall back to the default. This is the
-same contract the `postgresql` handler's own affinity block has
+same contract the `postgresql` component's own affinity block has
 (go-kure/launcher#448). **Behavior-changing** under
 `launcher.gokure.dev/v1alpha1` (go-kure/launcher#452) for one authored shape:
 the published schema leaves `nodeSelector` values untyped, so a document
@@ -1361,7 +1361,7 @@ This three-tier effective-value enforcement applies to the seven kind
 components that call `buildResourceRequirements` on their main container
 (`webservice`, `worker`, `deployment`, `cronjob`, `job`, `statefulset`,
 `daemonset`).
-**`postgresql` is exempt**: `createCluster` copies every entry of
+**`postgresql` is exempt**: its lowering rule copies every entry of
 `c.Resources` straight onto the Cluster spec (`cnpgResourceList`) and never calls
 `buildResourceRequirements`, so it has no intrinsic tier for its existing
 direct-form checks to diverge from.
@@ -2484,10 +2484,45 @@ not part of either change.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.
+  **A component lowering rule** (`PostgresqlRule`, `postgresql_lowering.go`,
+  go-kure/launcher#281), not a dispatchable handler: it reads the properties
+  as before (`Parse`; the published schema is pinned byte for byte against
+  the former handler's, `testdata/postgresql-property-schema.json`) and emits
+  the CNPG kind components that build the same objects — a `cnpg-cluster`
+  under the component's name, a `cnpg-objectstore` under the same name (one
+  same-name sibling group) when `objectStore` is set, a `cnpg-pooler`
+  `<name>-pooler` when `pooler.enabled`, and a `cnpg-database` `<name>-<db>`
+  per `databases` entry. `replicas` and `storageSize` are written to the
+  Cluster only when authored, so the policy applies to them exactly as
+  before. The two values postgresql derived from the policy are set after
+  it by the engine-only `cnpg-postgresql-defaults` trait the rule attaches
+  to the Cluster ahead of the authored traits (`traits/README.md`):
+  `enablePDB` (`instances > 1`) and the `1Gi` storage fallback, under the
+  policy maximum with postgresql's text (`storageSize "1Gi" exceeds enforced
+  maximum "512Mi"`). Authored traits go to the Cluster only. When the
+  document orders its components with a `dependency` policy that has a
+  rule, the rule adds one making the Pooler and the Databases depend on
+  the Cluster (`<name>-dependencies`): that layout gives each component a
+  bundle of its own. Without one it adds nothing, since any dependency edge
+  switches the whole document to that layout.
+  **Behavior-changing** under `launcher.gokure.dev/v1alpha1`
+  (go-kure/launcher#281): with both `objectStore` and `pooler`, the objects
+  now come in the order Cluster, ObjectStore, Pooler (was Cluster, Pooler,
+  ObjectStore; the objects are the same). A generated `<name>-pooler` or
+  `<name>-<db>` that is already the name of another component in the
+  document is refused, naming both. The Cluster kind's policy checks now
+  apply, under its field names: the registry allowlist on the image
+  (`imageName`, derived or authored), and `instances`/`storage.size` in the
+  policy messages. Refusals the API server or the operator gave at apply
+  now come at build: a resource request above its limit, a database named
+  `postgres`, `template0`, `template1` or not a DNS-1123 subdomain, and an
+  authored `storageSize: ""` (`storageSize: must not be empty; omit it to
+  take the policy default or 1Gi`), which built a Cluster CloudNativePG's
+  webhook refuses ("Size not configured").
   The component name becomes the Cluster's name and its `cnpg.io/cluster`
   endpoint selector, so it carries cnpg-cluster's name rule: a DNS-1035
   label (no leading digit, no dot) of at most 50 characters. Any other name
-  is refused at parse time, when endpoints are collected and by `Generate`
+  is refused when the rule lowers it and when endpoints are collected
   (`postgresql name "db.main": must be a DNS-1035 label of at most 50
   characters …`). The cap also keeps both endpoint selector values, the
   name and the pooler's `<name>-pooler`, within the 63-character label-value
@@ -2501,17 +2536,18 @@ not part of either change.
   kept as a value, so without `imageName` the cluster image was
   `ghcr.io/cloudnative-pg/postgresql:` — an empty tag that only the image
   pull rejected (go-kure/launcher#539). Only an omitted or null `version`
-  takes the default. `storageSize: ""` is still copied through as authored.
+  takes the default. `storageSize: ""` is refused (above).
   Any other storage size the Cluster would carry, authored or from the
   policy default, must parse and be positive (`storageSize: quantity must be
   positive, got "0"`): CloudNativePG's webhook parses only the size, so a
   zero or negative one was admitted and its claims failed the API server's
   positive storage-request check. A policy storage-size default is checked
-  when it is applied (`policy default for storageSize: invalid quantity
+  when it is applied (`policy default for storage.size: invalid quantity
   "lots"`), as the cpu/memory defaults are. The instance count must be at
   least 1, the CRD's minimum: a replicas policy default of 0 is refused
-  (`replicas: must be >= 1, got 0 from the policy default`), and so is an
-  authored `replicas: 0` at generation (`replicas: must be >= 1, got 0`).
+  (`instances: must be >= 1, got 0 from the policy default`), and so is an
+  authored `replicas: 0` when the rule lowers it (`replicas: must be >= 1,
+  got 0`).
   **Behavior-changing** under `launcher.gokure.dev/v1alpha1`: an authored
   `replicas: 0` or a non-positive `storageSize` used to build and was then
   refused at apply; it is now refused at build (go-kure/launcher#623).
@@ -2613,11 +2649,11 @@ not part of either change.
   `connectionLimit: 0` (go-kure/launcher#659), as `cnpg-cluster` refuses it:
   CloudNativePG omits a zero `connectionLimit` from the Cluster and applies its
   default `-1`, so the role would deploy with no limit. A role that must not
-  connect sets `login: false` instead. `Generate` repeats the refusal for a
+  connect sets `login: false` instead. The lowering repeats the refusal for a
   `PostgresqlConfig` built directly rather than parsed. `Endpoints` reads
   `pooler.enabled` the same way, so it refuses the wrong type instead of
   declaring no pooler endpoint.
-  Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
+  Its rule implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
   data-plane endpoint (`cnpg.io/cluster: <component-name>` on port `5432`) so a downstream
   platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
   without hardcoding the operator selector. When `pooler.enabled` is set it declares a **second**
@@ -2655,7 +2691,9 @@ not part of either change.
   unauthored field is left for the operator's own default. `postgresql`'s
   choices — an image from `version`, `primaryUpdateStrategy: unsupervised`,
   `enablePDB` from the replica count, a `1Gi` storage fallback, pod
-  anti-affinity — are not made here. The one value it writes unasked is
+  anti-affinity — are not made here: its lowering rule writes them as this
+  kind's properties, and the trait it attaches sets the two that depend on
+  the policy (see `postgresql` above). The one value it writes unasked is
   `instances: 1`, the CRD default, because `ClusterSpec.Instances` has no
   `omitempty` and would otherwise serialize as `0`. The non-pointer blocks
   appear even when unauthored, as they do for `postgresql`: `affinity` and
@@ -2716,14 +2754,19 @@ not part of either change.
   empty string is not refused — `storage.size: ""` keeps its meaning above —
   so an empty string on a defaulted field such as `primaryUpdateStrategy` is
   still omitted.
-  `ApplyPolicy` enforces the policy `postgresql` enforces, in the same order:
+  `ApplyPolicy` enforces the policy `postgresql` enforces (postgresql lowers
+  onto this kind, so it is the same code), in this order:
   the instance-count default when `instances` is not authored (an authored
   value wins even when it equals the fallback) and its maximum; the cpu and
   memory request and limit defaults on `resources`, filling only unset
   entries, and their maxima; and the storage-size default on `storage.size`
   when neither `storage.size` nor `storage.pvcTemplate`'s storage request is
-  authored. Unlike `postgresql` there is no `1Gi` fallback: with no policy
-  default the size is left to the operator. A storage-size default that is
+  authored. With no policy default the size is left to the operator; the
+  `1Gi` fallback is postgresql's, applied after the policy by the engine-only
+  `cnpg-postgresql-defaults` trait its rule attaches
+  (`ApplyPostgresqlDefaults`: the fallback is held to the policy maximum, and
+  `enablePDB` is set from the instance count). That method is for that trait,
+  not an authoring surface. A storage-size default that is
   not a quantity is refused (`policy default for storage.size: invalid
   quantity "lots"`), as an invalid cpu or memory default is, since with no
   maximum set nothing else would parse it. So is a zero or negative one
@@ -2742,8 +2785,10 @@ not part of either change.
   (`imageName: image "…" is not from an allowed registry [...]`); an unset
   `imageName` leaves the operator's default image, which is not checked, and
   `imageCatalogRef` names a catalog object rather than an image, so it is not
-  checked either. `postgresql` does not enforce the allowlist on its image.
-  As for `postgresql`, generation refuses `hugepages-<size>`
+  checked either. A `postgresql` component always writes `imageName` (its
+  derived `ghcr.io/cloudnative-pg/postgresql:<version>` or the authored one),
+  so the allowlist applies to its image too.
+  Generation refuses `hugepages-<size>`
   in `resources` without `cpu` or `memory` after policy defaults. It also
   applies the shared parser's request/limit cross-check there
   (`resources: cpu: request 2 must not exceed limit 1`; hugepages and
@@ -2798,8 +2843,9 @@ not part of either change.
   first two and whose pods get the last two from the default Priority and
   RuntimeClass admission controllers, which refuse an authored value that
   differs from theirs. The instance count is deliberately not policed:
-  `postgresql` applies no policy to its pooler, so a maximum here would refuse,
-  once `postgresql` lowers onto this kind, a document that builds today.
+  `postgresql`, which lowers its pooler onto this kind, never applied a
+  policy to the pooler's count, so a maximum here would refuse a document
+  that built before.
   Pod-level errors name the template's own fields, as in `template.spec:
   resources cpu limit "2" exceeds enforced maximum "1"`. A `template` that lists
   no containers (labels only, say) is written with `containers: []`: the Go type
@@ -3219,10 +3265,12 @@ stays at a known value regardless of what a future constructor does.
 **`postgresql` writes every CNPG value itself (kure `v0.2.0-beta.13`).** kure's
 release-2 builder contract retired the CNPG config-struct layer
 (`cnpg.Cluster`/`Pooler`/`ObjectStore`/`Database` and their `*Options` types) that
-`postgresql` used to go through. The handler now calls the generated
-`CreateCluster`/`CreatePooler`/`CreateObjectStore`/`CreateDatabase` and assigns the
-upstream `cnpgv1` / barman-cloud structs directly, with `AddClusterManagedRole`,
-`AddDatabaseExtension` and `SetObjectStoreS3Credentials` where kure admits them.
+`postgresql` used to go through. The handler then called the generated
+`CreateCluster`/`CreatePooler`/`CreateObjectStore`/`CreateDatabase` and assigned the
+upstream `cnpgv1` / barman-cloud structs directly. Since go-kure/launcher#281 the
+`postgresql` rule builds those structs as the properties of the `cnpg-*` kind
+components it lowers onto, whose `Generate` calls the same constructors, and
+`enablePDB` comes from the `cnpg-postgresql-defaults` trait.
 The values that layer used to inject are written explicitly, so the emitted
 manifests are unchanged byte for byte: `enablePDB` (true only for more than one
 instance), `primaryUpdateStrategy: unsupervised`, the `ACCESS_KEY_ID` /

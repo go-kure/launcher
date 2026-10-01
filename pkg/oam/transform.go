@@ -102,10 +102,14 @@ type autoHealthCheckEmitter interface {
 // CapabilityDefinition purposes. Use RegisterBuiltinTrait for launcher's own
 // built-in handlers; built-in types are never checked against CapabilityDefinition files.
 type Transformer struct {
-	componentHandlers  map[string]ComponentHandler
-	traitHandlers      map[string]TraitHandler
-	policyHandlers     map[string]PolicyHandler
-	builtinTraitTypes  map[string]bool
+	componentHandlers map[string]ComponentHandler
+	traitHandlers     map[string]TraitHandler
+	policyHandlers    map[string]PolicyHandler
+	builtinTraitTypes map[string]bool
+	// engineTraitTypes are the trait types registered with RegisterEngineTrait:
+	// dispatched from traitHandlers like any other, but only when a lowering
+	// rule attached them, and never listed.
+	engineTraitTypes   map[string]bool
 	capabilityDefs     map[string]*CapabilityDefinition
 	strictCapabilities bool
 	warnHandler        func(string)
@@ -143,6 +147,7 @@ func NewTransformer(componentHandlers map[string]ComponentHandler, traitHandlers
 		traitHandlers:          make(map[string]TraitHandler),
 		policyHandlers:         make(map[string]PolicyHandler),
 		builtinTraitTypes:      make(map[string]bool),
+		engineTraitTypes:       make(map[string]bool),
 		docLoweringRules:       make(map[string]DocumentLoweringRule),
 		componentLoweringRules: make(map[string]ComponentLoweringRule),
 		traitLoweringRules:     make(map[string]TraitLoweringRule),
@@ -222,6 +227,9 @@ func (t *Transformer) HandlerSchemas() HandlerSchemaSet {
 		}
 	}
 	for name, h := range t.traitHandlers {
+		if t.engineTraitTypes[name] {
+			continue
+		}
 		if p, ok := h.(PropertySchemaProvider); ok {
 			set.Traits[name] = p.PropertySchema()
 		}
@@ -294,6 +302,9 @@ func (t *Transformer) HandlerContracts() HandlerContractSet {
 		}
 	}
 	for name, h := range t.traitHandlers {
+		if t.engineTraitTypes[name] {
+			continue
+		}
 		if p, ok := h.(ContractDescriber); ok {
 			set.Traits[name] = p.ContractMetadata()
 		}
@@ -331,6 +342,26 @@ func (t *Transformer) RegisterPolicy(typeName string, h PolicyHandler) {
 func (t *Transformer) RegisterBuiltinTrait(typeName string, h TraitHandler) {
 	t.RegisterTrait(typeName, h)
 	t.builtinTraitTypes[typeName] = true
+}
+
+// RegisterEngineTrait registers a trait handler that only a lowering rule may
+// attach: an engine-only trait. It is RegisterBuiltinTrait (the same collision
+// checks; never checked against CapabilityDefinition files) with two
+// differences. A document that authors the type is refused — it is accepted only
+// on a trait a schema-declaring rule emitted (Trait.synthesized), at authored
+// validation (validateAuthoredTrait) and again at dispatch (applyEntryTraits).
+// And the type is not published: HandlerSchemas and HandlerContracts leave it out, so
+// no schema or description lists it as something to author.
+func (t *Transformer) RegisterEngineTrait(typeName string, h TraitHandler) {
+	t.RegisterBuiltinTrait(typeName, h)
+	t.engineTraitTypes[typeName] = true
+}
+
+// engineOnlyTraitError is the refusal of an engine-only trait type that a
+// document authored, or that reached dispatch without a lowering rule having
+// synthesized it.
+func engineOnlyTraitError(traitType string) error {
+	return errors.Errorf("trait type %q is engine-only: a lowering rule attaches it, and a document may not author it", traitType)
 }
 
 // SetCapabilityDefs replaces the set of loaded CapabilityDefinition schemas.
@@ -946,6 +977,9 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 			handler := t.findTraitHandler(trait.Type)
 			if handler == nil {
 				return &TransformError{Message: fmt.Sprintf("no handler for trait type %q", trait.Type)}
+			}
+			if t.engineTraitTypes[trait.Type] && !trait.synthesized {
+				return &TransformError{Message: fmt.Sprintf("component %q", entry.component.Name), Cause: engineOnlyTraitError(trait.Type)}
 			}
 
 			// A sealed trait was emitted by a lowering rule, which already merged

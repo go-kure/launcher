@@ -31,7 +31,7 @@ func TestApplyPolicy_NegativeResourceDefaultRefused(t *testing.T) {
 		{"job", &components.JobHandler{}, image},
 		{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "0 2 * * *"}},
 		{"webservice", &components.WebserviceHandler{}, image},
-		{"postgresql", &components.PostgresqlHandler{}, map[string]any{}},
+		{"postgresql", postgresqlViaRule{}, map[string]any{}},
 	}
 	defaults := []struct {
 		field  string

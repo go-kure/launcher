@@ -286,7 +286,6 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"daemonset":    &components.DaemonsetHandler{},
 		"statefulset":  &components.StatefulsetHandler{},
 		"service":      &components.ServiceHandler{},
-		"postgresql":   &components.PostgresqlHandler{},
 		"cnpg-cluster": &components.CnpgClusterHandler{},
 		"helmchart":    &components.HelmchartHandler{},
 		"helmrelease":  &components.HelmReleaseHandler{},
@@ -352,8 +351,19 @@ func builtinTraitLoweringRules() map[string]oam.TraitLoweringRule {
 // those tests exactly like a dispatchable handler is.
 func builtinComponentLoweringRules() map[string]oam.ComponentLoweringRule {
 	return map[string]oam.ComponentLoweringRule{
-		"worker": components.WorkerRule{},
-		"helm":   components.HelmRule{},
+		"worker":     components.WorkerRule{},
+		"helm":       components.HelmRule{},
+		"postgresql": components.PostgresqlRule{},
+	}
+}
+
+// builtinEngineTraits returns the built-in engine-only trait handlers keyed by
+// type: traits a lowering rule attaches and a document may not author
+// (oam.Transformer.RegisterEngineTrait). They are kept out of
+// builtinTraitHandlers, which lists the traits a document may author.
+func builtinEngineTraits() map[string]oam.TraitHandler {
+	return map[string]oam.TraitHandler{
+		"cnpg-postgresql-defaults": &traits.PostgresqlDefaultsHandler{},
 	}
 }
 
@@ -382,7 +392,9 @@ func newBuiltinTransformer() *oam.Transformer {
 	// "topology-spread" trait) for DeploymentHandler/TopologySpreadHandler to
 	// dispatch on the next fixpoint round. "helm" likewise lowers into the
 	// "helmrelease" or "helmtemplate" terminal, plus a generated Flux source for
-	// an inline URL. Neither may also appear in
+	// an inline URL, and "postgresql" into the CNPG kinds ("cnpg-cluster" with the
+	// engine-only "cnpg-postgresql-defaults" trait, "cnpg-objectstore",
+	// "cnpg-pooler", "cnpg-database"). None may also appear in
 	// builtinComponentHandlers — RegisterComponentLowering panics on that
 	// collision.
 	for _, r := range builtinComponentLoweringRules() {
@@ -390,6 +402,11 @@ func newBuiltinTransformer() *oam.Transformer {
 	}
 	for name, h := range builtinTraitHandlers() {
 		t.RegisterBuiltinTrait(name, h)
+	}
+	// "cnpg-postgresql-defaults" is attached by the "postgresql" rule to the
+	// cnpg-cluster it emits; a document authoring it is refused.
+	for name, h := range builtinEngineTraits() {
+		t.RegisterEngineTrait(name, h)
 	}
 	for name, h := range builtinPolicyHandlers() {
 		t.RegisterPolicy(name, h)

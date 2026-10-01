@@ -57,18 +57,6 @@ spec:
   storage:
     size: 10Gi
 ---
-apiVersion: postgresql.cnpg.io/v1
-kind: Pooler
-metadata:
-  name: postgres-pooler
-  namespace: default
-spec:
-  cluster:
-    name: postgres
-  pgbouncer:
-    poolMode: session
-  type: ro
----
 apiVersion: barmancloud.cnpg.io/v1
 kind: ObjectStore
 metadata:
@@ -88,3 +76,15 @@ spec:
   instanceSidecarConfiguration:
     resources: {}
   retentionPolicy: 14d
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: postgres-pooler
+  namespace: default
+spec:
+  cluster:
+    name: postgres
+  pgbouncer:
+    poolMode: session
+  type: ro

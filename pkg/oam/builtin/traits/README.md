@@ -12,7 +12,11 @@ in `pkg/cmd/kurel`) — it lowers into a terminal `ingress` or `httproute` trait
 than building a resource itself, so it is never also present in the dispatchable
 trait-handler map (a lowerable type and a dispatchable handler type are mutually
 exclusive by construction; see the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s
-Lowering section for the general mechanism). Some traits are **capability-aware**
+Lowering section for the general mechanism). One handler is **engine-only**:
+`cnpg-postgresql-defaults` is registered via `RegisterEngineTrait`
+(`builtinEngineTraits()` in `pkg/cmd/kurel`), so only a lowering rule may attach it —
+a document that authors it is refused — and it is not published in the handler schemas
+or contracts. Some traits are **capability-aware**
 (`CapabilityRequired`) and draw platform choices (issuer, gateway, secret store) from
 the `ClusterProfile` — this applies to both dispatchable handlers and lowering rules.
 Every built-in trait handler also implements `oam.PropertySchemaProvider`
@@ -531,7 +535,25 @@ handler runs — rather than building a resource itself — implements
 `RegisterTraitLowering`; `expose` (`expose_rule.go`, above) is the built-in example.
 See the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s Lowering
 section for the full mechanism (registration, the fixpoint, and
-`PropertySchemaProvider`/`CapabilityAware` enforcement).
+`PropertySchemaProvider`/`CapabilityAware` enforcement). A handler meant to be
+attached only by a lowering rule, never authored, is registered via
+`RegisterEngineTrait` instead of `RegisterBuiltinTrait` (see the next section).
+
+## The cnpg-postgresql-defaults trait (engine-only)
+
+`cnpg-postgresql-defaults` sets the two `Cluster` values `postgresql` derives after
+the policy, which its lowering rule cannot write because lowering runs before the
+policy: `enablePDB` (true for more than one instance, from the post-policy
+`instances`), and a `1Gi` storage size when neither the document nor a policy
+default gave one, held to the policy storage maximum (`storageSize "1Gi" exceeds
+enforced maximum "512Mi"`). The `postgresql` rule attaches it to the `cnpg-cluster`
+component it emits, ahead of the authored traits; the work is
+`CnpgClusterConfig.ApplyPostgresqlDefaults` in `pkg/oam/builtin/components`. It
+refuses a Cluster whose `enablePDB` is already set and a component whose config is
+not a `cnpg-cluster`. It declares an empty schema and is engine-only
+(`RegisterEngineTrait`): a document that authors it, on `postgresql`, on
+`cnpg-cluster` or anywhere else, is refused, and it is not in the published handler
+schemas or contracts.
 
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
 for the full config-field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)

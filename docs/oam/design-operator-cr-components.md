@@ -198,12 +198,15 @@ identical endpoint, which a test pins byte for byte. `cnpg-database` and
 
 A semantic component keeps its curated authoring surface and its opinions, and
 lowers onto kind components through the lowering engine (see the Lowering
-Engine design). The follow-up change under
-go-kure/launcher#281 does this for `postgresql`: its rule expands one
-`postgresql` component into a `cnpg-cluster` (and, where enabled, the kinds from
-go-kure/launcher#573), writing the image, storage fallback and update strategy as
-kind properties and attaching the post-policy `enablePDB` trait. The generated
-output is intended to stay identical.
+Engine design). go-kure/launcher#281 does this for `postgresql`: its rule
+expands one `postgresql` component into a `cnpg-cluster` (and, where enabled, a
+`cnpg-objectstore` of the same name, a `cnpg-pooler` and one `cnpg-database` per
+database), writing the image and update strategy as kind properties. The two
+values that depend on the policy, which runs after lowering, come from the
+engine-only `cnpg-postgresql-defaults` trait the rule attaches to the Cluster:
+`enablePDB` from the post-policy instance count, and the `1Gi` storage fallback,
+held to the policy maximum. The generated objects are unchanged; with both an
+object store and a pooler, the ObjectStore now precedes the Pooler.
 
 ## Consequences
 
@@ -220,8 +223,6 @@ output is intended to stay identical.
 
 ## What this does not cover
 
-- Lowering `postgresql` onto `cnpg-cluster`, and the `enablePDB` trait: the
-  follow-up change under go-kure/launcher#281.
 - Health checks for `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore`: their
   status carries no condition kstatus reads, so a check would report the object
   ready without waiting on anything. `postgresql` checks only its `Cluster`.
@@ -235,15 +236,14 @@ output is intended to stay identical.
   `cnpg-objectstore` run only the request/limit and hugepages checks, as
   `cnpg-cluster` does; resource-name validity, non-negative quantities, whole
   extended resources and hugepage divisibility are left to the API server.
-- `postgresql` does not apply the registry allowlist to its image, while
-  `cnpg-cluster` applies it to `imageName`, so a lowered `postgresql` whose
-  image comes from a registry outside the list would be refused: the follow-up
-  change decides that. `imageCatalogRef` names a catalog object rather than an
-  image and is not checked, nor is the operator's default image when
-  `imageName` is unset.
-- `postgresql` forwards some blocks into the same typed structs without the
-  omitted-zero refusal, so an authored `0` or `false` there can still be
-  dropped; `postgresql` is unchanged here.
+- `cnpg-cluster` applies the registry allowlist to `imageName`, and a lowered
+  `postgresql` always writes it (derived from `version` or authored), so since
+  go-kure/launcher#281 a `postgresql` image from a registry outside the list is
+  refused. `imageCatalogRef` names a catalog object rather than an image and is
+  not checked, nor is the operator's default image when `imageName` is unset.
+- `postgresql` builds its kind properties from the same typed structs, so the
+  omitted-zero refusal does not see a `0` or `false` its own parse already
+  dropped; its parse decides those, as before.
 - An authored empty string on an `omitempty` field with a CRD default (for
   example `primaryUpdateStrategy: ""`) is still omitted, and the operator
   applies its default; the refusal covers numbers and booleans only.

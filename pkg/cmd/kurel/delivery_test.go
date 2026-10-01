@@ -49,6 +49,9 @@ var deliveryScenarios = []deliveryScenario{
 	{name: "flat"},                        // one bundle, no --oci-tag
 	{name: "hierarchical", tag: "v1.0.0"}, // umbrella + one child per tier
 	{name: "dependency", tag: "v1.0.0"},   // per-component bundles with dependsOn, via the built-in dependency policy
+	// postgresql's pooler and database in their own bundles, each after the
+	// Cluster's, through the dependency policy the postgresql rule emits.
+	{name: "postgresql-dependency", tag: "v1.0.0"},
 }
 
 // runKurel runs the kurel command with args and returns its stdout and the
