@@ -468,7 +468,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"bucket", "gitrepository", "helmrepository", "ocirepository",
 	}
 	sort.Strings(wantHandlers)
-	wantRules := []string{"worker"}
+	wantRules := []string{"helm", "worker"}
 
 	got := make([]string, 0, len(builtinComponentHandlers()))
 	for name, h := range builtinComponentHandlers() {

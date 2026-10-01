@@ -66,7 +66,8 @@ reads it.
 | `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`. Emits nothing else — see below. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
-| `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. |
+| `helm` | via `helmrelease` + a generated `helmrepository`/`ocirepository`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per URL within a document. See below. |
+| `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | Helm via Flux (`native`) or client-side `template`. The composite `helm` replaces (go-kure/launcher#350). |
 | `helmrelease` | HelmRelease (+values ConfigMap) | Kind-named: the full Flux `HelmReleaseSpec` plus `valuesMode`, against an existing source. |
 | `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. The composite's `delivery: template`, authorable directly — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
@@ -1898,6 +1899,53 @@ not part of either change.
   server-side, so writing one here would fight it. Deployment, StatefulSet and
   DaemonSet get no such server-side defaulting and so are written explicitly —
   see Conventions.
+- **helm** (go-kure/launcher#349, `helm.go`) — the role-named Helm component: a
+  component-position lowering rule (`HelmRule`), not a handler, that lowers to the
+  kind-named terminals below. Properties: `chart`, `version`, `delivery`
+  (`flux` default | `template`), `source` (inline `url` with optional `kind`, or a
+  reference `{name, kind, namespace}`), `values`, `valuesMode` (`inline` |
+  `configMap`), and the HelmRelease keys `interval`, `releaseName`,
+  `targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
+  - `delivery: flux` emits a `helmrelease` under the authored name, with the
+    authored traits and annotations. A HelmRepository source becomes
+    `chart.spec.sourceRef`; an OCIRepository or HelmChart source becomes
+    `chartRef`. `values` and the HelmRelease keys are forwarded verbatim, so their
+    shape is the `helmrelease` terminal's to check. `valuesMode` is forwarded only
+    when authored: the rule has no registration-time default.
+  - An inline `url` also emits the source: a `helmrepository` with only the URL
+    for `http(s)://`, or an `ocirepository` with `ref.tag: <version>` for `oci://`.
+    It is named `<document>-source-<digest>`, where the 10-hex digest is taken
+    over the content identity: `helm:<url>`, or `oci:<url>:<version>`.
+    Components of one document with the same identity share one source; the
+    first emits it and the rest only reference it (`NameAllocator.NameOrAdopt`).
+    Different documents never share or collide, because the document name is part
+    of the source name. The source carries no traits and keeps its terminal's
+    interval default rather than the release `interval`. The source terminal's
+    registry allowlist (`ApplyPolicy`) and auto health check apply to it.
+  - **The generated source deploys in the `infra` tier**, whatever the release's
+    tier (`pkg/oam` classifies a rule-emitted `helmrepository`/`ocirepository`
+    that way). A release moved into `infra` by a tier annotation or a `placement`
+    policy therefore never sits in an earlier tier than its source. If it did, the
+    release's health check would hold back the source's tier, and the source
+    would never be applied.
+  - `delivery: template` emits a `helmtemplate` with the URL, its resolved kind,
+    `chart`, `version` and `values`. No source is emitted, and an authored
+    `valuesMode: inline` is dropped. The rule refuses everything a client-side
+    render cannot honour, each with a `helm:` message:
+    - a source reference, and `valuesMode: configMap`;
+    - an OCI source without `version`;
+    - each HelmRelease key, `releaseName` and `targetNamespace` included, which
+      `helmtemplate` does not accept.
+  - Strict, unlike `helmchart`. An undeclared key at the top level or inside
+    `source` is refused, and so are:
+    - `delivery: native`;
+    - `source.namespace` with an inline URL;
+    - `chart` with an OCIRepository or HelmChart source;
+    - `version` with a referenced OCIRepository or HelmChart source, which pins
+      its own.
+
+  An authored component already named like a generated source fails the build
+  as a duplicate component name.
 - **helmchart** — `chart`, `version`, `delivery` (`native`|`template`), `source`
   (inline `url` or `{name,kind}` ref), `values`/`valuesFrom`, `valuesMode`
   (`inline` default | `configMap`), `driftDetection`, `install.crds`/`upgrade.crds`.

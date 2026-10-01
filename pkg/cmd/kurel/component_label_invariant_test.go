@@ -217,6 +217,11 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		"chart": map[string]any{"spec": map[string]any{"chart": "app",
 			"sourceRef": map[string]any{"kind": "HelmRepository", "name": "example"}}},
 		"valuesMode": "configMap", "values": map[string]any{"replicaCount": 2}}, labelled: true},
+	// Lowers to the helmrelease terminal above plus a generated HelmRepository;
+	// the values ConfigMap is again the one labelled object.
+	"helm": {props: map[string]any{"chart": "app",
+		"source":     map[string]any{"url": "https://charts.example.com"},
+		"valuesMode": "configMap", "values": map[string]any{"replicaCount": 2}}, labelled: true},
 	"passthrough": {props: map[string]any{"object": map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "data": map[string]any{"k": "v"}}}},
 	"crd": {props: map[string]any{"inline": `apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition

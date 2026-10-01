@@ -51,6 +51,7 @@ var defaultTierMap = map[string]Tier{
 	"worker":       TierApps,
 	"cronjob":      TierApps,
 	"helmchart":    TierApps,
+	"helm":         TierApps,
 	"helmrelease":  TierApps,
 	"helmtemplate": TierApps,
 	"daemonset":    TierInfra,
@@ -80,8 +81,20 @@ func ClassifyComponent(c *Component) (Tier, error) {
 	return ClassifyComponentWithDomain(c, DefaultDomain)
 }
 
+// generatedSourceTypes are the Flux source component types a lowering rule emits on its
+// consumers' behalf (the helm rule's helmrepository and ocirepository). A rule-emitted
+// (synthesized) component of one of these types deploys in TierInfra, the earliest tier:
+// the consumers keep their own tier, from an annotation or a placement policy, and a source
+// in a later tier than a consumer would never be applied, since that tier waits on the
+// consumer's health check. An authored source keeps defaultTierMap's tier.
+var generatedSourceTypes = map[string]bool{
+	"helmrepository": true,
+	"ocirepository":  true,
+}
+
 // ClassifyComponentWithDomain returns the deployment tier for the given component, reading
-// the "<domain>/tier" override annotation. It checks that annotation first, then the
+// the "<domain>/tier" override annotation. It checks that annotation first, then whether
+// the component is a rule-generated source (generatedSourceTypes, TierInfra), then the
 // defaultTierMap, and falls back to TierApps. A nil component is an error; an empty domain
 // uses DefaultDomain; an invalid domain is an error (validated here independently, since
 // this is an exported helper callable outside the transform pipeline).
@@ -99,6 +112,9 @@ func ClassifyComponentWithDomain(c *Component, domain string) (Tier, error) {
 			return "", errors.Errorf("invalid tier annotation %q on component %q: must be one of infra, services, apps", v, c.Name)
 		}
 		return tier, nil
+	}
+	if c.synthesized && generatedSourceTypes[c.Type] {
+		return TierInfra, nil
 	}
 	if tier, ok := defaultTierMap[c.Type]; ok {
 		return tier, nil

@@ -237,6 +237,16 @@ Kustomization waits until the source is ready. Because the GVK is a `*.toolkit.f
 and each config accepts a Flux namespace, the check moves to that namespace with the object.
 They sit in `defaultTierMap` at `TierApps`, like `oci` and `helmchart`.
 
+The exception is a `helmrepository` or `ocirepository` that a lowering rule emitted
+(`Component.synthesized`): `ClassifyComponentWithDomain` places it in `TierInfra`, after
+any tier annotation and before `defaultTierMap`. The `helm` rule (go-kure/launcher#349)
+emits such a source for the releases that read it. Those releases keep their own tier, and
+a tier annotation or a `placement` policy may move them into `infra`. A source in a later
+tier than its consumer would never be applied, because each tier waits on the health checks
+of the tier before it, including the consumer's. In the earliest tier, the source never
+follows a consumer, and a consumer that shares its tier is retried by helm-controller until
+the source is ready. An authored source keeps `defaultTierMap`'s tier.
+
 A listed type can still decline its check per document by implementing
 `EmitsAutoHealthCheck() bool`. `job` uses it for `suspend: true` — a suspended Job creates no
 pods, so it reaches neither `Complete` nor `Failed` and the wait would block for exactly as
