@@ -126,6 +126,22 @@ func (passThroughTraitRule) LowerTrait(trait *Trait, _ LoweringContext) (Lowerin
 	return LoweringResult{Components: []Component{{Name: "web", Type: "reserved-sink", Properties: trait.Properties}}}, nil
 }
 
+// traitWrappingComponentRule declares no schema and copies its authored properties
+// into a pass-through-sidecar trait on the component it emits. That trait is sealed,
+// as every rule-emitted trait is, though nothing checked what it carries.
+type traitWrappingComponentRule struct{}
+
+func (traitWrappingComponentRule) ComponentType() string { return "trait-wrapping" }
+
+func (traitWrappingComponentRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{
+		Name:       "main",
+		Type:       "reserved-sink",
+		Properties: map[string]any{"image": "nginx"},
+		Traits:     []Trait{{Type: "pass-through-sidecar", Properties: comp.Properties}},
+	}}}, nil
+}
+
 // retypingDocRule rebuilds the first component by value as a reserved-sink,
 // copying its authored properties.
 type retypingDocRule struct{}
@@ -315,6 +331,19 @@ func TestTransform_SchemaLessTraitRulePassThroughIsRejected(t *testing.T) {
 	app.Spec.Components[0].Name = "main"
 	app.Spec.Components[0].Traits = []Trait{{Type: "pass-through-sidecar", Properties: authoredNetworkPolicy()}}
 	_, err := tr.Transform(app, TransformContext{})
+	expectPlatformReserved(t, err)
+}
+
+// TestTransform_SchemaLessTraitRuleOverSealedTraitIsRejected: a sealed trait is
+// rule output, not checked input. A schema-less component rule copies an authored
+// reserved value into a sealed trait, and a schema-less trait rule copies it into a
+// component; that component is not synthesized, so the handler rejects the value.
+func TestTransform_SchemaLessTraitRuleOverSealedTraitIsRejected(t *testing.T) {
+	tr := reservedSinkTransformer()
+	tr.RegisterComponentLowering(traitWrappingComponentRule{})
+	tr.RegisterTraitLowering(passThroughTraitRule{})
+
+	_, err := tr.Transform(singleComponentApp("Application", "trait-wrapping", authoredNetworkPolicy()), TransformContext{})
 	expectPlatformReserved(t, err)
 }
 
