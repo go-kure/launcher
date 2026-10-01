@@ -66,6 +66,13 @@ var defaultTierMap = map[string]Tier{
 	"ocirepository":  TierApps,
 	"gitrepository":  TierApps,
 	"bucket":         TierApps,
+
+	// The CloudNativePG kind components beside cnpg-cluster
+	// (go-kure/launcher#573) sit with it and with postgresql, which emits the
+	// same Pooler, Database and ObjectStore kinds.
+	"cnpg-pooler":      TierServices,
+	"cnpg-database":    TierServices,
+	"cnpg-objectstore": TierServices,
 }
 
 // validTiers is the set of valid tier values for annotation validation.

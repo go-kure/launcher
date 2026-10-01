@@ -1,0 +1,28 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: postgres-orders
+  namespace: default
+spec:
+  allowConnections: true
+  cluster:
+    name: postgres
+  connectionLimit: 50
+  databaseReclaimPolicy: delete
+  encoding: UTF8
+  ensure: present
+  extensions:
+  - ensure: present
+    name: pgvector
+    version: 0.8.0
+  icuLocale: en-US
+  isTemplate: false
+  localeProvider: icu
+  name: orders
+  owner: orders
+  schemas:
+  - ensure: present
+    name: reporting
+    owner: orders
+  tablespace: pg_default
+  template: template0

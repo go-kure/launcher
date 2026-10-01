@@ -1,0 +1,12 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres-backups
+    type: cnpg-objectstore
+    properties:
+      configuration:
+        destinationPath: s3://backups/postgres

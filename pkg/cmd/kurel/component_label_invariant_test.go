@@ -206,6 +206,12 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// CloudNativePG admits a Cluster name of at most 50 characters.
 	"cnpg-cluster": {props: map[string]any{"storage": map[string]any{"size": "10Gi"}},
 		nameBound: 50, longRefusal: "must be a DNS-1035 label of at most 50 characters"},
+	// The other CloudNativePG kinds also run no pods of their own. CloudNativePG
+	// names the Pooler's Service after it, so its name is a DNS-1035 label.
+	"cnpg-pooler": {props: map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}},
+		longRefusal: "must be a DNS-1035 label of at most 63 characters"},
+	"cnpg-database":    {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app", "owner": "app"}},
+	"cnpg-objectstore": {props: map[string]any{"configuration": map[string]any{"destinationPath": "s3://backups/db"}}},
 	"helmchart": {props: map[string]any{"version": "v1.17.2",
 		"source": map[string]any{"kind": "OCIRepository", "url": "oci://ghcr.io/example/charts/app"}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is

@@ -1,0 +1,14 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres-orders
+    type: cnpg-database
+    properties:
+      cluster:
+        name: postgres
+      name: orders
+      owner: orders

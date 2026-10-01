@@ -1245,6 +1245,11 @@ func detectCycles(deps map[string][]string) error {
 // for `type: oci`, which Flux treats as a static object with no artifact, so
 // there is no reconcile to wait on. The GVK is a *.toolkit.fluxcd.io kind, so
 // the check follows the CR to the Flux namespace when one is set.
+//
+// cnpg-pooler, cnpg-database and cnpg-objectstore (go-kure/launcher#573) are
+// not listed: the Pooler, Database and ObjectStore statuses carry no condition
+// kstatus reads, so a check would report Current without waiting on anything.
+// postgresql, which emits the same kinds, checks only its Cluster.
 var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"webservice":   {"apps/v1", "Deployment"},
 	"worker":       {"apps/v1", "Deployment"},

@@ -1,0 +1,44 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: postgres-pooler-ro
+  namespace: default
+spec:
+  cluster:
+    name: postgres
+  deploymentStrategy:
+    rollingUpdate:
+      maxUnavailable: 1
+    type: RollingUpdate
+  instances: 2
+  monitoring:
+    enablePodMonitor: true
+  pgbouncer:
+    parameters:
+      default_pool_size: "20"
+      max_client_conn: "1000"
+    paused: false
+    pg_hba:
+    - host all all 10.0.0.0/8 scram-sha-256
+    poolMode: transaction
+  serviceAccountName: pooler
+  serviceTemplate:
+    metadata:
+      labels:
+        team: orders
+    spec:
+      type: ClusterIP
+  template:
+    metadata:
+      labels:
+        team: orders
+    spec:
+      containers:
+      - name: pgbouncer
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 64Mi
+  type: ro

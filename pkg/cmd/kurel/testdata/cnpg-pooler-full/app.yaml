@@ -1,0 +1,48 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: test-db
+  namespace: default
+spec:
+  components:
+  - name: postgres-pooler-ro
+    type: cnpg-pooler
+    properties:
+      cluster:
+        name: postgres
+      type: ro
+      instances: 2
+      pgbouncer:
+        poolMode: transaction
+        parameters:
+          max_client_conn: "1000"
+          default_pool_size: "20"
+        pg_hba:
+        - host all all 10.0.0.0/8 scram-sha-256
+        paused: false
+      template:
+        metadata:
+          labels:
+            team: orders
+        spec:
+          containers:
+          - name: pgbouncer
+            resources:
+              requests:
+                cpu: 100m
+                memory: 64Mi
+              limits:
+                memory: 128Mi
+      deploymentStrategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxUnavailable: 1
+      monitoring:
+        enablePodMonitor: true
+      serviceTemplate:
+        metadata:
+          labels:
+            team: orders
+        spec:
+          type: ClusterIP
+      serviceAccountName: pooler
