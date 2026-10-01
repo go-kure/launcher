@@ -9,6 +9,7 @@ import (
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	"github.com/go-kure/kure/pkg/stack"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -145,6 +146,9 @@ func TestCnpgPoolerHandler_Refusals(t *testing.T) {
 		{"null unknown key", with("replicas", nil), `unknown field "replicas"`},
 		{"misspelt nested key", with("pgbouncer", map[string]any{"poolMod": "session"}), `unknown field "poolMod"`},
 		{"wrong scalar type", with("instances", "2"), "cannot unmarshal string"},
+		{"template ephemeral containers",
+			with("template", map[string]any{"spec": map[string]any{"containers": []any{}, "ephemeralContainers": []any{map[string]any{"name": "debug"}}}}),
+			"template.spec.ephemeralContainers: not supported"},
 		{"two spellings of one field",
 			map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}, "type": "rw", "Type": "ro"},
 			"sets the same field as"},
@@ -321,6 +325,10 @@ func TestCnpgPoolerConfig_ApplyPolicy(t *testing.T) {
 // of the parse-time refusals, for a config built directly in Go.
 func TestCnpgPoolerConfig_GenerateRevalidates(t *testing.T) {
 	ok := cnpgv1.PoolerSpec{Cluster: cnpgv1.LocalObjectReference{Name: "db"}, PgBouncer: &cnpgv1.PgBouncerSpec{}}
+	ephemeral := *ok.DeepCopy()
+	ephemeral.Template = &cnpgv1.PodTemplateSpec{Spec: corev1.PodSpec{
+		EphemeralContainers: []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug"}}},
+	}}
 	for _, tt := range []struct {
 		name, app string
 		spec      cnpgv1.PoolerSpec
@@ -330,6 +338,7 @@ func TestCnpgPoolerConfig_GenerateRevalidates(t *testing.T) {
 		{"no cluster", "db-pooler", cnpgv1.PoolerSpec{PgBouncer: &cnpgv1.PgBouncerSpec{}}, "cluster.name: required"},
 		{"cluster named like the pooler", "db", ok, "a pooler cannot have the same name as its cluster"},
 		{"no pgbouncer", "db-pooler", cnpgv1.PoolerSpec{Cluster: cnpgv1.LocalObjectReference{Name: "db"}}, "pgbouncer: required"},
+		{"template ephemeral containers", "db-pooler", ephemeral, "template.spec.ephemeralContainers: not supported"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &components.CnpgPoolerConfig{Name: tt.app, Namespace: "data", Spec: tt.spec}

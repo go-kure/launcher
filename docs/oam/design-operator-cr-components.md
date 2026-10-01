@@ -58,9 +58,10 @@ pointer and `containers` has no `omitempty`, so a template that lists no
 containers would carry `containers: null`, which the API server prunes before
 checking the CRD's required list. `cnpg-pooler` writes `containers: []`, which
 the operator reads as it reads an omitted spec, adding its `pgbouncer`
-container. A second derived test pins the scalar cases (`instances`, `ensure`)
-the same way as the omitted-zero list below: the CRD's scalar defaults crossed
-with the Go type's non-pointer fields without `omitempty`. The `containers`
+container. A second derived test pins the `Database` `ensure` cases the same
+way as the omitted-zero list below: the CRD's scalar defaults crossed with the
+Go type's non-pointer fields without `omitempty`. `cnpg-cluster`'s
+`instances` default is pinned by its own test. The `containers`
 case is a list, outside that derivation, and is pinned by its own
 serialization test.
 
@@ -158,8 +159,10 @@ the workload kinds apply to their pod (host namespaces, hostPath volumes,
 privilege, host-process, capabilities, the registry allowlist on each authored
 container image and the cpu and memory maxima), plus the storage maximum on a
 generic ephemeral volume's claim, as `cnpg-cluster` caps its ephemeral volume
-template, and an authored `pgbouncer.image` gets the registry allowlist. The
-instance count is not
+template, and an authored `pgbouncer.image` gets the registry allowlist. A
+template declaring ephemeral containers is refused at parse, as the workload
+kinds refuse them: the operator copies the template into a Deployment, whose
+pod template cannot carry them. The instance count is not
 policed, neither by a replica default nor by a maximum: `postgresql` applies no
 policy to its pooler today, so a maximum on the kind would refuse, once
 `postgresql` lowers onto it, a document that builds today, and break the
@@ -226,6 +229,10 @@ output is intended to stay identical.
   refuses because the shared Barman type invites it. `postgresql` still
   forwards its `objectStore.serverName` into the `ObjectStore` it emits;
   `postgresql` is unchanged here.
+- Of the shared resource parser's per-entry rules, `cnpg-pooler` and
+  `cnpg-objectstore` run only the request/limit and hugepages checks, as
+  `cnpg-cluster` does; resource-name validity, non-negative quantities, whole
+  extended resources and hugepage divisibility are left to the API server.
 - `postgresql` does not apply the registry allowlist to its image, while
   `cnpg-cluster` applies it to `imageName`, so a lowered `postgresql` whose
   image comes from a registry outside the list would be refused: the follow-up
