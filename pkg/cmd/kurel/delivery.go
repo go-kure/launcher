@@ -14,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/kustomize/kyaml/resid"
+	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
 
 	kio "github.com/go-kure/kure/pkg/io"
 	"github.com/go-kure/kure/pkg/stack"
@@ -268,6 +270,9 @@ func generateDelivery(cluster *stack.Cluster, opts deliveryOptions) (*deliveryOu
 		}
 		out.artifacts = append(out.artifacts, a)
 	}
+	if err := out.checkKustomizeBuilds(); err != nil {
+		return nil, err
+	}
 	if err := out.checkCollisions(); err != nil {
 		return nil, err
 	}
@@ -308,12 +313,11 @@ func (id objectIdentity) String() string {
 //     a configmap trait of one name): each unit's Kustomization would apply it,
 //     so they would overwrite each other's version and each would prune it
 //     when it leaves that unit;
-//   - an object twice in one artifact: kustomize refuses to build it ("may not
-//     add resource with an already registered id", Append in
-//     sigs.k8s.io/kustomize/api/resmap/reswrangler.go), so the Kustomization
-//     would never become Ready. Refusing it here names the object at build
-//     time, and also covers one object at two API versions, which kustomize
-//     would accept and apply twice.
+//   - an object twice in one artifact. Two copies kustomize refuses to build
+//     are refused before this, by checkKustomizeBuilds; this also covers one
+//     object at two API versions, which kustomize accepts and reconciliation
+//     would apply twice, and two members of an envelope only
+//     kustomize-controller expands.
 //
 // The check covers every artifact object alike, whatever component or trait
 // rendered it. Delivery objects never collide with each other: kure names
@@ -334,8 +338,9 @@ func (id objectIdentity) String() string {
 // Only what reconciliation applies owns an identity (appliedObjects): a list
 // envelope it expands owns nothing, and each member it applies is compared,
 // whatever fields that member has. An object kustomize-controller's decoder
-// drops (fluxStage) owns nothing either, so one carried twice in an artifact
-// is left to kustomize's own refusal.
+// drops (fluxStage) owns nothing either; two copies of one in an artifact are
+// refused by checkKustomizeBuilds, which reads what kustomize builds, before
+// the decoder drops anything.
 func (d *deliveryOutput) checkCollisions() error {
 	delivery := make(map[objectIdentity]bool, len(d.flux))
 	for _, o := range d.flux {
@@ -385,11 +390,87 @@ func duplicateError(first, second ownership) error {
 		also = " (also as " + first.object + ")"
 	}
 	if first.artifact == second.artifact {
-		return errors.Errorf("artifact %q carries %s twice%s: kustomize refuses to build an artifact with one object in it twice; rename one of the components or traits that render it",
+		return errors.Errorf("artifact %q carries %s twice%s: reconciling it would apply that one object twice; rename one of the components or traits that render it",
 			second.artifact, second.object, also)
 	}
 	return errors.Errorf("artifacts %q and %q both carry %s%s: the Flux Kustomization of each would apply and prune that one object; rename one of the components or traits that render it, so that each object belongs to one bundle",
 		first.artifact, second.artifact, second.object, also)
+}
+
+// checkKustomizeBuilds refuses an output with an artifact kustomize would
+// refuse to build because two of the resources it reads have one resource id.
+// The build appends every resource it reads from manifests.yaml to one
+// resource map (Factory.NewResMapFromBytes and newResMapFromResourceSlice,
+// sigs.k8s.io/kustomize/api v0.21.1 resmap/factory.go:67-74 and 126-136),
+// and Append (resmap/reswrangler.go:76-84) refuses a resource whose CurId
+// Equals one already in it. The resources it reads are kustomizeStage's
+// output, before kustomize-controller's decoder drops any, so this covers
+// objects that own no identity in checkCollisions too, such as a kustomize
+// config Kustomization or an object without an apiVersion.
+func (d *deliveryOutput) checkKustomizeBuilds() error {
+	type read struct {
+		id     resid.ResId
+		object string
+	}
+	for _, a := range d.artifacts {
+		var seen []read
+		for _, o := range a.objects {
+			top := identityOf(*o)
+			content, err := objectContent(*o)
+			if err != nil {
+				return errors.Wrapf(err, "artifact %q: %s: reading the object", a.name, top)
+			}
+			built, err := kustomizeStage(content)
+			if err != nil {
+				return errors.Wrapf(err, "artifact %q: %s", a.name, top)
+			}
+			for _, b := range built {
+				id, err := kustomizeResID(b.content)
+				if err != nil {
+					return errors.Wrapf(err, "artifact %q: %s", a.name, top)
+				}
+				object := top.String()
+				if b.member {
+					object = identityOf(&unstructured.Unstructured{Object: b.content}).String() +
+						" (a member of list " + top.String() + ")"
+				}
+				for _, s := range seen {
+					if s.id.Equals(id) {
+						return kustomizeDuplicateError(a.name, id, s.object, object)
+					}
+				}
+				seen = append(seen, read{id, object})
+			}
+		}
+	}
+	return nil
+}
+
+// kustomizeResID is the resource id kustomize's build gives an object with
+// content: Resource.CurId (sigs.k8s.io/kustomize/api v0.21.1
+// resource/resource.go:59-61 and 463-466), the group, version and kind of its
+// apiVersion and kind (with whether the built-in OpenAPI schema knows the kind
+// to be cluster-scoped), its name and its namespace (sigs.k8s.io/kustomize/kyaml
+// v0.21.1 resid/gvk.go:24-47). ResId.Equals (resid/resid.go:105-139) compares
+// group, version, kind and name exactly and the namespaces as kustomize reads
+// them: none at all for a cluster-scoped kind, and no namespace as "default".
+func kustomizeResID(content map[string]any) (resid.ResId, error) {
+	rn, err := kyaml.FromMap(content)
+	if err != nil {
+		return resid.ResId{}, errors.Wrap(err, "reading the object as kustomize does")
+	}
+	return resid.NewResIdWithNamespace(resid.GvkFromNode(rn), rn.GetName(), rn.GetNamespace()), nil
+}
+
+// kustomizeDuplicateError refuses an artifact that carries two objects
+// kustomize gives the resource id id.
+func kustomizeDuplicateError(artifact string, id resid.ResId, first, second string) error {
+	objects := second + " twice"
+	if first != second {
+		objects = first + " and " + second
+	}
+	return errors.Errorf("artifact %q would not build under kustomize: it carries %s, with one kustomize resource id, %s, and kustomize refuses to add a resource with an already registered id; rename one of the components or traits that render them",
+		artifact, objects, id)
 }
 
 // appliedObject is one object reconciling an artifact applies; member is
