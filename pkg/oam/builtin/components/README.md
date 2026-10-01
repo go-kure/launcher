@@ -1305,7 +1305,9 @@ tiers, in precedence order:
 2. **Policy default** — `ApplyPolicy` fills any request/limit the author left
    unset from `oam.Policy.DefaultCPURequest()`/`DefaultMemoryRequest()`/
    `DefaultCPULimit()`/`DefaultMemoryLimit()` (`enforce.go`'s
-   `applyDefaultQuantity`).
+   `applyDefaultQuantity`). A negative policy default fails the build, as a
+   negative authored quantity does, since Kubernetes would refuse it at apply;
+   zero is accepted.
 3. **Intrinsic handler default** — `buildResourceRequirements` (`common.go`)
    fills anything still unset at `Generate()` time: 100m CPU request, 128Mi
    memory request, and a memory limit mirroring the (possibly just-defaulted)

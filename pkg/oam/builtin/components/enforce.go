@@ -330,7 +330,10 @@ func enforceMaxResources(res ResourceRequirements, maxCPU, maxMemory string) err
 // (the author left this specific resource name unmentioned — map-key presence
 // is ResourceRequirements' equivalent of the old explicitResourceFlags bool,
 // now removed) and dflt is non-empty (the policy has a default for it); *rl
-// is allocated on first write if nil.
+// is allocated on first write if nil. A negative default is refused, as an
+// authored quantity is (parseResourceList): Kubernetes rejects a negative
+// request or limit at apply time, so accepting one here would only move the
+// failure from build to apply. Zero stays accepted, as it does when authored.
 func applyDefaultQuantity(rl *corev1.ResourceList, name corev1.ResourceName, dflt string) error {
 	if _, ok := (*rl)[name]; ok || dflt == "" {
 		return nil
@@ -338,6 +341,9 @@ func applyDefaultQuantity(rl *corev1.ResourceList, name corev1.ResourceName, dfl
 	q, err := resource.ParseQuantity(dflt)
 	if err != nil {
 		return errors.Errorf("policy default for %s: invalid quantity %q: %w", name, dflt, err)
+	}
+	if q.Sign() < 0 {
+		return errors.Errorf("policy default for %s: quantity must not be negative, got %q", name, dflt)
 	}
 	if *rl == nil {
 		*rl = corev1.ResourceList{}
