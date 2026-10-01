@@ -401,18 +401,23 @@ rule claims it). They form one sibling group, which deploys as a single componen
 Each member keeps its own config, policy defaults, traits and objects. The group has
 one tier, one bundle, one `dependency` node, one auto health check (for the first
 member's kind) and one layout directory. Its application generates the members'
-objects in emission order. It answers every config contract the transform or a trait
-reads (Service port and port name, backend Service name, routing target,
-ServiceAccount, single-pod claim) from the one member that has a value, and gives
-the Flux namespace to every member that takes one.
+objects in emission order. It answers every config contract the transform reads
+(Service port and port name, backend Service name, routing target, ServiceAccount,
+single-pod claim) from the one member that has a value, and gives the Flux
+namespace to every member that takes one.
+
+Traits run per member, against that member's own config: the rule decides which
+member carries each trait. A routing trait (ingress, Gateway API routes) belongs on
+the member that owns the Service; a workload trait on the workload member.
 
 The build refuses a group:
 - whose members fall in different tiers;
 - in which two members answer the same contract;
-- that has a member needing layout-level resources.
+- that has a member needing layout-level resources;
+- in which two members generate the same Kubernetes object.
 
 An authored duplicate name is still refused. So is a name repeated by different
-rule invocations, or by a trait or document rule.
+rule invocations, or by a trait or document rule, including a copy of a member.
 
 Expansion runs to a **fixpoint**: every round, every current document's non-terminal
 kind, components, traits, and policies are lowered once via their registered rule (if

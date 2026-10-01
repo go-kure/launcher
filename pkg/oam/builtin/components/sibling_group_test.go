@@ -9,6 +9,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/fluxcd"
 	"github.com/go-kure/kure/pkg/stack/layout"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -16,19 +17,30 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/policies"
+	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
 // webPairRule is a test ComponentLoweringRule that emits a `deployment` and a
 // `service` under the authored name: the same-name sibling group the `webservice`
 // rule will emit (go-kure/launcher#280).
-type webPairRule struct{ paused bool }
+// It routes the authored component's traits to the service member, as a rule must
+// for a routing trait: traits run per member, against that member's own config.
+// workload replaces the deployment member's type when set.
+type webPairRule struct {
+	paused   bool
+	workload string
+}
 
 func (webPairRule) ComponentType() string { return "web-pair" }
 
 func (r webPairRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
+	workload, props := "deployment", webPairDeploymentProps(r.paused)
+	if r.workload != "" {
+		workload, props = r.workload, map[string]any{"image": "ghcr.io/org/app:v1"}
+	}
 	return oam.LoweringResult{Components: []oam.Component{
-		{Name: comp.Name, Type: "deployment", Properties: webPairDeploymentProps(r.paused)},
-		{Name: comp.Name, Type: "service", Properties: webPairServiceProps(comp.Name)},
+		{Name: comp.Name, Type: workload, Properties: props},
+		{Name: comp.Name, Type: "service", Properties: webPairServiceProps(comp.Name), Traits: comp.Traits},
 	}}, nil
 }
 
@@ -71,9 +83,10 @@ type (
 
 func webPairTransformer(rule webPairRule) *oam.Transformer {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
-		"deployment": &components.DeploymentHandler{},
-		"service":    &components.ServiceHandler{},
-	}, nil)
+		"deployment":  &components.DeploymentHandler{},
+		"statefulset": &components.StatefulsetHandler{},
+		"service":     &components.ServiceHandler{},
+	}, map[string]oam.TraitHandler{"ingress": &traits.IngressHandler{}})
 	tr.RegisterComponentLowering(rule)
 	tr.RegisterPolicy("dependency", &policies.DependencyHandler{})
 	return tr
@@ -303,5 +316,59 @@ func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
 	}
 	if len(web) != 1 {
 		t.Errorf("Flux Kustomizations for web = %v, want exactly one", web)
+	}
+}
+
+// TestSiblingGroup_RoutingTraitOnTheServiceMember: a routing trait the rule places
+// on the service member resolves that member's port and Service name, and its
+// sub-application joins the group's one bundle.
+func TestSiblingGroup_RoutingTraitOnTheServiceMember(t *testing.T) {
+	doc := webPairApp()
+	doc.Spec.Components[0].Traits = []oam.Trait{{Type: "ingress", Properties: map[string]any{
+		"rules": []any{map[string]any{"host": "web.example.com", "paths": []any{map[string]any{"path": "/"}}}},
+	}}}
+	cluster, _, err := webPairTransformer(webPairRule{}).TransformWithPolicy(doc, oam.TransformContext{})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	_, bundle := groupApp(t, cluster, "web")
+	var ingress *stack.Application
+	for _, a := range bundle.Applications {
+		if a.Name == "web-ingress" {
+			ingress = a
+		}
+	}
+	if ingress == nil {
+		t.Fatal("the group's bundle carries no web-ingress application")
+	}
+	objs, err := ingress.Generate()
+	if err != nil {
+		t.Fatalf("ingress Generate: %v", err)
+	}
+	if len(objs) != 1 {
+		t.Fatalf("ingress generates %d objects, want 1", len(objs))
+	}
+	ing, ok := (*objs[0]).(*networkingv1.Ingress)
+	if !ok {
+		t.Fatalf("ingress generates %T, want *networkingv1.Ingress", *objs[0])
+	}
+	backend := ing.Spec.Rules[0].HTTP.Paths[0].Backend.Service
+	if backend.Name != "web" || backend.Port.Number != 80 {
+		t.Errorf("ingress backend = %s:%d, want the service member's web:80", backend.Name, backend.Port.Number)
+	}
+}
+
+// TestSiblingGroup_TwoMembersGeneratingOneObjectRefused: a statefulset member
+// generates its own headless Service named after the group, which the service
+// member also generates; the group refuses rather than deploy one object twice.
+func TestSiblingGroup_TwoMembersGeneratingOneObjectRefused(t *testing.T) {
+	cluster, _, err := webPairTransformer(webPairRule{workload: "statefulset"}).TransformWithPolicy(webPairApp(), oam.TransformContext{})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	app, _ := groupApp(t, cluster, "web")
+	_, err = app.Generate()
+	if want := `members "statefulset" and "service" both generate Service "default/web"`; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Generate err = %v, want it to contain %q", err, want)
 	}
 }

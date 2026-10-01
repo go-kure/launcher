@@ -26,11 +26,14 @@ type siblingGroup struct {
 // types, each with a registered ComponentHandler: a member a later round would
 // lower again could not keep the group's single identity through that rewrite.
 // A name emitted once is left alone, so a rule emitting no repeated name changes
-// nothing.
+// nothing. A marker the rule copied in with a component (a by-value copy of a
+// member of an existing group) is cleared first: only this invocation's own
+// repeated names form its groups.
 func (t *Transformer) stampSiblingGroups(components []Component) error {
 	byName := make(map[string][]int, len(components))
 	var repeated []string
 	for i := range components {
+		components[i].siblingGroup = nil
 		name := components[i].Name
 		byName[name] = append(byName[name], i)
 		if len(byName[name]) == 2 {
@@ -99,6 +102,7 @@ func collapseSiblingGroups(entries []componentEntry, namespace string) ([]compon
 		cfg := e.app.Config.(*siblingGroupConfig)
 		for _, m := range e.members {
 			cfg.members = append(cfg.members, m.app)
+			cfg.types = append(cfg.types, m.component.Type)
 		}
 	}
 	return out, nil
@@ -126,7 +130,10 @@ func (e componentEntry) healthCheckConfig() stack.ApplicationConfig {
 // siblingGroupConfig is the one ApplicationConfig a sibling group deploys as. It
 // generates each member's application in emission order and answers every
 // optional config interface the engine type-asserts on a deployed component's
-// config after traits ran, by asking the members:
+// config after traits ran, by asking the members. Traits themselves never see it:
+// applyTraits hands each trait its own member's application, so the rule places a
+// trait on the member whose contracts it reads (a routing trait on the member
+// owning the Service).
 //
 //   - fluxNamespaceSettable (transform.go applyAutoHealthChecks and
 //     postProcessFluxNamespace): set on every member.
@@ -151,15 +158,39 @@ func (e componentEntry) healthCheckConfig() stack.ApplicationConfig {
 // (stack.Application.SetConfig) is seen.
 type siblingGroupConfig struct {
 	members []*stack.Application
+	// types holds each member's component type, parallel to members, for errors.
+	types []string
 }
 
-// Generate returns the members' objects, member by member in emission order.
+// Generate returns the members' objects, member by member in emission order. Two
+// members generating the same Kubernetes object (API group, kind, namespace and
+// name) is refused: the group would deploy one object twice with two contents —
+// for example a statefulset member's headless Service and a service member's
+// Service, both named after the group.
 func (g *siblingGroupConfig) Generate(*stack.Application) ([]*client.Object, error) {
 	var objs []*client.Object
-	for _, m := range g.members {
+	owner := make(map[objectIdentity]string)
+	for i, m := range g.members {
 		out, err := m.Generate()
 		if err != nil {
 			return nil, err
+		}
+		for _, p := range out {
+			if p == nil || isNullValue(*p) {
+				continue
+			}
+			obj := *p
+			gvk := obj.GetObjectKind().GroupVersionKind()
+			kind := gvk.Kind
+			if kind == "" {
+				kind = fmt.Sprintf("%T", obj)
+			}
+			id := objectIdentity{group: gvk.Group, kind: kind, namespace: obj.GetNamespace(), name: obj.GetName()}
+			if prev, dup := owner[id]; dup && prev != g.types[i] {
+				return nil, errors.Errorf("sibling group %q: members %q and %q both generate %s; exactly one member may",
+					m.Name, prev, g.types[i], id)
+			}
+			owner[id] = g.types[i]
 		}
 		objs = append(objs, out...)
 	}

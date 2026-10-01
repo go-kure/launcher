@@ -1150,6 +1150,8 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 				} else {
 					comp.synthesized = false
 				}
+				// Nor does a document rule form or carry a sibling group (stampSiblingGroups).
+				comp.siblingGroup = nil
 				comp.origin = &compOrigin
 				// The traits it built are never synthesized either, for the same reason.
 				if err := t.sealNestedTraitsInDocument(comp, compOrigin, originalComponents); err != nil {
@@ -1457,6 +1459,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			for j := range result.Components {
 				result.Components[j].origin = &traitOrigin
 				result.Components[j].synthesized = inputChecked
+				// A trait rule never forms a sibling group; a by-value copy of the
+				// group member it decorates must not join that group (stampSiblingGroups).
+				result.Components[j].siblingGroup = nil
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
