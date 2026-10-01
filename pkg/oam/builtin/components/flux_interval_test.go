@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,9 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
+
+// namedInterval is a named string type, as Go code building properties may use.
+type namedInterval string
 
 // kindNamedIntervalCase is one kind-named component whose interval decodes into
 // a metav1.Duration (go-kure/launcher#601): helmrelease and the four Flux sources.
@@ -44,7 +48,9 @@ func kindNamedIntervalCases() []kindNamedIntervalCase {
 // build with the 60m default in place of the value authored.
 func TestKindNamedFluxComponents_IntervalFluxDuration(t *testing.T) {
 	refused := []struct {
-		key, interval, wantSub string
+		key      string
+		interval any
+		wantSub  string
 	}{
 		{"interval", "-5m", "must be a Flux duration"},
 		{"interval", "500us", "must be a Flux duration"},
@@ -54,11 +60,14 @@ func TestKindNamedFluxComponents_IntervalFluxDuration(t *testing.T) {
 		// The strict decode matches keys case-insensitively, so the check must too.
 		// A truncating value, because only the authored-text check can see it.
 		{"Interval", "0.0000000001ms", `emitted as "0s"`},
+		// Go code may build properties with a named string type; the decode
+		// accepts it, so the authored-text check must read it too.
+		{"interval", namedInterval("0.0000000001ms"), `emitted as "0s"`},
 	}
 	accepted := []string{"0s", "1ms", "1.5s", "10m", "1h30m"}
 	for _, c := range kindNamedIntervalCases() {
 		for _, tc := range refused {
-			t.Run(c.typ+"/refused "+tc.key+"="+tc.interval, func(t *testing.T) {
+			t.Run(fmt.Sprintf("%s/refused %s=%v (%T)", c.typ, tc.key, tc.interval, tc.interval), func(t *testing.T) {
 				props := c.props(t)
 				props[tc.key] = tc.interval
 				_, err := c.handler.ToApplicationConfig(&oam.Component{Name: "src", Type: c.typ, Properties: props}, "demo")
