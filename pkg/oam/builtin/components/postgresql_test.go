@@ -66,7 +66,8 @@ func TestPostgresqlHandler_InvalidProvider(t *testing.T) {
 
 // TestPostgresqlHandler_ManagedRoleConnectionLimit pins go-kure/launcher#659: a zero
 // connectionLimit is refused, since CloudNativePG would omit it and apply its default
-// -1 (no limit); -1 and a positive limit are carried.
+// -1 (no limit), at parse time and again by Generate for a directly built config;
+// -1 and a positive limit are carried.
 func TestPostgresqlHandler_ManagedRoleConnectionLimit(t *testing.T) {
 	roleWithLimit := func(limit float64) map[string]any {
 		return map[string]any{"managedRoles": []any{
@@ -91,6 +92,19 @@ func TestPostgresqlHandler_ManagedRoleConnectionLimit(t *testing.T) {
 			t.Errorf("connectionLimit %v: stored %v", limit, got)
 		}
 	}
+
+	t.Run("a directly built config", func(t *testing.T) {
+		zero := int64(0)
+		pc := &components.PostgresqlConfig{Replicas: 1, ManagedRoles: []components.ManagedRoleConfig{
+			{Name: "reader", Login: true},
+			{Name: "app_user", Login: true, ConnectionLimit: &zero},
+		}}
+		_, err := pc.Generate(stack.NewApplication("db", "default", pc))
+		wantDirect := strings.Replace(want, "managedRoles[0]", "managedRoles[1]", 1)
+		if err == nil || err.Error() != wantDirect {
+			t.Errorf("err = %v, want %q", err, wantDirect)
+		}
+	})
 }
 
 // TestPostgresqlConfig_Generate_ForwardsEveryResourceName pins go-kure/launcher#484: every

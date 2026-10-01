@@ -2592,7 +2592,8 @@ not part of either change.
   `connectionLimit: 0` (go-kure/launcher#659), as `cnpg-cluster` refuses it:
   CloudNativePG omits a zero `connectionLimit` from the Cluster and applies its
   default `-1`, so the role would deploy with no limit. A role that must not
-  connect sets `login: false` instead. `Endpoints` reads
+  connect sets `login: false` instead. `Generate` repeats the refusal for a
+  `PostgresqlConfig` built directly rather than parsed. `Endpoints` reads
   `pooler.enabled` the same way, so it refuses the wrong type instead of
   declaring no pooler endpoint.
   Its handler implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
