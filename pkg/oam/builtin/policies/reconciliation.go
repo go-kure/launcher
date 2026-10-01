@@ -121,14 +121,20 @@ func parseReconciliationSettings(policyName string, props map[string]any) (*oam.
 
 // validateDuration checks that a duration string is one Flux's Kustomization CRD
 // accepts on interval, retryInterval and timeout: parseable as a Go duration, and
-// within Flux's CRD pattern (see package fluxduration). Only the authored form
-// is checked (fluxduration.Validate): the policy hands the string on unchanged,
-// and the form it is finally emitted in is decided downstream of launcher.
+// within Flux's CRD pattern (see package fluxduration). The policy hands the
+// string to every leaf bundle, and the Flux Kustomization generated from a bundle
+// carries it as a metav1.Duration, which serializes as Duration.String(); so the
+// emitted form is checked as well as the authored one (fluxduration.ValidateEmitted).
+// That refuses 0.5ms, emitted as 500µs, and a positive value too small for the
+// duration type, emitted as 0s.
 func validateDuration(policyName, field, value string) error {
-	err := fluxduration.Validate(value)
+	err := fluxduration.ValidateEmitted(value)
+	var re *fluxduration.ResolutionError
 	switch {
 	case err == nil:
 		return nil
+	case errors.As(err, &re):
+		return errors.Errorf("policy %q: %s %q is invalid: %w (use 0s or at least 1ms)", policyName, field, value, err)
 	case errors.Is(err, fluxduration.ErrForm):
 		return errors.Errorf("policy %q: %s %q is not a valid Flux duration (unsigned, units ms, s, m, h)", policyName, field, value)
 	default:

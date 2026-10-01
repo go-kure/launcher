@@ -29,8 +29,7 @@ units.
 - `Form.Validate(value)` checks the authored text: `time.ParseDuration` must accept
   it (its own error is returned unchanged otherwise), and it must match the
   pattern (`ErrForm` otherwise). The package-level `Validate` is
-  `Interval.Validate`, used by the `reconciliation` policy, which hands the
-  authored string on unchanged rather than emitting it itself.
+  `Interval.Validate`.
 - `Form.ValidateEmitted(value)` also checks the form the value is emitted in. A
   caller that sets a `metav1.Duration` serializes `Duration.String()`, not the
   authored text, and that switches to `µs` or `ns` below one millisecond: `0.5ms`
@@ -51,4 +50,7 @@ In practice the accepted values are `0s` and anything of at least `1ms`, and bel
 `1h` under `SourceTimeout`. The kind-named Flux components (`helmrelease`,
 `helmrepository`, `ocirepository`, `gitrepository`, `bucket`) check every duration
 field this way, and the `oci` and `helmchart` composites their `interval`, at parse
-time and again when the config generates its objects.
+time and again when the config generates its objects. The `reconciliation` policy
+checks its `interval`, `retryInterval` and `timeout` with the package-level
+`ValidateEmitted`: the Flux `Kustomization` generated from each bundle carries them
+as `metav1.Duration`, and all three take the `Interval` form.
