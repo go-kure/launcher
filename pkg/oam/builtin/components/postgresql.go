@@ -535,6 +535,12 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 			if !ok {
 				return nil, errors.Errorf("%s: invalid connectionLimit value: %v", label, v)
 			}
+			// CloudNativePG's connectionLimit is omitempty with a CRD default of
+			// -1, so a 0 is dropped from the Cluster and the role gets no limit
+			// (cnpg-cluster refuses it the same way, cnpgClusterDefaultedZeroFields).
+			if n == 0 {
+				return nil, errors.Errorf("%s.connectionLimit: 0 cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default -1, no limit); set login: false to keep the role from connecting", label)
+			}
 			n64 := int64(n)
 			role.ConnectionLimit = &n64
 		}
