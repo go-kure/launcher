@@ -564,7 +564,9 @@ func parseMainContainerPorts(props map[string]any) ([]corev1.ContainerPort, erro
 			names[name] = true
 			cp.Name = name
 		}
-		if proto, present, err := parseStringField(m, "protocol", label+".protocol"); err != nil {
+		// Raw, so an explicit "" reaches the enum check and is refused, as the
+		// published schema's enum refuses it, rather than reading as TCP.
+		if proto, present, err := parseRawStringField(m, "protocol", label+".protocol"); err != nil {
 			return nil, err
 		} else if present {
 			if !containsValue(containerPortProtocols, corev1.Protocol(proto)) {

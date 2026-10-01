@@ -114,6 +114,8 @@ func TestDeploymentHandler_PortsRefused(t *testing.T) {
 			map[string]any{"containerPort": 81, "name": "http"},
 		), `ports[1].name: duplicate port name "http"`},
 		{"invalid protocol", portProps(map[string]any{"containerPort": 80, "protocol": "tcp"}), `ports[0].protocol: must be one of TCP, UDP, SCTP, got "tcp"`},
+		// The schema's enum refuses "", so the parser must too.
+		{"empty protocol", portProps(map[string]any{"containerPort": 80, "protocol": ""}), `ports[0].protocol: must be one of TCP, UDP, SCTP, got ""`},
 		{"duplicate port and protocol", portProps(
 			map[string]any{"containerPort": 80},
 			map[string]any{"containerPort": 80, "protocol": "TCP", "name": "web"},
@@ -191,6 +193,34 @@ func TestDeploymentHandler_NamedProbePorts(t *testing.T) {
 			err := deploymentConvertErr(tc.props)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want one containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeploymentHandler_PortsSchemaAgreesWithParser runs each entry through
+// the published schema (as kurel build and a lowering rule's emission are
+// checked) and through the parser, and requires the same verdict from both.
+func TestDeploymentHandler_PortsSchemaAgreesWithParser(t *testing.T) {
+	h := &components.DeploymentHandler{}
+	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"deployment": h}, nil)
+	for name, entry := range map[string]map[string]any{
+		"minimal":        {"containerPort": 8080},
+		"full":           {"containerPort": 8080, "name": "http", "protocol": "SCTP"},
+		"empty protocol": {"containerPort": 8080, "protocol": ""},
+		"bad protocol":   {"containerPort": 8080, "protocol": "tcp"},
+		"unknown key":    {"containerPort": 8080, "hostPort": 8080},
+		"no port":        {"name": "http"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			props := portProps(entry)
+			app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{
+				{Name: "web", Type: "deployment", Properties: props},
+			}}}
+			schemaErr := tr.ValidateAuthoredProperties(app)
+			parseErr := deploymentConvertErr(props)
+			if (schemaErr == nil) != (parseErr == nil) {
+				t.Errorf("schema error = %v, parser error = %v; they must agree", schemaErr, parseErr)
 			}
 		})
 	}
