@@ -64,6 +64,10 @@ var podSpecPropertyKeys = []string{
 // Supported"), so only the cronjob kind exposes and accepts it.
 var podSpecJobOnlyKeys = []string{"podActiveDeadlineSeconds"}
 
+// podSpecJobOnlyReason is the error text, after the key, for an
+// activeDeadlineSeconds on a non-Job pod template.
+const podSpecJobOnlyReason = "only Job pods may set activeDeadlineSeconds; apps/v1 validation forbids it on Deployment, StatefulSet, and DaemonSet pod templates"
+
 // podSpecRejectedKeys are corev1.PodSpec fields an author might reasonably
 // write that this schema deliberately does not accept; each is rejected with
 // an error naming the reason rather than silently ignored (unknown top-level
@@ -110,7 +114,7 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 	if !jobPods {
 		for _, key := range podSpecJobOnlyKeys {
 			if _, present := props[key]; present {
-				return PodSpecConfig{}, errors.Errorf("%s: only Job pods may set activeDeadlineSeconds; apps/v1 validation forbids it on Deployment, StatefulSet, and DaemonSet pod templates", key)
+				return PodSpecConfig{}, errors.Errorf("%s: %s", key, podSpecJobOnlyReason)
 			}
 		}
 	}

@@ -2606,9 +2606,11 @@ not part of either change.
   resources (`template.spec.containers[0] "pgbouncer": resources: cpu: request
   2 must not exceed limit 1`), as `cnpg-cluster` does on its `resources`; the
   other resource-name rules of the shared parser are left to the API server. A
-  template declaring `ephemeralContainers` is refused, as the workload kinds
-  refuse it: the operator copies the template into a Deployment, whose pod
-  template cannot carry them. The instance count is deliberately not policed:
+  template declaring `ephemeralContainers`, `activeDeadlineSeconds`, `priority`
+  or `overhead` is refused, as the workload kinds refuse them: the operator
+  copies the template into a Deployment, whose pod template cannot carry the
+  first two and whose pods the default Priority and RuntimeClass admission
+  controllers refuse with the last two. The instance count is deliberately not policed:
   `postgresql` applies no policy to its pooler, so a maximum here would refuse,
   once `postgresql` lowers onto this kind, a document that builds today.
   Pod-level errors name the template's own fields, as in `template.spec:
