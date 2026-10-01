@@ -68,3 +68,48 @@ func TestComponentEndpoints_MalformedProviderErrors(t *testing.T) {
 		t.Error("expected error for malformed provider endpoint, got nil")
 	}
 }
+
+// stubEndpointRule is a ComponentLoweringRule that also implements EndpointProvider.
+type stubEndpointRule struct {
+	typeName string
+	eps      []netpol.Endpoint
+}
+
+func (r stubEndpointRule) ComponentType() string { return r.typeName }
+func (r stubEndpointRule) LowerComponent(c *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{*c}}, nil
+}
+func (r stubEndpointRule) Endpoints(_ *Component) ([]netpol.Endpoint, error) { return r.eps, nil }
+
+// stubPlainRule is a ComponentLoweringRule that is NOT an EndpointProvider.
+type stubPlainRule struct{ typeName string }
+
+func (r stubPlainRule) ComponentType() string { return r.typeName }
+func (r stubPlainRule) LowerComponent(c *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{*c}}, nil
+}
+
+// TestComponentEndpoints_RuleDispatch: a lowerable type has no handler, so its
+// endpoints come from the ComponentLoweringRule that claims it.
+func TestComponentEndpoints_RuleDispatch(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(stubEndpointRule{typeName: "web", eps: []netpol.Endpoint{validEndpoint()}})
+	tr.RegisterComponentLowering(stubPlainRule{typeName: "plain-rule"})
+
+	eps, err := tr.ComponentEndpoints(&Component{Name: "x", Type: "web"})
+	if err != nil || len(eps) != 1 || eps[0].PodSelector.MatchLabels["cnpg.io/cluster"] != "pg" {
+		t.Errorf("rule provider dispatch: eps=%v err=%v", eps, err)
+	}
+	if eps, err := tr.ComponentEndpoints(&Component{Name: "x", Type: "plain-rule"}); eps != nil || err != nil {
+		t.Errorf("rule non-provider: want (nil,nil), got (%v,%v)", eps, err)
+	}
+}
+
+func TestComponentEndpoints_MalformedRuleProviderErrors(t *testing.T) {
+	malformed := []netpol.Endpoint{{PodSelector: &metav1.LabelSelector{}, Ports: []intstr.IntOrString{}}}
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(stubEndpointRule{typeName: "web", eps: malformed})
+	if _, err := tr.ComponentEndpoints(&Component{Name: "x", Type: "web"}); err == nil {
+		t.Error("expected error for malformed rule provider endpoint, got nil")
+	}
+}
