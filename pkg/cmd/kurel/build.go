@@ -200,6 +200,9 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	if err := rejectLayoutAugmenters(cluster.Node); err != nil {
 		return err
 	}
+	if opts.delivery.repository != "" {
+		replayGeneration(cluster.Node)
+	}
 
 	objects, err := collectFromNode(cluster.Node)
 	if err != nil {

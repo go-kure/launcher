@@ -193,6 +193,99 @@ type deliveryOutput struct {
 	flux []*client.Object
 }
 
+// replayGeneration makes every application in the cluster generate once: the
+// build's own pass (collectFromNode) generates, and the delivery layout walk,
+// which calls Application.Generate again, gets the objects of that pass back.
+// A component may hand out the objects it cached (the chart renderer does) and
+// a trait may change them in place, so a second generation could see the
+// first one's changes; replaying the first pass also makes each artifact carry
+// exactly the objects the build writes to <app>.yaml.
+func replayGeneration(node *stack.Node) {
+	if node == nil {
+		return
+	}
+	replayBundle(node.Bundle)
+	for _, child := range node.Children {
+		replayGeneration(child)
+	}
+}
+
+func replayBundle(b *stack.Bundle) {
+	if b == nil {
+		return
+	}
+	for _, child := range b.Children {
+		replayBundle(child)
+	}
+	for _, app := range b.Applications {
+		if app != nil && app.Config != nil {
+			app.Config = replayOf(app.Config)
+		}
+	}
+}
+
+// replayOf wraps cfg in a replayConfig that keeps the optional interfaces kure
+// checks on an application's config: stack.Validator (Application.Generate),
+// layout.LayoutAugmenter and layout.LayoutIntentAugmenter (the layout walker).
+func replayOf(cfg stack.ApplicationConfig) stack.ApplicationConfig {
+	r := &replayConfig{inner: cfg}
+	aug, ok := cfg.(layout.LayoutAugmenter)
+	if !ok {
+		return r
+	}
+	if intent, ok := cfg.(layout.LayoutIntentAugmenter); ok {
+		return &replayIntentAugmenter{replayAugmenter{r, aug}, intent}
+	}
+	return &replayAugmenter{r, aug}
+}
+
+// replayConfig generates through inner once and returns that result on every
+// later call.
+type replayConfig struct {
+	inner     stack.ApplicationConfig
+	generated bool
+	objects   []*client.Object
+	err       error
+}
+
+// Validate runs inner's validation, which Application.Generate calls before
+// each Generate.
+func (r *replayConfig) Validate() error {
+	if v, ok := r.inner.(stack.Validator); ok {
+		return v.Validate()
+	}
+	return nil
+}
+
+func (r *replayConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	if !r.generated {
+		r.objects, r.err = r.inner.Generate(app)
+		r.generated = true
+	}
+	if r.err != nil {
+		return nil, r.err
+	}
+	return append([]*client.Object(nil), r.objects...), nil
+}
+
+type replayAugmenter struct {
+	*replayConfig
+	aug layout.LayoutAugmenter
+}
+
+func (r *replayAugmenter) AugmentLayout(ml *layout.ManifestLayout) error {
+	return r.aug.AugmentLayout(ml)
+}
+
+type replayIntentAugmenter struct {
+	replayAugmenter
+	intent layout.LayoutIntentAugmenter
+}
+
+func (r *replayIntentAugmenter) WantsOwnLayout() bool {
+	return r.intent.WantsOwnLayout()
+}
+
 // writeDelivery generates the Flux delivery output for cluster and writes it
 // into dir: one flat artifact directory per bundle and <appName>.flux.yaml. It
 // is a no-op without --oci-repository. Everything is generated before the

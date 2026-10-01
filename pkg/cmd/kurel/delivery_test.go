@@ -17,7 +17,10 @@ import (
 
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	"github.com/go-kure/kure/pkg/stack"
+	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
@@ -552,6 +555,92 @@ func TestDeliveryEmptyBuild(t *testing.T) {
 		t.Errorf("empty artifact kustomization.yaml:\n%s\nwant:\n%s", kust, emptyArtifactKustomization)
 	}
 	checkDelivery(t, out, "empty", "", nil)
+}
+
+// countingConfig is a component whose every Generate differs from the one
+// before: it hands out one cached ConfigMap and adds an entry per call, as a
+// trait that changes a cached object in place would.
+type countingConfig struct {
+	calls int
+	cm    *corev1.ConfigMap
+}
+
+func (c *countingConfig) Generate(*stack.Application) ([]*client.Object, error) {
+	c.calls++
+	if c.cm == nil {
+		c.cm = &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "settings", Namespace: "shop"}, Data: map[string]string{}}
+	}
+	c.cm.Data[fmt.Sprintf("call-%d", c.calls)] = "x"
+	o := client.Object(c.cm)
+	return []*client.Object{&o}, nil
+}
+
+type failingValidator struct{ countingConfig }
+
+func (failingValidator) Validate() error { return errors.New("invalid settings") }
+
+type intentStub struct{ augmenterOnlyStub }
+
+func (intentStub) WantsOwnLayout() bool { return false }
+
+// TestReplayGeneration checks that after replayGeneration every application,
+// in a leaf bundle or under an umbrella, generates once and hands the
+// delivery layout walk that first result back, and that the replay keeps the
+// optional interfaces kure checks on a config.
+func TestReplayGeneration(t *testing.T) {
+	leaf, nested := &countingConfig{}, &countingConfig{}
+	leafApp := &stack.Application{Name: "leaf", Namespace: "shop", Config: leaf}
+	nestedApp := &stack.Application{Name: "nested", Namespace: "shop", Config: nested}
+	node := &stack.Node{
+		Bundle:   &stack.Bundle{Applications: []*stack.Application{leafApp}},
+		Children: []*stack.Node{{Bundle: &stack.Bundle{Children: []*stack.Bundle{{Applications: []*stack.Application{nestedApp}}}}}},
+	}
+	replayGeneration(node)
+	for _, tt := range []struct {
+		app *stack.Application
+		cfg *countingConfig
+	}{{leafApp, leaf}, {nestedApp, nested}} {
+		first, err := tt.app.Generate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := tt.app.Generate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tt.cfg.calls != 1 {
+			t.Errorf("%s generated %d times, want 1", tt.app.Name, tt.cfg.calls)
+		}
+		if len(second) != 1 || *second[0] != *first[0] {
+			t.Errorf("%s: second generation %v is not the first one's %v", tt.app.Name, second, first)
+		}
+		if data := (*second[0]).(*corev1.ConfigMap).Data; len(data) != 1 {
+			t.Errorf("%s: replayed ConfigMap carries %v, want only the first call's entry", tt.app.Name, data)
+		}
+	}
+
+	t.Run("validation still runs", func(t *testing.T) {
+		app := &stack.Application{Name: "bad", Config: replayOf(&failingValidator{})}
+		if _, err := app.Generate(); err == nil || !strings.Contains(err.Error(), "invalid settings") {
+			t.Errorf("Generate: %v, want the inner Validate error", err)
+		}
+	})
+	t.Run("interfaces kept", func(t *testing.T) {
+		if _, ok := replayOf(&countingConfig{}).(layout.LayoutAugmenter); ok {
+			t.Error("a plain config became a LayoutAugmenter")
+		}
+		aug := replayOf(augmenterOnlyStub{})
+		if _, ok := aug.(layout.LayoutAugmenter); !ok {
+			t.Error("a LayoutAugmenter lost AugmentLayout")
+		}
+		if _, ok := aug.(layout.LayoutIntentAugmenter); ok {
+			t.Error("a LayoutAugmenter gained WantsOwnLayout")
+		}
+		intent, ok := replayOf(intentStub{}).(layout.LayoutIntentAugmenter)
+		if !ok || intent.WantsOwnLayout() {
+			t.Errorf("a LayoutIntentAugmenter was not kept with its intent (ok %v)", ok)
+		}
+	})
 }
 
 // collisionAppYAML is an application "shop", one reconciliation unit named
