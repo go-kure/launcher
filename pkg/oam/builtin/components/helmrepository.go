@@ -31,7 +31,7 @@ func (h *HelmRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"secretRef":       fluxSourceObject("HelmRepository spec.secretRef: the Secret holding the repository credentials, in the namespace the HelmRepository lands in."),
 		"certSecretRef":   fluxSourceObject("HelmRepository spec.certSecretRef: the Secret holding a client certificate and/or CA certificate."),
 		"passCredentials": fluxSourceBool("HelmRepository spec.passCredentials: pass the secretRef credentials to chart hosts other than the url's."),
-		"interval":        fluxSourceString("HelmRepository spec.interval as a duration (e.g. 10m); defaults to 60m when unset or zero, except with type oci."),
+		"interval":        fluxSourceString("HelmRepository spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero, except with type oci."),
 		"insecure":        fluxSourceBool("HelmRepository spec.insecure: allow a non-TLS registry (type oci only)."),
 		"timeout":         fluxSourceString("HelmRepository spec.timeout for the index fetch or OCI operations, as a duration."),
 		"suspend":         fluxSourceBool("HelmRepository spec.suspend: stop reconciling the repository. Also skips the auto health check."),
@@ -49,6 +49,9 @@ func (h *HelmRepositoryHandler) ToApplicationConfig(component *oam.Component, na
 	spec, _, err := builtin.DecodeStrictJSON[sourcev1.HelmRepositorySpec](component.Properties)
 	if err != nil {
 		return nil, errors.Errorf("helmrepository: properties do not decode as a HelmRepositorySpec: %w", err)
+	}
+	if err := checkAuthoredFluxInterval("helmrepository", component.Properties); err != nil {
+		return nil, err
 	}
 	cfg := &HelmRepositoryConfig{Name: component.Name, Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(); err != nil {
@@ -83,6 +86,9 @@ func (c *HelmRepositoryConfig) isOCI() bool {
 // repeats them because this type and its fields are exported: a config built
 // directly by a library caller never went through ToApplicationConfig.
 func (c *HelmRepositoryConfig) validate() error {
+	if err := checkFluxIntervalDuration("helmrepository", c.Spec.Interval); err != nil {
+		return err
+	}
 	if c.isOCI() {
 		return checkFluxSourceURL("helmrepository", "url", c.Spec.URL, "oci://")
 	}

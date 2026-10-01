@@ -74,7 +74,7 @@ func (h *HelmReleaseHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"chart":              object("HelmRelease spec.chart: a chart template naming a chart in an existing HelmRepository, GitRepository or Bucket source. Exactly one of chart and chartRef is required."),
 		"chartRef":           object("HelmRelease spec.chartRef: a reference to an existing OCIRepository, ExternalArtifact or HelmChart source. Exactly one of chart and chartRef is required."),
-		"interval":           str("HelmRelease spec.interval as a duration (e.g. 10m, 1h30m); defaults to 60m when unset."),
+		"interval":           str("HelmRelease spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
 		"kubeConfig":         object("HelmRelease spec.kubeConfig: a kubeconfig reference for a remote cluster."),
 		"suspend":            boolean("HelmRelease spec.suspend: stop reconciling the release. true also suppresses the component's auto health check."),
 		"releaseName":        str("HelmRelease spec.releaseName. Flux's default applies when unset: <targetNamespace>-<name> when targetNamespace is set, else the component name."),
@@ -111,6 +111,9 @@ func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, names
 	spec, owned, err := builtin.DecodeStrictJSON[helmv2.HelmReleaseSpec](component.Properties, helmReleaseValuesModeKey)
 	if err != nil {
 		return nil, errors.Errorf("helmrelease: properties do not decode as a HelmReleaseSpec: %w", err)
+	}
+	if err := checkAuthoredFluxInterval("helmrelease", component.Properties); err != nil {
+		return nil, err
 	}
 	mode, err := helmReleaseValuesMode(owned)
 	if err != nil {
@@ -216,6 +219,9 @@ func (c *HelmReleaseConfig) validate() error {
 	}
 	if (c.Spec.Chart == nil) == (c.Spec.ChartRef == nil) {
 		return errors.New("helmrelease: exactly one of chart and chartRef is required")
+	}
+	if err := checkFluxIntervalDuration("helmrelease", c.Spec.Interval); err != nil {
+		return err
 	}
 	if _, err := helmReleaseValuesMap(c.Spec.Values); err != nil {
 		return err
