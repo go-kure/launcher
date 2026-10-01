@@ -130,7 +130,9 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 		// first rule that could rewrite it (lowerDocumentBody's pre-rule check,
 		// enforceAuthoredComponentReservations before a document rule) or, with no
 		// rule, in createApplications. A component a rule emitted, whose properties
-		// are stripped here, is synthesized and exempt from all three.
+		// are stripped here, is either synthesized and exempt from all three, or —
+		// output of a rule whose input was not checked — checked after this strip,
+		// where a stripped null is simply absent.
 		if isNullValue(props[key]) {
 			delete(props, key)
 			continue
