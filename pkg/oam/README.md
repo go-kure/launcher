@@ -440,8 +440,11 @@ under one name, each of a distinct type that has a component handler (no lowerin
 rule claims it). They form one sibling group, which deploys as a single component.
 Each member keeps its own config, policy defaults, traits and objects. The group has
 one tier, one bundle, one `dependency` node, one auto health check (for the first
-member's kind) and one layout directory. Its application generates the members'
-objects in emission order. It answers every config contract the transform reads
+member's kind) and one layout directory. Its application generates each member's
+first object in emission order, then every member's remaining objects in the same
+order: a deployment and a service member give Deployment, Service, then the
+Deployment's ServiceAccount and claims, as a single component generating all of them
+orders them. It answers every config contract the transform reads
 (Service port and port name, backend Service name, routing target, ServiceAccount,
 single-pod claim) from the one member that has a value, gives the Flux namespace
 to every member that takes one, and reports the group's name as its component

@@ -2,6 +2,7 @@ package components_test
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -253,7 +254,8 @@ func TestSiblingGroup_HealthCheckVetoIsTheDeployments(t *testing.T) {
 }
 
 // TestSiblingGroup_DeploysAsOneUnit proves the group is one component to every
-// name-keyed step: one application generating the Deployment then the Service,
+// name-keyed step: one application generating the Deployment, the Service, then
+// the Deployment's other objects,
 // one bundle with one Deployment health check and a dependsOn on db, one layout
 // directory holding both objects, and one Flux Kustomization.
 func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
@@ -267,9 +269,11 @@ func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	// The group generates exactly what its members generate on their own, the
-	// Deployment's objects first, then the Service's.
-	var want []string
+	// The group generates exactly what its members generate on their own, each
+	// member's primary object first — the Deployment, then the Service — and then
+	// the Deployment's ServiceAccount and claim, the order a webservice generates
+	// the same objects in.
+	var heads, tails []string
 	for _, m := range []struct {
 		h     oam.ComponentHandler
 		typ   string
@@ -282,9 +286,15 @@ func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s Generate: %v", m.typ, err)
 		}
-		want = append(want, objectIDs(alone)...)
+		ids := objectIDs(alone)
+		heads = append(heads, ids[0])
+		tails = append(tails, ids[1:]...)
 	}
-	if got := objectIDs(objs); len(want) < 2 || !reflect.DeepEqual(got, want) {
+	want := slices.Concat(heads, tails)
+	if !reflect.DeepEqual(want[:2], []string{"Deployment/web", "Service/web"}) || len(tails) < 2 {
+		t.Fatalf("members generate %v; want a Deployment and a Service first and the Deployment's ServiceAccount and claim", want)
+	}
+	if got := objectIDs(objs); !reflect.DeepEqual(got, want) {
 		t.Errorf("group generates %v, want %v", got, want)
 	}
 

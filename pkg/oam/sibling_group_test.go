@@ -213,6 +213,58 @@ func (*kindlessStub) Generate(*stack.Application) ([]*client.Object, error) {
 	return []*client.Object{&obj}, nil
 }
 
+// objectsStub generates one ConfigMap per name, a nil entry for an empty name.
+type objectsStub struct {
+	siblingStub
+	names []string
+}
+
+func (s *objectsStub) Generate(*stack.Application) ([]*client.Object, error) {
+	out := make([]*client.Object, 0, len(s.names))
+	for _, n := range s.names {
+		if n == "" {
+			out = append(out, nil)
+			continue
+		}
+		var obj client.Object = &corev1.ConfigMap{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+			ObjectMeta: metav1.ObjectMeta{Name: n, Namespace: "default"},
+		}
+		out = append(out, &obj)
+	}
+	return out, nil
+}
+
+// TestSiblingGroup_PrimaryObjectsFirst: the group generates each member's first
+// object in member order, then the members' remaining objects — the order one
+// component generating all of them uses (a Deployment, its Service, then the
+// ServiceAccount and claims). A leading nil entry does not count as a member's
+// first object.
+func TestSiblingGroup_PrimaryObjectsFirst(t *testing.T) {
+	objects := func(typ string, names ...string) *siblingStubHandler {
+		return &siblingStubHandler{typ: typ, build: func() stack.ApplicationConfig { return &objectsStub{names: names} }}
+	}
+	tr := siblingTransformer(objects("a", "a1", "a2"), objects("b", "", "b1", "b2"))
+	tr.RegisterComponentLowering(emitRule{"pair", pair("a", "b")})
+	cluster, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	objs, err := cluster.Node.Bundle.Applications[0].Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	var got []string
+	for _, p := range objs {
+		if p != nil {
+			got = append(got, (*p).GetName())
+		}
+	}
+	if want := []string{"a1", "b1", "a2", "b2"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("group objects = %v, want %v", got, want)
+	}
+}
+
 // TestSiblingGroup_KindlessObjectRefused: a member object with no kind cannot be
 // compared against the other members' objects, so the group refuses it.
 func TestSiblingGroup_KindlessObjectRefused(t *testing.T) {
