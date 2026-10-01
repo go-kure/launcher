@@ -494,7 +494,8 @@ slice, for example to add one trait of its own next to the authored ones or, in 
 document rule, to rebuild a component around the authored traits; a copy whose type
 or properties map the rule replaced counts as built by the rule. A forwarded trait's
 `Origin.Index` stays its authored slot even when the rule places its own trait ahead
-of it. A `DocumentLoweringRule` is handed a copy of the document whose component and
+of it, and a trait a document rule moves to another component keeps the component it
+was authored on in its `Origin`. A `DocumentLoweringRule` is handed a copy of the document whose component and
 trait slices are its own, so neither the rule nor the engine's stamping of what it
 forwards writes through to the authored document; properties maps are shared, and a
 rule still must not mutate them.
