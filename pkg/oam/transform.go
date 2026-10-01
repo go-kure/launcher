@@ -610,6 +610,9 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 			entries[i].tier = tier
 		}
 	}
+	if err := checkSiblingTiers(entries, policyResult.TierOverrides); err != nil {
+		return nil, nil, err
+	}
 
 	// A shared source is emitted by the consumer that deploys first. Deciding this
 	// only now, with final tiers and dependencies known, keeps the owner from

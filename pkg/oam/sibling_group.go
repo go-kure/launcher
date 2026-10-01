@@ -60,8 +60,9 @@ func (t *Transformer) stampSiblingGroups(components []Component) error {
 
 // collapseSiblingGroups folds each sibling group's entries into one entry, placed
 // where its first member stood. The collapsed entry carries the first member's
-// component (the primary: its type picks the auto health check), the members'
-// shared tier, and ONE stack.Application named after the group whose config is a
+// component (the primary: its type picks the auto health check), the primary's
+// tier (checkSiblingTiers settles it once placement has run), and ONE
+// stack.Application named after the group whose config is a
 // siblingGroupConfig over the members' own applications. Every name-keyed step
 // after this — tier overrides, policies, bundles, dependsOn, the component map,
 // the layout — therefore sees one component, while each member keeps its own
@@ -88,11 +89,6 @@ func collapseSiblingGroups(entries []componentEntry, namespace string) ([]compon
 			})
 			continue
 		}
-		if out[i].tier != e.tier {
-			return nil, &TransformError{Message: fmt.Sprintf(
-				"sibling group %q: member %q is in tier %q but member %q is in tier %q; a group deploys as one unit and needs one tier",
-				g.name, out[i].component.Type, out[i].tier, e.component.Type, e.tier)}
-		}
 		out[i].members = append(out[i].members, e)
 	}
 	for _, e := range out {
@@ -106,6 +102,31 @@ func collapseSiblingGroups(entries []componentEntry, namespace string) ([]compon
 		}
 	}
 	return out, nil
+}
+
+// checkSiblingTiers refuses a sibling group whose members were classified into
+// different tiers, unless a placement policy places the group's name: placement
+// overrides classification, so it gives the group its one tier (the override
+// loop in Transform has already set it). A group deploys as one unit and needs
+// one tier.
+func checkSiblingTiers(entries []componentEntry, overrides map[string]Tier) error {
+	for _, e := range entries {
+		if len(e.members) == 0 {
+			continue
+		}
+		if _, placed := overrides[e.component.Name]; placed {
+			continue
+		}
+		first := e.members[0]
+		for _, m := range e.members[1:] {
+			if m.tier != first.tier {
+				return &TransformError{Message: fmt.Sprintf(
+					"sibling group %q: member %q is in tier %q but member %q is in tier %q; a group deploys as one unit and needs one tier — place the group with a placement policy",
+					e.component.Name, first.component.Type, first.tier, m.component.Type, m.tier)}
+			}
+		}
+	}
+	return nil
 }
 
 // traitTargets returns the entries whose traits applyTraits dispatches: the

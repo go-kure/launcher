@@ -29,6 +29,8 @@ import (
 type webPairRule struct {
 	paused   bool
 	workload string
+	// serviceTier, when set, classifies the service member into that tier by annotation.
+	serviceTier string
 }
 
 func (webPairRule) ComponentType() string { return "web-pair" }
@@ -38,9 +40,13 @@ func (r webPairRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) 
 	if r.workload != "" {
 		workload, props = r.workload, map[string]any{"image": "ghcr.io/org/app:v1"}
 	}
+	svc := oam.Component{Name: comp.Name, Type: "service", Properties: webPairServiceProps(comp.Name), Traits: comp.Traits}
+	if r.serviceTier != "" {
+		svc.Annotations = map[string]string{oam.TierAnnotationKey(oam.DefaultDomain): r.serviceTier}
+	}
 	return oam.LoweringResult{Components: []oam.Component{
 		{Name: comp.Name, Type: workload, Properties: props},
-		{Name: comp.Name, Type: "service", Properties: webPairServiceProps(comp.Name), Traits: comp.Traits},
+		svc,
 	}}, nil
 }
 
@@ -89,6 +95,7 @@ func webPairTransformer(rule webPairRule) *oam.Transformer {
 	}, map[string]oam.TraitHandler{"ingress": &traits.IngressHandler{}})
 	tr.RegisterComponentLowering(rule)
 	tr.RegisterPolicy("dependency", &policies.DependencyHandler{})
+	tr.RegisterPolicy("placement", &policies.PlacementHandler{})
 	return tr
 }
 
@@ -119,12 +126,25 @@ func leafBundles(n *stack.Node) []*stack.Bundle {
 	if n == nil {
 		return nil
 	}
-	var out []*stack.Bundle
-	if n.Bundle != nil && len(n.Bundle.Applications) > 0 {
-		out = append(out, n.Bundle)
-	}
+	out := bundleTree(n.Bundle)
 	for _, c := range n.Children {
 		out = append(out, leafBundles(c)...)
+	}
+	return out
+}
+
+// bundleTree returns b and its nested child bundles that hold applications;
+// a hierarchical cluster nests its tier bundles under an umbrella bundle.
+func bundleTree(b *stack.Bundle) []*stack.Bundle {
+	if b == nil {
+		return nil
+	}
+	var out []*stack.Bundle
+	if len(b.Applications) > 0 {
+		out = append(out, b)
+	}
+	for _, c := range b.Children {
+		out = append(out, bundleTree(c)...)
 	}
 	return out
 }
@@ -355,6 +375,34 @@ func TestSiblingGroup_RoutingTraitOnTheServiceMember(t *testing.T) {
 	backend := ing.Spec.Rules[0].HTTP.Paths[0].Backend.Service
 	if backend.Name != "web" || backend.Port.Number != 80 {
 		t.Errorf("ingress backend = %s:%d, want the service member's web:80", backend.Name, backend.Port.Number)
+	}
+}
+
+// TestSiblingGroup_PlacementSettlesMixedTiers: members classified into different
+// tiers are refused, unless a placement policy places the group, which overrides
+// classification and gives the group its one tier.
+func TestSiblingGroup_PlacementSettlesMixedTiers(t *testing.T) {
+	rule := webPairRule{serviceTier: "infra"}
+
+	_, _, err := webPairTransformer(rule).TransformWithPolicy(webPairApp(), oam.TransformContext{})
+	if want := "a group deploys as one unit and needs one tier"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("unplaced mixed group: err = %v, want it to contain %q", err, want)
+	}
+
+	// No dependency web -> db here: placing web in infra, ahead of db, would cycle.
+	doc := webPairApp()
+	doc.Spec.Policies = []oam.ApplicationPolicy{{
+		Name: "web-in-infra", Type: "placement",
+		Properties: map[string]any{"component": "web", "tier": "infra"},
+	}}
+	cluster, _, err := webPairTransformer(rule).TransformWithPolicy(doc, oam.TransformContext{})
+	if err != nil {
+		t.Fatalf("placed mixed group: TransformWithPolicy: %v", err)
+	}
+	_, web := groupApp(t, cluster, "web")
+	_, db := groupApp(t, cluster, "db")
+	if !strings.Contains(web.Name, "infra") || strings.Contains(db.Name, "infra") {
+		t.Errorf("bundles: web in %q, db in %q; want web alone in the infra tier", web.Name, db.Name)
 	}
 }
 
