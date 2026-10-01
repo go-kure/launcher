@@ -228,9 +228,10 @@ output is intended to stay identical.
   written.
 - The CRDs' validation rules (CEL) are left to the API server, except the
   `ObjectStore`'s ban on `configuration.serverName`, which `cnpg-objectstore`
-  refuses because the shared Barman type invites it. `postgresql` still
-  forwards its `objectStore.serverName` into the `ObjectStore` it emits;
-  `postgresql` is unchanged here.
+  refuses because the shared Barman type invites it. `postgresql` carries its
+  `objectStore.serverName` as the `serverName` parameter of the Cluster's
+  barman-cloud plugin entry, never on the `ObjectStore` it emits
+  (go-kure/launcher#643).
 - Of the shared resource parser's per-entry rules, `cnpg-pooler` and
   `cnpg-objectstore` run only the request/limit and hugepages checks, as
   `cnpg-cluster` does; resource-name validity, non-negative quantities, whole
