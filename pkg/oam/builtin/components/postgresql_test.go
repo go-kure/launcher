@@ -10,6 +10,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -1099,5 +1100,28 @@ func TestPostgresqlHandler_NameBound(t *testing.T) {
 	pc := cfg.(*components.PostgresqlConfig)
 	if _, err := pc.Generate(stack.NewApplication(longest, "data", pc)); err != nil {
 		t.Errorf("Generate(50 characters): %v", err)
+	}
+}
+
+// The endpoint selectors carry the name verbatim (and the pooler's with a
+// "-pooler" suffix), so the longest admitted name must still give label values
+// the API server accepts on both.
+func TestPostgresqlHandler_Endpoints_LongestNameLabelValues(t *testing.T) {
+	h := &components.PostgresqlHandler{}
+	comp := &oam.Component{Name: strings.Repeat("a", 50), Type: "postgresql",
+		Properties: map[string]any{"pooler": map[string]any{"enabled": true}}}
+	eps, err := h.Endpoints(comp)
+	if err != nil {
+		t.Fatalf("Endpoints: %v", err)
+	}
+	if len(eps) != 2 {
+		t.Fatalf("expected the cluster and pooler endpoints, got %d", len(eps))
+	}
+	for i, ep := range eps {
+		for key, value := range ep.PodSelector.MatchLabels {
+			if errs := validation.IsValidLabelValue(value); len(errs) > 0 {
+				t.Errorf("endpoint %d selector %s=%q: %v", i, key, value, errs)
+			}
+		}
 	}
 }

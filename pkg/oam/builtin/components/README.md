@@ -2425,9 +2425,13 @@ not part of either change.
   label (no leading digit, no dot) of at most 50 characters. Any other name
   is refused at parse time, when endpoints are collected and by `Generate`
   (`postgresql name "db.main": must be a DNS-1035 label of at most 50
-  characters …`). **Behavior-changing** under `launcher.gokure.dev/v1alpha1`:
-  such a name used to build and was then refused by CloudNativePG at apply;
-  it is now refused at build (go-kure/launcher#615).
+  characters …`). The cap also keeps both endpoint selector values, the
+  name and the pooler's `<name>-pooler`, within the 63-character label-value
+  limit. **Behavior-changing** under `launcher.gokure.dev/v1alpha1`:
+  such a name used to build and was then refused by CloudNativePG at apply,
+  or, over 63 characters (56 with the pooler), gave a network-policy
+  selector the API server refuses; it is now refused at build
+  (go-kure/launcher#615, go-kure/launcher#589).
   An authored `version: ""` is refused by name (`version: must not be empty;
   omit it to default to "16"`), with or without `imageName`: it used to be
   kept as a value, so without `imageName` the cluster image was
