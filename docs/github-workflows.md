@@ -430,7 +430,9 @@ Runs on main and `release/*` branches only (not PRs):
 public, so the action's tag fetch needs no token, and no later step can read the job token from
 `.git/config`. The `go-kure.github.io` checkout keeps `DEPLOY_TOKEN` persisted, because the action
 pushes with the checkout's own credential. That checkout runs after both Hugo builds, so the
-deploy step is the only one that sees it.
+deploy step is the only workflow step that follows it. This orders the steps; it does not isolate
+the token, which stays on the runner for the rest of the job where a process left running by an
+earlier step could still read it.
 
 ### Trigger Matrix
 
