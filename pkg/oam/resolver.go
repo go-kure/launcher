@@ -145,7 +145,9 @@ func coerceValue(v any, decl *ParameterDecl) (any, error) {
 		}
 	case "array", "object":
 		if _, isStr := v.(string); isStr {
-			return nil, errors.Errorf("parameter %q (type %s) cannot be set with --set; use --values to supply a structured value", decl.Name, decl.Type)
+			// The string may come from --set or from a --values file; both are
+			// refused, and only --values can supply a list or map.
+			return nil, errors.Errorf("parameter %q (type %s): the value is a string, not a structured value; supply a YAML list or map with --values (--set supplies only strings)", decl.Name, decl.Type)
 		}
 		if err := checkStructuredShape(v, string(decl.Type)); err != nil {
 			return nil, errors.Errorf("parameter %q (type %s): the value %s", decl.Name, decl.Type, err.Error())
@@ -171,12 +173,15 @@ func checkStructuredShape(v any, paramType string) error {
 	default:
 		return nil
 	}
+	// A typed nil list or map passes the assertion above but is null under the
+	// package null contract (isNullValue), as a bare nil is.
+	if isNullValue(v) {
+		return errors.Errorf("is null, not %s", want)
+	}
 	if ok {
 		return nil
 	}
 	switch v.(type) {
-	case nil:
-		return errors.Errorf("is null, not %s", want)
 	case string:
 		return errors.Errorf("is a string, not %s", want)
 	case []any:

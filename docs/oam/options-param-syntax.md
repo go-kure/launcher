@@ -4,7 +4,7 @@
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.2 | 2026-10-01 | Node substitution for `array`/`object` parameters is implemented (#421): shape-checked values and defaults; a string default is refused |
+| 1.2 | 2026-10-01 | Node substitution for `array`/`object` parameters is implemented (go-kure/launcher#421): shape-checked values and defaults; a string default is refused |
 | 1.1 | 2026-05-14 | Record decision (Option A); remove Option B; add resolver behaviour section; correct env list claim |
 | 1.0 | 2026-04-19 | Initial draft — compared Option A (placeholders) and Option B (overlay) |
 

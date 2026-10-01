@@ -261,7 +261,9 @@ func TestResolveParameters_StructuredValueRefused(t *testing.T) {
 		{"null for array", "array", "x: ${p}\n", nil, "is null, not a list"},
 		{"list for object", "object", "x: ${p}\n", []any{"a"}, "is a list, not a map"},
 		{"null for object", "object", "x: ${p}\n", nil, "is null, not a map"},
-		{"--set string", "array", "x: ${p}\n", "a,b", "cannot be set with --set"},
+		{"typed nil list for array", "array", "x: ${p}\n", []any(nil), "is null, not a list"},
+		{"typed nil map for object", "object", "x: ${p}\n", map[string]any(nil), "is null, not a map"},
+		{"string for array", "array", "x: ${p}\n", "a,b", "the value is a string, not a structured value"},
 		{"inline use", "object", "x: \"prefix-${p}\"\n", map[string]any{"a": "b"}, "cannot be used in inline string substitution"},
 	}
 	for _, tc := range cases {
