@@ -46,7 +46,8 @@ type environmentSetSpec struct {
 
 // environmentBinding is one named profile+values pair. Profile is required; Values
 // is optional so an application without a kurel.yaml can still be bound to an
-// environment. Relative paths resolve against the environments file's directory.
+// environment. Both paths are relative to the environments file's directory and may
+// not leave it (see validateBindingPath).
 type environmentBinding struct {
 	Name    string `yaml:"name"`
 	Profile string `yaml:"profile"`
@@ -94,9 +95,9 @@ func resolveEnvironment(opts *buildOptions, appDir string, flags *pflag.FlagSet)
 	}
 
 	baseDir := filepath.Dir(path)
-	opts.profilePath = resolveRelative(baseDir, binding.Profile)
+	opts.profilePath = filepath.Join(baseDir, binding.Profile)
 	if binding.Values != "" {
-		opts.valuesPath = resolveRelative(baseDir, binding.Values)
+		opts.valuesPath = filepath.Join(baseDir, binding.Values)
 	}
 	return nil
 }
@@ -145,6 +146,12 @@ func parseEnvironmentSet(data []byte) (*environmentSet, error) {
 		if env.Profile == "" {
 			return nil, errors.Errorf("environment %q: profile is required", env.Name)
 		}
+		if err := validateBindingPath(env.Name, "profile", env.Profile); err != nil {
+			return nil, err
+		}
+		if err := validateBindingPath(env.Name, "values", env.Values); err != nil {
+			return nil, err
+		}
 	}
 	return &doc, nil
 }
@@ -167,9 +174,19 @@ func (d *environmentSet) names() []string {
 	return names
 }
 
-func resolveRelative(baseDir, p string) string {
+// validateBindingPath rejects an absolute path or one with a ".." element, per
+// AGENTS.md's "reject paths that escape the working directory". Unlike --profile and
+// --values, these paths come from file content, and the default environments.yaml
+// sits inside the package directory, so they are not the operator's own command
+// line. An empty path (an omitted values) passes.
+func validateBindingPath(env, field, p string) error {
 	if filepath.IsAbs(p) {
-		return p
+		return errors.Errorf("environment %q: %s must be relative to the environments file, got %q", env, field, p)
 	}
-	return filepath.Join(baseDir, p)
+	for _, elem := range strings.Split(filepath.ToSlash(p), "/") {
+		if elem == ".." {
+			return errors.Errorf("environment %q: %s must not contain \"..\", got %q", env, field, p)
+		}
+	}
+	return nil
 }
