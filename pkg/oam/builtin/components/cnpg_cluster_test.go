@@ -769,6 +769,38 @@ func TestCnpgClusterConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
 	})
 }
 
+func TestCnpgClusterConfig_Generate_RequestWithinLimit(t *testing.T) {
+	t.Run("authored request above its limit is refused", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{"resources": map[string]any{
+			"requests": map[string]any{"cpu": "2"},
+			"limits":   map[string]any{"cpu": "1"},
+		}})
+		_, err := c.Generate(stack.NewApplication("db", "data", c))
+		if err == nil || err.Error() != "resources: cpu: request 2 must not exceed limit 1" {
+			t.Errorf("err = %v, want the request/limit refusal", err)
+		}
+	})
+	t.Run("default limit below an authored request is refused", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{"resources": map[string]any{
+			"requests": map[string]any{"memory": "2Gi"},
+		}})
+		if err := c.ApplyPolicy(&stubPolicy{defaultMemoryLimit: "1Gi"}); err != nil {
+			t.Fatalf("ApplyPolicy: %v", err)
+		}
+		_, err := c.Generate(stack.NewApplication("db", "data", c))
+		if err == nil || err.Error() != "resources: memory: request 2Gi must not exceed limit 1Gi" {
+			t.Errorf("err = %v, want the request/limit refusal", err)
+		}
+	})
+	t.Run("request at or below its limit builds", func(t *testing.T) {
+		c := newCnpgCluster(t, map[string]any{"resources": map[string]any{
+			"requests": map[string]any{"cpu": "1", "memory": "1Gi"},
+			"limits":   map[string]any{"cpu": "1", "memory": "2Gi"},
+		}})
+		generateCnpgCluster(t, c)
+	})
+}
+
 func TestCnpgClusterConfig_Generate_HugePagesNeedCPUOrMemory(t *testing.T) {
 	hp := map[string]any{"hugepages-2Mi": "2Mi"}
 	c := newCnpgCluster(t, map[string]any{"resources": map[string]any{"requests": hp, "limits": hp}})

@@ -793,6 +793,12 @@ func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, 
 	if err := validateHugePagesHaveCPUOrMemory("resources", c.Spec.Resources.Requests, c.Spec.Resources.Limits); err != nil {
 		return nil, err
 	}
+	// The same holds for admission's request/limit cross-check. It runs here,
+	// after the policy defaults, so a default limit below an authored request
+	// is refused as well as an authored pair.
+	if err := validateResourceRequestLimit(c.Spec.Resources.Requests, c.Spec.Resources.Limits); err != nil {
+		return nil, err
+	}
 	cluster := kurecnpg.CreateCluster(app.Name, app.Namespace)
 	c.Spec.DeepCopyInto(&cluster.Spec)
 	obj := client.Object(cluster)
