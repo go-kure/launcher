@@ -331,9 +331,11 @@ func (id objectIdentity) String() string {
 // one kind and name are one object (a cluster-scoped one), or two that are
 // both refused at apply, so they are refused here either way.
 //
-// An artifact object that is a list envelope is applied as its members, so
-// every member is compared too (listMembers), while the envelope itself,
-// never applied, owns nothing (isListEnvelope).
+// Only what reconciliation applies owns an identity (appliedObjects): a list
+// envelope it expands owns nothing, and each member it applies is compared,
+// whatever fields that member has. An object kustomize-controller's decoder
+// drops (fluxStage) owns nothing either, so one carried twice in an artifact
+// is left to kustomize's own refusal.
 func (d *deliveryOutput) checkCollisions() error {
 	delivery := make(map[objectIdentity]bool, len(d.flux))
 	for _, o := range d.flux {
@@ -343,22 +345,15 @@ func (d *deliveryOutput) checkCollisions() error {
 	for _, a := range d.artifacts {
 		for _, o := range a.objects {
 			top := identityOf(*o)
-			members, err := listMembers(*o)
+			applied, err := appliedObjects(*o)
 			if err != nil {
-				return errors.Wrapf(err, "artifact %q: reading the list members of %s", a.name, top)
+				return errors.Wrapf(err, "artifact %q: %s", a.name, top)
 			}
-			for i, m := range append([]client.Object{*o}, members...) {
-				id := identityOf(m)
+			for _, m := range applied {
+				id := identityOf(m.object)
 				object := id.String()
-				if i > 0 {
+				if m.member {
 					object += " (a member of list " + top.String() + ")"
-				}
-				content, err := objectContent(m)
-				if err != nil {
-					return errors.Wrapf(err, "artifact %q: reading %s", a.name, object)
-				}
-				if isListEnvelope(content) {
-					continue
 				}
 				if delivery[id] {
 					return collisionError(a.name, object)
@@ -397,64 +392,142 @@ func duplicateError(first, second ownership) error {
 		first.artifact, second.artifact, second.object, also)
 }
 
-// isListEnvelope reports whether content is a list envelope, which
-// reconciliation replaces by its members and never applies itself: an object
-// whose items field is an array (ReadObjects expands it, whatever its kind),
-// or a *List kind with an items field (kustomize expands it, or drops it when
-// items is null).
-func isListEnvelope(content map[string]any) bool {
-	items, ok := content["items"]
-	if !ok {
-		return false
-	}
-	if _, isArray := items.([]any); isArray {
-		return true
-	}
-	kind, _ := content["kind"].(string)
-	return strings.HasSuffix(kind, "List")
+// appliedObject is one object reconciling an artifact applies; member is
+// false when it is the artifact object itself, true when a list envelope
+// carried it.
+type appliedObject struct {
+	object client.Object
+	member bool
 }
 
-// listMembers returns the objects o carries as a list envelope, at every
-// depth: each object in its items array and, recursively, theirs. Nothing
-// applies a list envelope itself; reconciling an artifact applies its
-// members:
+// appliedObjects returns what reconciling an artifact applies of its object o.
+// Reconciliation is two stages, and appliedObjects is exactly their
+// composition: kustomizeStage on o, then fluxStage on each object that yields.
 //
-//   - kustomize replaces an object whose kind ends in "List" and that has an
-//     items field by its items, recursively (Factory.inlineAnyEmbeddedLists in
-//     sigs.k8s.io/kustomize/api/resource/factory.go);
-//   - kustomize-controller then decodes kustomize's output with
-//     ReadObjects (github.com/fluxcd/pkg/ssa/utils/object.go), which
-//     replaces any object whose items field is an array, whatever its kind,
-//     by its items.
+//  1. kustomize builds the artifact (kustomizeStage);
+//  2. kustomize-controller decodes kustomize's output with ReadObjects and
+//     applies what that returns (fluxStage).
 //
-// Expanding every items array at every depth covers both, and can only
-// compare more objects than are applied, never fewer. An item that is not an
-// object is skipped: kustomize and ReadObjects both refuse it, so it is never
-// applied.
-func listMembers(o client.Object) ([]client.Object, error) {
+// A list envelope either stage expands is never applied and owns nothing;
+// every object the second stage returns is applied as is, and owns its
+// identity even when it has an items field of its own.
+func appliedObjects(o client.Object) ([]appliedObject, error) {
 	content, err := objectContent(o)
+	if err != nil {
+		return nil, errors.Wrap(err, "reading the object")
+	}
+	built, err := kustomizeStage(content)
 	if err != nil {
 		return nil, err
 	}
-	items, ok := content["items"].([]any)
-	if !ok {
-		return nil, nil
-	}
-	var members []client.Object
-	for _, item := range items {
-		m, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		member := &unstructured.Unstructured{Object: m}
-		nested, err := listMembers(member)
+	var applied []appliedObject
+	for _, b := range built {
+		objs, err := fluxStage(b)
 		if err != nil {
 			return nil, err
 		}
-		members = append(members, member)
-		members = append(members, nested...)
+		for _, m := range objs {
+			if m.object == nil {
+				// o itself, neither expanded nor dropped.
+				m.object = o
+			}
+			applied = append(applied, m)
+		}
 	}
-	return members, nil
+	return applied, nil
+}
+
+// builtObject is one object kustomizeStage yields: content, and whether a
+// *List envelope carried it (false for the artifact object itself).
+type builtObject struct {
+	content map[string]any
+	member  bool
+}
+
+// kustomizeStage is what kustomize's build makes of one artifact object
+// (Factory.inlineAnyEmbeddedLists, sigs.k8s.io/kustomize/api v0.21.1
+// resource/factory.go:187-227, applied to each item by
+// convertObjectSliceToNodeSlice and dropBadNodes, factory.go:230-268): an
+// object whose kind ends in "List" and that has an items field is replaced by
+// its items, recursively. Without an items field it is kept as is; with items
+// null it yields nothing; with items of any other type kustomize refuses the
+// build, and so does this. An empty object item is dropped (dropBadNodes). An
+// item that is not an object is refused here: kustomize refuses a null or
+// non-empty scalar one and drops an empty or zero one, and applies nothing of
+// it either way. Any other object is kept as is, whatever items field it has.
+//
+// When an artifact's only object is a List or ResourceList, kustomize's
+// reader unwraps it before that (ByteReader, sigs.k8s.io/kustomize/kyaml
+// v0.21.1 kio/byteio_reader.go:247-271): the same members, but it reads a
+// malformed one, or one with a functionConfig field and no items, as nothing
+// rather than refusing or keeping it. Where the two differ this refuses or
+// keeps the List, which can only refuse an artifact, never let an applied
+// object through unchecked.
+func kustomizeStage(content map[string]any) ([]builtObject, error) {
+	return kustomizeExpand(content, false)
+}
+
+func kustomizeExpand(content map[string]any, member bool) ([]builtObject, error) {
+	kind, _ := content["kind"].(string)
+	items, hasItems := content["items"]
+	if !strings.HasSuffix(kind, "List") || !hasItems {
+		return []builtObject{{content: content, member: member}}, nil
+	}
+	if items == nil {
+		return nil, nil
+	}
+	slice, ok := items.([]any)
+	if !ok {
+		return nil, errors.Errorf("%s has items of type %T, not an array: kustomize refuses to build it", kind, items)
+	}
+	var built []builtObject
+	for _, item := range slice {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, errors.Errorf("%s has an item of type %T, not an object: kustomize refuses to build it", kind, item)
+		}
+		if len(m) == 0 {
+			continue
+		}
+		inner, err := kustomizeExpand(m, true)
+		if err != nil {
+			return nil, err
+		}
+		built = append(built, inner...)
+	}
+	return built, nil
+}
+
+// fluxStage is what kustomize-controller applies of one object kustomize
+// built: ReadObjects (github.com/fluxcd/pkg/ssa v0.76.2 utils/object.go:44-77)
+// replaces an object whose items field is an array, whatever its kind, by its
+// immediate members, appended as is without expanding them further, and
+// refuses a member that is not an object. It drops any other object that is
+// not a Kubernetes object (no apiVersion, kind or name) or is a kustomize
+// config Kustomization (utils/is.go:71-82). A returned appliedObject with a
+// nil object stands for b itself when b is the artifact object.
+func fluxStage(b builtObject) ([]appliedObject, error) {
+	if items, isArray := b.content["items"].([]any); isArray {
+		applied := make([]appliedObject, 0, len(items))
+		for _, item := range items {
+			m, ok := item.(map[string]any)
+			if !ok {
+				kind, _ := b.content["kind"].(string)
+				return nil, errors.Errorf("%s has an item of type %T, not an object: kustomize-controller refuses to apply it", kind, item)
+			}
+			applied = append(applied, appliedObject{object: &unstructured.Unstructured{Object: m}, member: true})
+		}
+		return applied, nil
+	}
+	u := &unstructured.Unstructured{Object: b.content}
+	if u.GetName() == "" || u.GetKind() == "" || u.GetAPIVersion() == "" ||
+		(strings.ToLower(u.GetKind()) == "kustomization" && strings.HasPrefix(u.GetAPIVersion(), "kustomize.config.k8s.io/")) {
+		return nil, nil
+	}
+	if !b.member {
+		return []appliedObject{{}}, nil
+	}
+	return []appliedObject{{object: u, member: true}}, nil
 }
 
 // objectContent is o as its manifest encodes it: an unstructured object's own
