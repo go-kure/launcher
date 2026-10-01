@@ -198,6 +198,9 @@ func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
 		return nil, err
 	}
+	if err := checkPodPortNames(config.mainContainerPorts(), sidecars); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := parsePodSpec(props, false)
 	if err != nil {
@@ -393,15 +396,20 @@ func (c *WebserviceConfig) Generate(app *stack.Application) ([]*client.Object, e
 	return objects, nil
 }
 
+// mainContainerPorts is the main container's one port, named "http".
+// Unconditional: config.Port defaults to 80, and parseProbes/parseLifecycle
+// were told a named "http" port always exists.
+func (c *WebserviceConfig) mainContainerPorts() []corev1.ContainerPort {
+	return []corev1.ContainerPort{{Name: "http", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
+}
+
 func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
 	container, err := buildMainContainer(app.Name, mainContainerInput{
-		Image:     c.Image,
-		Command:   c.Command,
-		Args:      c.Args,
-		Resources: c.Resources,
-		// Unconditional: config.Port defaults to 80, and parseProbes/parseLifecycle
-		// were told a named "http" port always exists.
-		Ports:           []corev1.ContainerPort{{Name: "http", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}},
+		Image:           c.Image,
+		Command:         c.Command,
+		Args:            c.Args,
+		Resources:       c.Resources,
+		Ports:           c.mainContainerPorts(),
 		Env:             c.Env,
 		EnvFrom:         c.EnvFrom,
 		Probes:          c.Probes,

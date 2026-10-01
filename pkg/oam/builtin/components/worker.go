@@ -226,6 +226,10 @@ func parseWorker(props map[string]any) (workerOpinions, error) {
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
 		return out, err
 	}
+	// The main container declares no ports, so only sidecars can collide.
+	if err := checkPodPortNames(nil, sidecars); err != nil {
+		return out, err
+	}
 	if _, err := parsePodSpec(props, false); err != nil {
 		return out, err
 	}

@@ -15,9 +15,10 @@ API has them, and the same value validation real admission applies (ADR-036 L1: 
 Container projection shared by every kind). Only genuine escape-hatch fields (`passthrough.object`,
 `manifests`/`crd` inline content) and key→value maps whose keys are data (`nodeSelector`,
 `resources.requests`/`limits`) stay open by design; the remaining open objects (`probes`,
-`lifecycle`, `volumes`, the `volumeMounts`/`ports` items inside an `initContainers`/`sidecars`
+`lifecycle`, `volumes`, the `volumeMounts` items inside an `initContainers`/`sidecars`
 entry, the four-key `affinity` shorthand) are a known gap, not the target shape; the
-`volumeDevices` items beside them are closed. The
+`volumeDevices` items beside them, and a sidecar's `ports` items (go-kure/launcher#660), are
+closed. The
 `initContainers`/`sidecars` entries themselves are closed (go-kure/launcher#321, see "Common
 config"). The raw `corev1` `affinity` that `deployment` publishes is
 a different schema and is not part of that gap — it is modeled field-by-field. `helmrelease`
@@ -729,7 +730,20 @@ name only when that sidecar itself declares a `ports[]` entry of that name —
 the kubelet resolves a named port against the container's own ports, so an
 undeclared name would build and never resolve; unlike the main container,
 whose single named port is fixed by its kind, a sidecar may declare several
-and any of them is accepted. Closing the entry is behavior-changing under an
+and any of them is accepted. A sidecar's `ports` list is read exactly as
+`deployment` reads its main container's (see "Main container ports" below):
+closed entries, an IANA service `name`, a `protocol` from `TCP`/`UDP`/`SCTP`
+(an empty string refused), and no repeated name or `containerPort`/`protocol`
+pair within the sidecar (go-kure/launcher#660; before that the name and
+protocol were taken unchecked, and a non-list `ports`, an unknown key, a
+non-string name or a non-string protocol, which then read as `TCP`, was
+dropped). A port name must also be unique across the
+pod: the main container's ports (webservice's `http`, statefulset's `tcp`
+when it has a `port`, deployment's `ports` list) and every sidecar's. The
+API server checks names only per container and merely warns across them,
+while a Service selecting the name reaches only the first container that
+declares it, so a repeated name is refused, naming both containers. Init
+containers declare no ports, so they take no part. Closing the entry is behavior-changing under an
 unchanged `launcher.gokure.dev/v1alpha1`: a document that authored any other
 key on an entry built before and errors now. It is taken on the same
 reasoning as the `volumeClaimTemplates` entry below — the key never reached
@@ -1028,7 +1042,7 @@ no Service (use `webservice`, or a `service` component, for one).
 
 | property | type | notes | compat |
 |---|---|---|---|
-| `ports` | array | Each entry is `containerPort` (required, 1–65535), `name` (an IANA service name, as the API server checks a container port name) and `protocol` (`TCP`/`UDP`/`SCTP`, default `TCP`; an empty string is refused, as the published enum refuses it); any other key, `hostPort` and `hostIP` included, is refused. Names must be unique, as the API server requires. A repeated `containerPort`/`protocol` pair is refused too, which the API server only warns about: the second entry declares nothing new. The same number on two protocols is two ports. An absent, null or empty list declares no ports. A probe or lifecycle hook may address a declared port by name; a name the main container does not declare is refused, since the kubelet resolves it only against that container's own ports. Without `ports`, a named probe or hook port is refused with the same message as before. | additive |
+| `ports` | array | Each entry is `containerPort` (required, 1–65535), `name` (an IANA service name, as the API server checks a container port name) and `protocol` (`TCP`/`UDP`/`SCTP`, default `TCP`; an empty string is refused, as the published enum refuses it); any other key, `hostPort` and `hostIP` included, is refused. Names must be unique, as the API server requires, and also unique across the pod: a sidecar port of the same name is refused (go-kure/launcher#660). A repeated `containerPort`/`protocol` pair is refused too, which the API server only warns about: the second entry declares nothing new. The same number on two protocols is two ports. An absent, null or empty list declares no ports. A probe or lifecycle hook may address a declared port by name; a name the main container does not declare is refused, since the kubelet resolves it only against that container's own ports. Without `ports`, a named probe or hook port is refused with the same message as before. | additive |
 
 #### Raw scheduling properties (`deployment` only)
 

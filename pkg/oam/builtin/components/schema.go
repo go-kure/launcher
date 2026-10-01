@@ -602,20 +602,7 @@ func schemaInitContainers() oam.PropertySchema {
 // fields only a long-running container can use.
 func schemaSidecars() oam.PropertySchema {
 	props := schemaContainerEntry()
-	props["ports"] = oam.PropertySchema{
-		Type:        oam.PropertyTypeArray,
-		Description: "Ports the sidecar exposes. A named port is what the sidecar's own probes and lifecycle hooks may address by name.",
-		Items: &oam.PropertySchema{
-			Type:                 oam.PropertyTypeObject,
-			AdditionalProperties: true,
-			Description:          "A single container port.",
-			Properties: map[string]oam.PropertySchema{
-				"containerPort": {Type: oam.PropertyTypeInteger, Required: true, Description: "Port number the sidecar listens on."},
-				"name":          {Type: oam.PropertyTypeString, Description: "Port name, addressable by this sidecar's probes and lifecycle hooks."},
-				"protocol":      {Type: oam.PropertyTypeString, Description: "Port protocol; defaults to TCP."},
-			},
-		},
-	}
+	props["ports"] = schemaContainerPorts("Ports the sidecar exposes. A named port is what the sidecar's own probes and lifecycle hooks may address by name. Names and containerPort/protocol pairs must be unique; a name must also be unique across the pod's containers.")
 	props["probes"] = schemaProbes(false)
 	props["lifecycle"] = schemaLifecycle(false)
 	return oam.PropertySchema{

@@ -2944,33 +2944,13 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 		if sc.VolumeDevices, err = parseVolumeDeviceList(m, label, mounts); err != nil {
 			return nil, err
 		}
-		if rawPorts, ok := m["ports"].([]any); ok {
-			for j, rp := range rawPorts {
-				rp = nullElem(rp)
-				pm, ok := rp.(map[string]any)
-				if !ok {
-					return nil, errors.Errorf("sidecars[%d] %q: ports[%d]: expected object, got %T", i, sc.Name, j, rp)
-				}
-				pname, _ := pm["name"].(string)
-				port, present, err := parsePortField(pm, "containerPort", fmt.Sprintf("sidecars[%d] %q: ports[%d]: containerPort", i, sc.Name, j), 1)
-				if err != nil {
-					return nil, err
-				}
-				if !present {
-					return nil, errors.Errorf("sidecars[%d] %q: ports[%d]: containerPort is required", i, sc.Name, j)
-				}
-				cp := corev1.ContainerPort{
-					ContainerPort: port,
-					Protocol:      corev1.ProtocolTCP,
-				}
-				if pname != "" {
-					cp.Name = pname
-				}
-				if proto, ok := pm["protocol"].(string); ok && proto != "" {
-					cp.Protocol = corev1.Protocol(proto)
-				}
-				sc.Ports = append(sc.Ports, cp)
-			}
+		// Read as the deployment kind reads its main container's ports
+		// (go-kure/launcher#660): until then a sidecar's port name and protocol
+		// were taken unchecked, a repeated name reached the API server, and a
+		// non-list `ports`, an unknown key, a non-string name or a non-string
+		// protocol (which read as TCP) was dropped.
+		if sc.Ports, err = parseContainerPorts(m); err != nil {
+			return nil, errors.Errorf("%s: %w", label, err)
 		}
 		parsedSC, err := parseSecurityContext(m)
 		if err != nil {
@@ -3007,6 +2987,36 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 		out = append(out, sc)
 	}
 	return out, nil
+}
+
+// checkPodPortNames refuses a port name that more than one container of the pod
+// declares: the main container (mainPorts, as the kind builds them) and every
+// sidecar. The API server checks names only within one container and merely
+// warns across containers, and a Service selecting the port by name then
+// reaches only the first container that declares it (go-kure/launcher#660). A
+// name repeated within one container is parseContainerPorts' to refuse. Init
+// containers declare no ports here: initContainerPropertyKeys has no `ports`,
+// and this package does not model a restartable one (initContainerRejectedKeys).
+func checkPodPortNames(mainPorts []corev1.ContainerPort, sidecars []SidecarContainerConfig) error {
+	declaredBy := map[string]string{}
+	for _, p := range mainPorts {
+		if p.Name != "" {
+			declaredBy[p.Name] = "the main container"
+		}
+	}
+	for i, sc := range sidecars {
+		container := fmt.Sprintf("sidecars[%d] %q", i, sc.Name)
+		for j, p := range sc.Ports {
+			if p.Name == "" {
+				continue
+			}
+			if other, taken := declaredBy[p.Name]; taken {
+				return errors.Errorf("%s: ports[%d].name: port name %q is also declared by %s; a port name must be unique within the pod, or a Service selecting it by name reaches only the first container that declares it", container, j, p.Name, other)
+			}
+			declaredBy[p.Name] = container
+		}
+	}
+	return nil
 }
 
 // checkNamedPortsDeclared rejects a probe or lifecycle hook on a container that
