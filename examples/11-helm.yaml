@@ -5,7 +5,7 @@ metadata:
 spec:
   components:
   - name: redis
-    type: helmchart
+    type: helm
     properties:
       chart: redis
       version: "18.6.1"
