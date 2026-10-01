@@ -6,20 +6,38 @@ import (
 
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/layout"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// siblingStub is a component config answering one forwarded value contract
-// (ServicePort) and taking a Flux namespace, so a test can see which member the
-// group's config consulted.
+// siblingStub is a component config answering every value-forwarded contract and
+// taking a Flux namespace, so a test can see which member the group's config
+// consulted. A zero field answers with the zero value, as a trait decorator does
+// for a contract its inner config lacks.
 type siblingStub struct {
-	port   int32
-	fluxNS string
+	port     int32
+	backend  string
+	portName string
+	sa       string
+	claim    string
+	selector *metav1.LabelSelector
+	fluxNS   string
 }
 
 func (s *siblingStub) Generate(*stack.Application) ([]*client.Object, error) { return nil, nil }
 func (s *siblingStub) ServicePort() int32                                    { return s.port }
+func (s *siblingStub) BackendServiceName() string                            { return s.backend }
+func (s *siblingStub) ServicePortName() (string, bool)                       { return s.portName, s.portName != "" }
+func (s *siblingStub) ServiceAccountName() string                            { return s.sa }
+func (s *siblingStub) NonRWXClaim() string                                   { return s.claim }
 func (s *siblingStub) SetFluxNamespace(ns string)                            { s.fluxNS = ns }
+func (s *siblingStub) ServiceRoutingTarget(p []intstr.IntOrString) (*metav1.LabelSelector, []intstr.IntOrString) {
+	if s.selector == nil {
+		return nil, nil
+	}
+	return s.selector, p
+}
 
 type siblingAugmenterStub struct{ siblingStub }
 
@@ -168,11 +186,44 @@ func TestSiblingGroup_Refusals(t *testing.T) {
 	}
 }
 
+// TestSiblingGroup_TraitCopyDoesNotJoinGroup: a trait rule on a member that emits
+// a by-value copy of that member (marker included) under another type does not
+// enlarge the group; the copy is a duplicate name.
+func TestSiblingGroup_TraitCopyDoesNotJoinGroup(t *testing.T) {
+	tr := siblingTransformer(stubHandler("a", 0), stubHandler("b", 0), stubHandler("c", 0))
+	tr.RegisterComponentLowering(emitRule{"pair", func(c *Component) []Component {
+		return []Component{
+			{Name: c.Name, Type: "a", Properties: map[string]any{}, Traits: []Trait{{Type: "copy", Properties: map[string]any{}}}},
+			{Name: c.Name, Type: "b", Properties: map[string]any{}},
+		}
+	}})
+	tr.RegisterTraitLowering(copyTraitRule{})
+	_, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{})
+	if err == nil || !strings.Contains(err.Error(), `duplicate component name "web"`) {
+		t.Fatalf("err = %v, want a duplicate component name refusal", err)
+	}
+}
+
+// copyTraitRule lowers a "copy" trait to a copy of its component retyped "c".
+type copyTraitRule struct{}
+
+func (copyTraitRule) TraitType() string { return "copy" }
+func (copyTraitRule) LowerTrait(_ *Trait, lctx LoweringContext) (LoweringResult, error) {
+	c := *lctx.Component
+	c.Type = "c"
+	c.Traits = nil
+	return LoweringResult{Components: []Component{c}}, nil
+}
+
 // TestSiblingGroup_ForwardingAcrossMembers: a member answering a contract with a
 // zero value (as every trait decorator does for one it does not carry) leaves the
 // answer to the member that has one, and the Flux namespace reaches every member.
 func TestSiblingGroup_ForwardingAcrossMembers(t *testing.T) {
-	a, b := stubHandler("a", 0), stubHandler("b", 8080)
+	sel := &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}
+	a := stubHandler("a", 0)
+	b := &siblingStubHandler{typ: "b", build: func() stack.ApplicationConfig {
+		return &siblingStub{port: 8080, backend: "web-svc", portName: "http", sa: "web-sa", claim: "data", selector: sel}
+	}}
 	tr := siblingTransformer(a, b)
 	tr.RegisterComponentLowering(emitRule{"pair", pair("a", "b")})
 
@@ -184,8 +235,24 @@ func TestSiblingGroup_ForwardingAcrossMembers(t *testing.T) {
 	if len(apps) != 1 || apps[0].Name != "web" {
 		t.Fatalf("bundle applications = %d, want the group's one application", len(apps))
 	}
-	if got := apps[0].Config.(servicePortProvider).ServicePort(); got != 8080 {
+	cfg := apps[0].Config
+	if got := cfg.(servicePortProvider).ServicePort(); got != 8080 {
 		t.Errorf("ServicePort = %d, want member b's 8080", got)
+	}
+	if got := cfg.(serviceBackendNamer).BackendServiceName(); got != "web-svc" {
+		t.Errorf("BackendServiceName = %q, want member b's web-svc", got)
+	}
+	if got, known := cfg.(siblingServicePortNamer).ServicePortName(); got != "http" || !known {
+		t.Errorf("ServicePortName = (%q, %v), want member b's (http, true)", got, known)
+	}
+	if got := cfg.(ServiceAccountNamer).ServiceAccountName(); got != "web-sa" {
+		t.Errorf("ServiceAccountName = %q, want member b's web-sa", got)
+	}
+	if got := cfg.(siblingNonRWXClaimer).NonRWXClaim(); got != "data" {
+		t.Errorf("NonRWXClaim = %q, want member b's data", got)
+	}
+	if got, _ := cfg.(serviceRoutingTargeter).ServiceRoutingTarget(nil); got != sel {
+		t.Errorf("ServiceRoutingTarget selector = %v, want member b's %v", got, sel)
 	}
 	for _, h := range []*siblingStubHandler{a, b} {
 		if len(h.made) != 1 {
