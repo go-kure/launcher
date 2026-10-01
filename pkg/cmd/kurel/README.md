@@ -157,9 +157,9 @@ spec:
 `--environment <name>` behaves exactly as if the bound `--profile` and `--values` had
 been passed: the output is byte-identical to that invocation. `profile` and `values`
 are relative to the environments file's own directory, not the working directory, and
-may not leave it: an absolute path or a `..` element is an error, because the file's
-content (and, by default, its location inside the package) is not the operator's own
-command line. Pass `--profile`/`--values` directly for a file elsewhere. Each name
+may not leave it: an absolute path, a `..` element, or a symlink whose target lies
+outside that directory is an error, because the file's content (and, by default, its
+location inside the package) is not the operator's own command line. Pass `--profile`/`--values` directly for a file elsewhere. Each name
 must be a unique DNS-1123 label; `profile` is required, `values` is optional (an
 Application without a `kurel.yaml` can still be bound to a profile, and a binding
 with `values` on such an Application fails the same way `--values` does). The file is
