@@ -41,10 +41,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
+    # No later step authenticates to this repository: it is public, and the
+    # deploy action's tag fetch from it needs no token.
     - name: Checkout launcher repo
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         fetch-depth: 0
+        persist-credentials: false
 
     - name: Install build tools
       run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make
@@ -183,7 +186,10 @@ jobs:
         hugo --config hugo.toml,versions.toml --minify --baseURL "https://www.gokure.dev/launcher/"
         mv public public-root
 
-    - name: Checkout go-kure.github.io
+    # Credentials stay persisted here on purpose: the deploy-docs-push action
+    # pushes with the checkout's own credential. This checkout runs after both
+    # Hugo builds, so the deploy step is the only one that can read the token.
+    - name: Checkout go-kure.github.io # zizmor: ignore[artipacked]
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         repository: go-kure/go-kure.github.io

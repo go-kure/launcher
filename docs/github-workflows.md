@@ -426,6 +426,12 @@ Runs on main and `release/*` branches only (not PRs):
    is still the highest stable tag (the same rule Publish uses). Otherwise it deploys the slot and
    leaves the root untouched.
 
+**Credentials.** The launcher checkout sets `persist-credentials: false`: the repository is
+public, so the action's tag fetch needs no token, and no later step can read the job token from
+`.git/config`. The `go-kure.github.io` checkout keeps `DEPLOY_TOKEN` persisted, because the action
+pushes with the checkout's own credential. That checkout runs after both Hugo builds, so the
+deploy step is the only one that sees it.
+
 ### Trigger Matrix
 
 | Event | Deploys To | BaseURL |
