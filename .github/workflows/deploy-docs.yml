@@ -188,7 +188,7 @@ jobs:
 
     # Credentials stay persisted here on purpose: the deploy-docs-push action
     # pushes with the checkout's own credential. This checkout runs after both
-    # Hugo builds, so the deploy step is the only one that can read the token.
+    # Hugo builds, so the deploy step is the only workflow step after it.
     - name: Checkout go-kure.github.io # zizmor: ignore[artipacked]
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
