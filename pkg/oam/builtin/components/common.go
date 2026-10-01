@@ -454,26 +454,9 @@ func validateRelativePath(label, path string) error {
 // real file, so treating it as absent (like an empty optional field) would
 // silently drop the authored intent instead of rejecting the malformed input.
 //
-// NOTE on a deliberately deferred cross-check: this function validates
-// volumeName's own shape (a DNS-1123 label) but never checks it against the
-// component's actual `volumes` list, because parseEnv (and therefore this
-// function, reached through parseValueFrom) runs before parseVolumes in
-// every one of its 9 call sites (7 kind handlers plus parseInitContainers
-// and parseSidecars) and has no access to the parsed volume set. Real
-// admission's validateFileKeyRefVolumes
-// (k8s.io/kubernetes/pkg/apis/core/validation/validation.go, confirmed by
-// direct read of the upstream source) requires the referenced volume be
-// specifically emptyDir — its literal rejection message is "referenced
-// volume must be of type emptyDir" for any other source type — matching
-// TestCronjobHandler_FileKeyRef_VolumeWiring's existing emptyDir-sourced
-// coverage. A fileKeyRef naming a hostPath/pvc/configMap/secret volume (all
-// of which this schema also supports) therefore builds successfully here
-// today but would be rejected at real admission — a narrower, source-type
-// gap, not the bare by-name NotFound gap this note previously described.
-// Closing it needs threading the parsed volume set (name plus source type)
-// through parseEnv's call chain (or a post-hoc validation pass once env and
-// volumes are both parsed) — out of scope for this shared-schema-fidelity
-// PR; see the go-kure/launcher#278 ledger.
+// This function checks only volumeName's own shape (a DNS-1123 label):
+// parseEnv runs before parseVolumes in every call site, so the volume it
+// names is checked afterwards, by checkFileKeyRefVolumes.
 func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 	if err := rejectUnknownKeys(m, []string{"volumeName", "path", "key", "optional"}, "fileKeyRef"); err != nil {
 		return nil, err
@@ -516,6 +499,53 @@ func parseFileKeyRef(m map[string]any) (*corev1.FileKeySelector, error) {
 	}
 	sel.Optional = opt
 	return sel, nil
+}
+
+// checkFileKeyRefVolumes refuses an env fileKeyRef, in the main container, an
+// init container or a sidecar, whose volumeName names no volume the component
+// declares, or a declared volume that is not emptyDir. Real admission refuses
+// both for every pod spec, templates included (validateFileKeyRefVolumes,
+// called from ValidatePodSpec in k8s.io/kubernetes
+// pkg/apis/core/validation/validation.go). Only the component's own volumes
+// count: no trait the build evaluates adds an emptyDir volume. A raw
+// fluxcd-patches patch is outside the build's view (Flux applies it later, and
+// any component in the bundle may target this workload), so a volume only a
+// patch supplies is not seen, as for checkContainerVolumeModes' volumeDevices.
+func checkFileKeyRefVolumes(volumes []corev1.Volume, mainEnv []corev1.EnvVar, inits []InitContainerConfig, sidecars []SidecarContainerConfig) error {
+	emptyDir := make(map[string]bool, len(volumes))
+	for _, v := range volumes {
+		emptyDir[v.Name] = v.EmptyDir != nil
+	}
+	check := func(label string, env []corev1.EnvVar) error {
+		for _, ev := range env {
+			if ev.ValueFrom == nil || ev.ValueFrom.FileKeyRef == nil {
+				continue
+			}
+			name := ev.ValueFrom.FileKeyRef.VolumeName
+			isEmptyDir, declared := emptyDir[name]
+			if !declared {
+				return errors.Errorf("%senv %q: fileKeyRef.volumeName %q: no volume of that name is declared; fileKeyRef reads from an emptyDir volume in `volumes`", label, ev.Name, name)
+			}
+			if !isEmptyDir {
+				return errors.Errorf("%senv %q: fileKeyRef.volumeName %q: the volume is not emptyDir; the API server accepts a fileKeyRef only on an emptyDir volume", label, ev.Name, name)
+			}
+		}
+		return nil
+	}
+	if err := check("", mainEnv); err != nil {
+		return err
+	}
+	for i, ic := range inits {
+		if err := check(fmt.Sprintf("initContainers[%d] %q: ", i, ic.Name), ic.Env); err != nil {
+			return err
+		}
+	}
+	for i, sc := range sidecars {
+		if err := check(fmt.Sprintf("sidecars[%d] %q: ", i, sc.Name), sc.Env); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // parseNameKey extracts the "name"/"key" string pair shared by secretKeyRef and

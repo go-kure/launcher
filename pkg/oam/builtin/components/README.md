@@ -236,13 +236,15 @@ non-boolean rejection as above); corev1's `EnvFiles` feature; `volumeName`
 must be a valid DNS-1123 label and `key` a valid (relaxed) env var name,
 matching real admission's own `validateFileKeySelector`; `path` must be
 relative and must not contain a `..` backstep component, per this repo's own
-path-safety convention; **deferred:** `volumeName` is not cross-checked
-against the component's declared `volumes` — env parsing runs before volume
-parsing in every call site — so a `fileKeyRef` naming a nonexistent volume,
-or an existing but non-`emptyDir` one, builds successfully here but is
-rejected at real admission: `validateFileKeyRefVolumes` requires the
-referenced volume be specifically `emptyDir`, not any other source type this
-schema supports; see the doc comment on `parseFileKeyRef` in `common.go`; a
+path-safety convention; once the component's `volumes` are parsed,
+`volumeName` must name one of them of type `emptyDir` — a `fileKeyRef` in
+the main container, an init container or a sidecar naming an undeclared
+volume (a statefulset claim template included) or a non-`emptyDir` one is
+refused, as real admission's `validateFileKeyRefVolumes` refuses it (no
+trait the build evaluates adds an `emptyDir` volume; a raw `fluxcd-patches`
+patch is outside the build's view, so a volume only a patch supplies is not
+seen — declare the `emptyDir` volume on the component itself; see
+`checkFileKeyRefVolumes` in `common.go`); a
 key other than `volumeName`/`path`/`key`/`optional` is rejected outright too,
 rather than being silently ignored) —
 mutually exclusive among themselves too), `envFrom` (an authored non-array
