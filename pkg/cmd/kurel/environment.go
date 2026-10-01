@@ -94,7 +94,13 @@ func resolveEnvironment(opts *buildOptions, appDir string, flags *pflag.FlagSet)
 			opts.environment, path, strings.Join(doc.names(), ", "))
 	}
 
-	baseDir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	// Absolute first: EvalSymlinks keeps a relative input relative but returns an
+	// absolute target for an absolute link, and filepath.Rel cannot compare the two.
+	absDir, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		return errors.Wrapf(err, "resolving the directory of environments file %q", path)
+	}
+	baseDir, err := filepath.EvalSymlinks(absDir)
 	if err != nil {
 		return errors.Wrapf(err, "resolving the directory of environments file %q", path)
 	}
@@ -113,7 +119,7 @@ func resolveEnvironment(opts *buildOptions, appDir string, flags *pflag.FlagSet)
 	return nil
 }
 
-// containedPath joins rel onto baseDir (already symlink-free), resolves symlinks,
+// containedPath joins rel onto baseDir (absolute, symlink-free), resolves symlinks,
 // and rejects a target outside baseDir. validateBindingPath only checks the text of
 // the path; a symlink such as profiles -> /elsewhere passes that check, so the
 // resolved target is what gets checked and returned for build to read.
