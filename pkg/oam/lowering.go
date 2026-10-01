@@ -1650,10 +1650,16 @@ func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Orig
 // components", so this checks pointer identity against every original component's
 // own Traits slice instead of one. A trait sealed here is never synthesized: a
 // document rule's output stays authored (see the component loop in lowerDocumentOnce).
+// A forwarded trait records its slot in the original component's Traits
+// (Trait.authoredIndex) as sealEmittedNestedTraits does, so a rule that places a trait
+// of its own ahead of it does not shift its Origin.Index.
 func (t *Transformer) sealNestedTraitsInDocument(comp *Component, parentOrigin Origin, originalComponents []Component) error {
 	return t.sealNestedTraits(comp, parentOrigin, false, func(trait *Trait) bool {
 		for i := range originalComponents {
-			if isForwardedTrait(trait, originalComponents[i].Traits) {
+			if k := forwardedIndex(trait, originalComponents[i].Traits); k >= 0 {
+				if trait.authoredIndex == nil {
+					trait.authoredIndex = &k
+				}
 				return true
 			}
 		}
