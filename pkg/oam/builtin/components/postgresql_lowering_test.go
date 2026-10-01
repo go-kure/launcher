@@ -191,10 +191,24 @@ func TestPostgresqlRule_DependencyPolicyOnlyWhenTheDocumentOrders(t *testing.T) 
 		"rules": []any{
 			map[string]any{"component": "db-pooler", "dependsOn": []any{"db"}},
 			map[string]any{"component": "db-orders", "dependsOn": []any{"db"}},
+			// api waited for every object of db; it now waits for each member.
+			map[string]any{"component": "api", "dependsOn": []any{"db-pooler", "db-orders"}},
 		},
 	}}}
 	if !reflect.DeepEqual(res.Policies, want) {
 		t.Errorf("policies = %+v, want %+v", res.Policies, want)
+	}
+
+	// The name skips those the document's policies use, and only those: a
+	// component named db-dependencies does not move it.
+	taken := &oam.Application{Spec: oam.ApplicationSpec{
+		Components: append(append([]oam.Component{}, ordered.Spec.Components...), oam.Component{Name: "db-dependencies", Type: "webservice"}),
+		Policies: append(append([]oam.ApplicationPolicy{}, ordered.Spec.Policies...),
+			oam.ApplicationPolicy{Name: "db-dependencies", Type: "placement"},
+			oam.ApplicationPolicy{Name: "db-dependencies-1", Type: "placement"}),
+	}}
+	if res := lowerPostgresql(t, &comp, taken); len(res.Policies) != 1 || res.Policies[0].Name != "db-dependencies-2" {
+		t.Errorf("policies with db-dependencies and db-dependencies-1 taken = %+v, want one named db-dependencies-2", res.Policies)
 	}
 
 	// Nothing to order: no Pooler, no Databases.
