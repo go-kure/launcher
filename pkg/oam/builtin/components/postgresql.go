@@ -619,6 +619,7 @@ func (PostgresqlRule) Parse(component *oam.Component) (*PostgresqlConfig, error)
 	if err != nil {
 		return nil, err
 	}
+	firstDatabase := map[string]int{}
 	for i, dMap := range dbList {
 		label := fmt.Sprintf("databases[%d]", i)
 		name, present, err := parseStringField(dMap, "name", label+".name")
@@ -628,6 +629,13 @@ func (PostgresqlRule) Parse(component *oam.Component) (*PostgresqlConfig, error)
 		if !present {
 			return nil, errors.Errorf("%s: 'name' is required", label)
 		}
+		// Each entry generates one Database object named after it, so a
+		// repeated name would be one object authored twice: the Flux build
+		// cannot hold both, and kubectl keeps the last.
+		if first, seen := firstDatabase[name]; seen {
+			return nil, errors.Errorf("%s: repeats the name %q of databases[%d]; each database is one object", label, name, first)
+		}
+		firstDatabase[name] = i
 		owner, present, err := parseStringField(dMap, "owner", label+".owner")
 		if err != nil {
 			return nil, err

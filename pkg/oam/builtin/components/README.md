@@ -2515,8 +2515,8 @@ not part of either change.
   that layout gives each component a bundle of its own. Without one it adds
   no edge, since any dependency edge switches the whole document to that
   layout. The policies it adds are named `<name>-dependencies` and
-  `<member>-placement`, or, when a policy of the document already uses the
-  name, the first free one with `-<n>` appended.
+  `<name>-placement-<i>` (one per member), or, when a policy of the document
+  already uses the name, the first free one with `-<n>` appended.
   **Behavior-changing** under `launcher.gokure.dev/v1alpha1`
   (go-kure/launcher#281): with both `objectStore` and `pooler`, the objects
   now come in the order Cluster, ObjectStore, Pooler (was Cluster, Pooler,
@@ -2526,7 +2526,10 @@ not part of either change.
   bundles of their own, each after the Cluster's (was one bundle for all
   of postgresql's objects). A generated `<name>-pooler` or
   `<name>-<db>` that is already the name of another component in the
-  document is refused, naming both. The Cluster kind's policy checks now
+  document is refused, naming both. A database name repeated in
+  `databases` is refused, naming both entries: each entry is one Database
+  object, so the Flux build already failed on it, and the plain manifest
+  output carried duplicate Database documents (kubectl kept the last). The Cluster kind's policy checks now
   apply, under its field names: the registry allowlist on the image
   (`imageName`, derived or authored), and `instances`/`storage.size` in the
   policy messages. Refusals the API server or the operator gave at apply

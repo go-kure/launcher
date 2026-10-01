@@ -144,6 +144,30 @@ func TestBuild_PostgresqlPlacementReachesEveryMember(t *testing.T) {
 	})
 }
 
+// TestBuild_PostgresqlPlacementOfALongMemberName: the placement copies are
+// named after the Cluster, not the member, so a Database whose generated name
+// is already as long as a policy name can be is still placed.
+func TestBuild_PostgresqlPlacementOfALongMemberName(t *testing.T) {
+	app := `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  components:
+    - name: db
+      type: postgresql
+      properties:
+        databases:
+          - name: ` + strings.Repeat("a", 241) + `
+            owner: app
+  policies:
+` + strings.Replace(postgresqlPlacementPolicy, "tier: apps", "tier: services", 1)
+	if _, out, err := buildDocs(t, app); err != nil {
+		t.Fatalf("build failed: %v\noutput: %s", err, out)
+	}
+}
+
 // TestBuild_PostgresqlDependentWaitsForEveryMember: a component made to wait
 // for the postgresql component waited for the one bundle of all its objects;
 // it now waits for each member's bundle too, also when it shares the tier, so

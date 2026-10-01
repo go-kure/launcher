@@ -188,8 +188,8 @@ func postgresqlChildName(lctx oam.LoweringContext, cluster, suffix, what string)
 // duplicate). Sharing the Namer's namespace with generated component names
 // would refuse a valid document whose database, or another component's,
 // generates the same name, depending on which rule ran first. Two calls cannot
-// name the same policy either: each base is a component's own name followed by
-// "-dependencies" or "-placement".
+// name the same policy either: each base is the call's own component name
+// followed by "-dependencies" or "-placement-<i>".
 func postgresqlMemberPolicies(lctx oam.LoweringContext, cluster string, members []string) []oam.ApplicationPolicy {
 	if len(members) == 0 || lctx.Document == nil {
 		return nil
@@ -210,9 +210,13 @@ func postgresqlMemberPolicies(lctx oam.LoweringContext, cluster string, members 
 	if rules := postgresqlDependencyRules(lctx.Document, cluster, members); rules != nil {
 		out = append(out, oam.ApplicationPolicy{Name: free(cluster + "-dependencies"), Type: "dependency", Properties: map[string]any{"rules": rules}})
 	}
+	// Placements are numbered rather than named after the member: a member's
+	// name may already be as long as a policy name can be, the Cluster's cannot.
+	n := 0
 	for _, tier := range postgresqlPlacementTiers(lctx.Document, cluster) {
 		for _, m := range members {
-			out = append(out, oam.ApplicationPolicy{Name: free(m + "-placement"), Type: "placement", Properties: map[string]any{"component": m, "tier": tier}})
+			out = append(out, oam.ApplicationPolicy{Name: free(fmt.Sprintf("%s-placement-%d", cluster, n)), Type: "placement", Properties: map[string]any{"component": m, "tier": tier}})
+			n++
 		}
 	}
 	return out
