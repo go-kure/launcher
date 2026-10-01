@@ -156,6 +156,49 @@ func TestValidateAuthoredProperties_RejectsNestedReservedNull(t *testing.T) {
 	}
 }
 
+// TestValidateAuthoredProperties_KeepsTransformsExemptions: a synthesized component and
+// a sealed trait a checked rule emitted carry the platform's own values; Transform
+// accepts them, so the authored check must too.
+func TestValidateAuthoredProperties_KeepsTransformsExemptions(t *testing.T) {
+	newDoc := func() *Application {
+		app := appWithTrait("nested-reserved", map[string]any{"config": map[string]any{"locked": "x"}})
+		comp := &app.Spec.Components[0]
+		comp.Properties["networkPolicy"] = map[string]any{"rendered": true}
+		comp.synthesized = true
+		comp.Traits[0].sealed = true
+		comp.Traits[0].synthesized = true
+		return app
+	}
+	tr := nestedReservedTransformer()
+	if err := tr.ValidateAuthoredProperties(newDoc()); err != nil {
+		t.Fatalf("expected synthesized elements to be exempt, got: %v", err)
+	}
+	if _, err := tr.Transform(newDoc(), TransformContext{}); err != nil {
+		t.Fatalf("expected Transform to accept the same document, got: %v", err)
+	}
+}
+
+// TestValidateAuthoredProperties_ReservationErrorNamesStampedOrigin: a document the
+// lowering engine already stamped is named by its authored origin, as Transform's own
+// check names it, not by its current metadata.
+func TestValidateAuthoredProperties_ReservationErrorNamesStampedOrigin(t *testing.T) {
+	newDoc := func() *Application {
+		app := appWithTrait("nested-reserved", map[string]any{"config": map[string]any{"locked": "x"}})
+		app.Metadata.Name = "myapp-lowered"
+		app.origin = &Origin{Document: "myapp", DocumentKind: "Wrapper", Namespace: "test"}
+		return app
+	}
+	tr := nestedReservedTransformer()
+	tr.RegisterTraitLowering(nestedReservedWrapperRule{})
+	authoredErr := tr.ValidateAuthoredProperties(newDoc())
+	_, transformErr := tr.Transform(newDoc(), TransformContext{})
+	expectReservedRefusal(t, authoredErr, `in document "myapp" (kind "Wrapper")`)
+	expectReservedRefusal(t, transformErr, `in document "myapp" (kind "Wrapper")`)
+	if authoredErr.Error() != transformErr.Error() {
+		t.Errorf("error text differs:\n  ValidateAuthoredProperties: %v\n  Transform:                  %v", authoredErr, transformErr)
+	}
+}
+
 // TestValidateAuthoredProperties_ReservationErrorMatchesTransform: one document fails
 // with the same text on both paths, with and without lowering rules registered (the
 // two are reported by different Transform stages).

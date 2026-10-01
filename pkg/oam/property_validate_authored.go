@@ -93,8 +93,9 @@ func (t *Transformer) ValidateAuthoredProperties(app *Application) error {
 // would be gone before Transform's own check could see it, and the document would be
 // accepted (go-kure/launcher#635).
 //
-// It reports exactly what Transform reports for a document whose only defect is a
-// reserved key. With lowering rules registered, that is the check at the start of the
+// It reports exactly what Transform reports for a document whose only defect is one
+// reserved key; with several, Transform may meet another one first (a hierarchical
+// build applies traits in tier order). With lowering rules registered, that is the check at the start of the
 // first lowering round (enforceAuthoredReservations, before any rule ran, so the
 // LoweringError carries no chain); a non-terminal kind no rule claims is passed over,
 // as lowerDocumentOnce passes it over. With none, it is createApplications' component
@@ -107,14 +108,25 @@ func (t *Transformer) enforceDocumentReservations(app *Application) error {
 				return nil
 			}
 		}
-		origin := Origin{Document: app.Metadata.Name, DocumentKind: app.Kind, Namespace: app.Metadata.Namespace}
-		if err := t.enforceAuthoredReservations(app, origin); err != nil {
-			return &LoweringError{Origin: origin, Cause: err}
+		// lower seeds the LoweringError's origin from the metadata, while the round's
+		// own check names elements from the document's stamped origin when it has one.
+		seed := Origin{Document: app.Metadata.Name, DocumentKind: app.Kind, Namespace: app.Metadata.Namespace}
+		docOrigin, _ := app.Origin()
+		if docOrigin == (Origin{}) {
+			docOrigin = seed
+		}
+		if err := t.enforceAuthoredReservations(app, docOrigin); err != nil {
+			return &LoweringError{Origin: seed, Cause: err}
 		}
 		return nil
 	}
+	// The exemptions are createApplications' and applyTraits': a synthesized
+	// component, and a sealed trait a checked rule emitted.
 	for i := range app.Spec.Components {
 		comp := &app.Spec.Components[i]
+		if comp.synthesized {
+			continue
+		}
 		if err := t.enforceComponentReservations(comp, "properties"); err != nil {
 			return &TransformError{Message: fmt.Sprintf("component %q", comp.Name), Cause: err}
 		}
@@ -122,6 +134,9 @@ func (t *Transformer) enforceDocumentReservations(app *Application) error {
 	for i := range app.Spec.Components {
 		comp := &app.Spec.Components[i]
 		for j := range comp.Traits {
+			if comp.Traits[j].sealed && comp.Traits[j].synthesized {
+				continue
+			}
 			if err := t.enforceTraitReservations(&comp.Traits[j], "properties"); err != nil {
 				return &TransformError{Message: fmt.Sprintf("component %q trait %q", comp.Name, comp.Traits[j].Type), Cause: err}
 			}
