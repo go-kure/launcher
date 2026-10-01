@@ -314,7 +314,7 @@ guard's shared-direct set.
 - `verify-merge PR=<n>` - Build and test the PR's merge ref (`refs/pull/<n>/merge`), the tree its CI builds
 - `test-verify-merge` - Self-test `scripts/verify-merge.sh`
 - `test-pin-impact` - Run `scripts/check-pin-impact.sh`'s hermetic cases (`bash scripts/test/run-tests.sh`)
-- `check-issue-refs` - Reject bare `#N` and partial `launcher#N` references (self-test, then the tree; `AGENTS.md` § "Issue references")
+- `check-issue-refs` - Reject bare `#N` and ownerless `name#N` references (self-test, then the tree; `AGENTS.md` § "Issue references")
 
 ### Release
 No target releases or previews a release: run the **Release** workflow, with **Dry run** ticked for

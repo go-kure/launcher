@@ -147,7 +147,7 @@ self-test (`make test-verify-merge`).
 | `test` | `test` | 25 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
 | `security` | `Security` | 15 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `action-pins` | `action-pins` | 2 min | — | Fails if any third-party `uses:` ref is not pinned to a 40-char commit SHA (`go-kure/.github` composite action) |
-| `issue-refs` | `issue-refs` | 2 min | — | Self-tests then runs `scripts/check-issue-refs.sh` over the whole tracked tree: rejects a bare `#N` or a partial `launcher#N` reference (go-kure/launcher#400; `make check-issue-refs`) |
+| `issue-refs` | `issue-refs` | 2 min | — | Self-tests then runs `scripts/check-issue-refs.sh` over the whole tracked tree: rejects a bare `#N` or an ownerless `name#N` reference (go-kure/launcher#400; `make check-issue-refs`) |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) |
@@ -209,11 +209,12 @@ Runs on main and `release/*` branches only (not PRs):
   (go-kure/launcher#400): the self-test (`scripts/check-issue-refs-test.sh`, fixtures that must
   fail and must pass, each in a throwaway git repository), then `scripts/check-issue-refs.sh` on
   the tracked `*.go`, `*.md`, `*.sh`, `*.yml`, `*.yaml`, `*.toml` and `*.json` files. It rejects a
-  bare `#N` of two to five digits and a `launcher#N` without its owner, because neither names a
-  repository that `go doc`, pkg.go.dev or a reader in another repository can resolve. It scans the
-  whole tree rather than the changed lines, and has no path filter, so a PR and the merge queue
-  get the same result. Exempt: `CHANGELOG.md` (generated from commit subjects), anything under a
-  `testdata/` directory, Markdown anchors `](#...)`, and any line carrying `allow-ref`.
+  bare `#N` of two to five digits and an ownerless `name#N` such as `launcher#N` or `kure#N`,
+  because neither is a reference that `go doc`, pkg.go.dev or GitHub can resolve or link. It
+  scans the whole tree rather than the changed lines, and has no path filter, so a PR and the
+  merge queue get the same result. Exempt: `CHANGELOG.md` (generated from commit subjects),
+  anything under a `testdata/` directory, Markdown link targets `](...)`, and any line carrying
+  `allow-ref`.
   Convention and known gaps: `AGENTS.md` § "Issue references"
 - **Manifest schema validation** — `validate-manifests` builds a representative subset of
   `examples/*.yaml` via `kurel build` and validates the output against

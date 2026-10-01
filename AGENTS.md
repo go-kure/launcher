@@ -271,22 +271,25 @@ The remediation runbook is `go-kure/.github` → `docs/no-downstream-references.
 
 Write every issue or PR reference with its repository: `go-kure/launcher#N` for this repository,
 `owner/repo#N` for any other. A bare `#N` resolves against whichever repository the reader is in,
-and `go doc`, pkg.go.dev and test output have no repository at all; a partial `launcher#N` names
-the repository but GitHub does not link it. A reference to a downstream repository is not
+and `go doc`, pkg.go.dev and test output have no repository at all; an ownerless `launcher#N` or
+`kure#N` names a repository but GitHub does not link it. A reference to a downstream repository is not
 qualified: reword it and drop the number (see the section above).
 
 CI-enforced by the always-on `issue-refs` job (`make check-issue-refs`, also in `make check`,
 `make precommit` and `mise run verify`), which scans the whole tracked tree
 (`scripts/check-issue-refs.sh`, go-kure/launcher#400). It rejects a bare `#N` of two to five digits
-and a `launcher#N` without its `owner/` (also `pre-launcher#N`), in tracked `*.go`, `*.md`,
-`*.sh`, `*.yml`, `*.yaml`, `*.toml` and `*.json` files. Exempt: `CHANGELOG.md` (generated from commit subjects), anything under
-a `testdata/` directory, and Markdown anchors `](#...)`. A line that is genuinely not a reference
-(a quoted error message, a fixture string, an all-digit colour such as `#123`) takes an `allow-ref`
-pragma anywhere on that line.
+and an ownerless `name#N` of two to five digits (`launcher#N`, `kure#N`, also `pre-launcher#N`),
+in tracked `*.go`, `*.md`, `*.sh`, `*.yml`, `*.yaml`, `*.toml` and `*.json` files. Exempt:
+`CHANGELOG.md` (generated from commit subjects), anything under a `testdata/` directory, and
+Markdown link targets `](...)`, so `](#12-foo)` and `](design.md#12-foo)` pass; a bare URL passes
+because its anchor follows a `/`. A line that is genuinely not a reference (a quoted error
+message, a fixture string, an all-digit colour such as `#123`) takes an `allow-ref` pragma
+anywhere on that line.
 
 Known gaps — the guard does not catch these, so a reviewer must:
 
-- a single-digit `#N`, left alone because prose such as "step #1" would trip it;
+- a single-digit `#N` or `name#N`, left alone because prose such as "step #1" or a message such
+  as "resolve#2" would trip it;
 - any `owner/repo#N` passes, so a reference qualified with the wrong owner or repository is not
   caught.
 

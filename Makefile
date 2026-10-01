@@ -123,7 +123,7 @@ check-doc-fences: build-kurel ## Check the documentation's marked YAML fences (s
 
 # Self-test first, for the same reason (go-kure/launcher#400).
 .PHONY: check-issue-refs
-check-issue-refs: ## Reject bare #N and partial launcher#N references (self-test, then the tree)
+check-issue-refs: ## Reject bare #N and ownerless repo#N references (self-test, then the tree)
 	@bash scripts/check-issue-refs-test.sh
 	@bash scripts/check-issue-refs.sh
 

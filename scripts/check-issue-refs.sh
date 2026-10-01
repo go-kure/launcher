@@ -3,9 +3,9 @@
 # repository (go-kure/launcher#400).
 #
 # A bare `#N` resolves against whichever repository the reader happens to be in,
-# and `go doc`, pkg.go.dev and `go test` output have no repository at all. A
-# partial `launcher#N` names the repository but GitHub does not link it. Write
-# `go-kure/launcher#N`, or `owner/repo#N` for another repository.
+# and `go doc`, pkg.go.dev and `go test` output have no repository at all. An
+# ownerless `launcher#N` or `kure#N` names a repository but GitHub does not link
+# it. Write `go-kure/launcher#N`, or `owner/repo#N` for another repository.
 #
 # Scans the whole tree, not changed lines, so a PR and the merge queue get the
 # same result (the go-kure/.github scan-parity rule for gates).
@@ -18,17 +18,21 @@
 #   bare     `#N` with 2 to 5 digits, not preceded by a letter, digit, `_`, `&`
 #            or `%` (so `(#227)`, `#227/#242`, `pre-#444` are caught; the HTML
 #            entity `&#1234;` and the Go format verb `%#12x` are not)
-#   partial  a repository name ending in `launcher`, then `#N`, with no `owner/`
-#            before it (so `launcher#278`, `pre-launcher#278` and `...launcher#278`
-#            are caught; `go-kure/launcher#278` and `owner/kure-launcher#278` are not)
-# A Markdown link target `](#...)` is an anchor, not a reference, and is ignored.
+#   ownerless  a name containing a letter, then `#N` with 2 to 5 digits, with
+#              no `owner/` before it (so `launcher#278`, `kure#539`,
+#              `pre-launcher#278` and `...launcher#278` are caught;
+#              `go-kure/launcher#278` and `owner/kure-launcher#278` are not)
+# A Markdown link target `](...)` is a location, not a reference, and is ignored,
+# so `](#12-foo)` and `](design.md#12-foo)` pass. A bare URL passes too: its
+# anchor follows a `/`-separated path segment, the same as a qualified name.
 #
 # Escape hatch: `allow-ref` anywhere on the same line exempts that line. Needed
 # for an all-digit CSS colour such as `#123`, which no pattern can tell apart
 # from a reference.
 #
-# Not caught: a single-digit `#N` (prose such as "step #1" would trip it), and a
-# qualified `owner/repo#N` that names the wrong repository.
+# Not caught: a single-digit `#N` or `name#N` (prose such as "step #1" or a
+# message such as "resolve#2" would trip it), and a qualified `owner/repo#N`
+# that names the wrong repository.
 #
 # Usage: check-issue-refs.sh [--root DIR]
 # Exit:  0 clean, 1 references found, 2 usage or scan error.
@@ -45,7 +49,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 BARE='(^|[^A-Za-z0-9_&%])#[0-9]{2,5}([^A-Za-z0-9_]|$)'
-PART='(^|[^A-Za-z0-9_./-])[A-Za-z0-9_.-]*launcher#[0-9]+'
+PART='(^|[^A-Za-z0-9_./-])[A-Za-z0-9_.-]*[A-Za-z][A-Za-z0-9_.-]*#[0-9]{2,5}([^A-Za-z0-9_]|$)'
 
 hits="$(mktemp)"
 trap 'rm -f "$hits"' EXIT
@@ -67,7 +71,7 @@ found=0
 while IFS= read -r -d '' file && IFS= read -r -d '' lineno && IFS= read -r text; do
   [[ "$text" == *allow-ref* ]] && continue
   stripped="$text"
-  while [[ "$stripped" =~ ^(.*)\]\(#[^\)]*\)(.*)$ ]]; do
+  while [[ "$stripped" =~ ^(.*)\]\([^\)]*\)(.*)$ ]]; do
     stripped="${BASH_REMATCH[1]}]${BASH_REMATCH[2]}"
   done
   if [[ "$stripped" =~ $BARE || "$stripped" =~ $PART ]]; then
@@ -78,7 +82,7 @@ done <"$hits"
 
 if [[ "$found" -gt 0 ]]; then
   echo "" >&2
-  echo "check-issue-refs: $found line(s) with a bare #N or partial launcher#N reference." >&2
+  echo "check-issue-refs: $found line(s) with a bare #N or ownerless repo#N reference." >&2
   echo "Write go-kure/launcher#N (or owner/repo#N), or add allow-ref to a line that is not a reference." >&2
   exit 1
 fi
