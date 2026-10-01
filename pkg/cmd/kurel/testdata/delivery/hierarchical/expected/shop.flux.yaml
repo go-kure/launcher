@@ -70,6 +70,8 @@ metadata:
   name: shop-services
   namespace: flux-system
 spec:
+  dependsOn:
+  - name: shop-infra
   healthChecks:
   - apiVersion: postgresql.cnpg.io/v1
     kind: Cluster
@@ -99,6 +101,8 @@ metadata:
   name: shop-apps
   namespace: flux-system
 spec:
+  dependsOn:
+  - name: shop-services
   healthChecks:
   - apiVersion: apps/v1
     kind: Deployment
