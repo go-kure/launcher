@@ -280,9 +280,10 @@ CI-enforced by the always-on `issue-refs` job (`make check-issue-refs`, also in 
 (`scripts/check-issue-refs.sh`, go-kure/launcher#400). It rejects a bare `#N` of two to five digits
 and an ownerless `name#N` of two to five digits (`launcher#N`, `kure#N`, also `pre-launcher#N`),
 in tracked `*.go`, `*.md`, `*.sh`, `*.yml`, `*.yaml`, `*.toml` and `*.json` files. Exempt:
-`CHANGELOG.md` (generated from commit subjects), anything under a `testdata/` directory, and
-Markdown link targets `](...)`, so `](#12-foo)` and `](design.md#12-foo)` pass; a bare URL passes
-because its anchor follows a `/`. A line that is genuinely not a reference (a quoted error
+`CHANGELOG.md` (generated from commit subjects) and anything under a `testdata/` directory.
+Ignored within a line: a Markdown link target `](...)` without whitespace (so `](#12-foo)` and
+`](design.md#12-foo)` pass), a URL (`https://example.com/#12-foo`) and a printf verb with the `#`
+flag (`%+#12.6g`). A line that is genuinely not a reference (a quoted error
 message, a fixture string, an all-digit colour such as `#123`) takes an `allow-ref` pragma
 anywhere on that line.
 

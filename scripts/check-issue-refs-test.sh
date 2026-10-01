@@ -53,6 +53,9 @@ expect "partial launcher ref" 1 "a.go:1:" a.go '// see launcher#278'
 expect "ownerless other repository" 1 "a.md:1:" a.md 'removal tracked in kure#539'
 expect "ownerless ref as link text" 1 "a.md:1:" a.md 'see [kure#539](https://github.com/go-kure/kure/issues/539)'
 expect "ref beside a relative link" 1 "a.md:1:" a.md 'see [the section](design.md#12-foo) and kure#539'
+expect "ref in an indexed Go call" 1 "a.go:1:" a.go 'callbacks[i]("fixed in #227")'
+expect "ref after a URL" 1 "a.md:1:" a.md 'see https://example.com/x and #227'
+expect "ref after a percent sign" 1 "a.md:1:" a.md 'done to 100% #227 next'
 expect "bare ref at line start" 1 "notes.md:1:" notes.md '#123 is the tracking issue'
 expect "bare ref in a shell comment" 1 "x.sh:1:" x.sh '# Re-introduce the #417 defect'
 expect "bare ref in a Go string" 1 "a.go:1:" a.go 't.Errorf("want #227 component label")'
@@ -69,9 +72,11 @@ expect "qualified launcher ref" 0 "" a.go '// fixed in (go-kure/launcher#227, go
 expect "other repository" 0 "" a.md 'removal tracked in [go-kure/kure#539](https://github.com/go-kure/kure/issues/539)'
 expect "Markdown anchor" 0 "" a.md 'see [the section](#12-foo)'
 expect "relative link with a numbered anchor" 0 "" a.md 'see [x](file.md#12-foo) and [y](../foo.md#34-bar)'
-# A bare URL passes without stripping: its anchor follows a `/`-separated path
-# segment, which the ownerless rule treats like the owner in `owner/repo#N`.
+expect "link target with nested parentheses" 0 "" a.md 'see [section](design(v2).md#12-foo)'
+# A URL is stripped before matching, whatever precedes its anchor.
 expect "bare URL with a numbered anchor" 0 "" a.md 'see https://example.com/page#12-foo'
+expect "root-page URL anchor" 0 "" a.md 'see https://example.com/#12-foo'
+expect "Go format verb with flags" 0 "" a.go 'fmt.Printf("%+#12.6g %-#8x", value, n)'
 expect "single-digit name#N" 0 "" a.go 't.Fatalf("resolve#2: %v", err)'
 expect "HTML entity" 0 "" a.md 'a &#1234; entity'
 expect "Go format verb" 0 "" a.go 'fmt.Printf("%#12.6g", value)'

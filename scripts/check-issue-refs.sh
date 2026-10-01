@@ -15,16 +15,20 @@
 # directory, and this script and its self-test.
 #
 # Rejected:
-#   bare     `#N` with 2 to 5 digits, not preceded by a letter, digit, `_`, `&`
-#            or `%` (so `(#227)`, `#227/#242`, `pre-#444` are caught; the HTML
-#            entity `&#1234;` and the Go format verb `%#12x` are not)
+#   bare     `#N` with 2 to 5 digits, not preceded by a letter, digit, `_` or `&`
+#            (so `(#227)`, `#227/#242`, `pre-#444` are caught; the HTML entity
+#            `&#1234;` is not)
 #   ownerless  a name containing a letter, then `#N` with 2 to 5 digits, with
 #              no `owner/` before it (so `launcher#278`, `kure#539`,
 #              `pre-launcher#278` and `...launcher#278` are caught;
 #              `go-kure/launcher#278` and `owner/kure-launcher#278` are not)
-# A Markdown link target `](...)` is a location, not a reference, and is ignored,
-# so `](#12-foo)` and `](design.md#12-foo)` pass. A bare URL passes too: its
-# anchor follows a `/`-separated path segment, the same as a qualified name.
+# Ignored before matching, because each is a location or code, not a reference:
+#   - a Markdown link target `](...)` with no whitespace and at most one level of
+#     nested parentheses, so `](#12-foo)`, `](design.md#12-foo)` and
+#     `](design(v2).md#12-foo)` pass, while `f[i]("fixed in #227")` does not;
+#   - a URL `scheme://...` up to whitespace, a quote or a bracket, so
+#     `https://example.com/#12-foo` passes;
+#   - a printf verb carrying the `#` flag, so `%#12x` and `%+#12.6g` pass.
 #
 # Escape hatch: `allow-ref` anywhere on the same line exempts that line. Needed
 # for an all-digit CSS colour such as `#123`, which no pattern can tell apart
@@ -48,8 +52,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-BARE='(^|[^A-Za-z0-9_&%])#[0-9]{2,5}([^A-Za-z0-9_]|$)'
+BARE='(^|[^A-Za-z0-9_&])#[0-9]{2,5}([^A-Za-z0-9_]|$)'
 PART='(^|[^A-Za-z0-9_./-])[A-Za-z0-9_.-]*[A-Za-z][A-Za-z0-9_.-]*#[0-9]{2,5}([^A-Za-z0-9_]|$)'
+
+# Strippers: group 1 is the text before the match, the last group the text after.
+LINK='^(.*)\]\(([^()[:space:]]|\([^()[:space:]]*\))*\)(.*)$'
+URL='^(.*)[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]<>()"`]*(.*)$'
+VERB='^(.*)%[-+ 0]*#[-+ #0]*[0-9]*(\.[0-9]+)?[A-Za-z](.*)$'
 
 hits="$(mktemp)"
 trap 'rm -f "$hits"' EXIT
@@ -71,8 +80,15 @@ found=0
 while IFS= read -r -d '' file && IFS= read -r -d '' lineno && IFS= read -r text; do
   [[ "$text" == *allow-ref* ]] && continue
   stripped="$text"
-  while [[ "$stripped" =~ ^(.*)\]\([^\)]*\)(.*)$ ]]; do
-    stripped="${BASH_REMATCH[1]}]${BASH_REMATCH[2]}"
+  # Each pass removes one match, so every loop ends.
+  while [[ "$stripped" =~ $LINK ]]; do
+    stripped="${BASH_REMATCH[1]}]${BASH_REMATCH[3]}"
+  done
+  while [[ "$stripped" =~ $URL ]]; do
+    stripped="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+  done
+  while [[ "$stripped" =~ $VERB ]]; do
+    stripped="${BASH_REMATCH[1]}${BASH_REMATCH[3]}"
   done
   if [[ "$stripped" =~ $BARE || "$stripped" =~ $PART ]]; then
     echo "$file:$lineno: $text"
