@@ -412,7 +412,8 @@ member carries each trait. A routing trait (ingress, Gateway API routes) belongs
 the member that owns the Service; a workload trait on the workload member.
 
 The build refuses a group:
-- whose members fall in different tiers;
+- whose members fall in different tiers, unless a placement policy places the
+  group (it then deploys in the placed tier);
 - in which two members answer the same contract;
 - that has a member needing layout-level resources;
 - in which two members generate the same Kubernetes object;

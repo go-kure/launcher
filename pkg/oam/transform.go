@@ -610,6 +610,9 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 			entries[i].tier = tier
 		}
 	}
+	if err := checkSiblingTiers(entries, policyResult.TierOverrides); err != nil {
+		return nil, nil, err
+	}
 
 	// Phase 3: group by tier and build cluster.
 	tierGroups := groupByTier(entries)
