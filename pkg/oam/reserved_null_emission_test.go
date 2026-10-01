@@ -224,6 +224,30 @@ func (sharedMapTraitRule) LowerTrait(trait *Trait, _ LoweringContext) (LoweringR
 	}, nil
 }
 
+// parentMapTraitRule declares no schema and emits an open-sink whose properties map
+// is the one of the component it is attached to.
+type parentMapTraitRule struct{}
+
+func (parentMapTraitRule) TraitType() string { return "parent-map" }
+
+func (parentMapTraitRule) LowerTrait(_ *Trait, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: "open", Type: "open-sink", Properties: lctx.Component.Properties}}}, nil
+}
+
+// TestTransform_ReservedNullInMapSharedWithEnclosingComponentIsRejected: validating
+// the open-sink would strip the null from the authored reserved-sink it shares a
+// map with, so the authored component is checked before any rule of the round runs.
+func TestTransform_ReservedNullInMapSharedWithEnclosingComponentIsRejected(t *testing.T) {
+	tr := reservedSinkTransformer()
+	tr.RegisterComponent("open-sink", openSinkHandler{})
+	tr.RegisterTraitLowering(parentMapTraitRule{})
+
+	app := singleComponentApp("Application", "reserved-sink", authoredReservedNull())
+	app.Spec.Components[0].Traits = []Trait{{Type: "parent-map", Properties: map[string]any{}}}
+	_, err := tr.Transform(app, TransformContext{})
+	expectPlatformReserved(t, err)
+}
+
 // TestTransform_ReservedNullInMapSharedAcrossEmittedComponentsIsRejected: validating
 // the open-sink strips the null from the shared map, so the reserved-sink is checked
 // before any component of the result is validated.

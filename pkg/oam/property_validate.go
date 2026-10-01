@@ -128,8 +128,9 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 		// On the component surface the two rules never meet: enforcePlatformReserved
 		// runs upstream of this strip, so what it sees is what a user wrote. An
 		// authored component is checked before the first rule that could rewrite it
-		// (lowerDocumentBody's pre-rule check, enforceAuthoredComponentReservations
-		// before a document rule) or, with no rule, in createApplications. A
+		// or share its properties map (enforceAuthoredComponentReservations at the
+		// start of every lowerDocumentBody round and before a document rule,
+		// lowerDocumentBody's pre-rule check) and again in createApplications. A
 		// component a rule emitted, whose properties are stripped here, is either
 		// synthesized and exempt, or — output of a rule whose input was not checked —
 		// checked by enforceEmittedComponentReservations before this strip, so an
@@ -463,9 +464,9 @@ func joinPropertyTypes(types []PropertyType) string {
 // This runs upstream of emission validation, so what it sees is what a user wrote. On
 // the component surface the callers keep that true by skipping a component a lowering
 // rule synthesized (Component.synthesized) and by checking an authored one before any
-// rule can rewrite it — lowerDocumentBody before a ComponentLoweringRule,
-// enforceAuthoredComponentReservations before a DocumentLoweringRule,
-// createApplications otherwise. The output of a rule whose input was not checked stays
+// rule can rewrite it — enforceAuthoredComponentReservations at the start of every
+// lowerDocumentBody round and before a DocumentLoweringRule, lowerDocumentBody before
+// a ComponentLoweringRule, createApplications otherwise. The output of a rule whose input was not checked stays
 // authored, and enforceEmittedComponentReservations checks its components as they are
 // emitted, before emission validation removes an explicit null
 // (go-kure/launcher#609). The trait surface works the same way: an unsealed trait is

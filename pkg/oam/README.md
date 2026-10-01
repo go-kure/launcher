@@ -445,7 +445,10 @@ forwarding neither makes it synthesized nor resets it to authored. What a user w
 before any rule can rewrite it: before a `ComponentLoweringRule` claims the
 component, and for every component of a document before its `DocumentLoweringRule`
 runs, so rebuilding a component by value does not launder an authored reserved
-value.
+value. Every component no rule synthesized is also checked at the start of each
+lowering round, before any rule of that round runs, so a rule that emits an element
+sharing a component's properties map cannot have emission validation strip an
+authored `null` from it.
 
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the
