@@ -279,7 +279,6 @@ func loadSuppliedValues(opts *buildOptions) (map[string]any, error) {
 // newBuiltinTransformer and the handler-schema parity test.
 func builtinComponentHandlers() map[string]oam.ComponentHandler {
 	return map[string]oam.ComponentHandler{
-		"webservice":   &components.WebserviceHandler{},
 		"deployment":   &components.DeploymentHandler{},
 		"cronjob":      &components.CronjobHandler{},
 		"job":          &components.JobHandler{},
@@ -351,6 +350,7 @@ func builtinTraitLoweringRules() map[string]oam.TraitLoweringRule {
 // those tests exactly like a dispatchable handler is.
 func builtinComponentLoweringRules() map[string]oam.ComponentLoweringRule {
 	return map[string]oam.ComponentLoweringRule{
+		"webservice": components.WebserviceRule{},
 		"worker":     components.WorkerRule{},
 		"helm":       components.HelmRule{},
 		"postgresql": components.PostgresqlRule{},
@@ -390,7 +390,9 @@ func newBuiltinTransformer() *oam.Transformer {
 	// "worker" is a component-position lowering rule, not a dispatchable handler:
 	// it lowers into a terminal "deployment" component (plus a synthesized
 	// "topology-spread" trait) for DeploymentHandler/TopologySpreadHandler to
-	// dispatch on the next fixpoint round. "helm" likewise lowers into the
+	// dispatch on the next fixpoint round. "webservice" lowers into a same-name
+	// "deployment" and "service" pair, with the same synthesized trait on the
+	// "deployment". "helm" likewise lowers into the
 	// "helmrelease" or "helmtemplate" terminal, plus a generated Flux source for
 	// an inline URL, and "postgresql" into the CNPG kinds ("cnpg-cluster" with the
 	// engine-only "cnpg-postgresql-defaults" trait, "cnpg-objectstore",

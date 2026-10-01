@@ -10,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // stubPolicy implements oam.Policy for testing.
@@ -61,7 +60,7 @@ var _ oam.Policy = (*stubPolicy)(nil)
 func int32ptr(v int32) *int32 { return &v }
 
 func TestWebserviceHandler_CanHandle(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	if !h.CanHandle("webservice") {
 		t.Error("expected true for webservice")
 	}
@@ -81,21 +80,21 @@ func TestWebserviceHandler_RefusesAnAffinityTheAPIServerWould(t *testing.T) {
 		"nodeSelector value": {"nodeSelector": map[string]any{"ok": "va lue"}},
 	}
 	for name, affinity := range cases {
-		_, err := (&components.WebserviceHandler{}).ToApplicationConfig(&oam.Component{Name: "app", Type: "webservice",
+		_, err := (webserviceViaRule{}).ToApplicationConfig(&oam.Component{Name: "app", Type: "webservice",
 			Properties: map[string]any{"image": "nginx:1", "affinity": affinity}}, "default")
 		if err == nil || !strings.HasPrefix(err.Error(), "affinity: the shorthand evaluates to an affinity the API server would refuse: ") {
 			t.Errorf("%s: err = %v, want the shorthand refusal", name, err)
 		}
 	}
 	// A valid shorthand still builds.
-	if _, err := (&components.WebserviceHandler{}).ToApplicationConfig(&oam.Component{Name: "app", Type: "webservice",
+	if _, err := (webserviceViaRule{}).ToApplicationConfig(&oam.Component{Name: "app", Type: "webservice",
 		Properties: map[string]any{"image": "nginx:1", "affinity": map[string]any{"enablePodAntiAffinity": true}}}, "default"); err != nil {
 		t.Errorf("valid shorthand refused: %v", err)
 	}
 }
 
 func TestWebserviceHandler_RequiredImage_Missing(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name:       "app",
 		Type:       "webservice",
@@ -108,7 +107,7 @@ func TestWebserviceHandler_RequiredImage_Missing(t *testing.T) {
 }
 
 func TestWebserviceHandler_InvalidImage_Latest(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -123,7 +122,7 @@ func TestWebserviceHandler_InvalidImage_Latest(t *testing.T) {
 }
 
 func TestWebserviceHandler_Generate_BasicResources(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "my-app",
 		Type: "webservice",
@@ -169,7 +168,7 @@ func TestWebserviceHandler_Generate_BasicResources(t *testing.T) {
 }
 
 func TestWebserviceConfig_ApplyPolicy_MaxReplicas(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -195,7 +194,7 @@ func TestWebserviceConfig_ApplyPolicy_MaxReplicas(t *testing.T) {
 }
 
 func TestWebserviceConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -216,7 +215,7 @@ func TestWebserviceConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
 }
 
 func TestWebserviceConfig_ApplyPolicy_DefaultReplicas(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	// No replicas in properties → not explicit
 	component := &oam.Component{
 		Name: "app",
@@ -253,7 +252,7 @@ func TestWebserviceConfig_ApplyPolicy_DefaultReplicas(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithResources(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -282,7 +281,7 @@ func TestWebserviceHandler_WithResources(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithEnv_Simple(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -305,7 +304,7 @@ func TestWebserviceHandler_WithEnv_Simple(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithEnv_SecretRef(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -335,7 +334,7 @@ func TestWebserviceHandler_WithEnv_SecretRef(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithEnv_ConfigMapRef(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -365,7 +364,7 @@ func TestWebserviceHandler_WithEnv_ConfigMapRef(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithCommandAndArgs(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -386,7 +385,7 @@ func TestWebserviceHandler_WithCommandAndArgs(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithProbes(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -419,7 +418,7 @@ func TestWebserviceHandler_WithProbes(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithInitContainers(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -445,7 +444,7 @@ func TestWebserviceHandler_WithInitContainers(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithSidecars(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -470,7 +469,7 @@ func TestWebserviceHandler_WithSidecars(t *testing.T) {
 }
 
 func TestWebserviceConfig_ApplyPolicy_MaxCPU(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -496,7 +495,7 @@ func TestWebserviceConfig_ApplyPolicy_MaxCPU(t *testing.T) {
 }
 
 func TestWebserviceConfig_ApplyPolicy_DefaultCPURequest(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -517,7 +516,7 @@ func TestWebserviceConfig_ApplyPolicy_DefaultCPURequest(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithVolumes_EmptyDir(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -543,7 +542,7 @@ func TestWebserviceHandler_WithVolumes_EmptyDir(t *testing.T) {
 }
 
 func TestWebserviceConfig_ApplyPolicy_MaxStorageSize(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -575,7 +574,7 @@ func TestWebserviceConfig_ApplyPolicy_MaxStorageSize(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithProbes_NamedPort(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -612,7 +611,7 @@ func TestWebserviceHandler_WithProbes_NamedPort(t *testing.T) {
 // syntactically valid but different name is guaranteed unresolvable by the
 // kubelet and must be rejected, not accepted merely because a port exists.
 func TestWebserviceHandler_NamedPort_Mismatch_Error(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -634,7 +633,7 @@ func TestWebserviceHandler_NamedPort_Mismatch_Error(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithAffinity(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -661,7 +660,7 @@ func TestWebserviceHandler_WithAffinity(t *testing.T) {
 }
 
 func TestWebserviceHandler_InvalidAffinity(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -679,7 +678,7 @@ func TestWebserviceHandler_InvalidAffinity(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithEnv_FieldRef(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -708,7 +707,7 @@ func TestWebserviceHandler_WithEnv_FieldRef(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithEnv_ResourceFieldRef(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -738,7 +737,7 @@ func TestWebserviceHandler_WithEnv_ResourceFieldRef(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithEnv_MultipleValueFromSources_Error(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -767,7 +766,7 @@ func TestWebserviceHandler_WithEnv_MultipleValueFromSources_Error(t *testing.T) 
 }
 
 func TestWebserviceHandler_WithEnvFrom(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -812,7 +811,7 @@ func TestWebserviceHandler_WithEnvFrom(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithEnvFrom_BothRefs_Error(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -833,7 +832,7 @@ func TestWebserviceHandler_WithEnvFrom_BothRefs_Error(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithResources_ExtraNamedResources(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -879,7 +878,7 @@ func TestWebserviceHandler_WithResources_ExtraNamedResources(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithLifecycle(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -920,7 +919,7 @@ func TestWebserviceHandler_WithLifecycle(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithSecurityContext(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -975,7 +974,7 @@ func TestWebserviceHandler_WithSecurityContext(t *testing.T) {
 }
 
 func TestWebserviceHandler_WithSecurityContext_SeccompLocalhost_MissingProfile_Error(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -995,7 +994,7 @@ func TestWebserviceHandler_WithSecurityContext_SeccompLocalhost_MissingProfile_E
 }
 
 func TestWebserviceHandler_WithWorkingDir(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1025,7 +1024,7 @@ func TestWebserviceHandler_WithWorkingDir(t *testing.T) {
 }
 
 func TestWebserviceConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1056,7 +1055,7 @@ func TestWebserviceConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 // policy (including NoopPolicy) did not actually stop a hostPath volume from
 // being authored — a container-escape-adjacent gap, not merely a style one.
 func TestWebserviceConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1092,7 +1091,7 @@ func TestWebserviceConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
 // oam.Policy.ForbiddenContainerCapabilities(), so a forbidden Linux
 // capability could be added with nothing rejecting it.
 func TestWebserviceConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1127,7 +1126,7 @@ func TestWebserviceConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
 // cap. The error must name the value as a generated default so the author
 // knows where the number came from.
 func TestWebserviceConfig_ApplyPolicy_MaxCPU_AgainstIntrinsicDefault(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1151,7 +1150,7 @@ func TestWebserviceConfig_ApplyPolicy_MaxCPU_AgainstIntrinsicDefault(t *testing.
 }
 
 func TestWebserviceConfig_ApplyPolicy_MaxMemory_AgainstIntrinsicDefault(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1179,7 +1178,7 @@ func TestWebserviceConfig_ApplyPolicy_MaxMemory_AgainstIntrinsicDefault(t *testi
 // flagged, even though the intrinsic default (which never applies here)
 // would itself have exceeded it.
 func TestWebserviceConfig_ApplyPolicy_MaxCPU_AuthoredBeatsIntrinsic(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1209,7 +1208,7 @@ func TestWebserviceConfig_ApplyPolicy_MaxCPU_AuthoredBeatsIntrinsic(t *testing.T
 // the intrinsic handler default — the error does NOT carry the "generated
 // default" marker.
 func TestWebserviceConfig_ApplyPolicy_MaxCPU_PolicyDefaultEnforced(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1242,7 +1241,7 @@ func TestWebserviceConfig_ApplyPolicy_MaxCPU_PolicyDefaultEnforced(t *testing.T)
 // the max makes the limit exceed it identically, and the request check
 // (earlier in the fixed order) always reports first.
 func TestWebserviceConfig_ApplyPolicy_MaxMemory_RequestCheckedBeforeLimit(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1270,7 +1269,7 @@ func TestWebserviceConfig_ApplyPolicy_MaxMemory_RequestCheckedBeforeLimit(t *tes
 // fix is read-only: a config that passes policy still generates the exact
 // same intrinsic-default Resources it did before go-kure/launcher#251.
 func TestWebserviceConfig_ApplyPolicy_MaxResources_OutputUnchanged(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1340,7 +1339,7 @@ func TestWebserviceConfig_ApplyPolicy_MaxResources_OutputUnchanged(t *testing.T)
 // init/sidecar check under test.
 
 func TestWebserviceConfig_ApplyPolicy_InitContainerResourcesDenied(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1377,7 +1376,7 @@ func TestWebserviceConfig_ApplyPolicy_InitContainerResourcesDenied(t *testing.T)
 }
 
 func TestWebserviceConfig_ApplyPolicy_InitContainerRegistryDenied(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1411,7 +1410,7 @@ func TestWebserviceConfig_ApplyPolicy_InitContainerRegistryDenied(t *testing.T) 
 }
 
 func TestWebserviceConfig_ApplyPolicy_InitContainerPrivilegedDenied(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1444,7 +1443,7 @@ func TestWebserviceConfig_ApplyPolicy_InitContainerPrivilegedDenied(t *testing.T
 }
 
 func TestWebserviceConfig_ApplyPolicy_InitContainerCapabilitiesDenied(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1479,7 +1478,7 @@ func TestWebserviceConfig_ApplyPolicy_InitContainerCapabilitiesDenied(t *testing
 }
 
 func TestWebserviceConfig_ApplyPolicy_SidecarResourcesDenied(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1516,7 +1515,7 @@ func TestWebserviceConfig_ApplyPolicy_SidecarResourcesDenied(t *testing.T) {
 }
 
 func TestWebserviceConfig_ApplyPolicy_SidecarRegistryDenied(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1550,7 +1549,7 @@ func TestWebserviceConfig_ApplyPolicy_SidecarRegistryDenied(t *testing.T) {
 }
 
 func TestWebserviceConfig_ApplyPolicy_SidecarPrivilegedDenied(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1583,7 +1582,7 @@ func TestWebserviceConfig_ApplyPolicy_SidecarPrivilegedDenied(t *testing.T) {
 }
 
 func TestWebserviceConfig_ApplyPolicy_SidecarCapabilitiesDenied(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1625,7 +1624,7 @@ func TestWebserviceConfig_ApplyPolicy_SidecarCapabilitiesDenied(t *testing.T) {
 // silently discarded (no rejectUnknownKeys call on the init/sidecar item
 // map) and nothing was ever set on the built container.
 func TestWebserviceHandler_InitContainerSecurityContext_RoundTrip(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1672,7 +1671,7 @@ func TestWebserviceHandler_InitContainerSecurityContext_RoundTrip(t *testing.T) 
 }
 
 func TestWebserviceHandler_SidecarSecurityContext_RoundTrip(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1730,7 +1729,7 @@ func TestWebserviceHandler_SidecarSecurityContext_RoundTrip(t *testing.T) {
 // parser error path (not just the happy path) is wired through
 // parseInitContainers.
 func TestWebserviceHandler_InitContainerSecurityContext_ParseErrorPropagation(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",
@@ -1762,7 +1761,7 @@ func TestWebserviceHandler_InitContainerSecurityContext_ParseErrorPropagation(t 
 // corev1.Container whose SecurityContext stays nil, rather than some
 // zero-value struct.
 func TestWebserviceHandler_InitContainerSecurityContext_AbsentIsNoop(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	component := &oam.Component{
 		Name: "app",
 		Type: "webservice",

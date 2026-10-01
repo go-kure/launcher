@@ -7,7 +7,6 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // generateErr runs the full ToApplicationConfig -> Generate path and returns
@@ -72,7 +71,7 @@ func TestEffectiveRunAsUser(t *testing.T) {
 	})
 
 	t.Run("container-level runAsUser 0 under a pod-level runAsNonRoot is rejected", func(t *testing.T) {
-		err := generateErr(t, &components.WebserviceHandler{}, "webservice", map[string]any{
+		err := generateErr(t, webserviceViaRule{}, "webservice", map[string]any{
 			"image":              "ghcr.io/org/app:v1",
 			"port":               8080,
 			"podSecurityContext": map[string]any{"runAsNonRoot": true},
@@ -87,7 +86,7 @@ func TestEffectiveRunAsUser(t *testing.T) {
 	})
 
 	t.Run("init container inheriting the pod-level pair is rejected", func(t *testing.T) {
-		err := generateErr(t, &components.WebserviceHandler{}, "webservice", map[string]any{
+		err := generateErr(t, webserviceViaRule{}, "webservice", map[string]any{
 			"image":              "ghcr.io/org/app:v1",
 			"port":               8080,
 			"podSecurityContext": rootPod,

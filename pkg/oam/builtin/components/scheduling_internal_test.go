@@ -80,7 +80,7 @@ func TestOpinionatedKindsKeepAffinityShorthand(t *testing.T) {
 	cases := map[string]map[string]oam.PropertySchema{
 		"worker":      WorkerRule{}.PropertySchema(),
 		"statefulset": (&StatefulsetHandler{}).PropertySchema(),
-		"webservice":  (&WebserviceHandler{}).PropertySchema(),
+		"webservice":  WebserviceRule{}.PropertySchema(),
 	}
 	for kind, s := range cases {
 		affinity, found := s["affinity"]

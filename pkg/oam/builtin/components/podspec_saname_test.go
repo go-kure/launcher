@@ -85,8 +85,14 @@ func TestWorkloadKinds_ServiceAccountIdentityIsSingleSourced(t *testing.T) {
 // component name, not to the Application's; a nameless statefulset therefore
 // authors one here (TestStatefulsetConfig_NamelessWithoutServiceNameRefused
 // covers the refusal otherwise, go-kure/launcher#546).
+//
+// webservice is not a case: it is a lowering rule, not a handler a library
+// caller converts with directly, and the engine only lowers a named component.
 func TestWorkloadKinds_NamelessConfigFallsBackToApplication(t *testing.T) {
 	for _, k := range workloadKinds {
+		if k.name == "webservice" {
+			continue
+		}
 		t.Run(k.name, func(t *testing.T) {
 			props := k.props
 			if k.name == "statefulset" {

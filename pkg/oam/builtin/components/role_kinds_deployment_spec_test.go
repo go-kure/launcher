@@ -8,7 +8,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // roleKinds are the two role-named kinds that project appsv1.Deployment
@@ -19,7 +18,7 @@ var roleKinds = []struct {
 	name    string
 	handler oam.ComponentHandler
 }{
-	{"webservice", &components.WebserviceHandler{}},
+	{"webservice", webserviceViaRule{}},
 	{"worker", workerViaRule{}},
 }
 

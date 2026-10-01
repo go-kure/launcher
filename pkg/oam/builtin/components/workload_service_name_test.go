@@ -47,7 +47,7 @@ var serviceEmittingCases = []struct {
 	handler oam.ComponentHandler
 	props   func() map[string]any
 }{
-	{"webservice", &components.WebserviceHandler{}, func() map[string]any {
+	{"webservice", webserviceViaRule{}, func() map[string]any {
 		return map[string]any{"image": "ghcr.io/org/app:v1"}
 	}},
 	{"daemonset", &components.DaemonsetHandler{}, func() map[string]any {
@@ -197,12 +197,16 @@ func TestStatefulsetHandler_AuthoredServiceNameDecouplesComponentName(t *testing
 }
 
 // A nameless config (converted without a component name, as a library caller may) is not refused
-// at conversion: webservice and daemonset name their Service after the Application at Generate,
-// which checks that name instead.
+// at conversion: daemonset names its Service after the Application at Generate, which checks
+// that name instead. webservice is not a case: it is a lowering rule, not a handler a library
+// caller converts with directly, and the engine only lowers a named component.
 func TestWorkloadHandlers_NamelessConfigServiceNamedAfterApplication(t *testing.T) {
 	for _, tc := range serviceEmittingCases {
 		if tc.typ == "statefulset" {
 			continue // names its Service by ServiceName; see the test below
+		}
+		if tc.typ == "webservice" {
+			continue
 		}
 		t.Run(tc.typ, func(t *testing.T) {
 			cfg, err := tc.handler.ToApplicationConfig(

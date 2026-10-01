@@ -3,35 +3,94 @@ package components
 import (
 	"maps"
 
-	"github.com/go-kure/kure/pkg/kubernetes"
-	"github.com/go-kure/kure/pkg/stack"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
-// WebserviceHandler handles OAM webservice components.
-type WebserviceHandler struct{}
+// WebserviceRule lowers a "webservice" component (D1 component position,
+// oam.ComponentLoweringRule) into a same-name sibling group of two terminal
+// components: a "deployment" and a "service", in that order, both carrying
+// the component's name. It is the re-expression of the former
+// WebserviceHandler: webservice was a Deployment, a ClusterIP Service in front
+// of its pods, and launcher's own opinions, and `deployment` and `service` are
+// the unopinionated projections of those two API kinds, so what webservice
+// adds is the opinions — and those are what this rule evaluates. The group
+// deploys as one component (pkg/oam sibling groups): one tier, one bundle, one
+// health check on the Deployment, its objects in the order the handler
+// generated them (Deployment, Service, ServiceAccount, claims).
+//
+// LowerComponent first runs webservice's full parse (parseWebservice, the
+// former WebserviceHandler.ToApplicationConfig sequence unchanged), so every
+// input the handler refused is still refused, first failure first, with the
+// same cause text. It then emits:
+//
+//   - the deployment member, with the authored properties webservice declares
+//     except `port`, `topologySpread` and `affinity`, plus the main
+//     container's one port, `{name: http, containerPort: <port>}`. The four-key
+//     `affinity` shorthand is evaluated as worker evaluates it (buildAffinity,
+//     over the component's own app label) and emitted as the raw corev1 shape
+//     `deployment` publishes; `topologySpread` becomes a synthesized
+//     `topology-spread` trait in front of the deployment member's traits (none
+//     when it is false), the innermost decorator, where the handler applied its
+//     constraints;
+//   - the service member, with one port `{name: http, port: <port>}` (its
+//     `targetPort` defaults to the same number, its protocol to TCP) and the
+//     default selector `app: <component name>`, the deployment member's pod
+//     labels.
+//
+// Keys webservice does not declare are dropped rather than forwarded, as
+// WorkerRule drops them. Annotations go to both members, so a tier override
+// places the whole group.
+//
+// Each authored trait is forwarded by value (it keeps its authored slot, so
+// the group applies the traits in authored order across both members) to the
+// member whose objects or contracts it acts on:
+//
+//   - `expose`, `ingress` and `httproute` to the service member: they route to
+//     the component's Service and read its port, port name and name;
+//   - `prune-protection` and `force-replace` to both: they decorate every
+//     object a component generates, and each member generates its own;
+//   - every other trait to the deployment member: the workload traits read the
+//     pods, the ServiceAccount or the claims, and the bundle traits
+//     (`fluxcd-patches`, `fluxcd-postbuild`) act on the group's one
+//     Kustomization, which a trait applied to both would refuse as a duplicate
+//     sub-application. A trait type this rule does not know — one an extension
+//     registered — goes to the deployment member too, the side that holds the
+//     pods.
+//
+// Everything past the parse is the members' own: ApplyPolicy, NonRWXClaim,
+// ServiceAccountName and EmitsAutoHealthCheck are DeploymentConfig's, and the
+// Service port, port name and routing target are ServiceConfig's; the group
+// answers each from the one member that has a value. The synthesized inbound
+// NetworkPolicy keeps the component label as its pod selector, because the
+// service member selects its sibling's pods on ports mapped to themselves. An
+// ingress or httproute port addressed by name is translated to the Service
+// port's number on the way, as on a `service` component: `portName: http`
+// opens the port's number where the handler opened the name `http`, which its
+// container port also carried. A parse error surfaces through the lowering
+// engine, so it names the component's type and document
+// (`component "web" (type "webservice") in document …: <cause>`) instead of the
+// former handler's `component "web": <cause>`; the cause text is unchanged.
+type WebserviceRule struct{}
 
-// CanHandle returns true for webservice component type.
-func (h *WebserviceHandler) CanHandle(componentType string) bool {
-	return componentType == "webservice"
-}
+// ComponentType claims the "webservice" component type at the component
+// lowering position. build.go registers this rule via
+// RegisterComponentLowering instead of a dispatchable component handler, so
+// "webservice" is reachable only here.
+func (WebserviceRule) ComponentType() string { return "webservice" }
 
 // Endpoints implements oam.EndpointProvider: a webservice's in-cluster endpoint is its own pods
 // (labelled app=<component name>) on the declared container/service port. This lets a downstream
 // platform consumer synthesize generic app→app connections whose target is a webservice, the same
 // way it does for a postgresql target. The webservice's single `port` property drives both the
 // container port and the Service port (TargetPort == Port), so there is one endpoint per component.
-func (h *WebserviceHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
-	// Same read as ToApplicationConfig's: ComponentEndpoints calls this with no
+func (WebserviceRule) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	// Same read as parseWebservice's: ComponentEndpoints calls this with no
 	// schema validation first, so a wrongly typed port must be refused here too
 	// rather than declared as the default 80.
 	port := int32(80)
@@ -47,7 +106,10 @@ func (h *WebserviceHandler) Endpoints(component *oam.Component) ([]netpol.Endpoi
 }
 
 // PropertySchema declares the webservice component's user-facing properties.
-func (h *WebserviceHandler) PropertySchema() map[string]oam.PropertySchema {
+// Unchanged by the move to a lowering rule: HandlerSchemas publishes a rule's
+// schema exactly as it publishes a handler's, and
+// TestWebserviceRule_PropertySchemaUnchanged pins it byte for byte.
+func (WebserviceRule) PropertySchema() map[string]oam.PropertySchema {
 	m := map[string]oam.PropertySchema{
 		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
 		"port":            {Type: oam.PropertyTypeInteger, Default: 80, Description: "Container port exposed by the Deployment and its ClusterIP Service."},
@@ -72,424 +134,203 @@ func (h *WebserviceHandler) PropertySchema() map[string]oam.PropertySchema {
 	return m
 }
 
-// ToApplicationConfig converts an OAM webservice component to a WebserviceConfig.
-// The component name is its Service's name, so it is checked against the
-// Service-name rule first (validateComponentServiceName).
-func (h *WebserviceHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	if err := validateComponentServiceName(component.Name); err != nil {
-		return nil, err
-	}
-	config := &WebserviceConfig{
-		Name:      component.Name,
-		Namespace: namespace,
+// webserviceServiceTraits are the authored trait types the rule forwards to the
+// service member, and webserviceObjectTraits those it forwards to both members
+// (see WebserviceRule).
+var (
+	webserviceServiceTraits = map[string]bool{"expose": true, "ingress": true, "httproute": true}
+	webserviceObjectTraits  = map[string]bool{"prune-protection": true, "force-replace": true}
+)
+
+// webservicePortName is the name of the main container's one port and of the
+// Service's one port.
+const webservicePortName = "http"
+
+// webserviceContainerPorts is the main container's one port, as the deployment
+// member's parseContainerPorts reads the `ports` the rule emits.
+func webserviceContainerPorts(port int32) []corev1.ContainerPort {
+	return []corev1.ContainerPort{{Name: webservicePortName, ContainerPort: port, Protocol: corev1.ProtocolTCP}}
+}
+
+// LowerComponent validates comp as a webservice and emits the equivalent
+// deployment and service components (see WebserviceRule).
+func (r WebserviceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
+	opinions, err := parseWebservice(comp)
+	if err != nil {
+		return oam.LoweringResult{}, err
 	}
 
-	props := component.Properties
+	schema := r.PropertySchema()
+	depProps := make(map[string]any, len(comp.Properties))
+	for k, v := range comp.Properties {
+		if _, declared := schema[k]; declared {
+			depProps[k] = v
+		}
+	}
+	delete(depProps, "port")
+	delete(depProps, "topologySpread")
+	delete(depProps, "affinity")
+	depProps["ports"] = []any{map[string]any{"name": webservicePortName, "containerPort": int(opinions.port)}}
+	if affinity := buildAffinity(opinions.affinity, appLabels(comp.Name)); affinity != nil {
+		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(affinity)
+		if err != nil {
+			return oam.LoweringResult{}, errors.Wrap(err, "affinity: converting the evaluated shorthand")
+		}
+		depProps["affinity"] = raw
+		// As in WorkerRule: the deployment component validates the raw shape
+		// more strictly than the shorthand's own parse does, so the check runs
+		// here, where a refusal names the shorthand the author wrote.
+		if _, err := parseRawAffinity(depProps); err != nil {
+			return oam.LoweringResult{}, errors.Wrap(err, "affinity: the shorthand evaluates to an affinity the API server would refuse")
+		}
+	}
+
+	var depTraits, svcTraits []oam.Trait
+	if !opinions.topologySpreadDisabled {
+		depTraits = append(depTraits, oam.Trait{Type: "topology-spread", Properties: map[string]any{}})
+	}
+	for _, t := range comp.Traits {
+		switch {
+		case webserviceServiceTraits[t.Type]:
+			svcTraits = append(svcTraits, t)
+		case webserviceObjectTraits[t.Type]:
+			depTraits = append(depTraits, t)
+			svcTraits = append(svcTraits, t)
+		default:
+			depTraits = append(depTraits, t)
+		}
+	}
+
+	return oam.LoweringResult{Components: []oam.Component{
+		{
+			Name:        comp.Name,
+			Type:        "deployment",
+			Properties:  depProps,
+			Traits:      depTraits,
+			Annotations: maps.Clone(comp.Annotations),
+		},
+		{
+			Name: comp.Name,
+			Type: "service",
+			Properties: map[string]any{
+				"ports": []any{map[string]any{"name": webservicePortName, "port": int(opinions.port)}},
+			},
+			Traits:      svcTraits,
+			Annotations: maps.Clone(comp.Annotations),
+		},
+	}}, nil
+}
+
+// webserviceOpinions is what parseWebservice keeps: the properties webservice
+// evaluates itself rather than handing to the deployment component.
+type webserviceOpinions struct {
+	port                   int32
+	affinity               AffinityConfig
+	topologySpreadDisabled bool
+}
+
+// parseWebservice runs the former WebserviceHandler.ToApplicationConfig parse
+// over comp, in its original order, so an invalid webservice is refused with
+// the same first cause as before. Every other parsed value is discarded here —
+// the deployment and service components parse the forwarded properties again,
+// with the same helpers. The component name is its Service's name, so it is
+// checked against the Service-name rule first (validateComponentServiceName).
+func parseWebservice(comp *oam.Component) (webserviceOpinions, error) {
+	out := webserviceOpinions{port: 80}
+	if err := validateComponentServiceName(comp.Name); err != nil {
+		return out, err
+	}
+	props := comp.Properties
 
 	image, ok := props["image"].(string)
 	if !ok {
-		return nil, errors.New("required property 'image' missing or not a string")
+		return out, errors.New("required property 'image' missing or not a string")
 	}
 	if err := ValidateImageRef(image); err != nil {
-		return nil, err
+		return out, err
 	}
-	config.Image = image
-
-	config.Port = 80
 	if p, present, err := parsePortField(props, "port", "port", 1); err != nil {
-		return nil, err
+		return out, err
 	} else if present {
-		config.Port = p
+		out.port = p
 	}
-
-	replicas, replicasAuthored, err := parseReplicas(props, 1)
-	if err != nil {
-		return nil, err
+	if _, _, err := parseReplicas(props, 1); err != nil {
+		return out, err
 	}
-	config.Replicas = replicas
-	config.explicitReplicas = replicasAuthored
-
 	env, err := parseEnv(props)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	config.Env = env
-	envFrom, err := parseEnvFrom(props)
-	if err != nil {
-		return nil, err
+	if _, err := parseEnvFrom(props); err != nil {
+		return out, err
 	}
-	config.EnvFrom = envFrom
 	if resources, present, err := parseObjectField(props, "resources", "resources"); err != nil {
-		return nil, err
+		return out, err
 	} else if present {
-		r, err := parseResources(resources)
-		if err != nil {
-			return nil, errors.Wrap(err, "invalid resources configuration")
+		if _, err := parseResources(resources); err != nil {
+			return out, errors.Wrap(err, "invalid resources configuration")
 		}
-		config.Resources = r
 	}
-	command, err := parseCommand(props)
-	if err != nil {
-		return nil, err
+	if _, err := parseCommand(props); err != nil {
+		return out, err
 	}
-	config.Command = command
-	args, err := parseArgs(props)
-	if err != nil {
-		return nil, err
+	if _, err := parseArgs(props); err != nil {
+		return out, err
 	}
-	config.Args = args
-	// namedPortsAllowed=true, matchName="http": webservice always attaches a
-	// Name: "http" ContainerPort to the main container (createDeployment,
-	// unconditional — config.Port defaults to 80), so a probe/lifecycle port
-	// resolves only when it names that same "http" port.
-	probes, err := parseProbes(props, true, "http")
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid probe configuration")
+	// namedPortsAllowed=true, matchName="http": the main container always
+	// declares the one port named "http" (the deployment member's `ports`,
+	// unconditional — port defaults to 80), so a probe/lifecycle port resolves
+	// only when it names that same "http" port.
+	if _, err := parseProbes(props, true, webservicePortName); err != nil {
+		return out, errors.Wrap(err, "invalid probe configuration")
 	}
-	config.Probes = probes
-	lifecycle, err := parseLifecycle(props, true, "http")
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid lifecycle configuration")
+	if _, err := parseLifecycle(props, true, webservicePortName); err != nil {
+		return out, errors.Wrap(err, "invalid lifecycle configuration")
 	}
-	config.Lifecycle = lifecycle
-	securityContext, err := parseSecurityContext(props)
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid securityContext configuration")
+	if _, err := parseSecurityContext(props); err != nil {
+		return out, errors.Wrap(err, "invalid securityContext configuration")
 	}
-	config.SecurityContext = securityContext
-	if wd, present, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
-		return nil, err
-	} else if present {
-		config.WorkingDir = wd
+	if _, _, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
+		return out, err
 	}
 
 	parsed, err := parseVolumes(props)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	config.Volumes = parsed.Volumes
-	config.VolumeMounts = parsed.Mounts
-	config.VolumeDevices = parsed.Devices
-	config.PVCs = parsed.PVCs
-
-	// Init containers must be added before the main container so they
-	// appear first in spec.template.spec.initContainers; kube preserves
-	// declaration order on the pod spec and kustomize build output stays stable.
 	initContainers, err := parseInitContainers(props)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	config.InitContainers = initContainers
 	if ts, err := parseBoolField(props, "topologySpread", "topologySpread"); err != nil {
-		return nil, err
+		return out, err
 	} else if ts != nil && !*ts {
-		config.TopologySpreadDisabled = true
+		out.topologySpreadDisabled = true
 	}
 	affinity, err := parseAffinity(props)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	config.Affinity = affinity
+	out.affinity = affinity
 
 	sidecars, err := parseSidecars(props)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	config.Sidecars = sidecars
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
-		return nil, err
+		return out, err
 	}
-	if err := checkPodPortNames(config.mainContainerPorts(), sidecars); err != nil {
-		return nil, err
+	if err := checkPodPortNames(webserviceContainerPorts(out.port), sidecars); err != nil {
+		return out, err
 	}
 	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, sidecars); err != nil {
-		return nil, err
+		return out, err
 	}
-
-	podSpec, err := parsePodSpec(props, false)
-	if err != nil {
-		return nil, err
+	if _, err := parsePodSpec(props, false); err != nil {
+		return out, err
 	}
-	config.PodSpec = podSpec
-
-	depSpec, err := parseDeploymentSpec(props)
-	if err != nil {
-		return nil, err
+	if _, err := parseDeploymentSpec(props); err != nil {
+		return out, err
 	}
-	config.DeploymentSpec = depSpec
-
-	// The shorthand's own parse does not check label-key and label-value
-	// syntax, which the API server enforces on the affinity it evaluates to.
-	// Validated the way the deployment component validates a raw affinity, as
-	// on worker, so a refusal names the shorthand the author wrote. Last, so
-	// every earlier refusal keeps its place.
-	if evaluated := buildAffinity(affinity, appLabels(component.Name)); evaluated != nil {
-		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(evaluated)
-		if err != nil {
-			return nil, errors.Wrap(err, "affinity: converting the evaluated shorthand")
-		}
-		if _, err := parseRawAffinity(map[string]any{"affinity": raw}); err != nil {
-			return nil, errors.Wrap(err, "affinity: the shorthand evaluates to an affinity the API server would refuse")
-		}
-	}
-
-	return config, nil
-}
-
-// WebserviceConfig implements stack.ApplicationConfig for webservice components.
-type WebserviceConfig struct {
-	Name                   string
-	Namespace              string
-	Image                  string
-	Port                   int32
-	Replicas               int32
-	Env                    []corev1.EnvVar
-	EnvFrom                []corev1.EnvFromSource
-	Resources              ResourceRequirements
-	Command                []string
-	Args                   []string
-	Probes                 ProbeConfig
-	Lifecycle              *corev1.Lifecycle
-	SecurityContext        *corev1.SecurityContext
-	WorkingDir             string
-	Volumes                []corev1.Volume
-	VolumeMounts           []corev1.VolumeMount
-	VolumeDevices          []corev1.VolumeDevice
-	PVCs                   []PVCConfig
-	InitContainers         []InitContainerConfig
-	Sidecars               []SidecarContainerConfig
-	TopologySpreadDisabled bool
-	Affinity               AffinityConfig
-	// PodSpec holds the shared pod-level properties (see parsePodSpec).
-	PodSpec PodSpecConfig
-	// DeploymentSpec holds the DeploymentSpec-level properties
-	// (see parseDeploymentSpec), shared with the deployment and worker
-	// kinds — all three project appsv1.Deployment (go-kure/launcher#341).
-	DeploymentSpec   DeploymentSpecConfig
-	explicitReplicas bool
-}
-
-// EmitsAutoHealthCheck implements pkg/oam.autoHealthCheckEmitter: a paused
-// Deployment gets no synthesized readiness gate, for the reason spelled out on
-// DeploymentConfig.EmitsAutoHealthCheck — gating on a workload the document
-// told the controller not to roll out is not a health signal. The object is
-// still emitted and still applied by the enclosing Kustomization, and the
-// component's Service is unaffected.
-func (c *WebserviceConfig) EmitsAutoHealthCheck() bool {
-	return c.DeploymentSpec.Paused == nil || !*c.DeploymentSpec.Paused
-}
-
-// ServiceAccountName implements oam.ServiceAccountNamer: the authored
-// serviceAccountName, else the per-component ServiceAccount named after the
-// component.
-func (c *WebserviceConfig) ServiceAccountName() string {
-	return effectiveServiceAccountName(c.PodSpec, c.Name)
-}
-
-// NonRWXClaim names the first claim that limits this Deployment to one pod
-// (the one applyNonRWXConstraint refuses more replicas on), or "" when none
-// does. The scaler trait reads it: its HPA scales this Deployment past the
-// authored replicas, so the same limit has to hold for maxReplicas.
-func (c *WebserviceConfig) NonRWXClaim() string { return firstNonRWXPVC(c.PVCs) }
-
-// ApplyPolicy applies defaults then enforces limits from the policy.
-// Defaults are applied first so that enforced checks run on effective post-default values.
-func (c *WebserviceConfig) ApplyPolicy(p oam.Policy) error {
-	if p == nil {
-		return nil
-	}
-
-	c.Replicas = applyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
-		return err
-	}
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
-		return err
-	}
-	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
-		return err
-	}
-	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
-		return err
-	}
-
-	if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
-		return err
-	}
-	if err := enforceMaxResources(c.Resources, p.MaxCPU(), p.MaxMemory()); err != nil {
-		return err
-	}
-	if err := enforceAllowedRegistries(c.Image, p.AllowedRegistries()); err != nil {
-		return err
-	}
-	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
-		return err
-	}
-	if err := enforceHostPathVolumes(c.Volumes, p.AllowHostPathVolumes()); err != nil {
-		return err
-	}
-	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {
-		return err
-	}
-	if err := enforcePodResources(c.PodSpec, p.MaxCPU(), p.MaxMemory()); err != nil {
-		return err
-	}
-	if err := enforcePodHostProcess(c.PodSpec, p.AllowPrivileged()); err != nil {
-		return err
-	}
-	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
-		return err
-	}
-	for i, ic := range c.InitContainers {
-		if err := enforceExtraContainer("initContainers", i, ic.Name, ic.Image,
-			ic.Resources, ic.SecurityContext, p); err != nil {
-			return err
-		}
-	}
-	for i, sc := range c.Sidecars {
-		if err := enforceExtraContainer("sidecars", i, sc.Name, sc.Image,
-			sc.Resources, sc.SecurityContext, p); err != nil {
-			return err
-		}
-	}
-	for _, pvc := range c.PVCs {
-		if err := enforceMaxStorageSize(pvc.Size, p.MaxStorageSize()); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// ServicePort returns the port exposed by the component's Service.
-func (c *WebserviceConfig) ServicePort() int32 { return c.Port }
-
-// ServicePortName returns "http", the name createService gives the Service's
-// one port, and true, so routing traits refuse an implicit backend addressed by
-// any other port name. With no port (a library caller's zero Port) it returns
-// "" and false.
-func (c *WebserviceConfig) ServicePortName() (string, bool) {
-	if c.Port <= 0 {
-		return "", false
-	}
-	return "http", true
-}
-
-// Generate creates Kubernetes Deployment, Service, and ServiceAccount resources.
-// The ServiceAccount is omitted when serviceAccountName was authored (the pod
-// then runs as that pre-existing account). The Service is named after the
-// Application, which a library caller builds itself, so that name is held to
-// the Service-name rule here too.
-func (c *WebserviceConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if err := validateServiceName("name", app.Name); err != nil {
-		return nil, err
-	}
-	var err error
-	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
-	if err != nil {
-		return nil, err
-	}
-	deployment, err := c.createDeployment(app)
-	if err != nil {
-		return nil, err
-	}
-	service := c.createService(app)
-
-	depObj := client.Object(deployment)
-	svcObj := client.Object(service)
-
-	objects := []*client.Object{&depObj, &svcObj}
-	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
-		objects = append(objects, &saObj)
-	}
-	for _, pvc := range c.PVCs {
-		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
-		if err != nil {
-			return nil, err
-		}
-		pObj := client.Object(p)
-		objects = append(objects, &pObj)
-	}
-
-	return objects, nil
-}
-
-// mainContainerPorts is the main container's one port, named "http".
-// Unconditional: config.Port defaults to 80, and parseProbes/parseLifecycle
-// were told a named "http" port always exists.
-func (c *WebserviceConfig) mainContainerPorts() []corev1.ContainerPort {
-	return []corev1.ContainerPort{{Name: "http", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
-}
-
-func (c *WebserviceConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
-	container, err := buildMainContainer(app.Name, mainContainerInput{
-		Image:           c.Image,
-		Command:         c.Command,
-		Args:            c.Args,
-		Resources:       c.Resources,
-		Ports:           c.mainContainerPorts(),
-		Env:             c.Env,
-		EnvFrom:         c.EnvFrom,
-		Probes:          c.Probes,
-		WorkingDir:      c.WorkingDir,
-		Lifecycle:       c.Lifecycle,
-		SecurityContext: c.SecurityContext,
-		VolumeMounts:    c.VolumeMounts,
-		VolumeDevices:   c.VolumeDevices,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	dep := kubernetes.CreateDeployment(app.Name, app.Namespace)
-	dep.Labels = appLabels(app.Name)
-	dep.Annotations = nil
-	dep.Spec.Template.Labels = appLabels(app.Name)
-	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: appLabels(app.Name)}
-	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
-	if err := applyNonRWXConstraint(dep, app.Name, c.PVCs, c.Replicas, c.DeploymentSpec.Strategy); err != nil {
-		return nil, err
-	}
-	// After the constraint, for the reason given on DeploymentConfig's call
-	// site: the constraint reads the config rather than the object built so
-	// far, so the only strategy that can still reach this apply after a
-	// non-RWX claim is the Recreate the constraint just wrote.
-	c.DeploymentSpec.apply(dep)
-
-	var tscs []corev1.TopologySpreadConstraint
-	if !c.TopologySpreadDisabled {
-		tscs = BuildTopologySpreadConstraints(c.Replicas, appLabels(app.Name))
-	}
-	podSpec, err := buildPodSpec(podSpecInput{
-		Config:                    c.PodSpec,
-		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),
-		MainContainer:             container,
-		InitContainers:            c.InitContainers,
-		Sidecars:                  c.Sidecars,
-		Volumes:                   c.Volumes,
-		TopologySpreadConstraints: tscs,
-		Affinity:                  buildAffinity(c.Affinity, appLabels(app.Name)),
-	})
-	if err != nil {
-		return nil, err
-	}
-	dep.Spec.Template.Spec = podSpec
-
-	return dep, nil
-}
-
-func (c *WebserviceConfig) createService(app *stack.Application) *corev1.Service {
-	svc := kubernetes.CreateService(app.Name, app.Namespace)
-	svc.Labels = appLabels(app.Name)
-	svc.Annotations = nil
-	svc.Spec.Type = corev1.ServiceTypeClusterIP
-	svc.Spec.Selector = appLabels(app.Name)
-	kubernetes.AddServicePort(svc, corev1.ServicePort{
-		Name:       "http",
-		Port:       c.Port,
-		TargetPort: intstr.FromInt32(c.Port),
-		Protocol:   corev1.ProtocolTCP,
-	})
-	return svc
+	return out, nil
 }

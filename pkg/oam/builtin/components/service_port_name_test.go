@@ -23,8 +23,8 @@ func TestWorkloadConfigs_ServicePortNameMatchesGeneratedService(t *testing.T) {
 		wantName  string
 		wantKnown bool
 	}{
-		{"webservice", &components.WebserviceHandler{}, "webservice", map[string]any{"image": "nginx:1.25", "port": 8080}, "http", true},
-		{"webservice default port", &components.WebserviceHandler{}, "webservice", map[string]any{"image": "nginx:1.25"}, "http", true},
+		{"webservice", webserviceViaRule{}, "webservice", map[string]any{"image": "nginx:1.25", "port": 8080}, "http", true},
+		{"webservice default port", webserviceViaRule{}, "webservice", map[string]any{"image": "nginx:1.25"}, "http", true},
 		{"statefulset", &components.StatefulsetHandler{}, "statefulset", map[string]any{"image": "postgres:16", "port": 5432}, "tcp", true},
 		{"statefulset without port", &components.StatefulsetHandler{}, "statefulset", map[string]any{"image": "postgres:16"}, "", false},
 		{"daemonset", &components.DaemonsetHandler{}, "daemonset", map[string]any{"image": "prom/node-exporter:v1.0.0", "port": 9100}, "http", true},

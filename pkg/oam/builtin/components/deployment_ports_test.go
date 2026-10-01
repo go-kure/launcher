@@ -68,7 +68,7 @@ func TestDeploymentHandler_NoPortsDeclaresNone(t *testing.T) {
 func TestDeploymentHandler_PortMatchesWebservice(t *testing.T) {
 	dep, _ := generateDeployment(t, "web", portProps(map[string]any{"name": "http", "containerPort": 8080}))
 
-	cfg, err := (&components.WebserviceHandler{}).ToApplicationConfig(&oam.Component{
+	cfg, err := webserviceViaRule{}.ToApplicationConfig(&oam.Component{
 		Name: "web", Type: "webservice", Properties: map[string]any{"image": "nginx:1.27", "port": 8080},
 	}, "default")
 	if err != nil {

@@ -35,10 +35,10 @@ var wrongTopLevel = []struct {
 	value   any
 	want    string
 }{
-	{"webservice", &components.WebserviceHandler{}, imageBase, "port", "8080", "port: must be an integer, got string"},
+	{"webservice", webserviceViaRule{}, imageBase, "port", "8080", "port: must be an integer, got string"},
 	{"daemonset", &components.DaemonsetHandler{}, imageBase, "port", "8080", "port: must be an integer, got string"},
 	{"statefulset", &components.StatefulsetHandler{}, imageBase, "port", "8080", "port: must be an integer, got string"},
-	{"webservice", &components.WebserviceHandler{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
+	{"webservice", webserviceViaRule{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
 	{"worker", workerViaRule{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
 	{"cronjob", &components.CronjobHandler{}, cronBase, "restartPolicy", 1, "restartPolicy: must be a string, got int"},
 	{"statefulset", &components.StatefulsetHandler{}, imageBase, "serviceName", 3, "serviceName: must be a string, got int"},
@@ -76,22 +76,22 @@ func TestTopLevelOptional_PreservedBehaviour(t *testing.T) {
 	}
 
 	t.Run("webservice port defaults to 80", func(t *testing.T) {
-		cfg, err := (&components.WebserviceHandler{}).ToApplicationConfig(
+		cfg, err := webserviceViaRule{}.ToApplicationConfig(
 			&oam.Component{Name: "app", Type: "webservice", Properties: imageBase}, "default")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := cfg.(*components.WebserviceConfig).Port; got != 80 {
+		if got := cfg.(*webserviceViaRuleConfig).Port; got != 80 {
 			t.Errorf("Port = %d, want 80", got)
 		}
 	})
 	t.Run("webservice port is read", func(t *testing.T) {
-		cfg, err := (&components.WebserviceHandler{}).ToApplicationConfig(
+		cfg, err := webserviceViaRule{}.ToApplicationConfig(
 			&oam.Component{Name: "app", Type: "webservice", Properties: withProp(imageBase, "port", 8080)}, "default")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := cfg.(*components.WebserviceConfig).Port; got != 8080 {
+		if got := cfg.(*webserviceViaRuleConfig).Port; got != 8080 {
 			t.Errorf("Port = %d, want 8080", got)
 		}
 	})
@@ -112,12 +112,12 @@ func TestTopLevelOptional_PreservedBehaviour(t *testing.T) {
 		}
 	})
 	t.Run("webservice topologySpread false disables spreading", func(t *testing.T) {
-		cfg, err := (&components.WebserviceHandler{}).ToApplicationConfig(
+		cfg, err := webserviceViaRule{}.ToApplicationConfig(
 			&oam.Component{Name: "app", Type: "webservice", Properties: withProp(imageBase, "topologySpread", false)}, "default")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !cfg.(*components.WebserviceConfig).TopologySpreadDisabled {
+		if !cfg.(*webserviceViaRuleConfig).TopologySpreadDisabled {
 			t.Error("TopologySpreadDisabled = false, want true")
 		}
 	})
@@ -143,7 +143,7 @@ func TestTopLevelOptional_PreservedBehaviour(t *testing.T) {
 // The second read fell back to 80 on a wrong type, declaring an endpoint on a
 // port the rejected document never asked for; the two must agree.
 func TestWebserviceEndpoints_Port(t *testing.T) {
-	h := &components.WebserviceHandler{}
+	h := webserviceViaRule{}
 	endpointPort := func(props map[string]any) (int32, error) {
 		eps, err := h.Endpoints(&oam.Component{Name: "app", Type: "webservice", Properties: props})
 		if err != nil {
@@ -187,7 +187,7 @@ func TestPort_OutOfInt32RangeIsRejected(t *testing.T) {
 		handler oam.ComponentHandler
 		lo      string
 	}{
-		{"webservice", &components.WebserviceHandler{}, "1"},
+		{"webservice", webserviceViaRule{}, "1"},
 		{"daemonset", &components.DaemonsetHandler{}, "0"},
 		{"statefulset", &components.StatefulsetHandler{}, "0"},
 	} {
@@ -221,7 +221,7 @@ func TestIntegerReaders_OverflowIsARangeError(t *testing.T) {
 		"securityContext.runAsUser: must be an integer between -9223372036854775808 and 9223372036854775807, got 100000000000000000000": withProp(imageBase, "securityContext", map[string]any{"runAsUser": 1e20}),
 		"containerPort: must be an integer between 1 and 65535, got 65536":                                                              withProp(imageBase, "sidecars", sidecar),
 	} {
-		if err := convert(&components.WebserviceHandler{}, "webservice", props); err == nil || !strings.Contains(err.Error(), want) {
+		if err := convert(webserviceViaRule{}, "webservice", props); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %v, want it to contain %q", err, want)
 		}
 	}

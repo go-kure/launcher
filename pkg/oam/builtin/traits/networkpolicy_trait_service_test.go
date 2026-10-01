@@ -37,10 +37,8 @@ func traitServiceRoute(traitType, serviceName string, servicePort int) oam.Trait
 
 func traitServiceTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr) // also registers "deployment", "service" and "topology-spread"
 	tr.RegisterComponentLowering(components.WorkerRule{})
-	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
-	tr.RegisterComponent("deployment", &components.DeploymentHandler{})
 	tr.RegisterComponent("statefulset", &components.StatefulsetHandler{})
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})

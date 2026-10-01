@@ -176,11 +176,13 @@ func TestHTTPRouteHandler_TrafficSources_Parsed(t *testing.T) {
 // the full transform and yields a synthesized {component}-allow-ingress-traffic policy.
 func TestTransform_IngressTrafficSources_SynthesizesNetworkPolicy(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "web",
@@ -349,11 +351,13 @@ func synthesizedNetworkPolicy(t *testing.T, c *stack.Cluster, name string) *netw
 // router itself (which has no self backend port) gets no empty self policy.
 func TestTransform_BackendRef_RetargetsToBackendComponent(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{
 				{
@@ -409,11 +413,13 @@ func TestTransform_BackendRef_RetargetsToBackendComponent(t *testing.T) {
 // no synthesized policy for it, and no panic.
 func TestTransform_BackendRef_Unresolvable_LeavesAuthored(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "router",
@@ -447,11 +453,13 @@ func TestTransform_BackendRef_Unresolvable_LeavesAuthored(t *testing.T) {
 // including the named-port (PortName) branch that only the ingress collector exercises.
 func TestTransform_IngressBackendPath_RetargetsToBackend(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{
 				{
@@ -495,11 +503,87 @@ func TestTransform_IngressBackendPath_RetargetsToBackend(t *testing.T) {
 	if got := np.Spec.PodSelector.MatchLabels["gokure.dev/component"]; got != "backend" {
 		t.Errorf("target selector = %v, want gokure.dev/component=backend", np.Spec.PodSelector.MatchLabels)
 	}
-	// Named-port branch: the retargeted rule carries the port by name, not number.
+	// Named-port branch: the retargeted rule carries the port by name, and the
+	// backend's Service (a webservice's service member) translates it to the
+	// targetPort its pods listen on, as on a `service` component. It opened the
+	// name "http" while webservice was a handler; its container port carried that
+	// name, so the opened port is the same.
 	if len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 1 ||
-		np.Spec.Ingress[0].Ports[0].Port.StrVal != "http" {
-		t.Errorf("expected a single named ingress port \"http\", got %+v", np.Spec.Ingress)
+		np.Spec.Ingress[0].Ports[0].Port.Type != intstr.Int || np.Spec.Ingress[0].Ports[0].Port.IntVal != 9000 {
+		t.Errorf("expected a single ingress port 9000, got %+v", np.Spec.Ingress)
 	}
+}
+
+// A route whose backend names a webservice's Service on a port that Service
+// does not expose opens nothing on the webservice's pods: the service member
+// opens only its own declared ports, as a `service` component does. While
+// webservice was a handler it opened the undeclared port; the route was broken
+// either way, since the Service has no such port to forward.
+func TestTransform_IngressBackendPath_UndeclaredPortOpensNothing(t *testing.T) {
+	// Control: the same route on the declared port 8080 opens it.
+	if np := backendPathPolicy(t, 8080); np == nil || len(np.Spec.Ingress) != 1 ||
+		len(np.Spec.Ingress[0].Ports) != 1 || np.Spec.Ingress[0].Ports[0].Port.IntVal != 8080 {
+		t.Fatalf("control: expected backend-allow-ingress-traffic on 8080, got %+v", np)
+	}
+	if np := backendPathPolicy(t, 9090); np != nil {
+		t.Errorf("expected no allow for an undeclared backend port, got %+v", np.Spec.Ingress)
+	}
+}
+
+// backendPathPolicy builds a router webservice whose ingress path routes to the
+// "backend" webservice (port 8080) on port, and returns the synthesized
+// backend-allow-ingress-traffic policy, or nil when there is none. The router
+// gets no policy of its own either way.
+func backendPathPolicy(t *testing.T, port int) *networkingv1.NetworkPolicy {
+	t.Helper()
+	tr := oam.NewTransformer(nil, nil)
+	registerWebservice(tr)
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+
+	app := &oam.Application{
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{
+			Components: []oam.Component{
+				{
+					Name:       "router",
+					Type:       "webservice",
+					Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+					Traits: []oam.Trait{{
+						Type: "ingress",
+						Properties: map[string]any{
+							"rules": []any{map[string]any{
+								"host": "example.com",
+								"paths": []any{map[string]any{
+									"path":    "/",
+									"backend": "backend",
+									"port":    port,
+								}},
+							}},
+						},
+					}},
+				},
+				{
+					Name:       "backend",
+					Type:       "webservice",
+					Properties: map[string]any{"image": "api:1.0", "port": 8080},
+				},
+			},
+		},
+	}
+
+	cluster, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: ingressNetworkPolicyCapabilities("ingress-nginx")})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	if clusterHasApp(cluster, "router-allow-ingress-traffic") {
+		t.Errorf("port %d: did not expect a self policy for the router-only exposer; apps: %v", port, clusterAppNames(cluster))
+	}
+	if !clusterHasApp(cluster, "backend-allow-ingress-traffic") {
+		return nil
+	}
+	return synthesizedNetworkPolicy(t, cluster, "backend-allow-ingress-traffic")
 }
 
 // go-kure/launcher#227: a backendRef naming a component whose Service name differs from its component name (e.g. a
@@ -507,12 +591,14 @@ func TestTransform_IngressBackendPath_RetargetsToBackend(t *testing.T) {
 // branch) — a break there would silently fall back to "authored".
 func TestTransform_BackendRef_ResolvesViaServiceName(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterComponent("statefulset", &components.StatefulsetHandler{})
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{
 				{
@@ -557,11 +643,13 @@ func TestTransform_BackendRef_ResolvesViaServiceName(t *testing.T) {
 // stays on the exposing component.
 func TestTransform_BackendRef_SelfTarget_Unchanged(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "web",
@@ -594,10 +682,12 @@ func TestTransform_BackendRef_SelfTarget_Unchanged(t *testing.T) {
 // no inbound policy is synthesized absent trafficSources (additive, distinct paths).
 func TestTransform_EgressPeers_SynthesizesEgressNetworkPolicy(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "web",
@@ -634,10 +724,12 @@ func TestTransform_EgressPeers_SynthesizesEgressNetworkPolicy(t *testing.T) {
 // transform (fail-fast), rather than silently emitting a namespace-wide egress allow.
 func TestTransform_EgressPeers_InvalidSelector_Errors(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "web",
@@ -673,11 +765,13 @@ func TestTransform_ComponentLabelKey_Override(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := oam.NewTransformer(nil, nil)
-			tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+			registerWebservice(tr)
 			tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 			app := &oam.Application{
-				Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+				APIVersion: oam.SupportedAPIVersion,
+				Kind:       "Application",
+				Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 				Spec: oam.ApplicationSpec{
 					Components: []oam.Component{{
 						Name:       "web",
@@ -778,7 +872,9 @@ func ingressExternalBackendApp(backend string, port int, selector map[string]any
 		pathMap["backendSelector"] = map[string]any{"matchLabels": selector}
 	}
 	return &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "router",
@@ -800,7 +896,7 @@ func ingressExternalBackendApp(backend string, port int, selector map[string]any
 // namespace-wide routing traffic source preserved.
 func TestTransform_ExternalBackend_Ingress_WithSelector_SynthesizesNP(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 	app := ingressExternalBackendApp("external-svc", 8081, map[string]any{"app.kubernetes.io/name": "external"})
@@ -831,11 +927,13 @@ func TestTransform_ExternalBackend_Ingress_WithSelector_SynthesizesNP(t *testing
 // same kind of policy.
 func TestTransform_ExternalBackend_HTTPRoute_WithSelector_SynthesizesNP(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "router",
@@ -874,7 +972,7 @@ func TestTransform_ExternalBackend_HTTPRoute_WithSelector_SynthesizesNP(t *testi
 // policy (the behavior before go-kure/launcher#239).
 func TestTransform_ExternalBackend_WithoutSelector_LeavesAuthored(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 	app := ingressExternalBackendApp("external-svc", 8081, nil)
@@ -891,11 +989,13 @@ func TestTransform_ExternalBackend_WithoutSelector_LeavesAuthored(t *testing.T) 
 // port; a selectorless occurrence stays authored and must not widen the synthesized policy's ports.
 func TestTransform_ExternalBackend_MixedSelectorPresence_DoesNotWiden(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "router",
@@ -928,11 +1028,13 @@ func TestTransform_ExternalBackend_MixedSelectorPresence_DoesNotWiden(t *testing
 // Service has one selector — rejected at parse.
 func TestTransform_ExternalBackend_ConflictingSelectorsInTrait_Rejected(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "router",
@@ -962,7 +1064,7 @@ func TestTransform_ExternalBackend_ConflictingSelectorsInTrait_Rejected(t *testi
 // conflict resolved only at synthesis — it must fail the transform, not emit two colliding allows.
 func TestTransform_ExternalBackend_ConflictingSelectorsAcrossRouters_FailsTransform(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 	mkRouter := func(name, label string) oam.Component {
@@ -983,8 +1085,10 @@ func TestTransform_ExternalBackend_ConflictingSelectorsAcrossRouters_FailsTransf
 		}
 	}
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
-		Spec:     oam.ApplicationSpec{Components: []oam.Component{mkRouter("router-a", "external"), mkRouter("router-b", "other")}},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec:       oam.ApplicationSpec{Components: []oam.Component{mkRouter("router-a", "external"), mkRouter("router-b", "other")}},
 	}
 	if _, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"}); err == nil {
 		t.Fatal("expected an error for an external Service given two different selectors across routers")
@@ -996,12 +1100,14 @@ func TestTransform_ExternalBackend_ConflictingSelectorsAcrossRouters_FailsTransf
 // router routing to a bare external Service named db would collide.
 func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransform(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterComponent("statefulset", &components.StatefulsetHandler{})
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{
 				{
@@ -1047,12 +1153,14 @@ func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransf
 // component that emits NO inbound policy is not a conflict, so the external policy is still emitted.
 func TestTransform_ExternalBackend_NameNoCollisionWhenComponentHasNoPolicy(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterComponent("statefulset", &components.StatefulsetHandler{})
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{
 				// db has a differing Service name and no routing trait → emits no db-allow-ingress-traffic.
@@ -1093,11 +1201,13 @@ func TestTransform_ExternalBackend_NameNoCollisionWhenComponentHasNoPolicy(t *te
 // component-label targeting takes precedence and no error is raised.
 func TestTransform_ExternalBackend_SelectorOnSiblingComponent_Ignored(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{
 				{
@@ -1136,11 +1246,13 @@ func TestTransform_ExternalBackend_SelectorOnSiblingComponent_Ignored(t *testing
 // the component's own pods) → rejected at parse.
 func TestTransform_ExternalBackend_SelectorOnSelfBackend_Rejected(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "router",
@@ -1166,7 +1278,7 @@ func TestTransform_ExternalBackend_SelectorOnSelfBackend_Rejected(t *testing.T) 
 // An empty matchLabels backendSelector is rejected — it would otherwise select every pod.
 func TestTransform_ExternalBackend_EmptyMatchLabels_Rejected(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 	app := ingressExternalBackendApp("external-svc", 8081, map[string]any{})
@@ -1179,11 +1291,13 @@ func TestTransform_ExternalBackend_EmptyMatchLabels_Rejected(t *testing.T) {
 // policies.
 func TestTransform_ExternalBackend_MultipleServices_DistinctNames(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{
 				Name:       "router",
@@ -1218,12 +1332,14 @@ func TestTransform_ExternalBackend_MultipleServices_DistinctNames(t *testing.T) 
 // still retargets — the allow is synthesized on the backend's pods in the backend's tier bundle.
 func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterComponent("statefulset", &components.StatefulsetHandler{})
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
 	app := &oam.Application{
-		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{
 				{

@@ -73,7 +73,7 @@ func TestMountDecorators_RefuseANameTakenByABlockDevice(t *testing.T) {
 		props map[string]any
 	}
 	sources := []source{
-		{"webservice", &components.WebserviceHandler{}, blockPVC},
+		{"webservice", webserviceViaRule{}, blockPVC},
 		{"worker", workerViaRule{}, blockPVC},
 		{"deployment", &components.DeploymentHandler{}, blockPVC},
 		{"statefulset", &components.StatefulsetHandler{}, blockPVC},

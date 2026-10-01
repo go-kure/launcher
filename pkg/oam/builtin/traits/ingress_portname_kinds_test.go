@@ -16,7 +16,7 @@ import (
 
 func workloadKindTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponent("webservice", &components.WebserviceHandler{})
+	registerWebservice(tr)
 	tr.RegisterComponent("statefulset", &components.StatefulsetHandler{})
 	tr.RegisterComponent("daemonset", &components.DaemonsetHandler{})
 	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
@@ -59,7 +59,9 @@ func TestTransform_WorkloadKinds_ImplicitBackendPortName(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(k.kind+"/"+tc.name, func(t *testing.T) {
 				app := &oam.Application{
-					Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
+					APIVersion: oam.SupportedAPIVersion,
+					Kind:       "Application",
+					Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 					Spec: oam.ApplicationSpec{Components: []oam.Component{{
 						Name: "web", Type: k.kind, Properties: k.props, Traits: tc.traits,
 					}}},

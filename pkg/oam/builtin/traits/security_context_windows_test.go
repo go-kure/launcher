@@ -11,7 +11,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -130,7 +129,7 @@ func TestSecurityContextHandler_WindowsPod_RejectsIllegalOverride(t *testing.T) 
 // the pod-level `os` property on a workload kind, then the trait on top. The
 // generated workload must be one Kubernetes accepts.
 func TestSecurityContextHandler_WindowsPod_ThroughComponent(t *testing.T) {
-	cfg, err := (&components.WebserviceHandler{}).ToApplicationConfig(&oam.Component{
+	cfg, err := webserviceViaRule{}.ToApplicationConfig(&oam.Component{
 		Name: "api", Type: "webservice",
 		Properties: map[string]any{
 			"image": "ghcr.io/org/api:v1",

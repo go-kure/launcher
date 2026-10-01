@@ -35,9 +35,11 @@ source), alongside the built-in lowering rules: the trait-position ones
 (`builtinTraitLoweringRules()` — currently just `expose`, registered via
 `RegisterBuiltinTraitLowering` rather than `RegisterBuiltinTrait`) and the
 component-position ones (`builtinComponentLoweringRules()` — `worker`,
-`postgresql` and `helm`, registered via `RegisterComponentLowering`). `worker`
-lowers to a `deployment` component plus, unless `topologySpread: false`, a
-synthesized `topology-spread` trait. `postgresql` lowers to a `cnpg-cluster`
+`webservice`, `postgresql` and `helm`, registered via `RegisterComponentLowering`).
+`worker` lowers to a `deployment` component plus, unless `topologySpread: false`, a
+synthesized `topology-spread` trait. `webservice` lowers to a same-name `deployment`
+and `service` pair, deployed as one component, with the same `topology-spread`
+treatment on the `deployment`. `postgresql` lowers to a `cnpg-cluster`
 (plus `cnpg-objectstore`, `cnpg-pooler` and one `cnpg-database` per database
 when authored) carrying the engine-only `cnpg-postgresql-defaults` trait, which
 is registered from `builtinEngineTraits()` via `RegisterEngineTrait`: only a rule
@@ -84,7 +86,8 @@ way; the `cnpg-<kind>-minimal` and `cnpg-<kind>-full` fixtures build each.
 Because a lowering rule may claim types the parser would otherwise reject, `build`
 constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`
 runs first, and its `LowerableTypes()` (the kinds/component-types/trait-types claimed
-by its registered lowering rules — `worker`, `helm` and `expose` today) is passed into
+by its registered lowering rules — `worker`, `webservice`, `postgresql`, `helm` and
+`expose` today) is passed into
 `oam.ParseWithExtraTypes` alongside the `--capability-def`-supplied custom trait
 types. See the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s
 Parsing and Lowering sections for the general mechanism.

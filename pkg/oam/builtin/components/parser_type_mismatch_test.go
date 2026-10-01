@@ -205,17 +205,16 @@ func TestParseInitContainersSidecars_NonObjectElement(t *testing.T) {
 // `command` on a webservice component must fail the whole build rather than be
 // dropped on the way to the container.
 func TestParseCommandArgs_ReachTheHandler(t *testing.T) {
-	h := &WebserviceHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
+	_, err := WebserviceRule{}.LowerComponent(&oam.Component{
 		Name: "app",
 		Type: "webservice",
 		Properties: map[string]any{
 			"image":   "ghcr.io/org/app:v1",
 			"command": "/bin/sh -c true",
 		},
-	}, "default")
+	}, oam.LoweringContext{})
 	if err == nil {
-		t.Fatal("expected the webservice handler to reject a string command, got nil")
+		t.Fatal("expected the webservice rule to reject a string command, got nil")
 	}
 	if !strings.Contains(err.Error(), "command") {
 		t.Errorf("error does not name the property: %v", err)

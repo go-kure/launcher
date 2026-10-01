@@ -9,7 +9,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // These tests cover go-kure/launcher#321: an `initContainers`/`sidecars` entry
@@ -129,7 +128,7 @@ func TestSidecar_UnauthoredFieldsStayZero(t *testing.T) {
 		"image":    "ghcr.io/org/app:v1",
 		"sidecars": []any{map[string]any{"name": "proxy", "image": "ghcr.io/org/proxy:v1"}},
 	}
-	ps := podTemplateSpec(t, generateKind(t, &components.WebserviceHandler{}, "webservice", props))
+	ps := podTemplateSpec(t, generateKind(t, webserviceViaRule{}, "webservice", props))
 	sc := containerNamed(t, ps.Containers, "proxy")
 	if sc.WorkingDir != "" || sc.EnvFrom != nil || sc.ReadinessProbe != nil || sc.LivenessProbe != nil ||
 		sc.StartupProbe != nil || sc.Lifecycle != nil {
@@ -151,7 +150,7 @@ func TestExtraContainer_NullFieldIsAbsent(t *testing.T) {
 		"initContainers": []any{entry()},
 		"sidecars":       []any{sidecar},
 	}
-	ps := podTemplateSpec(t, generateKind(t, &components.WebserviceHandler{}, "webservice", props))
+	ps := podTemplateSpec(t, generateKind(t, webserviceViaRule{}, "webservice", props))
 	for _, c := range []corev1.Container{ps.InitContainers[0], containerNamed(t, ps.Containers, "x")} {
 		if c.WorkingDir != "" || c.EnvFrom != nil || c.ReadinessProbe != nil || c.Lifecycle != nil {
 			t.Errorf("null-authored container carries fields: %+v", c)
@@ -241,7 +240,7 @@ func TestExtraContainer_Errors(t *testing.T) {
 			for k, v := range tc.entry {
 				entry[k] = v
 			}
-			_, err := (&components.WebserviceHandler{}).ToApplicationConfig(&oam.Component{
+			_, err := webserviceViaRule{}.ToApplicationConfig(&oam.Component{
 				Name: "app", Type: "webservice",
 				Properties: map[string]any{"image": "ghcr.io/org/app:v1", tc.key: []any{entry}},
 			}, "default")
@@ -275,7 +274,7 @@ func TestSidecar_NamedPortResolvesAgainstAnyDeclaredPort(t *testing.T) {
 			},
 		}},
 	}
-	ps := podTemplateSpec(t, generateKind(t, &components.WebserviceHandler{}, "webservice", props))
+	ps := podTemplateSpec(t, generateKind(t, webserviceViaRule{}, "webservice", props))
 	sc := containerNamed(t, ps.Containers, "proxy")
 	if sc.ReadinessProbe.HTTPGet.Port != intstr.FromString("stats") || sc.LivenessProbe.HTTPGet.Port != intstr.FromString("admin") {
 		t.Errorf("probe ports = %v / %v, want stats / admin", sc.ReadinessProbe.HTTPGet.Port, sc.LivenessProbe.HTTPGet.Port)
@@ -335,7 +334,7 @@ func TestSidecar_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T)
 		"initContainers": []any{initEntry},
 		"sidecars":       []any{sidecarAllFields()},
 	}
-	second := renderTwice(t, &components.WebserviceHandler{}, "webservice", props, func(objects []*client.Object) {
+	second := renderTwice(t, webserviceViaRule{}, "webservice", props, func(objects []*client.Object) {
 		ps := podTemplateSpec(t, objects)
 		sc := containerNamed(t, ps.Containers, "proxy")
 		sc.ReadinessProbe.HTTPGet.Path = "/edited"
@@ -368,7 +367,7 @@ func authoredApp(props map[string]any) *oam.Application {
 }
 
 func authoredTransformer() *oam.Transformer {
-	return oam.NewTransformer(map[string]oam.ComponentHandler{"webservice": &components.WebserviceHandler{}}, nil)
+	return oam.NewTransformer(map[string]oam.ComponentHandler{"webservice": webserviceViaRule{}}, nil)
 }
 
 // TestContainerEntry_AuthoredCheckAcceptsTheFullSurface is the control for the
