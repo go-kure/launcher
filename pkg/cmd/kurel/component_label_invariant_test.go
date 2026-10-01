@@ -184,6 +184,9 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	"service": {props: map[string]any{"ports": []any{map[string]any{"name": "http", "port": 80, "targetPort": 8080}}},
 		longRefusal: serviceNameRefusal, labelled: true},
 	"postgresql": {props: map[string]any{"version": "16", "storageSize": "10Gi"}},
+	// The Cluster's pods are created and labelled by the operator, so the
+	// component emits no `app` label and no pod selector of its own.
+	"cnpg-cluster": {props: map[string]any{"storage": map[string]any{"size": "10Gi"}}},
 	"helmchart": {props: map[string]any{"version": "v1.17.2",
 		"source": map[string]any{"kind": "OCIRepository", "url": "oci://ghcr.io/example/charts/app"}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
