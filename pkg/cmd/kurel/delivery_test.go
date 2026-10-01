@@ -13,8 +13,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"gopkg.in/yaml.v3"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
@@ -1580,6 +1584,139 @@ func TestDeliveryAcceptsNearCollision(t *testing.T) {
 
 // TestDeliveryFlagsAccepted checks --oci-repository and --oci-tag values the
 // flag check must let through.
+// reconciliationAppYAML is the flat fixture's application (one bundle, shop)
+// with a reconciliation policy setting interval, retryInterval and timeout all
+// to duration.
+func reconciliationAppYAML(t *testing.T, duration string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(deliveryTestdata, "flat", "app.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data) + fmt.Sprintf(`  policies:
+    - name: flux
+      type: reconciliation
+      properties:
+        interval: %[1]s
+        retryInterval: %[1]s
+        timeout: %[1]s
+`, duration)
+}
+
+// TestDeliveryRefusesSubMillisecondDuration checks, through the CLI, that a
+// reconciliation policy duration the policy accepts as authored but that a
+// Kustomization writes outside Flux's duration pattern (0.5ms is written as
+// 500µs) is refused before anything is written, and that the near misses at
+// and above one millisecond are delivered as authored.
+func TestDeliveryRefusesSubMillisecondDuration(t *testing.T) {
+	profile := filepath.Join(deliveryTestdata, "cluster.yaml")
+	t.Run("0.5ms refused", func(t *testing.T) {
+		appPath := writeTempFile(t, t.TempDir(), "app.yaml", reconciliationAppYAML(t, "0.5ms"))
+		out := filepath.Join(t.TempDir(), "out")
+		stdout, err := runKurel(t, "build", appPath, "--profile", profile, "-o", out, "--oci-repository", testOCIRepository)
+		if err == nil {
+			t.Fatal("delivery build accepted a 0.5ms reconciliation interval")
+		}
+		for _, want := range []string{"Kustomization.kustomize.toolkit.fluxcd.io flux-system/shop", "spec.interval", `"500µs"`, "millisecond resolution"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not contain %q", err, want)
+			}
+		}
+		if stdout != "" {
+			t.Errorf("wrote to stdout before refusing:\n%s", stdout)
+		}
+		if _, err := os.Stat(out); !os.IsNotExist(err) {
+			t.Errorf("created the output directory before refusing (stat error %v)", err)
+		}
+	})
+	for _, duration := range []string{"1ms", "1.5s"} {
+		t.Run(duration+" delivered", func(t *testing.T) {
+			appPath := writeTempFile(t, t.TempDir(), "app.yaml", reconciliationAppYAML(t, duration))
+			out := t.TempDir()
+			if _, err := runKurel(t, "build", appPath, "--profile", profile, "-o", out, "--oci-repository", testOCIRepository); err != nil {
+				t.Fatalf("delivery build refused: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(out, fluxFileName("shop")))
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, o := range decodeDocs(t, data) {
+				if str(o["kind"]) != "Kustomization" {
+					continue
+				}
+				found = true
+				spec, _ := o["spec"].(map[string]any)
+				for _, field := range []string{"interval", "retryInterval", "timeout"} {
+					if got := str(spec[field]); got != duration {
+						t.Errorf("spec.%s = %q, want %q", field, got, duration)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("no Kustomization in %s:\n%s", fluxFileName("shop"), data)
+			}
+		})
+	}
+}
+
+// TestCheckDurations checks the duration check on every generated delivery
+// object's metav1.Duration fields: each must be written (Duration.String())
+// inside its Flux CRD pattern, an unset one is skipped, a written 0s is left
+// alone, and an object type with unknown duration fields is refused.
+func TestCheckDurations(t *testing.T) {
+	d := func(v time.Duration) *metav1.Duration { return &metav1.Duration{Duration: v} }
+	kust := func(interval time.Duration, retry, timeout *metav1.Duration) client.Object {
+		k := &kustv1.Kustomization{}
+		k.Name = "shop"
+		k.Spec.Interval = metav1.Duration{Duration: interval}
+		k.Spec.RetryInterval = retry
+		k.Spec.Timeout = timeout
+		return k
+	}
+	oci := func(interval time.Duration, timeout *metav1.Duration) client.Object {
+		r := &sourcev1.OCIRepository{}
+		r.Name = "shop"
+		r.Spec.Interval = metav1.Duration{Duration: interval}
+		r.Spec.Timeout = timeout
+		return r
+	}
+	tests := []struct {
+		name string
+		obj  client.Object
+		want string // "" accepts
+	}{
+		{"Kustomization defaults", kust(time.Hour, nil, nil), ""},
+		{"Kustomization at one millisecond", kust(time.Millisecond, d(time.Millisecond), d(time.Millisecond)), ""},
+		{"Kustomization fractional seconds", kust(1500*time.Millisecond, d(1500*time.Microsecond), d(90*time.Minute)), ""},
+		{"Kustomization zero", kust(0, d(0), d(0)), ""},
+		{"Kustomization interval below 1ms", kust(500*time.Microsecond, nil, nil), `spec.interval is written as "500µs"`},
+		{"Kustomization retryInterval below 1ms", kust(time.Minute, d(999*time.Nanosecond), nil), `spec.retryInterval is written as "999ns"`},
+		{"Kustomization timeout below 1ms", kust(time.Minute, nil, d(time.Nanosecond)), `spec.timeout is written as "1ns"`},
+		{"Kustomization negative timeout", kust(time.Minute, nil, d(-time.Second)), `spec.timeout is written as "-1s"`},
+		{"OCIRepository default", oci(time.Hour, nil), ""},
+		{"OCIRepository interval below 1ms", oci(500*time.Microsecond, nil), `spec.interval is written as "500µs"`},
+		{"OCIRepository timeout in minutes", oci(time.Hour, d(59*time.Minute)), ""},
+		{"OCIRepository timeout in hours", oci(time.Hour, d(time.Hour)), `spec.timeout is written as "1h0m0s"`},
+		{"unexpected type", &unstructured.Unstructured{}, "unexpected delivery object type"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := &deliveryOutput{flux: []*client.Object{&tt.obj}}
+			err := out.checkDurations()
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("refused: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error %v, want one containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestDeliveryFlagsAccepted(t *testing.T) {
 	tests := []struct {
 		name, repository, tag string
