@@ -278,8 +278,8 @@ qualified: reword it and drop the number (see the section above).
 CI-enforced by the always-on `issue-refs` job (`make check-issue-refs`, also in `make check`,
 `make precommit` and `mise run verify`), which scans the whole tracked tree
 (`scripts/check-issue-refs.sh`, go-kure/launcher#400). It rejects a bare `#N` of two to five digits
-and a `launcher#N` not preceded by `/`, in tracked `*.go`, `*.md`, `*.sh`, `*.yml`, `*.yaml`,
-`*.toml` and `*.json` files. Exempt: `CHANGELOG.md` (generated from commit subjects), anything under
+and a `launcher#N` without its `owner/` (also `pre-launcher#N`), in tracked `*.go`, `*.md`,
+`*.sh`, `*.yml`, `*.yaml`, `*.toml` and `*.json` files. Exempt: `CHANGELOG.md` (generated from commit subjects), anything under
 a `testdata/` directory, and Markdown anchors `](#...)`. A line that is genuinely not a reference
 (a quoted error message, a fixture string, an all-digit colour such as `#123`) takes an `allow-ref`
 pragma anywhere on that line.
