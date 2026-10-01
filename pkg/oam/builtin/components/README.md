@@ -1969,7 +1969,8 @@ not part of either change.
   `chart`, `version`, `delivery`, `valuesMode`, `interval`, `releaseName`, `targetNamespace` and the nested
   `driftDetection.mode`, `install.crds`, `upgrade.crds` must be strings; `driftDetection`,
   `install`, `upgrade` and `values` objects; `valuesFrom` an array whose entries carry string
-  `kind`, `valuesKey` and `targetPath`. A present value of another type is refused, naming the
+  `kind`, `valuesKey` and `targetPath`; `source` an object whose `url`, `name`, `kind` and
+  `namespace` are strings. A present value of another type is refused, naming the
   field: `version: 7` used to build with no version, and `interval: 7` with the `60m` default.
   A null still reads as unset, and so does an empty string for a string property; an object
   or array property refuses an empty string as the wrong type. Schema validation already refuses these in a
