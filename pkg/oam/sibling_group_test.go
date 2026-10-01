@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/layout"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -201,6 +202,29 @@ func TestSiblingGroup_TraitCopyDoesNotJoinGroup(t *testing.T) {
 	_, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{})
 	if err == nil || !strings.Contains(err.Error(), `duplicate component name "web"`) {
 		t.Fatalf("err = %v, want a duplicate component name refusal", err)
+	}
+}
+
+// kindlessStub generates one ConfigMap without apiVersion and kind.
+type kindlessStub struct{ siblingStub }
+
+func (*kindlessStub) Generate(*stack.Application) ([]*client.Object, error) {
+	var obj client.Object = &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "default"}}
+	return []*client.Object{&obj}, nil
+}
+
+// TestSiblingGroup_KindlessObjectRefused: a member object with no kind cannot be
+// compared against the other members' objects, so the group refuses it.
+func TestSiblingGroup_KindlessObjectRefused(t *testing.T) {
+	tr := siblingTransformer(stubHandler("a", 0), &siblingStubHandler{typ: "k", build: func() stack.ApplicationConfig { return &kindlessStub{} }})
+	tr.RegisterComponentLowering(emitRule{"pair", pair("a", "k")})
+	cluster, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	_, err = cluster.Node.Bundle.Applications[0].Generate()
+	if want := `member "k" generates object "default/web" with no kind`; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Generate err = %v, want it to contain %q", err, want)
 	}
 }
 

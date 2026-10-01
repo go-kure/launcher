@@ -166,7 +166,8 @@ type siblingGroupConfig struct {
 // members generating the same Kubernetes object (API group, kind, namespace and
 // name) is refused: the group would deploy one object twice with two contents —
 // for example a statefulset member's headless Service and a service member's
-// Service, both named after the group.
+// Service, both named after the group. An object without a kind cannot be
+// compared and is refused, as CheckCrossDocumentCollisions refuses one.
 func (g *siblingGroupConfig) Generate(*stack.Application) ([]*client.Object, error) {
 	var objs []*client.Object
 	owner := make(map[objectIdentity]string)
@@ -181,11 +182,11 @@ func (g *siblingGroupConfig) Generate(*stack.Application) ([]*client.Object, err
 			}
 			obj := *p
 			gvk := obj.GetObjectKind().GroupVersionKind()
-			kind := gvk.Kind
-			if kind == "" {
-				kind = fmt.Sprintf("%T", obj)
+			if gvk.Kind == "" {
+				return nil, errors.Errorf("sibling group %q: member %q generates object %q with no kind; set its apiVersion and kind so the group can compare its members' objects",
+					m.Name, g.types[i], qualifiedName(obj.GetNamespace(), obj.GetName()))
 			}
-			id := objectIdentity{group: gvk.Group, kind: kind, namespace: obj.GetNamespace(), name: obj.GetName()}
+			id := objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}
 			if prev, dup := owner[id]; dup && prev != g.types[i] {
 				return nil, errors.Errorf("sibling group %q: members %q and %q both generate %s; exactly one member may",
 					m.Name, prev, g.types[i], id)
