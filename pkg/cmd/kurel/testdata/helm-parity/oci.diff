@@ -1,19 +1,13 @@
 --- helmchart
 +++ helm
-@@ -2,8 +2,11 @@
+@@ -2,5 +2,5 @@
  kind: OCIRepository
  metadata:
 -  name: cert-manager
 +  name: cert-manager-source-1b8e2e802e
    namespace: default
  spec:
-   interval: 1h0m0s
-+  layerSelector:
-+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
-+    operation: copy
-   ref:
-     tag: v1.17.2
-@@ -18,5 +21,5 @@
+@@ -21,5 +21,5 @@
    chartRef:
      kind: OCIRepository
 -    name: cert-manager

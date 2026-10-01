@@ -42,8 +42,8 @@ wires each rule's `dependsOn` as bundle dependencies, on top of automatic tier e
 policy, an application spanning several tiers gets one bundle per tier instead, each
 depending on the bundle of the populated tier before it.
 
-When several components share one Flux source (a `helmchart` repository, or an OCI
-source shared with `oci`), the transform emits it once, in the bundle of the sharing
+When several components share one Flux source (a `helmchart` repository or OCI chart,
+or an `oci` artifact), the transform emits it once, in the bundle of the sharing
 component deployed first: the one in the earliest tier, after the components it depends
 on, with document order breaking ties. That component depends on no other component
 sharing the source, so it never waits on a bundle that needs a source it has not yet
