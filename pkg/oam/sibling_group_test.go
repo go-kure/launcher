@@ -491,8 +491,10 @@ type identityStub struct {
 func (s *identityStub) IdentityTargetPorts() bool { return s.identity }
 
 // TestSiblingGroup_RoutingTargetOnOwnPods: a member routing to another member's
-// pods on ports mapped to themselves reports no routing target, so the group keeps
-// its component-label policy; every other routing target still forwards.
+// pods on ports mapped to themselves routes to the group's own pods, so synthesis
+// keeps its component-label policy; every other routing target does not. Either
+// way the group forwards the member's routing target, whose ports synthesis still
+// translates and filters.
 func TestSiblingGroup_RoutingTargetOnOwnPods(t *testing.T) {
 	pods := &podsStub{labels: map[string]string{"app": "web", "tier": "front"}}
 	ports := []intstr.IntOrString{intstr.FromInt32(8080)}
@@ -500,20 +502,20 @@ func TestSiblingGroup_RoutingTargetOnOwnPods(t *testing.T) {
 		name     string
 		selector *metav1.LabelSelector
 		identity bool
-		forwards bool
+		ownPods  bool
 	}{
-		{"subset on identity ports", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}, true, false},
-		{"whole label set", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web", "tier": "front"}}, true, false},
-		{"remapped port", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}, false, true},
-		{"not a subset", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "other"}}, true, true},
-		{"extra label", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web", "x": "y"}}, true, true},
-		{"empty matchLabels", &metav1.LabelSelector{}, true, true},
+		{"subset on identity ports", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}, true, true},
+		{"whole label set", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web", "tier": "front"}}, true, true},
+		{"remapped port", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}, false, false},
+		{"not a subset", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "other"}}, true, false},
+		{"extra label", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web", "x": "y"}}, true, false},
+		{"empty matchLabels", &metav1.LabelSelector{}, true, false},
 		{"matchExpressions", &metav1.LabelSelector{
 			MatchLabels: map[string]string{"app": "web"},
 			MatchExpressions: []metav1.LabelSelectorRequirement{
 				{Key: "tier", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"front"}},
 			},
-		}, true, true},
+		}, true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -522,13 +524,10 @@ func TestSiblingGroup_RoutingTargetOnOwnPods(t *testing.T) {
 				stack.NewApplication("web", "ns", pods),
 				stack.NewApplication("web", "ns", route),
 			}}
-			sel, got := g.ServiceRoutingTarget(ports)
-			if !tc.forwards {
-				if sel != nil || got != nil {
-					t.Errorf("ServiceRoutingTarget = (%v, %v), want (nil, nil)", sel, got)
-				}
-				return
+			if got := g.routesToOwnPods(); got != tc.ownPods {
+				t.Errorf("routesToOwnPods = %v, want %v", got, tc.ownPods)
 			}
+			sel, got := g.ServiceRoutingTarget(ports)
 			if sel != tc.selector || len(got) != 1 || got[0] != ports[0] {
 				t.Errorf("ServiceRoutingTarget = (%v, %v), want the member's (%v, %v)", sel, got, tc.selector, ports)
 			}
@@ -537,7 +536,8 @@ func TestSiblingGroup_RoutingTargetOnOwnPods(t *testing.T) {
 }
 
 // TestSiblingGroup_RoutingTargetWithoutPodLabeler: a routing target selecting pods
-// no member declares — its own sibling runs none — still forwards.
+// no member declares — its own sibling runs none — does not route to the group's
+// own pods.
 func TestSiblingGroup_RoutingTargetWithoutPodLabeler(t *testing.T) {
 	sel := &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}
 	route := &identityStub{siblingStub: siblingStub{selector: sel}, identity: true}
@@ -545,6 +545,9 @@ func TestSiblingGroup_RoutingTargetWithoutPodLabeler(t *testing.T) {
 		stack.NewApplication("web", "ns", &siblingStub{}),
 		stack.NewApplication("web", "ns", route),
 	}}
+	if g.routesToOwnPods() {
+		t.Error("routesToOwnPods = true, want false")
+	}
 	if got, _ := g.ServiceRoutingTarget(nil); got != sel {
 		t.Errorf("ServiceRoutingTarget selector = %v, want the member's %v", got, sel)
 	}
