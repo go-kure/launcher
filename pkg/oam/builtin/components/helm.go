@@ -152,22 +152,27 @@ func (HelmRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (o
 // a source with exactly one of url and name, and a known valuesMode. The
 // passthrough keys come back in their own map under their declared spelling,
 // without nulls (absent). The strict decode matches keys case-insensitively, as
-// encoding/json does, so two spellings of one key are refused rather than one
-// silently winning.
+// encoding/json does, so two spellings of one key, at the top level or in
+// source, are refused rather than one silently winning.
 func decodeHelm(src map[string]any) (*helmProperties, map[string]any, error) {
+	if err := refuseFoldedKeys("", src); err != nil {
+		return nil, nil, err
+	}
+	for k, v := range src {
+		if s, ok := v.(map[string]any); ok && strings.EqualFold(k, "source") {
+			if err := refuseFoldedKeys("source.", s); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
 	props, owned, err := builtin.DecodeStrictJSON[helmProperties](src, helmPassthroughKeys...)
 	if err != nil {
 		return nil, nil, errors.Errorf("%s: properties do not decode: %w", helmType, err)
 	}
 	passthrough := make(map[string]any, len(owned))
-	written := make(map[string]string, len(owned))
 	for _, k := range slices.Sorted(maps.Keys(owned)) {
 		i := slices.IndexFunc(helmPassthroughKeys, func(key string) bool { return strings.EqualFold(key, k) })
 		key := helmPassthroughKeys[i] // owned holds only keys that fold onto one of these
-		if prior, dup := written[key]; dup {
-			return nil, nil, errors.Errorf("%s: %s is given more than once (as %s and %s)", helmType, key, prior, k)
-		}
-		written[key] = k
 		if v := owned[k]; v != nil {
 			passthrough[key] = v
 		}
@@ -189,6 +194,22 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, error) {
 		return nil, nil, errors.Errorf("%s: unsupported valuesMode %q; supported values: inline, configMap", helmType, props.ValuesMode)
 	}
 	return props, passthrough, nil
+}
+
+// refuseFoldedKeys refuses two keys of m that are equal under Unicode case
+// folding (strings.EqualFold, which also folds ſ onto s): the decode would match
+// both to one field and keep whichever it read last. The pairwise compare is
+// deliberate; lowercasing alone is a weaker fold. A properties map is small.
+func refuseFoldedKeys(prefix string, m map[string]any) error {
+	keys := slices.Sorted(maps.Keys(m))
+	for i, a := range keys {
+		for _, b := range keys[i+1:] {
+			if strings.EqualFold(a, b) {
+				return errors.Errorf("%s: %s%s and %s%s are one key given more than once (keys match ignoring case)", helmType, prefix, a, prefix, b)
+			}
+		}
+	}
+	return nil
 }
 
 // lowerHelmFlux emits the helmrelease component and, for an inline URL, the

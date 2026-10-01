@@ -246,7 +246,9 @@ tier than its consumer would never be applied, because each tier waits on the he
 of the tier before it, including the consumer's. In the earliest tier, the source never
 follows a consumer, and a consumer that shares its tier is retried by helm-controller until
 the source is ready. A `placement` policy naming the generated source may only keep it in
-`infra`; `TransformWithPolicy` refuses any other tier. An authored source keeps
+`infra`, and a `dependency` rule may not make it wait on any component (with its consumer
+placed in `infra` beside it, no cycle would report the deadlock); `TransformWithPolicy`
+refuses both. An authored source keeps
 `defaultTierMap`'s tier.
 
 A listed type can still decline its check per document by implementing

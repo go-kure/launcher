@@ -1934,7 +1934,8 @@ not part of either change.
     policy therefore never sits in an earlier tier than its source. If it did, the
     release's health check would hold back the source's tier, and the source
     would never be applied. For the same reason a `placement` policy naming the
-    generated source may only keep it in `infra`; any other tier fails the build.
+    generated source may only keep it in `infra`, and a `dependency` rule may not
+    make it wait on any component; either fails the build.
   - `delivery: template` emits a `helmtemplate` with the URL, its resolved kind,
     `chart`, `version` and `values`. No source is emitted, and an authored
     `valuesMode: inline` is dropped. The rule refuses everything a client-side
@@ -1949,7 +1950,10 @@ not part of either change.
     - `source.namespace` with an inline URL;
     - `chart` with an OCIRepository or HelmChart source;
     - `version` with a referenced OCIRepository or HelmChart source, which pins
-      its own.
+      its own;
+    - two keys equal ignoring case, at the top level or inside `source`
+      (`chart` and `Chart`): the decode would match both to one field and keep
+      either.
 
   An authored component already named like a generated source fails the build
   as a duplicate component name.
