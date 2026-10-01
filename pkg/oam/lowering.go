@@ -1399,11 +1399,13 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			for j := range result.Components {
 				result.Components[j].origin = &traitOrigin
 				// Synthesized only when the trait was checked before the rule ran:
-				// the rule declares a schema. trait.sealed is no proof of that — every
-				// rule-emitted trait is sealed, including one a schema-less rule
-				// copied authored properties into.
+				// the rule declares a schema and the trait is not sealed. trait.sealed
+				// is no proof of a check — every rule-emitted trait is sealed,
+				// including one a schema-less rule copied authored properties into —
+				// and a sealed trait skips the schema check above, so a declared
+				// schema proves nothing for it either.
 				_, declaresSchema := rule.(PropertySchemaProvider)
-				result.Components[j].synthesized = declaresSchema
+				result.Components[j].synthesized = declaresSchema && !trait.sealed
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}

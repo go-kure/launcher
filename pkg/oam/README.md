@@ -422,8 +422,9 @@ to be checked against. Output of any other rule stays authored and is checked li
 anything a user wrote, so a schema-less rule cannot pass a non-null authored reserved
 value through (an explicit `null` is stripped before that check,
 go-kure/launcher#609). A sealed trait is not checked input: every trait a rule
-emits is sealed, whether or not that rule's input was checked, so a schema-less
-`TraitLoweringRule` over a sealed trait still emits authored components. A
+emits is sealed, whether or not that rule's input was checked, and a sealed trait
+skips the schema check, so a `TraitLoweringRule` over a sealed trait emits authored
+components whether or not it declares a schema. A
 component a `DocumentLoweringRule` forwards — the same element of
 `doc.Spec.Components`, not a copy — keeps the classification it arrived with:
 forwarding neither makes it synthesized nor resets it to authored. An authored
@@ -692,8 +693,10 @@ Two things this deliberately does not do:
   authored rule; it would only have handed a reserved null to the type check,
   producing a loud rejection with the wrong reason. The **component** surface keeps
   the same separation: an authored component is checked before any rule can
-  rewrite it, and a component a rule emitted — whose properties are the ones the
-  strip touches — is exempt from reservation, as a sealed trait is.
+  rewrite it. A component a rule emitted from checked input — whose properties are
+  the ones the strip touches — is exempt from reservation, as a sealed trait is;
+  the output of a rule whose input was not checked stays authored and is checked
+  after the strip (see the rule-output contract above).
 - **A key the schema does not declare is untouched**, including inside an object
   that sets `AdditionalProperties`. Nothing describes such a value, so nothing
   here can normalise it, and a null inside an opaque object still reaches the

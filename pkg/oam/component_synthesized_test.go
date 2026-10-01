@@ -126,6 +126,21 @@ func (passThroughTraitRule) LowerTrait(trait *Trait, _ LoweringContext) (Lowerin
 	return LoweringResult{Components: []Component{{Name: "web", Type: "reserved-sink", Properties: trait.Properties}}}, nil
 }
 
+// schemaPassThroughTraitRule declares a schema that reserves networkPolicy, and
+// copies the trait properties into a component it emits. For a sealed trait the
+// schema is never checked, so the declaration alone proves nothing.
+type schemaPassThroughTraitRule struct{}
+
+func (schemaPassThroughTraitRule) TraitType() string { return "pass-through-sidecar" }
+
+func (schemaPassThroughTraitRule) PropertySchema() map[string]PropertySchema {
+	return reservedSinkHandler{}.PropertySchema()
+}
+
+func (schemaPassThroughTraitRule) LowerTrait(trait *Trait, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: "web", Type: "reserved-sink", Properties: trait.Properties}}}, nil
+}
+
 // traitWrappingComponentRule declares no schema and copies its authored properties
 // into a pass-through-sidecar trait on the component it emits. That trait is sealed,
 // as every rule-emitted trait is, though nothing checked what it carries.
@@ -342,6 +357,20 @@ func TestTransform_SchemaLessTraitRuleOverSealedTraitIsRejected(t *testing.T) {
 	tr := reservedSinkTransformer()
 	tr.RegisterComponentLowering(traitWrappingComponentRule{})
 	tr.RegisterTraitLowering(passThroughTraitRule{})
+
+	_, err := tr.Transform(singleComponentApp("Application", "trait-wrapping", authoredNetworkPolicy()), TransformContext{})
+	expectPlatformReserved(t, err)
+}
+
+// TestTransform_SchemaTraitRuleOverSealedTraitIsRejected: a trait rule that
+// declares a schema has it checked only for an unsealed trait. Over a sealed trait
+// a schema-less component rule filled with authored properties, the check never
+// runs, so the component the rule emits is not synthesized and the handler rejects
+// the authored reserved value.
+func TestTransform_SchemaTraitRuleOverSealedTraitIsRejected(t *testing.T) {
+	tr := reservedSinkTransformer()
+	tr.RegisterComponentLowering(traitWrappingComponentRule{})
+	tr.RegisterTraitLowering(schemaPassThroughTraitRule{})
 
 	_, err := tr.Transform(singleComponentApp("Application", "trait-wrapping", authoredNetworkPolicy()), TransformContext{})
 	expectPlatformReserved(t, err)
