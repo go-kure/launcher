@@ -63,7 +63,7 @@ type Component struct {
 	// isForwardedComponent) keeps the value it arrived with. What a user wrote is still
 	// checked before any rule can rewrite it: before a ComponentLoweringRule
 	// (lowerDocumentBody) and before a DocumentLoweringRule
-	// (enforceAuthoredComponentReservations).
+	// (enforceAuthoredReservations).
 	synthesized bool
 }
 

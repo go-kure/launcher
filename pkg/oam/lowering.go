@@ -1057,7 +1057,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		if origin == (Origin{}) {
 			origin = Origin{Document: doc.Metadata.Name, DocumentKind: doc.Kind, Namespace: doc.Metadata.Namespace}
 		}
-		if err := t.enforceAuthoredComponentReservations(doc, origin); err != nil {
+		if err := t.enforceAuthoredReservations(doc, origin); err != nil {
 			return nil, false, nil, err
 		}
 		// Snapshot the components doc had BEFORE the rule ran: a rule that forwards
@@ -1089,12 +1089,27 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		// A document rule's output is authored (the component loop below), except a
 		// component it forwarded that was already synthesized. Check the rest of every
 		// emitted document for reserved keys before validateEmittedDocument drops an
-		// explicit null from any of them.
+		// explicit null from any of them. Traits the same way, before
+		// sealNestedTraitsInDocument validates them.
 		forwardedSynthesized := func(comp *Component) bool {
 			return comp.synthesized && isForwardedComponent(comp, originalComponents)
 		}
+		forwardedSynthesizedTrait := func(trait *Trait) bool {
+			if !trait.synthesized {
+				return false
+			}
+			for i := range originalComponents {
+				if isForwardedTrait(trait, originalComponents[i].Traits) {
+					return true
+				}
+			}
+			return false
+		}
 		for i := range result.Documents {
 			if err := t.enforceEmittedComponentReservations(result.Documents[i].Spec.Components, origin.Rule, forwardedSynthesized); err != nil {
+				return nil, false, nil, errors.Wrapf(err, "%s", origin)
+			}
+			if err := t.enforceEmittedTraitReservations(result.Documents[i].Spec.Components, nil, origin.Rule, forwardedSynthesizedTrait); err != nil {
 				return nil, false, nil, errors.Wrapf(err, "%s", origin)
 			}
 		}
@@ -1201,14 +1216,17 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 		docOrigin = Origin{Document: doc.Metadata.Name, DocumentKind: doc.Kind, Namespace: doc.Metadata.Namespace}
 	}
 
-	// Every component no rule synthesized is checked for reserved keys before any
-	// rule of this round runs: a rule may emit an element whose properties map is
-	// that of a component it was handed (LoweringContext.Component), and validating
-	// the emitted element strips an explicit null from both (go-kure/launcher#609).
+	// Every component and trait no rule synthesized is checked for reserved keys
+	// before any rule of this round runs: a rule may emit an element whose properties
+	// map is that of a component or trait it was handed (LoweringContext.Component),
+	// and validating the emitted element strips an explicit null from both
+	// (go-kure/launcher#609, go-kure/launcher#626).
 	// The schema and the exemption are the ones the later checks use, so this
-	// refuses nothing they would accept; it only runs before the strip can hide a
-	// null from them.
-	if err := t.enforceAuthoredComponentReservations(doc, docOrigin); err != nil {
+	// refuses nothing they would accept, with one exception: an authored trait a
+	// component rule consumes instead of forwarding, which no later check sees. Its
+	// reserved key is an authored one all the same, as for a component a document
+	// rule drops (enforceAuthoredReservations).
+	if err := t.enforceAuthoredReservations(doc, docOrigin); err != nil {
 		return false, nil, err
 	}
 
@@ -1281,6 +1299,14 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			compOrigin.Rule = loweringRuleIdentity(string(PositionComponent), comp.Type, rule)
 			if !inputChecked {
 				if err := t.enforceEmittedComponentReservations(result.Components, compOrigin.Rule, nil); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", compOrigin)
+				}
+				// A trait the rule forwarded keeps what it was (sealEmittedNestedTraits),
+				// so one that arrived synthesized stays exempt.
+				forwardedSynthesized := func(trait *Trait) bool {
+					return trait.synthesized && isForwardedTrait(trait, originalTraits)
+				}
+				if err := t.enforceEmittedTraitReservations(result.Components, nil, compOrigin.Rule, forwardedSynthesized); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
@@ -1433,6 +1459,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// properties map with an emitted component.
 			if !inputChecked {
 				if err := t.enforceEmittedComponentReservations(result.Components, traitOrigin.Rule, nil); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
+				}
+				if err := t.enforceEmittedTraitReservations(result.Components, result.Traits, traitOrigin.Rule, nil); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
 			}
@@ -1694,27 +1723,44 @@ func sameMap(a, b map[string]any) bool {
 	return reflect.ValueOf(a).UnsafePointer() == reflect.ValueOf(b).UnsafePointer()
 }
 
-// enforceAuthoredComponentReservations runs the D3 check (enforcePlatformReserved) on
-// every component of doc that no lowering rule synthesized, against the schema that
-// component would later be checked against: its ComponentLoweringRule's when one is
-// registered (lowerDocumentBody's pre-rule check), else its dispatchable handler's
-// (createApplications). It runs before a DocumentLoweringRule, which may drop or
-// retype a component and so take it out of reach of those later checks. A type with
-// no schema reserves nothing here, and an unknown type is the validator's business.
-// A document rule's output is authored either way (lowerDocumentOnce) and is checked
-// downstream too.
-func (t *Transformer) enforceAuthoredComponentReservations(doc *Application, docOrigin Origin) error {
+// enforceAuthoredReservations runs the D3 check (enforcePlatformReserved) on every
+// component of doc that no lowering rule synthesized, and on every trait no rule
+// synthesized whatever component it sits in, against the schema each would later be
+// checked against: a ComponentLoweringRule's or TraitLoweringRule's when one is
+// registered for its type (lowerDocumentBody's pre-rule checks), else its dispatchable
+// handler's (createApplications, applyTraits). It runs before a DocumentLoweringRule,
+// which may drop or retype an element and so take it out of reach of those later
+// checks. A type with no schema reserves nothing here, and an unknown type is the
+// validator's business. A document rule's output is authored either way
+// (lowerDocumentOnce) and is checked downstream too.
+func (t *Transformer) enforceAuthoredReservations(doc *Application, docOrigin Origin) error {
 	for i := range doc.Spec.Components {
 		comp := &doc.Spec.Components[i]
-		if comp.synthesized {
-			continue
+		compOrigin, stamped := comp.Origin()
+		if !stamped {
+			compOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Namespace: docOrigin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: i}
 		}
-		if err := t.enforceComponentReservations(comp, "properties"); err != nil {
-			compOrigin, stamped := comp.Origin()
-			if !stamped {
-				compOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Namespace: docOrigin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: i}
+		if !comp.synthesized {
+			if err := t.enforceComponentReservations(comp, "properties"); err != nil {
+				return errors.Wrapf(err, "%s", compOrigin)
 			}
-			return errors.Wrapf(err, "%s", compOrigin)
+		}
+		// A synthesized component may still carry an authored trait a checked rule
+		// forwarded, so its traits are checked one by one.
+		for k := range comp.Traits {
+			trait := &comp.Traits[k]
+			if trait.synthesized {
+				continue
+			}
+			if err := t.enforceTraitReservations(trait, "properties"); err != nil {
+				traitOrigin, stamped := trait.Origin()
+				if !stamped {
+					traitOrigin = compOrigin
+					traitOrigin.TraitType = trait.Type
+					traitOrigin.Index = k
+				}
+				return errors.Wrapf(err, "%s", traitOrigin)
+			}
 		}
 	}
 	return nil
@@ -1758,6 +1804,56 @@ func (t *Transformer) enforceEmittedComponentReservations(comps []Component, rul
 		path := fmt.Sprintf("component %q (type %q) emitted by rule %s: properties", comp.Name, comp.Type, rule)
 		if err := t.enforceComponentReservations(comp, path); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// enforceTraitReservations is enforceComponentReservations for a trait: its schema is
+// its TraitLoweringRule's when one is registered, else its dispatchable handler's.
+func (t *Transformer) enforceTraitReservations(trait *Trait, path string) error {
+	var provider any
+	if rule, ok := t.traitLoweringRules[trait.Type]; ok {
+		provider = rule
+	} else if h := t.findTraitHandler(trait.Type); h != nil {
+		provider = h
+	}
+	p, ok := provider.(PropertySchemaProvider)
+	if !ok {
+		return nil
+	}
+	return enforcePlatformReserved(p.PropertySchema(), trait.Properties, path)
+}
+
+// enforceEmittedTraitReservations is enforceEmittedComponentReservations for the
+// traits one lowering rule invocation emitted and did not synthesize: those it
+// returned at trait position (traits) and those nested in the components it emitted
+// (comps). exempt, when set, names the ones it did not synthesize but forwarded
+// already synthesized. Like its component counterpart it must run on the whole result
+// before any of it is validated: validating an emitted trait strips an explicit null
+// from its properties, and validating an emitted component strips it from any trait
+// sharing that component's map (go-kure/launcher#626).
+func (t *Transformer) enforceEmittedTraitReservations(comps []Component, traits []Trait, rule string, exempt func(*Trait) bool) error {
+	for i := range traits {
+		trait := &traits[i]
+		if exempt != nil && exempt(trait) {
+			continue
+		}
+		path := fmt.Sprintf("trait %q emitted by rule %s: properties", trait.Type, rule)
+		if err := t.enforceTraitReservations(trait, path); err != nil {
+			return err
+		}
+	}
+	for i := range comps {
+		for k := range comps[i].Traits {
+			trait := &comps[i].Traits[k]
+			if exempt != nil && exempt(trait) {
+				continue
+			}
+			path := fmt.Sprintf("trait %q of component %q emitted by rule %s: properties", trait.Type, comps[i].Name, rule)
+			if err := t.enforceTraitReservations(trait, path); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -171,13 +171,14 @@ func expectReservedTraitRejected(t *testing.T, err error, site string) {
 
 // TestTransform_SchemalessComponentRuleTraitCopyIsRejected is go-kure/launcher#611:
 // an authored reserved value a schema-less component rule copied into a trait it
-// emits reaches applyTraits sealed but not synthesized, and is rejected there.
+// emits is sealed but not synthesized. It is rejected as the rule emits it
+// (go-kure/launcher#626), before applyTraits would have.
 func TestTransform_SchemalessComponentRuleTraitCopyIsRejected(t *testing.T) {
 	tr := reservedTraitTransformer()
 	tr.RegisterComponentLowering(traitEmittingComponentRule{})
 
 	_, err := tr.Transform(singleComponentApp("Application", "trait-emitting", authoredNetworkPolicy()), TransformContext{})
-	expectReservedTraitRejected(t, err, `component "web" trait "reserved-trait"`)
+	expectReservedTraitRejected(t, err, `trait "reserved-trait" of component "web" emitted by rule component/trait-emitting:`)
 }
 
 // TestTransform_SchemalessComponentRuleRenderedTraitIsRejected: fail-closed. A
@@ -188,7 +189,7 @@ func TestTransform_SchemalessComponentRuleRenderedTraitIsRejected(t *testing.T) 
 	tr.RegisterComponentLowering(schemalessRendersTraitComponentRule{})
 
 	_, err := tr.Transform(singleComponentApp("Application", "renders-trait", map[string]any{}), netpolCapability())
-	expectReservedTraitRejected(t, err, `component "main" trait "reserved-trait"`)
+	expectReservedTraitRejected(t, err, `trait "reserved-trait" of component "main" emitted by rule component/renders-trait:`)
 }
 
 // TestTransform_ComponentRuleMayWriteReservedTraitProperty: a schema-declaring
@@ -205,7 +206,7 @@ func TestTransform_ComponentRuleMayWriteReservedTraitProperty(t *testing.T) {
 
 // TestTransform_SchemalessTraitRuleTraitCopyIsRejected is the trait-position case: a
 // schema-less trait rule copies an authored trait's reserved value into the trait
-// it emits, which is rejected at applyTraits.
+// it emits, which is rejected as emitted.
 func TestTransform_SchemalessTraitRuleTraitCopyIsRejected(t *testing.T) {
 	tr := reservedTraitTransformer()
 	tr.RegisterTraitLowering(traitEmittingTraitRule{})
@@ -213,7 +214,7 @@ func TestTransform_SchemalessTraitRuleTraitCopyIsRejected(t *testing.T) {
 	app := singleComponentApp("Application", "reserved-sink", map[string]any{"image": "nginx"})
 	app.Spec.Components[0].Traits = []Trait{{Type: "trait-wrapper", Properties: authoredNetworkPolicy()}}
 	_, err := tr.Transform(app, TransformContext{})
-	expectReservedTraitRejected(t, err, `component "web" trait "reserved-trait"`)
+	expectReservedTraitRejected(t, err, `trait "reserved-trait" emitted by rule trait/trait-wrapper:`)
 }
 
 // TestTransform_TraitRuleMayWriteReservedTraitProperty: a schema-declaring trait rule
@@ -284,12 +285,12 @@ func TestTransform_TraitRuleOverUnsynthesizedSealedTraitEmitsAuthoredComponent(t
 }
 
 // TestTransform_DocumentRuleRenderedTraitIsRejected: a trait a document rule builds is
-// never synthesized, so a reserved value it rendered is rejected at applyTraits.
+// never synthesized, so a reserved value it rendered is rejected as emitted.
 func TestTransform_DocumentRuleRenderedTraitIsRejected(t *testing.T) {
 	tr := reservedTraitTransformer()
 	tr.RegisterDocumentLowering(rendersTraitDocRule{})
 
 	app := &Application{APIVersion: SupportedAPIVersion, Kind: "TraitRendering", Metadata: Metadata{Name: "myapp", Namespace: "test"}}
 	_, err := tr.Transform(app, netpolCapability())
-	expectReservedTraitRejected(t, err, `component "main" trait "reserved-trait"`)
+	expectReservedTraitRejected(t, err, `trait "reserved-trait" of component "main" emitted by rule document/TraitRendering:`)
 }

@@ -125,16 +125,20 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 		// No PlatformReserved exception, deliberately. Reservation governs what a user
 		// WROTE, so reporting it names the line an author actually typed.
 		//
-		// On the component surface the two rules never meet: enforcePlatformReserved
-		// runs upstream of this strip, so what it sees is what a user wrote. An
-		// authored component is checked before the first rule that could rewrite it
-		// or share its properties map (enforceAuthoredComponentReservations at the
-		// start of every lowerDocumentBody round and before a document rule,
-		// lowerDocumentBody's pre-rule check) and again in createApplications. A
-		// component a rule emitted, whose properties are stripped here, is either
-		// synthesized and exempt, or — output of a rule whose input was not checked —
-		// checked by enforceEmittedComponentReservations before this strip, so an
-		// explicit null it carries is still refused (go-kure/launcher#609).
+		// On the component and trait surfaces the two rules never meet:
+		// enforcePlatformReserved runs upstream of this strip, so what it sees is what
+		// a user wrote. An authored component or trait is checked before the first
+		// rule that could rewrite it or share its properties map
+		// (enforceAuthoredReservations at the start of every lowerDocumentBody round
+		// and before a document rule, lowerDocumentBody's pre-rule checks) and again
+		// in createApplications or applyTraits. A component or trait a rule emitted,
+		// whose properties are stripped here, is either synthesized and exempt, or —
+		// output of a rule whose input was not checked — checked by
+		// enforceEmittedComponentReservations or enforceEmittedTraitReservations
+		// before this strip, so an explicit null it carries is still refused
+		// (go-kure/launcher#609, go-kure/launcher#626). Emission validation runs
+		// this on the element's own copy (validateEmittedProperties), so the strip
+		// cannot reach another element sharing the map an element was emitted with.
 		if isNullValue(props[key]) {
 			delete(props, key)
 			continue
@@ -464,14 +468,16 @@ func joinPropertyTypes(types []PropertyType) string {
 // This runs upstream of emission validation, so what it sees is what a user wrote. On
 // the component surface the callers keep that true by skipping a component a lowering
 // rule synthesized (Component.synthesized) and by checking an authored one before any
-// rule can rewrite it — enforceAuthoredComponentReservations at the start of every
+// rule can rewrite it — enforceAuthoredReservations at the start of every
 // lowerDocumentBody round and before a DocumentLoweringRule, lowerDocumentBody before
 // a ComponentLoweringRule, createApplications otherwise. The output of a rule whose input was not checked stays
 // authored, and enforceEmittedComponentReservations checks its components as they are
 // emitted, before emission validation removes an explicit null
 // (go-kure/launcher#609). The trait surface works the same way: an unsealed trait is
-// checked before its capability merge, a sealed one only when a rule whose input was
-// not checked emitted it (Trait.synthesized false). No built-in component schema
+// checked at the start of every round and before its capability merge, a sealed one
+// only when a rule whose input was not checked emitted it (Trait.synthesized false),
+// and then first by enforceEmittedTraitReservations as it is emitted
+// (go-kure/launcher#626). No built-in component schema
 // declares a reserved property today: all 11 PlatformReserved declarations are on
 // trait schemas — 8 written literally (builtin/traits/expose_rule.go and ingress.go)
 // plus the 3 schemaNetworkPolicy(true) calls in the ExposeRule, IngressHandler and
@@ -1239,10 +1245,10 @@ func (a exactNumber) equal(b exactNumber) bool {
 func (t *Transformer) validateEmittedComponent(comp *Component) error {
 	path := fmt.Sprintf("emitted component %q (type %q): properties", comp.Name, comp.Type)
 	if h, ok := t.componentHandlers[comp.Type]; ok {
-		return validateEmittedProperties(h, comp.Properties, path)
+		return validateEmittedProperties(h, &comp.Properties, path)
 	}
 	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
-		return validateEmittedProperties(rule, comp.Properties, path)
+		return validateEmittedProperties(rule, &comp.Properties, path)
 	}
 	return nil
 }
@@ -1251,10 +1257,10 @@ func (t *Transformer) validateEmittedComponent(comp *Component) error {
 func (t *Transformer) validateEmittedTrait(trait *Trait) error {
 	path := fmt.Sprintf("emitted trait %q: properties", trait.Type)
 	if h, ok := t.traitHandlers[trait.Type]; ok {
-		return validateEmittedProperties(h, trait.Properties, path)
+		return validateEmittedProperties(h, &trait.Properties, path)
 	}
 	if rule, ok := t.traitLoweringRules[trait.Type]; ok {
-		return validateEmittedProperties(rule, trait.Properties, path)
+		return validateEmittedProperties(rule, &trait.Properties, path)
 	}
 	return nil
 }
@@ -1271,10 +1277,10 @@ func (t *Transformer) validateEmittedTrait(trait *Trait) error {
 func (t *Transformer) validateEmittedPolicy(pol *ApplicationPolicy) error {
 	path := fmt.Sprintf("emitted policy %q (type %q): properties", pol.Name, pol.Type)
 	if h, ok := t.policyHandlers[pol.Type]; ok {
-		return validateEmittedProperties(h, pol.Properties, path)
+		return validateEmittedProperties(h, &pol.Properties, path)
 	}
 	if rule, ok := t.policyLoweringRules[pol.Type]; ok {
-		return validateEmittedProperties(rule, pol.Properties, path)
+		return validateEmittedProperties(rule, &pol.Properties, path)
 	}
 	return nil
 }
@@ -1283,12 +1289,90 @@ func (t *Transformer) validateEmittedPolicy(pol *ApplicationPolicy) error {
 // declares one. PropertySchemaProvider is optional at every position, so a handler
 // that declares nothing accepts anything — the same latitude it has on the authored
 // path.
-func validateEmittedProperties(handler any, props map[string]any, path string) error {
+//
+// It validates, and leaves in *props, a deep copy (copyPropertyMap): validation
+// normalizes values and drops explicit nulls in place, and the map a rule emitted
+// may be held by other elements too — its other output, a trait it forwarded, the
+// element it lowered. Normalizing that map itself would strip a null from an
+// element whose type does not declare the key, which can lower into one that
+// reserves it a round later, or reach Transform from LowerRaws, without the null a
+// user wrote (go-kure/launcher#626).
+func validateEmittedProperties(handler any, props *map[string]any, path string) error {
 	p, ok := handler.(PropertySchemaProvider)
 	if !ok {
 		return nil
 	}
-	return validateProperties(p.PropertySchema(), props, path)
+	*props = copyPropertyMap(*props)
+	return validateProperties(p.PropertySchema(), *props, path)
+}
+
+// copyPropertyMap copies m and every map, slice and array in it, whatever its Go
+// type, so that nothing validation edits in place is shared with another holder of
+// m. Any other value is shared, every value keeps its Go type, and a nil map, slice
+// or interface stays nil. A map or slice reached twice is copied once, so the copy
+// has the same shape as m, cycles included: validating it fails, or loops, exactly
+// as validating m would have.
+func copyPropertyMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	return copyPropertyValue(reflect.ValueOf(m), map[propertyCopyKey]reflect.Value{}).Interface().(map[string]any)
+}
+
+// propertyCopyKey identifies a map or slice copyPropertyValue has already copied: two
+// slices are the same only with the same backing array, length and type.
+type propertyCopyKey struct {
+	ptr uintptr
+	len int
+	typ reflect.Type
+}
+
+func copyPropertyValue(v reflect.Value, seen map[propertyCopyKey]reflect.Value) reflect.Value {
+	switch v.Kind() {
+	case reflect.Map:
+		if v.IsNil() {
+			return v
+		}
+		key := propertyCopyKey{ptr: v.Pointer(), typ: v.Type()}
+		if out, ok := seen[key]; ok {
+			return out
+		}
+		out := reflect.MakeMapWithSize(v.Type(), v.Len())
+		seen[key] = out
+		for iter := v.MapRange(); iter.Next(); {
+			out.SetMapIndex(iter.Key(), copyPropertyValue(iter.Value(), seen))
+		}
+		return out
+	case reflect.Slice:
+		if v.IsNil() {
+			return v
+		}
+		key := propertyCopyKey{ptr: v.Pointer(), len: v.Len(), typ: v.Type()}
+		if out, ok := seen[key]; ok {
+			return out
+		}
+		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		seen[key] = out
+		for i := range v.Len() {
+			out.Index(i).Set(copyPropertyValue(v.Index(i), seen))
+		}
+		return out
+	case reflect.Array:
+		out := reflect.New(v.Type()).Elem()
+		for i := range v.Len() {
+			out.Index(i).Set(copyPropertyValue(v.Index(i), seen))
+		}
+		return out
+	case reflect.Interface:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.New(v.Type()).Elem()
+		out.Set(copyPropertyValue(v.Elem(), seen))
+		return out
+	default:
+		return v
+	}
 }
 
 // validateEmittedDocument applies validateEmittedComponent/validateEmittedPolicy to

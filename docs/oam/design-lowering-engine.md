@@ -177,7 +177,7 @@ a document rule's output is never synthesized, since nothing checks its whole in
 with — and
 an authored component is checked before any rule can rewrite it: before a
 `ComponentLoweringRule` claims it (`lowerDocumentBody`) and before a
-`DocumentLoweringRule` runs (`enforceAuthoredComponentReservations`). The proof: `webservice-expose-ingress/app.yaml` loses its
+`DocumentLoweringRule` runs (`enforceAuthoredReservations`, which checks authored traits the same way). The proof: `webservice-expose-ingress/app.yaml` loses its
 inline `controllerType: ingress` line; `expected.yaml` is **byte-identical** because the
 capability-supplied value was already sufficient — the authored line was redundant even
 before D3, and D3 makes that redundancy an error instead of a silent no-op. A third

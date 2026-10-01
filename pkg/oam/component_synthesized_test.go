@@ -315,7 +315,7 @@ func TestTransform_DocumentRuleForwardingAuthoredReservedIsRejected(t *testing.T
 // TestTransform_DocumentRuleCopyingAuthoredReservedIsRejected: a document rule that
 // rebuilds the authored component by value emits a component that is not
 // pointer-identical to its input. The authored reserved value is rejected before the
-// rule runs (enforceAuthoredComponentReservations).
+// rule runs (enforceAuthoredReservations).
 func TestTransform_DocumentRuleCopyingAuthoredReservedIsRejected(t *testing.T) {
 	tr := reservedSinkTransformer()
 	tr.RegisterDocumentLowering(forwardingDocRule{kind: "Wrapper"})
@@ -376,9 +376,9 @@ func TestTransform_SchemaLessTraitRuleOverSealedTraitIsRejected(t *testing.T) {
 
 // TestTransform_SchemaTraitRuleOverSealedTraitIsRejected: a schema-less component
 // rule fills a sealed trait with authored properties, so the trait is not
-// synthesized. A trait rule that declares a schema has that schema checked against
-// it before it runs (go-kure/launcher#611), and the authored reserved value is
-// rejected there.
+// synthesized. A trait that no rule synthesized is checked against the schema of the
+// trait rule that will claim it (go-kure/launcher#611) — since go-kure/launcher#626 as
+// soon as it is emitted — and the authored reserved value is rejected there.
 func TestTransform_SchemaTraitRuleOverSealedTraitIsRejected(t *testing.T) {
 	tr := reservedSinkTransformer()
 	tr.RegisterComponentLowering(traitWrappingComponentRule{})
@@ -386,11 +386,10 @@ func TestTransform_SchemaTraitRuleOverSealedTraitIsRejected(t *testing.T) {
 
 	_, err := tr.Transform(singleComponentApp("Application", "trait-wrapping", authoredNetworkPolicy()), TransformContext{})
 	expectPlatformReserved(t, err)
-	// Since go-kure/launcher#611 the sealed trait is checked before the
-	// schema-declaring rule runs, so the refusal names the trait, not only the
+	// The refusal names the trait and the rule that emitted it, not only the
 	// component createApplications would have named.
-	if msg := err.Error(); !strings.Contains(msg, `trait "pass-through-sidecar" on component "web"`) {
-		t.Errorf("expected the refusal at the trait rule, naming the trait, got: %v", msg)
+	if msg := err.Error(); !strings.Contains(msg, `trait "pass-through-sidecar" of component "main" emitted by rule component/trait-wrapping:`) {
+		t.Errorf("expected the refusal at emission, naming the trait, got: %v", msg)
 	}
 }
 
