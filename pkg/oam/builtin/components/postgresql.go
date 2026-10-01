@@ -535,11 +535,8 @@ func (h *PostgresqlHandler) ToApplicationConfig(component *oam.Component, namesp
 			if !ok {
 				return nil, errors.Errorf("%s: invalid connectionLimit value: %v", label, v)
 			}
-			// CloudNativePG's connectionLimit is omitempty with a CRD default of
-			// -1, so a 0 is dropped from the Cluster and the role gets no limit
-			// (cnpg-cluster refuses it the same way, cnpgClusterDefaultedZeroFields).
 			if n == 0 {
-				return nil, errors.Errorf("%s.connectionLimit: 0 cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default -1, no limit); set login: false to keep the role from connecting", label)
+				return nil, postgresqlZeroConnectionLimit(label)
 			}
 			n64 := int64(n)
 			role.ConnectionLimit = &n64
@@ -1120,7 +1117,12 @@ func (c *PostgresqlConfig) createCluster(app *stack.Application) (client.Object,
 		}
 	}
 
-	for _, role := range c.ManagedRoles {
+	for i, role := range c.ManagedRoles {
+		// The parse-time refusal is repeated for a config built without
+		// ToApplicationConfig.
+		if role.ConnectionLimit != nil && *role.ConnectionLimit == 0 {
+			return nil, postgresqlZeroConnectionLimit(fmt.Sprintf("managedRoles[%d]", i))
+		}
 		rc := cnpgv1.RoleConfiguration{
 			Name:        role.Name,
 			Comment:     role.Comment,
@@ -1148,6 +1150,14 @@ func (c *PostgresqlConfig) createCluster(app *stack.Application) (client.Object,
 	}
 
 	return cluster, nil
+}
+
+// postgresqlZeroConnectionLimit refuses a managed role's connectionLimit of 0.
+// CloudNativePG's connectionLimit is omitempty with a CRD default of -1, so a 0
+// is dropped from the Cluster and the role gets no limit (cnpg-cluster refuses
+// it the same way, cnpgClusterDefaultedZeroFields).
+func postgresqlZeroConnectionLimit(label string) error {
+	return errors.Errorf("%s.connectionLimit: 0 cannot be carried by the CloudNativePG API types (the field is omitted when zero, so the operator would apply its default -1, no limit); set login: false to keep the role from connecting", label)
 }
 
 // cnpgResourceList deep-copies every entry of rl — each name the shared parser admitted, not
