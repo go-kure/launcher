@@ -1,6 +1,10 @@
 package components
 
 import (
+	"maps"
+	"slices"
+	"strings"
+
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	kurecnpg "github.com/go-kure/kure/pkg/kubernetes/cnpg"
 	"github.com/go-kure/kure/pkg/stack"
@@ -93,9 +97,40 @@ var cnpgDatabaseAlwaysEncodedDefaults = map[string]string{
 	"servers[].ensure":    string(cnpgv1.EnsurePresent),
 }
 
+// refuseEmptyAlwaysEncodedDefaults refuses an authored "" on a field of
+// cnpgDatabaseAlwaysEncodedDefaults. The Go type cannot tell it from an
+// unauthored one, so Generate would write the CRD default over it, while the
+// CRD's enum refuses it as written. authored is the stripped property tree
+// decodeCnpgSpec returns; keys match case-insensitively, as the decode's do.
+func refuseEmptyAlwaysEncodedDefaults(authored map[string]any) error {
+	for _, path := range slices.Sorted(maps.Keys(cnpgDatabaseAlwaysEncodedDefaults)) {
+		list, field, ok := strings.Cut(path, "[].")
+		if !ok {
+			continue
+		}
+		for _, k := range slices.Sorted(maps.Keys(authored)) {
+			if !strings.EqualFold(k, list) {
+				continue
+			}
+			items, _ := authored[k].([]any)
+			for i, item := range items {
+				m, _ := item.(map[string]any)
+				for _, fk := range slices.Sorted(maps.Keys(m)) {
+					if strings.EqualFold(fk, field) && m[fk] == "" {
+						return errors.Errorf(`%s[%d].%s: "" is refused by the Database CRD, whose enum is present or absent; omit the field for the operator's default, %s`,
+							k, i, fk, cnpgDatabaseAlwaysEncodedDefaults[path])
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // fillAlwaysEncodedDefaults writes the CRD default into each field of
-// cnpgDatabaseAlwaysEncodedDefaults left empty. An authored "" counts as
-// unset: the CRD's enum would refuse it.
+// cnpgDatabaseAlwaysEncodedDefaults left empty. An authored "" never reaches
+// it (refuseEmptyAlwaysEncodedDefaults), so an empty field is unauthored, or
+// empty in a config built directly in Go, where the two cannot be told apart.
 func fillAlwaysEncodedDefaults(s *cnpgv1.DatabaseSpec) {
 	fill := func(o *cnpgv1.DatabaseObjectSpec) {
 		if o.Ensure == "" {
@@ -130,6 +165,9 @@ func (h *CnpgDatabaseHandler) ToApplicationConfig(component *oam.Component, name
 		return nil, err
 	}
 	if err := refuseUncarriedCnpgValues(props, spec, cnpgDatabaseDefaultedZeroFields); err != nil {
+		return nil, err
+	}
+	if err := refuseEmptyAlwaysEncodedDefaults(props); err != nil {
 		return nil, err
 	}
 	cfg := &CnpgDatabaseConfig{Name: component.Name, Namespace: namespace, Spec: *spec}

@@ -184,6 +184,45 @@ func TestCnpgDatabaseConfig_Generate_WritesAlwaysEncodedDefaults(t *testing.T) {
 	}
 }
 
+// TestCnpgDatabaseHandler_RefusesEmptyEnsure: an authored ensure: "" on a
+// schema, extension, fdw or server is refused by its path, whatever the key's
+// case, rather than read as unset and written as present; the CRD's enum would
+// refuse it as written. An explicit null is absence and takes the default.
+func TestCnpgDatabaseHandler_RefusesEmptyEnsure(t *testing.T) {
+	item := func(list, ensureKey string, ensure any) []any {
+		ok, x := map[string]any{"name": "ok"}, map[string]any{"name": "x", ensureKey: ensure}
+		if list == "servers" {
+			ok["fdw"], x["fdw"] = "f", "f"
+		}
+		return []any{ok, x}
+	}
+	for _, tt := range []struct {
+		list, key string
+	}{
+		{"schemas", "ensure"},
+		{"extensions", "ensure"},
+		{"fdws", "ensure"},
+		{"servers", "ensure"},
+		{"extensions", "Ensure"},
+	} {
+		t.Run(tt.list+"."+tt.key, func(t *testing.T) {
+			p := minimalDatabase()
+			p[tt.list] = item(tt.list, tt.key, "")
+			want := tt.list + `[1].` + tt.key + `: "" is refused by the Database CRD, whose enum is present or absent; omit the field for the operator's default, present`
+			if err := cnpgDatabaseErr(t, p); err == nil || err.Error() != want {
+				t.Errorf("err = %v, want %q", err, want)
+			}
+		})
+	}
+	t.Run("null is absence", func(t *testing.T) {
+		p := minimalDatabase()
+		p["schemas"] = item("schemas", "ensure", nil)
+		if got := generateCnpgDatabase(t, newCnpgDatabase(t, p)).Spec.Schemas[1].Ensure; got != cnpgv1.EnsurePresent {
+			t.Errorf("schemas[1].ensure = %q, want the CRD default present", got)
+		}
+	})
+}
+
 // TestCnpgDatabaseConfig_GenerateRevalidates pins the emission-boundary repeat
 // of the parse-time refusals, for a config built directly in Go.
 func TestCnpgDatabaseConfig_GenerateRevalidates(t *testing.T) {

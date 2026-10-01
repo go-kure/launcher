@@ -2784,8 +2784,11 @@ not part of either change.
   `cnpg-database` also refuses the names the CRD reserves (`postgres`,
   `template0`, `template1`). The `ensure` of each schema, extension, fdw and
   server has no `omitempty` but a CRD default of `present`, so `Generate` writes
-  `present` where it is unauthored or empty, as the API server would have; a
-  test derives that list from the CRD too. A Database runs nothing, so it has
+  `present` where it is unauthored, as the API server would have; a
+  test derives that list from the CRD too. An authored `ensure: ""` there is
+  refused by its path (`schemas[0].ensure: "" is refused by the Database CRD,
+  …`) rather than written as `present`, since the CRD's enum refuses it as
+  written; an explicit null is absence and takes the default. A Database runs nothing, so it has
   no policy and no endpoint.
   `cnpg-objectstore` caps the cpu and memory requests and limits of the plugin
   sidecar it adds to every instance pod (`instanceSidecarConfiguration.resources`)

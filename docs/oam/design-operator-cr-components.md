@@ -53,7 +53,8 @@ the API server would have applied. `DatabaseSpec` has the same shape one level
 down: the `ensure` of each schema, extension, fdw and server has no
 `omitempty` and a CRD default of `present`, so an unauthored one would reach the
 API server as `""`, which the CRD's enum refuses. `cnpg-database` writes
-`present` there. A `Pooler` template is the third case: its `spec` is not a
+`present` there, and refuses an authored `ensure: ""`, which the Go type
+cannot tell from an unauthored one. A `Pooler` template is the third case: its `spec` is not a
 pointer and `containers` has no `omitempty`, so a template that lists no
 containers would carry `containers: null`, which the API server prunes before
 checking the CRD's required list. `cnpg-pooler` writes `containers: []`, which
@@ -223,9 +224,6 @@ output is intended to stay identical.
 - Health checks for `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore`: their
   status carries no condition kstatus reads, so a check would report the object
   ready without waiting on anything. `postgresql` checks only its `Cluster`.
-- An authored `ensure: ""` on a `Database` schema, extension, fdw or server is
-  read as unset and written as `present`; the CRD's enum would refuse it as
-  written.
 - The CRDs' validation rules (CEL) are left to the API server, except the
   `ObjectStore`'s ban on `configuration.serverName`, which `cnpg-objectstore`
   refuses because the shared Barman type invites it. `postgresql` carries its
