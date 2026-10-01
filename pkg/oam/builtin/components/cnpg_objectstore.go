@@ -105,10 +105,15 @@ func (c *CnpgObjectStoreConfig) ApplyPolicy(p oam.Policy) error {
 }
 
 // Generate emits the ObjectStore: kure's identity-only constructor plus a deep
-// copy of the spec. The parse-time refusal is repeated, since the config is
-// exported.
+// copy of the spec. The parse-time refusals are repeated, since the config is
+// exported, and the sidecar's resources get admission's request/limit and
+// hugepages checks (validateCnpgResources): the plugin copies them onto a
+// container in every instance pod.
 func (c *CnpgObjectStoreConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	if err := c.validate(); err != nil {
+		return nil, err
+	}
+	if err := validateCnpgResources("instanceSidecarConfiguration", c.Spec.InstanceSidecarConfiguration.Resources); err != nil {
 		return nil, err
 	}
 	store := kurecnpg.CreateObjectStore(app.Name, app.Namespace)

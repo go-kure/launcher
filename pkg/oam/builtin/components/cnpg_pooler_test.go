@@ -270,6 +270,11 @@ func TestCnpgPoolerConfig_ApplyPolicy(t *testing.T) {
 		{"hostPath volume",
 			tmpl(map[string]any{"containers": []any{}, "volumes": []any{map[string]any{"name": "h", "hostPath": map[string]any{"path": "/"}}}}),
 			&stubPolicy{}, `template.spec: volume "h": hostPath volumes are not allowed by environment policy`},
+		{"ephemeral volume above the storage maximum",
+			tmpl(map[string]any{"containers": []any{}, "volumes": []any{map[string]any{"name": "scratch", "ephemeral": map[string]any{
+				"volumeClaimTemplate": map[string]any{"spec": map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "1Ti"}}}}}}}}),
+			&stubPolicy{maxStorageSize: "10Gi"},
+			`template.spec: volume "scratch" ephemeral.volumeClaimTemplate.spec.resources.requests.storage "1Ti" exceeds enforced maximum "10Gi"`},
 		{"pod hostProcess",
 			tmpl(map[string]any{"containers": []any{}, "securityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}}),
 			&stubPolicy{}, "template.spec.securityContext.windowsOptions.hostProcess is not allowed by environment policy"},
@@ -331,6 +336,42 @@ func TestCnpgPoolerConfig_GenerateRevalidates(t *testing.T) {
 			_, err := c.Generate(stack.NewApplication(tt.app, "data", c))
 			if err == nil || !strings.Contains(err.Error(), tt.wantSub) {
 				t.Errorf("err = %v, want it to contain %q", err, tt.wantSub)
+			}
+		})
+	}
+}
+
+// TestCnpgPoolerConfig_Generate_TemplateResources: the template's pod and
+// container resources get admission's request/limit and hugepages checks
+// before emission.
+func TestCnpgPoolerConfig_Generate_TemplateResources(t *testing.T) {
+	over := map[string]any{"requests": map[string]any{"cpu": "2"}, "limits": map[string]any{"cpu": "1"}}
+	for _, tt := range []struct {
+		name    string
+		spec    map[string]any
+		wantErr string
+	}{
+		{"container request above limit",
+			map[string]any{"containers": []any{map[string]any{"name": "pgbouncer", "resources": over}}},
+			`template.spec.containers[0] "pgbouncer": resources: cpu: request 2 must not exceed limit 1`},
+		{"init container request above limit",
+			map[string]any{"containers": []any{}, "initContainers": []any{map[string]any{"name": "init", "resources": over}}},
+			`template.spec.initContainers[0] "init": resources: cpu: request 2 must not exceed limit 1`},
+		{"pod request above limit",
+			map[string]any{"containers": []any{}, "resources": over},
+			"template.spec: resources: cpu: request 2 must not exceed limit 1"},
+		{"container hugepages without cpu or memory",
+			map[string]any{"containers": []any{map[string]any{"name": "pgbouncer", "resources": map[string]any{
+				"requests": map[string]any{"hugepages-2Mi": "2Mi"}, "limits": map[string]any{"hugepages-2Mi": "2Mi"}}}}},
+			`template.spec.containers[0] "pgbouncer": resources: hugepages require cpu or memory in requests or limits`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := minimalPooler()
+			p["template"] = map[string]any{"spec": tt.spec}
+			c := newCnpgPooler(t, p)
+			_, err := c.Generate(stack.NewApplication("db-pooler", "data", c))
+			if err == nil || err.Error() != tt.wantErr {
+				t.Errorf("err = %v, want %q", err, tt.wantErr)
 			}
 		})
 	}

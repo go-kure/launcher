@@ -179,6 +179,39 @@ func TestCnpgObjectStoreConfig_ApplyPolicy(t *testing.T) {
 	})
 }
 
+// TestCnpgObjectStoreConfig_Generate_SidecarResources: the sidecar's resources
+// get admission's request/limit and hugepages checks before emission.
+func TestCnpgObjectStoreConfig_Generate_SidecarResources(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		res     map[string]any
+		wantErr string
+	}{
+		{"request above limit", map[string]any{"requests": map[string]any{"cpu": "2"}, "limits": map[string]any{"cpu": "1"}},
+			"instanceSidecarConfiguration: resources: cpu: request 2 must not exceed limit 1"},
+		{"hugepages without cpu or memory", map[string]any{"limits": map[string]any{"hugepages-2Mi": "2Mi"}, "requests": map[string]any{"hugepages-2Mi": "2Mi"}},
+			"instanceSidecarConfiguration: resources: hugepages require cpu or memory in requests or limits"},
+		{"request at limit", map[string]any{"requests": map[string]any{"cpu": "1"}, "limits": map[string]any{"cpu": "1"}}, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newCnpgObjectStore(t, map[string]any{
+				"configuration":                minimalObjectStore()["configuration"],
+				"instanceSidecarConfiguration": map[string]any{"resources": tt.res},
+			})
+			_, err := c.Generate(stack.NewApplication("db-store", "data", c))
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Generate: %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Errorf("err = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // TestCnpgObjectStoreConfig_GenerateRevalidates pins the emission-boundary
 // repeat of the parse-time refusal, for a config built directly in Go.
 func TestCnpgObjectStoreConfig_GenerateRevalidates(t *testing.T) {

@@ -149,10 +149,11 @@ func requireCnpgClusterRef(name string) error {
 // enforcePodTemplatePolicy applies the environment policy gates the workload
 // kinds apply to their pod to an operator CR's raw pod template, which the
 // operator copies into the pods it creates: host namespaces, hostPath volumes,
-// the pod-level hostProcess switch, pod-level resources, and, for every init,
-// regular and ephemeral container, the registry allowlist on an authored
-// image, the cpu and memory maxima, and the privileged, hostProcess and
-// capability checks. label prefixes each error with the template's path.
+// the storage maximum on a generic ephemeral volume's claim, the pod-level
+// hostProcess switch, pod-level resources, and, for every init, regular and
+// ephemeral container, the registry allowlist on an authored image, the cpu
+// and memory maxima, and the privileged, hostProcess and capability checks.
+// label prefixes each error with the template's path.
 func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) error {
 	if ps == nil {
 		return nil
@@ -163,6 +164,20 @@ func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) er
 	}
 	if err := enforceHostPathVolumes(ps.Volumes, p.AllowHostPathVolumes()); err != nil {
 		return errors.Wrap(err, label)
+	}
+	// A generic ephemeral volume provisions a claim for every pod, so its
+	// storage request is capped as cnpg-cluster caps its ephemeralVolumeSource
+	// claim.
+	for _, v := range ps.Volumes {
+		if v.Ephemeral == nil || v.Ephemeral.VolumeClaimTemplate == nil {
+			continue
+		}
+		if q, ok := v.Ephemeral.VolumeClaimTemplate.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
+			where := fmt.Sprintf("volume %q ephemeral.volumeClaimTemplate.spec.resources.requests.storage", v.Name)
+			if err := enforceMaxResource(q.String(), p.MaxStorageSize(), where); err != nil {
+				return errors.Wrap(err, label)
+			}
+		}
 	}
 	// The pod-level hostProcess and resources checks are enforcePodHostProcess
 	// and enforcePodResources, restated so their errors name the template's
@@ -219,6 +234,42 @@ func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) er
 	}
 	for i, c := range ps.EphemeralContainers {
 		if err := check("ephemeralContainers", i, c.Name, c.Image, c.Resources, c.SecurityContext); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateCnpgResources applies admission's checks on a resource block the
+// operator copies onto a pod or container unchanged, as cnpg-cluster's
+// Generate does: hugepages need cpu or memory, and a request may not exceed
+// its limit (extended and hugepages resources need the two equal). Without it
+// the build would emit a CR whose pods admission refuses.
+func validateCnpgResources(label string, r corev1.ResourceRequirements) error {
+	if err := validateHugePagesHaveCPUOrMemory("resources", r.Requests, r.Limits); err != nil {
+		return errors.Wrap(err, label)
+	}
+	if err := validateResourceRequestLimit(r.Requests, r.Limits); err != nil {
+		return errors.Wrap(err, label)
+	}
+	return nil
+}
+
+// validatePodTemplateResources runs validateCnpgResources on a raw pod
+// template's pod-level resources and on every init and regular container.
+func validatePodTemplateResources(label string, ps *corev1.PodSpec) error {
+	if ps.Resources != nil {
+		if err := validateCnpgResources(label, *ps.Resources); err != nil {
+			return err
+		}
+	}
+	for i, c := range ps.InitContainers {
+		if err := validateCnpgResources(fmt.Sprintf("%s.initContainers[%d] %q", label, i, c.Name), c.Resources); err != nil {
+			return err
+		}
+	}
+	for i, c := range ps.Containers {
+		if err := validateCnpgResources(fmt.Sprintf("%s.containers[%d] %q", label, i, c.Name), c.Resources); err != nil {
 			return err
 		}
 	}

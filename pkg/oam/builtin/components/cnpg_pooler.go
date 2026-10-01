@@ -162,7 +162,9 @@ func (c *CnpgPoolerConfig) ApplyPolicy(p oam.Policy) error {
 
 // Generate emits the Pooler: kure's identity-only constructor plus a deep copy
 // of the spec. The parse-time refusals are repeated on what is emitted, since
-// the config is exported and the Pooler is named from app.Name.
+// the config is exported and the Pooler is named from app.Name. The template's
+// pod and container resources get admission's request/limit and hugepages
+// checks (validatePodTemplateResources), as cnpg-cluster's do.
 //
 // A template that lists no containers is written with containers: []. The Go
 // type cannot omit the template's spec and encodes an unset list as null,
@@ -175,6 +177,11 @@ func (c *CnpgPoolerConfig) Generate(app *stack.Application) ([]*client.Object, e
 	}
 	if err := c.validate(app.Name); err != nil {
 		return nil, err
+	}
+	if t := c.Spec.Template; t != nil {
+		if err := validatePodTemplateResources("template.spec", &t.Spec); err != nil {
+			return nil, err
+		}
 	}
 	pooler := kurecnpg.CreatePooler(app.Name, app.Namespace)
 	c.Spec.DeepCopyInto(&pooler.Spec)

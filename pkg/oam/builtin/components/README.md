@@ -2693,8 +2693,12 @@ not part of either change.
   namespaces, hostPath volumes, privilege, host-process, capabilities, the
   registry allowlist on each authored container image, cpu and memory maxima;
   errors name the container, as in `template.spec.containers[0] "pgbouncer": cpu
-  limit "2" exceeds enforced maximum "1"`) and the registry allowlist to an
-  authored `pgbouncer.image`. The instance count is deliberately not policed:
+  limit "2" exceeds enforced maximum "1"`), caps a generic ephemeral volume's
+  claim at the policy storage maximum, and applies the registry allowlist to an
+  authored `pgbouncer.image`. Generation runs the shared parser's
+  request/limit and hugepages checks on the template's pod and container
+  resources (`template.spec.containers[0] "pgbouncer": resources: cpu: request
+  2 must not exceed limit 1`), as `cnpg-cluster` does on its `resources`. The instance count is deliberately not policed:
   `postgresql` applies no policy to its pooler, so a maximum here would refuse,
   once `postgresql` lowers onto this kind, a document that builds today.
   Pod-level errors name the template's own fields, as in `template.spec:
@@ -2713,7 +2717,8 @@ not part of either change.
   no policy and no endpoint.
   `cnpg-objectstore` caps the cpu and memory requests and limits of the plugin
   sidecar it adds to every instance pod (`instanceSidecarConfiguration.resources`)
-  at the policy maxima, filling no default, and declares no endpoint. It refuses
+  at the policy maxima, filling no default, and declares no endpoint;
+  generation runs the same request/limit and hugepages checks on them. It refuses
   `configuration.serverName`, which the shared Barman type carries but the
   plugin's CRD forbids on an ObjectStore: the server name is a plugin parameter
   of the Cluster that uses the store.
