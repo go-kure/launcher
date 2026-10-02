@@ -520,7 +520,7 @@ func enforceReservedObject(schema map[string]PropertySchema, props map[string]an
 		}
 		keyRendered, keyAt := rendered.child(at, key)
 		if field.PlatformReserved {
-			if keyRendered.exempts(keyAt, props[key]) {
+			if keyRendered.exempts(keyAt, field, props[key]) {
 				continue
 			}
 			return errors.Wrapf(ErrPlatformReserved,
