@@ -140,6 +140,8 @@ func TestHelmTemplateHandler_SourceChecks(t *testing.T) {
 		{"OCIRepository on an https:// URL", map[string]any{"version": "1.0.0", "source": map[string]any{"url": "https://charts.example.com", "kind": "OCIRepository"}}, "requires an oci:// URL"},
 		{"other kind", map[string]any{"chart": "podinfo", "source": map[string]any{"url": "https://charts.example.com", "kind": "HelmChart"}}, "not valid for inline source"},
 		{"wrongly typed chart", map[string]any{"chart": 3, "source": map[string]any{"url": "https://charts.example.com"}}, "chart"},
+		{"user and token in an https:// URL", map[string]any{"chart": "podinfo", "source": map[string]any{"url": "https://deploy:s3cr3t@charts.example.com"}}, "helmtemplate: source.url must not carry a user or password; a client-side render takes no credentials"},
+		{"user in an oci:// URL", map[string]any{"version": "1.0.0", "source": map[string]any{"url": "oci://deploy@ghcr.io/x/podinfo"}}, "helmtemplate: source.url must not carry a user or password; a client-side render takes no credentials"},
 	}
 	for _, tc := range errCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,6 +151,9 @@ func TestHelmTemplateHandler_SourceChecks(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("error %q does not contain %q", err, tc.wantErr)
+			}
+			if strings.Contains(err.Error(), "s3cr3t") {
+				t.Errorf("error %q repeats the URL's credential", err)
 			}
 		})
 	}
@@ -162,6 +167,7 @@ func TestHelmTemplateHandler_SourceChecks(t *testing.T) {
 		{"http:// infers HelmRepository", map[string]any{"chart": "podinfo", "source": map[string]any{"url": "http://charts.example.com"}}, "HelmRepository"},
 		{"oci:// infers OCIRepository", map[string]any{"version": "1.2.3", "source": map[string]any{"url": "oci://ghcr.io/x/podinfo"}}, "OCIRepository"},
 		{"explicit OCIRepository", map[string]any{"version": "1.2.3", "source": map[string]any{"url": "oci://ghcr.io/x/podinfo", "kind": "OCIRepository"}}, "OCIRepository"},
+		{"@ in the path is not a user", map[string]any{"chart": "podinfo", "source": map[string]any{"url": "https://charts.example.com/team@example"}}, "HelmRepository"},
 	}
 	for _, tc := range kindCases {
 		t.Run(tc.name, func(t *testing.T) {

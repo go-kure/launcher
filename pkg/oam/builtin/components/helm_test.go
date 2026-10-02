@@ -468,6 +468,13 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"inline kind disagrees", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "kind": "OCIRepository"}}, "helm: source.kind OCIRepository requires an oci:// URL"},
 		{"inline HelmChart", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "kind": "HelmChart"}}, `helm: source.kind "HelmChart" is not valid for inline source`},
 		{"inline OCI with chart", map[string]any{"chart": "a", "source": oci}, "helm: chart is not used with source.kind OCIRepository"},
+		{"inline url with user and token", map[string]any{"chart": "a", "source": map[string]any{"url": "https://deploy:FAKE_TOKEN@charts.example.com"}}, "helm: source.url must not carry a user or password, which would be written in plain text into the generated source; author a helmrepository or ocirepository with secretRef and reference it with source.name"},
+		{"inline url with user only", map[string]any{"chart": "a", "source": map[string]any{"url": "https://deploy@charts.example.com"}}, "helm: source.url must not carry a user or password, which would be written"},
+		{"inline oci url with user and token", map[string]any{"version": "1.0.0", "source": map[string]any{"url": "oci://deploy:FAKE_TOKEN@ghcr.io/example/charts/podinfo"}}, "helm: source.url must not carry a user or password, which would be written"},
+		{"inline oci url with user only", map[string]any{"version": "1.0.0", "source": map[string]any{"url": "oci://deploy@ghcr.io/example/charts/podinfo"}}, "helm: source.url must not carry a user or password, which would be written"},
+		{"inline url that does not parse", map[string]any{"chart": "a", "source": map[string]any{"url": "https://deploy:FAKE_TOKEN%zz@charts.example.com"}}, "helm: source.url is not a valid URL"},
+		{"template url with user and token", template(map[string]any{"source": map[string]any{"url": "https://deploy:FAKE_TOKEN@charts.example.com"}}), "helm: source.url must not carry a user or password; a client-side render takes no credentials"},
+		{"template oci url with user only", map[string]any{"delivery": "template", "version": "1.0.0", "source": map[string]any{"url": "oci://deploy@ghcr.io/example/charts/podinfo"}}, "helm: source.url must not carry a user or password; a client-side render takes no credentials"},
 		{"reference without kind", map[string]any{"chart": "a", "source": map[string]any{"name": "x"}}, "helm: source.kind is required when source.name is set"},
 		{"inline GitRepository without ref", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository"}}, "helm: an inline source.kind GitRepository requires source.ref with exactly one of branch, tag, semver, name, commit"},
 		{"inline GitRepository empty ref", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{}}}, "helm: an inline source.kind GitRepository requires source.ref with exactly one of"},
@@ -529,6 +536,17 @@ func TestHelmRule_Refusals(t *testing.T) {
 				t.Errorf("error = %q quotes the credential from source.url", err)
 			}
 		})
+	}
+}
+
+// TestHelmRule_AtSignInPathIsNotUserinfo pins that the userinfo refusal reads
+// the parsed URL, not any "@": one in the path is accepted.
+func TestHelmRule_AtSignInPathIsNotUserinfo(t *testing.T) {
+	for _, delivery := range []string{"flux", "template"} {
+		props := map[string]any{"delivery": delivery, "chart": "podinfo", "source": map[string]any{"url": "https://charts.example.com/team@example"}}
+		if _, err := (components.HelmRule{}).LowerComponent(&oam.Component{Name: "podinfo", Type: "helm", Properties: props}, helmLowering("shop")); err != nil {
+			t.Errorf("delivery %s: LowerComponent refused an @ in the URL path: %v", delivery, err)
+		}
 	}
 }
 

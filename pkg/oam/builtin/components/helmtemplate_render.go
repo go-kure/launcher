@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -75,9 +76,14 @@ func (s chartSource) chartURL() string {
 // terminal so both enforce one set. An empty kind is
 // inferred from the scheme: oci:// is OCIRepository, anything else
 // HelmRepository. A HelmRepository needs an http:// or https:// URL and a chart
-// name; an OCIRepository needs an oci:// URL. Every error is prefixed with
-// owner, the component type.
+// name; an OCIRepository needs an oci:// URL. A URL carrying a user or password
+// is refused (refuseURLUserinfo), with the client-side render's remedy; the
+// helm rule's flux delivery checks it first, with its own. Every error is
+// prefixed with owner, the component type.
 func inlineChartSourceKind(owner, url, kind, chart string) (string, error) {
+	if err := refuseURLUserinfo(owner, url, templateUserinfoRemedy); err != nil {
+		return "", err
+	}
 	if kind == "" {
 		if strings.HasPrefix(url, "oci://") {
 			kind = "OCIRepository"
@@ -105,6 +111,27 @@ func inlineChartSourceKind(owner, url, kind, chart string) (string, error) {
 		return "", errors.Errorf("%s: source.kind %q is not valid for inline source; must be HelmRepository or OCIRepository", owner, kind)
 	}
 	return kind, nil
+}
+
+// templateUserinfoRemedy completes refuseURLUserinfo's message for a chart
+// rendered client-side, whose render options carry no credentials.
+const templateUserinfoRemedy = "; a client-side render takes no credentials"
+
+// refuseURLUserinfo refuses an inline chart source URL that carries a user or
+// password (https://user:token@host, oci://user@registry/chart): every path
+// copies the URL verbatim, into a generated source or the rendered component,
+// so the credential would land in plain text in the build output. remedy
+// completes the message. No message names the URL, and an unparsable one is
+// refused without url.Parse's error, whose text repeats the whole URL.
+func refuseURLUserinfo(owner, rawURL, remedy string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return errors.Errorf("%s: source.url is not a valid URL", owner)
+	}
+	if u.User != nil {
+		return errors.Errorf("%s: source.url must not carry a user or password%s", owner, remedy)
+	}
+	return nil
 }
 
 // chartRender is a chart's client-side render, cached and split by Helm hook

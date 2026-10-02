@@ -298,6 +298,10 @@ func refuseFoldedKeys(prefix string, m map[string]any) error {
 	return nil
 }
 
+// fluxUserinfoRemedy completes refuseURLUserinfo's message under delivery: flux,
+// where a credential belongs in an authored source's secretRef.
+const fluxUserinfoRemedy = ", which would be written in plain text into the generated source; author a helmrepository or ocirepository with secretRef and reference it with source.name"
+
 // lowerHelmFlux emits the helmrelease component and, for an inline source, the
 // source it references (unless another helm component of the document already
 // emitted the same one).
@@ -326,6 +330,9 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 		// decodeHelm required endpoint and bucketName; the bucket terminal
 		// checks the rest.
 	default:
+		if err := refuseURLUserinfo(helmType, src.URL, fluxUserinfoRemedy); err != nil {
+			return oam.LoweringResult{}, err
+		}
 		var err error
 		if kind, err = inlineChartSourceKind(helmType, src.URL, src.Kind, props.Chart); err != nil {
 			return oam.LoweringResult{}, err
