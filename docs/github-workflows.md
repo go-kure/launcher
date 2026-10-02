@@ -461,8 +461,9 @@ Runs on main and `release/*` branches only (not PRs):
    commit. If the label is no longer the highest stable tag, it deploys the slot and leaves the
    root untouched. If it is, but the label is not an existing tag or the checked-out commit is not
    the tag's, the deploy fails and pushes nothing. Dispatch again with an existing release tag as
-   both the ref and the label (`--ref <tag> -f version_label=<tag>`): the same tag when only the
-   ref was wrong, another existing one when the label was not a tag.
+   both the ref and the label, its slot, and `set_latest=true`
+   (`gh workflow run deploy-docs.yml --ref <tag> -f version_slot=<vX.Y> -f version_label=<tag> -f set_latest=true`):
+   the same tag when only the ref was wrong, another existing one when the label was not a tag.
 
 **Credentials.** The launcher checkout sets `persist-credentials: false`: the repository is
 public, so the action's tag fetch needs no token, and no later step can read the job token from
