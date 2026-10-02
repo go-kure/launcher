@@ -59,6 +59,8 @@ func TestURLRefusalsHideCredential(t *testing.T) {
 			[]string{`source registry "example.com"` + notAllowed, hidden}},
 		{"manifests, IPv6 zone", "manifests", url("https://[fe80::1%25s3cr3t]:8443/x.yaml"), []string{"[fe80::1]:8443"},
 			[]string{`source registry "[fe80::1]:8443"` + notAllowed, hidden}},
+		{"manifests, IPv6 zone holding a bracket", "manifests", url("https://[fe80::1%25zone]s3cr3t]:8443/x.yaml"), []string{"allowed.example"},
+			[]string{`source registry "[fe80::1]:8443"` + notAllowed, hidden}},
 		{"oci, user and token", "oci", ociSrc("oci://deploy:s3cr3t@ghcr.io/org/app"), []string{"ghcr.io"},
 			[]string{`source registry "ghcr.io"` + notAllowed, hidden}},
 		{"helmrepository https, user and token", "helmrepository", url("https://deploy:s3cr3t@charts.example.com/stable"), []string{"charts.example.com"},

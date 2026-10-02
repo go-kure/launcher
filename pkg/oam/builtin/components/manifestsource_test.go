@@ -408,6 +408,8 @@ func TestDisplayHost(t *testing.T) {
 		{"[fe80::1%s3cr3t]:8443", "[fe80::1]:8443", true},
 		{"[fe80::1%25s3cr3t]", "[fe80::1]", true},
 		{"fe80::1%s3cr3t", "fe80::1", true},
+		{"[fe80::1%zone]s3cr3t]:8443", "[fe80::1]:8443", true},
+		{"[fe80::1%zone]:s3cr3t", "[fe80::1]", true},
 	}
 	for _, tc := range cases {
 		got, trimmed := displayHost(tc.in)
@@ -419,6 +421,7 @@ func TestDisplayHost(t *testing.T) {
 	urls := []struct{ in, want string }{
 		{"https://deploy:s3cr3t@example.com:8443/a/s3cr3t?sig=s3cr3t#s3cr3t", "https://example.com:8443"},
 		{"https://[fe80::1%25s3cr3t]:8443/x.yaml", "https://[fe80::1]:8443"},
+		{"https://[fe80::1%25zone%5Ds3cr3t]:8443/x.yaml", "https://[fe80::1]:8443"},
 		{"https:deploy:s3cr3t@example.com/x", "(url without a host)"},
 	}
 	for _, tc := range urls {

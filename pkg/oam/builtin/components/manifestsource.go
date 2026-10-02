@@ -214,9 +214,9 @@ func displayURL(rawURL string) string {
 // displayHost reduces a host, as urlHost or url.URL.Host returns it, to the part
 // that is safe to print: what follows the last "@" (the userinfo is dropped), up
 // to the first "?" or "#" (a query or fragment urlHost keeps is dropped), with
-// an IPv6 zone ("%" up to the closing "]") dropped, since net/url keeps
-// arbitrary zone text in Host. The port stays. trimmed reports whether anything
-// was dropped.
+// an IPv6 zone ("%" up to the last "]") dropped, since net/url keeps arbitrary
+// zone text in Host, "]" included. The port stays, unless a zone precedes it
+// and it is not numeric. trimmed reports whether anything was dropped.
 func displayHost(host string) (shown string, trimmed bool) {
 	shown = host
 	if i := strings.IndexAny(shown, "?#"); i >= 0 {
@@ -226,9 +226,14 @@ func displayHost(host string) (shown string, trimmed bool) {
 		shown = shown[i+1:]
 	}
 	if i := strings.Index(shown, "%"); i >= 0 {
+		// The zone runs to the last "]", since it can itself contain one, and
+		// only a numeric port is kept after that.
 		rest := ""
-		if j := strings.Index(shown[i:], "]"); j >= 0 {
-			rest = shown[i+j:]
+		if j := strings.LastIndex(shown, "]"); j > i {
+			rest = "]"
+			if port := shown[j+1:]; len(port) > 1 && port[0] == ':' && strings.Trim(port[1:], "0123456789") == "" {
+				rest += port
+			}
 		}
 		shown = shown[:i] + rest
 	}
