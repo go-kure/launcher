@@ -336,6 +336,69 @@ func TestSiblingGroup_TraitSubApplications(t *testing.T) {
 	}
 }
 
+// renamingSubStub is a trait sub-application's config whose ApplyPolicy renames
+// its own application to to.
+type renamingSubStub struct {
+	siblingStub
+	own *stack.Application
+	to  string
+}
+
+func (s *renamingSubStub) ApplyPolicy(Policy) error {
+	s.own.Name = s.to
+	return nil
+}
+
+// renamingSubTrait appends a sub-application named by property "name" whose
+// ApplyPolicy renames it to property "to".
+type renamingSubTrait struct{}
+
+func (renamingSubTrait) CanHandle(t string) bool { return t == "renamesub" }
+func (renamingSubTrait) Apply(trait *Trait, app *stack.Application, b *stack.Bundle) error {
+	sub := stack.NewApplication(trait.Properties["name"].(string), app.Namespace, nil)
+	sub.SetConfig(&renamingSubStub{own: sub, to: trait.Properties["to"].(string)})
+	b.Applications = append(b.Applications, sub)
+	return nil
+}
+
+// TestSiblingGroup_TraitSubApplicationRenamedByPolicy is go-kure/launcher#755:
+// the duplicate check reads a group sub-application's name after its
+// ApplyPolicy has run. A policy renaming a sub-application onto another member's
+// is refused; one renaming it away frees its old name for another member.
+func TestSiblingGroup_TraitSubApplicationRenamedByPolicy(t *testing.T) {
+	sub := Trait{Type: "sub", Properties: map[string]any{}}
+	rename := func(name, to string) Trait {
+		return Trait{Type: "renamesub", Properties: map[string]any{"name": name, "to": to}}
+	}
+	for _, tc := range []struct {
+		name     string
+		onA, onB Trait
+		want     string
+	}{
+		{name: "renamed onto another member's", onA: sub, onB: rename("web-other", "web-sub"),
+			want: `sibling group "web": traits on members "a" and "b" both create sub-application "web-sub"`},
+		{name: "renamed away from its old name", onA: rename("web-sub", "web-moved"), onB: sub},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := NewTransformer(map[string]ComponentHandler{"a": stubHandler("a", 0), "b": stubHandler("b", 0)},
+				map[string]TraitHandler{"sub": subAppTrait{}, "renamesub": renamingSubTrait{}})
+			tr.RegisterComponentLowering(emitRule{"pair", func(c *Component) []Component {
+				return []Component{
+					{Name: c.Name, Type: "a", Properties: map[string]any{}, Traits: []Trait{tc.onA}},
+					{Name: c.Name, Type: "b", Properties: map[string]any{}, Traits: []Trait{tc.onB}},
+				}
+			}})
+			_, _, err := tr.TransformWithPolicy(siblingDoc(Component{Name: "web", Type: "pair"}), TransformContext{})
+			if tc.want == "" && err != nil {
+				t.Fatalf("TransformWithPolicy: %v", err)
+			}
+			if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // namedSubTrait appends a sub-application named <component>-<trait type>, so the
 // bundle's application order shows the order its traits were applied in.
 type namedSubTrait struct{}

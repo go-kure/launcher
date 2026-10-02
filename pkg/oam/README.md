@@ -607,7 +607,10 @@ The build refuses a group:
 - in which two members generate the same Kubernetes object (API group, kind,
   namespace and name), such as two Services both named after the group;
 - in which traits on two members create the same sub-application (the same trait on
-  both members derives one name, such as `web-rbac`, from the shared name).
+  both members derives one name, such as `web-rbac`, from the shared name). The names
+  are compared after each sub-application's `ApplyPolicy` has run, so a policy that
+  renames a sub-application onto another member's is refused, and the name it moved
+  away from is free (go-kure/launcher#755).
 
 An authored duplicate name is still refused. So is a name repeated by different
 rule invocations, or by a trait or document rule, including a copy of a member.
