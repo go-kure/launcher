@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"maps"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -387,14 +388,24 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 }
 
 // checkHelmGitSource checks an inline GitRepository source: an http:// or https://
-// URL, and exactly one source.ref field. An ssh:// URL is refused: Flux reads it
-// only with a key from spec.secretRef, which the inline form does not take, so the
-// generated source could never become ready. Flux checks out branch master when
+// URL without user info, and exactly one source.ref field. An ssh:// URL is
+// refused: Flux reads it only with a key from spec.secretRef, which the inline form
+// does not take, so the generated source could never become ready. A user or token
+// in the URL is refused too: it would be written into the generated manifest instead
+// of a Secret. Flux checks out branch master when
 // spec.ref is empty and picks one field by precedence when several are set; the
 // rule refuses both rather than follow either silently.
 func checkHelmGitSource(src *helmSource) error {
 	if !strings.HasPrefix(src.URL, "https://") && !strings.HasPrefix(src.URL, "http://") {
 		return errors.Errorf("%s: source.kind GitRepository requires an http:// or https:// URL; an ssh:// repository needs credentials, so author a gitrepository and reference it", helmType)
+	}
+	// The parse error is not wrapped: it quotes the whole URL, user info included.
+	u, err := url.Parse(src.URL)
+	if err != nil {
+		return errors.Errorf("%s: source.url is not a valid URL", helmType)
+	}
+	if u.User != nil {
+		return errors.Errorf("%s: source.url carries credentials, which an inline GitRepository does not take; author a gitrepository with a secretRef and reference it", helmType)
 	}
 	var set []string
 	if src.Ref != nil {
