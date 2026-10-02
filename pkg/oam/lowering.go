@@ -265,8 +265,13 @@ type LoweringContext struct {
 	Document *Application
 	// Component is the enclosing component; nil at document and policy position.
 	Component *Component
-	// Capabilities is TransformContext.Capabilities (post-EvaluateProfile).
-	Capabilities map[string]CapabilityBinding
+	// capabilities is TransformContext.Capabilities (post-EvaluateProfile). A rule
+	// reads it only through Capability, so every key it reads is recorded
+	// (go-kure/launcher#686).
+	capabilities map[string]CapabilityBinding
+	// consumed is TransformContext.consumedCapabilities, the set Capability records a
+	// read key into. nil where nothing collects them (LowerRaws, a test driver).
+	consumed map[string]struct{}
 	// Origin is the authored location of the element being lowered.
 	Origin Origin
 	// Namer allocates deterministic collision-free names (D2). Never nil when the
@@ -277,6 +282,33 @@ type LoweringContext struct {
 	// detection. A nil Namer is a contract violation by whoever built the
 	// LoweringContext; code that drives a rule directly supplies NewNameAllocator().
 	Namer *NameAllocator
+}
+
+// Capability returns the ClusterProfile capability bound to key (post-EvaluateProfile)
+// and whether the profile has one. It is the only way a rule reads a capability: a key
+// it finds is recorded as consumed, so TransformWithPolicy lists it in
+// PolicyResult.ConsumedCapabilities exactly as it lists a key a trait resolves against.
+// A key the profile does not bind is not recorded. The binding is the profile's own
+// value, read-only like the rest of the context: a rule must not mutate its Rendering.
+//
+// A read from a RawDocumentLoweringRule is not recorded. LowerRaws returns no
+// PolicyResult, and the raw rule's output re-enters Transform as authored input, where
+// the capabilities its traits resolve against are recorded.
+func (l LoweringContext) Capability(key string) (CapabilityBinding, bool) {
+	binding, ok := l.capabilities[key]
+	if ok && l.consumed != nil {
+		l.consumed[key] = struct{}{}
+	}
+	return binding, ok
+}
+
+// WithCapabilities returns a copy of l whose Capability reads look up m. It is for a
+// test driver that calls a rule directly; the engine wires the context it hands a rule
+// itself. The copy records nothing: a read through it is counted nowhere.
+func (l LoweringContext) WithCapabilities(m map[string]CapabilityBinding) LoweringContext {
+	l.capabilities = m
+	l.consumed = nil
+	return l
 }
 
 // NameAllocator hands out deterministic, collision-free generated names within one
@@ -477,7 +509,7 @@ func generatedName(base, suffix string) (string, error) {
 //
 // Every component and trait the rule builds is checked as authored, since nothing
 // checks the whole document it reads. A PlatformReserved value it renders from
-// LoweringContext.Capabilities is written with Component.RenderReserved or
+// LoweringContext.Capability is written with Component.RenderReserved or
 // Trait.RenderReserved, which records it as the rule's output; written any other way,
 // it is refused.
 type DocumentLoweringRule interface {
@@ -1087,7 +1119,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		// PR go-kure/launcher#283: the policy loop below stamped Rule unconditionally while the
 		// component loop already guarded against exactly this).
 		originalPolicies := input.Spec.Policies
-		lctx := LoweringContext{Document: input, Capabilities: ctx.Capabilities, Origin: origin, Namer: namer}
+		lctx := LoweringContext{Document: input, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, Origin: origin, Namer: namer}
 		result, err := rule.LowerDocument(input, lctx)
 		if err != nil {
 			return nil, false, nil, errors.Wrapf(err, "%s", origin)
@@ -1307,7 +1339,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				}
 			}
 			inputChecked := declaresSchema || comp.synthesized
-			lctx := LoweringContext{Document: doc, Component: &comp, Capabilities: ctx.Capabilities, Origin: compOrigin, Namer: namer}
+			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, Origin: compOrigin, Namer: namer}
 			result, err := rule.LowerComponent(&comp, lctx)
 			if err != nil {
 				return false, steps, errors.Wrapf(err, "%s", compOrigin)
@@ -1478,7 +1510,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// unpromoted: it holds only what the rule's own schema reserves, not what
 			// the components or traits the rule emits reserve.
 			inputChecked := trait.synthesized || (declaresSchema && !trait.sealed)
-			lctx := LoweringContext{Document: doc, Component: &comp, Capabilities: ctx.Capabilities, Origin: traitOrigin, Namer: namer}
+			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, Origin: traitOrigin, Namer: namer}
 			result, err := rule.LowerTrait(&resolvedTrait, lctx)
 			if err != nil {
 				return false, steps, errors.Wrapf(err, "%s", traitOrigin)
@@ -1574,7 +1606,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			newPolicies = append(newPolicies, pol)
 			continue
 		}
-		lctx := LoweringContext{Document: doc, Capabilities: ctx.Capabilities, Origin: polOrigin, Namer: namer}
+		lctx := LoweringContext{Document: doc, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, Origin: polOrigin, Namer: namer}
 		result, err := rule.LowerPolicy(&pol, lctx)
 		if err != nil {
 			return false, steps, errors.Wrapf(err, "%s", polOrigin)

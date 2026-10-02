@@ -20,9 +20,12 @@ type PolicyResult struct {
 	HealthCheckOverrides   []stack.HealthCheck
 	ReconciliationSettings *ReconciliationSettings
 	// ConsumedCapabilities is the sorted, deduped capability keys this app's traits
-	// actually resolved against ctx.Capabilities — the authoritative replacement for
-	// a downstream consumer's own interim candidate-key derivation (go-kure/launcher#290). Nil when no
-	// trait consumed anything (AppDependsOn's nil-until-populated convention).
+	// actually resolved against ctx.Capabilities, and that its lowering rules read
+	// through LoweringContext.Capability (go-kure/launcher#686) — the authoritative
+	// replacement for a downstream consumer's own interim candidate-key derivation
+	// (go-kure/launcher#290). A read by a RawDocumentLoweringRule, under LowerRaws, is
+	// not among them. Nil when nothing consumed anything (AppDependsOn's
+	// nil-until-populated convention).
 	ConsumedCapabilities []string
 }
 

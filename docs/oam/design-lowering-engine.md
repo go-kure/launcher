@@ -469,8 +469,9 @@ implementation. All three are answered by the shipped code:
   own `MaxLoweringDepth` budget and `LoweringContext`. A raw step appears in a
   `LoweringError` chain as `rawdocument/<apiVersion>/<kind>`, but stamps no `Origin` on
   its output: the round-trip through bytes would drop it. `ctx TransformContext` is
-  still passed to the raw rule, so a raw rule that reads `ctx.Capabilities` sees them,
-  but no ordinary rule runs inside `LowerRaws` any more, so `LowerRaws` itself no longer
+  still passed to the raw rule, so a raw rule that reads a capability through
+  `LoweringContext.Capability` sees it (unrecorded: `LowerRaws` returns no
+  `PolicyResult`), but no ordinary rule runs inside `LowerRaws` any more, so `LowerRaws` itself no longer
   needs an evaluated `ClusterProfile`.
 - **Should a document a raw-document rule emits be eligible to re-enter `LowerRaws`
   itself (a raw-to-raw fixpoint), or must it always land in base shape in one step?**

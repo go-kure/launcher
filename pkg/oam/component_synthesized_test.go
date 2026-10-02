@@ -31,7 +31,8 @@ func (reservedSinkHandler) PropertySchema() map[string]PropertySchema {
 // renderedNetworkPolicy is the reserved value a rule writes from the capability
 // rendering it was handed.
 func renderedNetworkPolicy(lctx LoweringContext) map[string]any {
-	return lctx.Capabilities["netpol"].Rendering
+	binding, _ := lctx.Capability("netpol")
+	return binding.Rendering
 }
 
 func netpolCapability() TransformContext {

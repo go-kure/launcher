@@ -62,7 +62,7 @@ func (r renderingDocRule) LowerDocument(doc *Application, lctx LoweringContext) 
 // map so a test may edit it without touching the capability.
 func renderNetpol(comp *Component, _ *Application, lctx LoweringContext) error {
 	return comp.RenderReserved("networkPolicy", map[string]any{
-		"trafficSources": lctx.Capabilities["netpol"].Rendering["trafficSources"],
+		"trafficSources": renderedNetworkPolicy(lctx)["trafficSources"],
 	})
 }
 
@@ -94,7 +94,7 @@ func expectRenderedNetpol(t *testing.T, sink *capturingReservedSink) {
 }
 
 // TestTransform_DocumentRuleRenderedReservedIsAccepted: a document rule that renders
-// the reserved value from LoweringContext.Capabilities through RenderReserved has it
+// the reserved value from LoweringContext.Capability through RenderReserved has it
 // accepted end to end, and the value reaches the handler.
 func TestTransform_DocumentRuleRenderedReservedIsAccepted(t *testing.T) {
 	tr, sink := capturingSinkTransformer()
@@ -580,7 +580,7 @@ func (r traitRenderingDocRule) LowerDocument(doc *Application, lctx LoweringCont
 // renderTraitNetpol is renderNetpol for a trait.
 func renderTraitNetpol(trait *Trait, _ *Application, lctx LoweringContext) error {
 	return trait.RenderReserved("networkPolicy", map[string]any{
-		"trafficSources": lctx.Capabilities["netpol"].Rendering["trafficSources"],
+		"trafficSources": renderedNetworkPolicy(lctx)["trafficSources"],
 	})
 }
 
@@ -624,7 +624,7 @@ func expectReservedTraitRefused(t *testing.T, err error) {
 }
 
 // TestTransform_DocumentRuleRenderedReservedTraitIsAccepted: a trait a document rule
-// builds, with the reserved value rendered from LoweringContext.Capabilities through
+// builds, with the reserved value rendered from LoweringContext.Capability through
 // Trait.RenderReserved, is accepted end to end, and the value reaches the handler.
 func TestTransform_DocumentRuleRenderedReservedTraitIsAccepted(t *testing.T) {
 	inputs := map[string]*Application{

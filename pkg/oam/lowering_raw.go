@@ -70,8 +70,11 @@ type rawDocKey struct {
 // authored input, and Transform rejects them with ErrPlatformReserved; emit the trait
 // as a person would write it and let Transform merge the capability.
 //
-// ctx.Capabilities reaches the rule as LoweringContext.Capabilities, for a rule whose
-// rewrite depends on what the platform offers. It is not an invitation to render.
+// ctx.Capabilities reaches the rule through LoweringContext.Capability, for a rule
+// whose rewrite depends on what the platform offers. It is not an invitation to
+// render. A read here is not recorded in PolicyResult.ConsumedCapabilities: LowerRaws
+// returns none, and the capabilities the output's traits resolve against are recorded
+// when Transform runs on it.
 //
 // What LowerRaws still checks itself, because the caller's parser cannot: each
 // claimed document's metadata, duplicate authored identities across the batch,
@@ -330,7 +333,7 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "%s: decode", d.origin)
 	}
-	lctx := LoweringContext{Capabilities: ctx.Capabilities, Origin: d.origin, Namer: namer}
+	lctx := LoweringContext{capabilities: ctx.Capabilities, Origin: d.origin, Namer: namer}
 	result, err := d.rule.LowerDocument(decoded, lctx)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "%s", d.origin)
