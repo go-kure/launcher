@@ -435,8 +435,9 @@ const helmValuesHashLen = 10
 // The trait is the configmap trait as authored documents use it, so the
 // ConfigMap follows the HelmRelease to a Flux namespace (it reads the
 // ConfigMap through valuesFrom) and is the helmrelease component's object for
-// pruning and replacement. It is not yet built through the configmap kind's
-// own code.
+// pruning and replacement. Like every configmap trait it is built through the
+// configmap kind's own code (go-kure/launcher#741); the values travel as one
+// string, so the kind's string-only data typing never refuses them.
 //
 // The values are serialized once. Those exact bytes are stored in the
 // ConfigMap and hashed into its name, so the name changes whenever the
