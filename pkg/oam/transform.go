@@ -772,7 +772,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// After D3, which checks only what was authored: the capability defaults a
 		// ComponentCapabilityDefaults handler names fill the keys left unauthored.
 		if d, ok := handler.(ComponentCapabilityDefaults); ok && !component.synthesized {
-			filled, err := applyComponentCapabilityDefaults(d, component.Properties, ctx)
+			filled, err := t.applyComponentCapabilityDefaults(d, component.Properties, ctx)
 			if err != nil {
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 			}
@@ -1525,7 +1525,9 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (
 // shares a value with the profile and an integer stays an integer. A filled value
 // that is not a property value (checkRenderedValue) is an error, never shared
 // instead; TransformWithPolicy refuses one before this runs (checkCapabilityRenderings).
-func applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[string]any, ctx TransformContext) (map[string]any, error) {
+// Each filled value is then validated against the component's schema
+// (validateCapabilityFill).
+func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[string]any, ctx TransformContext) (map[string]any, error) {
 	key, keys := d.CapabilityDefaults()
 	binding, ok := ctx.Capabilities[key]
 	if !ok {
@@ -1551,12 +1553,52 @@ func applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[s
 			return nil, errors.Wrapf(err, "capability %q defaults: rendering key %q", key, k)
 		}
 	}
+	copied := copyRendering(fill)
+	if err := t.validateCapabilityFill(d, key, copied); err != nil {
+		return nil, err
+	}
 	out := maps.Clone(props)
 	if out == nil {
 		out = make(map[string]any, len(fill))
 	}
-	maps.Copy(out, copyRendering(fill))
+	maps.Copy(out, copied)
 	return out, nil
+}
+
+// validateCapabilityFill checks the values applyComponentCapabilityDefaults is about
+// to fill against the component's own PropertySchema, and writes back each value
+// as validation normalized it, as authored validation does (go-kure/launcher#751).
+// EvaluateProfile validates a binding only through the trait handler or trait
+// lowering rule of its type, whose schema can differ from the component's, so the
+// component's schema decides. A component that declares no schema relies on that
+// trait-side check alone; with no trait handler or rule registered for the type
+// either, nothing validates the values, and the fill is refused.
+func (t *Transformer) validateCapabilityFill(d ComponentCapabilityDefaults, key string, fill map[string]any) error {
+	p, ok := d.(PropertySchemaProvider)
+	if !ok {
+		typeName, _, _ := strings.Cut(key, ".")
+		if _, has := t.traitHandlers[typeName]; has {
+			return nil
+		}
+		if _, has := t.traitLoweringRules[typeName]; has {
+			return nil
+		}
+		return errors.Errorf("capability %q defaults: nothing validates rendering keys %q: the component handler declares no PropertySchema and no trait handler or trait lowering rule is registered for type %q; implement PropertySchemaProvider on the component handler or register the trait",
+			key, slices.Sorted(maps.Keys(fill)), typeName)
+	}
+	schema := p.PropertySchema()
+	for _, k := range slices.Sorted(maps.Keys(fill)) {
+		field, declared := schema[k]
+		if !declared {
+			return errors.Errorf("capability %q defaults: rendering key %q is not a property the component declares (allowed: %s)", key, k, declaredFields(schema))
+		}
+		normalized, err := validatePropertyValue(field, fill[k], "properties."+k)
+		if err != nil {
+			return errors.Wrapf(err, "capability %q defaults", key)
+		}
+		fill[k] = normalized
+	}
+	return nil
 }
 
 // checkCapabilityRenderings refuses a capability binding whose rendering holds a value

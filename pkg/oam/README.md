@@ -331,8 +331,8 @@ the built-ins. Extend the system by implementing:
 | `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits). `Apply` mutates the application it is given and may append sub-applications to the bundle. It must not replace, remove or rename a component's application there, its own or any other component's of the bundle, including one whose traits already ran: the transform fails, naming the trait and the component, because the automatic health check and NetworkPolicy synthesis find a component's application by its name and then its pointer, and a replaced, removed or renamed one would silently get neither (go-kure/launcher#734). Nor may it rename a sibling group member's application: the member would generate its objects under a name the group's health check does not name, so the transform fails, naming the trait, the group and the member's type (go-kure/launcher#752). |
 | `PolicyHandler` | `CanHandle(type)` + `Apply(policy, components, result)` — validates one `spec.policies` entry and records its effect (tier overrides, dependency edges, extra health checks, reconciliation settings) on the shared `PolicyResult`; see [policies](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies). A policy type with no registered handler fails the transform. |
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
-| `ComponentCapabilityDefaults` | `CapabilityDefaults() (key string, properties []string)` — on a `ComponentHandler` whose properties take defaults from a `ClusterProfile` capability. Before `ToApplicationConfig`, the engine fills each listed property the component leaves unauthored (absent or `null`) from that binding's rendering; an authored value, `""` included, wins. It reads only the listed keys, never the rest of the rendering, and records the key in `ConsumedCapabilities` when the profile binds it. A component a lowering rule synthesized is skipped, as a sealed trait is. `EvaluateProfile` validates the binding only through the trait handler or trait lowering rule of the key's type, so register one; with neither, the rendering reaches the component unvalidated. Implemented by `persistentvolumeclaim` (`pvc`, `storageClassName`; go-kure/launcher#742). |
-| `ComponentCapabilityFiller` | `FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error)` — on a `ComponentHandler` whose capability defaults land below the top level of its properties, where `ComponentCapabilityDefaults` cannot reach. The engine calls it right after `ComponentCapabilityDefaults`, on a component no lowering rule synthesized, and passes the result to `ToApplicationConfig`; an error fails the component. It must not mutate `props`, and reads a binding only through `lctx.Capability`, which records the key in `ConsumedCapabilities`; `lctx` carries nothing else. Implemented by `statefulset` (`pvc`'s `storageClassName` into each `volumeClaimTemplates` entry that leaves `storageClass` unauthored; go-kure/launcher#761). |
+| `ComponentCapabilityDefaults` | `CapabilityDefaults() (key string, properties []string)` — on a `ComponentHandler` whose properties take defaults from a `ClusterProfile` capability. Before `ToApplicationConfig`, the engine fills each listed property the component leaves unauthored (absent or `null`) from that binding's rendering; an authored value, `""` included, wins. It reads only the listed keys, never the rest of the rendering, and records the key in `ConsumedCapabilities` when the profile binds it. A component a lowering rule synthesized is skipped, as a sealed trait is. Each filled value is validated against the component's own `PropertySchema`, which must declare every listed key (go-kure/launcher#751): the trait side's schema may differ. A handler that declares no schema relies on `EvaluateProfile`, which validates the binding only through the trait handler or trait lowering rule of the key's type, and checks the values only when that handler or rule implements `ValidateAndApplyDefaults` or the type has a `CapabilityDefinition`; with neither a handler nor a rule registered, the fill is refused. Implemented by `persistentvolumeclaim` (`pvc`, `storageClassName`; go-kure/launcher#742). |
+| `ComponentCapabilityFiller` | `FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error)` — on a `ComponentHandler` whose capability defaults land below the top level of its properties, where `ComponentCapabilityDefaults` cannot reach. The engine calls it right after `ComponentCapabilityDefaults`, on a component no lowering rule synthesized, and passes the result to `ToApplicationConfig`; an error fails the component. It must not mutate `props`, and reads a binding only through `lctx.Capability`, which records the key in `ConsumedCapabilities`; `lctx` carries nothing else. The handler validates the values it fills; the engine's schema check covers only `ComponentCapabilityDefaults` keys. Implemented by `statefulset` (`pvc`'s `storageClassName` into each `volumeClaimTemplates` entry that leaves `storageClass` unauthored; go-kure/launcher#761). |
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
 | `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). |
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
@@ -1188,12 +1188,28 @@ a trait lowering rule's input.
 
 A component handler that implements `ComponentCapabilityDefaults` (see Transform &
 extension) gets the same precedence for the properties it lists, and only those.
+Each value it fills is then validated against the component's own `PropertySchema`
+(go-kure/launcher#751): a value the trait handler's schema accepted can still be
+refused here, with an error naming the component, the capability and the property
+(`component "data": capability "pvc" defaults: properties.storageClassName: expected
+string, got int`). A capability type with no trait handler or trait lowering rule,
+whose binding `EvaluateProfile` therefore never checks, is validated by the
+component schema alone, and refused when the component declares none. A component
+with no schema whose capability type has a trait handler or rule relies on the trait
+side, which checks the values only when that handler or rule implements
+`ValidateAndApplyDefaults` or the type has a `CapabilityDefinition`. **Pre-GA input
+change**: a fill that used to reach a component unvalidated is now refused when
+nothing validates it, and a value the component's schema does not accept is refused.
 
 Both merges copy the rendering value they hand out, keeping its Go type: a `3` the
 profile decoded as `int` reaches the handler as `int`, and an `int64` above 2^53 keeps
 its exact value (go-kure/launcher#756). The copy used to be a JSON round trip, which
-turned every number into `float64`. A rendering value therefore obeys the same rule
-as a value a lowering rule writes with `RenderReserved`: a string, boolean, finite
+turned every number into `float64`. A `ComponentCapabilityDefaults` fill is then
+normalized by the component's schema check like any validated property: a
+`map[string]string` under an object property reaches the handler as
+`map[string]any`, and a `uint32` or named integer under an integer property as
+`int`. The profile's own value is left as it was. A rendering value therefore obeys
+the same rule as a value a lowering rule writes with `RenderReserved`: a string, boolean, finite
 number, list or string-keyed object, nested to any depth. `TransformWithPolicy`
 checks every binding in `TransformContext.Capabilities` before building anything,
 whether or not a document uses it, and refuses the transform with an error naming

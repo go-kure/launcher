@@ -25,6 +25,10 @@ func (h *numericDefaultsHandler) CapabilityDefaults() (string, []string) {
 	return "store", []string{"replicas", "big"}
 }
 
+func (h *numericDefaultsHandler) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{"replicas": {Type: PropertyTypeInteger}, "big": {Type: PropertyTypeInteger}}
+}
+
 func (h *numericDefaultsHandler) ToApplicationConfig(c *Component, _ string) (stack.ApplicationConfig, error) {
 	h.got = c.Properties
 	return &stubAppConfig{}, nil
