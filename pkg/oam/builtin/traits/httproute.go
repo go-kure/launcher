@@ -135,6 +135,9 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 					"use backendRef-level 'port' or an explicit 'name' instead",
 				existingPort)
 		}
+		if err := checkTraitServicePort(app); err != nil {
+			return nil, err
+		}
 		defaultPort = sp
 		traitPortProvided = true
 	}

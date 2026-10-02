@@ -167,12 +167,29 @@ func (c *ServiceConfig) ServicePort() int32 {
 // ServicePortName returns the first port's name ("" when it is unnamed) and
 // true: this config knows its port names, so routing traits refuse an implicit
 // backend addressed by any other port name — a later port's, or one the
-// Service does not have — just as they refuse any other port number.
+// Service does not have — just as they refuse any other port number. A
+// port-less headless Service also knows its ports, all none of them: it
+// returns "" and true, so routing traits refuse a trait-level servicePort on
+// it rather than route to a port the Service lacks (go-kure/launcher#690).
 func (c *ServiceConfig) ServicePortName() (string, bool) {
 	if len(c.Ports) == 0 {
-		return "", false
+		return "", true
 	}
 	return c.Ports[0].Name, true
+}
+
+// BackendServiceName names the Service this component owns when it has no
+// ports (go-kure/launcher#690). A Service with ports is already known as its
+// component's own by its first port (ServicePort); a port-less one would
+// otherwise read as no Service at all, and NetworkPolicy synthesis would then
+// treat a route naming it as an external backend and trust that route's
+// backendSelector. It returns "" when the Service has ports, leaving that
+// path unchanged.
+func (c *ServiceConfig) BackendServiceName() string {
+	if len(c.Ports) > 0 {
+		return ""
+	}
+	return c.Name
 }
 
 // ServiceRoutingTarget tells pkg/oam's inbound NetworkPolicy synthesis where

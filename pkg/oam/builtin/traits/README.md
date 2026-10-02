@@ -179,7 +179,12 @@ A `backend` naming a different Service is explicit and its `port`/`portName` is 
 checked. A component that exposes no Service port — `statefulset`/`daemonset` without
 `port`, or a kind that generates no Service such as `helmchart` — has no implicit
 backend unless the trait sets `servicePort` (and optionally `serviceName`); that
-trait-level port carries no name, so a `portName` is not checked against it.
+trait-level port carries no name, so a `portName` is not checked against it. A
+port-less headless `service` (`clusterIP: None` with no `ports`,
+go-kure/launcher#690) is the exception: its Service knows it has no port, so a
+trait-level `servicePort` on it is refused (`servicePort may not be set on
+component "db": its Service has no ports to route to`) rather than routed to a
+port the Service lacks.
 
 ## NetworkPolicy nulls: null, empty and absent
 

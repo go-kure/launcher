@@ -1594,9 +1594,13 @@ not part of either change.
     absence. A headless Service may have no `ports` at all; without
     `clusterIP`, at least one port is still required (`ports: at least one
     port is required`). A port-less Service has no first port, so routing
-    traits refuse it as an implicit backend and it declares no NetworkPolicy
-    endpoint. Without `clusterIP` the Service carries no `clusterIP`, as
-    before.
+    traits refuse it as an implicit backend, refuse a trait-level
+    `servicePort` on it, and it declares no NetworkPolicy endpoint. It still
+    owns its name (`BackendServiceName`): a route from another component
+    naming it is a route to a Service of this application, not an external
+    backend, so that route's `backendSelector` is not trusted and, with no
+    TCP port to translate, no allow is synthesized. Without `clusterIP` the
+    Service carries no `clusterIP`, as before.
   - **The component name must be a valid Service name.** It becomes the
     Service's `metadata.name`, which the API server validates as a DNS-1035
     label: at most 63 characters, lowercase letters, digits and `-`, starting
