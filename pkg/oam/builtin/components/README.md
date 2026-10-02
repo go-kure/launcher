@@ -3089,10 +3089,13 @@ not part of either change.
   A `url` that does not parse is refused without the URL or the parser's
   error, and a fetch error names the URL by scheme, host and path only
   (`manifestsource.go`'s `displayURL`; a URL with no host is not named): its
-  userinfo or query may carry a credential. A failed request keeps its cause
-  only when that is a dial, lookup or connection error, which names an address,
-  or a timeout; any other cause, such as a malformed redirect `Location` that
-  net/http would quote whole, is reported as `request failed`.
+  userinfo or query may carry a credential. A failed request or body read is
+  named by fixed text only (`failureCause`): a timeout, a failed host lookup,
+  or the failing network operation and its system error, such as
+  `dial failed: connection refused`; anything else reads `request failed` or
+  `response body could not be read`. The underlying error's own text is never
+  shown, since it can quote the URL, a server-sent header or trailer, or a TLS
+  certificate.
 
 ## StatefulSet-level and claim-template properties
 

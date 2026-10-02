@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"syscall"
 	"testing"
@@ -245,6 +246,18 @@ func TestResolve_URLErrorsHideCredential(t *testing.T) {
 		w.WriteHeader(http.StatusFound)
 	}))
 	defer badRedirect.Close()
+	// badTrailer answers 200 with a chunked body whose trailer is malformed and
+	// reflects the request's query, which net/http's read error would quote.
+	badTrailer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, buf, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n" + r.URL.RawQuery + "\r\n\r\n")
+		_ = buf.Flush()
+	}))
+	defer badTrailer.Close()
 
 	withCred := func(base, userinfo, rest string) string {
 		return strings.Replace(base, "://", "://"+userinfo+"@", 1) + rest
@@ -259,6 +272,7 @@ func TestResolve_URLErrorsHideCredential(t *testing.T) {
 		{"transport failure, token as user", withCred(hangUp.URL, "s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + hangUp.URL + "/crds.yaml\": request failed"},
 		{"malformed redirect location", badRedirect.URL + "/crds.yaml", "manifest source: fetch \"" + badRedirect.URL + "/crds.yaml\": request failed"},
 		{"opaque url", "https:deploy:s3cr3t@example.com/crds.yaml", "manifest source: fetch \"(url without a host)\": request failed"},
+		{"malformed trailer reflecting the query", badTrailer.URL + "/crds.yaml?sig=s3cr3t", "manifest source: read \"" + badTrailer.URL + "/crds.yaml\": response body could not be read"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -273,24 +287,27 @@ func TestResolve_URLErrorsHideCredential(t *testing.T) {
 	}
 }
 
-// TestTransportCause pins which client failures keep their text: a dial or
-// lookup failure names only an address, a timeout is named, and anything else,
-// such as net/http's quoted malformed Location, is reported generically.
-func TestTransportCause(t *testing.T) {
-	const leaky = "https://deploy:s3cr3t@example.com/x"
-	dial := &net.OpError{Op: "dial", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9}, Err: syscall.ECONNREFUSED}
+// TestFailureCause pins that a failure is named by fixed text only, never by
+// the error's own text, which can quote the URL, a server-sent header or
+// trailer, or a TLS certificate.
+func TestFailureCause(t *testing.T) {
+	const leaky = "https://deploy:s3cr3t@example.com/x?sig=s3cr3t"
+	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9}
 	cases := []struct {
 		name string
 		err  error
 		want string
 	}{
-		{"dial failure", &url.Error{Op: "Get", URL: leaky, Err: dial}, dial.Error()},
-		{"timeout", &url.Error{Op: "Get", URL: leaky, Err: context.DeadlineExceeded}, "request timed out"},
-		{"other", &url.Error{Op: "Get", URL: leaky, Err: errors.Errorf("failed to parse Location header %q", leaky)}, "request failed"},
+		{"dial refused", &url.Error{Op: "Get", URL: leaky, Err: &net.OpError{Op: "dial", Net: "tcp", Addr: addr, Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}}}, "dial failed: connection refused"},
+		{"host lookup", &url.Error{Op: "Get", URL: leaky, Err: &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "example.com", IsNotFound: true}}}, "host lookup failed"},
+		{"proxy TLS failure quoting a certificate", &url.Error{Op: "Get", URL: leaky, Err: &net.OpError{Op: "proxyconnect", Net: "tcp", Addr: addr, Err: errors.Errorf("tls: certificate is valid for %s, not localhost", leaky)}}, "proxyconnect failed"},
+		{"timeout", &url.Error{Op: "Get", URL: leaky, Err: context.DeadlineExceeded}, "timed out"},
+		{"malformed Location", &url.Error{Op: "Get", URL: leaky, Err: errors.Errorf("failed to parse Location header %q", leaky)}, ""},
+		{"malformed trailer", errors.Errorf("malformed MIME header: missing colon: %q", "sig=s3cr3t"), ""},
 	}
 	for _, tc := range cases {
-		if got := transportCause(tc.err); got != tc.want {
-			t.Errorf("%s: transportCause = %q, want %q", tc.name, got, tc.want)
+		if got := failureCause(tc.err); got != tc.want {
+			t.Errorf("%s: failureCause = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }
