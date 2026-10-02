@@ -2460,8 +2460,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   allowlist refusal names the host as `displayHost` reduces it: without userinfo, query,
   fragment or zone, port kept, saying when something was dropped; the matching itself is
   unchanged. It names no host at all when the reduced text is not a plain host (a DNS name,
-  IPv4 address or bracketed IPv6 address, with an optional numeric port), or when a `?` or `#`
-  precedes the userinfo's `@`, which may then belong to a query instead. A scheme refusal and the explicit-registry refusal below name only the component,
+  IPv4 address or bracketed IPv6 address, with an optional numeric port), or when a `[`, `]`,
+  `?` or `#`, none of which a userinfo may hold, precedes the last `@`, which may then sit
+  inside IPv6 brackets or a query instead. A scheme refusal and the explicit-registry refusal below name only the component,
   the field and the form expected, and the Amazon S3 refusal names the reduced host.
 
   Some sources are not fetched from the host their field names, so the check follows Flux instead:

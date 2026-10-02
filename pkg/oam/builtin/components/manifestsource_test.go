@@ -418,6 +418,10 @@ func TestDisplayHost(t *testing.T) {
 		{"deploy:s3?cr3t@example.com", "", true},
 		{"deploy:s3#cr3t@example.com", "", true},
 		{"s3cr3t?x@example.com", "", true},
+		{"[fe80::1%zone@s3cr3t?x]:8443", "", true},
+		{"[fe80::1%zone@s3cr3t#x]:8443", "", true},
+		{"[fe80::1]@s3cr3t", "", true},
+		{"deploy@corp:s3cr3t@example.com:8443", "example.com:8443", true},
 		{"example.com?sig=a@s3cr3t", "", true},
 		{"s3cr3t]:8443", "", true},
 	}
