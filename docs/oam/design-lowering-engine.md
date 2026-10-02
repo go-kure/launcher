@@ -515,6 +515,58 @@ implementation. All three are answered by the shipped code:
   this registry, and its seed carries no allowed group, so a `DocumentLoweringRule`
   emitting a raw-claimed group during `Transform` is rejected exactly as before.
 
+## Where a lowering rule places each object
+
+A component lowering rule can place each object it emits in one of three shapes.
+Pick the shape by asking these questions in order (go-kure/launcher#741):
+
+1. **Is the object one of the role's own objects, named after the component?** Emit it
+   as a **same-name sibling member**. `webservice` emits a `deployment`, a `service` and
+   a `serviceaccount`; `postgresql` emits a `cnpg-cluster` and a `cnpg-objectstore`.
+2. **Is the object differently named and owned by exactly one member?** That means it
+   shares the member's lifecycle, namespace, tier and decorators, or the member is
+   wired to it by name (a mount, `envFrom`, `valuesFrom`). Emit it as a **trait on that
+   member**. Example: the claims `webservice` and `worker` synthesize from their `pvc`
+   volumes as `pvc` traits on the `deployment` member (`roleClaims`). `helm`'s values
+   ConfigMap is planned to take this shape (go-kure/launcher#702).
+3. **Otherwise**, emit it as a **separately named kind component**. That covers an
+   object that is shared or adopted across components, authored directly, or ordered
+   or placed on its own. Examples: `helm`'s generated sources, shared per URL through
+   `NameAllocator.NameOrAdopt`; `postgresql`'s `cnpg-pooler` and `cnpg-database`
+   components, which carry their own dependency and placement policies.
+
+### Kind twins
+
+Some traits build an object that a kind component also builds: `pvc` ↔
+`persistentvolumeclaim`, and `configmap` ↔ `configmap`. A trait like that must
+build its object through the kind's own code path, so the same properties give the
+same object on both routes. The trait adds only what ownership means.
+
+For `pvc` the kind's code path is `components.ParseClaimProperties`,
+`ApplyClaimPolicy` and `GenerateClaim`, and these are the ownership fields:
+
+- **Name**: the trait's `name` property, against the kind's component name. Both are
+  held to the DNS-1123 subdomain rule.
+- **`app` label**: the owning component, against the claim itself.
+- **Namespace**: the owner's. Claims stay in the application namespace under a Flux
+  namespace (go-kure/launcher#740 moves only the objects a moved Flux object reads by
+  name).
+- **Bundle and provenance**: the claim joins the owner's bundle, so the owner's
+  decorators (`force-replace`, `prune-protection`) reach it, and provenance names the
+  owner.
+- **Input-side default**: a ClusterProfile `pvc` capability can supply a default
+  `storageClassName` to the trait. The kind has no capability rendering, so this is
+  the one input-side difference. Giving the kind the same default is tracked in
+  go-kure/launcher#742.
+
+`pkg/cmd/kurel/pvc_twin_test.go` builds each intent both ways. It requires identical
+claims apart from the `app` label, the same refusals for malformed properties on both
+paths, and a decorator on the owner that reaches the trait's claim.
+
+The `configmap` twin follows go-kure/launcher#740, which changes the same trait.
+Today the two `configmap` paths still differ in value typing, `binaryData` and
+`immutable`, and labels.
+
 ## What this does not resolve
 
 - **`TransformAll` (document-level 1→N producing multiple `*stack.Cluster`s) is not

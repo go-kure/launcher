@@ -1,9 +1,11 @@
 package traits
 
 import (
+	"maps"
+	"strings"
+
 	"github.com/go-kure/kure/pkg/stack"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -12,14 +14,12 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-var validPVCAccessModes = map[string]bool{
-	string(corev1.ReadWriteOnce):    true,
-	string(corev1.ReadOnlyMany):     true,
-	string(corev1.ReadWriteMany):    true,
-	string(corev1.ReadWriteOncePod): true,
-}
-
 // PVCHandler handles OAM pvc traits, generating a standalone PersistentVolumeClaim.
+// It is the persistentvolumeclaim kind's twin (go-kure/launcher#741): every
+// claim field is read, defaulted and built by the kind's own
+// components.ParseClaimProperties, ApplyClaimPolicy and GenerateClaim. The
+// trait adds only what ownership means: the claim's name (its `name`
+// property), the owner's labels and namespace, and the owner's bundle.
 type PVCHandler struct{}
 
 // CanHandle returns true for the pvc trait type.
@@ -38,23 +38,18 @@ func (h *PVCHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[str
 	return rendering, nil
 }
 
-// PropertySchema declares the pvc trait's user-facing properties.
+// PropertySchema declares the pvc trait's user-facing properties: the
+// persistentvolumeclaim kind's, plus the claim's `name`. Only the
+// storageClassName description differs, since the trait alone takes a
+// platform default from the ClusterProfile `pvc` capability
+// (go-kure/launcher#742 tracks giving the kind the same).
 func (h *PVCHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
-		"name": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the PersistentVolumeClaim to create."},
-		// size is not schema-required: an EnvironmentPolicy may supply it via
-		// DefaultStorageSize. When neither the trait nor a policy default provides a
-		// value, ApplyPolicy errors (pvc has no last-resort handler default).
-		"size":             {Type: oam.PropertyTypeString, Description: "Requested storage size as a Kubernetes quantity (e.g. 10Gi); may instead come from an EnvironmentPolicy storage default."},
-		"storageClassName": {Type: oam.PropertyTypeString, Description: "StorageClass backing the volume."},
-		"accessModes": {
-			Type:        oam.PropertyTypeArray,
-			Default:     []any{"ReadWriteOnce"},
-			Description: "Access modes requested for the volume.",
-			Items:       &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: []any{"ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"}, Description: "A volume access mode (ReadWriteOnce, ReadOnlyMany, ReadWriteMany, or ReadWriteOncePod)."},
-		},
-		"volumeMode": {Type: oam.PropertyTypeString, Enum: []any{"Filesystem", "Block"}, Description: "The claim's volumeMode. Omitted leaves it unset, which the apiserver defaults to Filesystem; Block provisions a raw block device."},
-	}
+	schema := maps.Clone((&components.PersistentVolumeClaimHandler{}).PropertySchema())
+	schema["name"] = oam.PropertySchema{Type: oam.PropertyTypeString, Required: true, Description: "Name of the PersistentVolumeClaim to create (a DNS-1123 subdomain)."}
+	sc := schema["storageClassName"]
+	sc.Description = "StorageClass backing the claim. Unset takes the ClusterProfile pvc capability's storageClassName, else the cluster's default class; an empty string requests no class (no dynamic provisioning)."
+	schema["storageClassName"] = sc
+	return schema
 }
 
 // Apply parses the trait properties and appends a standalone PVC to the bundle.
@@ -78,145 +73,49 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 	if name == "" {
 		return nil, errors.New("required property 'name' missing or not a string")
 	}
-
-	// size is optional at parse time: a policy default may supply it. When present
-	// it must be a valid quantity; the "must be set" check runs in validateEffective
-	// after ApplyPolicy has had a chance to apply the policy default.
-	size, _ := props["size"].(string)
-	if size != "" {
-		if _, err := resource.ParseQuantity(size); err != nil {
-			return nil, errors.Errorf("invalid PVC size %q: %w", size, err)
-		}
+	// The kind's claim name is its component name, which document validation
+	// holds to the same rule.
+	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+		return nil, errors.Errorf("PVC name %q is not a valid DNS-1123 subdomain: %s", name, strings.Join(errs, "; "))
 	}
-
-	// An authored "" requests no StorageClass, which the API keeps apart from an
-	// unset class (the cluster default), as a workload's `pvc` volume does
-	// (go-kure/launcher#702).
-	var storageClass string
-	var storageClassExplicitEmpty bool
-	if s, ok := props["storageClassName"].(string); ok {
-		storageClass = s
-		storageClassExplicitEmpty = s == ""
+	claim, err := components.ParseClaimProperties(props)
+	if err != nil {
+		return nil, errors.Wrapf(err, "PVC %q", name)
 	}
-
-	accessModes := []string{string(corev1.ReadWriteOnce)}
-	// rawModes != nil: a typed-nil []any is absent and takes the default, as an
-	// untyped null does, not "empty when specified" (go-kure/launcher#465).
-	if rawModes, ok := props["accessModes"].([]any); ok && rawModes != nil {
-		if len(rawModes) == 0 {
-			return nil, errors.New("accessModes must not be empty when specified")
-		}
-		accessModes = nil
-		for i, m := range rawModes {
-			s, ok := m.(string)
-			if !ok {
-				return nil, errors.Errorf("accessModes[%d]: expected string, got %T", i, m)
-			}
-			if !validPVCAccessModes[s] {
-				return nil, errors.Errorf("invalid accessMode %q: must be one of ReadWriteOnce, ReadOnlyMany, ReadWriteMany, ReadWriteOncePod", s)
-			}
-			accessModes = append(accessModes, s)
-		}
-	}
-
-	// volumeMode (go-kure/launcher#385) is read strictly, unlike the older keys
-	// above: a wrongly typed or unknown value is an error, not an unset mode.
-	// Omitted or null leaves the claim's mode unset.
-	var volumeMode corev1.PersistentVolumeMode
-	if v, present := props["volumeMode"]; present && v != nil {
-		s, ok := v.(string)
-		if !ok {
-			return nil, errors.Errorf("volumeMode: must be a string, got %T", v)
-		}
-		switch mode := corev1.PersistentVolumeMode(s); mode {
-		case corev1.PersistentVolumeFilesystem, corev1.PersistentVolumeBlock:
-			volumeMode = mode
-		default:
-			return nil, errors.Errorf("volumeMode: invalid value %q, want Filesystem or Block", s)
-		}
-	}
-
-	return &PVCTraitConfig{
-		Name:          name,
-		componentName: app.Name,
-		Size:          size,
-		StorageClass:  storageClass,
-		// Set only for an authored "": storageClass is then "" too.
-		StorageClassExplicitEmpty: storageClassExplicitEmpty,
-		AccessModes:               accessModes,
-		VolumeMode:                volumeMode,
-	}, nil
+	return &PVCTraitConfig{Name: name, componentName: app.Name, Claim: claim}, nil
 }
 
 // PVCTraitConfig implements stack.ApplicationConfig for standalone PVC traits.
 type PVCTraitConfig struct {
+	// Name is the claim's name.
 	Name          string
 	componentName string
-	Size          string
-	StorageClass  string
-	// StorageClassExplicitEmpty marks an authored storageClassName "": the
-	// claim then requests no class instead of the cluster default.
-	StorageClassExplicitEmpty bool
-	AccessModes               []string
-	// VolumeMode is the authored volumeMode, empty when unauthored.
-	VolumeMode corev1.PersistentVolumeMode
+	// Claim carries the claim's fields as the persistentvolumeclaim kind
+	// parses them. Claim.Size is "" until a policy default fills an
+	// unauthored size.
+	Claim components.PVCConfig
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource
 // provenance attribution.
 func (c *PVCTraitConfig) ComponentName() string { return c.componentName }
 
-// ApplyPolicy defaults the PVC size from the policy when the trait omitted it,
-// validates the effective size, and enforces the policy storage-size limit.
-// Precedence: authored > policy default > (error, no handler default). A nil
-// policy means no default and no cap.
+// ApplyPolicy applies the kind's storage policy: an unauthored size takes the
+// policy default, and the effective size must be positive and within the
+// policy maximum. A nil policy means no default and no cap.
 func (c *PVCTraitConfig) ApplyPolicy(p oam.Policy) error {
-	if p != nil {
-		c.Size = applyDefaultResource(c.Size, p.DefaultStorageSize())
-	}
-	if err := c.validateEffective(); err != nil {
-		return err
-	}
-	if p != nil {
-		if err := enforceMaxStorageSize(c.Size, p.MaxStorageSize()); err != nil {
-			return errors.Errorf("PVC %q %w", c.Name, err)
-		}
+	if err := components.ApplyClaimPolicy(&c.Claim, p); err != nil {
+		return errors.Wrapf(err, "PVC %q", c.Name)
 	}
 	return nil
 }
 
-// validateEffective owns the effective-size validation for the PVC: it runs
-// after the policy default is applied (from ApplyPolicy) and defensively from
-// Generate so a config built without ApplyPolicy cannot emit an empty size.
-func (c *PVCTraitConfig) validateEffective() error {
-	if c.Size == "" {
-		return errors.Errorf("PVC %q size is required (set it on the trait or via an EnvironmentPolicy storage default)", c.Name)
-	}
-	if _, err := resource.ParseQuantity(c.Size); err != nil {
-		return errors.Errorf("invalid PVC size %q: %w", c.Size, err)
-	}
-	return nil
-}
-
-// Generate delegates to components.BuildPVC so the trait shares the same PVC construction path.
+// Generate builds the claim through the kind's GenerateClaim, under the
+// trait's name and with the owning component's labels.
 func (c *PVCTraitConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	// Defensive: reject an unset/invalid size even if ApplyPolicy was bypassed.
-	if err := c.validateEffective(); err != nil {
-		return nil, err
-	}
-
-	labels := componentLabels(c.componentName)
-	pvc, err := components.BuildPVC(components.PVCConfig{
-		Name:                      c.Name,
-		Size:                      c.Size,
-		StorageClass:              c.StorageClass,
-		StorageClassExplicitEmpty: c.StorageClassExplicitEmpty,
-		AccessModes:               c.AccessModes,
-		VolumeMode:                c.VolumeMode,
-	}, app.Namespace, labels)
+	objs, err := components.GenerateClaim(c.Claim, c.Name, app.Namespace, componentLabels(c.componentName))
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "PVC %q", c.Name)
 	}
-	obj := client.Object(pvc)
-	return []*client.Object{&obj}, nil
+	return objs, nil
 }
