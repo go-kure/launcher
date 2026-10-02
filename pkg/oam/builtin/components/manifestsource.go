@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	kureio "github.com/go-kure/kure/pkg/io"
@@ -168,7 +169,7 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 		if redirectRefusal != nil {
 			return nil, errors.Errorf("manifest source: fetch %q: %w", shown, redirectRefusal)
 		}
-		return nil, errors.Errorf("manifest source: fetch %q: %s", shown, transportCause(err))
+		return nil, errors.Errorf("manifest source: fetch %q: %s", shown, orDefault(failureCause(err), "request failed"))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -176,7 +177,7 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes+1))
 	if err != nil {
-		return nil, errors.Errorf("manifest source: read %q: %w", shown, err)
+		return nil, errors.Errorf("manifest source: read %q: %s", shown, orDefault(failureCause(err), "response body could not be read"))
 	}
 	if int64(len(body)) > maxManifestBytes {
 		return nil, errors.Errorf("manifest source: %q response exceeds max size %d bytes", shown, maxManifestBytes)
@@ -199,21 +200,40 @@ func displayURL(rawURL string) string {
 	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}).String()
 }
 
-// transportCause names why a request failed without repeating text net/http
-// builds from a URL: its *url.Error names the request URL with only the
-// password masked, and a malformed redirect Location is quoted whole. A dial,
-// lookup or connection failure (*net.OpError) names only an address, so its
-// text is kept; a timeout is named; anything else is reported generically.
-func transportCause(err error) string {
+// failureCause names why a request or a response read failed using fixed text
+// only, or returns "" when it has none. An error's own text is never repeated:
+// net/http's *url.Error names the request URL with only the password masked, a
+// malformed redirect Location or response trailer is quoted whole, and a nested
+// TLS error quotes the server's certificate, any of which can carry the URL's
+// credential. Named are a timeout, a failed host lookup, and otherwise the
+// failing network operation (dial, read, proxyconnect, …) with its system error
+// (connection refused, …).
+func failureCause(err error) string {
+	var nerr net.Error
+	if errors.As(err, &nerr) && nerr.Timeout() {
+		return "timed out"
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return "host lookup failed"
+	}
 	var opErr *net.OpError
 	if errors.As(err, &opErr) {
-		return opErr.Error()
+		var errno syscall.Errno
+		if errors.As(err, &errno) {
+			return opErr.Op + " failed: " + errno.Error()
+		}
+		return opErr.Op + " failed"
 	}
-	var uerr *url.Error
-	if errors.As(err, &uerr) && uerr.Timeout() {
-		return "request timed out"
+	return ""
+}
+
+// orDefault returns cause, or def when cause is empty.
+func orDefault(cause, def string) string {
+	if cause == "" {
+		return def
 	}
-	return "request failed"
+	return cause
 }
 
 // checkURL enforces the scheme allowlist and the policy host allowlist on a URL
