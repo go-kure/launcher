@@ -114,7 +114,8 @@ func (h *OCIHandler) ToApplicationConfig(component *oam.Component, namespace str
 	}
 	cfg.URL = srcURL
 	if !strings.HasPrefix(cfg.URL, "oci://") {
-		return nil, errors.Errorf("oci: source.url %q must use the oci:// scheme", cfg.URL)
+		// Not quoted: the url can carry a credential (userinfo, a query).
+		return nil, errors.New("oci: source.url must use the oci:// scheme")
 	}
 
 	version, present, err := parseStringField(props, "version", "oci: version")
@@ -269,9 +270,10 @@ func (c *OCIConfig) ApplyPolicy(p oam.Policy) error {
 		return nil
 	}
 	if !ociNamesRegistry(c.URL, true) {
-		return errors.Errorf("oci: source.url: %q does not name its registry explicitly, so Flux may resolve it against Docker Hub: "+
-			"under an allowed-registries policy write oci://<registry>/<repository> with a registry that is localhost or contains \".\" or \":\" "+
-			"(e.g. oci://docker.io/library/app, oci://registry.example:5000/org/app)", c.URL)
+		// Not quoted: the first segment can be userinfo, which can carry a credential.
+		return errors.New("oci: source.url: the url does not name its registry explicitly, so Flux may resolve it against Docker Hub: " +
+			"under an allowed-registries policy write oci://<registry>/<repository> with a registry that is localhost or contains \".\" or \":\" " +
+			"(e.g. oci://docker.io/library/app, oci://registry.example:5000/org/app)")
 	}
 	return enforceAllowedURLHosts(c.URL, allowed)
 }

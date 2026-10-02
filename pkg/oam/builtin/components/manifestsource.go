@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -151,15 +152,22 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 	}
 	shown := displayURL(rawURL)
 	// redirectRefusal is this function's own refusal of a redirect hop, kept so
-	// it can be reported in place of the client's error, which wraps it.
+	// it can be reported in place of the client's error, which wraps it. It is
+	// fixed text: the redirect target is the server's, and its scheme, host or
+	// userinfo can carry anything, a reflected credential included.
 	var redirectRefusal error
 	httpClient := &http.Client{
 		Timeout: fetchTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxRedirects {
-				redirectRefusal = errors.Errorf("manifest source: too many redirects (>%d)", maxRedirects)
-			} else {
-				redirectRefusal = checkURL(req.URL.String(), allowedHosts)
+			switch target := req.URL.String(); {
+			case len(via) >= maxRedirects:
+				redirectRefusal = errors.Errorf("too many redirects (>%d)", maxRedirects)
+			case validateURLScheme(target) != nil:
+				redirectRefusal = errors.New("redirect to a url that is not http(s) refused")
+			case enforceAllowedURLHosts(target, allowedHosts) != nil:
+				redirectRefusal = errors.New("redirect to a host not in allowed registries refused")
+			default:
+				redirectRefusal = nil
 			}
 			return redirectRefusal
 		},
@@ -169,7 +177,7 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 		if redirectRefusal != nil {
 			return nil, errors.Errorf("manifest source: fetch %q: %w", shown, redirectRefusal)
 		}
-		return nil, errors.Errorf("manifest source: fetch %q: %s", shown, orDefault(failureCause(err), "request failed"))
+		return nil, &fetchError{msg: "manifest source: fetch " + strconv.Quote(shown) + ": " + orDefault(failureCause(err), "request failed"), cause: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -177,7 +185,7 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes+1))
 	if err != nil {
-		return nil, errors.Errorf("manifest source: read %q: %s", shown, orDefault(failureCause(err), "response body could not be read"))
+		return nil, &fetchError{msg: "manifest source: read " + strconv.Quote(shown) + ": " + orDefault(failureCause(err), "response body could not be read"), cause: err}
 	}
 	if int64(len(body)) > maxManifestBytes {
 		return nil, errors.Errorf("manifest source: %q response exceeds max size %d bytes", shown, maxManifestBytes)
@@ -192,14 +200,52 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 // capability URL puts its token (https://host/download/<token>/x.yaml); and the
 // query, where a signed URL does. A URL with no host, such as the opaque
 // https:user:token@host, which parses with everything after the scheme in
-// Opaque, is not rendered at all.
+// Opaque, is not rendered at all. The host itself goes through displayHost,
+// which drops an IPv6 zone.
 func displayURL(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" {
 		return "(url without a host)"
 	}
-	return (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
+	host, _ := displayHost(u.Host)
+	return u.Scheme + "://" + host
 }
+
+// displayHost reduces a host, as urlHost or url.URL.Host returns it, to the part
+// that is safe to print: what follows the last "@" (the userinfo is dropped), up
+// to the first "?" or "#" (a query or fragment urlHost keeps is dropped), with
+// an IPv6 zone ("%" up to the closing "]") dropped, since net/url keeps
+// arbitrary zone text in Host. The port stays. trimmed reports whether anything
+// was dropped.
+func displayHost(host string) (shown string, trimmed bool) {
+	shown = host
+	if i := strings.IndexAny(shown, "?#"); i >= 0 {
+		shown = shown[:i]
+	}
+	if i := strings.LastIndex(shown, "@"); i >= 0 {
+		shown = shown[i+1:]
+	}
+	if i := strings.Index(shown, "%"); i >= 0 {
+		rest := ""
+		if j := strings.Index(shown[i:], "]"); j >= 0 {
+			rest = shown[i+j:]
+		}
+		shown = shown[:i] + rest
+	}
+	return shown, shown != host
+}
+
+// fetchError is a fetch or read failure whose text is fixed (see failureCause)
+// but whose cause stays reachable through errors.Is and errors.As, so a caller
+// can still tell a timeout or a refused connection from other failures. Its
+// Error never includes the cause's own text.
+type fetchError struct {
+	msg   string
+	cause error
+}
+
+func (e *fetchError) Error() string { return e.msg }
+func (e *fetchError) Unwrap() error { return e.cause }
 
 // failureCause names why a request or a response read failed using fixed text
 // only, or returns "" when it has none. An error's own text is never repeated:
@@ -261,7 +307,14 @@ func enforceAllowedURLHosts(rawURL string, allowed []string) error {
 			return nil
 		}
 	}
-	return errors.Errorf("source registry %q is not in allowed registries %v", host, allowed)
+	// The refusal names the host as displayHost renders it: the compared value
+	// can carry the url's userinfo, query or IPv6 zone, any of which can hold a
+	// credential. Matching above is unchanged, so such a url still fails closed.
+	shown, trimmed := displayHost(host)
+	if trimmed {
+		return errors.Errorf("source registry %q is not in allowed registries %v; the url's userinfo, IPv6 zone, query or fragment, which no entry matches, is not shown", shown, allowed)
+	}
+	return errors.Errorf("source registry %q is not in allowed registries %v", shown, allowed)
 }
 
 // urlHost extracts the host, port included, that a source URL or endpoint names.
