@@ -840,6 +840,21 @@ claim. The rule turns each one into a synthesized `pvc` trait on its
 `deployment` member, named `<component>-<volume>` as before, and rewrites the
 volume to reference it by `claimName`. The output is unchanged.
 
+Such a volume that leaves `storageClass` unauthored (absent or `null`) takes
+the ClusterProfile `pvc` capability's `storageClassName`, as an authored `pvc`
+trait and the `persistentvolumeclaim` kind do (go-kure/launcher#746). The
+synthesized trait is sealed, so the engine merges no rendering into it; the
+rule reads the binding through `LoweringContext.Capability`, which records
+`pvc` in `ConsumedCapabilities`, and fills the value itself. An authored
+class, `""` included, wins. **Pre-GA output change**: such a volume used to
+ignore the binding, so an existing claim built from it got the cluster's
+default class when it was created, if the cluster had one. A claim's
+assigned `storageClassName` cannot change: if the binding's class differs
+from it, the claim fails to apply until it is recreated or the volume
+authors the assigned class. A claim created with no class may take one
+later, so it applies. `volumeClaimTemplates` takes no capability default
+(go-kure/launcher#761).
+
 - `claimName` must be a DNS-1123 subdomain.
 - `size` and `storageClass` are refused alongside it, because the referenced
   claim states its own (`volume "data": size cannot be set with claimName; …`).
@@ -1750,10 +1765,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `null`) comes from the ClusterProfile `pvc` capability's
     `storageClassName`, as the trait's does (go-kure/launcher#742); with no
     binding it stays unset, which is the cluster's default class. **Pre-GA
-    output change**: the kind used to ignore that binding, and since a claim's
-    `storageClassName` is immutable, an existing claim built from the kind
-    under a `pvc` binding now builds with a different class and fails to apply
-    until it is recreated or the class is authored. An unauthored `size`
+    output change**: the kind used to ignore that binding, so an existing
+    claim built from it got the cluster's default class when it was created,
+    if the cluster had one. A claim's assigned `storageClassName` cannot
+    change: if the binding's class differs from it, the claim fails to apply
+    until it is recreated or the assigned class is authored. A claim created
+    with no class may take one later, so it applies. An unauthored `size`
     comes from the EnvironmentPolicy storage default; with neither, the build
     fails with `size: required …`. The policy's maximum storage size applies
     either way. A workload mounts the claim through a `pvc` volume's

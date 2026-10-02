@@ -43,7 +43,7 @@ spec:
 | `metadata.name` | string | Identifies the cluster; referenced in build tooling |
 | `spec.gitopsEngine` | string | GitOps engine whose delivery CRs the built-in components emit. Accepted: `"fluxcd"` (default, optional). |
 | `spec.capabilities` | map | Keys are trait types; values are capability bindings |
-| `capabilities.<type>.rendering` | map | Platform values merged into trait properties before handler invocation, and into the listed properties of a component whose handler implements `ComponentCapabilityDefaults` (the `persistentvolumeclaim` kind reads `pvc`'s `storageClassName`) |
+| `capabilities.<type>.rendering` | map | Platform values merged into trait properties before handler invocation, and into the listed properties of a component whose handler implements `ComponentCapabilityDefaults` (the `persistentvolumeclaim` kind reads `pvc`'s `storageClassName`). A lowering rule may read a binding through `LoweringContext.Capability`: `webservice` and `worker` fill `pvc`'s `storageClassName` into the claims their `pvc` volumes describe (go-kure/launcher#746) |
 
 ### Capability schema
 

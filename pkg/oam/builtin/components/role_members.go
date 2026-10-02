@@ -55,12 +55,22 @@ func roleServiceAccount(comp *oam.Component, depProps map[string]any, traits []o
 // constraints still see it. depProps must be the rule's own copy: its
 // `volumes` list is replaced, never edited in place. parseVolumes has already
 // accepted every volume, so only the shape this rewrite reads is assumed.
-func roleClaims(comp *oam.Component, depProps map[string]any) ([]oam.Trait, error) {
+//
+// A synthesized trait is sealed, so the engine merges no capability rendering
+// into it. A volume that leaves storageClass unauthored (absent or null)
+// therefore takes the ClusterProfile `pvc` capability's storageClassName here,
+// as an authored pvc trait and the persistentvolumeclaim kind take it
+// (go-kure/launcher#746). An authored value, "" included, wins. The binding is
+// read through lctx, so its key is recorded as consumed, and only when a
+// volume generates a claim.
+func roleClaims(comp *oam.Component, depProps map[string]any, lctx oam.LoweringContext) ([]oam.Trait, error) {
 	vols, ok := depProps["volumes"].([]any)
 	if !ok {
 		return nil, nil
 	}
 	var traits []oam.Trait
+	var platformClass any
+	platformRead := false
 	rewritten := make([]any, len(vols))
 	for i, v := range vols {
 		rewritten[i] = v
@@ -78,8 +88,18 @@ func roleClaims(comp *oam.Component, depProps map[string]any) ([]oam.Trait, erro
 			return nil, errors.Errorf("PVC name %q is not a valid DNS-1123 subdomain: %s", claim, strings.Join(errs, "; "))
 		}
 		props := map[string]any{"name": claim, "size": m["size"]}
+		if !platformRead {
+			platformRead = true
+			sc, err := capabilityStorageClass(lctx)
+			if err != nil {
+				return nil, err
+			}
+			platformClass = sc
+		}
 		if sc, present := authoredValue(m, "storageClass"); present {
 			props["storageClassName"] = sc
+		} else if platformClass != nil {
+			props["storageClassName"] = platformClass
 		}
 		for _, key := range []string{"accessModes", "volumeMode"} {
 			if val, present := authoredValue(m, key); present {
@@ -98,4 +118,24 @@ func roleClaims(comp *oam.Component, depProps map[string]any) ([]oam.Trait, erro
 		depProps["volumes"] = rewritten
 	}
 	return traits, nil
+}
+
+// capabilityStorageClass returns the storageClassName the ClusterProfile `pvc`
+// capability renders, or nil when the profile binds no `pvc` key or the
+// rendering leaves it absent or null. A value that is not a string is refused:
+// the claim's storageClassName is one, and anything else would share a
+// profile value with the output.
+func capabilityStorageClass(lctx oam.LoweringContext) (any, error) {
+	binding, ok := lctx.Capability("pvc")
+	if !ok {
+		return nil, nil
+	}
+	v, present := authoredValue(binding.Rendering, "storageClassName")
+	if !present {
+		return nil, nil
+	}
+	if _, isString := v.(string); !isString {
+		return nil, errors.Errorf("capability \"pvc\" storageClassName: expected string, got %T", v)
+	}
+	return v, nil
 }

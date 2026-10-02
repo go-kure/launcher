@@ -227,6 +227,92 @@ func TestPVCTwin_CapabilityDefaultBothWays(t *testing.T) {
 	}
 }
 
+// roleVolumeTwinApp returns an Application with one role component "api" of
+// kind that mounts the claim "api-data" at /data either way: as a pvc volume
+// "data" describing the claim, or as an authored pvc trait "api-data" the
+// volume references by claimName. volumeProps are the claim fields as the
+// volume names them; the trait takes the same ones, storageClass renamed to
+// its storageClassName.
+func roleVolumeTwinApp(t *testing.T, kind string, viaTrait bool, volumeProps map[string]any) string {
+	t.Helper()
+	vol := map[string]any{"name": "data", "type": "pvc", "mountPath": "/data"}
+	comp := map[string]any{"name": "api", "type": kind}
+	if viaTrait {
+		traitProps := map[string]any{"name": "api-data"}
+		for k, v := range volumeProps {
+			if k == "storageClass" {
+				k = "storageClassName"
+			}
+			traitProps[k] = v
+		}
+		vol["claimName"] = "api-data"
+		comp["traits"] = []any{map[string]any{"type": "pvc", "properties": traitProps}}
+	} else {
+		for k, v := range volumeProps {
+			vol[k] = v
+		}
+	}
+	comp["properties"] = map[string]any{"image": "ghcr.io/example/api:v1.0.0", "volumes": []any{vol}}
+	app := map[string]any{
+		"apiVersion": "launcher.gokure.dev/v1alpha1",
+		"kind":       "Application",
+		"metadata":   map[string]any{"name": "my-app", "namespace": "default"},
+		"spec":       map[string]any{"components": []any{comp}},
+	}
+	out, err := yaml.Marshal(app)
+	if err != nil {
+		t.Fatalf("marshal app: %v", err)
+	}
+	return string(out)
+}
+
+// TestPVCTwin_RoleVolumeTakesTheCapabilityDefault requires a webservice or
+// worker pvc volume and an authored pvc trait to build the same claim under a
+// ClusterProfile `pvc` binding (go-kure/launcher#746). The volume's claim is a
+// sealed trait the rule synthesizes, which the engine merges no rendering
+// into, so the rule fills the platform class itself: unset or null takes it,
+// and an authored class, "" included, wins, as on the trait.
+func TestPVCTwin_RoleVolumeTakesTheCapabilityDefault(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]any
+		want  any // the claim's spec.storageClassName; nil means absent
+	}{
+		{name: "unset takes the platform class", props: map[string]any{"size": "1Gi"}, want: "platform-ssd"},
+		{name: "null takes the platform class", props: map[string]any{"size": "1Gi", "storageClass": nil}, want: "platform-ssd"},
+		{name: "authored class wins", props: map[string]any{"size": "1Gi", "storageClass": "slow"}, want: "slow"},
+		{name: "authored empty string wins", props: map[string]any{"size": "1Gi", "storageClass": ""}, want: ""},
+	}
+	for _, kind := range []string{"webservice", "worker"} {
+		for _, tc := range cases {
+			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+				var claims []map[string]any
+				for _, viaTrait := range []bool{false, true} {
+					docs, stderr, err := buildPVCDocsWithProfile(t, roleVolumeTwinApp(t, kind, viaTrait, tc.props), pvcCapabilityClusterYAML)
+					if err != nil {
+						t.Fatalf("viaTrait=%v: %v\n%s", viaTrait, err, stderr)
+					}
+					claim := claimDoc(t, docs, "api-data")
+					spec, _ := claim["spec"].(map[string]any)
+					got, present := spec["storageClassName"]
+					if !present {
+						got = nil
+					}
+					if got != tc.want {
+						t.Errorf("viaTrait=%v: spec.storageClassName = %#v (present %v), want %#v", viaTrait, got, present, tc.want)
+					}
+					claims = append(claims, claim)
+				}
+				if !reflect.DeepEqual(claims[0], claims[1]) {
+					v, _ := yaml.Marshal(claims[0])
+					tr, _ := yaml.Marshal(claims[1])
+					t.Errorf("claims differ\nvolume:\n%s\ntrait:\n%s", v, tr)
+				}
+			})
+		}
+	}
+}
+
 func labelOf(obj map[string]any, key string) string {
 	md, _ := obj["metadata"].(map[string]any)
 	labels, _ := md["labels"].(map[string]any)
