@@ -1,11 +1,16 @@
 package components
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"syscall"
 	"testing"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -219,14 +224,27 @@ func TestResolve_URLRejectsRedirectToDisallowedHost(t *testing.T) {
 
 // TestResolve_URLErrorsHideCredential pins that a fetch error names the url
 // without its userinfo, user included, and without its query, while keeping
-// host and path: the non-2xx refusal, and a transport failure, whose *url.Error
-// from net/http names the url with only the password masked.
+// host and path: the non-2xx refusal; a transport failure, whose *url.Error
+// from net/http names the url with only the password masked; a malformed
+// redirect Location, which net/http quotes whole; and an opaque url, which
+// parses with its userinfo in Opaque.
 func TestResolve_URLErrorsHideCredential(t *testing.T) {
 	notFound := httptest.NewServer(http.NotFoundHandler())
 	defer notFound.Close()
-	closed := httptest.NewServer(http.NotFoundHandler())
-	closedURL := closed.URL
-	closed.Close()
+	// hangUp closes every connection without a response: a transport failure
+	// that does not depend on a released port staying free.
+	hangUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}))
+	defer hangUp.Close()
+	badRedirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "https://deploy:s3cr3t@example.com/x?sig=s3cr3t#bad%zz")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer badRedirect.Close()
 
 	withCred := func(base, userinfo, rest string) string {
 		return strings.Replace(base, "://", "://"+userinfo+"@", 1) + rest
@@ -237,8 +255,10 @@ func TestResolve_URLErrorsHideCredential(t *testing.T) {
 		{"404, user and token", withCred(notFound.URL, "deploy:s3cr3t", "/crds.yaml"), notFound.URL + "/crds.yaml\": unexpected status 404"},
 		{"404, token as user", withCred(notFound.URL, "s3cr3t", "/crds.yaml"), notFound.URL + "/crds.yaml\": unexpected status 404"},
 		{"404, signed query", notFound.URL + "/crds.yaml?sig=s3cr3t", notFound.URL + "/crds.yaml\": unexpected status 404"},
-		{"transport failure, user and token", withCred(closedURL, "deploy:s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + closedURL + "/crds.yaml\": "},
-		{"transport failure, token as user", withCred(closedURL, "s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + closedURL + "/crds.yaml\": "},
+		{"transport failure, user and token", withCred(hangUp.URL, "deploy:s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + hangUp.URL + "/crds.yaml\": request failed"},
+		{"transport failure, token as user", withCred(hangUp.URL, "s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + hangUp.URL + "/crds.yaml\": request failed"},
+		{"malformed redirect location", badRedirect.URL + "/crds.yaml", "manifest source: fetch \"" + badRedirect.URL + "/crds.yaml\": request failed"},
+		{"opaque url", "https:deploy:s3cr3t@example.com/crds.yaml", "manifest source: fetch \"(url without a host)\": request failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -250,6 +270,28 @@ func TestResolve_URLErrorsHideCredential(t *testing.T) {
 				t.Errorf("error %q repeats the credential", err)
 			}
 		})
+	}
+}
+
+// TestTransportCause pins which client failures keep their text: a dial or
+// lookup failure names only an address, a timeout is named, and anything else,
+// such as net/http's quoted malformed Location, is reported generically.
+func TestTransportCause(t *testing.T) {
+	const leaky = "https://deploy:s3cr3t@example.com/x"
+	dial := &net.OpError{Op: "dial", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9}, Err: syscall.ECONNREFUSED}
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"dial failure", &url.Error{Op: "Get", URL: leaky, Err: dial}, dial.Error()},
+		{"timeout", &url.Error{Op: "Get", URL: leaky, Err: context.DeadlineExceeded}, "request timed out"},
+		{"other", &url.Error{Op: "Get", URL: leaky, Err: errors.Errorf("failed to parse Location header %q", leaky)}, "request failed"},
+	}
+	for _, tc := range cases {
+		if got := transportCause(tc.err); got != tc.want {
+			t.Errorf("%s: transportCause = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 
