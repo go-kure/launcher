@@ -22,24 +22,33 @@
 #              no `owner/` before it (so `launcher#278`, `kure#539`,
 #              `pre-launcher#278` and `...launcher#278` are caught;
 #              `go-kure/launcher#278` and `owner/kure-launcher#278` are not)
+#   emphasised  either of the above wrapped in single underscores, which the
+#               two patterns miss because `_` counts as part of a word (so
+#               `_#227_` and `_kure#539_` are caught; `__#12__`, `a_#12_b` and
+#               `_go-kure/kure#539_` are not)
 # Ignored before matching, because each is a location or code, not a reference:
 #   - a Markdown link target `](...)` with no whitespace or quote and at most one
 #     level of nested parentheses, so `](#12-foo)`, `](design.md#12-foo)` and
 #     `](design(v2).md#12-foo)` pass, while `f[i]("#227")` does not;
 #   - a URL `scheme://...` up to whitespace, a quote or a bracket, so
 #     `https://example.com/#12-foo` passes;
-#   - a printf verb carrying the `#` flag, so `%#12x`, `%+#12.6g` and the
-#     indexed `%#12[1]x` pass;
-#   - a shell prefix trim `${name#...}` or `${name##...}`, so `${port#80}` passes.
+#   - a printf verb carrying the `#` flag, so `%#12x`, `%+#12.6g`, the indexed
+#     `%#12[1]x` and the `*` width or precision `%#12.*x` pass;
+#   - a shell prefix trim `${name#...}` or `${name##...}`, also on an array
+#     element, so `${port#80}` and `${items[0]#80}` pass.
 #
 # Escape hatch: `allow-ref` anywhere on the same line exempts that line. Needed
 # for an all-digit CSS colour such as `#123`, which no pattern can tell apart
-# from a reference.
+# from a reference, and for a bare URL with parentheses before its fragment,
+# such as `https://example.com/v2_(legacy)#123`: the URL ends at the `(`, so
+# `)#123` reads as a reference. A Markdown link around the URL also works.
 #
 # Not caught: a single-digit `#N` or `name#N` (prose such as "step #1" or a
 # message such as "resolve#2" would trip it), an ownerless all-numeric
 # repository name such as `123#456` (digits on both sides of `#` also occur in
-# ordinary text), and a qualified `owner/repo#N` that names the wrong repository.
+# ordinary text), a qualified `owner/repo#N` that names the wrong repository,
+# and a reference that quoting moves out of a shell trim's pattern, such as
+# `echo "${x#" "see #227" "}"` (telling it apart needs quote-aware parsing).
 #
 # Usage: check-issue-refs.sh [--root DIR]
 # Exit:  0 clean, 1 references found, 2 usage or scan error.
@@ -57,12 +66,13 @@ done
 
 BARE='(^|[^A-Za-z0-9_&])#[0-9]{2,5}([^A-Za-z0-9_]|$)'
 PART='(^|[^A-Za-z0-9_./-])[A-Za-z0-9_.-]*[A-Za-z][A-Za-z0-9_.-]*#[0-9]{2,5}([^A-Za-z0-9_]|$)'
+EMPH='(^|[^A-Za-z0-9_&])_([A-Za-z0-9.-]*[A-Za-z][A-Za-z0-9.-]*)?#[0-9]{2,5}_([^A-Za-z0-9_]|$)'
 
 # Strippers: group 1 is the text before the match, the last group the text after.
 LINK='^(.*)\]\(([^()[:space:]"'"'"'`]|\([^()[:space:]"'"'"'`]*\))*\)(.*)$'
 URL='^(.*)[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]<>()"'"'"'`]*(.*)$'
-VERB='^(.*)%[-+ 0]*#[-+ #0]*(\[[0-9]+\])?[0-9]*(\.[0-9]*)?(\[[0-9]+\])?[A-Za-z](.*)$'
-TRIM='^(.*)\$\{[A-Za-z_][A-Za-z0-9_]*##?[^}]*\}(.*)$'
+VERB='^(.*)%[-+ 0]*#[-+ #0]*(\[[0-9]+\])?(\*|[0-9]*)(\.(\[[0-9]+\])?(\*|[0-9]*))?(\[[0-9]+\])?[A-Za-z](.*)$'
+TRIM='^(.*)\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]}]*\])?##?[^}]*\}(.*)$'
 
 hits="$(mktemp)"
 trap 'rm -f "$hits"' EXIT
@@ -71,7 +81,7 @@ trap 'rm -f "$hits"' EXIT
 # -z separates file name, line number and text with NUL, so a `:` in a file name
 # cannot shift the fields. Exit 1 means no candidate at all; above 1 is an error.
 rc=0
-git -C "$ROOT" grep -z --no-color -n -I -E -e "$BARE" -e "$PART" -- \
+git -C "$ROOT" grep -z --no-color -n -I -E -e "$BARE" -e "$PART" -e "$EMPH" -- \
   '*.go' '*.md' '*.sh' '*.yml' '*.yaml' '*.toml' '*.json' \
   ':!CHANGELOG.md' ':!testdata/*' ':!*/testdata/*' \
   ':!scripts/check-issue-refs.sh' ':!scripts/check-issue-refs-test.sh' >"$hits" || rc=$?
@@ -92,12 +102,12 @@ while IFS= read -r -d '' file && IFS= read -r -d '' lineno && IFS= read -r text;
     stripped="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
   done
   while [[ "$stripped" =~ $VERB ]]; do
-    stripped="${BASH_REMATCH[1]}${BASH_REMATCH[5]}"
+    stripped="${BASH_REMATCH[1]}${BASH_REMATCH[8]}"
   done
   while [[ "$stripped" =~ $TRIM ]]; do
-    stripped="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+    stripped="${BASH_REMATCH[1]}${BASH_REMATCH[3]}"
   done
-  if [[ "$stripped" =~ $BARE || "$stripped" =~ $PART ]]; then
+  if [[ "$stripped" =~ $BARE || "$stripped" =~ $PART || "$stripped" =~ $EMPH ]]; then
     echo "$file:$lineno: $text"
     found=$((found + 1))
   fi
