@@ -210,6 +210,9 @@ func TestComponentCapabilityDefaults_ValidatedAgainstComponent(t *testing.T) {
 		handler   ComponentHandler
 		trait     bool // register a "store" trait handler that accepts anything
 		rule      bool // register the "store-trait" trait lowering rule
+		vad       bool // the registered handler or rule implements ValidateAndApplyDefaults
+		def       bool // load a CapabilityDefinition for "store"
+		builtin   bool // register the "store" trait handler as built in
 		rendering map[string]any
 		want      map[string]any
 		wantErr   []string
@@ -234,25 +237,57 @@ func TestComponentCapabilityDefaults_ValidatedAgainstComponent(t *testing.T) {
 			handler:   &keyedDefaultsHandler{key: "store", keys: []string{"class"}},
 			rendering: map[string]any{"class": "fast"},
 			wantErr:   []string{`component "data"`, `capability "store" defaults: nothing validates rendering keys ["class"]`, "implement PropertySchemaProvider"}},
-		{name: "no schema, trait handler registered",
+		// A registered trait side counts only when it validates the rendering
+		// (go-kure/launcher#772).
+		{name: "no schema, trait handler that does not validate",
 			handler: &keyedDefaultsHandler{key: "store", keys: []string{"class"}}, trait: true,
 			rendering: map[string]any{"class": "fast"},
-			want:      map[string]any{"class": "fast"}},
-		{name: "no schema, trait lowering rule registered",
+			wantErr:   []string{`component "data"`, `capability "store" defaults: nothing validates rendering keys ["class"]`, `no trait handler or trait lowering rule for type "store" validates the rendering`}},
+		{name: "no schema, trait lowering rule that does not validate",
 			handler: &keyedDefaultsHandler{key: "store-trait", keys: []string{"class"}}, rule: true,
 			rendering: map[string]any{"class": "fast"},
+			wantErr:   []string{`component "data"`, `capability "store-trait" defaults: nothing validates rendering keys ["class"]`}},
+		{name: "no schema, trait handler implementing ValidateAndApplyDefaults",
+			handler: &keyedDefaultsHandler{key: "store", keys: []string{"class"}}, trait: true, vad: true,
+			rendering: map[string]any{"class": "fast"},
 			want:      map[string]any{"class": "fast"}},
+		{name: "no schema, trait lowering rule implementing ValidateAndApplyDefaults",
+			handler: &keyedDefaultsHandler{key: "store-trait", keys: []string{"class"}}, rule: true, vad: true,
+			rendering: map[string]any{"class": "fast"},
+			want:      map[string]any{"class": "fast"}},
+		{name: "no schema, custom trait type with a CapabilityDefinition",
+			handler: &keyedDefaultsHandler{key: "store", keys: []string{"class"}}, trait: true, def: true,
+			rendering: map[string]any{"class": "fast"},
+			want:      map[string]any{"class": "fast"}},
+		{name: "no schema, built-in trait type with a CapabilityDefinition, which never applies",
+			handler: &keyedDefaultsHandler{key: "store", keys: []string{"class"}}, trait: true, def: true, builtin: true,
+			rendering: map[string]any{"class": "fast"},
+			wantErr:   []string{`component "data"`, `capability "store" defaults: nothing validates rendering keys ["class"]`}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var traits map[string]TraitHandler
+			tr := NewTransformer(map[string]ComponentHandler{"store": tc.handler}, nil)
 			if tc.trait {
-				traits = map[string]TraitHandler{"store": &recordingTraitHandler{typ: "store"}}
+				var h TraitHandler = &recordingTraitHandler{typ: "store"}
+				if tc.vad {
+					h = &validatingTraitHandler{recordingTraitHandler{typ: "store"}}
+				}
+				if tc.builtin {
+					tr.RegisterBuiltinTrait("store", h)
+				} else {
+					tr.RegisterTrait("store", h)
+				}
 			}
-			tr := NewTransformer(map[string]ComponentHandler{"store": tc.handler}, traits)
 			if tc.rule {
 				var got map[string]any
-				tr.RegisterTraitLowering(recordingTraitRule{got: &got})
+				var r TraitLoweringRule = recordingTraitRule{got: &got}
+				if tc.vad {
+					r = validatingTraitRule{recordingTraitRule{got: &got}}
+				}
+				tr.RegisterTraitLowering(r)
+			}
+			if tc.def {
+				tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"store": {Metadata: Metadata{Name: "store"}}})
 			}
 			key, _ := tc.handler.(ComponentCapabilityDefaults).CapabilityDefaults()
 			caps := map[string]CapabilityBinding{key: {Rendering: tc.rendering}}
@@ -341,6 +376,21 @@ func (recordingTraitRule) TraitType() string { return "store-trait" }
 func (r recordingTraitRule) LowerTrait(trait *Trait, _ LoweringContext) (LoweringResult, error) {
 	*r.got = trait.Properties
 	return LoweringResult{Traits: []Trait{{Type: "store-trait-done", Properties: map[string]any{}}}}, nil
+}
+
+// validatingTraitHandler and validatingTraitRule are the recording handler and rule
+// implementing ValidateAndApplyDefaults, so EvaluateProfile validates their
+// renderings.
+type validatingTraitHandler struct{ recordingTraitHandler }
+
+func (validatingTraitHandler) ValidateAndApplyDefaults(r map[string]any) (map[string]any, error) {
+	return r, nil
+}
+
+type validatingTraitRule struct{ recordingTraitRule }
+
+func (validatingTraitRule) ValidateAndApplyDefaults(r map[string]any) (map[string]any, error) {
+	return r, nil
 }
 
 // TestCapabilityMerge_NullIsAbsent: an authored null does not displace a rendering

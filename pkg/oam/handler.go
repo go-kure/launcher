@@ -57,10 +57,10 @@ type CapabilityAware interface {
 // trait's are. Each copied value is validated against the component's own
 // PropertySchema, which must declare every listed key. A handler that declares no
 // schema relies on EvaluateProfile, which validates the binding only through the
-// trait handler or trait lowering rule of the key's type, and checks the values only
-// when that handler or rule implements ValidateAndApplyDefaults or the type has a
-// CapabilityDefinition; with neither a handler nor a rule registered, a fill is
-// refused.
+// trait handler or trait lowering rule of the key's type. Its fill is refused unless
+// that handler or rule validates the rendering: it implements
+// ValidateAndApplyDefaults, or the type is not built in and has a
+// CapabilityDefinition, whose schema EvaluateProfile applies (go-kure/launcher#772).
 type ComponentCapabilityDefaults interface {
 	CapabilityDefaults() (key string, properties []string)
 }
