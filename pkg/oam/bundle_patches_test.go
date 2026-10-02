@@ -367,6 +367,47 @@ func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
 			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
 		}
 	})
+	t.Run("annotations copied, then their source deleted", func(t *testing.T) {
+		// A documented limit: b alone carries a's tag, so it is named as a,
+		// without the patches' reason, and before c. It warns as Flux forces it.
+		envelope := collisionObject(&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "example.com/v1", "kind": "Widget",
+			"metadata": map[string]any{"namespace": "shop", "name": "envelope"},
+			"items":    []any{claimMap("a", true), claimMap("c", true), claimMap("b", false)},
+		}})
+		got := patchedWarnings(t, &stack.Bundle{Name: "raw", Applications: []*stack.Application{fixedApp("raw", envelope)},
+			Patches: []stack.Patch{{Patch: "- op: copy\n  from: /items/0/metadata/annotations\n  path: /items/2/metadata/annotations\n" +
+				"- op: remove\n  path: /items/0\n",
+				Target: &stack.PatchSelector{Kind: "Widget"}}}})
+		want := []string{
+			claimWarning("b", `component "raw"`, annotationReason),
+			claimWarning("c", `component "raw"`, annotationReason),
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
+		}
+	})
+	t.Run("annotations copied, another member renamed", func(t *testing.T) {
+		// Only the two members sharing a tag fall back; the renamed one is
+		// still traced, so it comes first.
+		envelope := collisionObject(&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "example.com/v1", "kind": "Widget",
+			"metadata": map[string]any{"namespace": "shop", "name": "envelope"},
+			"items":    []any{claimMap("a", true), claimMap("b", false), claimMap("c", true)},
+		}})
+		got := patchedWarnings(t, &stack.Bundle{Name: "raw", Applications: []*stack.Application{fixedApp("raw", envelope)},
+			Patches: []stack.Patch{{Patch: "- op: copy\n  from: /items/0/metadata/annotations\n  path: /items/1/metadata/annotations\n" +
+				"- op: replace\n  path: /items/2/metadata/name\n  value: renamed\n",
+				Target: &stack.PatchSelector{Kind: "Widget"}}}})
+		want := []string{
+			claimWarning("renamed", `component "raw"`, annotationReason),
+			claimWarning("a", `component "raw"`, annotationReason),
+			claimWarning("b", `component "raw"`, patchedReason),
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
+		}
+	})
 	t.Run("the tag moved into labels", func(t *testing.T) {
 		// The attribution build differs from Flux's, so nothing is traced.
 		got := patchedWarnings(t, &stack.Bundle{Name: "db", Applications: []*stack.Application{fixedApp("db", claimObject("shop", "data", forceAnnotated("enabled")))},

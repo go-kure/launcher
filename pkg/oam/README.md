@@ -491,10 +491,13 @@ volumes warn, and a bundle with no force-applied volume is not built again. Know
 is named by the first application that generates a volume of its final identity, else by its
 bundle, with its force key named `kustomize.toolkit.fluxcd.io/force: enabled, set by its bundle's
 patches` unless a generated volume of that identity carried it, after the bundle's traced
-volumes in kustomize's build order. That covers every volume of a bundle whose patches read or
-write the tag (a JSON `test` or `copy` of a whole annotations map), a volume whose annotations a
-patch replaces, one a patch adds, and both volumes when a patch copies one's annotations to the
-other. A patch set that does not build, or whose
+volumes in kustomize's build order. That covers every volume of a bundle whose second build
+differs from the first (a patch that `test`s a whole annotations map, or `copy`s one into another
+field), a volume whose annotations a patch replaces, one a patch adds, and both volumes when a
+patch copies one's annotations onto the other; the bundle's other volumes are still traced.
+When a patch copies annotations onto a volume and then deletes their source, the copy alone
+carries the source's tag and is named as the source: by its application, with its force key,
+in its place. A patch set that does not build, or whose
 result Flux cannot read (a list member that is not an object), is warned once, naming the bundle's first application and the build error, and that bundle is
 checked as generated. Every caller and build gets this; postBuild substitution and anything
 the cluster changes on apply are not modelled. An application a caller built rather than
