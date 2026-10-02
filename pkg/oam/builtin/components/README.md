@@ -2455,6 +2455,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `helmchart` checks nothing: it fetches from the source its `sourceRef` names, whose host is
   checked where that source is authored, as for a `helmrelease`.
 
+  No refusal prints the value it refused, since a URL or `endpoint` can carry a credential in
+  its userinfo (the user included), path, query or IPv6 zone (go-kure/launcher#699). An
+  allowlist refusal names the host as `displayHost` reduces it: without userinfo, query,
+  fragment or zone, port kept, saying when something was dropped; the matching itself is
+  unchanged. A scheme refusal and the explicit-registry refusal below name only the component,
+  the field and the form expected, and the Amazon S3 refusal names the reduced host.
+
   Some sources are not fetched from the host their field names, so the check follows Flux instead:
 
   - *An `oci://` URL must name its registry explicitly.* Flux parses an OCIRepository `url`, and a
@@ -3014,13 +3021,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   A `url` that does not parse is refused without the URL or the parser's
   error, and a fetch error names the URL by scheme and host only
   (`manifestsource.go`'s `displayURL`; a URL with no host is not named): its
-  userinfo, path or query may carry a credential. A failed request or body read is
+  userinfo, path or query may carry a credential, and an IPv6 zone in the host is
+  dropped too. A refused redirect hop reads fixed text (`redirect to a url that is
+  not http(s) refused`, `redirect to a host not in allowed registries refused`,
+  `too many redirects`), since its target is the server's. A failed request or body read is
   named by fixed text only (`failureCause`): a timeout, a failed host lookup,
   or the failing network operation and its system error, such as
   `dial failed: connection refused`; anything else reads `request failed` or
   `response body could not be read`. The underlying error's own text is never
   shown, since it can quote the URL, a server-sent header or trailer, or a TLS
-  certificate.
+  certificate, but it stays the error's cause: `errors.Is` and `errors.As` still
+  find it, so a timeout matches `context.DeadlineExceeded`.
 
 ## StatefulSet-level and claim-template properties
 

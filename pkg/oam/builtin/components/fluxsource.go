@@ -56,7 +56,9 @@ func checkFluxSourceURL(typ, field, value string, schemes ...string) error {
 			return nil
 		}
 	}
-	return errors.Errorf("%s: %s %q must start with %s", typ, field, value, strings.Join(schemes, " or "))
+	// The value is not quoted: it can carry a credential (userinfo, a query),
+	// and without an accepted scheme it cannot be reduced to a host safely.
+	return errors.Errorf("%s: %s must start with %s", typ, field, strings.Join(schemes, " or "))
 }
 
 // enforceFluxSourceHost checks the host a source is fetched from against the
@@ -95,9 +97,11 @@ func enforceFluxSourceOCIHost(typ, field, value string, requireRepository bool, 
 		if requireRepository {
 			form = "oci://<registry>/<repository>"
 		}
-		return errors.Errorf("%s: %s: %q does not name its registry explicitly, so Flux may resolve it against Docker Hub: "+
+		// The value is not quoted: its first segment can be userinfo, which can
+		// carry a credential.
+		return errors.Errorf("%s: %s: the url does not name its registry explicitly, so Flux may resolve it against Docker Hub: "+
 			"under an allowed-registries policy write %s with a registry that is localhost or contains \".\" or \":\" "+
-			"(e.g. oci://docker.io/library/app, oci://registry.example:5000/org/app)", typ, field, value, form)
+			"(e.g. oci://docker.io/library/app, oci://registry.example:5000/org/app)", typ, field, form)
 	}
 	return enforceFluxSourceHost(typ, field, value, p)
 }

@@ -120,10 +120,13 @@ func (c *BucketConfig) ApplyPolicy(p oam.Policy) error {
 	}
 	if c.Spec.Provider != sourcev1.BucketProviderAzure && p != nil && len(p.AllowedRegistries()) > 0 &&
 		namesAmazonS3(c.Spec.Endpoint) {
+		// The endpoint is named as displayHost renders its host: userinfo or a
+		// query on it can carry a credential.
+		shown, _ := displayHost(urlHost(c.Spec.Endpoint))
 		return errors.Errorf("bucket: endpoint: %q is treated as an Amazon S3 host (it contains \"amazonaws\"): "+
 			"Flux's S3 client fetches such a bucket not from endpoint but from the S3 host of spec.region, or of the bucket's "+
 			"location when region is unset, chosen at runtime, so the host cannot be checked against the allowed registries %v",
-			c.Spec.Endpoint, p.AllowedRegistries())
+			shown, p.AllowedRegistries())
 	}
 	return enforceFluxSourceHost("bucket", "endpoint", c.Spec.Endpoint, p)
 }

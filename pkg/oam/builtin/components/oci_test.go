@@ -410,15 +410,19 @@ func TestOCIConfig_ApplyPolicy_ExplicitRegistry(t *testing.T) {
 		t.Errorf("nil policy must be a no-op, got %v", err)
 	}
 
-	// The refusal names the field, the value and the form to write.
+	// The refusal names the field and the form to write, but not the value, whose
+	// first segment can be userinfo carrying a credential.
 	props["source"] = map[string]any{"url": "oci://ghcr.io"}
 	err := mustOCIConfig(t, props).(oam.Enforceable).ApplyPolicy(fakeOCIPolicy{allowed: []string{"ghcr.io"}})
 	if err == nil {
 		t.Fatal("want refusal for oci://ghcr.io under [ghcr.io]")
 	}
-	for _, want := range []string{"oci: source.url", `"oci://ghcr.io"`, "Docker Hub", "oci://<registry>/<repository>", "localhost"} {
+	for _, want := range []string{"oci: source.url: ", "Docker Hub", "oci://<registry>/<repository>", "localhost"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not contain %q", err, want)
 		}
+	}
+	if strings.Contains(err.Error(), `"oci://ghcr.io"`) {
+		t.Errorf("refusal %q quotes the url", err)
 	}
 }

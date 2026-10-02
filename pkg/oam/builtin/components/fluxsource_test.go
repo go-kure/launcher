@@ -416,7 +416,7 @@ func TestFluxSourceHandlers_Refuses(t *testing.T) {
 			{name: "no url", drop: "url", want: "helmrepository: url is required"},
 			{name: "ftp url", props: "url: ftp://charts.example.com", want: `must start with http:// or https:// or oci://`},
 			{name: "upper-case scheme", props: "url: HTTPS://charts.example.com", want: "must start with"},
-			{name: "type oci over https", props: "type: oci", want: `url "https://charts.example.com/stable" must start with oci://`},
+			{name: "type oci over https", props: "type: oci", want: `helmrepository: url must start with oci://`},
 		},
 		"ocirepository": {
 			{name: "no url", drop: "url", want: "ocirepository: url is required"},
