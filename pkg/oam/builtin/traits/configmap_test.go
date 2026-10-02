@@ -75,8 +75,8 @@ func TestConfigMapHandler_Apply_NoMountPath(t *testing.T) {
 }
 
 // TestConfigMapHandler_Apply_SizeLimit pins the trait to the API server's 1 MiB
-// ConfigMap limit (corev1.MaxSecretSize), summed over the stringified data
-// values the ConfigMap stores.
+// ConfigMap limit (corev1.MaxSecretSize), summed over the data values the
+// ConfigMap stores.
 func TestConfigMapHandler_Apply_SizeLimit(t *testing.T) {
 	limit := corev1.MaxSecretSize
 	cases := []struct {
@@ -99,10 +99,11 @@ func TestConfigMapHandler_Apply_SizeLimit(t *testing.T) {
 			wantErr: "hold 1048577 bytes, over the 1048576-byte limit",
 		},
 		{
-			// 12345 is stored as the five-byte string "12345".
-			name:    "a stringified number counted as stored",
+			// A number is refused, not stringified, as the configmap kind
+			// refuses it (go-kure/launcher#741).
+			name:    "a number refused before the size is counted",
 			data:    map[string]any{"n": 12345, "s": strings.Repeat("a", limit-4)},
-			wantErr: "hold 1048577 bytes, over the 1048576-byte limit",
+			wantErr: `configmap trait "my-config": data.n: must be a string, got int; quote the value`,
 		},
 	}
 	for _, tc := range cases {

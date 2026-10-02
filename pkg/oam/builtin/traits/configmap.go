@@ -1,11 +1,8 @@
 package traits
 
 import (
-	"fmt"
 	"maps"
-	"slices"
 
-	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -18,7 +15,12 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// ConfigMapHandler handles OAM configmap traits.
+// ConfigMapHandler handles OAM configmap traits. It is the configmap kind's
+// twin (go-kure/launcher#741): data, binaryData and immutable are read and the
+// ConfigMap is built by the kind's own components.ParseConfigMapProperties
+// and GenerateConfigMap. The trait adds only what ownership means: the
+// ConfigMap's name (its `name` property), the owner's labels and namespace,
+// the owner's bundle, and the optional mount into the owner's workload.
 type ConfigMapHandler struct{}
 
 // CanHandle returns true for configmap trait type.
@@ -26,14 +28,13 @@ func (h *ConfigMapHandler) CanHandle(traitType string) bool {
 	return traitType == "configmap"
 }
 
-// PropertySchema declares the configmap trait's user-facing properties so the
-// downstream runtime can validate them before invocation. `data` is an open map (escape hatch).
+// PropertySchema declares the configmap trait's user-facing properties: the
+// configmap kind's, plus the ConfigMap's `name` and the optional `mountPath`.
 func (h *ConfigMapHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
-		"name":      {Type: oam.PropertyTypeString, Required: true, Description: "Name of the ConfigMap resource to create."},
-		"mountPath": {Type: oam.PropertyTypeString, Description: "Path at which the ConfigMap is mounted as a volume into the component's workload; when set, the component is decorated with the volume mount."},
-		"data":      {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Key/value pairs stored in the ConfigMap data (values are stringified)."},
-	}
+	schema := maps.Clone((&components.ConfigMapHandler{}).PropertySchema())
+	schema["name"] = oam.PropertySchema{Type: oam.PropertyTypeString, Required: true, Description: "Name of the ConfigMap resource to create."}
+	schema["mountPath"] = oam.PropertySchema{Type: oam.PropertyTypeString, Description: "Path at which the ConfigMap is mounted as a volume into the component's workload; when set, the component is decorated with the volume mount."}
+	return schema
 }
 
 // ValidateAndApplyDefaults rejects any rendering key for this no-rendering trait.
@@ -59,26 +60,14 @@ func (h *ConfigMapHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 		mountPath = mp
 	}
 
-	// Keys are checked in sorted order, so with several bad keys the one
-	// reported does not depend on map iteration order.
-	data := make(map[string]string)
-	if rawData, ok := props["data"].(map[string]any); ok {
-		for _, k := range slices.Sorted(maps.Keys(rawData)) {
-			if err := components.ValidateConfigMapKey("data", k); err != nil {
-				return errors.Wrapf(err, "configmap trait %q", name)
-			}
-			data[k] = fmt.Sprintf("%v", rawData[k])
-		}
-	}
-	// Count the stringified values, which are what the ConfigMap stores.
-	if err := components.CheckConfigMapSize(data, nil); err != nil {
+	cm, err := components.ParseConfigMapProperties(props)
+	if err != nil {
 		return errors.Wrapf(err, "configmap trait %q", name)
 	}
-
 	cmConfig := &ConfigMapConfig{
 		Name:          name,
 		componentName: app.Name,
-		Data:          data,
+		ConfigMap:     cm,
 	}
 	cmApp := stack.NewApplication(name, app.Namespace, cmConfig)
 	bundle.Applications = append(bundle.Applications, cmApp)
@@ -92,9 +81,12 @@ func (h *ConfigMapHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 
 // ConfigMapConfig implements stack.ApplicationConfig for configmap traits.
 type ConfigMapConfig struct {
+	// Name is the ConfigMap's name.
 	Name          string
 	componentName string
-	Data          map[string]string
+	// ConfigMap carries data, binaryData and immutable as the configmap kind
+	// parses them; its Name and Namespace are unset.
+	ConfigMap components.ConfigMapConfig
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource
@@ -106,17 +98,10 @@ func (c *ConfigMapConfig) ComponentName() string { return c.componentName }
 // valuesFrom). Satisfies pkg/oam.fluxNamespaceInput.
 func (c *ConfigMapConfig) FluxNamespaceInput() (kind, name string) { return "ConfigMap", c.Name }
 
-// Generate creates a Kubernetes ConfigMap resource.
+// Generate builds the ConfigMap through the kind's GenerateConfigMap, under
+// the trait's name and with the owning component's labels.
 func (c *ConfigMapConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	cm := kubernetes.CreateConfigMap(app.Name, app.Namespace)
-	cm.Labels = componentLabels(c.componentName)
-	cm.Annotations = nil
-	for k, v := range c.Data {
-		kubernetes.AddConfigMapData(cm, k, v)
-	}
-
-	obj := client.Object(cm)
-	return []*client.Object{&obj}, nil
+	return components.GenerateConfigMap(c.ConfigMap, app.Name, app.Namespace, componentLabels(c.componentName))
 }
 
 // ConfigMapDecorator wraps an ApplicationConfig to add a volume and volumeMount
