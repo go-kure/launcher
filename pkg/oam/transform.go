@@ -988,13 +988,7 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 	var created []*stack.Application
 	ordered := make([]*stack.Application, 0, len(bundle.Applications))
 	for _, e := range entries {
-		// For a sibling group: each trait-created sub-application's name and the
-		// member type whose trait created it (see the check after Apply).
-		var groupTraitApps map[string]string
-		if len(e.members) > 0 {
-			groupTraitApps = make(map[string]string)
-		}
-		subApps, err := t.applyEntryTraits(app, e, entries, groupTraitApps, bundle, ctx)
+		subApps, err := t.applyEntryTraits(app, e, entries, bundle, ctx)
 		if err != nil {
 			return err
 		}
@@ -1133,20 +1127,48 @@ func entryAppRefusal(component, traitType, subApp string) (by, contract string) 
 	return fmt.Sprintf("%s: the ApplyPolicy of sub-application %q", by, subApp), entryAppPolicyContract
 }
 
+// groupSubApp is a sub-application a trait on a sibling group member created,
+// with that member's type.
+type groupSubApp struct {
+	app    *stack.Application
+	member string
+}
+
+// checkGroupSubApplications fails when traits on two members of sibling group
+// group created sub-applications of one name: members share the group's name,
+// so traits that derive a sub-application name from it (web-rbac, web-ingress)
+// would deploy one name twice. The names are read as they are now, after the
+// ApplyPolicy of every sub-application created so far, since a policy may rename
+// its own sub-application or an earlier one (go-kure/launcher#755).
+func checkGroupSubApplications(group string, subApps []groupSubApp) error {
+	byName := make(map[string]string, len(subApps))
+	for _, s := range subApps {
+		if member, dup := byName[s.app.Name]; dup && member != s.member {
+			return &TransformError{Message: fmt.Sprintf(
+				"sibling group %q: traits on members %q and %q both create sub-application %q; carry the trait on one member",
+				group, member, s.member, s.app.Name)}
+		}
+		byName[s.app.Name] = s.member
+	}
+	return nil
+}
+
 // applyEntryTraits applies the traits of one entry — each member's own, on that
 // member's application and in authored order, for a collapsed sibling group
-// (traitSteps). groupTraitApps is non-nil exactly for a group. It returns the
-// sub-applications the entry's traits appended to the bundle, in creation order,
-// and records each decorating trait (SubApplicationDecorator) with them in
-// ctx.subAppDecorations.
+// (traitSteps). It returns the sub-applications the entry's traits appended to
+// the bundle, in creation order, and records each decorating trait
+// (SubApplicationDecorator) with them in ctx.subAppDecorations.
 //
 // bundleEntries are the entries whose applications the bundle was built from.
 // Each must still be in the bundle, by pointer and under the name it had when
 // this entry's traits began, and each sibling group member's application under
 // its name then, after every trait and after the ApplyPolicy of every
 // sub-application one added (checkEntryApplications).
-func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundleEntries []componentEntry, groupTraitApps map[string]string, bundle *stack.Bundle, ctx TransformContext) ([]*stack.Application, error) {
+func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundleEntries []componentEntry, bundle *stack.Bundle, ctx TransformContext) ([]*stack.Application, error) {
 	var subApps []*stack.Application
+	// For a sibling group: each trait-created sub-application and the member type
+	// whose trait created it (checkGroupSubApplications).
+	var groupSubApps []groupSubApp
 	var decorators []subAppDecoration
 	// A sibling group applies a trait forwarded to two members on each; its
 	// sub-applications are decorated once per authored trait. The slot alone does
@@ -1247,17 +1269,6 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 
 			added := addedApplications(prev, bundle.Applications)
 			for _, newApp := range added {
-				// Members share the group's name, so traits on two members that
-				// derive a sub-application name from it (web-rbac, web-ingress)
-				// would deploy one name twice.
-				if groupTraitApps != nil {
-					if prev, dup := groupTraitApps[newApp.Name]; dup && prev != entry.component.Type {
-						return nil, &TransformError{Message: fmt.Sprintf(
-							"sibling group %q: traits on members %q and %q both create sub-application %q; carry the trait on one member",
-							entry.component.Name, prev, entry.component.Type, newApp.Name)}
-					}
-					groupTraitApps[newApp.Name] = entry.component.Type
-				}
 				if enforceable, ok := newApp.Config.(Enforceable); ok {
 					if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
 						return nil, &ViolationError{Component: entry.component.Name, Cause: err}
@@ -1267,6 +1278,14 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 					if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type, newApp.Name); err != nil {
 						return nil, err
 					}
+				}
+			}
+			if len(e.members) > 0 {
+				for _, newApp := range added {
+					groupSubApps = append(groupSubApps, groupSubApp{app: newApp, member: entry.component.Type})
+				}
+				if err := checkGroupSubApplications(entry.component.Name, groupSubApps); err != nil {
+					return nil, err
 				}
 			}
 			subApps = append(subApps, added...)
