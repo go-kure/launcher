@@ -3130,6 +3130,10 @@ not part of either change.
   any scope source) that authors `metadata.namespace` is rejected rather than
   emitted as-is — the Kubernetes API forbids a namespace on a cluster-scoped
   object, so letting it through would only defer the failure to apply time.
+  A `url` that does not parse is refused without the URL or the parser's
+  error, and a fetch error names the URL by scheme, host and path only
+  (`manifestsource.go`'s `displayURL`): its userinfo or query may carry a
+  credential.
 
 ## StatefulSet-level and claim-template properties
 

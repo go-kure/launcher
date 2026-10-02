@@ -86,11 +86,12 @@ func parseManifestSource(props map[string]any) (*manifestSource, error) {
 }
 
 // validateURLScheme rejects non-http(s) schemes up front. oci:// gets a distinct
-// "not yet supported" message.
+// "not yet supported" message. An unparsable URL is refused without the URL and
+// without url.Parse's error, whose text repeats it, credential included.
 func validateURLScheme(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return errors.Errorf("manifest source: invalid url %q: %w", rawURL, err)
+		return errors.Errorf("manifest source: url is not a valid URL")
 	}
 	switch u.Scheme {
 	case "http", "https":
@@ -141,11 +142,12 @@ func copyObjects(objs []client.Object) []client.Object {
 // fetchURL retrieves raw manifest YAML over http(s), treating the URL as
 // untrusted: scheme allowlist (initial + every redirect hop), host allowlist
 // re-checked on each redirect, request timeout, non-2xx rejection, and a hard
-// response-size cap.
+// response-size cap. Its errors name the URL only as displayURL renders it.
 func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 	if err := checkURL(rawURL, allowedHosts); err != nil {
 		return nil, err
 	}
+	shown := displayURL(rawURL)
 	httpClient := &http.Client{
 		Timeout: fetchTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -157,20 +159,44 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 	}
 	resp, err := httpClient.Get(rawURL)
 	if err != nil {
-		return nil, errors.Errorf("manifest source: fetch %q: %w", rawURL, err)
+		// The client wraps its failure in a *url.Error naming the request URL
+		// with only the password masked; keep just the cause.
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		return nil, errors.Errorf("manifest source: fetch %q: %w", shown, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, errors.Errorf("manifest source: fetch %q: unexpected status %d", rawURL, resp.StatusCode)
+		return nil, errors.Errorf("manifest source: fetch %q: unexpected status %d", shown, resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes+1))
 	if err != nil {
-		return nil, errors.Errorf("manifest source: read %q: %w", rawURL, err)
+		return nil, errors.Errorf("manifest source: read %q: %w", shown, err)
 	}
 	if int64(len(body)) > maxManifestBytes {
-		return nil, errors.Errorf("manifest source: %q response exceeds max size %d bytes", rawURL, maxManifestBytes)
+		return nil, errors.Errorf("manifest source: %q response exceeds max size %d bytes", shown, maxManifestBytes)
 	}
 	return body, nil
+}
+
+// displayURL renders a fetch URL for an error message as scheme, host and path
+// only. The userinfo goes, user included: url.URL.Redacted masks only the
+// password, and a token is as often written as the user
+// (https://<token>@host). The query goes too, since a signed URL carries its
+// credential there. rawURL has already parsed (checkURL).
+func displayURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "(invalid url)"
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.ForceQuery = false
+	u.Fragment = ""
+	u.RawFragment = ""
+	return u.String()
 }
 
 // checkURL enforces the scheme allowlist and the policy host allowlist on a URL

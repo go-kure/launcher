@@ -113,6 +113,25 @@ func TestParseManifestSource_RejectsOCIAndUnknownScheme(t *testing.T) {
 	}
 }
 
+// TestParseManifestSource_UnparsableURLHidesCredential pins that the refusal of
+// a url that does not parse repeats neither the url nor url.Parse's error, both
+// of which would print a credential in its userinfo.
+func TestParseManifestSource_UnparsableURLHidesCredential(t *testing.T) {
+	for _, rawURL := range []string{
+		"https://deploy:s3cr3t%zz@example.com/x.yaml", // bad escape in the password
+		"https://deploy:s3cr3t@exa mple.com/x.yaml",   // bad host
+	} {
+		_, err := parseManifestSource(map[string]any{"url": rawURL})
+		if err == nil || err.Error() != "manifest source: url is not a valid URL" {
+			t.Errorf("url %q: want the bare invalid-url refusal, got %v", rawURL, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "s3cr3t") || strings.Contains(err.Error(), "deploy") {
+			t.Errorf("url %q: error %q repeats the credential", rawURL, err)
+		}
+	}
+}
+
 // --- resolve (inline + caching) ---
 
 func TestResolve_InlineParsesAndCachesDefensiveCopies(t *testing.T) {
@@ -195,6 +214,42 @@ func TestResolve_URLRejectsRedirectToDisallowedHost(t *testing.T) {
 	s.setAllowedHosts([]string{hostOf(redir.URL)})
 	if _, err := s.resolve(); err == nil {
 		t.Error("want error when a redirect leaves the allowed host")
+	}
+}
+
+// TestResolve_URLErrorsHideCredential pins that a fetch error names the url
+// without its userinfo, user included, and without its query, while keeping
+// host and path: the non-2xx refusal, and a transport failure, whose *url.Error
+// from net/http names the url with only the password masked.
+func TestResolve_URLErrorsHideCredential(t *testing.T) {
+	notFound := httptest.NewServer(http.NotFoundHandler())
+	defer notFound.Close()
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closedURL := closed.URL
+	closed.Close()
+
+	withCred := func(base, userinfo, rest string) string {
+		return strings.Replace(base, "://", "://"+userinfo+"@", 1) + rest
+	}
+	cases := []struct {
+		name, url, want string
+	}{
+		{"404, user and token", withCred(notFound.URL, "deploy:s3cr3t", "/crds.yaml"), notFound.URL + "/crds.yaml\": unexpected status 404"},
+		{"404, token as user", withCred(notFound.URL, "s3cr3t", "/crds.yaml"), notFound.URL + "/crds.yaml\": unexpected status 404"},
+		{"404, signed query", notFound.URL + "/crds.yaml?sig=s3cr3t", notFound.URL + "/crds.yaml\": unexpected status 404"},
+		{"transport failure, user and token", withCred(closedURL, "deploy:s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + closedURL + "/crds.yaml\": "},
+		{"transport failure, token as user", withCred(closedURL, "s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + closedURL + "/crds.yaml\": "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := (&manifestSource{url: tc.url}).resolve()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to contain %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "s3cr3t") || strings.Contains(err.Error(), "deploy") {
+				t.Errorf("error %q repeats the credential", err)
+			}
+		})
 	}
 }
 
