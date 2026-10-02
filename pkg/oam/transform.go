@@ -982,8 +982,14 @@ func (t *Transformer) buildDependencyAwareCluster(app *Application, entries []co
 // The bundle's applications are then ordered component by component: each
 // entry's application followed by the sub-applications its traits created, in
 // creation order. Traits append to the bundle, which would otherwise put every
-// sub-application after every component of the bundle.
+// sub-application after every component of the bundle. This applies only when
+// the traits did nothing but append: the bundle must read exactly as it did
+// before the traits, followed by the sub-applications in creation order. A
+// trait handler that moved, replaced or removed an application leaves an order
+// of its own, which is kept as it left it.
 func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bundle *stack.Bundle, ctx TransformContext) error {
+	before := slices.Clone(bundle.Applications)
+	var created []*stack.Application
 	ordered := make([]*stack.Application, 0, len(bundle.Applications))
 	for _, e := range entries {
 		// For a sibling group: each trait-created sub-application's name and the
@@ -998,10 +1004,11 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 		}
 		ordered = append(ordered, e.app)
 		ordered = append(ordered, subApps...)
+		created = append(created, subApps...)
 	}
-	// A trait that did more than append to the bundle leaves it in an order the
-	// entries do not account for; it is then kept as the traits left it.
-	if sameApplications(ordered, bundle.Applications) {
+	// The membership check also holds the bundle to the entries: an application
+	// no entry accounts for keeps the bundle as it is.
+	if slices.Equal(bundle.Applications, append(before, created...)) && sameApplications(ordered, bundle.Applications) {
 		bundle.Applications = ordered
 	}
 	return nil

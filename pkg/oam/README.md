@@ -45,7 +45,8 @@ when `wait` is enabled, so the umbrella is Ready only when every child Kustomiza
 
 Within a bundle, each component's application is followed by the sub-applications its traits
 created, in creation order, so a trait's objects are emitted with their own component's rather
-than after every component of the bundle (go-kure/launcher#712). A trait whose handler
+than after every component of the bundle (go-kure/launcher#712). A trait handler that does
+anything but append to the bundle keeps the order it left (go-kure/launcher#718). A trait whose handler
 implements `SubApplicationDecorator` (the built-in `prune-protection` and `force-replace`) also
 decorates those sub-applications, whatever order the traits were authored in: the last step of
 the transform, after the Phase-4 synthesis below, applies it to each of them. The NetworkPolicies

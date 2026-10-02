@@ -670,6 +670,14 @@ config. Without this forward, kure's layout walker — which keys a structural d
 capability on a decorated (trait-carrying) config, silently losing the augmenter's layout-level
 effect (the hook-group repartitioning) the moment any trait is added.
 
+An inner config that also implements kure's `layout.LayoutIntentAugmenter` keeps that too:
+`wrapIfAugmenter` then returns an `intentAugmentingDecorator`, which forwards `WantsOwnLayout`.
+The walker treats an absent `WantsOwnLayout` as "wants its own layout", so without the forward an
+augmenter that answers `false` (stay in the parent's layout) would get a child layout as soon as a
+trait decorated it. The method is present only when the inner has it, like `AugmentLayout`. No
+built-in component config implements `LayoutIntentAugmenter`; this keeps a registered handler's
+config, or a future built-in's, placed where it asks.
+
 A straight forward alone would also bypass every decorator's own processing for the resources
 the augmenter adds: those are created inside `AugmentLayout`, after every decorator's `Generate`
 has returned. So after the inner `AugmentLayout` returns, `augmentingDecorator` calls the outer

@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -137,6 +138,67 @@ func TestDecorateSubApplications_AnyTraitOrder(t *testing.T) {
 	}
 }
 
+// reorderTraitHandler is a trait that does more than append to the bundle:
+// with replace it swaps its application for a new one named after it plus
+// "-replaced", otherwise it moves its application to the end of the bundle;
+// with appends it then adds a sub-application.
+type reorderTraitHandler struct {
+	replace bool
+	appends bool
+}
+
+func (reorderTraitHandler) CanHandle(t string) bool { return t == "reorder" }
+
+func (h reorderTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *stack.Bundle) error {
+	i := slices.Index(bundle.Applications, app)
+	if h.replace {
+		name := app.Name + "-replaced"
+		bundle.Applications[i] = stack.NewApplication(name, app.Namespace, &namedConfigMapConfig{name: name, namespace: app.Namespace})
+	} else {
+		bundle.Applications = append(slices.Delete(bundle.Applications, i, i+1), app)
+	}
+	if h.appends {
+		bundle.Applications = append(bundle.Applications,
+			stack.NewApplication(app.Name+"-sub", app.Namespace, &namedConfigMapConfig{name: app.Name + "-sub", namespace: app.Namespace}))
+	}
+	return nil
+}
+
+// TestApplyTraits_KeepsCustomOrder is go-kure/launcher#718: the bundle is
+// ordered component by component only when its traits did nothing but append.
+// A trait that moved or replaced an application keeps the order it left.
+// TestDecorateSubApplications_AnyTraitOrder's flat shape pins the append-only
+// case.
+func TestApplyTraits_KeepsCustomOrder(t *testing.T) {
+	cases := []struct {
+		name    string
+		handler reorderTraitHandler
+		want    string
+	}{
+		{name: "move", want: "other=,web="},
+		{name: "move-and-append", handler: reorderTraitHandler{appends: true}, want: "other=,web=,web-sub="},
+		{name: "replace", handler: reorderTraitHandler{replace: true}, want: "web-replaced=,other="},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := inDocumentTransformer()
+			tr.RegisterTrait("reorder", tc.handler)
+			app := makeApp("shop",
+				Component{Name: "web", Type: "webservice", Properties: map[string]any{}, Traits: []Trait{{Type: "reorder"}}},
+				Component{Name: "other", Type: "webservice", Properties: map[string]any{}},
+			)
+			app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+			cluster, _, err := tr.TransformWithPolicy(app, TransformContext{})
+			if err != nil {
+				t.Fatalf("TransformWithPolicy: %v", err)
+			}
+			if got := strings.Join(stamps(t, cluster), ","); got != tc.want {
+				t.Errorf("objects = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestDecorateSubApplications_OptIn pins that a trait handler which does not
 // answer true to DecoratesSubApplications keeps the narrow scope.
 func TestDecorateSubApplications_OptIn(t *testing.T) {
@@ -158,8 +220,9 @@ func TestDecorateSubApplications_OptIn(t *testing.T) {
 
 // pairRule lowers a "pair" component into a same-name sibling group of a
 // webservice and a statefulset. It forwards every authored trait to the
-// webservice and only the stamp traits to the statefulset too, as the builtin
-// webservice rule forwards prune-protection and force-replace to both members.
+// webservice and only the stamp and split traits to the statefulset too, as the
+// builtin webservice rule forwards prune-protection and force-replace to both
+// members.
 type pairRule struct{}
 
 func (pairRule) ComponentType() string { return "pair" }
@@ -167,7 +230,7 @@ func (pairRule) ComponentType() string { return "pair" }
 func (pairRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
 	var stampsOnly []Trait
 	for _, tr := range comp.Traits {
-		if tr.Type == "stamp" {
+		if tr.Type == "stamp" || tr.Type == "split" {
 			stampsOnly = append(stampsOnly, tr)
 		}
 	}
@@ -228,6 +291,44 @@ func TestDecorateSubApplications_TwoDecoratorsOneSlot(t *testing.T) {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
 	if got, want := strings.Join(stamps(t, cluster), ","), "web-a=xs,web-b=,settings=xs"; got != want {
+		t.Errorf("objects = %s, want %s", got, want)
+	}
+}
+
+// splitRule lowers a "split" trait into a stamp on a webservice member and a
+// seal on any other member, so one forwarded trait becomes two decorating
+// traits of different types on two members, both in the split's authored slot.
+type splitRule struct{}
+
+func (splitRule) TraitType() string { return "split" }
+
+func (splitRule) LowerTrait(_ *Trait, ctx LoweringContext) (LoweringResult, error) {
+	if ctx.Component != nil && ctx.Component.Type == "webservice" {
+		return LoweringResult{Traits: []Trait{{Type: "stamp"}}}, nil
+	}
+	return LoweringResult{Traits: []Trait{{Type: "seal"}}}, nil
+}
+
+// TestDecorateSubApplications_TwoTypesTwoMembers pins that the sub-application
+// dedupe key names the trait type (go-kure/launcher#718): the seal on the
+// statefulset member shares the stamp's authored slot but is a different
+// trait, so it is not skipped as the webservice member's copy.
+func TestDecorateSubApplications_TwoTypesTwoMembers(t *testing.T) {
+	tr := inDocumentTransformer()
+	tr.RegisterTrait("stamp", stampTraitHandler{decorates: true})
+	tr.RegisterTrait("seal", stampTraitHandler{decorates: true, seal: true})
+	tr.RegisterTraitLowering(splitRule{})
+	tr.RegisterComponentLowering(pairRule{})
+	app := makeApp("shop", Component{Name: "web", Type: "pair", Properties: map[string]any{}, Traits: []Trait{
+		{Type: "settings", Properties: map[string]any{"name": "settings"}},
+		{Type: "split"},
+	}})
+	app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+	cluster, _, err := tr.TransformWithPolicy(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	if got, want := strings.Join(stamps(t, cluster), ","), "web-a=x,web-b=s,settings=xs"; got != want {
 		t.Errorf("objects = %s, want %s", got, want)
 	}
 }
