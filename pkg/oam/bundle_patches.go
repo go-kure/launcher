@@ -1,12 +1,15 @@
 package oam
 
 import (
+	"bytes"
+	"io"
 	"path"
 	"sync"
 
 	kio "github.com/go-kure/kure/pkg/io"
 	"github.com/go-kure/kure/pkg/stack"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/kustomize/api/krusty"
 	kustypes "sigs.k8s.io/kustomize/api/types"
@@ -94,17 +97,23 @@ func kustomizeBuild(fs filesys.FileSystem, dir string) (out []*unstructured.Unst
 	if err != nil {
 		return nil, errors.Wrap(err, "building the bundle's patches")
 	}
-	// kustomize-controller serializes the build before reading it, and a result
-	// that does not serialize fails its build.
-	if _, err := res.AsYaml(); err != nil {
+	// kustomize-controller serializes the build and reads the objects back from
+	// the YAML (fluxcd/pkg/ssa ReadObjects), so they are read here the same way: a
+	// result that does not serialize fails the build, and a value the YAML changes
+	// (a date becomes a string) is read as Flux reads it.
+	manifests, err := res.AsYaml()
+	if err != nil {
 		return nil, errors.Wrap(err, "serializing the patched objects")
 	}
-	for _, r := range res.Resources() {
-		m, err := r.Map()
-		if err != nil {
+	decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(manifests), 2048)
+	for {
+		obj := &unstructured.Unstructured{}
+		if err := decoder.Decode(obj); err != nil {
+			if errors.Is(err, io.EOF) {
+				return out, nil
+			}
 			return nil, errors.Wrap(err, "reading the patched objects")
 		}
-		out = append(out, &unstructured.Unstructured{Object: m})
+		out = append(out, obj)
 	}
-	return out, nil
 }
