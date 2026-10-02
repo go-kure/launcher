@@ -2039,21 +2039,25 @@ not part of either change.
     authored traits and annotations. A HelmRepository, GitRepository or Bucket
     source (go-kure/launcher#336) becomes `chart.spec.sourceRef` with `chart`
     required: the chart name, or for a GitRepository or Bucket the chart's path in
-    the fetched artifact. An OCIRepository or HelmChart source becomes `chartRef`.
-    `values` and the HelmRelease keys are forwarded verbatim, so their shape is
+    the fetched artifact. For a GitRepository or Bucket the rule also sets
+    `chart.spec.reconcileStrategy: Revision`, so a new source revision deploys even
+    when the chart's version is unchanged (Flux's `ChartVersion` default would skip
+    it); a HelmRepository keeps that default. An OCIRepository or HelmChart source
+    becomes `chartRef`. `values` and the HelmRelease keys are forwarded verbatim, so their shape is
     the `helmrelease` terminal's to check. `valuesMode` is forwarded only when
     authored: the rule has no registration-time default.
   - An inline source also emits the source: a `helmrepository` with only the URL
     for `http(s)://`, or an `ocirepository` with `ref.tag: <version>` for `oci://`.
     A Git repository needs `kind: GitRepository` set (an `http(s)://` URL alone
-    means a Helm repository) and emits a `gitrepository` with the URL (`http://`,
-    `https://` or `ssh://`) and `source.ref`, which must set exactly one of
+    means a Helm repository) and emits a `gitrepository` with the URL (`http://`
+    or `https://`) and `source.ref`, which must set exactly one of
     `branch`, `tag`, `semver`, `name`, `commit`: Flux would otherwise check out
     branch `master`, or pick one of several fields by precedence. `kind: Bucket`
     with `endpoint` and `bucketName` (and optionally `provider`, `region`,
     `prefix`), and no `url`, emits a `bucket` with exactly those keys.
     Credentials (`secretRef` and the like) have no inline form: author the
-    `gitrepository` or `bucket` component and reference it.
+    `gitrepository` or `bucket` component and reference it. That includes every
+    `ssh://` repository, which Flux reads only with a key from `secretRef`.
     The `ocirepository` also selects the Helm chart content layer
     (`application/vnd.cncf.helm.chart.content.v1.tar+gzip`) with
     `operation: copy`. Flux therefore passes the chart archive through unchanged.
@@ -2094,7 +2098,7 @@ not part of either change.
     - `delivery: native`;
     - `source.namespace` with an inline source;
     - an inline GitRepository without exactly one `source.ref` field, or with a
-      URL that is not `http://`, `https://` or `ssh://`;
+      URL that is not `http://` or `https://` (an `ssh://` one needs credentials);
     - `url` with an inline Bucket, or one without `endpoint` or `bucketName`;
     - `source.ref` other than on an inline GitRepository, and `endpoint`,
       `bucketName`, `provider`, `region`, `prefix` other than on an inline

@@ -7,6 +7,7 @@ spec:
   chart:
     spec:
       chart: ./charts/podinfo
+      reconcileStrategy: Revision
       sourceRef:
         kind: GitRepository
         name: podinfo
@@ -22,6 +23,7 @@ spec:
   chart:
     spec:
       chart: charts/exporter
+      reconcileStrategy: Revision
       sourceRef:
         kind: Bucket
         name: chart-artifacts

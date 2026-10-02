@@ -98,7 +98,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 			Required:    true,
 			Description: "Chart source: inline (a url, or a Bucket's endpoint and bucketName; the source is generated, and shared by helm components of the document with the same content identity), or a reference (name, kind, namespace) to an existing source CR.",
 			Properties: map[string]oam.PropertySchema{
-				"url":       str("Inline chart location: an http:// or https:// Helm repository URL, an oci:// URL naming the chart, or with kind GitRepository an http://, https:// or ssh:// Git repository URL. Mutually exclusive with name; not used with kind Bucket."),
+				"url":       str("Inline chart location: an http:// or https:// Helm repository URL, an oci:// URL naming the chart, or with kind GitRepository an http:// or https:// Git repository URL. Mutually exclusive with name; not used with kind Bucket."),
 				"kind":      {Type: oam.PropertyTypeString, Enum: []any{"HelmRepository", "GitRepository", "Bucket", "OCIRepository", "HelmChart"}, Description: "Source kind. With url it is inferred from the scheme when unset and must agree with it (HelmRepository or OCIRepository); a Git repository URL needs kind GitRepository set. Without url or name, kind Bucket generates a Bucket from endpoint and bucketName. With name it is required and may be any of the five."},
 				"name":      str("Name of an existing source CR to reference. Mutually exclusive with url; not supported under delivery: template."),
 				"namespace": str("Namespace of the referenced source CR. Only with name."),
@@ -365,6 +365,12 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 		if props.Version != "" {
 			spec["version"] = props.Version
 		}
+		// Flux builds a new chart artifact from a GitRepository or Bucket only when
+		// the chart's version changes, unless reconcileStrategy is Revision; a chart
+		// read from a moving branch or a changed bucket would otherwise never deploy.
+		if kind == "GitRepository" || kind == "Bucket" {
+			spec["reconcileStrategy"] = "Revision"
+		}
 		release["chart"] = map[string]any{"spec": spec}
 	} else {
 		release["chartRef"] = ref
@@ -380,14 +386,15 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	return result, nil
 }
 
-// checkHelmGitSource checks an inline GitRepository source: a URL the
-// gitrepository terminal accepts, and exactly one source.ref field. Flux checks
-// out branch master when spec.ref is empty and picks one field by precedence
-// when several are set; the rule refuses both rather than follow either
-// silently.
+// checkHelmGitSource checks an inline GitRepository source: an http:// or https://
+// URL, and exactly one source.ref field. An ssh:// URL is refused: Flux reads it
+// only with a key from spec.secretRef, which the inline form does not take, so the
+// generated source could never become ready. Flux checks out branch master when
+// spec.ref is empty and picks one field by precedence when several are set; the
+// rule refuses both rather than follow either silently.
 func checkHelmGitSource(src *helmSource) error {
-	if !strings.HasPrefix(src.URL, "https://") && !strings.HasPrefix(src.URL, "http://") && !strings.HasPrefix(src.URL, "ssh://") {
-		return errors.Errorf("%s: source.kind GitRepository requires an http://, https:// or ssh:// URL", helmType)
+	if !strings.HasPrefix(src.URL, "https://") && !strings.HasPrefix(src.URL, "http://") {
+		return errors.Errorf("%s: source.kind GitRepository requires an http:// or https:// URL; an ssh:// repository needs credentials, so author a gitrepository and reference it", helmType)
 	}
 	var set []string
 	if src.Ref != nil {
