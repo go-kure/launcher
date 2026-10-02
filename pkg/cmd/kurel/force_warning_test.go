@@ -192,9 +192,9 @@ spec:
 }
 
 // TestBuild_PatchedForceWarningLeavesOutputUntagged pins that reading a bundle's
-// patched volumes changes nothing kurel emits: the origin annotation the patch
-// build carries reaches neither the manifest output nor any file a delivery
-// build writes.
+// patched volumes changes nothing kurel emits: no kustomize-internal annotation
+// of the patch build reaches the manifest output or any file a delivery build
+// writes.
 func TestBuild_PatchedForceWarningLeavesOutputUntagged(t *testing.T) {
 	const app = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
