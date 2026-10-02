@@ -216,18 +216,26 @@ func TestFluxNamespace_UnreadTraitObjectsStay(t *testing.T) {
 	}
 }
 
-// TestFluxNamespace_CrossNamespaceChartVerifyStays: a chart template whose
+// TestFluxNamespace_ChartVerifyFollowsHelmChartNamespace: a chart template whose
 // sourceRef names a namespace has helm-controller create its HelmChart there, so
-// the verification Secret is read from that namespace, not the release's, and
-// does not follow the release.
-func TestFluxNamespace_CrossNamespaceChartVerifyStays(t *testing.T) {
-	hr := fluxNSComponent(t, "c", "helmrelease",
-		map[string]any{"chart": hrChart(map[string]any{"kind": "HelmRepository", "name": "example", "namespace": "charts"},
-			map[string]any{"provider": "cosign", "secretRef": secretRef("creds")})},
-		externalSecretTrait("creds"))
-	got := fluxNSObjects(t, hr)
-	if ns := got["ExternalSecret/creds"]; ns != "default" {
-		t.Errorf("ExternalSecret/creds namespace = %q, want %q", ns, "default")
+// the verification Secret is read from that namespace. It follows the release
+// only when that namespace is the Flux namespace.
+func TestFluxNamespace_ChartVerifyFollowsHelmChartNamespace(t *testing.T) {
+	for _, tc := range []struct{ sourceNS, want string }{
+		{"charts", "default"},
+		{"default", "default"},
+		{fluxNSTarget, fluxNSTarget},
+	} {
+		t.Run(tc.sourceNS, func(t *testing.T) {
+			hr := fluxNSComponent(t, "c", "helmrelease",
+				map[string]any{"chart": hrChart(map[string]any{"kind": "HelmRepository", "name": "example", "namespace": tc.sourceNS},
+					map[string]any{"provider": "cosign", "secretRef": secretRef("creds")})},
+				externalSecretTrait("creds"))
+			got := fluxNSObjects(t, hr)
+			if ns := got["ExternalSecret/creds"]; ns != tc.want {
+				t.Errorf("ExternalSecret/creds namespace = %q, want %q", ns, tc.want)
+			}
+		})
 	}
 }
 

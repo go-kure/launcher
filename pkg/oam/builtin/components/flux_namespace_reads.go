@@ -40,8 +40,9 @@ func (r *fluxReads) secretRef(ref *meta.LocalObjectReference) {
 // FluxNamespaceReads reports the HelmRelease's valuesFrom ConfigMaps and
 // Secrets, its kubeConfig ConfigMap or Secret, and the chart template's
 // verification Secret when the HelmChart helm-controller creates lands in the
-// HelmRelease's namespace (sourceRef names no namespace). The values ConfigMap
-// of valuesMode: configMap is this config's own object and moves with it.
+// HelmRelease's namespace (sourceRef names no namespace, or names that one). The
+// values ConfigMap of valuesMode: configMap is this config's own object and
+// moves with it.
 func (c *HelmReleaseConfig) FluxNamespaceReads() (configMaps, secrets []string) {
 	var r fluxReads
 	for _, v := range c.Spec.ValuesFrom {
@@ -60,7 +61,7 @@ func (c *HelmReleaseConfig) FluxNamespaceReads() (configMaps, secrets []string) 
 			r.secret(k.SecretRef.Name)
 		}
 	}
-	if ch := c.Spec.Chart; ch != nil && ch.Spec.SourceRef.Namespace == "" && ch.Spec.Verify != nil {
+	if ch := c.Spec.Chart; ch != nil && ch.GetNamespace(c.fluxNamespace()) == c.fluxNamespace() && ch.Spec.Verify != nil {
 		r.secretRef(ch.Spec.Verify.SecretRef)
 	}
 	return r.configMaps, r.secrets
