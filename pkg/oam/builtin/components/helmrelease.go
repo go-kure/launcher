@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
@@ -159,8 +161,9 @@ func (h *HelmReleaseHandler) UnsupportedFieldHint(key string) string {
 // ToApplicationConfig decodes the component's properties strictly into a
 // helmv2.HelmReleaseSpec. Any key HelmReleaseSpec does not declare, at any
 // depth, and any wrongly typed value is an error. Checks: exactly one of chart
-// and chartRef, values a JSON object, each valuesFrom kind Secret or
-// ConfigMap. Every other constraint is left to Flux's own CRD admission.
+// and chartRef, values a JSON object, each valuesFrom entry within the
+// ValuesReference CRD's constraints. Every other constraint is left to Flux's
+// own CRD admission.
 func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, _, err := builtin.DecodeStrictJSON[helmv2.HelmReleaseSpec](component.Properties)
 	if err != nil {
@@ -261,10 +264,25 @@ func (c *HelmReleaseConfig) validate() error {
 // CRD enum on kind).
 var helmReleaseValuesFromKinds = []string{"Secret", "ConfigMap"}
 
+// The ValuesReference CRD's limits and patterns on name, valuesKey and
+// targetPath (github.com/fluxcd/pkg/apis/meta). The patterns are copied
+// verbatim.
+const (
+	helmReleaseValuesNameMax       = 253
+	helmReleaseValuesKeyMax        = 253
+	helmReleaseValuesTargetPathMax = 250
+)
+
+var (
+	helmReleaseValuesKeyPattern        = regexp.MustCompile(`^[\-._a-zA-Z0-9]+$`)
+	helmReleaseValuesTargetPathPattern = regexp.MustCompile(`^([a-zA-Z0-9_\-.\\\/]|\[[0-9]{1,5}\])+$`)
+)
+
 // checkHelmReleaseValuesRef checks one spec.valuesFrom entry against the
-// ValuesReference constraints launcher enforces at build time, so a bad entry
-// fails the build instead of the apply. The error starts with the field name;
-// validate prefixes the entry's index.
+// ValuesReference constraints of Flux's CRD, so a bad entry fails the build
+// instead of the apply. Lengths count characters, as the CRD's maxLength
+// does. The error starts with the field name; validate prefixes the entry's
+// index.
 func checkHelmReleaseValuesRef(ref *helmv2.ValuesReference) error {
 	kinds := strings.Join(helmReleaseValuesFromKinds, ", ")
 	if ref.Kind == "" {
@@ -272,6 +290,30 @@ func checkHelmReleaseValuesRef(ref *helmv2.ValuesReference) error {
 	}
 	if !slices.Contains(helmReleaseValuesFromKinds, ref.Kind) {
 		return errors.Errorf("kind %q is not one of %s", ref.Kind, kinds)
+	}
+	if ref.Name == "" {
+		return errors.New("name is required")
+	}
+	if n := utf8.RuneCountInString(ref.Name); n > helmReleaseValuesNameMax {
+		return errors.Errorf("name is %d characters, more than %d", n, helmReleaseValuesNameMax)
+	}
+	if err := checkHelmReleaseValuesPattern("valuesKey", ref.ValuesKey, helmReleaseValuesKeyMax, helmReleaseValuesKeyPattern); err != nil {
+		return err
+	}
+	return checkHelmReleaseValuesPattern("targetPath", ref.TargetPath, helmReleaseValuesTargetPathMax, helmReleaseValuesTargetPathPattern)
+}
+
+// checkHelmReleaseValuesPattern checks an optional ValuesReference field: unset
+// is fine, a set value is at most limit characters and matches pattern.
+func checkHelmReleaseValuesPattern(field, value string, limit int, pattern *regexp.Regexp) error {
+	if value == "" {
+		return nil
+	}
+	if n := utf8.RuneCountInString(value); n > limit {
+		return errors.Errorf("%s is %d characters, more than %d", field, n, limit)
+	}
+	if !pattern.MatchString(value) {
+		return errors.Errorf("%s %q does not match %s", field, value, pattern)
 	}
 	return nil
 }
