@@ -349,7 +349,10 @@ version-string move and no deprecation period. Such a change uses the `format` c
 PR description discloses the output change.
 
 **Stability promise (from the first stable GA release).** While a version string is current,
-every document that was valid under it remains valid, and compiles to the same output.
+every document that was valid under it remains valid, and compiles to the same output. For
+`launcher.gokure.dev/v1alpha1` the baseline is the set of documents the first stable GA release
+accepts, and the output it compiles them to; a document only an earlier pre-release accepted
+is not covered.
 
 **The additive test.** A change is additive **if and only if** every previously valid document
 remains valid *and* compiles to the same output. Additive changes ship freely under the same
@@ -362,10 +365,10 @@ until go-kure/launcher#408 they were not — an undeclared key decoded into a `m
 and was silently dropped. While that held, *every* property ever added to an existing component
 or trait kind was formally breaking, because a document could already have been authoring that
 key to no effect and would start compiling to different output the moment a handler claimed it.
-Closing the gap is itself a one-off exception to the test: a document that authored a key no
-handler declares was accepted before and is a build error now. It never compiled to the output
-its author intended — the key was dropped — so the exception is taken deliberately here, under
-`v1alpha1`, rather than carried forward as a permanent hole in the promise.
+go-kure/launcher#408 closed the gap before the first stable GA release: a document that
+authored a key no handler declares was accepted before and is a build error now. It never
+compiled to the output its author intended — the key was dropped — and the change was taken
+under `v1alpha1` while no stability promise applied, so the promise starts without that hole.
 
 **Breaking changes move the version string (from the first stable GA release).** From that
 release on, a breaking document-format change requires a new `apiVersion` (via graduation to

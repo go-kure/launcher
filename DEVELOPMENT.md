@@ -41,7 +41,8 @@ The `main` branch is protected — all changes must go through pull requests.
    groups under the changelog's
    Document Format heading. See `docs/oam/design-gvk.md` § Document-Format Lifecycle:
    until the first stable GA release, a `format` commit may change or newly reject existing
-   documents if its subject (the changelog entry) names which ones.
+   documents if its subject (the changelog entry) names which ones and the PR description
+   discloses the output change.
 
 2. **Develop and test locally**:
    ```bash
