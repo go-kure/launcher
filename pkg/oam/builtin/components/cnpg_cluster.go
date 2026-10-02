@@ -726,9 +726,10 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 
 // ApplyPostgresqlDefaults sets the values a postgresql component left to its
 // environment policy, on the Cluster after ApplyPolicy. It exists for the
-// synthesized trait the postgresql lowering rule attaches (engine-only, see
-// traits.PostgresqlDefaultsHandler) and is not an authoring surface: an
-// authored cnpg-cluster keeps the operator's defaults for both values.
+// post-policy step the postgresql lowering rule attaches to the Cluster it
+// emits (applyPostgresqlDefaults, oam.Component.AfterPolicy) and is not an
+// authoring surface: an authored cnpg-cluster keeps the operator's defaults
+// for both values.
 //
 //   - spec.enablePDB is set to instances > 1, read from the count the policy
 //     decided. A Cluster that already sets it is refused: two sources would
@@ -752,6 +753,18 @@ func (c *CnpgClusterConfig) ApplyPostgresqlDefaults() error {
 		c.Spec.StorageConfiguration.Size = fallback
 	}
 	return nil
+}
+
+// applyPostgresqlDefaults is the post-policy step (oam.PostPolicyStep) the
+// postgresql lowering rule attaches to the Cluster it emits: ApplyPostgresqlDefaults
+// on the Cluster's config. Any other config is refused: the step would
+// otherwise do nothing.
+func applyPostgresqlDefaults(config stack.ApplicationConfig) error {
+	cfg, ok := config.(*CnpgClusterConfig)
+	if !ok {
+		return errors.Errorf("postgresql defaults: the component is not a cnpg-cluster (config %T)", config)
+	}
+	return cfg.ApplyPostgresqlDefaults()
 }
 
 // cnpgVolume is the effective storage request of one volume the Cluster asks

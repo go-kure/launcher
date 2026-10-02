@@ -547,29 +547,6 @@ func TestNewBuiltinTransformer_PublishesPostgresqlSchemaUnchanged(t *testing.T) 
 	}
 }
 
-// TestNewBuiltinTransformer_EngineTraitsAreNotPublished: the engine-only traits
-// are registered (a document using postgresql builds), are not among the traits a
-// document may author, and are left out of every listing a consumer reads.
-func TestNewBuiltinTransformer_EngineTraitsAreNotPublished(t *testing.T) {
-	tr := newBuiltinTransformer()
-	schemas := tr.HandlerSchemas().Traits
-	contracts := tr.HandlerContracts().Traits
-	for name := range builtinEngineTraits() {
-		if _, ok := builtinTraitHandlers()[name]; ok {
-			t.Errorf("engine-only trait %q is also in builtinTraitHandlers", name)
-		}
-		if _, ok := schemas[name]; ok {
-			t.Errorf("HandlerSchemas() publishes engine-only trait %q", name)
-		}
-		if _, ok := contracts[name]; ok {
-			t.Errorf("HandlerContracts() lists engine-only trait %q", name)
-		}
-	}
-	if _, ok := builtinEngineTraits()["cnpg-postgresql-defaults"]; !ok {
-		t.Error("builtinEngineTraits() does not register cnpg-postgresql-defaults, which the postgresql rule attaches")
-	}
-}
-
 // TestNewBuiltinTransformer_PublishesPolicySchemas: every built-in policy handler's
 // schema is discoverable through HandlerSchemas().Policies, the same place a caller
 // finds component and trait schemas, and equals what the handler itself declares.

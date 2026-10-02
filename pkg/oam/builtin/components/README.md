@@ -2644,8 +2644,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   objects of different kinds). `replicas` and `storageSize` are written to the
   Cluster only when authored, so the policy applies to them exactly as
   before. The two values postgresql derived from the policy are set after
-  it by the engine-only `cnpg-postgresql-defaults` trait the rule attaches
-  to the Cluster ahead of the authored traits (`traits/README.md`):
+  it by a post-policy step the rule attaches to the Cluster
+  (`oam.Component.AfterPolicy`), which runs before the authored traits:
   `enablePDB` (`instances > 1`) and the `1Gi` storage fallback, under the
   policy maximum with postgresql's text (`storageSize "1Gi" exceeds enforced
   maximum "512Mi"`). Authored traits go to the Cluster, and those that
@@ -2928,10 +2928,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   entries, and their maxima; and the storage-size default on `storage.size`
   when neither `storage.size` nor `storage.pvcTemplate`'s storage request is
   authored. With no policy default the size is left to the operator; the
-  `1Gi` fallback is postgresql's, applied after the policy by the engine-only
-  `cnpg-postgresql-defaults` trait its rule attaches
+  `1Gi` fallback is postgresql's, applied after the policy by the post-policy
+  step its rule attaches
   (`ApplyPostgresqlDefaults`: the fallback is held to the policy maximum, and
-  `enablePDB` is set from the instance count). That method is for that trait,
+  `enablePDB` is set from the instance count). That method is for that step,
   not an authoring surface. A storage-size default that is
   not a quantity is refused (`policy default for storage.size: invalid
   quantity "lots"`), as an invalid cpu or memory default is, since with no
@@ -3450,7 +3450,7 @@ release-2 builder contract retired the CNPG config-struct layer
 upstream `cnpgv1` / barman-cloud structs directly. Since go-kure/launcher#281 the
 `postgresql` rule builds those structs as the properties of the `cnpg-*` kind
 components it lowers onto, whose `Generate` calls the same constructors, and
-`enablePDB` comes from the `cnpg-postgresql-defaults` trait.
+`enablePDB` comes from the post-policy step the rule attaches to the Cluster.
 The values that layer used to inject are written explicitly, so the emitted
 manifests are unchanged byte for byte: `enablePDB` (true only for more than one
 instance), `primaryUpdateStrategy: unsupervised`, the `ACCESS_KEY_ID` /
