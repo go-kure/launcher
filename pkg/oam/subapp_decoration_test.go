@@ -136,8 +136,8 @@ func TestDecorateSubApplications_AnyTraitOrder(t *testing.T) {
 // reorderTraitHandler is a trait that does more than append to the bundle. Its
 // op acts on the application named target, or on the trait's own application
 // when target is empty: "move" moves it to the end of the bundle, "replace"
-// swaps it for a new one named after it plus "-replaced", "remove" drops it,
-// and "" does nothing. With appends set it then adds a sub-application of that
+// swaps it for a new one named after it plus "-replaced", "rename" adds
+// "-renamed" to its name in place, "remove" drops it, and "" does nothing. With appends set it then adds a sub-application of that
 // name.
 type reorderTraitHandler struct {
 	op      string
@@ -159,6 +159,8 @@ func (h reorderTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *sta
 	case "replace":
 		name := bundle.Applications[i].Name + "-replaced"
 		bundle.Applications[i] = stack.NewApplication(name, app.Namespace, &namedConfigMapConfig{name: name, namespace: app.Namespace})
+	case "rename":
+		bundle.Applications[i].Name += "-renamed"
 	case "remove":
 		bundle.Applications = slices.Delete(bundle.Applications, i, i+1)
 	}
@@ -238,24 +240,31 @@ func TestApplyTraits_KeepsCustomOrder(t *testing.T) {
 
 // TestApplyTraits_RefusesReplacedComponentApplication is
 // go-kure/launcher#734: the Phase-4 passes find a component's application by
-// the pointer its entry holds, so a trait that replaces or removes one, its own
-// or another component's in the bundle, fails the transform instead of
-// silently costing that component its NetworkPolicies and health check.
+// its name and then the pointer its entry holds, so a trait that replaces,
+// removes or renames one, its own or another component's in the bundle, fails
+// the transform instead of silently costing that component its NetworkPolicies
+// and health check.
 func TestApplyTraits_RefusesReplacedComponentApplication(t *testing.T) {
+	const contract = `; a TraitHandler mutates the application it is given and appends sub-applications, it must not replace, remove or rename a component's application`
+	replaced := `component "web" trait "reorder0" replaced or removed the application of component %q` + contract
 	for name, tc := range map[string]struct {
-		handler   reorderTraitHandler
-		component string
+		handler reorderTraitHandler
+		want    string
 	}{
-		"replace its own":             {reorderTraitHandler{op: "replace"}, "web"},
-		"remove its own":              {reorderTraitHandler{op: "remove"}, "web"},
-		"remove its own and append":   {reorderTraitHandler{op: "remove", appends: "web"}, "web"},
-		"replace another component's": {reorderTraitHandler{op: "replace", target: "other"}, "other"},
+		"replace its own":             {reorderTraitHandler{op: "replace"}, fmt.Sprintf(replaced, "web")},
+		"remove its own":              {reorderTraitHandler{op: "remove"}, fmt.Sprintf(replaced, "web")},
+		"remove its own and append":   {reorderTraitHandler{op: "remove", appends: "web"}, fmt.Sprintf(replaced, "web")},
+		"replace another component's": {reorderTraitHandler{op: "replace", target: "other"}, fmt.Sprintf(replaced, "other")},
+		"rename its own": {reorderTraitHandler{op: "rename"},
+			`component "web" trait "reorder0" renamed the application of component "web" from "web" to "web-renamed"` + contract},
+		"rename another component's": {reorderTraitHandler{op: "rename", target: "other"},
+			`component "web" trait "reorder0" renamed the application of component "other" from "other" to "other-renamed"` + contract},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tr := inDocumentTransformer()
 			app := reorderApp(tr, []reorderTraitHandler{tc.handler}, false)
 			_, _, err := tr.TransformWithPolicy(app, TransformContext{})
-			want := fmt.Sprintf(`component "web" trait "reorder0" replaced or removed the application of component %q; a TraitHandler mutates the application it is given and appends sub-applications, it must not replace or remove an application`, tc.component)
+			want := tc.want
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("err = %v, want one containing %q", err, want)
 			}
