@@ -2071,7 +2071,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `operation: copy`. Flux therefore passes the chart archive through unchanged.
     By default it would extract and re-archive the chart, dropping files that its
     ignore rules exclude (`*.zip`, `*.png`, ...) even when the chart reads them
-    with `.Files.Get`. `helmchart`'s generated OCIRepository selects the same layer.
+    with `.Files.Get`.
     It is named `<document>-source-<digest>`, where the 10-hex digest is taken
     over the content identity: `helm:<url>`, `oci:<url>:<version>`,
     `git:<JSON of url and ref>`, or `bucket:<JSON of provider, endpoint,
@@ -2101,7 +2101,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     - an OCI source without `version`;
     - each HelmRelease key, `releaseName` and `targetNamespace` included, which
       `helmtemplate` does not accept.
-  - Strict, unlike `helmchart`. An undeclared key at the top level or inside
+  - Strict, unlike the removed `helmchart`. An undeclared key at the top level or inside
     `source` is refused, and so are:
     - `delivery: native`;
     - `source.namespace` with an inline source;
