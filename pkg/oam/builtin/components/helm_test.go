@@ -483,6 +483,8 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"inline Bucket without bucketName", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com"}}, "helm: an inline source.kind Bucket requires source.endpoint and source.bucketName"},
 		{"inline Bucket without endpoint", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "bucketName": "charts"}}, "helm: an inline source.kind Bucket requires source.endpoint and source.bucketName"},
 		{"inline Bucket with namespace", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts", "namespace": "x"}}, "helm: source.namespace is only valid with source.name"},
+		{"inline Bucket endpoint URL with user and token", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "https://user:FAKE_TOKEN@minio.example.com", "bucketName": "charts"}}, "helm: source.endpoint carries credentials, which an inline Bucket does not take; author a bucket with a secretRef and reference it"},
+		{"inline Bucket endpoint host with user and token", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "user:FAKE_TOKEN@minio.example.com:9000", "bucketName": "charts"}}, "helm: source.endpoint carries credentials, which an inline Bucket does not take; author a bucket with a secretRef and reference it"},
 		{"inline Bucket without chart", map[string]any{"source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts"}}, "helm: source.kind Bucket requires chart to be specified"},
 		{"inline Bucket with version", map[string]any{"chart": "charts/a", "version": "1.0.0", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts"}}, "helm: version is not used with source.kind Bucket, whose chart is read at the source's fetched revision"},
 		{"endpoint without Bucket", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "endpoint": "minio.example.com"}}, "helm: source.endpoint is only valid with an inline source.kind Bucket"},
@@ -533,6 +535,30 @@ func TestHelmRule_Refusals(t *testing.T) {
 // reconcileStrategy Revision, so a new source revision with an unchanged chart
 // version still deploys. A HelmRepository release keeps Flux's ChartVersion
 // default and carries no reconcileStrategy key.
+// TestHelmRule_InlineBucketProviderEnum: the authored pipeline's schema check
+// refuses an inline Bucket provider outside Flux's set, so a typo fails the build
+// instead of reaching the generated bucket.
+func TestHelmRule_InlineBucketProviderEnum(t *testing.T) {
+	validate := func(provider string) error {
+		tr := oam.NewTransformer(nil, nil)
+		tr.RegisterComponentLowering(components.HelmRule{})
+		return tr.ValidateAuthoredProperties(&oam.Application{Spec: oam.ApplicationSpec{
+			Components: []oam.Component{{Name: "web", Type: "helm", Properties: map[string]any{
+				"chart":  "charts/a",
+				"source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts", "provider": provider},
+			}}},
+		}})
+	}
+	for _, p := range []string{"generic", "aws", "gcp", "azure"} {
+		if err := validate(p); err != nil {
+			t.Errorf("provider %q refused: %v", p, err)
+		}
+	}
+	if err := validate("awz"); err == nil || !strings.Contains(err.Error(), "provider") {
+		t.Errorf("provider awz: error = %v, want a refusal naming provider", err)
+	}
+}
+
 func TestHelmRule_ReconcileStrategyRevisionForGitAndBucket(t *testing.T) {
 	cases := []struct {
 		name  string
