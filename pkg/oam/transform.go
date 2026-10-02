@@ -964,8 +964,9 @@ func (t *Transformer) buildDependencyAwareCluster(app *Application, entries []co
 // the traits did nothing but append: the bundle must read exactly as it did
 // before the traits, followed by the sub-applications in creation order. A
 // trait handler that moved an application or removed a sub-application leaves
-// an order of its own, which is kept as it left it. One that replaced or
-// removed a component's application fails the transform (applyEntryTraits).
+// an order of its own, which is kept as it left it. One that replaced, removed
+// or renamed a component's application fails the transform
+// (checkEntryApplications).
 func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bundle *stack.Bundle, ctx TransformContext) error {
 	before := slices.Clone(bundle.Applications)
 	var created []*stack.Application
@@ -1030,6 +1031,35 @@ func sameApplications(a, b []*stack.Application) bool {
 	return true
 }
 
+// entryAppContract is the TraitHandler contract a refused trait broke.
+const entryAppContract = "a TraitHandler mutates the application it is given and appends sub-applications, it must not replace, remove or rename a component's application"
+
+// checkEntryApplications fails when trait traitType of component component
+// left a bundle entry's application out of the bundle, by pointer, or renamed
+// it from names[i]. The Phase-4 automatic health check and NetworkPolicy
+// synthesis find a component's application by its name and then its pointer,
+// so a replaced, removed or renamed one would silently get neither
+// (go-kure/launcher#734).
+func checkEntryApplications(entries []componentEntry, names []string, bundle *stack.Bundle, component, traitType string) error {
+	inBundle := make(map[*stack.Application]bool, len(bundle.Applications))
+	for _, a := range bundle.Applications {
+		inBundle[a] = true
+	}
+	for i, c := range entries {
+		if !inBundle[c.app] {
+			return &TransformError{Message: fmt.Sprintf(
+				"component %q trait %q replaced or removed the application of component %q; %s",
+				component, traitType, c.component.Name, entryAppContract)}
+		}
+		if c.app.Name != names[i] {
+			return &TransformError{Message: fmt.Sprintf(
+				"component %q trait %q renamed the application of component %q from %q to %q; %s",
+				component, traitType, c.component.Name, names[i], c.app.Name, entryAppContract)}
+		}
+	}
+	return nil
+}
+
 // applyEntryTraits applies the traits of one entry — each member's own, on that
 // member's application and in authored order, for a collapsed sibling group
 // (traitSteps). groupTraitApps is non-nil exactly for a group. It returns the
@@ -1038,10 +1068,8 @@ func sameApplications(a, b []*stack.Application) bool {
 // ctx.subAppDecorations.
 //
 // bundleEntries are the entries whose applications the bundle was built from.
-// Each must still be in the bundle, by pointer, after every trait: the Phase-4
-// automatic health check and NetworkPolicy synthesis find a component's
-// application by the pointer its entry holds, so a replaced one would silently
-// get neither (go-kure/launcher#734).
+// Each must still be in the bundle, by pointer and under its name, after every
+// trait (checkEntryApplications).
 func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundleEntries []componentEntry, groupTraitApps map[string]string, bundle *stack.Bundle, ctx TransformContext) ([]*stack.Application, error) {
 	var subApps []*stack.Application
 	var decorators []subAppDecoration
@@ -1054,6 +1082,10 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 		typ   string
 	}
 	decorated := make(map[slotTrait]string)
+	entryNames := make([]string, len(bundleEntries))
+	for i, c := range bundleEntries {
+		entryNames[i] = c.app.Name
+	}
 	for _, step := range e.traitSteps(app) {
 		entry := step.entry
 		for _, trait := range step.traits {
@@ -1131,12 +1163,8 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 					Cause:   err,
 				}
 			}
-			for _, c := range bundleEntries {
-				if !slices.Contains(bundle.Applications, c.app) {
-					return nil, &TransformError{Message: fmt.Sprintf(
-						"component %q trait %q replaced or removed the application of component %q; a TraitHandler mutates the application it is given and appends sub-applications, it must not replace or remove an application",
-						entry.component.Name, trait.Type, c.component.Name)}
-				}
+			if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type); err != nil {
+				return nil, err
 			}
 
 			added := addedApplications(prev, bundle.Applications)

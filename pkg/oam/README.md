@@ -47,7 +47,7 @@ Within a bundle, each component's application is followed by the sub-application
 created, in creation order, so a trait's objects are emitted with their own component's rather
 than after every component of the bundle (go-kure/launcher#712). A trait handler that moves
 an application or removes a sub-application keeps the order it left (go-kure/launcher#718); one
-that replaces or removes a component's application fails the transform (go-kure/launcher#734,
+that replaces, removes or renames a component's application fails the transform (go-kure/launcher#734,
 see `TraitHandler` below). A trait whose handler
 implements `SubApplicationDecorator` (the built-in `prune-protection` and `force-replace`) also
 decorates those sub-applications, whatever order the traits were authored in: the last step of
@@ -311,7 +311,7 @@ the built-ins. Extend the system by implementing:
 | Interface | Role |
 |-----------|------|
 | `ComponentHandler` | `CanHandle(type)` + `ToApplicationConfig(...)` — see [components](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components). |
-| `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits). `Apply` mutates the application it is given and may append sub-applications to the bundle. It must not replace or remove a component's application there: the transform fails, naming the trait and the component, because the automatic health check and NetworkPolicy synthesis find a component's application by pointer and a replaced one would silently get neither (go-kure/launcher#734). |
+| `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits). `Apply` mutates the application it is given and may append sub-applications to the bundle. It must not replace, remove or rename a component's application there: the transform fails, naming the trait and the component, because the automatic health check and NetworkPolicy synthesis find a component's application by its name and then its pointer, and a replaced, removed or renamed one would silently get neither (go-kure/launcher#734). |
 | `PolicyHandler` | `CanHandle(type)` + `Apply(policy, components, result)` — validates one `spec.policies` entry and records its effect (tier overrides, dependency edges, extra health checks, reconciliation settings) on the shared `PolicyResult`; see [policies](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies). A policy type with no registered handler fails the transform. |
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
