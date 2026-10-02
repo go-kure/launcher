@@ -61,6 +61,7 @@ expect "unspaced ref in an indexed Go call" 1 "a.go:1:" a.go 'callbacks[i]("#227
 expect "unspaced partial ref in an indexed Go call" 1 "a.go:1:" a.go 'callbacks[i]("launcher#278")'
 expect "ref after a shell prefix trim" 1 "x.sh:1:" x.sh 'echo "${ports#80}" # see #227'
 expect "ref after an array element trim" 1 "x.sh:1:" x.sh 'echo "${items[0]#80}" # see #227'
+expect "ref inside an array subscript" 1 "x.sh:1:" x.sh 'echo "${items["tracked in #227"]#80}"'
 expect "ref after a starred Go format verb" 1 "a.go:1:" a.go 'fmt.Printf("%#12.*x", 3, value) // see #227'
 # Neither pattern above sees these: `_` counts as part of a word.
 expect "emphasised bare ref" 1 "a.md:1:" a.md 'fixed in _#227_ last week'
