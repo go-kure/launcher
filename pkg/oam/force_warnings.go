@@ -121,20 +121,18 @@ func (s *forceScan) addPatched(apps []GeneratedApplication) error {
 	if err != nil {
 		return err
 	}
-	for _, out := range built {
-		for _, obj := range fluxExpanded(out) {
-			id, ok := volumeIdentity(obj)
-			if !ok {
-				continue
-			}
-			selected := forceSelected(obj)
-			g, seen := generated[id]
-			producer := "the bundle of " + apps[0].String()
-			if seen {
-				producer = g.app.String()
-			}
-			s.add(id, producer, apps[0].Forced, selected, selected && g.selected)
+	for _, obj := range built {
+		id, ok := volumeIdentity(obj)
+		if !ok {
+			continue
 		}
+		selected := forceSelected(obj)
+		g, seen := generated[id]
+		producer := "the bundle of " + apps[0].String()
+		if seen {
+			producer = g.app.String()
+		}
+		s.add(id, producer, apps[0].Forced, selected, selected && g.selected)
 	}
 	return nil
 }
@@ -181,14 +179,16 @@ func bundleEnd(apps []GeneratedApplication, start int) int {
 // A bundle's patches (GeneratedApplication.Patches, from the fluxcd-patches trait)
 // are applied first, as Flux applies its Kustomization's spec.patches: the objects
 // of a leaf bundle with patches are built with kustomize and the patched copies are
-// read (applyBundlePatches), exactly as Flux builds them, so a patched volume is
+// read (applyBundlePatches), exactly as Flux builds and reads them (a document Flux
+// skips, such as one without an apiVersion, is skipped), so a patched volume is
 // warned exactly when Flux force-applies it. A patch can add the force key, remove
 // or disable it, delete or rename the volume, or add one to a list envelope. The
 // build is not traced back to the generated objects: a patched volume is named by
 // the first application that generates a volume of its final identity, else by its
 // bundle, and a force key is named as the patches' unless a generated volume of that
 // identity carried it, so a volume a patch renames or swaps can be named
-// imprecisely. A patch set that does not build is warned once, naming the bundle's
+// imprecisely. A patch set that does not build, or whose result Flux cannot read
+// (a list member that is not an object), is warned once, naming the bundle's
 // first application and the build error, and that bundle's objects are read
 // unpatched. postBuild substitution and anything the cluster changes on apply are
 // not modelled.

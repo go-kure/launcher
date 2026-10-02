@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"io"
 	"path"
+	"strings"
 	"sync"
 
 	kio "github.com/go-kure/kure/pkg/io"
 	"github.com/go-kure/kure/pkg/stack"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/kustomize/api/krusty"
@@ -34,11 +36,11 @@ const (
 // trait sets), as kustomize-controller builds them: the objects encoded as a
 // delivered artifact encodes them, a kustomization.yaml listing them with the
 // patches appended in order and each target mapped field for field, built with
-// krusty under kustomize-controller's options. The resources come in kustomize's
-// build order (input order, except that a List's members follow the other
-// objects), list envelopes not yet expanded the way Flux's ReadObjects expands
-// them. A patch set that does not build, or whose result does not serialize, is an
-// error.
+// krusty under kustomize-controller's options, then read back as Flux reads them
+// (fluxReadObjects). The objects come in kustomize's build order (input order,
+// except that a List's members follow the other objects), list envelopes expanded
+// to their members. A patch set that does not build, or whose result does not
+// serialize or read, is an error.
 func applyBundlePatches(objects []*client.Object, patches []stack.Patch) ([]*unstructured.Unstructured, error) {
 	manifests, err := kio.EncodeObjectsToYAML(objects)
 	if err != nil {
@@ -98,22 +100,72 @@ func kustomizeBuild(fs filesys.FileSystem, dir string) (out []*unstructured.Unst
 		return nil, errors.Wrap(err, "building the bundle's patches")
 	}
 	// kustomize-controller serializes the build and reads the objects back from
-	// the YAML (fluxcd/pkg/ssa ReadObjects), so they are read here the same way: a
-	// result that does not serialize fails the build, and a value the YAML changes
-	// (a date becomes a string) is read as Flux reads it.
+	// the YAML (fluxReadObjects), so they are read here the same way: a result that
+	// does not serialize or read fails the build, and a value the YAML changes (a
+	// date becomes a string) is read as Flux reads it.
 	manifests, err := res.AsYaml()
 	if err != nil {
 		return nil, errors.Wrap(err, "serializing the patched objects")
 	}
-	decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(manifests), 2048)
+	out, err = fluxReadObjects(bytes.NewReader(manifests))
+	if err != nil {
+		return nil, errors.Wrap(err, "reading the patched objects")
+	}
+	return out, nil
+}
+
+// fluxReadObjects mirrors fluxcd/pkg/ssa utils.ReadObjects (ssa/v0.77.0), which
+// kustomize-controller reads a build's YAML with: a list (apimachinery's IsList:
+// items is an array) stands for its members, one level only and unfiltered, and
+// a member that is not an object is an error; any other document is kept only if
+// it is a Kubernetes object (isKubernetesObject) and not a kustomize config
+// (isKustomization).
+func fluxReadObjects(r io.Reader) ([]*unstructured.Unstructured, error) {
+	reader := utilyaml.NewYAMLOrJSONDecoder(r, 2048)
+	objects := make([]*unstructured.Unstructured, 0)
+
 	for {
 		obj := &unstructured.Unstructured{}
-		if err := decoder.Decode(obj); err != nil {
+		err := reader.Decode(obj)
+		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return out, nil
+				break
 			}
-			return nil, errors.Wrap(err, "reading the patched objects")
+			return objects, err
 		}
-		out = append(out, obj)
+
+		if obj.IsList() {
+			err = obj.EachListItem(func(item runtime.Object) error {
+				obj := item.(*unstructured.Unstructured)
+				objects = append(objects, obj)
+				return nil
+			})
+			if err != nil {
+				return objects, err
+			}
+			continue
+		}
+
+		if isKubernetesObject(obj) && !isKustomization(obj) {
+			objects = append(objects, obj)
+		}
 	}
+
+	return objects, nil
+}
+
+// isKubernetesObject mirrors fluxcd/pkg/ssa utils.IsKubernetesObject (ssa/v0.77.0):
+// the object has a name, a kind and an apiVersion.
+func isKubernetesObject(object *unstructured.Unstructured) bool {
+	if object.GetName() == "" || object.GetKind() == "" || object.GetAPIVersion() == "" {
+		return false
+	}
+	return true
+}
+
+// isKustomization mirrors fluxcd/pkg/ssa utils.IsKustomization (ssa/v0.77.0): the
+// object is a kustomize config.
+func isKustomization(object *unstructured.Unstructured) bool {
+	return strings.ToLower(object.GetKind()) == "kustomization" &&
+		strings.HasPrefix(object.GetAPIVersion(), "kustomize.config.k8s.io/")
 }
