@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -158,8 +159,8 @@ func (h *HelmReleaseHandler) UnsupportedFieldHint(key string) string {
 // ToApplicationConfig decodes the component's properties strictly into a
 // helmv2.HelmReleaseSpec. Any key HelmReleaseSpec does not declare, at any
 // depth, and any wrongly typed value is an error. Checks: exactly one of chart
-// and chartRef, values a JSON object. Every other constraint is left to Flux's
-// own CRD admission.
+// and chartRef, values a JSON object, each valuesFrom kind Secret or
+// ConfigMap. Every other constraint is left to Flux's own CRD admission.
 func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, _, err := builtin.DecodeStrictJSON[helmv2.HelmReleaseSpec](component.Properties)
 	if err != nil {
@@ -247,6 +248,30 @@ func (c *HelmReleaseConfig) validate() error {
 	}
 	if _, err := helmReleaseValuesMap(c.Spec.Values); err != nil {
 		return err
+	}
+	for i := range c.Spec.ValuesFrom {
+		if err := checkHelmReleaseValuesRef(&c.Spec.ValuesFrom[i]); err != nil {
+			return errors.Errorf("helmrelease: valuesFrom[%d].%w", i, err)
+		}
+	}
+	return nil
+}
+
+// helmReleaseValuesFromKinds are the kinds Flux's ValuesReference admits (its
+// CRD enum on kind).
+var helmReleaseValuesFromKinds = []string{"Secret", "ConfigMap"}
+
+// checkHelmReleaseValuesRef checks one spec.valuesFrom entry against the
+// ValuesReference constraints launcher enforces at build time, so a bad entry
+// fails the build instead of the apply. The error starts with the field name;
+// validate prefixes the entry's index.
+func checkHelmReleaseValuesRef(ref *helmv2.ValuesReference) error {
+	kinds := strings.Join(helmReleaseValuesFromKinds, ", ")
+	if ref.Kind == "" {
+		return errors.Errorf("kind is required: one of %s", kinds)
+	}
+	if !slices.Contains(helmReleaseValuesFromKinds, ref.Kind) {
+		return errors.Errorf("kind %q is not one of %s", ref.Kind, kinds)
 	}
 	return nil
 }
