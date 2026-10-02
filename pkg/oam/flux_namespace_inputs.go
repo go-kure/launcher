@@ -20,8 +20,10 @@ type fluxNamespaceInput interface {
 	FluxNamespaceInput() (kind, name string)
 }
 
-// traitSubApps is one component's application and the sub-applications its
-// traits appended, recorded by applyEntryTraits for postProcessFluxNamespace.
+// traitSubApps is the application a trait ran on and the sub-applications it
+// appended, recorded by applyEntryTraits for postProcessFluxNamespace. In a
+// sibling group that is the member carrying the trait, not the group, so one
+// member's reads never move another member's trait objects.
 type traitSubApps struct {
 	owner   *stack.Application
 	subApps []*stack.Application

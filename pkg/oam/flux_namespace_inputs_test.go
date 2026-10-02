@@ -59,6 +59,65 @@ func TestMoveFluxNamespaceInputs(t *testing.T) {
 	}
 }
 
+// secretInputTrait appends a sub-application producing Secret "x".
+type secretInputTrait struct{}
+
+func (secretInputTrait) CanHandle(string) bool { return true }
+func (secretInputTrait) Apply(_ *Trait, app *stack.Application, b *stack.Bundle) error {
+	b.Applications = append(b.Applications, stack.NewApplication(app.Name+"-in", app.Namespace, &inputStub{kind: "Secret", name: "x"}))
+	return nil
+}
+
+// TestSiblingGroup_FluxNamespaceInputsFollowTheirMember: in a sibling group a
+// trait sub-application follows the member whose trait created it, so it moves
+// only when that member reads it, not when another member does.
+func TestSiblingGroup_FluxNamespaceInputsFollowTheirMember(t *testing.T) {
+	in := []Trait{{Type: "in", Properties: map[string]any{}}}
+	for _, tc := range []struct {
+		name     string
+		onReader bool
+		want     string
+	}{
+		{name: "trait on the reading member", onReader: true, want: "flux"},
+		{name: "trait on another member", onReader: false, want: "ns"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &siblingStubHandler{typ: "a", build: func() stack.ApplicationConfig { return &readerStub{secrets: []string{"x"}} }}
+			tr := NewTransformer(map[string]ComponentHandler{"a": reader, "b": stubHandler("b", 0)},
+				map[string]TraitHandler{"in": secretInputTrait{}})
+			tr.RegisterComponentLowering(emitRule{"pair", func(c *Component) []Component {
+				a := Component{Name: c.Name, Type: "a", Properties: map[string]any{}}
+				b := Component{Name: c.Name, Type: "b", Properties: map[string]any{}}
+				if tc.onReader {
+					a.Traits = in
+				} else {
+					b.Traits = in
+				}
+				return []Component{a, b}
+			}})
+			doc := siblingDoc(Component{Name: "web", Type: "pair"})
+			doc.Metadata.Namespace = "ns"
+			cluster, _, err := tr.TransformWithPolicy(doc, TransformContext{FluxNamespace: "flux"})
+			if err != nil {
+				t.Fatalf("TransformWithPolicy: %v", err)
+			}
+			var found bool
+			for _, a := range cluster.Node.Bundle.Applications {
+				if a.Name != "web-in" {
+					continue
+				}
+				found = true
+				if a.Namespace != tc.want {
+					t.Errorf("web-in namespace = %q, want %q", a.Namespace, tc.want)
+				}
+			}
+			if !found {
+				t.Fatal("no web-in application in the bundle")
+			}
+		})
+	}
+}
+
 // TestSiblingGroup_FluxNamespaceReads: a group reports every member's reads.
 func TestSiblingGroup_FluxNamespaceReads(t *testing.T) {
 	g := &siblingGroupConfig{members: []*stack.Application{

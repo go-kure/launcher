@@ -184,7 +184,9 @@ func (e componentEntry) healthCheckConfig() stack.ApplicationConfig {
 //
 //   - fluxNamespaceSettable (transform.go applyAutoHealthChecks and
 //     postProcessFluxNamespace): set on every member.
-//   - fluxNamespaceReader (moveFluxNamespaceInputs): every member's reads.
+//   - fluxNamespaceReader: every member's reads. moveFluxNamespaceInputs asks
+//     the member a trait ran on instead, so the union never moves one member's
+//     trait object for another member's read.
 //   - autoHealthCheckEmitter (applyAutoHealthChecks): the primary member's
 //     answer, since the health check names the primary's kind.
 //   - ComponentNamed (for consumers attributing objects to their component):

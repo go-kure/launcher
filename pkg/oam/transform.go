@@ -73,8 +73,9 @@ type TransformContext struct {
 	// TransformWithPolicy. Internal only, initialized like consumedCapabilities; a
 	// pointer so every by-value ctx copy appends to one slice.
 	subAppDecorations *[]subAppDecoration
-	// traitSubApps accumulates each component's application and the
-	// sub-applications its traits appended, recorded by applyEntryTraits and read
+	// traitSubApps accumulates each application a trait ran on (a sibling
+	// group's member, not the group) and the sub-applications that trait
+	// appended, recorded by applyEntryTraits and read
 	// by postProcessFluxNamespace. Internal only, shared like subAppDecorations.
 	traitSubApps *[]traitSubApps
 }
@@ -1192,6 +1193,11 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				}
 			}
 			subApps = append(subApps, added...)
+			// Recorded under the member the trait ran on, not the group: only
+			// that member's Flux object reading one moves it.
+			if len(added) > 0 && ctx.traitSubApps != nil {
+				*ctx.traitSubApps = append(*ctx.traitSubApps, traitSubApps{owner: entry.app, subApps: added})
+			}
 
 			if d, ok := handler.(SubApplicationDecorator); ok && d.DecoratesSubApplications() {
 				if trait.authoredIndex != nil {
@@ -1212,9 +1218,6 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			d.subApps = subApps
 			*ctx.subAppDecorations = append(*ctx.subAppDecorations, d)
 		}
-	}
-	if len(subApps) > 0 && ctx.traitSubApps != nil {
-		*ctx.traitSubApps = append(*ctx.traitSubApps, traitSubApps{owner: e.app, subApps: subApps})
 	}
 	return subApps, nil
 }
