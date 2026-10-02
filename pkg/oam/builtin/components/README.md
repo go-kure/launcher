@@ -1083,7 +1083,9 @@ named `serviceName` (default: the component name) on `statefulset`. An authored
   old `spec.subdomain`, which is set only when a pod is created, so their DNS
   names under the new Service do not resolve until they are replaced: run
   `kubectl rollout restart statefulset/<name>` (or, under `updateStrategy:
-  OnDelete`, delete the pods one at a time). (The authored Service
+  OnDelete`, delete the pods one at a time). A `rollingUpdate.partition`
+  excludes the pods below it from the restart: set it to `0` for the restart,
+  or delete those pods one at a time. (The authored Service
   cannot keep the old name: it is the component's own, and component names are
   unique within an Application.)
 - A trait that routed to the component's own Service (an implicit `ingress`,
