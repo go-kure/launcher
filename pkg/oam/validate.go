@@ -51,6 +51,12 @@ var validComponentTypes = map[string]bool{
 	"cnpg-pooler":      true,
 	"cnpg-database":    true,
 	"cnpg-objectstore": true,
+
+	// The kind components for the objects the workload kinds generated
+	// (go-kure/launcher#702).
+	"serviceaccount":        true,
+	"persistentvolumeclaim": true,
+	"configmap":             true,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.

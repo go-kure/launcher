@@ -1,0 +1,14 @@
+apiVersion: v1
+binaryData:
+  logo.bin: aGVsbG8=
+data:
+  LOG_LEVEL: info
+  config.yaml: |
+    mode: production
+immutable: true
+kind: ConfigMap
+metadata:
+  labels:
+    app: settings
+  name: settings
+  namespace: default

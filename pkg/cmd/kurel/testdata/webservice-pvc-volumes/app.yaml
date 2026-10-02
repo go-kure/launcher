@@ -1,0 +1,30 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        port: 8080
+        volumes:
+          - name: data
+            type: pvc
+            mountPath: /data
+            size: 5Gi
+            storageClass: fast
+          - name: scratch
+            type: pvc
+            devicePath: /dev/scratch
+            volumeMode: Block
+            size: 1Gi
+            storageClass: ""
+            accessModes:
+              - ReadWriteOnce
+              - ReadOnlyMany
+      traits:
+        - type: prune-protection
+          properties: {}

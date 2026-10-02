@@ -215,6 +215,12 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		longRefusal: "must be a DNS-1035 label of at most 63 characters"},
 	"cnpg-database":    {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app", "owner": "app"}},
 	"cnpg-objectstore": {props: map[string]any{"configuration": map[string]any{"destinationPath": "s3://backups/db"}}},
+	// The go-kure/launcher#702 kinds name their one object after the
+	// component, and a ServiceAccount, ConfigMap or claim name is a DNS-1123
+	// subdomain, so each accepts the 200-character name and labels its object.
+	"serviceaccount":        {props: map[string]any{}, labelled: true},
+	"persistentvolumeclaim": {props: map[string]any{"size": "1Gi"}, labelled: true},
+	"configmap":             {props: map[string]any{"data": map[string]any{"k": "v"}}, labelled: true},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

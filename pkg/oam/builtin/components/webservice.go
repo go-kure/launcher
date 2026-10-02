@@ -13,9 +13,10 @@ import (
 )
 
 // WebserviceRule lowers a "webservice" component (D1 component position,
-// oam.ComponentLoweringRule) into a same-name sibling group of two terminal
-// components: a "deployment" and a "service", in that order, both carrying
-// the component's name. It is the re-expression of the former
+// oam.ComponentLoweringRule) into a same-name sibling group of terminal
+// components: a "deployment", a "service" and, unless `serviceAccountName` is
+// authored, a "serviceaccount", in that order, all carrying the component's
+// name. It is the re-expression of the former
 // WebserviceHandler: webservice was a Deployment, a ClusterIP Service in front
 // of its pods, and launcher's own opinions, and `deployment` and `service` are
 // the unopinionated projections of those two API kinds, so what webservice
@@ -41,20 +42,25 @@ import (
 //   - the service member, with one port `{name: http, port: <port>}` (its
 //     `targetPort` defaults to the same number, its protocol to TCP) and the
 //     default selector `app: <component name>`, the deployment member's pod
-//     labels.
+//     labels;
+//   - unless `serviceAccountName` is authored, the serviceaccount member
+//     (roleServiceAccount): the component's own ServiceAccount, with
+//     `automountServiceAccountToken: false` as the handler generated it, and
+//     `serviceAccountName: <component name>` on the deployment member so it
+//     generates none of its own.
 //
 // Keys webservice does not declare are dropped rather than forwarded, as
-// WorkerRule drops them. Annotations go to both members, so a tier override
+// WorkerRule drops them. Annotations go to every member, so a tier override
 // places the whole group.
 //
 // Each authored trait is forwarded by value (it keeps its authored slot, so
-// the group applies the traits in authored order across both members) to the
+// the group applies the traits in authored order across the members) to the
 // member whose objects or contracts it acts on:
 //
 //   - `expose`, `ingress` and `httproute` to the service member: they route to
 //     the component's Service and read its port, port name and name;
-//   - `prune-protection` and `force-replace` to both: they decorate every
-//     object a component generates, and each member generates its own;
+//   - `prune-protection` and `force-replace` to every member: they decorate
+//     every object a component generates, and each member generates its own;
 //   - every other trait to the deployment member: the workload traits read the
 //     pods, the ServiceAccount or the claims, and the bundle traits
 //     (`fluxcd-patches`, `fluxcd-postbuild`) act on the group's one
@@ -135,12 +141,9 @@ func (WebserviceRule) PropertySchema() map[string]oam.PropertySchema {
 }
 
 // webserviceServiceTraits are the authored trait types the rule forwards to the
-// service member, and webserviceObjectTraits those it forwards to both members
-// (see WebserviceRule).
-var (
-	webserviceServiceTraits = map[string]bool{"expose": true, "ingress": true, "httproute": true}
-	webserviceObjectTraits  = map[string]bool{"prune-protection": true, "force-replace": true}
-)
+// service member; roleObjectTraits those it forwards to every member (see
+// WebserviceRule).
+var webserviceServiceTraits = map[string]bool{"expose": true, "ingress": true, "httproute": true}
 
 // webservicePortName is the name of the main container's one port and of the
 // Service's one port.
@@ -185,6 +188,8 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContex
 		}
 	}
 
+	sa := roleServiceAccount(comp, depProps, comp.Traits)
+
 	var depTraits, svcTraits []oam.Trait
 	if !opinions.topologySpreadDisabled {
 		depTraits = append(depTraits, oam.Trait{Type: "topology-spread", Properties: map[string]any{}})
@@ -193,7 +198,7 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContex
 		switch {
 		case webserviceServiceTraits[t.Type]:
 			svcTraits = append(svcTraits, t)
-		case webserviceObjectTraits[t.Type]:
+		case roleObjectTraits[t.Type]:
 			depTraits = append(depTraits, t)
 			svcTraits = append(svcTraits, t)
 		default:
@@ -201,7 +206,7 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContex
 		}
 	}
 
-	return oam.LoweringResult{Components: []oam.Component{
+	members := []oam.Component{
 		{
 			Name:        comp.Name,
 			Type:        "deployment",
@@ -218,7 +223,11 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContex
 			Traits:      svcTraits,
 			Annotations: maps.Clone(comp.Annotations),
 		},
-	}}, nil
+	}
+	if sa != nil {
+		members = append(members, *sa)
+	}
+	return oam.LoweringResult{Components: members}, nil
 }
 
 // webserviceOpinions is what parseWebservice keeps: the properties webservice

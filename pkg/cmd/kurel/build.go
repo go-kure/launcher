@@ -302,6 +302,10 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"cnpg-pooler":      &components.CnpgPoolerHandler{},
 		"cnpg-database":    &components.CnpgDatabaseHandler{},
 		"cnpg-objectstore": &components.CnpgObjectStoreHandler{},
+
+		"serviceaccount":        &components.ServiceAccountHandler{},
+		"persistentvolumeclaim": &components.PersistentVolumeClaimHandler{},
+		"configmap":             &components.ConfigMapHandler{},
 	}
 }
 

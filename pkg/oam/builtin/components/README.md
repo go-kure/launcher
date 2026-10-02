@@ -59,12 +59,15 @@ reads it.
 
 | `type` | Produces | Summary |
 |--------|----------|---------|
-| `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. Lowered to a same-name `deployment` and `service` pair plus a `topology-spread` trait (`WebserviceRule`) — see below. |
-| `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). Lowered to a `deployment` component plus a `topology-spread` trait (`WorkerRule`) — see below. |
+| `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. Lowered to a same-name `deployment`, `service` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WebserviceRule`) — see below. |
+| `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). Lowered to a same-name `deployment` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WorkerRule`) — see below. |
 | `statefulset` | StatefulSet, SA (+PVC) | Stateful workload with `volumeClaimTemplates`; `serviceName` names a governing `service` authored beside it. Emits no Service (go-kure/launcher#690). |
 | `daemonset` | DaemonSet, SA (+PVC) | Per-node daemon; honors `tolerations`. Emits no Service (go-kure/launcher#690). |
 | `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
 | `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`, `clusterIP: None` for a headless one. Emits nothing else — see below. |
+| `serviceaccount` | ServiceAccount | Kind-named ServiceAccount: `automountServiceAccountToken`, `imagePullSecrets`. A workload names it with `serviceAccountName` — see below. |
+| `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
+| `configmap` | ConfigMap | Kind-named ConfigMap: `data`, `binaryData`, `immutable`. A workload reads it through a `configMap` volume or `envFrom` — see below. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
@@ -810,6 +813,29 @@ before, into a Deployment the API server rejects. A webservice's name is
 checked against the Service-name rule first, so an over-long name is refused
 there, before this check.
 
+### Referencing an existing claim (`pvc.claimName`)
+
+A `pvc` volume with `claimName` mounts an existing claim instead of generating
+one (go-kure/launcher#702). The claim usually comes from a
+`persistentvolumeclaim` component, but it can be any claim in the namespace.
+The volume generates no object, and its claim name is used exactly as written:
+it is not qualified with the component name the way a generated claim is.
+
+- `claimName` must be a DNS-1123 subdomain.
+- `size` and `storageClass` are refused alongside it, because the referenced
+  claim states its own (`volume "data": size cannot be set with claimName; …`).
+- `claimName: ""` is refused, not read as absent.
+- `accessModes` stays: it states the referenced claim's modes, defaulting to
+  `ReadWriteOnce` as on a generated claim. The workload still reads them. A
+  non-RWX claim still forces `strategy: Recreate` on a Deployment, still
+  refuses `replicas` above 1, and still limits a `scaler` to one replica. To
+  scale against a `ReadWriteMany` claim, state `accessModes: [ReadWriteMany]`
+  on the volume.
+- `volumeMode`, `readOnly` and the mount keys work as on a generated claim.
+
+Every workload kind that accepts `volumes` accepts `claimName`. `BuildPVC`
+refuses a `PVCConfig` that carries a `ClaimName`: there is no object to build.
+
 ### Raw block volumes (`volumeMode: Block`)
 
 A claim with `volumeMode: Block` has no filesystem. A container consumes it
@@ -1534,6 +1560,21 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `affinity: the shorthand evaluates to an affinity the API server would
     refuse: …` text. Keys worker does not declare are dropped rather than forwarded to
     `deployment`; `kurel build` refuses them before lowering anyway.
+  - **Both rules emit the component's ServiceAccount as a `serviceaccount`
+    member** (go-kure/launcher#702) unless `serviceAccountName` is authored. A
+    `worker` therefore lowers to a same-name sibling group of a `deployment` and
+    a `serviceaccount`; a `webservice` to a `deployment`, a `service` and a
+    `serviceaccount`. The member carries `automountServiceAccountToken: false`,
+    the component's annotations, and the authored `prune-protection` and
+    `force-replace` traits. The `deployment` member is handed
+    `serviceAccountName: <component-name>`, so it runs as that account and
+    generates none of its own. The output is unchanged: the same ServiceAccount,
+    in the same place, so every golden builds byte-identically. One consequence
+    for a library caller: a registry that lowers `webservice` or `worker` must
+    register a `serviceaccount` component handler too, or the build fails with
+    `member type "serviceaccount" has no component handler`. The claims a `pvc`
+    volume generates stay with the `deployment` member for now; moving them to
+    trait-generated claims is part of go-kure/launcher#702.
   - **`webservice` is a component lowering rule, not a handler**
     (`WebserviceRule`, go-kure/launcher#280). It runs webservice's own parse,
     then re-expresses the component as a same-name sibling group (see `pkg/oam`
@@ -1666,6 +1707,37 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - It implements `oam.EndpointProvider`: one endpoint, the `selector` pods on
     every TCP `targetPort` (deduplicated). A Service with no TCP port declares
     none.
+- **serviceaccount**, **persistentvolumeclaim**, **configmap**
+  (go-kure/launcher#702) are kind-named projections of one object each. Each
+  emits that object, named after the component, and nothing else, so another
+  component refers to it by the component name. They are the authorable forms
+  of the objects the workload kinds generate for themselves today, and they
+  carry no launcher opinions. Like `deployment` and `service`, they are
+  absent from the default tier map and deploy in the `apps` tier unless a tier
+  annotation or placement policy says otherwise. None has an auto health check
+  (see `pkg/oam` "componentHealthCheckGVK").
+  - `serviceaccount` publishes `automountServiceAccountToken` and
+    `imagePullSecrets` (`[{name}]`). An unauthored
+    `automountServiceAccountToken` stays unset, which Kubernetes reads as
+    true. The account a workload kind generates sets it to false, so a
+    `serviceaccount` replacing that account authors `false` to keep the same
+    posture. A workload runs as it through `serviceAccountName`, which also
+    stops the workload from generating its own account.
+  - `persistentvolumeclaim` publishes `size`, `storageClassName`,
+    `accessModes` (default `[ReadWriteOnce]`) and `volumeMode`. The claim is
+    built by the same `BuildPVC` as a `pvc` volume and the `pvc` trait, so the
+    three agree on every field they share, including the explicit-empty
+    `storageClassName: ""`, which requests no class. An unauthored `size`
+    comes from the EnvironmentPolicy storage default; with neither, the build
+    fails with `size: required …`. The policy's maximum storage size applies
+    either way. A workload mounts the claim through a `pvc` volume's
+    `claimName` (see "Referencing an existing claim" below). A claim name
+    another component also generates (for example a `pvc` trait of the same
+    name) is refused as a generated-object collision.
+  - `configmap` publishes `data` (string values only: a number or a boolean
+    is refused rather than stringified), `binaryData` (base64; a key may not
+    also appear in `data`) and `immutable`. It is a different type from the
+    `configmap` trait, which attaches a ConfigMap to another component.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of

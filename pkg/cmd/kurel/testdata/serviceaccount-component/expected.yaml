@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: runner
+  name: runner
+  namespace: default
+---
+apiVersion: v1
+automountServiceAccountToken: false
+imagePullSecrets:
+- name: registry-credentials
+kind: ServiceAccount
+metadata:
+  labels:
+    app: builder
+  name: builder
+  namespace: default

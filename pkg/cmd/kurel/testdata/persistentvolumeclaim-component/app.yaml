@@ -1,0 +1,20 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: media
+      type: persistentvolumeclaim
+      properties:
+        size: 20Gi
+        storageClassName: fast
+        accessModes:
+          - ReadWriteMany
+    - name: raw
+      type: persistentvolumeclaim
+      properties:
+        size: 1Gi
+        storageClassName: ""
+        volumeMode: Block

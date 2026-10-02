@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+  labels:
+    app: queue-worker
+  name: queue-worker
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: queue-worker
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: queue-worker
+    spec:
+      containers:
+      - image: ghcr.io/example/worker:v1.0.0
+        name: queue-worker
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - mountPath: /shared
+          name: shared
+        - mountPath: /cache
+          name: cache
+      serviceAccountName: queue-worker
+      topologySpreadConstraints:
+      - labelSelector:
+          matchLabels:
+            app: queue-worker
+        maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+      - labelSelector:
+          matchLabels:
+            app: queue-worker
+        maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+      volumes:
+      - name: shared
+        persistentVolumeClaim:
+          claimName: queue--worker-shared
+      - emptyDir: {}
+        name: cache
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+  labels:
+    app: queue-worker
+  name: queue-worker
+  namespace: default
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+  labels:
+    app: queue-worker
+  name: queue--worker-shared
+  namespace: default
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 2Gi

@@ -387,6 +387,9 @@ func (c *JobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	}
 
 	for _, pvc := range c.PVCs {
+		if pvc.ClaimName != "" {
+			continue // an existing claim, referenced by claimName
+		}
 		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
 		if err != nil {
 			return nil, err

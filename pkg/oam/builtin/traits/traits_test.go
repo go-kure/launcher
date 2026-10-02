@@ -2,6 +2,7 @@ package traits_test
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 
@@ -983,6 +984,38 @@ func TestPVCTraitConfig_Generate_OK(t *testing.T) {
 	}
 	if len(objects) != 1 {
 		t.Errorf("expected 1 PVC object, got %d", len(objects))
+	}
+}
+
+// An authored storageClassName "" requests no class: the claim carries a
+// pointer to "" rather than no field, which would select the cluster's default
+// class. Absent and null stay unset (go-kure/launcher#702).
+func TestPVCTraitConfig_Generate_StorageClassName(t *testing.T) {
+	for name, tc := range map[string]struct {
+		props map[string]any
+		want  *string
+	}{
+		"absent":         {map[string]any{}, nil},
+		"null":           {map[string]any{"storageClassName": nil}, nil},
+		"explicit empty": {map[string]any{"storageClassName": ""}, new("")},
+		"named":          {map[string]any{"storageClassName": "fast"}, new("fast")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			props := map[string]any{"name": "shared-data", "size": "5Gi"}
+			maps.Copy(props, tc.props)
+			bundle := newBundle()
+			if err := (&traits.PVCHandler{}).Apply(&oam.Trait{Type: "pvc", Properties: props}, newApp("api", "default"), bundle); err != nil {
+				t.Fatalf("Apply: %v", err)
+			}
+			objects, err := bundle.Applications[0].Generate()
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			got := (*objects[0]).(*corev1.PersistentVolumeClaim).Spec.StorageClassName
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Errorf("storageClassName = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
