@@ -82,9 +82,8 @@ type fluxNamespaceSettable interface {
 // auto health-check (from componentHealthCheckGVK) is only meaningful for some
 // of the documents they accept. Two shapes qualify, and both return false:
 //
-//   - the config emits no object for the check to reference. Helmchart returns
-//     false for delivery=template, which renders manifests client-side and
-//     emits no HelmRelease.
+//   - the config emits no object for the check to reference for some
+//     documents. No built-in config takes this shape today.
 //   - the config emits the object, but the document instructs the workload not
 //     to progress, so a readiness gate on it is not a health signal. Deployment
 //     returns false for paused: true, job and helmrelease for suspend: true.
@@ -1311,7 +1310,6 @@ var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"statefulset":  {"apps/v1", "StatefulSet"},
 	"daemonset":    {"apps/v1", "DaemonSet"},
 	"job":          {"batch/v1", "Job"},
-	"helmchart":    {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
 	"helmrelease":  {"helm.toolkit.fluxcd.io/v2", "HelmRelease"},
 	"postgresql":   {"postgresql.cnpg.io/v1", "Cluster"},
 	"cnpg-cluster": {"postgresql.cnpg.io/v1", "Cluster"},
@@ -1353,13 +1351,13 @@ func isFluxControlPlaneGVK(apiVersion string) bool {
 // references based on each component's type, followed by any explicit overrides.
 //
 // The synthesized check's namespace must point at the namespace where the
-// referenced object actually lands. For Flux-CR configs (helmchart →
+// referenced object actually lands. For Flux-CR configs (helmrelease →
 // HelmRelease) the object is relocated to the flux namespace by
 // postProcessFluxNamespace, so the check must carry the same flux namespace —
 // this mirrors that function's predicate exactly (fluxNamespaceSettable +
 // non-empty fluxNamespace) so the check always follows its object. Configs that
-// will not emit the referenced object (helmchart delivery=template) are skipped
-// via autoHealthCheckEmitter.
+// veto their check (helmrelease with suspend: true) are skipped via
+// autoHealthCheckEmitter.
 func applyAutoHealthChecks(cluster *stack.Cluster, componentMap map[string]componentEntry, overrides []stack.HealthCheck, fluxNamespace string) {
 	if cluster == nil {
 		return
@@ -1374,8 +1372,7 @@ func applyAutoHealthChecks(cluster *stack.Cluster, componentMap map[string]compo
 			if !ok {
 				continue
 			}
-			// Skip when the config will not emit the referenced object
-			// (e.g. helmchart delivery=template emits manifests, no HelmRelease).
+			// Skip when the config vetoes its check (autoHealthCheckEmitter).
 			if e, ok := app.Config.(autoHealthCheckEmitter); ok && !e.EmitsAutoHealthCheck() {
 				continue
 			}

@@ -1028,7 +1028,7 @@ func (c *dedupTrackingConfig) Generate(_ *stack.Application) ([]*client.Object, 
 	return nil, nil
 }
 
-func TestTransform_HelmchartSourceDedup(t *testing.T) {
+func TestTransform_SourceDedup(t *testing.T) {
 	cfgA := &dedupTrackingConfig{name: "comp-a", sourceKey: "helm:https://example.com/charts"}
 	cfgB := &dedupTrackingConfig{name: "comp-b", sourceKey: "helm:https://example.com/charts"}
 
@@ -1050,9 +1050,9 @@ func TestTransform_HelmchartSourceDedup(t *testing.T) {
 	}
 }
 
-func TestTransform_HelmchartMixedDelivery_SameSourceURL(t *testing.T) {
-	// template delivery returns "" from GetSourceKey — it must not claim the source key
-	// and must not cause the subsequent native component to be suppressed.
+func TestTransform_EmptySourceKeySkipsDedup(t *testing.T) {
+	// A config emitting no source returns "" from GetSourceKey — it must not claim the source key
+	// and must not cause the subsequent component to be suppressed.
 	cfgTemplate := &dedupTrackingConfig{name: "app-template", sourceKey: ""}
 	cfgNative := &dedupTrackingConfig{name: "app-native", sourceKey: "helm:https://example.com/charts"}
 
@@ -1620,20 +1620,20 @@ func TestTransform_BuiltinTrait_CapabilityResolved_NoDefinition_NoWarn(t *testin
 	}
 }
 
-// --- applyAutoHealthChecks namespace + delivery=template veto ---
+// --- applyAutoHealthChecks namespace + emitter veto ---
 
 // fluxHCConfig implements ApplicationConfig + fluxNamespaceSettable (like a
-// native helmchart whose HelmRelease is relocated to the flux namespace).
+// helmrelease whose HelmRelease is relocated to the flux namespace).
 type fluxHCConfig struct{ ns string }
 
 func (c *fluxHCConfig) Generate(_ *stack.Application) ([]*client.Object, error) { return nil, nil }
 func (c *fluxHCConfig) SetFluxNamespace(ns string)                              { c.ns = ns }
 
-// templateHCConfig is a fluxHCConfig that vetoes its auto health check (like a
-// helmchart with delivery=template: no HelmRelease object emitted).
-type templateHCConfig struct{ fluxHCConfig }
+// vetoHCConfig is a fluxHCConfig that vetoes its auto health check (like a
+// helmrelease with suspend: true, whose HelmRelease is never reconciled).
+type vetoHCConfig struct{ fluxHCConfig }
 
-func (c *templateHCConfig) EmitsAutoHealthCheck() bool { return false }
+func (c *vetoHCConfig) EmitsAutoHealthCheck() bool { return false }
 
 // plainHCConfig implements only ApplicationConfig (a workload component whose
 // object stays in the app namespace; not flux-relocated).
@@ -1645,14 +1645,14 @@ func leafClusterWith(app *stack.Application) *stack.Cluster {
 	return &stack.Cluster{Node: &stack.Node{Bundle: &stack.Bundle{Applications: []*stack.Application{app}}}}
 }
 
-func helmchartEntryMap(app *stack.Application, typ string) map[string]componentEntry {
+func entryMap(app *stack.Application, typ string) map[string]componentEntry {
 	return map[string]componentEntry{app.Name: {component: Component{Name: app.Name, Type: typ}, app: app}}
 }
 
 func TestApplyAutoHealthChecks_FluxConfigUsesFluxNamespace(t *testing.T) {
 	app := stack.NewApplication("redis", "demo", &fluxHCConfig{})
 	cluster := leafClusterWith(app)
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "helmchart"), nil, "flux-system")
+	applyAutoHealthChecks(cluster, entryMap(app, "helmrelease"), nil, "flux-system")
 
 	hc := cluster.Node.Bundle.HealthChecks
 	if len(hc) != 1 {
@@ -1666,7 +1666,7 @@ func TestApplyAutoHealthChecks_FluxConfigUsesFluxNamespace(t *testing.T) {
 func TestApplyAutoHealthChecks_EmptyFluxNamespaceUsesAppNamespace(t *testing.T) {
 	app := stack.NewApplication("redis", "demo", &fluxHCConfig{})
 	cluster := leafClusterWith(app)
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "helmchart"), nil, "")
+	applyAutoHealthChecks(cluster, entryMap(app, "helmrelease"), nil, "")
 
 	hc := cluster.Node.Bundle.HealthChecks
 	if len(hc) != 1 || hc[0].Namespace != "demo" {
@@ -1677,7 +1677,7 @@ func TestApplyAutoHealthChecks_EmptyFluxNamespaceUsesAppNamespace(t *testing.T) 
 func TestApplyAutoHealthChecks_WorkloadKeepsAppNamespace(t *testing.T) {
 	app := stack.NewApplication("web", "demo", &plainHCConfig{})
 	cluster := leafClusterWith(app)
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "webservice"), nil, "flux-system")
+	applyAutoHealthChecks(cluster, entryMap(app, "webservice"), nil, "flux-system")
 
 	hc := cluster.Node.Bundle.HealthChecks
 	if len(hc) != 1 || hc[0].Kind != "Deployment" || hc[0].Namespace != "demo" {
@@ -1692,7 +1692,7 @@ func TestApplyAutoHealthChecks_SettableWorkloadKeepsAppNamespace(t *testing.T) {
 	// The check must NOT move to the flux namespace (target is not a Flux CR).
 	app := stack.NewApplication("web", "demo", &fluxHCConfig{})
 	cluster := leafClusterWith(app)
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "webservice"), nil, "flux-system")
+	applyAutoHealthChecks(cluster, entryMap(app, "webservice"), nil, "flux-system")
 
 	hc := cluster.Node.Bundle.HealthChecks
 	if len(hc) != 1 || hc[0].Kind != "Deployment" || hc[0].Namespace != "demo" {
@@ -1700,21 +1700,21 @@ func TestApplyAutoHealthChecks_SettableWorkloadKeepsAppNamespace(t *testing.T) {
 	}
 }
 
-func TestApplyAutoHealthChecks_TemplateDeliverySkipped(t *testing.T) {
-	app := stack.NewApplication("rendered", "demo", &templateHCConfig{})
+func TestApplyAutoHealthChecks_VetoSkipped(t *testing.T) {
+	app := stack.NewApplication("rendered", "demo", &vetoHCConfig{})
 	cluster := leafClusterWith(app)
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "helmchart"), nil, "flux-system")
+	applyAutoHealthChecks(cluster, entryMap(app, "helmrelease"), nil, "flux-system")
 
 	if hc := cluster.Node.Bundle.HealthChecks; len(hc) != 0 {
-		t.Fatalf("expected no auto health check for template delivery, got %+v", hc)
+		t.Fatalf("expected no auto health check for a vetoing config, got %+v", hc)
 	}
 }
 
 func TestApplyAutoHealthChecks_OverridesAppendedVerbatim(t *testing.T) {
-	app := stack.NewApplication("rendered", "demo", &templateHCConfig{})
+	app := stack.NewApplication("rendered", "demo", &vetoHCConfig{})
 	cluster := leafClusterWith(app)
 	override := stack.HealthCheck{APIVersion: "helm.toolkit.fluxcd.io/v2", Kind: "HelmRelease", Name: "external", Namespace: "other-ns"}
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "helmchart"), []stack.HealthCheck{override}, "flux-system")
+	applyAutoHealthChecks(cluster, entryMap(app, "helmrelease"), []stack.HealthCheck{override}, "flux-system")
 
 	hc := cluster.Node.Bundle.HealthChecks
 	if len(hc) != 1 || hc[0] != override {
@@ -1728,7 +1728,7 @@ func TestApplyAutoHealthChecks_OCIUsesFluxNamespace(t *testing.T) {
 	// check must reference the Kustomization GVK in the flux namespace.
 	app := stack.NewApplication("checkout", "demo", &fluxHCConfig{})
 	cluster := leafClusterWith(app)
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "oci"), nil, "flux-system")
+	applyAutoHealthChecks(cluster, entryMap(app, "oci"), nil, "flux-system")
 
 	hc := cluster.Node.Bundle.HealthChecks
 	if len(hc) != 1 {
@@ -1751,7 +1751,7 @@ func TestApplyAutoHealthChecks_HelmReleaseKindRegistered(t *testing.T) {
 	for _, tc := range []struct{ fluxNS, wantNS string }{{"flux-system", "flux-system"}, {"", "demo"}} {
 		app := stack.NewApplication("web", "demo", &fluxHCConfig{})
 		cluster := leafClusterWith(app)
-		applyAutoHealthChecks(cluster, helmchartEntryMap(app, "helmrelease"), nil, tc.fluxNS)
+		applyAutoHealthChecks(cluster, entryMap(app, "helmrelease"), nil, tc.fluxNS)
 
 		want := stack.HealthCheck{APIVersion: "helm.toolkit.fluxcd.io/v2", Kind: "HelmRelease", Name: "web", Namespace: tc.wantNS}
 		if hc := cluster.Node.Bundle.HealthChecks; len(hc) != 1 || hc[0] != want {
@@ -1777,7 +1777,7 @@ func TestApplyAutoHealthChecks_FluxSourceKindsRegistered(t *testing.T) {
 		for _, tc := range []struct{ fluxNS, wantNS string }{{"flux-system", "flux-system"}, {"", "demo"}} {
 			app := stack.NewApplication("src", "demo", &fluxHCConfig{})
 			cluster := leafClusterWith(app)
-			applyAutoHealthChecks(cluster, helmchartEntryMap(app, k.typ), nil, tc.fluxNS)
+			applyAutoHealthChecks(cluster, entryMap(app, k.typ), nil, tc.fluxNS)
 
 			want := stack.HealthCheck{APIVersion: "source.toolkit.fluxcd.io/v1", Kind: k.kind, Name: "src", Namespace: tc.wantNS}
 			if hc := cluster.Node.Bundle.HealthChecks; len(hc) != 1 || hc[0] != want {
@@ -1792,7 +1792,7 @@ func TestApplyAutoHealthChecks_OCIEmptyFluxNamespaceUsesAppNamespace(t *testing.
 	// namespace, so the health check must follow it there.
 	app := stack.NewApplication("checkout", "demo", &fluxHCConfig{})
 	cluster := leafClusterWith(app)
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "oci"), nil, "")
+	applyAutoHealthChecks(cluster, entryMap(app, "oci"), nil, "")
 
 	hc := cluster.Node.Bundle.HealthChecks
 	if len(hc) != 1 || hc[0].Kind != "Kustomization" || hc[0].Namespace != "demo" {
@@ -1810,7 +1810,7 @@ func TestApplyAutoHealthChecks_OCIEmptyFluxNamespaceUsesAppNamespace(t *testing.
 func TestApplyAutoHealthChecks_DeploymentKindRegistered(t *testing.T) {
 	app := stack.NewApplication("api", "demo", &plainHCConfig{})
 	cluster := leafClusterWith(app)
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "deployment"), nil, "flux-system")
+	applyAutoHealthChecks(cluster, entryMap(app, "deployment"), nil, "flux-system")
 
 	hc := cluster.Node.Bundle.HealthChecks
 	if len(hc) != 1 {
@@ -1831,7 +1831,7 @@ func TestApplyAutoHealthChecks_DeploymentKindRegistered(t *testing.T) {
 func TestApplyAutoHealthChecks_CnpgClusterKindRegistered(t *testing.T) {
 	app := stack.NewApplication("db", "demo", &plainHCConfig{})
 	cluster := leafClusterWith(app)
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "cnpg-cluster"), nil, "flux-system")
+	applyAutoHealthChecks(cluster, entryMap(app, "cnpg-cluster"), nil, "flux-system")
 
 	want := stack.HealthCheck{APIVersion: "postgresql.cnpg.io/v1", Kind: "Cluster", Name: "db", Namespace: "demo"}
 	if hc := cluster.Node.Bundle.HealthChecks; len(hc) != 1 || hc[0] != want {
@@ -1852,7 +1852,7 @@ func TestApplyAutoHealthChecks_CnpgClusterKindRegistered(t *testing.T) {
 func TestApplyAutoHealthChecks_JobKindRegistered(t *testing.T) {
 	app := stack.NewApplication("batch", "demo", &plainHCConfig{})
 	cluster := leafClusterWith(app)
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "job"), nil, "flux-system")
+	applyAutoHealthChecks(cluster, entryMap(app, "job"), nil, "flux-system")
 
 	hc := cluster.Node.Bundle.HealthChecks
 	if len(hc) != 1 {
@@ -1869,11 +1869,11 @@ func TestApplyAutoHealthChecks_JobKindRegistered(t *testing.T) {
 // register: JobConfig.EmitsAutoHealthCheck reports false for `suspend: true`
 // (components.TestJobHandler_SuspendVetoesAutoHealthCheck pins that half), and
 // this half pins that a false answer from a job-typed component actually
-// suppresses the check rather than being consulted only for helmchart types.
+// suppresses the check rather than being consulted only for helm-release types.
 func TestApplyAutoHealthChecks_JobVetoHonoured(t *testing.T) {
-	app := stack.NewApplication("batch", "demo", &templateHCConfig{})
+	app := stack.NewApplication("batch", "demo", &vetoHCConfig{})
 	cluster := leafClusterWith(app)
-	applyAutoHealthChecks(cluster, helmchartEntryMap(app, "job"), nil, "flux-system")
+	applyAutoHealthChecks(cluster, entryMap(app, "job"), nil, "flux-system")
 
 	if hc := cluster.Node.Bundle.HealthChecks; len(hc) != 0 {
 		t.Fatalf("expected no auto health check for a vetoing job component, got %+v", hc)

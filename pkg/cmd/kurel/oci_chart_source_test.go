@@ -11,11 +11,11 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// An oci component and a helmchart-over-OCI naming the same artifact and
+// An oci component and a helm component over OCI naming the same artifact and
 // version each get their own OCIRepository (go-kure/launcher#665): the chart's
 // copies the chart layer as-is, the oci component's keeps Flux's default and
 // extracts the layer. One shared object cannot carry both, so a shared source
-// key would hand one consumer a source shaped for the other.
+// would hand one consumer a source shaped for the other.
 const ociAndChartSameArtifactYAML = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
@@ -30,11 +30,10 @@ spec:
           url: oci://registry.example.com/charts/shop
         version: 1.2.3
     - name: chart
-      type: helmchart
+      type: helm
       properties:
         version: 1.2.3
         source:
-          kind: OCIRepository
           url: oci://registry.example.com/charts/shop
 `
 
@@ -69,7 +68,7 @@ func buildStdoutDocs(t *testing.T, appYAML string) ([]map[string]any, string) {
 	return docs, out.String()
 }
 
-func TestBuild_OCIAndHelmchartSameArtifact_SeparateSources(t *testing.T) {
+func TestBuild_OCIAndHelmSameArtifact_SeparateSources(t *testing.T) {
 	docs, out := buildStdoutDocs(t, ociAndChartSameArtifactYAML)
 
 	repos := map[string]map[string]any{}
@@ -82,17 +81,20 @@ func TestBuild_OCIAndHelmchartSameArtifact_SeparateSources(t *testing.T) {
 		spec, _ := d["spec"].(map[string]any)
 		repos[name] = spec
 	}
-	if got := slices.Sorted(maps.Keys(repos)); !slices.Equal(got, []string{"chart", "manifests"}) {
-		t.Fatalf("OCIRepositories = %v, want one per component [chart manifests]\noutput:\n%s", got, out)
+	// The helm component's source is generated under a content-derived name.
+	names := slices.Sorted(maps.Keys(repos))
+	if len(names) != 2 || names[0] != "manifests" || !strings.HasPrefix(names[1], "shop-source-") {
+		t.Fatalf("OCIRepositories = %v, want the oci component's and one generated for the chart [manifests shop-source-...]\noutput:\n%s", names, out)
 	}
+	chartSource := names[1]
 
 	// The oci component leaves layerSelector unset: Flux's default, extract.
 	if sel, ok := repos["manifests"]["layerSelector"]; ok {
 		t.Errorf("manifests layerSelector = %v, want unset (Flux default extract)", sel)
 	}
-	sel, _ := repos["chart"]["layerSelector"].(map[string]any)
+	sel, _ := repos[chartSource]["layerSelector"].(map[string]any)
 	if sel["operation"] != "copy" || sel["mediaType"] != "application/vnd.cncf.helm.chart.content.v1.tar+gzip" {
-		t.Errorf("chart layerSelector = %v, want the chart content layer with operation copy", repos["chart"]["layerSelector"])
+		t.Errorf("chart source layerSelector = %v, want the chart content layer with operation copy", repos[chartSource]["layerSelector"])
 	}
 
 	// Each consumer references its own source.
@@ -112,7 +114,7 @@ func TestBuild_OCIAndHelmchartSameArtifact_SeparateSources(t *testing.T) {
 		refs = append(refs, fmt.Sprintf("%s/%v->%v/%v", d["kind"], md["name"], ref["kind"], ref["name"]))
 	}
 	slices.Sort(refs)
-	want := []string{"HelmRelease/chart->OCIRepository/chart", "Kustomization/manifests->OCIRepository/manifests"}
+	want := []string{"HelmRelease/chart->OCIRepository/" + chartSource, "Kustomization/manifests->OCIRepository/manifests"}
 	if !slices.Equal(refs, want) {
 		t.Errorf("source references = %v, want %v", refs, want)
 	}

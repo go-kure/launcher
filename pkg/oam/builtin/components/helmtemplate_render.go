@@ -15,22 +15,18 @@ import (
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
-	chartutil "helm.sh/helm/v4/pkg/chart/v2/util"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // This file is the one implementation of client-side Helm chart rendering and
-// of the Helm hook-group layout partition. Two configs run it: HelmTemplateConfig
-// (the kind-named helmtemplate terminal) and HelmchartConfig under delivery:
-// template (the helmchart composite). Each embeds chartRender, which renders once
-// and caches the hook groups, and hands it its own renderer, its own chart
-// source and the component type a render failure is prefixed with (a failure
-// to parse the rendered output is not prefixed; see chartRender.render).
-// Nothing below depends on which of the two it serves.
+// of the Helm hook-group layout partition, run by HelmTemplateConfig (the
+// kind-named helmtemplate terminal). It embeds chartRender, which renders once
+// and caches the hook groups, and hands it its renderer, its chart source and
+// the component type a render failure is prefixed with (a failure to parse the
+// rendered output is not prefixed; see chartRender.render).
 
 // renderChartFunc is the chart renderer: kure's helm.RenderChart, or a stub
 // injected by a test. Variadic opts matches kure's RenderChart signature (kure
@@ -42,51 +38,27 @@ type renderChartFunc = func(chartURL, version string, values map[string]any, opt
 // chartSource is what one client-side render fetches: an inline chart source
 // whose Kind inlineChartSourceKind has already resolved and checked against
 // URL's scheme, the chart name within a HelmRepository, the chart version, the
-// values tree handed to the render as-is, and the release identity the render
-// uses: ReleaseName and Namespace become .Release.Name and .Release.Namespace,
-// and each, when empty, leaves kure's default ("release", "default") in place.
+// values tree handed to the render as-is, and the namespace the render uses as
+// .Release.Namespace (empty leaves kure's default, "default"). .Release.Name is
+// always kure's default, "release".
 type chartSource struct {
-	URL         string
-	Kind        string // "HelmRepository" or "OCIRepository"
-	Chart       string
-	Version     string
-	Values      map[string]any
-	ReleaseName string
-	Namespace   string
+	URL       string
+	Kind      string // "HelmRepository" or "OCIRepository"
+	Chart     string
+	Version   string
+	Values    map[string]any
+	Namespace string
 }
 
-// renderOptions turns the release identity into kure render options, one per
-// non-empty field. The namespace only sets .Release.Namespace: kure stamps no
-// metadata.namespace, so a chart that omits it still renders namespace-less
-// objects.
+// renderOptions turns the namespace into a kure render option when set. It
+// only sets .Release.Namespace: kure stamps no metadata.namespace, so a chart
+// that omits it still renders namespace-less objects.
 func (s chartSource) renderOptions() []helm.RenderOption {
 	var opts []helm.RenderOption
-	if s.ReleaseName != "" {
-		opts = append(opts, helm.WithReleaseName(s.ReleaseName))
-	}
 	if s.Namespace != "" {
 		opts = append(opts, helm.WithNamespace(s.Namespace))
 	}
 	return opts
-}
-
-// checkReleaseIdentity checks an authored release name and target namespace
-// for a client-side render, which no HelmRelease CRD admission ever sees: the
-// release name by Helm's own rule (chartutil.ValidateReleaseName: at most 53
-// characters, lowercase DNS-style), the namespace as a DNS-1123 label. An
-// empty value is not authored and passes.
-func checkReleaseIdentity(componentType, releaseName, targetNamespace string) error {
-	if releaseName != "" {
-		if err := chartutil.ValidateReleaseName(releaseName); err != nil {
-			return errors.Errorf("%s: releaseName %q: %w", componentType, releaseName, err)
-		}
-	}
-	if targetNamespace != "" {
-		if errs := validation.IsDNS1123Label(targetNamespace); len(errs) > 0 {
-			return errors.Errorf("%s: targetNamespace: invalid namespace %q: %s", componentType, targetNamespace, strings.Join(errs, "; "))
-		}
-	}
-	return nil
 }
 
 // chartURL is the location handed to the renderer: a HelmRepository's base URL
@@ -99,8 +71,8 @@ func (s chartSource) chartURL() string {
 }
 
 // inlineChartSourceKind resolves an inline chart source's kind and checks it
-// against the URL's scheme — the helmchart composite's Form A rules, shared
-// with the helmtemplate terminal so both enforce one set. An empty kind is
+// against the URL's scheme, shared by the helm rule and the helmtemplate
+// terminal so both enforce one set. An empty kind is
 // inferred from the scheme: oci:// is OCIRepository, anything else
 // HelmRepository. A HelmRepository needs an http:// or https:// URL and a chart
 // name; an OCIRepository needs an oci:// URL. Every error is prefixed with
@@ -136,15 +108,14 @@ func inlineChartSourceKind(owner, url, kind, chart string) (string, error) {
 }
 
 // chartRender is a chart's client-side render, cached and split by Helm hook
-// phase and weight. HelmTemplateConfig and HelmchartConfig embed it; it must
-// never gain an AugmentLayout method of its own, since kure's layout walker
+// phase and weight. HelmTemplateConfig embeds it and declares its own
+// AugmentLayout; chartRender must never gain one, since kure's layout walker
 // type-asserts layout.LayoutAugmenter by presence and the method would be
-// promoted onto every *HelmchartConfig — see wrapIfHelmchartAugmenter.
+// promoted onto every embedder, augmenter or not.
 type chartRender struct {
 	// hookGroups caches the rendered chart's manifests, split by Helm hook phase
 	// and weight (via helm.SplitByHookWeight). Populated by render on first
-	// call; nil until then (and always nil for the composite's delivery: native,
-	// which never renders). Not goroutine-safe — concurrent Generate/AugmentLayout
+	// call; nil until then. Not goroutine-safe — concurrent Generate/AugmentLayout
 	// calls on the same config race on rendered/hookGroups (an identical cache in
 	// a downstream consumer's analogous handler isn't goroutine-safe either).
 	hookGroups []helm.HookGroup
@@ -705,8 +676,8 @@ func toJSONTypes(v any, path string) (any, error) {
 // the right is wrong: near a 253-char ml.Name, the fixed numeric+phase suffix
 // would be cut away entirely and every group would yield the identical
 // dirName — a deterministic collision. So the PREFIX (ml.Name) is capped
-// instead, following the same truncation approach as the helmchart
-// composite's valuesConfigMapName: reserve room for a short sha256 hash of the
+// instead, following the same truncation approach as helmrelease.go's
+// boundedResourceName: reserve room for a short sha256 hash of the
 // full ml.Name so two different long ml.Names are vanishingly unlikely to
 // truncate to the same prefix (the same probabilistic guarantee as that
 // approach, not an absolute one).

@@ -63,7 +63,7 @@ func checkImplicitBackend(app *stack.Application, location string) error {
 	if !ok || pp.ServicePort() == 0 {
 		return errors.Errorf(
 			"%s: component %q has no service port; configure a service port or specify an explicit backend name"+
-				" (for helmchart components, set servicePort and optionally serviceName on the trait)",
+				" (for chart-based components such as helm, helmrelease or helmtemplate, set servicePort and optionally serviceName on the trait)",
 			location, app.Name)
 	}
 	return nil
@@ -169,7 +169,7 @@ func (h *IngressHandler) PropertySchema() map[string]oam.PropertySchema {
 		},
 		"annotations":             {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Additional annotations to set on the Ingress resource."},
 		"ingressClassName":        {Type: oam.PropertyTypeString, Description: "IngressClass that should handle this Ingress."},
-		"servicePort":             {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one (e.g. helmchart)."},
+		"servicePort":             {Type: oam.PropertyTypeInteger, Description: "Service port to route to when the component does not expose one (e.g. a Helm chart)."},
 		"serviceName":             {Type: oam.PropertyTypeString, Description: "Service name to route to; requires servicePort to also be set."},
 		"name":                    {Type: oam.PropertyTypeString, Description: "Overrides the sub-application name, allowing multiple ingress traits per component."},
 		"scope":                   {Type: oam.PropertyTypeString, Description: "Suffix appended to the sub-application name to disambiguate multiple ingress traits."},
@@ -206,7 +206,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	}
 
 	// Trait-level explicit backend — allows routing traits on component types that do not
-	// implement servicePortProvider (e.g. helmchart). servicePort is parsed first so that
+	// implement servicePortProvider (e.g. helmrelease). servicePort is parsed first so that
 	// an invalid value is rejected before serviceName can be honoured.
 	traitPortProvided := false
 	if _, hasServicePort := props["servicePort"]; hasServicePort {

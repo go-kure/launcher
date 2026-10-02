@@ -42,8 +42,8 @@ wires each rule's `dependsOn` as bundle dependencies, on top of automatic tier e
 policy, an application spanning several tiers gets one bundle per tier instead, each
 depending on the bundle of the populated tier before it.
 
-When several components share one Flux source (a `helmchart` repository or OCI chart,
-or an `oci` artifact), the transform emits it once, in the bundle of the sharing
+When several `oci` components share one Flux source (the same OCI artifact),
+the transform emits it once, in the bundle of the sharing
 component deployed first: the one in the earliest tier, after the components it depends
 on, with document order breaking ties. That component depends on no other component
 sharing the source, so it never waits on a bundle that needs a source it has not yet
@@ -90,7 +90,7 @@ Sets Flux Kustomization reconciliation parameters on every leaf bundle of the
 application. `interval`, `retryInterval` and `timeout` must be durations Flux's
 Kustomization CRD accepts (`5m`, `1h30m`): unsigned, in `ms`, `s`, `m` or `h`, so a value
 such as `-5m` or `500ns` that Go would parse is still an error. The check is the one the
-`oci` and `helmchart` components use for their `interval` (the internal
+`oci` component uses for its `interval` (the internal
 `pkg/oam/internal/fluxduration`), applied to the emitted form as well as the authored
 one: the generated Kustomization carries each value as a `metav1.Duration`, which
 serializes as Go's `Duration.String()`, so a value below Flux's millisecond resolution is

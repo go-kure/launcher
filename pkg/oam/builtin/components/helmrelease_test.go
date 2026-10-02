@@ -81,7 +81,7 @@ func hrGenerate(t *testing.T, cfg stack.ApplicationConfig, fluxNS string) (*helm
 
 func TestHelmReleaseHandler_CanHandle(t *testing.T) {
 	h := &components.HelmReleaseHandler{}
-	if !h.CanHandle("helmrelease") || h.CanHandle("helmchart") {
+	if !h.CanHandle("helmrelease") || h.CanHandle("helm") {
 		t.Error("CanHandle must accept helmrelease only")
 	}
 }

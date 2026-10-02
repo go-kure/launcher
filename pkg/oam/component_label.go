@@ -40,7 +40,7 @@ const ComponentLabelDigestLength = 10
 // characters.
 //
 // It is a projection, not a refusal, because the component types that name no
-// container or Service after the component (helmchart, manifests, oci, crd,
+// container or Service after the component (helmtemplate, manifests, oci, crd,
 // passthrough, and the traits attached to them) legitimately accept names up
 // to 253 characters: their object names allow it, and the label is an
 // identifier, not an address. The projection is deterministic, so the same name

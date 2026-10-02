@@ -1820,10 +1820,9 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 // depends on the read. One that type-checks the value without testing
 // isExplicitNull refuses an untyped null — as a wrong type, or as a missing
 // required value where the read folds a failed assertion into its requiredness
-// check (oci.go's source); one that ignores a failed assertion (helmchart.go's
-// version and driftDetection, among others) drops it as if absent. A typed nil
-// passes an assertion to its own type, so a raw []any read takes []any(nil) as
-// an empty list; see "The null contract" in README.md.
+// check (oci.go's source); one that ignores a failed assertion drops it as if
+// absent. A typed nil passes an assertion to its own type, so a raw []any read
+// takes []any(nil) as an empty list; see "The null contract" in README.md.
 //
 // A key authored with no value (`updateStrategy:`) decodes to a present entry
 // holding nil. That is ABSENCE, not a present value of the wrong type, and the

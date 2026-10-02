@@ -29,7 +29,7 @@ kind: ClusterProfile
 metadata:
   name: <string>       # cluster identifier, e.g. "prod-eu-west"
 spec:
-  gitopsEngine: fluxcd # optional; default "fluxcd". Selects native-delivery CR type for helmchart.
+  gitopsEngine: fluxcd # optional; default "fluxcd". Names the engine whose delivery CRs built-in components emit.
   capabilities:
     <trait-type>:      # e.g. "expose", "certificate", "external-secret"
       rendering:       # values injected into trait properties at build time
@@ -41,7 +41,7 @@ spec:
 | Field | Type | Description |
 |---|---|---|
 | `metadata.name` | string | Identifies the cluster; referenced in build tooling |
-| `spec.gitopsEngine` | string | GitOps engine for helmchart native delivery. Accepted: `"fluxcd"` (default, optional). |
+| `spec.gitopsEngine` | string | GitOps engine whose delivery CRs the built-in components emit. Accepted: `"fluxcd"` (default, optional). |
 | `spec.capabilities` | map | Keys are trait types; values are capability bindings |
 | `capabilities.<type>.rendering` | map | Platform values merged into trait properties before handler invocation |
 
@@ -76,8 +76,8 @@ Those fields are downstream-specific and must not appear in a launcher `cluster.
 - downstream component-variant selection
 
 Note: `spec.gitopsEngine` (a single string field) is launcher-specific and IS present in
-launcher ClusterProfiles. It selects which native GitOps delivery CRs are emitted for
-helmchart components. It is not the same as a downstream runtime's full delivery-wiring
+launcher ClusterProfiles. It names the GitOps engine whose delivery CRs are emitted by
+the built-in components. It is not the same as a downstream runtime's full delivery-wiring
 block, which stays in that runtime only.
 
 ---

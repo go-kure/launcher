@@ -3,8 +3,6 @@ package kurel
 import (
 	"bytes"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 	"testing"
 
@@ -12,44 +10,37 @@ import (
 )
 
 // The tests in this file pin go-kure/launcher#325: an authored property declared as
-// a string but written with another YAML type (`delivery: 123`, `valuesMode: true`)
-// must fail the build, naming the property, rather than be coerced to "" by the
+// a string but written with another YAML type (`interval: 10`, `valuesMode: true`)
+// must fail the build, naming the property, rather than be coerced to "" by a
 // handler's comma-ok read and then defaulted as though it were absent.
 //
-// The handlers themselves keep their comma-ok reads (`cfg.Delivery, _ =
-// props["delivery"].(string)` in helmchart.go). The type check lives in one place,
-// Transformer.ValidateAuthoredProperties, which `kurel build` runs on every authored
-// component and trait before any handler sees it (build.go). That is option (b) of
-// the issue — type-checking once, generically, against each handler's declared
-// PropertySchema — and it is why these tests go through the build and the
-// registered schemas rather than through a handler.
+// The type check lives in one place, Transformer.ValidateAuthoredProperties, which
+// `kurel build` runs on every authored component and trait before any handler sees
+// it (build.go). That is option (b) of the issue — type-checking once, generically,
+// against each handler's declared PropertySchema — and it is why these tests go
+// through the build and the registered schemas rather than through a handler.
 
-// TestBuildCommand_HelmchartNonStringProperty_Rejected is the issue's own case, end
-// to end: every string-typed helmchart property written with a non-string value
-// fails `kurel build` with the property's path and the type it actually got.
-func TestBuildCommand_HelmchartNonStringProperty_Rejected(t *testing.T) {
+// TestBuildCommand_HelmReleaseNonStringProperty_Rejected is the issue's own case,
+// end to end: string-typed helmrelease properties written with a non-string value
+// fail `kurel build` with the property's path and the type it actually got.
+func TestBuildCommand_HelmReleaseNonStringProperty_Rejected(t *testing.T) {
 	cases := []struct {
 		key     string
 		yamlVal string // as the author writes it, unquoted
 		gotType string // the Go type yaml.v3 decodes it to
 	}{
-		{"chart", "123", "int"},
-		{"version", "1.2", "float64"},
-		{"delivery", "123", "int"},
 		{"interval", "10", "int"},
+		{"timeout", "1.5", "float64"},
 		{"releaseName", "true", "bool"},
 		{"targetNamespace", "7", "int"},
+		{"storageNamespace", "7", "int"},
+		{"serviceAccountName", "false", "bool"},
 		{"valuesMode", "true", "bool"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {
-			// chart and source are always present so the only defect in the
-			// document is the one under test; a case overriding chart replaces it.
-			props := map[string]string{"chart": "podinfo", tc.key: tc.yamlVal}
-			var b strings.Builder
-			for _, k := range slices.Sorted(maps.Keys(props)) {
-				fmt.Fprintf(&b, "        %s: %s\n", k, props[k])
-			}
+			// chart is always present so the only defect in the document is the
+			// one under test.
 			appYAML := `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
@@ -58,10 +49,15 @@ metadata:
 spec:
   components:
     - name: podinfo
-      type: helmchart
+      type: helmrelease
       properties:
-` + b.String() + `        source:
-          url: https://stefanprodan.github.io/podinfo
+        ` + tc.key + `: ` + tc.yamlVal + `
+        chart:
+          spec:
+            chart: podinfo
+            sourceRef:
+              kind: HelmRepository
+              name: podinfo
 `
 			dir := t.TempDir()
 			appPath := writeTempFile(t, dir, "app.yaml", appYAML)
@@ -76,7 +72,7 @@ spec:
 			if err == nil {
 				t.Fatalf("%s: %s built successfully; want a type error\noutput:\n%s", tc.key, tc.yamlVal, out.String())
 			}
-			want := fmt.Sprintf(`component "podinfo" (type "helmchart"): properties.%s: expected string, got %s`, tc.key, tc.gotType)
+			want := fmt.Sprintf(`component "podinfo" (type "helmrelease"): properties.%s: expected string, got %s`, tc.key, tc.gotType)
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("error does not name the malformed property\n got: %v\nwant substring: %s", err, want)
 			}
@@ -160,9 +156,9 @@ func TestBuiltinStringProperties_RejectNonStringOnAuthoredPath(t *testing.T) {
 		}, schema)
 	}
 
-	// Guard against the sweep iterating nothing: helmchart alone declares seven
+	// Guard against the sweep iterating nothing: helmrelease alone declares eight
 	// top-level string properties.
-	if checked < 7 {
+	if checked < 8 {
 		t.Fatalf("swept only %d string-typed properties; the registration maps or schemas are not being read", checked)
 	}
 	t.Logf("swept %d top-level string-typed properties", checked)

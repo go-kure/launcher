@@ -54,12 +54,6 @@ func runWebservice(props map[string]any) error {
 	return err
 }
 
-func runHelmchart(props map[string]any) error {
-	_, err := (&components.HelmchartHandler{}).ToApplicationConfig(
-		&oam.Component{Name: "metrics", Type: "helmchart", Properties: props}, "monitoring")
-	return err
-}
-
 func runManifests(props map[string]any) error {
 	_, err := (&components.ManifestsHandler{}).ToApplicationConfig(
 		&oam.Component{Name: "m", Type: "manifests", Properties: props}, "default")
@@ -211,20 +205,6 @@ func requiredFieldSites() []requiredFieldSite {
 			})
 		}
 	}
-	sites = append(sites, requiredFieldSite{
-		name: "helmchart.valuesFrom.name",
-		props: func(v any) map[string]any {
-			return map[string]any{
-				"chart":      "kube-prometheus-stack",
-				"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
-				"valuesFrom": []any{setOrOmit(map[string]any{"kind": "ConfigMap"}, "name", v)},
-			}
-		},
-		run:         runHelmchart,
-		typeErr:     "valuesFrom[0].name: must be a string, got int",
-		requiredErr: "valuesFrom[0]: name is required",
-		good:        "cfg",
-	})
 	for _, f := range []string{"apiVersion", "kind"} {
 		sites = append(sites, requiredFieldSite{
 			name:        "manifests.scopeOverrides." + f,

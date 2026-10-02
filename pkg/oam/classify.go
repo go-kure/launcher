@@ -50,7 +50,6 @@ var defaultTierMap = map[string]Tier{
 	"webservice":   TierApps,
 	"worker":       TierApps,
 	"cronjob":      TierApps,
-	"helmchart":    TierApps,
 	"helm":         TierApps,
 	"helmrelease":  TierApps,
 	"helmtemplate": TierApps,
@@ -61,7 +60,7 @@ var defaultTierMap = map[string]Tier{
 	"oci":          TierApps,
 
 	// The kind-named Flux source components (go-kure/launcher#347) sit with the
-	// oci and helmchart components that also emit Flux sources.
+	// oci component, which also emits a Flux source.
 	"helmrepository": TierApps,
 	"ocirepository":  TierApps,
 	"gitrepository":  TierApps,

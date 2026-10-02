@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"strings"
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
@@ -35,7 +36,7 @@ const helmReleaseValuesModeKey = "valuesMode"
 const helmReleaseValuesKey = "values.json"
 
 // helmReleaseDefaultInterval is spec.interval when the component leaves it
-// unset. Flux requires the field; 60m matches the helmchart composite.
+// unset. Flux requires the field; 60m matches the Flux source components.
 const helmReleaseDefaultInterval = 60 * time.Minute
 
 // helmReleaseValuesHashLen is how many hex digits of the values digest the
@@ -346,7 +347,7 @@ func (c *HelmReleaseConfig) Generate(_ *stack.Application) ([]*client.Object, er
 // valuesConfigMap moves hr's values into a ConfigMap in hr's namespace. It
 // clears spec.values and places a valuesFrom entry for the ConfigMap ahead of
 // the authored entries, so an authored entry still wins on a shared key, as
-// under the helmchart composite. Empty or absent values generate nothing and
+// Flux merges valuesFrom in order. Empty or absent values generate nothing and
 // return nil.
 //
 // The values are serialized once. Those exact bytes are stored in the
@@ -372,10 +373,9 @@ func (c *HelmReleaseConfig) valuesConfigMap(hr *helmv2.HelmRelease) (*corev1.Con
 
 	cm := kubernetes.CreateConfigMap(name, hr.Namespace)
 	// The label is the component's label value (appLabels: the component
-	// name, projected when it exceeds 63 characters, go-kure/launcher#572),
-	// as on the helmchart composite's values ConfigMap. A component name can
-	// be a 253-byte DNS-1123 subdomain, so the raw name would not always be a
-	// legal label value.
+	// name, projected when it exceeds 63 characters, go-kure/launcher#572).
+	// A component name can be a 253-byte DNS-1123 subdomain, so the raw name
+	// would not always be a legal label value.
 	cm.Labels = appLabels(c.Name)
 	kubernetes.AddConfigMapData(cm, helmReleaseValuesKey, string(data))
 
@@ -388,11 +388,39 @@ func (c *HelmReleaseConfig) valuesConfigMap(hr *helmv2.HelmRelease) (*corev1.Con
 }
 
 // helmReleaseValuesConfigMapName names the values ConfigMap of component name
-// whose serialized values have the hex digest valuesDigest: the composite's
-// valuesConfigMapName scheme (boundedResourceName) with the suffix
-// "-values-<first 10 digest digits>". The suffix survives truncation, so the
-// name always carries the values hash and is always a legal DNS-1123
-// subdomain within 253 bytes.
+// whose serialized values have the hex digest valuesDigest: boundedResourceName
+// with the suffix "-values-<first 10 digest digits>". The suffix survives
+// truncation, so the name always carries the values hash and is always a legal
+// DNS-1123 subdomain within 253 bytes.
 func helmReleaseValuesConfigMapName(name, valuesDigest string) string {
 	return boundedResourceName(name, "-values-"+valuesDigest[:helmReleaseValuesHashLen])
+}
+
+// boundedResourceName appends suffix to name and keeps the result a legal
+// DNS-1123 subdomain name (at most 253 bytes) for any valid component name
+// (validate.go admits DNS-1123 subdomains of up to 253 bytes). A name that
+// fits is name+suffix; one that does not keeps a truncated prefix of name, a
+// short digest of the full name, and suffix intact. suffix must itself be
+// DNS-1123-legal, start with "-" and end in an alphanumeric, and be short
+// enough to leave room for the digest.
+func boundedResourceName(name, suffix string) string {
+	maxPrefix := 253 - len(suffix)
+	if len(name) <= maxPrefix {
+		return name + suffix
+	}
+	// A plain truncation to maxPrefix characters would map any two distinct
+	// valid component names (up to 253 chars — validate.go's DNS-1123
+	// subdomain max) that share the same first maxPrefix characters to the
+	// identical ConfigMap name. Full-name uniqueness (validate.go's
+	// duplicate-component-name check) does not protect against this — it
+	// compares full names, not truncated prefixes — so two such components
+	// in one Application would silently share (and one clobber) the other's
+	// values ConfigMap. Reserve room for a short content hash of the full
+	// name so a truncated name stays unique to the name it came from.
+	const hashLen = 8
+	sum := sha256.Sum256([]byte(name))
+	hash := hex.EncodeToString(sum[:])[:hashLen]
+	prefixLen := maxPrefix - hashLen - 1 // -1 for the "-" joining prefix and hash
+	prefix := strings.TrimRight(name[:prefixLen], "-.")
+	return prefix + "-" + hash + suffix
 }

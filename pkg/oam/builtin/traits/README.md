@@ -70,7 +70,7 @@ preflight reject every valid use of the trait.
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `configmap` | ConfigMap (+ optional volume mount) | `name`, `data`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, Job, or CronJob; any other component fails generation) |
-| `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; an authored engine-owned `scope` is accepted; a capability rendering carries no keys). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source), from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment; a Deployment passed through as raw, unstructured output (`passthrough`, `helmchart` or `helmtemplate` templates) is not inspected (see below). |
+| `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; an authored engine-owned `scope` is accepted; a capability rendering carries no keys). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source), from its post-policy `spec.replicas`: none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment; a Deployment passed through as raw, unstructured output (`passthrough`, or `helmtemplate` templates) is not inspected (see below). |
 | `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`. Admitted on `webservice`, `worker` and `deployment` only. On any of them with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. |
 
 ### Operational (FluxCD)
@@ -176,7 +176,7 @@ time instead of building an Ingress whose backend port cannot resolve
 A `backend` naming a different Service is explicit and its `port`/`portName` is not
 checked. A component that exposes no Service port — `deployment`, `statefulset` and
 `daemonset` (which dropped `port` and its Service in go-kure/launcher#690), or another
-kind that generates no Service such as `helmchart` — has no implicit
+kind that generates no Service such as `helmrelease` — has no implicit
 backend unless the trait sets `servicePort` (and optionally `serviceName`); that
 trait-level port carries no name, so a `portName` is not checked against it. A
 port-less headless `service` (`clusterIP: None` with no `ports`,
@@ -638,7 +638,7 @@ The trait is strict in five ways, each an error at build time:
   (`statefulset`, `daemonset`, a `manifests` source without a Deployment, …)
   fails, rather than carrying a trait that does nothing. A Deployment passed
   through as raw, unstructured output — a `passthrough` object, or one rendered
-  from `helmchart` or `helmtemplate` templates — is not inspected, as for the other
+  from `helmtemplate` templates — is not inspected, as for the other
   Deployment-decorating traits, so such a component fails the same way.
 - **A `matchLabels` selector is required.** A Deployment whose selector is
   missing, has no `matchLabels`, or also carries `matchExpressions` is refused,
@@ -651,8 +651,8 @@ The trait is strict in five ways, each an error at build time:
 
 ## Decorator forwarding for layout-augmenting components
 
-A component config that also implements kure's `layout.LayoutAugmenter` (e.g. `helmchart` under
-`valuesMode: configMap` or `delivery: template`, or any `helmtemplate`) can carry any trait. `wrapIfAugmenter`
+A component config that also implements kure's `layout.LayoutAugmenter` (e.g. any `helmtemplate`)
+can carry any trait. `wrapIfAugmenter`
 (`decorator.go`) is the shared construction-site helper every trait decorator calls: if the
 wrapped inner config implements `layout.LayoutAugmenter`, it returns an `augmentingDecorator`
 wrapping the trait-specific decorator instead of the plain one, so the wrapper itself also
@@ -660,7 +660,7 @@ satisfies `layout.LayoutAugmenter` and forwards `AugmentLayout` straight through
 config. Without this forward, kure's layout walker — which keys a structural decision off
 `layout.LayoutAugmenter`'s mere *presence* on the concrete config it walks — would never see the
 capability on a decorated (trait-carrying) config, silently losing the augmenter's layout-level
-effect (the values `ConfigMap`, or the hook-group repartitioning) the moment any trait is added.
+effect (the hook-group repartitioning) the moment any trait is added.
 
 A straight forward alone would also bypass every decorator's own processing for the resources
 the augmenter adds: those are created inside `AugmentLayout`, after every decorator's `Generate`
@@ -668,8 +668,8 @@ has returned. So after the inner `AugmentLayout` returns, `augmentingDecorator` 
 decorator's unexported `postAugmentLayout` hook when it implements one. `prune-protection` and
 `force-replace` are the two decorators that do: each annotates every resource on the per-app layout
 and its child layouts with its own annotation (`kustomize.toolkit.fluxcd.io/prune: disabled`,
-`kustomize.toolkit.fluxcd.io/force: enabled`), so the `helmchart` values `ConfigMap` is covered
-along with the `HelmRelease`. kure's walker calls `AugmentLayout` only on a layout it
+`kustomize.toolkit.fluxcd.io/force: enabled`), so a resource the augmenter adds or moves into a
+child layout is covered along with the rest. kure's walker calls `AugmentLayout` only on a layout it
 seeded with that one application's `Generate` output, so the trait's narrow scope is unchanged —
 sibling applications in the same bundle are never on that layout. The hook runs at every level of
 a decorator chain, so trait order does not matter. The other decorators (`configmap`,

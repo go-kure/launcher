@@ -24,7 +24,7 @@ import (
 
 // fluxSourceDefaultInterval is spec.interval when a source component leaves it
 // unset (a zero duration counts as unset). OCIRepository, GitRepository and
-// Bucket require the field; 60m is the helmchart composite's source default.
+// Bucket require the field; 60m matches the helmrelease default.
 const fluxSourceDefaultInterval = 60 * time.Minute
 
 // defaultFluxSourceInterval sets d to fluxSourceDefaultInterval when it is zero.
