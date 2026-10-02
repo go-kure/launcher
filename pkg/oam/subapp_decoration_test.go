@@ -12,12 +12,10 @@ import (
 // stampTraitHandler is a decorating trait: Apply wraps the application's config
 // so that every object it generates gains one more "x" in its "stamp"
 // annotation. An object decorated twice therefore reads "xx". With decorates
-// false it does not opt in to SubApplicationDecorator's pass; with appends it
-// also adds a sub-application on every Apply. With seal it is the "seal" trait
-// instead, adding "s".
+// false it does not opt in to SubApplicationDecorator's pass. With seal it is
+// the "seal" trait instead, adding "s".
 type stampTraitHandler struct {
 	decorates bool
-	appends   bool
 	seal      bool
 }
 
@@ -28,16 +26,12 @@ func (h stampTraitHandler) CanHandle(t string) bool {
 	return t == "stamp"
 }
 
-func (h stampTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *stack.Bundle) error {
+func (h stampTraitHandler) Apply(_ *Trait, app *stack.Application, _ *stack.Bundle) error {
 	mark := "x"
 	if h.seal {
 		mark = "s"
 	}
 	app.Config = &stampConfig{inner: app.Config, mark: mark}
-	if h.appends {
-		bundle.Applications = append(bundle.Applications,
-			stack.NewApplication(app.Name+"-stamp", app.Namespace, &namedConfigMapConfig{name: app.Name + "-stamp", namespace: app.Namespace}))
-	}
 	return nil
 }
 
@@ -349,19 +343,61 @@ func TestDecorateSubApplications_TwoTypesTwoMembers(t *testing.T) {
 	}
 }
 
-// TestDecorateSubApplications_RefusesAppend pins that a decorating trait which
-// adds an application while decorating a sub-application is refused: the pass
-// runs after the build's other steps, which would never see that application.
-func TestDecorateSubApplications_RefusesAppend(t *testing.T) {
-	tr := inDocumentTransformer()
-	tr.RegisterTrait("stamp", stampTraitHandler{decorates: true, appends: true})
-	app := makeApp("shop", Component{Name: "web", Type: "webservice", Properties: map[string]any{}, Traits: []Trait{
-		{Type: "stamp"},
-	}})
-	app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
-	_, _, err := tr.TransformWithPolicy(app, TransformContext{})
-	want := `component "web" trait "stamp" added an application while decorating sub-application "web-stamp"`
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("error = %v, want it to contain %s", err, want)
+// bundleEditTraitHandler is a decorating trait that edits the bundle. Applied to
+// its component's application in the trait pass, it appends the sub-application
+// "<name>-sub". Applied to that sub-application in the decoration pass, it makes
+// the change named by edit to the bundle.
+type bundleEditTraitHandler struct {
+	edit string // "append", "remove-and-append", "replace" or "reorder"
+}
+
+func (bundleEditTraitHandler) CanHandle(t string) bool { return t == "edit" }
+
+func (h bundleEditTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *stack.Bundle) error {
+	newApp := func(name string) *stack.Application {
+		return stack.NewApplication(name, app.Namespace, &namedConfigMapConfig{name: name, namespace: app.Namespace})
+	}
+	if !strings.HasSuffix(app.Name, "-sub") {
+		bundle.Applications = append(bundle.Applications, newApp(app.Name+"-sub"))
+		return nil
+	}
+	i := slices.Index(bundle.Applications, app)
+	switch h.edit {
+	case "append":
+		bundle.Applications = append(bundle.Applications, newApp(app.Name+"-extra"))
+	case "remove-and-append":
+		// The length is unchanged: a length check alone would pass this.
+		bundle.Applications = append(slices.Delete(bundle.Applications, 0, 1), newApp(app.Name+"-extra"))
+	case "replace":
+		bundle.Applications[i] = newApp(app.Name)
+	case "reorder":
+		bundle.Applications = append([]*stack.Application{app}, slices.Delete(bundle.Applications, i, i+1)...)
+	}
+	return nil
+}
+
+func (bundleEditTraitHandler) DecoratesSubApplications() bool { return true }
+
+// TestDecorateSubApplications_RefusesBundleChange is go-kure/launcher#723. A
+// decorating trait that changes the bundle's applications while decorating a
+// sub-application is refused. The pass runs after the build's other steps, so
+// they would never see an added application, and the order is already final.
+// A removal followed by an append leaves the length unchanged, and is refused
+// all the same.
+func TestDecorateSubApplications_RefusesBundleChange(t *testing.T) {
+	for _, edit := range []string{"append", "remove-and-append", "replace", "reorder"} {
+		t.Run(edit, func(t *testing.T) {
+			tr := inDocumentTransformer()
+			tr.RegisterTrait("edit", bundleEditTraitHandler{edit: edit})
+			app := makeApp("shop", Component{Name: "web", Type: "webservice", Properties: map[string]any{}, Traits: []Trait{
+				{Type: "edit"},
+			}})
+			app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+			_, _, err := tr.TransformWithPolicy(app, TransformContext{})
+			want := `component "web" trait "edit" changed the bundle's applications while decorating sub-application "web-sub"; a SubApplicationDecorator must not add, remove, replace or reorder applications`
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want it to contain %s", err, want)
+			}
+		})
 	}
 }

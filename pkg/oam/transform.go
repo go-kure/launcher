@@ -1199,19 +1199,25 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 // sub-applications of its component, as the last step of the build. It runs
 // after every trait of every component, so a decorator authored before the trait
 // that creates a sub-application covers it as well as one authored after.
+//
+// The bundle's order is final by then, so a decorator must leave its
+// applications exactly as they are. They are compared by pointer and position
+// rather than by count, so a removal followed by an append is caught too. The
+// snapshot is a copy because a removal shifts the shared backing array in
+// place.
 func decorateSubApplications(decorations []subAppDecoration) error {
 	for _, d := range decorations {
 		for _, subApp := range d.subApps {
-			prevLen := len(d.bundle.Applications)
+			prev := slices.Clone(d.bundle.Applications)
 			if err := d.handler.Apply(&d.trait, subApp, d.bundle); err != nil {
 				return &TransformError{
 					Message: fmt.Sprintf("component %q trait %q on sub-application %q", d.component, d.trait.Type, subApp.Name),
 					Cause:   err,
 				}
 			}
-			if len(d.bundle.Applications) != prevLen {
+			if !slices.Equal(prev, d.bundle.Applications) {
 				return &TransformError{Message: fmt.Sprintf(
-					"component %q trait %q added an application while decorating sub-application %q; a SubApplicationDecorator must not append to the bundle",
+					"component %q trait %q changed the bundle's applications while decorating sub-application %q; a SubApplicationDecorator must not add, remove, replace or reorder applications",
 					d.component, d.trait.Type, subApp.Name)}
 			}
 		}
