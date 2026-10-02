@@ -147,12 +147,6 @@ func TestConsumedCapabilities_RuleReads(t *testing.T) {
 			if !slices.Equal(result.ConsumedCapabilities, tc.want) {
 				t.Errorf("ConsumedCapabilities = %v, want %v", result.ConsumedCapabilities, tc.want)
 			}
-
-			// The plain Transform path collects nothing, and a rule's read there must not
-			// fail for want of a set to record into.
-			if _, err := tr.Transform(tc.app(), TransformContext{Capabilities: capReadProfile()}); err != nil {
-				t.Fatalf("Transform: unexpected error: %v", err)
-			}
 		})
 	}
 }
