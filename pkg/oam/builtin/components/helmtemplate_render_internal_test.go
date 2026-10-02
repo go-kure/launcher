@@ -687,7 +687,7 @@ func TestAugmentLayout_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
 	// A second near-253-char ml.Name sharing mlNameA's truncated prefix must
 	// still yield a distinct dirName set — the sha256 prefix, not just the
 	// group index, is what prevents cross-name collision (mirrors
-	// TestValuesConfigMapName_TruncationPreservesUniqueness).
+	// TestBoundedResourceName_TruncationPreservesUniqueness).
 	mlNameB := strings.Repeat("a", 228) + "." + strings.Repeat("c", 24)
 	if len(mlNameB) != 253 {
 		t.Fatalf("test setup: len(mlNameB) = %d, want 253", len(mlNameB))
