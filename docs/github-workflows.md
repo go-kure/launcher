@@ -179,21 +179,13 @@ Runs on main and `release/*` branches only (not PRs):
 
 ### Features
 
-- **No-Downstream-References guard** — `docs-build` runs the shared `go-kure/.github`
-  `check-forbidden-terms` action, which scans `--full-tree` on **every** event so a PR and the merge
-  queue produce identical results (scan parity). Drift-check steps keep the vendored copy that the
-  release script uses (`site/scripts/check-forbidden-terms.sh`) and the vendored release guide
-  (`docs/releasing.md`) byte-identical to their canonical files, checked out at a ref the
-  `Resolve pinned guard revision` step derives from the guard action's own `uses:@<sha>` pin —
-  never a second, independently-maintained `ref:` literal. `scripts/vendor-guard.sh`
-  re-fetches and re-vendors both files from the same pin, run as a `renovate.json`
-  `postUpgradeTasks` command whenever the `go-kure/.github` github-actions dependency bumps
-  (go-kure/launcher#475), so the vendored copies and the pin can't drift apart; safe to run by hand
-  too. See `go-kure/.github`'s `docs/standards.md` § "Adopting the trusted Actions lane" for the
-  full mechanism and go-kure/kure#813 for the original migration off a two-pin design
-- **Doc-sync checks** — `docs-build` (Layers 1/2) and `doc-gate` (Layer 3) run the canonical
-  `check-doc-sync`, `check-links` and `check-doc-gate` actions from `go-kure/.github`; launcher no
-  longer vendors its own copies under `site/scripts/`
+- **No-Downstream-References guard** — `docs-build` runs the shared guard and byte-compares the
+  three vendored copies (`site/scripts/check-forbidden-terms.sh`, `docs/releasing.md`,
+  `docs/shared-workflows.md`), which `scripts/vendor-guard.sh` re-vendors at the guard's pin; the
+  mechanism is on the Shared Workflows page (`docs/shared-workflows.md`, vendored from
+  `go-kure/.github`)
+- **Doc-sync checks** — `docs-build` and `doc-gate` run the shared `check-doc-sync`, `check-links`
+  and `check-doc-gate` actions; see the Shared Workflows page
 - **Documentation YAML fence check** — `docs-build` runs `make check-doc-fences`
   (`site/scripts/check-doc-fences.sh`, go-kure/launcher#442), which checks every YAML fence
   marked with a `check` attribute in its info string and reports a failing fence as
@@ -409,12 +401,9 @@ Runs on main and `release/*` branches only (not PRs):
 - **Runs on draft PRs** — no draft gate on any job (2026-08-19, GitLab `mr-review` parity — draft
   blocks merge only, via branch protection, not what CI runs)
 - **make install guard** — every job that calls `make` installs it first (runner image lacks it)
-- **govulncheck allowlist** — the `Security` job runs `govulncheck -scan symbol -format json`, then
-  gates the report through the shared `go-kure/.github` `govulncheck-gate` composite action (same
-  fail-closed script kure uses), which blocks on any OSV ID with a reachable symbol trace that isn't
-  in the action's `allowlist` input. The action fails closed: a missing, empty, or unparseable report
-  is a gate error (exit 2), never a silent clean result, and reachable-vs-allowed advisories are
-  printed to the job log so accepted risk stays visible rather than looking clean.
+- **govulncheck allowlist** — the `Security` job runs `govulncheck -scan symbol -format json` and
+  gates the report through the shared `govulncheck-gate` action, with this repository's
+  `allowlist` input (exit codes on the Shared Workflows page).
   - Currently allowlisted: `GO-2026-5377` (external-secrets controller privilege escalation). Launcher
     only imports `external-secrets/apis` to generate CRD manifests; reachable traces are generated
     deepcopy boilerplate and package init, never a reconciler. The apis module is untagged and the Go
@@ -455,17 +444,9 @@ Runs on main and `release/*` branches only (not PRs):
 3. Runs `scripts/gen-versions-toml.sh` to generate versioned Hugo config overlay
 4. Builds the Hugo site targeting `https://www.gokure.dev/launcher/<slot>/`
 5. If `set_latest=true`, also builds at `https://www.gokure.dev/launcher/`
-6. Checks out `go-kure/go-kure.github.io` and deploys to the `launcher/` subdirectory through the
-   shared `deploy-docs-push` action from `go-kure/.github`. When `set_latest=true`, the action
-   fetches the tags again right before writing the root and writes `launcher/` only if the label
-   is still the highest stable tag (the same rule Publish uses) and the checkout is that tag's
-   commit. If the label is no longer the highest stable tag, it deploys the slot and leaves the
-   root untouched. If it is, but the label is not an existing tag or the checked-out commit is not
-   the tag's, the deploy fails and pushes nothing. Dispatch again with the highest existing stable
-   tag as both the ref and the label, its slot, and `set_latest=true`
-   (`gh workflow run deploy-docs.yml --ref <tag> -f version_slot=<vX.Y> -f version_label=<tag> -f set_latest=true`):
-   the label itself when only the ref was wrong. An older tag would deploy only its slot and leave
-   the root untouched.
+6. Checks out `go-kure/go-kure.github.io` and deploys to `launcher/<slot>/` through the shared
+   `deploy-docs-push` action; when and how it also writes the `launcher/` root is on the Shared
+   Workflows page
 
 **Credentials.** The launcher checkout sets `persist-credentials: false`: the repository is
 public, so the action's tag fetch needs no token, and no later step can read the job token from
@@ -483,67 +464,18 @@ earlier step could still read it.
 | `workflow_dispatch` | `launcher/<slot>/` | `www.gokure.dev/launcher/<slot>/` |
 | `workflow_dispatch` + `set_latest=true` | `launcher/<slot>/` + `launcher/` | both |
 
-### Concurrency
+### Concurrency, Preservation, Authentication
 
-Per-slot group (`deploy-docs-<slot>`) with `cancel-in-progress: false` — two deploys **to the same
-slot** queue rather than cancel, so neither is dropped.
-
-Deploys to *different* slots are not serialised: the group name includes the slot, so a `v1.2`
-deploy and a `v1.3` deploy run at the same time and push to the same docs repository. The
-`deploy-docs-push` action handles that race. When a push is rejected because the other deploy
-moved the pages branch, it starts again from the new tip, writes this deploy's slot again (keeping
-the other slot's content), re-checks the root decision, and pushes. It retries up to five
-attempts, then fails the deploy. Any other push failure fails the deploy immediately.
-
-Not covered: two deploys to the *same* slot are queued, not re-checked, so an older patch release
-deployed after a newer one still replaces that slot's content. A tag cut before this workflow
-version runs the deploy from its own ref, so its deploy uses the workflow as it was at that tag.
-
-### Preservation
-
-Only the target slot is replaced. Other `launcher/v*/`, `launcher/dev/`, `CNAME`, and `.nojekyll`
-are preserved. The root `launcher/` files are only overwritten when `set_latest=true`, the label
-is still the highest stable tag when the deploy writes, and the deploy's checkout is that tag's
-commit. When the label ranks highest but is not an existing tag, or its tag is not the
-checked-out commit, the deploy fails (see How It Works); when it does not rank highest, the slot
-still deploys. A root write replaces everything directly under `launcher/` except `dev/` and the
-`v*/` slots.
-
-### Authentication
-
-Requires `DEPLOY_TOKEN` secret — a PAT with write access to `go-kure/go-kure.github.io`.
+Per-slot concurrency group `deploy-docs-<slot>`; `DEPLOY_TOKEN` secret (a PAT with write access to
+`go-kure/go-kure.github.io`). Root re-check, retry and what a deploy keeps are on the Shared
+Workflows page.
 
 ---
 
 ## Merge Queue
 
-launcher merges through GitHub's native **merge queue** (configured in the `main-protection`
-ruleset, not a workflow file). This replaced the former `rebase-check` job and `auto-rebase.yml`
-workflow — it is the native equivalent of GitLab's merged-results pipelines.
-
-### How It Works
-
-1. A reviewed PR is added to the queue ("Merge when ready").
-2. The queue creates a temporary branch combining `main` + the PR and fires a `merge_group`
-   event; `lint`/`test`/`build` run against that **merged result**.
-3. If green, the PR lands on `main` with the **rebase** merge method (linear history preserved).
-   If the merged result fails, the PR is dropped from the queue and `main` stays green.
-
-### Why
-
-- Tests the actual merged result, which `rebase-check` (ancestry-only) could not.
-- No force-pushing contributor branches and no per-merge auto-rebase storm — the queue rebases
-  once, at merge time.
-
-### Configuration (ruleset `merge_queue` rule)
-
-- **Merge method:** `REBASE` (linear history)
-- **Grouping:** `ALLGREEN` (a failing entry is dropped from the group)
-- **Batch size:** 1 (conservative; tune after observing runner load)
-- **Required checks on the queue:** `lint`, `test`, `build` (must also trigger on `merge_group`)
-
-Auto-merge is **not** enabled — every PR is reviewed and queued manually. The merge queue rule is
-managed centrally in `go-kure/.github` (`governance/repository-settings-policy.yaml`).
+launcher merges through the merge queue. How it works, its settings and the required checks are on
+the Shared Workflows page.
 
 ---
 
@@ -574,32 +506,8 @@ What is specific to launcher:
 
 ## PR Review Workflow
 
-**File:** `.github/workflows/pr-review.yml`
-**Reusable source:** `go-kure/.github/.github/workflows/pr-review.yml@main`
-
-### Triggers
-
-- Pull requests: `opened`, `synchronize`, `reopened`, on GitHub's default types
-- `merge_group` (no filters): required so this check reports on the merge queue's temporary
-  ref once it becomes a required status check — the queue payload has no `pull_request` field,
-  so the existing fork skip below evaluates false and the job reports `skipped`/success as a
-  no-op
-- Runs on draft PRs the same as ready ones (2026-08-19, GitLab `mr-review` parity); skips fork PRs
-- `ready_for_review` is not declared, same reasoning as `ci.yml`: it was kept as a rollout-window
-  safety net while the callee (`pr-review.yml@main`, in `go-kure/.github`) still gated on
-  `draft == false` (its own parity fix landed 2026-08-19, `46dfc88`) and dropped once that window
-  closed.
-
-### How It Works
-
-Two-pass AI review via the cluster-local claude-max-proxy sidecar:
-
-1. **Pass 1 — Review**: Sends PR diff + `AGENTS.md` + `.claude/CLAUDE.md` to the review model.
-   Posts up to 3 findings in a structured table as a PR comment.
-2. **Pass 2 — Assessment**: If the review found issues, an assessment model fact-checks each
-   finding against the actual diff and the provided standards. Posts a verification comment.
-
-Non-blocking: uses `continue-on-error: true` so review failures never prevent merging.
+**File:** `.github/workflows/pr-review.yml`, calling `go-kure/.github`'s `pr-review.yml@main`.
+What it does, its configuration and the incident switch are on the Shared Workflows page.
 
 ### Context Input
 
@@ -607,35 +515,16 @@ Non-blocking: uses `continue-on-error: true` so review failures never prevent me
 with:
   pr_review_context: "OAM-native package manager for Kubernetes, shipped as the kurel CLI.
     Implements a two-config-set model: package config (app requirements) + site config (cluster
-    capabilities), resolved at install time to produce Kubernetes manifests."
+    capabilities), resolved at install time to produce Kubernetes manifests. An open-source
+    go-kure project."
 ```
 
 ---
 
 ## Claude Workflow
 
-**File:** `.github/workflows/claude.yml`
-**Reusable source:** `go-kure/.github/.github/workflows/claude.yml@main`
-
-### Triggers
-
-- Issue comments and PR review comments (when `@claude` is mentioned)
-- Issues opened or assigned
-- PR reviews submitted
-
-No `pull_request` trigger: a `pull_request` event carries no `@claude` mention, so the job
-would only start and immediately skip (go-kure/.github#222, fixed org-wide in
-go-kure/.github#223).
-
-### Purpose
-
-Runs the `anthropics/claude-code-action@v1` agent on any PR or issue that mentions `@claude`.
-The agent has full repo access via checkout and can read code, answer questions, or suggest
-changes.
-
-### Requirements
-
-Secret: `CLAUDE_CODE_OAUTH_TOKEN`
+**File:** `.github/workflows/claude.yml`, calling `go-kure/.github`'s `claude.yml@main`. Triggers
+and requirements are on the Shared Workflows page.
 
 ---
 
@@ -765,8 +654,8 @@ injected into step processes as a side effect).
 
 ### Self-Hosted Runner
 
-All jobs run on the `autops-kube-kure` GitHub ARC scale-set. The runner image lacks `make`,
-so every job that calls `make` installs it first:
+Jobs run on the `autops-kube-kure` runner described on the Shared Workflows page. Its image lacks
+`make`, so every job that calls `make` installs it first:
 
 ```yaml
 - name: Install build tools
@@ -781,7 +670,8 @@ so every job that calls `make` installs it first:
 - **Version updates:** Run `make sync-go-version` to update Go version across all files
 - **Version check:** Run `make check-go-version` to verify consistency
 - **New jobs using `make`:** Include the install guard step above
-- **Reusable workflows:** Changes in `go-kure/.github` take effect immediately for all callers
+- **Shared workflows:** behaviour from `go-kure/.github` is on the Shared Workflows page; reusable
+  workflows run at `@main`, composite actions at the pinned SHA
 
 ---
 
