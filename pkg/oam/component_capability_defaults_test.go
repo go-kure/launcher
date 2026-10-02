@@ -12,13 +12,18 @@ import (
 // --- Capability defaults on components, and null over a rendering key (go-kure/launcher#742) ---
 
 // defaultsComponentHandler takes "class" from the "store" capability and records
-// the properties it was handed.
+// the properties it was handed. Its schema leaves "class" untyped, so any property
+// value passes validateCapabilityFill.
 type defaultsComponentHandler struct{ got map[string]any }
 
 func (h *defaultsComponentHandler) CanHandle(t string) bool { return t == "store" }
 
 func (h *defaultsComponentHandler) CapabilityDefaults() (string, []string) {
 	return "store", []string{"class"}
+}
+
+func (h *defaultsComponentHandler) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{"size": {Type: PropertyTypeString}, "class": {}}
 }
 
 func (h *defaultsComponentHandler) ToApplicationConfig(c *Component, _ string) (stack.ApplicationConfig, error) {
@@ -147,7 +152,7 @@ func TestComponentCapabilityDefaults_UncopyableValueRefused(t *testing.T) {
 		t.Errorf("handler ran with %v", h.got)
 	}
 
-	_, err = applyComponentCapabilityDefaults(h, map[string]any{}, TransformContext{Capabilities: caps})
+	_, err = tr.applyComponentCapabilityDefaults(h, map[string]any{}, TransformContext{Capabilities: caps})
 	if err == nil || !strings.Contains(err.Error(), `capability "store" defaults: rendering key "class"`) {
 		t.Errorf("applyComponentCapabilityDefaults error = %v, want one naming the capability and the key", err)
 	}
@@ -169,6 +174,147 @@ func TestComponentCapabilityDefaults_SynthesizedSkipped(t *testing.T) {
 	}
 	if len(result.ConsumedCapabilities) != 0 {
 		t.Errorf("ConsumedCapabilities = %v, want none", result.ConsumedCapabilities)
+	}
+}
+
+// keyedDefaultsHandler is a "store" component taking keys from the capability key,
+// with no schema of its own.
+type keyedDefaultsHandler struct {
+	key  string
+	keys []string
+	got  map[string]any
+}
+
+func (h *keyedDefaultsHandler) CanHandle(t string) bool { return t == "store" }
+
+func (h *keyedDefaultsHandler) CapabilityDefaults() (string, []string) { return h.key, h.keys }
+
+func (h *keyedDefaultsHandler) ToApplicationConfig(c *Component, _ string) (stack.ApplicationConfig, error) {
+	h.got = c.Properties
+	return &stubAppConfig{}, nil
+}
+
+// schemaDefaultsHandler is keyedDefaultsHandler declaring "class" as a string.
+type schemaDefaultsHandler struct{ keyedDefaultsHandler }
+
+func (h *schemaDefaultsHandler) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{"class": {Type: PropertyTypeString}}
+}
+
+// TestComponentCapabilityDefaults_ValidatedAgainstComponent: each filled value is
+// checked against the component's own schema, whatever the trait side accepted, and
+// a fill nothing can validate is refused (go-kure/launcher#751).
+func TestComponentCapabilityDefaults_ValidatedAgainstComponent(t *testing.T) {
+	cases := []struct {
+		name      string
+		handler   ComponentHandler
+		trait     bool // register a "store" trait handler that accepts anything
+		rule      bool // register the "store-trait" trait lowering rule
+		rendering map[string]any
+		want      map[string]any
+		wantErr   []string
+	}{
+		{name: "component schema refuses what the trait accepts",
+			handler: &schemaDefaultsHandler{keyedDefaultsHandler{key: "store", keys: []string{"class"}}}, trait: true,
+			rendering: map[string]any{"class": 5},
+			wantErr:   []string{`component "data": capability "store" defaults: properties.class: expected string, got int`}},
+		{name: "component schema refuses with no trait handler",
+			handler:   &schemaDefaultsHandler{keyedDefaultsHandler{key: "store", keys: []string{"class"}}},
+			rendering: map[string]any{"class": true},
+			wantErr:   []string{`component "data"`, `capability "store" defaults`, "properties.class: expected string"}},
+		{name: "component schema alone accepts",
+			handler:   &schemaDefaultsHandler{keyedDefaultsHandler{key: "store", keys: []string{"class"}}},
+			rendering: map[string]any{"class": "fast"},
+			want:      map[string]any{"class": "fast"}},
+		{name: "key the component schema does not declare",
+			handler:   &schemaDefaultsHandler{keyedDefaultsHandler{key: "store", keys: []string{"class", "tier"}}},
+			rendering: map[string]any{"class": "fast", "tier": "gold"},
+			wantErr:   []string{`component "data"`, `capability "store" defaults: rendering key "tier" is not a property the component declares`}},
+		{name: "no schema and nothing registered for the type",
+			handler:   &keyedDefaultsHandler{key: "store", keys: []string{"class"}},
+			rendering: map[string]any{"class": "fast"},
+			wantErr:   []string{`component "data"`, `capability "store" defaults: nothing validates rendering keys ["class"]`, "implement PropertySchemaProvider"}},
+		{name: "no schema, trait handler registered",
+			handler: &keyedDefaultsHandler{key: "store", keys: []string{"class"}}, trait: true,
+			rendering: map[string]any{"class": "fast"},
+			want:      map[string]any{"class": "fast"}},
+		{name: "no schema, trait lowering rule registered",
+			handler: &keyedDefaultsHandler{key: "store-trait", keys: []string{"class"}}, rule: true,
+			rendering: map[string]any{"class": "fast"},
+			want:      map[string]any{"class": "fast"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var traits map[string]TraitHandler
+			if tc.trait {
+				traits = map[string]TraitHandler{"store": &recordingTraitHandler{typ: "store"}}
+			}
+			tr := NewTransformer(map[string]ComponentHandler{"store": tc.handler}, traits)
+			if tc.rule {
+				var got map[string]any
+				tr.RegisterTraitLowering(recordingTraitRule{got: &got})
+			}
+			key, _ := tc.handler.(ComponentCapabilityDefaults).CapabilityDefaults()
+			caps := map[string]CapabilityBinding{key: {Rendering: tc.rendering}}
+			app := storeApp(Component{Name: "data", Type: "store", Properties: map[string]any{}})
+			_, _, err := tr.TransformWithPolicy(app, TransformContext{Capabilities: caps})
+			var got map[string]any
+			switch h := tc.handler.(type) {
+			case *schemaDefaultsHandler:
+				got = h.got
+			case *keyedDefaultsHandler:
+				got = h.got
+			}
+			if tc.wantErr != nil {
+				if err == nil {
+					t.Fatalf("TransformWithPolicy succeeded with %v, want a refusal", got)
+				}
+				for _, w := range tc.wantErr {
+					if !strings.Contains(err.Error(), w) {
+						t.Errorf("error %q does not contain %q", err, w)
+					}
+				}
+				if got != nil {
+					t.Errorf("handler ran with %v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("TransformWithPolicy: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("handler got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// objectDefaultsHandler is keyedDefaultsHandler declaring "class" as an open object.
+type objectDefaultsHandler struct{ keyedDefaultsHandler }
+
+func (h *objectDefaultsHandler) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{"class": {Type: PropertyTypeObject, AdditionalProperties: true}}
+}
+
+// TestComponentCapabilityDefaults_NormalizedByComponentSchema: the copy keeps the
+// rendering's Go type, and the component schema check then normalizes the fill as it
+// normalizes any validated property, so a map[string]string under an object property
+// reaches the handler as map[string]any; the profile's own value is left as it was
+// (go-kure/launcher#751).
+func TestComponentCapabilityDefaults_NormalizedByComponentSchema(t *testing.T) {
+	h := &objectDefaultsHandler{keyedDefaultsHandler{key: "store", keys: []string{"class"}}}
+	tr := NewTransformer(map[string]ComponentHandler{"store": h}, nil)
+	rendering := map[string]any{"class": map[string]string{"tier": "fast"}}
+	caps := map[string]CapabilityBinding{"store": {Rendering: rendering}}
+	app := storeApp(Component{Name: "data", Type: "store", Properties: map[string]any{}})
+	if _, _, err := tr.TransformWithPolicy(app, TransformContext{Capabilities: caps}); err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	if want := map[string]any{"class": map[string]any{"tier": "fast"}}; !reflect.DeepEqual(h.got, want) {
+		t.Errorf("handler got %#v, want %#v", h.got, want)
+	}
+	if want := map[string]any{"class": map[string]string{"tier": "fast"}}; !reflect.DeepEqual(rendering, want) {
+		t.Errorf("profile rendering = %#v, want it unchanged %#v", rendering, want)
 	}
 }
 
