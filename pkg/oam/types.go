@@ -59,12 +59,21 @@ type Component struct {
 	// stays authored, schema or not: the check its schema runs there covers the
 	// trait's own reserved keys, not those of what the rule emits. A
 	// document rule's output is never synthesized, since nothing checks its whole
-	// input (go-kure/launcher#612); a component it forwards (pointer-identical,
-	// isForwardedComponent) keeps the value it arrived with. What a user wrote is still
-	// checked before any rule can rewrite it: before a ComponentLoweringRule
-	// (lowerDocumentBody) and before a DocumentLoweringRule
-	// (enforceAuthoredReservations).
+	// input; a component it forwards (pointer-identical, isForwardedComponent) keeps
+	// the value it arrived with, and a reserved value it renders is exempt through
+	// rendered instead. What a user wrote is still checked before any rule can rewrite
+	// it: before a ComponentLoweringRule (lowerDocumentBody) and before a
+	// DocumentLoweringRule (enforceAuthoredReservations).
 	synthesized bool
+	// rendered records the PlatformReserved values a lowering rule rendered into
+	// Properties (RenderReserved, rendered_reserved.go): a reserved key holding the
+	// recorded value at its own path is exempt from the D3 check even on a component
+	// that is not synthesized, and only while it holds that value. Per value, unlike
+	// synthesized, so a rule whose whole input nothing checked — a document rule —
+	// can still render a reserved value without exempting what it copied. Never
+	// written in place, so a copy of the component keeps the record it was taken
+	// with. The engine never sets or clears it.
+	rendered renderedValues
 	// siblingGroup marks a member of a same-name sibling group: components that
 	// one ComponentLoweringRule invocation emitted under one name, each of a
 	// distinct terminal type (stampSiblingGroups, lowering.go). Members share the
@@ -105,8 +114,17 @@ type Trait struct {
 	// Any other trait — authored, forwarded, or sealed by a rule whose input was not
 	// checked — is checked by D3 before a schema-declaring TraitLoweringRule
 	// (lowerDocumentBody) and in applyTraits. Every trait a document rule builds is
-	// unsynthesized (go-kure/launcher#612). Only a sealed trait is ever synthesized.
+	// unsynthesized, since nothing checks the rule's whole input; a reserved value it
+	// renders is exempt through rendered instead. Only a sealed trait is ever
+	// synthesized.
 	synthesized bool
+	// rendered is Component.rendered for a trait (Trait.RenderReserved): a reserved
+	// key holding the value a lowering rule recorded at its own path is exempt from
+	// the D3 check, and only while it holds that value. Checked against the trait's
+	// own Properties, never the capability-merged copy applyTraits dispatches, so a
+	// capability merge cannot exempt anything. Never written in place; the engine
+	// never sets or clears it.
+	rendered renderedValues
 	// forwardedFrom is set only while a ComponentLoweringRule runs: the engine
 	// hands the rule a marked copy of the component's traits (forwardableTraits,
 	// lowering.go), so a by-value copy the rule forwards is still recognised as

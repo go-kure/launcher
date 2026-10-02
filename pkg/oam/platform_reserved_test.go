@@ -85,7 +85,7 @@ func TestEnforcePlatformReserved(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := enforcePlatformReserved(reservedSchema(), tc.props, "properties")
+			err := enforcePlatformReserved(reservedSchema(), tc.props, nil, "properties")
 			if tc.wantKey == "" {
 				if err != nil {
 					t.Fatalf("expected the properties to be accepted, got: %v", err)
@@ -112,7 +112,7 @@ func TestEnforcePlatformReserved(t *testing.T) {
 // declares nothing reserves nothing" latitude — the same latitude
 // validateEmittedProperties gives a handler with no PropertySchemaProvider.
 func TestEnforcePlatformReserved_EmptySchemaAcceptsAnything(t *testing.T) {
-	if err := enforcePlatformReserved(nil, map[string]any{"networkPolicy": map[string]any{}}, "properties"); err != nil {
+	if err := enforcePlatformReserved(nil, map[string]any{"networkPolicy": map[string]any{}}, nil, "properties"); err != nil {
 		t.Fatalf("an empty schema must reserve nothing, got: %v", err)
 	}
 }
@@ -128,7 +128,7 @@ func TestEnforcePlatformReserved_ReportsTheSameViolationEveryRun(t *testing.T) {
 	props := map[string]any{"alpha": "a", "omega": "o"}
 
 	for i := range 50 {
-		err := enforcePlatformReserved(schema, props, "properties")
+		err := enforcePlatformReserved(schema, props, nil, "properties")
 		if err == nil {
 			t.Fatalf("run %d: expected a rejection", i)
 		}

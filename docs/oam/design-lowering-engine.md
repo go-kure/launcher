@@ -175,9 +175,13 @@ synthesized, or a trait rule whose input trait is synthesized or that declares a
 over an unsealed one, and the traits nested in what it emits share that classification.
 A sealed, unsynthesized trait that passes the check is still not checked input, so a
 trait rule's output over one stays authored, schema or not;
-a document rule's output is never synthesized, since nothing checks its whole input
-(go-kure/launcher#612), and a component it forwards keeps the classification it arrived
-with — and
+a document rule's output is never synthesized, since nothing checks its whole input,
+and a component it forwards keeps the classification it arrived with; a reserved value
+such a rule renders from capabilities is written with `Component.RenderReserved` (or
+`Trait.RenderReserved` for a trait it builds), which records it per property, and is
+accepted only while the key still holds the recorded value, so an authored value
+copied from anywhere in the input is still refused
+(go-kure/launcher#612) — and
 an authored component is checked before any rule can rewrite it: before a
 `ComponentLoweringRule` claims it (`lowerDocumentBody`) and before a
 `DocumentLoweringRule` runs (`enforceAuthoredReservations`, which checks authored traits the same way). The proof: `webservice-expose-ingress/app.yaml` loses its

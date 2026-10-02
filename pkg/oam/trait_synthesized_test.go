@@ -138,8 +138,8 @@ func (r sidecarEmittingComponentRule) LowerComponent(_ *Component, _ LoweringCon
 }
 
 // rendersTraitDocRule builds a component carrying a reserved-trait whose reserved
-// value it rendered itself. A document rule's output stays authored, traits
-// included.
+// value it rendered itself, by plain assignment. A document rule's output stays
+// authored, traits included.
 type rendersTraitDocRule struct{}
 
 func (rendersTraitDocRule) Kind() string { return "TraitRendering" }
@@ -285,7 +285,9 @@ func TestTransform_TraitRuleOverUnsynthesizedSealedTraitEmitsAuthoredComponent(t
 }
 
 // TestTransform_DocumentRuleRenderedTraitIsRejected: a trait a document rule builds is
-// never synthesized, so a reserved value it rendered is rejected as emitted.
+// never synthesized, so a reserved value it rendered and wrote directly, rather than
+// with Trait.RenderReserved (document_rule_rendered_reserved_test.go), is rejected as
+// emitted.
 func TestTransform_DocumentRuleRenderedTraitIsRejected(t *testing.T) {
 	tr := reservedTraitTransformer()
 	tr.RegisterDocumentLowering(rendersTraitDocRule{})

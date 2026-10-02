@@ -474,6 +474,12 @@ func generatedName(base, suffix string) (string, error) {
 // (parser.go) before any transform runs. Registered with RegisterDocumentLowering;
 // reachable only from the in-transform entry point, where lowerDocumentOnce always
 // supplies a genuine *Application.
+//
+// Every component and trait the rule builds is checked as authored, since nothing
+// checks the whole document it reads. A PlatformReserved value it renders from
+// LoweringContext.Capabilities is written with Component.RenderReserved or
+// Trait.RenderReserved, which records it as the rule's output; written any other way,
+// it is refused.
 type DocumentLoweringRule interface {
 	// Kind is the authored kind this rule claims, e.g. "WebApplication". Never
 	// the terminal kind "Application".
@@ -1096,10 +1102,11 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		// not whatever rule (if any) produced the input doc.
 		origin.Rule = loweringRuleIdentity(string(PositionDocument), doc.Kind, rule)
 		// A document rule's output is authored (the component loop below), except a
-		// component it forwarded that was already synthesized. Check the rest of every
-		// emitted document for reserved keys before validateEmittedDocument drops an
-		// explicit null from any of them. Traits the same way, before
-		// sealNestedTraitsInDocument validates them.
+		// component it forwarded that was already synthesized and a reserved value it
+		// recorded with Component.RenderReserved or Trait.RenderReserved. Check the
+		// rest of every emitted document for reserved keys before
+		// validateEmittedDocument drops an explicit null from any of them. Traits the
+		// same way, before sealNestedTraitsInDocument validates them.
 		forwardedSynthesized := func(comp *Component) bool {
 			return comp.synthesized && isForwardedComponent(comp, originalComponents)
 		}
@@ -1164,7 +1171,9 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 				// policy properties and metadata included — and nothing checks all of
 				// that before it runs, so its output is never synthesized: a by-value
 				// copy that carried the marker is reset, and every component it built
-				// is checked downstream as if a user wrote it.
+				// is checked downstream as if a user wrote it. Only the reserved values
+				// the rule recorded (Component.rendered, kept here) are exempt, each
+				// while it holds the recorded value.
 				if isForwardedComponent(comp, originalComponents) {
 					if prior, ok := comp.Origin(); ok {
 						compOrigin.Rule = prior.Rule
@@ -1293,7 +1302,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// unchecked, so its output stays authored and is checked downstream.
 			p, declaresSchema := rule.(PropertySchemaProvider)
 			if declaresSchema && !comp.synthesized {
-				if err := enforcePlatformReserved(p.PropertySchema(), comp.Properties, "properties"); err != nil {
+				if err := enforcePlatformReserved(p.PropertySchema(), comp.Properties, comp.rendered, "properties"); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
@@ -1443,9 +1452,10 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				// dispatchable handler) and createApplications (transform.go, for a
 				// component handler) perform the same check at their own merge points,
 				// alongside honoring Trait.synthesized in applyTraits. Checked against
-				// trait.Properties (the pre-merge original), not resolvedTrait.
+				// trait.Properties (the pre-merge original), not resolvedTrait, with only
+				// the trait's own record (Trait.RenderReserved) exempt.
 				if declaresSchema {
-					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
+					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties"); err != nil {
 						return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 					}
 				}
@@ -1456,8 +1466,9 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			} else if declaresSchema && !trait.synthesized {
 				// D3 on a sealed trait no checked rule emitted (Trait.synthesized): a
 				// schema-less rule may have copied an authored reserved value into it.
-				// Its Properties are final, so they are checked as they stand.
-				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
+				// Its Properties are final, so they are checked as they stand, a value
+				// the rule recorded with Trait.RenderReserved exempt.
+				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties"); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
 			}
@@ -1652,7 +1663,9 @@ func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Orig
 // []Trait forwarded slice cannot express "forwarded from one of N original
 // components", so this checks pointer identity against every original component's
 // own Traits slice instead of one. A trait sealed here is never synthesized: a
-// document rule's output stays authored (see the component loop in lowerDocumentOnce).
+// document rule's output stays authored (see the component loop in lowerDocumentOnce),
+// and a reserved value the rule rendered into it is exempt only through its record
+// (Trait.RenderReserved), which sealing keeps.
 // A forwarded trait that carries no origin yet is stamped with its authored location:
 // the component it came from and its slot in that component's Traits. The next
 // round's fallback would derive it from the emitting component instead, which names
@@ -1847,7 +1860,9 @@ func (t *Transformer) enforceAuthoredReservations(doc *Application, docOrigin Or
 // component, against the schema it would later be checked against: its
 // ComponentLoweringRule's when one is registered, else its dispatchable handler's. A
 // type with no schema reserves nothing, and an unknown type is the validator's
-// business. The caller decides whether the component is exempt (synthesized).
+// business. The caller decides whether the component is exempt (synthesized); a
+// reserved value it records as rendered (Component.RenderReserved) is exempt here, as
+// is a trait's (Trait.RenderReserved) in enforceTraitReservations.
 func (t *Transformer) enforceComponentReservations(comp *Component, path string) error {
 	var provider any
 	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
@@ -1859,7 +1874,7 @@ func (t *Transformer) enforceComponentReservations(comp *Component, path string)
 	if !ok {
 		return nil
 	}
-	return enforcePlatformReserved(p.PropertySchema(), comp.Properties, path)
+	return enforcePlatformReserved(p.PropertySchema(), comp.Properties, comp.rendered, path)
 }
 
 // enforceEmittedComponentReservations is the D3 check on the components one lowering
@@ -1899,7 +1914,7 @@ func (t *Transformer) enforceTraitReservations(trait *Trait, path string) error 
 	if !ok {
 		return nil
 	}
-	return enforcePlatformReserved(p.PropertySchema(), trait.Properties, path)
+	return enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, path)
 }
 
 // enforceEmittedTraitReservations is enforceEmittedComponentReservations for the
