@@ -101,6 +101,11 @@ type ConfigMapConfig struct {
 // provenance attribution.
 func (c *ConfigMapConfig) ComponentName() string { return c.componentName }
 
+// FluxNamespaceInput names the ConfigMap, so it follows its component's Flux
+// object to the Flux namespace when that object reads it (a helmrelease's
+// valuesFrom). Satisfies pkg/oam.fluxNamespaceInput.
+func (c *ConfigMapConfig) FluxNamespaceInput() (kind, name string) { return "ConfigMap", c.Name }
+
 // Generate creates a Kubernetes ConfigMap resource.
 func (c *ConfigMapConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	cm := kubernetes.CreateConfigMap(app.Name, app.Namespace)

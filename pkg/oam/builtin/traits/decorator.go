@@ -17,6 +17,13 @@ type fluxNamespaceSettable interface {
 	SetFluxNamespace(string)
 }
 
+// fluxNamespaceReader mirrors oam.fluxNamespaceReader locally (unexported
+// cross-package). Decorators forward it so a wrapped Flux config's inputs (a
+// helmrelease's valuesFrom) still follow it to the Flux namespace.
+type fluxNamespaceReader interface {
+	FluxNamespaceReads() (configMaps, secrets []string)
+}
+
 // autoHealthCheckEmitter mirrors oam.autoHealthCheckEmitter locally (unexported
 // cross-package). Decorators forward it so a wrapped config's veto (e.g. a
 // suspended helmrelease's) still reaches the auto health-check synthesis.
@@ -48,9 +55,10 @@ type identityPortMapper interface {
 // N-deep wrap chain never hides an interface from a later trait or a post-build
 // phase.
 //
-// The twelve forwarded interfaces are exactly those type-asserted on app.Config
+// The thirteen forwarded interfaces are exactly those type-asserted on app.Config
 // AFTER traits run: stack.Validator (kure pkg/stack/application.go:51),
-// fluxNamespaceSettable (oam/transform.go:1092,1149), autoHealthCheckEmitter
+// fluxNamespaceSettable (oam/transform.go:1092,1149), fluxNamespaceReader
+// (oam/flux_namespace_inputs.go moveFluxNamespaceInputs), autoHealthCheckEmitter
 // (oam/transform.go:1137), servicePortProvider and serviceBackendNamer
 // (traits/ingress.go:41,53,62 and oam/netpol_synthesis.go:68,71),
 // servicePortNamer (traits/ingress.go:77), oam.ServiceAccountNamer
@@ -69,11 +77,11 @@ type identityPortMapper interface {
 // backendRefTargetCollector): synthesis runs before the sub-application pass,
 // and forwarding them would make every decorated component a router. One more,
 // kure's layout.LayoutAugmenter, is forwarded separately — see wrapIfAugmenter
-// below — because unlike these twelve it must NOT be present unconditionally;
+// below — because unlike these thirteen it must NOT be present unconditionally;
 // so is its extension layout.LayoutIntentAugmenter, for the same reason.
 //
 // Every method is defined unconditionally, so an embedding decorator ALWAYS
-// satisfies all twelve. Call sites must therefore test the returned VALUE, not the
+// satisfies all thirteen. Call sites must therefore test the returned VALUE, not the
 // interface's presence. Eight already do this correctly and must stay that way:
 // resolveServiceName (ingress.go) checks for a non-empty name,
 // checkImplicitPortName (ingress.go) checks the known flag, rbac.go's
@@ -105,6 +113,16 @@ func (d decoratorBase) SetFluxNamespace(ns string) {
 	if setter, ok := d.Inner.(fluxNamespaceSettable); ok {
 		setter.SetFluxNamespace(ns)
 	}
+}
+
+// FluxNamespaceReads forwards the ConfigMaps and Secrets the inner config's Flux
+// object reads from its own namespace (fluxNamespaceReader), or none when the
+// inner config does not implement it.
+func (d decoratorBase) FluxNamespaceReads() (configMaps, secrets []string) {
+	if r, ok := d.Inner.(fluxNamespaceReader); ok {
+		return r.FluxNamespaceReads()
+	}
+	return nil, nil
 }
 
 // EmitsAutoHealthCheck forwards the inner config's auto-health-check veto (e.g. a
@@ -267,21 +285,22 @@ func checkVolumeCollision(podSpec *corev1.PodSpec, name, source, hint string) er
 }
 
 // decoratedConfig is the method set every decoratorBase-embedding decorator
-// satisfies unconditionally: Generate, plus decoratorBase's twelve forwards
-// (Validate, SetFluxNamespace, EmitsAutoHealthCheck, ServicePort,
+// satisfies unconditionally: Generate, plus decoratorBase's thirteen forwards
+// (Validate, SetFluxNamespace, FluxNamespaceReads, EmitsAutoHealthCheck, ServicePort,
 // BackendServiceName, ServicePortName, ServiceAccountName, NonRWXClaim,
 // ServiceRoutingTarget, PodTemplateLabels, IdentityTargetPorts, ComponentName).
 // augmentingDecorator embeds this — not the narrower
 // stack.ApplicationConfig — because embedding an interface-typed field
 // promotes only that interface's own declared method set, not the full
 // method set of the dynamic value stored in it: a field typed as plain
-// stack.ApplicationConfig would silently drop the twelve decoratorBase forwards
+// stack.ApplicationConfig would silently drop the thirteen decoratorBase forwards
 // the moment wrapIfAugmenter actually wraps, reintroducing Task 1's bug for
 // every future component whose inner config implements LayoutAugmenter.
 type decoratedConfig interface {
 	stack.ApplicationConfig
 	stack.Validator
 	fluxNamespaceSettable
+	fluxNamespaceReader
 	autoHealthCheckEmitter
 	servicePortProvider
 	serviceBackendNamer
@@ -297,7 +316,7 @@ type decoratedConfig interface {
 // augmentingDecorator adds AugmentLayout to an outer decorator only when the
 // wrapped inner config implements layout.LayoutAugmenter. See wrapIfAugmenter
 // for why this must be conditional rather than an unconditional forward like
-// decoratorBase's other twelve methods, and see decoratedConfig for why this
+// decoratorBase's other thirteen methods, and see decoratedConfig for why this
 // embeds that instead of stack.ApplicationConfig.
 type augmentingDecorator struct {
 	decoratedConfig
@@ -380,7 +399,7 @@ var _ layout.LayoutIntentAugmenter = intentAugmentingDecorator{}
 // PRESENCE, and that presence decides whether the app gets a per-app
 // sub-layout or merges into the parent's flat Resources (walker.go:473-505) —
 // a structural decision, not a side effect with a safe no-op default. So
-// unlike decoratorBase's other twelve forwards, this one cannot be defined
+// unlike decoratorBase's other thirteen forwards, this one cannot be defined
 // unconditionally: doing so would force every decorated component into
 // per-app sub-layout placement regardless of what its inner config wants.
 // Every trait decorator constructor must route its return value through this.

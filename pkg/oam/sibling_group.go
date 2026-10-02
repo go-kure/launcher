@@ -184,6 +184,7 @@ func (e componentEntry) healthCheckConfig() stack.ApplicationConfig {
 //
 //   - fluxNamespaceSettable (transform.go applyAutoHealthChecks and
 //     postProcessFluxNamespace): set on every member.
+//   - fluxNamespaceReader (moveFluxNamespaceInputs): every member's reads.
 //   - autoHealthCheckEmitter (applyAutoHealthChecks): the primary member's
 //     answer, since the health check names the primary's kind.
 //   - ComponentNamed (for consumers attributing objects to their component):
@@ -269,6 +270,19 @@ func (g *siblingGroupConfig) SetFluxNamespace(ns string) {
 			s.SetFluxNamespace(ns)
 		}
 	}
+}
+
+// FluxNamespaceReads is every member's reads (fluxNamespaceReader): each member
+// that moves to the Flux namespace reads its own inputs from there.
+func (g *siblingGroupConfig) FluxNamespaceReads() (configMaps, secrets []string) {
+	for _, m := range g.members {
+		if r, ok := m.Config.(fluxNamespaceReader); ok {
+			cms, secs := r.FluxNamespaceReads()
+			configMaps = append(configMaps, cms...)
+			secrets = append(secrets, secs...)
+		}
+	}
+	return configMaps, secrets
 }
 
 // ComponentName is the group's name, which every member shares (ComponentNamed).

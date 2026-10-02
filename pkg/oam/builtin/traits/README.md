@@ -680,7 +680,7 @@ have nothing to do for an augmenter-added resource, so they implement no hook.
 
 Every trait decorator also embeds `decoratorBase`, which forwards the optional
 interfaces a component config may implement — `stack.Validator`,
-`fluxNamespaceSettable`, `autoHealthCheckEmitter`, `servicePortProvider`,
+`fluxNamespaceSettable`, `fluxNamespaceReader`, `autoHealthCheckEmitter`, `servicePortProvider`,
 `serviceBackendNamer`, `servicePortNamer`, `oam.ServiceAccountNamer`, `nonRWXClaimer`,
 `serviceRoutingTargeter`, `podTemplateLabeler`, `identityPortMapper` and `oam.ComponentNamed` —
 so a decorated config keeps answering them. The `oam.ComponentNamed` forward keeps a trait
@@ -717,6 +717,18 @@ meaning, and the guard already treats "method absent" and "method returns `false
 so a conditional forward here would only reintroduce the exact silent-loss failure mode the method
 exists to prevent, this time for any trait-decorated `delivery: template` component (e.g. one
 carrying `prune-protection`), which would otherwise be wrongly rejected by `kurel build`.
+
+## Trait objects under a Flux namespace
+
+Under `TransformContext.FluxNamespace` a trait's objects stay in the application namespace,
+except a `configmap` trait's ConfigMap or the Secret an `external-secret` trait's ExternalSecret
+writes, when the component's own Flux object reads it by name from the namespace that object moves
+to: a `helmrelease`'s `valuesFrom`, a `helmrepository`'s `secretRef` and the like. That one moves
+with it — the ExternalSecret moves, and with it the Secret it writes; the remote key it defaults
+from the application namespace does not change (go-kure/launcher#740). The two sub-application
+configs name their object through `FluxNamespaceInput() (kind, name string)`; the component configs
+report what they read through `FluxNamespaceReads()`, which every decorator forwards. See the
+`pkg/oam` README for the full rule.
 
 ## Component attribution
 

@@ -2327,6 +2327,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`SetFluxNamespace`). Under a Flux namespace, a component that does not author
   `targetNamespace` gets `spec.targetNamespace` set to the application namespace, so the
   release still installs there rather than into the Flux namespace; an authored value wins.
+  The ConfigMaps and Secrets the HelmRelease reads from its own namespace — `valuesFrom`,
+  `kubeConfig.secretRef` / `configMapRef`, and `chart.spec.verify.secretRef` when
+  `chart.spec.sourceRef` names no namespace (helm-controller then creates the HelmChart beside the
+  release) — must live in the Flux namespace too. A `configmap` or `external-secret` trait on the
+  component whose object one of them names moves there with the release; one none of them names
+  stays in the application namespace with the release's workloads (go-kure/launcher#740). A
+  trait ConfigMap named in `valuesFrom` therefore leaves the application namespace even when the
+  chart's pods read it too; give the pods their own copy, under another name, if they need it.
   Consequence: Flux then derives the default release name as `<targetNamespace>-<name>`
   (`shop-web` for a component `web` in namespace `shop`), not `<name>`. Author
   `releaseName` when a specific release name matters — for instance when taking over a
@@ -2610,7 +2618,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `serviceAccountName`, a GitRepository `include`, a HelmChart's `sourceRef` — resolves in the
   namespace the CR lands in, so under a Flux namespace the objects it names must live there. A
   `helmchart` whose `sourceRef` names a source component in the same document finds it there:
-  both move to the Flux namespace.
+  both move to the Flux namespace. So does the Secret of an `external-secret` trait (or the
+  ConfigMap of a `configmap` trait) on the component when one of the Secret references names it
+  (`FluxNamespaceReads`, go-kure/launcher#740); a trait object no reference names stays in the
+  application namespace.
 
   **Health check.** The inferred auto health check references the CR
   (`source.toolkit.fluxcd.io/v1`, in the namespace the CR lands in). `suspend: true` skips it,
