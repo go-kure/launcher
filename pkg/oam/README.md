@@ -449,8 +449,9 @@ kind ending in `List` whose `items` is an array, recursively, then Flux expands 
 remaining object whose `items` is an array, one level only — and a member is forced by its
 own metadata, not the envelope's. An object generated more than once is warned once,
 naming its first producer and every reason any copy is forced. It
-covers every generated claim alike — a component's `volumes`, the `pvc` trait, the
-`persistentvolumeclaim` component, a `manifests` component's objects — and changes no
+covers every generated claim alike — a `webservice`/`worker` `volumes` entry (a
+synthesized `pvc` trait, so named as a sub-application of its component,
+go-kure/launcher#702), the `pvc` trait, the `persistentvolumeclaim` component, a `manifests` component's objects — and changes no
 output. A `volumes` entry with `claimName` and the `volsync` trait's `sourcePVC` generate no
 claim: an existing claim is warned where it is generated. With no warning handler it
 does nothing. An embedder that does not
