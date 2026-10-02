@@ -101,6 +101,21 @@ func TestWarnForcedVolumes(t *testing.T) {
 			`PersistentVolumeClaim shop/b (component "raw") is force-applied (` + bundleReason + `)` + forcedTail,
 		}},
 		{"an envelope's own annotation forces no member", []GeneratedApplication{generatedApp("raw", "", listObject("List", unstructuredClaim("a", false)))}, nil},
+		{"Flux expands a non-List envelope", []GeneratedApplication{generatedApp("raw", "", listObject("Widget", unstructuredClaim("a", true)))},
+			[]string{`PersistentVolumeClaim shop/a (component "raw") is force-applied (` + annotationReason + `)` + forcedTail}},
+		{"Flux expands a non-List envelope one level only", []GeneratedApplication{forced(generatedApp("raw", "", listObject("Widget",
+			map[string]any{"apiVersion": "v1", "kind": "Widget", "metadata": map[string]any{"name": "inner"}, "items": []any{unstructuredClaim("a", true)}},
+		)))}, nil},
+		{"annotation value in another case", []GeneratedApplication{generatedApp("db", "", claimObject("shop", "data", forceAnnotated("Enabled")))},
+			[]string{`PersistentVolumeClaim shop/data (component "db") is force-applied (` + annotationReason + `)` + forcedTail}},
+		{"force label", []GeneratedApplication{generatedApp("db", "", collisionObject(&corev1.PersistentVolumeClaim{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
+			ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: "data", Labels: map[string]string{fluxForceAnnotation: "enabled"}},
+		}))}, []string{`PersistentVolumeClaim shop/data (component "db") is force-applied (` + annotationReason + `)` + forcedTail}},
+		{"a forced repeat names the unforced first producer", []GeneratedApplication{
+			generatedApp("db", "", claimObject("shop", "data", nil)),
+			generatedApp("raw", "", claimObject("shop", "data", forceAnnotated("enabled"))),
+		}, []string{`PersistentVolumeClaim shop/data (component "db") is force-applied (` + annotationReason + `)` + forcedTail}},
 		{"one claim repeated warns once", []GeneratedApplication{generatedApp("db", "", annotatedClaim, annotatedClaim, claimObject("shop", "data", forceAnnotated("enabled")))},
 			[]string{`PersistentVolumeClaim shop/data (component "db") is force-applied (` + annotationReason + `)` + forcedTail}},
 		{"a repeat joins its reasons to the first", []GeneratedApplication{

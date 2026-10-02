@@ -32,11 +32,13 @@ type forcedVolume struct {
 // then deletes and recreates the object when an update changes an immutable field,
 // instead of failing the apply, and a claim's data can be lost with it.
 //
-// Objects are read as Flux applies them: a list envelope (an unstructured object
-// whose items is an array) stands for its members, recursively, and a member is
-// forced by its own annotation, not the envelope's. Each object, keyed by API
-// group, kind, namespace and name, is warned once, naming the first application
-// that generates it and every reason any copy of it is forced.
+// An object is annotated as Flux's force selector matches it: the force key in its
+// labels or its annotations, with the value enabled in any letter case.
+//
+// Objects are read as Flux applies them (appliedObjects): a list envelope stands for
+// its members, and a member is forced by its own metadata, not the envelope's. Each
+// object, keyed by API group, kind, namespace and name, is warned once, naming the
+// first application that generates it and every reason any copy of it is forced.
 //
 // It warns and changes nothing: the force is the author's choice. A caller passes
 // GenerateApplications' result, after CheckInDocumentCollisions; the warnings follow
@@ -58,10 +60,6 @@ func (t *Transformer) WarnForcedVolumes(apps []GeneratedApplication) {
 				if gvk.Group != "" || (gvk.Kind != "PersistentVolume" && gvk.Kind != "PersistentVolumeClaim") {
 					continue
 				}
-				annotated := obj.GetAnnotations()[fluxForceAnnotation] == fluxForceAnnotationEnabled
-				if !annotated && !app.Forced {
-					continue
-				}
 				id := objectIdentity{kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}
 				v, seen := found[id]
 				if !seen {
@@ -69,29 +67,73 @@ func (t *Transformer) WarnForcedVolumes(apps []GeneratedApplication) {
 					found[id] = v
 					order = append(order, id)
 				}
-				v.annotated = v.annotated || annotated
+				v.annotated = v.annotated || forceSelected(obj)
 				v.forced = v.forced || app.Forced
 			}
 		}
 	}
 	for _, id := range order {
-		t.warnHandler(found[id].warning())
+		if v := found[id]; v.annotated || v.forced {
+			t.warnHandler(v.warning())
+		}
 	}
 }
 
-// appliedObjects returns obj as Flux applies it. A list envelope — an unstructured
-// object whose items is an array, apimachinery's IsList — expands to its members,
-// recursively, as Kustomize's build and Flux's ReadObjects expand it; a member that
-// is not an object is dropped (Flux fails such an apply). Anything else is itself.
+// forceSelected reports whether Flux's force selector matches obj, as fluxcd/pkg/ssa
+// AnyInMetadata matches it: the force key's label or annotation is enabled, compared
+// without regard to case.
+func forceSelected(obj client.Object) bool {
+	return strings.EqualFold(obj.GetLabels()[fluxForceAnnotation], fluxForceAnnotationEnabled) ||
+		strings.EqualFold(obj.GetAnnotations()[fluxForceAnnotation], fluxForceAnnotationEnabled)
+}
+
+// appliedObjects returns the objects Flux applies for obj, in two stages, as
+// kustomize-controller builds and then reads its source. Kustomize's build
+// (kustomize/api resource/factory.go, inlineAnyEmbeddedLists) replaces an object
+// whose kind ends in "List" and whose items is an array with its members,
+// recursively. Flux's ReadObjects (fluxcd/pkg/ssa) then replaces every remaining
+// list envelope (apimachinery's IsList: items is an array, kind unchecked) with its
+// members, one level only. A member that is not an object is dropped, as either
+// stage fails such an apply.
 func appliedObjects(obj client.Object) []client.Object {
+	var out []client.Object
+	for _, built := range kustomizeInlined(obj) {
+		u, ok := built.(*unstructured.Unstructured)
+		if !ok || !u.IsList() {
+			out = append(out, built)
+			continue
+		}
+		out = append(out, listMembers(u)...)
+	}
+	return out
+}
+
+// kustomizeInlined is Kustomize's list inlining: an unstructured object whose kind
+// ends in "List" and whose items is an array stands for its items, recursively; any
+// other object is itself. (Kustomize also drops a List whose items is null; no
+// volume is lost with it.)
+func kustomizeInlined(obj client.Object) []client.Object {
 	u, ok := obj.(*unstructured.Unstructured)
-	if !ok || !u.IsList() {
+	if !ok || !strings.HasSuffix(u.GetKind(), "List") {
+		return []client.Object{obj}
+	}
+	if _, isArray := u.Object["items"].([]any); !isArray {
 		return []client.Object{obj}
 	}
 	var out []client.Object
-	for _, item := range u.Object["items"].([]any) {
+	for _, member := range listMembers(u) {
+		out = append(out, kustomizeInlined(member)...)
+	}
+	return out
+}
+
+// listMembers returns the object members of an unstructured list's items array.
+func listMembers(u *unstructured.Unstructured) []client.Object {
+	items, _ := u.Object["items"].([]any)
+	var out []client.Object
+	for _, item := range items {
 		if m, ok := item.(map[string]any); ok {
-			out = append(out, appliedObjects(&unstructured.Unstructured{Object: m})...)
+			out = append(out, &unstructured.Unstructured{Object: m})
 		}
 	}
 	return out
