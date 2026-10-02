@@ -2,6 +2,8 @@ package traits
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
@@ -57,10 +59,15 @@ func (h *ConfigMapHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 		mountPath = mp
 	}
 
+	// Keys are checked in sorted order, so with several bad keys the one
+	// reported does not depend on map iteration order.
 	data := make(map[string]string)
 	if rawData, ok := props["data"].(map[string]any); ok {
-		for k, v := range rawData {
-			data[k] = fmt.Sprintf("%v", v)
+		for _, k := range slices.Sorted(maps.Keys(rawData)) {
+			if err := components.ValidateConfigMapKey("data", k); err != nil {
+				return errors.Wrapf(err, "configmap trait %q", name)
+			}
+			data[k] = fmt.Sprintf("%v", rawData[k])
 		}
 	}
 	// Count the stringified values, which are what the ConfigMap stores.

@@ -107,7 +107,7 @@ func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
 	} else if present {
 		for _, k := range slices.Sorted(maps.Keys(raw)) {
 			v := raw[k]
-			if err := validateConfigMapKey("data", k); err != nil {
+			if err := ValidateConfigMapKey("data", k); err != nil {
 				return nil, err
 			}
 			s, ok := v.(string)
@@ -126,7 +126,7 @@ func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
 	} else if present {
 		for _, k := range slices.Sorted(maps.Keys(raw)) {
 			v := raw[k]
-			if err := validateConfigMapKey("binaryData", k); err != nil {
+			if err := ValidateConfigMapKey("binaryData", k); err != nil {
 				return nil, err
 			}
 			if _, dup := c.Data[k]; dup {
@@ -178,9 +178,10 @@ func CheckConfigMapSize(data map[string]string, binaryData map[string][]byte) er
 	return nil
 }
 
-// validateConfigMapKey refuses a key the API server refuses in a ConfigMap
-// (IsConfigMapKey).
-func validateConfigMapKey(field, key string) error {
+// ValidateConfigMapKey refuses a key the API server refuses in a ConfigMap
+// (IsConfigMapKey). The configmap component and the configmap trait both call
+// it, so they refuse the same keys with the same message.
+func ValidateConfigMapKey(field, key string) error {
 	if errs := validation.IsConfigMapKey(key); len(errs) > 0 {
 		return errors.Errorf("%s: invalid key %q: %s", field, key, strings.Join(errs, "; "))
 	}

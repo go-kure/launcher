@@ -1740,8 +1740,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `binaryData` values together may hold at most 1,048,576 bytes, the limit
     the API server enforces; a larger ConfigMap is refused at build time. That
     check is the exported `CheckConfigMapSize(data, binaryData)`, which the
-    `configmap` trait also calls. Keys are checked in sorted order, so with
-    several bad entries the one reported is the same on every build. It is
+    `configmap` trait also calls. A key the API server refuses in a ConfigMap
+    is refused by the exported `ValidateConfigMapKey(field, key)`, which the
+    trait also calls for its `data` keys. Keys are checked in sorted order, so
+    with several bad entries the one reported is the same on every build. It is
     a different type from the
     `configmap` trait, which attaches a ConfigMap to another component.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
