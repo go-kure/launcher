@@ -736,6 +736,12 @@ configs name their object through `FluxNamespaceInput() (kind, name string)`; th
 report what they read through `FluxNamespaceReads()`, which every decorator forwards. See the
 `pkg/oam` README for the full rule.
 
+The `helm` component's `valuesMode: configMap` relies on this: its rule appends a synthesized
+`configmap` trait holding the values to the `helmrelease` it lowers to, and names that ConfigMap
+in `valuesFrom`, so it follows the HelmRelease (go-kure/launcher#702). Synthesized, the trait goes
+through the same `configmap` checks as an authored one (key validity, the size limit), and its
+ConfigMap is emitted after the HelmRelease.
+
 ## Component attribution
 
 Every trait sub-app config exposes the OAM component it was emitted for via

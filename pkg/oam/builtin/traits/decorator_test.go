@@ -241,8 +241,7 @@ func TestWrapIfAugmenter_AllConstructionSites(t *testing.T) {
 	// TestConfigMapDecorator_DoesNotClaimLayoutAugmenter_WhenInnerDoesNot,
 	// but with a real helmrelease config instead of nakedStub: the regression
 	// this guards against would silently relocate every flat-bundle helmrelease
-	// app into per-app sub-layout placement. valuesMode: configMap emits its
-	// ConfigMap from Generate, so even that mode is no augmenter.
+	// app into per-app sub-layout placement.
 	t.Run("NewConfigMapDecorator/RealHelmReleaseDoesNotWrap", func(t *testing.T) {
 		cfg, err := (&components.HelmReleaseHandler{}).ToApplicationConfig(&oam.Component{
 			Name: "metrics",
@@ -252,8 +251,7 @@ func TestWrapIfAugmenter_AllConstructionSites(t *testing.T) {
 					"chart":     "kube-prometheus-stack",
 					"sourceRef": map[string]any{"kind": "HelmRepository", "name": "prometheus-community"},
 				}},
-				"valuesMode": "configMap",
-				"values":     map[string]any{"replicaCount": 3},
+				"values": map[string]any{"replicaCount": 3},
 			},
 		}, "monitoring")
 		if err != nil {

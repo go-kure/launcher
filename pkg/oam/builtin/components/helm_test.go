@@ -3,6 +3,7 @@ package components_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -63,7 +64,8 @@ func TestHelmRule_ComponentType(t *testing.T) {
 // carrying only the URL, named after the document and the URL's identity, and a
 // helmrelease under the authored name whose chart template references it. Every
 // passthrough key, the authored traits and the annotations reach the release
-// verbatim; nothing but the URL reaches the source.
+// verbatim; nothing but the URL reaches the source. valuesMode itself is never
+// forwarded.
 func TestHelmRule_FluxHelmRepository(t *testing.T) {
 	traits := []oam.Trait{{Type: "force-replace", Properties: map[string]any{}}}
 	annotations := map[string]string{"example.com/tier": "services"}
@@ -80,7 +82,7 @@ func TestHelmRule_FluxHelmRepository(t *testing.T) {
 	props := map[string]any{
 		"chart":      "podinfo",
 		"version":    "6.5.0",
-		"valuesMode": "configMap",
+		"valuesMode": "inline",
 		"source":     map[string]any{"url": "https://charts.example.com"},
 	}
 	for k, v := range passthrough {
@@ -113,7 +115,6 @@ func TestHelmRule_FluxHelmRepository(t *testing.T) {
 		t.Errorf("release name = %q, want the authored podinfo", release.Name)
 	}
 	want := map[string]any{
-		"valuesMode": "configMap",
 		"chart": map[string]any{"spec": map[string]any{
 			"chart":     "podinfo",
 			"version":   "6.5.0",
@@ -454,6 +455,9 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"two spellings in source.ref", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main", "Branch": "dev"}}}, "helm: source.ref.Branch and source.ref.branch are one key given more than once"},
 		{"delivery native", map[string]any{"delivery": "native", "chart": "a", "source": repo}, `helm: unsupported delivery "native"; supported values: flux, template`},
 		{"unknown valuesMode", map[string]any{"valuesMode": "file", "chart": "a", "source": repo}, `helm: unsupported valuesMode "file"`},
+		{"configMap NaN in values", map[string]any{"valuesMode": "configMap", "chart": "a", "source": repo, "values": map[string]any{"x": math.NaN()}}, "helm: values is not representable as JSON"},
+		{"configMap values not an object", map[string]any{"valuesMode": "configMap", "chart": "a", "source": repo, "values": []any{1}}, "values must be a JSON object"},
+		{"configMap valuesFrom not a list", map[string]any{"valuesMode": "configMap", "chart": "a", "source": repo, "values": map[string]any{"a": 1}, "valuesFrom": "extra"}, "helm: valuesFrom must be a list, got string"},
 		{"no source", map[string]any{"chart": "a"}, "helm: source is required"},
 		{"url and name", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "name": "x"}}, "helm: source.url and source.name are mutually exclusive"},
 		{"neither url nor name", map[string]any{"chart": "a", "source": map[string]any{"kind": "HelmRepository"}}, "helm: source requires either source.url (inline) or source.name (reference)"},

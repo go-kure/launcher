@@ -70,8 +70,8 @@ reads it.
 | `configmap` | ConfigMap | Kind-named ConfigMap: `data`, `binaryData`, `immutable`. A workload reads it through a `configMap` volume or `envFrom` — see below. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
-| `helm` | via `helmrelease` + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
-| `helmrelease` | HelmRelease (+values ConfigMap) | Kind-named: the full Flux `HelmReleaseSpec` plus `valuesMode`, against an existing source. |
+| `helm` | via `helmrelease` (+ a values `configmap` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
+| `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source. |
 | `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. What `helm` lowers to under `delivery: template`, authorable directly — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `helmrepository` | HelmRepository | Kind-named: the full Flux `HelmRepositorySpec`, and nothing else. |
@@ -2159,8 +2159,34 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     when the chart's version is unchanged (Flux's `ChartVersion` default would skip
     it); a HelmRepository keeps that default. An OCIRepository or HelmChart source
     becomes `chartRef`. `values` and the HelmRelease keys are forwarded verbatim, so their shape is
-    the `helmrelease` terminal's to check. `valuesMode` is forwarded only when
-    authored: the rule has no registration-time default.
+    the `helmrelease` terminal's to check. `valuesMode` is never forwarded, and the
+    rule has no registration-time default for it: `inline` (or no `valuesMode`)
+    keeps `values` on the `helmrelease`.
+  - **`valuesMode: configMap`** (go-kure/launcher#702) with non-empty `values`
+    moves them into a `configmap` trait the rule appends to the `helmrelease`, after
+    its authored traits, and drops `values` from it. The trait's ConfigMap carries
+    the values under the key `values.json`, and a `valuesFrom` entry
+    `{kind: ConfigMap, name: <it>, valuesKey: values.json}` is placed before the
+    authored entries, so an authored entry wins on a shared key (Flux merges
+    `spec.valuesFrom` in list order). The values are serialized once, as indented JSON
+    with sorted keys and numbers kept exact (JSON is YAML, which is how Flux reads a
+    values reference); those exact bytes are both stored and hashed into the name:
+    `<component>-values-<first 10 hex digits of their sha256>`. A name that would
+    exceed 253 bytes keeps a truncated prefix plus a short digest of the full
+    component name, so it is always a legal DNS-1123 subdomain and always carries the
+    values hash. Identical values hash alike whatever their key order, and any change
+    to them renames the ConfigMap and so changes the HelmRelease's spec, which is what
+    makes Flux upgrade the release on a values-only edit. Empty or absent `values`
+    add no trait and no entry; `values` that are not a JSON object, a non-finite
+    number in them, or a `valuesFrom` that is not a list are `helm:` build errors.
+    Being an ordinary `configmap` trait, it is checked by that trait (a key it refuses,
+    or data over the ConfigMap size limit, fails the build), labelled
+    `app: <label value>` like the trait's other ConfigMaps, emitted after the
+    HelmRelease, and moved with the release into the Flux namespace, since its
+    `valuesFrom` names it. The trait is synthesized by the rule, not yet built through
+    the `configmap` kind's own code. Known gap, shared with authored traits
+    (go-kure/launcher#757): an authored `configmap` trait on the same component that
+    takes the same name is not refused, and both ConfigMaps are emitted.
   - An inline source also emits the source: a `helmrepository` with only the URL
     for `http(s)://`, or an `ocirepository` with `ref.tag: <version>` for `oci://`.
     A Git repository needs `kind: GitRepository` set (an `http(s)://` URL alone
@@ -2268,7 +2294,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   | 4 | The delivery value `native` is `flux`. |
   | 5 | *(void)* `targetNamespace` under a Flux namespace: both default it to the application namespace (go-kure/launcher#625). |
   | 6 | A generated source keeps its terminal's default interval, not the release interval. |
-  | 7 | No registration-time `valuesMode` default; `valuesMode` is forwarded only when authored. |
+  | 7 | No registration-time `valuesMode` default; `valuesMode` is never forwarded (under `configMap` the values become a `configmap` trait). |
   | 8 | Generated sources get the automatic source health check. |
   | 9 | The registry allowlist applies to inline sources. |
   | 10 | Generated sources deploy in the infra tier. A tier annotation on the component places only its release; the generated source stays in infra. |
@@ -2282,26 +2308,27 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   | 18 | Any other `helmchart` default or build-time check a terminal does not reproduce (strict decoding). |
 
   Two `helmchart` behaviours have no `helm` counterpart beyond row 18: `valuesMode: configMap`
-  no longer makes the component a `LayoutAugmenter` (the `helmrelease` terminal emits the
-  values ConfigMap from `Generate`, so `kurel build` accepts it and a layout-walking consumer
+  no longer makes the component a `LayoutAugmenter` (the values ConfigMap comes from a
+  `configmap` trait on the `helmrelease`, ordinary build output, so `kurel build` accepts it and a layout-walking consumer
   no longer moves the component into a sub-layout), and under `delivery: template` the render's
   `.Release.Name` and `.Release.Namespace` can no longer be authored (row 11; see
   **helmtemplate**).
 - **helmrelease** — the kind-named terminal for Flux's `HelmRelease`
   (go-kure/launcher#327, part of the Helm-family redesign go-kure/launcher#336). Its
   properties are exactly the top-level JSON keys of `HelmReleaseSpec` in the
-  helm-controller API version `go.mod` links, plus one launcher-owned key, `valuesMode`;
-  a test ties the published schema to that struct, so a helm-controller bump that adds or
+  helm-controller API version `go.mod` links; a test ties the published schema to that struct, so a helm-controller bump that adds or
   drops a spec field fails the suite until the schema follows. It creates no source:
   `chart.spec.sourceRef` or `chartRef` names one that already exists.
 
   **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON` into
-  `HelmReleaseSpec`, with `valuesMode` split off first. A key the struct does not declare,
+  `HelmReleaseSpec`. A key the struct does not declare,
   at any depth (`chart.spec.chartVersion`, a stray key inside a `valuesFrom` entry), is refused
   by name, and so is a wrongly typed value (`suspend: "yes"`, `maxHistory: "3"`, an
   unparsable duration). The schema keeps the nested Flux blocks as open objects; the strict
-  decode is what checks them. A reflection test asserts that `valuesMode` shadows no spec
-  field, against an explicit, empty exclusion list. Known gap, inherited from the decoder:
+  decode is what checks them. `valuesMode` is refused like any other unknown key; the
+  error adds a pointer to the `helm` component's `valuesMode: configMap`, or a
+  `configmap` trait plus a `valuesFrom` entry, which replace it (go-kure/launcher#702).
+  Known gap, inherited from the decoder:
   inside a type with its own `UnmarshalJSON` unknown keys are not refused — `values` is the
   case that matters, and it is open by design. Keys match case-insensitively, as in
   `encoding/json`; schema validation, which a `kurel build` runs first, is exact.
@@ -2327,8 +2354,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `upgrade.strategy.retryInterval`. A nested key matches case-insensitively at every level, as
   the decode does. Exactly one of
   `chart` and `chartRef` is required. `values` must be a JSON object; a non-finite number
-  (`.nan`, `.inf`) is a build error, never a panic. `valuesMode` is `inline` (the default)
-  or `configMap`. Nothing else is checked here: the enum checks on `driftDetection.mode`,
+  (`.nan`, `.inf`) is a build error, never a panic. Nothing else is checked here: the enum checks on `driftDetection.mode`,
   `install.crds`, `upgrade.crds` and `valuesFrom[].kind`, and the required
   `valuesFrom[].name`, are left to the HelmRelease CRD's own admission, and there is no
   `releaseName` default — Flux's own applies.
@@ -2363,24 +2389,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the readiness gate on it is skipped, so `suspend: true` stays a usable way to stage a
   release. Trait decorators forward the veto.
 
-  **`valuesMode: configMap`.** With non-empty `values`, `Generate` itself returns a
-  ConfigMap beside the HelmRelease, in the HelmRelease's namespace (where Flux resolves
-  `valuesFrom`); `spec.values` is cleared, and a `valuesFrom` entry for the ConfigMap is
-  placed before the authored entries, so an authored entry wins on a shared key (Flux merges
-  `spec.valuesFrom` in list order). The component is no `LayoutAugmenter`: the
-  ConfigMap is ordinary `Generate` output, so `kurel build` emits it and a layout-walking
-  consumer does not move the component into a sub-layout. The values are serialized once,
-  as indented JSON with sorted keys (JSON is YAML, which is how Flux reads a values
-  reference), and those exact bytes are both stored, under the key `values.json` that the
-  `valuesFrom` entry names, and hashed into the ConfigMap's name:
-  `<component>-values-<first 10 hex digits of their sha256>`. A name that would exceed 253
-  bytes keeps a truncated prefix plus a short digest of the full component name, so it is
-  always a legal DNS-1123 subdomain and always carries the values hash. Identical values hash alike whatever their key order, and
-  any change to them renames the ConfigMap and so changes the HelmRelease's spec, which is
-  what makes Flux upgrade the release on a values-only edit. The ConfigMap carries the label
-  `app: <label value>` and no annotations — the component name at 63 characters or fewer,
-  its projection past that, as [The `app` label](#the-app-label) describes. Empty or absent
-  `values` generate no ConfigMap and no entry. There is no handler-level default for `valuesMode`.
+  **Values in a ConfigMap.** The HelmRelease is the only object `helmrelease` emits.
+  Until go-kure/launcher#702 it took a launcher-owned `valuesMode: configMap` and emitted
+  the values ConfigMap itself; that key is gone (see **Decoding**). The `helm`
+  component's `valuesMode: configMap` produces the same ConfigMap through a `configmap`
+  trait (see **helm**), and on a `helmrelease` authored directly the same result is a
+  `configmap` trait plus a `valuesFrom` entry naming it.
 - **helmtemplate** — the kind-named terminal for a client-side Helm render
   (go-kure/launcher#348, part of the Helm-family redesign go-kure/launcher#336), and what the
   role-named `helm` rule lowers to under `delivery: template`.
@@ -2467,7 +2481,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   hook-free chart included, since the group count is known only after the render — so even a
   hook-free chart gets its own sub-layout directory under a layout-walking consumer, for no
   behavioural benefit. Known limitation: the child directory name's DNS-1123 truncation (a
-  `sha256`-prefixed truncation, the scheme `helmrelease` uses for its values ConfigMap name) makes
+  `sha256`-prefixed truncation, the scheme `helm` uses for its values ConfigMap name) makes
   same-name collisions vanishingly unlikely *within* one Application, but two different
   Applications with a same-named component still collide — component names are unique only
   within one Application, while emitted Kustomization CRs for hook-group children share one
@@ -3406,7 +3420,7 @@ byte-identical, and projects a longer one onto a readable prefix of at most 52 c
 (its first 52, with trailing `-` and `.` trimmed) plus `-` and
 a 10-hex-character sha256 digest (go-kure/launcher#572). The workload kinds and `service` never reach
 the projection, since their container name or Service name already refuses a name over 63
-characters; the `helmrelease` values ConfigMap does (a `helmrelease` values
+characters; the `helm` values ConfigMap does (a values
 ConfigMap that previously omitted `app` past 63 characters now carries the projected value). Object names are not projected. A custom handler
 that labels its objects by component uses the same function, so its selectors and the
 built-in traits' selectors (a PodDisruptionBudget, a NetworkPolicy `podSelector`) agree.

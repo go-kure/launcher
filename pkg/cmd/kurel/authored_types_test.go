@@ -10,7 +10,7 @@ import (
 )
 
 // The tests in this file pin go-kure/launcher#325: an authored property declared as
-// a string but written with another YAML type (`interval: 10`, `valuesMode: true`)
+// a string but written with another YAML type (`interval: 10`, `releaseName: true`)
 // must fail the build, naming the property, rather than be coerced to "" by a
 // handler's comma-ok read and then defaulted as though it were absent.
 //
@@ -35,7 +35,6 @@ func TestBuildCommand_HelmReleaseNonStringProperty_Rejected(t *testing.T) {
 		{"targetNamespace", "7", "int"},
 		{"storageNamespace", "7", "int"},
 		{"serviceAccountName", "false", "bool"},
-		{"valuesMode", "true", "bool"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {

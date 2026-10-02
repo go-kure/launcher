@@ -224,14 +224,14 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},
-	// valuesMode configMap with non-empty values emits the values ConfigMap,
-	// the one object of this type carrying an `app` label.
+	// Emits only the HelmRelease, which carries no `app` label.
 	"helmrelease": {props: map[string]any{
 		"chart": map[string]any{"spec": map[string]any{"chart": "app",
 			"sourceRef": map[string]any{"kind": "HelmRepository", "name": "example"}}},
-		"valuesMode": "configMap", "values": map[string]any{"replicaCount": 2}}, labelled: true},
+		"values": map[string]any{"replicaCount": 2}}},
 	// Lowers to the helmrelease terminal above plus a generated HelmRepository;
-	// the values ConfigMap is again the one labelled object.
+	// valuesMode configMap with non-empty values adds the values ConfigMap
+	// through a configmap trait, the one labelled object.
 	"helm": {props: map[string]any{"chart": "app",
 		"source":     map[string]any{"url": "https://charts.example.com"},
 		"valuesMode": "configMap", "values": map[string]any{"replicaCount": 2}}, labelled: true},
