@@ -3088,8 +3088,11 @@ not part of either change.
   object, so letting it through would only defer the failure to apply time.
   A `url` that does not parse is refused without the URL or the parser's
   error, and a fetch error names the URL by scheme, host and path only
-  (`manifestsource.go`'s `displayURL`): its userinfo or query may carry a
-  credential.
+  (`manifestsource.go`'s `displayURL`; a URL with no host is not named): its
+  userinfo or query may carry a credential. A failed request keeps its cause
+  only when that is a dial, lookup or connection error, which names an address,
+  or a timeout; any other cause, such as a malformed redirect `Location` that
+  net/http would quote whole, is reported as `request failed`.
 
 ## StatefulSet-level and claim-template properties
 

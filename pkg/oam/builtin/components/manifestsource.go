@@ -3,6 +3,7 @@ package components
 import (
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -148,24 +149,26 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 		return nil, err
 	}
 	shown := displayURL(rawURL)
+	// redirectRefusal is this function's own refusal of a redirect hop, kept so
+	// it can be reported in place of the client's error, which wraps it.
+	var redirectRefusal error
 	httpClient := &http.Client{
 		Timeout: fetchTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= maxRedirects {
-				return errors.Errorf("manifest source: too many redirects (>%d)", maxRedirects)
+				redirectRefusal = errors.Errorf("manifest source: too many redirects (>%d)", maxRedirects)
+			} else {
+				redirectRefusal = checkURL(req.URL.String(), allowedHosts)
 			}
-			return checkURL(req.URL.String(), allowedHosts)
+			return redirectRefusal
 		},
 	}
 	resp, err := httpClient.Get(rawURL)
 	if err != nil {
-		// The client wraps its failure in a *url.Error naming the request URL
-		// with only the password masked; keep just the cause.
-		var uerr *url.Error
-		if errors.As(err, &uerr) {
-			err = uerr.Err
+		if redirectRefusal != nil {
+			return nil, errors.Errorf("manifest source: fetch %q: %w", shown, redirectRefusal)
 		}
-		return nil, errors.Errorf("manifest source: fetch %q: %w", shown, err)
+		return nil, errors.Errorf("manifest source: fetch %q: %s", shown, transportCause(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -181,22 +184,36 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 	return body, nil
 }
 
-// displayURL renders a fetch URL for an error message as scheme, host and path
-// only. The userinfo goes, user included: url.URL.Redacted masks only the
-// password, and a token is as often written as the user
-// (https://<token>@host). The query goes too, since a signed URL carries its
-// credential there. rawURL has already parsed (checkURL).
+// displayURL renders a fetch URL for an error message from its scheme, host and
+// path only. The userinfo is left out, user included: url.URL.Redacted masks
+// only the password, and a token is as often written as the user
+// (https://<token>@host). The query is left out too, since a signed URL carries
+// its credential there. A URL with no host, such as the opaque
+// https:user:token@host, which parses with everything after the scheme in
+// Opaque, is not rendered at all.
 func displayURL(rawURL string) string {
 	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "(invalid url)"
+	if err != nil || u.Host == "" {
+		return "(url without a host)"
 	}
-	u.User = nil
-	u.RawQuery = ""
-	u.ForceQuery = false
-	u.Fragment = ""
-	u.RawFragment = ""
-	return u.String()
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}).String()
+}
+
+// transportCause names why a request failed without repeating text net/http
+// builds from a URL: its *url.Error names the request URL with only the
+// password masked, and a malformed redirect Location is quoted whole. A dial,
+// lookup or connection failure (*net.OpError) names only an address, so its
+// text is kept; a timeout is named; anything else is reported generically.
+func transportCause(err error) string {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return opErr.Error()
+	}
+	var uerr *url.Error
+	if errors.As(err, &uerr) && uerr.Timeout() {
+		return "request timed out"
+	}
+	return "request failed"
 }
 
 // checkURL enforces the scheme allowlist and the policy host allowlist on a URL
