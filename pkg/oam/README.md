@@ -451,10 +451,11 @@ own metadata, not the envelope's. An object generated more than once is warned o
 naming its first producer and every reason any copy is forced. A bundle's patches
 (`GeneratedApplication.Patches`, which the `fluxcd-patches` trait sets) are applied first,
 as Flux applies its Kustomization's `spec.patches` (go-kure/launcher#728): the objects of a
-leaf bundle that holds a volume are built with kustomize (krusty, with kustomize-controller's
-options, serialized and with a panic recovered) and the patched copies are read. A patch can
-add the force key (named `kustomize.toolkit.fluxcd.io/force: enabled, set by its bundle's
-patches`), remove or disable it, or delete the volume. A patch set that does not build is
+leaf bundle with patches are built with kustomize (krusty, with kustomize-controller's
+options, serialized and with a panic recovered) and the patched copies are read, each named by
+the application that generated it. A patch can add the force key (named
+`kustomize.toolkit.fluxcd.io/force: enabled, set by its bundle's patches`), remove or disable
+it, delete or rename the volume, or add one to a list envelope. A patch set that does not build is
 warned once, naming the bundle's first application and the build error, and that bundle is
 checked as generated. Every caller and build gets this; postBuild substitution and anything
 the cluster changes on apply are not modelled. An application a caller built rather than
