@@ -205,7 +205,7 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 		config.WorkingDir = workingDir
 	}
 
-	parsed, err := parseVolumes(props)
+	parsed, err := parsePodVolumes(props)
 	if err != nil {
 		return nil, err
 	}
@@ -300,10 +300,9 @@ func (c *JobConfig) EmitsAutoHealthCheck() bool {
 }
 
 // ServiceAccountName implements oam.ServiceAccountNamer: the authored
-// serviceAccountName, else the per-component ServiceAccount named after the
-// component.
-func (c *JobConfig) ServiceAccountName() string {
-	return effectiveServiceAccountName(c.PodSpec, c.Name)
+// serviceAccountName, or "" when the pods run as no named account.
+func (c *JobConfig) ServiceAccountName() (string, bool) {
+	return c.PodSpec.ServiceAccountName, true
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy. A Job has
@@ -357,48 +356,18 @@ func (c *JobConfig) ApplyPolicy(p oam.Policy) error {
 			return err
 		}
 	}
-	for _, pvc := range c.PVCs {
-		if err := enforceMaxStorageSize(pvc.Size, p.MaxStorageSize()); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
-// Generate creates a Kubernetes Job, ServiceAccount, and any declared PVCs.
-// The ServiceAccount is omitted when serviceAccountName was authored.
+// Generate creates a Kubernetes Job, and nothing beside it: no ServiceAccount
+// and no claim (go-kure/launcher#702).
 func (c *JobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	var err error
-	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
-	if err != nil {
-		return nil, err
-	}
 	job, err := c.createJob(app)
 	if err != nil {
 		return nil, err
 	}
-
 	obj := client.Object(job)
-	objects := []*client.Object{&obj}
-	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
-		objects = append(objects, &saObj)
-	}
-
-	for _, pvc := range c.PVCs {
-		if pvc.ClaimName != "" {
-			continue // an existing claim, referenced by claimName
-		}
-		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
-		if err != nil {
-			return nil, err
-		}
-		pObj := client.Object(p)
-		objects = append(objects, &pObj)
-	}
-
-	return objects, nil
+	return []*client.Object{&obj}, nil
 }
 
 func (c *JobConfig) createJob(app *stack.Application) (*batchv1.Job, error) {
@@ -438,12 +407,11 @@ func (c *JobConfig) createJob(app *stack.Application) (*batchv1.Job, error) {
 	// OnFailure), so the authored/defaulted value lands on the template — the
 	// Job API rejects the Always that pod defaulting would otherwise apply.
 	podSpec, err := buildPodSpec(podSpecInput{
-		Config:                    c.PodSpec,
-		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),
-		MainContainer:             container,
-		InitContainers:            c.InitContainers,
-		Volumes:                   c.Volumes,
-		RestartPolicy:             c.RestartPolicy,
+		Config:         c.PodSpec,
+		MainContainer:  container,
+		InitContainers: c.InitContainers,
+		Volumes:        c.Volumes,
+		RestartPolicy:  c.RestartPolicy,
 	})
 	if err != nil {
 		return nil, err

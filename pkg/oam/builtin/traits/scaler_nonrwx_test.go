@@ -29,29 +29,45 @@ func nonRWXScalerTransformer() *oam.Transformer {
 	tr.RegisterComponentLowering(components.WebserviceRule{})
 	tr.RegisterComponentLowering(components.WorkerRule{})
 	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
+	tr.RegisterBuiltinTrait("pvc", &traits.PVCHandler{})
 	tr.RegisterBuiltinTrait("scaler", &traits.ScalerHandler{})
 	tr.RegisterBuiltinTrait("configmap", &traits.ConfigMapHandler{})
 	return tr
 }
 
-func claimProps(modes ...string) map[string]any {
+// claimProps mounts one claim with the given access modes. A role kind
+// (webservice, worker) describes the claim it synthesizes, named
+// "<component>-data"; a pod kind generates none, so it references an existing
+// claim "data" and states that claim's modes (go-kure/launcher#702).
+func claimProps(kind string, modes ...string) map[string]any {
 	authored := make([]any, len(modes))
 	for i, m := range modes {
 		authored[i] = m
 	}
+	vol := map[string]any{
+		"name":        "data",
+		"type":        "pvc",
+		"mountPath":   "/data",
+		"accessModes": authored,
+	}
+	if kind == "deployment" {
+		vol["claimName"] = "data"
+	} else {
+		vol["size"] = "1Gi"
+	}
 	return map[string]any{
 		"image":    "ghcr.io/org/app:v1",
 		"replicas": 1,
-		"volumes": []any{
-			map[string]any{
-				"name":        "data",
-				"type":        "pvc",
-				"mountPath":   "/data",
-				"size":        "1Gi",
-				"accessModes": authored,
-			},
-		},
+		"volumes":  []any{vol},
 	}
+}
+
+// nonRWXClaimName is the claim the scaler refusal names for claimProps(kind).
+func nonRWXClaimName(kind string) string {
+	if kind == "deployment" {
+		return `"data"`
+	}
+	return `"app-data"`
 }
 
 func scalerTrait(props map[string]any) oam.Trait {
@@ -145,11 +161,11 @@ func TestScaler_NonRWXClaim_RejectsMaxReplicasAboveOne(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := transformOne(t, tc.kind, claimProps(tc.modes...), tc.policy, tc.traits...)
+			err := transformOne(t, tc.kind, claimProps(tc.kind, tc.modes...), tc.policy, tc.traits...)
 			if err == nil {
 				t.Fatal("expected the build to fail: the HPA can scale past the one replica a non-RWX claim allows")
 			}
-			for _, want := range []string{`"scaler"`, `"data"`, "maxReplicas " + tc.wantMax} {
+			for _, want := range []string{`"scaler"`, nonRWXClaimName(tc.kind), "maxReplicas " + tc.wantMax} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q does not name %s", err, want)
 				}
@@ -165,12 +181,12 @@ func TestScaler_NonRWXClaim_AcceptsSafeCombinations(t *testing.T) {
 		props map[string]any
 		max   int
 	}{
-		{"webservice/maxReplicas-1", "webservice", claimProps("ReadWriteOnce"), 1},
-		{"worker/maxReplicas-1", "worker", claimProps("ReadWriteOnce"), 1},
-		{"webservice/shareable-claim", "webservice", claimProps("ReadWriteOnce", "ReadWriteMany"), 5},
+		{"webservice/maxReplicas-1", "webservice", claimProps("webservice", "ReadWriteOnce"), 1},
+		{"worker/maxReplicas-1", "worker", claimProps("worker", "ReadWriteOnce"), 1},
+		{"webservice/shareable-claim", "webservice", claimProps("webservice", "ReadWriteOnce", "ReadWriteMany"), 5},
 		{"worker/no-claim", "worker", map[string]any{"image": "ghcr.io/org/app:v1"}, 5},
-		{"deployment/maxReplicas-1", "deployment", claimProps("ReadWriteOnce"), 1},
-		{"deployment/shareable-claim", "deployment", claimProps("ReadWriteOnce", "ReadWriteMany"), 5},
+		{"deployment/maxReplicas-1", "deployment", claimProps("deployment", "ReadWriteOnce"), 1},
+		{"deployment/shareable-claim", "deployment", claimProps("deployment", "ReadWriteOnce", "ReadWriteMany"), 5},
 		{"deployment/no-claim", "deployment", map[string]any{"image": "ghcr.io/org/app:v1"}, 5},
 	}
 	for _, tc := range cases {
@@ -210,11 +226,11 @@ func TestScaler_NonRWXClaim_DeploymentNamesLaterClaim(t *testing.T) {
 		"replicas": 1,
 		"volumes": []any{
 			map[string]any{
-				"name": "shared", "type": "pvc", "mountPath": "/shared", "size": "1Gi",
+				"name": "shared", "type": "pvc", "mountPath": "/shared", "claimName": "shared",
 				"accessModes": []any{"ReadWriteMany"},
 			},
 			map[string]any{
-				"name": "scratch", "type": "pvc", "mountPath": "/scratch", "size": "1Gi",
+				"name": "scratch", "type": "pvc", "mountPath": "/scratch", "claimName": "scratch",
 				"accessModes": []any{"ReadWriteOnce"},
 			},
 		},

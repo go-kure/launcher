@@ -7,7 +7,6 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
-	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
@@ -16,9 +15,9 @@ import (
 // tests pinning webservice's behaviour keep running against the production
 // path, one step at a time as the engine takes them: the rule's
 // LowerComponent, then DeploymentHandler and ServiceHandler for the two
-// components it emits, then the synthesized topology-spread trait
-// (traits.TopologySpreadHandler) on the deployment member when the rule
-// attached one. The config it returns is the deployment member's own, so
+// components it emits, then the synthesized topology-spread and pvc traits
+// (traits.TopologySpreadHandler, traits.PVCHandler) on the deployment member
+// when the rule attached them. The config it returns is the deployment member's own, so
 // ApplyPolicy, ServiceAccountName, NonRWXClaim and EmitsAutoHealthCheck are
 // DeploymentConfig's; ServicePort and ServicePortName are the service
 // member's, as the sibling group answers them.
@@ -72,9 +71,11 @@ func (webserviceViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 		return nil, errors.Errorf("service handler returned %T, want *components.ServiceConfig", cfg)
 	}
 	var synthesized []oam.Trait
+	spread := false
 	for _, t := range emitted.Traits {
-		if t.Type == "topology-spread" {
+		if t.Type == "topology-spread" || t.Type == "pvc" {
 			synthesized = append(synthesized, t)
+			spread = spread || t.Type == "topology-spread"
 		}
 	}
 	return &webserviceViaRuleConfig{
@@ -83,14 +84,15 @@ func (webserviceViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 		serviceAccount:         sa,
 		synthesized:            synthesized,
 		Port:                   svc.ServicePort(),
-		TopologySpreadDisabled: len(synthesized) == 0,
+		TopologySpreadDisabled: !spread,
 	}, nil
 }
 
 // webserviceViaRuleConfig is the deployment member's config, the service
 // member's, the serviceaccount member's when the rule emitted one, and the
-// traits the rule synthesized in front of the deployment member's (today at
-// most one, topology-spread). Port and TopologySpreadDisabled restate the two
+// traits the rule synthesized in front of the deployment member's
+// (topology-spread, and one `pvc` trait per claim its pvc volumes describe).
+// Port and TopologySpreadDisabled restate the two
 // opinions the former WebserviceConfig carried as fields, read back from what
 // the rule emitted.
 type webserviceViaRuleConfig struct {
@@ -111,13 +113,13 @@ func (c *webserviceViaRuleConfig) ServicePortName() (string, bool) {
 
 // Generate generates the members as the sibling group does: each member's
 // first object in member order (Deployment, Service, ServiceAccount), then the
-// rest of each member's objects (the deployment member's claims).
+// rest of each member's objects, then the claims of the synthesized `pvc`
+// traits, which follow their component.
 func (c *webserviceViaRuleConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	inner := stack.NewApplication(app.Name, app.Namespace, c.DeploymentConfig)
-	for i := range c.synthesized {
-		if err := (&traits.TopologySpreadHandler{}).Apply(&c.synthesized[i], inner, nil); err != nil {
-			return nil, err
-		}
+	subApps, err := applySynthesizedTraits("webservice", c.synthesized, inner)
+	if err != nil {
+		return nil, err
 	}
 	dep, err := inner.Config.Generate(app)
 	if err != nil {
@@ -144,5 +146,9 @@ func (c *webserviceViaRuleConfig) Generate(app *stack.Application) ([]*client.Ob
 			objs = append(objs, member[1:]...)
 		}
 	}
-	return objs, nil
+	claims, err := generateSubApplications(subApps)
+	if err != nil {
+		return nil, err
+	}
+	return append(objs, claims...), nil
 }

@@ -11,6 +11,7 @@ spec:
       labels:
         app: migrate
     spec:
+      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/migrate:v1.0.0
         livenessProbe:
@@ -29,13 +30,3 @@ spec:
             cpu: 100m
             memory: 128Mi
       restartPolicy: OnFailure
-      serviceAccountName: migrate
----
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: migrate
-  name: migrate
-  namespace: default

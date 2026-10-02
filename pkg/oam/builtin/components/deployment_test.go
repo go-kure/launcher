@@ -69,27 +69,25 @@ func TestDeploymentHandler_RequiredImage_Missing(t *testing.T) {
 	}
 }
 
-// TestDeploymentHandler_Generate_NoService pins the deliberate omission: this
-// kind has no `port` property, so unlike webservice it never emits a Service.
+// TestDeploymentHandler_Generate_NoService pins the deliberate omissions: this
+// kind has no `port` property, so unlike webservice it never emits a Service,
+// and it generates no ServiceAccount (go-kure/launcher#702) — the Deployment is
+// its only object.
 func TestDeploymentHandler_Generate_NoService(t *testing.T) {
 	_, objects := generateDeployment(t, "backend", map[string]any{
 		"image": "ghcr.io/org/backend:v1.0.0",
 	})
 
-	var foundService, foundSA bool
 	for _, obj := range objects {
 		switch (*obj).(type) {
 		case *corev1.Service:
-			foundService = true
+			t.Error("deployment must not generate a Service — it publishes no port property")
 		case *corev1.ServiceAccount:
-			foundSA = true
+			t.Error("deployment must not generate a ServiceAccount")
 		}
 	}
-	if foundService {
-		t.Error("deployment must not generate a Service — it publishes no port property")
-	}
-	if !foundSA {
-		t.Error("expected a ServiceAccount")
+	if len(objects) != 1 {
+		t.Errorf("generated %d objects, want the Deployment alone", len(objects))
 	}
 }
 
@@ -102,32 +100,10 @@ func TestDeploymentHandler_Generate_NoService(t *testing.T) {
 // unpatchable and orphans its ReplicaSets. Mutating one map here must leave
 // every other consumer untouched.
 func TestDeploymentHandler_LabelMapsAreNotShared(t *testing.T) {
-	dep, objects := generateDeployment(t, "app", map[string]any{
+	dep, _ := generateDeployment(t, "app", map[string]any{
 		"image": "ghcr.io/org/app:v1",
-		"volumes": []any{
-			map[string]any{
-				"name":        "data",
-				"type":        "pvc",
-				"mountPath":   "/data",
-				"size":        "1Gi",
-				"accessModes": []any{"ReadWriteMany"},
-			},
-		},
 	})
 
-	var sa *corev1.ServiceAccount
-	var pvc *corev1.PersistentVolumeClaim
-	for _, obj := range objects {
-		switch o := (*obj).(type) {
-		case *corev1.ServiceAccount:
-			sa = o
-		case *corev1.PersistentVolumeClaim:
-			pvc = o
-		}
-	}
-	if sa == nil || pvc == nil {
-		t.Fatalf("expected a ServiceAccount and a PVC alongside the Deployment, got sa=%v pvc=%v", sa != nil, pvc != nil)
-	}
 	if dep.Spec.Selector == nil {
 		t.Fatal("Deployment has no selector")
 	}
@@ -140,8 +116,6 @@ func TestDeploymentHandler_LabelMapsAreNotShared(t *testing.T) {
 		{"deployment.metadata.labels", dep.Labels},
 		{"deployment.spec.selector.matchLabels", dep.Spec.Selector.MatchLabels},
 		{"deployment.spec.template.metadata.labels", dep.Spec.Template.Labels},
-		{"serviceaccount.metadata.labels", sa.Labels},
-		{"pvc.metadata.labels", pvc.Labels},
 	}
 	// t.Fatalf, not t.Errorf: the aliasing loop below writes into every one of
 	// these maps, and a nil map there panics with "assignment to entry in nil
@@ -252,7 +226,7 @@ func nonRWXVolumeProps(extra map[string]any) map[string]any {
 				"name":        "data",
 				"type":        "pvc",
 				"mountPath":   "/data",
-				"size":        "1Gi",
+				"claimName":   "data",
 				"accessModes": []any{"ReadWriteOnce"},
 			},
 		},
@@ -322,7 +296,7 @@ func TestDeploymentHandler_RWXCapableClaimIsNotConstrained(t *testing.T) {
 					"name":        "data",
 					"type":        "pvc",
 					"mountPath":   "/data",
-					"size":        "1Gi",
+					"claimName":   "data",
 					"accessModes": modes,
 				},
 			},
@@ -377,11 +351,11 @@ func TestDeploymentHandler_RWXCapableClaimIsNotConstrained(t *testing.T) {
 			"replicas": 2,
 			"volumes": []any{
 				map[string]any{
-					"name": "shared", "type": "pvc", "mountPath": "/shared", "size": "1Gi",
+					"name": "shared", "type": "pvc", "mountPath": "/shared", "claimName": "shared",
 					"accessModes": []any{"ReadWriteOnce", "ReadWriteMany"},
 				},
 				map[string]any{
-					"name": "private", "type": "pvc", "mountPath": "/private", "size": "1Gi",
+					"name": "private", "type": "pvc", "mountPath": "/private", "claimName": "private",
 					"accessModes": []any{"ReadWriteOnce"},
 				},
 			},
@@ -538,7 +512,7 @@ func TestDeploymentHandler_RWXLeavesStrategyUntouched(t *testing.T) {
 				"name":        "data",
 				"type":        "pvc",
 				"mountPath":   "/data",
-				"size":        "1Gi",
+				"claimName":   "data",
 				"accessModes": []any{"ReadWriteMany"},
 			},
 		},
@@ -566,7 +540,7 @@ func TestDeploymentHandler_ServiceAccountName_Authored(t *testing.T) {
 	if !ok {
 		t.Fatal("DeploymentConfig does not implement oam.ServiceAccountNamer")
 	}
-	if got := namer.ServiceAccountName(); got != "existing-sa" {
+	if got, _ := namer.ServiceAccountName(); got != "existing-sa" {
 		t.Errorf("ServiceAccountName() = %q, want %q", got, "existing-sa")
 	}
 }
@@ -633,15 +607,6 @@ func TestDeploymentConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
 	})
 	if err := cfg.(oam.Enforceable).ApplyPolicy(&stubPolicy{}); err == nil {
 		t.Error("expected an error for a privileged container under a policy that forbids it")
-	}
-}
-
-func TestDeploymentConfig_ApplyPolicy_MaxStorageSize(t *testing.T) {
-	cfg := deploymentConfig(t, "app", nonRWXVolumeProps(nil))
-	p := &stubPolicy{}
-	p.maxStorageSize = "512Mi"
-	if err := cfg.(oam.Enforceable).ApplyPolicy(p); err == nil {
-		t.Error("expected an error when the PVC size exceeds max")
 	}
 }
 

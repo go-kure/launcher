@@ -13,7 +13,7 @@ import (
 // registerWebservice registers "webservice" on tr as kurel build does: the
 // components.WebserviceRule lowering rule, plus the three terminal kinds it
 // emits ("deployment", "service", "serviceaccount") and the "topology-spread"
-// trait it synthesizes. Tests that build a webservice through a Transformer use
+// and "pvc" traits it synthesizes. Tests that build a webservice through a Transformer use
 // it, so they run the production path — the same-name sibling group, its trait
 // routing and its NetworkPolicy synthesis — rather than a handler stand-in.
 func registerWebservice(tr *oam.Transformer) {
@@ -22,14 +22,15 @@ func registerWebservice(tr *oam.Transformer) {
 	tr.RegisterComponent("service", &components.ServiceHandler{})
 	tr.RegisterComponent("serviceaccount", &components.ServiceAccountHandler{})
 	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
+	tr.RegisterBuiltinTrait("pvc", &traits.PVCHandler{})
 }
 
 // webserviceViaRule presents components.WebserviceRule as the
 // oam.ComponentHandler the former WebserviceHandler was, for the tests that
 // call a handler directly rather than through a Transformer: the rule's
 // LowerComponent, then DeploymentHandler and ServiceHandler for the two
-// components it emits, then the synthesized topology-spread trait on the
-// deployment member when the rule attached one. The config it returns is the
+// components it emits, then the synthesized topology-spread and pvc traits on
+// the deployment member when the rule attached them. The config it returns is the
 // deployment member's own, so ServiceAccountName, NonRWXClaim and
 // EmitsAutoHealthCheck are DeploymentConfig's; ServicePort and ServicePortName
 // are the service member's, as the sibling group answers them.
@@ -79,7 +80,7 @@ func (webserviceViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 	}
 	var synthesized []oam.Trait
 	for _, t := range emitted.Traits {
-		if t.Type == "topology-spread" {
+		if t.Type == "topology-spread" || t.Type == "pvc" {
 			synthesized = append(synthesized, t)
 		}
 	}
@@ -88,8 +89,8 @@ func (webserviceViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 
 // webserviceViaRuleConfig is the deployment member's config, the service
 // member's, the serviceaccount member's when the rule emitted one, and the
-// traits the rule synthesized in front of the deployment member's (today at
-// most one, topology-spread).
+// traits the rule synthesized in front of the deployment member's
+// (topology-spread, and one `pvc` trait per claim its pvc volumes describe).
 type webserviceViaRuleConfig struct {
 	*components.DeploymentConfig
 	service        *components.ServiceConfig
@@ -105,13 +106,13 @@ func (c *webserviceViaRuleConfig) ServicePortName() (string, bool) {
 
 // Generate generates the members as the sibling group does: each member's
 // first object in member order (Deployment, Service, ServiceAccount), then the
-// rest of each member's objects (the deployment member's claims).
+// rest of each member's objects, then the claims of the synthesized `pvc`
+// traits, which follow their component.
 func (c *webserviceViaRuleConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	inner := stack.NewApplication(app.Name, app.Namespace, c.DeploymentConfig)
-	for i := range c.synthesized {
-		if err := (&traits.TopologySpreadHandler{}).Apply(&c.synthesized[i], inner, nil); err != nil {
-			return nil, err
-		}
+	subApps, err := applySynthesizedTraits("webservice", c.synthesized, inner)
+	if err != nil {
+		return nil, err
 	}
 	dep, err := inner.Config.Generate(app)
 	if err != nil {
@@ -138,5 +139,9 @@ func (c *webserviceViaRuleConfig) Generate(app *stack.Application) ([]*client.Ob
 			objs = append(objs, member[1:]...)
 		}
 	}
-	return objs, nil
+	claims, err := generateSubApplications(subApps)
+	if err != nil {
+		return nil, err
+	}
+	return append(objs, claims...), nil
 }

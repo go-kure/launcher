@@ -60,8 +60,9 @@ func (workerViaRule) ToApplicationConfig(comp *oam.Component, namespace string) 
 
 // workerViaRuleConfig is the deployment component's config, the serviceaccount
 // member's when the rule emitted one, and the traits the worker rule
-// synthesized in front of the authored ones (today at most one,
-// topology-spread), applied innermost at Generate as the engine applies them.
+// synthesized in front of the authored ones (topology-spread, and one `pvc`
+// trait per claim its pvc volumes describe), applied at Generate as the engine
+// applies them.
 type workerViaRuleConfig struct {
 	*components.DeploymentConfig
 	serviceAccount stack.ApplicationConfig
@@ -70,25 +71,66 @@ type workerViaRuleConfig struct {
 
 // Generate generates the members as the sibling group does: each member's
 // first object in member order (Deployment, ServiceAccount), then the rest of
-// the deployment member's objects (its claims).
+// the deployment member's objects, then the claims of the synthesized `pvc`
+// traits, which follow their component.
 func (c *workerViaRuleConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	inner := stack.NewApplication(app.Name, app.Namespace, c.DeploymentConfig)
-	for i := range c.synthesized {
-		if c.synthesized[i].Type != "topology-spread" {
-			return nil, errors.Errorf("worker rule synthesized an unexpected %q trait", c.synthesized[i].Type)
-		}
-		if err := (&traits.TopologySpreadHandler{}).Apply(&c.synthesized[i], inner, nil); err != nil {
-			return nil, err
-		}
-	}
-	dep, err := inner.Config.Generate(app)
-	if err != nil || c.serviceAccount == nil {
-		return dep, err
-	}
-	sa, err := c.serviceAccount.Generate(app)
+	subApps, err := applySynthesizedTraits("worker", c.synthesized, inner)
 	if err != nil {
 		return nil, err
 	}
-	objs := append([]*client.Object{dep[0]}, sa...)
-	return append(objs, dep[1:]...), nil
+	dep, err := inner.Config.Generate(app)
+	if err != nil {
+		return nil, err
+	}
+	objs := []*client.Object{dep[0]}
+	if c.serviceAccount != nil {
+		sa, err := c.serviceAccount.Generate(app)
+		if err != nil {
+			return nil, err
+		}
+		objs = append(objs, sa...)
+	}
+	objs = append(objs, dep[1:]...)
+	claims, err := generateSubApplications(subApps)
+	if err != nil {
+		return nil, err
+	}
+	return append(objs, claims...), nil
+}
+
+// applySynthesizedTraits applies the traits a role rule synthesized on its
+// deployment member as the engine does: topology-spread decorates the member,
+// and each `pvc` trait becomes a sub-application carrying its claim. It returns
+// those sub-applications for generateSubApplications.
+func applySynthesizedTraits(rule string, synthesized []oam.Trait, inner *stack.Application) ([]*stack.Application, error) {
+	bundle := &stack.Bundle{}
+	for i := range synthesized {
+		var err error
+		switch synthesized[i].Type {
+		case "topology-spread":
+			err = (&traits.TopologySpreadHandler{}).Apply(&synthesized[i], inner, nil)
+		case "pvc":
+			err = (&traits.PVCHandler{}).Apply(&synthesized[i], inner, bundle)
+		default:
+			err = errors.Errorf("%s rule synthesized an unexpected %q trait", rule, synthesized[i].Type)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return bundle.Applications, nil
+}
+
+// generateSubApplications generates each trait sub-application in order.
+func generateSubApplications(apps []*stack.Application) ([]*client.Object, error) {
+	var objs []*client.Object
+	for _, a := range apps {
+		o, err := a.Config.Generate(a)
+		if err != nil {
+			return nil, err
+		}
+		objs = append(objs, o...)
+	}
+	return objs, nil
 }

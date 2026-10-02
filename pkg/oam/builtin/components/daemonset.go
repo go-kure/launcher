@@ -119,7 +119,7 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, err
 	}
 	config.Tolerations = tolerations
-	parsed, err := parseVolumes(props)
+	parsed, err := parsePodVolumes(props)
 	if err != nil {
 		return nil, err
 	}
@@ -185,10 +185,9 @@ type DaemonsetConfig struct {
 }
 
 // ServiceAccountName implements oam.ServiceAccountNamer: the authored
-// serviceAccountName, else the per-component ServiceAccount named after the
-// component.
-func (c *DaemonsetConfig) ServiceAccountName() string {
-	return effectiveServiceAccountName(c.PodSpec, c.Name)
+// serviceAccountName, or "" when the pods run as no named account.
+func (c *DaemonsetConfig) ServiceAccountName() (string, bool) {
+	return c.PodSpec.ServiceAccountName, true
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -241,50 +240,19 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 			return err
 		}
 	}
-	for _, pvc := range c.PVCs {
-		if err := enforceMaxStorageSize(pvc.Size, p.MaxStorageSize()); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
-// Generate creates a Kubernetes DaemonSet, its ServiceAccount, and any
-// standalone PVCs. The ServiceAccount is omitted when serviceAccountName was
-// authored. It emits no Service: an authored `service` component exposes the
-// pods.
+// Generate creates a Kubernetes DaemonSet, and nothing beside it: no
+// ServiceAccount and no claim (go-kure/launcher#702). It emits no Service
+// either: an authored `service` component exposes the pods.
 func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	var err error
-	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
-	if err != nil {
-		return nil, err
-	}
 	ds, err := c.createDaemonSet(app)
 	if err != nil {
 		return nil, err
 	}
-
 	dsObj := client.Object(ds)
-	objects := []*client.Object{&dsObj}
-
-	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
-		objects = append(objects, &saObj)
-	}
-
-	for _, pvc := range c.PVCs {
-		if pvc.ClaimName != "" {
-			continue // an existing claim, referenced by claimName
-		}
-		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
-		if err != nil {
-			return nil, err
-		}
-		pObj := client.Object(p)
-		objects = append(objects, &pObj)
-	}
-	return objects, nil
+	return []*client.Object{&dsObj}, nil
 }
 
 func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.DaemonSet, error) {
@@ -318,12 +286,11 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 	ds.Spec.Template.Labels = appLabels(app.Name)
 
 	podSpec, err := buildPodSpec(podSpecInput{
-		Config:                    c.PodSpec,
-		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),
-		MainContainer:             container,
-		InitContainers:            c.InitContainers,
-		Volumes:                   c.Volumes,
-		Tolerations:               c.Tolerations,
+		Config:         c.PodSpec,
+		MainContainer:  container,
+		InitContainers: c.InitContainers,
+		Volumes:        c.Volumes,
+		Tolerations:    c.Tolerations,
 	})
 	if err != nil {
 		return nil, err

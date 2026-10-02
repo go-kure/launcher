@@ -37,6 +37,7 @@ spec:
               matchLabels:
                 app: backend
             topologyKey: kubernetes.io/hostname
+      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/backend:v1.0.0
         name: backend
@@ -46,7 +47,6 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
-      serviceAccountName: backend
       tolerations:
       - effect: NoSchedule
         key: dedicated
@@ -65,12 +65,3 @@ spec:
         nodeTaintsPolicy: Honor
         topologyKey: topology.kubernetes.io/zone
         whenUnsatisfiable: DoNotSchedule
----
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: backend
-  name: backend
-  namespace: default

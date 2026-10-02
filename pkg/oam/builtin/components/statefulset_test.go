@@ -77,8 +77,8 @@ func TestStatefulsetHandler_Generate_BasicResources(t *testing.T) {
 	if foundSVC {
 		t.Error("expected no Service")
 	}
-	if !foundSA {
-		t.Error("expected ServiceAccount")
+	if foundSA {
+		t.Error("generated a ServiceAccount; a pod kind generates none (go-kure/launcher#702)")
 	}
 }
 

@@ -188,12 +188,17 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContex
 		}
 	}
 
+	claimTraits, err := roleClaims(comp, depProps)
+	if err != nil {
+		return oam.LoweringResult{}, err
+	}
 	sa := roleServiceAccount(comp, depProps, comp.Traits)
 
 	var depTraits, svcTraits []oam.Trait
 	if !opinions.topologySpreadDisabled {
 		depTraits = append(depTraits, oam.Trait{Type: "topology-spread", Properties: map[string]any{}})
 	}
+	depTraits = append(depTraits, claimTraits...)
 	for _, t := range comp.Traits {
 		switch {
 		case webserviceServiceTraits[t.Type]:

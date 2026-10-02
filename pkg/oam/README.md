@@ -314,7 +314,7 @@ the built-ins. Extend the system by implementing:
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
 | `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not add, remove, replace or reorder the bundle's applications there (the transform fails). Implemented by `prune-protection` and `force-replace`. |
-| `ServiceAccountNamer` | `ServiceAccountName() string` — the ServiceAccount a workload component's pods run as: the authored `serviceAccountName` when set, else the per-component account the handler generates (named after the component). Traits that bind identity to the workload (the `rbac` trait's binding subject) read this instead of assuming the component name. Implemented by every built-in workload kind config. |
+| `ServiceAccountNamer` | `ServiceAccountName() (name string, runsPods bool)` — the ServiceAccount a workload component's pods run as: the authored `serviceAccountName`, or `""` when none is authored (no pod kind generates an account, go-kure/launcher#702; a `webservice`/`worker` hands its `deployment` member the name of the account it generates). `runsPods` reports whether the config runs pods at all; a trait decorator or sibling group that wraps no pod-running config reports `false`. Traits that bind identity to the workload (the `rbac` trait's binding subject) read this instead of assuming the component name, and `rbac` refuses a pod-running component with no name. Implemented by every built-in pod kind config. **Breaking library change**: the method gained the `runsPods` result. |
 | `LayoutAugmentationCoverage` | `GenerateCoversAugmentLayout() bool` — for a config that also implements kure's `layout.LayoutAugmenter`, declare whether `Generate` alone already produces every resource `AugmentLayout` places into the layout. `kurel build` (which never walks a `layout.ManifestLayout`) uses this to fail closed: an augmenter that doesn't implement this interface, or that implements it and returns `false`, is rejected outright rather than silently dropping layout-level resources from the output. |
 
 `PolicyResult.ConsumedCapabilities` is the sorted, deduped set of capability keys this
@@ -513,11 +513,10 @@ Each member keeps its own config, policy defaults, traits and objects. The group
 one tier, one bundle, one `dependency` node, one auto health check (for the first
 member's kind) and one layout directory. Its application generates each member's
 first object in emission order, then every member's remaining objects in the same
-order: a deployment and a service member give Deployment, Service, then the
-Deployment's ServiceAccount and claims, as a single component generating all of them
-orders them. `webservice` lowers to a deployment, a service and a serviceaccount member,
-which give Deployment, Service, ServiceAccount, then the Deployment's claims: the same
-order (go-kure/launcher#702). It answers every config contract the transform reads
+order, as a single component generating all of them orders them. `webservice`
+lowers to a deployment, a service and a serviceaccount member, which give
+Deployment, Service, ServiceAccount, then the claims of the deployment member's
+synthesized `pvc` traits (go-kure/launcher#702). It answers every config contract the transform reads
 (Service port and port name, backend Service name, routing target, ServiceAccount,
 single-pod claim) from the one member that has a value, gives the Flux namespace
 to every member that takes one, and reports the group's name as its component

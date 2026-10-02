@@ -122,14 +122,10 @@ func TestJobHandler_Generate_Shape(t *testing.T) {
 		t.Errorf("Image = %q, want the authored image", got)
 	}
 
-	var sawServiceAccount bool
 	for _, obj := range objs {
 		if _, ok := (*obj).(*corev1.ServiceAccount); ok {
-			sawServiceAccount = true
+			t.Error("Generate emitted a ServiceAccount; a pod kind generates none (go-kure/launcher#702)")
 		}
-	}
-	if !sawServiceAccount {
-		t.Error("Generate did not emit a ServiceAccount")
 	}
 
 	// Nothing unauthored may reach the spec: every JobSpec-level pointer stays

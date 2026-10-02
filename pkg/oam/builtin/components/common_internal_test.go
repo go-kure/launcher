@@ -2,6 +2,7 @@ package components
 
 import (
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -2181,143 +2182,69 @@ func TestParseVolumeClaimTemplates_NonStringStorageClass_Error(t *testing.T) {
 	}
 }
 
-// TestQualifyPVCNames_QualifiesObjectNameAndClaimRef regression-tests a
-// review finding (go-kure/launcher#284): the generated PVC object reused the bare
-// pod-local volume name verbatim as its own Kubernetes object name, so two
-// components sharing the same pod-local name (e.g. both "data") would
-// collide on one PersistentVolumeClaim in the same namespace.
-func TestQualifyPVCNames_QualifiesObjectNameAndClaimRef(t *testing.T) {
-	volumes := []corev1.Volume{
-		{Name: "data", VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"},
-		}},
-		{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-	}
-	pvcs := []PVCConfig{{Name: "data", Size: "1Gi"}}
+// TestRoleClaims_RewritesVolumesToClaims: a role component's pvc volume that
+// describes a claim becomes a `pvc` trait carrying that claim, qualified by the
+// component name, and the volume is rewritten to reference it by claimName.
+// A volume that already references a claim is left alone, and the authored
+// list is never edited in place.
+func TestRoleClaims_RewritesVolumesToClaims(t *testing.T) {
+	data := map[string]any{"name": "data", "type": "pvc", "mountPath": "/data", "size": "1Gi", "storageClass": "fast", "accessModes": []any{"ReadWriteMany"}}
+	shared := map[string]any{"name": "shared", "type": "pvc", "mountPath": "/shared", "claimName": "existing"}
+	tmp := map[string]any{"name": "tmp", "type": "emptyDir", "mountPath": "/tmp"}
+	props := map[string]any{"volumes": []any{data, shared, tmp}}
 
-	got, err := qualifyPVCNames(volumes, pvcs, "job")
+	traits, err := roleClaims(&oam.Component{Name: "api"}, props)
 	if err != nil {
-		t.Fatalf("qualifyPVCNames returned unexpected error: %v", err)
+		t.Fatalf("roleClaims: %v", err)
 	}
-
-	if len(got) != 1 || got[0].Name != "job-data" {
-		t.Fatalf("qualified PVCs = %+v, want [{Name: job-data ...}]", got)
-	}
-	if volumes[0].Name != "data" {
-		t.Errorf("Volume.Name = %q, want unchanged %q", volumes[0].Name, "data")
-	}
-	if volumes[0].PersistentVolumeClaim.ClaimName != "job-data" {
-		t.Errorf("Volume.PersistentVolumeClaim.ClaimName = %q, want %q", volumes[0].PersistentVolumeClaim.ClaimName, "job-data")
-	}
-	if volumes[1].EmptyDir == nil {
-		t.Error("expected the unrelated emptyDir volume to be left untouched")
-	}
-}
-
-func TestQualifyPVCNames_NoPVCs_NoOp(t *testing.T) {
-	volumes := []corev1.Volume{{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
-	got, err := qualifyPVCNames(volumes, nil, "job")
-	if err != nil {
-		t.Fatalf("qualifyPVCNames returned unexpected error: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("qualifyPVCNames with no PVCs = %+v, want empty", got)
-	}
-}
-
-// TestQualifyPVCNames_Idempotent regression-tests a review finding
-// (go-kure/launcher#284): each workload kind's Generate() mutates c.PVCs/c.Volumes in
-// place via `c.PVCs = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)`, so a
-// second Generate() call on the same component instance re-invokes this
-// function with already-qualified state. The prior implementation keyed
-// qualification off PVCConfig.Name, which is exactly the field the first
-// call rewrote — "app-data" became "app-app-data" on the second pass. The
-// fix keys off Volume.Name, which this function never rewrites, so a second
-// call must reproduce the first call's result exactly.
-func TestQualifyPVCNames_Idempotent(t *testing.T) {
-	volumes := []corev1.Volume{
-		{Name: "data", VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"},
-		}},
-	}
-	pvcs := []PVCConfig{{Name: "data", Size: "1Gi"}}
-
-	first, err := qualifyPVCNames(volumes, pvcs, "app")
-	if err != nil {
-		t.Fatalf("first call: qualifyPVCNames returned unexpected error: %v", err)
-	}
-	if len(first) != 1 || first[0].Name != "app-data" {
-		t.Fatalf("first call: qualified PVCs = %+v, want [{Name: app-data ...}]", first)
-	}
-	if volumes[0].PersistentVolumeClaim.ClaimName != "app-data" {
-		t.Fatalf("first call: ClaimName = %q, want %q", volumes[0].PersistentVolumeClaim.ClaimName, "app-data")
-	}
-
-	second, err := qualifyPVCNames(volumes, first, "app")
-	if err != nil {
-		t.Fatalf("second call: qualifyPVCNames returned unexpected error: %v", err)
-	}
-	if len(second) != 1 || second[0].Name != "app-data" {
-		t.Fatalf("second call: qualified PVCs = %+v, want [{Name: app-data ...}] (unchanged)", second)
-	}
-	if volumes[0].PersistentVolumeClaim.ClaimName != "app-data" {
-		t.Fatalf("second call: ClaimName = %q, want %q (unchanged)", volumes[0].PersistentVolumeClaim.ClaimName, "app-data")
-	}
-	if volumes[0].Name != "data" {
-		t.Errorf("Volume.Name = %q, want unchanged %q", volumes[0].Name, "data")
-	}
-}
-
-// TestQualifyPVCNames_NoCollisionAcrossHyphenatedNames regression-tests a
-// review finding (go-kure/launcher#284): plain "<appName>-<localName>" concatenation
-// is not collision-free when either component itself contains a hyphen —
-// appName "a-b" with localName "data", and appName "a" with localName
-// "b-data", both produced the same qualified name "a-b-data". The fix
-// escapes interior hyphens in each half before joining, so the two distinct
-// (appName, localName) pairs must qualify to distinct names.
-func TestQualifyPVCNames_NoCollisionAcrossHyphenatedNames(t *testing.T) {
-	volumesA := []corev1.Volume{{Name: "data", VolumeSource: corev1.VolumeSource{
-		PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"},
+	want := []oam.Trait{{Type: "pvc", Properties: map[string]any{
+		"name": "api-data", "size": "1Gi", "storageClassName": "fast", "accessModes": []any{"ReadWriteMany"},
 	}}}
-	pvcsA := []PVCConfig{{Name: "data", Size: "1Gi"}}
-	qualifiedA, err := qualifyPVCNames(volumesA, pvcsA, "a-b")
-	if err != nil {
-		t.Fatalf("qualifyPVCNames returned unexpected error: %v", err)
+	if !reflect.DeepEqual(traits, want) {
+		t.Fatalf("traits = %#v, want %#v", traits, want)
 	}
-
-	volumesB := []corev1.Volume{{Name: "b-data", VolumeSource: corev1.VolumeSource{
-		PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "b-data"},
-	}}}
-	pvcsB := []PVCConfig{{Name: "b-data", Size: "1Gi"}}
-	qualifiedB, err := qualifyPVCNames(volumesB, pvcsB, "a")
-	if err != nil {
-		t.Fatalf("qualifyPVCNames returned unexpected error: %v", err)
+	vols := props["volumes"].([]any)
+	wantData := map[string]any{"name": "data", "type": "pvc", "mountPath": "/data", "accessModes": []any{"ReadWriteMany"}, "claimName": "api-data"}
+	if !reflect.DeepEqual(vols[0], wantData) {
+		t.Errorf("volumes[0] = %#v, want %#v", vols[0], wantData)
 	}
-
-	if len(qualifiedA) != 1 || len(qualifiedB) != 1 {
-		t.Fatalf("qualifiedA = %+v, qualifiedB = %+v, want one PVC each", qualifiedA, qualifiedB)
+	if !reflect.DeepEqual(vols[1], shared) || !reflect.DeepEqual(vols[2], tmp) {
+		t.Errorf("volumes[1:] = %#v, want the claim reference and the emptyDir unchanged", vols[1:])
 	}
-	if qualifiedA[0].Name == qualifiedB[0].Name {
-		t.Fatalf("collision: appName %q + volume %q and appName %q + volume %q both qualified to %q",
-			"a-b", "data", "a", "b-data", qualifiedA[0].Name)
+	if _, ok := data["claimName"]; ok || data["size"] != "1Gi" {
+		t.Errorf("authored volume edited in place: %#v", data)
 	}
 }
 
-func TestQualifyPVCNames_InvalidDNS_Error(t *testing.T) {
-	// Regression test: qualified PVC names must be valid DNS-1123 subdomains.
-	// Component names with uppercase letters would produce invalid qualified names.
-	volumes := []corev1.Volume{{
-		Name: "data",
-		VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"},
-		},
-	}}
-	pvcs := []PVCConfig{{Name: "data", Size: "1Gi"}}
+// TestRoleClaims_NoCollisionAcrossHyphenatedNames: plain
+// "<component>-<volume>" concatenation is not collision-free when either half
+// contains a hyphen — component "a-b" with volume "data", and component "a"
+// with volume "b-data", would both name "a-b-data" (go-kure/launcher#284).
+// Each half is escaped before joining, so the two claims stay distinct.
+func TestRoleClaims_NoCollisionAcrossHyphenatedNames(t *testing.T) {
+	claim := func(comp, vol string) string {
+		t.Helper()
+		props := map[string]any{"volumes": []any{map[string]any{"name": vol, "type": "pvc", "mountPath": "/d", "size": "1Gi"}}}
+		traits, err := roleClaims(&oam.Component{Name: comp}, props)
+		if err != nil {
+			t.Fatalf("roleClaims(%q, %q): %v", comp, vol, err)
+		}
+		if len(traits) != 1 {
+			t.Fatalf("roleClaims(%q, %q) = %d traits, want 1", comp, vol, len(traits))
+		}
+		return traits[0].Properties["name"].(string)
+	}
+	if a, b := claim("a-b", "data"), claim("a", "b-data"); a == b {
+		t.Fatalf("collision: both pairs named %q", a)
+	}
+}
 
-	// Uppercase in appName produces an invalid DNS-1123 subdomain
-	_, err := qualifyPVCNames(volumes, pvcs, "MyApp")
-	if err == nil {
-		t.Fatal("qualifyPVCNames: expected error for uppercase in appName, got nil")
+// TestRoleClaims_InvalidDNS_Error: the qualified claim name must be a
+// DNS-1123 subdomain, which an uppercase component name is not.
+func TestRoleClaims_InvalidDNS_Error(t *testing.T) {
+	props := map[string]any{"volumes": []any{map[string]any{"name": "data", "type": "pvc", "mountPath": "/d", "size": "1Gi"}}}
+	if _, err := roleClaims(&oam.Component{Name: "MyApp"}, props); err == nil {
+		t.Fatal("roleClaims: expected error for an uppercase component name, got nil")
 	}
 }
 

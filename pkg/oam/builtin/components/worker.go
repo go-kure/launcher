@@ -134,11 +134,20 @@ func (r WorkerRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (
 		}
 	}
 
+	claimTraits, err := roleClaims(comp, props)
+	if err != nil {
+		return oam.LoweringResult{}, err
+	}
 	sa := roleServiceAccount(comp, props, comp.Traits)
 
-	traits := comp.Traits
+	var synthesized []oam.Trait
 	if !opinions.topologySpreadDisabled {
-		traits = append([]oam.Trait{{Type: "topology-spread", Properties: map[string]any{}}}, comp.Traits...)
+		synthesized = append(synthesized, oam.Trait{Type: "topology-spread", Properties: map[string]any{}})
+	}
+	synthesized = append(synthesized, claimTraits...)
+	traits := comp.Traits
+	if len(synthesized) > 0 {
+		traits = append(synthesized, comp.Traits...)
 	}
 
 	members := []oam.Component{{

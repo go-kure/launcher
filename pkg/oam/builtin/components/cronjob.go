@@ -282,7 +282,7 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		config.WorkingDir = workingDir
 	}
 
-	parsed, err := parseVolumes(props)
+	parsed, err := parsePodVolumes(props)
 	if err != nil {
 		return nil, err
 	}
@@ -359,10 +359,9 @@ type CronjobConfig struct {
 }
 
 // ServiceAccountName implements oam.ServiceAccountNamer: the authored
-// serviceAccountName, else the per-component ServiceAccount named after the
-// component.
-func (c *CronjobConfig) ServiceAccountName() string {
-	return effectiveServiceAccountName(c.PodSpec, c.Name)
+// serviceAccountName, or "" when the pods run as no named account.
+func (c *CronjobConfig) ServiceAccountName() (string, bool) {
+	return c.PodSpec.ServiceAccountName, true
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -415,48 +414,18 @@ func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
 			return err
 		}
 	}
-	for _, pvc := range c.PVCs {
-		if err := enforceMaxStorageSize(pvc.Size, p.MaxStorageSize()); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
-// Generate creates a Kubernetes CronJob, ServiceAccount, and any declared PVCs.
-// The ServiceAccount is omitted when serviceAccountName was authored.
+// Generate creates a Kubernetes CronJob, and nothing beside it: no
+// ServiceAccount and no claim (go-kure/launcher#702).
 func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	var err error
-	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
-	if err != nil {
-		return nil, err
-	}
 	cronjob, err := c.createCronJob(app)
 	if err != nil {
 		return nil, err
 	}
-
 	obj := client.Object(cronjob)
-	objects := []*client.Object{&obj}
-	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
-		objects = append(objects, &saObj)
-	}
-
-	for _, pvc := range c.PVCs {
-		if pvc.ClaimName != "" {
-			continue // an existing claim, referenced by claimName
-		}
-		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
-		if err != nil {
-			return nil, err
-		}
-		pObj := client.Object(p)
-		objects = append(objects, &pObj)
-	}
-
-	return objects, nil
+	return []*client.Object{&obj}, nil
 }
 
 func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob, error) {
@@ -508,12 +477,11 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	// template carries — unchanged from when the constructor still wrote
 	// `Never` and this assignment overwrote it.
 	podSpec, err := buildPodSpec(podSpecInput{
-		Config:                    c.PodSpec,
-		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),
-		MainContainer:             container,
-		InitContainers:            c.InitContainers,
-		Volumes:                   c.Volumes,
-		RestartPolicy:             c.RestartPolicy,
+		Config:         c.PodSpec,
+		MainContainer:  container,
+		InitContainers: c.InitContainers,
+		Volumes:        c.Volumes,
+		RestartPolicy:  c.RestartPolicy,
 	})
 	if err != nil {
 		return nil, err

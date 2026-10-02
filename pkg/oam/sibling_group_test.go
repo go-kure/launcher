@@ -30,7 +30,7 @@ func (s *siblingStub) Generate(*stack.Application) ([]*client.Object, error) { r
 func (s *siblingStub) ServicePort() int32                                    { return s.port }
 func (s *siblingStub) BackendServiceName() string                            { return s.backend }
 func (s *siblingStub) ServicePortName() (string, bool)                       { return s.portName, s.portName != "" }
-func (s *siblingStub) ServiceAccountName() string                            { return s.sa }
+func (s *siblingStub) ServiceAccountName() (string, bool)                    { return s.sa, s.sa != "" }
 func (s *siblingStub) NonRWXClaim() string                                   { return s.claim }
 func (s *siblingStub) SetFluxNamespace(ns string)                            { s.fluxNS = ns }
 func (s *siblingStub) ServiceRoutingTarget(p []intstr.IntOrString) (*metav1.LabelSelector, []intstr.IntOrString) {
@@ -454,8 +454,8 @@ func TestSiblingGroup_ForwardingAcrossMembers(t *testing.T) {
 	if got, known := cfg.(siblingServicePortNamer).ServicePortName(); got != "http" || !known {
 		t.Errorf("ServicePortName = (%q, %v), want member b's (http, true)", got, known)
 	}
-	if got := cfg.(ServiceAccountNamer).ServiceAccountName(); got != "web-sa" {
-		t.Errorf("ServiceAccountName = %q, want member b's web-sa", got)
+	if got, pods := cfg.(ServiceAccountNamer).ServiceAccountName(); got != "web-sa" || !pods {
+		t.Errorf("ServiceAccountName = (%q, %v), want member b's (web-sa, true)", got, pods)
 	}
 	if got := cfg.(siblingNonRWXClaimer).NonRWXClaim(); got != "data" {
 		t.Errorf("NonRWXClaim = %q, want member b's data", got)

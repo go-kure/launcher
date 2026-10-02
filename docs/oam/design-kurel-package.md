@@ -155,7 +155,7 @@ runtime:
 | `external-secret` | no — the store comes from an authored `secretStoreRef`, an optional `secretStoreRef` rendering, or an authored `provider` fallback | ExternalSecrets ExternalSecret |
 | `networkpolicy` | no | Kubernetes NetworkPolicy |
 | `cilium-networkpolicy` | no | CiliumNetworkPolicy |
-| `rbac` | no | Role/RoleBinding (or ClusterRole/ClusterRoleBinding) bound to the component's ServiceAccount |
+| `rbac` | no | Role/RoleBinding (or ClusterRole/ClusterRoleBinding) bound to the ServiceAccount the pods run as: the authored `serviceAccountName`, or the account a `webservice`/`worker` generates; refused on a pod kind with no `serviceAccountName` (go-kure/launcher#702) |
 | `security-context` | no | Sets the pod and container security context for a PSA level |
 | `pvc` | no | PersistentVolumeClaim |
 | `volsync` | no | VolSync ReplicationSource |

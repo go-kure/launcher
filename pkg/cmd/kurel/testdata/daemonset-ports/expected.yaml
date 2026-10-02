@@ -14,6 +14,7 @@ spec:
       labels:
         app: agent
     spec:
+      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/agent:v1.0.0
         livenessProbe:
@@ -39,14 +40,4 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
-      serviceAccountName: agent
   updateStrategy: {}
----
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: agent
-  name: agent
-  namespace: default

@@ -334,12 +334,6 @@ func TestParsePodSpec_Empty(t *testing.T) {
 	if !reflect.DeepEqual(cfg.PodSpec, corev1.PodSpec{}) {
 		t.Errorf("parsePodSpec with no pod keys = %#v, want zero PodSpec", cfg.PodSpec)
 	}
-	if !generatesServiceAccount(cfg) {
-		t.Error("generatesServiceAccount = false for unauthored serviceAccountName")
-	}
-	if got := effectiveServiceAccountName(cfg, "api"); got != "api" {
-		t.Errorf("effectiveServiceAccountName = %q, want api", got)
-	}
 }
 
 func TestParsePodSpec_Errors(t *testing.T) {
@@ -501,17 +495,19 @@ func TestBuildPodSpec_LayersOnAuthoredFields(t *testing.T) {
 		t.Fatalf("buildMainContainer: %v", err)
 	}
 	ps, err := buildPodSpec(podSpecInput{
-		Config:                    cfg,
-		DefaultServiceAccountName: "api",
-		MainContainer:             main,
-		Volumes:                   []corev1.Volume{{Name: "data"}},
-		Tolerations:               []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpExists}},
+		Config:        cfg,
+		MainContainer: main,
+		Volumes:       []corev1.Volume{{Name: "data"}},
+		Tolerations:   []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpExists}},
 	})
 	if err != nil {
 		t.Fatalf("buildPodSpec: %v", err)
 	}
 	if ps.ServiceAccountName != "custom-sa" {
 		t.Errorf("ServiceAccountName = %q, want authored custom-sa", ps.ServiceAccountName)
+	}
+	if ps.AutomountServiceAccountToken != nil {
+		t.Errorf("AutomountServiceAccountToken = %v, want unset beside an authored account", *ps.AutomountServiceAccountToken)
 	}
 	if ps.TerminationGracePeriodSeconds == nil || *ps.TerminationGracePeriodSeconds != 5 {
 		t.Errorf("TerminationGracePeriodSeconds = %v, want 5", ps.TerminationGracePeriodSeconds)
@@ -529,15 +525,50 @@ func TestBuildPodSpec_LayersOnAuthoredFields(t *testing.T) {
 		t.Errorf("Affinity/RestartPolicy set without input: %v / %q", ps.Affinity, ps.RestartPolicy)
 	}
 
-	defaulted, err := buildPodSpec(podSpecInput{DefaultServiceAccountName: "api", MainContainer: main})
-	if err != nil {
-		t.Fatalf("buildPodSpec (defaulted): %v", err)
-	}
-	if defaulted.ServiceAccountName != "api" {
-		t.Errorf("ServiceAccountName = %q, want default api", defaulted.ServiceAccountName)
-	}
-	if _, err := buildPodSpec(podSpecInput{DefaultServiceAccountName: "api"}); err == nil {
+	if _, err := buildPodSpec(podSpecInput{}); err == nil {
 		t.Error("buildPodSpec without a main container succeeded, want error")
+	}
+}
+
+// TestBuildPodSpec_AutomountDefault: no kind generates a ServiceAccount
+// (go-kure/launcher#702), so a pod without serviceAccountName runs as the
+// namespace's `default` account and keeps its token unmounted unless
+// automountServiceAccountToken is authored. Beside an authored account the
+// field stays as authored, unset included.
+func TestBuildPodSpec_AutomountDefault(t *testing.T) {
+	cases := []struct {
+		name      string
+		props     map[string]any
+		wantSA    string
+		wantMount *bool
+	}{
+		{"nothing authored", map[string]any{}, "", boolp(false)},
+		{"automount authored true", map[string]any{"automountServiceAccountToken": true}, "", boolp(true)},
+		{"automount authored false", map[string]any{"automountServiceAccountToken": false}, "", boolp(false)},
+		{"account authored", map[string]any{"serviceAccountName": "custom-sa"}, "custom-sa", nil},
+		{"account and automount authored", map[string]any{"serviceAccountName": "custom-sa", "automountServiceAccountToken": true}, "custom-sa", boolp(true)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := parsePodSpec(tc.props, false)
+			if err != nil {
+				t.Fatalf("parsePodSpec: %v", err)
+			}
+			main, err := buildMainContainer("api", mainContainerInput{Image: "ghcr.io/org/api:v1"})
+			if err != nil {
+				t.Fatalf("buildMainContainer: %v", err)
+			}
+			ps, err := buildPodSpec(podSpecInput{Config: cfg, MainContainer: main})
+			if err != nil {
+				t.Fatalf("buildPodSpec: %v", err)
+			}
+			if ps.ServiceAccountName != tc.wantSA {
+				t.Errorf("ServiceAccountName = %q, want %q", ps.ServiceAccountName, tc.wantSA)
+			}
+			if !reflect.DeepEqual(ps.AutomountServiceAccountToken, tc.wantMount) {
+				t.Errorf("AutomountServiceAccountToken = %v, want %v", ps.AutomountServiceAccountToken, tc.wantMount)
+			}
+		})
 	}
 }
 
@@ -566,7 +597,7 @@ func TestBuildPodSpec_ContainerOSFields(t *testing.T) {
 			if err != nil {
 				t.Fatalf("buildMainContainer: %v", err)
 			}
-			_, err = buildPodSpec(podSpecInput{Config: cfg, DefaultServiceAccountName: "api", MainContainer: main})
+			_, err = buildPodSpec(podSpecInput{Config: cfg, MainContainer: main})
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("buildPodSpec: unexpected error %v", err)

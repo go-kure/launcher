@@ -85,33 +85,48 @@ func hasServiceAccount(objects []*client.Object) bool {
 	return false
 }
 
-// TestWorkloadKinds_DefaultServiceAccount pins the pre-existing behaviour:
-// without an authored serviceAccountName every kind emits its per-component
-// ServiceAccount and the pod template runs as it.
+// TestWorkloadKinds_DefaultServiceAccount: without an authored
+// serviceAccountName the role kinds (webservice, worker) keep their
+// per-component ServiceAccount, emitted by a `serviceaccount` member, and the
+// pod runs as it. The pod kinds generate none (go-kure/launcher#702): the pod
+// names no account and its token stays unmounted, and the namer reports a
+// config that runs pods under no account of its own.
 func TestWorkloadKinds_DefaultServiceAccount(t *testing.T) {
 	for _, k := range workloadKinds {
 		t.Run(k.name, func(t *testing.T) {
-			objects := generateKind(t, k.handler, k.name, k.props)
-			if !hasServiceAccount(objects) {
-				t.Error("expected a generated ServiceAccount when serviceAccountName is not authored")
+			role := k.name == "webservice" || k.name == "worker"
+			wantSA := ""
+			if role {
+				wantSA = "app"
 			}
-			if got := podTemplateSpec(t, objects).ServiceAccountName; got != "app" {
-				t.Errorf("pod ServiceAccountName = %q, want app", got)
+			objects := generateKind(t, k.handler, k.name, k.props)
+			if got := hasServiceAccount(objects); got != role {
+				t.Errorf("ServiceAccount generated = %v, want %v", got, role)
+			}
+			ps := podTemplateSpec(t, objects)
+			if ps.ServiceAccountName != wantSA {
+				t.Errorf("pod ServiceAccountName = %q, want %q", ps.ServiceAccountName, wantSA)
+			}
+			if role && ps.AutomountServiceAccountToken != nil {
+				t.Errorf("pod AutomountServiceAccountToken = %v, want unset beside the role's account", *ps.AutomountServiceAccountToken)
+			}
+			if !role && (ps.AutomountServiceAccountToken == nil || *ps.AutomountServiceAccountToken) {
+				t.Errorf("pod AutomountServiceAccountToken = %v, want false", ps.AutomountServiceAccountToken)
 			}
 			namer, ok := objects2Config(t, k.handler, k.name, k.props).(oam.ServiceAccountNamer)
 			if !ok {
 				t.Fatal("config does not implement oam.ServiceAccountNamer")
 			}
-			if got := namer.ServiceAccountName(); got != "app" {
-				t.Errorf("ServiceAccountName() = %q, want app", got)
+			if got, pods := namer.ServiceAccountName(); got != wantSA || !pods {
+				t.Errorf("ServiceAccountName() = (%q, %v), want (%q, true)", got, pods, wantSA)
 			}
 		})
 	}
 }
 
-// TestWorkloadKinds_AuthoredServiceAccount: an authored serviceAccountName is
-// behaviour-changing — the per-component ServiceAccount is no longer
-// generated, the pod template runs as the authored account, and the
+// TestWorkloadKinds_AuthoredServiceAccount: with an authored
+// serviceAccountName no kind generates a ServiceAccount (a role kind no
+// longer emits its member), the pod template runs as the authored account, and the
 // oam.ServiceAccountNamer contract (read by the rbac trait) reports it.
 func TestWorkloadKinds_AuthoredServiceAccount(t *testing.T) {
 	for _, k := range workloadKinds {
@@ -125,7 +140,7 @@ func TestWorkloadKinds_AuthoredServiceAccount(t *testing.T) {
 				t.Errorf("pod ServiceAccountName = %q, want shared-sa", got)
 			}
 			namer := objects2Config(t, k.handler, k.name, props).(oam.ServiceAccountNamer)
-			if got := namer.ServiceAccountName(); got != "shared-sa" {
+			if got, _ := namer.ServiceAccountName(); got != "shared-sa" {
 				t.Errorf("ServiceAccountName() = %q, want shared-sa", got)
 			}
 		})

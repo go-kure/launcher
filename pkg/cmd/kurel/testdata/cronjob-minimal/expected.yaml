@@ -17,6 +17,7 @@ spec:
           labels:
             app: cleanup
         spec:
+          automountServiceAccountToken: false
           containers:
           - image: ghcr.io/example/cleanup:v1.0.0
             name: cleanup
@@ -27,15 +28,5 @@ spec:
                 cpu: 100m
                 memory: 128Mi
           restartPolicy: OnFailure
-          serviceAccountName: cleanup
   schedule: 0 2 * * *
   successfulJobsHistoryLimit: 3
----
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: cleanup
-  name: cleanup
-  namespace: default

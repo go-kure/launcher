@@ -56,7 +56,7 @@ preflight reject every valid use of the trait.
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `certificate` | cert-manager Certificate | `secretName`, `dnsNames[]`, `duration`, `renewBefore`, `privateKey` (`algorithm`/`size`/`encoding`/`rotationPolicy`) (issuer from ClusterProfile) |
-| `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide`. The binding subject is the component's effective ServiceAccount via `oam.ServiceAccountNamer` (an authored `serviceAccountName`, else the per-component account); Role/binding object names stay component-derived. |
+| `rbac` | Role/RoleBinding (+ClusterRole/Binding) | `rules[]` (`apiGroups`/`resources`/`verbs`), `clusterWide`. The binding subject is the account the component's pods run as, via `oam.ServiceAccountNamer`: an authored `serviceAccountName`, or a `webservice`/`worker`'s generated account. A pod kind (`deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) without `serviceAccountName` generates no account (go-kure/launcher#702), so `rbac` on it is refused (`rbac: component "x" runs as no ServiceAccount of its own; set serviceAccountName to the existing ServiceAccount the rules are granted to`) rather than bound to an account that does not exist. A component that runs no pods keeps the component name as the subject. Role/binding object names stay component-derived. |
 | `external-secret` | ESO ExternalSecret (+ optional envFrom / volume mount) | `secretName`, `data[]`/`dataFrom[]`, `refreshInterval`, `envFrom`, `mountPath` (store from ClusterProfile or `provider`) |
 | `security-context` | (modifies PodSpec) | `psaLevel` (`restricted`\|`baseline`\|`privileged`), optional: `runAsNonRoot`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`, `runAsUser`, `runAsGroup`, `fsGroup`. On a pod whose component set `os.name: windows` only the Windows-legal subset is written (see below). |
 
@@ -708,9 +708,10 @@ sub-application decorated by `prune-protection` or `force-replace` attributed to
 are deliberately not forwarded: synthesis runs before the engine decorates a sub-application, and
 forwarding them would make every decorated component look like a router. The `ServiceAccountNamer` forward is what keeps the
 `rbac` row above true once a second trait is present: without it a workload
-that authored `serviceAccountName` would stop reporting its account as soon as
-any trait wrapped it, and `rbac` would silently bind the per-component name
-instead. The `nonRWXClaimer` forward does the same for the `scaler` row: a
+that authored `serviceAccountName` would stop reporting its account, and that
+it runs pods, as soon as any trait wrapped it, and `rbac` would silently bind
+the component name instead. A config that is not a `ServiceAccountNamer`
+forwards `("", false)`: no account, and no pods. The `nonRWXClaimer` forward does the same for the `scaler` row: a
 decorating trait declared before `scaler` must not hide the claim that caps
 `maxReplicas` at 1. The `serviceRoutingTargeter` forward keeps a decorated `service`
 component's synthesized ingress allow on its `selector` pods rather than on the component

@@ -61,15 +61,15 @@ reads it.
 |--------|----------|---------|
 | `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. Lowered to a same-name `deployment`, `service` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WebserviceRule`) — see below. |
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). Lowered to a same-name `deployment` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WorkerRule`) — see below. |
-| `statefulset` | StatefulSet, SA (+PVC) | Stateful workload with `volumeClaimTemplates`; `serviceName` names a governing `service` authored beside it. Emits no Service (go-kure/launcher#690). |
-| `daemonset` | DaemonSet, SA (+PVC) | Per-node daemon; honors `tolerations`. Emits no Service (go-kure/launcher#690). |
-| `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
+| `statefulset` | StatefulSet | Stateful workload with `volumeClaimTemplates`; `serviceName` names a governing `service` authored beside it. Emits no Service (go-kure/launcher#690). |
+| `daemonset` | DaemonSet | Per-node daemon; honors `tolerations`. Emits no Service (go-kure/launcher#690). |
+| `deployment` | Deployment | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
 | `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`, `clusterIP: None` for a headless one. Emits nothing else — see below. |
 | `serviceaccount` | ServiceAccount | Kind-named ServiceAccount: `automountServiceAccountToken`, `imagePullSecrets`. A workload names it with `serviceAccountName` — see below. |
 | `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
 | `configmap` | ConfigMap | Kind-named ConfigMap: `data`, `binaryData`, `immutable`. A workload reads it through a `configMap` volume or `envFrom` — see below. |
-| `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
-| `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
+| `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
+| `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
 | `helmrelease` | HelmRelease (+values ConfigMap) | Kind-named: the full Flux `HelmReleaseSpec` plus `valuesMode`, against an existing source. |
 | `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. What `helm` lowers to under `delivery: template`, authorable directly — see below. |
@@ -88,8 +88,12 @@ reads it.
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. |
 
-The seven workload kinds emit their per-component ServiceAccount only when the
-component does not author `serviceAccountName` (see "Pod-level properties" below).
+Only the two role kinds, `webservice` and `worker`, emit a per-component
+ServiceAccount, and only when the component does not author
+`serviceAccountName`. The five pod kinds (`deployment`, `statefulset`,
+`daemonset`, `job`, `cronjob`) emit no ServiceAccount and no claim of their own
+(go-kure/launcher#702). See "Pod-level properties" and "Referencing an existing
+claim" below.
 
 ## Common config
 
@@ -680,19 +684,15 @@ malformed input; an absent `accessModes` key still defaults to
 malformed; `ReadWriteOncePod`
 combined with any other access mode is rejected outright — real Kubernetes
 requires it be the claim's only mode; the same parser
-backs `volumeClaimTemplates.accessModes` below; the generated
-`PersistentVolumeClaim` object's own Kubernetes name is the component's
-`<app.Name>-<pod-local volume name>`, not the bare pod-local name — two
+backs `volumeClaimTemplates.accessModes` below; on `webservice` and
+`worker`, the claim a `pvc` volume describes is named
+`<component name>-<pod-local volume name>`, not the bare pod-local name — two
 components in the same namespace that both author a `pvc` volume named
 `data` would otherwise emit two colliding `PersistentVolumeClaim/data`
 objects; the pod-local `Volume.Name` and its `VolumeMount` reference stay
-unqualified, only the PVC object's name and the matching
-`Volume.PersistentVolumeClaim.ClaimName` are qualified (`qualifyPVCNames` in
-`common.go`, called once per kind's `Generate()`) — qualification is keyed
-off the stable pod-local `Volume.Name` rather than the PVC's own (mutable)
-object name, so a second `Generate()` call on the same component instance
-reproduces the same qualified name instead of re-qualifying an
-already-qualified one (e.g. `app-data` becoming `app-app-data`); the join
+unqualified, only the claim's name and the matching
+`Volume.PersistentVolumeClaim.ClaimName` are qualified (`roleClaims` in
+`role_members.go`, once, when the rule lowers the component); the join
 itself escapes interior hyphens in each half (`escapeForPVCQualification`)
 before concatenating, since plain `<appName>-<localName>` string
 concatenation is not collision-free when either half itself contains a
@@ -817,21 +817,38 @@ there, before this check.
 
 A `pvc` volume with `claimName` mounts an existing claim instead of generating
 one (go-kure/launcher#702). The claim usually comes from a
-`persistentvolumeclaim` component, but it can be any claim in the namespace.
-The volume generates no object, and its claim name is used exactly as written:
-it is not qualified with the component name the way a generated claim is.
+`persistentvolumeclaim` component or a `pvc` trait, but it can be any claim in
+the namespace. The volume generates no object, and its claim name is used
+exactly as written: it is not qualified with the component name the way a
+role kind's claim is.
+
+**On the five pod kinds `claimName` is required.** `deployment`,
+`statefulset`, `daemonset`, `job` and `cronjob` generate no claim, so a `pvc`
+volume without `claimName` is refused (`volume "data": a pvc volume must set
+claimName to an existing claim; the component generates none, so declare it
+with a persistentvolumeclaim component or a pvc trait`). This is a breaking
+pre-GA format change. To migrate, move the volume's `size`, `storageClass`,
+`accessModes` and `volumeMode` onto a `persistentvolumeclaim` component (or a
+`pvc` trait), and reference it from the volume with `claimName`, keeping
+`accessModes` on the volume. The environment's storage-size limit and
+default now apply to that claim, not to the volume.
+
+`webservice` and `worker` still accept a `pvc` volume that describes its
+claim. The rule turns each one into a synthesized `pvc` trait on its
+`deployment` member, named `<component>-<volume>` as before, and rewrites the
+volume to reference it by `claimName`. The output is unchanged.
 
 - `claimName` must be a DNS-1123 subdomain.
 - `size` and `storageClass` are refused alongside it, because the referenced
   claim states its own (`volume "data": size cannot be set with claimName; …`).
 - `claimName: ""` is refused, not read as absent.
 - `accessModes` stays: it states the referenced claim's modes, defaulting to
-  `ReadWriteOnce` as on a generated claim. The workload still reads them. A
+  `ReadWriteOnce` as on a claim a role kind describes. The workload still reads them. A
   non-RWX claim still forces `strategy: Recreate` on a Deployment, still
   refuses `replicas` above 1, and still limits a `scaler` to one replica. To
   scale against a `ReadWriteMany` claim, state `accessModes: [ReadWriteMany]`
   on the volume.
-- `volumeMode`, `readOnly` and the mount keys work as on a generated claim.
+- `volumeMode`, `readOnly` and the mount keys work as on a described claim.
 
 Every workload kind that accepts `volumes` accepts `claimName`. `BuildPVC`
 refuses a `PVCConfig` that carries a `ClaimName`: there is no object to build.
@@ -907,7 +924,7 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|
-| `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account and the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). The generated account carries `automountServiceAccountToken: false`; an authored account is owned elsewhere and its own setting governs, so authors who want the pod not to mount a token set the pod-level `automountServiceAccountToken: false` explicitly — the handler does not inject it. | additive when unset |
+| `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account; on `webservice` and `worker` the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). Unset on a pod kind, the pod names no account (the namespace's `default`), and the kind sets the pod-level `automountServiceAccountToken: false` unless that is authored (go-kure/launcher#702); a role kind's generated account carries `automountServiceAccountToken: false` itself. An authored account is owned elsewhere and its own setting governs, so authors who want the pod not to mount a token set the pod-level `automountServiceAccountToken: false` explicitly — the handler does not inject it. | additive when unset |
 | `automountServiceAccountToken` | bool | Pod-level token automount override. | additive |
 | `terminationGracePeriodSeconds` | int ≥ 0 | Grace period before SIGKILL. | additive |
 | `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob and job only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it. Distinct from the JobSpec-level `activeDeadlineSeconds` below: this one bounds a single pod, that one the whole job. | additive |
@@ -928,31 +945,22 @@ controllers, on by default, derive them from
 differs, so authoring one can at best repeat the derived value), and
 `serviceAccount` (deprecated alias of `serviceAccountName`).
 
-Every kind config implements `oam.ServiceAccountNamer` (`pkg/oam/handler.go`),
-returning the authored `serviceAccountName` or, when unset, the component name
-the generated ServiceAccount carries. The `rbac` trait
+Every pod kind config implements `oam.ServiceAccountNamer` (`pkg/oam/handler.go`),
+returning `(name, runsPods)`: the authored `serviceAccountName` (or `""`) and
+`true`. A role rule hands its `deployment` member `serviceAccountName:
+<component name>` unless one is authored, so a `webservice` or `worker` answers
+the account its `serviceaccount` member generates. The `rbac` trait
 (`pkg/oam/builtin/traits/rbac.go`) binds its RoleBinding/ClusterRoleBinding
-subject to that name, so binding follows the authored account; the Role and
-binding objects keep their component-derived names.
+subject to that name, so binding follows the account the pods run as; the Role
+and binding objects keep their component-derived names. A pod-running
+component with no account name is refused by `rbac` rather than bound to an
+account that does not exist; see the traits README.
 
-The unauthored fallback is the kind config's own `Name`, set by each handler's
-`ToApplicationConfig` from `component.Name`. On every supported path that is
-the same string as the `stack.Application`'s name, because the transform builds
-the Application from that same component — but that agreement is an invariant
-of the call site, not of the types, so `Generate` does not re-derive the name
-from `app.Name` alongside it. Both the generated ServiceAccount's name and the
-pod's `serviceAccountName` are resolved by asking the `oam.ServiceAccountNamer`
-implementation itself (`generationServiceAccountName` in `podspec.go`), which
-is the same method the `rbac` trait reads. The account a RoleBinding names and
-the account the pods run as are therefore one value by construction, and cannot
-drift apart if the two names ever differ. The shared kind test asserts the three
-agree on every kind, including against a deliberately mismatched Application
-name.
-
-A config built directly rather than through `ToApplicationConfig` carries no
-`Name`; its namer then returns `""` — the "fall back to the component name"
-convention `decoratorBase.ServiceAccountName` documents and the `rbac` trait
-implements — and the Application's own name stands in.
+The pod's `serviceAccountName` is the namer's own answer, so the account a
+RoleBinding names and the account the pods run as are one value by
+construction. The shared kind test asserts they agree on every kind, including
+against a deliberately mismatched Application name, and that a role kind's
+generated ServiceAccount carries the same name.
 
 `securityContext.privileged: true` is rejected unless the environment policy's
 `AllowPrivileged()` allows it (`enforce.go`'s `enforcePrivileged`).
@@ -1267,7 +1275,7 @@ so it cannot account for later HPA scaling. The `scaler` trait covers
 that gap itself: `deployment` reports its first non-RWX claim to the trait
 (`NonRWXClaim`), and the trait refuses an effective `maxReplicas` above 1 when
 one is present (see "Non-RWX volumes"). `statefulset` is still excluded: besides
-standalone claims from `volumes`, emitted as PVCs as on the other kinds, it has
+claims referenced from `volumes`, as on the other kinds, it has
 per-pod claims from `volumeClaimTemplates`, so the question differs.
 
 **`deployment` reports its pod template labels** (`PodTemplateLabels`), so a
@@ -1572,9 +1580,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     in the same place, so every golden builds byte-identically. One consequence
     for a library caller: a registry that lowers `webservice` or `worker` must
     register a `serviceaccount` component handler too, or the build fails with
-    `member type "serviceaccount" has no component handler`. The claims a `pvc`
-    volume generates stay with the `deployment` member for now; moving them to
-    trait-generated claims is part of go-kure/launcher#702.
+    `member type "serviceaccount" has no component handler`.
+  - **Both rules turn each claim a `pvc` volume describes into a synthesized
+    `pvc` trait** on the `deployment` member (go-kure/launcher#702), named
+    `<component>-<volume>` as before, and rewrite the volume to reference it by
+    `claimName`, keeping `accessModes` so the non-RWX constraints still see it.
+    The claims are generated as before, after the component's own objects. A
+    registry that lowers `webservice` or `worker` must register the `pvc` trait
+    handler too.
   - **`webservice` is a component lowering rule, not a handler**
     (`WebserviceRule`, go-kure/launcher#280). It runs webservice's own parse,
     then re-expresses the component as a same-name sibling group (see `pkg/oam`
@@ -1719,10 +1732,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - `serviceaccount` publishes `automountServiceAccountToken` and
     `imagePullSecrets` (`[{name}]`). An unauthored
     `automountServiceAccountToken` stays unset, which Kubernetes reads as
-    true. The account a workload kind generates sets it to false, so a
+    true. The account a role kind generates sets it to false, so a
     `serviceaccount` replacing that account authors `false` to keep the same
     posture. A workload runs as it through `serviceAccountName`, which also
-    stops the workload from generating its own account.
+    stops a role kind from generating its own account.
   - `persistentvolumeclaim` publishes `size`, `storageClassName`,
     `accessModes` (default `[ReadWriteOnce]`) and `volumeMode`. The claim is
     built by the same `BuildPVC` as a `pvc` volume and the `pvc` trait, so the
@@ -1910,7 +1923,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   container ports (see "Main container ports"), and only then may a probe or
   hook name a port; no `sidecars` schema key (init containers only), matching
   `cronjob`.
-  It emits a `Job`, its per-component `ServiceAccount`, and any declared PVCs.
+  It emits a `Job` and nothing else (go-kure/launcher#702).
 
   The twelve JobSpec-level properties are the ones `cronjob` projects onto its
   job template, projected here onto `spec` directly. Every one is
@@ -2067,7 +2080,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   To opt in, add the **`force-replace` trait** (no properties) to the component.
   It stamps `kustomize.toolkit.fluxcd.io/force: enabled` on every object the
-  component emits — the Job and, when generated, its ServiceAccount — which kustomize-controller
+  component emits — the Job — which kustomize-controller
   reads as its apply `ForceSelector`: on an immutable-field error it deletes and
   recreates the object, so an update re-runs the Job, **stopping any run in
   progress**. The Job keeps the component's name, so the auto health check below
@@ -3195,8 +3208,9 @@ Custom component types implement `oam.ComponentHandler` (`CanHandle` +
 `ToApplicationConfig`) and are registered alongside the built-ins. Exported helpers:
 `ValidateImageRef` (image policy) and `BuildPVC` (PVC from a `PVCConfig`). A custom
 `Generate()` that builds standalone PVCs from a `PVCConfig` list should qualify their
-names the same way every built-in kind does — see `qualifyPVCNames` (unexported,
-`common.go`) — to avoid two components colliding on the same pod-local volume name.
+names with the component name the way the role kinds do — see `roleClaims`
+(unexported, `role_members.go`) — to avoid two components colliding on the same
+pod-local volume name.
 
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
 for the full type/field reference, the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)

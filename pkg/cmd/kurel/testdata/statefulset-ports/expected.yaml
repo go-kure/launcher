@@ -16,6 +16,7 @@ spec:
       labels:
         app: db
     spec:
+      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/postgres:v15.0
         livenessProbe:
@@ -42,7 +43,6 @@ spec:
         volumeMounts:
         - mountPath: /var/lib/postgresql/data
           name: data
-      serviceAccountName: db
   updateStrategy: {}
   volumeClaimTemplates:
   - metadata:
@@ -54,12 +54,3 @@ spec:
         requests:
           storage: 10Gi
     status: {}
----
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: db
-  name: db
-  namespace: default

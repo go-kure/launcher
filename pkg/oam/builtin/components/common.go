@@ -2789,6 +2789,31 @@ func parseClaimReference(m map[string]any, volName, claimName string, volumeMode
 	}, nil
 }
 
+// parsePodVolumes is parseVolumes for a pod kind (deployment, statefulset,
+// daemonset, job, cronjob), which generates no claim of its own
+// (go-kure/launcher#702): every pvc volume must reference an existing claim by
+// claimName. The role rules call parseVolumes itself and route the claims their
+// pvc volumes describe through synthesized `pvc` traits (roleClaims). The check
+// runs first, so a volume describing a claim to generate is refused for that
+// rather than for a missing size; parseVolumes still reports every malformed
+// shape this lenient scan skips.
+func parsePodVolumes(props map[string]any) (ParsedVolumes, error) {
+	if v, present := authoredValue(props, "volumes"); present {
+		vols, _ := v.([]any)
+		for _, el := range vols {
+			m, ok := nullElem(el).(map[string]any)
+			if !ok || m["type"] != "pvc" {
+				continue
+			}
+			if _, ref := authoredValue(m, "claimName"); !ref {
+				name, _ := m["name"].(string)
+				return ParsedVolumes{}, errors.Errorf("volume %q: a pvc volume must set claimName to an existing claim; the component generates none, so declare it with a persistentvolumeclaim component or a pvc trait", name)
+			}
+		}
+	}
+	return parseVolumes(props)
+}
+
 var validAccessModes = map[string]bool{
 	string(corev1.ReadWriteOnce):    true,
 	string(corev1.ReadOnlyMany):     true,
@@ -4710,18 +4735,6 @@ func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error)
 	return container, nil
 }
 
-// createServiceAccount creates a ServiceAccount with automountServiceAccountToken disabled
-// (PSA restricted profile compliance). Annotations are cleared unconditionally: kure's
-// release-1 builder contract stamps none (go-kure/launcher#361, so this is now a no-op),
-// but the field stays at a known value whatever a future constructor does.
-func createServiceAccount(name, namespace string, labels map[string]string) *corev1.ServiceAccount {
-	sa := kubernetes.CreateServiceAccount(name, namespace)
-	sa.Labels = maps.Clone(labels)
-	sa.Annotations = nil
-	kubernetes.SetServiceAccountAutomountToken(sa, false)
-	return sa
-}
-
 // VolumeClaimTemplate represents a PVC template for a StatefulSet.
 // StorageClass has no explicit-empty-string escape here, unlike PVCConfig's
 // StorageClassExplicitEmpty: parseVolumeClaimTemplates reads it with
@@ -5003,90 +5016,17 @@ func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev
 	return claim, nil
 }
 
-// qualifyPVCNames rewrites the Kubernetes object name of every generated PVC
-// to "<appName>-<pod-local name>", so two components in the same Application
-// (or two Applications in the same namespace, e.g. two CronJobs each
-// authoring a "data" volume) that happen to choose the same pod-local volume
-// name don't collide on a single PersistentVolumeClaim object. Only the PVC's
-// own object name and the matching Volume.PersistentVolumeClaim.ClaimName
-// reference are qualified — Volume.Name itself, and every VolumeMount that
-// references it, are left untouched, since those only need to resolve within
-// this one pod spec and qualifying them would just rename the mount for no
-// reason.
 // escapeForPVCQualification doubles every hyphen in s, so a single
 // unescaped "-" can serve as an unambiguous join delimiter between two
-// escaped components. Without this, plain "<appName>-<localName>"
-// concatenation is not collision-free: appName "a-b" with localName "data"
-// and appName "a" with localName "b-data" both produce "a-b-data". Escaping
-// first makes the two encoded halves distinguishable from any "-" that was
-// already part of either input — DNS-1123 names never start or end with
-// "-", so doubling interior hyphens cannot introduce a leading/trailing "-"
-// either.
+// escaped components. roleClaims names the claim a role component's pvc volume
+// describes "<escaped component>-<escaped volume>", so two components that
+// choose the same pod-local volume name don't collide on one claim. Without
+// the escape, plain "<component>-<volume>" concatenation is not
+// collision-free: component "a-b" with volume "data" and component "a" with
+// volume "b-data" both produce "a-b-data". Escaping first makes the two
+// encoded halves distinguishable from any "-" that was already part of either
+// input — DNS-1123 names never start or end with "-", so doubling interior
+// hyphens cannot introduce a leading/trailing "-" either.
 func escapeForPVCQualification(s string) string {
 	return strings.ReplaceAll(s, "-", "--")
-}
-
-func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) ([]PVCConfig, error) {
-	if len(pvcs) == 0 {
-		return pvcs, nil
-	}
-	// Volume.Name is the pod-local volume name and is never rewritten by
-	// this function — only the PVC's own object Name and the matching
-	// Volume.PersistentVolumeClaim.ClaimName are. It is therefore the
-	// stable qualification source even if this function runs more than
-	// once against the same component (e.g. Generate called a second
-	// time): re-deriving "<appName>-<pod-local name>" from Volume.Name
-	// each time keeps the result idempotent, instead of qualifying an
-	// already-qualified PVCConfig.Name/ClaimName left over from a prior
-	// run and doubling the prefix (e.g. "app-data" -> "app-app-data").
-	//
-	// A claimName reference names an existing claim, which is not this
-	// component's to rename: it is copied as is, and its pod volume (keyed by
-	// the pod-local name it keeps in Name) is skipped in both passes, so a
-	// referenced claim sharing a name with a generated one is never rewritten.
-	referenceVolumes := make(map[string]bool)
-	for _, pvc := range pvcs {
-		if pvc.ClaimName != "" {
-			referenceVolumes[pvc.Name] = true
-		}
-	}
-	localNameByClaimName := make(map[string]string, len(volumes))
-	for i := range volumes {
-		claim := volumes[i].PersistentVolumeClaim
-		if claim == nil || referenceVolumes[volumes[i].Name] {
-			continue
-		}
-		localNameByClaimName[claim.ClaimName] = volumes[i].Name
-	}
-	qualifiedNames := make(map[string]string, len(pvcs))
-	out := make([]PVCConfig, len(pvcs))
-	for i, pvc := range pvcs {
-		if pvc.ClaimName != "" {
-			out[i] = pvc
-			continue
-		}
-		localName, ok := localNameByClaimName[pvc.Name]
-		if !ok {
-			localName = pvc.Name
-		}
-		qualified := escapeForPVCQualification(appName) + "-" + escapeForPVCQualification(localName)
-		// Validate the qualified PVC name is a valid DNS-1123 subdomain.
-		// Kubernetes PersistentVolumeClaim names must be valid DNS subdomains.
-		if errs := validation.IsDNS1123Subdomain(qualified); len(errs) > 0 {
-			return nil, errors.Errorf("PVC name %q is not a valid DNS-1123 subdomain: %s", qualified, strings.Join(errs, "; "))
-		}
-		out[i] = pvc
-		out[i].Name = qualified
-		qualifiedNames[pvc.Name] = qualified
-	}
-	for i := range volumes {
-		claim := volumes[i].PersistentVolumeClaim
-		if claim == nil || referenceVolumes[volumes[i].Name] {
-			continue
-		}
-		if qualified, ok := qualifiedNames[claim.ClaimName]; ok {
-			claim.ClaimName = qualified
-		}
-	}
-	return out, nil
 }

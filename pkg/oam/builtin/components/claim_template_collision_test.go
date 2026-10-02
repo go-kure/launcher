@@ -27,7 +27,7 @@ func TestStatefulset_ClaimTemplateCollisions(t *testing.T) {
 		}, `volume "data" has the same name as a claim template`},
 		{"claim template and a pvc volume", map[string]any{
 			"volumeClaimTemplates": []any{data},
-			"volumes":              []any{map[string]any{"name": "data", "type": "pvc", "size": "1Gi", "mountPath": "/shared", "accessModes": []any{"ReadWriteMany"}}},
+			"volumes":              []any{map[string]any{"name": "data", "type": "pvc", "claimName": "shared-data", "mountPath": "/shared", "accessModes": []any{"ReadWriteMany"}}},
 		}, `volume "data" has the same name as a claim template`},
 		{"two claim templates with one mountPath", map[string]any{
 			"volumeClaimTemplates": []any{data, map[string]any{"name": "logs", "size": "1Gi", "mountPath": "/data"}},

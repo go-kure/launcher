@@ -40,9 +40,10 @@ component-position ones (`builtinComponentLoweringRules()` — `worker`,
 synthesized `topology-spread` trait. `webservice` lowers to a same-name `deployment`
 and `service` pair, deployed as one component, with the same `topology-spread`
 treatment on the `deployment`. Unless `serviceAccountName` is authored, both also
-emit a same-name `serviceaccount` member for the component's ServiceAccount
-(go-kure/launcher#702), so `builtinComponentHandlers()` must register
-`serviceaccount`. `postgresql` lowers to a `cnpg-cluster`
+emit a same-name `serviceaccount` member for the component's ServiceAccount, and
+turn each claim a `pvc` volume describes into a synthesized `pvc` trait on the
+`deployment` member (go-kure/launcher#702), so `builtinComponentHandlers()` must
+register `serviceaccount` and the `pvc` trait handler must be registered. `postgresql` lowers to a `cnpg-cluster`
 (plus `cnpg-objectstore`, `cnpg-pooler` and one `cnpg-database` per database
 when authored) carrying the engine-only `cnpg-postgresql-defaults` trait, which
 is registered from `builtinEngineTraits()` via `RegisterEngineTrait`: only a rule
@@ -91,7 +92,10 @@ kind components `serviceaccount`, `persistentvolumeclaim` and `configmap`
 build each one, and the `pvc-volume-claimname` fixture mounts a
 `persistentvolumeclaim` through a `pvc` volume's `claimName`. The
 `webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
-role components generate, byte-identical to before the `serviceaccount` member.
+role components generate, byte-identical to before the `serviceaccount` member
+and the synthesized `pvc` traits. The five pod kinds generate no ServiceAccount
+and no claim: their fixtures emit the workload alone, with
+`automountServiceAccountToken: false` on the pod when no account is authored.
 
 Because a lowering rule may claim types the parser would otherwise reject, `build`
 constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`

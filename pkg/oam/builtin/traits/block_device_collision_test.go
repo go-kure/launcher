@@ -23,7 +23,7 @@ func TestMountDecorators_RefuseAPathTakenByABlockDevice(t *testing.T) {
 		Properties: map[string]any{
 			"image": "ghcr.io/org/app:v1",
 			"volumes": []any{map[string]any{
-				"name": "disk", "type": "pvc", "size": "1Gi",
+				"name": "disk", "type": "pvc", "claimName": "disk",
 				"devicePath": "/dev/xvda", "volumeMode": "Block",
 			}},
 		},
@@ -63,7 +63,7 @@ func TestMountDecorators_RefuseAPathTakenByABlockDevice(t *testing.T) {
 // ValidateVolumeDevices rejects (go-kure/launcher#385).
 func TestMountDecorators_RefuseANameTakenByABlockDevice(t *testing.T) {
 	blockPVC := map[string]any{"volumes": []any{map[string]any{
-		"name": "disk", "type": "pvc", "size": "1Gi", "devicePath": "/dev/xvda", "volumeMode": "Block",
+		"name": "disk", "type": "pvc", "claimName": "disk", "devicePath": "/dev/xvda", "volumeMode": "Block",
 	}}}
 	type source struct {
 		kind    string

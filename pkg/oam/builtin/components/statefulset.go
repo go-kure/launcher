@@ -146,7 +146,7 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.VolumeClaimTemplates = vcts
 
-	parsed, err := parseVolumes(props)
+	parsed, err := parsePodVolumes(props)
 	if err != nil {
 		return nil, err
 	}
@@ -245,10 +245,9 @@ type StatefulsetConfig struct {
 }
 
 // ServiceAccountName implements oam.ServiceAccountNamer: the authored
-// serviceAccountName, else the per-component ServiceAccount named after the
-// component.
-func (c *StatefulsetConfig) ServiceAccountName() string {
-	return effectiveServiceAccountName(c.PodSpec, c.Name)
+// serviceAccountName, or "" when the pods run as no named account.
+func (c *StatefulsetConfig) ServiceAccountName() (string, bool) {
+	return c.PodSpec.ServiceAccountName, true
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -310,11 +309,6 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 			return err
 		}
 	}
-	for _, pvc := range c.PVCs {
-		if err := enforceMaxStorageSize(pvc.Size, p.MaxStorageSize()); err != nil {
-			return err
-		}
-	}
 	for _, vct := range c.VolumeClaimTemplates {
 		if err := enforceMaxStorageSize(vct.effectiveStorageRequest(), p.MaxStorageSize()); err != nil {
 			return err
@@ -324,45 +318,23 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 	return nil
 }
 
-// Generate creates a Kubernetes StatefulSet, its ServiceAccount, and any
-// standalone PVCs. The ServiceAccount is omitted when serviceAccountName was
-// authored. It emits no Service: ServiceName names one authored beside it. A
-// library caller may set ServiceName itself, so a non-empty one is held to the
-// Service-name rule here too.
+// Generate creates a Kubernetes StatefulSet, and nothing beside it: no
+// ServiceAccount and no standalone claim (go-kure/launcher#702). It emits no
+// Service either: ServiceName names one authored beside it. A library caller
+// may set ServiceName itself, so a non-empty one is held to the Service-name
+// rule here too.
 func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	if c.ServiceName != "" {
 		if err := validateServiceName("serviceName", c.ServiceName); err != nil {
 			return nil, err
 		}
 	}
-	var err error
-	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
-	if err != nil {
-		return nil, err
-	}
-
 	sts, err := c.createStatefulSet(app)
 	if err != nil {
 		return nil, err
 	}
 	stsObj := client.Object(sts)
-	objects := []*client.Object{&stsObj}
-	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
-		objects = append(objects, &saObj)
-	}
-	for _, pvc := range c.PVCs {
-		if pvc.ClaimName != "" {
-			continue // an existing claim, referenced by claimName
-		}
-		p, err := BuildPVC(pvc, app.Namespace, appLabels(app.Name))
-		if err != nil {
-			return nil, err
-		}
-		pObj := client.Object(p)
-		objects = append(objects, &pObj)
-	}
-	return objects, nil
+	return []*client.Object{&stsObj}, nil
 }
 
 // claimTemplateMountsAndDevices splits the claim templates into the main
@@ -455,13 +427,12 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	c.StatefulSetSpec.apply(sts)
 
 	podSpec, err := buildPodSpec(podSpecInput{
-		Config:                    c.PodSpec,
-		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),
-		MainContainer:             container,
-		InitContainers:            c.InitContainers,
-		Sidecars:                  c.Sidecars,
-		Volumes:                   c.Volumes,
-		Affinity:                  buildAffinity(c.Affinity, appLabels(app.Name)),
+		Config:         c.PodSpec,
+		MainContainer:  container,
+		InitContainers: c.InitContainers,
+		Sidecars:       c.Sidecars,
+		Volumes:        c.Volumes,
+		Affinity:       buildAffinity(c.Affinity, appLabels(app.Name)),
 	})
 	if err != nil {
 		return nil, err
