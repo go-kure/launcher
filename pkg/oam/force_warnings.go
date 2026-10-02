@@ -18,10 +18,143 @@ const (
 
 // forcedVolume is one force-applied PersistentVolume or PersistentVolumeClaim, with
 // the first application that generates it and every reason it is forced.
+// annotated is set by any copy Flux would apply with the force key enabled;
+// generatedAnnotated by one that already carried it as generated, so a force key
+// only a bundle's patches add is named as theirs.
 type forcedVolume struct {
-	kind, name        string
-	app               GeneratedApplication
-	annotated, forced bool
+	kind, name                            string
+	app                                   GeneratedApplication
+	annotated, generatedAnnotated, forced bool
+}
+
+// forceScan collects the force-applied volumes of a document in generation order.
+type forceScan struct {
+	order []objectIdentity
+	found map[objectIdentity]*forcedVolume
+}
+
+// add records one copy of a volume: app generates it, annotated if Flux applies it
+// with the force key enabled, generatedAnnotated if it was generated so.
+func (s *forceScan) add(id objectIdentity, app GeneratedApplication, annotated, generatedAnnotated bool) {
+	v, seen := s.found[id]
+	if !seen {
+		v = &forcedVolume{kind: id.kind, name: qualifiedName(id.namespace, id.name), app: app}
+		s.found[id] = v
+		s.order = append(s.order, id)
+	}
+	v.annotated = v.annotated || annotated
+	v.generatedAnnotated = v.generatedAnnotated || generatedAnnotated
+	v.forced = v.forced || app.Forced
+}
+
+// volumeIdentity returns obj's identity if it is a core PersistentVolume or
+// PersistentVolumeClaim.
+func volumeIdentity(obj client.Object) (objectIdentity, bool) {
+	gvk := obj.GetObjectKind().GroupVersionKind()
+	if gvk.Group != "" || (gvk.Kind != "PersistentVolume" && gvk.Kind != "PersistentVolumeClaim") {
+		return objectIdentity{}, false
+	}
+	return objectIdentity{kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}, true
+}
+
+// generatedObjects returns app's objects, nil entries and nil objects skipped.
+func generatedObjects(app GeneratedApplication) []*client.Object {
+	var out []*client.Object
+	for _, p := range app.Objects {
+		if p != nil && !isNullValue(*p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// addUnpatched records the volumes of apps as generated.
+func (s *forceScan) addUnpatched(apps []GeneratedApplication) {
+	for _, app := range apps {
+		for _, p := range generatedObjects(app) {
+			for _, obj := range appliedObjects(*p) {
+				if id, ok := volumeIdentity(obj); ok {
+					selected := forceSelected(obj)
+					s.add(id, app, selected, selected)
+				}
+			}
+		}
+	}
+}
+
+// addPatched records the volumes of one leaf bundle's apps as Flux applies them
+// after the bundle's patches: each volume the build keeps, named by the first
+// application that generates it, annotated as its patched copies are. A patch
+// that deletes a volume drops it; one the build holds that no application
+// generated as such (a patch renamed it) is named by the bundle's first
+// application, and its force key is not named as the patches' since its
+// generated copy is unknown. A bundle with no volume is not built: a patch adds
+// no object.
+func (s *forceScan) addPatched(apps []GeneratedApplication) error {
+	var objects []*client.Object
+	var order []objectIdentity
+	producer := map[objectIdentity]GeneratedApplication{}
+	generated := map[objectIdentity]bool{}
+	for _, app := range apps {
+		for _, p := range generatedObjects(app) {
+			objects = append(objects, p)
+			for _, obj := range appliedObjects(*p) {
+				id, ok := volumeIdentity(obj)
+				if !ok {
+					continue
+				}
+				if _, seen := producer[id]; !seen {
+					producer[id] = app
+					order = append(order, id)
+				}
+				generated[id] = generated[id] || forceSelected(obj)
+			}
+		}
+	}
+	if len(order) == 0 {
+		return nil
+	}
+	built, err := applyBundlePatches(objects, apps[0].Patches)
+	if err != nil {
+		return err
+	}
+	var builtOrder []objectIdentity
+	patched := map[objectIdentity]bool{}
+	for _, obj := range built {
+		id, ok := volumeIdentity(obj)
+		if !ok {
+			continue
+		}
+		if _, seen := patched[id]; !seen {
+			builtOrder = append(builtOrder, id)
+		}
+		patched[id] = patched[id] || forceSelected(obj)
+	}
+	for _, id := range order {
+		if selected, kept := patched[id]; kept {
+			s.add(id, producer[id], selected, selected && generated[id])
+		}
+	}
+	for _, id := range builtOrder {
+		if _, ok := producer[id]; !ok {
+			s.add(id, apps[0], patched[id], patched[id])
+		}
+	}
+	return nil
+}
+
+// bundleEnd returns the end of the run of apps, from start, that one leaf bundle
+// generated: the applications GenerateApplications generated from one bundle, or
+// a single application a caller built.
+func bundleEnd(apps []GeneratedApplication, start int) int {
+	end := start + 1
+	if apps[start].bundle == nil {
+		return end
+	}
+	for end < len(apps) && apps[end].bundle == apps[start].bundle {
+		end++
+	}
+	return end
 }
 
 // WarnForcedVolumes emits one warning through the warning handler (SetWarningHandler)
@@ -40,40 +173,42 @@ type forcedVolume struct {
 // object, keyed by API group, kind, namespace and name, is warned once, naming the
 // first application that generates it and every reason any copy of it is forced.
 //
+// A bundle's patches (GeneratedApplication.Patches, from the fluxcd-patches trait)
+// are applied first, as Flux applies its Kustomization's spec.patches: the objects
+// of a leaf bundle holding a volume are built with kustomize and the patched copies
+// are read (applyBundlePatches). A patch can add the force key, remove or disable
+// it, or delete the volume; a force key only patches add is named as theirs. A
+// patch set that does not build is warned once, naming the bundle's first
+// application and the build error, and that bundle's objects are read unpatched.
+// postBuild substitution and anything the cluster changes on apply are not
+// modelled.
+//
 // It warns and changes nothing: the force is the author's choice. A caller passes
-// GenerateApplications' result, after CheckInDocumentCollisions; the warnings follow
-// generation order. With no warning handler it does nothing. A nil entry, or a nil
-// object inside one, is skipped.
+// GenerateApplications' result, after CheckInDocumentCollisions; the volume warnings
+// follow generation order, after any patch build warning. An application a caller
+// built (not from GenerateApplications) is patched on its own. With no warning
+// handler it does nothing. A nil entry, or a nil object inside one, is skipped.
 func (t *Transformer) WarnForcedVolumes(apps []GeneratedApplication) {
 	if t.warnHandler == nil {
 		return
 	}
-	var order []objectIdentity
-	found := map[objectIdentity]*forcedVolume{}
-	for _, app := range apps {
-		for _, p := range app.Objects {
-			if p == nil || isNullValue(*p) {
-				continue
-			}
-			for _, obj := range appliedObjects(*p) {
-				gvk := obj.GetObjectKind().GroupVersionKind()
-				if gvk.Group != "" || (gvk.Kind != "PersistentVolume" && gvk.Kind != "PersistentVolumeClaim") {
-					continue
-				}
-				id := objectIdentity{kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}
-				v, seen := found[id]
-				if !seen {
-					v = &forcedVolume{kind: gvk.Kind, name: qualifiedName(obj.GetNamespace(), obj.GetName()), app: app}
-					found[id] = v
-					order = append(order, id)
-				}
-				v.annotated = v.annotated || forceSelected(obj)
-				v.forced = v.forced || app.Forced
-			}
+	scan := forceScan{found: map[objectIdentity]*forcedVolume{}}
+	for start := 0; start < len(apps); {
+		end := bundleEnd(apps, start)
+		bundle := apps[start:end]
+		start = end
+		if len(bundle[0].Patches) == 0 {
+			scan.addUnpatched(bundle)
+			continue
+		}
+		if err := scan.addPatched(bundle); err != nil {
+			t.warnHandler(fmt.Sprintf("the patches of the bundle of %s could not be applied, so its "+
+				"force-applied volumes are checked as generated, without them: %v", bundle[0], err))
+			scan.addUnpatched(bundle)
 		}
 	}
-	for _, id := range order {
-		if v := found[id]; v.annotated || v.forced {
+	for _, id := range scan.order {
+		if v := scan.found[id]; v.annotated || v.forced {
 			t.warnHandler(v.warning())
 		}
 	}
@@ -141,8 +276,11 @@ func listMembers(u *unstructured.Unstructured) []client.Object {
 
 func (v *forcedVolume) warning() string {
 	var reasons []string
-	if v.annotated {
+	switch {
+	case v.generatedAnnotated:
 		reasons = append(reasons, fluxForceAnnotation+": "+fluxForceAnnotationEnabled)
+	case v.annotated:
+		reasons = append(reasons, fluxForceAnnotation+": "+fluxForceAnnotationEnabled+", set by its bundle's patches")
 	}
 	if v.forced {
 		reasons = append(reasons, "its bundle's reconciliation policy sets force: true")

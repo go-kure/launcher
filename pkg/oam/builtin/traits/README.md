@@ -72,7 +72,7 @@ preflight reject every valid use of the trait.
 ### Operational (FluxCD)
 | `type` | Effect | Key properties |
 |--------|--------|----------------|
-| `fluxcd-patches` | Appends `Kustomization.spec.patches` | `patches[]` (`patch`, `target`) |
+| `fluxcd-patches` | Appends `Kustomization.spec.patches`; the force warning reads volumes after them (go-kure/launcher#728) | `patches[]` (`patch`, `target`) |
 | `fluxcd-postbuild` | Sets `Kustomization.spec.postBuild` | `substitute`, `substituteFrom[]` |
 | `prune-protection` | Adds `kustomize.toolkit.fluxcd.io/prune: disabled` | (no properties) |
 | `force-replace` | Adds `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a `job`'s pod template). Replacing a Job re-runs it and stops any run in progress. Replacing a PersistentVolumeClaim or PersistentVolume can lose its data, so each one annotated gets a build warning. Opt-in: without the trait launcher does not add the annotation. | (no properties) |
