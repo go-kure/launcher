@@ -1218,23 +1218,30 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 //
 // The bundle's order is final by then, so a decorator must leave its
 // applications exactly as they are. They are compared by pointer and position
-// rather than by count, so a removal followed by an append is caught too. The
+// rather than by count, so a removal followed by an append is caught too, and
+// by name: the automatic health check and NetworkPolicy synthesis have already
+// named their objects after the applications (go-kure/launcher#734). The
 // snapshot is a copy because a removal shifts the shared backing array in
 // place.
 func decorateSubApplications(decorations []subAppDecoration) error {
 	for _, d := range decorations {
 		for _, subApp := range d.subApps {
 			prev := slices.Clone(d.bundle.Applications)
+			prevNames := make([]string, len(prev))
+			for i, a := range prev {
+				prevNames[i] = a.Name
+			}
+			subAppName := subApp.Name
 			if err := d.handler.Apply(&d.trait, subApp, d.bundle); err != nil {
 				return &TransformError{
-					Message: fmt.Sprintf("component %q trait %q on sub-application %q", d.component, d.trait.Type, subApp.Name),
+					Message: fmt.Sprintf("component %q trait %q on sub-application %q", d.component, d.trait.Type, subAppName),
 					Cause:   err,
 				}
 			}
-			if !slices.Equal(prev, d.bundle.Applications) {
+			if !slices.Equal(prev, d.bundle.Applications) || !slices.EqualFunc(prev, prevNames, func(a *stack.Application, name string) bool { return a.Name == name }) {
 				return &TransformError{Message: fmt.Sprintf(
-					"component %q trait %q changed the bundle's applications while decorating sub-application %q; a SubApplicationDecorator must not add, remove, replace or reorder applications",
-					d.component, d.trait.Type, subApp.Name)}
+					"component %q trait %q changed the bundle's applications while decorating sub-application %q; a SubApplicationDecorator must not add, remove, replace, rename or reorder applications",
+					d.component, d.trait.Type, subAppName)}
 			}
 		}
 	}

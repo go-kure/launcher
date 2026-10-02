@@ -31,8 +31,8 @@ type TraitHandler interface {
 // (a pvc trait's claim, an ingress trait's Ingress), whichever order the traits
 // were authored in. That pass runs last in the build, after every trait of every
 // component and the NetworkPolicy synthesis, and calls Apply with each
-// sub-application in turn; Apply must not add, remove, replace or reorder the
-// bundle's applications there (the transform fails). Synthesized
+// sub-application in turn; Apply must not add, remove, replace, rename or
+// reorder the bundle's applications there (the transform fails). Synthesized
 // NetworkPolicies belong to no component's traits and are not decorated.
 type SubApplicationDecorator interface {
 	DecoratesSubApplications() bool

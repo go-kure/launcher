@@ -411,7 +411,7 @@ func TestDecorateSubApplications_TwoTypesTwoMembers(t *testing.T) {
 // "<name>-sub". Applied to that sub-application in the decoration pass, it makes
 // the change named by edit to the bundle.
 type bundleEditTraitHandler struct {
-	edit string // "append", "remove-and-append", "replace" or "reorder"
+	edit string // "append", "remove-and-append", "replace", "rename" or "reorder"
 }
 
 func (bundleEditTraitHandler) CanHandle(t string) bool { return t == "edit" }
@@ -433,6 +433,10 @@ func (h bundleEditTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *
 		bundle.Applications = append(slices.Delete(bundle.Applications, 0, 1), newApp(app.Name+"-extra"))
 	case "replace":
 		bundle.Applications[i] = newApp(app.Name)
+	case "rename":
+		// The component's application, after its checks and policies were named.
+		owner := strings.TrimSuffix(app.Name, "-sub")
+		bundle.Applications[slices.IndexFunc(bundle.Applications, func(a *stack.Application) bool { return a.Name == owner })].Name += "-renamed"
 	case "reorder":
 		bundle.Applications = append([]*stack.Application{app}, slices.Delete(bundle.Applications, i, i+1)...)
 	}
@@ -446,9 +450,10 @@ func (bundleEditTraitHandler) DecoratesSubApplications() bool { return true }
 // sub-application is refused. The pass runs after the build's other steps, so
 // they would never see an added application, and the order is already final.
 // A removal followed by an append leaves the length unchanged, and is refused
-// all the same.
+// all the same. So is a rename (go-kure/launcher#734): the health check and
+// NetworkPolicies already carry the name.
 func TestDecorateSubApplications_RefusesBundleChange(t *testing.T) {
-	for _, edit := range []string{"append", "remove-and-append", "replace", "reorder"} {
+	for _, edit := range []string{"append", "remove-and-append", "replace", "rename", "reorder"} {
 		t.Run(edit, func(t *testing.T) {
 			tr := inDocumentTransformer()
 			tr.RegisterTrait("edit", bundleEditTraitHandler{edit: edit})
@@ -457,7 +462,7 @@ func TestDecorateSubApplications_RefusesBundleChange(t *testing.T) {
 			}})
 			app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
 			_, _, err := tr.TransformWithPolicy(app, TransformContext{})
-			want := `component "web" trait "edit" changed the bundle's applications while decorating sub-application "web-sub"; a SubApplicationDecorator must not add, remove, replace or reorder applications`
+			want := `component "web" trait "edit" changed the bundle's applications while decorating sub-application "web-sub"; a SubApplicationDecorator must not add, remove, replace, rename or reorder applications`
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("error = %v, want it to contain %s", err, want)
 			}
