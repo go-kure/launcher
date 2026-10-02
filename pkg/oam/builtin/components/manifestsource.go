@@ -103,7 +103,8 @@ func validateURLScheme(rawURL string) error {
 	case "oci":
 		return errors.Errorf("manifest source: oci:// urls are not yet supported (designed, not implemented)")
 	default:
-		return errors.Errorf("manifest source: unsupported url scheme %q (only http/https)", u.Scheme)
+		// The scheme is not quoted: it is authored text, so it can hold anything.
+		return errors.New("manifest source: unsupported url scheme (only http/https)")
 	}
 }
 
@@ -327,10 +328,13 @@ func enforceAllowedURLHosts(rawURL string, allowed []string) error {
 			return nil
 		}
 	}
-	// The refusal names the host as displayHost renders it: the compared value
-	// can carry the url's userinfo, query or IPv6 zone, any of which can hold a
-	// credential. Matching above is unchanged, so such a url still fails closed.
-	shown, trimmed := displayHost(host)
+	// The refusal names the host as displayHost renders it from the raw
+	// authority, not from host: the compared value can carry the url's userinfo,
+	// query or IPv6 zone, any of which can hold a credential, and urlHost's own
+	// reduction of an ssh:// url could drop the context displayHost needs to
+	// tell them apart. Matching above is unchanged, so such a url still fails
+	// closed.
+	shown, trimmed := displayHost(urlAuthority(rawURL))
 	switch {
 	case !trimmed:
 		return errors.Errorf("source registry %q is not in allowed registries %v", shown, allowed)
@@ -372,6 +376,21 @@ func urlHost(rawURL string) string {
 		return before
 	}
 	return rawURL
+}
+
+// urlAuthority is the authority a source URL or endpoint names, unreduced: the
+// value with its oci://, https://, http:// or ssh:// scheme stripped, up to the
+// first "/". Unlike urlHost it keeps the userinfo of an ssh:// url, so
+// displayHost sees everything before the host.
+func urlAuthority(rawURL string) string {
+	for _, scheme := range []string{"oci://", "https://", "http://", "ssh://"} {
+		if after, ok := strings.CutPrefix(rawURL, scheme); ok {
+			rawURL = after
+			break
+		}
+	}
+	before, _, _ := strings.Cut(rawURL, "/")
+	return before
 }
 
 // ociNamesRegistry reports whether an oci:// url names its registry explicitly:

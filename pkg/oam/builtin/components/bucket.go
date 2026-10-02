@@ -123,7 +123,7 @@ func (c *BucketConfig) ApplyPolicy(p oam.Policy) error {
 		namesAmazonS3(c.Spec.Endpoint) {
 		// The endpoint is named as displayHost renders its host, or not at all:
 		// userinfo or a query on it can carry a credential.
-		shown, _ := displayHost(urlHost(c.Spec.Endpoint))
+		shown, _ := displayHost(urlAuthority(c.Spec.Endpoint))
 		if shown == "" {
 			shown = "(host not shown)"
 		} else {
