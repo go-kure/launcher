@@ -1266,12 +1266,13 @@ func TestCronjobHandler_PropertySchema_JobSpecAndCronSpecKeys_Present(t *testing
 	h := &components.CronjobHandler{}
 	schema := h.PropertySchema()
 
-	// 20 cronjob-own keys, the 12 JobSpec-level keys from schemaJobSpec (six
-	// from the original cronjob work, five added with the job component in
-	// go-kure/launcher#344, podFailurePolicy added in go-kure/launcher#345),
+	// 21 cronjob-own keys (`ports` added in go-kure/launcher#334), the 12
+	// JobSpec-level keys from schemaJobSpec (six from the original cronjob
+	// work, five added with the job component in go-kure/launcher#344,
+	// podFailurePolicy added in go-kure/launcher#345),
 	// and the 31 shared pod-level keys from schemaPodSpec
 	// (podActiveDeadlineSeconds included: cronjob pods are Job pods).
-	const wantTotalKeys = 63
+	const wantTotalKeys = 64
 	if len(schema) != wantTotalKeys {
 		t.Fatalf("PropertySchema() returned %d keys, want %d", len(schema), wantTotalKeys)
 	}

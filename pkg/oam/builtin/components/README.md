@@ -387,6 +387,10 @@ container is named `"http"`/`"tcp"` respectively, but only when `port > 0`),
 and `webservice` never (its `port` always defaults to 80, so the main
 container is always named `"http"`) — a numeric port is unaffected either way,
 since it dials the kubelet directly rather than resolving a declared name.
+(Those rules hold for a document without `ports`. Once `deployment`,
+`daemonset`, `statefulset`, `job` or `cronjob` declares `ports`, a named port
+resolves against the main container's whole list, `port`'s entry included, and
+a name that list does not declare is refused; see "Main container ports".)
 Where a named port is allowed at all, it is further checked against the
 exact name the kind's builder actually declares — `"http"` for
 `webservice`/`daemonset`, `"tcp"` for `statefulset` — not merely accepted as
@@ -741,7 +745,8 @@ protocol were taken unchecked, and a non-list `ports`, an unknown key, a
 non-string name or a non-string protocol, which then read as `TCP`, was
 dropped). A port name must also be unique across the
 pod: the main container's ports (webservice's `http`, statefulset's `tcp`
-when it has a `port`, deployment's `ports` list) and every sidecar's. The
+when it has a `port` and its `ports` list, deployment's `ports` list) and every
+sidecar's. The
 API server checks names only per container and merely warns across them,
 while a Service selecting the name reaches only the first container that
 declares it, so a repeated name is refused, naming both containers. Init
@@ -1043,11 +1048,24 @@ the trait handlers README) applies the same
 from the Deployment's post-policy replica count. It refuses a Deployment that
 already carries raw `topologySpreadConstraints`, so the two never merge.
 
-#### Main container ports (`deployment` only)
+#### Main container ports
 
 `deployment` publishes `ports`, the main container's `corev1.ContainerPort` list
 (go-kure/launcher#280). It declares container ports only: the kind still emits
 no Service (use `webservice`, or a `service` component, for one).
+
+`daemonset`, `statefulset`, `job` and `cronjob` publish the same `ports`, with
+the same entry rules (go-kure/launcher#334): container ports are a PodSpec
+field, so every kind-named workload component projects them. `ports` emits no
+Service on any of them. `daemonset` and `statefulset` keep their single `port`
+and the Service it drives, unchanged: `port` still declares the main
+container's first port (`http` on `daemonset`, `tcp` on `statefulset`), and
+`ports` follows it. A `ports` entry that reuses that name, or `port`'s number on
+TCP, is refused, since the container would declare it twice; with no `port`,
+the name is free. The Service still carries `port` alone. A document without
+`ports` builds exactly as before, and its named probe and hook ports are
+accepted and refused exactly as before; with `ports`, they resolve against the
+main container's whole list, `port`'s entry included.
 
 | property | type | notes | compat |
 |---|---|---|---|
@@ -1608,7 +1626,9 @@ not part of either change.
   `corev1.PersistentVolumeClaimSpec`; see "Raw block volumes" above). The
   StatefulSetSpec-level and
   claim-template field sets are classified in "StatefulSet-level and
-  claim-template properties" below.
+  claim-template properties" below. `ports` declares further container ports
+  beside `port`; the headless Service still carries `port` alone (see "Main
+  container ports").
   - **The headless Service's name must be a valid Service name.** It is
     `serviceName`, or the component name when that is not authored, and the
     API server validates a Service's `metadata.name` as a DNS-1035 label: at
@@ -1636,7 +1656,9 @@ not part of either change.
   go-kure/launcher#412 via the shared parser — see "What `tolerations` changed
   for `daemonset`" above, which is the only place in this work that is not
   additive); `port`
-  optionally adds a Service. No `sidecars` schema key (init containers only).
+  optionally adds a Service; `ports` declares further container ports beside
+  it and adds nothing to the Service (see "Main container ports"). No
+  `sidecars` schema key (init containers only).
   DaemonSetSpec-level (go-kure/launcher#340, `daemonset_spec.go`): `updateStrategy`,
   `minReadySeconds`, `revisionHistoryLimit`. `appsv1.DaemonSetSpec` has five
   fields; `template` is the pod projection above and `selector` is
@@ -1739,8 +1761,9 @@ not part of either change.
   or `@every <duration>` (e.g. `@every 1h30m`, validated via Go's
   `time.ParseDuration` — a malformed duration is rejected, not merely
   regex-matched). `restartPolicy` (default `OnFailure`),
-  `successfulJobsHistoryLimit`/`failedJobsHistoryLimit`. No `sidecars` schema
-  key (init containers only).
+  `successfulJobsHistoryLimit`/`failedJobsHistoryLimit`. `ports` declares
+  container ports, and emits no Service (see "Main container ports"). No
+  `sidecars` schema key (init containers only).
   CronJobSpec-level: `concurrencyPolicy` (`Allow`|`Forbid`|`Replace`; the API's
   own default is `Allow`, but this is only ever written when authored —
   `ConcurrencyPolicy` has no `omitempty`, so writing it unconditionally would
@@ -1777,8 +1800,10 @@ not part of either change.
   which is what pod defaulting would otherwise supply, and a present-but-
   non-string or empty value is refused rather than read as an omission that
   would silently restore that default), and the shared container
-  and pod-level surface above. No `port`, so no Service and no named probe
-  ports; no `sidecars` schema key (init containers only), matching `cronjob`.
+  and pod-level surface above. No `port` and no Service; `ports` declares
+  container ports (see "Main container ports"), and only then may a probe or
+  hook name a port; no `sidecars` schema key (init containers only), matching
+  `cronjob`.
   It emits a `Job`, its per-component `ServiceAccount`, and any declared PVCs.
 
   The twelve JobSpec-level properties are the ones `cronjob` projects onto its
