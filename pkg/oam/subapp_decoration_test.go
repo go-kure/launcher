@@ -619,3 +619,63 @@ func TestDecorateSubApplications_RefusesBundleChange(t *testing.T) {
 		})
 	}
 }
+
+// memberRenameTraitHandler is a decorating trait that keeps the application it
+// is applied to in the trait pass, a sibling group member's, and appends the
+// sub-application "<name>-sub". Applied to that sub-application in the
+// decoration pass, it renames the kept application when rename is set.
+type memberRenameTraitHandler struct {
+	rename bool
+	kept   *stack.Application
+}
+
+func (*memberRenameTraitHandler) CanHandle(t string) bool { return t == "memberrename" }
+
+func (h *memberRenameTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *stack.Bundle) error {
+	if h.kept == nil {
+		h.kept = app
+		name := app.Name + "-sub"
+		bundle.Applications = append(bundle.Applications, stack.NewApplication(name, app.Namespace, &namedConfigMapConfig{name: name, namespace: app.Namespace}))
+		return nil
+	}
+	if h.rename {
+		h.kept.Name += "-renamed"
+	}
+	return nil
+}
+
+func (*memberRenameTraitHandler) DecoratesSubApplications() bool { return true }
+
+// TestDecorateSubApplications_RefusesRenamedSiblingMember is
+// go-kure/launcher#763: the bundle holds a sibling group's application, not its
+// members', so the decoration pass's bundle comparison cannot see a member
+// renamed. A decorator that kept a member's application from the trait pass and
+// renames it while decorating fails the transform, as a trait or a policy that
+// renames one does (go-kure/launcher#752).
+func TestDecorateSubApplications_RefusesRenamedSiblingMember(t *testing.T) {
+	for name, tc := range map[string]struct {
+		rename bool
+		want   string
+	}{
+		"renames a member": {true, `component "web" trait "memberrename" while decorating sub-application "web-sub" renamed the application of member "webservice" of sibling group "web" from "web" to "web-renamed"; ` + subAppDecoratorContract},
+		"no-op":            {false, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := inDocumentTransformer()
+			tr.RegisterTrait("memberrename", &memberRenameTraitHandler{rename: tc.rename})
+			tr.RegisterComponentLowering(pairRule{})
+			app := makeApp("shop", Component{Name: "web", Type: "pair", Properties: map[string]any{}, Traits: []Trait{{Type: "memberrename"}}})
+			app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+			_, _, err := tr.TransformWithPolicy(app, TransformContext{})
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("TransformWithPolicy: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one containing %q", err, tc.want)
+			}
+		})
+	}
+}

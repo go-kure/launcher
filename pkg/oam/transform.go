@@ -80,12 +80,15 @@ type TransformContext struct {
 }
 
 // subAppDecoration is one decorating trait of one component and the
-// sub-applications that component's traits appended to bundle.
+// sub-applications that component's traits appended to bundle. entries are the
+// entries bundle was built from, whose sibling group members the decoration must
+// not rename.
 type subAppDecoration struct {
 	component string
 	trait     Trait
 	handler   TraitHandler
 	bundle    *stack.Bundle
+	entries   []componentEntry
 	subApps   []*stack.Application
 }
 
@@ -1080,38 +1083,48 @@ func snapshotEntryAppNames(entries []componentEntry) entryAppNames {
 	return s
 }
 
-// checkEntryApplications fails when trait traitType of component component —
-// its Apply, or with subApp set the ApplyPolicy of sub-application subApp it
-// added — left a bundle entry's application out of the bundle, by pointer, or
+// subAppDecoratorContract is the SubApplicationDecorator contract a refused
+// decorating trait broke.
+const subAppDecoratorContract = "a SubApplicationDecorator must not add, remove, replace, rename or reorder applications"
+
+// entryAppStep names the step checkEntryApplications checks after: a trait's
+// Apply (the zero value), the ApplyPolicy of the sub-application policyOf the
+// trait added, or the trait's decoration of sub-application decorating.
+type entryAppStep struct {
+	policyOf, decorating string
+}
+
+// checkEntryApplications fails when trait traitType of component component, at
+// step, left a bundle entry's application out of the bundle, by pointer, or
 // renamed it or a sibling group member's from names. The Phase-4 automatic
 // health check and NetworkPolicy synthesis find a component's application by
 // its name and then its pointer, so a replaced, removed or renamed one would
 // silently get neither; a renamed member would generate its objects under a
 // name the group's health check does not name (go-kure/launcher#734,
-// go-kure/launcher#752). A member is checked by name only: the bundle holds the
-// group's application, and a trait is handed the member's application, never
-// the group's list of them.
-func checkEntryApplications(entries []componentEntry, names entryAppNames, bundle *stack.Bundle, component, traitType, subApp string) error {
+// go-kure/launcher#752, go-kure/launcher#763). A member is checked by name only:
+// the bundle holds the group's application, and a trait is handed the member's
+// application, never the group's list of them.
+func checkEntryApplications(entries []componentEntry, names entryAppNames, bundle *stack.Bundle, component, traitType string, step entryAppStep) error {
 	inBundle := make(map[*stack.Application]bool, len(bundle.Applications))
 	for _, a := range bundle.Applications {
 		inBundle[a] = true
 	}
 	for i, c := range entries {
 		if !inBundle[c.app] {
-			by, contract := entryAppRefusal(component, traitType, subApp)
+			by, contract := entryAppRefusal(component, traitType, step)
 			return &TransformError{Message: fmt.Sprintf(
 				"%s replaced or removed the application of component %q; %s",
 				by, c.component.Name, contract)}
 		}
 		if c.app.Name != names.entries[i] {
-			by, contract := entryAppRefusal(component, traitType, subApp)
+			by, contract := entryAppRefusal(component, traitType, step)
 			return &TransformError{Message: fmt.Sprintf(
 				"%s renamed the application of component %q from %q to %q; %s",
 				by, c.component.Name, names.entries[i], c.app.Name, contract)}
 		}
 		for j, m := range c.members {
 			if m.app.Name != names.members[i][j] {
-				by, contract := entryAppRefusal(component, traitType, subApp)
+				by, contract := entryAppRefusal(component, traitType, step)
 				return &TransformError{Message: fmt.Sprintf(
 					"%s renamed the application of member %q of sibling group %q from %q to %q; %s",
 					by, m.component.Type, c.component.Name, names.members[i][j], m.app.Name, contract)}
@@ -1123,12 +1136,15 @@ func checkEntryApplications(entries []componentEntry, names entryAppNames, bundl
 
 // entryAppRefusal returns the subject of a checkEntryApplications error and the
 // contract it broke.
-func entryAppRefusal(component, traitType, subApp string) (by, contract string) {
+func entryAppRefusal(component, traitType string, step entryAppStep) (by, contract string) {
 	by = fmt.Sprintf("component %q trait %q", component, traitType)
-	if subApp == "" {
-		return by, entryAppContract
+	switch {
+	case step.policyOf != "":
+		return fmt.Sprintf("%s: the ApplyPolicy of sub-application %q", by, step.policyOf), entryAppPolicyContract
+	case step.decorating != "":
+		return fmt.Sprintf("%s while decorating sub-application %q", by, step.decorating), subAppDecoratorContract
 	}
-	return fmt.Sprintf("%s: the ApplyPolicy of sub-application %q", by, subApp), entryAppPolicyContract
+	return by, entryAppContract
 }
 
 // groupSubApp is a sub-application a trait on a sibling group member created,
@@ -1267,7 +1283,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 					Cause:   err,
 				}
 			}
-			if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type, ""); err != nil {
+			if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type, entryAppStep{}); err != nil {
 				return nil, err
 			}
 
@@ -1279,7 +1295,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 					}
 					// The policy runs after the trait's check, so it is held to the
 					// same names (go-kure/launcher#752).
-					if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type, newApp.Name); err != nil {
+					if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type, entryAppStep{policyOf: newApp.Name}); err != nil {
 						return nil, err
 					}
 				}
@@ -1308,7 +1324,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 					decorated[key] = entry.component.Type
 				}
 				decorators = append(decorators, subAppDecoration{
-					component: entry.component.Name, trait: resolved, handler: handler, bundle: bundle,
+					component: entry.component.Name, trait: resolved, handler: handler, bundle: bundle, entries: bundleEntries,
 				})
 			}
 		}
@@ -1333,9 +1349,12 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 // by name: the automatic health check and NetworkPolicy synthesis have already
 // named their objects after the applications (go-kure/launcher#734). The
 // snapshot is a copy because a removal shifts the shared backing array in
-// place.
+// place. A sibling group member's application is not in the bundle, so its
+// name is checked against the entries' (checkEntryApplications): the group's
+// health check already names it (go-kure/launcher#763).
 func decorateSubApplications(decorations []subAppDecoration) error {
 	for _, d := range decorations {
+		names := snapshotEntryAppNames(d.entries)
 		for _, subApp := range d.subApps {
 			prev := slices.Clone(d.bundle.Applications)
 			prevNames := make([]string, len(prev))
@@ -1351,8 +1370,11 @@ func decorateSubApplications(decorations []subAppDecoration) error {
 			}
 			if !slices.Equal(prev, d.bundle.Applications) || !slices.EqualFunc(prev, prevNames, func(a *stack.Application, name string) bool { return a.Name == name }) {
 				return &TransformError{Message: fmt.Sprintf(
-					"component %q trait %q changed the bundle's applications while decorating sub-application %q; a SubApplicationDecorator must not add, remove, replace, rename or reorder applications",
-					d.component, d.trait.Type, subAppName)}
+					"component %q trait %q changed the bundle's applications while decorating sub-application %q; %s",
+					d.component, d.trait.Type, subAppName, subAppDecoratorContract)}
+			}
+			if err := checkEntryApplications(d.entries, names, d.bundle, d.component, d.trait.Type, entryAppStep{decorating: subAppName}); err != nil {
+				return err
 			}
 		}
 	}
