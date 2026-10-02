@@ -64,7 +64,7 @@ reads it.
 | `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
 | `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
 | `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
-| `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`. Emits nothing else — see below. |
+| `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`, `clusterIP: None` for a headless one. Emits nothing else — see below. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` + a generated `helmrepository`/`ocirepository`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per URL within a document. See below. |
@@ -1559,7 +1559,7 @@ not part of either change.
   every workload kind puts on its pods; set it when the Service fronts a
   workload named differently (a `deployment` named `api-server` behind a
   `service` named `api`). `ports` is the full `corev1.ServicePort` list, at
-  least one entry: `port` (required), `targetPort` (a number or a container
+  least one entry unless the Service is headless: `port` (required), `targetPort` (a number or a container
   port name, published as the `Types: [integer, string]` union
   (go-kure/launcher#383), so a value of any other type is rejected by property
   validation before the parser sees it; defaults to `port`), `protocol` (`TCP`, `UDP` or `SCTP`; defaults
@@ -1567,6 +1567,18 @@ not part of either change.
   port/protocol pairs must be unique). `type` is `ClusterIP` (default),
   `NodePort` or `LoadBalancer`; `ExternalName` is not offered, since it has no
   selector. An empty `selector` is refused.
+  - **Headless.** `clusterIP: None` (go-kure/launcher#690) emits
+    `spec.clusterIP: None`: no virtual IP, and cluster DNS resolves the name to
+    the selected pods, as a StatefulSet's governing Service needs. It requires
+    `type: ClusterIP` (the default), since the API server refuses a headless
+    `NodePort` or `LoadBalancer` Service. `None` is the only value: a literal
+    address is refused, and so is an empty string, rather than read as
+    absence. A headless Service may have no `ports` at all; without
+    `clusterIP`, at least one port is still required (`ports: at least one
+    port is required`). A port-less Service has no first port, so routing
+    traits refuse it as an implicit backend and it declares no NetworkPolicy
+    endpoint. Without `clusterIP` the Service carries no `clusterIP`, as
+    before.
   - **The component name must be a valid Service name.** It becomes the
     Service's `metadata.name`, which the API server validates as a DNS-1035
     label: at most 63 characters, lowercase letters, digits and `-`, starting

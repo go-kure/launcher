@@ -1,0 +1,26 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: hello
+  namespace: default
+spec:
+  components:
+    - name: db
+      type: deployment
+      properties:
+        image: ghcr.io/example/db:v1.0
+    - name: db-peers
+      type: service
+      properties:
+        clusterIP: None
+        selector:
+          app: db
+        ports:
+          - name: tcp
+            port: 5432
+    - name: db-discovery
+      type: service
+      properties:
+        clusterIP: None
+        selector:
+          app: db

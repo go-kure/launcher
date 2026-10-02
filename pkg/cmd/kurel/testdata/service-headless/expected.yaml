@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: db
+  name: db
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+      - image: ghcr.io/example/db:v1.0
+        name: db
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: db
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: db
+  name: db
+  namespace: default
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: db-peers
+  name: db-peers
+  namespace: default
+spec:
+  clusterIP: None
+  ports:
+  - name: tcp
+    port: 5432
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    app: db
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: db-discovery
+  name: db-discovery
+  namespace: default
+spec:
+  clusterIP: None
+  selector:
+    app: db
+  type: ClusterIP

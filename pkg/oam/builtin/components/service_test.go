@@ -189,6 +189,15 @@ func TestServiceHandler_Rejects(t *testing.T) {
 		{"selector empty", map[string]any{"selector": map[string]any{}, "ports": []any{map[string]any{"port": 80}}}, "selector: must name at least one label"},
 		{"selector non-string value", map[string]any{"selector": map[string]any{"app": 1}, "ports": []any{map[string]any{"port": 80}}}, "selector.app: must be a string"},
 		{"type invalid", map[string]any{"type": "ExternalName", "ports": []any{map[string]any{"port": 80}}}, "type: must be one of ClusterIP, NodePort, LoadBalancer"},
+		// go-kure/launcher#690: only None, and only on a ClusterIP Service. A set-but-empty
+		// value is refused, not read as absent.
+		{"clusterIP empty", map[string]any{"clusterIP": "", "ports": []any{map[string]any{"port": 80}}}, `clusterIP: must be "None", got ""`},
+		{"clusterIP address", map[string]any{"clusterIP": "10.0.0.10", "ports": []any{map[string]any{"port": 80}}}, `clusterIP: must be "None", got "10.0.0.10"`},
+		{"clusterIP lowercase none", map[string]any{"clusterIP": "none"}, `clusterIP: must be "None", got "none"`},
+		{"clusterIP wrong type", map[string]any{"clusterIP": true}, "clusterIP: must be a string"},
+		{"headless NodePort", map[string]any{"clusterIP": "None", "type": "NodePort", "ports": []any{map[string]any{"port": 80}}}, `clusterIP: "None" requires type ClusterIP, got NodePort`},
+		{"headless LoadBalancer", map[string]any{"clusterIP": "None", "type": "LoadBalancer"}, `clusterIP: "None" requires type ClusterIP, got LoadBalancer`},
+		{"ports missing, clusterIP null", map[string]any{"clusterIP": nil}, "ports: at least one port is required"},
 	}
 	h := &components.ServiceHandler{}
 	for _, tt := range tests {
@@ -416,8 +425,13 @@ func TestServiceHandler_Endpoints_RejectsMalformed(t *testing.T) {
 func TestServiceHandler_PropertySchema(t *testing.T) {
 	s := (&components.ServiceHandler{}).PropertySchema()
 	ports, ok := s["ports"]
-	if !ok || ports.Type != oam.PropertyTypeArray || !ports.Required || ports.Items == nil {
-		t.Fatalf("ports schema = %+v, want a required array", ports)
+	// Not Required: a headless Service may have none, so the parser enforces "at least one"
+	// for the other Services (TestServiceHandler_Rejects).
+	if !ok || ports.Type != oam.PropertyTypeArray || ports.Required || ports.Items == nil {
+		t.Fatalf("ports schema = %+v, want an optional array", ports)
+	}
+	if ip := s["clusterIP"]; ip.Type != oam.PropertyTypeString || ip.Required || ip.Default != nil || !slices.Equal(ip.Enum, []any{"None"}) {
+		t.Errorf("clusterIP schema = %+v, want an optional string with enum [None] and no default", ip)
 	}
 	item := ports.Items.Properties
 	// A missing entry reads as the zero PropertySchema (Type "", not Required), so each key's
@@ -443,5 +457,49 @@ func TestServiceHandler_PropertySchema(t *testing.T) {
 	}
 	if s["selector"].Type != oam.PropertyTypeObject || !s["selector"].AdditionalProperties {
 		t.Errorf("selector schema = %+v, want an open object", s["selector"])
+	}
+}
+
+// go-kure/launcher#690: clusterIP None emits a headless Service, with or without ports; without
+// the key the Service carries no clusterIP, as before.
+func TestServiceHandler_Headless(t *testing.T) {
+	withPorts := generateService(t, "db", map[string]any{
+		"clusterIP": "None",
+		"ports":     []any{map[string]any{"name": "tcp", "port": 5432}},
+	})
+	if withPorts.Spec.ClusterIP != "None" || withPorts.Spec.Type != corev1.ServiceTypeClusterIP {
+		t.Errorf("clusterIP/type = %q/%q, want None/ClusterIP", withPorts.Spec.ClusterIP, withPorts.Spec.Type)
+	}
+	if len(withPorts.Spec.Ports) != 1 || withPorts.Spec.Ports[0].Port != 5432 {
+		t.Errorf("ports = %+v, want the one authored port", withPorts.Spec.Ports)
+	}
+
+	for name, props := range map[string]map[string]any{
+		"ports absent": {"clusterIP": "None"},
+		"ports empty":  {"clusterIP": "None", "ports": []any{}},
+		"ports null":   {"clusterIP": "None", "ports": nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := generateService(t, "db", props)
+			if svc.Spec.ClusterIP != "None" || len(svc.Spec.Ports) != 0 {
+				t.Errorf("clusterIP/ports = %q/%+v, want None and no ports", svc.Spec.ClusterIP, svc.Spec.Ports)
+			}
+			if got := svc.Spec.Selector; len(got) != 1 || got["app"] != "db" {
+				t.Errorf("selector = %v, want the default app: db", got)
+			}
+			cfg := serviceConfig(t, "db", props)
+			if pp, ok := cfg.(interface{ ServicePort() int32 }); !ok || pp.ServicePort() != 0 {
+				t.Error("a port-less Service must report no service port, so routing traits refuse an implicit backend")
+			}
+			eps, err := (&components.ServiceHandler{}).Endpoints(&oam.Component{Name: "db", Type: "service", Properties: props})
+			if err != nil || len(eps) != 0 {
+				t.Errorf("Endpoints = %+v, %v; want none", eps, err)
+			}
+		})
+	}
+
+	plain := generateService(t, "db", map[string]any{"ports": []any{map[string]any{"port": 5432}}})
+	if plain.Spec.ClusterIP != "" {
+		t.Errorf("clusterIP without the key = %q, want unset", plain.Spec.ClusterIP)
 	}
 }
