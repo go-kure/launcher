@@ -77,8 +77,10 @@ func TestWarnForcedVolumes_BothClaimSources(t *testing.T) {
 		annotation = "kustomize.toolkit.fluxcd.io/force: enabled"
 		bundle     = "its bundle's reconciliation policy sets force: true"
 	)
+	// A role kind turns a described volume claim into a synthesized `pvc` trait
+	// (go-kure/launcher#702), so it is attributed as a sub-application too.
 	volumeClaim := func(reason string) string {
-		return `PersistentVolumeClaim default/api-cache (component "api") is force-applied (` + reason + `)` + forcedWarningTail
+		return `PersistentVolumeClaim default/api-cache (sub-application "api-cache" of component "api") is force-applied (` + reason + `)` + forcedWarningTail
 	}
 	traitClaim := func(reason string) string {
 		return `PersistentVolumeClaim default/shared-data (sub-application "shared-data" of component "api") is force-applied (` + reason + `)` + forcedWarningTail
@@ -222,7 +224,7 @@ func TestBuild_ForcedClaimWarnsOnStderr(t *testing.T) {
 	if plainErr != "" {
 		t.Errorf("unforced build warned: %q", plainErr)
 	}
-	want := "warning: PersistentVolumeClaim default/api-cache (component \"api\") is force-applied (its bundle's reconciliation policy sets force: true)" + forcedWarningTail + "\n" +
+	want := "warning: PersistentVolumeClaim default/api-cache (sub-application \"api-cache\" of component \"api\") is force-applied (its bundle's reconciliation policy sets force: true)" + forcedWarningTail + "\n" +
 		"warning: PersistentVolumeClaim default/shared-data (sub-application \"shared-data\" of component \"api\") is force-applied (its bundle's reconciliation policy sets force: true)" + forcedWarningTail + "\n"
 	if forcedErr != want {
 		t.Errorf("stderr =\n%s\nwant\n%s", forcedErr, want)
