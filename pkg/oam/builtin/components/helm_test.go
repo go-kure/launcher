@@ -473,9 +473,9 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"inline GitRepository empty ref", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{}}}, "helm: an inline source.kind GitRepository requires source.ref with exactly one of"},
 		{"inline GitRepository two ref fields", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main", "tag": "v1.0.0"}}}, "helm: source.ref sets branch, tag; an inline GitRepository takes exactly one of branch, tag, semver, name, commit"},
 		{"inline GitRepository oci URL", map[string]any{"chart": "a", "source": map[string]any{"url": "oci://ghcr.io/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires an http:// or https:// URL; an ssh:// repository needs credentials, so author a gitrepository and reference it"},
-		{"inline GitRepository URL with user and token", map[string]any{"chart": "a", "source": map[string]any{"url": "https://user:token@github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.url carries credentials, which an inline GitRepository does not take; author a gitrepository with a secretRef and reference it"},
-		{"inline GitRepository URL with token only", map[string]any{"chart": "a", "source": map[string]any{"url": "https://token@github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.url carries credentials, which an inline GitRepository does not take; author a gitrepository with a secretRef and reference it"},
-		{"inline GitRepository malformed URL with a token", map[string]any{"chart": "a", "source": map[string]any{"url": "https://user:FAKE_TOKEN@github.com/%zz", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.url is not a valid URL"},
+		{"inline GitRepository URL with user and token", map[string]any{"chart": "a", "source": map[string]any{"url": "https://user:token@github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.url of an inline GitRepository must be an http:// or https:// URL of a host, an optional port and a repository path only; user info, a query or a fragment is not taken inline (author a gitrepository with a secretRef and reference it)"},
+		{"inline GitRepository URL with token only", map[string]any{"chart": "a", "source": map[string]any{"url": "https://token@github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.url of an inline GitRepository must be an http:// or https:// URL of a host, an optional port and a repository path only; user info, a query or a fragment is not taken inline (author a gitrepository with a secretRef and reference it)"},
+		{"inline GitRepository malformed URL with a token", map[string]any{"chart": "a", "source": map[string]any{"url": "https://user:FAKE_TOKEN@github.com/%zz", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.url of an inline GitRepository must be an http:// or https:// URL of a host, an optional port and a repository path only; user info, a query or a fragment is not taken inline (author a gitrepository with a secretRef and reference it)"},
 		{"inline GitRepository ssh URL", map[string]any{"chart": "a", "source": map[string]any{"url": "ssh://git@github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires an http:// or https:// URL; an ssh:// repository needs credentials, so author a gitrepository and reference it"},
 		{"inline GitRepository without chart", map[string]any{"source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires chart to be specified"},
 		{"inline GitRepository with version", map[string]any{"chart": "./charts/a", "version": "1.0.0", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: version is not used with source.kind GitRepository, whose chart is read at the source's fetched revision"},
@@ -483,8 +483,10 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"inline Bucket without bucketName", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com"}}, "helm: an inline source.kind Bucket requires source.endpoint and source.bucketName"},
 		{"inline Bucket without endpoint", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "bucketName": "charts"}}, "helm: an inline source.kind Bucket requires source.endpoint and source.bucketName"},
 		{"inline Bucket with namespace", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts", "namespace": "x"}}, "helm: source.namespace is only valid with source.name"},
-		{"inline Bucket endpoint URL with user and token", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "https://user:FAKE_TOKEN@minio.example.com", "bucketName": "charts"}}, "helm: source.endpoint carries credentials, which an inline Bucket does not take; author a bucket with a secretRef and reference it"},
-		{"inline Bucket endpoint host with user and token", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "user:FAKE_TOKEN@minio.example.com:9000", "bucketName": "charts"}}, "helm: source.endpoint carries credentials, which an inline Bucket does not take; author a bucket with a secretRef and reference it"},
+		{"inline Bucket endpoint URL with user and token", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "https://user:FAKE_TOKEN@minio.example.com", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an http:// or https:// URL of only a host and an optional port; user info, a path, a query or a fragment is not taken inline (author a bucket with a secretRef and reference it)"},
+		{"inline Bucket endpoint host with user and token", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "user:FAKE_TOKEN@minio.example.com:9000", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an http:// or https:// URL of only a host and an optional port; user info, a path, a query or a fragment is not taken inline (author a bucket with a secretRef and reference it)"},
+		{"inline Bucket endpoint with a signed query", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "https://minio.example.com/?X-Amz-Signature=FAKE_TOKEN", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an http:// or https:// URL of only a host and an optional port; user info, a path, a query or a fragment is not taken inline (author a bucket with a secretRef and reference it)"},
+		{"inline Bucket endpoint with a fragment", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com#FAKE_TOKEN", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an http:// or https:// URL of only a host and an optional port; user info, a path, a query or a fragment is not taken inline (author a bucket with a secretRef and reference it)"},
 		{"inline Bucket without chart", map[string]any{"source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts"}}, "helm: source.kind Bucket requires chart to be specified"},
 		{"inline Bucket with version", map[string]any{"chart": "charts/a", "version": "1.0.0", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts"}}, "helm: version is not used with source.kind Bucket, whose chart is read at the source's fetched revision"},
 		{"endpoint without Bucket", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "endpoint": "minio.example.com"}}, "helm: source.endpoint is only valid with an inline source.kind Bucket"},
@@ -538,6 +540,67 @@ func TestHelmRule_Refusals(t *testing.T) {
 // TestHelmRule_InlineBucketProviderEnum: the authored pipeline's schema check
 // refuses an inline Bucket provider outside Flux's set, so a typo fails the build
 // instead of reaching the generated bucket.
+// TestHelmRule_InlineSourceAddressShape: an inline GitRepository url must be
+// exactly a host, optional port and repository path, and an inline Bucket
+// endpoint exactly a host and optional port. Everything else is refused without
+// echoing the value, and every plain form is accepted.
+func TestHelmRule_InlineSourceAddressShape(t *testing.T) {
+	git := func(u string) map[string]any {
+		return map[string]any{"chart": "./charts/a", "source": map[string]any{"url": u, "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}
+	}
+	bucket := func(ep string) map[string]any {
+		return map[string]any{"chart": "charts/a", "source": map[string]any{"kind": "Bucket", "endpoint": ep, "bucketName": "charts"}}
+	}
+	lower := func(props map[string]any) error {
+		_, err := components.HelmRule{}.LowerComponent(&oam.Component{Name: "podinfo", Type: "helm", Properties: props}, helmLowering("shop"))
+		return err
+	}
+	refused := map[string]map[string]any{
+		"git query":          git("https://github.com/example/charts?token=FAKE_TOKEN"),
+		"git empty query":    git("https://github.com/example/charts?"),
+		"git fragment":       git("https://github.com/example/charts#FAKE_TOKEN"),
+		"git empty fragment": git("https://github.com/example/charts#"),
+		"git empty host":     git("https:///example/charts"),
+		"git no host":        git("https://"),
+		"git no path":        git("https://github.com"),
+		"git root path":      git("https://github.com/"),
+		"git empty port":     git("https://github.com:/example/charts"),
+		"bucket path":        bucket("https://minio.example.com/FAKE_TOKEN"),
+		"bucket bare path":   bucket("minio.example.com/charts"),
+		"bucket scheme only": bucket("https://"),
+		"bucket ftp":         bucket("ftp://minio.example.com"),
+		"bucket empty port":  bucket("minio.example.com:"),
+	}
+	for name, props := range refused {
+		t.Run("refused/"+name, func(t *testing.T) {
+			err := lower(props)
+			if err == nil || !strings.Contains(err.Error(), "is not taken inline") {
+				t.Fatalf("error = %v, want the inline address refusal", err)
+			}
+			if strings.Contains(err.Error(), "FAKE_TOKEN") {
+				t.Errorf("error = %q quotes the address", err)
+			}
+		})
+	}
+	accepted := map[string]map[string]any{
+		"git https":          git("https://github.com/example/charts"),
+		"git http with port": git("http://git.example.com:8080/example/charts.git"),
+		"git trailing slash": git("https://github.com/example/charts/"),
+		"bucket host":        bucket("minio.example.com"),
+		"bucket host:port":   bucket("minio.example.com:9000"),
+		"bucket ipv6":        bucket("[::1]:9000"),
+		"bucket https":       bucket("https://minio.example.com"),
+		"bucket http slash":  bucket("http://minio.example.com:9000/"),
+	}
+	for name, props := range accepted {
+		t.Run("accepted/"+name, func(t *testing.T) {
+			if err := lower(props); err != nil {
+				t.Fatalf("refused a plain address: %v", err)
+			}
+		})
+	}
+}
+
 func TestHelmRule_InlineBucketProviderEnum(t *testing.T) {
 	validate := func(provider string) error {
 		tr := oam.NewTransformer(nil, nil)
