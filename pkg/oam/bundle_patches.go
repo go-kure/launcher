@@ -73,8 +73,7 @@ func applyBundlePatches(objects []*client.Object, patches []stack.Patch) ([]*uns
 // a mutex, with load restrictions off and plugins disabled, and a panic recovered
 // as an error. It keeps the input order, as Flux's zero-value Reorder option does
 // (it is neither legacy nor unspecified, so nothing is sorted), named here so a
-// change of default cannot reorder it: each resource is traced to the object it
-// was built from by position. (Build also resets kustomize's global OpenAPI schema
+// change of default cannot reorder it. (Build also resets kustomize's global OpenAPI schema
 // around each build, which matters only to a kustomization with an openapi
 // field; this one has none.)
 func kustomizeBuild(fs filesys.FileSystem, dir string) (out []*unstructured.Unstructured, err error) {
