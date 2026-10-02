@@ -552,6 +552,23 @@ func TestHelmReleaseHandler_ConfigMapAppLabelBoundary(t *testing.T) {
 	}
 }
 
+// TestHelmReleaseHandler_ConfigMapNameDotAtTruncationBoundary: a 253-byte
+// component name is truncated to make room for the digest and the
+// "-values-<hash>" suffix (253 - 18 - 8 - 1 = 226 bytes kept). When the kept
+// prefix ends in '.', the dot is trimmed, so the name never carries ".-" and
+// stays a DNS-1123 subdomain; the valuesFrom entry names the same ConfigMap.
+func TestHelmReleaseHandler_ConfigMapNameDotAtTruncationBoundary(t *testing.T) {
+	name := strings.Repeat("a", 225) + "." + strings.Repeat("b", 27)
+	if len(name) != 253 || name[225] != '.' {
+		t.Fatalf("test setup: %d-byte name with %q at 225, want 253 bytes with '.'", len(name), name[225])
+	}
+	hr, cm := hrGenerate(t, hrConfig(t, name, configMapModeProps(map[string]any{"a": 1})), "")
+	got := assertValuesConfigMap(t, hr, cm)
+	if strings.Contains(got, ".-") || len(got) > 253 {
+		t.Errorf("ConfigMap name %q (%d bytes) kept the boundary dot or overran 253", got, len(got))
+	}
+}
+
 // TestHelmReleaseHandler_ConfigMapFollowsFluxNamespace: under a Flux
 // namespace the ConfigMap lands with the HelmRelease, where Flux resolves
 // valuesFrom.
