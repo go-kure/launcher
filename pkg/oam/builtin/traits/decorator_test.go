@@ -386,3 +386,49 @@ func TestConfigMapDecorator_PreservesServiceForwardsWhenAugmented(t *testing.T) 
 		t.Error("EmitsAutoHealthCheck() = false, want true (default for a non-implementing inner)")
 	}
 }
+
+// namedSubAppStub is a trait sub-application config naming its component, as
+// the pvc trait's claim does (oam.ComponentNamed).
+type namedSubAppStub struct{ component string }
+
+func (s *namedSubAppStub) Generate(app *stack.Application) ([]*client.Object, error) {
+	return nil, nil
+}
+func (s *namedSubAppStub) ComponentName() string { return s.component }
+
+// namedAugmentingSubAppStub is namedSubAppStub that also augments its layout.
+type namedAugmentingSubAppStub struct{ namedSubAppStub }
+
+func (s *namedAugmentingSubAppStub) AugmentLayout(l *layout.ManifestLayout) error { return nil }
+
+// TestDecorators_ForwardComponentName pins that prune-protection and
+// force-replace keep the component a trait sub-application names
+// (go-kure/launcher#712: the engine decorates sub-applications with them), on
+// both wrap paths, and answer "" for an inner that names none.
+func TestDecorators_ForwardComponentName(t *testing.T) {
+	handlers := []oam.TraitHandler{&traits.PruneProtectionHandler{}, &traits.ForceReplaceHandler{}}
+	inners := []struct {
+		name  string
+		inner stack.ApplicationConfig
+		want  string
+	}{
+		{name: "named", inner: &namedSubAppStub{component: "api"}, want: "api"},
+		{name: "named augmenting", inner: &namedAugmentingSubAppStub{namedSubAppStub{component: "api"}}, want: "api"},
+		{name: "unnamed", inner: &nakedStub{}, want: ""},
+	}
+	for _, h := range handlers {
+		for _, in := range inners {
+			app := stack.NewApplication("shared-data", "default", in.inner)
+			if err := h.Apply(&oam.Trait{}, app, &stack.Bundle{}); err != nil {
+				t.Fatalf("%T %s: Apply: %v", h, in.name, err)
+			}
+			named, ok := app.Config.(oam.ComponentNamed)
+			if !ok {
+				t.Fatalf("%T %s: decorated config does not implement oam.ComponentNamed", h, in.name)
+			}
+			if got := named.ComponentName(); got != in.want {
+				t.Errorf("%T %s: ComponentName() = %q, want %q", h, in.name, got, in.want)
+			}
+		}
+	}
+}

@@ -43,6 +43,14 @@ The tier umbrella bundle is named after the Application and leaves `Wait` unset:
 its Kustomization one health check per child Kustomization, and Flux ignores health checks
 when `wait` is enabled, so the umbrella is Ready only when every child Kustomization is.
 
+Within a bundle, each component's application is followed by the sub-applications its traits
+created, in creation order, so a trait's objects are emitted with their own component's rather
+than after every component of the bundle (go-kure/launcher#712). A trait whose handler
+implements `SubApplicationDecorator` (the built-in `prune-protection` and `force-replace`) also
+decorates those sub-applications, whatever order the traits were authored in: the last step of
+the transform, after the Phase-4 synthesis below, applies it to each of them. The NetworkPolicies
+that synthesis adds are no component's sub-applications and stay undecorated.
+
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /
 `cilium-networkpolicy` traits are unaffected):
@@ -298,6 +306,7 @@ the built-ins. Extend the system by implementing:
 | `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). |
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
+| `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not append to the bundle there (the transform fails). Implemented by `prune-protection` and `force-replace`. |
 | `ServiceAccountNamer` | `ServiceAccountName() string` — the ServiceAccount a workload component's pods run as: the authored `serviceAccountName` when set, else the per-component account the handler generates (named after the component). Traits that bind identity to the workload (the `rbac` trait's binding subject) read this instead of assuming the component name. Implemented by every built-in workload kind config. |
 | `LayoutAugmentationCoverage` | `GenerateCoversAugmentLayout() bool` — for a config that also implements kure's `layout.LayoutAugmenter`, declare whether `Generate` alone already produces every resource `AugmentLayout` places into the layout. `kurel build` (which never walks a `layout.ManifestLayout`) uses this to fail closed: an augmenter that doesn't implement this interface, or that implements it and returns `false`, is rejected outright rather than silently dropping layout-level resources from the output. |
 

@@ -20,6 +20,19 @@ type TraitHandler interface {
 	Apply(trait *Trait, app *stack.Application, bundle *stack.Bundle) error
 }
 
+// SubApplicationDecorator is an optional interface for TraitHandlers whose Apply
+// decorates an application's objects (prune-protection, force-replace). When
+// DecoratesSubApplications returns true, the engine also applies the trait to
+// every sub-application the component's other traits appended to the bundle
+// (a pvc trait's claim, an ingress trait's Ingress), whichever order the traits
+// were authored in. That pass runs last in the build, after every trait of every
+// component and the NetworkPolicy synthesis, and calls Apply with each
+// sub-application in turn; Apply must not append to the bundle there. Synthesized
+// NetworkPolicies belong to no component's traits and are not decorated.
+type SubApplicationDecorator interface {
+	DecoratesSubApplications() bool
+}
+
 // CapabilityAware is an optional interface for TraitHandlers that require a
 // matching ClusterProfile capability to produce correct output. If
 // CapabilityRequired returns true and no capability resolves for the trait,

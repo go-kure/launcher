@@ -1,0 +1,20 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    # prune-protection covers the claim the pvc trait creates, authored before
+    # it (go-kure/launcher#712).
+    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+      traits:
+        - type: pvc
+          properties:
+            name: shared-data
+            size: 5Gi
+        - type: prune-protection
+          properties: {}

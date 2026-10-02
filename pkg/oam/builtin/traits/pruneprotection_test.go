@@ -92,10 +92,11 @@ func TestPruneProtectionHandler_Apply_OnlyTargetApp(t *testing.T) {
 	}
 }
 
-// TestPruneProtectionHandler_Apply_DoesNotProtectSiblingApps documents that
-// prune-protection only annotates resources produced by the component's own
-// app.Config. Resources appended to bundle.Applications by other trait handlers
-// (e.g. rbac) are NOT annotated — narrow scope is intentional.
+// TestPruneProtectionHandler_Apply_DoesNotProtectSiblingApps pins that Apply
+// itself annotates only the application it is handed. The sub-applications
+// other trait handlers append to bundle.Applications (e.g. rbac) are reached by
+// the engine instead, which calls Apply on each of them once every trait has run
+// (oam.SubApplicationDecorator; the pvc-trait-prune-protection fixture).
 func TestPruneProtectionHandler_Apply_DoesNotProtectSiblingApps(t *testing.T) {
 	rbacH := &traits.RBACHandler{}
 	prune := &traits.PruneProtectionHandler{}
@@ -129,7 +130,7 @@ func TestPruneProtectionHandler_Apply_DoesNotProtectSiblingApps(t *testing.T) {
 		}
 	}
 
-	// Sibling (rbac) resources are NOT annotated — narrow scope is intentional.
+	// Sibling (rbac) resources are NOT annotated by Apply alone.
 	rbacApp := bundle.Applications[1]
 	rbacResources, err := rbacApp.Config.Generate(rbacApp)
 	if err != nil {
@@ -137,7 +138,7 @@ func TestPruneProtectionHandler_Apply_DoesNotProtectSiblingApps(t *testing.T) {
 	}
 	for _, r := range rbacResources {
 		if _, ok := (*r).GetAnnotations()[stack.AnnotationFluxPruneKey]; ok {
-			t.Errorf("rbac sibling resource %q: should NOT have prune annotation (narrow scope)", (*r).GetName())
+			t.Errorf("rbac sibling resource %q: should NOT have prune annotation from Apply alone", (*r).GetName())
 		}
 	}
 }

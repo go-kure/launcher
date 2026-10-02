@@ -35,15 +35,22 @@ func (h *PruneProtectionHandler) PropertySchema() map[string]oam.PropertySchema 
 // AugmentLayout ran (e.g. a helmtemplate component's hook-group child
 // layouts) — see pruneProtectedConfig.postAugmentLayout.
 //
-// Narrow scope: only resources produced by the component's own app.Config are
-// annotated. Resources appended to bundle.Applications by other trait handlers
-// (e.g. rbac, certificate, ingress) are not affected.
+// Apply itself wraps only the application it is handed. The sub-applications
+// the component's other traits append to the bundle (e.g. pvc, rbac, ingress)
+// are reached through DecoratesSubApplications: the engine calls Apply on each
+// of them once every trait has run.
 func (h *PruneProtectionHandler) Apply(_ *oam.Trait, app *stack.Application, _ *stack.Bundle) error {
 	app.Config = wrapIfAugmenter(
 		&pruneProtectedConfig{decoratorBase: decoratorBase{Inner: app.Config}},
 		app.Config)
 	return nil
 }
+
+// DecoratesSubApplications reports that the trait also covers the component's
+// trait sub-applications (oam.SubApplicationDecorator).
+func (h *PruneProtectionHandler) DecoratesSubApplications() bool { return true }
+
+var _ oam.SubApplicationDecorator = (*PruneProtectionHandler)(nil)
 
 // pruneProtectedConfig wraps an ApplicationConfig and injects
 // stack.AnnotationFluxPruneKey = stack.AnnotationFluxPruneDisabled into every
