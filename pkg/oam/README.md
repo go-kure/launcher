@@ -460,7 +460,7 @@ by the first application that generates a volume of its final identity, else by 
 and its force key is named `kustomize.toolkit.fluxcd.io/force: enabled, set by its bundle's
 patches` unless a generated volume of that identity carried it; a volume a patch renames or
 swaps can therefore be named imprecisely, and a patched bundle's warnings follow kustomize's
-build order. A patch set that does not build is
+build order (tracked in go-kure/launcher#745). A patch set that does not build is
 warned once, naming the bundle's first application and the build error, and that bundle is
 checked as generated. Every caller and build gets this; postBuild substitution and anything
 the cluster changes on apply are not modelled. An application a caller built rather than
