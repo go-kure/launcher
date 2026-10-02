@@ -343,3 +343,64 @@ func TestTransform_RenderedReservedUndeclaredChildSurvivesValidation(t *testing.
 		}
 	}
 }
+
+// TestTransform_RenderedReservedSharedValueIsAccepted: one map a rule renders into two
+// reserved keys reaches each as its own copy, so emission validation normalizing it
+// under one key ("limits" declares cpu an integer) does not rewrite it under the other
+// ("data" leaves cpu undeclared), and both still match their records. When the two
+// keys shared the map, validating limits.cpu turned data's renderedPort(2) into int(2)
+// and the next check refused the unchanged rule output.
+func TestTransform_RenderedReservedSharedValueIsAccepted(t *testing.T) {
+	for _, el := range typedElements {
+		t.Run(el.name, func(t *testing.T) {
+			got, err := el.run(t, emptyDoc("Rendering"), func(_ *map[string]any, render func(string, any) error, _ *Application) error {
+				shared := map[string]any{"cpu": renderedPort(2)}
+				if err := render("data", shared); err != nil {
+					return err
+				}
+				return render("limits", shared)
+			})
+			if err != nil {
+				t.Fatalf("one value rendered into two reserved keys must be accepted, got: %v", err)
+			}
+			if want := map[string]any{"cpu": renderedPort(2)}; !reflect.DeepEqual(got["data"], want) {
+				t.Fatalf("expected data %#v at the handler, got %#v", want, got["data"])
+			}
+			if want := map[string]any{"cpu": 2}; !reflect.DeepEqual(got["limits"], want) {
+				t.Fatalf("expected limits %#v at the handler, got %#v", want, got["limits"])
+			}
+		})
+	}
+}
+
+// TestRenderReserved_WritesADetachedCopy: RenderReserved writes a deep copy of the
+// value, so changing the caller's value afterwards, at any depth, changes nothing in
+// the properties, for a component and a trait alike.
+func TestRenderReserved_WritesADetachedCopy(t *testing.T) {
+	elements := map[string]func() (func(string, any) error, func() map[string]any){
+		"component": func() (func(string, any) error, func() map[string]any) {
+			c := &Component{}
+			return c.RenderReserved, func() map[string]any { return c.Properties }
+		},
+		"trait": func() (func(string, any) error, func() map[string]any) {
+			tr := &Trait{}
+			return tr.RenderReserved, func() map[string]any { return tr.Properties }
+		},
+	}
+	for name, newElement := range elements {
+		t.Run(name, func(t *testing.T) {
+			render, props := newElement()
+			value := map[string]any{"mode": "platform", "sources": []any{map[string]any{"namespace": "ingress"}}, "ports": []int32{80}}
+			if err := render("networkPolicy", value); err != nil {
+				t.Fatalf("RenderReserved: %v", err)
+			}
+			value["mode"] = "open"
+			value["sources"].([]any)[0].(map[string]any)["namespace"] = "anywhere"
+			value["ports"].([]int32)[0] = 443
+			want := map[string]any{"networkPolicy": map[string]any{"mode": "platform", "sources": []any{map[string]any{"namespace": "ingress"}}, "ports": []int32{80}}}
+			if got := props(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("changing the caller's value changed the properties: %#v, want %#v", got, want)
+			}
+		})
+	}
+}
