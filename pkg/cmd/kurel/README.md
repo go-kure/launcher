@@ -44,7 +44,8 @@ treatment on the `deployment`. `postgresql` lowers to a `cnpg-cluster`
 when authored) carrying the engine-only `cnpg-postgresql-defaults` trait, which
 is registered from `builtinEngineTraits()` via `RegisterEngineTrait`: only a rule
 may attach it, and it is not published in the handler schemas. `helm` lowers to a `helmrelease` (plus a generated
-`helmrepository` or `ocirepository` for an inline URL, shared within the document)
+`helmrepository`, `ocirepository`, `gitrepository` or `bucket` for an inline
+source, shared within the document)
 or, under `delivery: template`, to a `helmtemplate`. The built-in application policy
 handlers are registered too (`builtinPolicyHandlers()` — `dependency`, `placement`,
 `reconciliation` and `health-checks`, registered via `RegisterPolicy`). Every registered handler and rule

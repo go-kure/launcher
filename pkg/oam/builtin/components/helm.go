@@ -250,11 +250,11 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, error) {
 		if s.Endpoint == "" || s.BucketName == "" {
 			return nil, nil, errors.Errorf("%s: an inline source.kind Bucket requires source.endpoint and source.bucketName", helmType)
 		}
-		// No host, host:port or URL authority holds an "@" but user info does, in
-		// either form (https://user:token@host or user:token@host). The value is
-		// not quoted back, so the credential does not reach the error.
-		if strings.Contains(s.Endpoint, "@") {
-			return nil, nil, errors.Errorf("%s: source.endpoint carries credentials, which an inline Bucket does not take; author a bucket with a secretRef and reference it", helmType)
+		// Only a bare host[:port] or a URL of a host and port is accepted, so
+		// user info, a signed query or anything else an endpoint could smuggle
+		// is refused. The value is not quoted back.
+		if !plainBucketEndpoint(s.Endpoint) {
+			return nil, nil, errors.Errorf("%s: source.endpoint of an inline Bucket must be a host[:port], or an http:// or https:// URL of only a host and an optional port; user info, a path, a query or a fragment is not taken inline (author a bucket with a secretRef and reference it)", helmType)
 		}
 	case s.URL == "" && s.Name == "":
 		return nil, nil, errors.Errorf("%s: source requires either source.url (inline) or source.name (reference)", helmType)
@@ -393,25 +393,51 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	return result, nil
 }
 
+// plainSourceURL reports whether raw is exactly an http:// or https:// URL made
+// of a host, an optional port and, when withPath is set, a non-root path (without
+// it, at most "/"). The URL is re-assembled from what url.Parse found and must
+// match raw, so user info, a query, a fragment or anything else is refused by
+// construction rather than by a list of what to look for: an inline source has no
+// credential form, and the address is written verbatim into the generated source.
+func plainSourceURL(raw string, withPath bool) bool {
+	scheme, rest, ok := strings.Cut(raw, "://")
+	if !ok || (scheme != "http" && scheme != "https") {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" || strings.HasSuffix(u.Host, ":") {
+		return false
+	}
+	path := u.EscapedPath()
+	if withPath != (path != "" && path != "/") {
+		return false
+	}
+	return rest == u.Host+path
+}
+
+// plainBucketEndpoint reports whether an inline Bucket endpoint is a bare
+// host[:port], or an http:// or https:// URL of only a host and port.
+func plainBucketEndpoint(endpoint string) bool {
+	if strings.Contains(endpoint, "://") {
+		return plainSourceURL(endpoint, false)
+	}
+	return plainSourceURL("https://"+endpoint, false)
+}
+
 // checkHelmGitSource checks an inline GitRepository source: an http:// or https://
-// URL without user info, and exactly one source.ref field. An ssh:// URL is
-// refused: Flux reads it only with a key from spec.secretRef, which the inline form
-// does not take, so the generated source could never become ready. A user or token
-// in the URL is refused too: it would be written into the generated manifest instead
-// of a Secret. Flux checks out branch master when
+// URL of a host and repository path only (plainSourceURL), and exactly one
+// source.ref field. An ssh:// URL is refused: Flux reads it only with a key from
+// spec.secretRef, which the inline form does not take, so the generated source
+// could never become ready. A user or token in the URL is refused too: it would be
+// written into the generated manifest instead of a Secret. Flux checks out branch master when
 // spec.ref is empty and picks one field by precedence when several are set; the
 // rule refuses both rather than follow either silently.
 func checkHelmGitSource(src *helmSource) error {
 	if !strings.HasPrefix(src.URL, "https://") && !strings.HasPrefix(src.URL, "http://") {
 		return errors.Errorf("%s: source.kind GitRepository requires an http:// or https:// URL; an ssh:// repository needs credentials, so author a gitrepository and reference it", helmType)
 	}
-	// The parse error is not wrapped: it quotes the whole URL, user info included.
-	u, err := url.Parse(src.URL)
-	if err != nil {
-		return errors.Errorf("%s: source.url is not a valid URL", helmType)
-	}
-	if u.User != nil {
-		return errors.Errorf("%s: source.url carries credentials, which an inline GitRepository does not take; author a gitrepository with a secretRef and reference it", helmType)
+	if !plainSourceURL(src.URL, true) {
+		return errors.Errorf("%s: source.url of an inline GitRepository must be an http:// or https:// URL of a host, an optional port and a repository path only; user info, a query or a fragment is not taken inline (author a gitrepository with a secretRef and reference it)", helmType)
 	}
 	var set []string
 	if src.Ref != nil {
