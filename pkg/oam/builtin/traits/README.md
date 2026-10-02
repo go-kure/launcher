@@ -81,11 +81,19 @@ preflight reject every valid use of the trait.
 | `prune-protection` | Adds `kustomize.toolkit.fluxcd.io/prune: disabled` | (no properties) |
 | `force-replace` | Adds `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a `job`'s pod template). Replacing a Job re-runs it and stops any run in progress. Opt-in: without the trait launcher does not add the annotation. | (no properties) |
 
-`prune-protection` and `force-replace` annotate every object the component itself generates,
-including resources a layout-augmenting component adds (see "Decorator forwarding" below), and
-nothing another trait appends to the bundle. `force-replace` sets its annotation after the
-component's own `Generate` returns, so it reaches a `job`'s Job even though that component clears
-the Job's annotations while building it.
+`prune-protection` and `force-replace` annotate every object the component produces: what the
+component itself generates, including resources a layout-augmenting component adds (see
+"Decorator forwarding" below), and every sub-application its other traits append to the bundle —
+the objects of `pvc`, `configmap`, `volsync`, `certificate`, `ingress`, `httproute`, `rbac`,
+`scaler`, `networkpolicy`, `cilium-networkpolicy` and `external-secret`. Trait order does not
+matter: both implement `oam.SubApplicationDecorator`, and the engine applies them to the
+component's sub-applications in a last build step, after every trait of every component has run.
+A sibling group's sub-applications are covered once, whichever members the trait was forwarded to.
+The NetworkPolicies the engine synthesizes (default-deny, inbound and egress allows) are not
+covered: they belong to no component's traits and are regenerated on every build, so Flux
+pruning them stays correct. Neither is another component's sub-application. `force-replace` sets
+its annotation after the component's own `Generate` returns, so it reaches a `job`'s Job even
+though that component clears the Job's annotations while building it.
 
 ## Capability-aware traits
 
@@ -670,8 +678,8 @@ decorator's unexported `postAugmentLayout` hook when it implements one. `prune-p
 and its child layouts with its own annotation (`kustomize.toolkit.fluxcd.io/prune: disabled`,
 `kustomize.toolkit.fluxcd.io/force: enabled`), so a resource the augmenter adds or moves into a
 child layout is covered along with the rest. kure's walker calls `AugmentLayout` only on a layout it
-seeded with that one application's `Generate` output, so the trait's narrow scope is unchanged —
-sibling applications in the same bundle are never on that layout. The hook runs at every level of
+seeded with that one application's `Generate` output, so the hook reaches only the application the
+decorator wraps — sibling applications in the same bundle are never on that layout. The hook runs at every level of
 a decorator chain, so trait order does not matter. The other decorators (`configmap`,
 `external-secret`, `security-context`, `topology-spread`) rewrite the workload their inner `Generate` returns and
 have nothing to do for an augmenter-added resource, so they implement no hook.
@@ -680,8 +688,12 @@ Every trait decorator also embeds `decoratorBase`, which forwards the optional
 interfaces a component config may implement — `stack.Validator`,
 `fluxNamespaceSettable`, `autoHealthCheckEmitter`, `servicePortProvider`,
 `serviceBackendNamer`, `servicePortNamer`, `oam.ServiceAccountNamer`, `nonRWXClaimer`,
-`serviceRoutingTargeter`, `podTemplateLabeler` and `identityPortMapper` — so a decorated config
-keeps answering them. The `ServiceAccountNamer` forward is what keeps the
+`serviceRoutingTargeter`, `podTemplateLabeler`, `identityPortMapper` and `oam.ComponentNamed` —
+so a decorated config keeps answering them. The `oam.ComponentNamed` forward keeps a trait
+sub-application decorated by `prune-protection` or `force-replace` attributed to its component
+(see "Component attribution" below). The NetworkPolicy synthesis collectors of the routing traits
+are deliberately not forwarded: synthesis runs before the engine decorates a sub-application, and
+forwarding them would make every decorated component look like a router. The `ServiceAccountNamer` forward is what keeps the
 `rbac` row above true once a second trait is present: without it a workload
 that authored `serviceAccountName` would stop reporting its account as soon as
 any trait wrapped it, and `rbac` would silently bind the per-component name
@@ -718,7 +730,8 @@ Every trait sub-app config exposes the OAM component it was emitted for via
 name, never the sub-app or K8s Service name. Consumers use it to stamp per-resource
 provenance (the derived `<domain>/component` label) without re-deriving the component
 from sub-app names, which several handlers author from properties rather than
-`<component>-<suffix>`. The routing traits' existing `TargetComponentName()` (used by
+`<component>-<suffix>`. A sub-app decorated by `prune-protection` or `force-replace` keeps
+answering it through the decorator. The routing traits' existing `TargetComponentName()` (used by
 auto-NetworkPolicy synthesis) delegates to the same accessor; auto-synthesized
 NetworkPolicies target that `<domain>/component` label by default (domain from
 `TransformContext.Domain`, library default `gokure.dev`;

@@ -1,0 +1,19 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    # force-replace covers the claim the pvc trait creates, authored after it
+    # (go-kure/launcher#712).
+    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+      traits:
+        - type: force-replace
+        - type: pvc
+          properties:
+            name: shared-data
+            size: 5Gi

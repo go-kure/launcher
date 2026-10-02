@@ -1,0 +1,24 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    # A trait sub-application follows its own component, not every component:
+    # the claim api-data comes right after api's objects, before the worker
+    # api-data's (go-kure/launcher#712).
+    - name: api
+      type: webservice
+      properties:
+        image: ghcr.io/example/api:v1.0.0
+        port: 8080
+      traits:
+        - type: pvc
+          properties:
+            name: api-data
+            size: 5Gi
+    - name: api-data
+      type: worker
+      properties:
+        image: ghcr.io/example/worker:v1.0.0

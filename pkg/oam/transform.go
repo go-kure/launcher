@@ -67,6 +67,22 @@ type TransformContext struct {
 	// Reference type, so every by-value ctx copy through the pipeline shares one
 	// map — same sharing pattern Capabilities/EgressPeers already rely on.
 	consumedCapabilities map[string]struct{}
+	// subAppDecorations accumulates, per component, each decorating trait
+	// (SubApplicationDecorator) and the trait sub-applications it covers, recorded by
+	// applyEntryTraits and applied by decorateSubApplications as the last step of
+	// TransformWithPolicy. Internal only, initialized like consumedCapabilities; a
+	// pointer so every by-value ctx copy appends to one slice.
+	subAppDecorations *[]subAppDecoration
+}
+
+// subAppDecoration is one decorating trait of one component and the
+// sub-applications that component's traits appended to bundle.
+type subAppDecoration struct {
+	component string
+	trait     Trait
+	handler   TraitHandler
+	bundle    *stack.Bundle
+	subApps   []*stack.Application
 }
 
 // fluxNamespaceSettable is implemented by ApplicationConfig types that emit
@@ -554,6 +570,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		ctx.Policy = &NoopPolicy{}
 	}
 	ctx.consumedCapabilities = make(map[string]struct{})
+	ctx.subAppDecorations = &[]subAppDecoration{}
 
 	// Validate + normalize the platform domain (and the optional full-key override) once,
 	// fail-fast before building anything. ComponentLabelKey takes precedence over Domain,
@@ -717,6 +734,11 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	}
 	synthesizeEndpointIngressNetworkPolicies(cluster, componentMap, ctx.IngressPeers)
 	postProcessFluxNamespace(cluster, ctx.FluxNamespace)
+	// Last: a decorator hides the interfaces the steps above read on a trait
+	// sub-application (the NetworkPolicy synthesis collectors among them).
+	if err := decorateSubApplications(*ctx.subAppDecorations); err != nil {
+		return nil, nil, err
+	}
 
 	if len(ctx.consumedCapabilities) > 0 {
 		keys := make([]string, 0, len(ctx.consumedCapabilities))
@@ -956,7 +978,13 @@ func (t *Transformer) buildDependencyAwareCluster(app *Application, entries []co
 // Capability rendering values are merged into trait properties before dispatch;
 // OAM inline values take precedence. Policy enforcement is applied to configs
 // added by each trait.
+//
+// The bundle's applications are then ordered component by component: each
+// entry's application followed by the sub-applications its traits created, in
+// creation order. Traits append to the bundle, which would otherwise put every
+// sub-application after every component of the bundle.
 func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bundle *stack.Bundle, ctx TransformContext) error {
+	ordered := make([]*stack.Application, 0, len(bundle.Applications))
 	for _, e := range entries {
 		// For a sibling group: each trait-created sub-application's name and the
 		// member type whose trait created it (see the check after Apply).
@@ -964,26 +992,67 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 		if len(e.members) > 0 {
 			groupTraitApps = make(map[string]string)
 		}
-		if err := t.applyEntryTraits(app, e, groupTraitApps, bundle, ctx); err != nil {
+		subApps, err := t.applyEntryTraits(app, e, groupTraitApps, bundle, ctx)
+		if err != nil {
 			return err
 		}
+		ordered = append(ordered, e.app)
+		ordered = append(ordered, subApps...)
+	}
+	// A trait that did more than append to the bundle leaves it in an order the
+	// entries do not account for; it is then kept as the traits left it.
+	if sameApplications(ordered, bundle.Applications) {
+		bundle.Applications = ordered
 	}
 	return nil
 }
 
+// sameApplications reports whether a and b hold the same applications, each
+// exactly once, in any order.
+func sameApplications(a, b []*stack.Application) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	count := make(map[*stack.Application]int, len(a))
+	for _, x := range a {
+		count[x]++
+	}
+	for _, x := range b {
+		if count[x] != 1 {
+			return false
+		}
+		count[x]--
+	}
+	return true
+}
+
 // applyEntryTraits applies the traits of one entry — each member's own, on that
 // member's application and in authored order, for a collapsed sibling group
-// (traitSteps). groupTraitApps is non-nil exactly for a group.
-func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, groupTraitApps map[string]string, bundle *stack.Bundle, ctx TransformContext) error {
+// (traitSteps). groupTraitApps is non-nil exactly for a group. It returns the
+// sub-applications the entry's traits appended to the bundle, in creation order,
+// and records each decorating trait (SubApplicationDecorator) with them in
+// ctx.subAppDecorations.
+func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, groupTraitApps map[string]string, bundle *stack.Bundle, ctx TransformContext) ([]*stack.Application, error) {
+	var subApps []*stack.Application
+	var decorators []subAppDecoration
+	// A sibling group applies a trait forwarded to two members on each; its
+	// sub-applications are decorated once per authored trait. The slot alone does
+	// not name the trait — a trait rule's output keeps its input's slot — so the
+	// key adds the type, and only another member's copy is skipped.
+	type slotTrait struct {
+		index int
+		typ   string
+	}
+	decorated := make(map[slotTrait]string)
 	for _, step := range e.traitSteps(app) {
 		entry := step.entry
 		for _, trait := range step.traits {
 			handler := t.findTraitHandler(trait.Type)
 			if handler == nil {
-				return &TransformError{Message: fmt.Sprintf("no handler for trait type %q", trait.Type)}
+				return nil, &TransformError{Message: fmt.Sprintf("no handler for trait type %q", trait.Type)}
 			}
 			if t.engineTraitTypes[trait.Type] && !trait.synthesized {
-				return &TransformError{Message: fmt.Sprintf("component %q", entry.component.Name), Cause: engineOnlyTraitError(trait.Type)}
+				return nil, &TransformError{Message: fmt.Sprintf("component %q", entry.component.Name), Cause: engineOnlyTraitError(trait.Type)}
 			}
 
 			// A sealed trait was emitted by a lowering rule, which already merged
@@ -999,7 +1068,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 				resolved, matchedKey, matched = resolveCapability(trait, ctx.Capabilities)
 
 				if aware, ok := handler.(CapabilityAware); ok && aware.CapabilityRequired() && !matched {
-					return &TransformError{
+					return nil, &TransformError{
 						Message: fmt.Sprintf("component %q trait %q: capability %q not found in ClusterProfile",
 							entry.component.Name, trait.Type, buildCapabilityKey(trait)),
 						Cause: ErrMissingCapability,
@@ -1012,7 +1081,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 					if _, hasDef := t.capabilityDefs[trait.Type]; !hasDef {
 						msg := fmt.Sprintf("no CapabilityDefinition found for custom trait %q", trait.Type)
 						if t.strictCapabilities {
-							return &TransformError{Message: msg}
+							return nil, &TransformError{Message: msg}
 						}
 						if t.warnHandler != nil {
 							t.warnHandler(msg)
@@ -1027,7 +1096,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 				// a value the trait itself recorded (Trait.RenderReserved) is.
 				if p, ok := handler.(PropertySchemaProvider); ok {
 					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties"); err != nil {
-						return &TransformError{
+						return nil, &TransformError{
 							Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
 							Cause:   err,
 						}
@@ -1043,7 +1112,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 				// Its Properties are final, so they are checked as they stand, a value
 				// the rule recorded with Trait.RenderReserved exempt.
 				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties"); err != nil {
-					return &TransformError{
+					return nil, &TransformError{
 						Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
 						Cause:   err,
 					}
@@ -1051,7 +1120,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 			}
 			prevLen := len(bundle.Applications)
 			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {
-				return &TransformError{
+				return nil, &TransformError{
 					Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
 					Cause:   err,
 				}
@@ -1063,7 +1132,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 				// would deploy one name twice.
 				if groupTraitApps != nil {
 					if prev, dup := groupTraitApps[newApp.Name]; dup && prev != entry.component.Type {
-						return &TransformError{Message: fmt.Sprintf(
+						return nil, &TransformError{Message: fmt.Sprintf(
 							"sibling group %q: traits on members %q and %q both create sub-application %q; carry the trait on one member",
 							entry.component.Name, prev, entry.component.Type, newApp.Name)}
 					}
@@ -1071,9 +1140,53 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 				}
 				if enforceable, ok := newApp.Config.(Enforceable); ok {
 					if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
-						return &ViolationError{Component: entry.component.Name, Cause: err}
+						return nil, &ViolationError{Component: entry.component.Name, Cause: err}
 					}
 				}
+			}
+			subApps = append(subApps, bundle.Applications[prevLen:]...)
+
+			if d, ok := handler.(SubApplicationDecorator); ok && d.DecoratesSubApplications() {
+				if trait.authoredIndex != nil {
+					key := slotTrait{*trait.authoredIndex, trait.Type}
+					if member, seen := decorated[key]; seen && member != entry.component.Type {
+						continue
+					}
+					decorated[key] = entry.component.Type
+				}
+				decorators = append(decorators, subAppDecoration{
+					component: entry.component.Name, trait: resolved, handler: handler, bundle: bundle,
+				})
+			}
+		}
+	}
+	if len(subApps) > 0 && ctx.subAppDecorations != nil {
+		for _, d := range decorators {
+			d.subApps = subApps
+			*ctx.subAppDecorations = append(*ctx.subAppDecorations, d)
+		}
+	}
+	return subApps, nil
+}
+
+// decorateSubApplications applies each recorded decorating trait to the trait
+// sub-applications of its component, as the last step of the build. It runs
+// after every trait of every component, so a decorator authored before the trait
+// that creates a sub-application covers it as well as one authored after.
+func decorateSubApplications(decorations []subAppDecoration) error {
+	for _, d := range decorations {
+		for _, subApp := range d.subApps {
+			prevLen := len(d.bundle.Applications)
+			if err := d.handler.Apply(&d.trait, subApp, d.bundle); err != nil {
+				return &TransformError{
+					Message: fmt.Sprintf("component %q trait %q on sub-application %q", d.component, d.trait.Type, subApp.Name),
+					Cause:   err,
+				}
+			}
+			if len(d.bundle.Applications) != prevLen {
+				return &TransformError{Message: fmt.Sprintf(
+					"component %q trait %q added an application while decorating sub-application %q; a SubApplicationDecorator must not append to the bundle",
+					d.component, d.trait.Type, subApp.Name)}
 			}
 		}
 	}

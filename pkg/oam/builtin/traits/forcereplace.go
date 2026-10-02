@@ -44,9 +44,9 @@ func (h *ForceReplaceHandler) PropertySchema() map[string]oam.PropertySchema {
 //
 // Coverage and scope are prune-protection's (see PruneProtectionHandler.Apply):
 // the component's own Generate output plus, for a layout.LayoutAugmenter
-// config, every resource on its per-app layout after AugmentLayout ran.
-// Resources appended to bundle.Applications by other trait handlers are not
-// affected.
+// config, every resource on its per-app layout after AugmentLayout ran, and,
+// through DecoratesSubApplications, the sub-applications the component's other
+// traits append to the bundle.
 //
 // The annotation is set after the inner Generate returns, so it survives a
 // component that resets its objects' annotations while building them (the job
@@ -57,6 +57,12 @@ func (h *ForceReplaceHandler) Apply(_ *oam.Trait, app *stack.Application, _ *sta
 		app.Config)
 	return nil
 }
+
+// DecoratesSubApplications reports that the trait also covers the component's
+// trait sub-applications (oam.SubApplicationDecorator).
+func (h *ForceReplaceHandler) DecoratesSubApplications() bool { return true }
+
+var _ oam.SubApplicationDecorator = (*ForceReplaceHandler)(nil)
 
 // forceReplaceConfig wraps an ApplicationConfig and injects
 // annotationFluxForceKey = annotationFluxForceEnabled into every resource
