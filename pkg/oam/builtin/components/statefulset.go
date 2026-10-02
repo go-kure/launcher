@@ -2,6 +2,7 @@ package components
 
 import (
 	"maps"
+	"slices"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
@@ -48,6 +49,57 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaStatefulSetSpec())
 	return m
+}
+
+// FillCapabilityDefaults gives each volumeClaimTemplates entry that leaves
+// storageClass unauthored (absent or null) the ClusterProfile `pvc`
+// capability's storageClassName, as an authored pvc trait, the
+// persistentvolumeclaim kind and a webservice or worker pvc volume take it
+// (go-kure/launcher#761). An authored class, "" included, wins. The binding is
+// read once, and only when the list holds an entry, so `pvc` is recorded as
+// consumed exactly when the component builds a claim template. A shape the
+// parser refuses (a list that is not one, an entry that is not a mapping) is
+// left for ToApplicationConfig to refuse.
+func (h *StatefulsetHandler) FillCapabilityDefaults(props map[string]any, lctx oam.LoweringContext) (map[string]any, error) {
+	entries, ok := props["volumeClaimTemplates"].([]any)
+	if !ok {
+		return props, nil
+	}
+	var platformClass any
+	platformRead := false
+	var filled []any
+	for i, v := range entries {
+		entry, ok := nullElem(v).(map[string]any)
+		if !ok {
+			continue
+		}
+		if !platformRead {
+			platformRead = true
+			sc, err := capabilityStorageClass(lctx)
+			if err != nil {
+				return nil, err
+			}
+			if sc == nil {
+				return props, nil
+			}
+			platformClass = sc
+		}
+		if _, present := authoredValue(entry, "storageClass"); present {
+			continue
+		}
+		if filled == nil {
+			filled = slices.Clone(entries)
+		}
+		entry = maps.Clone(entry)
+		entry["storageClass"] = platformClass
+		filled[i] = entry
+	}
+	if filled == nil {
+		return props, nil
+	}
+	out := maps.Clone(props)
+	out["volumeClaimTemplates"] = filled
+	return out, nil
 }
 
 // ToApplicationConfig converts an OAM statefulset component to a StatefulsetConfig.
@@ -464,7 +516,7 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 				},
 			},
 		}
-		if vct.StorageClass != "" {
+		if vct.StorageClass != "" || vct.StorageClassExplicitEmpty {
 			pvc.Spec.StorageClassName = &vct.StorageClass
 		}
 		vct.Spec.apply(&pvc)

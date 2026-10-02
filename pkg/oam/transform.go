@@ -778,6 +778,13 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			}
 			component.Properties = filled
 		}
+		if f, ok := handler.(ComponentCapabilityFiller); ok && !component.synthesized {
+			filled, err := f.FillCapabilityDefaults(component.Properties, LoweringContext{capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities})
+			if err != nil {
+				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+			}
+			component.Properties = filled
+		}
 
 		config, err := handler.ToApplicationConfig(&component, namespace)
 		if err != nil {
