@@ -313,6 +313,98 @@ func TestPVCTwin_RoleVolumeTakesTheCapabilityDefault(t *testing.T) {
 	}
 }
 
+// claimTemplateApp returns an Application holding one statefulset "db" whose
+// single volumeClaimTemplates entry "data" carries props.
+func claimTemplateApp(t *testing.T, props map[string]any) string {
+	t.Helper()
+	entry := map[string]any{"name": "data", "mountPath": "/data"}
+	for k, v := range props {
+		entry[k] = v
+	}
+	app := map[string]any{
+		"apiVersion": "launcher.gokure.dev/v1alpha1",
+		"kind":       "Application",
+		"metadata":   map[string]any{"name": "my-app", "namespace": "default"},
+		"spec": map[string]any{"components": []any{map[string]any{
+			"name": "db", "type": "statefulset",
+			"properties": map[string]any{"image": "ghcr.io/example/db:v1.0.0", "volumeClaimTemplates": []any{entry}},
+		}}},
+	}
+	out, err := yaml.Marshal(app)
+	if err != nil {
+		t.Fatalf("marshal app: %v", err)
+	}
+	return string(out)
+}
+
+// TestPVCTwin_ClaimTemplateTakesTheCapabilityDefault requires a statefulset
+// volumeClaimTemplates entry to take the same storageClassName under a
+// ClusterProfile `pvc` binding as an authored pvc trait (go-kure/launcher#761):
+// the platform class fills an unset or null value, and an authored value, ""
+// included, wins. The template's spec is compared with the trait claim's spec.
+func TestPVCTwin_ClaimTemplateTakesTheCapabilityDefault(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]any
+		want  any // spec.storageClassName; nil means absent
+	}{
+		{name: "unset takes the platform class", props: map[string]any{"size": "1Gi"}, want: "platform-ssd"},
+		{name: "null takes the platform class", props: map[string]any{"size": "1Gi", "storageClass": nil}, want: "platform-ssd"},
+		{name: "authored class wins", props: map[string]any{"size": "1Gi", "storageClass": "slow"}, want: "slow"},
+		{name: "authored empty string wins", props: map[string]any{"size": "1Gi", "storageClass": ""}, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			docs, stderr, err := buildPVCDocsWithProfile(t, claimTemplateApp(t, tc.props), pvcCapabilityClusterYAML)
+			if err != nil {
+				t.Fatalf("template: %v\n%s", err, stderr)
+			}
+			var template map[string]any
+			for _, d := range docs {
+				if d["kind"] != "StatefulSet" {
+					continue
+				}
+				spec, _ := d["spec"].(map[string]any)
+				templates, _ := spec["volumeClaimTemplates"].([]any)
+				if len(templates) != 1 {
+					t.Fatalf("StatefulSet has %d claim templates, want 1", len(templates))
+				}
+				template, _ = templates[0].(map[string]any)
+			}
+			if template == nil {
+				t.Fatal("no StatefulSet in the output")
+			}
+			templateSpec, _ := template["spec"].(map[string]any)
+
+			traitProps := map[string]any{}
+			for k, v := range tc.props {
+				if k == "storageClass" {
+					k = "storageClassName"
+				}
+				traitProps[k] = v
+			}
+			docs, stderr, err = buildPVCDocsWithProfile(t, pvcTwinApp(t, true, "data", traitProps), pvcCapabilityClusterYAML)
+			if err != nil {
+				t.Fatalf("trait: %v\n%s", err, stderr)
+			}
+			traitSpec, _ := claimDoc(t, docs, "data")["spec"].(map[string]any)
+
+			got, present := templateSpec["storageClassName"]
+			if !present {
+				got = nil
+			}
+			if got != tc.want {
+				t.Errorf("template spec.storageClassName = %#v (present %v), want %#v", got, present, tc.want)
+			}
+			if !reflect.DeepEqual(templateSpec, traitSpec) {
+				ts, _ := yaml.Marshal(templateSpec)
+				tr, _ := yaml.Marshal(traitSpec)
+				t.Errorf("specs differ\ntemplate:\n%s\ntrait:\n%s", ts, tr)
+			}
+		})
+	}
+}
+
 func labelOf(obj map[string]any, key string) string {
 	md, _ := obj["metadata"].(map[string]any)
 	labels, _ := md["labels"].(map[string]any)

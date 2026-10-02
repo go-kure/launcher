@@ -2067,16 +2067,11 @@ func nullElem(v any) any {
 // convention would otherwise collapse, silently provisioning through the
 // default class instead of honoring an explicit opt-out.
 //
-// Do not read this helper as the sole place that convention does not fit. Two
-// other optional string fields in this file also need "" to mean something
-// other than absent, and neither is served by this helper:
+// It serves volumeClaimTemplate.storageClass as well (go-kure/launcher#761).
+// Do not read it as the sole place that convention does not fit: another
+// optional string field in this file also needs "" to mean something other
+// than absent and is not served by this helper:
 //
-//   - volumeClaimTemplate.storageClass has identical semantics but does not
-//     express them: parseVolumeClaimTemplates reads it with parseStringField
-//     and discards the presence flag, so an authored "" is indistinguishable
-//     from an absent key. Blocked upstream until go-kure/launcher#361; now
-//     that createStatefulSet builds the claim template itself, the gap is
-//     local and fixable here. See VolumeClaimTemplate's own doc comment.
 //   - affinity.podAntiAffinityType must let an explicit "" reach its enum check
 //     so it is refused by name; parseStringField would report "" as absent and
 //     fall back to the "preferred" default instead. parseAffinity therefore
@@ -4736,22 +4731,18 @@ func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error)
 }
 
 // VolumeClaimTemplate represents a PVC template for a StatefulSet.
-// StorageClass has no explicit-empty-string escape here, unlike PVCConfig's
-// StorageClassExplicitEmpty: parseVolumeClaimTemplates reads it with
-// parseStringField and discards the presence flag, and createStatefulSet only
-// sets Spec.StorageClassName when the value is non-empty — so an authored
-// `storageClass: ""` on a StatefulSet's volumeClaimTemplates entry cannot be
-// distinguished from an absent one. This was a cross-repo gap while kure's
-// CreateVolumeClaimTemplate owned the construction; since go-kure/launcher#361
-// the claim template is a corev1.PersistentVolumeClaim literal built here, so
-// the gap is now local. Closing it changes the emitted claim for documents
-// that author the empty string and is deliberately not part of that adoption.
 type VolumeClaimTemplate struct {
 	Name         string
 	StorageClass string
-	Size         string
-	AccessModes  []string
-	MountPath    string
+	// StorageClassExplicitEmpty records an authored `storageClass: ""`, which
+	// requests no class: createStatefulSet then sets Spec.StorageClassName to
+	// a pointer to "", as BuildPVC does for PVCConfig's field of the same name
+	// (go-kure/launcher#761). Absent, the field stays nil and the cluster's
+	// default class applies.
+	StorageClassExplicitEmpty bool
+	Size                      string
+	AccessModes               []string
+	MountPath                 string
 	// DevicePath is where a volumeMode: Block claim appears in the main
 	// container as a raw block device. Exactly one of MountPath and
 	// DevicePath is set (go-kure/launcher#385).
@@ -4844,28 +4835,18 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		if err := rejectUnknownKeys(m, volumeClaimTemplatePropertyKeys, entryLabel); err != nil {
 			return nil, err
 		}
-		// parseStringField, not a bare assertion: same silent-acceptance gap
-		// as the `volumes` pvc case above — a present-but-non-string
-		// storageClass (e.g. a number) previously read as absent and built
-		// with the cluster default class instead of being rejected. Unlike
-		// name/size/mountPath below, storageClass is optional and has no
-		// requiredness check to catch the resulting empty string, so this
-		// one was silent end-to-end.
-		storageClass, _, err := parseStringField(m, "storageClass", fmt.Sprintf("volumeClaimTemplate %q: storageClass", vct.Name))
+		// parseStorageClassField, as on the `volumes[].pvc` path: a
+		// present-but-non-string storageClass is refused rather than read as
+		// absent, a non-empty class must be a DNS-1123 subdomain
+		// (ValidateClassName, which the apiserver runs on every non-empty
+		// storageClassName), and an authored "" is kept apart from an absent
+		// key, so it requests no class (go-kure/launcher#761).
+		storageClass, explicitEmpty, err := parseStorageClassField(m, fmt.Sprintf("volumeClaimTemplate %q: storageClass", vct.Name))
 		if err != nil {
 			return nil, err
 		}
-		// ValidateClassName (NameIsDNSSubdomain), which
-		// ValidatePersistentVolumeClaimSpec runs on every non-empty
-		// storageClassName. parseStorageClassField applies it on the
-		// `volumes[].pvc` path; this one had only the string-type check, so an
-		// invalid class name built a claim the apiserver then rejected.
-		if storageClass != "" {
-			if errs := validation.IsDNS1123Subdomain(storageClass); len(errs) > 0 {
-				return nil, errors.Errorf("volumeClaimTemplate %q: invalid storageClass %q: %s", vct.Name, storageClass, strings.Join(errs, "; "))
-			}
-		}
 		vct.StorageClass = storageClass
+		vct.StorageClassExplicitEmpty = explicitEmpty
 		size, sizeAuthored, err := parseStringField(m, "size", entryLabel+": size")
 		if err != nil {
 			return nil, err

@@ -559,11 +559,12 @@ Input is not among them: a ClusterProfile `pvc` capability supplies an unauthore
 through `ComponentCapabilityDefaults` (go-kure/launcher#742). A `webservice` or
 `worker` `pvc` volume takes it as well: the trait `roleClaims` synthesizes is sealed,
 so the rule reads the binding through `LoweringContext.Capability` and fills the
-value itself (go-kure/launcher#746).
+value itself (go-kure/launcher#746). A `statefulset` `volumeClaimTemplates` entry takes
+it too, through the handler's `ComponentCapabilityFiller` (go-kure/launcher#761).
 
 `pkg/cmd/kurel/pvc_twin_test.go` builds each intent both ways. It requires identical
-claims apart from the `app` label, the same capability default on both paths and on
-a role kind's `pvc` volume, the
+claims apart from the `app` label, the same capability default on both paths, on
+a role kind's `pvc` volume and on a claim template, the
 same refusals for malformed properties on both paths, and a decorator on the owner
 that reaches the trait's claim.
 

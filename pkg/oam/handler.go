@@ -61,6 +61,20 @@ type ComponentCapabilityDefaults interface {
 	CapabilityDefaults() (key string, properties []string)
 }
 
+// ComponentCapabilityFiller is an optional interface for ComponentHandlers whose
+// capability defaults land below the top level of their properties, where
+// ComponentCapabilityDefaults cannot reach: the statefulset kind's
+// volumeClaimTemplates entries take the `pvc` capability's storageClassName
+// (go-kure/launcher#761). FillCapabilityDefaults runs right after
+// ComponentCapabilityDefaults, on unsynthesized components only, and returns the
+// properties ToApplicationConfig receives. It must not mutate props: it returns
+// props itself when it fills nothing, and copies what it changes. It reads a
+// binding only through lctx.Capability, which records the key as consumed; lctx
+// carries nothing else. An error fails the component.
+type ComponentCapabilityFiller interface {
+	FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error)
+}
+
 // PropertySchemaProvider is an optional interface implemented by component and
 // trait handlers that declare a schema for their user-facing properties. The
 // downstream runtime's validator consumes these schemas (via Transformer.HandlerSchemas) to validate a

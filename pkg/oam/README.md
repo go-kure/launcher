@@ -332,6 +332,7 @@ the built-ins. Extend the system by implementing:
 | `PolicyHandler` | `CanHandle(type)` + `Apply(policy, components, result)` — validates one `spec.policies` entry and records its effect (tier overrides, dependency edges, extra health checks, reconciliation settings) on the shared `PolicyResult`; see [policies](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies). A policy type with no registered handler fails the transform. |
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
 | `ComponentCapabilityDefaults` | `CapabilityDefaults() (key string, properties []string)` — on a `ComponentHandler` whose properties take defaults from a `ClusterProfile` capability. Before `ToApplicationConfig`, the engine fills each listed property the component leaves unauthored (absent or `null`) from that binding's rendering; an authored value, `""` included, wins. It reads only the listed keys, never the rest of the rendering, and records the key in `ConsumedCapabilities` when the profile binds it. A component a lowering rule synthesized is skipped, as a sealed trait is. `EvaluateProfile` validates the binding only through the trait handler or trait lowering rule of the key's type, so register one; with neither, the rendering reaches the component unvalidated. Implemented by `persistentvolumeclaim` (`pvc`, `storageClassName`; go-kure/launcher#742). |
+| `ComponentCapabilityFiller` | `FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error)` — on a `ComponentHandler` whose capability defaults land below the top level of its properties, where `ComponentCapabilityDefaults` cannot reach. The engine calls it right after `ComponentCapabilityDefaults`, on a component no lowering rule synthesized, and passes the result to `ToApplicationConfig`; an error fails the component. It must not mutate `props`, and reads a binding only through `lctx.Capability`, which records the key in `ConsumedCapabilities`; `lctx` carries nothing else. Implemented by `statefulset` (`pvc`'s `storageClassName` into each `volumeClaimTemplates` entry that leaves `storageClass` unauthored; go-kure/launcher#761). |
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
 | `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). |
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
@@ -345,7 +346,8 @@ app's traits actually resolved against `ctx.Capabilities` during the transform �
 `ClusterProfile` match, not every syntactically possible key a trait could name — plus
 every bound key a `ComponentCapabilityDefaults` handler takes defaults from
 (go-kure/launcher#742), and every key a component, trait, document or policy lowering rule reads through
-`LoweringContext.Capability` (go-kure/launcher#686). A read by a
+`LoweringContext.Capability` (go-kure/launcher#686), as a `ComponentCapabilityFiller`
+handler does (go-kure/launcher#761). A read by a
 `RawDocumentLoweringRule` under `LowerRaws` is not among them: `LowerRaws` returns no
 `PolicyResult`, and the capabilities the rewritten document's traits resolve against are
 recorded when `TransformWithPolicy` runs on it. Populated

@@ -821,7 +821,7 @@ func schemaVolumeClaimTemplates() oam.PropertySchema {
 		"size":         {Type: oam.PropertyTypeString, Description: `Requested storage size (e.g. "10Gi"). Shorthand for resources.requests.storage; exactly one of the two is required.`},
 		"mountPath":    {Type: oam.PropertyTypeString, Description: "Path where the claim is mounted in the container. Not a claim-spec field — it drives the container's VolumeMount. Exactly one of mountPath and devicePath is required."},
 		"devicePath":   {Type: oam.PropertyTypeString, Description: "Path in the container where a volumeMode: Block claim appears as a raw block device. Not a claim-spec field — it drives the container's VolumeDevice. Authored instead of mountPath, and only together with volumeMode: Block."},
-		"storageClass": {Type: oam.PropertyTypeString, Description: "StorageClass used to provision the volume. Omitted means the cluster's default class."},
+		"storageClass": {Type: oam.PropertyTypeString, Description: "StorageClass used to provision the volume. Unset takes the ClusterProfile pvc capability's storageClassName, else the cluster's default class; an empty string requests no class (no dynamic provisioning)."},
 		"accessModes":  {Type: oam.PropertyTypeArray, Description: "Requested access modes for the volume.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: accessModesEnum(), Description: "A single access mode."}},
 	}
 	maps.Copy(props, schemaVolumeClaimSpec())
