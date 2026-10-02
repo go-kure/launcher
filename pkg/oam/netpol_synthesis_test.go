@@ -655,7 +655,7 @@ func TestSynthesizeNetworkPolicies_ServicelessComponent_DoesNotShadowExternalBac
 // A Service-LESS component name must NOT fabricate an R3 ambiguity with another component's real
 // BackendServiceName().
 func TestSynthesizeNetworkPolicies_ServicelessComponent_NoFalseAmbiguity(t *testing.T) {
-	// "db-headless" is a Service-less component; "db" is a statefulset whose Service is "db-headless".
+	// "db-headless" is a Service-less component; "db" is a component whose Service is "db-headless".
 	appA := stack.NewApplication("db-headless", "default", noopConfig{})
 	appB := stack.NewApplication("db", "default", svcNamerConfig{svc: "db-headless"})
 	bundle := &stack.Bundle{Applications: []*stack.Application{appA, appB}}

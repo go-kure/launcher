@@ -33,15 +33,16 @@ type trafficRule struct {
 	Ports   []intstr.IntOrString
 }
 
-// serviceBackendNamer is optionally implemented by a component config whose Kubernetes Service
-// name differs from its component name (e.g. a statefulset's headless service). Used to resolve
-// an expose backendRef (a Service name) back to the sibling component that owns it (go-kure/launcher#227).
+// serviceBackendNamer is optionally implemented by a component config that names its Kubernetes
+// Service explicitly (e.g. a port-less headless `service` component, which ServicePort cannot
+// identify). Used to resolve an expose backendRef (a Service name) back to the sibling component
+// that owns it (go-kure/launcher#227).
 type serviceBackendNamer interface {
 	BackendServiceName() string
 }
 
 // servicePortProvider is optionally implemented by a component config that exposes a Service port
-// (the webservice/statefulset convention: Service name == component name). Used to decide whether a
+// (the webservice/service convention: Service name == component name). Used to decide whether a
 // component actually owns a routable Service.
 type servicePortProvider interface {
 	ServicePort() int32
