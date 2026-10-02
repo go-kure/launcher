@@ -1123,24 +1123,21 @@ func TestPVCTraitConfig_Generate_RejectsEmptySize(t *testing.T) {
 	}
 }
 
-// TestPVCTraitConfig_Generate_RejectsNonPositiveSize: the trait builds its
-// claim through components.BuildPVC, so the positivity rule upstream applies to
-// requests[storage] (go-kure/launcher#384) reaches it too — a zero or negative
-// size fails the build instead of emitting a claim admission refuses.
-func TestPVCTraitConfig_Generate_RejectsNonPositiveSize(t *testing.T) {
+// TestPVCHandler_Apply_RejectsNonPositiveSize: the trait parses its size with
+// the persistentvolumeclaim kind's parser (go-kure/launcher#741), so the
+// positivity rule upstream applies to requests[storage] (go-kure/launcher#384)
+// refuses a zero or negative size when the trait is applied, as it does for
+// the kind, not only at Generate.
+func TestPVCHandler_Apply_RejectsNonPositiveSize(t *testing.T) {
 	for _, size := range []string{"0", "-1Gi"} {
 		t.Run(size, func(t *testing.T) {
 			h := &traits.PVCHandler{}
 			trait := &oam.Trait{Type: "pvc", Properties: map[string]any{"name": "data", "size": size}}
-			bundle := newBundle()
-			if err := h.Apply(trait, newApp("api", "default"), bundle); err != nil {
-				t.Fatalf("Apply: %v", err)
-			}
-			_, err := bundle.Applications[0].Generate()
+			err := h.Apply(trait, newApp("api", "default"), newBundle())
 			if err == nil {
-				t.Fatalf("expected Generate to reject size %q", size)
+				t.Fatalf("expected Apply to reject size %q", size)
 			}
-			if !strings.Contains(err.Error(), "size must be positive") {
+			if !strings.Contains(err.Error(), "size: must be positive") {
 				t.Errorf("error should name the positivity rule, got: %v", err)
 			}
 		})
@@ -1174,6 +1171,14 @@ func TestPVCTraitConfig_VolumeMode(t *testing.T) {
 	}
 	t.Run("unauthored", func(t *testing.T) {
 		if vm := claimFor(t, map[string]any{"name": "disk", "size": "5Gi"}).Spec.VolumeMode; vm != nil {
+			t.Errorf("volumeMode = %v, want nil", *vm)
+		}
+	})
+	// The property schema refuses "" in a document. A Go caller that bypasses
+	// it gets the persistentvolumeclaim kind's reading of "": unset
+	// (go-kure/launcher#741).
+	t.Run("empty string reads as unset", func(t *testing.T) {
+		if vm := claimFor(t, map[string]any{"name": "disk", "size": "5Gi", "volumeMode": ""}).Spec.VolumeMode; vm != nil {
 			t.Errorf("volumeMode = %v, want nil", *vm)
 		}
 	})

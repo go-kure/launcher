@@ -649,8 +649,8 @@ present, must be a **positive** quantity. **Behavior-changing**
 `ValidatePersistentVolumeClaimSpec` runs `ValidatePositiveQuantityValue` over
 `requests[storage]`, which refuses zero as well as negative values — the
 claim built before was never admissible. `BuildPVC` applies the same rule,
-so the `pvc` trait, which builds its claim through it, refuses a zero or
-negative `size` too; `pvc.storageClass`,
+and the `pvc` trait, which parses its claim with the `persistentvolumeclaim`
+kind's `ParseClaimProperties`, refuses a zero or negative `size` too; `pvc.storageClass`,
 if authored, must be a string — a present-but-non-string value (e.g. a bare
 number) is rejected rather than silently building with the cluster default
 class — and, once confirmed a string, a non-empty value must also be a valid
@@ -1740,9 +1740,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     stops a role kind from generating its own account.
   - `persistentvolumeclaim` publishes `size`, `storageClassName`,
     `accessModes` (default `[ReadWriteOnce]`) and `volumeMode`. The claim is
-    built by the same `BuildPVC` as a `pvc` volume and the `pvc` trait, so the
-    three agree on every field they share, including the explicit-empty
-    `storageClassName: ""`, which requests no class. An unauthored `size`
+    built by the same `BuildPVC` as a `pvc` volume, so the two agree on every
+    field they share, including the explicit-empty `storageClassName: ""`,
+    which requests no class. The `pvc` trait is this kind's twin
+    (go-kure/launcher#741): it runs the kind's own `ParseClaimProperties`,
+    `ApplyClaimPolicy` and `GenerateClaim`, so the same properties build the
+    same claim. Only the ownership fields differ: the claim's name, its `app`
+    label, namespace and bundle. An unauthored `size`
     comes from the EnvironmentPolicy storage default; with neither, the build
     fails with `size: required …`. The policy's maximum storage size applies
     either way. A workload mounts the claim through a `pvc` volume's
@@ -3208,7 +3212,9 @@ reason rather than silently ignored:
 
 Custom component types implement `oam.ComponentHandler` (`CanHandle` +
 `ToApplicationConfig`) and are registered alongside the built-ins. Exported helpers:
-`ValidateImageRef` (image policy) and `BuildPVC` (PVC from a `PVCConfig`). A custom
+`ValidateImageRef` (image policy), `BuildPVC` (PVC from a `PVCConfig`), and the
+`persistentvolumeclaim` kind's claim path, `ParseClaimProperties`,
+`ApplyClaimPolicy` and `GenerateClaim`, which the `pvc` trait builds through. A custom
 `Generate()` that builds standalone PVCs from a `PVCConfig` list should qualify their
 names with the component name the way the role kinds do — see `roleClaims`
 (unexported, `role_members.go`) — to avoid two components colliding on the same

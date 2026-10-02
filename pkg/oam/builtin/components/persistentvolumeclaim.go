@@ -16,8 +16,9 @@ import (
 //
 // It emits the claim and nothing else. The component name is the claim's
 // name, so a workload volume's `claimName` names it. The claim is built by the
-// same BuildPVC as a workload's `pvc` volume and the `pvc` trait, so the three
-// agree on every field they share.
+// same BuildPVC as a workload's `pvc` volume, and the `pvc` trait is this
+// kind's twin: it runs the same ParseClaimProperties, ApplyClaimPolicy and
+// GenerateClaim (go-kure/launcher#741).
 type PersistentVolumeClaimHandler struct{}
 
 // CanHandle returns true for the persistentvolumeclaim component type.
@@ -78,46 +79,101 @@ type PersistentVolumeClaimConfig struct {
 }
 
 // ApplyPolicy fills an unauthored size from the policy's storage default and
-// enforces the policy's maximum. Precedence: authored > policy default; with
-// neither, the size is refused.
+// enforces the policy's maximum.
 func (c *PersistentVolumeClaimConfig) ApplyPolicy(p oam.Policy) error {
-	if p != nil && c.Claim.Size == "" {
-		c.Claim.Size = p.DefaultStorageSize()
+	return ApplyClaimPolicy(&c.Claim, p)
+}
+
+// Generate creates the PersistentVolumeClaim, named and labelled after the
+// Application.
+func (c *PersistentVolumeClaimConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	return GenerateClaim(c.Claim, app.Name, app.Namespace, appLabels(app.Name))
+}
+
+// parsePersistentVolumeClaim reads a persistentvolumeclaim component's
+// properties.
+func parsePersistentVolumeClaim(component *oam.Component) (*PersistentVolumeClaimConfig, error) {
+	claim, err := ParseClaimProperties(component.Properties)
+	if err != nil {
+		return nil, err
 	}
-	if err := c.validateSize(); err != nil {
+	return &PersistentVolumeClaimConfig{Name: component.Name, Claim: claim}, nil
+}
+
+// The three functions below are the kind's whole claim path: parse, policy,
+// generate. The pvc trait, the kind's twin (go-kure/launcher#741), runs the
+// same three, so the two build the same claim from the same properties and
+// differ only in what ownership means: the claim's name, its labels, its
+// namespace and the bundle it is placed in, all passed to GenerateClaim.
+
+// ParseClaimProperties reads a claim's size, storageClassName, accessModes
+// and volumeMode with the parsers a workload's `pvc` volume uses for the same
+// fields. Keys it does not know are left to the caller: the pvc trait reads
+// `name`, and the engine reads `scope`. The returned Name is unset.
+func ParseClaimProperties(props map[string]any) (PVCConfig, error) {
+	var claim PVCConfig
+	if size, present, err := parseStringField(props, "size", "size"); err != nil {
+		return PVCConfig{}, err
+	} else if present {
+		// An authored size is checked now; an unauthored one waits for the
+		// policy default (ApplyClaimPolicy).
+		if err := validateClaimSize(size); err != nil {
+			return PVCConfig{}, err
+		}
+		claim.Size = size
+	}
+
+	storageClass, explicitEmpty, err := parseStorageClassKey(props, "storageClassName", "storageClassName")
+	if err != nil {
+		return PVCConfig{}, err
+	}
+	claim.StorageClass = storageClass
+	claim.StorageClassExplicitEmpty = explicitEmpty
+
+	accessModes, err := parseAccessModes(props)
+	if err != nil {
+		return PVCConfig{}, err
+	}
+	claim.AccessModes = accessModes
+
+	if vm, present, err := parseStringField(props, "volumeMode", "volumeMode"); err != nil {
+		return PVCConfig{}, err
+	} else if present {
+		mode, err := parseVolumeModeValue(vm, "volumeMode")
+		if err != nil {
+			return PVCConfig{}, err
+		}
+		claim.VolumeMode = mode
+	}
+	return claim, nil
+}
+
+// ApplyClaimPolicy fills an unauthored claim size from the policy's storage
+// default and enforces the policy's maximum. Precedence: authored > policy
+// default; with neither, the size is refused. A nil policy means no default
+// and no cap.
+func ApplyClaimPolicy(claim *PVCConfig, p oam.Policy) error {
+	if p != nil && claim.Size == "" {
+		claim.Size = p.DefaultStorageSize()
+	}
+	if err := validateClaimSize(claim.Size); err != nil {
 		return err
 	}
 	if p != nil {
-		return enforceMaxStorageSize(c.Claim.Size, p.MaxStorageSize())
+		return enforceMaxStorageSize(claim.Size, p.MaxStorageSize())
 	}
 	return nil
 }
 
-// validateSize refuses an unset or non-positive size. It runs from ApplyPolicy,
-// once a policy default had its chance, and again from Generate, so a config
-// built without ApplyPolicy cannot emit a claim with no size.
-func (c *PersistentVolumeClaimConfig) validateSize() error {
-	if c.Claim.Size == "" {
-		return errors.New("size: required (set it on the component or via an EnvironmentPolicy storage default)")
-	}
-	qty, err := resource.ParseQuantity(c.Claim.Size)
-	if err != nil {
-		return errors.Errorf("size: invalid quantity %q: %w", c.Claim.Size, err)
-	}
-	if qty.Sign() <= 0 {
-		return errors.Errorf("size: must be positive, got %q", c.Claim.Size)
-	}
-	return nil
-}
-
-// Generate creates the PersistentVolumeClaim.
-func (c *PersistentVolumeClaimConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if err := c.validateSize(); err != nil {
+// GenerateClaim builds the claim under name in namespace with labels. It
+// checks the size again, so a config built without ApplyClaimPolicy cannot
+// emit a claim with no size.
+func GenerateClaim(claim PVCConfig, name, namespace string, labels map[string]string) ([]*client.Object, error) {
+	if err := validateClaimSize(claim.Size); err != nil {
 		return nil, err
 	}
-	claim := c.Claim
-	claim.Name = app.Name
-	pvc, err := BuildPVC(claim, app.Namespace, appLabels(app.Name))
+	claim.Name = name
+	pvc, err := BuildPVC(claim, namespace, labels)
 	if err != nil {
 		return nil, err
 	}
@@ -125,45 +181,17 @@ func (c *PersistentVolumeClaimConfig) Generate(app *stack.Application) ([]*clien
 	return []*client.Object{&obj}, nil
 }
 
-// parsePersistentVolumeClaim reads a persistentvolumeclaim component's
-// properties with the parsers a workload's `pvc` volume uses for the same
-// fields.
-func parsePersistentVolumeClaim(component *oam.Component) (*PersistentVolumeClaimConfig, error) {
-	props := component.Properties
-	c := &PersistentVolumeClaimConfig{Name: component.Name}
-
-	if size, present, err := parseStringField(props, "size", "size"); err != nil {
-		return nil, err
-	} else if present {
-		c.Claim.Size = size
-		// An authored size is checked now; an unauthored one waits for the
-		// policy default (ApplyPolicy).
-		if err := c.validateSize(); err != nil {
-			return nil, err
-		}
+// validateClaimSize refuses an unset or non-positive size.
+func validateClaimSize(size string) error {
+	if size == "" {
+		return errors.New("size: required (author it, or set an EnvironmentPolicy storage default)")
 	}
-
-	storageClass, explicitEmpty, err := parseStorageClassKey(props, "storageClassName", "storageClassName")
+	qty, err := resource.ParseQuantity(size)
 	if err != nil {
-		return nil, err
+		return errors.Errorf("size: invalid quantity %q: %w", size, err)
 	}
-	c.Claim.StorageClass = storageClass
-	c.Claim.StorageClassExplicitEmpty = explicitEmpty
-
-	accessModes, err := parseAccessModes(props)
-	if err != nil {
-		return nil, err
+	if qty.Sign() <= 0 {
+		return errors.Errorf("size: must be positive, got %q", size)
 	}
-	c.Claim.AccessModes = accessModes
-
-	if vm, present, err := parseStringField(props, "volumeMode", "volumeMode"); err != nil {
-		return nil, err
-	} else if present {
-		mode, err := parseVolumeModeValue(vm, "volumeMode")
-		if err != nil {
-			return nil, err
-		}
-		c.Claim.VolumeMode = mode
-	}
-	return c, nil
+	return nil
 }

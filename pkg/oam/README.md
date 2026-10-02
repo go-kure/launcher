@@ -346,7 +346,12 @@ a rule directly, and used to set the field, uses
 Some documents, components, traits, and policies are authored in a higher-level
 vocabulary that has no direct dispatchable handler — a type a platform wants expanded
 into one or more terminal types before the transform's own component/trait dispatch
-runs. The lowering engine (`lowering.go`, `lowering_raw.go`) is the shared fixpoint
+runs. Where a component lowering rule places each object it emits (a same-name
+sibling member, a trait on one member, or a separately named kind component), and
+how a trait builds the same object as its kind twin, is set out in
+`docs/oam/design-lowering-engine.md`, section "Where a lowering rule places each
+object".
+The lowering engine (`lowering.go`, `lowering_raw.go`) is the shared fixpoint
 that performs that expansion, reachable from two entry points:
 
 | Entry point | Reachable rules | Use when |
