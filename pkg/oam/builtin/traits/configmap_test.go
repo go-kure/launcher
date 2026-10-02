@@ -229,10 +229,13 @@ func TestTransform_FluxNamespace_ReachesHelmRelease(t *testing.T) {
 	)
 	transformer.RegisterBuiltinTrait("configmap", &traits.ConfigMapHandler{})
 
-	// OAM app: helmrelease component + configmap trait WITHOUT mountPath.
+	// OAM app: helmrelease component + configmap traits WITHOUT mountPath.
 	// Without mountPath the configmap trait adds a sibling ConfigMap app but does NOT
 	// wrap the helmrelease config, so postProcessFluxNamespace calls SetFluxNamespace
-	// directly on HelmReleaseConfig — exercising the pipeline wiring.
+	// directly on HelmReleaseConfig — exercising the pipeline wiring. The release
+	// reads metrics-config through valuesFrom, from its own namespace, so that
+	// ConfigMap follows it to the Flux namespace; other-config, which it does not
+	// read, stays in the application namespace (go-kure/launcher#740).
 	app := &oam.Application{
 		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
@@ -247,6 +250,7 @@ func TestTransform_FluxNamespace_ReachesHelmRelease(t *testing.T) {
 								"sourceRef": map[string]any{"kind": "HelmRepository", "name": "prometheus-community"},
 							},
 						},
+						"valuesFrom": []any{map[string]any{"kind": "ConfigMap", "name": "metrics-config"}},
 					},
 					Traits: []oam.Trait{
 						{
@@ -255,6 +259,13 @@ func TestTransform_FluxNamespace_ReachesHelmRelease(t *testing.T) {
 								"name": "metrics-config",
 								"data": map[string]any{"key": "val"},
 								// no mountPath — configmap adds sibling, does not wrap
+							},
+						},
+						{
+							Type: "configmap",
+							Properties: map[string]any{
+								"name": "other-config",
+								"data": map[string]any{"key": "val"},
 							},
 						},
 					},
@@ -314,6 +325,28 @@ func TestTransform_FluxNamespace_ReachesHelmRelease(t *testing.T) {
 	}
 	if !found {
 		t.Error("no HelmRelease found in cluster")
+	}
+
+	// The ConfigMap the release reads follows it; the other one stays.
+	want := map[string]string{"metrics-config": "custom-flux", "other-config": "default"}
+	for _, bundleApp := range allApps {
+		ns, ok := want[bundleApp.Name]
+		if !ok {
+			continue
+		}
+		delete(want, bundleApp.Name)
+		objs, genErr := bundleApp.Config.Generate(bundleApp)
+		if genErr != nil {
+			t.Fatalf("Generate %s: %v", bundleApp.Name, genErr)
+		}
+		for _, objPtr := range objs {
+			if got := (*objPtr).GetNamespace(); got != ns {
+				t.Errorf("%s: %T.Namespace = %q, want %q", bundleApp.Name, *objPtr, got, ns)
+			}
+		}
+	}
+	for name := range want {
+		t.Errorf("no application %q found in cluster", name)
 	}
 }
 

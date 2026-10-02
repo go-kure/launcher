@@ -73,6 +73,10 @@ type TransformContext struct {
 	// TransformWithPolicy. Internal only, initialized like consumedCapabilities; a
 	// pointer so every by-value ctx copy appends to one slice.
 	subAppDecorations *[]subAppDecoration
+	// traitSubApps accumulates each component's application and the
+	// sub-applications its traits appended, recorded by applyEntryTraits and read
+	// by postProcessFluxNamespace. Internal only, shared like subAppDecorations.
+	traitSubApps *[]traitSubApps
 }
 
 // subAppDecoration is one decorating trait of one component and the
@@ -540,6 +544,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	}
 	ctx.consumedCapabilities = make(map[string]struct{})
 	ctx.subAppDecorations = &[]subAppDecoration{}
+	ctx.traitSubApps = &[]traitSubApps{}
 
 	// Validate + normalize the platform domain (and the optional full-key override) once,
 	// fail-fast before building anything. ComponentLabelKey takes precedence over Domain,
@@ -702,7 +707,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 	synthesizeEndpointIngressNetworkPolicies(cluster, componentMap, ctx.IngressPeers)
-	postProcessFluxNamespace(cluster, ctx.FluxNamespace)
+	postProcessFluxNamespace(cluster, *ctx.traitSubApps, ctx.FluxNamespace)
 	// Last: a decorator hides the interfaces the steps above read on a trait
 	// sub-application (the NetworkPolicy synthesis collectors among them).
 	if err := decorateSubApplications(*ctx.subAppDecorations); err != nil {
@@ -1208,6 +1213,9 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			*ctx.subAppDecorations = append(*ctx.subAppDecorations, d)
 		}
 	}
+	if len(subApps) > 0 && ctx.traitSubApps != nil {
+		*ctx.traitSubApps = append(*ctx.traitSubApps, traitSubApps{owner: e.app, subApps: subApps})
+	}
 	return subApps, nil
 }
 
@@ -1492,8 +1500,10 @@ var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 }
 
 // postProcessFluxNamespace walks all leaf bundle applications and calls
-// SetFluxNamespace on any config that satisfies fluxNamespaceSettable.
-func postProcessFluxNamespace(cluster *stack.Cluster, ns string) {
+// SetFluxNamespace on any config that satisfies fluxNamespaceSettable, then
+// moves the trait sub-applications those Flux objects read from their own
+// namespace (moveFluxNamespaceInputs).
+func postProcessFluxNamespace(cluster *stack.Cluster, owned []traitSubApps, ns string) {
 	if cluster == nil || ns == "" {
 		return
 	}
@@ -1504,6 +1514,7 @@ func postProcessFluxNamespace(cluster *stack.Cluster, ns string) {
 			}
 		}
 	})
+	moveFluxNamespaceInputs(owned, ns)
 }
 
 // isFluxControlPlaneGVK reports whether an auto health-check GVK targets a Flux

@@ -54,6 +54,22 @@ decorates those sub-applications, whatever order the traits were authored in: th
 the transform, after the Phase-4 synthesis below, applies it to each of them. The NetworkPolicies
 that synthesis adds are no component's sub-applications and stay undecorated.
 
+Under `TransformContext.FluxNamespace`, every config that takes it (`SetFluxNamespace`: the
+`helmrelease`, `oci` and Flux source kinds) moves its Flux objects there, and a trait
+sub-application of that component follows only when the Flux object reads it by name from its own
+namespace (go-kure/launcher#740). The config reports what it reads (`FluxNamespaceReads`: a
+HelmRelease's `valuesFrom`, `kubeConfig` and chart-template `verify` Secret, a source's
+`secretRef`, `certSecretRef`, `proxySecretRef` and the Secrets under `verify` and `sts`); a
+sub-application config names the ConfigMap or Secret it produces (`FluxNamespaceInput`: the
+`configmap` trait's ConfigMap, the Secret an `external-secret` trait's ExternalSecret writes). Both
+kind and name must match. Every other trait object — a ConfigMap or Secret the Flux object does not
+name, a Certificate, a claim, a NetworkPolicy, a route — stays in the application namespace with the
+workloads, where a HelmRelease installs them (`targetNamespace`). A ConfigMap or Secret the Flux
+object names moves even when the chart's pods read it as well: the Flux object cannot reconcile
+without it, and a reference through the chart's values is invisible here. Every built-in config
+that takes the Flux namespace reports its reads, possibly none (`oci`); decorators and sibling
+groups forward them.
+
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /
 `cilium-networkpolicy` traits are unaffected):

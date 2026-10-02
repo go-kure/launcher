@@ -524,6 +524,15 @@ type ExternalSecretConfig struct {
 // provenance attribution.
 func (c *ExternalSecretConfig) ComponentName() string { return c.componentName }
 
+// FluxNamespaceInput names the Secret the ExternalSecret produces in its own
+// namespace, so it follows its component's Flux object to the Flux namespace
+// when that object reads the Secret (a helmrepository's secretRef). The remote
+// key it defaults from the application namespace does not change. Satisfies
+// pkg/oam.fluxNamespaceInput.
+func (c *ExternalSecretConfig) FluxNamespaceInput() (kind, name string) {
+	return "Secret", c.TargetSecretName
+}
+
 // Generate creates an ExternalSecret CRD resource.
 func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	dur, err := time.ParseDuration(c.RefreshInterval)
