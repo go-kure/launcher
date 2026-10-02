@@ -1736,7 +1736,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     name) is refused as a generated-object collision.
   - `configmap` publishes `data` (string values only: a number or a boolean
     is refused rather than stringified), `binaryData` (base64; a key may not
-    also appear in `data`) and `immutable`. It is a different type from the
+    also appear in `data`) and `immutable`. The `data` values and the decoded
+    `binaryData` values together may hold at most 1,048,576 bytes, the limit
+    the API server enforces; a larger ConfigMap is refused at build time. It is
+    a different type from the
     `configmap` trait, which attaches a ConfigMap to another component.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,

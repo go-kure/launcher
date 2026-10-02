@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -94,7 +95,7 @@ func (c *ConfigMapConfig) Generate(app *stack.Application) ([]*client.Object, er
 }
 
 // parseConfigMap reads a configmap component's properties, applying the key
-// checks ValidateConfigMap applies to the same fields.
+// and total-size checks ValidateConfigMap applies to the same fields.
 func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
 	props := component.Properties
 	c := &ConfigMapConfig{Name: component.Name}
@@ -140,6 +141,19 @@ func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
 			}
 			c.BinaryData[k] = b
 		}
+	}
+
+	// ValidateConfigMap also caps the summed size of every data value and every
+	// decoded binaryData value; over it the API server refuses the ConfigMap.
+	total := 0
+	for _, v := range c.Data {
+		total += len(v)
+	}
+	for _, v := range c.BinaryData {
+		total += len(v)
+	}
+	if total > corev1.MaxSecretSize {
+		return nil, errors.Errorf("data and binaryData hold %d bytes, over the %d-byte limit the API server allows a ConfigMap", total, corev1.MaxSecretSize)
 	}
 
 	immutable, err := parseBoolField(props, "immutable", "immutable")

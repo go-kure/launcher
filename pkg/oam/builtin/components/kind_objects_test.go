@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -284,6 +285,43 @@ func TestConfigMapHandler_Refusals(t *testing.T) {
 			_, err := kindConfig(t, h, "configmap", "settings", tc.props)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// The summed size of the data values and the decoded binaryData values may
+// reach corev1.MaxSecretSize and no further, as ValidateConfigMap allows.
+func TestConfigMapHandler_TotalSizeLimit(t *testing.T) {
+	h := &components.ConfigMapHandler{}
+	half := corev1.MaxSecretSize / 2
+	for name, tc := range map[string]struct {
+		data, binary int // bytes in one data value and one decoded binaryData value
+		refused      bool
+	}{
+		"data at the limit":          {data: corev1.MaxSecretSize},
+		"data one byte over":         {data: corev1.MaxSecretSize + 1, refused: true},
+		"split at the limit":         {data: half, binary: corev1.MaxSecretSize - half},
+		"split one byte over":        {data: half, binary: corev1.MaxSecretSize - half + 1, refused: true},
+		"binary alone one byte over": {binary: corev1.MaxSecretSize + 1, refused: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			props := map[string]any{}
+			if tc.data > 0 {
+				props["data"] = map[string]any{"text": strings.Repeat("x", tc.data)}
+			}
+			if tc.binary > 0 {
+				props["binaryData"] = map[string]any{"blob": base64.StdEncoding.EncodeToString(make([]byte, tc.binary))}
+			}
+			_, err := kindConfig(t, h, "configmap", "settings", props)
+			if tc.refused {
+				if err == nil || !strings.Contains(err.Error(), "over the 1048576-byte limit") {
+					t.Fatalf("err = %v, want the size-limit refusal", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err = %v, want the ConfigMap accepted at the limit", err)
 			}
 		})
 	}
