@@ -483,10 +483,10 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"inline Bucket without bucketName", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com"}}, "helm: an inline source.kind Bucket requires source.endpoint and source.bucketName"},
 		{"inline Bucket without endpoint", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "bucketName": "charts"}}, "helm: an inline source.kind Bucket requires source.endpoint and source.bucketName"},
 		{"inline Bucket with namespace", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts", "namespace": "x"}}, "helm: source.namespace is only valid with source.name"},
-		{"inline Bucket endpoint URL with user and token", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "https://user:FAKE_TOKEN@minio.example.com", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an http:// or https:// URL of only a host and an optional port; user info, a path, a query or a fragment is not taken inline (author a bucket with a secretRef and reference it)"},
-		{"inline Bucket endpoint host with user and token", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "user:FAKE_TOKEN@minio.example.com:9000", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an http:// or https:// URL of only a host and an optional port; user info, a path, a query or a fragment is not taken inline (author a bucket with a secretRef and reference it)"},
-		{"inline Bucket endpoint with a signed query", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "https://minio.example.com/?X-Amz-Signature=FAKE_TOKEN", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an http:// or https:// URL of only a host and an optional port; user info, a path, a query or a fragment is not taken inline (author a bucket with a secretRef and reference it)"},
-		{"inline Bucket endpoint with a fragment", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com#FAKE_TOKEN", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an http:// or https:// URL of only a host and an optional port; user info, a path, a query or a fragment is not taken inline (author a bucket with a secretRef and reference it)"},
+		{"inline Bucket endpoint URL with user and token", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "https://user:FAKE_TOKEN@minio.example.com", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an https:// URL of only a host and an optional port; user info, a path, a query, a fragment or http:// is not taken inline (author a bucket, with a secretRef or insecure: true, and reference it)"},
+		{"inline Bucket endpoint host with user and token", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "user:FAKE_TOKEN@minio.example.com:9000", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an https:// URL of only a host and an optional port; user info, a path, a query, a fragment or http:// is not taken inline (author a bucket, with a secretRef or insecure: true, and reference it)"},
+		{"inline Bucket endpoint with a signed query", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "https://minio.example.com/?X-Amz-Signature=FAKE_TOKEN", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an https:// URL of only a host and an optional port; user info, a path, a query, a fragment or http:// is not taken inline (author a bucket, with a secretRef or insecure: true, and reference it)"},
+		{"inline Bucket endpoint with a fragment", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com#FAKE_TOKEN", "bucketName": "charts"}}, "helm: source.endpoint of an inline Bucket must be a host[:port], or an https:// URL of only a host and an optional port; user info, a path, a query, a fragment or http:// is not taken inline (author a bucket, with a secretRef or insecure: true, and reference it)"},
 		{"inline Bucket without chart", map[string]any{"source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts"}}, "helm: source.kind Bucket requires chart to be specified"},
 		{"inline Bucket with version", map[string]any{"chart": "charts/a", "version": "1.0.0", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts"}}, "helm: version is not used with source.kind Bucket, whose chart is read at the source's fetched revision"},
 		{"endpoint without Bucket", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "endpoint": "minio.example.com"}}, "helm: source.endpoint is only valid with an inline source.kind Bucket"},
@@ -570,6 +570,7 @@ func TestHelmRule_InlineSourceAddressShape(t *testing.T) {
 		"bucket scheme only": bucket("https://"),
 		"bucket ftp":         bucket("ftp://minio.example.com"),
 		"bucket empty port":  bucket("minio.example.com:"),
+		"bucket http":        bucket("http://minio.example.com:9000"),
 	}
 	for name, props := range refused {
 		t.Run("refused/"+name, func(t *testing.T) {
@@ -590,7 +591,7 @@ func TestHelmRule_InlineSourceAddressShape(t *testing.T) {
 		"bucket host:port":   bucket("minio.example.com:9000"),
 		"bucket ipv6":        bucket("[::1]:9000"),
 		"bucket https":       bucket("https://minio.example.com"),
-		"bucket http slash":  bucket("http://minio.example.com:9000/"),
+		"bucket https slash": bucket("https://minio.example.com:9000/"),
 	}
 	for name, props := range accepted {
 		t.Run("accepted/"+name, func(t *testing.T) {
