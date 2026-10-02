@@ -1014,6 +1014,24 @@ func (t *Transformer) applyTraits(app *Application, entries []componentEntry, bu
 	return nil
 }
 
+// addedApplications returns the applications in after that are not in before,
+// by pointer, in after's order. A trait handler may move or remove applications
+// as well as append, so what it added is not simply the tail past before's
+// length: a removal shifts the tail left and hides what follows it.
+func addedApplications(before, after []*stack.Application) []*stack.Application {
+	had := make(map[*stack.Application]bool, len(before))
+	for _, a := range before {
+		had[a] = true
+	}
+	var added []*stack.Application
+	for _, a := range after {
+		if !had[a] {
+			added = append(added, a)
+		}
+	}
+	return added
+}
+
 // sameApplications reports whether a and b hold the same applications, each
 // exactly once, in any order.
 func sameApplications(a, b []*stack.Application) bool {
@@ -1125,7 +1143,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 					}
 				}
 			}
-			prevLen := len(bundle.Applications)
+			prev := slices.Clone(bundle.Applications)
 			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {
 				return nil, &TransformError{
 					Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
@@ -1133,12 +1151,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 				}
 			}
 
-			// A handler that removed an application may leave the bundle shorter
-			// than it found it; nothing it holds past prevLen is new then.
-			var added []*stack.Application
-			if len(bundle.Applications) > prevLen {
-				added = bundle.Applications[prevLen:]
-			}
+			added := addedApplications(prev, bundle.Applications)
 			for _, newApp := range added {
 				// Members share the group's name, so traits on two members that
 				// derive a sub-application name from it (web-rbac, web-ingress)
