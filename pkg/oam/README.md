@@ -547,7 +547,9 @@ component carrying the same traits.
 The build refuses a group:
 - whose members fall in different tiers, unless a placement policy places the
   group (it then deploys in the placed tier);
-- in which two members answer the same contract;
+- in which two members answer the same contract (a member that runs pods
+  answers `ServiceAccountName` even with no name, since its pods run as the
+  namespace's `default` account);
 - that has a member needing layout-level resources;
 - in which two members generate the same Kubernetes object (API group, kind,
   namespace and name), such as two Services both named after the group;
