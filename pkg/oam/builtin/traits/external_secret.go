@@ -527,8 +527,9 @@ func (c *ExternalSecretConfig) ComponentName() string { return c.componentName }
 // FluxNamespaceInput names the Secret the ExternalSecret produces in its own
 // namespace, so it follows its component's Flux object to the Flux namespace
 // when that object reads the Secret (a helmrepository's secretRef). The remote
-// key it defaults from the application namespace does not change. Satisfies
-// pkg/oam.fluxNamespaceInput.
+// key it defaults from the application namespace does not change. A namespaced
+// SecretStore it names must then exist in the Flux namespace; a
+// ClusterSecretStore needs nothing. Satisfies pkg/oam.fluxNamespaceInput.
 func (c *ExternalSecretConfig) FluxNamespaceInput() (kind, name string) {
 	return "Secret", c.TargetSecretName
 }
