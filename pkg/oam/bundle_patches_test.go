@@ -141,6 +141,18 @@ func TestWarnForcedVolumes_BundlePatches(t *testing.T) {
 			bundle(false, []stack.Patch{{Patch: addForceJSON, Target: &stack.PatchSelector{Kind: "PersistentVolumeClaim", Name: "b"}}},
 				fixedApp("raw", listObject("List", unstructuredClaim("a", false), unstructuredClaim("b", false)))),
 			[]string{claimWarning("b", `component "raw"`, patchedReason)}},
+		// The objects are read from the build's YAML, as Flux reads them: a date
+		// there is a string, so the annotations beside it stay readable.
+		{"a patch adds a date annotation beside the force key",
+			bundle(false, []stack.Patch{{Patch: strings.Replace(addForceSMP, "  annotations:\n", "  annotations:\n    reviewed-at: 2026-10-02\n", 1)}},
+				fixedApp("db", plain())),
+			[]string{claimWarning("data", `component "db"`, patchedReason)}},
+		{"a patch adds a list member with a date annotation",
+			bundle(false, []stack.Patch{{Patch: "apiVersion: v1\nkind: Widget\nmetadata:\n  name: envelope\nitems:\n" +
+				"- apiVersion: v1\n  kind: PersistentVolumeClaim\n  metadata:\n    name: added\n    namespace: shop\n" +
+				"    annotations:\n      reviewed-at: 2026-10-02\n      kustomize.toolkit.fluxcd.io/force: enabled\n"}},
+				fixedApp("raw", listObject("Widget", unstructuredClaim("a", false)))),
+			[]string{claimWarning("added", `the bundle of component "raw"`, patchedReason)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
