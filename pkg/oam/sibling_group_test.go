@@ -552,3 +552,40 @@ func TestSiblingGroup_RoutingTargetWithoutPodLabeler(t *testing.T) {
 		t.Errorf("ServiceRoutingTarget selector = %v, want the member's %v", got, sel)
 	}
 }
+
+// namerStub answers ServiceAccountName with a name and a runsPods flag set
+// independently, as a library config may.
+type namerStub struct {
+	siblingStub
+	name     string
+	runsPods bool
+}
+
+func (s *namerStub) ServiceAccountName() (string, bool) { return s.name, s.runsPods }
+
+// TestSiblingGroup_ServiceAccountNameOrsRunsPods: the group answers the first
+// member's non-empty name and ORs every member's runsPods, so a named member
+// that runs no pods does not make the group run pods.
+func TestSiblingGroup_ServiceAccountNameOrsRunsPods(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		members  []*namerStub
+		wantName string
+		wantPods bool
+	}{
+		{"named member runs no pods", []*namerStub{{name: "sa"}}, "sa", false},
+		{"named member, later member runs pods", []*namerStub{{name: "sa"}, {runsPods: true}}, "sa", true},
+		{"first name wins", []*namerStub{{name: "a", runsPods: true}, {name: "b", runsPods: true}}, "a", true},
+		{"no name, pods", []*namerStub{{}, {runsPods: true}}, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &siblingGroupConfig{}
+			for _, m := range tc.members {
+				g.members = append(g.members, stack.NewApplication("web", "ns", m))
+			}
+			if name, pods := g.ServiceAccountName(); name != tc.wantName || pods != tc.wantPods {
+				t.Errorf("ServiceAccountName = (%q, %v), want (%q, %v)", name, pods, tc.wantName, tc.wantPods)
+			}
+		})
+	}
+}

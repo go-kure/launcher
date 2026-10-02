@@ -1511,8 +1511,12 @@ func applyAutoHealthChecks(cluster *stack.Cluster, componentMap map[string]compo
 	}
 	walkLeafBundles(cluster.Node, func(bundle *stack.Bundle) {
 		for _, app := range bundle.Applications {
+			// Match the component's own application by identity, not by name: a
+			// trait's sub-application (a `pvc` trait's claim `<component>-<volume>`)
+			// can share its name with another component, and must not get that
+			// component's check (go-kure/launcher#702).
 			entry, ok := componentMap[app.Name]
-			if !ok {
+			if !ok || app != entry.app {
 				continue
 			}
 			gvk, ok := componentHealthCheckGVK[entry.component.Type]

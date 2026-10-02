@@ -827,11 +827,13 @@ role kind's claim is.
 volume without `claimName` is refused (`volume "data": a pvc volume must set
 claimName to an existing claim; the component generates none, so declare it
 with a persistentvolumeclaim component or a pvc trait`). This is a breaking
-pre-GA format change. To migrate, move the volume's `size`, `storageClass`,
-`accessModes` and `volumeMode` onto a `persistentvolumeclaim` component (or a
-`pvc` trait), and reference it from the volume with `claimName`, keeping
-`accessModes` on the volume. The environment's storage-size limit and
-default now apply to that claim, not to the volume.
+pre-GA format change. To migrate, declare the claim with a
+`persistentvolumeclaim` component (or a `pvc` trait) carrying the volume's
+`size`, its `storageClass` as `storageClassName`, and its `accessModes` and
+`volumeMode`. Then reference it from the volume with `claimName`. Keep
+`accessModes` on the volume, and keep `volumeMode: Block` there too: a
+`devicePath` mount needs it on the volume. The environment's storage-size
+limit and default now apply to that claim, not to the volume.
 
 `webservice` and `worker` still accept a `pvc` volume that describes its
 claim. The rule turns each one into a synthesized `pvc` trait on its

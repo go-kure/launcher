@@ -317,17 +317,18 @@ func (g *siblingGroupConfig) ServicePortName() (string, bool) {
 // ServiceAccountName is the one member's non-empty ServiceAccount name, or "";
 // runsPods is whether any member runs pods.
 func (g *siblingGroupConfig) ServiceAccountName() (string, bool) {
+	var name string
 	runsPods := false
 	for _, m := range g.members {
 		if n, ok := m.Config.(ServiceAccountNamer); ok {
-			name, pods := n.ServiceAccountName()
-			if name != "" {
-				return name, true
+			memberName, pods := n.ServiceAccountName()
+			if name == "" {
+				name = memberName
 			}
 			runsPods = runsPods || pods
 		}
 	}
-	return "", runsPods
+	return name, runsPods
 }
 
 // NonRWXClaim is the one member's non-empty single-pod claim, or "".
