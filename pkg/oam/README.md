@@ -445,9 +445,10 @@ kind ending in `List` whose `items` is an array, recursively, then Flux expands 
 remaining object whose `items` is an array, one level only — and a member is forced by its
 own metadata, not the envelope's. An object generated more than once is warned once,
 naming its first producer and every reason any copy is forced. It
-covers every generated claim alike — a component's `volumes`, the `pvc` trait, a
-`manifests` component's objects — and changes no output. The `volsync` trait generates no
-claim: its `sourcePVC` is warned where that claim is generated. With no warning handler it
+covers every generated claim alike — a component's `volumes`, the `pvc` trait, the
+`persistentvolumeclaim` component, a `manifests` component's objects — and changes no
+output. A `volumes` entry with `claimName` and the `volsync` trait's `sourcePVC` generate no
+claim: an existing claim is warned where it is generated. With no warning handler it
 does nothing. An embedder that does not
 call it gets no warning. Objects a layout augmenter adds outside `Generate` are not in the
 inventory and are not checked (`kurel build` refuses an augmenter whose `Generate` does not
