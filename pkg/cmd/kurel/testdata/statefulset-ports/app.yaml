@@ -9,8 +9,9 @@ spec:
       type: statefulset
       properties:
         image: ghcr.io/example/postgres:v15.0
-        port: 5432
         ports:
+          - name: tcp
+            containerPort: 5432
           - name: metrics
             containerPort: 9187
         probes:

@@ -221,8 +221,8 @@ type siblingGroupConfig struct {
 // of them uses, which keeps a component re-expressed as a group byte-identical.
 // Two members generating the same Kubernetes object (API group, kind, namespace
 // and name) is refused: the group would deploy one object twice with two contents
-// — for example a statefulset member's headless Service and a service member's
-// Service, both named after the group. An object without a kind cannot be
+// — for example two members that each generate a Service named after the
+// group. An object without a kind cannot be
 // compared and is refused, as CheckCrossDocumentCollisions refuses one.
 func (g *siblingGroupConfig) Generate(*stack.Application) ([]*client.Object, error) {
 	var heads, tails []*client.Object

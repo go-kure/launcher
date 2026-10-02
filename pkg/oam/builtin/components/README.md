@@ -61,8 +61,8 @@ reads it.
 |--------|----------|---------|
 | `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. Lowered to a same-name `deployment` and `service` pair plus a `topology-spread` trait (`WebserviceRule`) — see below. |
 | `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). Lowered to a `deployment` component plus a `topology-spread` trait (`WorkerRule`) — see below. |
-| `statefulset` | StatefulSet, headless Service, SA | Stateful workload with `volumeClaimTemplates`. |
-| `daemonset` | DaemonSet, SA (+Service if `port`) | Per-node daemon; honors `tolerations`. |
+| `statefulset` | StatefulSet, SA (+PVC) | Stateful workload with `volumeClaimTemplates`; `serviceName` names a governing `service` authored beside it. Emits no Service (go-kure/launcher#690). |
+| `daemonset` | DaemonSet, SA (+PVC) | Per-node daemon; honors `tolerations`. Emits no Service (go-kure/launcher#690). |
 | `deployment` | Deployment, ServiceAccount (+PVC) | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
 | `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`, `clusterIP: None` for a headless one. Emits nothing else — see below. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
@@ -175,10 +175,10 @@ a dotted or longer name, so the component-name rule itself is unchanged. `job` r
 the name from its introduction; the other six gained the check in
 go-kure/launcher#407. Nothing that previously produced an applyable manifest is
 affected — such a document never did. A kind that also names a Service after
-the component (`webservice`, `daemonset` with a `port`, `statefulset` without
-`serviceName`) refuses a dotted or longer name earlier, at conversion, by the
-stricter Service-name rule described under each kind in "Per-type highlights"
-(go-kure/launcher#546).
+the component (`webservice`) refuses a dotted or longer name earlier, at
+conversion, by the stricter Service-name rule described under each kind in
+"Per-type highlights" (go-kure/launcher#546). `daemonset` and `statefulset`
+named one too until they stopped emitting a Service (go-kure/launcher#690).
 
 Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
 `daemonset`, `cronjob`, `job`)
@@ -387,10 +387,11 @@ container is named `"http"`/`"tcp"` respectively, but only when `port > 0`),
 and `webservice` never (its `port` always defaults to 80, so the main
 container is always named `"http"`) — a numeric port is unaffected either way,
 since it dials the kubelet directly rather than resolving a declared name.
-(Those rules hold for a document without `ports`. Once `deployment`,
-`daemonset`, `statefulset`, `job` or `cronjob` declares `ports`, a named port
-resolves against the main container's whole list, `port`'s entry included, and
-a name that list does not declare is refused; see "Main container ports".)
+(Those rules predate `ports`, and the `port` they describe on `daemonset` and
+`statefulset` is gone (go-kure/launcher#690). Today `deployment`, `daemonset`,
+`statefulset`, `job` and `cronjob` resolve a named port against the main
+container's `ports` list, refusing a name that list does not declare and any
+named port when it is empty; see "Main container ports".)
 Where a named port is allowed at all, it is further checked against the
 exact name the kind's builder actually declares — `"http"` for
 `webservice`/`daemonset`, `"tcp"` for `statefulset` — not merely accepted as
@@ -744,8 +745,8 @@ pair within the sidecar (go-kure/launcher#660; before that the name and
 protocol were taken unchecked, and a non-list `ports`, an unknown key, a
 non-string name or a non-string protocol, which then read as `TCP`, was
 dropped). A port name must also be unique across the
-pod: the main container's ports (webservice's `http`, statefulset's `tcp`
-when it has a `port` and its `ports` list, deployment's `ports` list) and every
+pod: the main container's ports (webservice's `http`, the `ports` list of
+statefulset and deployment) and every
 sidecar's. The
 API server checks names only per container and merely warns across them,
 while a Service selecting the name reaches only the first container that
@@ -1057,19 +1058,40 @@ no Service (use `webservice`, or a `service` component, for one).
 `daemonset`, `statefulset`, `job` and `cronjob` publish the same `ports`, with
 the same entry rules (go-kure/launcher#334): container ports are a PodSpec
 field, so every kind-named workload component projects them. `ports` emits no
-Service on any of them. `daemonset` and `statefulset` keep their single `port`
-and the Service it drives, unchanged: `port` still declares the main
-container's first port (`http` on `daemonset`, `tcp` on `statefulset`), and
-`ports` follows it. A `ports` entry that reuses that name, or `port`'s number on
-TCP, is refused, since the container would declare it twice; with no `port`,
-the name is free. The Service still carries `port` alone. A document without
-`ports` builds exactly as before, and its named probe and hook ports are
-accepted and refused exactly as before; with `ports`, they resolve against the
-main container's whole list, `port`'s entry included.
+Service on any of them. A named probe or hook port resolves against the
+main container's `ports`; with none declared, it is refused.
+
+**Breaking (go-kure/launcher#690): `daemonset` and `statefulset` dropped `port`
+and the Service it drove**, as `deployment` did in go-kure/launcher#343. `port`
+declared the main container's first port and a Service in front of it: a
+ClusterIP Service named after the component on `daemonset`, a headless one
+named `serviceName` (default: the component name) on `statefulset`. An authored
+`port` is now refused as an unknown property. To migrate:
+
+- Move the number into `ports` under the name `port` gave it, so named probe
+  and hook ports keep resolving: `port: N` becomes
+  `ports: [{name: http, containerPort: N}]` on `daemonset`,
+  `ports: [{name: tcp, containerPort: N}]` on `statefulset`.
+- Author the Service as a `service` component that selects the pods
+  (`selector: {app: <component>}`). For a `statefulset`'s governing Service,
+  set `clusterIP: None` and name it in `serviceName`.
+- `serviceName` no longer defaults to the component name: unset, the
+  StatefulSet carries `serviceName: ""`. The API server refuses a change to
+  `spec.serviceName` on an existing StatefulSet, so one that relied on the
+  default and now names the authored Service must be recreated: delete it with
+  `--cascade=orphan` so its pods survive, then apply. (The authored Service
+  cannot keep the old name: it is the component's own, and component names are
+  unique within an Application.)
+- A trait that routed to the component's own Service (an implicit `ingress`,
+  `httproute` or `expose` backend, or a `networkPolicy` ingress allow) now
+  belongs on the authored `service`; on the workload it is refused with
+  `component "<name>" has no service port`.
+
+`examples/13-statefulset.yaml` shows the result.
 
 | property | type | notes | compat |
 |---|---|---|---|
-| `ports` | array | Each entry is `containerPort` (required, 1–65535), `name` (an IANA service name, as the API server checks a container port name) and `protocol` (`TCP`/`UDP`/`SCTP`, default `TCP`; an empty string is refused, as the published enum refuses it); any other key, `hostPort` and `hostIP` included, is refused. Names must be unique, as the API server requires, and also unique across the pod: a sidecar port of the same name is refused (go-kure/launcher#660). A repeated `containerPort`/`protocol` pair is refused too, which the API server only warns about: the second entry declares nothing new. The same number on two protocols is two ports. An absent, null or empty list declares no ports. A probe or lifecycle hook may address a declared port by name; a name the main container does not declare is refused, since the kubelet resolves it only against that container's own ports. Without `ports`, a named probe or hook port is accepted and refused exactly as before: `deployment`, `job` and `cronjob` refuse it, while `daemonset` and `statefulset` accept `port`'s own name (`http`/`tcp`) when `port` is set. | additive |
+| `ports` | array | Each entry is `containerPort` (required, 1–65535), `name` (an IANA service name, as the API server checks a container port name) and `protocol` (`TCP`/`UDP`/`SCTP`, default `TCP`; an empty string is refused, as the published enum refuses it); any other key, `hostPort` and `hostIP` included, is refused. Names must be unique, as the API server requires, and also unique across the pod: a sidecar port of the same name is refused (go-kure/launcher#660). A repeated `containerPort`/`protocol` pair is refused too, which the API server only warns about: the second entry declares nothing new. The same number on two protocols is two ports. An absent, null or empty list declares no ports. A probe or lifecycle hook may address a declared port by name; a name the main container does not declare is refused, since the kubelet resolves it only against that container's own ports. Without `ports`, a named probe or hook port is refused. | additive (`daemonset`/`statefulset`: replaces `port`, go-kure/launcher#690) |
 
 #### Raw scheduling properties (`deployment` only)
 
@@ -1203,8 +1225,10 @@ named Service (on `servicePort`), not on this component's. When no component in
 the package owns that Service, no allow is synthesized for it and it stays
 authored. A `serviceName` equal to the component name — like `servicePort` alone
 — is treated as this component's own Service and keeps the allow here. `worker`
-behaves the same way. On a kind that names its own Service (a `statefulset`'s
-`serviceName`), "own" means that Service name rather than the component name.
+behaves the same way, and so do `daemonset` and `statefulset`, which emit no
+Service either (go-kure/launcher#690): a `statefulset` routing to its governing
+Service names that authored `service`, which owns it, so the allow lands on that
+Service's selector.
 
 **`scaler` is available on `deployment`**, as on `webservice` and `worker`. An HPA
 scales the Deployment past its replica count, and the non-RWX guard below checks
@@ -1301,7 +1325,8 @@ rendering in `common.go`) read through `oam.IntegerValue`. So a `uint16` port or
 literal decodes to. Each reader then checks the value against its own target (a port
 is 1–65535, a count fits `int32`) and refuses it with an error rather than truncating
 or wrapping (go-kure/launcher#525). That includes the main and sidecar container
-ports; `daemonset`/`statefulset` still read `port: 0` as "no port".
+ports. (`daemonset`/`statefulset` read `port: 0` as "no port" until they
+dropped `port`, go-kure/launcher#690.)
 
 **Non-RWX volumes.** A `ReadWriteOnce` (or `ReadWriteOncePod`) claim cannot be
 held by an outgoing and an incoming pod at once, so the handler allows **at
@@ -1446,7 +1471,8 @@ object would change what the next `Generate` emits.
 
 Wrong-type handling for the optional top-level properties go-kure/launcher#405
 moved onto the presence-reporting helpers: `port` on `webservice`, `daemonset`
-and `statefulset` (`parseInt32Field`; on `webservice` both reads of it — the
+and `statefulset` (the latter two have since dropped it, go-kure/launcher#690;
+`parseInt32Field`; on `webservice` both reads of it — the
 conversion and the `Endpoints` declaration — so a wrong type is not declared
 as an endpoint on port 80 either), `topologySpread` on `webservice` and
 `worker` and `prune` on `oci` (`parseBoolField`), `serviceName` on
@@ -1637,71 +1663,51 @@ not part of either change.
   - It implements `oam.EndpointProvider`: one endpoint, the `selector` pods on
     every TCP `targetPort` (deduplicated). A Service with no TCP port declares
     none.
-- **statefulset** — `serviceName` (headless) and `volumeClaimTemplates`
+- **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
   `corev1.PersistentVolumeClaimSpec`; see "Raw block volumes" above). The
   StatefulSetSpec-level and
   claim-template field sets are classified in "StatefulSet-level and
-  claim-template properties" below. `ports` declares further container ports
-  beside `port`; the headless Service still carries `port` alone (see "Main
-  container ports").
-  - **The headless Service's name must be a valid Service name.** It is
-    `serviceName`, or the component name when that is not authored, and the
-    API server validates a Service's `metadata.name` as a DNS-1035 label: at
-    most 63 characters, lowercase letters, digits and `-`, starting with a
-    letter and ending with a letter or digit. Either source is checked at
-    conversion and the error names the one it came from (`serviceName:
-    "api.v1" is not a valid Service name, which must be a DNS-1035 label`, or
-    `name: "api.v1" …` for the default), instead of building a manifest the
-    cluster rejects on apply (go-kure/launcher#546). Only the Service's name
-    is held to this: with a valid `serviceName`, a component name such as
-    `1api` still builds, within the container-name rule above. `Generate`
-    applies the same rule to the config's `ServiceName`, so a config built
-    without a component name must set it.
-  - **An ingress `portName` on a `statefulset` must be `tcp`.** With a `port`,
-    the headless Service's one port is named `tcp`, so an `ingress` path whose
-    implicit backend is this component's Service (no `backend`, or `backend`
-    naming the headless Service) and that addresses it by any other `portName`
-    is refused at build time (`cannot route implicit backend to port "name"`),
-    just as a numbered `port` other than the component's `port` is
-    (go-kure/launcher#545). Without a `port` there is no port name to check:
-    an implicit backend is refused unless the trait sets `servicePort` itself,
-    and that trait-level port carries no name to hold a `portName` to.
+  claim-template properties" below. `ports` declares the main container's
+  ports (see "Main container ports"). It emits no Service
+  (go-kure/launcher#690).
+  - **`serviceName` names the governing Service, which the component does
+    not emit.** Author it as a headless `service` component (`clusterIP:
+    None`, selecting `app: <component>`) and name it here. It has no default:
+    unset, the StatefulSet carries `serviceName: ""`. An authored value must be
+    a valid Service name, a DNS-1035 label (at most 63 characters, lowercase
+    letters, digits and `-`, starting with a letter and ending with a letter
+    or digit), and is refused at conversion otherwise (`serviceName: "api.v1"
+    is not a valid Service name, which must be a DNS-1035 label`,
+    go-kure/launcher#546); `Generate` applies the same rule to the config's
+    `ServiceName`. Before go-kure/launcher#690 `serviceName` defaulted to the
+    component name and the component emitted that headless Service itself;
+    "Main container ports" has the migration, including why an existing
+    StatefulSet must be recreated.
+  - **A route to the pods names the authored Service.** With no Service of
+    its own, the component is no implicit backend: an `ingress`, `httproute`
+    or `expose` without a `backend` on it is refused (`component "<name>"
+    has no service port`). Put the trait on the authored `service`, or name
+    that Service as the trait's `backend`.
 - **daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`/`tolerationSeconds`;
   `tolerationSeconds` and the toleration cross-field rules arrived with
   go-kure/launcher#412 via the shared parser — see "What `tolerations` changed
   for `daemonset`" above, which is the only place in this work that is not
-  additive); `port`
-  optionally adds a Service; `ports` declares further container ports beside
-  it and adds nothing to the Service (see "Main container ports"). No
+  additive); `ports` declares the main container's ports (see "Main container
+  ports"). It emits no Service (go-kure/launcher#690): author a `service`
+  component selecting `app: <component>` to expose the pods, and put routing
+  traits on it. No
   `sidecars` schema key (init containers only).
   DaemonSetSpec-level (go-kure/launcher#340, `daemonset_spec.go`): `updateStrategy`,
   `minReadySeconds`, `revisionHistoryLimit`. `appsv1.DaemonSetSpec` has five
   fields; `template` is the pod projection above and `selector` is
   builder-managed, which leaves these three.
 
-  **With `port > 0`, the component name must be a valid Service name.** The
-  Service it adds is named after the component, and the API server validates a
-  Service's `metadata.name` as a DNS-1035 label: at most 63 characters,
-  lowercase letters, digits and `-`, starting with a letter and ending with a
-  letter or digit. So with `port > 0`, `api.v1`, a 64-character name and `1api`
-  are refused at conversion (`name: "1api" is not a valid Service name, which
-  must be a DNS-1035 label`) instead of building a manifest the cluster rejects
-  on apply (go-kure/launcher#546); `Generate` applies the same rule to the
-  Application name it is handed. Without a `port` (or with `port: 0`) no
-  Service is emitted, and such a name is held only to the container-name rule
-  above.
-
-  **With `port > 0`, an ingress `portName` must be `http`.** The added
-  Service's one port is named `http`, so an `ingress` path whose implicit
-  backend is this component's Service (no `backend`, or `backend` naming that
-  Service) and that addresses it by any other `portName` is refused at build
-  time (`cannot route implicit backend to port "name"`), just as a numbered
-  `port` other than the component's `port` is (go-kure/launcher#545). Without
-  a `port` there is no Service and no port name to check: an implicit backend
-  is refused unless the trait sets `servicePort` itself, and that trait-level
-  port carries no name to hold a `portName` to.
+  Before go-kure/launcher#690, `port > 0` added a ClusterIP Service named after
+  the component, which held the component name to the Service-name rule and an
+  ingress `portName` to `http` (go-kure/launcher#545, go-kure/launcher#546).
+  With no Service, only the container-name rule above applies.
 
   | Property | Type | Effect | Compatibility |
   |----------|------|--------|---------------|

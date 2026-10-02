@@ -10,7 +10,7 @@ spec:
   selector:
     matchLabels:
       app: db
-  serviceName: db
+  serviceName: ""
   template:
     metadata:
       labels:
@@ -54,23 +54,6 @@ spec:
         requests:
           storage: 10Gi
     status: {}
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app: db
-  name: db
-  namespace: default
-spec:
-  clusterIP: None
-  ports:
-  - name: tcp
-    port: 5432
-    protocol: TCP
-    targetPort: 5432
-  selector:
-    app: db
 ---
 apiVersion: v1
 automountServiceAccountToken: false

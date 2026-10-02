@@ -9,7 +9,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -29,9 +28,8 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 	m := map[string]oam.PropertySchema{
 		"image":                {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
 		"replicas":             {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of StatefulSet pod replicas."},
-		"port":                 {Type: oam.PropertyTypeInteger, Description: "Container port to expose via the headless Service."},
-		"ports":                schemaMainContainerPortsBeside(statefulsetPortName),
-		"serviceName":          {Type: oam.PropertyTypeString, Description: "Name of the headless Service (defaults to the component name). Must be a valid Service name, a DNS-1035 label."},
+		"ports":                schemaMainContainerPorts(),
+		"serviceName":          {Type: oam.PropertyTypeString, Description: "Name of the governing Service that gives the pods their stable network identity, a headless `service` component authored beside this one. No default. Must be a valid Service name, a DNS-1035 label."},
 		"env":                  schemaEnv(false),
 		"envFrom":              schemaEnvFrom(false),
 		"resources":            schemaResources(false),
@@ -77,16 +75,9 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	config.Replicas = replicas
 	config.explicitReplicas = replicasAuthored
 
-	if p, present, err := parsePortField(props, "port", "port", 0); err != nil {
-		return nil, err
-	} else if present {
-		config.Port = p
-	}
-
-	// serviceName is the headless Service's name, so it is held to the
-	// Service-name rule (validateServiceName) whether authored or defaulted to
-	// the component name; the error names whichever of the two it came from.
-	// The component name itself is not constrained once serviceName is set.
+	// serviceName names the governing Service, which the component does not
+	// emit, so it is held to the Service-name rule (validateServiceName). It
+	// has no default: unset, spec.serviceName stays empty.
 	if sn, present, err := parseStringField(props, "serviceName", "serviceName"); err != nil {
 		return nil, err
 	} else if present {
@@ -94,11 +85,6 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 			return nil, err
 		}
 		config.ServiceName = sn
-	} else {
-		if err := validateComponentServiceName(component.Name); err != nil {
-			return nil, err
-		}
-		config.ServiceName = component.Name
 	}
 
 	env, err := parseEnv(props)
@@ -132,17 +118,12 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.Args = args
 
-	ports, err := parseMainContainerPorts(props, config.portContainerPorts())
+	ports, err := parseContainerPorts(props)
 	if err != nil {
 		return nil, err
 	}
 	config.Ports = ports
-	// Without `ports`, namedPortsAllowed mirrors portContainerPorts' own
-	// `c.Port > 0` guard: the main container only gets a Name: "tcp"
-	// ContainerPort when a port was actually configured, so a probe/lifecycle
-	// port resolves only in that case, and only when it names that same "tcp"
-	// port. With `ports`, a name resolves against the whole list.
-	probes, lifecycle, err := parseMainContainerHandlers(props, ports, config.mainContainerPorts(), config.Port > 0, statefulsetPortName)
+	probes, lifecycle, err := parseMainContainerHandlers(props, ports)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +186,7 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, vcts), initContainers, sidecars); err != nil {
 		return nil, err
 	}
-	if err := checkPodPortNames(config.mainContainerPorts(), sidecars); err != nil {
+	if err := checkPodPortNames(config.Ports, sidecars); err != nil {
 		return nil, err
 	}
 	// Claim templates are left out on purpose: they are persistentVolumeClaim
@@ -235,9 +216,8 @@ type StatefulsetConfig struct {
 	Namespace            string
 	Image                string
 	Replicas             int32
-	Port                 int32
-	Ports                []corev1.ContainerPort // further main-container ports, after Port's own; not on the headless Service
-	ServiceName          string
+	Ports                []corev1.ContainerPort // the main container's ports
+	ServiceName          string                 // spec.serviceName, the governing Service; empty when unset
 	Env                  []corev1.EnvVar
 	EnvFrom              []corev1.EnvFromSource
 	Resources            ResourceRequirements
@@ -344,30 +324,16 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 	return nil
 }
 
-// ServicePort returns the port exposed by the component's headless Service, or 0 if no port is configured.
-func (c *StatefulsetConfig) ServicePort() int32 { return c.Port }
-
-// ServicePortName returns "tcp", the name createHeadlessService gives the
-// headless Service's one port, and true, so routing traits refuse an implicit
-// backend addressed by any other port name. Without a port the Service has
-// none, so it returns "" and false.
-func (c *StatefulsetConfig) ServicePortName() (string, bool) {
-	if c.Port <= 0 {
-		return "", false
-	}
-	return statefulsetPortName, true
-}
-
-// BackendServiceName returns the name of the Kubernetes Service the statefulset exposes.
-func (c *StatefulsetConfig) BackendServiceName() string { return c.ServiceName }
-
-// Generate creates Kubernetes StatefulSet, headless Service, ServiceAccount, and any standalone PVCs.
-// The ServiceAccount is omitted when serviceAccountName was authored. The
-// headless Service is named by ServiceName, which a library caller may set
-// itself, so that name is held to the Service-name rule here too.
+// Generate creates a Kubernetes StatefulSet, its ServiceAccount, and any
+// standalone PVCs. The ServiceAccount is omitted when serviceAccountName was
+// authored. It emits no Service: ServiceName names one authored beside it. A
+// library caller may set ServiceName itself, so a non-empty one is held to the
+// Service-name rule here too.
 func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if err := validateServiceName("serviceName", c.ServiceName); err != nil {
-		return nil, err
+	if c.ServiceName != "" {
+		if err := validateServiceName("serviceName", c.ServiceName); err != nil {
+			return nil, err
+		}
 	}
 	var err error
 	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
@@ -379,12 +345,8 @@ func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, 
 	if err != nil {
 		return nil, err
 	}
-	svc := c.createHeadlessService(app)
-
 	stsObj := client.Object(sts)
-	svcObj := client.Object(svc)
-
-	objects := []*client.Object{&stsObj, &svcObj}
+	objects := []*client.Object{&stsObj}
 	if generatesServiceAccount(c.PodSpec) {
 		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
 		objects = append(objects, &saObj)
@@ -451,25 +413,6 @@ func checkClaimTemplateCollisions(vcts []VolumeClaimTemplate, volumes []corev1.V
 	return nil
 }
 
-// statefulsetPortName is the name `port` gives its container port and the
-// headless Service port.
-const statefulsetPortName = "tcp"
-
-// portContainerPorts is the container port `port` declares, named "tcp", or
-// none when no port is configured.
-func (c *StatefulsetConfig) portContainerPorts() []corev1.ContainerPort {
-	if c.Port <= 0 {
-		return nil
-	}
-	return []corev1.ContainerPort{{Name: statefulsetPortName, ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
-}
-
-// mainContainerPorts is the main container's whole port list: Port's own
-// entry, then Ports.
-func (c *StatefulsetConfig) mainContainerPorts() []corev1.ContainerPort {
-	return joinContainerPorts(c.portContainerPorts(), c.Ports)
-}
-
 func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.StatefulSet, error) {
 	// Claim-template mounts (and devices) precede the authored volume ones, as
 	// before.
@@ -485,7 +428,7 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 		Command:         c.Command,
 		Args:            c.Args,
 		Resources:       c.Resources,
-		Ports:           c.mainContainerPorts(),
+		Ports:           c.Ports,
 		Env:             c.Env,
 		EnvFrom:         c.EnvFrom,
 		Probes:          c.Probes,
@@ -555,21 +498,4 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	}
 
 	return sts, nil
-}
-
-func (c *StatefulsetConfig) createHeadlessService(app *stack.Application) *corev1.Service {
-	svc := kubernetes.CreateService(c.ServiceName, app.Namespace)
-	svc.Labels = appLabels(app.Name)
-	svc.Annotations = nil
-	svc.Spec.ClusterIP = "None"
-	svc.Spec.Selector = appLabels(app.Name)
-	if c.Port > 0 {
-		kubernetes.AddServicePort(svc, corev1.ServicePort{
-			Name:       statefulsetPortName,
-			Port:       c.Port,
-			TargetPort: intstr.FromInt32(c.Port),
-			Protocol:   corev1.ProtocolTCP,
-		})
-	}
-	return svc
 }

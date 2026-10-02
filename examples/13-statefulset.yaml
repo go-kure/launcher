@@ -9,7 +9,13 @@ spec:
     properties:
       image: myregistry/my-stateful-app:v1.0.0
       replicas: 3
-      port: 8080
+      ports:
+      - name: http
+        containerPort: 8080
+      # The governing Service gives the pods their stable network identity. A
+      # statefulset emits no Service: it names the headless `service` authored
+      # below.
+      serviceName: app-headless
       volumeClaimTemplates:
       - name: data
         size: "20Gi"
@@ -19,3 +25,12 @@ spec:
         requests:
           cpu: "200m"
           memory: "256Mi"
+  - name: app-headless
+    type: service
+    properties:
+      clusterIP: None
+      selector:
+        app: app
+      ports:
+      - name: http
+        port: 8080

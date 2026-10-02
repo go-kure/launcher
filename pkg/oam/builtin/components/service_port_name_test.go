@@ -25,10 +25,6 @@ func TestWorkloadConfigs_ServicePortNameMatchesGeneratedService(t *testing.T) {
 	}{
 		{"webservice", webserviceViaRule{}, "webservice", map[string]any{"image": "nginx:1.25", "port": 8080}, "http", true},
 		{"webservice default port", webserviceViaRule{}, "webservice", map[string]any{"image": "nginx:1.25"}, "http", true},
-		{"statefulset", &components.StatefulsetHandler{}, "statefulset", map[string]any{"image": "postgres:16", "port": 5432}, "tcp", true},
-		{"statefulset without port", &components.StatefulsetHandler{}, "statefulset", map[string]any{"image": "postgres:16"}, "", false},
-		{"daemonset", &components.DaemonsetHandler{}, "daemonset", map[string]any{"image": "prom/node-exporter:v1.0.0", "port": 9100}, "http", true},
-		{"daemonset without port", &components.DaemonsetHandler{}, "daemonset", map[string]any{"image": "prom/node-exporter:v1.0.0"}, "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,6 +59,37 @@ func TestWorkloadConfigs_ServicePortNameMatchesGeneratedService(t *testing.T) {
 			}
 			if len(ports) != 1 || ports[0].Name != name {
 				t.Fatalf("generated Service ports = %+v, want exactly one named %q", ports, name)
+			}
+		})
+	}
+}
+
+// daemonset and statefulset emit no Service since go-kure/launcher#690, so neither is an implicit
+// backend: their configs report no service port, port name or backend Service name, and a
+// routing trait on one must name an authored `service`.
+func TestWorkloadConfigs_NoServiceKindsAreNotBackends(t *testing.T) {
+	ports := []any{map[string]any{"name": "http", "containerPort": 9100}}
+	for _, tc := range []struct {
+		kind    string
+		handler oam.ComponentHandler
+		props   map[string]any
+	}{
+		{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "prom/node-exporter:v1.0.0", "ports": ports}},
+		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "postgres:16", "ports": ports, "serviceName": "db"}},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			cfg, err := tc.handler.ToApplicationConfig(&oam.Component{Name: "web", Type: tc.kind, Properties: tc.props}, "default")
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			if _, ok := cfg.(interface{ ServicePort() int32 }); ok {
+				t.Errorf("%T implements ServicePort", cfg)
+			}
+			if _, ok := cfg.(interface{ ServicePortName() (string, bool) }); ok {
+				t.Errorf("%T implements ServicePortName", cfg)
+			}
+			if _, ok := cfg.(interface{ BackendServiceName() string }); ok {
+				t.Errorf("%T implements BackendServiceName", cfg)
 			}
 		})
 	}

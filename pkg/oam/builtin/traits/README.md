@@ -171,13 +171,12 @@ time instead of building an Ingress whose backend port cannot resolve
 | Component kind | Implicit backend port name |
 |----------------|----------------------------|
 | `webservice` | `http` |
-| `statefulset` (with `port`) | `tcp` |
-| `daemonset` (with `port`) | `http` |
 | `service` | the first port's own `name` (so a later port's name is refused too) |
 
 A `backend` naming a different Service is explicit and its `port`/`portName` is not
-checked. A component that exposes no Service port — `statefulset`/`daemonset` without
-`port`, or a kind that generates no Service such as `helmchart` — has no implicit
+checked. A component that exposes no Service port — `deployment`, `statefulset` and
+`daemonset` (which dropped `port` and its Service in go-kure/launcher#690), or another
+kind that generates no Service such as `helmchart` — has no implicit
 backend unless the trait sets `servicePort` (and optionally `serviceName`); that
 trait-level port carries no name, so a `portName` is not checked against it. A
 port-less headless `service` (`clusterIP: None` with no `ports`,

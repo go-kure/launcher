@@ -1505,7 +1505,6 @@ const sharedConfigMapComponents = `    - name: %[1]s
       type: %[2]s
       properties:
         image: ghcr.io/example/%[1]s:v1.0.0
-        port: 8080
       traits:
         - type: configmap
           properties:

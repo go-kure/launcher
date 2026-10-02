@@ -475,7 +475,8 @@ The build refuses a group:
   group (it then deploys in the placed tier);
 - in which two members answer the same contract;
 - that has a member needing layout-level resources;
-- in which two members generate the same Kubernetes object;
+- in which two members generate the same Kubernetes object (API group, kind,
+  namespace and name), such as two Services both named after the group;
 - in which traits on two members create the same sub-application (the same trait on
   both members derives one name, such as `web-rbac`, from the shared name).
 

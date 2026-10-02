@@ -10,7 +10,7 @@ spec:
   selector:
     matchLabels:
       app: db
-  serviceName: db
+  serviceName: ""
   template:
     metadata:
       labels:
@@ -19,10 +19,6 @@ spec:
       containers:
       - image: ghcr.io/example/postgres:v15.0
         name: db
-        ports:
-        - containerPort: 5432
-          name: tcp
-          protocol: TCP
         resources:
           limits:
             memory: 128Mi
@@ -44,23 +40,6 @@ spec:
         requests:
           storage: 10Gi
     status: {}
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app: db
-  name: db
-  namespace: default
-spec:
-  clusterIP: None
-  ports:
-  - name: tcp
-    port: 5432
-    protocol: TCP
-    targetPort: 5432
-  selector:
-    app: db
 ---
 apiVersion: v1
 automountServiceAccountToken: false

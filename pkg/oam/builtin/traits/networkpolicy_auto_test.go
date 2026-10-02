@@ -3,6 +3,7 @@ package traits_test
 import (
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -586,9 +587,10 @@ func backendPathPolicy(t *testing.T, port int) *networkingv1.NetworkPolicy {
 	return synthesizedNetworkPolicy(t, cluster, "backend-allow-ingress-traffic")
 }
 
-// go-kure/launcher#227: a backendRef naming a component whose Service name differs from its component name (e.g. a
-// statefulset's headless service) resolves via BackendServiceName() (the serviceBackendNamer
-// branch) — a break there would silently fall back to "authored".
+// go-kure/launcher#227: a backendRef naming a Service whose name differs from the workload's component name resolves
+// to the component owning that Service, and the allow lands on the pods it selects — a break there would
+// silently fall back to "authored". Since go-kure/launcher#690 a statefulset's governing Service is an authored
+// `service` component (the port-less one resolves via BackendServiceName: service_headless_routing_test.go).
 func TestTransform_BackendRef_ResolvesViaServiceName(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
 	registerWebservice(tr)
@@ -619,8 +621,9 @@ func TestTransform_BackendRef_ResolvesViaServiceName(t *testing.T) {
 				{
 					Name:       "db",
 					Type:       "statefulset",
-					Properties: map[string]any{"image": "postgres:16", "port": 5432, "serviceName": "db-headless"},
+					Properties: map[string]any{"image": "postgres:16", "serviceName": "db-headless"},
 				},
+				dbHeadlessService(nil),
 			},
 		},
 	}
@@ -629,14 +632,26 @@ func TestTransform_BackendRef_ResolvesViaServiceName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
-	// The Service name "db-headless" resolves to component "db".
-	if !clusterHasApp(cluster, "db-allow-ingress-traffic") {
-		t.Fatalf("expected \"db-allow-ingress-traffic\" (resolved via BackendServiceName); apps: %v", clusterAppNames(cluster))
+	// The Service name "db-headless" resolves to its `service` component, whose selector picks db's pods.
+	if !clusterHasApp(cluster, "db-headless-allow-ingress-traffic") {
+		t.Fatalf("expected \"db-headless-allow-ingress-traffic\"; apps: %v", clusterAppNames(cluster))
 	}
-	np := synthesizedNetworkPolicy(t, cluster, "db-allow-ingress-traffic")
-	if got := np.Spec.PodSelector.MatchLabels["gokure.dev/component"]; got != "db" {
-		t.Errorf("target selector = %v, want gokure.dev/component=db", np.Spec.PodSelector.MatchLabels)
+	if clusterHasApp(cluster, "db-allow-ingress-traffic") {
+		t.Errorf("the statefulset owns no Service, so it gets no allow under its own name; apps: %v", clusterAppNames(cluster))
 	}
+	np := synthesizedNetworkPolicy(t, cluster, "db-headless-allow-ingress-traffic")
+	if got := np.Spec.PodSelector.MatchLabels["app"]; got != "db" {
+		t.Errorf("target selector = %v, want app=db", np.Spec.PodSelector.MatchLabels)
+	}
+}
+
+// dbHeadlessService is the authored headless governing Service of statefulset "db", on 5432.
+func dbHeadlessService(annotations map[string]string) oam.Component {
+	return oam.Component{Name: "db-headless", Type: "service", Annotations: annotations, Properties: map[string]any{
+		"clusterIP": "None",
+		"selector":  map[string]any{"app": "db"},
+		"ports":     []any{map[string]any{"name": "tcp", "port": 5432}},
+	}}
 }
 
 // go-kure/launcher#227: a self-referencing backendRef (the component's own service) is unchanged — the allow
@@ -1096,12 +1111,12 @@ func TestTransform_ExternalBackend_ConflictingSelectorsAcrossRouters_FailsTransf
 }
 
 // An external policy name that collides with an ACTUALLY-EMITTED component inbound policy fails the
-// transform. Component db (statefulset, Service db-headless) emits db-allow-ingress-traffic; a
-// router routing to a bare external Service named db would collide.
+// transform. Component db (a Service-less deployment routing to the Service named after it through
+// servicePort, which nothing in the package owns) emits db-allow-ingress-traffic; a router routing
+// to a bare external Service named db would collide.
 func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransform(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
 	registerWebservice(tr)
-	tr.RegisterComponent("statefulset", &components.StatefulsetHandler{})
 	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
 
 	app := &oam.Application{
@@ -1112,15 +1127,15 @@ func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransf
 			Components: []oam.Component{
 				{
 					Name:       "db",
-					Type:       "statefulset",
-					Properties: map[string]any{"image": "postgres:16", "port": 5432, "serviceName": "db-headless"},
+					Type:       "deployment",
+					Properties: map[string]any{"image": "postgres:16"},
 					// db's own routing trait → emits db-allow-ingress-traffic.
 					Traits: []oam.Trait{{
 						Type: "httproute",
 						Properties: map[string]any{
-							"parentRefs":    []any{map[string]any{"name": "gw"}},
-							"rules":         []any{map[string]any{"backendRefs": []any{map[string]any{"name": "db-headless", "port": 5432}}}},
-							"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "gateway-system"}}},
+							"parentRefs":  []any{map[string]any{"name": "gw"}},
+							"servicePort": 5432,
+							"rules":       []any{map[string]any{}},
 						},
 					}},
 				},
@@ -1132,20 +1147,20 @@ func TestTransform_ExternalBackend_NameCollisionWithEmittedComponent_FailsTransf
 						Type: "httproute",
 						Properties: map[string]any{
 							"parentRefs": []any{map[string]any{"name": "gw"}},
-							// Bare external Service "db" (not db-headless) → unresolved → db-allow-ingress-traffic.
+							// Bare external Service "db", owned by no component → unresolved → db-allow-ingress-traffic.
 							"rules": []any{map[string]any{"backendRefs": []any{map[string]any{
 								"name": "db", "port": 8080,
 								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "external"}},
 							}}}},
-							"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "gateway-system"}}},
 						},
 					}},
 				},
 			},
 		},
 	}
-	if _, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"}); err == nil {
-		t.Fatal("expected an error for an external backend policy name colliding with an emitted component policy")
+	want := `external backend Service "db" in namespace "default" collides with a synthesized policy named "db-allow-ingress-traffic"`
+	if _, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: httprouteNetworkPolicyCapabilities("gateway-system")}); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want one containing %q", err, want)
 	}
 }
 
@@ -1163,11 +1178,11 @@ func TestTransform_ExternalBackend_NameNoCollisionWhenComponentHasNoPolicy(t *te
 		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{
-				// db has a differing Service name and no routing trait → emits no db-allow-ingress-traffic.
+				// db owns no Service and has no routing trait → emits no db-allow-ingress-traffic.
 				{
 					Name:       "db",
 					Type:       "statefulset",
-					Properties: map[string]any{"image": "postgres:16", "port": 5432, "serviceName": "db-headless"},
+					Properties: map[string]any{"image": "postgres:16", "serviceName": "db-headless"},
 				},
 				{
 					Name:       "router",
@@ -1362,8 +1377,9 @@ func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
 					Name:        "db",
 					Type:        "statefulset",
 					Annotations: map[string]string{"gokure.dev/tier": "services"},
-					Properties:  map[string]any{"image": "postgres:16", "port": 5432, "serviceName": "db-headless"},
+					Properties:  map[string]any{"image": "postgres:16", "serviceName": "db-headless"},
 				},
+				dbHeadlessService(map[string]string{"gokure.dev/tier": "services"}),
 			},
 		},
 	}
@@ -1372,12 +1388,12 @@ func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
-	if !clusterHasApp(cluster, "db-allow-ingress-traffic") {
-		t.Fatalf("expected db-allow-ingress-traffic across tier bundles; apps: %v", clusterAppNames(cluster))
+	if !clusterHasApp(cluster, "db-headless-allow-ingress-traffic") {
+		t.Fatalf("expected db-headless-allow-ingress-traffic across tier bundles; apps: %v", clusterAppNames(cluster))
 	}
-	np := synthesizedNetworkPolicy(t, cluster, "db-allow-ingress-traffic")
-	if got := np.Spec.PodSelector.MatchLabels["gokure.dev/component"]; got != "db" {
-		t.Errorf("target selector = %v, want gokure.dev/component=db", np.Spec.PodSelector.MatchLabels)
+	np := synthesizedNetworkPolicy(t, cluster, "db-headless-allow-ingress-traffic")
+	if got := np.Spec.PodSelector.MatchLabels["app"]; got != "db" {
+		t.Errorf("target selector = %v, want app=db", np.Spec.PodSelector.MatchLabels)
 	}
 	if len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 1 || np.Spec.Ingress[0].Ports[0].Port.IntVal != 5432 {
 		t.Errorf("expected a single ingress rule on port 5432, got %+v", np.Spec.Ingress)

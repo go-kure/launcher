@@ -10,6 +10,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/fluxcd"
 	"github.com/go-kure/kure/pkg/stack/layout"
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -91,8 +92,8 @@ type (
 func webPairTransformer(rule webPairRule) *oam.Transformer {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
 		"deployment":  &components.DeploymentHandler{},
-		"statefulset": &components.StatefulsetHandler{},
 		"service":     &components.ServiceHandler{},
+		"svc-emitter": svcEmitterHandler{},
 	}, map[string]oam.TraitHandler{"ingress": &traits.IngressHandler{}})
 	tr.RegisterComponentLowering(rule)
 	tr.RegisterPolicy("dependency", &policies.DependencyHandler{})
@@ -416,17 +417,38 @@ func TestSiblingGroup_PlacementSettlesMixedTiers(t *testing.T) {
 	}
 }
 
-// TestSiblingGroup_TwoMembersGeneratingOneObjectRefused: a statefulset member
-// generates its own headless Service named after the group, which the service
-// member also generates; the group refuses rather than deploy one object twice.
+// svcEmitterHandler is a test component that generates a Service named after
+// its Application and answers none of the group's contracts. No builtin kind
+// besides `service` generates a Service since go-kure/launcher#690.
+type svcEmitterHandler struct{}
+
+func (svcEmitterHandler) CanHandle(t string) bool { return t == "svc-emitter" }
+
+func (svcEmitterHandler) ToApplicationConfig(*oam.Component, string) (stack.ApplicationConfig, error) {
+	return svcEmitterConfig{}, nil
+}
+
+type svcEmitterConfig struct{}
+
+func (svcEmitterConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	svc := client.Object(&corev1.Service{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
+		ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: app.Namespace},
+	})
+	return []*client.Object{&svc}, nil
+}
+
+// TestSiblingGroup_TwoMembersGeneratingOneObjectRefused: the workload member
+// generates a Service named after the group, which the service member also
+// generates; the group refuses rather than deploy one object twice.
 func TestSiblingGroup_TwoMembersGeneratingOneObjectRefused(t *testing.T) {
-	cluster, _, err := webPairTransformer(webPairRule{workload: "statefulset"}).TransformWithPolicy(webPairApp(), oam.TransformContext{})
+	cluster, _, err := webPairTransformer(webPairRule{workload: "svc-emitter"}).TransformWithPolicy(webPairApp(), oam.TransformContext{})
 	if err != nil {
 		t.Fatalf("TransformWithPolicy: %v", err)
 	}
 	app, _ := groupApp(t, cluster, "web")
 	_, err = app.Generate()
-	if want := `members "statefulset" and "service" both generate Service "default/web"`; err == nil || !strings.Contains(err.Error(), want) {
+	if want := `members "svc-emitter" and "service" both generate Service "default/web"`; err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("Generate err = %v, want it to contain %q", err, want)
 	}
 }

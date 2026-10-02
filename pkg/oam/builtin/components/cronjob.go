@@ -257,7 +257,7 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		return nil, err
 	}
 	config.Args = args
-	ports, err := parseMainContainerPorts(props, nil)
+	ports, err := parseContainerPorts(props)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +265,7 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	// Without `ports`, namedPortsAllowed=false: the main container then
 	// declares no ContainerPort for the kubelet to resolve a named
 	// probe/lifecycle port against. With `ports`, a name resolves against them.
-	probes, lifecycle, err := parseMainContainerHandlers(props, ports, ports, false, "")
+	probes, lifecycle, err := parseMainContainerHandlers(props, ports)
 	if err != nil {
 		return nil, err
 	}

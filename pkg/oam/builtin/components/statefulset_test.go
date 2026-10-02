@@ -36,14 +36,18 @@ func TestStatefulsetHandler_RequiredImage_Missing(t *testing.T) {
 	}
 }
 
+// TestStatefulsetHandler_Generate_BasicResources pins the output since
+// go-kure/launcher#690: a StatefulSet and its ServiceAccount, and no headless
+// Service, which an authored `service` component provides instead.
 func TestStatefulsetHandler_Generate_BasicResources(t *testing.T) {
 	h := &components.StatefulsetHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "db",
 		Type: "statefulset",
 		Properties: map[string]any{
-			"image": "ghcr.io/org/postgres:v15",
-			"port":  5432,
+			"image":       "ghcr.io/org/postgres:v15",
+			"ports":       []any{map[string]any{"name": "tcp", "containerPort": 5432}},
+			"serviceName": "db-headless",
 		},
 	}, "default")
 	if err != nil {
@@ -70,8 +74,8 @@ func TestStatefulsetHandler_Generate_BasicResources(t *testing.T) {
 	if !foundSTS {
 		t.Error("expected StatefulSet")
 	}
-	if !foundSVC {
-		t.Error("expected headless Service")
+	if foundSVC {
+		t.Error("expected no Service")
 	}
 	if !foundSA {
 		t.Error("expected ServiceAccount")
@@ -405,59 +409,10 @@ func TestStatefulsetHandler_WithSharedPodFields(t *testing.T) {
 	t.Error("StatefulSet not found in output")
 }
 
-// TestStatefulsetHandler_NamedProbePort_WithPort_Accepted and
-// TestStatefulsetHandler_NamedProbePort_WithoutPort_Error cover go-kure/launcher#278
-// wave-11 finding 5: statefulset's main container is only named "tcp" when
-// `port` is set, mirroring daemonset's identical conditional shape (see
-// TestDaemonsetHandler_NamedProbePort_WithPort_Accepted).
-func TestStatefulsetHandler_NamedProbePort_WithPort_Accepted(t *testing.T) {
-	h := &components.StatefulsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "db",
-		Type: "statefulset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/postgres:v15",
-			"port":  5432,
-			"probes": map[string]any{
-				"readiness": map[string]any{
-					"tcpSocket": map[string]any{"port": "tcp"},
-				},
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("db", "default", cfg)
-	if _, err := cfg.Generate(app); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-}
-
-// TestStatefulsetHandler_NamedProbePort_Mismatch_Error covers go-kure/launcher#278
-// wave-12 finding 3: with a port configured, statefulset names it "tcp" —
-// "http" (webservice/daemonset's own name) is syntactically valid but not
-// what this container declares, so it must be rejected too.
-func TestStatefulsetHandler_NamedProbePort_Mismatch_Error(t *testing.T) {
-	h := &components.StatefulsetHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "db",
-		Type: "statefulset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/postgres:v15",
-			"port":  5432,
-			"probes": map[string]any{
-				"readiness": map[string]any{
-					"tcpSocket": map[string]any{"port": "http"},
-				},
-			},
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for a named port that does not match statefulset's declared \"tcp\" container port")
-	}
-}
-
+// TestStatefulsetHandler_NamedProbePort_WithoutPort_Error: without `ports` the
+// main container declares no port, so "tcp", the name `port` used to give it,
+// has nothing to resolve against (go-kure/launcher#278 wave-11 finding 5,
+// go-kure/launcher#690).
 func TestStatefulsetHandler_NamedProbePort_WithoutPort_Error(t *testing.T) {
 	h := &components.StatefulsetHandler{}
 	_, err := h.ToApplicationConfig(&oam.Component{
@@ -604,7 +559,6 @@ func TestStatefulsetConfig_ApplyPolicy_InitContainerResourcesDenied(t *testing.T
 		Type: "statefulset",
 		Properties: map[string]any{
 			"image":     "ghcr.io/org/postgres:v15",
-			"port":      5432,
 			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
 			"initContainers": []any{
 				map[string]any{"name": "init", "image": "ghcr.io/org/init:v1"},
@@ -639,7 +593,6 @@ func TestStatefulsetConfig_ApplyPolicy_InitContainerRegistryDenied(t *testing.T)
 		Type: "statefulset",
 		Properties: map[string]any{
 			"image":     "ghcr.io/org/postgres:v15",
-			"port":      5432,
 			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
 			"initContainers": []any{
 				map[string]any{"name": "init", "image": "docker.io/x/y:v1"},
@@ -671,7 +624,6 @@ func TestStatefulsetConfig_ApplyPolicy_InitContainerPrivilegedDenied(t *testing.
 		Type: "statefulset",
 		Properties: map[string]any{
 			"image":     "ghcr.io/org/postgres:v15",
-			"port":      5432,
 			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
 			"initContainers": []any{
 				map[string]any{
@@ -704,7 +656,6 @@ func TestStatefulsetConfig_ApplyPolicy_InitContainerCapabilitiesDenied(t *testin
 		Type: "statefulset",
 		Properties: map[string]any{
 			"image":     "ghcr.io/org/postgres:v15",
-			"port":      5432,
 			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
 			"initContainers": []any{
 				map[string]any{
@@ -739,7 +690,6 @@ func TestStatefulsetConfig_ApplyPolicy_SidecarResourcesDenied(t *testing.T) {
 		Type: "statefulset",
 		Properties: map[string]any{
 			"image":     "ghcr.io/org/postgres:v15",
-			"port":      5432,
 			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
 			"sidecars": []any{
 				map[string]any{"name": "sidecar", "image": "ghcr.io/org/sidecar:v1"},
@@ -774,7 +724,6 @@ func TestStatefulsetConfig_ApplyPolicy_SidecarRegistryDenied(t *testing.T) {
 		Type: "statefulset",
 		Properties: map[string]any{
 			"image":     "ghcr.io/org/postgres:v15",
-			"port":      5432,
 			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
 			"sidecars": []any{
 				map[string]any{"name": "sidecar", "image": "docker.io/x/y:v1"},
@@ -806,7 +755,6 @@ func TestStatefulsetConfig_ApplyPolicy_SidecarPrivilegedDenied(t *testing.T) {
 		Type: "statefulset",
 		Properties: map[string]any{
 			"image":     "ghcr.io/org/postgres:v15",
-			"port":      5432,
 			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
 			"sidecars": []any{
 				map[string]any{
@@ -839,7 +787,6 @@ func TestStatefulsetConfig_ApplyPolicy_SidecarCapabilitiesDenied(t *testing.T) {
 		Type: "statefulset",
 		Properties: map[string]any{
 			"image":     "ghcr.io/org/postgres:v15",
-			"port":      5432,
 			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
 			"sidecars": []any{
 				map[string]any{

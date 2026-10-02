@@ -31,11 +31,20 @@ spec:
   updateStrategy: {}
 ---
 apiVersion: v1
-kind: Service
+automountServiceAccountToken: false
+kind: ServiceAccount
 metadata:
   labels:
     app: agent
   name: agent
+  namespace: default
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: agent-http
+  name: agent-http
   namespace: default
 spec:
   ports:
@@ -47,21 +56,12 @@ spec:
     app: agent
   type: ClusterIP
 ---
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: agent
-  name: agent
-  namespace: default
----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   labels:
-    app: agent
-  name: agent-ingress
+    app: agent-http
+  name: agent-http-ingress
   namespace: default
 spec:
   ingressClassName: nginx
@@ -71,7 +71,7 @@ spec:
       paths:
       - backend:
           service:
-            name: agent
+            name: agent-http
             port:
               number: 9090
         path: /metrics
