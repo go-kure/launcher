@@ -153,6 +153,11 @@ func TestWarnForcedVolumes_BundlePatches(t *testing.T) {
 				"    annotations:\n      reviewed-at: 2026-10-02\n      kustomize.toolkit.fluxcd.io/force: enabled\n"}},
 				fixedApp("raw", listObject("Widget", unstructuredClaim("a", false)))),
 			[]string{claimWarning("added", `the bundle of component "raw"`, patchedReason)}},
+		// Flux's read skips a document that is not a Kubernetes object, so it is
+		// never applied.
+		{"a patch removes the claim's apiVersion",
+			bundle(false, []stack.Patch{{Patch: "- op: remove\n  path: /apiVersion\n", Target: claimKind()}}, fixedApp("db", annotated())),
+			nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -353,7 +358,8 @@ func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
 }
 
 // TestWarnForcedVolumes_BundlePatchesFailToBuild pins the fallback: a patch set
-// kustomize cannot build is warned once and the bundle is checked unpatched.
+// Flux cannot build, or whose build it cannot read, is warned once and the bundle
+// is checked unpatched.
 func TestWarnForcedVolumes_BundlePatchesFailToBuild(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -364,6 +370,10 @@ func TestWarnForcedVolumes_BundlePatchesFailToBuild(t *testing.T) {
 		// Flux's build too.
 		{"the result does not serialize", []stack.Patch{
 			{Patch: "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: data\n  namespace: shop\n  annotations:\n    123: hello\n"}}},
+		// Kustomize builds it, but Flux's read fails on a list member that is not
+		// an object.
+		{"a list member is not an object", []stack.Patch{
+			{Patch: "- op: add\n  path: /items\n  value: [broken]\n", Target: claimKind()}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := patchedWarnings(t, &stack.Bundle{Name: "db",
