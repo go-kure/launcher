@@ -722,14 +722,16 @@ carrying `prune-protection`), which would otherwise be wrongly rejected by `kure
 
 Under `TransformContext.FluxNamespace` a trait's objects stay in the application namespace,
 except a `configmap` trait's ConfigMap or the Secret an `external-secret` trait's ExternalSecret
-writes, when the component's own Flux object reads it by name from the namespace that object moves
-to: a `helmrelease`'s `valuesFrom`, a `helmrepository`'s `secretRef` and the like. That one moves
-with it — the ExternalSecret moves, and with it the Secret it writes; the remote key it defaults
-from the application namespace does not change (go-kure/launcher#740). The default
+or a `certificate` trait's Certificate writes, when the component's own Flux object reads it by
+name from the namespace that object moves to: a `helmrelease`'s `valuesFrom`, a `helmrepository`'s
+`secretRef` or `certSecretRef` and the like. That one moves with it — the ExternalSecret or
+Certificate moves, and with it the Secret it writes; the remote key an ExternalSecret defaults from
+the application namespace does not change (go-kure/launcher#740). The default
 `ClusterSecretStore` serves it there unchanged; a namespaced store (`secretStoreRef.kind:
 SecretStore`) is resolved in the ExternalSecret's own namespace, so a store of that name must
-exist in the Flux namespace too. The transform cannot see which stores a cluster has, so it does
-not check this. The two sub-application
+exist in the Flux namespace too. Likewise a Certificate's `ClusterIssuer` serves it anywhere, while
+a namespaced `Issuer` must exist in the Flux namespace. The transform cannot see which stores or
+issuers a cluster has, so it does not check this. The three sub-application
 configs name their object through `FluxNamespaceInput() (kind, name string)`; the component configs
 report what they read through `FluxNamespaceReads()`, which every decorator forwards. See the
 `pkg/oam` README for the full rule.

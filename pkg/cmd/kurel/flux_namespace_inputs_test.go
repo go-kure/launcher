@@ -87,6 +87,10 @@ func externalSecretTrait(secretName string) oam.Trait {
 	}}
 }
 
+func certificateTrait(secretName string) oam.Trait {
+	return oam.Trait{Type: "certificate", Properties: map[string]any{"secretName": secretName, "dnsNames": []any{"app.example.com"}}}
+}
+
 func secretRef(name string) map[string]any { return map[string]any{"name": name} }
 
 func hrChart(sourceRef map[string]any, verify map[string]any) map[string]any {
@@ -130,10 +134,15 @@ func TestFluxNamespace_ReadInputsFollow(t *testing.T) {
 			es, "HelmRepository/c", "ExternalSecret/creds"},
 		{"helmrepository certSecretRef", "helmrepository", map[string]any{"certSecretRef": secretRef("creds")},
 			es, "HelmRepository/c", "ExternalSecret/creds"},
+		// cert-manager writes the Secret beside its Certificate.
+		{"helmrepository certSecretRef from a certificate", "helmrepository", map[string]any{"certSecretRef": secretRef("repo-tls")},
+			certificateTrait("repo-tls"), "HelmRepository/c", "Certificate/repo-tls"},
 		{"ocirepository secretRef", "ocirepository", map[string]any{"secretRef": secretRef("creds")},
 			es, "OCIRepository/c", "ExternalSecret/creds"},
 		{"ocirepository certSecretRef", "ocirepository", map[string]any{"certSecretRef": secretRef("creds")},
 			es, "OCIRepository/c", "ExternalSecret/creds"},
+		{"ocirepository certSecretRef from a certificate", "ocirepository", map[string]any{"certSecretRef": secretRef("repo-tls")},
+			certificateTrait("repo-tls"), "OCIRepository/c", "Certificate/repo-tls"},
 		{"ocirepository proxySecretRef", "ocirepository", map[string]any{"proxySecretRef": secretRef("creds")},
 			es, "OCIRepository/c", "ExternalSecret/creds"},
 		{"ocirepository verify secretRef", "ocirepository",

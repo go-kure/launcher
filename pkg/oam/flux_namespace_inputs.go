@@ -14,8 +14,9 @@ type fluxNamespaceReader interface {
 
 // fluxNamespaceInput is implemented by a trait sub-application's config whose
 // object is a ConfigMap or Secret a Flux object can read by name: the configmap
-// trait's ConfigMap, or the Secret an external-secret trait's ExternalSecret
-// produces in its own namespace. kind is "ConfigMap" or "Secret".
+// trait's ConfigMap, or the Secret an external-secret trait's ExternalSecret or
+// a certificate trait's Certificate produces in its own namespace. kind is
+// "ConfigMap" or "Secret".
 type fluxNamespaceInput interface {
 	FluxNamespaceInput() (kind, name string)
 }
@@ -33,7 +34,8 @@ type traitSubApps struct {
 // ns, the trait sub-applications that object reads from its own namespace
 // (go-kure/launcher#740): a configmap trait's ConfigMap a HelmRelease names in
 // valuesFrom, the Secret of an external-secret trait a HelmRepository names in
-// secretRef. A sub-application the object does not read stays in the
+// secretRef, the Secret of a certificate trait one names in certSecretRef. A
+// sub-application the object does not read stays in the
 // application namespace with the workloads, which may read it too. One the
 // object reads moves even when the workloads read it as well: the Flux object
 // needs it to reconcile at all, while a workload's reference through the
