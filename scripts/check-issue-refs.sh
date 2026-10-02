@@ -23,9 +23,11 @@
 #              `pre-launcher#278` and `...launcher#278` are caught;
 #              `go-kure/launcher#278` and `owner/kure-launcher#278` are not)
 #   emphasised  either of the above wrapped in single underscores, which the
-#               two patterns miss because `_` counts as part of a word (so
-#               `_#227_` and `_kure#539_` are caught; `__#12__`, `a_#12_b` and
-#               `_go-kure/kure#539_` are not)
+#               two patterns miss because `_` counts as part of a word; the
+#               opening `_` must not follow a letter, digit, `_`, `&`, `.`, `/`
+#               or `-` (so `_#227_`, `_kure#539_` and `_my_repo#539_` are
+#               caught; `__#12__`, `a_#12_b`, `_go-kure/kure#539_` and
+#               `_owner/_repo#539_` are not)
 # Ignored before matching, because each is a location or code, not a reference:
 #   - a Markdown link target `](...)` with no whitespace or quote and at most one
 #     level of nested parentheses, so `](#12-foo)`, `](design.md#12-foo)` and
@@ -66,7 +68,7 @@ done
 
 BARE='(^|[^A-Za-z0-9_&])#[0-9]{2,5}([^A-Za-z0-9_]|$)'
 PART='(^|[^A-Za-z0-9_./-])[A-Za-z0-9_.-]*[A-Za-z][A-Za-z0-9_.-]*#[0-9]{2,5}([^A-Za-z0-9_]|$)'
-EMPH='(^|[^A-Za-z0-9_&])_([A-Za-z0-9.-]*[A-Za-z][A-Za-z0-9.-]*)?#[0-9]{2,5}_([^A-Za-z0-9_]|$)'
+EMPH='(^|[^A-Za-z0-9_&./-])_([A-Za-z0-9_.-]*[A-Za-z][A-Za-z0-9_.-]*)?#[0-9]{2,5}_([^A-Za-z0-9_]|$)'
 
 # Strippers: group 1 is the text before the match, the last group the text after.
 LINK='^(.*)\]\(([^()[:space:]"'"'"'`]|\([^()[:space:]"'"'"'`]*\))*\)(.*)$'
