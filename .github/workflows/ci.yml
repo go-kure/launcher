@@ -990,6 +990,11 @@ jobs:
     # re-vendored by scripts/vendor-guard.sh at the same pin as the guard.
     - name: Diff vendored release guide vs canonical
       run: diff -u .tmp/go-kure-dot-github/standards/release-process.md docs/releasing.md
+    # The shared workflows guide is written once, in go-kure/.github, and
+    # published by every repository that uses the shared workflows; this copy is
+    # re-vendored by scripts/vendor-guard.sh at the same pin as the guard.
+    - name: Diff vendored shared workflows guide vs canonical
+      run: diff -u .tmp/go-kure-dot-github/standards/github-workflows.md docs/shared-workflows.md
 
     - name: Read Hugo version from mise.toml
       id: hugo-version

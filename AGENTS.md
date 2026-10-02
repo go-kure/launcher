@@ -36,7 +36,7 @@ launcher/
 │   ├── errors/       # structured error types + wrapping helpers
 │   ├── oam/          # OAM model, parser, transformer (+ builtin/ handlers, netpol/)
 │   └── patch/        # JSONPath-based patching (TOML/YAML, strategic merge), standalone
-├── docs/             # Documentation (design.md, oam/ specs, github-workflows)
+├── docs/             # Documentation (design.md, oam/ specs, github-workflows, shared-workflows)
 ├── examples/         # Runnable example applications and cluster profiles
 ├── site/             # Hugo docs site (docs-map.yaml, scripts/, content/)
 ├── .github/
@@ -342,7 +342,7 @@ map and run `bash site/scripts/gen-docs-tables.sh`.
 | `pkg/oam/builtin/components/` | `api-reference/oam-components` | — |
 | `pkg/oam/builtin/traits/` | `api-reference/oam-traits` | — |
 | `pkg/oam/builtin/policies/` | `api-reference/oam-policies` | — |
-| `.github/workflows/` | — | `contributing/github-workflows`, `contributing/releasing` |
+| `.github/workflows/` | — | `contributing/github-workflows`, `contributing/shared-workflows`, `contributing/releasing` |
 <!-- END GENERATED: reverse-mapping -->
 
 ## Security Considerations
@@ -415,7 +415,9 @@ The go-kure org governance, design documents, and community files are maintained
 - **Contributing**: [CONTRIBUTING.md](https://github.com/go-kure/.github/blob/main/CONTRIBUTING.md)
 - **Reusable workflows**: release (`release.yml`, `release-publish.yml`, `release-state.yml`), pr-review, claude — all
   hosted in go-kure/.github. Releasing: `docs/releasing.md`, vendored from go-kure/.github's
-  `standards/release-process.md` by `scripts/vendor-guard.sh` — edit it there, never here
+  `standards/release-process.md` by `scripts/vendor-guard.sh` — edit it there, never here. Shared
+  workflow behaviour: `docs/shared-workflows.md`, vendored from go-kure/.github's
+  `standards/github-workflows.md` by the same script — edit it there, never here
 - **Reusable workflow reference**: [go-kure/.github AGENTS.md](https://github.com/go-kure/.github/blob/main/AGENTS.md)
 
 ## Questions?
