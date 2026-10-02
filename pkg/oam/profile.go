@@ -29,8 +29,8 @@ type ClusterProfileMetadata struct {
 
 // ClusterProfileSpec holds the capability bindings for a cluster.
 type ClusterProfileSpec struct {
-	// GitopsEngine selects which native GitOps delivery CRs are emitted for helmchart
-	// components. Accepted values: "fluxcd" (default). Empty string is normalized to
+	// GitopsEngine names the GitOps engine whose delivery CRs the built-in
+	// components emit. Accepted values: "fluxcd" (default). Empty string is normalized to
 	// "fluxcd" by ParseClusterProfile. Reserved for future ArgoCD support.
 	GitopsEngine string                       `yaml:"gitopsEngine,omitempty" json:"gitopsEngine,omitempty"`
 	Capabilities map[string]CapabilityBinding `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`

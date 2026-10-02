@@ -120,7 +120,7 @@ Selectors under an operator's own label and naming contract — the `postgresql`
 `cnpg.io/cluster` and `cnpg.io/poolerName` — carry the operator's values and are not
 component-identity labels.
 It is a projection rather than a refusal because the label is an identifier, not the object's
-name: several component types (`helmchart`, `manifests`, `oci`,
+name: several component types (`manifests`, `oci`,
 `crd`, `passthrough`) and their traits accept a name over 63 characters. Object names are never
 projected.
 Because a projected value is itself a valid component name, validation rejects an Application
@@ -220,7 +220,7 @@ nothing for a health check to read. The other unlisted types — `passthrough`, 
 carries, or for `helmtemplate` whatever the chart it renders client-side carries (and no
 HelmRelease), so there is no single GVK to name. When adding a component type, decide which
 group it falls in and say so; silence here reads the same either way. `helmtemplate`
-(go-kure/launcher#348) sits in `defaultTierMap` at `TierApps`, like `helmchart`.
+(go-kure/launcher#348) sits in `defaultTierMap` at `TierApps`, like `helmrelease`.
 `cnpg-cluster` is listed: it emits one CloudNativePG `Cluster`, the same object
 `postgresql`'s check already targets, so it gets the same check (and, in `defaultTierMap`,
 the same `services` tier). `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore`
@@ -229,11 +229,11 @@ the same `services` tier). `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore`
 without waiting on anything — `postgresql`, which emits the same kinds, checks only its
 `Cluster`. They sit in the `services` tier with `cnpg-cluster`.
 
-`helmrelease` (go-kure/launcher#327) is listed, with the same `helm.toolkit.fluxcd.io/v2`
-`HelmRelease` GVK as `helmchart`: it always emits exactly one HelmRelease, whose Ready
+`helmrelease` (go-kure/launcher#327) is listed, with the `helm.toolkit.fluxcd.io/v2`
+`HelmRelease` GVK: it always emits exactly one HelmRelease, whose Ready
 condition kstatus reads directly. Because the GVK is a `*.toolkit.fluxcd.io` kind and its
 config accepts a Flux namespace, the check moves to that namespace with the object. It sits
-in `defaultTierMap` at `TierApps`, like `helmchart`. It declines its check for
+in `defaultTierMap` at `TierApps`. It declines its check for
 `suspend: true` (below).
 
 The kind-named Flux source components `helmrepository`, `ocirepository`, `gitrepository` and
@@ -241,7 +241,7 @@ The kind-named Flux source components `helmrepository`, `ocirepository`, `gitrep
 GVK: each emits exactly one source CR, whose Ready condition kstatus reads, so a dependent
 Kustomization waits until the source is ready. Because the GVK is a `*.toolkit.fluxcd.io` kind
 and each config accepts a Flux namespace, the check moves to that namespace with the object.
-They sit in `defaultTierMap` at `TierApps`, like `oci` and `helmchart`.
+They sit in `defaultTierMap` at `TierApps`, like `oci` and `helmrelease`.
 
 The exception is a `helmrepository`, `ocirepository`, `gitrepository` or `bucket` that a
 lowering rule emitted (`Component.synthesized`): `ClassifyComponentWithDomain` places it in

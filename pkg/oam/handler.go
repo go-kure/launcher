@@ -121,17 +121,15 @@ type ServiceAccountNamer interface {
 // consumer that never constructs or walks a layout.ManifestLayout (e.g.
 // pkg/cmd/kurel's flat-YAML build path): would skipping AugmentLayout lose
 // anything? true only when Generate's own output is already a complete
-// superset of what AugmentLayout adds — e.g. a helmchart component with
-// delivery: template, whose AugmentLayout only repartitions Generate's flat
-// union into hook-ordered child layouts and adds nothing new. false, or this
-// interface being absent altogether, is the fail-closed default: it means
-// AugmentLayout adds something Generate's own output does not already
-// contain — e.g. a helmchart component with valuesMode: configMap, whose
-// AugmentLayout emits a values ConfigMap that Generate's HelmRelease
-// references but never emits itself. A LayoutAugmenter implementation that
-// does not also implement this interface is always treated as false: an
-// augmenter a consumer doesn't know the coverage of must never be assumed
-// safe to skip.
+// superset of what AugmentLayout adds — e.g. a helmtemplate component, whose
+// AugmentLayout only repartitions Generate's flat union into hook-ordered
+// child layouts and adds nothing new. false, or this interface being absent
+// altogether, is the fail-closed default: it means AugmentLayout adds
+// something Generate's own output does not already contain — e.g. an object
+// that Generate's output references but never emits itself. A
+// LayoutAugmenter implementation that does not also implement this interface
+// is always treated as false: an augmenter a consumer doesn't know the
+// coverage of must never be assumed safe to skip.
 type LayoutAugmentationCoverage interface {
 	GenerateCoversAugmentLayout() bool
 }

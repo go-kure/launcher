@@ -3,8 +3,6 @@ package components
 import (
 	"fmt"
 	"testing"
-
-	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // A typed-nil ELEMENT (map[string]any(nil) inside an []any) asserts as an object
@@ -64,11 +62,6 @@ func TestBespokeListReaders_TypedNilElementRefusedLikeUntyped(t *testing.T) {
 		}},
 		{"volumeClaimTemplates[0]", nil, func(v any) error {
 			_, err := parseVolumeClaimTemplates(map[string]any{"volumeClaimTemplates": []any{v}})
-			return err
-		}},
-		{"helmchart valuesFrom[0]", nil, func(v any) error {
-			_, err := (&HelmchartHandler{}).ToApplicationConfig(&oam.Component{Name: "c", Type: "helmchart",
-				Properties: map[string]any{"valuesFrom": []any{v}}}, "ns")
 			return err
 		}},
 		{"manifests scopeOverrides[0]", nil, func(v any) error {

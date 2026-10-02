@@ -78,35 +78,6 @@ func TestHelmParity(t *testing.T) {
 	}
 }
 
-// TestHelmParityFrozenOutput proves each frozen helmchart output is what kurel
-// build prints for its helmchart input today, built against the helm fixture's
-// cluster.yaml as TestHelmParity always did. It goes with the helmchart handler.
-// Set UPDATE_GOLDEN=1 to write the frozen files. Only stdout is compared:
-// helmchart's deprecation warning goes to stderr.
-func TestHelmParityFrozenOutput(t *testing.T) {
-	update := os.Getenv("UPDATE_GOLDEN") == "1"
-	for _, tc := range helmParityCases {
-		t.Run(tc.name, func(t *testing.T) {
-			profile := filepath.Join(filepath.Dir(tc.helm), "cluster.yaml")
-			got := buildManifests(t, helmParityPath(tc.name, ".helmchart.yaml"), profile)
-			frozenPath := helmParityPath(tc.name, ".helmchart.out.yaml")
-			if update {
-				if err := os.WriteFile(frozenPath, []byte(got), 0o644); err != nil {
-					t.Fatalf("writing %s: %v", frozenPath, err)
-				}
-				return
-			}
-			want, err := os.ReadFile(frozenPath)
-			if err != nil {
-				t.Fatalf("reading %s: %v (run with UPDATE_GOLDEN=1 to generate)", frozenPath, err)
-			}
-			if got != string(want) {
-				t.Errorf("helmchart output differs from %s:\nwant:\n%s\ngot:\n%s", frozenPath, want, got)
-			}
-		})
-	}
-}
-
 // buildManifests runs kurel build and returns its stdout.
 func buildManifests(t *testing.T, appPath, profilePath string) string {
 	t.Helper()

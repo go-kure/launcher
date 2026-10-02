@@ -42,15 +42,15 @@ func htAuthoredErr(props map[string]any) error {
 
 func TestHelmTemplateHandler_CanHandle(t *testing.T) {
 	h := &components.HelmTemplateHandler{}
-	if !h.CanHandle("helmtemplate") || h.CanHandle("helmchart") {
+	if !h.CanHandle("helmtemplate") || h.CanHandle("helm") {
 		t.Error("CanHandle must accept helmtemplate only")
 	}
 }
 
 // TestHelmTemplateHandler_RejectionMatrix pins, one case per key, that the
-// terminal refuses outright every helmchart property that only the composite's
-// delivery: native reads, a source reference, and an OCIRepository source
-// without a version. Each refused key is refused twice over: by the handler's
+// terminal refuses outright every property only a Flux-reconciled release
+// reads, a source reference, and an OCIRepository source without a version.
+// Each refused key is refused twice over: by the handler's
 // strict decode, and by authored-property validation against the published
 // schema, which a kurel build runs first. The OCI version rule is the
 // handler's alone: the schema cannot express a requirement that depends on
@@ -90,8 +90,8 @@ func TestHelmTemplateHandler_RejectionMatrix(t *testing.T) {
 			delete(p, "chart")
 			p["source"] = map[string]any{"url": "oci://ghcr.io/example/charts/podinfo"}
 		}, "requires version", false},
-		// Not in the composite-only set, but the composite's own switch: the
-		// terminal is always template delivery.
+		// The helm rule's delivery switch: the terminal is always template
+		// delivery.
 		{"delivery", withKey("delivery", "template"), `"delivery"`, true},
 	}
 	for _, tc := range cases {
@@ -122,7 +122,7 @@ func TestHelmTemplateHandler_RejectionMatrix(t *testing.T) {
 }
 
 // TestHelmTemplateHandler_SourceChecks pins the inline-source rules the
-// terminal shares with the composite: source and source.url required, the
+// terminal shares with the helm rule: source and source.url required, the
 // kind inferred from the scheme when unset and checked against it when set,
 // chart required for a HelmRepository.
 func TestHelmTemplateHandler_SourceChecks(t *testing.T) {
@@ -295,10 +295,9 @@ var htTemplateChart = map[string]string{
 	"test.yaml":  "apiVersion: v1\nkind: Pod\nmetadata:\n  name: smoke\n  annotations:\n    helm.sh/hook: test\nspec:\n  containers:\n    - name: c\n      image: busybox\n",
 }
 
-// htRenderPair renders the same chart through the helmtemplate terminal and
-// through the helmchart composite under delivery: template, both parsed from
-// documents by their handlers.
-func htRenderPair(t *testing.T, srvURL string, values map[string]any) (terminal, composite stack.ApplicationConfig) {
+// htRenderTerminal parses a helmtemplate component on the chart served at
+// srvURL through its handler.
+func htRenderTerminal(t *testing.T, srvURL string, values map[string]any) stack.ApplicationConfig {
 	t.Helper()
 	terminal, err := htParse(map[string]any{
 		"chart":   "testchart",
@@ -309,21 +308,7 @@ func htRenderPair(t *testing.T, srvURL string, values map[string]any) (terminal,
 	if err != nil {
 		t.Fatalf("helmtemplate ToApplicationConfig: %v", err)
 	}
-	composite, err = (&components.HelmchartHandler{}).ToApplicationConfig(&oam.Component{
-		Name: "web",
-		Type: "helmchart",
-		Properties: map[string]any{
-			"chart":    "testchart",
-			"version":  "0.1.0",
-			"delivery": "template",
-			"source":   map[string]any{"url": srvURL},
-			"values":   values,
-		},
-	}, "demo")
-	if err != nil {
-		t.Fatalf("helmchart ToApplicationConfig: %v", err)
-	}
-	return terminal, composite
+	return terminal
 }
 
 func htGenerate(t *testing.T, cfg stack.ApplicationConfig) []client.Object {
@@ -352,24 +337,19 @@ func htAugment(t *testing.T, cfg stack.ApplicationConfig) *layout.ManifestLayout
 	return ml
 }
 
-// TestHelmTemplate_MatchesCompositeTemplateDelivery renders one real chart —
-// served locally, fetched and rendered by kure exactly as a build does —
-// through the terminal and through the composite's delivery: template, and
-// requires identical output: the same objects in the same order from
-// Generate, and the same hook-group child layouts from AugmentLayout. It also
-// checks the terminal's own result: hook execution order (the multi-event
-// hook placed by its earliest phase, the test hook dropped), the values
-// entry's int type honored by the chart's `eq`, and the children's union equal
-// to Generate's output, which is what GenerateCoversAugmentLayout asserts.
-func TestHelmTemplate_MatchesCompositeTemplateDelivery(t *testing.T) {
+// TestHelmTemplate_RendersRealChart renders one real chart — served locally,
+// fetched and rendered by kure exactly as a build does — through the terminal
+// and checks its result: hook execution order (the multi-event hook placed by
+// its earliest phase, the test hook dropped), the values entry's int type
+// honored by the chart's `eq`, three hook-group child layouts from
+// AugmentLayout, and the children's union equal to Generate's output, which is
+// what GenerateCoversAugmentLayout asserts.
+func TestHelmTemplate_RendersRealChart(t *testing.T) {
 	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", htTemplateChart)
 	values := map[string]any{"replicas": 3}
-	terminal, composite := htRenderPair(t, srvURL, values)
+	terminal := htRenderTerminal(t, srvURL, values)
 
-	termObjs, compObjs := htGenerate(t, terminal), htGenerate(t, composite)
-	if !reflect.DeepEqual(termObjs, compObjs) {
-		t.Fatalf("Generate differs between helmtemplate and helmchart delivery: template:\n  helmtemplate: %#v\n  helmchart:    %#v", termObjs, compObjs)
-	}
+	termObjs := htGenerate(t, terminal)
 	var names []string
 	for _, o := range termObjs {
 		names = append(names, o.GetName())
@@ -392,10 +372,7 @@ func TestHelmTemplate_MatchesCompositeTemplateDelivery(t *testing.T) {
 		}
 	}
 
-	termLayout, compLayout := htAugment(t, terminal), htAugment(t, composite)
-	if !reflect.DeepEqual(termLayout, compLayout) {
-		t.Fatalf("AugmentLayout differs between helmtemplate and helmchart delivery: template:\n  helmtemplate: %#v\n  helmchart:    %#v", termLayout, compLayout)
-	}
+	termLayout := htAugment(t, terminal)
 	if len(termLayout.Children) != 3 {
 		t.Fatalf("terminal layout has %d children, want 3 (pre-install, main, post-install)", len(termLayout.Children))
 	}

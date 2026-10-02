@@ -41,7 +41,7 @@ func (h *OCIHandler) PropertySchema() map[string]oam.PropertySchema {
 		"path":            {Type: oam.PropertyTypeString, Default: "./", Description: "Path within the artifact that the Kustomization reconciles."},
 		"prune":           {Type: oam.PropertyTypeBoolean, Default: true, Description: "Whether the Kustomization prunes resources removed from the source."},
 		"interval":        {Type: oam.PropertyTypeString, Description: "Reconciliation interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms (default 60m)."},
-		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Set the Kustomization's spec.targetNamespace, which sets or overrides the namespace of every namespaced object in the artifact, Flux custom resources included. No default: unset, each object keeps the namespace the artifact's own kustomize build gives it. Author it when namespaced objects are still without a namespace after that build (the artifact sets none, in the objects or in a kustomization.yaml namespace), since they otherwise fail at apply with \"namespace not specified\". Unlike helmchart and helmrelease under a Flux namespace, this does not default to the application namespace, because a default would override every object's own namespace."},
+		"targetNamespace": {Type: oam.PropertyTypeString, Description: "Set the Kustomization's spec.targetNamespace, which sets or overrides the namespace of every namespaced object in the artifact, Flux custom resources included. No default: unset, each object keeps the namespace the artifact's own kustomize build gives it. Author it when namespaced objects are still without a namespace after that build (the artifact sets none, in the objects or in a kustomization.yaml namespace), since they otherwise fail at apply with \"namespace not specified\". Unlike helmrelease under a Flux namespace, this does not default to the application namespace, because a default would override every object's own namespace."},
 		"wait":            {Type: oam.PropertyTypeBoolean, Description: "Set the Kustomization's spec.wait: Flux waits for every resource it applies to become ready before reporting the Kustomization ready. Unset or false emits nothing. Cannot be combined with a non-empty healthChecks, which kustomize-controller ignores when wait is true."},
 		"healthChecks": {
 			Type:        oam.PropertyTypeArray,
@@ -279,8 +279,8 @@ func (c *OCIConfig) ApplyPolicy(p oam.Policy) error {
 // GetSourceKey returns the dedup key for the OCIRepository source CR,
 // "oci:<url>:<version>", shared only by oci components naming one artifact.
 // The component deployed first emits the shared source (see
-// oam.SourceDeduplicatable). A helmchart-over-OCI on the same artifact keys
-// its own source differently: it copies the chart layer instead of
+// oam.SourceDeduplicatable). A helm component over OCI on the same artifact
+// gets its own generated source, which copies the chart layer instead of
 // extracting it.
 func (c *OCIConfig) GetSourceKey() string {
 	return "oci:" + c.URL + ":" + c.Version
@@ -316,8 +316,7 @@ func (c *OCIConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
 	// built directly by a library consumer — never parsed — reaches
 	// parseDuration below, which discards the parse error: a signed or
 	// sub-millisecond value would be emitted in a form Flux rejects, and text
-	// that is no duration at all as 0s. Same shape as the re-checks at the top of
-	// (*HelmchartConfig).Generate.
+	// that is no duration at all as 0s.
 	if err := validateFluxInterval("oci", effectiveInterval(c.Interval)); err != nil {
 		return nil, err
 	}
@@ -347,7 +346,7 @@ func (c *OCIConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
 		Kind: "OCIRepository",
 		Name: srcName,
 	}
-	// No default, unlike helmchart/helmrelease: a Kustomization targetNamespace
+	// No default, unlike helmrelease: a Kustomization targetNamespace
 	// overrides every object's namespace (go-kure/launcher#622).
 	if c.TargetNamespace != "" {
 		kz.Spec.TargetNamespace = c.TargetNamespace

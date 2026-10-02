@@ -212,57 +212,48 @@ func TestWrapIfAugmenter_AllConstructionSites(t *testing.T) {
 		assertForwards(t, app.Config, &called)
 	})
 
-	// NewConfigMapDecorator/RealHelmchart* below is the end-to-end proof that
+	// NewConfigMapDecorator/RealHelmTemplate* below is the end-to-end proof that
 	// presence-based forwarding fires for a production component (a real
-	// valuesMode: configMap helmchart config), not just augmenterStub. See
-	// TestConfigMapDecorator_ForwardsLayoutAugmenter above for the stub-based
-	// coverage of this same construction site.
-	t.Run("NewConfigMapDecorator/RealHelmchartConfigMapValues", func(t *testing.T) {
-		h := &components.HelmchartHandler{}
-		cfg, err := h.ToApplicationConfig(&oam.Component{
-			Name: "metrics",
-			Type: "helmchart",
+	// helmtemplate config, which partitions its render by hook group), not just
+	// augmenterStub. See TestConfigMapDecorator_ForwardsLayoutAugmenter above for
+	// the stub-based coverage of this same construction site.
+	t.Run("NewConfigMapDecorator/RealHelmTemplate", func(t *testing.T) {
+		cfg, err := (&components.HelmTemplateHandler{}).ToApplicationConfig(&oam.Component{
+			Name: "myapp",
+			Type: "helmtemplate",
 			Properties: map[string]any{
-				"chart":      "kube-prometheus-stack",
-				"valuesMode": "configMap",
-				"values":     map[string]any{"replicaCount": 3},
-				"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+				"chart":  "myapp",
+				"source": map[string]any{"url": "https://charts.example.com"},
 			},
-		}, "monitoring")
+		}, "default")
 		if err != nil {
 			t.Fatalf("ToApplicationConfig: %v", err)
 		}
-
 		dec := traits.NewConfigMapDecorator(cfg, "c", "/etc/c")
-		aug, ok := dec.(interface {
+		if _, ok := dec.(interface {
 			AugmentLayout(l *layout.ManifestLayout) error
-		})
-		if !ok {
-			t.Fatal("decorator wrapping a real configMap-mode helmchart config does not implement LayoutAugmenter")
-		}
-		ml := &layout.ManifestLayout{}
-		if err := aug.AugmentLayout(ml); err != nil {
-			t.Fatalf("AugmentLayout: %v", err)
-		}
-		if len(ml.Resources) != 1 {
-			t.Errorf("ml.Resources has %d entries, want 1 (the generated values ConfigMap)", len(ml.Resources))
+		}); !ok {
+			t.Fatal("decorator wrapping a real helmtemplate config does not implement LayoutAugmenter")
 		}
 	})
 
-	// RealHelmchartInlineDoesNotWrap mirrors the negative guard in
+	// RealHelmReleaseDoesNotWrap mirrors the negative guard in
 	// TestConfigMapDecorator_DoesNotClaimLayoutAugmenter_WhenInnerDoesNot,
-	// but with a real inline-mode helmchart config instead of nakedStub: the
-	// regression this guards against would silently relocate every
-	// flat-bundle helmchart app into per-app sub-layout placement.
-	t.Run("NewConfigMapDecorator/RealHelmchartInlineDoesNotWrap", func(t *testing.T) {
-		h := &components.HelmchartHandler{}
-		cfg, err := h.ToApplicationConfig(&oam.Component{
+	// but with a real helmrelease config instead of nakedStub: the regression
+	// this guards against would silently relocate every flat-bundle helmrelease
+	// app into per-app sub-layout placement. valuesMode: configMap emits its
+	// ConfigMap from Generate, so even that mode is no augmenter.
+	t.Run("NewConfigMapDecorator/RealHelmReleaseDoesNotWrap", func(t *testing.T) {
+		cfg, err := (&components.HelmReleaseHandler{}).ToApplicationConfig(&oam.Component{
 			Name: "metrics",
-			Type: "helmchart",
+			Type: "helmrelease",
 			Properties: map[string]any{
-				"chart":  "kube-prometheus-stack",
-				"values": map[string]any{"replicaCount": 3},
-				"source": map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
+				"chart": map[string]any{"spec": map[string]any{
+					"chart":     "kube-prometheus-stack",
+					"sourceRef": map[string]any{"kind": "HelmRepository", "name": "prometheus-community"},
+				}},
+				"valuesMode": "configMap",
+				"values":     map[string]any{"replicaCount": 3},
 			},
 		}, "monitoring")
 		if err != nil {
@@ -273,11 +264,11 @@ func TestWrapIfAugmenter_AllConstructionSites(t *testing.T) {
 		if _, ok := dec.(interface {
 			AugmentLayout(l *layout.ManifestLayout) error
 		}); ok {
-			t.Fatal("decorator wrapping an inline-mode (no-op augmenter) helmchart config must not implement LayoutAugmenter")
+			t.Fatal("decorator wrapping a helmrelease config must not implement LayoutAugmenter")
 		}
 	})
 
-	// The following three subtests guard augmentingDecorator's unconditional
+	// The following two subtests guard augmentingDecorator's unconditional
 	// GenerateCoversAugmentLayout forward (coverage forwarding): unlike
 	// AugmentLayout's own forward, this one must come through regardless of
 	// what the inner augmenter reports, so pkg/cmd/kurel's build guard sees
@@ -294,46 +285,19 @@ func TestWrapIfAugmenter_AllConstructionSites(t *testing.T) {
 		}
 	}
 
-	t.Run("NewConfigMapDecorator/RealHelmchartTemplateDelivery_CoversAugmentLayout", func(t *testing.T) {
-		h := &components.HelmchartHandler{}
-		cfg, err := h.ToApplicationConfig(&oam.Component{
+	t.Run("NewConfigMapDecorator/RealHelmTemplate_CoversAugmentLayout", func(t *testing.T) {
+		cfg, err := (&components.HelmTemplateHandler{}).ToApplicationConfig(&oam.Component{
 			Name: "myapp",
-			Type: "helmchart",
+			Type: "helmtemplate",
 			Properties: map[string]any{
-				"chart":    "myapp",
-				"delivery": "template",
-				"source":   map[string]any{"url": "https://charts.example.com"},
+				"chart":  "myapp",
+				"source": map[string]any{"url": "https://charts.example.com"},
 			},
 		}, "default")
 		if err != nil {
 			t.Fatalf("ToApplicationConfig: %v", err)
 		}
-		dec := traits.NewConfigMapDecorator(cfg, "c", "/etc/c")
-		if _, ok := dec.(interface {
-			AugmentLayout(l *layout.ManifestLayout) error
-		}); !ok {
-			t.Fatal("decorator wrapping a real template-delivery helmchart config does not implement LayoutAugmenter")
-		}
-		assertCoverage(t, dec, true)
-	})
-
-	t.Run("NewConfigMapDecorator/RealHelmchartConfigMapValues_DoesNotCoverAugmentLayout", func(t *testing.T) {
-		h := &components.HelmchartHandler{}
-		cfg, err := h.ToApplicationConfig(&oam.Component{
-			Name: "metrics",
-			Type: "helmchart",
-			Properties: map[string]any{
-				"chart":      "kube-prometheus-stack",
-				"valuesMode": "configMap",
-				"values":     map[string]any{"replicaCount": 3},
-				"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
-			},
-		}, "monitoring")
-		if err != nil {
-			t.Fatalf("ToApplicationConfig: %v", err)
-		}
-		dec := traits.NewConfigMapDecorator(cfg, "c", "/etc/c")
-		assertCoverage(t, dec, false)
+		assertCoverage(t, traits.NewConfigMapDecorator(cfg, "c", "/etc/c"), true)
 	})
 
 	t.Run("NewConfigMapDecorator/AugmenterStubDoesNotOptIn", func(t *testing.T) {

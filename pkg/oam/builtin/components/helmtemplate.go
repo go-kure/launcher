@@ -16,8 +16,7 @@ import (
 // helmTemplateType is the helmtemplate component type. It prefixes the errors
 // the handler and config raise themselves — property decoding and validation,
 // and a failed chart render — but not a failure to parse the rendered output,
-// which the shared render code returns unprefixed for this terminal and the
-// composite alike (chartRender.render).
+// which the render code returns unprefixed (chartRender.render).
 const helmTemplateType = "helmtemplate"
 
 // helmTemplateValuesKey is the one property the strict decode splits off: the
@@ -28,10 +27,9 @@ const helmTemplateValuesKey = "values"
 // HelmTemplateHandler handles the kind-named `helmtemplate` component: a Helm
 // chart rendered client-side at build time into raw manifests, returned in Helm
 // hook order and, for a layout-walking consumer, partitioned into one child
-// layout per hook group. It is the helmchart composite's `delivery: template`
-// path lifted out as a directly authorable terminal, and both run the same
-// render and partition code (helmtemplate_render.go). It emits no source CR and
-// no HelmRelease.
+// layout per hook group. It is directly authorable and is also what the helm
+// rule lowers to under `delivery: template`; the render and partition code is
+// in helmtemplate_render.go. It emits no source CR and no HelmRelease.
 type HelmTemplateHandler struct{}
 
 // CanHandle returns true for the helmtemplate component type.
@@ -62,12 +60,11 @@ func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 
 // helmTemplateProperties is the property surface the strict decode checks,
 // values excepted. Any key it does not declare, at any depth, is refused — in
-// particular the composite's release identity (releaseName, targetNamespace;
-// this terminal renders into the application namespace under kure's default
-// release name), every helmchart property that only the composite's delivery:
-// native reads (interval, driftDetection, install, upgrade, valuesFrom,
-// valuesMode), the composite's own delivery switch, and a source reference
-// (source.name, source.namespace).
+// particular a release identity (releaseName, targetNamespace; this terminal
+// renders into the application namespace under kure's default release name),
+// every property only a Flux-reconciled release reads (interval,
+// driftDetection, install, upgrade, valuesFrom, valuesMode), the helm rule's
+// delivery switch, and a source reference (source.name, source.namespace).
 type helmTemplateProperties struct {
 	Source  *helmTemplateSource `json:"source"`
 	Chart   string              `json:"chart"`
@@ -82,8 +79,7 @@ type helmTemplateSource struct {
 }
 
 // ToApplicationConfig decodes the component's properties strictly, with values
-// split off first, and checks the result the way the composite checks an
-// inline source under delivery: template: source.url required, the kind
+// split off first, and checks the inline source: source.url required, the kind
 // inferred from or checked against the URL scheme, chart required for a
 // HelmRepository, version required for an OCIRepository, values an object that
 // encodes as JSON.
@@ -113,16 +109,15 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 	if err != nil {
 		return nil, err
 	}
-	// Record the resolved kind, as the composite does for an inline source.
+	// Record the resolved kind.
 	cfg.SourceKind = src.Kind
 	return cfg, nil
 }
 
 // helmTemplateValues reads the values key split off before the strict decode.
 // Absent, or null (typed or not), means no values; anything else must be an
-// object. The map is kept exactly as authored — the same map, with the same
-// value types, the composite hands the renderer — rather than taken from the
-// strict decoder, whose json.Number numbers a chart template would compare and
+// object. The map is kept exactly as authored, with the YAML-decoded value
+// types, rather than taken from the strict decoder, whose json.Number numbers a chart template would compare and
 // print differently. The owned split matches keys case-insensitively, so two
 // spellings of the key are refused rather than one silently winning.
 func helmTemplateValues(owned map[string]any) (map[string]any, error) {
@@ -175,13 +170,12 @@ type HelmTemplateConfig struct {
 	renderChart renderChartFunc
 
 	// chartRender caches the render and its hook groups, shared by Generate
-	// and AugmentLayout — the implementation the composite's delivery:
-	// template runs too.
+	// and AugmentLayout.
 	chartRender
 }
 
 // ApplyPolicy is a no-op: rendered chart manifests have no resource-limit
-// policy, as under the composite.
+// policy.
 func (c *HelmTemplateConfig) ApplyPolicy(_ oam.Policy) error { return nil }
 
 // source checks c and returns what the render fetches. ToApplicationConfig
@@ -227,9 +221,9 @@ func (c *HelmTemplateConfig) Generate(_ *stack.Application) ([]*client.Object, e
 }
 
 // AugmentLayout repartitions the render Generate returned flat into one child
-// layout per Helm hook group, chained in execution order — the composite's
-// delivery: template layout, from the same code (chartRender.partition). A
-// chart with at most one hook group leaves ml unchanged.
+// layout per Helm hook group, chained in execution order
+// (chartRender.partition). A chart with at most one hook group leaves ml
+// unchanged.
 func (c *HelmTemplateConfig) AugmentLayout(ml *layout.ManifestLayout) error {
 	if err := c.ensureRendered(); err != nil {
 		return err

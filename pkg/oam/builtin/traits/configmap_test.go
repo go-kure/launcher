@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
-	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/stack"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -75,30 +74,32 @@ func TestConfigMapHandler_Apply_NoMountPath(t *testing.T) {
 }
 
 func TestTransform_FluxNamespace_ReachesHelmRelease(t *testing.T) {
-	// Build a transformer with helmchart component handler and configmap trait handler.
+	// Build a transformer with helmrelease component handler and configmap trait handler.
 	transformer := oam.NewTransformer(
 		map[string]oam.ComponentHandler{
-			"helmchart": &components.HelmchartHandler{},
+			"helmrelease": &components.HelmReleaseHandler{},
 		},
 		nil,
 	)
 	transformer.RegisterBuiltinTrait("configmap", &traits.ConfigMapHandler{})
 
-	// OAM app: helmchart component + configmap trait WITHOUT mountPath.
+	// OAM app: helmrelease component + configmap trait WITHOUT mountPath.
 	// Without mountPath the configmap trait adds a sibling ConfigMap app but does NOT
-	// wrap the helmchart config, so postProcessFluxNamespace calls SetFluxNamespace
-	// directly on HelmchartConfig — exercising the pipeline wiring.
+	// wrap the helmrelease config, so postProcessFluxNamespace calls SetFluxNamespace
+	// directly on HelmReleaseConfig — exercising the pipeline wiring.
 	app := &oam.Application{
 		Metadata: oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{
 				{
 					Name: "metrics",
-					Type: "helmchart",
+					Type: "helmrelease",
 					Properties: map[string]any{
-						"chart": "kube-prometheus-stack",
-						"source": map[string]any{
-							"url": "https://prometheus-community.github.io/helm-charts",
+						"chart": map[string]any{
+							"spec": map[string]any{
+								"chart":     "kube-prometheus-stack",
+								"sourceRef": map[string]any{"kind": "HelmRepository", "name": "prometheus-community"},
+							},
 						},
 					},
 					Traits: []oam.Trait{
@@ -139,7 +140,7 @@ func TestTransform_FluxNamespace_ReachesHelmRelease(t *testing.T) {
 	}
 	collectApps(cluster.Node)
 
-	// Find the helmchart app, generate its resources, and assert namespaces.
+	// Find the helmrelease app, generate its resources, and assert namespaces.
 	var found bool
 	for _, bundleApp := range allApps {
 		if bundleApp.Name != "metrics" {
@@ -152,26 +153,26 @@ func TestTransform_FluxNamespace_ReachesHelmRelease(t *testing.T) {
 		for _, objPtr := range objs {
 			obj := *objPtr
 			switch o := obj.(type) {
-			case *helmv2.HelmRelease, *sourcev1.HelmRepository:
+			case *helmv2.HelmRelease:
 				found = true
 				if ns := obj.GetNamespace(); ns != "custom-flux" {
 					t.Errorf("%T.Namespace = %q, want %q", obj, ns, "custom-flux")
 				}
 				// The release still installs into the application namespace
 				// (go-kure/launcher#610).
-				if hr, ok := o.(*helmv2.HelmRelease); ok && hr.Spec.TargetNamespace != "default" {
-					t.Errorf("HelmRelease targetNamespace = %q, want the application namespace %q", hr.Spec.TargetNamespace, "default")
+				if o.Spec.TargetNamespace != "default" {
+					t.Errorf("HelmRelease targetNamespace = %q, want the application namespace %q", o.Spec.TargetNamespace, "default")
 				}
 			}
 		}
 	}
 	if !found {
-		t.Error("no HelmRelease or HelmRepository found in cluster")
+		t.Error("no HelmRelease found in cluster")
 	}
 }
 
 // hcVetoConfig implements ApplicationConfig + autoHealthCheckEmitter and vetoes
-// its auto health check (like a helmchart with delivery=template).
+// its auto health check (like a helmrelease with suspend: true).
 type hcVetoConfig struct{ fluxNSCapture }
 
 func (c *hcVetoConfig) EmitsAutoHealthCheck() bool { return false }

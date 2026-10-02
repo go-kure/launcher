@@ -47,8 +47,8 @@ func TestOCIHandler_CanHandle(t *testing.T) {
 	if !h.CanHandle("oci") {
 		t.Error("expected true for oci")
 	}
-	if h.CanHandle("helmchart") {
-		t.Error("expected false for helmchart")
+	if h.CanHandle("helmrelease") {
+		t.Error("expected false for helmrelease")
 	}
 }
 

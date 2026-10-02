@@ -18,8 +18,8 @@ type fluxNamespaceSettable interface {
 }
 
 // autoHealthCheckEmitter mirrors oam.autoHealthCheckEmitter locally (unexported
-// cross-package). Decorators forward it so a wrapped helmchart's template-delivery
-// veto still reaches the auto health-check synthesis.
+// cross-package). Decorators forward it so a wrapped config's veto (e.g. a
+// suspended helmrelease's) still reaches the auto health-check synthesis.
 type autoHealthCheckEmitter interface {
 	EmitsAutoHealthCheck() bool
 }
@@ -90,7 +90,7 @@ func (d decoratorBase) Validate() error {
 }
 
 // SetFluxNamespace forwards the per-request Flux namespace to the inner config
-// when it satisfies fluxNamespaceSettable (e.g. HelmchartConfig).
+// when it satisfies fluxNamespaceSettable (e.g. HelmReleaseConfig).
 func (d decoratorBase) SetFluxNamespace(ns string) {
 	if setter, ok := d.Inner.(fluxNamespaceSettable); ok {
 		setter.SetFluxNamespace(ns)
@@ -98,7 +98,7 @@ func (d decoratorBase) SetFluxNamespace(ns string) {
 }
 
 // EmitsAutoHealthCheck forwards the inner config's auto-health-check veto (e.g. a
-// wrapped helmchart with delivery=template emits no HelmRelease). Defaults to true
+// wrapped helmrelease with suspend: true is never reconciled). Defaults to true
 // when the inner config does not implement the interface.
 func (d decoratorBase) EmitsAutoHealthCheck() bool {
 	if e, ok := d.Inner.(autoHealthCheckEmitter); ok {

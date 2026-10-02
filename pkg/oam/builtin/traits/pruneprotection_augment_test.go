@@ -10,7 +10,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -156,68 +155,5 @@ func TestNonPruneDecorator_DoesNotAnnotateAugmentLayoutResources(t *testing.T) {
 		if _, ok := o.GetAnnotations()[stack.AnnotationFluxPruneKey]; ok {
 			t.Errorf("%q: unexpectedly annotated without prune-protection", o.GetName())
 		}
-	}
-}
-
-// TestPruneProtection_HelmchartValuesConfigMap_WalkCluster exercises the
-// concrete case go-kure/launcher#324 was filed for end to end through kure's real layout
-// walker: a helmchart component under valuesMode: configMap emits its values
-// ConfigMap only from AugmentLayout. With prune-protection on the component,
-// that ConfigMap must be annotated; a sibling application in the same bundle
-// (merged into the parent layout, not the component's per-app sub-layout)
-// must not be.
-func TestPruneProtection_HelmchartValuesConfigMap_WalkCluster(t *testing.T) {
-	cfg, err := (&components.HelmchartHandler{}).ToApplicationConfig(&oam.Component{
-		Name: "metrics",
-		Type: "helmchart",
-		Properties: map[string]any{
-			"chart":      "kube-prometheus-stack",
-			"valuesMode": "configMap",
-			"values":     map[string]any{"replicaCount": 3},
-			"source":     map[string]any{"url": "https://prometheus-community.github.io/helm-charts"},
-		},
-	}, "monitoring")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("metrics", "monitoring", cfg)
-	applyPruneProtection(t, app)
-	sibling := stack.NewApplication("sibling", "monitoring", &cmStub{name: "sibling", namespace: "monitoring"})
-
-	cluster := &stack.Cluster{
-		Name: "c",
-		Node: &stack.Node{
-			Name:   "apps",
-			Bundle: &stack.Bundle{Name: "apps", Applications: []*stack.Application{app, sibling}},
-		},
-	}
-	root, err := layout.WalkCluster(cluster, layout.LayoutRules{})
-	if err != nil {
-		t.Fatalf("WalkCluster: %v", err)
-	}
-
-	var sawValuesCM, sawSibling bool
-	for _, o := range layoutObjects(root) {
-		switch o.GetName() {
-		case "sibling":
-			sawSibling = true
-			if isPruneDisabled(o) {
-				t.Error("sibling application's ConfigMap was annotated; prune-protection must stay scoped to its own component")
-			}
-		default:
-			if o.GetObjectKind().GroupVersionKind().Kind == "ConfigMap" {
-				sawValuesCM = true
-			}
-			if !isPruneDisabled(o) {
-				t.Errorf("%s %q: missing %s=%s", o.GetObjectKind().GroupVersionKind().Kind, o.GetName(),
-					stack.AnnotationFluxPruneKey, stack.AnnotationFluxPruneDisabled)
-			}
-		}
-	}
-	if !sawValuesCM {
-		t.Error("walked layout carries no values ConfigMap; the test no longer exercises the AugmentLayout path")
-	}
-	if !sawSibling {
-		t.Error("walked layout carries no sibling ConfigMap; the scoping assertion is vacuous")
 	}
 }

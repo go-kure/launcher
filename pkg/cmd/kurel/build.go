@@ -286,7 +286,6 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"statefulset":  &components.StatefulsetHandler{},
 		"service":      &components.ServiceHandler{},
 		"cnpg-cluster": &components.CnpgClusterHandler{},
-		"helmchart":    &components.HelmchartHandler{},
 		"helmrelease":  &components.HelmReleaseHandler{},
 		"helmtemplate": &components.HelmTemplateHandler{},
 		"passthrough":  &components.PassthroughHandler{},
@@ -429,17 +428,18 @@ func newBuiltinTransformer() *oam.Transformer {
 
 // rejectLayoutAugmenters walks the transform result and fails loudly if any
 // component's config implements layout.LayoutAugmenter without also
-// implementing oam.LayoutAugmentationCoverage returning true (e.g. a
-// helmchart component with valuesMode: configMap, which needs a generated
-// values ConfigMap emitted alongside it). The build's generation
-// (oam.GenerateApplications) never constructs or walks a layout.ManifestLayout, so an augmenter's
-// resources are otherwise silently dropped — leaving, for the configMap
-// case, a HelmRelease whose valuesFrom reference points at a ConfigMap that
-// was never generated. Fail-closed default: a LayoutAugmenter that does not
-// also implement LayoutAugmentationCoverage, or implements it but returns
-// false, is rejected — only an explicit true (asserting that Generate's own
-// output already covers everything AugmentLayout would add, e.g. a helmchart
-// component with delivery: template) is let through.
+// implementing oam.LayoutAugmentationCoverage returning true, i.e. one whose
+// AugmentLayout adds resources its Generate output does not contain. The
+// build's generation (oam.GenerateApplications) never constructs or walks a
+// layout.ManifestLayout, so such resources would otherwise be silently
+// dropped, leaving any reference to them in the generated objects dangling.
+// No built-in component needs this today: the only built-in augmenter,
+// helmtemplate, reports coverage. The guard stays fail-closed for a
+// registered handler that does: a LayoutAugmenter that does not also
+// implement LayoutAugmentationCoverage, or implements it but returns false, is
+// rejected — only an explicit true (asserting that Generate's own output
+// already covers everything AugmentLayout would add, as helmtemplate's hook
+// partition does) is let through.
 func rejectLayoutAugmenters(node *stack.Node) error {
 	if node == nil {
 		return nil
@@ -479,7 +479,7 @@ func rejectLayoutAugmentersInBundle(bundle *stack.Bundle) error {
 			continue
 		}
 		return errors.Errorf(
-			"kurel build: component %q needs layout-level resources (e.g. a helmchart valuesMode: configMap values ConfigMap) that this build path cannot generate — kurel build does not walk a layout.ManifestLayout, so those resources would be silently missing from the output; switch the component to a mode that does not need one",
+			"kurel build: component %q needs layout-level resources that this build path cannot generate — kurel build does not walk a layout.ManifestLayout, so those resources would be silently missing from the output; switch the component to a mode that does not need one",
 			app.Name)
 	}
 	return nil

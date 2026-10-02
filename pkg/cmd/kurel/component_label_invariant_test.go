@@ -215,8 +215,6 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		longRefusal: "must be a DNS-1035 label of at most 63 characters"},
 	"cnpg-database":    {props: map[string]any{"cluster": map[string]any{"name": "db"}, "name": "app", "owner": "app"}},
 	"cnpg-objectstore": {props: map[string]any{"configuration": map[string]any{"destinationPath": "s3://backups/db"}}},
-	"helmchart": {props: map[string]any{"version": "v1.17.2",
-		"source": map[string]any{"kind": "OCIRepository", "url": "oci://ghcr.io/example/charts/app"}}},
 	// Renders a locally served chart; helmtemplateLabelProps says why it is
 	// unlabelled, selects no pods and accepts the 200-character name.
 	"helmtemplate": {propsFor: helmtemplateLabelProps},

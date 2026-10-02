@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -40,8 +41,23 @@ func (f fluxDurationField[S]) name() string {
 	return strings.Join(f.path, ".")
 }
 
-// validateFluxInterval refuses an authored interval the Flux CRDs a composite
-// component (helmchart, oci) emits would reject at apply time. The interval
+// effectiveInterval is the interval the oci component emits: the authored one,
+// or 60m when unset.
+func effectiveInterval(interval string) string {
+	if interval == "" {
+		return "60m"
+	}
+	return interval
+}
+
+// parseDuration reads an interval validateFluxInterval has already accepted.
+func parseDuration(s string) metav1.Duration {
+	d, _ := time.ParseDuration(s)
+	return metav1.Duration{Duration: d}
+}
+
+// validateFluxInterval refuses an authored interval the Flux CRDs the oci
+// component emits would reject at apply time. The interval
 // reaches them through parseDuration, as a metav1.Duration, so the emitted form
 // is checked as well as the authored one; that also refuses a positive value
 // too small for the duration type, which would be emitted as 0s. Called at parse

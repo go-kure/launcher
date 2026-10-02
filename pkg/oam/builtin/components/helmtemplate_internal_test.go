@@ -168,8 +168,7 @@ func TestHelmTemplateHandler_EveryFieldReachable(t *testing.T) {
 }
 
 // TestHelmTemplateConfig_MultiEventHookOrdersByEarliestPhase is the
-// helmtemplate terminal's hook-order oracle, mirroring the composite's
-// TestGenerate_MultiEventHookOrdersByEarliestPhase: an object whose
+// helmtemplate terminal's hook-order oracle: an object whose
 // helm.sh/hook annotation names several events ("pre-install,pre-upgrade")
 // must land in the pre-install group, ahead of the hook-free main group, not in
 // kure's alphabetical "unknown" bucket after post-upgrade. Changing multiHook
@@ -231,8 +230,7 @@ metadata:
 // ConfigMap: go-kure/launcher#581's reproduction. yaml.v3 decodes a rendered
 // integer as a Go int, which runtime.DeepCopyJSONValue refuses with a panic,
 // and a multi-event hook is the object the grouping step deep-copies
-// (cloneWithHookAnnotation). Shared with the composite's
-// TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields.
+// (cloneWithHookAnnotation).
 const multiEventHookJobChart = `apiVersion: batch/v1
 kind: Job
 metadata:
@@ -322,8 +320,7 @@ func generatedNames(objects []*client.Object) []string {
 // panic in the grouping copy: "cannot deep copy int"), lands in the pre-install
 // hook group, and emits backoffLimit: 3 unchanged — written exactly as the same
 // document decoded by yaml.v3 alone would be (an int and an int64 encode
-// alike). The composite half is
-// TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields.
+// alike).
 func TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields(t *testing.T) {
 	cfg := helmTemplateFixture(t, stubRender(multiEventHookJobChart))
 
@@ -376,8 +373,6 @@ func TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields(t *testing.T) {
 // unquoted timestamp with a UTC offset of 24 hours. yaml.v3 decodes it to a
 // time.Time that RFC 3339 cannot express, which time.Time.MarshalJSON — and so
 // kure's writer, which writes an object from its JSON encoding — refuses.
-// Shared with the composite's
-// TestGenerateTemplate_TimestampOutsideRFC3339IsABuildError.
 const outOfRangeOffsetChart = `apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -407,8 +402,7 @@ func TestHelmTemplateConfig_TimestampOutsideRFC3339IsABuildError(t *testing.T) {
 
 // topLevelNonStringKeyChart renders, after a hook-free ConfigMap, a hook-free
 // ConfigMap with an unquoted 1 and true among its own top-level keys, which
-// makes yaml.v3 decode that whole document to map[any]any. Shared with the
-// composite's TestGenerateTemplate_TopLevelNonStringKeyIsABuildError.
+// makes yaml.v3 decode that whole document to map[any]any.
 const topLevelNonStringKeyChart = `apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -438,8 +432,7 @@ func TestHelmTemplateConfig_TopLevelNonStringKeyIsABuildError(t *testing.T) {
 // hook with a non-string mapping key, a pre-delete,post-delete hook with an
 // out-of-range timestamp, and a pre-rollback,test hook with non-string keys
 // at its own top level. Hook grouping drops all three hooks unwritten, so
-// none of those keys or values is ever emitted. Shared with the composite's
-// TestGenerateTemplate_DroppedHookWithUnemittableValuesBuilds.
+// none of those keys or values is ever emitted.
 const droppedHooksUnemittableChart = `apiVersion: v1
 kind: ConfigMap
 metadata:

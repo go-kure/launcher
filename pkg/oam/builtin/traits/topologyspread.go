@@ -93,7 +93,7 @@ type topologySpreadConfig struct {
 // Generate delegates to the inner config, then applies the constraints to each
 // generated typed *appsv1.Deployment — one a launcher kind builds, or one a
 // manifests source decodes. A Deployment emitted as unstructured output
-// (passthrough, helmchart templates) is not inspected, like every other
+// (passthrough, helmtemplate renders) is not inspected, like every other
 // Deployment-decorating trait. A component with no typed Deployment is an
 // error: the trait would otherwise be accepted and do nothing.
 func (c *topologySpreadConfig) Generate(app *stack.Application) ([]*client.Object, error) {
@@ -116,7 +116,7 @@ func (c *topologySpreadConfig) Generate(app *stack.Application) ([]*client.Objec
 		}
 	}
 	if !found {
-		return nil, errors.Errorf("topology-spread: component %q generates no Deployment the trait can act on; it needs a Deployment built by a launcher kind or decoded from a manifests source, and a Deployment passed through as raw, unstructured output (passthrough, helmchart templates) is not inspected", app.Name)
+		return nil, errors.Errorf("topology-spread: component %q generates no Deployment the trait can act on; it needs a Deployment built by a launcher kind or decoded from a manifests source, and a Deployment passed through as raw, unstructured output (passthrough, helmtemplate renders) is not inspected", app.Name)
 	}
 	return objects, nil
 }

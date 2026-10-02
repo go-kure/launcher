@@ -1,5 +1,8 @@
 package components
 
+// Tests of the client-side Helm render and hook-group partition
+// (helmtemplate_render.go), driven through the helmtemplate terminal.
+
 import (
 	"encoding/json"
 	"fmt"
@@ -7,102 +10,18 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-func TestHelmchartConfig_GenerateTemplate_HTTP(t *testing.T) {
-	twoConfigMaps := []byte(`apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: first
-data:
-  key: value
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: second
-data:
-  key: value`)
-
-	cfg := &HelmchartConfig{
-		Name:       "myapp",
-		Namespace:  "default",
-		Delivery:   "template",
-		Chart:      "myapp",
-		SourceURL:  "https://charts.example.com",
-		SourceKind: "HelmRepository",
-		renderChart: func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
-			if chartURL != "https://charts.example.com/myapp" {
-				t.Errorf("chartURL = %q, want https://charts.example.com/myapp", chartURL)
-			}
-			return twoConfigMaps, nil
-		},
-	}
-
-	if err := cfg.ensureRendered(); err != nil {
-		t.Fatalf("ensureRendered: %v", err)
-	}
-	var count int
-	for _, g := range cfg.hookGroups {
-		count += len(g.Resources)
-	}
-	if count != 2 {
-		t.Fatalf("expected 2 objects, got %d", count)
-	}
-}
-
-func TestHelmchartConfig_GenerateTemplate_OCI(t *testing.T) {
-	oneConfigMap := []byte(`apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: cm
-data:
-  key: value`)
-
-	cfg := &HelmchartConfig{
-		Name:       "myapp",
-		Namespace:  "default",
-		Delivery:   "template",
-		SourceURL:  "oci://ghcr.io/example/charts/myapp",
-		SourceKind: "OCIRepository",
-		Version:    "1.2.3",
-		renderChart: func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
-			// OCI: chartURL must equal SourceURL as-is (no chart name appended)
-			if chartURL != "oci://ghcr.io/example/charts/myapp" {
-				t.Errorf("chartURL = %q, want oci://ghcr.io/example/charts/myapp", chartURL)
-			}
-			if version != "1.2.3" {
-				t.Errorf("version = %q, want 1.2.3", version)
-			}
-			return oneConfigMap, nil
-		},
-	}
-
-	if err := cfg.ensureRendered(); err != nil {
-		t.Fatalf("ensureRendered: %v", err)
-	}
-	var count int
-	for _, g := range cfg.hookGroups {
-		count += len(g.Resources)
-	}
-	if count != 1 {
-		t.Fatalf("expected 1 object, got %d", count)
-	}
-}
 
 func TestDecodeKubeManifests_ErrorOnMalformedYAML(t *testing.T) {
 	_, err := decodeKubeManifests([]byte("key: [unclosed"))
@@ -440,148 +359,6 @@ func TestToJSONTypes_TimeIsItsMarshalJSONString(t *testing.T) {
 	}
 }
 
-func TestValuesConfigMapName_TruncatesLongComponentName(t *testing.T) {
-	// Case 1: a long name with no '.' anywhere near the 246-char truncation
-	// boundary.
-	plain := strings.Repeat("a", 253)
-	gotPlain := valuesConfigMapName(plain)
-	if len(gotPlain) > 253 {
-		t.Errorf("plain: len(%q) = %d, want <= 253", gotPlain, len(gotPlain))
-	}
-	if errs := validation.IsDNS1123Subdomain(gotPlain); len(errs) != 0 {
-		t.Errorf("plain: IsDNS1123Subdomain(%q) = %v, want no errors", gotPlain, errs)
-	}
-	if !strings.HasSuffix(gotPlain, "-values") {
-		t.Errorf("plain: %q does not end in -values", gotPlain)
-	}
-
-	// Case 2: the actual truncation boundary (prefixLen = maxPrefix(246) -
-	// hashLen(8) - 1 = 237, not 246 — the hash suffix eats into maxPrefix)
-	// lands immediately after a literal '.' — dotBoundary[236] == '.', so
-	// dotBoundary[:237] ends in ".", exercising the TrimRight(name, "-.")
-	// cleanup that prevents a dangling '.' from being left at the end of the
-	// truncated prefix.
-	dotBoundary := strings.Repeat("a", 236) + "." + strings.Repeat("b", 16)
-	if dotBoundary[236] != '.' {
-		t.Fatalf("test setup: dotBoundary[236] = %q, want '.'", dotBoundary[236])
-	}
-	gotDot := valuesConfigMapName(dotBoundary)
-	if len(gotDot) > 253 {
-		t.Errorf("dotBoundary: len(%q) = %d, want <= 253", gotDot, len(gotDot))
-	}
-	if errs := validation.IsDNS1123Subdomain(gotDot); len(errs) != 0 {
-		t.Errorf("dotBoundary: IsDNS1123Subdomain(%q) = %v, want no errors", gotDot, errs)
-	}
-	if strings.HasPrefix(gotDot, ".") || strings.Contains(gotDot, "..") {
-		t.Errorf("dotBoundary: %q has a dangling '.' artifact from truncation", gotDot)
-	}
-
-	// Build a real configMap-mode config with the dot-boundary name and
-	// non-empty Values: the ConfigMap name (from AugmentLayout) and the
-	// HelmRelease's generated valuesFrom ref (from buildHelmRelease) must
-	// both be byte-identical to each other and to the direct helper call
-	// above — the same helper backs both call sites (see valuesConfigMapName's
-	// doc comment).
-	cfg := &HelmchartConfig{
-		Name:       dotBoundary,
-		Namespace:  "default",
-		ValuesMode: "configMap",
-		Values:     map[string]any{"replicaCount": 1},
-	}
-	wrapped := wrapIfHelmchartAugmenter(cfg)
-	aug, ok := wrapped.(interface {
-		AugmentLayout(*layout.ManifestLayout) error
-	})
-	if !ok {
-		t.Fatal("configMap-mode config with non-empty Values does not implement LayoutAugmenter")
-	}
-	ml := &layout.ManifestLayout{}
-	if err := aug.AugmentLayout(ml); err != nil {
-		t.Fatalf("AugmentLayout: %v", err)
-	}
-	if len(ml.Resources) != 1 {
-		t.Fatalf("ml.Resources has %d entries, want 1", len(ml.Resources))
-	}
-	cm, ok := ml.Resources[0].(*corev1.ConfigMap)
-	if !ok {
-		t.Fatalf("ml.Resources[0] = %T, want *corev1.ConfigMap", ml.Resources[0])
-	}
-
-	hr := cfg.buildHelmRelease()
-	if len(hr.Spec.ValuesFrom) == 0 {
-		t.Fatal("buildHelmRelease produced no ValuesFrom entries")
-	}
-
-	if cm.Name != gotDot {
-		t.Errorf("ConfigMap name = %q, want %q (direct helper call)", cm.Name, gotDot)
-	}
-	if hr.Spec.ValuesFrom[0].Name != gotDot {
-		t.Errorf("HelmRelease ValuesFrom[0].Name = %q, want %q (direct helper call)", hr.Spec.ValuesFrom[0].Name, gotDot)
-	}
-}
-
-// TestValuesConfigMapName_TruncationPreservesUniqueness pins that two distinct
-// valid component names (each within validate.go's 253-char DNS-1123 max)
-// sharing the same first 246 characters still produce distinct ConfigMap
-// names. Component names are unique only in full (validate.go's
-// duplicate-name check), so a plain 246-char truncation would map both to the
-// identical name — silently sharing, and one clobbering, the other's values
-// ConfigMap.
-func TestValuesConfigMapName_TruncationPreservesUniqueness(t *testing.T) {
-	shared := strings.Repeat("a", 246)
-	nameA := shared + strings.Repeat("b", 7) // 253 chars total
-	nameB := shared + strings.Repeat("c", 7) // 253 chars total, same 246-char prefix
-	if nameA == nameB {
-		t.Fatal("test setup: nameA and nameB must differ")
-	}
-	gotA := valuesConfigMapName(nameA)
-	gotB := valuesConfigMapName(nameB)
-	if gotA == gotB {
-		t.Fatalf("valuesConfigMapName collided: nameA=%q nameB=%q both produced %q", nameA, nameB, gotA)
-	}
-	for _, got := range []string{gotA, gotB} {
-		if len(got) > 253 {
-			t.Errorf("len(%q) = %d, want <= 253", got, len(got))
-		}
-		if errs := validation.IsDNS1123Subdomain(got); len(errs) != 0 {
-			t.Errorf("IsDNS1123Subdomain(%q) = %v, want no errors", got, errs)
-		}
-	}
-}
-
-// helmchartTemplateFixture returns a *HelmchartConfig configured for
-// delivery: template with the given renderChart stub — the shared shape used
-// by every white-box template-delivery test below.
-func helmchartTemplateFixture(renderChart func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error)) *HelmchartConfig {
-	return &HelmchartConfig{
-		Name:        "myapp",
-		Namespace:   "default",
-		Delivery:    "template",
-		Chart:       "myapp",
-		SourceURL:   "https://charts.example.com",
-		SourceKind:  "HelmRepository",
-		renderChart: renderChart,
-	}
-}
-
-func TestEnsureRendered_CachesRender(t *testing.T) {
-	calls := 0
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
-		calls++
-		return []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"), nil
-	})
-
-	if _, err := cfg.Generate(nil); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	if err := cfg.augmentLayoutTemplate(&layout.ManifestLayout{Name: "myapp", Namespace: "default/myapp"}); err != nil {
-		t.Fatalf("augmentLayoutTemplate: %v", err)
-	}
-	if calls != 1 {
-		t.Errorf("renderChart called %d times, want 1 (Generate then AugmentLayout must render exactly once)", calls)
-	}
-}
-
 func TestGenerate_FlattensHookGroupsInExecutionOrder(t *testing.T) {
 	raw := []byte(`apiVersion: v1
 kind: ConfigMap
@@ -602,7 +379,7 @@ metadata:
   annotations:
     helm.sh/hook: pre-install
 `)
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+	cfg := helmTemplateFixture(t, func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 		return raw, nil
 	})
 
@@ -630,15 +407,15 @@ metadata:
 	}
 }
 
-func TestAugmentLayoutTemplate_SingleGroup_NoChildren(t *testing.T) {
+func TestAugmentLayout_SingleGroup_NoChildren(t *testing.T) {
 	raw := []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n")
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+	cfg := helmTemplateFixture(t, func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 		return raw, nil
 	})
 
 	ml := &layout.ManifestLayout{Name: "myapp", Namespace: "default/myapp"}
-	if err := cfg.augmentLayoutTemplate(ml); err != nil {
-		t.Fatalf("augmentLayoutTemplate: %v", err)
+	if err := cfg.AugmentLayout(ml); err != nil {
+		t.Fatalf("AugmentLayout: %v", err)
 	}
 	if len(ml.Children) != 0 {
 		t.Errorf("ml.Children has %d entries, want 0 (a single hook group is a no-op)", len(ml.Children))
@@ -648,7 +425,7 @@ func TestAugmentLayoutTemplate_SingleGroup_NoChildren(t *testing.T) {
 	}
 }
 
-func TestAugmentLayoutTemplate_MultiGroup_PartitionsAndChains(t *testing.T) {
+func TestAugmentLayout_MultiGroup_PartitionsAndChains(t *testing.T) {
 	raw := []byte(`apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -668,7 +445,7 @@ metadata:
   annotations:
     helm.sh/hook: post-install
 `)
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+	cfg := helmTemplateFixture(t, func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 		return raw, nil
 	})
 
@@ -682,8 +459,8 @@ metadata:
 		FilePer:             layout.FilePerKind,
 		ApplicationFileMode: layout.AppFileSingle, // must NOT propagate to children
 	}
-	if err := cfg.augmentLayoutTemplate(ml); err != nil {
-		t.Fatalf("augmentLayoutTemplate: %v", err)
+	if err := cfg.AugmentLayout(ml); err != nil {
+		t.Fatalf("AugmentLayout: %v", err)
 	}
 	if ml.Resources != nil {
 		t.Errorf("ml.Resources = %v, want nil after partitioning", ml.Resources)
@@ -731,182 +508,6 @@ metadata:
 			t.Errorf("Children[%d].DependsOn = %v, want [%q]", i, child.DependsOn, prevName)
 		}
 		prevName = child.Name
-	}
-}
-
-// TestAugmentLayoutTemplate_ChildKustomizationReferencesResolveOnDisk exercises
-// the actual kure disk-writer, not just the in-memory ml/Children shape: every
-// resources: entry of every kustomization.yaml written must resolve on disk,
-// and an entry naming a directory must reach that directory's own
-// kustomization.yaml. A child nested twice (its Namespace ending in its own
-// name, go-kure/kure#771) leaves only an empty intermediate directory there,
-// so a bare existence check would not catch it. The parent is an application
-// layout as kure's walker hands it to the augmenter: Namespace its parent
-// directory, ApplicationFileMode unset (directory mode). An AppFileSingle
-// root would write its kustomization.yaml into its Namespace instead of its
-// own directory, listing the children where they are not written, so it
-// cannot host them; the children's own AppFileUnset (never inherited from the
-// parent) is asserted in TestAugmentLayoutTemplate_MultiGroup_PartitionsAndChains.
-func TestAugmentLayoutTemplate_ChildKustomizationReferencesResolveOnDisk(t *testing.T) {
-	raw := []byte(`apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: pre
-  annotations:
-    helm.sh/hook: pre-install
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: post
-  annotations:
-    helm.sh/hook: post-install
-`)
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
-		return raw, nil
-	})
-
-	ml := &layout.ManifestLayout{
-		Name:      "myapp",
-		Namespace: "team",
-	}
-	if err := cfg.augmentLayoutTemplate(ml); err != nil {
-		t.Fatalf("augmentLayoutTemplate: %v", err)
-	}
-	if len(ml.Children) < 2 {
-		t.Fatalf("test setup: expected multiple hook groups to produce children, got %d", len(ml.Children))
-	}
-
-	dir := t.TempDir()
-	if err := ml.WriteToDisk(dir); err != nil {
-		t.Fatalf("WriteToDisk: %v", err)
-	}
-
-	var kustFiles []string
-	if err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if !info.IsDir() && info.Name() == "kustomization.yaml" {
-			kustFiles = append(kustFiles, path)
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("walk: %v", err)
-	}
-	if len(kustFiles) == 0 {
-		t.Fatal("no kustomization.yaml was written")
-	}
-
-	resourceLine := regexp.MustCompile(`^  - (.+)$`)
-	for _, kf := range kustFiles {
-		data, err := os.ReadFile(kf)
-		if err != nil {
-			t.Fatalf("read %s: %v", kf, err)
-		}
-		kdir := filepath.Dir(kf)
-		for line := range strings.SplitSeq(string(data), "\n") {
-			m := resourceLine.FindStringSubmatch(line)
-			if m == nil {
-				continue
-			}
-			ref := filepath.Join(kdir, m[1])
-			fi, err := os.Stat(ref)
-			if err != nil {
-				t.Errorf("%s: resources entry %q does not resolve on disk (%v)", kf, m[1], err)
-				continue
-			}
-			if fi.IsDir() {
-				if _, err := os.Stat(filepath.Join(ref, "kustomization.yaml")); err != nil {
-					t.Errorf("%s: resources entry %q is a directory without its own kustomization.yaml (%v)", kf, m[1], err)
-				}
-			}
-		}
-	}
-}
-
-// TestAugmentLayoutTemplate_WriteManifestUnderAppFileSingleDefault pins
-// go-kure/launcher#563: a hook-group helmchart walked by kure's WalkCluster
-// and written by WriteManifest with a Config-wide AppFileSingle default, under
-// a placement other than FluxIntegratedPerLayout. The partitioned component
-// layout must stay a directory (augmentLayoutTemplate pins its unset mode to
-// AppFilePerResource), so kure neither refuses it as an AppFileSingle layout
-// with children nor drops the children from the build: each hook group is
-// written as one file there and listed by that directory's
-// kustomization.yaml, and every rendered object is reachable from the root.
-func TestAugmentLayoutTemplate_WriteManifestUnderAppFileSingleDefault(t *testing.T) {
-	raw := []byte(`apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: pre
-  annotations:
-    helm.sh/hook: pre-install
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: main
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: post
-  annotations:
-    helm.sh/hook: post-install
-`)
-	for _, placement := range []layout.FluxPlacement{layout.FluxSeparate, layout.FluxIntegratedPerBundle} {
-		t.Run(string(placement), func(t *testing.T) {
-			cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
-				return raw, nil
-			})
-			app := stack.NewApplication("myapp", "default", wrapIfHelmchartAugmenter(cfg))
-			cluster := &stack.Cluster{
-				Name: "c",
-				Node: &stack.Node{
-					Name:   "apps",
-					Bundle: &stack.Bundle{Name: "apps", Applications: []*stack.Application{app}},
-				},
-			}
-			root, err := layout.WalkCluster(cluster, layout.LayoutRules{FluxPlacement: placement})
-			if err != nil {
-				t.Fatalf("WalkCluster: %v", err)
-			}
-			appLayout := findLayoutByName(root, "myapp")
-			if appLayout == nil {
-				t.Fatal("walked tree has no layout for the helmchart component")
-			}
-			if len(appLayout.Children) != 3 {
-				t.Fatalf("component layout has %d children, want 3 hook groups", len(appLayout.Children))
-			}
-			if appLayout.ApplicationFileMode != layout.AppFilePerResource {
-				t.Errorf("component layout ApplicationFileMode = %v, want AppFilePerResource", appLayout.ApplicationFileMode)
-			}
-
-			base := t.TempDir()
-			wcfg := layout.Config{ManifestsDir: "clusters", ApplicationFileMode: layout.AppFileSingle}
-			if err := layout.WriteManifest(base, wcfg, root); err != nil {
-				t.Fatalf("WriteManifest: %v", err)
-			}
-
-			appDir := filepath.Join(base, wcfg.ManifestsDir, appLayout.FullRepoPath())
-			listed := map[string]bool{}
-			for _, e := range kustomizationResources(t, appDir) {
-				listed[e] = true
-			}
-			for _, child := range appLayout.Children {
-				entry := child.Name + ".yaml"
-				if !listed[entry] {
-					t.Errorf("%s/kustomization.yaml does not list hook group file %q (listed: %v)", appDir, entry, listed)
-				}
-			}
-
-			got := reachableObjectNames(t, filepath.Join(base, wcfg.ManifestsDir, root.FullRepoPath()))
-			for _, name := range []string{"pre", "main", "post"} {
-				if !got[name] {
-					t.Errorf("object %q is not reachable from the root kustomization.yaml (reachable: %v)", name, got)
-				}
-			}
-		})
 	}
 }
 
@@ -990,7 +591,7 @@ func TestExcludedHookPhasesAreDropped(t *testing.T) {
 	}
 	raw.WriteString("---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: kept\n")
 
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+	cfg := helmTemplateFixture(t, func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 		return []byte(raw.String()), nil
 	})
 
@@ -1042,12 +643,12 @@ func TestHookGroupDir_TruncatesLongPhase(t *testing.T) {
 	}
 }
 
-// TestAugmentLayoutTemplate_ChildNameStaysWithinDNS1123Limit exercises
+// TestAugmentLayout_ChildNameStaysWithinDNS1123Limit exercises
 // hookGroupChildName directly with near-253-char ml.Names (validate.go's
 // DNS-1123 subdomain max), including one whose truncation boundary lands
 // right after a '.', and pins both the within-name and cross-name uniqueness
 // guarantees hookGroupChildName's doc comment claims.
-func TestAugmentLayoutTemplate_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
+func TestAugmentLayout_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
 	groups := []helm.HookGroup{
 		{Phase: "pre-install"},
 		{Phase: strings.Repeat("x", 80)}, // slugs+truncates to 40 x's via hookGroupDir
@@ -1056,7 +657,7 @@ func TestAugmentLayoutTemplate_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
 	// mlNameA's truncation boundary (prefixLen=229 for group 0's suffix
 	// "-00-pre-install", len 15: maxPrefix=253-15=238, prefixLen=238-8-1=229)
 	// lands right after a literal '.': mlNameA[:229] ends in ".", exercising
-	// the TrimRight(name, "-.") cleanup mirrored from valuesConfigMapName.
+	// the TrimRight(name, "-.") cleanup mirrored from boundedResourceName.
 	mlNameA := strings.Repeat("a", 228) + "." + strings.Repeat("b", 24)
 	if len(mlNameA) != 253 {
 		t.Fatalf("test setup: len(mlNameA) = %d, want 253", len(mlNameA))
@@ -1105,7 +706,7 @@ func TestAugmentLayoutTemplate_ChildNameStaysWithinDNS1123Limit(t *testing.T) {
 
 // generateNames runs Generate and returns the resulting objects' names in
 // order, failing the test on any error or non-unstructured object.
-func generateNames(t *testing.T, cfg *HelmchartConfig) []string {
+func generateNames(t *testing.T, cfg *HelmTemplateConfig) []string {
 	t.Helper()
 	objects, err := cfg.Generate(nil)
 	if err != nil {
@@ -1120,45 +721,6 @@ func generateNames(t *testing.T, cfg *HelmchartConfig) []string {
 		names[i] = u.GetName()
 	}
 	return names
-}
-
-// TestGenerate_MultiEventHookOrdersByEarliestPhase pins the fix for the
-// defect kure's SplitByHookWeight documents but does not itself correct
-// (kure pkg/stack/helm/hooks.go:35-36): a comma-separated helm.sh/hook
-// annotation ("pre-install,pre-upgrade") must land in the pre-install-ordered
-// group, not kure's alphabetical "unknown" bucket (which sorts after
-// post-upgrade — the opposite of what the annotation requests).
-func TestGenerate_MultiEventHookOrdersByEarliestPhase(t *testing.T) {
-	raw := []byte(`apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: multi
-  annotations:
-    helm.sh/hook: pre-install,pre-upgrade
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: main
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: post
-  annotations:
-    helm.sh/hook: post-install
-`)
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
-		return raw, nil
-	})
-
-	got := generateNames(t, cfg)
-	want := []string{"multi", "main", "post"}
-	for i := range want {
-		if i >= len(got) || got[i] != want[i] {
-			t.Fatalf("execution order = %v, want %v", got, want)
-		}
-	}
 }
 
 // TestGenerate_MultiEventHookPicksEarliestByPriorityNotPosition covers a
@@ -1182,7 +744,7 @@ kind: ConfigMap
 metadata:
   name: main
 `)
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+	cfg := helmTemplateFixture(t, func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 		return raw, nil
 	})
 
@@ -1214,7 +776,7 @@ kind: ConfigMap
 metadata:
   name: main
 `)
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+	cfg := helmTemplateFixture(t, func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 		return raw, nil
 	})
 
@@ -1246,7 +808,7 @@ kind: ConfigMap
 metadata:
   name: kept
 `)
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+	cfg := helmTemplateFixture(t, func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 		return raw, nil
 	})
 
@@ -1276,7 +838,7 @@ metadata:
   annotations:
     helm.sh/hook: crd-install,some-custom-hook
 `)
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+	cfg := helmTemplateFixture(t, func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 		return raw, nil
 	})
 
@@ -1330,7 +892,7 @@ metadata:
   annotations:
     helm.sh/hook: test,crd-install
 `)
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+	cfg := helmTemplateFixture(t, func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 		return raw, nil
 	})
 
@@ -1372,7 +934,7 @@ metadata:
   annotations:
     helm.sh/hook: ","
 `)
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
+	cfg := helmTemplateFixture(t, func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
 		return raw, nil
 	})
 
@@ -1397,18 +959,18 @@ metadata:
 	}
 }
 
-// TestAugmentLayoutTemplate_MultiEventHookAnnotationUnchangedInOutput is the
+// TestAugmentLayout_MultiEventHookAnnotationUnchangedInOutput is the
 // test called for by the fix's own hazard: the grouping-key rewrite
 // (normalizeHookAnnotationForGrouping) must never leak into the object that
 // ends up in emitted output. Exercises both Generate (flattened union) and
-// AugmentLayout's template branch (augmentLayoutTemplate, repartitioned into
+// AugmentLayout (repartitioned into
 // child layouts) — a no-op implementation that simply left the multi-event
 // annotation untouched would satisfy the "annotation unchanged" half of this
 // test but fail its "correct group placement" half, and a broken
 // implementation that mutated the object in place would fail the reverse —
 // only a correct fix (copy-for-grouping, restore-original-for-output)
 // satisfies both halves at once.
-func TestAugmentLayoutTemplate_MultiEventHookAnnotationUnchangedInOutput(t *testing.T) {
+func TestAugmentLayout_MultiEventHookAnnotationUnchangedInOutput(t *testing.T) {
 	const wantHook = "pre-install,pre-upgrade"
 	raw := []byte(`apiVersion: v1
 kind: ConfigMap
@@ -1434,7 +996,7 @@ metadata:
 	}
 
 	// Generate path: correct placement (first) and unchanged annotation.
-	genCfg := helmchartTemplateFixture(renderChart)
+	genCfg := helmTemplateFixture(t, renderChart)
 	objects, err := genCfg.Generate(nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -1456,10 +1018,10 @@ metadata:
 	// AugmentLayout path: correct child group placement (dirName derived from
 	// the earliest phase, "pre-install") and unchanged annotation on the
 	// resource inside that child.
-	augCfg := helmchartTemplateFixture(renderChart)
+	augCfg := helmTemplateFixture(t, renderChart)
 	ml := &layout.ManifestLayout{Name: "myapp", Namespace: "default/myapp"}
-	if err := augCfg.augmentLayoutTemplate(ml); err != nil {
-		t.Fatalf("augmentLayoutTemplate: %v", err)
+	if err := augCfg.AugmentLayout(ml); err != nil {
+		t.Fatalf("AugmentLayout: %v", err)
 	}
 	if len(ml.Children) != 3 {
 		t.Fatalf("ml.Children has %d entries, want 3", len(ml.Children))
@@ -1479,83 +1041,5 @@ metadata:
 	}
 	if got := child.GetAnnotations()["helm.sh/hook"]; got != wantHook {
 		t.Errorf("AugmentLayout: multi's helm.sh/hook annotation = %q, want unchanged %q", got, wantHook)
-	}
-}
-
-// TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields pins
-// go-kure/launcher#581's acceptance on the helmchart composite's
-// delivery: template: a rendered pre-install,pre-upgrade Job with
-// backoffLimit: 3 builds without panicking (yaml.v3's Go int used to panic in
-// the grouping copy: "cannot deep copy int"), lands in the pre-install hook
-// group, and emits backoffLimit: 3 unchanged. The terminal half, on the same
-// chart, is TestHelmTemplateConfig_MultiEventHookJobWithIntegerFields.
-func TestAugmentLayoutTemplate_MultiEventHookJobWithIntegerFields(t *testing.T) {
-	cfg := helmchartTemplateFixture(func(chartURL, version string, values map[string]any, opts ...helm.RenderOption) ([]byte, error) {
-		return []byte(multiEventHookJobChart), nil
-	})
-
-	// Builds: Generate and AugmentLayout's template branch both return,
-	// without a panic.
-	objects, err := cfg.Generate(nil)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	ml := &layout.ManifestLayout{Name: "myapp", Namespace: "default/myapp"}
-	if err := cfg.augmentLayoutTemplate(ml); err != nil {
-		t.Fatalf("augmentLayoutTemplate: %v", err)
-	}
-
-	// Lands in the pre-install hook group: first in execution order, and the
-	// sole object of the first child layout, the pre-install group.
-	if got, want := generatedNames(objects), []string{"migrate", "main"}; !slices.Equal(got, want) {
-		t.Fatalf("execution order = %v, want %v", got, want)
-	}
-	if len(ml.Children) != 2 {
-		t.Fatalf("ml.Children has %d entries, want 2 hook groups", len(ml.Children))
-	}
-	if name := ml.Children[0].Name; name != "myapp-00-pre-install" {
-		t.Fatalf("Children[0].Name = %q, want %q", name, "myapp-00-pre-install")
-	}
-	hook := ml.Children[0].Resources
-	if names := resourceNames(hook); !slices.Equal(names, []string{"migrate"}) {
-		t.Fatalf("Children[0] holds %v, want [migrate]", names)
-	}
-	assertDeepCopyable(t, hook)
-
-	// Emits backoffLimit: 3 unchanged, from Generate and from the hook group.
-	assertEmitsBackoffLimit3(t, "Generate", *objects[0])
-	assertEmitsBackoffLimit3(t, "pre-install group", hook[0])
-}
-
-// TestGenerateTemplate_TimestampOutsideRFC3339IsABuildError is the
-// composite's delivery: template counterpart of
-// TestHelmTemplateConfig_TimestampOutsideRFC3339IsABuildError, on the same
-// chart: a rendered timestamp RFC 3339 cannot express fails the build, as
-// kure's writer refused it.
-func TestGenerateTemplate_TimestampOutsideRFC3339IsABuildError(t *testing.T) {
-	cfg := helmchartTemplateFixture(stubRender(outOfRangeOffsetChart))
-	_, err := cfg.Generate(nil)
-	assertErrorMentions(t, err, `ConfigMap "stamped"`, ".data.at", "timezone hour outside of range")
-}
-
-// TestGenerateTemplate_TopLevelNonStringKeyIsABuildError is the composite's
-// delivery: template counterpart of
-// TestHelmTemplateConfig_TopLevelNonStringKeyIsABuildError, on the same
-// chart: a key that is not a string at a rendered document's own top level
-// fails the build, naming the object and the top level.
-func TestGenerateTemplate_TopLevelNonStringKeyIsABuildError(t *testing.T) {
-	cfg := helmchartTemplateFixture(stubRender(topLevelNonStringKeyChart))
-	_, err := cfg.Generate(nil)
-	assertErrorMentions(t, err, `ConfigMap "stray-keys"`, "top level", "not a string")
-}
-
-// TestGenerateTemplate_DroppedHookWithUnemittableValuesBuilds is the
-// composite's delivery: template counterpart of
-// TestHelmTemplateConfig_DroppedHookWithUnemittableValuesBuilds, on the same
-// chart.
-func TestGenerateTemplate_DroppedHookWithUnemittableValuesBuilds(t *testing.T) {
-	cfg := helmchartTemplateFixture(stubRender(droppedHooksUnemittableChart))
-	if got, want := generateNames(t, cfg), []string{"main"}; !slices.Equal(got, want) {
-		t.Errorf("Generate emitted %v, want %v", got, want)
 	}
 }

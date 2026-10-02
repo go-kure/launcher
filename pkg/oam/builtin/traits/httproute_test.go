@@ -1146,11 +1146,11 @@ func TestHTTPRouteHandler_ImplicitBackend_PortMismatch_Error(t *testing.T) {
 	})
 }
 
-// --- HTTPRouteHandler trait-level servicePort/serviceName (helmchart support) ---
+// --- HTTPRouteHandler trait-level servicePort/serviceName (chart-based components) ---
 
 func TestHTTPRouteHandler_TraitLevel_ServicePort_Success(t *testing.T) {
 	h := &HTTPRouteHandler{}
-	// nil config = no servicePortProvider (simulates helmchart)
+	// nil config = no servicePortProvider (simulates a chart-based component)
 	app := stack.NewApplication("myapp", "default", nil)
 	cfg, err := h.parseProperties(map[string]any{
 		"servicePort": float64(8080),

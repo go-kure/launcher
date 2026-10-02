@@ -161,7 +161,7 @@ func TestPruneProtectionHandler_Apply_ForwardsSetFluxNamespace(t *testing.T) {
 
 func TestPruneProtectionHandler_Apply_ForwardsEmitsAutoHealthCheck(t *testing.T) {
 	// hcVetoConfig (configmap_test.go) vetoes its auto health check, like a
-	// helmchart with delivery=template.
+	// helmrelease with suspend: true.
 	app := stack.NewApplication("rendered", "default", &hcVetoConfig{})
 	if err := (&traits.PruneProtectionHandler{}).Apply(&oam.Trait{Type: "prune-protection"}, app, &stack.Bundle{}); err != nil {
 		t.Fatalf("Apply: %v", err)

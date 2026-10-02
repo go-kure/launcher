@@ -102,14 +102,13 @@ Error: validating application file "app.yaml": component "web": trait "expose": 
 ```
 
 The same check type-checks every declared property, so a value of the wrong YAML
-type fails the build instead of being coerced. Many handlers read string
-properties with a lenient type assertion that turns a non-string into `""`, which the
-handler then treats as absent — so on the handler alone, `delivery: 123` on a
-`helmchart` component builds with the `native` default. Through `build` it is
-rejected (go-kure/launcher#325):
+type fails the build instead of being coerced. A handler that reads a string
+property with a lenient type assertion turns a non-string into `""` and then treats
+it as absent, so on such a handler alone a wrongly typed value silently becomes the
+default. Through `build` it is rejected (go-kure/launcher#325):
 
 ```text
-Error: validating application file "app.yaml": component "podinfo" (type "helmchart"): properties.delivery: expected string, got int
+Error: validating application file "app.yaml": component "podinfo" (type "helmrelease"): properties.interval: expected string, got int
 ```
 
 In package mode this runs *after* parameter resolution, because an authored `${...}`
@@ -207,15 +206,12 @@ constructs or walks a kure `layout.ManifestLayout`. (Only the Flux delivery outp
 component, **unless** it also implements `oam.LayoutAugmentationCoverage` and
 its `GenerateCoversAugmentLayout()` returns `true` — meaning its plain
 `Generate` output is already a complete superset of whatever `AugmentLayout`
-would otherwise add, so skipping the layout walk loses nothing. The `helmchart`
-component with `valuesMode: configMap` (which needs a values `ConfigMap`
-emitted alongside it) does not opt in and still fails the build; `delivery:
-template` (which only repartitions `Generate`'s own flat output into hook-group
-child layouts, adding no resources) does opt in and builds normally, and so does
-every kind-named `helmtemplate` component, which is that same path authored
-directly — see the
+would otherwise add, so skipping the layout walk loses nothing. The `helmtemplate` component (which
+only repartitions `Generate`'s own flat output into hook-group child layouts,
+adding no resources) opts in and builds normally, and so does a `helm` component
+under `delivery: template`, which lowers to it — see the
 [Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
-helmchart and helmtemplate sections. Any other `LayoutAugmenter` that doesn't implement
+helmtemplate section. Any other `LayoutAugmenter` that doesn't implement
 `oam.LayoutAugmentationCoverage` at all still fails closed, the same as before
 this opt-out existed. The kind-named `helmrelease` component is not a
 `LayoutAugmenter`: its `valuesMode: configMap` values `ConfigMap` is part of
@@ -306,10 +302,10 @@ Limits:
   generates stays behind, so build into a fresh directory. (An empty artifact's stale
   `manifests.yaml` is removed.)
 - An artifact holds the same flat object list the stdout build emits: a `helmtemplate`
-  component's (or `helmchart` `delivery: template`'s) Helm hook groups are not split
+  component's (or a `helm` `delivery: template` one's) Helm hook groups are not split
   into ordered sub-directories.
 - A namespaced object the build renders without `metadata.namespace` (for example from a
-  `helmtemplate` chart, or `helmchart` with `delivery: template`) is written as is. The
+  `helmtemplate` chart, or `helm` with `delivery: template`) is written as is. The
   generated `Kustomization` sets no `targetNamespace`, so kustomize-controller refuses it
   ("namespace not specified"). Rendering the chart with the release namespace is tracked
   in [go-kure/launcher#602](https://github.com/go-kure/launcher/issues/602).

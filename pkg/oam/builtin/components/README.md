@@ -68,9 +68,8 @@ reads it.
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
 | `helm` | via `helmrelease` + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
-| `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | **Deprecated: use `helm`** (migration table below). Helm via Flux (`native`) or client-side `template`. |
 | `helmrelease` | HelmRelease (+values ConfigMap) | Kind-named: the full Flux `HelmReleaseSpec` plus `valuesMode`, against an existing source. |
-| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. The composite's `delivery: template`, authorable directly — see below. |
+| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. What `helm` lowers to under `delivery: template`, authorable directly — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `helmrepository` | HelmRepository | Kind-named: the full Flux `HelmRepositorySpec`, and nothing else. |
 | `ocirepository` | OCIRepository | Kind-named: the full Flux `OCIRepositorySpec`, with no Kustomization (compare `oci`). |
@@ -141,7 +140,7 @@ fields are `env[].valueFrom.fileKeyRef.volumeName`/`.path`/`.key`,
 `valueFrom.fieldRef.fieldPath`, `valueFrom.resourceFieldRef.resource`,
 `envFrom[].configMapRef.name` and `.secretRef.name`, the `name` and `image` of
 an `initContainers`/`sidecars` entry and the `name`/`mountPath` of its
-`volumeMounts`, `helmchart` `valuesFrom[].name`, `manifests`
+`volumeMounts`, `manifests`
 `scopeOverrides[].apiVersion`/`.kind`, and `oci` `source.url` and `version`.
 `fileKeyRef`, `volumeMounts` and `scopeOverrides` used to report their fields
 together ("volumeName, path, and key are all required"), so a wrong type on
@@ -149,10 +148,8 @@ one looked like any of them might be missing; each field is now named on its
 own. What is accepted is unchanged: every one of these values was rejected
 before and still is, and only the message changed. For a document run through
 schema validation, the schema already refuses a non-string at every one of
-these positions except `helmchart` `valuesFrom[].name`, whose items the
-published schema declares only as an open object. So the parser message is what an author
-sees there, and for any caller that hands properties to a handler without
-schema validation (go-kure/launcher#453).
+these positions, so the parser message is what a caller sees that hands
+properties to a handler without schema validation (go-kure/launcher#453).
 
 **The main container is named after the component, so a workload component
 name must be a DNS-1123 *label*, not merely a subdomain.** A component name is
@@ -170,7 +167,7 @@ seven workload kinds (`webservice`, `worker`, `deployment`, `statefulset`,
 builder they share. The name is refused rather than rewritten to `batch-worker`:
 a derived name would silently rename the container and could collide with an
 init container or sidecar of that name. Component types that name no container
-after the component (`helmchart`, `manifests`, `passthrough`, …) keep accepting
+after the component (`helmrelease`, `manifests`, `passthrough`, …) keep accepting
 a dotted or longer name, so the component-name rule itself is unchanged. `job` refused
 the name from its introduction; the other six gained the check in
 go-kure/launcher#407. Nothing that previously produced an applyable manifest is
@@ -1259,7 +1256,7 @@ covers (see `pkg/oam` "Same-name sibling groups").
 | `strategy.rollingUpdate` (both knobs zero) | — | Rejected: `ValidateRollingUpdateDeployment` refuses `maxUnavailable: 0` together with `maxSurge: 0`, a pair that can make no progress. It rejects **only** that pair — unlike the DaemonSet rule, which also rejects both being non-zero. `SetDefaults_Deployment` guards each field with its own `== nil` check, so authoring one knob does not suppress the other's 25% default and a lone authored zero is always legal. | additive |
 | `minReadySeconds` | int ≥ 0 | Seconds a new pod must be ready before it counts as available. Must stay **below** the effective `progressDeadlineSeconds`, whose own API default is 600 — so `minReadySeconds: 600` alone is rejected here, exactly as the apiserver would reject the defaulted pair. | additive |
 | `revisionHistoryLimit` | int ≥ 0 | Old ReplicaSets retained. `0` is meaningful (retain none) and distinguishable from unset. | additive |
-| `paused` | bool | Pauses rollouts of the Deployment. `paused: true` additionally suppresses the **auto health check** the transform pipeline would otherwise synthesize for this component: pausing tells the Deployment controller not to roll the workload out, so gating the enclosing Kustomization on that workload becoming ready asks for the one thing the document just said should not happen. The Deployment is still emitted and still applied by the enclosing Kustomization — only the readiness gate on it is skipped, which keeps `paused: true` usable for staging a workload. Nothing here asserts what the Deployment controller does with a paused object; the reason stands either way, since a gate that blocks on a state the document forbids and a gate that passes without observing anything are both useless. Implemented as `EmitsAutoHealthCheck` on each of the three configs, the `pkg/oam` seam `helmchart` already uses for `delivery: template`. | additive |
+| `paused` | bool | Pauses rollouts of the Deployment. `paused: true` additionally suppresses the **auto health check** the transform pipeline would otherwise synthesize for this component: pausing tells the Deployment controller not to roll the workload out, so gating the enclosing Kustomization on that workload becoming ready asks for the one thing the document just said should not happen. The Deployment is still emitted and still applied by the enclosing Kustomization — only the readiness gate on it is skipped, which keeps `paused: true` usable for staging a workload. Nothing here asserts what the Deployment controller does with a paused object; the reason stands either way, since a gate that blocks on a state the document forbids and a gate that passes without observing anything are both useless. Implemented as `EmitsAutoHealthCheck` on each of the three configs, the `pkg/oam` seam a suspended `helmrelease` also uses. | additive |
 | `progressDeadlineSeconds` | int ≥ 0 | Must be **greater than** the effective `minReadySeconds`, the cross-field rule `ValidateDeploymentSpec` applies. Both halves are compared as *effective* values, because both have an API default a document may be leaving it to: `minReadySeconds` defaults to 0 (a non-pointer `int32`, so it has no unset state) and `progressDeadlineSeconds` defaults to 600. So the rule fires in both directions — `progressDeadlineSeconds: 0` alone is rejected against the defaulted 0, and `minReadySeconds: 600` alone is rejected against the defaulted 600 — and the error names, for each half, whether the value was authored or defaulted, since either can be a field the document never mentions. | additive |
 | `selector`, `template` | — | Not authorable, and rejected with a message saying so rather than silently ignored. The selector is builder-managed (`app: <component>`) and immutable once the object exists; the pod template is projected from the component's own container and pod-level properties. | additive |
 | any of the five `DeploymentSpec` properties above, authored as `null` (on `deployment`, `webservice` and `worker` alike); **and, on `deployment` only, any optional property of the kind** | — | Read as omission, not as a present-but-wrong type — including a typed nil, which is what a Go-constructed lowering rule produces when it assigns a nil map into an `any`. `pkg/oam`'s property validator already treats a null under an optional property as absent, so without this a component could satisfy the published schema and then fail during handler conversion. `parseDeploymentSpec` strips nulls itself, so the five fields above behave this way on `webservice` and `worker` too. The wider guarantee is the `deployment` kind's alone: there it covers the kind's whole **top-level** surface, so `replicas: null`, `workingDir: null`, `env: null` and the rest all read as unauthored and `replicas: null` takes the default 1. Since go-kure/launcher#394 this is no longer specific to `deployment` for a property read through one of the shared field helpers in `common.go`, which test presence with `authoredValue`, nor for the six parsers that used to read their own property with a bare map lookup rather than a helper — `envFrom`, `probes`, `lifecycle`, `securityContext`, `volumes`, `accessModes` — which were converted to the same primitive. Since go-kure/launcher#570 it also covers the top-level keys that were still answered with a bare lookup and then type-checked — `cronjob`'s `timeZone`, `successfulJobsHistoryLimit` and `failedJobsHistoryLimit`; `completionMode` on `job` and `cronjob`; `passthrough`'s `clusterScoped`; `inline` and `url` on `crd` and `manifests`; and `manifests`' `scopeOverrides` — so a null there, typed or untyped, now reads as omission instead of a wrong type. That mattered because `ValidateAuthoredProperties` does not strip a top-level null, so `kurel build` used to reach the refusal. **One deliberate exception, and it is not an oversight:** the `postStart`/`preStop` handler keys (`httpGet`, `exec`, `sleep`, `tcpSocket`) still answer presence with a bare lookup, because there the rule being enforced *is* presence — `lifecycle: {preStop: {tcpSocket: null}}` must stay a refusal, since reading it as absence would let an authored-but-empty `tcpSocket` vanish and a valid sibling handler win silently, which is the exact silent-drop the surrounding paragraph rejects. The exception covers a probe's handler keys (`httpGet`, `tcpSocket`, `exec`, `grpc`) as well: `countProbeHandlers` reads them the same way, for the same reason, so a null one is refused too. Absence and authored-null are genuinely different documents for those handler keys. A `null` on a field that is required once its parent is authored (`strategy.type`) surfaces as the requiredness error, not a type error; `selector`/`template` are not optional properties, so naming either as `null` still earns the refusal above. **It now reaches nested keys too** — `securityContext: {runAsUser: null}` builds as if `runAsUser` were omitted. That fix deliberately sits *inside* each nested parser, after its unknown-key rejection, rather than in a recursive pre-strip over the property map: a recursive strip would remove `securityContext: {bogusKey: null}` before `parseSecurityContext`'s own rejection ever saw it, turning a named refusal into silence — trading one silent-drop bug for another. So a recognized nested key read through the helpers treats a null as absence, and an unrecognized one is still named and refused; both sides of that `securityContext` boundary are pinned in `deployment_nested_null_test.go`. The two nested map readers that used to read each entry raw now skip a null entry too, as `stringMapStrict` already did: `parseResourceList` (a `resources.requests`/`limits` quantity, where property validation deletes a null first only under the declared `cpu` and `memory` keys) and `parseLabelMap` (a `nodeSelector`, `service` `selector` or `matchLabels` value). As with `securityContext`, the skip comes after the key check: an invalid resource name or label key is still refused whatever its value, and a wrongly typed entry is still refused. A map left empty by the skip meets the empty-map refusal where one exists — `service`'s `selector: {app: null}` is refused as `selector: {}` is, rather than emitting a selector-less Service. | additive |
@@ -1499,8 +1496,7 @@ range, got 5000000000`). `parseInt32Field` words that case apart from a wrong
 type for every field it reads, so an out-of-range `replicas` or
 `minReadySeconds` gets the same range message. `postgresql`'s other top-level
 reads (`storageSize`, `backup`, `pooler`, …) were converted separately, in
-go-kure/launcher#512 (see the `postgresql` entry below); `helmchart`'s were
-not part of either change.
+go-kure/launcher#512 (see the `postgresql` entry below).
 
 - **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
   plus the full `DeploymentSpec`-level surface they share with `deployment` —
@@ -2134,16 +2130,13 @@ not part of either change.
 
   An authored component already named like a generated source fails the build
   as a duplicate component name.
-- **helmchart** — **Deprecated; use `helm`.** It still builds unchanged, and `kurel
-  build` prints `warning: component "<name>": type helmchart is deprecated: …` for
-  each authored helmchart component (the handler declares
-  `ContractMetadata.Deprecated`; see the pkg/oam README, "Contract metadata"). It is
-  removed together with the next document-format version, after at least one minor
-  release (`docs/oam/design-gvk.md`, "Document-Format Lifecycle"). To migrate,
-  change `type: helmchart` to `type: helm` and rename `delivery: native` to
-  `delivery: flux`; the other properties keep their names. The output then changes
-  only as this table says. `TestHelmParity` (`pkg/cmd/kurel`) pins it on three
-  fixture pairs, whose diffs are in `pkg/cmd/kurel/testdata/helm-parity/`:
+- **helmchart** — **Removed** (go-kure/launcher#350); use `helm`. A document still authoring
+  `type: helmchart` fails validation with the unknown-type error plus a pointer to `helm`. To
+  migrate, change `type: helmchart` to `type: helm` and rename `delivery: native` to
+  `delivery: flux`; the other properties keep their names. The output then changes only as
+  this table says. `TestHelmParity` (`pkg/cmd/kurel`) pins it on three fixture pairs: the
+  last `helmchart` output of each input, frozen before the removal, is diffed against the
+  `helm` build, and the diffs are in `pkg/cmd/kurel/testdata/helm-parity/`:
 
   | # | What changes with `helm` |
   |---|---|
@@ -2164,186 +2157,14 @@ not part of either change.
   | 15 | Unknown keys are refused at any depth of `source`, and so are two keys that differ only in case. |
   | 16 | *(void)* A generated OCIRepository: both set `layerSelector` (the chart content layer, `copy`) (go-kure/launcher#665). |
   | 17 | `placement` may keep a generated source only in infra, and a `dependency` rule may not make it wait. |
-  | 18 | Any other composite default or build-time check a terminal does not reproduce (strict decoding). |
+  | 18 | Any other `helmchart` default or build-time check a terminal does not reproduce (strict decoding). |
 
-  `chart`, `version`, `delivery` (`native`|`template`), `source`
-  (inline `url` or `{name,kind}` ref), `values`/`valuesFrom`, `valuesMode`
-  (`inline` default | `configMap`), `driftDetection`, `install.crds`/`upgrade.crds`.
-  With native delivery, components whose inline `source.url` (plus `version` for OCI) match share one source
-  CR, emitted by the one deployed first — earliest tier, then `dependency` order, then
-  document order — and referenced by the others. An OCI chart source is never shared
-  with an `oci` component naming the same artifact: the generated OCIRepository
-  selects the Helm chart content layer with `operation: copy`, so Flux passes the
-  chart archive through unchanged instead of extracting it and re-archiving it
-  without the files its ignore rules exclude (`*.zip`, `*.png`, ...), which a chart
-  may read with `.Files.Get`; the `oci` component's extracts the layer, so each
-  gets its own.
-  `valuesMode: configMap` externalizes `values` into a literal `ConfigMap` resource
-  — not a kustomize `configMapGenerator` (its hash-suffixed name has no HelmRelease
-  entry in kustomize's built-in name-reference table to rewrite) — referenced from
-  the `HelmRelease` via `spec.valuesFrom`. Emitting that `ConfigMap` requires a
-  consumer that walks kure's `ManifestLayout` (the `layout.LayoutAugmenter` path). A
-  layout-walking consumer keys a structural decision off that interface's mere
-  presence, not just its side effect (`pkg/stack/layout/walker.go`): switching an
-  existing component from `inline` to `configMap` (with non-empty `values`) moves
-  its `HelmRelease` and source CR out of the parent bundle's flat resource set and
-  into their own per-app sub-layout directory with its own `kustomization.yaml` — a
-  visible output-path change in a GitOps repo, not an internal detail.
-  `kurel build`'s own flat output (`pkg/cmd/kurel/build.go`) never walks the layout,
-  so it rejects `valuesMode: configMap` at build time (naming the component)
-  when the component has non-empty `values` — with no `values` to externalize
-  there is nothing to emit, so the config is not wrapped as a `LayoutAugmenter`
-  and `kurel build` accepts it — rather than emit a `HelmRelease` referencing a
-  `ConfigMap` that isn't in the output. Use `inline` (the default) with
-  `kurel build` for a component that does have `values`, or a consumer that
-  walks the layout. Known limitation: the generated `ConfigMap`'s
-  name (`<component>-values`) is not checked against a user-authored `configmap`
-  trait's own `name` property — a component whose `configmap` trait happens to
-  produce that exact name collides silently (`pkg/oam/validate.go` has no
-  cross-trait resource-name uniqueness check at all, for any trait pair, so this
-  is one instance of a pre-existing gap, not one this component introduces).
-  A `prune-protection` trait on the component also annotates this generated
-  `ConfigMap` for a consumer that walks the layout: the trait post-processes the
-  per-app layout after `AugmentLayout` runs, not only the `Generate` output (see
-  the traits README, "Decorator forwarding for layout-augmenting components").
-  When both the generated
-  `configMap` values reference and a user-supplied `valuesFrom` entry are present,
-  the user's entry wins on overlapping keys (Flux merges `spec.valuesFrom` in list
-  order, and the generated reference is added before the user's own entries);
-  under `inline` mode, `spec.values` is merged last and always wins over any
-  `valuesFrom` entry on overlapping keys. Known limitation: a values-only edit
-  under `valuesMode: configMap` changes only the generated `ConfigMap`'s data —
-  the `HelmRelease` itself (which carries only the stable ConfigMap name and
-  key) is untouched, so whether that change is picked up promptly depends on
-  the installed `helm-controller`'s own watch behavior for referenced
-  `valuesFrom` objects, which this repo does not control or vendor. If
-  reconciliation does not pick it up immediately, trigger one explicitly:
-  `flux reconcile helmrelease <name>`. Known limitation: `delivery: template`
-  rejects `valuesFrom`/`valuesMode: configMap`/`interval`/`driftDetection`/
-  `install.crds`/`upgrade.crds` outright (compile-time validation error) rather than
-  applying them. `delivery: native` is unaffected. Known limitation, over-broad wording fixed: this list is the
-  set of properties `delivery: template` rejects when **explicitly** authored — an inherited
-  handler default (e.g. `valuesMode` with no property-level `configMap`) falls back to `inline`
-  rather than erroring (`ToApplicationConfig`'s `delivery: template` validation in
-  `pkg/oam/builtin/components/helmchart.go`); same over-broad-wording
-  class `go-kure/launcher#319` already fixed elsewhere in this file.
-
-  **Namespaces under `delivery: native`** (go-kure/launcher#610). The HelmRelease, its source
-  CR and its values `ConfigMap` land in the Flux namespace when one is configured, else in the application namespace
-  (`SetFluxNamespace`). Under a Flux namespace, a component that does not author
-  `targetNamespace` gets `spec.targetNamespace` set to the application namespace, so the release
-  installs there rather than into the Flux namespace, as on the `helmrelease` terminal; an
-  authored value wins. Consequence: Flux then derives the default release name as
-  `<targetNamespace>-<name>` (`shop-web` for a component `web` in namespace `shop`), not `<name>`,
-  while Helm keeps its release state in the HelmRelease's own namespace. Before this, such a
-  release installed into the Flux namespace under the name `<name>`, so a release installed
-  that way changes namespace and name. To keep it where it is, author `targetNamespace` as the
-  Flux namespace; to keep only its name, author `releaseName`.
-
-  **Release identity under `delivery: template`** (go-kure/launcher#602). The client-side render's
-  `.Release.Namespace` is `targetNamespace` when authored, else the application namespace —
-  never the Flux namespace, which only places control-plane CRs. Its `.Release.Name` is
-  `releaseName` when authored, else kure's default `release`. That default differs from
-  `delivery: native`, where Flux derives the release name from the HelmRelease (`<name>`, or
-  `<targetNamespace>-<name>` when a target namespace is set, as it always is under a Flux
-  namespace); author `releaseName` when a chart's
-  object names must match across the two. Both values are checked at build time because no
-  HelmRelease admission sees them: `releaseName` by Helm's own release-name rule (at most 53
-  characters, lowercase DNS-style), `targetNamespace` as a DNS-1123 label. The namespace only
-  reaches the chart as `.Release.Namespace`: nothing stamps `metadata.namespace` on rendered
-  objects, so a chart that leaves it unset still renders namespace-less objects.
-
-  **`interval` must be a duration Flux accepts** (go-kure/launcher#590; `oci` applies the same
-  check). `interval` (default `60m`) is emitted onto the source CR and the `HelmRelease`, whose
-  CRDs require `^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`: unsigned, in `ms`, `s`, `m` or `h`
-  (`10m`, `1h30m`, `1.5h`). `time.ParseDuration` alone would also accept `-5m` or `500us`,
-  which then failed at apply time; both are build errors now. The value is emitted as a
-  `metav1.Duration`, which serializes `Duration.String()` rather than the authored text, so
-  that form is checked too: `0.5ms` matches the pattern but is written as `500µs`, and is
-  refused as below Flux's millisecond resolution. A positive value too small for the duration
-  type (`0.0000000001ms`) is refused the same way rather than emitted as `0s`. In practice any
-  value of `0s` or at least `1ms` is accepted. The check also runs in `Generate`, so a
-  `HelmchartConfig` or `OCIConfig` built directly rather than parsed is refused as well, instead
-  of emitting an `interval` Flux rejects or, for text that is no duration, `0s`. The check
-  lives in the internal `pkg/oam/internal/fluxduration`, shared with the `reconciliation`
-  policy.
-
-  **A wrongly typed optional property is an error, not dropped** (go-kure/launcher#601).
-  `chart`, `version`, `delivery`, `valuesMode`, `interval`, `releaseName`, `targetNamespace` and the nested
-  `driftDetection.mode`, `install.crds`, `upgrade.crds` must be strings; `driftDetection`,
-  `install`, `upgrade` and `values` objects; `valuesFrom` an array whose entries carry string
-  `kind`, `valuesKey` and `targetPath`; `source` an object whose `url`, `name`, `kind` and
-  `namespace` are strings. A present value of another type is refused, naming the
-  field: `version: 7` used to build with no version, and `interval: 7` with the `60m` default.
-  A null still reads as unset, and so does an empty string for a string property; an object
-  or array property refuses an empty string as the wrong type. Schema validation already refuses these in a
-  `kurel build`; the handler check covers a handler called directly and a component a lowering
-  rule builds in Go.
-
-  **`delivery: template` is the `helmtemplate` component's code path.** Its source checks,
-  render, hook-group ordering and layout partition are one implementation shared with the
-  kind-named `helmtemplate` terminal below (`helmtemplate_render.go`), so what this entry says
-  about template output holds for both.
-
-  **`delivery: template` output is partitioned by Helm hook group.** Every rendered manifest
-  carrying a `helm.sh/hook` annotation (or a standalone `helm.sh/hook-weight`) is grouped by
-  `(phase, weight)` via kure's `helm.SplitByHookWeight`, then emitted in hook-execution order —
-  `pre-install, pre-upgrade, main, post-install, post-upgrade, <unknown, alphabetical>` — instead of
-  raw chart-render order; a chart with no hook annotations at all yields one group and
-  byte-identical output (a correctness fix, not a behavior change, for the unannotated case).
-  `pre-delete`/`post-delete`/`pre-rollback`/`post-rollback`/`test` objects are dropped outright
-  (kure does not surface them as static manifests) — mostly a bug fix, since a `test` Pod rendered
-  as a static GitOps object would otherwise be reconciled on every apply, but it is silent data
-  loss for a chart that relies on one of those hooks; `pkg/oam` has no logging channel to flag it.
-  A rendered mapping with a key that is not a string (an unquoted `1:` or `true:`) is a build
-  error naming the object and the mapping — the document's own top level (named `top level`)
-  as much as a mapping nested in it — and so is an unquoted timestamp that RFC 3339 cannot
-  express (a UTC offset of 24 hours or more, such as `+24:00`), naming the object and the value's
-  path: an emitted manifest is written through Go's JSON encoding, which refuses both. A document
-  that one of the dropped hooks above carries is never written, so it is dropped with such a
-  key or value in it rather than refused — including a non-string key in its `metadata` or
-  `metadata.annotations` mapping, which does not hide the `helm.sh/hook` annotation.
-  For a layout-walking consumer (the `layout.LayoutAugmenter` path, same mechanism as the
-  `valuesMode: configMap` relocation above), more than one hook group makes `AugmentLayout` clear
-  the component's flat `Resources` and replace them with one child `ManifestLayout` per group,
-  named `<component>-NN-<phase-slug>`, written to its own directory `<component dir>/<child>`
-  (its `Namespace` is the component layout's own path, which kure joins with the child's name,
-  so a hook-group directory is never nested twice) and chained via `DependsOn`, listing each
-  child's preceding sibling in the order kure's `helm.SplitByHookWeight` synthesizes from Helm's
-  hook phases — a combined install/upgrade ordering for GitOps reconciliation, not Helm's own
-  per-operation execution order (kure `pkg/stack/helm/hooks.go:28-36`). `DependsOn` is set on every child
-  regardless of placement, but kure's layout integrator only translates it into `spec.dependsOn`
-  on a per-child Flux Kustomization CR under `FluxIntegratedPerLayout` placement (kure
-  `pkg/stack/layout/manifest.go`'s `DependsOn` field doc); under coarser placement modes the
-  children's resources are aggregated instead, and reconciliation ordering between hook groups is
-  not separately enforced. When it partitions, `AugmentLayout` also sets the component layout's
-  `ApplicationFileMode` to `AppFilePerResource` unless the caller already set one, so the component
-  stays a directory whose `kustomization.yaml` lists the children. Without that, a writer-wide
-  `AppFileSingle` default (kure `layout.Config.ApplicationFileMode`) would make kure's
-  `WriteManifest` refuse the tree under any placement but `FluxIntegratedPerLayout`: an
-  `AppFileSingle` layout writes no `kustomization.yaml`, so nothing would list its child layouts
-  (`go-kure/launcher#563`). The children carry no mode of their own, so under such a default each
-  hook group is written as one file, `<component dir>/<child>.yaml`, instead of a sub-directory,
-  and the component's `kustomization.yaml` lists it; under `FluxIntegratedPerLayout` kure's layout
-  integrator keeps every child a directory with its own Flux Kustomization, whatever the default.
-  A single-group chart's `AugmentLayout` is a no-op. Every `delivery: template`
-  component becomes a `LayoutAugmenter` regardless of hook-group count — including a hook-free
-  chart, since the wrap decision happens at config-construction time, before the network render
-  that would reveal there is only one group — so even a hook-free templated chart now gets its own
-  sub-layout directory under a layout-walking consumer, for no behavioural benefit; this mirrors
-  `valuesMode: configMap`'s relocation caveat above (same mechanism, different trigger). Known
-  limitation: the child directory name's DNS-1123 truncation (mirroring `valuesConfigMapName`'s own
-  `sha256`-prefixed truncation above) makes same-name collisions vanishingly unlikely *within* one
-  Application, but two different Applications with a same-named component still collide — component
-  names are unique only within one Application (`pkg/oam/validate.go:196-199`), while emitted
-  Kustomization CRs for hook-group children share one controller namespace; a pre-existing gap
-  (inherited from a downstream consumer's reference implementation) that this partitioning newly exposes, not one
-  it introduces. `kurel build`'s flat output **accepts** `delivery: template` — its `Generate`
-  output is already the same flat union `AugmentLayout` would otherwise repartition, so nothing is
-  lost by skipping the layout walk — while still rejecting `valuesMode: configMap` when it would
-  actually emit a values `ConfigMap` (`emitsValuesConfigMap()`: `configMap` mode with non-empty
-  `values`), same qualification as the over-broad-wording fix above, not an unconditional rejection
-  of every `LayoutAugmenter`.
+  Two `helmchart` behaviours have no `helm` counterpart beyond row 18: `valuesMode: configMap`
+  no longer makes the component a `LayoutAugmenter` (the `helmrelease` terminal emits the
+  values ConfigMap from `Generate`, so `kurel build` accepts it and a layout-walking consumer
+  no longer moves the component into a sub-layout), and under `delivery: template` the render's
+  `.Release.Name` and `.Release.Namespace` can no longer be authored (row 11; see
+  **helmtemplate**).
 - **helmrelease** — the kind-named terminal for Flux's `HelmRelease`
   (go-kure/launcher#327, part of the Helm-family redesign go-kure/launcher#336). Its
   properties are exactly the top-level JSON keys of `HelmReleaseSpec` in the
@@ -2364,11 +2185,20 @@ not part of either change.
   `encoding/json`; schema validation, which a `kurel build` runs first, is exact.
 
   **Defaults and checks.** `interval` defaults to `60m` when unset (a zero duration counts
-  as unset); Flux requires the field, and `60m` is the `helmchart` default. A set `interval`
-  must be a duration Flux accepts, checked as for `helmchart` (see its `interval` paragraph;
-  go-kure/launcher#601): on the authored text, which also refuses a positive value that would
-  decode to zero and be replaced by the default, and again in `Generate` on the decoded
-  duration's emitted form, for a config built directly. Its other duration fields are checked
+  as unset); Flux requires the field. A set `interval` must be a duration Flux accepts
+  (go-kure/launcher#590, go-kure/launcher#601; `oci` applies the same check). The CRDs
+  require `^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`: unsigned, in `ms`, `s`, `m` or `h` (`10m`,
+  `1h30m`, `1.5h`). `time.ParseDuration` alone would also accept `-5m` or `500us`, which
+  would fail at apply time; both are build errors. The value is emitted as a
+  `metav1.Duration`, which serializes `Duration.String()` rather than the authored text, so
+  that form is checked too: `0.5ms` matches the pattern but is written as `500µs`, and is
+  refused as below Flux's millisecond resolution. A positive value too small for the
+  duration type (`0.0000000001ms`) is refused the same way rather than emitted as `0s`. In
+  practice any value of `0s` or at least `1ms` is accepted. The check runs on the authored
+  text, which also refuses a positive value that would decode to zero and be replaced by the
+  default, and again in `Generate` on the decoded duration's emitted form, for a config built
+  directly. It lives in the internal `pkg/oam/internal/fluxduration`, shared with the
+  `reconciliation` policy. Its other duration fields are checked
   the same way, in the same form (go-kure/launcher#606): `timeout`, `chart.spec.interval`,
   `install.timeout`, `upgrade.timeout`, `test.timeout`, `rollback.timeout`,
   `uninstall.timeout`, and `install.strategy.retryInterval` and
@@ -2376,11 +2206,10 @@ not part of either change.
   the decode does. Exactly one of
   `chart` and `chartRef` is required. `values` must be a JSON object; a non-finite number
   (`.nan`, `.inf`) is a build error, never a panic. `valuesMode` is `inline` (the default)
-  or `configMap`. Nothing else is checked here: compared with the `helmchart` composite,
-  the enum checks on `driftDetection.mode`, `install.crds`, `upgrade.crds` and
-  `valuesFrom[].kind`, and the required `valuesFrom[].name`, are dropped and left to the
-  HelmRelease CRD's own admission, and there is no `releaseName` default — Flux's own
-  applies. These are deliberate deltas from the composite, not gaps.
+  or `configMap`. Nothing else is checked here: the enum checks on `driftDetection.mode`,
+  `install.crds`, `upgrade.crds` and `valuesFrom[].kind`, and the required
+  `valuesFrom[].name`, are left to the HelmRelease CRD's own admission, and there is no
+  `releaseName` default — Flux's own applies.
 
   **Identity and namespaces.** The HelmRelease is named after the component and lands in
   the Flux namespace when one is configured, else in the application namespace
@@ -2407,84 +2236,113 @@ not part of either change.
   **`valuesMode: configMap`.** With non-empty `values`, `Generate` itself returns a
   ConfigMap beside the HelmRelease, in the HelmRelease's namespace (where Flux resolves
   `valuesFrom`); `spec.values` is cleared, and a `valuesFrom` entry for the ConfigMap is
-  placed before the authored entries, so an authored entry wins on a shared key, as under
-  the composite. Unlike the composite, the component is no `LayoutAugmenter`: the
+  placed before the authored entries, so an authored entry wins on a shared key (Flux merges
+  `spec.valuesFrom` in list order). The component is no `LayoutAugmenter`: the
   ConfigMap is ordinary `Generate` output, so `kurel build` emits it and a layout-walking
   consumer does not move the component into a sub-layout. The values are serialized once,
   as indented JSON with sorted keys (JSON is YAML, which is how Flux reads a values
   reference), and those exact bytes are both stored, under the key `values.json` that the
   `valuesFrom` entry names, and hashed into the ConfigMap's name:
   `<component>-values-<first 10 hex digits of their sha256>`. A name that would exceed 253
-  bytes keeps a truncated prefix plus a short digest of the full component name, the same
-  scheme as the composite's values ConfigMap, so it is always a legal DNS-1123 subdomain and
-  always carries the values hash. Identical values hash alike whatever their key order, and
+  bytes keeps a truncated prefix plus a short digest of the full component name, so it is
+  always a legal DNS-1123 subdomain and always carries the values hash. Identical values hash alike whatever their key order, and
   any change to them renames the ConfigMap and so changes the HelmRelease's spec, which is
   what makes Flux upgrade the release on a values-only edit. The ConfigMap carries the label
   `app: <label value>` and no annotations — the component name at 63 characters or fewer,
-  its projection past that, as [The `app` label](#the-app-label) describes (the same label
-  as the composite's values ConfigMap). Empty or absent `values` generate no ConfigMap and
-  no entry. There is no handler-level default for `valuesMode`.
+  its projection past that, as [The `app` label](#the-app-label) describes. Empty or absent
+  `values` generate no ConfigMap and no entry. There is no handler-level default for `valuesMode`.
 - **helmtemplate** — the kind-named terminal for a client-side Helm render
-  (go-kure/launcher#348, part of the Helm-family redesign go-kure/launcher#336): the
-  `helmchart` composite's `delivery: template` path, lifted out so it can be authored directly.
+  (go-kure/launcher#348, part of the Helm-family redesign go-kure/launcher#336), and what the
+  role-named `helm` rule lowers to under `delivery: template`.
   It fetches and renders the chart at build time and emits the rendered manifests. It creates
   no source CR and no `HelmRelease`, so it carries no auto health check.
 
-  **Properties.** Exactly the keys that path reads except `releaseName` and `targetNamespace`, in
-  the composite's shape. `source` is
+  **Properties.** `source` is
   required: `url` (required) is an `http://` or `https://` Helm repository URL, or an `oci://`
   URL naming the chart; `kind` (optional, `HelmRepository` or `OCIRepository`) is inferred from
   the scheme when unset — `oci://` is `OCIRepository`, anything else `HelmRepository` — and
   must agree with it when set. `chart` is required for a `HelmRepository`; an `OCIRepository`'s
-  URL already names the chart, so there `chart` is not used, as under the composite. `version`
+  URL already names the chart, so there `chart` is not used. `version`
   is required for an `OCIRepository`. `values` is an open object, the Helm values tree, and must
   be representable as JSON: a non-finite number (`.nan`, `.inf`) is a build error. The source
-  checks are the composite's own, shared rather than copied.
+  checks are shared with the `helm` rule's inline source rather than copied.
 
   **Decoding.** `values` is split off, and the rest of the property map is decoded with
   `builtin.DecodeStrictJSON` into a closed struct, so any other key, at any depth, is refused by
-  name, as is a wrongly typed value. `values` itself reaches the render exactly as authored —
-  the same map, with the same YAML-decoded value types, that the composite hands the renderer —
-  rather than the strict decoder's `json.Number` re-reading, which a chart template comparing
-  a value with a number would treat differently. The schema declares the same keys, with
-  `source` closed to `url` and `kind`, and a test ties it to the struct. Keys match
-  case-insensitively in the handler, as in `encoding/json`; schema validation, which a
+  name, as is a wrongly typed value. `values` itself reaches the render exactly as authored, with
+  its YAML-decoded value types, rather than the strict decoder's `json.Number` re-reading, which
+  a chart template comparing a value with a number would treat differently. The schema declares
+  the same keys, with `source` closed to `url` and `kind`, and a test ties it to the struct. Keys
+  match case-insensitively in the handler, as in `encoding/json`; schema validation, which a
   `kurel build` runs first, is exact.
 
-  **Refused outright.** Every other `helmchart` property — `releaseName`, `targetNamespace`, and
-  those only its `delivery: native` reads: `interval`, `driftDetection`, `install`, `upgrade`,
-  `valuesFrom`, `valuesMode` — the composite's own `delivery` switch, and a source reference
+  **Refused outright.** A release identity (`releaseName`, `targetNamespace`), every property
+  only a Flux-reconciled release reads (`interval`, `driftDetection`, `install`, `upgrade`,
+  `valuesFrom`, `valuesMode`), the `helm` rule's `delivery` switch, and a source reference
   (`source.name`, `source.namespace`) are undeclared keys: schema validation refuses each, and so
   does the strict decode. An `OCIRepository` source without `version` is refused by the handler.
-  The key itself is what is refused, whatever it holds: the composite, under
-  `delivery: template`, rejects `driftDetection` by its `mode` and `install`/`upgrade` by their
-  `crds`, and turns an inherited handler-level `valuesMode: configMap` default into `inline`;
-  the terminal has no handler-level default at all. The render's `.Release.Namespace` is the
-  application namespace and its `.Release.Name` is kure's default `release`, as under the
-  composite when neither `targetNamespace` nor `releaseName` is authored; the terminal declares
-  neither, so neither can be set. As there, nothing stamps `metadata.namespace` on rendered
-  objects.
+  The key itself is what is refused, whatever it holds; the terminal has no handler-level default
+  at all. The render's `.Release.Namespace` is the application namespace and its `.Release.Name`
+  is kure's default `release`; the terminal declares neither, so neither can be set. Flux derives
+  a HelmRelease's default release name differently (`<name>`, or `<targetNamespace>-<name>` when
+  a target namespace is set), so a chart whose object names embed the release name renders them
+  differently under the two deliveries. Nothing stamps `metadata.namespace` on rendered objects,
+  so a chart that leaves it unset renders namespace-less objects.
 
-  **Output and hook-group layout.** The composite's `delivery: template` output, from the same
-  code. `Generate` returns every rendered object flat, in Helm hook execution order —
+  **Output order.** Every rendered manifest carrying a `helm.sh/hook` annotation (or a standalone
+  `helm.sh/hook-weight`) is grouped by `(phase, weight)` via kure's `helm.SplitByHookWeight`.
+  `Generate` returns every rendered object flat, in hook-execution order —
   `pre-install, pre-upgrade, main, post-install, post-upgrade, <unknown, alphabetical>` — with a
-  multi-event annotation such as `pre-install,pre-upgrade` placed by its earliest phase, and
-  `pre-delete`/`post-delete`/`pre-rollback`/`post-rollback`/`test` objects dropped. For a
-  layout-walking consumer, a chart with more than one hook group gets one child layout per group
-  from `AugmentLayout`, named `<component>-NN-<phase-slug>`, written directly under the
-  component's own directory and chained via `DependsOn`, and the component layout is pinned to a
-  directory (`AppFilePerResource`) unless the caller set a mode; the `helmchart` entry above
-  carries the placement details and the residual cross-Application name-collision gap, which
-  applies here unchanged. Every `helmtemplate` component is a `LayoutAugmenter`, a hook-free
-  chart included, since the group count is known only after the render; its
-  `GenerateCoversAugmentLayout` is always true, so `kurel build`, which never walks a layout,
-  accepts it and emits `Generate`'s flat output.
+  multi-event annotation such as `pre-install,pre-upgrade` placed by its earliest phase; a chart
+  with no hook annotations at all yields one group, in chart-render order.
+  `pre-delete`/`post-delete`/`pre-rollback`/`post-rollback`/`test` objects are dropped outright
+  (kure does not surface them as static manifests) — mostly a bug fix, since a `test` Pod rendered
+  as a static GitOps object would otherwise be reconciled on every apply, but it is silent data
+  loss for a chart that relies on one of those hooks; `pkg/oam` has no logging channel to flag it.
+  A rendered mapping with a key that is not a string (an unquoted `1:` or `true:`) is a build
+  error naming the object and the mapping — the document's own top level (named `top level`)
+  as much as a mapping nested in it — and so is an unquoted timestamp that RFC 3339 cannot
+  express (a UTC offset of 24 hours or more, such as `+24:00`), naming the object and the value's
+  path: an emitted manifest is written through Go's JSON encoding, which refuses both. A document
+  that one of the dropped hooks above carries is never written, so it is dropped with such a
+  key or value in it rather than refused — including a non-string key in its `metadata` or
+  `metadata.annotations` mapping, which does not hide the `helm.sh/hook` annotation.
 
-  **Relationship to `helmchart` and `helm`.** `helmchart` with `delivery: template` keeps its
-  authored surface and its output; both components run one render and partition
-  implementation. `helmtemplate` is the terminal the role-named `helm` lowering rule
-  (go-kure/launcher#349) is to emit for client-side rendering; that rule is not part of this
-  component. Retiring the composite is tracked separately in go-kure/launcher#350.
+  **Hook-group layout.** For a layout-walking consumer (the `layout.LayoutAugmenter` path), more
+  than one hook group makes `AugmentLayout` clear the component's flat `Resources` and replace
+  them with one child `ManifestLayout` per group, named `<component>-NN-<phase-slug>`, written to
+  its own directory `<component dir>/<child>` (its `Namespace` is the component layout's own path,
+  which kure joins with the child's name, so a hook-group directory is never nested twice) and
+  chained via `DependsOn`, listing each child's preceding sibling in the order kure's
+  `helm.SplitByHookWeight` synthesizes from Helm's hook phases — a combined install/upgrade
+  ordering for GitOps reconciliation, not Helm's own per-operation execution order (kure
+  `pkg/stack/helm/hooks.go:28-36`). `DependsOn` is set on every child regardless of placement, but
+  kure's layout integrator only translates it into `spec.dependsOn` on a per-child Flux
+  Kustomization CR under `FluxIntegratedPerLayout` placement (kure `pkg/stack/layout/manifest.go`'s
+  `DependsOn` field doc); under coarser placement modes the children's resources are aggregated
+  instead, and reconciliation ordering between hook groups is not separately enforced. When it
+  partitions, `AugmentLayout` also sets the component layout's `ApplicationFileMode` to
+  `AppFilePerResource` unless the caller already set one, so the component stays a directory
+  whose `kustomization.yaml` lists the children. Without that, a writer-wide `AppFileSingle`
+  default (kure `layout.Config.ApplicationFileMode`) would make kure's `WriteManifest` refuse the
+  tree under any placement but `FluxIntegratedPerLayout`: an `AppFileSingle` layout writes no
+  `kustomization.yaml`, so nothing would list its child layouts (`go-kure/launcher#563`). The
+  children carry no mode of their own, so under such a default each hook group is written as one
+  file, `<component dir>/<child>.yaml`, instead of a sub-directory, and the component's
+  `kustomization.yaml` lists it; under `FluxIntegratedPerLayout` kure's layout integrator keeps
+  every child a directory with its own Flux Kustomization, whatever the default. A single-group
+  chart's `AugmentLayout` is a no-op. Every `helmtemplate` component is a `LayoutAugmenter`, a
+  hook-free chart included, since the group count is known only after the render — so even a
+  hook-free chart gets its own sub-layout directory under a layout-walking consumer, for no
+  behavioural benefit. Known limitation: the child directory name's DNS-1123 truncation (a
+  `sha256`-prefixed truncation, the scheme `helmrelease` uses for its values ConfigMap name) makes
+  same-name collisions vanishingly unlikely *within* one Application, but two different
+  Applications with a same-named component still collide — component names are unique only
+  within one Application, while emitted Kustomization CRs for hook-group children share one
+  controller namespace; a pre-existing gap (inherited from a downstream consumer's reference
+  implementation) that this partitioning exposes. `GenerateCoversAugmentLayout` is always true —
+  `Generate`'s output is already the flat union `AugmentLayout` repartitions — so `kurel build`,
+  which never walks a layout, accepts the component and emits `Generate`'s flat output.
 - **oci** — `source.url` (`oci://…`), `version` (tag or `sha256:…`), `path`,
   `prune`, `interval`, `targetNamespace`, `wait`, `healthChecks`.
   `targetNamespace` has no default (go-kure/launcher#622). Unset, the
@@ -2494,8 +2352,7 @@ not part of either change.
   kustomize-controller does not fill in its own namespace for an object that
   still has none. Author `targetNamespace` when namespaced objects are left
   without a namespace after that build: they otherwise fail at apply with
-  `namespace not specified`, with or without a Flux namespace. This deliberately differs from `helmchart` (`delivery:
-  native`) and `helmrelease`, which under a Flux namespace default
+  `namespace not specified`, with or without a Flux namespace. This deliberately differs from `helmrelease`, which under a Flux namespace default
   `targetNamespace` to the application namespace. A Kustomization's
   `targetNamespace` sets or overrides the namespace of every namespaced object
   it applies, Flux custom resources included, so a default would move the
@@ -2529,8 +2386,7 @@ not part of either change.
   even when `ghcr.io` or `registry` is listed. No policy, or an empty
   allowlist, accepts every `oci://` url.
   `interval` (default `60m`) must be a duration Flux accepts, checked exactly as
-  for `helmchart` (go-kure/launcher#590): see the `interval` paragraph under
-  **helmchart** above.
+  for `helmrelease` (go-kure/launcher#590): see its Defaults paragraph above.
 - **helmrepository / ocirepository / gitrepository / bucket** — the kind-named terminals for
   Flux's four fetching source kinds (go-kure/launcher#347, part of the Helm-family redesign
   go-kure/launcher#336). Each component's properties are exactly the top-level JSON keys of its
@@ -2538,7 +2394,7 @@ not part of either change.
   `BucketSpec`, in the version `go.mod` links — and a test ties each published schema to its
   struct, so a bump that adds or drops a spec field fails the suite until the schema follows.
   Each emits exactly one CR of its kind, named after the component, and nothing else: no
-  Kustomization (compare `oci`), no HelmRelease (compare `helmchart`), and no source dedup — two
+  Kustomization (compare `oci`), no HelmRelease (compare `helmrelease`), and no source dedup — two
   components naming the same URL emit two CRs.
 
   **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON` into the spec
@@ -2556,8 +2412,8 @@ not part of either change.
   `oci://` under `type: oci`; `oci://` for `ocirepository`; `http://`, `https://` or `ssh://` for
   `gitrepository`, so an scp-style `git@host:org/repo` is refused — write
   `ssh://git@host/org/repo`. The CRD has no pattern for `endpoint`, so it is only required.
-  `interval` defaults to `60m` when unset (a zero duration counts as unset), the `helmchart`
-  composite's source default; a `helmrepository` with `type: oci` gets no default, since Flux
+  `interval` defaults to `60m` when unset (a zero duration counts as unset), matching the
+  `helmrelease` default; a `helmrepository` with `type: oci` gets no default, since Flux
   does not poll it, and its emitted `interval` reads `0s`, the value the Go type always writes.
   A set `interval` must be a duration Flux accepts, checked exactly as on `helmrelease` above
   (go-kure/launcher#601); under `type: oci` too, where the CRD pattern still applies.
@@ -2623,12 +2479,14 @@ not part of either change.
   as `job` does for its own `suspend: true`, and so does a `helmrepository` with `type: oci`,
   which Flux treats as a static object with no artifact to wait for.
 
-  **Compared with the `helmchart` composite's inline source** (`source.url`). The composite emits
-  a HelmRepository, or an OCIRepository for an `oci://` URL, carrying only `url`, `interval` and,
-  for OCI, a `ref.tag` from `version` and a `layerSelector` copying the Helm chart content
-  layer; it shares one CR between components naming the same source; and it does not check the URL host against the allowed registries. The source
-  components expose the whole spec (credentials, `type: oci`, `provider`, verification, …), check
-  the host, and never share a CR. These are deliberate deltas, not gaps.
+  **Generated by the `helm` rule.** An inline source on a `helm` component generates one of
+  these components: a `helmrepository` for an `http(s)://` URL; an `ocirepository` for an
+  `oci://` URL, with a `ref.tag` from `version` and a `layerSelector` copying the Helm chart
+  content layer; a `gitrepository` for `kind: GitRepository` with its URL and one `source.ref`
+  field; or a `bucket` for `kind: Bucket` with `endpoint` and `bucketName` and no URL. It is
+  named `<app>-source-<digest>` and shared by every `helm` component with the same source
+  identity (see **helm** above). An authored source component exposes the whole spec
+  (credentials, `type: oci`, `provider`, verification, …) and is never shared.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.
@@ -3265,9 +3123,8 @@ Two limits worth knowing before relying on the rule:
   authored path has no top-level strip: `ValidateAuthoredProperties` checks shape and
   leaves a top-level null in place, so there the null reaches the parser. What it
   does next depends on how the parser consumes the lookup: one that type-checks the
-  value refuses it as a wrong type, while one that discards a failed assertion, as
-  `helmchart`'s `version` and `driftDetection` reads do, treats it as absent without
-  saying so. `go-kure/launcher#423`, `go-kure/launcher#394` and `go-kure/launcher#570`
+  value refuses it as a wrong type, while one that discards a failed assertion treats
+  it as absent without saying so. `go-kure/launcher#423`, `go-kure/launcher#394` and `go-kure/launcher#570`
   converted the parsers they covered; the last of them are listed with the `null`
   row of the `deployment` table above.
 - **An empty object is not a null and is not absent.** `{}` and an absent key mean
@@ -3377,7 +3234,7 @@ byte-identical, and projects a longer one onto a readable prefix of at most 52 c
 (its first 52, with trailing `-` and `.` trimmed) plus `-` and
 a 10-hex-character sha256 digest (go-kure/launcher#572). The workload kinds and `service` never reach
 the projection, since their container name or Service name already refuses a name over 63
-characters; the `helmchart` and `helmrelease` values ConfigMaps do (a `helmrelease` values
+characters; the `helmrelease` values ConfigMap does (a `helmrelease` values
 ConfigMap that previously omitted `app` past 63 characters now carries the projected value). Object names are not projected. A custom handler
 that labels its objects by component uses the same function, so its selectors and the
 built-in traits' selectors (a PodDisruptionBudget, a NetworkPolicy `podSelector`) agree.

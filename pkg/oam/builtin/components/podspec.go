@@ -1195,7 +1195,7 @@ type mainContainerInput struct {
 // the author never wrote; the same check refuses an undotted name longer than
 // 63 characters, so its message states both rules. The check lives here rather than in
 // validateComponent because component types that name no container after the
-// component (helmchart, manifests, custom types, …) legitimately accept a
+// component (helmtemplate, manifests, custom types, …) legitimately accept a
 // dotted name; checking in the one builder every workload kind goes through
 // covers every present and future caller (go-kure/launcher#407). The name is
 // refused, never rewritten: deriving `batch-worker` would silently rename the

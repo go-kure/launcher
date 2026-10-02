@@ -2452,7 +2452,7 @@ func TestIngressHandler_Apply_ImplicitBackend_PortMismatch_Error(t *testing.T) {
 	})
 }
 
-// --- IngressHandler trait-level servicePort/serviceName (helmchart support) ---
+// --- IngressHandler trait-level servicePort/serviceName (chart-based components) ---
 
 func TestIngressHandler_TraitLevel_ServicePort_Success(t *testing.T) {
 	h := &traits.IngressHandler{}
@@ -2468,7 +2468,7 @@ func TestIngressHandler_TraitLevel_ServicePort_Success(t *testing.T) {
 			},
 		},
 	}
-	// newApp creates a component with no servicePortProvider (simulates helmchart)
+	// newApp creates a component with no servicePortProvider (simulates a chart-based component)
 	app := newApp("myapp", "default")
 	bundle := newBundle()
 	if err := h.Apply(trait, app, bundle); err != nil {
