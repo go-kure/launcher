@@ -2583,13 +2583,15 @@ not part of either change.
 
   No refusal prints the value it refused, since a URL or `endpoint` can carry a credential in
   its userinfo (the user included), path, query or IPv6 zone (go-kure/launcher#699). An
-  allowlist refusal names the host as `displayHost` reduces it: without userinfo, query,
-  fragment or zone, port kept, saying when something was dropped; the matching itself is
-  unchanged. It names no host at all when the reduced text is not a plain host (a DNS name,
-  IPv4 address or bracketed IPv6 address, with an optional numeric port), or when a `[`, `]`,
-  `?` or `#`, none of which a userinfo may hold, precedes the last `@`, which may then sit
-  inside IPv6 brackets or a query instead. A scheme refusal and the explicit-registry refusal below name only the component,
-  the field and the form expected, and the Amazon S3 refusal names the reduced host.
+  allowlist refusal names the host as `displayHost` reduces the url's raw authority (an
+  `ssh://` user included, not the host the match used): without userinfo, query, fragment or
+  zone, port kept, saying when something was dropped; the matching itself is unchanged. It
+  names no host at all when the reduced text is not a plain host (a DNS name, IPv4 address or
+  bracketed IPv6 address, with an optional numeric port), or when a `[`, `]`, `?` or `#`, none
+  of which a userinfo may hold, precedes the last `@`, which may then sit inside IPv6 brackets
+  or a query instead. A scheme refusal (the four sources', `oci`'s, and `crd`'s and
+  `manifests`' `http`/`https` check) and the explicit-registry refusal below name only the
+  component, the field and the form expected, and the Amazon S3 refusal names the reduced host.
 
   Some sources are not fetched from the host their field names, so the check follows Flux instead:
 

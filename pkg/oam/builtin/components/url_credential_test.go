@@ -70,6 +70,10 @@ func TestURLRefusalsHideCredential(t *testing.T) {
 			[]string{"gitrepository: url: source registry is not in allowed registries", notShown}},
 		{"gitrepository, IPv6 zone holding the userinfo and a ?", "gitrepository", url("https://[fe80::1%zone@s3cr3t?x]:8443/org/repo"), []string{"[fe80::1]:8443"},
 			[]string{"gitrepository: url: source registry is not in allowed registries", notShown}},
+		{"gitrepository ssh, IPv6 zone holding the userinfo", "gitrepository", url("ssh://[fe80::1%zone@s3cr3t/repo"), []string{"[fe80::1]:22"},
+			[]string{"gitrepository: url: source registry is not in allowed registries", notShown}},
+		{"gitrepository ssh, user", "gitrepository", url("ssh://deploy@github.com/org/repo"), []string{"gitlab.com"},
+			[]string{`gitrepository: url: source registry "github.com"` + notAllowed}},
 		{"bucket endpoint, IPv6 zone holding the userinfo", "bucket", bucket("[fe80::1%zone@s3cr3t]:9000", ""), []string{"[fe80::1]:9000"},
 			[]string{"bucket: endpoint: source registry is not in allowed registries", notShown}},
 		{"oci, user and token", "oci", ociSrc("oci://deploy:s3cr3t@ghcr.io/org/app"), []string{"ghcr.io"},
@@ -86,6 +90,10 @@ func TestURLRefusalsHideCredential(t *testing.T) {
 			[]string{"bucket: endpoint: ", `source registry "minio.example.com:9000"` + notAllowed}},
 
 		// The scheme checks.
+		{"crd, unsupported scheme", "crd", url("s3cr3t://example.com/crds.yaml"), nil,
+			[]string{"manifest source: unsupported url scheme (only http/https)"}},
+		{"manifests, unsupported scheme", "manifests", url("s3cr3t://example.com/x.yaml"), nil,
+			[]string{"manifest source: unsupported url scheme (only http/https)"}},
 		{"oci, not oci://", "oci", ociSrc("https://deploy:s3cr3t@ghcr.io/org/app"), nil,
 			[]string{"oci: source.url must use the oci:// scheme"}},
 		{"helmrepository, unsupported scheme", "helmrepository", url("ftp://deploy:s3cr3t@charts.example.com"), nil,
