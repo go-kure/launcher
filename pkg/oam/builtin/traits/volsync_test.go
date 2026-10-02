@@ -9,7 +9,7 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
-func TestVolSyncHandler_SubAppName_MatchesCrane(t *testing.T) {
+func TestVolSyncHandler_SubAppName_IsSourcePVCBackup(t *testing.T) {
 	h := &traits.VolSyncHandler{}
 	app := stack.NewApplication("myapp", "default", nil)
 	bundle := &stack.Bundle{}

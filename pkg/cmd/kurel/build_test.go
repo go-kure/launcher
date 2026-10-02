@@ -359,7 +359,7 @@ spec:
 }
 
 func TestBuildCommand_StaleProfileField_Rejected(t *testing.T) {
-	const staleCraneProfile = `apiVersion: launcher.gokure.dev/v1alpha1
+	const staleGitopsProfile = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: ClusterProfile
 metadata:
   name: stale-cluster
@@ -374,7 +374,7 @@ spec:
 `
 	dir := t.TempDir()
 	appPath := writeTempFile(t, dir, "app.yaml", testAppYAML)
-	profilePath := writeTempFile(t, dir, "cluster.yaml", staleCraneProfile)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", staleGitopsProfile)
 
 	cmd := NewKurelCommand()
 	var out bytes.Buffer
