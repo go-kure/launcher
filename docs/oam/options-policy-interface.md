@@ -87,7 +87,7 @@ type Enforceable interface {
 }
 ```
 
-Component config types (e.g. `WebserviceConfig`, `DeploymentConfig`) implement this interface.
+Component config types (e.g. `DeploymentConfig`, `StatefulsetConfig`) implement this interface.
 The transformer calls `ApplyPolicy` after parsing each component, passing the environment
 policy from the request.
 
@@ -280,7 +280,7 @@ The change is mechanical: the parameter type changes from `*api.EnvironmentPolic
 
 ```go
 // Before (downstream):
-func (c *WebserviceConfig) ApplyPolicy(p *api.EnvironmentPolicy) error {
+func (c *DeploymentConfig) ApplyPolicy(p *api.EnvironmentPolicy) error {
     if p == nil { return nil }
     c.Replicas = policy.ApplyDefaultReplicas(c.Replicas, c.explicitReplicas, p.Defaults.Replicas)
     if err := policy.EnforceMaxReplicas(c.Replicas, p.Enforced.MaxReplicas); err != nil {
@@ -293,7 +293,7 @@ func (c *WebserviceConfig) ApplyPolicy(p *api.EnvironmentPolicy) error {
 }
 
 // After (launcher-migrated):
-func (c *WebserviceConfig) ApplyPolicy(p oam.Policy) error {
+func (c *DeploymentConfig) ApplyPolicy(p oam.Policy) error {
     // nil check not needed — caller always passes at least NoopPolicy
     c.Replicas = policy.ApplyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
     if err := policy.EnforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
