@@ -132,7 +132,7 @@ func TestWarnForcedVolumes_BundlePatches(t *testing.T) {
 			[]string{claimWarning("data", `component "db"`, annotationReason)}},
 		{"a patch renames the claim",
 			bundle(false, []stack.Patch{{Patch: "- op: replace\n  path: /metadata/name\n  value: renamed\n", Target: claimKind()}}, fixedApp("db", annotated())),
-			[]string{claimWarning("renamed", `component "db"`, annotationReason)}},
+			[]string{claimWarning("renamed", `the bundle of component "db"`, patchedReason)}},
 		{"a patch reaches another application's claim of the bundle",
 			bundle(false, []stack.Patch{{Patch: addForceSMP}},
 				fixedApp("web", claimObject("shop", "web", nil)), fixedApp("cache", plain())),
@@ -166,10 +166,12 @@ func TestWarnForcedVolumes_BundlePatchScope(t *testing.T) {
 	}
 }
 
-// TestWarnForcedVolumes_BundlePatchProvenance pins that a patched volume is named
-// by the application that generated it, in generation order, even when a patch
-// renames it, and that a volume a patch adds to a list envelope is found in a
-// bundle that generated none.
+// TestWarnForcedVolumes_BundlePatchProvenance pins that each patched volume is
+// forced exactly as Flux's build forces it, whatever the patches do to names,
+// lists and annotations, and how it is named: by the first application that
+// generates a volume of its final identity, else by its bundle, in kustomize's
+// build order, with a force key named as the patches' unless a generated volume of
+// its final identity carried it.
 func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
 	t.Run("rename", func(t *testing.T) {
 		// Kinds mixed, so kustomize's legacy sort would reorder them: a
@@ -184,7 +186,7 @@ func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
 			Target: &stack.PatchSelector{Kind: "PersistentVolumeClaim", Name: "data"}}}})
 		want := []string{
 			claimWarning("web", `component "web"`, annotationReason),
-			claimWarning("renamed", `component "cache"`, patchedReason),
+			claimWarning("renamed", `the bundle of component "config"`, patchedReason),
 			`PersistentVolume pv-later (component "later") is force-applied (` + annotationReason + `)` + forcedTail,
 		}
 		if !slices.Equal(got, want) {
@@ -201,7 +203,7 @@ func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
 			Patches: []stack.Patch{{Patch: "- op: add\n  path: /items/-\n  value:\n    apiVersion: v1\n    kind: PersistentVolumeClaim\n" +
 				"    metadata:\n      namespace: shop\n      name: added\n      annotations:\n        kustomize.toolkit.fluxcd.io/force: enabled\n",
 				Target: &stack.PatchSelector{Kind: "Widget"}}}})
-		want := []string{claimWarning("added", `component "raw"`, patchedReason)}
+		want := []string{claimWarning("added", `the bundle of component "config"`, patchedReason)}
 		if !slices.Equal(got, want) {
 			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
 		}
@@ -218,8 +220,8 @@ func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
 		}, Patches: []stack.Patch{{Patch: "- op: replace\n  path: /metadata/name\n  value: renamed\n",
 			Target: &stack.PatchSelector{Kind: "PersistentVolumeClaim", Name: "data"}}}})
 		want := []string{
-			claimWarning("renamed", `component "list"`, annotationReason),
 			claimWarning("tail", `component "tail"`, annotationReason),
+			claimWarning("renamed", `the bundle of component "config"`, patchedReason),
 		}
 		if !slices.Equal(got, want) {
 			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
@@ -236,7 +238,7 @@ func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
 			{Patch: "- op: replace\n  path: /metadata/name\n  value: data\n",
 				Target: &stack.PatchSelector{Kind: "PersistentVolumeClaim", Name: "replacement"}},
 		}})
-		want := []string{claimWarning("data", `component "new"`, annotationReason)}
+		want := []string{claimWarning("data", `component "old"`, patchedReason)}
 		if !slices.Equal(got, want) {
 			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
 		}
@@ -250,13 +252,27 @@ func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
 		got := patchedWarnings(t, &stack.Bundle{Name: "raw", Applications: []*stack.Application{fixedApp("raw", envelope)},
 			Patches: []stack.Patch{{Patch: "- op: replace\n  path: /items/0/metadata/name\n  value: renamed\n",
 				Target: &stack.PatchSelector{Kind: "Widget"}}}})
-		want := []string{claimWarning("renamed", `component "raw"`, annotationReason)}
+		want := []string{claimWarning("renamed", `the bundle of component "raw"`, patchedReason)}
+		if !slices.Equal(got, want) {
+			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
+		}
+	})
+	t.Run("whole annotations tested", func(t *testing.T) {
+		// The patch sees the annotations exactly as Flux's build does: kustomize's
+		// own entries and nothing more.
+		got := patchedWarnings(t, &stack.Bundle{Name: "db", Applications: []*stack.Application{fixedApp("db", claimObject("shop", "data", nil))},
+			Patches: []stack.Patch{{Patch: "- op: test\n  path: /metadata/annotations\n  value:\n" +
+				"    internal.config.kubernetes.io/previousNames: data\n" +
+				"    internal.config.kubernetes.io/previousNamespaces: shop\n" +
+				"    internal.config.kubernetes.io/previousKinds: PersistentVolumeClaim\n" +
+				"- op: add\n  path: /metadata/annotations/kustomize.toolkit.fluxcd.io~1force\n  value: enabled\n",
+				Target: claimKind()}}})
+		want := []string{claimWarning("data", `component "db"`, patchedReason)}
 		if !slices.Equal(got, want) {
 			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
 		}
 	})
 	t.Run("envelope member's annotations tested", func(t *testing.T) {
-		// The patch sees the member's annotations as generated: no origin in them.
 		member := claimMap("data", false)
 		member["metadata"].(map[string]any)["annotations"] = map[string]any{}
 		envelope := collisionObject(&unstructured.Unstructured{Object: map[string]any{
@@ -299,14 +315,12 @@ func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
 			{Patch: "- op: replace\n  path: /metadata/name\n  value: data\n",
 				Target: &stack.PatchSelector{Kind: "PersistentVolumeClaim", Name: "replacement"}},
 		}})
-		want := []string{claimWarning("data", `component "new"`, annotationReason)}
+		want := []string{claimWarning("data", `component "old"`, patchedReason)}
 		if !slices.Equal(got, want) {
 			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
 		}
 	})
 	t.Run("annotations replaced", func(t *testing.T) {
-		// A strategic merge patch replacing the annotations drops the origin, so
-		// the claim is traced by its identity.
 		got := patchedWarnings(t, &stack.Bundle{Name: "db", Applications: []*stack.Application{
 			fixedApp("config", configMap("shop", "settings")),
 			fixedApp("db", claimObject("shop", "data", nil)),
