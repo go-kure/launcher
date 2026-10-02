@@ -116,7 +116,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 				},
 				"endpoint":   str("Object storage address of an inline Bucket source (its spec.endpoint). Required with an inline kind Bucket, and only valid there."),
 				"bucketName": str("Bucket name of an inline Bucket source. Required with an inline kind Bucket, and only valid there."),
-				"provider":   str("Provider of an inline Bucket source: generic (Flux's default), aws, gcp or azure. Only with an inline kind Bucket."),
+				"provider":   {Type: oam.PropertyTypeString, Enum: []any{"generic", "aws", "gcp", "azure"}, Description: "Provider of an inline Bucket source: generic (Flux's default), aws, gcp or azure. Only with an inline kind Bucket."},
 				"region":     str("Region of an inline Bucket source's endpoint. Only with an inline kind Bucket."),
 				"prefix":     str("Object prefix of an inline Bucket source, for server-side filtering. Only with an inline kind Bucket."),
 			},
@@ -249,6 +249,12 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, error) {
 		}
 		if s.Endpoint == "" || s.BucketName == "" {
 			return nil, nil, errors.Errorf("%s: an inline source.kind Bucket requires source.endpoint and source.bucketName", helmType)
+		}
+		// No host, host:port or URL authority holds an "@" but user info does, in
+		// either form (https://user:token@host or user:token@host). The value is
+		// not quoted back, so the credential does not reach the error.
+		if strings.Contains(s.Endpoint, "@") {
+			return nil, nil, errors.Errorf("%s: source.endpoint carries credentials, which an inline Bucket does not take; author a bucket with a secretRef and reference it", helmType)
 		}
 	case s.URL == "" && s.Name == "":
 		return nil, nil, errors.Errorf("%s: source requires either source.url (inline) or source.name (reference)", helmType)

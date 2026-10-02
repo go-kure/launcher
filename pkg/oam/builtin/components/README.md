@@ -2058,7 +2058,10 @@ not part of either change.
     - an inline GitRepository without exactly one `source.ref` field, or with a
       URL that is not `http://` or `https://` (an `ssh://` one needs credentials),
       or with a user or token in the URL;
-    - `url` with an inline Bucket, or one without `endpoint` or `bucketName`;
+    - `url` with an inline Bucket, or one without `endpoint` or `bucketName`, or
+      with a user or token in `endpoint` (any `@`), or with a `provider` other
+      than `generic`, `aws`, `gcp` or `azure` (checked at the helm rule; the
+      `bucket` terminal leaves it to the CRD);
     - `source.ref` other than on an inline GitRepository, and `endpoint`,
       `bucketName`, `provider`, `region`, `prefix` other than on an inline
       Bucket;
