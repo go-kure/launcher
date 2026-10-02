@@ -473,7 +473,19 @@ func helmValuesConfigMap(name string, release map[string]any) (*oam.Trait, error
 	case []any:
 		release["valuesFrom"] = append([]any{entry}, authored...)
 	default:
-		return nil, errors.Errorf("%s: valuesFrom must be a list, got %T", helmType, authored)
+		// A library caller may pass a typed list ([]map[string]any,
+		// []helmv2.ValuesReference). The helmrelease decodes valuesFrom through
+		// JSON, so normalize through JSON too; anything that is not a JSON array
+		// is refused here.
+		var list []any
+		encoded, err := json.Marshal(authored)
+		if err == nil {
+			err = json.Unmarshal(encoded, &list)
+		}
+		if err != nil {
+			return nil, errors.Errorf("%s: valuesFrom must be a list, got %T", helmType, authored)
+		}
+		release["valuesFrom"] = append([]any{entry}, list...)
 	}
 	return &oam.Trait{
 		Type: "configmap",

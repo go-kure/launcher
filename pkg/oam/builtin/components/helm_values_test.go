@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -132,6 +133,25 @@ func TestHelmRule_ValuesConfigMap(t *testing.T) {
 	want := map[string]any{"replicaCount": json.Number("2"), "image": map[string]any{"tag": "1.2"}, "big": json.Number("18446744073709551615")}
 	if !reflect.DeepEqual(stored, want) {
 		t.Errorf("stored values %v, want %v", stored, want)
+	}
+}
+
+// TestHelmRule_ValuesConfigMapTypedValuesFrom: a library caller's typed
+// valuesFrom list is accepted as the helmrelease would decode it, the
+// generated entry ahead of the authored ones.
+func TestHelmRule_ValuesConfigMapTypedValuesFrom(t *testing.T) {
+	for _, authored := range []any{
+		[]map[string]any{{"kind": "Secret", "name": "creds"}},
+		[]helmv2.ValuesReference{{Kind: "Secret", Name: "creds"}},
+	} {
+		props := helmValuesProps(map[string]any{"a": 1})
+		props["valuesFrom"] = authored
+		release, trait := lowerHelmValues(t, "web", props)
+		assertValuesTrait(t, release, trait)
+		from := release.Properties["valuesFrom"].([]any)
+		if len(from) != 2 || from[1].(map[string]any)["name"] != "creds" || from[1].(map[string]any)["kind"] != "Secret" {
+			t.Errorf("%T: valuesFrom = %v, want generated then creds", authored, from)
+		}
 	}
 }
 
