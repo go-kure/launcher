@@ -160,7 +160,13 @@ func (h reorderTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *sta
 		name := bundle.Applications[i].Name + "-replaced"
 		bundle.Applications[i] = stack.NewApplication(name, app.Namespace, &namedConfigMapConfig{name: name, namespace: app.Namespace})
 	case "rename":
-		bundle.Applications[i].Name += "-renamed"
+		// Its own application by pointer: a sibling group member's is not in the
+		// bundle.
+		renamed := app
+		if h.target != "" {
+			renamed = bundle.Applications[i]
+		}
+		renamed.Name += "-renamed"
 	case "remove":
 		bundle.Applications = slices.Delete(bundle.Applications, i, i+1)
 	}
@@ -304,15 +310,16 @@ type policyOpConfig struct {
 }
 
 func (c *policyOpConfig) ApplyPolicy(Policy) error {
-	i := slices.Index(c.bundle.Applications, c.own)
+	// By pointer: a sibling group member's application is not in the bundle.
+	target := c.own
 	if c.target != "" {
-		i = slices.IndexFunc(c.bundle.Applications, func(a *stack.Application) bool { return a.Name == c.target })
+		target = c.bundle.Applications[slices.IndexFunc(c.bundle.Applications, func(a *stack.Application) bool { return a.Name == c.target })]
 	}
 	switch c.op {
 	case "rename":
-		c.bundle.Applications[i].Name += "-renamed"
+		target.Name += "-renamed"
 	case "remove":
-		c.bundle.Applications = slices.Delete(c.bundle.Applications, i, i+1)
+		c.bundle.Applications = slices.DeleteFunc(c.bundle.Applications, func(a *stack.Application) bool { return a == target })
 	}
 	return nil
 }
@@ -414,6 +421,46 @@ func (pairRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResu
 		{Name: comp.Name, Type: "webservice", Properties: map[string]any{"configMap": comp.Name + "-a"}, Traits: append([]Trait(nil), comp.Traits...)},
 		{Name: comp.Name, Type: "statefulset", Properties: map[string]any{"configMap": comp.Name + "-b"}, Traits: stampsOnly},
 	}}, nil
+}
+
+// TestApplyTraits_RefusesRenamedSiblingMember is go-kure/launcher#752: a trait
+// on a sibling group runs on a member's application, which the bundle does not
+// hold (the group's does), so a member is checked by its name. A trait or a
+// trait sub-application's policy that renames it fails the transform: the
+// member would generate its objects under a name the group's health check does
+// not name.
+func TestApplyTraits_RefusesRenamedSiblingMember(t *testing.T) {
+	const member = `renamed the application of member "webservice" of sibling group "web" from "web" to "web-renamed"; `
+	for name, tc := range map[string]struct {
+		typ     string
+		handler TraitHandler
+		want    string
+	}{
+		"trait renames its member": {"reorder0", reorderTraitHandler{op: "rename"},
+			`component "web" trait "reorder0" ` + member + entryAppContract},
+		"policy renames a member": {"policyop0", policyOpTraitHandler{op: "rename"},
+			`component "web" trait "policyop0": the ApplyPolicy of sub-application "web-sub" ` + member + entryAppPolicyContract},
+		"no-op trait":  {"reorder0", reorderTraitHandler{}, ""},
+		"no-op policy": {"policyop0", policyOpTraitHandler{}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := inDocumentTransformer()
+			tr.RegisterTrait(tc.typ, tc.handler)
+			tr.RegisterComponentLowering(pairRule{})
+			app := makeApp("shop", Component{Name: "web", Type: "pair", Properties: map[string]any{}, Traits: []Trait{{Type: tc.typ}}})
+			app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+			_, _, err := tr.TransformWithPolicy(app, TransformContext{})
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("TransformWithPolicy: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one containing %q", err, tc.want)
+			}
+		})
+	}
 }
 
 // TestDecorateSubApplications_SiblingGroupOnce pins that a decorating trait a
