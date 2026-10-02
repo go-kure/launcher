@@ -41,6 +41,7 @@ func TestURLRefusalsHideCredential(t *testing.T) {
 		notAllowed = " is not in allowed registries "
 		hidden     = "the url's userinfo, IPv6 zone, query or fragment, which no entry matches, is not shown"
 		implicit   = "the url does not name its registry explicitly"
+		notShown   = "it is not shown, since the url's userinfo, IPv6 zone, query or fragment cannot be told apart from its host"
 	)
 	cases := []struct {
 		name, typ string
@@ -61,6 +62,14 @@ func TestURLRefusalsHideCredential(t *testing.T) {
 			[]string{`source registry "[fe80::1]:8443"` + notAllowed, hidden}},
 		{"manifests, IPv6 zone holding a bracket", "manifests", url("https://[fe80::1%25zone]s3cr3t]:8443/x.yaml"), []string{"allowed.example"},
 			[]string{`source registry "[fe80::1]:8443"` + notAllowed, hidden}},
+		{"oci, userinfo holding a ?", "oci", ociSrc("oci://deploy:s3?cr3t@ghcr.io/org/app"), []string{"ghcr.io"},
+			[]string{"source registry is not in allowed registries", notShown}},
+		{"helmrepository, userinfo holding a #", "helmrepository", url("oci://deploy:s3#cr3t@ghcr.io/charts"), []string{"ghcr.io"},
+			[]string{"helmrepository: url: source registry is not in allowed registries", notShown}},
+		{"gitrepository, IPv6 zone holding the userinfo", "gitrepository", url("https://[fe80::1%zone@s3cr3t]:8443/org/repo"), []string{"[fe80::1]:8443"},
+			[]string{"gitrepository: url: source registry is not in allowed registries", notShown}},
+		{"bucket endpoint, IPv6 zone holding the userinfo", "bucket", bucket("[fe80::1%zone@s3cr3t]:9000", ""), []string{"[fe80::1]:9000"},
+			[]string{"bucket: endpoint: source registry is not in allowed registries", notShown}},
 		{"oci, user and token", "oci", ociSrc("oci://deploy:s3cr3t@ghcr.io/org/app"), []string{"ghcr.io"},
 			[]string{`source registry "ghcr.io"` + notAllowed, hidden}},
 		{"helmrepository https, user and token", "helmrepository", url("https://deploy:s3cr3t@charts.example.com/stable"), []string{"charts.example.com"},
@@ -98,6 +107,8 @@ func TestURLRefusalsHideCredential(t *testing.T) {
 		// The Amazon S3 endpoint rule.
 		{"bucket, Amazon S3 endpoint", "bucket", bucket("deploy:s3cr3t@s3.amazonaws.com", "aws"), []string{"s3.amazonaws.com"},
 			[]string{`bucket: endpoint: "s3.amazonaws.com" is treated as an Amazon S3 host`}},
+		{"bucket, Amazon S3 endpoint, userinfo holding a ?", "bucket", bucket("deploy:s3?cr3t@s3.amazonaws.com", "aws"), []string{"s3.amazonaws.com"},
+			[]string{"bucket: endpoint: (host not shown) is treated as an Amazon S3 host"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
