@@ -191,6 +191,81 @@ spec:
 	}
 }
 
+// TestBuild_PatchedForceWarningLeavesOutputUntagged pins that reading a bundle's
+// patched volumes changes nothing kurel emits: the origin annotation the patch
+// build carries reaches neither the manifest output nor any file a delivery
+// build writes.
+func TestBuild_PatchedForceWarningLeavesOutputUntagged(t *testing.T) {
+	const app = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    - name: media
+      type: persistentvolumeclaim
+      properties:
+        size: 20Gi
+      traits:
+        - type: fluxcd-patches
+          properties:
+            patches:
+              - target:
+                  kind: PersistentVolumeClaim
+                patch: |
+                  - op: add
+                    path: /metadata/annotations
+                    value:
+                      kustomize.toolkit.fluxcd.io/force: enabled
+`
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", app)
+	profile := filepath.Join(deliveryTestdata, "cluster.yaml")
+	build := func(args ...string) string {
+		t.Helper()
+		cmd := NewKurelCommand()
+		var stdout, stderr bytes.Buffer
+		cmd.SetOut(&stdout)
+		cmd.SetErr(&stderr)
+		cmd.SetArgs(append([]string{"build", appPath, "--profile", profile}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("build %q: %v\nstderr: %s", args, err, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "set by its bundle's patches") {
+			t.Fatalf("build %q did not read the patched claim: stderr = %q", args, stderr.String())
+		}
+		return stdout.String()
+	}
+	const tag = "internal.config.kubernetes.io"
+	if out := build(); strings.Contains(out, tag) {
+		t.Errorf("manifest output carries %s:\n%s", tag, out)
+	}
+	outDir := filepath.Join(dir, "out")
+	build("-o", outDir, "--oci-repository", testOCIRepository)
+	files := 0
+	err := filepath.WalkDir(outDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files++
+		if bytes.Contains(data, []byte(tag)) {
+			t.Errorf("%s carries %s:\n%s", path, tag, data)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if files == 0 {
+		t.Fatal("the delivery build wrote no file")
+	}
+}
+
 // TestWarnForcedVolumes_ListMembers pins that a claim inside a list a `manifests`
 // component generates is warned about as Flux applies it: by its own annotation,
 // or by the bundle's force. The manifest parser expands the outer list itself, so
