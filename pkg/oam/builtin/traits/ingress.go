@@ -21,8 +21,8 @@ type servicePortProvider interface {
 	ServicePort() int32
 }
 
-// serviceBackendNamer is implemented by component configs whose Kubernetes Service
-// name differs from the application name (e.g. StatefulsetConfig.ServiceName).
+// serviceBackendNamer is implemented by component configs that name their Kubernetes
+// Service explicitly (e.g. a port-less headless ServiceConfig).
 type serviceBackendNamer interface {
 	BackendServiceName() string
 }

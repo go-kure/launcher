@@ -81,11 +81,6 @@ func TestWorkloadKinds_ServiceAccountIdentityIsSingleSourced(t *testing.T) {
 // "" — the convention decoratorBase.ServiceAccountName documents and the rbac
 // trait implements — and the Application's own name stands in.
 //
-// statefulset names its headless Service by serviceName, which defaults to the
-// component name, not to the Application's; a nameless statefulset therefore
-// authors one here (TestStatefulsetConfig_NamelessWithoutServiceNameRefused
-// covers the refusal otherwise, go-kure/launcher#546).
-//
 // webservice is not a case: it is a lowering rule, not a handler a library
 // caller converts with directly, and the engine only lowers a named component.
 func TestWorkloadKinds_NamelessConfigFallsBackToApplication(t *testing.T) {
@@ -94,12 +89,8 @@ func TestWorkloadKinds_NamelessConfigFallsBackToApplication(t *testing.T) {
 			continue
 		}
 		t.Run(k.name, func(t *testing.T) {
-			props := k.props
-			if k.name == "statefulset" {
-				props = withProps(k.props, map[string]any{"serviceName": "db"})
-			}
 			cfg, err := k.handler.ToApplicationConfig(
-				&oam.Component{Name: "", Type: k.name, Properties: props}, "default")
+				&oam.Component{Name: "", Type: k.name, Properties: k.props}, "default")
 			if err != nil {
 				t.Fatalf("ToApplicationConfig: %v", err)
 			}
