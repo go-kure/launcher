@@ -202,9 +202,7 @@ func TestFluxNamespace_UnreadTraitObjectsStay(t *testing.T) {
 	for _, typ := range []string{"certificate", "pvc", "networkpolicy", "cilium-networkpolicy", "ingress", "httproute"} {
 		traits = append(traits, oam.Trait{Type: typ, Properties: traitLabelFixtures[typ].props})
 	}
-	// Inline values: the fixture's values ConfigMap is the release's own object,
-	// which moves with it, not a trait's.
-	hr := fluxNSComponent(t, "c", "helmrelease", map[string]any{"valuesMode": "inline",
+	hr := fluxNSComponent(t, "c", "helmrelease", map[string]any{
 		"valuesFrom": []any{map[string]any{"kind": "ConfigMap", "name": "read"}}}, traits...)
 	got := fluxNSObjects(t, hr)
 	for key, ns := range got {

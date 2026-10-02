@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
@@ -74,8 +76,10 @@ var helmFluxOnlyKeys = []string{"interval", "releaseName", "targetNamespace", "d
 // HelmRelease reads (helmFluxOnlyKeys), a source reference, valuesMode:
 // configMap, and an OCI source without a version, each with a helm: message
 // naming what the author wrote rather than the terminal it would reach.
-// valuesMode is forwarded only when authored; the rule has no registration-time
-// default.
+// valuesMode has no registration-time default and is never forwarded: under
+// configMap with non-empty values the rule moves the values into a configmap
+// trait on the helmrelease and prepends a valuesFrom entry for it
+// (helmValuesConfigMap).
 type HelmRule struct{}
 
 // ComponentType claims the "helm" component type at the component lowering
@@ -124,7 +128,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 			},
 		},
 		"values":          object("Helm values tree. Must be representable as JSON."),
-		"valuesMode":      {Type: oam.PropertyTypeString, Enum: []any{"inline", "configMap"}, Description: "How values reach the HelmRelease: inline keeps them in spec.values; configMap moves them into a generated ConfigMap. Unset means inline. configMap is refused under delivery: template."},
+		"valuesMode":      {Type: oam.PropertyTypeString, Enum: []any{"inline", "configMap"}, Description: "How values reach the HelmRelease: inline keeps them in spec.values; configMap moves non-empty values into a ConfigMap emitted by a configmap trait on the HelmRelease, referenced by a valuesFrom entry placed before the authored ones. Unset means inline. configMap is refused under delivery: template."},
 		"interval":        str("HelmRelease spec.interval as a Flux duration (default 60m). The generated source keeps its own default. Refused under delivery: template."),
 		"releaseName":     str("HelmRelease spec.releaseName. Refused under delivery: template."),
 		"targetNamespace": str("HelmRelease spec.targetNamespace. Refused under delivery: template."),
@@ -308,8 +312,15 @@ const fluxUserinfoRemedy = ", which would be written in plain text into the gene
 func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmProperties, passthrough map[string]any) (oam.LoweringResult, error) {
 	src := props.Source
 	release := maps.Clone(passthrough)
-	if props.ValuesMode != "" {
-		release["valuesMode"] = props.ValuesMode
+	traits := comp.Traits
+	if props.ValuesMode == "configMap" {
+		trait, err := helmValuesConfigMap(comp.Name, release)
+		if err != nil {
+			return oam.LoweringResult{}, err
+		}
+		if trait != nil {
+			traits = append(slices.Clone(comp.Traits), *trait)
+		}
 	}
 
 	kind := src.Kind
@@ -396,10 +407,90 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 		Name:        comp.Name,
 		Type:        "helmrelease",
 		Properties:  release,
-		Traits:      comp.Traits,
+		Traits:      traits,
 		Annotations: comp.Annotations,
 	})
 	return result, nil
+}
+
+// helmValuesKey is the data key the values ConfigMap stores the serialized
+// values under, and the valuesKey its valuesFrom entry names. The stored bytes
+// are JSON (a YAML subset, which is how Flux reads a valuesFrom value), so the
+// key says what they are.
+const helmValuesKey = "values.json"
+
+// helmValuesHashLen is how many hex digits of the values digest the values
+// ConfigMap's name carries.
+const helmValuesHashLen = 10
+
+// helmValuesConfigMap implements valuesMode: configMap on release, the
+// helmrelease properties lowerHelmFlux builds. It removes values and, when
+// they are non-empty, prepends a valuesFrom entry for a ConfigMap named
+// helmValuesConfigMapName and returns the configmap trait that emits it, for
+// the helmrelease to carry. The entry goes ahead of the authored ones, so an
+// authored entry still wins on a shared key, as Flux merges valuesFrom in
+// order. Absent or empty values return a nil trait and no entry.
+//
+// The trait is the configmap trait as authored documents use it, so the
+// ConfigMap follows the HelmRelease to a Flux namespace (it reads the
+// ConfigMap through valuesFrom) and is the helmrelease component's object for
+// pruning and replacement. It is not yet built through the configmap kind's
+// own code.
+//
+// The values are serialized once. Those exact bytes are stored in the
+// ConfigMap and hashed into its name, so the name changes whenever the
+// content does: the HelmRelease's spec changes with it, which makes Flux
+// reconcile a values-only edit, and two components with identical values
+// carry the same hash.
+func helmValuesConfigMap(name string, release map[string]any) (*oam.Trait, error) {
+	raw, ok := release["values"]
+	delete(release, "values")
+	if !ok {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, errors.Errorf("%s: values is not representable as JSON: %w", helmType, err)
+	}
+	values, err := helmReleaseValuesMap(&apiextensionsv1.JSON{Raw: encoded})
+	if err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return nil, nil
+	}
+	data, err := json.MarshalIndent(values, "", "  ")
+	if err != nil {
+		return nil, errors.Errorf("%s: values is not representable as JSON: %w", helmType, err)
+	}
+	sum := sha256.Sum256(data)
+	cmName := helmValuesConfigMapName(name, hex.EncodeToString(sum[:]))
+
+	entry := map[string]any{"kind": "ConfigMap", "name": cmName, "valuesKey": helmValuesKey}
+	switch authored := release["valuesFrom"].(type) {
+	case nil:
+		release["valuesFrom"] = []any{entry}
+	case []any:
+		release["valuesFrom"] = append([]any{entry}, authored...)
+	default:
+		return nil, errors.Errorf("%s: valuesFrom must be a list, got %T", helmType, authored)
+	}
+	return &oam.Trait{
+		Type: "configmap",
+		Properties: map[string]any{
+			"name": cmName,
+			"data": map[string]any{helmValuesKey: string(data)},
+		},
+	}, nil
+}
+
+// helmValuesConfigMapName names the values ConfigMap of component name whose
+// serialized values have the hex digest valuesDigest: boundedResourceName
+// with the suffix "-values-<first 10 digest digits>". The suffix survives
+// truncation, so the name always carries the values hash and is always a legal
+// DNS-1123 subdomain within 253 bytes.
+func helmValuesConfigMapName(name, valuesDigest string) string {
+	return boundedResourceName(name, "-values-"+valuesDigest[:helmValuesHashLen])
 }
 
 // plainSourceURL reports whether raw is exactly an http:// or https:// URL made

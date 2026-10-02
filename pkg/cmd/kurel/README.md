@@ -226,9 +226,10 @@ under `delivery: template`, which lowers to it — see the
 [Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
 helmtemplate section. Any other `LayoutAugmenter` that doesn't implement
 `oam.LayoutAugmentationCoverage` at all still fails closed, the same as before
-this opt-out existed. The kind-named `helmrelease` component is not a
-`LayoutAugmenter`: its `valuesMode: configMap` values `ConfigMap` is part of
-its plain `Generate` output, so `build` emits it alongside the HelmRelease.
+this opt-out existed. A `helm` component under `valuesMode: configMap` is not a
+`LayoutAugmenter` either: its values `ConfigMap` comes from a `configmap` trait
+on the `helmrelease` it lowers to, ordinary trait output, so `build` emits it
+after the HelmRelease.
 
 ### Flux delivery output
 
