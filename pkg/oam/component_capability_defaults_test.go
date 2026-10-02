@@ -128,7 +128,9 @@ func TestComponentCapabilityDefaults_CopiesValues(t *testing.T) {
 }
 
 // TestComponentCapabilityDefaults_UncopyableValueRefused: a filled value that cannot
-// be copied fails the transform rather than being shared with the profile.
+// be copied fails the transform rather than being shared with the profile. Through
+// TransformWithPolicy the binding is refused before any component is built
+// (go-kure/launcher#756); called directly, the fill refuses it itself.
 func TestComponentCapabilityDefaults_UncopyableValueRefused(t *testing.T) {
 	h := &defaultsComponentHandler{}
 	tr := NewTransformer(map[string]ComponentHandler{"store": h}, nil)
@@ -138,11 +140,16 @@ func TestComponentCapabilityDefaults_UncopyableValueRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("TransformWithPolicy succeeded, want an error for an uncopyable rendering value")
 	}
-	if !strings.Contains(err.Error(), `component "data"`) || !strings.Contains(err.Error(), `capability "store" defaults`) {
-		t.Errorf("error %q does not name the component and the capability", err)
+	if !strings.Contains(err.Error(), `capability "store" rendering key "class"`) {
+		t.Errorf("error %q does not name the capability and the rendering key", err)
 	}
 	if h.got != nil {
 		t.Errorf("handler ran with %v", h.got)
+	}
+
+	_, err = applyComponentCapabilityDefaults(h, map[string]any{}, TransformContext{Capabilities: caps})
+	if err == nil || !strings.Contains(err.Error(), `capability "store" defaults: rendering key "class"`) {
+		t.Errorf("applyComponentCapabilityDefaults error = %v, want one naming the capability and the key", err)
 	}
 }
 

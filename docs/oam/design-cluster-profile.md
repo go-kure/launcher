@@ -129,6 +129,11 @@ resolved = rendering ∪ application-properties   (application overwrites)
 An application property authored as `null` is absent, so it does not overwrite: the
 rendering's value stands (go-kure/launcher#742).
 
+A rendering value reaches the handler as a copy with its decoded type kept, so a `3`
+stays an integer. The transform refuses a rendering holding a `null` below the top
+level, `NaN` or `±Inf`, or a Go value that is not a string, boolean, number, list or
+string-keyed object, before it builds anything (go-kure/launcher#756).
+
 Example:
 
 ```yaml
