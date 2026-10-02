@@ -326,3 +326,72 @@ func TestConfigMapHandler_TotalSizeLimit(t *testing.T) {
 		})
 	}
 }
+
+// With several bad entries, the one reported is the first in sorted key
+// order, whatever order the map iterates in. Five bad keys and fifty runs make
+// an unsorted loop report "a" every time with a chance of about 5^-50.
+func TestConfigMapHandler_RefusalsInSortedKeyOrder(t *testing.T) {
+	h := &components.ConfigMapHandler{}
+	// five returns keys a..e (in scrambled literal order), each with suffix
+	// appended and mapped to v.
+	five := func(suffix string, v any) map[string]any {
+		m := map[string]any{}
+		for _, k := range []string{"e", "c", "a", "d", "b"} {
+			m[k+suffix] = v
+		}
+		return m
+	}
+	for name, tc := range map[string]struct {
+		props map[string]any
+		want  string
+	}{
+		"invalid data keys":       {map[string]any{"data": five("/x", "x")}, `data: invalid key "a/x"`},
+		"non-string data values":  {map[string]any{"data": five("", 1)}, "data.a: must be a string"},
+		"invalid binaryData keys": {map[string]any{"binaryData": five("/x", "eA==")}, `binaryData: invalid key "a/x"`},
+		"bad base64 values":       {map[string]any{"binaryData": five("", "not base64!")}, "binaryData.a: invalid base64"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for range 50 {
+				_, err := kindConfig(t, h, "configmap", "settings", tc.props)
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// CheckConfigMapSize is the check the configmap trait shares: it sums the data
+// values and the decoded binaryData values against corev1.MaxSecretSize.
+func TestCheckConfigMapSize(t *testing.T) {
+	half := corev1.MaxSecretSize / 2
+	for name, tc := range map[string]struct {
+		data    map[string]string
+		binary  map[string][]byte
+		refused bool
+	}{
+		"empty": {},
+		"at the limit across both": {
+			data:   map[string]string{"t": strings.Repeat("x", half)},
+			binary: map[string][]byte{"b": make([]byte, corev1.MaxSecretSize-half)},
+		},
+		"one byte over across both": {
+			data:    map[string]string{"t": strings.Repeat("x", half)},
+			binary:  map[string][]byte{"b": make([]byte, corev1.MaxSecretSize-half+1)},
+			refused: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := components.CheckConfigMapSize(tc.data, tc.binary)
+			if tc.refused {
+				if err == nil || !strings.Contains(err.Error(), "hold 1048577 bytes, over the 1048576-byte limit") {
+					t.Fatalf("err = %v, want the size-limit refusal", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err = %v, want nil", err)
+			}
+		})
+	}
+}
