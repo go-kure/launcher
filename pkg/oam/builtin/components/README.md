@@ -1987,13 +1987,16 @@ not part of either change.
   component-position lowering rule (`HelmRule`), not a handler, that lowers to the
   kind-named terminals below. Properties: `chart`, `version`, `delivery`
   (`flux` default | `template`), `source` (inline `url` with optional `kind`, or a
-  reference `{name, kind, namespace}`), `values`, `valuesMode` (`inline` |
+  reference `{name, kind, namespace}` to an existing HelmRepository, GitRepository,
+  Bucket, OCIRepository or HelmChart), `values`, `valuesMode` (`inline` |
   `configMap`), and the HelmRelease keys `interval`, `releaseName`,
   `targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
   - `delivery: flux` emits a `helmrelease` under the authored name, with the
-    authored traits and annotations. A HelmRepository source becomes
-    `chart.spec.sourceRef`; an OCIRepository or HelmChart source becomes
-    `chartRef`. `values` and the HelmRelease keys are forwarded verbatim, so their
+    authored traits and annotations. A HelmRepository source, or a referenced
+    GitRepository or Bucket source (go-kure/launcher#336), becomes
+    `chart.spec.sourceRef` with `chart` required: the chart name, or for a
+    GitRepository or Bucket the chart's path in the fetched artifact. An
+    OCIRepository or HelmChart source becomes `chartRef`. `values` and the HelmRelease keys are forwarded verbatim, so their
     shape is the `helmrelease` terminal's to check. `valuesMode` is forwarded only
     when authored: the rule has no registration-time default.
   - An inline `url` also emits the source: a `helmrepository` with only the URL
@@ -2035,6 +2038,10 @@ not part of either change.
     - `chart` with an OCIRepository or HelmChart source;
     - `version` with a referenced OCIRepository or HelmChart source, which pins
       its own;
+    - `version` with a GitRepository or Bucket source: Flux reads that chart at
+      the source's fetched revision and ignores `version`;
+    - `source.kind` GitRepository or Bucket with an inline `url` (only the
+      reference form exists for those kinds);
     - two keys equal ignoring case, at the top level or inside `source`
       (`chart` and `Chart`): the decode would match both to one field and keep
       either.
