@@ -175,7 +175,7 @@ func TestPodPortNames_Accepted(t *testing.T) {
 				sidecarWithPorts("a", map[string]any{"containerPort": 9090}),
 				sidecarWithPorts("b", map[string]any{"containerPort": 9091}),
 			}}},
-		{"statefulset without port", "statefulset", map[string]any{"image": "ghcr.io/org/app:v1", "sidecars": []any{
+		{"statefulset without main ports", "statefulset", map[string]any{"image": "ghcr.io/org/app:v1", "sidecars": []any{
 			sidecarWithPorts("proxy", map[string]any{"name": "tcp", "containerPort": 15000}),
 		}}},
 		{"worker without main ports", "worker", map[string]any{"image": "ghcr.io/org/app:v1", "sidecars": []any{

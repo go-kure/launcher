@@ -1180,12 +1180,13 @@ func parseReplicas(props map[string]any, defaultVal int32) (int32, bool, error) 
 // tcpSocket port by looking it up in that same container's own declared
 // Ports, so a string port can never resolve there and is rejected outright
 // rather than authoring a probe/lifecycle hook that is guaranteed to fail at
-// runtime. Kinds that do declare a main-container port pass the port's own
-// presence (e.g. `c.Port > 0`) through here instead of a blanket true/false,
-// since the port is itself optional on some of those kinds (daemonset,
-// statefulset) — see each ToApplicationConfig call site. matchName is the
-// exact `ports[].name` the kind's builder actually declares (e.g. "http",
-// "tcp"); when namedPortsAllowed is true a named port must equal matchName,
+// runtime. Kinds whose main container declares ports only when authored
+// (deployment, daemonset, statefulset, job, cronjob) pass `len(ports) > 0`
+// with an empty matchName and check the names against the whole list
+// afterwards (checkNamedPortsDeclared); webservice, whose container always
+// declares "http", passes true. matchName is the
+// exact `ports[].name` the kind's builder actually declares (e.g. "http");
+// when it is non-empty a named port must equal matchName,
 // since the kubelet resolves it only against a name the container itself
 // declares — a syntactically valid but undeclared name (e.g. "metrics" on a
 // component whose only declared port is "http") would build successfully but
@@ -1873,8 +1874,9 @@ func parseInt32Field(raw map[string]any, key, label string) (int32, bool, error)
 	return int32(i), present, err //nolint:gosec // bounded to int32 by parseIntField
 }
 
-// parsePortField is parseIntField over the port range lo–65535. lo is 1, or 0
-// where the component reads an explicit 0 as "no port" (daemonset, statefulset).
+// parsePortField is parseIntField over the port range lo–65535. lo is 1 for
+// every caller today; 0 would read an explicit 0 as "no port", as daemonset and
+// statefulset did before they dropped `port` (go-kure/launcher#690).
 func parsePortField(raw map[string]any, key, label string, lo int64) (int32, bool, error) {
 	i, present, err := parseIntField(raw, key, label, lo, 65535)
 	return int32(i), present, err //nolint:gosec // bounded to lo..65535 by parseIntField

@@ -61,7 +61,7 @@ type serviceRoutingTargeter interface {
 
 // componentServiceName returns the Kubernetes Service name a component owns and whether it owns one.
 // A component is a valid backendRef target only if it declares an explicit BackendServiceName or a
-// positive ServicePort; a Service-less component (e.g. a worker, or a daemonset with no port) owns
+// positive ServicePort; a Service-less component (e.g. a worker, a deployment or a daemonset) owns
 // no Service, so its name must NOT enter serviceToComponent — otherwise it would shadow a bare
 // external Service of the same name (misrouting a go-kure/launcher#239 backendSelector target) or fabricate a false
 // R3 ambiguity against another component's real Service name.

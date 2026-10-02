@@ -72,8 +72,8 @@ func checkImplicitBackend(app *stack.Application, location string) error {
 // checkTraitServicePort refuses a trait-level servicePort on a component that owns a Service and
 // knows it has no port: a port-less headless service (go-kure/launcher#690). servicePort would
 // route to a port that Service lacks. A component with a service port is refused separately, with
-// its own message; one that does not know its ports (helmchart, a port-less daemonset) is not
-// refused.
+// its own message; one that does not know its ports (helmchart, or a kind with no Service such
+// as daemonset) is not refused.
 func checkTraitServicePort(app *stack.Application) error {
 	pn, ok := app.Config.(servicePortNamer)
 	if !ok {
