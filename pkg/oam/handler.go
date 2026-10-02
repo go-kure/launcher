@@ -120,14 +120,18 @@ type ComponentNamed interface {
 }
 
 // ServiceAccountNamer is an optional interface for component ApplicationConfig
-// types whose pods run as a ServiceAccount. It returns the effective name: the
-// authored `serviceAccountName` when the component set one, else the
-// per-component ServiceAccount the handler generates (named after the
-// component). Traits that bind RBAC or other identity to the workload (the rbac
-// trait's RoleBinding subject) read this instead of assuming the component name,
-// so an authored serviceAccountName is honoured end to end.
+// types. name is the ServiceAccount the component's pods run as: the authored
+// `serviceAccountName`, or "" when none was authored — no pod kind generates a
+// per-component account (go-kure/launcher#702), so such pods run as the
+// namespace's `default` account. A role rule that generates one hands its pod
+// member that account's name, so the member answers it. runsPods reports
+// whether the config runs pods at all; a wrapper that forwards the interface (a
+// trait decorator, a sibling group) reports false when nothing it wraps does. Traits that bind RBAC or
+// other identity to the workload (the rbac trait's RoleBinding subject) read
+// this instead of assuming the component name, so an authored
+// serviceAccountName is honoured end to end and a pod without one is refused.
 type ServiceAccountNamer interface {
-	ServiceAccountName() string
+	ServiceAccountName() (name string, runsPods bool)
 }
 
 // LayoutAugmentationCoverage is an optional interface for ApplicationConfig

@@ -81,13 +81,19 @@ func (h *RBACHandler) parseProperties(props map[string]any, app *stack.Applicati
 	}
 
 	// The binding subject is the ServiceAccount the component's pods actually
-	// run as: an authored serviceAccountName when the component set one (see
-	// oam.ServiceAccountNamer), else the per-component account named after
-	// the component.
+	// run as: the authored serviceAccountName (see oam.ServiceAccountNamer).
+	// A pod kind without one runs as the namespace's `default` account, which
+	// no kind generates (go-kure/launcher#702), so binding rules to it is
+	// refused rather than granted to every pod in the namespace. A config
+	// that runs no pods keeps the account named after the component.
 	serviceAccountName := app.Name
 	if namer, ok := app.Config.(oam.ServiceAccountNamer); ok {
-		if name := namer.ServiceAccountName(); name != "" {
+		name, runsPods := namer.ServiceAccountName()
+		switch {
+		case name != "":
 			serviceAccountName = name
+		case runsPods:
+			return nil, errors.Errorf("rbac: component %q runs as no ServiceAccount of its own; set serviceAccountName to the existing ServiceAccount the rules are granted to", app.Name)
 		}
 	}
 

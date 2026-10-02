@@ -716,7 +716,7 @@ func TestTopologySpread_ForwardsServiceAccountName(t *testing.T) {
 	if !ok {
 		t.Fatal("decorated config does not implement oam.ServiceAccountNamer")
 	}
-	if got := namer.ServiceAccountName(); got != "shared-sa" {
+	if got, _ := namer.ServiceAccountName(); got != "shared-sa" {
 		t.Errorf("ServiceAccountName() = %q, want shared-sa", got)
 	}
 }

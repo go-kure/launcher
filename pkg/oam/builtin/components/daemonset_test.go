@@ -66,8 +66,8 @@ func TestDaemonsetHandler_Generate_ResourceTypes(t *testing.T) {
 	if !foundDS {
 		t.Error("expected DaemonSet")
 	}
-	if !foundSA {
-		t.Error("expected ServiceAccount")
+	if foundSA {
+		t.Error("generated a ServiceAccount; a pod kind generates none (go-kure/launcher#702)")
 	}
 }
 
@@ -449,8 +449,8 @@ func TestDaemonsetConfig_PortsEmitNoService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if len(objects) != 2 {
-		t.Fatalf("expected 2 objects (DaemonSet + ServiceAccount), got %d", len(objects))
+	if len(objects) != 1 {
+		t.Fatalf("expected 1 object (the DaemonSet), got %d", len(objects))
 	}
 	ds, ok := (*objects[0]).(*appsv1.DaemonSet)
 	if !ok {
@@ -459,9 +459,6 @@ func TestDaemonsetConfig_PortsEmitNoService(t *testing.T) {
 	want := []corev1.ContainerPort{{Name: "http", ContainerPort: 9090, Protocol: corev1.ProtocolTCP}}
 	if got := ds.Spec.Template.Spec.Containers[0].Ports; !reflect.DeepEqual(got, want) {
 		t.Errorf("container ports = %#v, want %#v", got, want)
-	}
-	if _, ok := (*objects[1]).(*corev1.ServiceAccount); !ok {
-		t.Errorf("objects[1] = %T, want *ServiceAccount", *objects[1])
 	}
 }
 
@@ -489,8 +486,8 @@ func TestDaemonsetConfig_WithoutPort(t *testing.T) {
 			t.Error("expected no Service")
 		}
 	}
-	if len(objects) != 2 {
-		t.Errorf("expected 2 objects (DaemonSet + ServiceAccount), got %d", len(objects))
+	if len(objects) != 1 {
+		t.Errorf("expected 1 object (the DaemonSet), got %d", len(objects))
 	}
 }
 

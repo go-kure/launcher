@@ -32,9 +32,9 @@ import (
 // container/volume/scheduling fields the kind handler supplies.
 //
 // ServiceAccountName, when authored, names an existing ServiceAccount the pod
-// runs as; the kind handler then does not generate its per-component
-// ServiceAccount (see each handler's Generate). Empty means "use the
-// per-component ServiceAccount named after the component", as before.
+// runs as. No kind generates one (go-kure/launcher#702): empty means the pod
+// runs as the namespace's `default` account, with its token unmounted unless
+// AutomountServiceAccountToken is authored (see buildPodSpec).
 type PodSpecConfig struct {
 	corev1.PodSpec
 }
@@ -1238,10 +1238,7 @@ func buildMainContainer(name string, in mainContainerInput) (*corev1.Container, 
 // beyond the shared PodSpecConfig: the containers, the volumes, and the
 // scheduling/lifecycle fields it exposes as its own properties.
 type podSpecInput struct {
-	Config PodSpecConfig
-	// DefaultServiceAccountName is the per-component ServiceAccount the pod
-	// runs as when Config.ServiceAccountName is not authored.
-	DefaultServiceAccountName string
+	Config                    PodSpecConfig
 	MainContainer             *corev1.Container
 	InitContainers            []InitContainerConfig
 	Sidecars                  []SidecarContainerConfig
@@ -1327,8 +1324,14 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 	if in.RestartPolicy != "" {
 		ps.RestartPolicy = in.RestartPolicy
 	}
-	if ps.ServiceAccountName == "" {
-		ps.ServiceAccountName = in.DefaultServiceAccountName
+	// A pod without serviceAccountName runs as the namespace's `default`
+	// account, which no kind generates or binds. Its token stays unmounted
+	// unless automountServiceAccountToken was authored — the posture the
+	// per-component account each kind generated before
+	// go-kure/launcher#702 gave it.
+	if ps.ServiceAccountName == "" && ps.AutomountServiceAccountToken == nil {
+		automount := false
+		ps.AutomountServiceAccountToken = &automount
 	}
 	if err := validateContainerOSFields(&ps); err != nil {
 		return corev1.PodSpec{}, err
@@ -1379,59 +1382,4 @@ func validateEffectiveRunAsUser(ps *corev1.PodSpec) error {
 		return err
 	}
 	return check("containers", ps.Containers)
-}
-
-// effectiveServiceAccountName returns the ServiceAccount a workload's pods run
-// as: the authored serviceAccountName when set, else the per-component
-// ServiceAccount named after the component. Traits that bind RBAC to the
-// workload's identity (the rbac trait) read this through the
-// oam.ServiceAccountNamer interface each kind config implements.
-//
-// componentName is the kind config's own Name, set by each handler's
-// ToApplicationConfig from component.Name. On every supported path that is the
-// same string as the stack.Application's name, because transformComponents
-// builds the Application with stack.NewApplication(component.Name, …)
-// (pkg/oam/transform.go:662) from that same component — but that is an
-// invariant of the call site, not of the types, so the generation path does not
-// re-derive the name from app.Name alongside it. It resolves through
-// generationServiceAccountName below, which calls the same
-// oam.ServiceAccountNamer method the rbac trait reads, keeping the account a
-// RoleBinding names and the account the pods run as one value even for a
-// hand-built config whose Name differs from the Application it is placed in.
-func effectiveServiceAccountName(cfg PodSpecConfig, componentName string) string {
-	if cfg.ServiceAccountName != "" {
-		return cfg.ServiceAccountName
-	}
-	return componentName
-}
-
-// generationServiceAccountName resolves, on the generation path, the
-// ServiceAccount a kind's pods run as — and the name of the per-component
-// account the kind emits.
-//
-// It asks the same oam.ServiceAccountNamer implementation the rbac trait reads,
-// applying that interface's own ""-means-fall-back-to-the-component-name
-// convention (documented on decoratorBase.ServiceAccountName, and implemented
-// identically in the rbac trait's binding subject at traits/rbac.go). Deriving
-// both from one method is what keeps the account a RoleBinding names and the
-// account the pods actually run as a single value: reading `app.Name` here
-// while the namer reads the config's own Name left the two free to drift, and
-// nothing but the comment above enforced that they could not.
-//
-// The Application name stands in only when the namer reports "" — a config
-// built directly rather than through ToApplicationConfig carries no Name, which
-// tests do (traits/external_secret_test.go). On every supported path the config
-// name and the Application name are the same string, so this returns exactly
-// what it returned before and no generated output moves.
-func generationServiceAccountName(namer oam.ServiceAccountNamer, appName string) string {
-	if name := namer.ServiceAccountName(); name != "" {
-		return name
-	}
-	return appName
-}
-
-// generatesServiceAccount reports whether the kind handler should emit its
-// per-component ServiceAccount: only when no serviceAccountName was authored.
-func generatesServiceAccount(cfg PodSpecConfig) bool {
-	return cfg.ServiceAccountName == ""
 }

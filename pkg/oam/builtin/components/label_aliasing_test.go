@@ -15,10 +15,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// aliasingPVCVolume is a volume of type pvc, which makes each kind emit a
-// PersistentVolumeClaim alongside its workload. That is the second object in one
-// Generate whose labels could alias the workload's, and it is the only path that
-// reaches BuildPVC's clone.
+// aliasingPVCVolume is a volume of type pvc, which makes a role kind (webservice,
+// worker) emit a PersistentVolumeClaim alongside its workload. That is a second
+// object in one Generate whose labels could alias the workload's, and it is the
+// only path that reaches BuildPVC's clone. The pod kinds generate no claim and
+// no ServiceAccount (go-kure/launcher#702), so they carry no such volume.
 //
 // The access mode is ReadWriteMany because the kinds below also set replicas=3,
 // and a non-RWX claim on a multi-replica workload is rejected during Generate.
@@ -34,25 +35,24 @@ var aliasingPVCVolume = []any{
 
 // labelAliasingProps adds, per kind, whatever that kind needs to reach every
 // label map it can produce: replicas >= 3 so both topology spread constraints
-// are built, pod anti-affinity so an affinity selector exists, and a pvc volume
-// so a second labelled object is generated. daemonset and cronjob take neither
-// replicas nor affinity, so they contribute their object, template and claim
-// label maps only.
+// are built, pod anti-affinity so an affinity selector exists, and, on a role
+// kind, a pvc volume so a claim is generated. daemonset and cronjob take neither
+// replicas nor affinity, so they contribute their object and template label
+// maps only.
 var labelAliasingProps = map[string]map[string]any{
 	"webservice": {"replicas": 3, "affinity": map[string]any{"enablePodAntiAffinity": true}, "volumes": aliasingPVCVolume},
 	"worker":     {"replicas": 3, "affinity": map[string]any{"enablePodAntiAffinity": true}, "volumes": aliasingPVCVolume},
 	"statefulset": {
 		"replicas": 3,
 		"affinity": map[string]any{"enablePodAntiAffinity": true},
-		"volumes":  aliasingPVCVolume,
 		// A claim template is a per-object metadata position only this kind
 		// has, so only this kind can carry it into the collection.
 		"volumeClaimTemplates": []any{
 			map[string]any{"name": "state", "size": "1Gi", "mountPath": "/state"},
 		},
 	},
-	"daemonset": {"volumes": aliasingPVCVolume},
-	"cronjob":   {"volumes": aliasingPVCVolume},
+	"daemonset": {},
+	"cronjob":   {},
 }
 
 // labelMap is one caller-reachable label map, named by where it lives so a
@@ -170,9 +170,9 @@ func collectLabelMaps(objects []*client.Object) []labelMap {
 // would still pass while guarding nothing. This states the positions the fixture
 // must reach, per kind, and fails loudly when one disappears.
 func TestCollectLabelMaps_ReachesEveryGuardedPosition(t *testing.T) {
-	// Every kind emits its workload, a pod template, a ServiceAccount and a
-	// PersistentVolumeClaim from the pvc volume. Only webservice and worker
-	// build topology spread constraints; only the three that take replicas
+	// Every kind emits its workload and a pod template; webservice and worker
+	// also emit a ServiceAccount and a PersistentVolumeClaim from the pvc
+	// volume. Only webservice and worker build topology spread constraints; only the three that take replicas
 	// build an anti-affinity selector. A StatefulSet claim template carries no
 	// labels today, so there is no position to require — the collector reads
 	// it anyway, so labelling one later lands in these tests rather than
@@ -205,22 +205,16 @@ func TestCollectLabelMaps_ReachesEveryGuardedPosition(t *testing.T) {
 			"StatefulSet/app.spec.selector.matchLabels",
 			"StatefulSet/app.spec.template.labels",
 			"StatefulSet/app.spec.template.spec.podAntiAffinity.preferred[0].labelSelector",
-			"ServiceAccount/app.metadata.labels",
-			"PersistentVolumeClaim/app-data.metadata.labels",
 		},
 		"daemonset": {
 			"DaemonSet/app.metadata.labels",
 			"DaemonSet/app.spec.selector.matchLabels",
 			"DaemonSet/app.spec.template.labels",
-			"ServiceAccount/app.metadata.labels",
-			"PersistentVolumeClaim/app-data.metadata.labels",
 		},
 		"cronjob": {
 			"CronJob/app.metadata.labels",
 			"CronJob/app.spec.jobTemplate.labels",
 			"CronJob/app.spec.jobTemplate.spec.template.labels",
-			"ServiceAccount/app.metadata.labels",
-			"PersistentVolumeClaim/app-data.metadata.labels",
 		},
 	}
 

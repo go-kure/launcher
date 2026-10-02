@@ -16,11 +16,11 @@ import (
 type saStub struct{ name string }
 
 func (s *saStub) Generate(app *stack.Application) ([]*client.Object, error) { return nil, nil }
-func (s *saStub) ServiceAccountName() string                                { return s.name }
+func (s *saStub) ServiceAccountName() (string, bool)                        { return s.name, true }
 
 // TestDecorator_ForwardsServiceAccountNamer: a trait decorator must keep
 // oam.ServiceAccountNamer reachable. Without the forward the wrapped config
-// stops answering and every reader falls back to the component name.
+// stops answering and rbac takes it for a config that runs no pods.
 func TestDecorator_ForwardsServiceAccountNamer(t *testing.T) {
 	app := stack.NewApplication("web", "default", &saStub{name: "shared-sa"})
 	if err := (&traits.ConfigMapHandler{}).Apply(
@@ -32,14 +32,15 @@ func TestDecorator_ForwardsServiceAccountNamer(t *testing.T) {
 	if !ok {
 		t.Fatal("wrapped config does not implement oam.ServiceAccountNamer")
 	}
-	if got := namer.ServiceAccountName(); got != "shared-sa" {
-		t.Errorf("ServiceAccountName() = %q, want shared-sa", got)
+	if got, pods := namer.ServiceAccountName(); got != "shared-sa" || !pods {
+		t.Errorf("ServiceAccountName() = (%q, %v), want (shared-sa, true)", got, pods)
 	}
 }
 
-// TestDecorator_ServiceAccountNamerDefault: an inner config that names no
-// account answers "", which is the sentinel every reader treats as "fall back
-// to the component name" (see traits/rbac.go).
+// TestDecorator_ServiceAccountNamerDefault: an inner config that does not
+// implement the interface answers "" and false — a config that runs no pods,
+// for which rbac keeps the account named after the component (see
+// traits/rbac.go).
 func TestDecorator_ServiceAccountNamerDefault(t *testing.T) {
 	app := stack.NewApplication("worker", "default", &nakedStub{})
 	if err := (&traits.ConfigMapHandler{}).Apply(
@@ -51,8 +52,8 @@ func TestDecorator_ServiceAccountNamerDefault(t *testing.T) {
 	if !ok {
 		t.Fatal("wrapped config does not implement oam.ServiceAccountNamer")
 	}
-	if got := namer.ServiceAccountName(); got != "" {
-		t.Errorf("ServiceAccountName() = %q, want empty", got)
+	if got, pods := namer.ServiceAccountName(); got != "" || pods {
+		t.Errorf("ServiceAccountName() = (%q, %v), want (\"\", false)", got, pods)
 	}
 }
 

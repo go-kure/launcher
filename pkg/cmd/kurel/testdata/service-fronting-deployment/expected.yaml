@@ -16,6 +16,7 @@ spec:
       labels:
         app: api-server
     spec:
+      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/api:v1.0
         name: api-server
@@ -25,16 +26,6 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
-      serviceAccountName: api-server
----
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: api-server
-  name: api-server
-  namespace: default
 ---
 apiVersion: v1
 kind: Service

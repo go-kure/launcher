@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
@@ -46,7 +47,9 @@ func blockKinds() []blockKind {
 }
 
 // props returns a fresh property map: the kind's own required keys, an image,
-// and extra on top.
+// and extra on top. A pod kind generates no claim (go-kure/launcher#702), so
+// every pvc volume describing one is rewritten to reference a claim of the
+// volume's name instead; only the role rules still emit the claims.
 func (k blockKind) props(extra map[string]any) map[string]any {
 	p := map[string]any{"image": "ghcr.io/org/app:v1"}
 	for key, v := range k.base {
@@ -55,7 +58,37 @@ func (k blockKind) props(extra map[string]any) map[string]any {
 	for key, v := range extra {
 		p[key] = v
 	}
+	if vols, ok := p["volumes"].([]any); ok && !k.emitsClaims() {
+		p["volumes"] = asClaimReferences(vols)
+	}
 	return p
+}
+
+// emitsClaims reports whether the kind generates the claims its pvc volumes
+// describe: only the role rules do.
+func (k blockKind) emitsClaims() bool { return k.kind == "webservice" || k.kind == "worker" }
+
+// asClaimReferences returns vols with every pvc volume that describes a claim
+// rewritten to reference one named like the volume. The entries are cloned:
+// the case tables share them across kinds.
+func asClaimReferences(vols []any) []any {
+	out := make([]any, len(vols))
+	for i, v := range vols {
+		out[i] = v
+		m, ok := v.(map[string]any)
+		if !ok || m["type"] != "pvc" {
+			continue
+		}
+		if _, ref := m["claimName"]; ref {
+			continue
+		}
+		ref := maps.Clone(m)
+		delete(ref, "size")
+		delete(ref, "storageClass")
+		ref["claimName"] = m["name"]
+		out[i] = ref
+	}
+	return out
 }
 
 func (k blockKind) configure(t *testing.T, extra map[string]any) (stack.ApplicationConfig, error) {
@@ -166,6 +199,12 @@ func TestRawBlock_PVCVolume_RendersVolumeDevice(t *testing.T) {
 			if hasMountNamed(&main, "disk") {
 				t.Errorf("main container also mounts the block volume as a filesystem: %+v", main.VolumeMounts)
 			}
+			if !k.emitsClaims() {
+				if len(g.claims) != 0 {
+					t.Errorf("pod kind emitted %d PersistentVolumeClaims, want none", len(g.claims))
+				}
+				return
+			}
 			if len(g.claims) != 1 {
 				t.Fatalf("expected 1 PersistentVolumeClaim, got %d", len(g.claims))
 			}
@@ -188,6 +227,9 @@ func TestRawBlock_PVCVolume_FilesystemModeAuthored(t *testing.T) {
 			main := g.pod.Containers[0]
 			if !hasMountNamed(&main, "disk") || len(main.VolumeDevices) != 0 {
 				t.Errorf("want a filesystem mount and no device, got mounts %+v devices %+v", main.VolumeMounts, main.VolumeDevices)
+			}
+			if !k.emitsClaims() {
+				return
 			}
 			if vm := g.claims[0].Spec.VolumeMode; vm == nil || *vm != corev1.PersistentVolumeFilesystem {
 				t.Errorf("claim volumeMode = %v, want Filesystem", vm)

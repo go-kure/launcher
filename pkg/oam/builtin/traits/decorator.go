@@ -77,7 +77,7 @@ type identityPortMapper interface {
 // interface's presence. Eight already do this correctly and must stay that way:
 // resolveServiceName (ingress.go) checks for a non-empty name,
 // checkImplicitPortName (ingress.go) checks the known flag, rbac.go's
-// binding subject falls back to the component name on "", the scaler treats
+// binding subject reads the runsPods flag beside the name, the scaler treats
 // an empty claim name as "no claim limits the replicas",
 // applyAutoHealthChecks (oam/transform.go:1148-1152) gates its settable check on
 // isFluxControlPlaneGVK, the NetworkPolicy synthesis treats a nil routing
@@ -147,18 +147,18 @@ func (d decoratorBase) ServicePortName() (string, bool) {
 	return "", false
 }
 
-// ServiceAccountName forwards the inner config's effective ServiceAccount name
-// (oam.ServiceAccountNamer), or "" when the inner config does not name one.
-// Callers must treat "" as "fall back to the component name" — rbac.go's
-// binding subject does. Without this forward, a decorating trait declared
-// before `rbac` (security-context, configmap, external-secret,
-// prune-protection) hides the workload's authored serviceAccountName and the
-// RoleBinding binds an account the kind no longer generates.
-func (d decoratorBase) ServiceAccountName() string {
+// ServiceAccountName forwards the inner config's ServiceAccount name and
+// runsPods flag (oam.ServiceAccountNamer), or "" and false when the inner
+// config does not implement it. Without this forward, a decorating trait
+// declared before `rbac` (security-context, configmap, external-secret,
+// prune-protection) hides the workload's authored serviceAccountName, and
+// rbac.go could no longer tell a pod without one (refused) from a config that
+// runs no pods.
+func (d decoratorBase) ServiceAccountName() (string, bool) {
 	if n, ok := d.Inner.(oam.ServiceAccountNamer); ok {
 		return n.ServiceAccountName()
 	}
-	return ""
+	return "", false
 }
 
 // NonRWXClaim forwards the inner config's single-pod claim (nonRWXClaimer), or

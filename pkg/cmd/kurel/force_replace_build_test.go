@@ -66,7 +66,8 @@ func docAnnotation(obj map[string]any, key string) (string, bool) {
 }
 
 // TestBuildCommand_JobWithForceReplaceTrait: with the trait, every object the
-// job component emits — the Job and its ServiceAccount — carries
+// job component emits — the Job; it generates no ServiceAccount
+// (go-kure/launcher#702) — carries
 // kustomize.toolkit.fluxcd.io/force: enabled, and the Job keeps the component
 // name (which is what the auto health check targets).
 func TestBuildCommand_JobWithForceReplaceTrait(t *testing.T) {
@@ -88,7 +89,7 @@ func TestBuildCommand_JobWithForceReplaceTrait(t *testing.T) {
 			t.Errorf("%s: kustomize.toolkit.fluxcd.io/force = %q, want \"enabled\"\noutput:\n%s", kind, v, out)
 		}
 	}
-	for _, k := range []string{"Job", "ServiceAccount"} {
+	for _, k := range []string{"Job"} {
 		if !kinds[k] {
 			t.Errorf("output has no %s; the annotation assertion is vacuous for it\noutput:\n%s", k, out)
 		}

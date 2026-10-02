@@ -274,9 +274,8 @@ func validateServiceName(field, name string) error {
 
 // validateComponentServiceName is validateServiceName at conversion, for a
 // workload kind that names its Service after the component. A nameless config
-// (converted without a component name, as a library caller may; see
-// generationServiceAccountName) is let through: its Generate checks the name it
-// actually emits, the Application's.
+// (converted without a component name, as a library caller may) is let
+// through: its Generate checks the name it actually emits, the Application's.
 func validateComponentServiceName(name string) error {
 	if name == "" {
 		return nil

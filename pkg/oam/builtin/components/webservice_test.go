@@ -541,38 +541,6 @@ func TestWebserviceHandler_WithVolumes_EmptyDir(t *testing.T) {
 	}
 }
 
-func TestWebserviceConfig_ApplyPolicy_MaxStorageSize(t *testing.T) {
-	h := webserviceViaRule{}
-	component := &oam.Component{
-		Name: "app",
-		Type: "webservice",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/app:v1",
-			"replicas": 1,
-			"volumes": []any{
-				map[string]any{
-					"name":         "data",
-					"type":         "pvc",
-					"mountPath":    "/data",
-					"size":         "20Gi",
-					"storageClass": "standard",
-					"accessModes":  []any{"ReadWriteOnce"},
-				},
-			},
-		},
-	}
-	cfg, err := h.ToApplicationConfig(component, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-	p := &stubPolicy{}
-	p.maxStorageSize = "5Gi"
-	if err := enforceable.ApplyPolicy(p); err == nil {
-		t.Error("expected error when PVC size exceeds max")
-	}
-}
-
 func TestWebserviceHandler_WithProbes_NamedPort(t *testing.T) {
 	h := webserviceViaRule{}
 	component := &oam.Component{

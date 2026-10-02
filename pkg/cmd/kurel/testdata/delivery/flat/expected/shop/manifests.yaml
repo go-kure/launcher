@@ -76,6 +76,7 @@ spec:
           labels:
             app: jobs
         spec:
+          automountServiceAccountToken: false
           containers:
           - image: ghcr.io/example/jobs:v1.0.0
             name: jobs
@@ -86,15 +87,5 @@ spec:
                 cpu: 100m
                 memory: 128Mi
           restartPolicy: OnFailure
-          serviceAccountName: jobs
   schedule: 0 * * * *
   successfulJobsHistoryLimit: 3
----
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: jobs
-  name: jobs
-  namespace: shop

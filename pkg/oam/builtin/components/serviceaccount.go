@@ -73,10 +73,10 @@ type ServiceAccountConfig struct {
 
 // Generate creates the ServiceAccount.
 func (c *ServiceAccountConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	// Named from the component, as generationServiceAccountName names a
-	// workload's account, so a role rule's deployment member, which is handed
-	// that same name, runs as exactly this account; the Application's name is
-	// the fallback for a config built without one.
+	// Named from the component, so a role rule's deployment member, which is
+	// handed that same name as its serviceAccountName, runs as exactly this
+	// account; the Application's name is the fallback for a config built
+	// without one.
 	name := c.Name
 	if name == "" {
 		name = app.Name

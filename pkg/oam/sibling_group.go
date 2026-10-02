@@ -314,14 +314,20 @@ func (g *siblingGroupConfig) ServicePortName() (string, bool) {
 	return "", false
 }
 
-// ServiceAccountName is the one member's non-empty ServiceAccount name, or "".
-func (g *siblingGroupConfig) ServiceAccountName() string {
+// ServiceAccountName is the one member's non-empty ServiceAccount name, or "";
+// runsPods is whether any member runs pods.
+func (g *siblingGroupConfig) ServiceAccountName() (string, bool) {
+	runsPods := false
 	for _, m := range g.members {
-		if n, ok := m.Config.(ServiceAccountNamer); ok && n.ServiceAccountName() != "" {
-			return n.ServiceAccountName()
+		if n, ok := m.Config.(ServiceAccountNamer); ok {
+			name, pods := n.ServiceAccountName()
+			if name != "" {
+				return name, true
+			}
+			runsPods = runsPods || pods
 		}
 	}
-	return ""
+	return "", runsPods
 }
 
 // NonRWXClaim is the one member's non-empty single-pod claim, or "".
@@ -476,8 +482,10 @@ func siblingAnswers(cfg stack.ApplicationConfig) []string {
 			out = append(out, "ServicePortName")
 		}
 	}
-	if n, ok := cfg.(ServiceAccountNamer); ok && n.ServiceAccountName() != "" {
-		out = append(out, "ServiceAccountName")
+	if n, ok := cfg.(ServiceAccountNamer); ok {
+		if name, _ := n.ServiceAccountName(); name != "" {
+			out = append(out, "ServiceAccountName")
+		}
 	}
 	if n, ok := cfg.(siblingNonRWXClaimer); ok && n.NonRWXClaim() != "" {
 		out = append(out, "NonRWXClaim")

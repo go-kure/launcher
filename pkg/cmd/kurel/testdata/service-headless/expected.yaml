@@ -16,6 +16,7 @@ spec:
       labels:
         app: db
     spec:
+      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/db:v1.0
         name: db
@@ -25,16 +26,6 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
-      serviceAccountName: db
----
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: db
-  name: db
-  namespace: default
 ---
 apiVersion: v1
 kind: Service

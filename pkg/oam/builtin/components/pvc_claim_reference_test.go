@@ -87,6 +87,8 @@ func TestPVCVolume_ClaimName_NonRWXRefusesReplicas(t *testing.T) {
 
 // A referenced claim that shares its name with a generated claim's pod-local
 // name must not be rewritten by qualification, and Generate stays idempotent.
+// Only a role kind still generates (and so qualifies) a claim
+// (go-kure/launcher#702).
 func TestPVCVolume_ClaimName_NotQualified(t *testing.T) {
 	props := map[string]any{
 		"image": "ghcr.io/org/app:v1",
@@ -95,7 +97,10 @@ func TestPVCVolume_ClaimName_NotQualified(t *testing.T) {
 			map[string]any{"name": "other", "type": "pvc", "mountPath": "/other", "claimName": "data"},
 		},
 	}
-	cfg := deploymentConfig(t, "app", props)
+	cfg, err := webserviceViaRule{}.ToApplicationConfig(&oam.Component{Name: "app", Type: "webservice", Properties: props}, "default")
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
 	for run := 1; run <= 2; run++ {
 		objects, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
 		if err != nil {
@@ -161,6 +166,34 @@ func TestPVCVolume_ClaimName_Refusals(t *testing.T) {
 			_, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: "deployment", Properties: claimRefProps(tc.vol, nil)}, "default")
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestPVCVolume_PodKindsRequireClaimName: the five pod kinds generate no claim
+// (go-kure/launcher#702), so a pvc volume that describes one instead of
+// referencing it by claimName is refused, not silently left unmounted.
+func TestPVCVolume_PodKindsRequireClaimName(t *testing.T) {
+	for _, tc := range []struct {
+		kind    string
+		handler interface {
+			ToApplicationConfig(*oam.Component, string) (stack.ApplicationConfig, error)
+		}
+		extra map[string]any
+	}{
+		{"deployment", &components.DeploymentHandler{}, nil},
+		{"statefulset", &components.StatefulsetHandler{}, nil},
+		{"daemonset", &components.DaemonsetHandler{}, nil},
+		{"job", &components.JobHandler{}, nil},
+		{"cronjob", &components.CronjobHandler{}, map[string]any{"schedule": "0 2 * * *"}},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			props := claimRefProps(map[string]any{"size": "1Gi"}, tc.extra)
+			delete(props["volumes"].([]any)[0].(map[string]any), "claimName")
+			_, err := tc.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: tc.kind, Properties: props}, "default")
+			if err == nil || !strings.Contains(err.Error(), "must set claimName") {
+				t.Fatalf("error = %v, want a refusal requiring claimName", err)
 			}
 		})
 	}

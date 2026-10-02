@@ -195,7 +195,7 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 		config.WorkingDir = workingDir
 	}
 
-	parsed, err := parseVolumes(props)
+	parsed, err := parsePodVolumes(props)
 	if err != nil {
 		return nil, err
 	}
@@ -299,10 +299,9 @@ type DeploymentConfig struct {
 }
 
 // ServiceAccountName implements oam.ServiceAccountNamer: the authored
-// serviceAccountName, else the per-component ServiceAccount named after the
-// component.
-func (c *DeploymentConfig) ServiceAccountName() string {
-	return effectiveServiceAccountName(c.PodSpec, c.Name)
+// serviceAccountName, or "" when the pods run as no named account.
+func (c *DeploymentConfig) ServiceAccountName() (string, bool) {
+	return c.PodSpec.ServiceAccountName, true
 }
 
 // PodTemplateLabels returns the labels createDeployment puts on the pod template.
@@ -397,12 +396,6 @@ func (c *DeploymentConfig) ApplyPolicy(p oam.Policy) error {
 			return err
 		}
 	}
-	for _, pvc := range c.PVCs {
-		if err := enforceMaxStorageSize(pvc.Size, p.MaxStorageSize()); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -419,39 +412,15 @@ func deploymentComponentLabels(name string) map[string]string {
 	return map[string]string{"app": oam.ComponentLabelValue(name)}
 }
 
-// Generate creates a Kubernetes Deployment and ServiceAccount (no Service).
-// The ServiceAccount is omitted when serviceAccountName was authored.
+// Generate creates a Kubernetes Deployment, and nothing beside it: no Service,
+// no ServiceAccount, no claim (go-kure/launcher#702).
 func (c *DeploymentConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	var err error
-	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
-	if err != nil {
-		return nil, err
-	}
 	deployment, err := c.createDeployment(app)
 	if err != nil {
 		return nil, err
 	}
-
 	depObj := client.Object(deployment)
-
-	objects := []*client.Object{&depObj}
-	if generatesServiceAccount(c.PodSpec) {
-		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, deploymentComponentLabels(app.Name)))
-		objects = append(objects, &saObj)
-	}
-	for _, pvc := range c.PVCs {
-		if pvc.ClaimName != "" {
-			continue // an existing claim, referenced by claimName
-		}
-		p, err := BuildPVC(pvc, app.Namespace, deploymentComponentLabels(app.Name))
-		if err != nil {
-			return nil, err
-		}
-		pObj := client.Object(p)
-		objects = append(objects, &pObj)
-	}
-
-	return objects, nil
+	return []*client.Object{&depObj}, nil
 }
 
 func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Deployment, error) {
@@ -499,7 +468,6 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:                    c.PodSpec,
-		DefaultServiceAccountName: generationServiceAccountName(c, app.Name),
 		MainContainer:             container,
 		InitContainers:            c.InitContainers,
 		Sidecars:                  c.Sidecars,

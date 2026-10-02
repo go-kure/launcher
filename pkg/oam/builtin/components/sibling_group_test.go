@@ -52,13 +52,16 @@ func (r webPairRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) 
 	}}, nil
 }
 
-// webPairDeploymentProps carries a ReadWriteOnce claim so the Deployment has a
-// non-empty NonRWXClaim to forward.
+// webPairDeploymentProps references a ReadWriteOnce claim so the Deployment has
+// a non-empty NonRWXClaim to forward, and names its ServiceAccount so it has a
+// non-empty ServiceAccountName: a deployment generates neither object
+// (go-kure/launcher#702).
 func webPairDeploymentProps(paused bool) map[string]any {
 	props := map[string]any{
-		"image": "ghcr.io/org/app:v1",
+		"image":              "ghcr.io/org/app:v1",
+		"serviceAccountName": "web-sa",
 		"volumes": []any{map[string]any{
-			"name": "data", "type": "pvc", "mountPath": "/data", "size": "1Gi",
+			"name": "data", "type": "pvc", "mountPath": "/data", "claimName": "data",
 			"accessModes": []any{"ReadWriteOnce"},
 		}},
 	}
@@ -78,7 +81,7 @@ func webPairServiceProps(name string) map[string]any {
 // The contracts the engine and the builtin traits type-assert on a component's
 // config, as the sibling group's config must answer them.
 type (
-	saNamer        interface{ ServiceAccountName() string }
+	saNamer        interface{ ServiceAccountName() (string, bool) }
 	nonRWXClaimer  interface{ NonRWXClaim() string }
 	healthEmitter  interface{ EmitsAutoHealthCheck() bool }
 	portProvider   interface{ ServicePort() int32 }
@@ -206,8 +209,8 @@ func TestSiblingGroup_ForwardsEachContractToItsMember(t *testing.T) {
 	dep := memberConfig(t, &components.DeploymentHandler{}, "deployment", webPairDeploymentProps(false))
 	svc := memberConfig(t, &components.ServiceHandler{}, "service", webPairServiceProps("web"))
 
-	wantSA := dep.(saNamer).ServiceAccountName()
-	if got := cfg.(saNamer).ServiceAccountName(); wantSA == "" || got != wantSA {
+	wantSA, _ := dep.(saNamer).ServiceAccountName()
+	if got, _ := cfg.(saNamer).ServiceAccountName(); wantSA == "" || got != wantSA {
 		t.Errorf("ServiceAccountName = %q, want the deployment's %q", got, wantSA)
 	}
 	wantClaim := dep.(nonRWXClaimer).NonRWXClaim()
@@ -272,8 +275,9 @@ func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
 	}
 	// The group generates exactly what its members generate on their own, each
 	// member's primary object first — the Deployment, then the Service — and then
-	// the Deployment's ServiceAccount and claim, the order a webservice generates
-	// the same objects in.
+	// any remaining objects. Neither member generates more than its primary
+	// object (a deployment emits no ServiceAccount or claim, go-kure/launcher#702),
+	// so the tail is empty here; pkg/oam's sibling-group tests pin the tail order.
 	var heads, tails []string
 	for _, m := range []struct {
 		h     oam.ComponentHandler
@@ -292,8 +296,8 @@ func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
 		tails = append(tails, ids[1:]...)
 	}
 	want := slices.Concat(heads, tails)
-	if !reflect.DeepEqual(want[:2], []string{"Deployment/web", "Service/web"}) || len(tails) < 2 {
-		t.Fatalf("members generate %v; want a Deployment and a Service first and the Deployment's ServiceAccount and claim", want)
+	if !reflect.DeepEqual(want, []string{"Deployment/web", "Service/web"}) {
+		t.Fatalf("members generate %v; want a Deployment and a Service", want)
 	}
 	if got := objectIDs(objs); !reflect.DeepEqual(got, want) {
 		t.Errorf("group generates %v, want %v", got, want)
