@@ -2102,9 +2102,10 @@ not part of either change.
       or one that is more or less than a host, an optional port and a
       repository path (user info, a query or a fragment is refused);
     - `url` with an inline Bucket, or one without `endpoint` or `bucketName`, or
-      an `endpoint` that is more than a `host[:port]` or an `http://` or
-      `https://` URL of a host and port (user info, a path, a query or a
-      fragment is refused), or a `provider` other than `generic`, `aws`, `gcp`
+      an `endpoint` that is more than a `host[:port]` or an `https://` URL of a
+      host and port (user info, a path, a query, a fragment or `http://` is
+      refused: a non-TLS endpoint needs `insecure: true`, which only an authored
+      `bucket` takes), or a `provider` other than `generic`, `aws`, `gcp`
       or `azure` (checked at the helm rule; the `bucket` terminal leaves it to
       the CRD);
     - `source.ref` other than on an inline GitRepository, and `endpoint`,

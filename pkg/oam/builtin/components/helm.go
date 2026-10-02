@@ -250,11 +250,11 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, error) {
 		if s.Endpoint == "" || s.BucketName == "" {
 			return nil, nil, errors.Errorf("%s: an inline source.kind Bucket requires source.endpoint and source.bucketName", helmType)
 		}
-		// Only a bare host[:port] or a URL of a host and port is accepted, so
-		// user info, a signed query or anything else an endpoint could smuggle
-		// is refused. The value is not quoted back.
+		// Only a bare host[:port] or an https:// URL of a host and port is
+		// accepted, so user info, a signed query or anything else an endpoint
+		// could smuggle is refused. The value is not quoted back.
 		if !plainBucketEndpoint(s.Endpoint) {
-			return nil, nil, errors.Errorf("%s: source.endpoint of an inline Bucket must be a host[:port], or an http:// or https:// URL of only a host and an optional port; user info, a path, a query or a fragment is not taken inline (author a bucket with a secretRef and reference it)", helmType)
+			return nil, nil, errors.Errorf("%s: source.endpoint of an inline Bucket must be a host[:port], or an https:// URL of only a host and an optional port; user info, a path, a query, a fragment or http:// is not taken inline (author a bucket, with a secretRef or insecure: true, and reference it)", helmType)
 		}
 	case s.URL == "" && s.Name == "":
 		return nil, nil, errors.Errorf("%s: source requires either source.url (inline) or source.name (reference)", helmType)
@@ -416,10 +416,12 @@ func plainSourceURL(raw string, withPath bool) bool {
 }
 
 // plainBucketEndpoint reports whether an inline Bucket endpoint is a bare
-// host[:port], or an http:// or https:// URL of only a host and port.
+// host[:port], or an https:// URL of only a host and port. http:// is refused:
+// Flux reaches a non-TLS endpoint only with spec.insecure, which the inline form
+// does not take, so the generated bucket could never become ready.
 func plainBucketEndpoint(endpoint string) bool {
 	if strings.Contains(endpoint, "://") {
-		return plainSourceURL(endpoint, false)
+		return strings.HasPrefix(endpoint, "https://") && plainSourceURL(endpoint, false)
 	}
 	return plainSourceURL("https://"+endpoint, false)
 }
