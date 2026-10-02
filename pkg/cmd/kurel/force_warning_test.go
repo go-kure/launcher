@@ -109,6 +109,35 @@ func TestWarnForcedVolumes_BothClaimSources(t *testing.T) {
 	}
 }
 
+// TestWarnForcedVolumes_ClaimComponent pins that the persistentvolumeclaim
+// component's claim is warned about like any other generated claim, by either
+// force mechanism.
+func TestWarnForcedVolumes_ClaimComponent(t *testing.T) {
+	const app = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    - name: media
+      type: persistentvolumeclaim
+      properties:
+        size: 20Gi
+      traits:
+        - type: force-replace
+  policies:
+    - name: flux
+      type: reconciliation
+      properties:
+        force: true
+`
+	want := []string{`PersistentVolumeClaim default/media (component "media") is force-applied (kustomize.toolkit.fluxcd.io/force: enabled; its bundle's reconciliation policy sets force: true)` + forcedWarningTail}
+	if got := forcedVolumeWarnings(t, app); !slices.Equal(got, want) {
+		t.Errorf("warnings =\n%q\nwant\n%q", got, want)
+	}
+}
+
 // TestWarnForcedVolumes_ListMembers pins that a claim inside a list a `manifests`
 // component generates is warned about as Flux applies it: by its own annotation,
 // or by the bundle's force. The manifest parser expands the outer list itself, so
