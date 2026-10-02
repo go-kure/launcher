@@ -1169,6 +1169,27 @@ a trait lowering rule's input.
 A component handler that implements `ComponentCapabilityDefaults` (see Transform &
 extension) gets the same precedence for the properties it lists, and only those.
 
+Both merges copy the rendering value they hand out, keeping its Go type: a `3` the
+profile decoded as `int` reaches the handler as `int`, and an `int64` above 2^53 keeps
+its exact value (go-kure/launcher#756). The copy used to be a JSON round trip, which
+turned every number into `float64`. A rendering value therefore obeys the same rule
+as a value a lowering rule writes with `RenderReserved`: a string, boolean, finite
+number, list or string-keyed object, nested to any depth. `TransformWithPolicy`
+checks every binding in `TransformContext.Capabilities` before building anything,
+whether or not a document uses it, and refuses the transform with an error naming
+the capability key and the top-level rendering key
+(`capability "pvc" rendering key "limits": …`). A `null` top-level value is not
+refused: it reads as absent. **Pre-GA input change**: these renderings built before
+and are now refused:
+
+- a `null` below the top level (`limits: {cpu: null}`), which the round trip kept;
+- `NaN` or `±Inf` (YAML `.nan`, `.inf`, `-.inf`), on which the round trip failed and
+  the trait merge then handed out the profile's own value;
+- in a Go-built `TransformContext.Capabilities`, any other Go type (a struct, a
+  pointer, a channel, a function, a map whose keys are not strings): the round trip
+  converted a struct or pointer to its JSON form, and failed on a channel or
+  function, which the trait merge then handed out uncopied.
+
 This is a large internal builder surface; the tables above cover the entry points.
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the full
 type reference, the design notes under the Concepts section, and `examples/` for

@@ -1,7 +1,6 @@
 package oam
 
 import (
-	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -567,6 +566,11 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 	if err := checkNamespaceLabel("flux namespace", ctx.FluxNamespace); err != nil {
+		return nil, nil, err
+	}
+	// Every binding's rendering is checked once here, used or not: both merge sites
+	// copy it keeping Go types and have no way to refuse a value they cannot copy.
+	if err := checkCapabilityRenderings(ctx.Capabilities); err != nil {
 		return nil, nil, err
 	}
 
@@ -1423,6 +1427,8 @@ func deploymentOrder(entries []componentEntry, deps map[string][]string) []compo
 // (go-kure/launcher#742). Tries the scoped key, falls back to the bare
 // type key. Returns (trait, "", false) on no match; otherwise (possibly merged
 // trait, matched key, true) — a match with empty Rendering still counts as consumed.
+// The rendering is copied with its Go types kept (copyRendering), which relies on
+// TransformWithPolicy having checked it (checkCapabilityRenderings).
 func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (Trait, string, bool) {
 	if len(capabilities) == 0 {
 		return trait, "", false
@@ -1441,10 +1447,7 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (
 		return trait, matchedKey, true
 	}
 
-	rendering, err := deepCopyMap(cap.Rendering)
-	if err != nil {
-		rendering = cap.Rendering
-	}
+	rendering := copyRendering(cap.Rendering)
 
 	merged := make(map[string]any, len(rendering)+len(trait.Properties))
 	maps.Copy(merged, rendering)
@@ -1466,8 +1469,10 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (
 // as defaults, inline wins", restricted to the listed keys. The key is recorded as
 // consumed when the profile binds it, whether or not a value was copied, as a trait's
 // matched key is. props is never mutated: a copy is returned when a value is filled,
-// and the filled values are deep copies, so no component shares a value with the
-// profile. A filled value that cannot be copied is an error, never shared instead.
+// and the filled values are deep copies that keep their Go types, so no component
+// shares a value with the profile and an integer stays an integer. A filled value
+// that is not a property value (checkRenderedValue) is an error, never shared
+// instead; TransformWithPolicy refuses one before this runs (checkCapabilityRenderings).
 func applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[string]any, ctx TransformContext) (map[string]any, error) {
 	key, keys := d.CapabilityDefaults()
 	binding, ok := ctx.Capabilities[key]
@@ -1489,16 +1494,55 @@ func applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[s
 	if len(fill) == 0 {
 		return props, nil
 	}
-	copied, err := deepCopyMap(fill)
-	if err != nil {
-		return nil, errors.Wrapf(err, "capability %q defaults", key)
+	for _, k := range slices.Sorted(maps.Keys(fill)) {
+		if err := checkRenderedValue(fill[k], map[propertyCopyKey]bool{}); err != nil {
+			return nil, errors.Wrapf(err, "capability %q defaults: rendering key %q", key, k)
+		}
 	}
 	out := maps.Clone(props)
 	if out == nil {
-		out = make(map[string]any, len(copied))
+		out = make(map[string]any, len(fill))
 	}
-	maps.Copy(out, copied)
+	maps.Copy(out, copyRendering(fill))
 	return out, nil
+}
+
+// checkCapabilityRenderings refuses a capability binding whose rendering holds a value
+// that is not a property value (checkRenderedValue): a null below the top level,
+// NaN or ±Inf, or a Go type other than a string, boolean, number, list or
+// string-keyed object. Both merge sites (resolveCapability and
+// applyComponentCapabilityDefaults) copy a rendering with copyRendering, which keeps
+// Go types but cannot copy such a value, so the check runs once, for every binding,
+// before anything is built (go-kure/launcher#756). A null top-level value is not
+// refused: it reads as absent (isNullValue).
+func checkCapabilityRenderings(capabilities map[string]CapabilityBinding) error {
+	for _, key := range slices.Sorted(maps.Keys(capabilities)) {
+		rendering := capabilities[key].Rendering
+		for _, k := range slices.Sorted(maps.Keys(rendering)) {
+			if isNullValue(rendering[k]) {
+				continue
+			}
+			if err := checkRenderedValue(rendering[k], map[propertyCopyKey]bool{}); err != nil {
+				return errors.Wrapf(err, "capability %q rendering key %q", key, k)
+			}
+		}
+	}
+	return nil
+}
+
+// copyRendering returns a deep copy of a rendering checkCapabilityRenderings
+// accepted, keeping each value's Go type (copyRenderedValue): an int stays an int,
+// and an int64 above 2^53 keeps its value. A nil value is kept as nil.
+func copyRendering(rendering map[string]any) map[string]any {
+	out := make(map[string]any, len(rendering))
+	for k, v := range rendering {
+		if v == nil {
+			out[k] = nil
+			continue
+		}
+		out[k] = copyRenderedValue(v)
+	}
+	return out
 }
 
 // buildCapabilityKey returns "<type>.<scope>" when the trait carries a non-empty
@@ -1886,17 +1930,4 @@ func enforceCapabilityConstraints(traitTypes []string, policy Policy) error {
 	}
 
 	return nil
-}
-
-// deepCopyMap returns a deep copy of a map[string]any via JSON round-trip.
-func deepCopyMap(src map[string]any) (map[string]any, error) {
-	data, err := json.Marshal(src)
-	if err != nil {
-		return nil, err
-	}
-	var dst map[string]any
-	if err := json.Unmarshal(data, &dst); err != nil {
-		return nil, err
-	}
-	return dst, nil
 }
