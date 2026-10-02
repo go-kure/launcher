@@ -435,7 +435,7 @@ func (svcNamerConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
 func (c svcNamerConfig) BackendServiceName() string                            { return c.svc }
 
 // svcPortConfig implements servicePortProvider: a component that owns a Service named after itself
-// (webservice convention) when port > 0, and owns none when port == 0 (e.g. a port-less daemonset).
+// (webservice convention) when port > 0, and owns none when port == 0 (a component with no Service).
 type svcPortConfig struct{ port int32 }
 
 func (svcPortConfig) Generate(_ *stack.Application) ([]*client.Object, error) { return nil, nil }
@@ -666,7 +666,7 @@ func TestSynthesizeNetworkPolicies_ServicelessComponent_NoFalseAmbiguity(t *test
 	}
 }
 
-// A component with an optional Service but no port (ServicePort() == 0, e.g. a port-less daemonset)
+// A component with an optional Service but no port (ServicePort() == 0, e.g. a port-less one)
 // owns no Service and must not be a backendRef target.
 func TestSynthesizeNetworkPolicies_ZeroPortComponent_NotAServiceOwner(t *testing.T) {
 	backend := stack.NewApplication("zero", "default", svcPortConfig{port: 0}) // no Service
