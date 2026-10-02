@@ -1133,7 +1133,13 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 				}
 			}
 
-			for _, newApp := range bundle.Applications[prevLen:] {
+			// A handler that removed an application may leave the bundle shorter
+			// than it found it; nothing it holds past prevLen is new then.
+			var added []*stack.Application
+			if len(bundle.Applications) > prevLen {
+				added = bundle.Applications[prevLen:]
+			}
+			for _, newApp := range added {
 				// Members share the group's name, so traits on two members that
 				// derive a sub-application name from it (web-rbac, web-ingress)
 				// would deploy one name twice.
@@ -1151,7 +1157,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 					}
 				}
 			}
-			subApps = append(subApps, bundle.Applications[prevLen:]...)
+			subApps = append(subApps, added...)
 
 			if d, ok := handler.(SubApplicationDecorator); ok && d.DecoratesSubApplications() {
 				if trait.authoredIndex != nil {

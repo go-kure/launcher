@@ -140,10 +140,12 @@ func TestDecorateSubApplications_AnyTraitOrder(t *testing.T) {
 
 // reorderTraitHandler is a trait that does more than append to the bundle:
 // with replace it swaps its application for a new one named after it plus
-// "-replaced", otherwise it moves its application to the end of the bundle;
-// with appends it then adds a sub-application.
+// "-replaced", with remove it drops its application, otherwise it moves its
+// application to the end of the bundle; with appends it then adds a
+// sub-application.
 type reorderTraitHandler struct {
 	replace bool
+	remove  bool
 	appends bool
 }
 
@@ -151,10 +153,13 @@ func (reorderTraitHandler) CanHandle(t string) bool { return t == "reorder" }
 
 func (h reorderTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *stack.Bundle) error {
 	i := slices.Index(bundle.Applications, app)
-	if h.replace {
+	switch {
+	case h.replace:
 		name := app.Name + "-replaced"
 		bundle.Applications[i] = stack.NewApplication(name, app.Namespace, &namedConfigMapConfig{name: name, namespace: app.Namespace})
-	} else {
+	case h.remove:
+		bundle.Applications = slices.Delete(bundle.Applications, i, i+1)
+	default:
 		bundle.Applications = append(slices.Delete(bundle.Applications, i, i+1), app)
 	}
 	if h.appends {
@@ -166,7 +171,8 @@ func (h reorderTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *sta
 
 // TestApplyTraits_KeepsCustomOrder is go-kure/launcher#718: the bundle is
 // ordered component by component only when its traits did nothing but append.
-// A trait that moved or replaced an application keeps the order it left.
+// A trait that moved, replaced or removed an application keeps the order it
+// left; one that shortened the bundle must not make the engine index past it.
 // TestDecorateSubApplications_AnyTraitOrder's flat shape pins the append-only
 // case.
 func TestApplyTraits_KeepsCustomOrder(t *testing.T) {
@@ -178,6 +184,7 @@ func TestApplyTraits_KeepsCustomOrder(t *testing.T) {
 		{name: "move", want: "other=,web="},
 		{name: "move-and-append", handler: reorderTraitHandler{appends: true}, want: "other=,web=,web-sub="},
 		{name: "replace", handler: reorderTraitHandler{replace: true}, want: "web-replaced=,other="},
+		{name: "remove", handler: reorderTraitHandler{remove: true}, want: "other="},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
