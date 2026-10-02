@@ -41,17 +41,17 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 		delete(clusterProps, "instances")
 	}
 
-	// The defaults trait goes first, so it is the innermost: it sets the
-	// Cluster's policy-dependent values before any authored trait sees the
-	// Cluster, as postgresql's Generate did.
-	traits := append([]oam.Trait{{Type: postgresqlDefaultsTrait, Properties: map[string]any{}}}, comp.Traits...)
 	out := []oam.Component{{
 		Name:        comp.Name,
 		Type:        "cnpg-cluster",
 		Properties:  clusterProps,
-		Traits:      traits,
+		Traits:      slices.Clone(comp.Traits),
 		Annotations: maps.Clone(comp.Annotations),
 	}}
+	// The policy-dependent values are set by a post-policy step: after the
+	// policy decided the instance count and storage, and before any authored
+	// trait sees the Cluster, as postgresql's Generate did.
+	out[0].AfterPolicy(applyPostgresqlDefaults)
 
 	// The ObjectStore is named like the Cluster, so it is emitted under the
 	// component's own name: a member of the Cluster's same-name sibling group.
@@ -377,9 +377,9 @@ func exactNumbers(v any) error {
 }
 
 // clusterSpec is the Cluster spec postgresql wrote, without the values the
-// environment policy decides: spec.enablePDB (set by the defaults trait) and,
+// environment policy decides: spec.enablePDB (set by the post-policy step) and,
 // when storageSize was not authored, spec.storage.size (the policy default, or
-// the defaults trait's 1Gi fallback). spec.instances is the authored replicas
+// the post-policy step's 1Gi fallback). spec.instances is the authored replicas
 // count, or 0 when replicas was not authored (LowerComponent then leaves it
 // out).
 //

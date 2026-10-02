@@ -41,9 +41,9 @@ func lowerPostgresql(t *testing.T, comp *oam.Component, doc *oam.Application) oa
 }
 
 // The rule emits the Cluster, the ObjectStore under the same name, the Pooler
-// and one Database per entry, in that order. The defaults trait goes on the
-// Cluster ahead of the authored traits; the others carry none. Every component
-// gets its own copy of the annotations.
+// and one Database per entry, in that order. The defaults are a post-policy
+// step on the Cluster, not a trait, so the Cluster carries only the authored
+// traits. Every component gets its own copy of the annotations.
 func TestPostgresqlRule_Emission(t *testing.T) {
 	comp := &oam.Component{
 		Name: "db",
@@ -77,12 +77,10 @@ func TestPostgresqlRule_Emission(t *testing.T) {
 		t.Fatalf("emitted %v, want %v", got, want)
 	}
 
-	traits := res.Components[0].Traits
-	if len(traits) != 2 || traits[0].Type != "cnpg-postgresql-defaults" || traits[1].Type != "prune-protection" {
-		t.Errorf("Cluster traits = %+v, want the defaults trait then the authored one", traits)
-	}
-	// prune-protection decorates every object, so every member carries it.
-	for _, c := range res.Components[1:] {
+	// The defaults are a post-policy step, not a trait: the Cluster carries the
+	// authored trait only, and prune-protection decorates every object, so every
+	// member carries it.
+	for _, c := range res.Components {
 		if len(c.Traits) != 1 || c.Traits[0].Type != "prune-protection" {
 			t.Errorf("%s %q carries traits %+v, want the authored prune-protection", c.Type, c.Name, c.Traits)
 		}
@@ -102,7 +100,7 @@ func TestPostgresqlRule_Emission(t *testing.T) {
 }
 
 // instances and storage.size are written only when authored, so the policy
-// default and the defaults trait's fallback apply exactly as they applied to
+// default and the post-policy step's fallback apply exactly as they applied to
 // replicas and storageSize.
 func TestPostgresqlRule_InstancesAndStorageOnlyWhenAuthored(t *testing.T) {
 	unauthored := lowerPostgresql(t, &oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{}}, nil).Components[0].Properties

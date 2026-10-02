@@ -83,6 +83,10 @@ type Component struct {
 	// (collapseSiblingGroups, sibling_group.go). The engine alone sets it: an
 	// authored component, and any other rule's output, never carries one.
 	siblingGroup *siblingGroup
+	// afterPolicy holds the post-policy steps a lowering rule attached with
+	// AfterPolicy (post_policy_step.go), in the order attached. Unexported, so a
+	// document can neither author nor carry one.
+	afterPolicy []PostPolicyStep
 }
 
 // Origin returns the component's authored provenance and whether the lowering engine

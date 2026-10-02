@@ -202,8 +202,8 @@ Engine design). go-kure/launcher#281 does this for `postgresql`: its rule
 expands one `postgresql` component into a `cnpg-cluster` (and, where enabled, a
 `cnpg-objectstore` of the same name, a `cnpg-pooler` and one `cnpg-database` per
 database), writing the image and update strategy as kind properties. The two
-values that depend on the policy, which runs after lowering, come from the
-engine-only `cnpg-postgresql-defaults` trait the rule attaches to the Cluster:
+values that depend on the policy, which runs after lowering, come from a
+post-policy step the rule attaches to the Cluster (go-kure/launcher#729):
 `enablePDB` from the post-policy instance count, and the `1Gi` storage fallback,
 held to the policy maximum. The generated objects are unchanged; with both an
 object store and a pooler, the ObjectStore now precedes the Pooler.

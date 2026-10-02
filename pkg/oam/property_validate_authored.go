@@ -218,9 +218,6 @@ func withUnsupportedFieldHint(handler any, err error) error {
 // engineTraitProperties.
 func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait) error {
 	path := fmt.Sprintf("component %q: trait %q: properties", componentName, trait.Type)
-	if t.engineTraitTypes[trait.Type] && !trait.synthesized {
-		return errors.Wrapf(engineOnlyTraitError(trait.Type), "component %q", componentName)
-	}
 	if h, ok := t.traitHandlers[trait.Type]; ok {
 		return validateAuthoredTraitAgainst(h, trait.Properties, path)
 	}

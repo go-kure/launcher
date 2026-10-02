@@ -669,16 +669,21 @@ start of each lowering round, before any rule of that round runs, so a rule that
 emits an element sharing a component's or trait's properties map cannot have
 emission validation strip an authored `null` from it.
 
-**Engine-only traits.** `RegisterEngineTrait(type, handler)` registers a trait
-handler that only a lowering rule may attach: it dispatches like any built-in
-trait, but a trait of that type that is not synthesized — authored, or emitted by a
-rule whose input nothing checked — is refused, by `ValidateAuthoredProperties` and
-again at dispatch (`trait type "…" is engine-only: a lowering rule attaches it, and
-a document may not author it`). It is left out of `HandlerSchemas` and
-`HandlerContracts`, so nothing publishes it as something to author. The built-in
-one is `cnpg-postgresql-defaults`, which the `postgresql` rule attaches to the
-`cnpg-cluster` it emits to set the values postgresql derives after the policy
-(go-kure/launcher#281).
+**Post-policy steps.** Lowering runs before the environment policy, so a rule
+cannot write a value it derives from what the policy decided. It attaches a
+`PostPolicyStep` to the component it emits instead, with
+`Component.AfterPolicy(step)`. The transform runs the steps on the config the
+component's handler built, in the order attached, right after
+`Enforceable.ApplyPolicy` and before any trait of the component; an error fails the
+transform, naming the component. A step is part of the component value: it survives
+copies and later lowering rounds, including a trait rule rewriting the component's
+traits, but not serialization, and a document cannot author one. A
+`ComponentLoweringRule` that lowers a component carrying a step carries it over only
+by copying that component; a component it builds anew has no step, and the engine
+cannot tell one was dropped. The built-in user is the `postgresql` rule, which
+attaches a step to the `cnpg-cluster` it emits to set the values postgresql derives
+after the policy (`CnpgClusterConfig.ApplyPostgresqlDefaults`; go-kure/launcher#281,
+go-kure/launcher#729).
 
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the

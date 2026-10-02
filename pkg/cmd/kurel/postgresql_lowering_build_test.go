@@ -397,12 +397,11 @@ spec:
 	}
 }
 
-// TestBuild_PostgresqlDefaultsTraitIsEngineOnly: the trait the postgresql rule
-// attaches to its Cluster cannot be authored, on postgresql or on the
-// cnpg-cluster kind it lowers onto. kurel's parse already refuses it as a trait
-// type a document may not name; the engine's own refusals behind that are pinned
-// in pkg/oam (engine_trait_test.go).
-func TestBuild_PostgresqlDefaultsTraitIsEngineOnly(t *testing.T) {
+// TestBuild_PostgresqlDefaultsIsNotATraitType: the postgresql defaults are a
+// post-policy step the rule attaches to its Cluster, not a trait, so the name
+// the former engine-only trait had is refused as an unknown trait type, on
+// postgresql and on the cnpg-cluster kind it lowers onto.
+func TestBuild_PostgresqlDefaultsIsNotATraitType(t *testing.T) {
 	for _, typ := range []string{"postgresql", "cnpg-cluster"} {
 		t.Run(typ, func(t *testing.T) {
 			app := `apiVersion: launcher.gokure.dev/v1alpha1

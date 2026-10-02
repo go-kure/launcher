@@ -57,11 +57,12 @@ const (
 // lowering engine, so it names the component's type and document
 // (`component "db" (type "postgresql") in document …: <cause>`).
 //
-// The two policy-dependent values are written after the policy ran, by the
-// engine-only `cnpg-postgresql-defaults` trait the rule attaches in front of
-// the authored traits: lowering runs before the environment policy, and the
-// Cluster's policy defaults (instances, storage.size) apply only to values the
-// document left unset. The trait calls CnpgClusterConfig.ApplyPostgresqlDefaults.
+// The two policy-dependent values are written after the policy ran, by a
+// post-policy step the rule attaches to the Cluster (oam.Component.AfterPolicy),
+// which runs before the authored traits: lowering runs before the environment
+// policy, and the Cluster's policy defaults (instances, storage.size) apply only
+// to values the document left unset. The step calls
+// CnpgClusterConfig.ApplyPostgresqlDefaults.
 //
 // The authored traits are forwarded unchanged to the `cnpg-cluster`
 // component; the annotations go to every component the rule emits.
@@ -71,10 +72,6 @@ type PostgresqlRule struct{}
 // lowering position. build.go registers this rule via RegisterComponentLowering
 // instead of a dispatchable component handler.
 func (PostgresqlRule) ComponentType() string { return "postgresql" }
-
-// postgresqlDefaultsTrait is the engine-only trait the rule attaches to the
-// Cluster it emits (traits.PostgresqlDefaultsHandler).
-const postgresqlDefaultsTrait = "cnpg-postgresql-defaults"
 
 // validatePostgresqlClusterName applies cnpg-cluster's Cluster-name rule
 // (validateCnpgClusterName) to a postgresql component, whose name becomes the

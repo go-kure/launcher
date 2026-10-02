@@ -7,7 +7,6 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
-	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
@@ -16,9 +15,10 @@ import (
 // tests pinning postgresql's behaviour keep running against the production
 // path, one step at a time as the engine takes them: the rule's
 // LowerComponent, then the CNPG kind handler for each component it emits, the
-// policy on each of their configs, then the synthesized
-// cnpg-postgresql-defaults trait (traits.PostgresqlDefaultsHandler) on the
-// Cluster before Generate.
+// policy on each of their configs, then the post-policy step the rule attaches
+// to the Cluster (CnpgClusterConfig.ApplyPostgresqlDefaults) before Generate.
+// The step itself is not visible outside pkg/oam, so the adapter calls what it
+// calls; the kurel goldens pin that the engine runs it.
 //
 // The config it returns embeds what PostgresqlRule.Parse read, so the tests
 // reading parsed fields keep reading them; those fields are not updated by
@@ -61,11 +61,7 @@ func (postgresqlViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 		if err != nil {
 			return nil, err
 		}
-		m := postgresqlMember{name: emitted.Name, config: cfg}
-		if emitted.Type == "cnpg-cluster" {
-			m.synthesized = emitted.Traits[:len(emitted.Traits)-len(comp.Traits)]
-		}
-		out.members = append(out.members, m)
+		out.members = append(out.members, postgresqlMember{name: emitted.Name, config: cfg})
 	}
 	return out, nil
 }
@@ -78,9 +74,8 @@ type postgresqlViaRuleConfig struct {
 }
 
 type postgresqlMember struct {
-	name        string
-	config      stack.ApplicationConfig
-	synthesized []oam.Trait
+	name   string
+	config stack.ApplicationConfig
 }
 
 // cluster is the Cluster component's config.
@@ -109,22 +104,17 @@ func (c *postgresqlViaRuleConfig) Generate(app *stack.Application) ([]*client.Ob
 			name = app.Name
 		}
 		cfg := m.config
-		// The trait sets the Cluster's defaults on the config it is handed, so
+		// The step sets the Cluster's defaults on the config it is handed, so
 		// it gets a copy: a second Generate starts from the same config, as
 		// the engine's single transform does.
-		if cc, ok := cfg.(*components.CnpgClusterConfig); ok && len(m.synthesized) > 0 {
+		if cc, ok := cfg.(*components.CnpgClusterConfig); ok {
 			cp := *cc
+			if err := cp.ApplyPostgresqlDefaults(); err != nil {
+				return nil, err
+			}
 			cfg = &cp
 		}
 		inner := stack.NewApplication(name, app.Namespace, cfg)
-		for j := range m.synthesized {
-			if m.synthesized[j].Type != "cnpg-postgresql-defaults" {
-				return nil, errors.Errorf("postgresql rule synthesized an unexpected %q trait", m.synthesized[j].Type)
-			}
-			if err := (&traits.PostgresqlDefaultsHandler{}).Apply(&m.synthesized[j], inner, nil); err != nil {
-				return nil, err
-			}
-		}
 		got, err := inner.Config.Generate(inner)
 		if err != nil {
 			return nil, err
