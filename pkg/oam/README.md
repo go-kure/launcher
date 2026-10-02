@@ -212,7 +212,10 @@ registries have the same shape and the same failure mode — `traitComponentRest
 (which traits a component type accepts; today only `scaler` is restricted, to `webservice`,
 `worker` and `deployment`, the kinds that report a non-RWX claim to it) and `componentHealthCheckGVK` (the workload GVK
 a component type's auto health check targets; an unlisted type is skipped silently, so
-its bundle simply carries one health check fewer).
+its bundle simply carries one health check fewer). The auto check is attached only
+to the component's own application, matched by identity: a trait sub-application
+that shares another component's name (a `pvc` trait's claim `<component>-<volume>`)
+never takes that component's check (go-kure/launcher#702).
 
 **Membership in `componentHealthCheckGVK` follows what kstatus can actually read, not
 whether the workload has a steady ready state.** `job` is listed: kstatus's `jobConditions`
