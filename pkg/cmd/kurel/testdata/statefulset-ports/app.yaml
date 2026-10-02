@@ -1,0 +1,27 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-db
+  namespace: default
+spec:
+  components:
+    - name: db
+      type: statefulset
+      properties:
+        image: ghcr.io/example/postgres:v15.0
+        port: 5432
+        ports:
+          - name: metrics
+            containerPort: 9187
+        probes:
+          readiness:
+            tcpSocket:
+              port: tcp
+          liveness:
+            httpGet:
+              path: /metrics
+              port: metrics
+        volumeClaimTemplates:
+          - name: data
+            size: 10Gi
+            mountPath: /var/lib/postgresql/data

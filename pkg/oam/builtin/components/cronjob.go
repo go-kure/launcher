@@ -89,6 +89,7 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"resources":                  schemaResources(false),
 		"command":                    schemaStringArray(),
 		"args":                       schemaStringArray(),
+		"ports":                      schemaMainContainerPorts(),
 		"probes":                     schemaProbes(false),
 		"lifecycle":                  schemaLifecycle(false),
 		"securityContext":            schemaSecurityContext(false),
@@ -256,18 +257,19 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		return nil, err
 	}
 	config.Args = args
-	// namedPortsAllowed=false: cronjob exposes no port property at all, so its
-	// main container never declares a ContainerPort for the kubelet to
-	// resolve a named probe/lifecycle port against.
-	probes, err := parseProbes(props, false, "")
+	ports, err := parseMainContainerPorts(props, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "invalid probe configuration")
+		return nil, err
+	}
+	config.Ports = ports
+	// Without `ports`, namedPortsAllowed=false: the main container then
+	// declares no ContainerPort for the kubelet to resolve a named
+	// probe/lifecycle port against. With `ports`, a name resolves against them.
+	probes, lifecycle, err := parseMainContainerHandlers(props, ports, ports, false, "")
+	if err != nil {
+		return nil, err
 	}
 	config.Probes = probes
-	lifecycle, err := parseLifecycle(props, false, "")
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid lifecycle configuration")
-	}
 	config.Lifecycle = lifecycle
 	securityContext, err := parseSecurityContext(props)
 	if err != nil {
@@ -339,6 +341,7 @@ type CronjobConfig struct {
 	Resources               ResourceRequirements
 	Command                 []string
 	Args                    []string
+	Ports                   []corev1.ContainerPort
 	Probes                  ProbeConfig
 	Lifecycle               *corev1.Lifecycle
 	SecurityContext         *corev1.SecurityContext
@@ -454,12 +457,12 @@ func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, erro
 }
 
 func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob, error) {
-	// No Ports: cronjob exposes no port property (see parseProbes' namedPortsAllowed=false above).
 	container, err := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
 		Command:         c.Command,
 		Args:            c.Args,
 		Resources:       c.Resources,
+		Ports:           c.Ports,
 		Env:             c.Env,
 		EnvFrom:         c.EnvFrom,
 		Probes:          c.Probes,

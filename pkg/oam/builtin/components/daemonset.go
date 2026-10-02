@@ -28,6 +28,7 @@ func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 	m := map[string]oam.PropertySchema{
 		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
 		"port":            {Type: oam.PropertyTypeInteger, Description: "Container port to expose; when set, a ClusterIP Service is generated."},
+		"ports":           schemaMainContainerPortsBeside(daemonsetPortName),
 		"env":             schemaEnv(false),
 		"envFrom":         schemaEnvFrom(false),
 		"resources":       schemaResources(false),
@@ -105,19 +106,21 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 			return nil, err
 		}
 	}
-	// namedPortsAllowed mirrors createContainer's own `c.Port > 0` guard below:
-	// the main container only gets a Name: "http" ContainerPort when a port
-	// was actually configured, so a probe/lifecycle port resolves only in
-	// that case, and only when it names that same "http" port.
-	probes, err := parseProbes(props, config.Port > 0, "http")
+	ports, err := parseMainContainerPorts(props, config.portContainerPorts())
 	if err != nil {
-		return nil, errors.Wrap(err, "invalid probe configuration")
+		return nil, err
+	}
+	config.Ports = ports
+	// Without `ports`, namedPortsAllowed mirrors portContainerPorts' own
+	// `c.Port > 0` guard: the main container only gets a Name: "http"
+	// ContainerPort when a port was actually configured, so a probe/lifecycle
+	// port resolves only in that case, and only when it names that same "http"
+	// port. With `ports`, a name resolves against the whole list.
+	probes, lifecycle, err := parseMainContainerHandlers(props, ports, config.mainContainerPorts(), config.Port > 0, daemonsetPortName)
+	if err != nil {
+		return nil, err
 	}
 	config.Probes = probes
-	lifecycle, err := parseLifecycle(props, config.Port > 0, "http")
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid lifecycle configuration")
-	}
 	config.Lifecycle = lifecycle
 	securityContext, err := parseSecurityContext(props)
 	if err != nil {
@@ -176,7 +179,8 @@ type DaemonsetConfig struct {
 	Name            string
 	Namespace       string
 	Image           string
-	Port            int32 // when > 0, generates a ClusterIP Service exposing this port
+	Port            int32                  // when > 0, generates a ClusterIP Service exposing this port
+	Ports           []corev1.ContainerPort // further main-container ports, after Port's own; no Service
 	Env             []corev1.EnvVar
 	EnvFrom         []corev1.EnvFromSource
 	Resources       ResourceRequirements
@@ -219,7 +223,7 @@ func (c *DaemonsetConfig) ServicePortName() (string, bool) {
 	if c.Port <= 0 {
 		return "", false
 	}
-	return "http", true
+	return daemonsetPortName, true
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -334,7 +338,7 @@ func (c *DaemonsetConfig) createService(app *stack.Application) *corev1.Service 
 	svc.Spec.Type = corev1.ServiceTypeClusterIP
 	svc.Spec.Selector = appLabels(app.Name)
 	kubernetes.AddServicePort(svc, corev1.ServicePort{
-		Name:       "http",
+		Name:       daemonsetPortName,
 		Port:       c.Port,
 		TargetPort: intstr.FromInt32(c.Port),
 		Protocol:   corev1.ProtocolTCP,
@@ -342,17 +346,32 @@ func (c *DaemonsetConfig) createService(app *stack.Application) *corev1.Service 
 	return svc
 }
 
-func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.DaemonSet, error) {
-	var ports []corev1.ContainerPort
-	if c.Port > 0 {
-		ports = []corev1.ContainerPort{{Name: "http", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
+// daemonsetPortName is the name `port` gives its container port and the
+// Service port.
+const daemonsetPortName = "http"
+
+// portContainerPorts is the container port `port` declares, named "http", or
+// none when no port is configured.
+func (c *DaemonsetConfig) portContainerPorts() []corev1.ContainerPort {
+	if c.Port <= 0 {
+		return nil
 	}
+	return []corev1.ContainerPort{{Name: daemonsetPortName, ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
+}
+
+// mainContainerPorts is the main container's whole port list: Port's own
+// entry, then Ports.
+func (c *DaemonsetConfig) mainContainerPorts() []corev1.ContainerPort {
+	return joinContainerPorts(c.portContainerPorts(), c.Ports)
+}
+
+func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.DaemonSet, error) {
 	container, err := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
 		Command:         c.Command,
 		Args:            c.Args,
 		Resources:       c.Resources,
-		Ports:           ports,
+		Ports:           c.mainContainerPorts(),
 		Env:             c.Env,
 		EnvFrom:         c.EnvFrom,
 		Probes:          c.Probes,

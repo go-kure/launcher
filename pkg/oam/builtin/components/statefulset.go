@@ -30,6 +30,7 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"image":                {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
 		"replicas":             {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of StatefulSet pod replicas."},
 		"port":                 {Type: oam.PropertyTypeInteger, Description: "Container port to expose via the headless Service."},
+		"ports":                schemaMainContainerPortsBeside(statefulsetPortName),
 		"serviceName":          {Type: oam.PropertyTypeString, Description: "Name of the headless Service (defaults to the component name). Must be a valid Service name, a DNS-1035 label."},
 		"env":                  schemaEnv(false),
 		"envFrom":              schemaEnvFrom(false),
@@ -131,19 +132,21 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.Args = args
 
-	// namedPortsAllowed mirrors createContainer's own `c.Port > 0` guard: the
-	// main container only gets a Name: "tcp" ContainerPort when a port was
-	// actually configured, so a probe/lifecycle port resolves only in that
-	// case, and only when it names that same "tcp" port.
-	probes, err := parseProbes(props, config.Port > 0, "tcp")
+	ports, err := parseMainContainerPorts(props, config.portContainerPorts())
 	if err != nil {
-		return nil, errors.Wrap(err, "invalid probe configuration")
+		return nil, err
+	}
+	config.Ports = ports
+	// Without `ports`, namedPortsAllowed mirrors portContainerPorts' own
+	// `c.Port > 0` guard: the main container only gets a Name: "tcp"
+	// ContainerPort when a port was actually configured, so a probe/lifecycle
+	// port resolves only in that case, and only when it names that same "tcp"
+	// port. With `ports`, a name resolves against the whole list.
+	probes, lifecycle, err := parseMainContainerHandlers(props, ports, config.mainContainerPorts(), config.Port > 0, statefulsetPortName)
+	if err != nil {
+		return nil, err
 	}
 	config.Probes = probes
-	lifecycle, err := parseLifecycle(props, config.Port > 0, "tcp")
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid lifecycle configuration")
-	}
 	config.Lifecycle = lifecycle
 	securityContext, err := parseSecurityContext(props)
 	if err != nil {
@@ -233,6 +236,7 @@ type StatefulsetConfig struct {
 	Image                string
 	Replicas             int32
 	Port                 int32
+	Ports                []corev1.ContainerPort // further main-container ports, after Port's own; not on the headless Service
 	ServiceName          string
 	Env                  []corev1.EnvVar
 	EnvFrom              []corev1.EnvFromSource
@@ -351,7 +355,7 @@ func (c *StatefulsetConfig) ServicePortName() (string, bool) {
 	if c.Port <= 0 {
 		return "", false
 	}
-	return "tcp", true
+	return statefulsetPortName, true
 }
 
 // BackendServiceName returns the name of the Kubernetes Service the statefulset exposes.
@@ -447,13 +451,23 @@ func checkClaimTemplateCollisions(vcts []VolumeClaimTemplate, volumes []corev1.V
 	return nil
 }
 
-// mainContainerPorts is the main container's port, named "tcp", or none when
-// no port is configured.
-func (c *StatefulsetConfig) mainContainerPorts() []corev1.ContainerPort {
+// statefulsetPortName is the name `port` gives its container port and the
+// headless Service port.
+const statefulsetPortName = "tcp"
+
+// portContainerPorts is the container port `port` declares, named "tcp", or
+// none when no port is configured.
+func (c *StatefulsetConfig) portContainerPorts() []corev1.ContainerPort {
 	if c.Port <= 0 {
 		return nil
 	}
-	return []corev1.ContainerPort{{Name: "tcp", ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
+	return []corev1.ContainerPort{{Name: statefulsetPortName, ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
+}
+
+// mainContainerPorts is the main container's whole port list: Port's own
+// entry, then Ports.
+func (c *StatefulsetConfig) mainContainerPorts() []corev1.ContainerPort {
+	return joinContainerPorts(c.portContainerPorts(), c.Ports)
 }
 
 func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.StatefulSet, error) {
@@ -551,7 +565,7 @@ func (c *StatefulsetConfig) createHeadlessService(app *stack.Application) *corev
 	svc.Spec.Selector = appLabels(app.Name)
 	if c.Port > 0 {
 		kubernetes.AddServicePort(svc, corev1.ServicePort{
-			Name:       "tcp",
+			Name:       statefulsetPortName,
 			Port:       c.Port,
 			TargetPort: intstr.FromInt32(c.Port),
 			Protocol:   corev1.ProtocolTCP,
