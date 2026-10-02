@@ -217,9 +217,10 @@ func displayURL(rawURL string) string {
 
 // displayHost reduces a host, as urlHost or url.URL.Host returns it, to the part
 // that is safe to print, or to "" when that part cannot be told apart from the
-// rest. The userinfo runs to the last "@" and is dropped, unless a "?" or "#"
-// precedes that "@": the "@" may then belong to a query or fragment as well, so
-// nothing is shown. A query or fragment urlHost keeps is dropped, and so is an
+// rest. The userinfo runs to the last "@" and is dropped, unless "[", "]", "?"
+// or "#", none of which a userinfo may hold, precedes that "@": the "@" may
+// then sit inside IPv6 brackets or a query or fragment instead, so nothing is
+// shown. A query or fragment urlHost keeps is dropped, and so is an
 // IPv6 zone ("%" up to the last "]"), since net/url keeps arbitrary zone text
 // in Host, "]" included. What is left is shown only when it is a plain host
 // (plainHost); anything else, such as a "]" left from a userinfo inside the
@@ -228,10 +229,10 @@ func displayURL(rawURL string) string {
 func displayHost(host string) (shown string, trimmed bool) {
 	shown = host
 	at := strings.LastIndex(shown, "@")
+	if at >= 0 && strings.ContainsAny(shown[:at], "[]?#") {
+		return "", true
+	}
 	if q := strings.IndexAny(shown, "?#"); q >= 0 {
-		if q < at {
-			return "", true
-		}
 		shown = shown[:q]
 	}
 	if at >= 0 {

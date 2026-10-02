@@ -68,6 +68,8 @@ func TestURLRefusalsHideCredential(t *testing.T) {
 			[]string{"helmrepository: url: source registry is not in allowed registries", notShown}},
 		{"gitrepository, IPv6 zone holding the userinfo", "gitrepository", url("https://[fe80::1%zone@s3cr3t]:8443/org/repo"), []string{"[fe80::1]:8443"},
 			[]string{"gitrepository: url: source registry is not in allowed registries", notShown}},
+		{"gitrepository, IPv6 zone holding the userinfo and a ?", "gitrepository", url("https://[fe80::1%zone@s3cr3t?x]:8443/org/repo"), []string{"[fe80::1]:8443"},
+			[]string{"gitrepository: url: source registry is not in allowed registries", notShown}},
 		{"bucket endpoint, IPv6 zone holding the userinfo", "bucket", bucket("[fe80::1%zone@s3cr3t]:9000", ""), []string{"[fe80::1]:9000"},
 			[]string{"bucket: endpoint: source registry is not in allowed registries", notShown}},
 		{"oci, user and token", "oci", ociSrc("oci://deploy:s3cr3t@ghcr.io/org/app"), []string{"ghcr.io"},
