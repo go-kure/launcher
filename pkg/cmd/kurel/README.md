@@ -106,9 +106,12 @@ by its registered lowering rules — `worker`, `webservice`, `postgresql`, `helm
 types. See the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s
 Parsing and Lowering sections for the general mechanism.
 
-Immediately after parsing, `build` calls `ValidateAuthoredProperties`, so a component
-or trait property no handler declares is a build error naming the field and the
-allowed set, rather than being silently dropped (go-kure/launcher#408):
+Once the application is parsed and the profile evaluated, `build` calls
+`ValidateAuthoredPropertiesWithCapabilities` with the evaluated bindings, so a
+component or trait property no handler declares is a build error naming the field
+and the allowed set, rather than being silently dropped (go-kure/launcher#408). The
+bindings are what let a trait leave a nested required key to the capability
+rendering (go-kure/launcher#765):
 
 ```text
 Error: validating application file "app.yaml": component "web": trait "expose": properties: unsupported field "tls" (allowed: allowedGroups, allowedHostnameWildcard, annotations, authResponseHeaders, authSigninURL, authURL, certManagerClusterIssuer, controllerType, forceSslRedirect, gatewayName, gatewayNamespace, hostnames, ingressClassName, name, networkPolicy, rules, scope, secretName, serviceName, servicePort, sslRedirect)
