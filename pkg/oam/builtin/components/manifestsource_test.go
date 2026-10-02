@@ -223,13 +223,16 @@ func TestResolve_URLRejectsRedirectToDisallowedHost(t *testing.T) {
 	}
 }
 
-// TestResolve_URLErrorsHideCredential pins that a fetch error names the url
-// without its userinfo, user included, and without its query, while keeping
-// host and path: the non-2xx refusal; a transport failure, whose *url.Error
-// from net/http names the url with only the password masked; a malformed
-// redirect Location, which net/http quotes whole; and an opaque url, which
-// parses with its userinfo in Opaque.
+// TestResolve_URLErrorsHideCredential pins that a fetch error names the url by
+// scheme and host only, without its userinfo, user included, its path or its
+// query, in every error class: the non-2xx refusal; a transport failure, whose
+// *url.Error from net/http names the url with only the password masked; a body
+// read; the size cap; a malformed redirect Location, which net/http quotes
+// whole; and an opaque url, which parses with its userinfo in Opaque.
 func TestResolve_URLErrorsHideCredential(t *testing.T) {
+	orig := maxManifestBytes
+	maxManifestBytes = 64
+	defer func() { maxManifestBytes = orig }()
 	notFound := httptest.NewServer(http.NotFoundHandler())
 	defer notFound.Close()
 	// hangUp closes every connection without a response: a transport failure
@@ -258,21 +261,31 @@ func TestResolve_URLErrorsHideCredential(t *testing.T) {
 		_ = buf.Flush()
 	}))
 	defer badTrailer.Close()
+	oversized := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("a", 1000)))
+	}))
+	defer oversized.Close()
 
 	withCred := func(base, userinfo, rest string) string {
 		return strings.Replace(base, "://", "://"+userinfo+"@", 1) + rest
 	}
+	// tokenPath is a capability URL's path, the token being the path segment.
+	const tokenPath = "/download/s3cr3t/crds.yaml"
 	cases := []struct {
 		name, url, want string
 	}{
-		{"404, user and token", withCred(notFound.URL, "deploy:s3cr3t", "/crds.yaml"), notFound.URL + "/crds.yaml\": unexpected status 404"},
-		{"404, token as user", withCred(notFound.URL, "s3cr3t", "/crds.yaml"), notFound.URL + "/crds.yaml\": unexpected status 404"},
-		{"404, signed query", notFound.URL + "/crds.yaml?sig=s3cr3t", notFound.URL + "/crds.yaml\": unexpected status 404"},
-		{"transport failure, user and token", withCred(hangUp.URL, "deploy:s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + hangUp.URL + "/crds.yaml\": request failed"},
-		{"transport failure, token as user", withCred(hangUp.URL, "s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + hangUp.URL + "/crds.yaml\": request failed"},
-		{"malformed redirect location", badRedirect.URL + "/crds.yaml", "manifest source: fetch \"" + badRedirect.URL + "/crds.yaml\": request failed"},
+		{"404, user and token", withCred(notFound.URL, "deploy:s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + notFound.URL + "\": unexpected status 404"},
+		{"404, token as user", withCred(notFound.URL, "s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + notFound.URL + "\": unexpected status 404"},
+		{"404, signed query", notFound.URL + "/crds.yaml?sig=s3cr3t", "manifest source: fetch \"" + notFound.URL + "\": unexpected status 404"},
+		{"404, token in path", notFound.URL + tokenPath, "manifest source: fetch \"" + notFound.URL + "\": unexpected status 404"},
+		{"transport failure, user and token", withCred(hangUp.URL, "deploy:s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + hangUp.URL + "\": request failed"},
+		{"transport failure, token as user", withCred(hangUp.URL, "s3cr3t", "/crds.yaml"), "manifest source: fetch \"" + hangUp.URL + "\": request failed"},
+		{"transport failure, token in path", hangUp.URL + tokenPath, "manifest source: fetch \"" + hangUp.URL + "\": request failed"},
+		{"malformed redirect location", badRedirect.URL + "/crds.yaml", "manifest source: fetch \"" + badRedirect.URL + "\": request failed"},
 		{"opaque url", "https:deploy:s3cr3t@example.com/crds.yaml", "manifest source: fetch \"(url without a host)\": request failed"},
-		{"malformed trailer reflecting the query", badTrailer.URL + "/crds.yaml?sig=s3cr3t", "manifest source: read \"" + badTrailer.URL + "/crds.yaml\": response body could not be read"},
+		{"malformed trailer reflecting the query", badTrailer.URL + "/crds.yaml?sig=s3cr3t", "manifest source: read \"" + badTrailer.URL + "\": response body could not be read"},
+		{"body read, token in path", badTrailer.URL + tokenPath + "?malformed", "manifest source: read \"" + badTrailer.URL + "\": response body could not be read"},
+		{"size cap, token in path", oversized.URL + tokenPath, "manifest source: \"" + oversized.URL + "\" response exceeds max size 64 bytes"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -3087,9 +3087,9 @@ not part of either change.
   emitted as-is — the Kubernetes API forbids a namespace on a cluster-scoped
   object, so letting it through would only defer the failure to apply time.
   A `url` that does not parse is refused without the URL or the parser's
-  error, and a fetch error names the URL by scheme, host and path only
+  error, and a fetch error names the URL by scheme and host only
   (`manifestsource.go`'s `displayURL`; a URL with no host is not named): its
-  userinfo or query may carry a credential. A failed request or body read is
+  userinfo, path or query may carry a credential. A failed request or body read is
   named by fixed text only (`failureCause`): a timeout, a failed host lookup,
   or the failing network operation and its system error, such as
   `dial failed: connection refused`; anything else reads `request failed` or
