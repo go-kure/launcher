@@ -395,6 +395,8 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 	evaluated := make(map[string]CapabilityBinding, len(profile.Spec.Capabilities))
 	for key, binding := range profile.Spec.Capabilities {
 		typeName, _, _ := strings.Cut(key, ".")
+		// capabilityValidated mirrors which of the branches below validate the
+		// rendering; a change here is a change there.
 		handler, ok := t.traitHandlers[typeName]
 		if !ok {
 			// The type may be a trait-position lowering rule instead of a dispatchable
@@ -1594,25 +1596,44 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 	return out, nil
 }
 
+// capabilityValidated reports whether EvaluateProfile validates a rendering of
+// capability type typeName: the trait handler registered for it, else the trait
+// lowering rule, implements ValidateAndApplyDefaults, or the type is not built in
+// and has a CapabilityDefinition, whose schema EvaluateProfile applies. With neither
+// a handler nor a rule, EvaluateProfile passes the binding through unchecked. It
+// mirrors EvaluateProfile's branches; a change to one is a change to both.
+func (t *Transformer) capabilityValidated(typeName string) bool {
+	var registered any
+	if h, ok := t.traitHandlers[typeName]; ok {
+		registered = h
+	} else if rule, ok := t.traitLoweringRules[typeName]; ok {
+		registered = rule
+	} else {
+		return false
+	}
+	if _, ok := registered.(ValidateAndApplyDefaults); ok {
+		return true
+	}
+	_, hasDef := t.capabilityDefs[typeName]
+	return hasDef && !t.builtinTraitTypes[typeName]
+}
+
 // validateCapabilityFill checks the values applyComponentCapabilityDefaults is about
 // to fill against the component's own PropertySchema, and writes back each value
 // as validation normalized it, as authored validation does (go-kure/launcher#751).
 // EvaluateProfile validates a binding only through the trait handler or trait
 // lowering rule of its type, whose schema can differ from the component's, so the
 // component's schema decides. A component that declares no schema relies on that
-// trait-side check alone; with no trait handler or rule registered for the type
-// either, nothing validates the values, and the fill is refused.
+// trait-side check alone, and the fill is refused when it does not validate the
+// rendering (capabilityValidated, go-kure/launcher#772).
 func (t *Transformer) validateCapabilityFill(d ComponentCapabilityDefaults, key string, fill map[string]any) error {
 	p, ok := d.(PropertySchemaProvider)
 	if !ok {
 		typeName, _, _ := strings.Cut(key, ".")
-		if _, has := t.traitHandlers[typeName]; has {
+		if t.capabilityValidated(typeName) {
 			return nil
 		}
-		if _, has := t.traitLoweringRules[typeName]; has {
-			return nil
-		}
-		return errors.Errorf("capability %q defaults: nothing validates rendering keys %q: the component handler declares no PropertySchema and no trait handler or trait lowering rule is registered for type %q; implement PropertySchemaProvider on the component handler or register the trait",
+		return errors.Errorf("capability %q defaults: nothing validates rendering keys %q: the component handler declares no PropertySchema, and no trait handler or trait lowering rule for type %q validates the rendering (none implements ValidateAndApplyDefaults, and no CapabilityDefinition applies to it); implement PropertySchemaProvider on the component handler, or ValidateAndApplyDefaults on the trait",
 			key, slices.Sorted(maps.Keys(fill)), typeName)
 	}
 	schema := p.PropertySchema()
