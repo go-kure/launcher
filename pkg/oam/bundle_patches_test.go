@@ -343,17 +343,30 @@ func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
 // TestWarnForcedVolumes_BundlePatchesFailToBuild pins the fallback: a patch set
 // kustomize cannot build is warned once and the bundle is checked unpatched.
 func TestWarnForcedVolumes_BundlePatchesFailToBuild(t *testing.T) {
-	got := patchedWarnings(t, &stack.Bundle{Name: "db",
-		Applications: []*stack.Application{fixedApp("db", claimObject("shop", "data", forceAnnotated("enabled")))},
-		Patches:      []stack.Patch{{Patch: removeForceJSON}, {Patch: "not: [valid"}}})
-	if len(got) != 2 {
-		t.Fatalf("warnings = %q, want a build warning and the unpatched claim's", got)
-	}
-	if !strings.HasPrefix(got[0], `the patches of the bundle of component "db" could not be applied, so its force-applied volumes are checked as generated, without them: `) {
-		t.Errorf("build warning = %q", got[0])
-	}
-	if want := claimWarning("data", `component "db"`, annotationReason); got[1] != want {
-		t.Errorf("claim warning = %q, want %q", got[1], want)
+	for _, tc := range []struct {
+		name    string
+		patches []stack.Patch
+	}{
+		{"a patch does not parse", []stack.Patch{{Patch: removeForceJSON}, {Patch: "not: [valid"}}},
+		// Kustomize builds it, but the result cannot be serialized, which fails
+		// Flux's build too.
+		{"the result does not serialize", []stack.Patch{
+			{Patch: "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: data\n  namespace: shop\n  annotations:\n    123: hello\n"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := patchedWarnings(t, &stack.Bundle{Name: "db",
+				Applications: []*stack.Application{fixedApp("db", claimObject("shop", "data", forceAnnotated("enabled")))},
+				Patches:      tc.patches})
+			if len(got) != 2 {
+				t.Fatalf("warnings = %q, want a build warning and the unpatched claim's", got)
+			}
+			if !strings.HasPrefix(got[0], `the patches of the bundle of component "db" could not be applied, so its force-applied volumes are checked as generated, without them: `) {
+				t.Errorf("build warning = %q", got[0])
+			}
+			if want := claimWarning("data", `component "db"`, annotationReason); got[1] != want {
+				t.Errorf("claim warning = %q, want %q", got[1], want)
+			}
+		})
 	}
 }
 

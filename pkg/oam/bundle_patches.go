@@ -31,9 +31,11 @@ const (
 // trait sets), as kustomize-controller builds them: the objects encoded as a
 // delivered artifact encodes them, a kustomization.yaml listing them with the
 // patches appended in order and each target mapped field for field, built with
-// krusty under kustomize-controller's options. The resources keep their input
-// order (a patch never reorders them), list envelopes not yet expanded the way
-// Flux's ReadObjects expands them. A patch set that does not build is an error.
+// krusty under kustomize-controller's options. The resources come in kustomize's
+// build order (input order, except that a List's members follow the other
+// objects), list envelopes not yet expanded the way Flux's ReadObjects expands
+// them. A patch set that does not build, or whose result does not serialize, is an
+// error.
 func applyBundlePatches(objects []*client.Object, patches []stack.Patch) ([]*unstructured.Unstructured, error) {
 	manifests, err := kio.EncodeObjectsToYAML(objects)
 	if err != nil {
@@ -71,9 +73,9 @@ func applyBundlePatches(objects []*client.Object, patches []stack.Patch) ([]*uns
 
 // kustomizeBuild runs krusty on dir as fluxcd/pkg/kustomize Build runs it: under
 // a mutex, with load restrictions off and plugins disabled, and a panic recovered
-// as an error. It keeps the input order, as Flux's zero-value Reorder option does
-// (it is neither legacy nor unspecified, so nothing is sorted), named here so a
-// change of default cannot reorder it. (Build also resets kustomize's global OpenAPI schema
+// as an error. It does not sort, as Flux's zero-value Reorder option does not (it
+// is neither legacy nor unspecified), named here so a change of default cannot
+// reorder it. (Build also resets kustomize's global OpenAPI schema
 // around each build, which matters only to a kustomization with an openapi
 // field; this one has none.)
 func kustomizeBuild(fs filesys.FileSystem, dir string) (out []*unstructured.Unstructured, err error) {
@@ -91,6 +93,11 @@ func kustomizeBuild(fs filesys.FileSystem, dir string) (out []*unstructured.Unst
 	}).Run(fs, dir)
 	if err != nil {
 		return nil, errors.Wrap(err, "building the bundle's patches")
+	}
+	// kustomize-controller serializes the build before reading it, and a result
+	// that does not serialize fails its build.
+	if _, err := res.AsYaml(); err != nil {
+		return nil, errors.Wrap(err, "serializing the patched objects")
 	}
 	for _, r := range res.Resources() {
 		m, err := r.Map()
