@@ -286,6 +286,12 @@ flag (`%+#12.6g`, `%#12[1]x`) and a shell prefix trim (`${port#80}`). A line tha
 message, a fixture string, an all-digit colour such as `#123`) takes an `allow-ref` pragma
 anywhere on that line.
 
+Commit messages are covered too, so write `Closes go-kure/launcher#N`, not `Closes #N`
+(go-kure/launcher#732). The same matcher scans each non-merge commit message, against the
+pull request's base in CI and `ISSUE_REFS_BASE` (default `origin/main`) in
+`make check-issue-refs`. It skips Renovate's commits, and a stale local `origin/main` needs a
+`git fetch origin` first.
+
 Known gaps — the guard does not catch these, so a reviewer must:
 
 - a single-digit `#N` or `name#N`, left alone because prose such as "step #1" or a message such

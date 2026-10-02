@@ -353,6 +353,11 @@ jobs:
 
   # Always-on and whole-tree, so a PR and the merge queue get the same result
   # (go-kure/launcher#400). Self-test first: a guard that cannot fail proves nothing.
+  # A pull request also checks its own commit messages (go-kure/launcher#732),
+  # base.sha..head.sha, not the checked-out merge commit: a base that moved after
+  # the event would otherwise pull main's own commits into the range. Push and
+  # merge_group skip that step: their commits were checked on the pull request,
+  # and a rebase keeps each message.
   issue-refs:
     name: issue-refs
     runs-on: autops-kube-kure
@@ -360,10 +365,18 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
     - name: Self-test the issue-reference guard
       run: bash scripts/check-issue-refs-test.sh
     - name: Check issue references
       run: bash scripts/check-issue-refs.sh
+    - name: Check issue references in the pull request's commit messages
+      if: github.event_name == 'pull_request'
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: bash scripts/check-issue-refs.sh --commits "$BASE_SHA" --head "$HEAD_SHA"
 
   pin-impact:
     name: pin-impact

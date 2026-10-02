@@ -3,8 +3,10 @@
 #
 # The guard is only proven if a bare reference makes it fail. Each case writes one
 # file into a throwaway git repository, runs the guard on that repository, and
-# asserts the exit status and, for a failure, the reported file:line. The fixtures
-# live in this script so the guard's own scan of the real tree never sees them.
+# asserts the exit status and, for a failure, the reported file:line. The commit
+# cases (go-kure/launcher#732) commit one message instead and scan base..HEAD.
+# The fixtures live in this script so the guard's own scan of the real tree never
+# sees them.
 #
 # Usage: bash scripts/check-issue-refs-test.sh
 # (invoked via `make check-issue-refs`, before the guard runs on the real tree)
@@ -116,6 +118,55 @@ expect "generated changelog" 0 "" CHANGELOG.md '- fix: something (#227)'
 expect "testdata fixture" 0 "" pkg/x/testdata/in.yaml 'name: app # #227'
 expect "root testdata fixture" 0 "" testdata/in.yaml 'name: app # #227'
 expect "file type out of scope" 0 "" a.txt 'see #227'
+
+# ── commit messages (--commits, go-kure/launcher#732) ───────────────────────
+# expect_commits <name> <want-rc: 0|1|2> <want-substring-or-empty> <author-email> <message> [base] [head]
+# Commits one file with <message> by <author-email> on top of a base commit, then
+# scans base..HEAD. [base] overrides the base the guard is given; [head], passed
+# as --head, the other end (`base` names the base commit).
+expect_commits() {
+  local name="$1" want_rc="$2" want_out="$3" email="$4" message="$5" base="${6:-}" head="${7:-}" rc=0 out
+  local -a head_arg=()
+  # No hooks and no signing from the caller's global git config.
+  local -a git=(git -C "$WORK/repo" -c core.hooksPath=/dev/null -c commit.gpgSign=false)
+  rm -rf "$WORK/repo"
+  mkdir -p "$WORK/repo"
+  git -C "$WORK/repo" init -q
+  "${git[@]}" -c user.name=base -c user.email=base@example.com commit -q --allow-empty -m 'base'
+  local base_oid
+  base_oid="$(git -C "$WORK/repo" rev-parse HEAD)"
+  [[ -n "$base" ]] || base="$base_oid"
+  [[ "$head" != "base" ]] || head="$base_oid"
+  [[ -z "$head" ]] || head_arg=(--head "$head")
+  printf 'x\n' >"$WORK/repo/x.txt"
+  git -C "$WORK/repo" add -A
+  "${git[@]}" -c user.name=author -c "user.email=$email" commit -q -m "$message"
+  out="$(bash "$GATE" --root "$WORK/repo" --commits "$base" "${head_arg[@]}" 2>&1)" || rc=$?
+  if [[ "$rc" -ne "$want_rc" ]]; then
+    echo "FAIL $name: exit $rc, want $want_rc"
+    printf '%s\n' "$out" | sed 's/^/    /'
+    fail=$((fail + 1))
+    return
+  fi
+  if [[ -n "$want_out" && "$out" != *"$want_out"* ]]; then
+    echo "FAIL $name: output lacks \"$want_out\""
+    printf '%s\n' "$out" | sed 's/^/    /'
+    fail=$((fail + 1))
+    return
+  fi
+  pass=$((pass + 1))
+}
+
+expect_commits "bare closing trailer" 1 "(fix: x): Closes #732" dev@example.com $'fix: x\n\nCloses #732'
+expect_commits "bare ref in a subject" 1 "(fix: x (#732)): fix: x (#732)" dev@example.com 'fix: x (#732)'
+expect_commits "ownerless ref in a body" 1 "): see launcher#278" dev@example.com $'fix: x\n\nsee launcher#278'
+expect_commits "qualified closing trailer" 0 "1 commit message(s)" dev@example.com $'fix: x\n\nCloses go-kure/launcher#732'
+expect_commits "pragma in a commit body" 0 "" dev@example.com $'fix: x\n\nquoted on purpose: #732 allow-ref'
+expect_commits "Renovate-authored bare ref" 0 "1 Renovate commit(s) skipped" renovate@whitesourcesoftware.com $'chore(deps): update x\n\nCloses #732'
+expect_commits "unresolvable base" 2 "is not a commit" dev@example.com 'fix: x' no-such-base
+# CI passes the PR head with --head; a range that stops before the bare commit is clean.
+expect_commits "head before the bare commit" 0 "0 commit message(s)" dev@example.com $'fix: x\n\nCloses #732' "" base
+expect_commits "unresolvable head" 2 "is not a commit" dev@example.com 'fix: x' "" no-such-head
 
 echo "check-issue-refs-test: $pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]

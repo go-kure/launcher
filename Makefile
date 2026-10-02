@@ -122,10 +122,14 @@ check-doc-fences: build-kurel ## Check the documentation's marked YAML fences (s
 	@bash site/scripts/check-doc-fences.sh
 
 # Self-test first, for the same reason (go-kure/launcher#400).
+# Commit messages in $(ISSUE_REFS_BASE)..HEAD are checked too (go-kure/launcher#732).
+ISSUE_REFS_BASE ?= origin/main
+
 .PHONY: check-issue-refs
-check-issue-refs: ## Reject bare #N and ownerless repo#N references (self-test, then the tree)
+check-issue-refs: ## Reject bare #N and ownerless repo#N references (self-test, the tree, then commit messages since ISSUE_REFS_BASE)
 	@bash scripts/check-issue-refs-test.sh
 	@bash scripts/check-issue-refs.sh
+	@bash scripts/check-issue-refs.sh --commits $(ISSUE_REFS_BASE)
 
 # =============================================================================
 # Testing
