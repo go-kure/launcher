@@ -292,6 +292,89 @@ func TestApplyTraits_RefusesRenameOfEarlierComponent(t *testing.T) {
 	}
 }
 
+// policyOpConfig is a trait sub-application's config whose ApplyPolicy acts on
+// the application named target, or on the trait's own application own when
+// target is empty: "rename" adds "-renamed" to its name in place, "remove" drops
+// it from the bundle, and "" does nothing.
+type policyOpConfig struct {
+	namedConfigMapConfig
+	op, target string
+	own        *stack.Application
+	bundle     *stack.Bundle
+}
+
+func (c *policyOpConfig) ApplyPolicy(Policy) error {
+	i := slices.Index(c.bundle.Applications, c.own)
+	if c.target != "" {
+		i = slices.IndexFunc(c.bundle.Applications, func(a *stack.Application) bool { return a.Name == c.target })
+	}
+	switch c.op {
+	case "rename":
+		c.bundle.Applications[i].Name += "-renamed"
+	case "remove":
+		c.bundle.Applications = slices.Delete(c.bundle.Applications, i, i+1)
+	}
+	return nil
+}
+
+// policyOpTraitHandler appends a sub-application named after the trait's
+// application plus "-sub", whose policyOpConfig carries op and target.
+type policyOpTraitHandler struct{ op, target string }
+
+func (policyOpTraitHandler) CanHandle(t string) bool { return strings.HasPrefix(t, "policyop") }
+
+func (h policyOpTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *stack.Bundle) error {
+	name := app.Name + "-sub"
+	bundle.Applications = append(bundle.Applications, stack.NewApplication(name, app.Namespace, &policyOpConfig{
+		namedConfigMapConfig: namedConfigMapConfig{name: name, namespace: app.Namespace},
+		op:                   h.op, target: h.target, own: app, bundle: bundle,
+	}))
+	return nil
+}
+
+// TestApplyTraits_RefusesPolicyReplacedComponentApplication is
+// go-kure/launcher#752: a trait sub-application's ApplyPolicy runs after the
+// trait's own check, so it is checked again against the same names. One that
+// renames or removes a component's application, its own or an earlier one's,
+// fails the transform, naming the trait, its component and the sub-application.
+func TestApplyTraits_RefusesPolicyReplacedComponentApplication(t *testing.T) {
+	contract := "; " + entryAppPolicyContract
+	for name, tc := range map[string]struct {
+		web, other policyOpTraitHandler
+		want       string
+	}{
+		"rename its own": {web: policyOpTraitHandler{op: "rename"},
+			want: `component "web" trait "policyop0": the ApplyPolicy of sub-application "web-sub" renamed the application of component "web" from "web" to "web-renamed"` + contract},
+		"rename an earlier component's": {other: policyOpTraitHandler{op: "rename", target: "web"},
+			want: `component "other" trait "policyop1": the ApplyPolicy of sub-application "other-sub" renamed the application of component "web" from "web" to "web-renamed"` + contract},
+		// On the last component no later trait's check would see the removal.
+		"remove its own": {other: policyOpTraitHandler{op: "remove"},
+			want: `component "other" trait "policyop1": the ApplyPolicy of sub-application "other-sub" replaced or removed the application of component "other"` + contract},
+		"no-op": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := inDocumentTransformer()
+			tr.RegisterTrait("policyop0", tc.web)
+			tr.RegisterTrait("policyop1", tc.other)
+			app := makeApp("shop",
+				Component{Name: "web", Type: "webservice", Properties: map[string]any{}, Traits: []Trait{{Type: "policyop0"}}},
+				Component{Name: "other", Type: "webservice", Properties: map[string]any{}, Traits: []Trait{{Type: "policyop1"}}},
+			)
+			app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+			_, _, err := tr.TransformWithPolicy(app, TransformContext{})
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("TransformWithPolicy: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // TestDecorateSubApplications_OptIn pins that a trait handler which does not
 // answer true to DecoratesSubApplications keeps the narrow scope.
 func TestDecorateSubApplications_OptIn(t *testing.T) {

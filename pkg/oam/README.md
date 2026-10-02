@@ -1097,7 +1097,11 @@ etc.) are default-deny; a container capability appearing in both an explicit `Al
 the `Forbidden` list is rejected, since forbidden always wins, and a nil/empty
 `Allowed`/`Forbidden` list means no restriction/no forbids respectively. Handlers that implement
 `Enforceable` receive it via `ApplyPolicy`; `NoopPolicy` supplies zero values when no policy is
-set (so `ApplyPolicy` is always called with a non-nil value at runtime).
+set (so `ApplyPolicy` is always called with a non-nil value at runtime). A trait's
+sub-application runs its `ApplyPolicy` after the trait's `Apply` and is held to the same rule
+as the `TraitHandler`: it must not replace, remove or rename a component's application in the
+bundle. The transform fails, naming the trait, its component and the sub-application
+(go-kure/launcher#752).
 
 Handlers apply values with the precedence **authored > policy default > handler default**,
 then enforce the limits on the resulting effective value — for cpu/memory this explicitly

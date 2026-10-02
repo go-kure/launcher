@@ -53,7 +53,9 @@ type Policy interface {
 // Enforceable is implemented by component and trait ApplicationConfig types that
 // accept per-environment policy enforcement. The runtime calls ApplyPolicy after
 // each handler produces a config; configs that do not implement Enforceable are
-// left unchanged.
+// left unchanged. The ApplyPolicy of a trait's sub-application must not replace,
+// remove or rename a component's application in the bundle: the transform fails
+// (go-kure/launcher#752).
 type Enforceable interface {
 	ApplyPolicy(policy Policy) error
 }
