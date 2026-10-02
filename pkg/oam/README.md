@@ -439,10 +439,13 @@ application is `GeneratedApplication.Forced` (its leaf bundle sets `Force`, whic
 `PersistentVolumeClaim shop/data (component "db") is force-applied
 (kustomize.toolkit.fluxcd.io/force: enabled): when an update changes an immutable field,
 Flux deletes and recreates it instead of failing the apply, which can lose its data`.
-Objects are read as Flux applies them: a list envelope still in the output (an
-unstructured object whose `items` is an array) stands for its members, recursively, and a
-member is forced by its own annotation, not the envelope's. An object generated more than
-once is warned once, naming its first producer and every reason any copy is forced. It
+An object counts as annotated as Flux's force selector matches it: the force key as a label
+or an annotation, with `enabled` in any letter case. Objects are read as Flux applies them:
+a list envelope still in the output stands for its members — Kustomize's build expands a
+kind ending in `List` whose `items` is an array, recursively, then Flux expands any
+remaining object whose `items` is an array, one level only — and a member is forced by its
+own metadata, not the envelope's. An object generated more than once is warned once,
+naming its first producer and every reason any copy is forced. It
 covers every generated claim alike — a component's `volumes`, the `pvc` trait, a
 `manifests` component's objects — and changes no output. The `volsync` trait generates no
 claim: its `sourcePVC` is warned where that claim is generated. With no warning handler it
