@@ -2,6 +2,8 @@ package oam
 
 import (
 	stderrors "errors"
+	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,12 +16,14 @@ import (
 
 // typedReservedSchema reserves an integer, an array of integers and an object with an
 // integer field, so emission validation rewrites what a rule renders into them
-// (normalizeIntegerValue, asArrayValue, asObjectValue) before the next D3 check, and
-// an object whose children are all undeclared, which it rewrites nothing below.
+// (normalizeIntegerValue, asArrayValue, asObjectValue) before the next D3 check, a
+// floating-point number, and an object whose children are all undeclared, which it
+// rewrites nothing below.
 func typedReservedSchema() map[string]PropertySchema {
 	return map[string]PropertySchema{
 		"image": {Type: PropertyTypeString, Description: "Authored freely."},
 		"port":  {Type: PropertyTypeInteger, PlatformReserved: true, Description: "Platform-supplied."},
+		"ratio": {Type: PropertyTypeNumber, PlatformReserved: true, Description: "Platform-supplied."},
 		"codes": {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeInteger}, PlatformReserved: true, Description: "Platform-supplied."},
 		"limits": {Type: PropertyTypeObject, PlatformReserved: true, Description: "Platform-supplied.", Properties: map[string]PropertySchema{
 			"cpu": {Type: PropertyTypeInteger},
@@ -146,6 +150,75 @@ func TestTransform_RenderedReservedNumberReplacedByAnotherIsRefused(t *testing.T
 			})
 		}
 	}
+}
+
+// TestTransform_RenderedReservedSignedZeroReplacedIsRefused: +0.0 and -0.0 compare
+// equal as numbers but are two values to a handler (math.Signbit), so an authored zero
+// of the other sign copied over a rendered one is refused — a policy's -0.0 over a
+// rendered 0.0, and the reverse — for a component and a trait alike.
+func TestTransform_RenderedReservedSignedZeroReplacedIsRefused(t *testing.T) {
+	tests := []struct {
+		name     string
+		rendered float64
+		authored string
+	}{
+		{"authored negative zero over a rendered positive zero", 0.0, "-0.0"},
+		{"authored positive zero over a rendered negative zero", math.Copysign(0, -1), "0.0"},
+	}
+	for _, el := range typedElements {
+		for _, tc := range tests {
+			t.Run(el.name+"/"+tc.name, func(t *testing.T) {
+				app := policyRatioApp(t, "Copying", tc.authored)
+				_, err := el.run(t, app, func(props *map[string]any, render func(string, any) error, doc *Application) error {
+					if err := render("ratio", tc.rendered); err != nil {
+						return err
+					}
+					authored, ok := doc.Spec.Policies[0].Properties["ratio"].(float64)
+					if !ok || authored != tc.rendered || math.Signbit(authored) == math.Signbit(tc.rendered) {
+						t.Fatalf("test premise: the authored %#v must be a zero of the other sign than the rendered %#v", doc.Spec.Policies[0].Properties["ratio"], tc.rendered)
+					}
+					(*props)["ratio"] = authored
+					return nil
+				})
+				expectTypedReservedRefused(t, err, "ratio")
+			})
+		}
+	}
+}
+
+// TestTransform_RenderedReservedSignedZeroSurvivesValidation: a rendered zero of
+// either sign matches its record after emission validation, and reaches the handler
+// with its sign.
+func TestTransform_RenderedReservedSignedZeroSurvivesValidation(t *testing.T) {
+	for _, el := range typedElements {
+		for _, rendered := range []float64{0.0, math.Copysign(0, -1)} {
+			t.Run(fmt.Sprintf("%s/signbit=%v", el.name, math.Signbit(rendered)), func(t *testing.T) {
+				got, err := el.run(t, emptyDoc("Rendering"), func(_ *map[string]any, render func(string, any) error, _ *Application) error {
+					return render("ratio", rendered)
+				})
+				if err != nil {
+					t.Fatalf("a rendered reserved zero must be accepted, got: %v", err)
+				}
+				f, ok := got["ratio"].(float64)
+				if !ok || f != 0 || math.Signbit(f) != math.Signbit(rendered) {
+					t.Fatalf("expected ratio %v (signbit %v) at the handler, got %#v", rendered, math.Signbit(rendered), got["ratio"])
+				}
+			})
+		}
+	}
+}
+
+// policyRatioApp is a document whose policy carries an authored ratio, decoded from
+// YAML the way a user's document is.
+func policyRatioApp(t *testing.T, kind, ratio string) *Application {
+	t.Helper()
+	var props map[string]any
+	if err := yaml.Unmarshal([]byte("ratio: "+ratio+"\n"), &props); err != nil {
+		t.Fatalf("decode policy properties: %v", err)
+	}
+	app := emptyDoc(kind)
+	app.Spec.Policies = []ApplicationPolicy{{Name: "p", Type: "anything", Properties: props}}
+	return app
 }
 
 // renderedPort is a rule's own named integer type, which emission validation rewrites

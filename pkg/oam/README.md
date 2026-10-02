@@ -542,17 +542,18 @@ copies, so emission validation normalizing it under one key leaves the other as
 written. A reserved key is then accepted only while it
 holds the recorded value at that same path: either that value itself, or what
 emission validation makes of it under the key's own schema, compared Go type for Go
-type. So the record survives validation's normalization exactly where validation
-performs it (a `[]byte` or `[]int32` under a declared array becoming `[]any`, a named
+type and a floating-point number bit for bit. So the record survives validation's
+normalization exactly where validation performs it (a `[]byte` or `[]int32` under a declared array becoming `[]any`, a named
 integer under a declared integer becoming `int`), and nowhere else: below a key an
 object leaves to `AdditionalProperties`, or under a schema with no `Type`, the
 handler receives what the rule wrote, so a rendered `[]byte` there is not matched by
 an authored list of the same integers. A value the rule copied into the key from a
 trait, a policy, metadata or another component, or changed after recording it, is
 refused like any authored one — including a number that only prints the same, such
-as an authored `1.0000000000000001e+18` over a rendered `1000000000000000100`
-(go-kure/launcher#612). `RenderReserved` refuses a value that is or holds a `null`,
-NaN or ±Inf, any Go type other than strings, booleans, numbers, slices, arrays and
+as an authored `1.0000000000000001e+18` over a rendered `1000000000000000100`, or one
+that only compares equal, such as an authored `-0.0` over a rendered `0.0`, which a
+handler tells apart with `math.Signbit` (go-kure/launcher#612). `RenderReserved`
+refuses a value that is or holds a `null`, NaN or ±Inf, any Go type other than strings, booleans, numbers, slices, arrays and
 string-keyed maps, or a collection that contains itself. The record follows the component
 through copies and later lowering rounds; a rule that rebuilds a component from its
 fields, or a document that is serialized and parsed again (what `LowerRaws` returns),
@@ -573,8 +574,10 @@ may lower into one that does reserve it a round later. A trait such a rule only 
 keeps its classification, as a forwarded component does. A sealed trait that is not
 synthesized is checked as it stands: as it is emitted, and again before a
 `TraitLoweringRule` that declares a schema runs over it and when its handler applies
-it. A schema-less rule that copies an authored reserved value,
-or renders one from capabilities, into a trait it emits is therefore rejected. A
+it. A schema-less rule that copies an authored reserved value into a trait it emits,
+or writes one there any way other than `Trait.RenderReserved`, is therefore rejected;
+a value it renders from capabilities with `Trait.RenderReserved` is accepted while the
+key still holds it. A
 sealed trait that passes that check is still not checked input for what the rule
 emits: its schema covers the trait's own reserved keys, not those of the components
 or traits the rule builds, so that rule's output stays authored. A

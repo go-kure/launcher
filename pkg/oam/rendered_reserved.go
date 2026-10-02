@@ -27,9 +27,10 @@ import (
 // and nowhere else: below a key an object leaves to AdditionalProperties, or under a
 // schema with no Type, validation passes the value through as written, so a []byte
 // there still differs from a list of the same integers. Two numbers a property reader
-// tells apart never compare equal, since every value is compared with its Go type:
-// 1000000000000000100 and 1.0000000000000001e+18 print the same in JSON, though
-// IntegerValue reads them apart.
+// tells apart never compare equal, since every value is compared with its Go type and
+// a floating-point number by its bits: 1000000000000000100 and 1.0000000000000001e+18
+// print the same in JSON, though IntegerValue reads them apart, and +0.0 equals -0.0
+// under ==, though math.Signbit reads them apart.
 //
 // A record map is never written once built: adding a path builds a new one
 // (renderedValues.with), so recording on one copy of an element never exempts
@@ -219,8 +220,9 @@ func checkRenderedValue(value any, onPath map[propertyCopyKey]bool) error {
 // It is when current is the snapshot itself — the check running before emission
 // validation has seen the value — or when current is what emission validation makes
 // of the snapshot: validatePropertyValue under field, run on a fresh copy so the
-// record is never rewritten. Both are compared with reflect.DeepEqual, which tells Go
-// types apart, so a value is equal only to one of the same type at every depth.
+// record is never rewritten. Both are compared with exactRenderedValue, which tells Go
+// types apart, so a value is equal only to one of the same type at every depth, and
+// tells floating-point numbers apart by their bits, so +0.0 never matches -0.0.
 // Normalization equivalence is thereby validation's own, not a copy of its rules: a
 // []byte below a declared array of integers matches the []any of ints validation
 // writes back there, while below a key left to AdditionalProperties, or under a
@@ -231,11 +233,60 @@ func sameRenderedValue(field PropertySchema, recorded, current any) bool {
 	if isNullValue(current) {
 		return false
 	}
-	if reflect.DeepEqual(recorded, current) {
+	if exactRenderedValue(recorded, current) {
 		return true
 	}
 	normalized, err := validatePropertyValue(field, copyRenderedValue(recorded), "")
-	return err == nil && reflect.DeepEqual(normalized, current)
+	return err == nil && exactRenderedValue(normalized, current)
+}
+
+// exactRenderedValue is reflect.DeepEqual for a recorded value, except that two
+// floating-point numbers, of any float kind, are equal only when their bits are:
+// +0.0 and -0.0 compare equal with ==, and so with DeepEqual, yet a handler tells
+// them apart (math.Signbit). NaN, the other value == misreads, is never recorded
+// (checkRenderedValue). recorded is a snapshot, or what validation makes of one,
+// finite and acyclic, and the walk descends both values together, so it ends with
+// recorded whatever current holds.
+func exactRenderedValue(recorded, current any) bool {
+	if recorded == nil || current == nil {
+		return recorded == nil && current == nil
+	}
+	r, c := reflect.ValueOf(recorded), reflect.ValueOf(current)
+	if r.Type() != c.Type() {
+		return false
+	}
+	switch r.Kind() {
+	case reflect.Float32, reflect.Float64:
+		// Widening a float32 keeps its sign and value, so its float64 bits differ
+		// exactly where its own do.
+		return math.Float64bits(r.Float()) == math.Float64bits(c.Float())
+	case reflect.Slice, reflect.Array:
+		if r.Kind() == reflect.Slice && r.IsNil() != c.IsNil() {
+			return false
+		}
+		if r.Len() != c.Len() {
+			return false
+		}
+		for i := range r.Len() {
+			if !exactRenderedValue(r.Index(i).Interface(), c.Index(i).Interface()) {
+				return false
+			}
+		}
+		return true
+	case reflect.Map:
+		if r.IsNil() != c.IsNil() || r.Len() != c.Len() {
+			return false
+		}
+		for iter := r.MapRange(); iter.Next(); {
+			v := c.MapIndex(iter.Key())
+			if !v.IsValid() || !exactRenderedValue(iter.Value().Interface(), v.Interface()) {
+				return false
+			}
+		}
+		return true
+	default:
+		return reflect.DeepEqual(recorded, current)
+	}
 }
 
 // setPropertyAt writes value at the object-key path segments in *props, creating the
