@@ -59,12 +59,14 @@ var defaultTierMap = map[string]Tier{
 	"manifests":    TierApps,
 	"oci":          TierApps,
 
-	// The kind-named Flux source components (go-kure/launcher#347) sit with the
-	// oci component, which also emits a Flux source.
+	// The kind-named Flux source components (go-kure/launcher#347,
+	// go-kure/launcher#351) sit with the oci component, which also emits a Flux
+	// source.
 	"helmrepository": TierApps,
 	"ocirepository":  TierApps,
 	"gitrepository":  TierApps,
 	"bucket":         TierApps,
+	"helmchart":      TierApps,
 
 	// The CloudNativePG kind components beside cnpg-cluster
 	// (go-kure/launcher#573) sit with it and with postgresql, which emits the

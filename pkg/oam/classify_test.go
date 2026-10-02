@@ -49,6 +49,7 @@ func TestClassifyComponent_DefaultMap(t *testing.T) {
 		{"ocirepository", TierApps},
 		{"gitrepository", TierApps},
 		{"bucket", TierApps},
+		{"helmchart", TierApps},
 	}
 	for _, tc := range cases {
 		t.Run(tc.typ, func(t *testing.T) {

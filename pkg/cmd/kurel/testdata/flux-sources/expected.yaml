@@ -55,3 +55,19 @@ spec:
   secretRef:
     name: minio-credentials
   suspend: true
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmChart
+metadata:
+  name: podinfo-chart
+  namespace: sources
+spec:
+  chart: charts/podinfo
+  interval: 1h0m0s
+  reconcileStrategy: Revision
+  sourceRef:
+    kind: GitRepository
+    name: podinfo-repo
+  valuesFiles:
+  - charts/podinfo/values.yaml
+  - charts/podinfo/values-prod.yaml

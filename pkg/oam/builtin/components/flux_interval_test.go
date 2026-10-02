@@ -19,7 +19,7 @@ import (
 type namedInterval string
 
 // kindNamedIntervalCase is one kind-named component whose interval decodes into
-// a metav1.Duration (go-kure/launcher#601): helmrelease and the four Flux sources.
+// a metav1.Duration (go-kure/launcher#601): helmrelease and the five Flux sources.
 type kindNamedIntervalCase struct {
 	typ     string
 	handler oam.ComponentHandler
@@ -128,6 +128,12 @@ func TestKindNamedFluxConfigs_GenerateChecksInterval(t *testing.T) {
 		"bucket": func(d time.Duration) stack.ApplicationConfig {
 			return &components.BucketConfig{Name: "src", Spec: sourcev1.BucketSpec{
 				BucketName: "b", Endpoint: "s3.amazonaws.com", Interval: metav1.Duration{Duration: d},
+			}}
+		},
+		"helmchart": func(d time.Duration) stack.ApplicationConfig {
+			return &components.HelmChartConfig{Name: "src", Spec: sourcev1.HelmChartSpec{
+				Chart: "podinfo", SourceRef: sourcev1.LocalHelmChartSourceReference{Kind: "HelmRepository", Name: "podinfo"},
+				Interval: metav1.Duration{Duration: d},
 			}}
 		},
 	}

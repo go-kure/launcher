@@ -256,6 +256,7 @@ spec:
 	"ocirepository":  {props: map[string]any{"url": "oci://registry.example.com/manifests/app", "ref": map[string]any{"tag": "v1.0.0"}}},
 	"gitrepository":  {props: map[string]any{"url": "https://git.example.com/app.git", "ref": map[string]any{"branch": "main"}}},
 	"bucket":         {props: map[string]any{"bucketName": "artifacts", "endpoint": "minio.example.com:9000"}},
+	"helmchart":      {props: map[string]any{"chart": "podinfo", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "podinfo"}}},
 }
 
 // traitLabelFixture renders one trait on a host component.

@@ -9,10 +9,12 @@ import (
 	"github.com/pmezard/go-difflib/difflib"
 )
 
-// helmParityCases pairs each helm fixture with the helmchart document it replaced.
-// Both helmchart files live under testdata/helm-parity: <name>.helmchart.yaml is
-// the input document, kept as provenance, and <name>.helmchart.out.yaml is what
-// kurel build printed for it before helmchart was removed (go-kure/launcher#350).
+// helmParityCases pairs each helm fixture with the helmchart composite document it
+// replaced. Both helmchart files live under testdata/helm-parity: <name>.helmchart.yaml
+// is the input document, kept as provenance and never built (the helmchart type is
+// now the Flux HelmChart source, go-kure/launcher#351), and <name>.helmchart.out.yaml
+// is what kurel build printed for it before the composite was removed
+// (go-kure/launcher#350).
 var helmParityCases = []struct {
 	name, helm string
 }{

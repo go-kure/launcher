@@ -152,7 +152,7 @@ the fact. The covenant below prevents that.
 |---|---|---|
 | Reserved (downstream-only) | `backup` | No launcher component or trait of this name exists; launcher must not claim it for an unrelated feature. (Distinct from the existing `backup` *property* of the `postgresql` component — a property name, not a type name; no collision.) |
 | Shadowed (same name, downstream superset) | `prune-protection` | Launcher builtin; the downstream implementation carries additive behaviour on top. Upstreaming that delta — and retiring this shadowed class — is tracked in go-kure/launcher#245. |
-| Former builtin (downstream-used) | `helmchart` | No launcher type of this name since go-kure/launcher#350; go-kure/launcher#351 reuses it for the Flux `HelmChart` CR, and a downstream dialect using the name renames its type before adopting that release. |
+| Former builtin (downstream-used) | `helmchart` | The role-level composite of this name was removed by go-kure/launcher#350; since go-kure/launcher#351 the name is the kind-named component for the Flux `HelmChart` CR, and a downstream dialect using the name renames its type before adopting that release. |
 
 **Enforcement is deliberately review discipline, not CI.** An extending dialect commonly lives
 in a separate, non-public project that launcher's CI cannot see or gate against; a downstream
@@ -219,9 +219,11 @@ builtin predated the rule: `helmchart` was a role-level composite (a HelmRelease
 source, or client-side rendered manifests), not a projection of the Flux `HelmChart` CR its
 name suggests. It was removed in favour of the role-named `helm` (go-kure/launcher#350)
 without a document-format version move, which the Document-Format Lifecycle below does not
-require before the first stable GA release; a document still declaring it fails validation
-with a pointer to `helm`. go-kure/launcher#351 reuses the name for the `HelmChart` CR
-(maintainer decision, 2026-10-02).
+require before the first stable GA release. go-kure/launcher#351 reuses the name for the
+`HelmChart` CR (maintainer decision, 2026-10-02), so `helmchart` now follows rule 1. A document
+written for the composite fails validation on a key the HelmChart spec does not declare;
+when the refused key is one of the composite's own (`source`, `values`, `delivery`, …) the
+error adds a pointer to `helm`.
 
 ---
 

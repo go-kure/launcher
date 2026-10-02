@@ -297,6 +297,7 @@ func builtinComponentHandlers() map[string]oam.ComponentHandler {
 		"ocirepository":  &components.OCIRepositoryHandler{},
 		"gitrepository":  &components.GitRepositoryHandler{},
 		"bucket":         &components.BucketHandler{},
+		"helmchart":      &components.HelmChartHandler{},
 
 		"cnpg-pooler":      &components.CnpgPoolerHandler{},
 		"cnpg-database":    &components.CnpgDatabaseHandler{},

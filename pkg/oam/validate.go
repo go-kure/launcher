@@ -39,23 +39,18 @@ var validComponentTypes = map[string]bool{
 	"manifests":    true,
 	"oci":          true,
 
-	// The kind-named Flux source components (go-kure/launcher#347).
+	// The kind-named Flux source components (go-kure/launcher#347,
+	// go-kure/launcher#351).
 	"helmrepository": true,
 	"ocirepository":  true,
 	"gitrepository":  true,
 	"bucket":         true,
+	"helmchart":      true,
 
 	// The CloudNativePG kind components beside cnpg-cluster (go-kure/launcher#573).
 	"cnpg-pooler":      true,
 	"cnpg-database":    true,
 	"cnpg-objectstore": true,
-}
-
-// removedComponentTypes maps a removed built-in component type to what replaces
-// it. A document still using one gets the unknown-type error plus this hint. A
-// registered custom type of the same name is admitted as any other custom type.
-var removedComponentTypes = map[string]string{
-	"helmchart": `use "helm" (go-kure/launcher#350; migration table in pkg/oam/builtin/components/README.md)`,
 }
 
 // validTraitTypes is the set of supported trait types from design-kurel-package.md §4.3.
@@ -255,11 +250,7 @@ func validateComponent(c *Component, index int, seenNames map[string]componentNa
 	}
 
 	if !validComponentTypes[c.Type] && !lowerableComponentTypes[c.Type] && !customComponentTypes[c.Type] {
-		verr := errors.NewValidationError("type", c.Type, c.Name, supportedComponentTypes())
-		if hint, removed := removedComponentTypes[c.Type]; removed {
-			verr.Message = fmt.Sprintf("%s; type %q was removed: %s", verr.Error(), c.Type, hint)
-		}
-		return verr
+		return errors.NewValidationError("type", c.Type, c.Name, supportedComponentTypes())
 	}
 
 	for j, t := range c.Traits {
