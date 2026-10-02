@@ -231,7 +231,8 @@ func (r shorthandRawRule) LowerDocument(doc any, lctx oam.LoweringContext) (oam.
 	}
 	props := map[string]any{"hostnames": []any{d.Spec.Hostname}}
 	if r.foldRendering {
-		for k, v := range lctx.Capabilities["expose"].Rendering {
+		binding, _ := lctx.Capability("expose")
+		for k, v := range binding.Rendering {
 			props[k] = v
 		}
 	}

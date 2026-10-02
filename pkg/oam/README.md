@@ -291,12 +291,24 @@ the built-ins. Extend the system by implementing:
 
 `PolicyResult.ConsumedCapabilities` is the sorted, deduped set of capability keys this
 app's traits actually resolved against `ctx.Capabilities` during the transform — a real
-`ClusterProfile` match, not every syntactically possible key a trait could name. Populated
+`ClusterProfile` match, not every syntactically possible key a trait could name — plus
+every key a component, trait, document or policy lowering rule reads through
+`LoweringContext.Capability` (go-kure/launcher#686). A read by a
+`RawDocumentLoweringRule` under `LowerRaws` is not among them: `LowerRaws` returns no
+`PolicyResult`, and the capabilities the rewritten document's traits resolve against are
+recorded when `TransformWithPolicy` runs on it. Populated
 only by `TransformWithPolicy` (nil on the plain `Transform` path, which discards
 `PolicyResult` entirely); a downstream consumer that needs this signal must call
 `TransformWithPolicy`. It replaces a downstream consumer's own interim, purely syntactic
 candidate-key derivation with the authoritative one launcher's own resolution already
 computes internally.
+
+A lowering rule reads a capability only through `lctx.Capability(key)`, which returns
+the binding and whether the profile has one, and records a key it finds. The
+`LoweringContext.Capabilities` map field is gone. A downstream rule author migrates
+`lctx.Capabilities[k]` to `binding, ok := lctx.Capability(k)`. A test driver that calls
+a rule directly, and used to set the field, uses
+`lctx.WithCapabilities(m)` instead; its reads are recorded nowhere.
 
 ## Lowering
 
@@ -522,7 +534,7 @@ rule still must not mutate them.
 Sealing says nothing about whether the trait's content was checked. A component or
 trait a rule emits is synthesized when its properties are the rule's own output from
 checked input, so a `PlatformReserved` value the rule rendered from
-`LoweringContext.Capabilities` is accepted rather than rejected as authored. That
+`LoweringContext.Capability` is accepted rather than rejected as authored. That
 holds only when the rule's input was checked before it ran: a
 `ComponentLoweringRule` that declares a schema (`PropertySchemaProvider`) or whose
 input component is itself synthesized, or a `TraitLoweringRule` that declares a
@@ -530,7 +542,7 @@ schema over an unsealed trait or whose input trait is itself synthesized. A trai
 nested in an emitted component gets the same classification as that component. A
 `DocumentLoweringRule`'s output is never synthesized: the rule
 sees trait and policy properties and metadata too, which nothing checks before it
-runs. Such a rule writes a reserved value it renders from `LoweringContext.Capabilities`
+runs. Such a rule writes a reserved value it renders from `LoweringContext.Capability`
 with `Component.RenderReserved(path, value)`, or `Trait.RenderReserved(path, value)`
 for a trait it builds, which writes a deep copy of `value` at the dot-separated
 object-key `path` in `Properties` (`"networkPolicy"`,

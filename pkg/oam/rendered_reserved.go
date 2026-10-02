@@ -44,7 +44,7 @@ type renderedValues map[string]any
 // key the component's schema marks PlatformReserved. It is for a rule whose output
 // is otherwise checked as authored — every component a DocumentLoweringRule builds,
 // and the output of any rule whose input nothing checked — that renders a reserved
-// value from LoweringContext.Capabilities. Writing a reserved value any other way
+// value from LoweringContext.Capability. Writing a reserved value any other way
 // leaves it authored, and Transform rejects it with ErrPlatformReserved.
 //
 // path is a dot-separated list of object keys below Properties, for example
@@ -89,7 +89,7 @@ func (c *Component) RenderReserved(path string, value any) error {
 // accepts it in a key that schema marks PlatformReserved, and changing value
 // afterwards changes nothing in t.Properties. It is for every trait a DocumentLoweringRule
 // builds, and any other trait the engine checks as authored, that carries a reserved
-// value rendered from LoweringContext.Capabilities.
+// value rendered from LoweringContext.Capability.
 //
 // The record covers t's own properties only. The ClusterProfile capability applyTraits
 // merges into an unsealed trait at transform time is not recorded and needs none: the

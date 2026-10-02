@@ -48,7 +48,7 @@ type Component struct {
 	origin *Origin
 	// synthesized marks a component a lowering rule emitted rather than forwarded:
 	// its properties are the rule's own output, which may carry a PlatformReserved
-	// value the rule rendered from LoweringContext.Capabilities, so the D3 check on
+	// value the rule rendered from LoweringContext.Capability, so the D3 check on
 	// AUTHORED values (enforcePlatformReserved) does not apply to it — the component
 	// counterpart of Trait.synthesized. The engine sets it at each emission site
 	// (lowering.go); a rule in another package cannot, and an authored component is

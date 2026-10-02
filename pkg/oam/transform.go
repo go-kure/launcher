@@ -59,8 +59,10 @@ type TransformContext struct {
 	// kurel path, where endpoint-ingress synthesis is a no-op.
 	IngressPeers map[string][]netpol.IngressPeer
 	// consumedCapabilities accumulates keys traits actually resolved against
-	// Capabilities (go-kure/launcher#290) — populated by resolveCapability's call sites, read back
-	// into PolicyResult.ConsumedCapabilities at the end of TransformWithPolicy.
+	// Capabilities (go-kure/launcher#290) — populated by resolveCapability's call sites,
+	// and by LoweringContext.Capability for a key a lowering rule reads
+	// (go-kure/launcher#686) — read back into PolicyResult.ConsumedCapabilities at the
+	// end of TransformWithPolicy.
 	// Internal only: nil on a caller-constructed ctx; TransformWithPolicy inits it.
 	// Reference type, so every by-value ctx copy through the pipeline shares one
 	// map — same sharing pattern Capabilities/EgressPeers already rely on.
@@ -744,7 +746,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// applyTraits/lowerDocumentBody. A component a lowering rule synthesized
 		// (Component.synthesized) is exempt, as a synthesized trait is in applyTraits:
 		// its properties are the rule's own output, which may carry a reserved value the
-		// rule rendered from LoweringContext.Capabilities. A rule's output is marked
+		// rule rendered from LoweringContext.Capability. A rule's output is marked
 		// synthesized only when its input was already checked before that rule ran: a
 		// component rule that declares a schema or receives a synthesized component,
 		// or a trait rule that receives a synthesized trait or declares a schema and

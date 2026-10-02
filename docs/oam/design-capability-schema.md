@@ -239,6 +239,20 @@ capability-processing step on `!trait.sealed`, since a sealed trait was emitted 
 lowering round that already merged its own rendering — the same guard that prevents a
 double-merge prevents a double-count for free.
 
+A lowering rule's own read counts too (go-kure/launcher#686). A component, trait,
+document or policy rule reads a capability only through `LoweringContext.Capability(key)`,
+which returns the binding and records a key the profile binds into the same set; a key the
+profile does not bind is not recorded, matching the trait path. The context has no exported
+capabilities map, so no read bypasses the record. A rule that renders a capability into its
+output, or decides what to emit from one, depends on that capability as much as a trait
+that resolves against it, and a consumer ordering applications by this set must see it.
+Migration for a downstream rule author: `lctx.Capabilities[k]` becomes
+`binding, ok := lctx.Capability(k)`; a test driver that set the `Capabilities` field to
+call a rule directly uses `lctx.WithCapabilities(m)`, whose reads are recorded nowhere.
+A `RawDocumentLoweringRule`'s read under `LowerRaws` is not recorded either: `LowerRaws`
+returns no `PolicyResult`, and the capabilities the rewritten document's traits resolve
+against are recorded when `TransformWithPolicy` runs on it.
+
 `ConsumedCapabilities` is populated only by `TransformWithPolicy`, never by the plain
 `Transform` entry point, which discards `PolicyResult` — see the `pkg/oam/README.md`
 "Transform & extension" section for the field's shape.
