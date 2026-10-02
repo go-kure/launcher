@@ -34,6 +34,10 @@ import (
 // `ports` is the full corev1.ServicePort list, each entry with its own
 // `targetPort` (default: the entry's `port`) and `protocol` (default TCP),
 // rather than webservice's single port that drives both sides.
+//
+// `clusterIP: None` makes the Service headless (go-kure/launcher#690); a
+// headless Service may have no ports at all, as a StatefulSet's governing
+// Service often has.
 type ServiceHandler struct{}
 
 // CanHandle returns true for the service component type.
@@ -49,6 +53,10 @@ var serviceTypes = []corev1.ServiceType{
 	corev1.ServiceTypeNodePort,
 	corev1.ServiceTypeLoadBalancer,
 }
+
+// serviceClusterIPNone is the one spec.clusterIP value this kind emits: a
+// headless Service. A literal address is not offered.
+const serviceClusterIPNone = "None"
 
 // serviceProtocols is the set of port protocols the API accepts.
 var serviceProtocols = []corev1.Protocol{corev1.ProtocolTCP, corev1.ProtocolUDP, corev1.ProtocolSCTP}
@@ -70,6 +78,11 @@ func (h *ServiceHandler) PropertySchema() map[string]oam.PropertySchema {
 			Enum:        typeEnum,
 			Description: "Service type: ClusterIP, NodePort or LoadBalancer. ExternalName is not supported.",
 		},
+		"clusterIP": {
+			Type:        oam.PropertyTypeString,
+			Enum:        []any{serviceClusterIPNone},
+			Description: "None makes the Service headless: no virtual IP, DNS resolves to the selected pods. Only with type ClusterIP. A headless Service may have no ports. A literal address is not supported.",
+		},
 		"selector": {
 			Type:                 oam.PropertyTypeObject,
 			AdditionalProperties: true,
@@ -77,8 +90,7 @@ func (h *ServiceHandler) PropertySchema() map[string]oam.PropertySchema {
 		},
 		"ports": {
 			Type:        oam.PropertyTypeArray,
-			Required:    true,
-			Description: "The Service's ports; at least one. Routing traits on this component default to, and accept only, the first port.",
+			Description: "The Service's ports; at least one, unless clusterIP is None. Routing traits on this component default to, and accept only, the first port.",
 			Items: &oam.PropertySchema{
 				Type:        oam.PropertyTypeObject,
 				Description: "One Service port. Every port needs a name when there is more than one; names and port/protocol pairs must be unique.",
@@ -135,6 +147,8 @@ type ServiceConfig struct {
 	Name      string
 	Namespace string
 	Type      corev1.ServiceType
+	// ClusterIP is "" (a virtual IP is allocated) or "None" (headless).
+	ClusterIP string
 	// Selector is the pod selector: authored, or app: <component name>.
 	Selector map[string]string
 	// Ports carries every port with its defaults applied (targetPort, protocol).
@@ -206,6 +220,7 @@ func (c *ServiceConfig) Generate(app *stack.Application) ([]*client.Object, erro
 	svc.Labels = appLabels(app.Name)
 	svc.Annotations = nil
 	svc.Spec.Type = c.Type
+	svc.Spec.ClusterIP = c.ClusterIP
 	svc.Spec.Selector = maps.Clone(c.Selector)
 	for _, p := range c.Ports {
 		kubernetes.AddServicePort(svc, p)
@@ -273,6 +288,19 @@ func parseService(component *oam.Component) (*ServiceConfig, error) {
 		c.Type = st
 	}
 
+	if ip, present, err := parseRawStringField(props, "clusterIP", "clusterIP"); err != nil {
+		return nil, err
+	} else if present {
+		if ip != serviceClusterIPNone {
+			return nil, errors.Errorf("clusterIP: must be %q, got %q; a literal address is not supported", serviceClusterIPNone, ip)
+		}
+		// The API server refuses a headless NodePort or LoadBalancer Service.
+		if c.Type != corev1.ServiceTypeClusterIP {
+			return nil, errors.Errorf("clusterIP: %q requires type %s, got %s", serviceClusterIPNone, corev1.ServiceTypeClusterIP, c.Type)
+		}
+		c.ClusterIP = ip
+	}
+
 	c.Selector = appLabels(component.Name)
 	if raw, present, err := parseObjectField(props, "selector", "selector"); err != nil {
 		return nil, err
@@ -293,7 +321,7 @@ func parseService(component *oam.Component) (*ServiceConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !present || len(entries) == 0 {
+	if (!present || len(entries) == 0) && c.ClusterIP != serviceClusterIPNone {
 		return nil, errors.New("ports: at least one port is required")
 	}
 	names := map[string]bool{}
