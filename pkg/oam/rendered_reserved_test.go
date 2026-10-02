@@ -13,6 +13,9 @@ type renderedMode string
 // renderedFlag is a rule's own named boolean type.
 type renderedFlag bool
 
+// renderedRatio is a rule's own named floating-point type.
+type renderedRatio float64
+
 // TestSameRenderedValue: a recorded snapshot equals a current value when the value is
 // the snapshot itself, or what emission validation makes of it under the reserved
 // key's schema — so a coercion counts only where validation performs it, and every
@@ -31,6 +34,7 @@ func TestSameRenderedValue(t *testing.T) {
 		limits      = PropertySchema{Type: PropertyTypeObject, Properties: map[string]PropertySchema{"cpu": integer}}
 		openObject  = PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true}
 		nestedLists = PropertySchema{Type: PropertyTypeObject, Properties: map[string]PropertySchema{"a": integers}}
+		negZero     = math.Copysign(0, -1)
 	)
 	tests := []struct {
 		name     string
@@ -50,6 +54,16 @@ func TestSameRenderedValue(t *testing.T) {
 		{"integer: float differs from the int JSON prints the same", integer, 1.0000000000000001e+18, int64(1000000000000000100), false},
 		{"number: float32 is kept, so differs from float64", number, float32(0.5), 0.5, false},
 		{"number: differs from its string", number, 8443, "8443", false},
+		// Signed zeros compare equal with == but a handler tells them apart
+		// (math.Signbit), so a floating-point number is compared bit for bit.
+		{"number: positive zero differs from negative zero", number, 0.0, negZero, false},
+		{"number: negative zero differs from positive zero", number, negZero, 0.0, false},
+		{"number: negative zero equals itself", number, negZero, negZero, true},
+		{"number: float32 negative zero differs from positive zero", number, float32(negZero), float32(0), false},
+		{"number: named negative zero equals the float validation writes", number, renderedRatio(negZero), negZero, true},
+		{"number: named negative zero differs from positive zero", number, renderedRatio(negZero), 0.0, false},
+		{"integer: integral negative zero differs from positive zero", integer, negZero, 0.0, false},
+		{"untyped: positive zero differs from negative zero", untyped, 0.0, negZero, false},
 		{"string: named type equals string", str, renderedMode("platform"), "platform", true},
 		{"string: differs from bytes", str, "AQI=", []byte{1, 2}, false},
 		{"boolean: named type equals bool", boolean, renderedFlag(true), true, true},
@@ -84,6 +98,9 @@ func TestSameRenderedValue(t *testing.T) {
 		{"open object: undeclared named integer is kept", openObject, map[string]any{"port": renderedPort(8443)}, map[string]any{"port": 8443}, false},
 		{"open object: typed map becomes map[string]any, its items kept", openObject, map[string]int32{"cpu": 2}, map[string]any{"cpu": int32(2)}, true},
 		{"open object: typed map items differ from ints", openObject, map[string]int32{"cpu": 2}, map[string]any{"cpu": 2}, false},
+		{"array without items: a zero item differs from a negative zero", list, []float64{0}, []any{negZero}, false},
+		{"array without items: a negative zero item equals itself", list, []float64{negZero}, []any{negZero}, true},
+		{"open object: an undeclared zero differs from a negative zero", openObject, map[string]any{"r": 0.0}, map[string]any{"r": negZero}, false},
 		{"open object: an extra key", openObject, map[string]int{"cpu": 2}, map[string]any{"cpu": 2, "mem": 1}, false},
 		{"open object: another key", openObject, map[string]int{"cpu": 2}, map[string]any{"mem": 2}, false},
 		{"open object: typed nil for an empty object", openObject, map[string]any{"a": map[string]any{}}, map[string]any{"a": map[string]any(nil)}, false},
