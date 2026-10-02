@@ -858,8 +858,10 @@ with a comma-ok assertion (`cfg.Delivery, _ = props["delivery"].(string)`), so o
 the handler alone a `delivery: 123` becomes `""` and is defaulted as though it were
 absent. Type-checking once here, against the schema each handler already declares,
 is what rejects it — not a per-field check in each handler. A caller that drives
-`Transform` directly must therefore call `ValidateAuthoredProperties` first (after
-any parameter substitution) to get the same guarantee `kurel build` gives.
+`Transform` directly must therefore call `ValidateAuthoredPropertiesWithCapabilities`
+first (after any parameter substitution, with the bindings `EvaluateProfile`
+returned) to get the same guarantee `kurel build` gives. `ValidateAuthoredProperties`
+is the same check for a caller with no profile.
 
 Authored policies are checked the same way, after every component, in document order:
 against the `PolicyHandler` registered for the type, else the `PolicyLoweringRule`
@@ -875,10 +877,32 @@ it accepts; and a policy type nothing is registered for, which the transform rej
 with `no handler for policy type`. Top-level `Required` is also deliberately not enforced
 here — `ClusterProfile` capability rendering merges into a trait's top-level property
 map after this runs, so a required property the platform supplies is legitimately
-absent from what the author wrote. Nested `Required`, inside an object the author did
-write, still is, although the rendering now merges into nested objects too
-(go-kure/launcher#750): a partial nested override relying on the rendering for a
-required sibling is refused here (a known limit, see go-kure/launcher#765).
+absent from what the author wrote.
+
+Nested `Required`, inside an object the author did write, is enforced
+(go-kure/launcher#765):
+
+- `ValidateAuthoredProperties` knows no profile, so it checks nested `Required` as
+  written, on every trait.
+- `ValidateAuthoredPropertiesWithCapabilities(app, capabilities)` does the same for a
+  trait no binding matches. For a trait a binding matches, it checks the trait's
+  properties as the rendering merges into them, recursively
+  (go-kure/launcher#750), so a required key the rendering supplies is not refused:
+  a partial override such as `issuerRef: {kind: Issuer}` over a rendered
+  `issuerRef: {name: ca}` is accepted. A missing key is then reported as `"name" is
+  required; neither the trait nor capability "certificate"'s rendering sets it`. A
+  required key inside an array element is always checked as written, because a
+  rendering never merges into a list.
+- `Transform` makes the same check itself on every trait's merged properties, at both
+  merge sites (trait dispatch and the lowering fixpoint), whether or not a binding
+  matched. This is new for a caller that runs `Transform` without the validator: a
+  nested required key missing from both the trait and the rendering used to reach the
+  handler and is now refused. `kurel build` already ran the validator, so its output
+  is unchanged.
+
+Required is enforced only inside an object that is present after the merge; an
+object property left out entirely is not refused, whatever its own `Required` flag
+says, as at the top level.
 
 One property is legal on **every** trait regardless of what its handler declares:
 `scope`. It is read by the transform engine rather than by a handler —
@@ -1194,10 +1218,10 @@ an authored object used to replace the rendered object whole, dropping its sibli
 keys (go-kure/launcher#750). This holds for every trait with a rendering, on both the
 dispatch path and a trait lowering rule's input.
 
-Limit: authored validation (`ValidateAuthoredProperties`) runs before the merge and
-still enforces nested `Required` inside an object the author wrote, so a partial
-override that omits a required nested key the rendering would supply is refused
-(see go-kure/launcher#765).
+Authored validation checks nested `Required` on the merged properties too
+(`ValidateAuthoredPropertiesWithCapabilities`, go-kure/launcher#765), so a partial
+override that omits a required nested key the rendering supplies is accepted. The
+profile-less `ValidateAuthoredProperties` still refuses it.
 
 A component handler that implements `ComponentCapabilityDefaults` (see Transform &
 extension) gets the same precedence for the properties it lists, and only those.

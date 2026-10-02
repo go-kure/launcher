@@ -1270,6 +1270,15 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 							Cause:   err,
 						}
 					}
+					// Nested Required is checked on the merged properties, where a
+					// rendering may have supplied a required key the author left out
+					// (go-kure/launcher#765). It runs whether or not a binding matched.
+					if err := checkNestedRequired(p.PropertySchema(), resolved.Properties, "properties", boundCapability(matched, matchedKey)); err != nil {
+						return nil, &TransformError{
+							Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
+							Cause:   err,
+						}
+					}
 				}
 
 				if matched && ctx.consumedCapabilities != nil {

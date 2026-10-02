@@ -254,8 +254,8 @@ the component level, or a stray `spec.traits`, fails there.
 `Trait.Properties` and `ApplicationPolicy.Properties` (`pkg/oam/types.go`)
 are each `map[string]any`, so YAML strictness stops at the envelope and any key at all decodes
 successfully. Those maps are instead checked against the handler's own declared
-`PropertySchema` by `Transformer.ValidateAuthoredProperties`, which the build calls immediately
-after parsing (`pkg/cmd/kurel/build.go`). For a policy, the handler is the `PolicyHandler`
+`PropertySchema` by `Transformer.ValidateAuthoredPropertiesWithCapabilities`, which the build
+calls after parsing and evaluating the profile (`pkg/cmd/kurel/build.go`). For a policy, the handler is the `PolicyHandler`
 registered for its type, or the `PolicyLoweringRule` claiming it; the built-in handlers
 `kurel build` registers (`dependency`, `placement`, `reconciliation`, `health-checks`, in
 `pkg/oam/builtin/policies`) each declare one. A policy type with nothing registered for it is
@@ -327,9 +327,12 @@ parsing (`applyTraits` → `resolveCapability`, `pkg/oam/transform.go`), so a
 capability-aware trait may legitimately author a document in which the platform, not the
 author, supplies a required property. Enforcing `Required` before that merge would reject it.
 Nested `Required` — inside an object- or array-typed property — *is* enforced. Capability
-rendering now merges into nested objects too (go-kure/launcher#750), so a partial nested
-override that relies on the rendering for a required sibling is refused at parse time: a
-known limit, tracked in go-kure/launcher#765.
+rendering merges into nested objects too (go-kure/launcher#750), so on a trait a capability
+binding matches it is enforced on the merged properties: by
+`ValidateAuthoredPropertiesWithCapabilities`, and by `Transform` at both merge sites
+(go-kure/launcher#765). A partial nested override that relies on the rendering for a required
+sibling is therefore accepted. A required key inside an array element is checked as written,
+because a rendering never merges into a list.
 
 ---
 

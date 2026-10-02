@@ -60,7 +60,30 @@ import (
 // Returns the first error in a deterministic order (components in document order,
 // each component's own properties before its traits, then policies in document
 // order), so a document with several problems always reports the same one.
+//
+// It knows no ClusterProfile, so it enforces nested Required on every trait as
+// written: a required key missing from a nested object the author wrote is refused
+// here even when a capability rendering would supply it. An object the author
+// leaves out entirely is not refused, whatever its own Required flag says, as at the
+// top level. ValidateAuthoredPropertiesWithCapabilities is the profile-aware
+// variant: the rendering merges into nested objects (mergeRenderedProperties,
+// go-kure/launcher#750), and the variant accepts a partial nested override that
+// relies on it for a required sibling.
 func (t *Transformer) ValidateAuthoredProperties(app *Application) error {
+	return t.ValidateAuthoredPropertiesWithCapabilities(app, nil)
+}
+
+// ValidateAuthoredPropertiesWithCapabilities is ValidateAuthoredProperties for a
+// document built against capabilities, the evaluated ClusterProfile's bindings
+// (EvaluateProfile). A trait a binding matches, by the lookup resolveCapability makes
+// on the properties once validated, is checked for nested Required on its properties
+// as the rendering merges into them, not as written: the rendering may supply a
+// required key the author left out (go-kure/launcher#765). Every other check is
+// ValidateAuthoredProperties', and a trait no binding matches is refused for the
+// same nested key, though with several problems the nested Required one may be
+// reported after the others. Transform makes the same after-merge check itself, so
+// a nested key neither side supplies is refused there too.
+func (t *Transformer) ValidateAuthoredPropertiesWithCapabilities(app *Application, capabilities map[string]CapabilityBinding) error {
 	if app == nil {
 		return nil
 	}
@@ -73,7 +96,7 @@ func (t *Transformer) ValidateAuthoredProperties(app *Application) error {
 			return err
 		}
 		for j := range comp.Traits {
-			if err := t.validateAuthoredTrait(comp.Name, &comp.Traits[j]); err != nil {
+			if err := t.validateAuthoredTrait(comp.Name, &comp.Traits[j], capabilities); err != nil {
 				return err
 			}
 		}
@@ -216,15 +239,56 @@ func withUnsupportedFieldHint(handler any, err error) error {
 // It differs from the component position in one way: the engine itself reads a
 // property off every authored trait, whatever the handler declares — see
 // engineTraitProperties.
-func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait) error {
+//
+// Given capabilities, a trait whose handler declares a schema is checked against it
+// with nested Required cleared (relaxObjectRequired), and then for nested Required on
+// the properties merged as resolveCapability merges them (checkNestedRequired), so a
+// required key the rendering supplies is not refused (go-kure/launcher#765). A trait
+// no binding matches is checked on its properties as written.
+func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait, capabilities map[string]CapabilityBinding) error {
 	path := fmt.Sprintf("component %q: trait %q: properties", componentName, trait.Type)
+	var handler any
 	if h, ok := t.traitHandlers[trait.Type]; ok {
-		return validateAuthoredTraitAgainst(h, trait.Properties, path)
+		handler = h
+	} else if rule, ok := t.traitLoweringRules[trait.Type]; ok {
+		handler = rule
+	} else {
+		return nil
 	}
-	if rule, ok := t.traitLoweringRules[trait.Type]; ok {
-		return validateAuthoredTraitAgainst(rule, trait.Properties, path)
+	p, declares := handler.(PropertySchemaProvider)
+	if !declares || len(capabilities) == 0 {
+		return validateAuthoredTraitAgainst(handler, trait.Properties, path)
 	}
-	return nil
+	schema := withEngineTraitProperties(p.PropertySchema())
+	if err := validateAuthoredProperties(relaxObjectRequired(schema), trait.Properties, path); err != nil {
+		return err
+	}
+	// Looked up only after validation, which normalizes what the author wrote: a scope
+	// of a named string type matches its binding here, as it does in Transform.
+	merged, matchedKey, _ := resolveCapability(*trait, capabilities)
+	return checkNestedRequired(schema, merged.Properties, path, matchedKey)
+}
+
+// relaxObjectRequired returns schema with Required cleared on every field of an
+// object reached from the top level through object fields alone, the objects a
+// capability rendering merges into. The top level keeps its flags (authored
+// validation ignores them), and so does everything under an array's Items: a list
+// is authored whole, never merged into, so a required key of one of its elements is
+// genuinely missing when the author leaves it out. schema is never mutated, as in
+// withEngineTraitProperties.
+func relaxObjectRequired(schema map[string]PropertySchema) map[string]PropertySchema {
+	out := make(map[string]PropertySchema, len(schema))
+	for key, field := range schema {
+		if field.Type == PropertyTypeObject && len(field.Properties) > 0 {
+			field.Properties = relaxObjectRequired(field.Properties)
+			for k, sub := range field.Properties {
+				sub.Required = false
+				field.Properties[k] = sub
+			}
+		}
+		out[key] = field
+	}
+	return out
 }
 
 // engineTraitProperties are properties the TRANSFORM ENGINE reads off an authored
@@ -358,10 +422,10 @@ func validateAuthoredAgainst(handler any, props map[string]any, path string) err
 // sweep: it rejects a key the schema does not declare and checks the shape of every
 // key it does, but never reports a declared Required field that the document omits.
 //
-// Required is deliberately not enforced HERE, and only here — the nested case still
-// is, because validatePropertyValue recurses into validateObjectProperties for a
-// declared object field and that path is unchanged. The distinction is not
-// cosmetic:
+// Required is deliberately not enforced HERE, at the top level — the nested case
+// is enforced by whatever schema the caller passes, because validatePropertyValue
+// recurses into validateObjectProperties for a declared object field. The
+// distinction is not cosmetic:
 //
 //   - A trait's top-level properties are not complete at this point. ClusterProfile
 //     capability rendering merges into them later (applyTraits → resolveCapability),
@@ -370,11 +434,14 @@ func validateAuthoredAgainst(handler any, props map[string]any, path string) err
 //     capability-aware traits the profile exists to complete — the same spurious
 //     "is required" failure recorded against the emitted path in
 //     validateEmittedDocument's note on forwarded traits.
-//   - A nested object is still checked for Required here, and reporting a missing
-//     field names the line the user wrote. Capability rendering does merge into
-//     nested objects too (mergeRenderedProperties, go-kure/launcher#750), so a
-//     partial nested override that relies on the rendering for a required sibling
-//     is refused here: a known limit, go-kure/launcher#765.
+//   - A nested object's Required is checked here, as written, when no capability
+//     binding matches the trait: nothing will merge into it, so a required field of
+//     an object the user wrote is genuinely missing, and reporting it names the line
+//     they wrote. When a binding matches, the rendering merges into nested objects
+//     too (mergeRenderedProperties, go-kure/launcher#750), so validateAuthoredTrait
+//     passes a schema with nested Required cleared (relaxObjectRequired) and checks
+//     the merged properties instead (checkNestedRequired, go-kure/launcher#765), as
+//     applyTraits and the lowering fixpoint do after their own merge.
 //   - Nothing is lost at the component top level either. A handler that needs a
 //     property already fails without it, with a message written for that property;
 //     a second gate here would only change which error surfaces first.

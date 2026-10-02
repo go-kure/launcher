@@ -154,6 +154,85 @@ func validateObjectProperties(schema map[string]PropertySchema, additionalAllowe
 	return nil
 }
 
+// checkNestedRequired reports the first Required key missing (absent, or a null as
+// isNullValue reads it) from an object props holds under a declared object field,
+// at any depth, the objects of an array whose Items declare them included. Top-level
+// Required is not checked: authored validation never enforces it on a trait, and a
+// handler that needs a property already refuses its absence.
+//
+// It is the after-merge half of nested Required (go-kure/launcher#765). Authored
+// validation of a trait a capability binds clears nested Required
+// (relaxObjectRequired), because the rendering merged in later may supply a key the
+// author left out; applyTraits and the lowering fixpoint then call this on the
+// merged properties. It checks presence only: a value's shape is validation's
+// business, so a value of the wrong type is passed over here.
+//
+// capability is the matched binding's key, "" when none matched; it only words the
+// error.
+func checkNestedRequired(schema map[string]PropertySchema, props map[string]any, path, capability string) error {
+	for _, key := range slices.Sorted(maps.Keys(schema)) {
+		v, present := props[key]
+		if !present || isNullValue(v) {
+			continue
+		}
+		if err := checkRequiredIn(schema[key], v, path+"."+key, capability); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkRequiredIn is checkNestedRequired for one present value: an object's own
+// Required keys first, as validateObjectProperties orders them, then its fields; an
+// array's elements in order.
+func checkRequiredIn(field PropertySchema, value any, path, capability string) error {
+	switch field.Type {
+	case PropertyTypeObject:
+		obj, ok := asObjectValue(value)
+		if !ok || len(field.Properties) == 0 {
+			return nil
+		}
+		for _, key := range slices.Sorted(maps.Keys(field.Properties)) {
+			if !field.Properties[key].Required {
+				continue
+			}
+			if v, present := obj[key]; !present || isNullValue(v) {
+				if capability == "" {
+					return errors.Errorf("%s: %q is required", path, key)
+				}
+				return errors.Errorf("%s: %q is required; neither the trait nor capability %q's rendering sets it", path, key, capability)
+			}
+		}
+		return checkNestedRequired(field.Properties, obj, path, capability)
+	case PropertyTypeArray:
+		items, ok := asArrayValue(value)
+		if !ok || field.Items == nil {
+			return nil
+		}
+		for i, item := range items {
+			if isNullValue(item) {
+				continue
+			}
+			if err := checkRequiredIn(*field.Items, item, fmt.Sprintf("%s[%d]", path, i), capability); err != nil {
+				return err
+			}
+		}
+	case PropertyTypeString, PropertyTypeInteger, PropertyTypeBoolean, PropertyTypeNumber:
+		// A scalar holds no keys. A union (Types) is checked member by member
+		// against bare types (validateUnionValue), so it declares none either.
+	}
+	return nil
+}
+
+// boundCapability is the capability argument of checkNestedRequired: the matched
+// key, or "" when no binding matched.
+func boundCapability(matched bool, key string) string {
+	if !matched {
+		return ""
+	}
+	return key
+}
+
 // validatePropertyValue checks one value against its declared PropertySchema: the
 // value matches schema.Type, an array's elements match schema.Items, an object's
 // fields recurse through validateObjectProperties, and — after the type check — the

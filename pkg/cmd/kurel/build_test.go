@@ -1115,6 +1115,63 @@ spec:
 	}
 }
 
+// TestBuildCommand_PartialNestedOverrideOfCapability: a certificate trait that
+// authors only issuerRef.kind builds against a profile rendering issuerRef.name.
+// The rendering merges into the nested object (go-kure/launcher#750), and build
+// checks nested Required on the merged properties, not as written
+// (go-kure/launcher#765).
+func TestBuildCommand_PartialNestedOverrideOfCapability(t *testing.T) {
+	const appYAML = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: frontend
+      type: webservice
+      properties:
+        image: ghcr.io/example/frontend:v1.0.0
+        port: 8080
+      traits:
+        - type: certificate
+          properties:
+            secretName: frontend-tls
+            dnsNames:
+              - frontend.example.com
+            issuerRef:
+              kind: Issuer
+`
+	const profileYAML = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: test-cluster
+spec:
+  capabilities:
+    certificate:
+      rendering:
+        issuerRef:
+          name: letsencrypt-prod
+          kind: ClusterIssuer
+`
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", appYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", profileYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("build failed: %v\noutput: %s", err, out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "name: letsencrypt-prod") || !strings.Contains(got, "kind: Issuer\n") {
+		t.Errorf("want the Certificate's issuerRef to keep the rendered name and the authored kind, got:\n%s", got)
+	}
+}
+
 // TestBuildCommand_HelmtemplateUndeclaredPropertyRejected: a release-identity
 // property helmtemplate does not declare is a build error naming it, before any
 // chart is fetched — authored-property validation runs first.
