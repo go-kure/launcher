@@ -155,6 +155,21 @@ func TestHelmRule_ValuesConfigMapTypedValuesFrom(t *testing.T) {
 	}
 }
 
+// TestHelmRule_ValuesConfigMapTypedValuesFromStrict: a raw entry whose
+// duplicate key carries a wrongly typed first value is refused, as the
+// helmrelease's strict decode refuses it; normalizing through []any alone would
+// keep only the last value and hide it.
+func TestHelmRule_ValuesConfigMapTypedValuesFromStrict(t *testing.T) {
+	props := helmValuesProps(map[string]any{"a": 1})
+	props["valuesFrom"] = []json.RawMessage{json.RawMessage(`{"kind":"Secret","name":"creds","optional":"invalid","optional":true}`)}
+	lctx := helmLowering("shop")
+	lctx.Origin.Component = "web"
+	_, err := components.HelmRule{}.LowerComponent(&oam.Component{Name: "web", Type: "helm", Properties: props}, lctx)
+	if err == nil || !strings.Contains(err.Error(), "helm: valuesFrom:") {
+		t.Fatalf("err = %v, want the strict valuesFrom refusal", err)
+	}
+}
+
 // TestHelmRule_ValuesConfigMapNameTracksValues: the name moves with the
 // values; two components with the same values carry the same hash and bytes.
 func TestHelmRule_ValuesConfigMapNameTracksValues(t *testing.T) {

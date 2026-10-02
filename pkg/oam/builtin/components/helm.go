@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -476,7 +477,10 @@ func helmValuesConfigMap(name string, release map[string]any) (*oam.Trait, error
 		// A library caller may pass a typed list ([]map[string]any,
 		// []helmv2.ValuesReference). The helmrelease decodes valuesFrom through
 		// JSON, so normalize through JSON too; anything that is not a JSON array
-		// is refused here.
+		// is refused here. The caller's list is strict-decoded first, as the
+		// helmrelease would decode it: the round trip into []any keeps only the
+		// last of duplicate keys inside a raw entry, which would hide a bad
+		// earlier value from the helmrelease's own strict decode.
 		var list []any
 		encoded, err := json.Marshal(authored)
 		if err == nil {
@@ -484,6 +488,9 @@ func helmValuesConfigMap(name string, release map[string]any) (*oam.Trait, error
 		}
 		if err != nil {
 			return nil, errors.Errorf("%s: valuesFrom must be a list, got %T", helmType, authored)
+		}
+		if _, _, err := builtin.DecodeStrictJSON[helmValuesFromSpec](map[string]any{"valuesFrom": authored}); err != nil {
+			return nil, errors.Errorf("%s: valuesFrom: %w", helmType, err)
 		}
 		release["valuesFrom"] = append([]any{entry}, list...)
 	}
@@ -494,6 +501,12 @@ func helmValuesConfigMap(name string, release map[string]any) (*oam.Trait, error
 			"data": map[string]any{helmValuesKey: string(data)},
 		},
 	}, nil
+}
+
+// helmValuesFromSpec is the valuesFrom field of HelmReleaseSpec alone, for
+// helmValuesConfigMap's strict decode of a typed list.
+type helmValuesFromSpec struct {
+	ValuesFrom []helmv2.ValuesReference `json:"valuesFrom"`
 }
 
 // helmValuesConfigMapName names the values ConfigMap of component name whose
