@@ -164,6 +164,100 @@ func TestHelmRule_FluxOCIRepository(t *testing.T) {
 	}
 }
 
+// TestHelmRule_FluxGitRepository: an inline GitRepository source generates a
+// gitrepository with the URL and the one authored ref field, named after the
+// JSON identity, and the release reads it through chart.spec.sourceRef with
+// chart as the path. An ssh:// URL is accepted as well.
+func TestHelmRule_FluxGitRepository(t *testing.T) {
+	for _, url := range []string{"https://github.com/example/charts", "ssh://git@github.com/example/charts"} {
+		t.Run(url, func(t *testing.T) {
+			comps := lowerHelm(t, helmLowering("shop"), "podinfo", map[string]any{
+				"chart":  "./charts/podinfo",
+				"source": map[string]any{"url": url, "kind": "GitRepository", "ref": map[string]any{"tag": "v6.5.0"}},
+			})
+			if len(comps) != 2 {
+				t.Fatalf("emitted %d components, want source and release", len(comps))
+			}
+			source := componentByType(t, comps, "gitrepository")
+			wantName := helmSourceName("shop", `git:{"url":"`+url+`","ref":{"tag":"v6.5.0"}}`)
+			if source.Name != wantName {
+				t.Errorf("source name = %q, want %q", source.Name, wantName)
+			}
+			if want := map[string]any{"url": url, "ref": map[string]any{"tag": "v6.5.0"}}; !reflect.DeepEqual(source.Properties, want) {
+				t.Errorf("source properties = %v, want %v", source.Properties, want)
+			}
+			release := componentByType(t, comps, "helmrelease")
+			wantRelease := map[string]any{"chart": map[string]any{"spec": map[string]any{
+				"chart": "./charts/podinfo", "sourceRef": map[string]any{"kind": "GitRepository", "name": wantName},
+			}}}
+			if !reflect.DeepEqual(release.Properties, wantRelease) {
+				t.Errorf("release properties = %v, want %v", release.Properties, wantRelease)
+			}
+		})
+	}
+}
+
+// TestHelmRule_FluxBucket: an inline Bucket source generates a bucket with the
+// authored location keys only, named after the JSON identity of every key that
+// locates it, and the release reads it through chart.spec.sourceRef.
+func TestHelmRule_FluxBucket(t *testing.T) {
+	comps := lowerHelm(t, helmLowering("shop"), "podinfo", map[string]any{
+		"chart":  "charts/podinfo",
+		"source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts", "provider": "generic", "prefix": "podinfo/"},
+	})
+	if len(comps) != 2 {
+		t.Fatalf("emitted %d components, want source and release", len(comps))
+	}
+	source := componentByType(t, comps, "bucket")
+	wantName := helmSourceName("shop", `bucket:{"provider":"generic","endpoint":"minio.example.com","bucketName":"charts","region":"","prefix":"podinfo/"}`)
+	if source.Name != wantName {
+		t.Errorf("source name = %q, want %q", source.Name, wantName)
+	}
+	wantSource := map[string]any{"endpoint": "minio.example.com", "bucketName": "charts", "provider": "generic", "prefix": "podinfo/"}
+	if !reflect.DeepEqual(source.Properties, wantSource) {
+		t.Errorf("source properties = %v, want %v", source.Properties, wantSource)
+	}
+	release := componentByType(t, comps, "helmrelease")
+	wantRelease := map[string]any{"chart": map[string]any{"spec": map[string]any{
+		"chart": "charts/podinfo", "sourceRef": map[string]any{"kind": "Bucket", "name": wantName},
+	}}}
+	if !reflect.DeepEqual(release.Properties, wantRelease) {
+		t.Errorf("release properties = %v, want %v", release.Properties, wantRelease)
+	}
+}
+
+// TestHelmRule_GitAndBucketSharePerIdentity: two components with the same Git
+// URL and ref, or the same Bucket location, share one generated source; a
+// different ref, or a different bucket, gets its own.
+func TestHelmRule_GitAndBucketSharePerIdentity(t *testing.T) {
+	lctx := helmLowering("shop")
+	git := func(ref map[string]any) map[string]any {
+		return map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": ref}
+	}
+	first := lowerHelm(t, lctx, "a", map[string]any{"chart": "./a", "source": git(map[string]any{"branch": "main"})})
+	second := lowerHelm(t, lctx, "b", map[string]any{"chart": "./b", "source": git(map[string]any{"branch": "main"})})
+	if len(second) != 1 || second[0].Type != "helmrelease" {
+		t.Fatalf("second Git claimant emitted %+v, want only its release (the source is adopted)", second)
+	}
+	other := lowerHelm(t, lctx, "c", map[string]any{"chart": "./c", "source": git(map[string]any{"tag": "main"})})
+	if a, c := componentByType(t, first, "gitrepository").Name, componentByType(t, other, "gitrepository").Name; a == c {
+		t.Errorf("branch main and tag main share source %s", a)
+	}
+
+	bucket := func(name string) map[string]any {
+		return map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": name}
+	}
+	b1 := lowerHelm(t, lctx, "d", map[string]any{"chart": "d", "source": bucket("charts")})
+	b2 := lowerHelm(t, lctx, "e", map[string]any{"chart": "e", "source": bucket("charts")})
+	if len(b2) != 1 || b2[0].Type != "helmrelease" {
+		t.Fatalf("second Bucket claimant emitted %+v, want only its release", b2)
+	}
+	b3 := lowerHelm(t, lctx, "f", map[string]any{"chart": "f", "source": bucket("other")})
+	if a, c := componentByType(t, b1, "bucket").Name, componentByType(t, b3, "bucket").Name; a == c {
+		t.Errorf("two buckets share source %s", a)
+	}
+}
+
 // TestHelmRule_OCIWithoutVersion: an inline OCI source without a version is
 // accepted under delivery: flux, as helmchart accepts it: the source carries no
 // ref, so Flux pulls the latest tag.
@@ -353,7 +447,9 @@ func TestHelmRule_Refusals(t *testing.T) {
 		want  string
 	}{
 		{"unknown key", map[string]any{"chart": "a", "source": repo, "replicas": 2}, `helm: properties do not decode: json: unknown field "replicas"`},
-		{"unknown source key", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "ref": "x"}}, `helm: properties do not decode: json: unknown field "ref"`},
+		{"unknown source key", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "branch": "x"}}, `helm: properties do not decode: json: unknown field "branch"`},
+		{"unknown source.ref key", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main", "sha": "x"}}}, `helm: properties do not decode: json: unknown field "sha"`},
+		{"two spellings in source.ref", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main", "Branch": "dev"}}}, "helm: source.ref.Branch and source.ref.branch are one key given more than once"},
 		{"delivery native", map[string]any{"delivery": "native", "chart": "a", "source": repo}, `helm: unsupported delivery "native"; supported values: flux, template`},
 		{"unknown valuesMode", map[string]any{"valuesMode": "file", "chart": "a", "source": repo}, `helm: unsupported valuesMode "file"`},
 		{"no source", map[string]any{"chart": "a"}, "helm: source is required"},
@@ -371,8 +467,22 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"inline HelmChart", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "kind": "HelmChart"}}, `helm: source.kind "HelmChart" is not valid for inline source`},
 		{"inline OCI with chart", map[string]any{"chart": "a", "source": oci}, "helm: chart is not used with source.kind OCIRepository"},
 		{"reference without kind", map[string]any{"chart": "a", "source": map[string]any{"name": "x"}}, "helm: source.kind is required when source.name is set"},
-		{"inline GitRepository", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository"}}, `helm: source.kind "GitRepository" is not valid for inline source; must be HelmRepository or OCIRepository`},
-		{"inline Bucket", map[string]any{"chart": "a", "source": map[string]any{"url": "https://minio.example.com", "kind": "Bucket"}}, `helm: source.kind "Bucket" is not valid for inline source; must be HelmRepository or OCIRepository`},
+		{"inline GitRepository without ref", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository"}}, "helm: an inline source.kind GitRepository requires source.ref with exactly one of branch, tag, semver, name, commit"},
+		{"inline GitRepository empty ref", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{}}}, "helm: an inline source.kind GitRepository requires source.ref with exactly one of"},
+		{"inline GitRepository two ref fields", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main", "tag": "v1.0.0"}}}, "helm: source.ref sets branch, tag; an inline GitRepository takes exactly one of branch, tag, semver, name, commit"},
+		{"inline GitRepository oci URL", map[string]any{"chart": "a", "source": map[string]any{"url": "oci://ghcr.io/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires an http://, https:// or ssh:// URL"},
+		{"inline GitRepository without chart", map[string]any{"source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires chart to be specified"},
+		{"inline GitRepository with version", map[string]any{"chart": "./charts/a", "version": "1.0.0", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: version is not used with source.kind GitRepository, whose chart is read at the source's fetched revision"},
+		{"inline Bucket with url", map[string]any{"chart": "a", "source": map[string]any{"url": "https://minio.example.com", "kind": "Bucket"}}, "helm: source.kind Bucket takes source.endpoint and source.bucketName, not source.url"},
+		{"inline Bucket without bucketName", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com"}}, "helm: an inline source.kind Bucket requires source.endpoint and source.bucketName"},
+		{"inline Bucket without endpoint", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "bucketName": "charts"}}, "helm: an inline source.kind Bucket requires source.endpoint and source.bucketName"},
+		{"inline Bucket with namespace", map[string]any{"chart": "a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts", "namespace": "x"}}, "helm: source.namespace is only valid with source.name"},
+		{"inline Bucket without chart", map[string]any{"source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts"}}, "helm: source.kind Bucket requires chart to be specified"},
+		{"inline Bucket with version", map[string]any{"chart": "charts/a", "version": "1.0.0", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts"}}, "helm: version is not used with source.kind Bucket, whose chart is read at the source's fetched revision"},
+		{"endpoint without Bucket", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "endpoint": "minio.example.com"}}, "helm: source.endpoint is only valid with an inline source.kind Bucket"},
+		{"provider on a Bucket reference", map[string]any{"chart": "a", "source": map[string]any{"name": "x", "kind": "Bucket", "provider": "aws"}}, "helm: source.provider is only valid with an inline source.kind Bucket"},
+		{"ref without GitRepository", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "ref": map[string]any{"branch": "main"}}}, "helm: source.ref is only valid with an inline source.kind GitRepository"},
+		{"ref on a GitRepository reference", map[string]any{"chart": "a", "source": map[string]any{"name": "x", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.ref is only valid with an inline source.kind GitRepository"},
 		{"reference unknown kind", map[string]any{"chart": "a", "source": map[string]any{"name": "x", "kind": "ExternalArtifact"}}, `helm: source.kind "ExternalArtifact" is not valid for a source reference; must be HelmRepository, GitRepository, Bucket, OCIRepository, or HelmChart`},
 		{"reference HelmRepository without chart", map[string]any{"source": map[string]any{"name": "x", "kind": "HelmRepository"}}, "helm: source.kind HelmRepository requires chart to be specified"},
 		{"reference GitRepository without chart", map[string]any{"source": map[string]any{"name": "x", "kind": "GitRepository"}}, "helm: source.kind GitRepository requires chart to be specified"},
@@ -382,6 +492,8 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"reference OCI with chart", map[string]any{"chart": "a", "source": map[string]any{"name": "x", "kind": "OCIRepository"}}, "helm: chart is not used with source.kind OCIRepository"},
 		{"reference HelmChart with version", map[string]any{"version": "1.0.0", "source": map[string]any{"name": "x", "kind": "HelmChart"}}, "helm: version is not used with a referenced source.kind HelmChart"},
 		{"template reference", map[string]any{"delivery": "template", "chart": "a", "source": map[string]any{"name": "x", "kind": "HelmRepository"}}, "helm: delivery: template requires an inline source URL; source.name is not supported"},
+		{"template inline GitRepository", map[string]any{"delivery": "template", "chart": "./charts/a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: delivery: template does not support source.kind GitRepository (a client-side render fetches the chart from a HelmRepository or OCIRepository only)"},
+		{"template inline Bucket", map[string]any{"delivery": "template", "chart": "charts/a", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts"}}, "helm: delivery: template does not support source.kind Bucket"},
 		{"template GitRepository reference", map[string]any{"delivery": "template", "chart": "./charts/a", "source": map[string]any{"name": "x", "kind": "GitRepository"}}, "helm: delivery: template requires an inline source URL; source.name is not supported"},
 		{"template valuesMode configMap", template(map[string]any{"valuesMode": "configMap"}), "helm: delivery: template does not support valuesMode: configMap"},
 		{"template OCI without version", map[string]any{"delivery": "template", "source": oci}, "helm: delivery: template with an OCIRepository source requires version to be set"},

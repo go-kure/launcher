@@ -1,0 +1,25 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: default
+spec:
+  components:
+    - name: podinfo
+      type: helm
+      properties:
+        chart: charts/podinfo
+        source:
+          kind: Bucket
+          endpoint: minio.example.com
+          bucketName: charts
+          prefix: charts/
+    - name: exporter
+      type: helm
+      properties:
+        chart: charts/exporter
+        source:
+          kind: Bucket
+          endpoint: minio.example.com
+          bucketName: charts
+          prefix: charts/

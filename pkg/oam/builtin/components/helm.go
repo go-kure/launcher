@@ -3,6 +3,7 @@ package components
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"maps"
 	"slices"
 	"strings"
@@ -40,18 +41,21 @@ var helmFluxOnlyKeys = []string{"interval", "releaseName", "targetNamespace", "d
 // layer of the helmchart composite's split (go-kure/launcher#336):
 //
 //   - delivery: flux (the default) emits a `helmrelease` component carrying the
-//     authored name, traits and annotations. With an inline source.url it also
+//     authored name, traits and annotations. With an inline source it also
 //     emits the source the release reads: a `helmrepository` for an http(s)://
-//     URL, an `ocirepository` for an oci:// URL (ref.tag = version).
+//     URL, an `ocirepository` for an oci:// URL (ref.tag = version), a
+//     `gitrepository` for source.kind GitRepository (url plus exactly one
+//     source.ref field), or a `bucket` for source.kind Bucket (endpoint and
+//     bucketName instead of a url).
 //   - delivery: template emits a `helmtemplate` component carrying the authored
 //     name, traits and annotations, with the URL inline. No source is emitted:
 //     the chart is rendered at build time.
 //
 // A generated source is named <document>-source-<digest>, the digest taken over
 // the source's content identity (helmSourceIdentity), and claimed through
-// NameAllocator.NameOrAdopt: helm components of one document that share a URL
-// (and, for OCI, a version) share one source, and the second one only
-// references it. Two documents never share or collide on a generated source,
+// NameAllocator.NameOrAdopt: helm components of one document that share a
+// source identity (the URL, with the version for OCI and the ref for Git, or a
+// Bucket's location) share one source, and the second one only references it. Two documents never share or collide on a generated source,
 // because the document name is part of its name. The source uses its terminal's
 // own interval default, never the release interval, so the identity says
 // everything about its content.
@@ -86,18 +90,34 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: desc}
 	}
 	return map[string]oam.PropertySchema{
-		"chart":    str("Chart name within a HelmRepository source, or the chart's path within a referenced GitRepository or Bucket source; required with those three. Refused with an OCIRepository or HelmChart source, which already name the chart."),
+		"chart":    str("Chart name within a HelmRepository source, or the chart's path within a GitRepository or Bucket source; required with those three. Refused with an OCIRepository or HelmChart source, which already name the chart."),
 		"version":  str("Chart version. For an inline oci:// source it is the OCIRepository's ref.tag, and required under delivery: template. Refused with a referenced OCIRepository or HelmChart source, which already pin it, and with a GitRepository or Bucket source, whose chart Flux reads at the fetched revision, ignoring any version."),
-		"delivery": {Type: oam.PropertyTypeString, Default: "flux", Enum: []any{"flux", "template"}, Description: "flux emits a HelmRelease (plus its source for an inline URL); template renders the chart client-side at build time."},
+		"delivery": {Type: oam.PropertyTypeString, Default: "flux", Enum: []any{"flux", "template"}, Description: "flux emits a HelmRelease (plus its source for an inline source); template renders the chart client-side at build time, from an inline HelmRepository or OCIRepository URL only."},
 		"source": {
 			Type:        oam.PropertyTypeObject,
 			Required:    true,
-			Description: "Chart source: an inline url (the source is generated, and shared by helm components of the document with the same URL and, for OCI, version), or a reference (name, kind, namespace) to an existing source CR.",
+			Description: "Chart source: inline (a url, or a Bucket's endpoint and bucketName; the source is generated, and shared by helm components of the document with the same content identity), or a reference (name, kind, namespace) to an existing source CR.",
 			Properties: map[string]oam.PropertySchema{
-				"url":       str("Inline chart location: an http:// or https:// Helm repository URL, or an oci:// URL naming the chart. Mutually exclusive with name."),
-				"kind":      {Type: oam.PropertyTypeString, Enum: []any{"HelmRepository", "GitRepository", "Bucket", "OCIRepository", "HelmChart"}, Description: "Source kind. With url it is inferred from the scheme when unset and must agree with it (HelmRepository or OCIRepository); with name it is required and may be any of the five."},
+				"url":       str("Inline chart location: an http:// or https:// Helm repository URL, an oci:// URL naming the chart, or with kind GitRepository an http://, https:// or ssh:// Git repository URL. Mutually exclusive with name; not used with kind Bucket."),
+				"kind":      {Type: oam.PropertyTypeString, Enum: []any{"HelmRepository", "GitRepository", "Bucket", "OCIRepository", "HelmChart"}, Description: "Source kind. With url it is inferred from the scheme when unset and must agree with it (HelmRepository or OCIRepository); a Git repository URL needs kind GitRepository set. Without url or name, kind Bucket generates a Bucket from endpoint and bucketName. With name it is required and may be any of the five."},
 				"name":      str("Name of an existing source CR to reference. Mutually exclusive with url; not supported under delivery: template."),
 				"namespace": str("Namespace of the referenced source CR. Only with name."),
+				"ref": {
+					Type:        oam.PropertyTypeObject,
+					Description: "Git reference of an inline GitRepository source (its spec.ref): exactly one of branch, tag, semver, name, commit. Required with an inline kind GitRepository, and only valid there.",
+					Properties: map[string]oam.PropertySchema{
+						"branch": str("Branch to check out."),
+						"tag":    str("Tag to check out."),
+						"semver": str("SemVer range of tags to check out."),
+						"name":   str("Git reference name to check out, e.g. refs/heads/main."),
+						"commit": str("Commit SHA to check out."),
+					},
+				},
+				"endpoint":   str("Object storage address of an inline Bucket source (its spec.endpoint). Required with an inline kind Bucket, and only valid there."),
+				"bucketName": str("Bucket name of an inline Bucket source. Required with an inline kind Bucket, and only valid there."),
+				"provider":   str("Provider of an inline Bucket source: generic (Flux's default), aws, gcp or azure. Only with an inline kind Bucket."),
+				"region":     str("Region of an inline Bucket source's endpoint. Only with an inline kind Bucket."),
+				"prefix":     str("Object prefix of an inline Bucket source, for server-side filtering. Only with an inline kind Bucket."),
 			},
 		},
 		"values":          object("Helm values tree. Must be representable as JSON."),
@@ -124,14 +144,41 @@ type helmProperties struct {
 	Source     *helmSource `json:"source"`
 }
 
-// helmSource is an inline URL (with an optional kind) or a reference to an
-// existing source CR (name, kind, optional namespace).
+// helmSource is an inline source or a reference to an existing source CR
+// (name, kind, optional namespace). Inline, it is a URL with an optional kind
+// (and with kind GitRepository a ref), or with kind Bucket an endpoint and
+// bucketName (plus provider, region, prefix) and no URL.
 type helmSource struct {
-	URL       string `json:"url"`
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
+	URL        string      `json:"url"`
+	Kind       string      `json:"kind"`
+	Name       string      `json:"name"`
+	Namespace  string      `json:"namespace"`
+	Ref        *helmGitRef `json:"ref"`
+	Endpoint   string      `json:"endpoint"`
+	BucketName string      `json:"bucketName"`
+	Provider   string      `json:"provider"`
+	Region     string      `json:"region"`
+	Prefix     string      `json:"prefix"`
 }
+
+// helmGitRef is an inline GitRepository source's reference, emitted as its
+// spec.ref. The rule requires exactly one field.
+type helmGitRef struct {
+	Branch string `json:"branch,omitempty"`
+	Tag    string `json:"tag,omitempty"`
+	SemVer string `json:"semver,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Commit string `json:"commit,omitempty"`
+}
+
+// fields lists r's keys, in Flux's GitRepositoryRef order, with their values.
+func (r *helmGitRef) fields() [][2]string {
+	return [][2]string{{"branch", r.Branch}, {"tag", r.Tag}, {"semver", r.SemVer}, {"name", r.Name}, {"commit", r.Commit}}
+}
+
+// inlineBucket reports whether s generates a Bucket: kind Bucket without a
+// reference name.
+func (s *helmSource) inlineBucket() bool { return s.Kind == "Bucket" && s.Name == "" }
 
 // LowerComponent decodes comp as a helm component and emits its terminal
 // components (see HelmRule).
@@ -151,7 +198,9 @@ func (HelmRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (o
 }
 
 // decodeHelm decodes props strictly and checks what holds for every delivery:
-// a source with exactly one of url and name, and a known valuesMode. The
+// a source with exactly one of url and name (an inline Bucket has neither, but
+// an endpoint and bucketName), each source key only in the form that reads it,
+// and a known valuesMode. The
 // passthrough keys come back in their own map under their declared spelling,
 // without nulls (absent). The strict decode matches keys case-insensitively, as
 // encoding/json does, so two spellings of one key, at the top level or in
@@ -164,6 +213,13 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, error) {
 		if s, ok := v.(map[string]any); ok && strings.EqualFold(k, "source") {
 			if err := refuseFoldedKeys("source.", s); err != nil {
 				return nil, nil, err
+			}
+			for rk, rv := range s {
+				if r, ok := rv.(map[string]any); ok && strings.EqualFold(rk, "ref") {
+					if err := refuseFoldedKeys("source.ref.", r); err != nil {
+						return nil, nil, err
+					}
+				}
 			}
 		}
 	}
@@ -182,13 +238,32 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, error) {
 	if props.Source == nil {
 		return nil, nil, errors.Errorf("%s: source is required", helmType)
 	}
-	switch s := props.Source; {
+	s := props.Source
+	switch {
 	case s.URL != "" && s.Name != "":
 		return nil, nil, errors.Errorf("%s: source.url and source.name are mutually exclusive", helmType)
+	case s.inlineBucket():
+		if s.URL != "" {
+			return nil, nil, errors.Errorf("%s: source.kind Bucket takes source.endpoint and source.bucketName, not source.url", helmType)
+		}
+		if s.Endpoint == "" || s.BucketName == "" {
+			return nil, nil, errors.Errorf("%s: an inline source.kind Bucket requires source.endpoint and source.bucketName", helmType)
+		}
 	case s.URL == "" && s.Name == "":
 		return nil, nil, errors.Errorf("%s: source requires either source.url (inline) or source.name (reference)", helmType)
-	case s.URL != "" && s.Namespace != "":
+	}
+	if s.Name == "" && s.Namespace != "" {
 		return nil, nil, errors.Errorf("%s: source.namespace is only valid with source.name", helmType)
+	}
+	if !s.inlineBucket() {
+		for _, f := range [][2]string{{"endpoint", s.Endpoint}, {"bucketName", s.BucketName}, {"provider", s.Provider}, {"region", s.Region}, {"prefix", s.Prefix}} {
+			if f[1] != "" {
+				return nil, nil, errors.Errorf("%s: source.%s is only valid with an inline source.kind Bucket", helmType, f[0])
+			}
+		}
+	}
+	if s.Ref != nil && (s.Kind != "GitRepository" || s.URL == "") {
+		return nil, nil, errors.Errorf("%s: source.ref is only valid with an inline source.kind GitRepository", helmType)
 	}
 	switch props.ValuesMode {
 	case "", "inline", "configMap":
@@ -214,7 +289,7 @@ func refuseFoldedKeys(prefix string, m map[string]any) error {
 	return nil
 }
 
-// lowerHelmFlux emits the helmrelease component and, for an inline URL, the
+// lowerHelmFlux emits the helmrelease component and, for an inline source, the
 // source it references (unless another helm component of the document already
 // emitted the same one).
 func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmProperties, passthrough map[string]any) (oam.LoweringResult, error) {
@@ -225,12 +300,8 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	}
 
 	kind := src.Kind
-	if src.URL != "" {
-		var err error
-		if kind, err = inlineChartSourceKind(helmType, src.URL, src.Kind, props.Chart); err != nil {
-			return oam.LoweringResult{}, err
-		}
-	} else {
+	switch {
+	case src.Name != "":
 		switch kind {
 		case "":
 			return oam.LoweringResult{}, errors.Errorf("%s: source.kind is required when source.name is set", helmType)
@@ -238,15 +309,27 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 		default:
 			return oam.LoweringResult{}, errors.Errorf("%s: source.kind %q is not valid for a source reference; must be HelmRepository, GitRepository, Bucket, OCIRepository, or HelmChart", helmType, kind)
 		}
-		if helmChartTemplateKind(kind) && props.Chart == "" {
-			return oam.LoweringResult{}, errors.Errorf("%s: source.kind %s requires chart to be specified", helmType, kind)
+	case kind == "GitRepository":
+		if err := checkHelmGitSource(src); err != nil {
+			return oam.LoweringResult{}, err
 		}
-		// Flux reads a GitRepository or Bucket chart at the source's fetched
-		// revision and ignores chart.spec.version, so an authored one would be
-		// silently dropped.
-		if (kind == "GitRepository" || kind == "Bucket") && props.Version != "" {
-			return oam.LoweringResult{}, errors.Errorf("%s: version is not used with source.kind %s, whose chart is read at the source's fetched revision", helmType, kind)
+	case kind == "Bucket":
+		// decodeHelm required endpoint and bucketName; the bucket terminal
+		// checks the rest.
+	default:
+		var err error
+		if kind, err = inlineChartSourceKind(helmType, src.URL, src.Kind, props.Chart); err != nil {
+			return oam.LoweringResult{}, err
 		}
+	}
+	if helmChartTemplateKind(kind) && props.Chart == "" {
+		return oam.LoweringResult{}, errors.Errorf("%s: source.kind %s requires chart to be specified", helmType, kind)
+	}
+	// Flux reads a GitRepository or Bucket chart at the source's fetched
+	// revision and ignores chart.spec.version, so an authored one would be
+	// silently dropped.
+	if (kind == "GitRepository" || kind == "Bucket") && props.Version != "" {
+		return oam.LoweringResult{}, errors.Errorf("%s: version is not used with source.kind %s, whose chart is read at the source's fetched revision", helmType, kind)
 	}
 	// An OCIRepository or HelmChart source already names the chart, and a
 	// chartRef has no version: an inline OCI version becomes the generated
@@ -267,8 +350,8 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	if src.Namespace != "" {
 		ref["namespace"] = src.Namespace
 	}
-	if src.URL != "" {
-		source, adopted, err := helmGeneratedSource(lctx, kind, src.URL, props.Version)
+	if src.Name == "" {
+		source, adopted, err := helmGeneratedSource(lctx, kind, src, props.Version)
 		if err != nil {
 			return oam.LoweringResult{}, err
 		}
@@ -297,6 +380,33 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	return result, nil
 }
 
+// checkHelmGitSource checks an inline GitRepository source: a URL the
+// gitrepository terminal accepts, and exactly one source.ref field. Flux checks
+// out branch master when spec.ref is empty and picks one field by precedence
+// when several are set; the rule refuses both rather than follow either
+// silently.
+func checkHelmGitSource(src *helmSource) error {
+	if !strings.HasPrefix(src.URL, "https://") && !strings.HasPrefix(src.URL, "http://") && !strings.HasPrefix(src.URL, "ssh://") {
+		return errors.Errorf("%s: source.kind GitRepository requires an http://, https:// or ssh:// URL", helmType)
+	}
+	var set []string
+	if src.Ref != nil {
+		for _, f := range src.Ref.fields() {
+			if f[1] != "" {
+				set = append(set, f[0])
+			}
+		}
+	}
+	switch len(set) {
+	case 0:
+		return errors.Errorf("%s: an inline source.kind GitRepository requires source.ref with exactly one of branch, tag, semver, name, commit", helmType)
+	case 1:
+		return nil
+	default:
+		return errors.Errorf("%s: source.ref sets %s; an inline GitRepository takes exactly one of branch, tag, semver, name, commit", helmType, strings.Join(set, ", "))
+	}
+}
+
 // helmChartTemplateKind reports whether a source of kind is read through the
 // HelmRelease's chart template (chart.spec.sourceRef), whose kinds Flux limits
 // to HelmRepository, GitRepository and Bucket. Every other kind is a chartRef.
@@ -308,11 +418,14 @@ func helmChartTemplateKind(kind string) bool {
 	return false
 }
 
-// helmGeneratedSource names and builds the source component for an inline URL.
-// adopted reports that another helm component of the document already emitted
-// it: the caller then references it by name without emitting it again.
-func helmGeneratedSource(lctx oam.LoweringContext, kind, url, version string) (oam.Component, bool, error) {
-	identity := helmSourceIdentity(kind, url, version)
+// helmGeneratedSource names and builds the source component for an inline
+// source. adopted reports that another helm component of the document already
+// emitted it: the caller then references it by name without emitting it again.
+func helmGeneratedSource(lctx oam.LoweringContext, kind string, src *helmSource, version string) (oam.Component, bool, error) {
+	identity, err := helmGeneratedSourceIdentity(kind, src, version)
+	if err != nil {
+		return oam.Component{}, false, err
+	}
 	sum := sha256.Sum256([]byte(identity))
 	digest := hex.EncodeToString(sum[:])[:helmSourceDigestLen]
 	name, adopted, err := lctx.Namer.NameOrAdopt(lctx.Origin.Document, "source-"+digest, identity, lctx.Origin)
@@ -320,10 +433,28 @@ func helmGeneratedSource(lctx oam.LoweringContext, kind, url, version string) (o
 		return oam.Component{}, false, errors.Wrapf(err, "%s: naming the generated source", helmType)
 	}
 	source := oam.Component{Name: name}
+	url := src.URL
 	switch kind {
 	case "HelmRepository":
 		source.Type = "helmrepository"
 		source.Properties = map[string]any{"url": url}
+	case "GitRepository":
+		ref := map[string]any{}
+		for _, f := range src.Ref.fields() {
+			if f[1] != "" {
+				ref[f[0]] = f[1]
+			}
+		}
+		source.Type = "gitrepository"
+		source.Properties = map[string]any{"url": url, "ref": ref}
+	case "Bucket":
+		source.Type = "bucket"
+		source.Properties = map[string]any{"endpoint": src.Endpoint, "bucketName": src.BucketName}
+		for _, f := range [][2]string{{"provider", src.Provider}, {"region", src.Region}, {"prefix", src.Prefix}} {
+			if f[1] != "" {
+				source.Properties[f[0]] = f[1]
+			}
+		}
 	default: // OCIRepository, the only other kind inlineChartSourceKind returns
 		// Copy the chart layer as-is: Flux's default extracts the first layer and
 		// re-archives it without the files its ignore rules exclude (*.zip,
@@ -350,12 +481,47 @@ func helmSourceIdentity(kind, url, version string) string {
 	return "helm:" + url
 }
 
+// helmGeneratedSourceIdentity is the content identity of the source an inline
+// source generates. A GitRepository's is its URL and ref, a Bucket's every key
+// that locates it, each as JSON so that no separator inside a URL or endpoint
+// can make two of them collide; a HelmRepository's and an OCIRepository's stay
+// helmSourceIdentity's, so their generated names do not change.
+func helmGeneratedSourceIdentity(kind string, src *helmSource, version string) (string, error) {
+	var prefix string
+	var content any
+	switch kind {
+	case "GitRepository":
+		prefix, content = "git:", struct {
+			URL string     `json:"url"`
+			Ref helmGitRef `json:"ref"`
+		}{src.URL, *src.Ref}
+	case "Bucket":
+		prefix, content = "bucket:", struct {
+			Provider   string `json:"provider"`
+			Endpoint   string `json:"endpoint"`
+			BucketName string `json:"bucketName"`
+			Region     string `json:"region"`
+			Prefix     string `json:"prefix"`
+		}{src.Provider, src.Endpoint, src.BucketName, src.Region, src.Prefix}
+	default:
+		return helmSourceIdentity(kind, src.URL, version), nil
+	}
+	b, err := json.Marshal(content)
+	if err != nil {
+		return "", errors.Wrapf(err, "%s: encoding the generated source identity", helmType)
+	}
+	return prefix + string(b), nil
+}
+
 // lowerHelmTemplate emits the helmtemplate component after refusing what a
 // client-side render cannot honour.
 func lowerHelmTemplate(comp *oam.Component, props *helmProperties, passthrough map[string]any) (oam.LoweringResult, error) {
 	src := props.Source
 	if src.Name != "" {
 		return oam.LoweringResult{}, errors.Errorf("%s: delivery: template requires an inline source URL; source.name is not supported", helmType)
+	}
+	if src.Kind == "GitRepository" || src.Kind == "Bucket" {
+		return oam.LoweringResult{}, errors.Errorf("%s: delivery: template does not support source.kind %s (a client-side render fetches the chart from a HelmRepository or OCIRepository only)", helmType, src.Kind)
 	}
 	for _, key := range helmFluxOnlyKeys {
 		if _, ok := passthrough[key]; ok {

@@ -243,8 +243,9 @@ Kustomization waits until the source is ready. Because the GVK is a `*.toolkit.f
 and each config accepts a Flux namespace, the check moves to that namespace with the object.
 They sit in `defaultTierMap` at `TierApps`, like `oci` and `helmchart`.
 
-The exception is a `helmrepository` or `ocirepository` that a lowering rule emitted
-(`Component.synthesized`): `ClassifyComponentWithDomain` places it in `TierInfra`, after
+The exception is a `helmrepository`, `ocirepository`, `gitrepository` or `bucket` that a
+lowering rule emitted (`Component.synthesized`): `ClassifyComponentWithDomain` places it in
+`TierInfra`, after
 any tier annotation and before `defaultTierMap`. The `helm` rule (go-kure/launcher#349)
 emits such a source for the releases that read it. Those releases keep their own tier, and
 a tier annotation or a `placement` policy may move them into `infra`. A source in a later
