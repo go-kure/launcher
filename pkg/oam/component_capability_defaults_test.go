@@ -3,6 +3,7 @@ package oam
 import (
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -123,6 +124,25 @@ func TestComponentCapabilityDefaults_CopiesValues(t *testing.T) {
 	filled["tier"] = "changed"
 	if got := caps["store"].Rendering["class"].(map[string]any)["tier"]; got != "fast" {
 		t.Errorf("the profile's rendering changed to %v through the filled value", got)
+	}
+}
+
+// TestComponentCapabilityDefaults_UncopyableValueRefused: a filled value that cannot
+// be copied fails the transform rather than being shared with the profile.
+func TestComponentCapabilityDefaults_UncopyableValueRefused(t *testing.T) {
+	h := &defaultsComponentHandler{}
+	tr := NewTransformer(map[string]ComponentHandler{"store": h}, nil)
+	caps := map[string]CapabilityBinding{"store": {Rendering: map[string]any{"class": make(chan int)}}}
+	app := storeApp(Component{Name: "data", Type: "store", Properties: map[string]any{}})
+	_, _, err := tr.TransformWithPolicy(app, TransformContext{Capabilities: caps})
+	if err == nil {
+		t.Fatal("TransformWithPolicy succeeded, want an error for an uncopyable rendering value")
+	}
+	if !strings.Contains(err.Error(), `component "data"`) || !strings.Contains(err.Error(), `capability "store" defaults`) {
+		t.Errorf("error %q does not name the component and the capability", err)
+	}
+	if h.got != nil {
+		t.Errorf("handler ran with %v", h.got)
 	}
 }
 
