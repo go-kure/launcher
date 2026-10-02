@@ -2109,14 +2109,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     - an inline GitRepository without exactly one `source.ref` field, or with a
       URL that is not `http://` or `https://` (an `ssh://` one needs credentials),
       or one that is more or less than a host, an optional port and a
-      repository path (user info, a query or a fragment is refused);
+      repository path (user info, a query or a fragment is refused), or whose
+      port is outside 1–65535;
     - `url` with an inline Bucket, or one without `endpoint` or `bucketName`, or
       an `endpoint` that is more than a `host[:port]` or an `https://` URL of a
       host and port (user info, a path, a query, a fragment or `http://` is
       refused: a non-TLS endpoint needs `insecure: true`, which only an authored
-      `bucket` takes), or a `provider` other than `generic`, `aws`, `gcp`
-      or `azure` (checked at the helm rule; the `bucket` terminal leaves it to
-      the CRD);
+      `bucket` takes) or whose port is outside 1–65535, or a `provider` other
+      than `generic`, `aws`, `gcp` or `azure` (checked at the helm rule; the
+      `bucket` terminal leaves it to the CRD);
     - `source.ref` other than on an inline GitRepository, and `endpoint`,
       `bucketName`, `provider`, `region`, `prefix` other than on an inline
       Bucket;
