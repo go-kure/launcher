@@ -1,0 +1,221 @@
+package oam
+
+import (
+	"reflect"
+	"slices"
+	"testing"
+
+	"github.com/go-kure/kure/pkg/stack"
+)
+
+// --- Capability defaults on components, and null over a rendering key (go-kure/launcher#742) ---
+
+// defaultsComponentHandler takes "class" from the "store" capability and records
+// the properties it was handed.
+type defaultsComponentHandler struct{ got map[string]any }
+
+func (h *defaultsComponentHandler) CanHandle(t string) bool { return t == "store" }
+
+func (h *defaultsComponentHandler) CapabilityDefaults() (string, []string) {
+	return "store", []string{"class"}
+}
+
+func (h *defaultsComponentHandler) ToApplicationConfig(c *Component, _ string) (stack.ApplicationConfig, error) {
+	h.got = c.Properties
+	return &stubAppConfig{}, nil
+}
+
+// storeLoweringRule declares a schema, so the "store" component it emits counts as
+// synthesized.
+type storeLoweringRule struct{ props map[string]any }
+
+func (storeLoweringRule) ComponentType() string { return "store-rule" }
+
+func (storeLoweringRule) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{}
+}
+
+func (r storeLoweringRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: comp.Name, Type: "store", Properties: r.props}}}, nil
+}
+
+// storeApp is a terminal Application holding comp, as the lowering pass requires.
+func storeApp(comp Component) *Application {
+	app := makeApp("myapp", comp)
+	app.APIVersion = SupportedAPIVersion
+	app.Kind = terminalDocumentKind
+	return app
+}
+
+func storeBinding() map[string]CapabilityBinding {
+	return map[string]CapabilityBinding{
+		"store": {Rendering: map[string]any{"class": "platform", "extra": "never-copied"}},
+	}
+}
+
+func TestComponentCapabilityDefaults(t *testing.T) {
+	cases := []struct {
+		name         string
+		props        map[string]any
+		capabilities map[string]CapabilityBinding
+		want         map[string]any
+		wantConsumed []string
+	}{
+		{name: "unset takes the rendering", props: map[string]any{"size": "1Gi"}, capabilities: storeBinding(),
+			want: map[string]any{"size": "1Gi", "class": "platform"}, wantConsumed: []string{"store"}},
+		{name: "nil properties take the rendering", props: nil, capabilities: storeBinding(),
+			want: map[string]any{"class": "platform"}, wantConsumed: []string{"store"}},
+		{name: "null takes the rendering", props: map[string]any{"class": nil}, capabilities: storeBinding(),
+			want: map[string]any{"class": "platform"}, wantConsumed: []string{"store"}},
+		{name: "authored value wins", props: map[string]any{"class": "mine"}, capabilities: storeBinding(),
+			want: map[string]any{"class": "mine"}, wantConsumed: []string{"store"}},
+		{name: "authored empty string wins", props: map[string]any{"class": ""}, capabilities: storeBinding(),
+			want: map[string]any{"class": ""}, wantConsumed: []string{"store"}},
+		{name: "no binding leaves the properties", props: map[string]any{"size": "1Gi"}, capabilities: nil,
+			want: map[string]any{"size": "1Gi"}, wantConsumed: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &defaultsComponentHandler{}
+			tr := NewTransformer(map[string]ComponentHandler{"store": h}, nil)
+			authored := tc.props
+			var before map[string]any
+			if authored != nil {
+				before = map[string]any{}
+				for k, v := range authored {
+					before[k] = v
+				}
+			}
+			app := storeApp(Component{Name: "data", Type: "store", Properties: authored})
+			_, result, err := tr.TransformWithPolicy(app, TransformContext{Capabilities: tc.capabilities})
+			if err != nil {
+				t.Fatalf("TransformWithPolicy: %v", err)
+			}
+			if !reflect.DeepEqual(h.got, tc.want) {
+				t.Errorf("handler got %v, want %v", h.got, tc.want)
+			}
+			if !slices.Equal(result.ConsumedCapabilities, tc.wantConsumed) {
+				t.Errorf("ConsumedCapabilities = %v, want %v", result.ConsumedCapabilities, tc.wantConsumed)
+			}
+			if authored != nil && !reflect.DeepEqual(authored, before) {
+				t.Errorf("the authored properties were mutated: %v, was %v", authored, before)
+			}
+		})
+	}
+}
+
+// TestComponentCapabilityDefaults_CopiesValues: a filled value is a copy, so a
+// handler changing it leaves the profile's rendering as it was.
+func TestComponentCapabilityDefaults_CopiesValues(t *testing.T) {
+	h := &defaultsComponentHandler{}
+	tr := NewTransformer(map[string]ComponentHandler{"store": h}, nil)
+	caps := map[string]CapabilityBinding{"store": {Rendering: map[string]any{"class": map[string]any{"tier": "fast"}}}}
+	app := storeApp(Component{Name: "data", Type: "store", Properties: map[string]any{}})
+	if _, _, err := tr.TransformWithPolicy(app, TransformContext{Capabilities: caps}); err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	filled, ok := h.got["class"].(map[string]any)
+	if !ok {
+		t.Fatalf("handler got class %v, want a map", h.got["class"])
+	}
+	filled["tier"] = "changed"
+	if got := caps["store"].Rendering["class"].(map[string]any)["tier"]; got != "fast" {
+		t.Errorf("the profile's rendering changed to %v through the filled value", got)
+	}
+}
+
+// TestComponentCapabilityDefaults_SynthesizedSkipped: a component a lowering rule
+// synthesized keeps the rule's own output, as a sealed trait does.
+func TestComponentCapabilityDefaults_SynthesizedSkipped(t *testing.T) {
+	h := &defaultsComponentHandler{}
+	tr := NewTransformer(map[string]ComponentHandler{"store": h}, nil)
+	tr.RegisterComponentLowering(storeLoweringRule{props: map[string]any{"size": "1Gi"}})
+	app := storeApp(Component{Name: "data", Type: "store-rule", Properties: map[string]any{}})
+	_, result, err := tr.TransformWithPolicy(app, TransformContext{Capabilities: storeBinding()})
+	if err != nil {
+		t.Fatalf("TransformWithPolicy: %v", err)
+	}
+	if want := map[string]any{"size": "1Gi"}; !reflect.DeepEqual(h.got, want) {
+		t.Errorf("handler got %v, want the rule's output %v unchanged", h.got, want)
+	}
+	if len(result.ConsumedCapabilities) != 0 {
+		t.Errorf("ConsumedCapabilities = %v, want none", result.ConsumedCapabilities)
+	}
+}
+
+// recordingTraitHandler records the properties a dispatched trait of its type was
+// handed.
+type recordingTraitHandler struct {
+	typ string
+	got map[string]any
+}
+
+func (h *recordingTraitHandler) CanHandle(t string) bool { return t == h.typ }
+
+func (h *recordingTraitHandler) Apply(trait *Trait, _ *stack.Application, _ *stack.Bundle) error {
+	h.got = trait.Properties
+	return nil
+}
+
+// recordingTraitRule records the properties a lowered trait was handed, and emits a
+// store-trait-done trait, since a rule may not emit nothing.
+type recordingTraitRule struct{ got *map[string]any }
+
+func (recordingTraitRule) TraitType() string { return "store-trait" }
+
+func (r recordingTraitRule) LowerTrait(trait *Trait, _ LoweringContext) (LoweringResult, error) {
+	*r.got = trait.Properties
+	return LoweringResult{Traits: []Trait{{Type: "store-trait-done", Properties: map[string]any{}}}}, nil
+}
+
+// TestCapabilityMerge_NullIsAbsent: an authored null does not displace a rendering
+// value on either trait merge site, the dispatch path (applyTraits) and the
+// lowering path (lowerDocumentBody). A null under a key the rendering lacks stays.
+func TestCapabilityMerge_NullIsAbsent(t *testing.T) {
+	caps := map[string]CapabilityBinding{"store-trait": {Rendering: map[string]any{"class": "platform"}}}
+	authored := func() map[string]any { return map[string]any{"class": nil, "other": nil, "name": "x"} }
+	want := map[string]any{"class": "platform", "other": nil, "name": "x"}
+
+	t.Run("resolveCapability", func(t *testing.T) {
+		got, key, matched := resolveCapability(Trait{Type: "store-trait", Properties: authored()}, caps)
+		if !matched || key != "store-trait" {
+			t.Fatalf("resolveCapability matched=%v key=%q", matched, key)
+		}
+		if !reflect.DeepEqual(got.Properties, want) {
+			t.Errorf("merged %v, want %v", got.Properties, want)
+		}
+	})
+
+	t.Run("dispatch path", func(t *testing.T) {
+		th := &recordingTraitHandler{typ: "store-trait"}
+		tr := NewTransformer(
+			map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+			map[string]TraitHandler{"store-trait": th},
+		)
+		app := storeApp(Component{Name: "web", Type: "webservice",
+			Traits: []Trait{{Type: "store-trait", Properties: authored()}}})
+		if _, err := tr.Transform(app, TransformContext{Capabilities: caps}); err != nil {
+			t.Fatalf("Transform: %v", err)
+		}
+		if !reflect.DeepEqual(th.got, want) {
+			t.Errorf("handler got %v, want %v", th.got, want)
+		}
+	})
+
+	t.Run("lowering path", func(t *testing.T) {
+		var got map[string]any
+		tr := NewTransformer(
+			map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+			map[string]TraitHandler{"store-trait-done": &recordingTraitHandler{typ: "store-trait-done"}},
+		)
+		tr.RegisterTraitLowering(recordingTraitRule{got: &got})
+		app := storeApp(Component{Name: "web", Type: "webservice",
+			Traits: []Trait{{Type: "store-trait", Properties: authored()}}})
+		if _, err := tr.Transform(app, TransformContext{Capabilities: caps}); err != nil {
+			t.Fatalf("Transform: %v", err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("rule got %v, want %v", got, want)
+		}
+	})
+}

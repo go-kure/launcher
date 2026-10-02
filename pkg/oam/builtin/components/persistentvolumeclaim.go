@@ -18,12 +18,20 @@ import (
 // name, so a workload volume's `claimName` names it. The claim is built by the
 // same BuildPVC as a workload's `pvc` volume, and the `pvc` trait is this
 // kind's twin: it runs the same ParseClaimProperties, ApplyClaimPolicy and
-// GenerateClaim (go-kure/launcher#741).
+// GenerateClaim (go-kure/launcher#741). Both take an unauthored
+// storageClassName from the ClusterProfile `pvc` capability (CapabilityDefaults).
 type PersistentVolumeClaimHandler struct{}
 
 // CanHandle returns true for the persistentvolumeclaim component type.
 func (h *PersistentVolumeClaimHandler) CanHandle(componentType string) bool {
 	return componentType == "persistentvolumeclaim"
+}
+
+// CapabilityDefaults reads the `pvc` capability binding, the one the pvc trait
+// merges, for storageClassName only (oam.ComponentCapabilityDefaults). An authored
+// value, "" included, wins.
+func (h *PersistentVolumeClaimHandler) CapabilityDefaults() (string, []string) {
+	return "pvc", []string{"storageClassName"}
 }
 
 // PropertySchema declares the persistentvolumeclaim component's user-facing
@@ -40,7 +48,7 @@ func (h *PersistentVolumeClaimHandler) PropertySchema() map[string]oam.PropertyS
 		},
 		"storageClassName": {
 			Type:        oam.PropertyTypeString,
-			Description: "StorageClass backing the claim. Unset uses the cluster's default class; an empty string requests no class (no dynamic provisioning).",
+			Description: "StorageClass backing the claim. Unset takes the ClusterProfile pvc capability's storageClassName, else the cluster's default class; an empty string requests no class (no dynamic provisioning).",
 		},
 		"accessModes": {
 			Type:        oam.PropertyTypeArray,
