@@ -725,7 +725,11 @@ except a `configmap` trait's ConfigMap or the Secret an `external-secret` trait'
 writes, when the component's own Flux object reads it by name from the namespace that object moves
 to: a `helmrelease`'s `valuesFrom`, a `helmrepository`'s `secretRef` and the like. That one moves
 with it — the ExternalSecret moves, and with it the Secret it writes; the remote key it defaults
-from the application namespace does not change (go-kure/launcher#740). The two sub-application
+from the application namespace does not change (go-kure/launcher#740). The default
+`ClusterSecretStore` serves it there unchanged; a namespaced store (`secretStoreRef.kind:
+SecretStore`) is resolved in the ExternalSecret's own namespace, so a store of that name must
+exist in the Flux namespace too. The transform cannot see which stores a cluster has, so it does
+not check this. The two sub-application
 configs name their object through `FluxNamespaceInput() (kind, name string)`; the component configs
 report what they read through `FluxNamespaceReads()`, which every decorator forwards. See the
 `pkg/oam` README for the full rule.
