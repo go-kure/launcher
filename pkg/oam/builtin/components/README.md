@@ -2329,8 +2329,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   release still installs there rather than into the Flux namespace; an authored value wins.
   The ConfigMaps and Secrets the HelmRelease reads from its own namespace — `valuesFrom`,
   `kubeConfig.secretRef` / `configMapRef`, and `chart.spec.verify.secretRef` when
-  `chart.spec.sourceRef` names no namespace (helm-controller then creates the HelmChart beside the
-  release) — must live in the Flux namespace too. A `configmap` or `external-secret` trait on the
+  helm-controller creates the HelmChart beside the release (`chart.spec.sourceRef` names no
+  namespace, or names the Flux namespace) — must live in the Flux namespace too. A `configmap` or `external-secret` trait on the
   component whose object one of them names moves there with the release; one none of them names
   stays in the application namespace with the release's workloads (go-kure/launcher#740). A
   trait ConfigMap named in `valuesFrom` therefore leaves the application namespace even when the
