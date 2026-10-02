@@ -475,7 +475,11 @@ func joinPropertyTypes(types []PropertyType) string {
 // a ComponentLoweringRule, createApplications otherwise. The output of a rule whose input was not checked stays
 // authored, and enforceEmittedComponentReservations checks its components as they are
 // emitted, before emission validation removes an explicit null
-// (go-kure/launcher#609). The trait surface works the same way: an unsealed trait is
+// (go-kure/launcher#609). rendered is the element's record of the reserved values a
+// rule wrote with Component.RenderReserved or Trait.RenderReserved: a reserved key
+// holding the value recorded at its own path is the rule's output, not authored, and
+// is passed over; any other value in it, copied from anywhere or changed since, is
+// refused as before. The trait surface works the same way: an unsealed trait is
 // checked at the start of every round and before its capability merge, a sealed one
 // only when a rule whose input was not checked emitted it (Trait.synthesized false),
 // and then first by enforceEmittedTraitReservations as it is emitted
@@ -495,7 +499,15 @@ func joinPropertyTypes(types []PropertyType) string {
 // wherever it is declared rather than only at the top level (go-kure/launcher#635). No schema
 // declares a nested reserved field today; the walk exists so declaring one later is
 // enforcement, not documentation — the exact gap D3 was written to close.
-func enforcePlatformReserved(schema map[string]PropertySchema, props map[string]any, path string) error {
+func enforcePlatformReserved(schema map[string]PropertySchema, props map[string]any, rendered renderedValues, path string) error {
+	return enforceReservedObject(schema, props, rendered, "", path)
+}
+
+// enforceReservedObject is enforcePlatformReserved over one declared object. at is
+// the object's own RenderReserved path below the properties map ("" at the top),
+// tracked apart from path, which is the human-readable prefix a caller passes; a
+// reserved key is exempt only while it holds the value rendered records at its path.
+func enforceReservedObject(schema map[string]PropertySchema, props map[string]any, rendered renderedValues, at, path string) error {
 	if len(schema) == 0 || len(props) == 0 {
 		return nil
 	}
@@ -506,11 +518,15 @@ func enforcePlatformReserved(schema map[string]PropertySchema, props map[string]
 		if !ok {
 			continue
 		}
+		keyRendered, keyAt := rendered.child(at, key)
 		if field.PlatformReserved {
+			if keyRendered.exempts(keyAt, props[key]) {
+				continue
+			}
 			return errors.Wrapf(ErrPlatformReserved,
 				"%s: %q is platform-reserved and may only be set via ClusterProfile capability rendering", path, key)
 		}
-		if err := enforceReservedValue(field, props[key], path+"."+key); err != nil {
+		if err := enforceReservedValue(field, props[key], keyRendered, keyAt, path+"."+key); err != nil {
 			return err
 		}
 	}
@@ -521,8 +537,9 @@ func enforcePlatformReserved(schema map[string]PropertySchema, props map[string]
 // a declared object's fields, and each item of a declared array whose Items schema
 // can itself hold a reservation (an object, or an array of them), named by its index
 // as validatePropertyValue names it. The walk follows the schema, not the value, so
-// it ends at the schema's depth whatever the value holds.
-func enforceReservedValue(field PropertySchema, value any, path string) error {
+// it ends at the schema's depth whatever the value holds. An array item has no
+// RenderReserved path, so nothing below one is exempt.
+func enforceReservedValue(field PropertySchema, value any, rendered renderedValues, at, path string) error {
 	switch field.Type {
 	case PropertyTypeObject:
 		if len(field.Properties) == 0 {
@@ -533,7 +550,7 @@ func enforceReservedValue(field PropertySchema, value any, path string) error {
 			// Not an object: validatePropertyValue reports the type mismatch.
 			return nil
 		}
-		return enforcePlatformReserved(field.Properties, obj, path)
+		return enforceReservedObject(field.Properties, obj, rendered, at, path)
 	case PropertyTypeArray:
 		if field.Items == nil {
 			return nil
@@ -544,7 +561,7 @@ func enforceReservedValue(field PropertySchema, value any, path string) error {
 			return nil
 		}
 		for i, item := range items {
-			if err := enforceReservedValue(*field.Items, item, fmt.Sprintf("%s[%d]", path, i)); err != nil {
+			if err := enforceReservedValue(*field.Items, item, nil, "", fmt.Sprintf("%s[%d]", path, i)); err != nil {
 				return err
 			}
 		}

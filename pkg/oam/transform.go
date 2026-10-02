@@ -750,9 +750,11 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// or a trait rule that receives a synthesized trait or declares a schema and
 		// receives an unsealed one. A component a document rule forwards
 		// unchanged keeps its classification. Any other rule output, including every
-		// component a document rule builds, is checked here like an authored component.
+		// component a document rule builds, is checked here like an authored component,
+		// except a reserved value the rule recorded with Component.RenderReserved while
+		// it still holds the recorded value.
 		if p, ok := handler.(PropertySchemaProvider); ok && !component.synthesized {
-			if err := enforcePlatformReserved(p.PropertySchema(), component.Properties, "properties"); err != nil {
+			if err := enforcePlatformReserved(p.PropertySchema(), component.Properties, component.rendered, "properties"); err != nil {
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 			}
 		}
@@ -1020,9 +1022,10 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 				// D3: an authored value for a platform-reserved property is rejected
 				// before capability rendering is merged in. Checked against trait.Properties
 				// (the pre-merge original) — resolveCapability's merged rendering must stay
-				// invisible to this check.
+				// invisible to this check, and cannot make an authored value exempt: only
+				// a value the trait itself recorded (Trait.RenderReserved) is.
 				if p, ok := handler.(PropertySchemaProvider); ok {
-					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
+					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties"); err != nil {
 						return &TransformError{
 							Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
 							Cause:   err,
@@ -1036,8 +1039,9 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, group
 			} else if p, ok := handler.(PropertySchemaProvider); ok && !trait.synthesized {
 				// D3 on a sealed trait no checked rule emitted (Trait.synthesized): a
 				// schema-less rule may have copied an authored reserved value into it.
-				// Its Properties are final, so they are checked as they stand.
-				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, "properties"); err != nil {
+				// Its Properties are final, so they are checked as they stand, a value
+				// the rule recorded with Trait.RenderReserved exempt.
+				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties"); err != nil {
 					return &TransformError{
 						Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
 						Cause:   err,

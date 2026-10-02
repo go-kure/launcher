@@ -530,9 +530,25 @@ schema over an unsealed trait or whose input trait is itself synthesized. A trai
 nested in an emitted component gets the same classification as that component. A
 `DocumentLoweringRule`'s output is never synthesized: the rule
 sees trait and policy properties and metadata too, which nothing checks before it
-runs (go-kure/launcher#612). Output of any other rule stays authored and is checked like
-anything a user wrote, so a schema-less rule cannot pass an authored reserved value
-through. Its components and traits — those it emits at trait position and those
+runs. Such a rule writes a reserved value it renders from `LoweringContext.Capabilities`
+with `Component.RenderReserved(path, value)`, or `Trait.RenderReserved(path, value)`
+for a trait it builds, which writes `value` at the dot-separated object-key `path` in
+`Properties` (`"networkPolicy"`,
+`"tls.secretName"`; array items cannot be addressed) and records it as rendered. A
+reserved key is then accepted only while it holds the recorded value at that same
+path, compared by what it encodes to as JSON, so the record survives emission
+validation's normalization but a value the rule copied into the key from a trait, a
+policy, metadata or another component, or changed after recording it, is refused
+like any authored one (go-kure/launcher#612). `RenderReserved` refuses a value that
+is or holds a `null`, or does not encode to JSON. The record follows the component
+through copies and later lowering rounds; a rule that rebuilds a component from its
+fields, or a document that is serialized and parsed again (what `LowerRaws` returns),
+leaves it behind. A trait works the same way against its own type's schema; its
+record covers the trait's own properties, checked before `applyTraits` merges a
+capability rendering in, so that merge exempts nothing. Output of any other rule whose
+input was not checked stays authored too (`RenderReserved` works there the same way)
+and is checked like anything a user wrote, so a schema-less rule cannot pass an
+authored reserved value through. Its components and traits — those it emits at trait position and those
 nested in the components it emits — are checked for reserved keys as they are
 emitted, before emission validation strips an explicit `null`, so a reserved key
 written as `null` is refused here exactly as when authored directly
@@ -632,7 +648,9 @@ inner field is enforced wherever it is declared, not only at the top level
 (go-kure/launcher#635).
 `createApplications` and `applyTraits` (`transform.go`) run this check on the authored
 path, and the lowering engine runs it on a `TraitLoweringRule`'s input trait before
-capability rendering is resolved into it (see Lowering above).
+capability rendering is resolved into it (see Lowering above). A value a lowering rule
+recorded with `Component.RenderReserved` or `Trait.RenderReserved` is exempt while the
+key still holds it (see Lowering above).
 
 Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
 component/trait/policy's properties against its TARGET handler's declared schema —

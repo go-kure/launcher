@@ -64,8 +64,8 @@ func (r rendersReservedComponentRule) LowerComponent(comp *Component, lctx Lower
 }
 
 // rendersReservedDocRule is the same at document position: it constructs a new
-// component and writes the reserved property from the capability rendering. Unlike
-// the component and trait cases, its output stays authored.
+// component and writes the reserved property from the capability rendering, by plain
+// assignment. Unlike the component and trait cases, its output stays authored.
 type rendersReservedDocRule struct{}
 
 func (rendersReservedDocRule) Kind() string { return "Rendering" }
@@ -238,7 +238,8 @@ func TestTransform_ComponentRuleMayWriteReservedProperty(t *testing.T) {
 
 // TestTransform_DocumentRuleWrittenReservedPropertyIsRejected: a document rule's
 // output is never synthesized, since nothing checks its whole input (here an empty
-// document) before it runs. A reserved value it wrote is rejected, as on main.
+// document) before it runs. A reserved value it wrote directly, rather than with
+// Component.RenderReserved (document_rule_rendered_reserved_test.go), is rejected.
 func TestTransform_DocumentRuleWrittenReservedPropertyIsRejected(t *testing.T) {
 	tr := reservedSinkTransformer()
 	tr.RegisterDocumentLowering(rendersReservedDocRule{})

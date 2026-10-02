@@ -377,14 +377,14 @@ func TestNullAndPlatformReserved_DoNotMeet(t *testing.T) {
 	})
 
 	t.Run("authored null is still refused", func(t *testing.T) {
-		err := enforcePlatformReserved(schema, map[string]any{"registry": nil}, "properties")
+		err := enforcePlatformReserved(schema, map[string]any{"registry": nil}, nil, "properties")
 		if err == nil {
 			t.Fatal("expected an authored reserved null to be refused")
 		}
 		if !stderrors.Is(err, ErrPlatformReserved) {
 			t.Fatalf("expected ErrPlatformReserved, got: %v", err)
 		}
-		if err := enforcePlatformReserved(schema, map[string]any{"image": nil}, "properties"); err != nil {
+		if err := enforcePlatformReserved(schema, map[string]any{"image": nil}, nil, "properties"); err != nil {
 			t.Fatalf("an unreserved key is not this function's business, got: %v", err)
 		}
 	})
