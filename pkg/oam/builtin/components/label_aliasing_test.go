@@ -205,8 +205,6 @@ func TestCollectLabelMaps_ReachesEveryGuardedPosition(t *testing.T) {
 			"StatefulSet/app.spec.selector.matchLabels",
 			"StatefulSet/app.spec.template.labels",
 			"StatefulSet/app.spec.template.spec.podAntiAffinity.preferred[0].labelSelector",
-			"Service/app.metadata.labels",
-			"Service/app.spec.selector",
 			"ServiceAccount/app.metadata.labels",
 			"PersistentVolumeClaim/app-data.metadata.labels",
 		},

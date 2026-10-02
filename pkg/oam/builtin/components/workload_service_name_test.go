@@ -16,8 +16,9 @@ import (
 // go-kure/launcher#546: every workload kind that emits a Service holds the Service's name to the
 // rule the API server applies to it, a DNS-1035 label, as the service kind already does. A
 // component name only has to be a DNS-1123 subdomain, so without this check a name such as
-// "1api" (and, for statefulset, any authored serviceName) built a Service the cluster rejects on
-// apply.
+// "1api" built a Service the cluster rejects on apply. statefulset's serviceName names a Service
+// too, authored beside it, and is held to the same rule. Since go-kure/launcher#690 daemonset and
+// statefulset emit no Service, so their component names are not constrained.
 
 // invalidServiceNames are valid component names (DNS-1123 subdomains) that are not valid Service
 // names.
@@ -49,12 +50,6 @@ var serviceEmittingCases = []struct {
 }{
 	{"webservice", webserviceViaRule{}, func() map[string]any {
 		return map[string]any{"image": "ghcr.io/org/app:v1"}
-	}},
-	{"daemonset", &components.DaemonsetHandler{}, func() map[string]any {
-		return map[string]any{"image": "ghcr.io/org/app:v1", "port": 9090}
-	}},
-	{"statefulset", &components.StatefulsetHandler{}, func() map[string]any {
-		return map[string]any{"image": "ghcr.io/org/app:v1", "port": 5432}
 	}},
 }
 
@@ -96,7 +91,7 @@ func servicesIn(objs []*client.Object) []*corev1.Service {
 }
 
 // A component name that is not a valid Service name is refused at conversion by every kind that
-// names a Service after it (statefulset through its defaulted serviceName).
+// names a Service after it.
 func TestWorkloadHandlers_RejectInvalidServiceName(t *testing.T) {
 	for _, tc := range serviceEmittingCases {
 		for _, n := range invalidServiceNames {
@@ -122,13 +117,10 @@ func TestWorkloadHandlers_AcceptLongestValidServiceName(t *testing.T) {
 	}
 }
 
-// Generate names webservice's and daemonset's Service after the Application, which a library
-// caller builds itself, so it applies the same rule to the name it actually emits.
+// Generate names webservice's Service after the Application, which a library caller builds
+// itself, so it applies the same rule to the name it actually emits.
 func TestWorkloadConfigs_GenerateRejectsInvalidServiceName(t *testing.T) {
 	for _, tc := range serviceEmittingCases {
-		if tc.typ == "statefulset" {
-			continue // names its Service by ServiceName, not the Application; covered below
-		}
 		t.Run(tc.typ, func(t *testing.T) {
 			cfg, err := tc.handler.ToApplicationConfig(
 				&oam.Component{Name: "api", Type: tc.typ, Properties: tc.props()}, "default")
@@ -143,21 +135,29 @@ func TestWorkloadConfigs_GenerateRejectsInvalidServiceName(t *testing.T) {
 	}
 }
 
-// A daemonset without a port emits no Service, so its name is not held to the Service-name rule.
-// "1api" is a valid container name (a DNS-1123 label) but not a valid Service name.
-func TestDaemonsetHandler_NoPort_AcceptsNonServiceName(t *testing.T) {
-	for _, props := range []map[string]any{
-		{"image": "ghcr.io/org/app:v1"},
-		{"image": "ghcr.io/org/app:v1", "port": 0},
+// daemonset and statefulset emit no Service (go-kure/launcher#690), so their names are not held
+// to the Service-name rule, with or without container ports. "1api" is a valid container name (a
+// DNS-1123 label) but not a valid Service name.
+func TestWorkloadKinds_NoService_AcceptsNonServiceName(t *testing.T) {
+	ports := []any{map[string]any{"name": "http", "containerPort": 9090}}
+	for _, tc := range []struct {
+		typ     string
+		handler oam.ComponentHandler
+		props   map[string]any
+	}{
+		{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
+		{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "ports": ports}},
+		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
+		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "ports": ports}},
 	} {
-		objs := buildComponent(t, &components.DaemonsetHandler{}, "1api", "daemonset", props)
+		objs := buildComponent(t, tc.handler, "1api", tc.typ, tc.props)
 		if svcs := servicesIn(objs); len(svcs) != 0 {
-			t.Errorf("props %v: Services = %v, want none", props, svcs)
+			t.Errorf("%s %v: Services = %v, want none", tc.typ, tc.props, svcs)
 		}
 	}
 }
 
-// An authored serviceName is the headless Service's name, so it is held to the same rule and the
+// An authored serviceName names the governing Service, so it is held to the same rule and the
 // error names the property.
 func TestStatefulsetHandler_RejectsInvalidAuthoredServiceName(t *testing.T) {
 	h := &components.StatefulsetHandler{}
@@ -172,9 +172,10 @@ func TestStatefulsetHandler_RejectsInvalidAuthoredServiceName(t *testing.T) {
 	}
 }
 
-// Only the Service's name is constrained: a component name that is not a valid Service name
-// builds once serviceName names the Service validly, and a serviceName at the limit builds.
-func TestStatefulsetHandler_AuthoredServiceNameDecouplesComponentName(t *testing.T) {
+// serviceName is projected as authored and decouples nothing from the component name, which no
+// longer names a Service: a component name that is not a valid Service name builds, a serviceName
+// at the limit builds, and neither emits a Service.
+func TestStatefulsetHandler_AuthoredServiceNameProjected(t *testing.T) {
 	longest := longestServiceName(t)
 	for _, tc := range []struct{ component, serviceName string }{
 		{"1api", "db"},
@@ -184,62 +185,48 @@ func TestStatefulsetHandler_AuthoredServiceNameDecouplesComponentName(t *testing
 			"image":       "ghcr.io/org/app:v1",
 			"serviceName": tc.serviceName,
 		})
-		svcs := servicesIn(objs)
-		if len(svcs) != 1 || svcs[0].Name != tc.serviceName {
-			t.Fatalf("%s: Services = %v, want exactly one named %q", tc.component, svcs, tc.serviceName)
+		if svcs := servicesIn(objs); len(svcs) != 0 {
+			t.Errorf("%s: Services = %v, want none", tc.component, svcs)
 		}
-		for _, o := range objs {
-			if sts, ok := (*o).(*appsv1.StatefulSet); ok && sts.Spec.ServiceName != tc.serviceName {
-				t.Errorf("%s: StatefulSet serviceName = %q, want %q", tc.component, sts.Spec.ServiceName, tc.serviceName)
-			}
+		if got := statefulSetServiceName(t, objs); got != tc.serviceName {
+			t.Errorf("%s: StatefulSet serviceName = %q, want %q", tc.component, got, tc.serviceName)
 		}
 	}
 }
 
-// A nameless config (converted without a component name, as a library caller may) is not refused
-// at conversion: daemonset names its Service after the Application at Generate, which checks
-// that name instead. webservice is not a case: it is a lowering rule, not a handler a library
-// caller converts with directly, and the engine only lowers a named component.
-func TestWorkloadHandlers_NamelessConfigServiceNamedAfterApplication(t *testing.T) {
-	for _, tc := range serviceEmittingCases {
-		if tc.typ == "statefulset" {
-			continue // names its Service by ServiceName; see the test below
+// serviceName has no default (go-kure/launcher#690): unset, spec.serviceName stays empty, for a
+// named and a nameless (library-converted) config alike.
+func TestStatefulsetHandler_NoServiceName_LeavesItEmpty(t *testing.T) {
+	for _, name := range []string{"db", ""} {
+		cfg, err := (&components.StatefulsetHandler{}).ToApplicationConfig(&oam.Component{
+			Name: name, Type: "statefulset", Properties: map[string]any{"image": "ghcr.io/org/app:v1"},
+		}, "default")
+		if err != nil {
+			t.Fatalf("%q: ToApplicationConfig: %v", name, err)
 		}
-		if tc.typ == "webservice" {
-			continue
+		objs, err := cfg.Generate(stack.NewApplication("db", "default", cfg))
+		if err != nil {
+			t.Fatalf("%q: Generate: %v", name, err)
 		}
-		t.Run(tc.typ, func(t *testing.T) {
-			cfg, err := tc.handler.ToApplicationConfig(
-				&oam.Component{Name: "", Type: tc.typ, Properties: tc.props()}, "default")
-			if err != nil {
-				t.Fatalf("ToApplicationConfig: %v", err)
-			}
-			objs, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
-			if err != nil {
-				t.Fatalf("Generate: %v", err)
-			}
-			if svcs := servicesIn(objs); len(svcs) != 1 || svcs[0].Name != "app" {
-				t.Errorf("Services = %v, want exactly one named \"app\"", svcs)
-			}
-		})
+		if got := statefulSetServiceName(t, objs); got != "" {
+			t.Errorf("%q: StatefulSet serviceName = %q, want empty", name, got)
+		}
 	}
 }
 
-// A nameless statefulset without serviceName has an empty ServiceName, which used to emit a
-// Service with no name; Generate refuses it instead.
-func TestStatefulsetConfig_NamelessWithoutServiceNameRefused(t *testing.T) {
-	cfg, err := (&components.StatefulsetHandler{}).ToApplicationConfig(&oam.Component{
-		Name: "", Type: "statefulset", Properties: map[string]any{"image": "ghcr.io/org/app:v1"},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
+func statefulSetServiceName(t *testing.T, objs []*client.Object) string {
+	t.Helper()
+	for _, o := range objs {
+		if sts, ok := (*o).(*appsv1.StatefulSet); ok {
+			return sts.Spec.ServiceName
+		}
 	}
-	_, err = cfg.Generate(stack.NewApplication("app", "default", cfg))
-	wantServiceNameError(t, err, "serviceName", "")
+	t.Fatal("no StatefulSet emitted")
+	return ""
 }
 
-// Generate names the headless Service by the config's ServiceName, which a library caller may set
-// itself, so it applies the rule to that name too.
+// Generate projects the config's ServiceName, which a library caller may set itself, so it applies
+// the rule to a non-empty one too.
 func TestStatefulsetConfig_GenerateRejectsInvalidServiceName(t *testing.T) {
 	cfg, err := (&components.StatefulsetHandler{}).ToApplicationConfig(&oam.Component{
 		Name: "db", Type: "statefulset", Properties: map[string]any{"image": "ghcr.io/org/app:v1"},

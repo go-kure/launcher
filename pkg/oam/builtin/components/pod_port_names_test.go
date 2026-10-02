@@ -132,7 +132,9 @@ func TestPodPortNames_MainVsSidecar(t *testing.T) {
 		{"webservice http", "webservice", map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, "http"},
 		// webservice's main port is named "http" even when `port` is left to its default.
 		{"webservice default port", "webservice", map[string]any{"image": "ghcr.io/org/app:v1"}, "http"},
-		{"statefulset tcp", "statefulset", map[string]any{"image": "ghcr.io/org/app:v1", "port": 5432}, "tcp"},
+		{"statefulset ports list", "statefulset", map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
+			map[string]any{"name": "tcp", "containerPort": 5432},
+		}}, "tcp"},
 		{"deployment ports list", "deployment", map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
 			map[string]any{"name": "grpc", "containerPort": 9000},
 		}}, "grpc"},
@@ -155,7 +157,7 @@ func TestPodPortNames_MainVsSidecar(t *testing.T) {
 // TestPodPortNames_Accepted keeps what the check must not refuse: distinct
 // names across containers, nameless ports sharing a number across containers
 // (each container has its own network view of declared ports), a statefulset
-// sidecar named "tcp" when the main container declares no port, and a worker
+// sidecar named "tcp" when the main container declares no ports, and a worker
 // sidecar named "http" (worker's main container declares none).
 func TestPodPortNames_Accepted(t *testing.T) {
 	cases := []struct {

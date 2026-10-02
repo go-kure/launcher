@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -426,29 +427,21 @@ func TestDaemonsetHandler_SharedTolerationParserReachesDaemonset(t *testing.T) {
 	}
 }
 
-func TestDaemonsetConfig_WithPort(t *testing.T) {
+// TestDaemonsetConfig_PortsEmitNoService pins go-kure/launcher#690: the
+// migration of a removed `port: N` is `ports: [{name: http, containerPort: N}]`,
+// which declares the container port and emits no Service.
+func TestDaemonsetConfig_PortsEmitNoService(t *testing.T) {
 	h := &components.DaemonsetHandler{}
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name: "agent",
 		Type: "daemonset",
 		Properties: map[string]any{
 			"image": "ghcr.io/org/agent:v1.0.0",
-			"port":  9090,
+			"ports": []any{map[string]any{"name": "http", "containerPort": 9090}},
 		},
 	}, "default")
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	dc, ok := cfg.(*components.DaemonsetConfig)
-	if !ok {
-		t.Fatalf("expected *DaemonsetConfig, got %T", cfg)
-	}
-	if dc.Port != 9090 {
-		t.Errorf("Port = %d, want 9090", dc.Port)
-	}
-	if dc.ServicePort() != 9090 {
-		t.Errorf("ServicePort() = %d, want 9090", dc.ServicePort())
 	}
 
 	app := stack.NewApplication("agent", "default", cfg)
@@ -456,56 +449,19 @@ func TestDaemonsetConfig_WithPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-
-	var foundDS, foundSvc, foundSA bool
-	for _, obj := range objects {
-		switch o := (*obj).(type) {
-		case *appsv1.DaemonSet:
-			foundDS = true
-			// Verify container port
-			if len(o.Spec.Template.Spec.Containers) == 0 {
-				t.Fatal("no containers in DaemonSet")
-			}
-			ports := o.Spec.Template.Spec.Containers[0].Ports
-			if len(ports) == 0 || ports[0].ContainerPort != 9090 {
-				t.Errorf("container port = %v, want [{http 9090}]", ports)
-			}
-		case *corev1.Service:
-			foundSvc = true
-			if len(o.Spec.Ports) == 0 || o.Spec.Ports[0].Port != 9090 {
-				t.Errorf("service port = %v, want 9090", o.Spec.Ports)
-			}
-			if o.Spec.Type != corev1.ServiceTypeClusterIP {
-				t.Errorf("service type = %q, want ClusterIP", o.Spec.Type)
-			}
-			if o.Name != "agent" {
-				t.Errorf("service name = %q, want \"agent\"", o.Name)
-			}
-		case *corev1.ServiceAccount:
-			foundSA = true
-		}
+	if len(objects) != 2 {
+		t.Fatalf("expected 2 objects (DaemonSet + ServiceAccount), got %d", len(objects))
 	}
-	if !foundDS {
-		t.Error("expected DaemonSet")
+	ds, ok := (*objects[0]).(*appsv1.DaemonSet)
+	if !ok {
+		t.Fatalf("objects[0] = %T, want *DaemonSet", *objects[0])
 	}
-	if !foundSvc {
-		t.Error("expected Service when port > 0")
+	want := []corev1.ContainerPort{{Name: "http", ContainerPort: 9090, Protocol: corev1.ProtocolTCP}}
+	if got := ds.Spec.Template.Spec.Containers[0].Ports; !reflect.DeepEqual(got, want) {
+		t.Errorf("container ports = %#v, want %#v", got, want)
 	}
-	if !foundSA {
-		t.Error("expected ServiceAccount")
-	}
-	// Verify object order: DaemonSet → Service → ServiceAccount
-	if len(objects) < 3 {
-		t.Fatalf("expected at least 3 objects, got %d", len(objects))
-	}
-	if _, ok := (*objects[0]).(*appsv1.DaemonSet); !ok {
-		t.Errorf("objects[0] = %T, want *DaemonSet", *objects[0])
-	}
-	if _, ok := (*objects[1]).(*corev1.Service); !ok {
-		t.Errorf("objects[1] = %T, want *Service", *objects[1])
-	}
-	if _, ok := (*objects[2]).(*corev1.ServiceAccount); !ok {
-		t.Errorf("objects[2] = %T, want *ServiceAccount", *objects[2])
+	if _, ok := (*objects[1]).(*corev1.ServiceAccount); !ok {
+		t.Errorf("objects[1] = %T, want *ServiceAccount", *objects[1])
 	}
 }
 
@@ -530,7 +486,7 @@ func TestDaemonsetConfig_WithoutPort(t *testing.T) {
 
 	for _, obj := range objects {
 		if _, ok := (*obj).(*corev1.Service); ok {
-			t.Error("expected no Service when port is not set")
+			t.Error("expected no Service")
 		}
 	}
 	if len(objects) != 2 {
@@ -538,98 +494,9 @@ func TestDaemonsetConfig_WithoutPort(t *testing.T) {
 	}
 }
 
-func TestDaemonsetHandler_ServicePortName_IsHttp(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "node-exporter",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "prom/node-exporter:v1.0.0",
-			"port":  float64(9100),
-		},
-	}, "monitoring")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("node-exporter", "monitoring", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	for _, objPtr := range objects {
-		switch obj := (*objPtr).(type) {
-		case *corev1.Service:
-			for _, p := range obj.Spec.Ports {
-				if p.Name != "http" {
-					t.Errorf("Service port name = %q, want %q", p.Name, "http")
-				}
-			}
-		case *appsv1.DaemonSet:
-			for _, c := range obj.Spec.Template.Spec.Containers {
-				for _, p := range c.Ports {
-					if p.Name != "http" {
-						t.Errorf("DaemonSet container port name = %q, want %q", p.Name, "http")
-					}
-				}
-			}
-		}
-	}
-}
-
-// TestDaemonsetHandler_NamedProbePort_WithPort_Accepted and
-// TestDaemonsetHandler_NamedProbePort_WithoutPort_Error cover go-kure/launcher#278
-// wave-11 finding 5: daemonset's main container is only named "http" when
-// `port` is set (see TestDaemonsetConfig_WithoutPort above) — so unlike
-// worker/cronjob, whether a named probe/lifecycle port resolves depends on
-// the specific component instance, not the kind alone.
-func TestDaemonsetHandler_NamedProbePort_WithPort_Accepted(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"port":  9090,
-			"probes": map[string]any{
-				"liveness": map[string]any{
-					"httpGet": map[string]any{"port": "http", "path": "/healthz"},
-				},
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("agent", "default", cfg)
-	if _, err := cfg.Generate(app); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-}
-
-// TestDaemonsetHandler_NamedProbePort_Mismatch_Error covers go-kure/launcher#278
-// wave-12 finding 3: with a port configured, daemonset names it "http" —
-// "tcp" (statefulset's own name) is syntactically valid but not what this
-// container declares, so it must be rejected too.
-func TestDaemonsetHandler_NamedProbePort_Mismatch_Error(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"port":  9090,
-			"probes": map[string]any{
-				"liveness": map[string]any{
-					"httpGet": map[string]any{"port": "tcp", "path": "/healthz"},
-				},
-			},
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for a named port that does not match daemonset's declared \"http\" container port")
-	}
-}
-
+// TestDaemonsetHandler_NamedProbePort_WithoutPort_Error: without `ports` the
+// main container declares no port, so a named probe port has nothing to
+// resolve against (go-kure/launcher#278 wave-11 finding 5).
 func TestDaemonsetHandler_NamedProbePort_WithoutPort_Error(t *testing.T) {
 	h := &components.DaemonsetHandler{}
 	_, err := h.ToApplicationConfig(&oam.Component{

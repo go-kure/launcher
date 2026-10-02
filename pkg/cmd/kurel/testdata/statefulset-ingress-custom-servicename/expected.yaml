@@ -33,10 +33,19 @@ spec:
   updateStrategy: {}
 ---
 apiVersion: v1
-kind: Service
+automountServiceAccountToken: false
+kind: ServiceAccount
 metadata:
   labels:
     app: db
+  name: db
+  namespace: default
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: postgres-primary
   name: postgres-primary
   namespace: default
 spec:
@@ -48,22 +57,14 @@ spec:
     targetPort: 5432
   selector:
     app: db
----
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: db
-  name: db
-  namespace: default
+  type: ClusterIP
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   labels:
-    app: db
-  name: db-ingress
+    app: postgres-primary
+  name: postgres-primary-ingress
   namespace: default
 spec:
   ingressClassName: nginx

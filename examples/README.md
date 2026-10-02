@@ -35,8 +35,8 @@ below.
 | 10 | [10-postgresql-ha.yaml](10-postgresql-ha.yaml) | postgresql | — | minimal |
 | 11 | [11-helm.yaml](11-helm.yaml) | helm | — | minimal |
 | 12 | [12-daemonset.yaml](12-daemonset.yaml) | daemonset | — | minimal |
-| 13 | [13-statefulset.yaml](13-statefulset.yaml) | statefulset | — | minimal |
-| 14 | [14-full-stack.yaml](14-full-stack.yaml) | webservice×3, worker, cronjob, postgresql, helm, daemonset, statefulset | expose, expose.internal, certificate, external-secret, configmap, scaler | gateway-certmanager-aws |
+| 13 | [13-statefulset.yaml](13-statefulset.yaml) | statefulset, service (headless) | — | minimal |
+| 14 | [14-full-stack.yaml](14-full-stack.yaml) | webservice×3, worker, cronjob, postgresql, helm, daemonset, statefulset, service | expose, expose.internal, certificate, external-secret, configmap, scaler | gateway-certmanager-aws |
 | 15 | [15-passthrough-minimal.yaml](15-passthrough-minimal.yaml) | passthrough (SparkApplication CRD + cluster-scoped ClusterRole) | — | minimal |
 
 **Profile compatibility notes:**

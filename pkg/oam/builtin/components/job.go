@@ -179,7 +179,7 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 		return nil, err
 	}
 	config.Args = args
-	ports, err := parseMainContainerPorts(props, nil)
+	ports, err := parseContainerPorts(props)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 	// the main container then declares no ContainerPort for the kubelet to
 	// resolve a named probe/lifecycle port against. With `ports`, a name
 	// resolves against them.
-	probes, lifecycle, err := parseMainContainerHandlers(props, ports, ports, false, "")
+	probes, lifecycle, err := parseMainContainerHandlers(props, ports)
 	if err != nil {
 		return nil, err
 	}

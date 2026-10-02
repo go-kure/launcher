@@ -31,11 +31,20 @@ spec:
   updateStrategy: {}
 ---
 apiVersion: v1
-kind: Service
+automountServiceAccountToken: false
+kind: ServiceAccount
 metadata:
   labels:
     app: agent
   name: agent
+  namespace: default
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: agent-http
+  name: agent-http
   namespace: default
 spec:
   ports:
@@ -47,26 +56,17 @@ spec:
     app: agent
   type: ClusterIP
 ---
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: agent
-  name: agent
-  namespace: default
----
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   labels:
-    app: agent
-  name: agent-httproute
+    app: agent-http
+  name: agent-http-httproute
   namespace: default
 spec:
   parentRefs:
   - name: my-gateway
   rules:
   - backendRefs:
-    - name: agent
+    - name: agent-http
       port: 9090

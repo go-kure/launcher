@@ -271,7 +271,7 @@ type DeploymentConfig struct {
 	Resources ResourceRequirements
 	Command   []string
 	Args      []string
-	// Ports are the main container's declared ports (parseMainContainerPorts).
+	// Ports are the main container's declared ports (parseContainerPorts).
 	Ports           []corev1.ContainerPort
 	Probes          ProbeConfig
 	Lifecycle       *corev1.Lifecycle

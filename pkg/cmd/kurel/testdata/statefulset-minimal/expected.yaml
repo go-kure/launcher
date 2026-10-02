@@ -10,7 +10,7 @@ spec:
   selector:
     matchLabels:
       app: db
-  serviceName: db
+  serviceName: db-headless
   template:
     metadata:
       labels:
@@ -46,11 +46,20 @@ spec:
     status: {}
 ---
 apiVersion: v1
-kind: Service
+automountServiceAccountToken: false
+kind: ServiceAccount
 metadata:
   labels:
     app: db
   name: db
+  namespace: default
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: db-headless
+  name: db-headless
   namespace: default
 spec:
   clusterIP: None
@@ -61,12 +70,4 @@ spec:
     targetPort: 5432
   selector:
     app: db
----
-apiVersion: v1
-automountServiceAccountToken: false
-kind: ServiceAccount
-metadata:
-  labels:
-    app: db
-  name: db
-  namespace: default
+  type: ClusterIP

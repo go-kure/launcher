@@ -59,6 +59,28 @@ func traitServiceSourceNamespace(traitType string) string {
 	return "gateway-system"
 }
 
+// routerProps are the properties of a Service-less router of kind. A statefulset names a governing
+// Service it does not own (go-kure/launcher#690).
+func routerProps(kind string) map[string]any {
+	props := map[string]any{"image": "api:1.0"}
+	if kind == "statefulset" {
+		props["serviceName"] = "api-headless"
+	}
+	return props
+}
+
+// billingComponents are a backend workload and the authored `service` that owns billing-svc and
+// selects its pods, on port 8080.
+func billingComponents() []oam.Component {
+	return []oam.Component{
+		{Name: "billing", Type: "deployment", Properties: map[string]any{"image": "billing:1.0"}},
+		{Name: "billing-svc", Type: "service", Properties: map[string]any{
+			"selector": map[string]any{"app": "billing"},
+			"ports":    []any{map[string]any{"name": "http", "port": 8080, "targetPort": 8080}},
+		}},
+	}
+}
+
 func transformTraitService(t *testing.T, traitType string, comps []oam.Component) *stack.Cluster {
 	t.Helper()
 	// apiVersion and kind are set because worker is a lowering rule: once any
@@ -77,36 +99,30 @@ func transformTraitService(t *testing.T, traitType string, comps []oam.Component
 	return cluster
 }
 
-// The issue's reproduction: a Service-less router (worker, deployment) routes through a trait-level
-// serviceName to a Service owned by another component in the package. The allow lands on that
-// component's pods on the trait's servicePort, and the router gets none.
+// The issue's reproduction: a Service-less router (worker, deployment, or a statefulset whose
+// serviceName names a Service it does not own) routes through a trait-level serviceName to a
+// Service owned by another component in the package. The allow lands on the pods that Service
+// selects, on the trait's servicePort, and the router gets none.
 func TestTransform_TraitServiceName_RetargetsToOwningComponent(t *testing.T) {
 	for _, traitType := range []string{"ingress", "httproute"} {
-		for _, kind := range []string{"worker", "deployment"} {
+		for _, kind := range []string{"worker", "deployment", "statefulset"} {
 			t.Run(traitType+"/"+kind, func(t *testing.T) {
-				cluster := transformTraitService(t, traitType, []oam.Component{
-					{
-						Name:       "api",
-						Type:       kind,
-						Properties: map[string]any{"image": "api:1.0"},
-						Traits:     []oam.Trait{traitServiceRoute(traitType, "billing-svc", 8080)},
-					},
-					{
-						Name:       "billing",
-						Type:       "statefulset",
-						Properties: map[string]any{"image": "billing:1.0", "port": 8080, "serviceName": "billing-svc"},
-					},
-				})
+				cluster := transformTraitService(t, traitType, append([]oam.Component{{
+					Name:       "api",
+					Type:       kind,
+					Properties: routerProps(kind),
+					Traits:     []oam.Trait{traitServiceRoute(traitType, "billing-svc", 8080)},
+				}}, billingComponents()...))
 
 				if clusterHasApp(cluster, "api-allow-ingress-traffic") {
 					t.Errorf("router %q must get no allow for a Service it does not own; apps: %v", "api", clusterAppNames(cluster))
 				}
-				if !clusterHasApp(cluster, "billing-allow-ingress-traffic") {
-					t.Fatalf("expected the allow retargeted to \"billing-allow-ingress-traffic\"; apps: %v", clusterAppNames(cluster))
+				if !clusterHasApp(cluster, "billing-svc-allow-ingress-traffic") {
+					t.Fatalf("expected the allow retargeted to \"billing-svc-allow-ingress-traffic\"; apps: %v", clusterAppNames(cluster))
 				}
-				np := synthesizedNetworkPolicy(t, cluster, "billing-allow-ingress-traffic")
-				if got := np.Spec.PodSelector.MatchLabels["gokure.dev/component"]; got != "billing" {
-					t.Errorf("target selector = %v, want gokure.dev/component=billing", np.Spec.PodSelector.MatchLabels)
+				np := synthesizedNetworkPolicy(t, cluster, "billing-svc-allow-ingress-traffic")
+				if got := np.Spec.PodSelector.MatchLabels["app"]; got != "billing" {
+					t.Errorf("target selector = %v, want app=billing", np.Spec.PodSelector.MatchLabels)
 				}
 				if len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 1 ||
 					np.Spec.Ingress[0].Ports[0].Port.IntVal != 8080 {
@@ -123,19 +139,25 @@ func TestTransform_TraitServiceName_RetargetsToOwningComponent(t *testing.T) {
 
 // A trait-level serviceName no component in the package owns takes the external-bare-Service path:
 // with no backendSelector to say which pods back it, it is left authored — no policy for it, and
-// none on the router.
+// none on the router. A statefulset's serviceName does not make it the owner of the Service it
+// names: routing to that name is external too (go-kure/launcher#690).
 func TestTransform_TraitServiceName_Unowned_LeavesAuthored(t *testing.T) {
 	for _, traitType := range []string{"ingress", "httproute"} {
-		for _, kind := range []string{"worker", "deployment"} {
-			t.Run(traitType+"/"+kind, func(t *testing.T) {
+		for _, tc := range []struct{ kind, service string }{
+			{"worker", "billing-svc"},
+			{"deployment", "billing-svc"},
+			{"statefulset", "billing-svc"},
+			{"statefulset", "api-headless"},
+		} {
+			t.Run(traitType+"/"+tc.kind+"/"+tc.service, func(t *testing.T) {
 				cluster := transformTraitService(t, traitType, []oam.Component{{
 					Name:       "api",
-					Type:       kind,
-					Properties: map[string]any{"image": "api:1.0"},
-					Traits:     []oam.Trait{traitServiceRoute(traitType, "billing-svc", 8080)},
+					Type:       tc.kind,
+					Properties: routerProps(tc.kind),
+					Traits:     []oam.Trait{traitServiceRoute(traitType, tc.service, 8080)},
 				}})
 				for _, n := range clusterAppNames(cluster) {
-					if n == "api-allow-ingress-traffic" || n == "billing-svc-allow-ingress-traffic" {
+					if n == "api-allow-ingress-traffic" || n == tc.service+"-allow-ingress-traffic" {
 						t.Errorf("expected no synthesized ingress policy for an unowned trait-level Service, got %q", n)
 					}
 				}
@@ -144,43 +166,35 @@ func TestTransform_TraitServiceName_Unowned_LeavesAuthored(t *testing.T) {
 	}
 }
 
-// A router that owns a Service but publishes no service port (a statefulset with a headless
-// serviceName and no port) may still set the trait-level pair. Naming another Service is external
-// and retargets; naming its own Service is self and keeps the allow on the router.
-func TestTransform_TraitServiceName_RouterOwningAService(t *testing.T) {
+// A statefulset routing to its governing Service, authored as a `service` component: the allow
+// lands on the pods that Service selects, under the Service's name, not on the router
+// (go-kure/launcher#690).
+func TestTransform_TraitServiceName_StatefulsetGoverningService(t *testing.T) {
 	for _, traitType := range []string{"ingress", "httproute"} {
-		t.Run(traitType+"/external", func(t *testing.T) {
+		t.Run(traitType, func(t *testing.T) {
 			cluster := transformTraitService(t, traitType, []oam.Component{
 				{
 					Name:       "api",
 					Type:       "statefulset",
-					Properties: map[string]any{"image": "api:1.0", "serviceName": "api-headless"},
-					Traits:     []oam.Trait{traitServiceRoute(traitType, "billing-svc", 8080)},
+					Properties: routerProps("statefulset"),
+					Traits:     []oam.Trait{traitServiceRoute(traitType, "api-headless", 8080)},
 				},
-				{
-					Name:       "billing",
-					Type:       "statefulset",
-					Properties: map[string]any{"image": "billing:1.0", "port": 8080, "serviceName": "billing-svc"},
-				},
+				{Name: "api-headless", Type: "service", Properties: map[string]any{
+					"clusterIP": "None",
+					"selector":  map[string]any{"app": "api"},
+					"ports":     []any{map[string]any{"name": "tcp", "port": 8080}},
+				}},
 			})
 			if clusterHasApp(cluster, "api-allow-ingress-traffic") {
-				t.Errorf("router must get no allow for another component's Service; apps: %v", clusterAppNames(cluster))
+				t.Errorf("router must get no allow under its own name; apps: %v", clusterAppNames(cluster))
 			}
-			if !clusterHasApp(cluster, "billing-allow-ingress-traffic") {
-				t.Errorf("expected \"billing-allow-ingress-traffic\"; apps: %v", clusterAppNames(cluster))
+			if !clusterHasApp(cluster, "api-headless-allow-ingress-traffic") {
+				t.Fatalf("expected \"api-headless-allow-ingress-traffic\"; apps: %v", clusterAppNames(cluster))
 			}
-		})
-		t.Run(traitType+"/self", func(t *testing.T) {
-			cluster := transformTraitService(t, traitType, []oam.Component{{
-				Name:       "api",
-				Type:       "statefulset",
-				Properties: map[string]any{"image": "api:1.0", "serviceName": "api-headless"},
-				Traits:     []oam.Trait{traitServiceRoute(traitType, "api-headless", 8080)},
-			}})
-			if !clusterHasApp(cluster, "api-allow-ingress-traffic") {
-				t.Fatalf("expected the self allow \"api-allow-ingress-traffic\"; apps: %v", clusterAppNames(cluster))
+			np := synthesizedNetworkPolicy(t, cluster, "api-headless-allow-ingress-traffic")
+			if got := np.Spec.PodSelector.MatchLabels["app"]; got != "api" {
+				t.Errorf("target selector = %v, want app=api", np.Spec.PodSelector.MatchLabels)
 			}
-			np := synthesizedNetworkPolicy(t, cluster, "api-allow-ingress-traffic")
 			if len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 1 ||
 				np.Spec.Ingress[0].Ports[0].Port.IntVal != 8080 {
 				t.Errorf("expected a single ingress rule on port 8080, got %+v", np.Spec.Ingress)
@@ -209,9 +223,10 @@ func TestTransform_TraitServicePortOnly_StaysSelf(t *testing.T) {
 	}
 }
 
-// A trait-level external default combined with an explicit self path/backendRef: each policy gets
-// only its own ports — the external default's servicePort on the owning component, the self
-// route's port on the router.
+// A trait-level external default combined with an explicit path/backendRef to another Service in
+// the package: each policy gets only its own ports — the default's servicePort on billing-svc's
+// pods, the explicit route's port on api-headless's. Before go-kure/launcher#690 the router, a
+// statefulset, owned api-headless itself; it is now an authored `service`.
 func TestTransform_TraitServiceName_MixedWithSelfRoute_SplitsPorts(t *testing.T) {
 	for _, traitType := range []string{"ingress", "httproute"} {
 		t.Run(traitType, func(t *testing.T) {
@@ -231,20 +246,18 @@ func TestTransform_TraitServiceName_MixedWithSelfRoute_SplitsPorts(t *testing.T)
 					map[string]any{"backendRefs": []any{map[string]any{"name": "api-headless", "port": 9000}}},
 				}
 			}
-			cluster := transformTraitService(t, traitType, []oam.Component{
-				{
-					Name:       "api",
-					Type:       "statefulset",
-					Properties: map[string]any{"image": "api:1.0", "serviceName": "api-headless"},
-					Traits:     []oam.Trait{trait},
-				},
-				{
-					Name:       "billing",
-					Type:       "statefulset",
-					Properties: map[string]any{"image": "billing:1.0", "port": 8080, "serviceName": "billing-svc"},
-				},
-			})
-			for comp, want := range map[string]int32{"api": 9000, "billing": 8080} {
+			cluster := transformTraitService(t, traitType, append([]oam.Component{
+				{Name: "api", Type: "statefulset", Properties: routerProps("statefulset"), Traits: []oam.Trait{trait}},
+				{Name: "api-headless", Type: "service", Properties: map[string]any{
+					"clusterIP": "None",
+					"selector":  map[string]any{"app": "api"},
+					"ports":     []any{map[string]any{"name": "tcp", "port": 9000}},
+				}},
+			}, billingComponents()...))
+			if clusterHasApp(cluster, "api-allow-ingress-traffic") {
+				t.Errorf("router must get no allow under its own name; apps: %v", clusterAppNames(cluster))
+			}
+			for comp, want := range map[string]int32{"api-headless": 9000, "billing-svc": 8080} {
 				name := comp + "-allow-ingress-traffic"
 				if !clusterHasApp(cluster, name) {
 					t.Fatalf("expected %q; apps: %v", name, clusterAppNames(cluster))

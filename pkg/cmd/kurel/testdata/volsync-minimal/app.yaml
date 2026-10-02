@@ -9,7 +9,6 @@ spec:
       type: statefulset
       properties:
         image: ghcr.io/example/postgres:v15.0
-        port: 5432
         volumeClaimTemplates:
           - name: data
             size: 10Gi

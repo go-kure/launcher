@@ -8,7 +8,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -27,8 +26,7 @@ func (h *DaemonsetHandler) CanHandle(componentType string) bool {
 func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 	m := map[string]oam.PropertySchema{
 		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
-		"port":            {Type: oam.PropertyTypeInteger, Description: "Container port to expose; when set, a ClusterIP Service is generated."},
-		"ports":           schemaMainContainerPortsBeside(daemonsetPortName),
+		"ports":           schemaMainContainerPorts(),
 		"env":             schemaEnv(false),
 		"envFrom":         schemaEnvFrom(false),
 		"resources":       schemaResources(false),
@@ -94,29 +92,12 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, err
 	}
 	config.Args = args
-	if port, present, err := parsePortField(props, "port", "port", 0); err != nil {
-		return nil, err
-	} else if present {
-		config.Port = port
-	}
-	// A port adds a Service named after the component, so only then is the
-	// component name held to the Service-name rule (validateComponentServiceName).
-	if config.Port > 0 {
-		if err := validateComponentServiceName(component.Name); err != nil {
-			return nil, err
-		}
-	}
-	ports, err := parseMainContainerPorts(props, config.portContainerPorts())
+	ports, err := parseContainerPorts(props)
 	if err != nil {
 		return nil, err
 	}
 	config.Ports = ports
-	// Without `ports`, namedPortsAllowed mirrors portContainerPorts' own
-	// `c.Port > 0` guard: the main container only gets a Name: "http"
-	// ContainerPort when a port was actually configured, so a probe/lifecycle
-	// port resolves only in that case, and only when it names that same "http"
-	// port. With `ports`, a name resolves against the whole list.
-	probes, lifecycle, err := parseMainContainerHandlers(props, ports, config.mainContainerPorts(), config.Port > 0, daemonsetPortName)
+	probes, lifecycle, err := parseMainContainerHandlers(props, ports)
 	if err != nil {
 		return nil, err
 	}
@@ -179,8 +160,7 @@ type DaemonsetConfig struct {
 	Name            string
 	Namespace       string
 	Image           string
-	Port            int32                  // when > 0, generates a ClusterIP Service exposing this port
-	Ports           []corev1.ContainerPort // further main-container ports, after Port's own; no Service
+	Ports           []corev1.ContainerPort // the main container's ports; no Service
 	Env             []corev1.EnvVar
 	EnvFrom         []corev1.EnvFromSource
 	Resources       ResourceRequirements
@@ -209,21 +189,6 @@ type DaemonsetConfig struct {
 // component.
 func (c *DaemonsetConfig) ServiceAccountName() string {
 	return effectiveServiceAccountName(c.PodSpec, c.Name)
-}
-
-// ServicePort implements servicePortProvider, making DaemonsetConfig usable as an
-// implicit backend for ingress, httproute, and expose traits.
-func (c *DaemonsetConfig) ServicePort() int32 { return c.Port }
-
-// ServicePortName returns "http", the name createService gives the Service's
-// one port, and true, so routing traits refuse an implicit backend addressed by
-// any other port name. Without a port no Service is generated, so it returns ""
-// and false.
-func (c *DaemonsetConfig) ServicePortName() (string, bool) {
-	if c.Port <= 0 {
-		return "", false
-	}
-	return daemonsetPortName, true
 }
 
 // ApplyPolicy applies defaults then enforces limits from the policy.
@@ -285,17 +250,11 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 	return nil
 }
 
-// Generate creates a Kubernetes DaemonSet, optional Service, and ServiceAccount.
-// A Service is generated when Port > 0. The ServiceAccount is omitted when
-// serviceAccountName was authored. The Service is named after the Application,
-// which a library caller builds itself, so with a port that name is held to the
-// Service-name rule here too.
+// Generate creates a Kubernetes DaemonSet, its ServiceAccount, and any
+// standalone PVCs. The ServiceAccount is omitted when serviceAccountName was
+// authored. It emits no Service: an authored `service` component exposes the
+// pods.
 func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if c.Port > 0 {
-		if err := validateServiceName("name", app.Name); err != nil {
-			return nil, err
-		}
-	}
 	var err error
 	c.PVCs, err = qualifyPVCNames(c.Volumes, c.PVCs, app.Name)
 	if err != nil {
@@ -308,12 +267,6 @@ func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, er
 
 	dsObj := client.Object(ds)
 	objects := []*client.Object{&dsObj}
-
-	if c.Port > 0 {
-		svc := c.createService(app)
-		svcObj := client.Object(svc)
-		objects = append(objects, &svcObj)
-	}
 
 	if generatesServiceAccount(c.PodSpec) {
 		saObj := client.Object(createServiceAccount(generationServiceAccountName(c, app.Name), app.Namespace, appLabels(app.Name)))
@@ -331,47 +284,13 @@ func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, er
 	return objects, nil
 }
 
-func (c *DaemonsetConfig) createService(app *stack.Application) *corev1.Service {
-	svc := kubernetes.CreateService(app.Name, app.Namespace)
-	svc.Labels = appLabels(app.Name)
-	svc.Annotations = nil
-	svc.Spec.Type = corev1.ServiceTypeClusterIP
-	svc.Spec.Selector = appLabels(app.Name)
-	kubernetes.AddServicePort(svc, corev1.ServicePort{
-		Name:       daemonsetPortName,
-		Port:       c.Port,
-		TargetPort: intstr.FromInt32(c.Port),
-		Protocol:   corev1.ProtocolTCP,
-	})
-	return svc
-}
-
-// daemonsetPortName is the name `port` gives its container port and the
-// Service port.
-const daemonsetPortName = "http"
-
-// portContainerPorts is the container port `port` declares, named "http", or
-// none when no port is configured.
-func (c *DaemonsetConfig) portContainerPorts() []corev1.ContainerPort {
-	if c.Port <= 0 {
-		return nil
-	}
-	return []corev1.ContainerPort{{Name: daemonsetPortName, ContainerPort: c.Port, Protocol: corev1.ProtocolTCP}}
-}
-
-// mainContainerPorts is the main container's whole port list: Port's own
-// entry, then Ports.
-func (c *DaemonsetConfig) mainContainerPorts() []corev1.ContainerPort {
-	return joinContainerPorts(c.portContainerPorts(), c.Ports)
-}
-
 func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.DaemonSet, error) {
 	container, err := buildMainContainer(app.Name, mainContainerInput{
 		Image:           c.Image,
 		Command:         c.Command,
 		Args:            c.Args,
 		Resources:       c.Resources,
-		Ports:           c.mainContainerPorts(),
+		Ports:           c.Ports,
 		Env:             c.Env,
 		EnvFrom:         c.EnvFrom,
 		Probes:          c.Probes,

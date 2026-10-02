@@ -262,8 +262,9 @@ func appendUniquePort(ports []intstr.IntOrString, p intstr.IntOrString) []intstr
 // passes: "api.v1", a 64-character name and "1api" all pass that check.
 // field names where the value came from ("name" for the component name,
 // "serviceName" for statefulset's authored property), so the author can find
-// it. Every kind that emits a Service calls it: service, webservice, daemonset
-// (when it has a port) and statefulset (go-kure/launcher#546).
+// it. Every kind that emits a Service calls it, service and webservice
+// (go-kure/launcher#546), and so does statefulset for the governing Service its
+// serviceName names.
 func validateServiceName(field, name string) error {
 	if errs := validation.IsDNS1035Label(name); len(errs) > 0 {
 		return errors.Errorf("%s: %q is not a valid Service name, which must be a DNS-1035 label: %s", field, name, strings.Join(errs, "; "))
@@ -275,8 +276,7 @@ func validateServiceName(field, name string) error {
 // workload kind that names its Service after the component. A nameless config
 // (converted without a component name, as a library caller may; see
 // generationServiceAccountName) is let through: its Generate checks the name it
-// actually emits, the Application's for webservice and daemonset, and refuses
-// statefulset's then-empty ServiceName.
+// actually emits, the Application's.
 func validateComponentServiceName(name string) error {
 	if name == "" {
 		return nil

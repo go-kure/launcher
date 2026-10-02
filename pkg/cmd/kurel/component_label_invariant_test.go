@@ -193,11 +193,13 @@ var componentLabelFixtures = map[string]componentLabelFixture{
 		"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: serviceNameRefusal, labelled: true, selectors: 5},
 	"worker": {props: workloadProps(map[string]any{"replicas": 3, "topologySpread": true,
 		"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: containerNameRefusal, labelled: true, selectors: 4},
-	"deployment":  {props: workloadProps(map[string]any{"replicas": 3}), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
-	"cronjob":     {props: workloadProps(map[string]any{"schedule": "0 2 * * *"}), longRefusal: containerNameRefusal, labelled: true},
-	"job":         {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true},
-	"daemonset":   {props: workloadProps(map[string]any{"port": 9090}), longRefusal: serviceNameRefusal, labelled: true, selectors: 2},
-	"statefulset": {props: workloadProps(map[string]any{"port": 5432, "affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: serviceNameRefusal, labelled: true, selectors: 3},
+	"deployment": {props: workloadProps(map[string]any{"replicas": 3}), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
+	"cronjob":    {props: workloadProps(map[string]any{"schedule": "0 2 * * *"}), longRefusal: containerNameRefusal, labelled: true},
+	"job":        {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true},
+	// daemonset and statefulset emit no Service since go-kure/launcher#690, so
+	// their long-name refusal is the container name's, as deployment's.
+	"daemonset":   {props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1},
+	"statefulset": {props: workloadProps(map[string]any{"affinity": map[string]any{"enablePodAntiAffinity": true}}), longRefusal: containerNameRefusal, labelled: true, selectors: 2},
 	"service": {props: map[string]any{"ports": []any{map[string]any{"name": "http", "port": 80, "targetPort": 8080}}},
 		longRefusal: serviceNameRefusal, labelled: true},
 	// The Cluster's pods are created and labelled by the operator, so these
@@ -308,7 +310,10 @@ var traitLabelFixtures = map[string]traitLabelFixture{
 		"ingress":          []any{map[string]any{"fromEndpoints": []any{map[string]any{"matchLabels": map[string]any{"role": "frontend"}}}}}},
 		longHost: true},
 	"volsync": {props: map[string]any{"sourcePVC": "data", "schedule": "@daily"},
-		host: "statefulset", hostProps: workloadProps(map[string]any{"port": 5432,
+		// Pod anti-affinity gives the host a second pod selector beside the
+		// StatefulSet's own, now that it emits no Service (go-kure/launcher#690).
+		host: "statefulset", hostProps: workloadProps(map[string]any{
+			"affinity":             map[string]any{"enablePodAntiAffinity": true},
 			"volumeClaimTemplates": []any{map[string]any{"name": "data", "size": "10Gi", "mountPath": "/data"}}})},
 	"rbac": {props: map[string]any{"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "verbs": []any{"get"}}},
 		"clusterWide": true}, longHost: true, longLabelled: true},

@@ -36,8 +36,6 @@ var wrongTopLevel = []struct {
 	want    string
 }{
 	{"webservice", webserviceViaRule{}, imageBase, "port", "8080", "port: must be an integer, got string"},
-	{"daemonset", &components.DaemonsetHandler{}, imageBase, "port", "8080", "port: must be an integer, got string"},
-	{"statefulset", &components.StatefulsetHandler{}, imageBase, "port", "8080", "port: must be an integer, got string"},
 	{"webservice", webserviceViaRule{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
 	{"worker", workerViaRule{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
 	{"cronjob", &components.CronjobHandler{}, cronBase, "restartPolicy", 1, "restartPolicy: must be a string, got int"},
@@ -95,14 +93,16 @@ func TestTopLevelOptional_PreservedBehaviour(t *testing.T) {
 			t.Errorf("Port = %d, want 8080", got)
 		}
 	})
-	t.Run("statefulset empty serviceName falls back to the component name", func(t *testing.T) {
+	// serviceName has no default since go-kure/launcher#690, so an empty one
+	// reads as unset: spec.serviceName stays empty.
+	t.Run("statefulset empty serviceName is unset", func(t *testing.T) {
 		cfg, err := (&components.StatefulsetHandler{}).ToApplicationConfig(
 			&oam.Component{Name: "app", Type: "statefulset", Properties: withProp(imageBase, "serviceName", "")}, "default")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := cfg.(*components.StatefulsetConfig).ServiceName; got != "app" {
-			t.Errorf("ServiceName = %q, want the component name", got)
+		if got := cfg.(*components.StatefulsetConfig).ServiceName; got != "" {
+			t.Errorf("ServiceName = %q, want empty", got)
 		}
 	})
 	t.Run("cronjob empty restartPolicy is still refused", func(t *testing.T) {
@@ -177,7 +177,9 @@ func TestWebserviceEndpoints_Port(t *testing.T) {
 
 // An integer beyond int32 is the one port shape schema validation lets through
 // (the schema declares `integer` with no maximum); toInt32's ok used to drop it
-// for the default, and it must now be refused on each kind that reads `port`.
+// for the default, and it must now be refused on each kind that reads `port`
+// (webservice alone since go-kure/launcher#690 removed daemonset's and
+// statefulset's).
 // The refusal names the range, not the type: the value IS an integer, so
 // "must be an integer, got int" would contradict itself. The float64 rows are
 // the shape a JSON-decoded document delivers.
@@ -188,8 +190,6 @@ func TestPort_OutOfInt32RangeIsRejected(t *testing.T) {
 		lo      string
 	}{
 		{"webservice", webserviceViaRule{}, "1"},
-		{"daemonset", &components.DaemonsetHandler{}, "0"},
-		{"statefulset", &components.StatefulsetHandler{}, "0"},
 	} {
 		for _, v := range []struct {
 			name  string

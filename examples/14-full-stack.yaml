@@ -1,5 +1,5 @@
 # Full-stack example — exercises every Phase 1 component type and every Phase 1 trait type.
-# Component types: webservice, worker, cronjob, postgresql, helm, daemonset, statefulset
+# Component types: webservice, worker, cronjob, postgresql, helm, daemonset, statefulset, service
 # Trait types: expose (public + scoped internal), ingress, httproute, certificate,
 #              external-secret, configmap, scaler
 # Use with cluster-profiles/gateway-certmanager-aws.yaml to exercise scoped capabilities.
@@ -164,11 +164,25 @@ spec:
     properties:
       image: myregistry/session-store:v1.0.0
       replicas: 3
-      port: 6379
+      ports:
+      - name: tcp
+        containerPort: 6379
+      serviceName: session-store-headless
       volumeClaimTemplates:
       - name: data
         size: "10Gi"
         mountPath: /data
+
+  # --- service: the statefulset's governing (headless) Service ---
+  - name: session-store-headless
+    type: service
+    properties:
+      clusterIP: None
+      selector:
+        app: session-store
+      ports:
+      - name: tcp
+        port: 6379
 
   # --- webservice: ingress (direct — no capability dispatch) ---
   - name: admin

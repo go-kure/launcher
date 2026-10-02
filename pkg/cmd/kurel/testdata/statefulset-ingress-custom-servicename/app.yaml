@@ -9,8 +9,19 @@ spec:
       type: statefulset
       properties:
         image: ghcr.io/example/postgres:v15.0
-        port: 5432
+        ports:
+          - name: tcp
+            containerPort: 5432
         serviceName: postgres-primary
+    - name: postgres-primary
+      type: service
+      properties:
+        clusterIP: None
+        selector:
+          app: db
+        ports:
+          - name: tcp
+            port: 5432
       traits:
         - type: ingress
           properties:
