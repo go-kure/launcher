@@ -39,7 +39,8 @@ var helmFluxOnlyKeys = []string{"interval", "releaseName", "targetNamespace", "d
 
 // HelmRule lowers a "helm" component (D1 component position,
 // oam.ComponentLoweringRule) to the kind-named Flux terminals, the role-named
-// layer of the helmchart composite's split (go-kure/launcher#336):
+// successor to the removed helmchart composite (go-kure/launcher#336,
+// go-kure/launcher#350):
 //
 //   - delivery: flux (the default) emits a `helmrelease` component carrying the
 //     authored name, traits and annotations. With an inline source it also
@@ -524,8 +525,7 @@ func helmGeneratedSource(lctx oam.LoweringContext, kind string, src *helmSource,
 }
 
 // helmSourceIdentity is a generated source's content identity: every input
-// that shapes it. It equals the helmchart composite's dedup key
-// (HelmchartConfig.GetSourceKey).
+// that shapes it: kind and url, plus version for an OCI source.
 func helmSourceIdentity(kind, url, version string) string {
 	if kind == "OCIRepository" {
 		return "oci:" + url + ":" + version

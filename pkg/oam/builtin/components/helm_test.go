@@ -261,7 +261,7 @@ func TestHelmRule_GitAndBucketSharePerIdentity(t *testing.T) {
 }
 
 // TestHelmRule_OCIWithoutVersion: an inline OCI source without a version is
-// accepted under delivery: flux, as helmchart accepts it: the source carries no
+// accepted under delivery: flux, as the removed helmchart accepted it: the source carries no
 // ref, so Flux pulls the latest tag.
 func TestHelmRule_OCIWithoutVersion(t *testing.T) {
 	comps := lowerHelm(t, helmLowering("shop"), "podinfo", map[string]any{
