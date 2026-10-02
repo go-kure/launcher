@@ -151,7 +151,8 @@ the fact. The covenant below prevents that.
 | Class | Names | Status |
 |---|---|---|
 | Reserved (downstream-only) | `backup` | No launcher component or trait of this name exists; launcher must not claim it for an unrelated feature. (Distinct from the existing `backup` *property* of the `postgresql` component — a property name, not a type name; no collision.) |
-| Shadowed (same name, downstream superset) | `helmchart`, `prune-protection` | Launcher builtins; the downstream implementation carries additive behaviour on top. Upstreaming these deltas — and retiring this shadowed class — is tracked in go-kure/launcher#245. |
+| Shadowed (same name, downstream superset) | `prune-protection` | Launcher builtin; the downstream implementation carries additive behaviour on top. Upstreaming that delta — and retiring this shadowed class — is tracked in go-kure/launcher#245. |
+| Former builtin (downstream-used) | `helmchart` | No launcher type of this name since go-kure/launcher#350; go-kure/launcher#351 reuses it for the Flux `HelmChart` CR, and a downstream dialect using the name renames its type before adopting that release. |
 
 **Enforcement is deliberately review discipline, not CI.** An extending dialect commonly lives
 in a separate, non-public project that launcher's CI cannot see or gate against; a downstream
@@ -213,14 +214,14 @@ role-named; `expose` is lowerable and role-named. The layering the Helm-family r
    alongside core `networkpolicy`. Under this rule the Flux `Kustomization` CR becomes
    `fluxcd-kustomization`, because bare `kustomization` collides with `kustomization.yaml`.
 
-A name this rule produces is still subject to the reservation covenant above. One existing
-builtin predates the rule: `helmchart` is a role-level composite (a HelmRelease plus its
+A name this rule produces is still subject to the reservation covenant above. One former
+builtin predated the rule: `helmchart` was a role-level composite (a HelmRelease plus its
 source, or client-side rendered manifests), not a projection of the Flux `HelmChart` CR its
-name suggests. It is deprecated in favour of the role-named `helm`: every authored use
-warns, and it still builds unchanged. Its removal needs no document-format version move
-before the first stable GA release (Document-Format Lifecycle below) and is tracked in
-go-kure/launcher#350. The reuse of
-the name for the `HelmChart` CR (go-kure/launcher#351) waits for that removal.
+name suggests. It was removed in favour of the role-named `helm` (go-kure/launcher#350)
+without a document-format version move, which the Document-Format Lifecycle below does not
+require before the first stable GA release; a document still declaring it fails validation
+with a pointer to `helm`. go-kure/launcher#351 reuses the name for the `HelmChart` CR
+(maintainer decision, 2026-10-02).
 
 ---
 
