@@ -1,8 +1,11 @@
 package traits_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // A role kind's pvc volume describes a claim the rule now synthesizes as a
@@ -37,5 +40,41 @@ func TestRoleClaims_MaxStorageSizeReachesTheSynthesizedClaim(t *testing.T) {
 				t.Fatalf("expected the build to succeed, got: %v", err)
 			}
 		})
+	}
+}
+
+// A role rule reads the ClusterProfile `pvc` capability for the claims its
+// volumes describe (go-kure/launcher#746), so TransformWithPolicy lists the key
+// as consumed exactly when a volume generates a claim, as it lists the key an
+// authored pvc trait resolves against. A volume that references an existing
+// claim generates none and reads nothing.
+func TestRoleClaims_PVCCapabilityIsConsumed(t *testing.T) {
+	caps := map[string]oam.CapabilityBinding{"pvc": {Rendering: map[string]any{"storageClassName": "platform-ssd"}}}
+	volume := map[string]map[string]any{
+		"generated claim": {"name": "data", "type": "pvc", "mountPath": "/data", "size": "1Gi"},
+		"claim reference": {"name": "data", "type": "pvc", "mountPath": "/data", "claimName": "existing"},
+	}
+	want := map[string][]string{"generated claim": {"pvc"}, "claim reference": nil}
+	for _, kind := range []string{"webservice", "worker"} {
+		for name, vol := range volume {
+			t.Run(kind+"/"+name, func(t *testing.T) {
+				app := &oam.Application{
+					APIVersion: oam.SupportedAPIVersion,
+					Kind:       "Application",
+					Metadata:   oam.Metadata{Name: "pkg", Namespace: "default"},
+					Spec: oam.ApplicationSpec{Components: []oam.Component{{
+						Name: "app", Type: kind,
+						Properties: map[string]any{"image": "ghcr.io/org/app:v1", "replicas": 1, "volumes": []any{vol}},
+					}}},
+				}
+				_, result, err := nonRWXScalerTransformer().TransformWithPolicy(app, oam.TransformContext{Capabilities: caps})
+				if err != nil {
+					t.Fatalf("transform: %v", err)
+				}
+				if got := result.ConsumedCapabilities; !reflect.DeepEqual(got, want[name]) {
+					t.Errorf("consumed capabilities %v, want %v", got, want[name])
+				}
+			})
+		}
 	}
 }

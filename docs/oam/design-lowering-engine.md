@@ -556,10 +556,14 @@ For `pvc` the kind's code path is `components.ParseClaimProperties`,
   owner.
 Input is not among them: a ClusterProfile `pvc` capability supplies an unauthored
 `storageClassName` to both, to the trait through its rendering merge and to the kind
-through `ComponentCapabilityDefaults` (go-kure/launcher#742).
+through `ComponentCapabilityDefaults` (go-kure/launcher#742). A `webservice` or
+`worker` `pvc` volume takes it as well: the trait `roleClaims` synthesizes is sealed,
+so the rule reads the binding through `LoweringContext.Capability` and fills the
+value itself (go-kure/launcher#746).
 
 `pkg/cmd/kurel/pvc_twin_test.go` builds each intent both ways. It requires identical
-claims apart from the `app` label, the same capability default on both paths, the
+claims apart from the `app` label, the same capability default on both paths and on
+a role kind's `pvc` volume, the
 same refusals for malformed properties on both paths, and a decorator on the owner
 that reaches the trait's claim.
 

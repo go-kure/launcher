@@ -103,7 +103,7 @@ func (WorkerRule) PropertySchema() map[string]oam.PropertySchema {
 
 // LowerComponent validates comp as a worker and emits the equivalent
 // deployment component (see WorkerRule).
-func (r WorkerRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
+func (r WorkerRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
 	opinions, err := parseWorker(comp.Properties)
 	if err != nil {
 		return oam.LoweringResult{}, err
@@ -134,7 +134,7 @@ func (r WorkerRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (
 		}
 	}
 
-	claimTraits, err := roleClaims(comp, props)
+	claimTraits, err := roleClaims(comp, props, lctx)
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}

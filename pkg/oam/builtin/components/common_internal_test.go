@@ -1,6 +1,7 @@
 package components
 
 import (
+	"maps"
 	"math"
 	"reflect"
 	"strings"
@@ -2193,7 +2194,7 @@ func TestRoleClaims_RewritesVolumesToClaims(t *testing.T) {
 	tmp := map[string]any{"name": "tmp", "type": "emptyDir", "mountPath": "/tmp"}
 	props := map[string]any{"volumes": []any{data, shared, tmp}}
 
-	traits, err := roleClaims(&oam.Component{Name: "api"}, props)
+	traits, err := roleClaims(&oam.Component{Name: "api"}, props, oam.LoweringContext{})
 	if err != nil {
 		t.Fatalf("roleClaims: %v", err)
 	}
@@ -2225,7 +2226,7 @@ func TestRoleClaims_NoCollisionAcrossHyphenatedNames(t *testing.T) {
 	claim := func(comp, vol string) string {
 		t.Helper()
 		props := map[string]any{"volumes": []any{map[string]any{"name": vol, "type": "pvc", "mountPath": "/d", "size": "1Gi"}}}
-		traits, err := roleClaims(&oam.Component{Name: comp}, props)
+		traits, err := roleClaims(&oam.Component{Name: comp}, props, oam.LoweringContext{})
 		if err != nil {
 			t.Fatalf("roleClaims(%q, %q): %v", comp, vol, err)
 		}
@@ -2243,8 +2244,63 @@ func TestRoleClaims_NoCollisionAcrossHyphenatedNames(t *testing.T) {
 // DNS-1123 subdomain, which an uppercase component name is not.
 func TestRoleClaims_InvalidDNS_Error(t *testing.T) {
 	props := map[string]any{"volumes": []any{map[string]any{"name": "data", "type": "pvc", "mountPath": "/d", "size": "1Gi"}}}
-	if _, err := roleClaims(&oam.Component{Name: "MyApp"}, props); err == nil {
+	if _, err := roleClaims(&oam.Component{Name: "MyApp"}, props, oam.LoweringContext{}); err == nil {
 		t.Fatal("roleClaims: expected error for an uppercase component name, got nil")
+	}
+}
+
+// TestRoleClaims_CapabilityStorageClassDefault: a synthesized claim trait is
+// sealed, so the rule itself fills an unauthored storageClassName from the
+// ClusterProfile `pvc` capability (go-kure/launcher#746). Absent and null are
+// unauthored; an authored class, "" included, wins; a rendering that leaves
+// storageClassName absent or null fills nothing.
+func TestRoleClaims_CapabilityStorageClassDefault(t *testing.T) {
+	platform := map[string]oam.CapabilityBinding{"pvc": {Rendering: map[string]any{"storageClassName": "platform-ssd"}}}
+	cases := []struct {
+		name  string
+		vol   map[string]any // merged over a pvc volume "data" of size 1Gi
+		caps  map[string]oam.CapabilityBinding
+		want  any // the trait's storageClassName; nil means absent
+		wantP bool
+	}{
+		{name: "no binding", caps: nil},
+		{name: "unset takes the platform class", caps: platform, want: "platform-ssd", wantP: true},
+		{name: "null takes the platform class", vol: map[string]any{"storageClass": nil}, caps: platform, want: "platform-ssd", wantP: true},
+		{name: "authored class wins", vol: map[string]any{"storageClass": "slow"}, caps: platform, want: "slow", wantP: true},
+		{name: "authored empty string wins", vol: map[string]any{"storageClass": ""}, caps: platform, want: "", wantP: true},
+		{name: "rendering without the key", caps: map[string]oam.CapabilityBinding{"pvc": {Rendering: map[string]any{"size": "9Gi"}}}},
+		{name: "rendering null", caps: map[string]oam.CapabilityBinding{"pvc": {Rendering: map[string]any{"storageClassName": nil}}}},
+		{name: "a scoped binding is not read", caps: map[string]oam.CapabilityBinding{"pvc.fast": {Rendering: map[string]any{"storageClassName": "platform-ssd"}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			vol := map[string]any{"name": "data", "type": "pvc", "mountPath": "/data", "size": "1Gi"}
+			maps.Copy(vol, tc.vol)
+			props := map[string]any{"volumes": []any{vol}}
+			traits, err := roleClaims(&oam.Component{Name: "api"}, props, oam.LoweringContext{}.WithCapabilities(tc.caps))
+			if err != nil {
+				t.Fatalf("roleClaims: %v", err)
+			}
+			if len(traits) != 1 {
+				t.Fatalf("roleClaims = %d traits, want 1", len(traits))
+			}
+			got, present := traits[0].Properties["storageClassName"]
+			if present != tc.wantP || got != tc.want {
+				t.Errorf("storageClassName = %#v (present %v), want %#v (present %v)", got, present, tc.want, tc.wantP)
+			}
+		})
+	}
+}
+
+// TestRoleClaims_CapabilityStorageClassMustBeAString: a rendering value the
+// claim cannot carry is refused by name rather than passed on, so no output
+// shares a value with the profile.
+func TestRoleClaims_CapabilityStorageClassMustBeAString(t *testing.T) {
+	caps := map[string]oam.CapabilityBinding{"pvc": {Rendering: map[string]any{"storageClassName": map[string]any{"tier": "fast"}}}}
+	props := map[string]any{"volumes": []any{map[string]any{"name": "data", "type": "pvc", "mountPath": "/data", "size": "1Gi"}}}
+	_, err := roleClaims(&oam.Component{Name: "api"}, props, oam.LoweringContext{}.WithCapabilities(caps))
+	if err == nil || !strings.Contains(err.Error(), `capability "pvc" storageClassName: expected string`) {
+		t.Fatalf("err = %v, want a refusal naming the capability key", err)
 	}
 }
 

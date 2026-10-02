@@ -157,7 +157,7 @@ func webserviceContainerPorts(port int32) []corev1.ContainerPort {
 
 // LowerComponent validates comp as a webservice and emits the equivalent
 // deployment and service components (see WebserviceRule).
-func (r WebserviceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
+func (r WebserviceRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
 	opinions, err := parseWebservice(comp)
 	if err != nil {
 		return oam.LoweringResult{}, err
@@ -188,7 +188,7 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, _ oam.LoweringContex
 		}
 	}
 
-	claimTraits, err := roleClaims(comp, depProps)
+	claimTraits, err := roleClaims(comp, depProps, lctx)
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
