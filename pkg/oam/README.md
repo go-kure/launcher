@@ -61,9 +61,10 @@ namespace (go-kure/launcher#740). The config reports what it reads (`FluxNamespa
 HelmRelease's `valuesFrom`, `kubeConfig` and chart-template `verify` Secret, a source's
 `secretRef`, `certSecretRef`, `proxySecretRef` and the Secrets under `verify` and `sts`); a
 sub-application config names the ConfigMap or Secret it produces (`FluxNamespaceInput`: the
-`configmap` trait's ConfigMap, the Secret an `external-secret` trait's ExternalSecret writes). Both
-kind and name must match. Every other trait object — a ConfigMap or Secret the Flux object does not
-name, a Certificate, a claim, a NetworkPolicy, a route — stays in the application namespace with the
+`configmap` trait's ConfigMap, the Secret an `external-secret` trait's ExternalSecret or a
+`certificate` trait's Certificate writes). Both kind and name must match. Every other trait object —
+a ConfigMap or Secret the Flux object does not name, a Certificate whose Secret it does not name, a
+claim, a NetworkPolicy, a route — stays in the application namespace with the
 workloads, where a HelmRelease installs them (`targetNamespace`). A ConfigMap or Secret the Flux
 object names moves even when the chart's pods read it as well: the Flux object cannot reconcile
 without it, and a reference through the chart's values is invisible here. Every built-in config

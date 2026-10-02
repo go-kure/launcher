@@ -244,6 +244,14 @@ type CertificateConfig struct {
 // provenance attribution.
 func (c *CertificateConfig) ComponentName() string { return c.componentName }
 
+// FluxNamespaceInput names the Secret cert-manager writes beside the
+// Certificate, so the Certificate follows its component's Flux object to the
+// Flux namespace when that object reads the Secret (a helmrepository's
+// certSecretRef). A namespaced Issuer it names must then exist in the Flux
+// namespace; a ClusterIssuer needs nothing. Satisfies
+// pkg/oam.fluxNamespaceInput.
+func (c *CertificateConfig) FluxNamespaceInput() (kind, name string) { return "Secret", c.SecretName }
+
 // ApplyPolicy is a no-op: certificates have no enforceable policy fields.
 func (c *CertificateConfig) ApplyPolicy(_ oam.Policy) error { return nil }
 

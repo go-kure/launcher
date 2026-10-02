@@ -2334,7 +2334,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   The ConfigMaps and Secrets the HelmRelease reads from its own namespace — `valuesFrom`,
   `kubeConfig.secretRef` / `configMapRef`, and `chart.spec.verify.secretRef` when
   helm-controller creates the HelmChart beside the release (`chart.spec.sourceRef` names no
-  namespace, or names the Flux namespace) — must live in the Flux namespace too. A `configmap` or `external-secret` trait on the
+  namespace, or names the Flux namespace) — must live in the Flux namespace too. A `configmap`, `external-secret` or `certificate` trait on the
   component whose object one of them names moves there with the release; one none of them names
   stays in the application namespace with the release's workloads (go-kure/launcher#740). A
   trait ConfigMap named in `valuesFrom` therefore leaves the application namespace even when the
@@ -2622,8 +2622,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `serviceAccountName`, a GitRepository `include`, a HelmChart's `sourceRef` — resolves in the
   namespace the CR lands in, so under a Flux namespace the objects it names must live there. A
   `helmchart` whose `sourceRef` names a source component in the same document finds it there:
-  both move to the Flux namespace. So does the Secret of an `external-secret` trait (or the
-  ConfigMap of a `configmap` trait) on the component when one of the Secret references names it
+  both move to the Flux namespace. So does the Secret of an `external-secret` or `certificate`
+  trait (or the ConfigMap of a `configmap` trait) on the component when one of the Secret
+  references names it — a `certSecretRef` naming a `certificate` trait's `secretName` moves that
+  Certificate
   (`FluxNamespaceReads`, go-kure/launcher#740); a trait object no reference names stays in the
   application namespace.
 
