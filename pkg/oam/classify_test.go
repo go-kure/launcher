@@ -53,6 +53,11 @@ func TestClassifyComponent_DefaultMap(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.typ, func(t *testing.T) {
+			// ClassifyComponent falls back to TierApps for an unmapped type, so
+			// its result alone cannot show that a TierApps row is registered.
+			if got, ok := defaultTierMap[tc.typ]; !ok || got != tc.want {
+				t.Errorf("defaultTierMap[%q] = %q, %v; want %q, true", tc.typ, got, ok, tc.want)
+			}
 			c := &Component{Name: tc.typ, Type: tc.typ}
 			tier, err := ClassifyComponent(c)
 			if err != nil {
