@@ -255,6 +255,55 @@ func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
 			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
 		}
 	})
+	t.Run("envelope member's annotations tested", func(t *testing.T) {
+		// The patch sees the member's annotations as generated: no origin in them.
+		member := claimMap("data", false)
+		member["metadata"].(map[string]any)["annotations"] = map[string]any{}
+		envelope := collisionObject(&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "example.com/v1", "kind": "Widget",
+			"metadata": map[string]any{"namespace": "shop", "name": "envelope"},
+			"items":    []any{member},
+		}})
+		got := patchedWarnings(t, &stack.Bundle{Name: "raw", Applications: []*stack.Application{fixedApp("raw", envelope)},
+			Patches: []stack.Patch{{Patch: "- op: test\n  path: /items/0/metadata/annotations\n  value: {}\n" +
+				"- op: add\n  path: /items/0/metadata/annotations/kustomize.toolkit.fluxcd.io~1force\n  value: enabled\n",
+				Target: &stack.PatchSelector{Kind: "Widget"}}}})
+		want := []string{claimWarning("data", `component "raw"`, patchedReason)}
+		if !slices.Equal(got, want) {
+			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
+		}
+	})
+	t.Run("envelope member's annotations copied", func(t *testing.T) {
+		envelope := collisionObject(&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "example.com/v1", "kind": "Widget",
+			"metadata": map[string]any{"namespace": "shop", "name": "envelope"},
+			"items":    []any{claimMap("a", true), claimMap("b", false)},
+		}})
+		got := patchedWarnings(t, &stack.Bundle{Name: "raw", Applications: []*stack.Application{fixedApp("raw", envelope)},
+			Patches: []stack.Patch{{Patch: "- op: copy\n  from: /items/0/metadata/annotations\n  path: /items/1/metadata/annotations\n",
+				Target: &stack.PatchSelector{Kind: "Widget"}}}})
+		want := []string{claimWarning("a", `component "raw"`, annotationReason), claimWarning("b", `component "raw"`, patchedReason)}
+		if !slices.Equal(got, want) {
+			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
+		}
+	})
+	t.Run("annotations replaced, then identity reused", func(t *testing.T) {
+		got := patchedWarnings(t, &stack.Bundle{Name: "db", Applications: []*stack.Application{
+			fixedApp("old", claimObject("shop", "data", nil)),
+			fixedApp("new", claimObject("shop", "replacement", forceAnnotated("enabled"))),
+		}, Patches: []stack.Patch{
+			{Patch: "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: replacement\n  namespace: shop\n" +
+				"  annotations:\n    $patch: replace\n    kustomize.toolkit.fluxcd.io/force: enabled\n"},
+			{Patch: "- op: replace\n  path: /metadata/name\n  value: archive\n",
+				Target: &stack.PatchSelector{Kind: "PersistentVolumeClaim", Name: "data"}},
+			{Patch: "- op: replace\n  path: /metadata/name\n  value: data\n",
+				Target: &stack.PatchSelector{Kind: "PersistentVolumeClaim", Name: "replacement"}},
+		}})
+		want := []string{claimWarning("data", `component "new"`, annotationReason)}
+		if !slices.Equal(got, want) {
+			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
+		}
+	})
 	t.Run("annotations replaced", func(t *testing.T) {
 		// A strategic merge patch replacing the annotations drops the origin, so
 		// the claim is traced by its identity.

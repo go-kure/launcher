@@ -88,45 +88,61 @@ func (s *forceScan) addUnpatched(apps []GeneratedApplication) {
 	}
 }
 
-// generatedOrigin is one object handed to a bundle's patch build, a list
-// envelope's members included: the application that generated it and whether
-// Flux's force selector matched it as generated.
+// generatedOrigin is one resource of a bundle's patch build as generated: an
+// object, or a member of a kustomize-inlined List. It records the application
+// that generated it, its identity, whether Flux's force selector matched it, and,
+// for a list envelope Flux expands, its members.
 type generatedOrigin struct {
 	app      GeneratedApplication
+	id       objectIdentity
+	selected bool
+	members  []generatedMember
+}
+
+// generatedMember is one member of a generated list envelope Flux expands.
+type generatedMember struct {
+	id       objectIdentity
 	selected bool
 }
 
 // patchedVolume is one volume of a bundle's patch build, keyed for generation
-// order by its origin.
+// order by its origin and its place among that origin's members.
 type patchedVolume struct {
-	order                       int
+	origin, member              int
 	id                          objectIdentity
 	app                         GeneratedApplication
 	selected, generatedSelected bool
 }
 
 // addPatched records the volumes of one leaf bundle's apps as Flux applies them
-// after the bundle's patches. Each object handed to the build, a list envelope's
-// members included, carries its origin (originAnnotation), which kustomize keeps
-// through list inlining, renames and JSON6902 patches. A patched volume is named
-// by its origin's application, in generation order, and its force key is named as
-// the patches' unless its origin was generated with it. One whose origin a patch
-// dropped (a strategic merge patch replacing the annotations) is matched to the
-// generated volume of its identity; one a patch added, as a member of a list
-// envelope, to its envelope's application; else to the bundle's first
-// application. A bundle with no volume is built too, since a patch can add one.
+// after the bundle's patches. Each resource of the build carries its origin
+// (originAnnotation), which kustomize keeps through renames and JSON6902 patches;
+// only resources kustomize itself holds are tagged, as kustomize sets its own
+// internal annotations on them before any patch, so the tag changes no patch's
+// result. A volume is named by its origin's application, in generation order,
+// and its force key is named as the patches' unless it was generated with it.
+//
+// A list envelope's members are traced through the envelope: to the generated
+// member of their identity, else, renamed, to the generated member at their place
+// whose identity the envelope no longer holds; one a patch added is named by the
+// envelope's application. A resource whose tag a patch dropped (a strategic merge
+// patch replacing the annotations) is traced to the origin of its identity, else
+// to the only origin of its kind no other resource holds; one that cannot be
+// traced is named by the bundle's first application. A bundle with no volume is
+// built too, since a patch can add one.
 func (s *forceScan) addPatched(apps []GeneratedApplication) error {
 	var objects []*client.Object
 	var origins []generatedOrigin
-	generated := map[objectIdentity]int{}
 	for _, app := range apps {
 		for _, p := range generatedObjects(app) {
 			content, err := objectContent(*p)
 			if err != nil {
 				return err
 			}
-			tagOrigins(content, app, &origins, generated)
 			var obj client.Object = &unstructured.Unstructured{Object: content}
+			for _, r := range kustomizeInlined(obj) {
+				origins = append(origins, tagOrigin(r, app, len(origins)))
+			}
 			objects = append(objects, &obj)
 		}
 	}
@@ -134,71 +150,153 @@ func (s *forceScan) addPatched(apps []GeneratedApplication) error {
 	if err != nil {
 		return err
 	}
-	var volumes []patchedVolume
-	for _, out := range built {
-		envelope, hasEnvelope := originOf(out, origins)
-		for _, obj := range fluxExpanded(out) {
-			id, ok := volumeIdentity(obj)
-			if !ok {
-				continue
-			}
-			v := patchedVolume{order: len(origins) + len(volumes), id: id, app: apps[0], selected: forceSelected(obj)}
-			i, traced := originOf(obj, origins)
-			if !traced {
-				i, traced = generated[id]
-			}
-			switch {
-			case traced:
-				v.order, v.app, v.generatedSelected = i, origins[i].app, origins[i].selected
-			case hasEnvelope:
-				v.app = origins[envelope].app
-			}
-			volumes = append(volumes, v)
+	traced := make([]int, len(built))
+	claimed := make([]bool, len(origins))
+	for k, out := range built {
+		i, ok := originOf(out, origins)
+		if ok && !claimed[i] {
+			claimed[i] = true
+		} else {
+			i = -1
+		}
+		traced[k] = i
+	}
+	for k, out := range built {
+		if traced[k] < 0 {
+			traced[k] = untaggedOrigin(out, origins, claimed)
 		}
 	}
-	slices.SortStableFunc(volumes, func(a, b patchedVolume) int { return a.order - b.order })
+	var volumes []patchedVolume
+	for k, out := range built {
+		volumes = append(volumes, tracedVolumes(out, traced[k], origins, apps[0], len(origins)+k)...)
+	}
+	slices.SortStableFunc(volumes, func(a, b patchedVolume) int {
+		if a.origin != b.origin {
+			return a.origin - b.origin
+		}
+		return a.member - b.member
+	})
 	for _, v := range volumes {
 		s.add(v.id, v.app, v.selected, v.selected && v.generatedSelected)
 	}
 	return nil
 }
 
-// originAnnotation carries an object's index among the origins of its bundle's
+// untaggedOrigin traces a built resource that carries no origin: to the unheld
+// origin of its identity, else to the only unheld origin of its kind, and marks
+// it held; -1 when neither exists.
+func untaggedOrigin(out client.Object, origins []generatedOrigin, claimed []bool) int {
+	id := resourceIdentity(out)
+	match := -1
+	for i, o := range origins {
+		if claimed[i] {
+			continue
+		}
+		if o.id == id {
+			match = i
+			break
+		}
+		if o.id.group == id.group && o.id.kind == id.kind {
+			if match >= 0 && origins[match].id != id {
+				match = -2
+			} else if match == -1 {
+				match = i
+			}
+		}
+	}
+	if match < 0 {
+		return -1
+	}
+	claimed[match] = true
+	return match
+}
+
+// tracedVolumes returns the volumes of one built resource, traced to origin
+// (-1: untraced, ordered at fallback after every origin).
+func tracedVolumes(out client.Object, origin int, origins []generatedOrigin, first GeneratedApplication, fallback int) []patchedVolume {
+	if origin < 0 {
+		var volumes []patchedVolume
+		for m, obj := range fluxExpanded(out) {
+			if id, ok := volumeIdentity(obj); ok {
+				volumes = append(volumes, patchedVolume{origin: fallback, member: m, id: id, app: first, selected: forceSelected(obj)})
+			}
+		}
+		return volumes
+	}
+	o := origins[origin]
+	u, isEnvelope := out.(*unstructured.Unstructured)
+	if !isEnvelope || !u.IsList() {
+		id, ok := volumeIdentity(out)
+		if !ok {
+			return nil
+		}
+		return []patchedVolume{{origin: origin, id: id, app: o.app, selected: forceSelected(out), generatedSelected: o.selected}}
+	}
+	members := listMembers(u)
+	held := map[objectIdentity]bool{}
+	for _, m := range members {
+		held[resourceIdentity(m)] = true
+	}
+	used := make([]bool, len(o.members))
+	var volumes []patchedVolume
+	for k, obj := range members {
+		id := resourceIdentity(obj)
+		j := slices.IndexFunc(o.members, func(g generatedMember) bool { return g.id == id })
+		if j >= 0 && used[j] {
+			j = -1
+		}
+		if j < 0 && k < len(o.members) && !used[k] && !held[o.members[k].id] {
+			j = k
+		}
+		v := patchedVolume{origin: origin, member: len(o.members) + k, app: o.app, selected: forceSelected(obj)}
+		if j >= 0 {
+			used[j] = true
+			v.member, v.generatedSelected = j, o.members[j].selected
+		}
+		if vid, ok := volumeIdentity(obj); ok {
+			v.id = vid
+			volumes = append(volumes, v)
+		}
+	}
+	return volumes
+}
+
+// originAnnotation carries a resource's index among the origins of its bundle's
 // patch build. kustomize keeps annotations under internal.config.kubernetes.io
 // across a JSON6902 patch even when the patch replaces the annotations, and the
 // build is read here only, so no applied object carries it.
 const originAnnotation = "internal.config.kubernetes.io/launcher-force-origin"
 
-// tagOrigins records content, and every member of its items, recursively, as an
-// origin of app and tags it with its index. generated keeps each volume
-// identity's first origin.
-func tagOrigins(content map[string]any, app GeneratedApplication, origins *[]generatedOrigin, generated map[objectIdentity]int) {
-	u := &unstructured.Unstructured{Object: content}
-	i := len(*origins)
-	*origins = append(*origins, generatedOrigin{app: app, selected: forceSelected(u)})
-	if id, ok := volumeIdentity(u); ok {
-		if _, seen := generated[id]; !seen {
-			generated[id] = i
+// tagOrigin tags r, a resource of the patch build, as origin i of app and
+// returns that origin. A list envelope's members are recorded, not tagged: a
+// patch sees their annotations as generated.
+func tagOrigin(r client.Object, app GeneratedApplication, i int) generatedOrigin {
+	o := generatedOrigin{app: app, id: resourceIdentity(r), selected: forceSelected(r)}
+	if u, ok := r.(*unstructured.Unstructured); ok && u.IsList() {
+		for _, m := range listMembers(u) {
+			o.members = append(o.members, generatedMember{id: resourceIdentity(m), selected: forceSelected(m)})
 		}
 	}
-	annotations := u.GetAnnotations()
+	annotations := r.GetAnnotations()
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
 	annotations[originAnnotation] = strconv.Itoa(i)
-	u.SetAnnotations(annotations)
-	items, _ := content["items"].([]any)
-	for _, item := range items {
-		if member, ok := item.(map[string]any); ok {
-			tagOrigins(member, app, origins, generated)
-		}
-	}
+	r.SetAnnotations(annotations)
+	return o
 }
 
 // originOf returns the origin index obj carries, if it carries a valid one.
 func originOf(obj client.Object, origins []generatedOrigin) (int, bool) {
 	i, err := strconv.Atoi(obj.GetAnnotations()[originAnnotation])
 	return i, err == nil && i >= 0 && i < len(origins)
+}
+
+// resourceIdentity keys obj as kustomize and Flux key a resource: API group, kind,
+// namespace and name.
+func resourceIdentity(obj client.Object) objectIdentity {
+	gvk := obj.GetObjectKind().GroupVersionKind()
+	return objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}
 }
 
 // objectContent returns a copy of obj's content as its manifest encodes it: its
