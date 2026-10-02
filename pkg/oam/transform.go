@@ -1040,30 +1040,47 @@ func sameApplications(a, b []*stack.Application) bool {
 // entryAppContract is the TraitHandler contract a refused trait broke.
 const entryAppContract = "a TraitHandler mutates the application it is given and appends sub-applications, it must not replace, remove or rename a component's application"
 
-// checkEntryApplications fails when trait traitType of component component
-// left a bundle entry's application out of the bundle, by pointer, or renamed
-// it from names[i]. The Phase-4 automatic health check and NetworkPolicy
-// synthesis find a component's application by its name and then its pointer,
-// so a replaced, removed or renamed one would silently get neither
-// (go-kure/launcher#734).
-func checkEntryApplications(entries []componentEntry, names []string, bundle *stack.Bundle, component, traitType string) error {
+// entryAppPolicyContract is the Enforceable contract a refused trait
+// sub-application's ApplyPolicy broke.
+const entryAppPolicyContract = "an Enforceable's ApplyPolicy enforces policy on its own configuration, it must not replace, remove or rename a component's application"
+
+// checkEntryApplications fails when trait traitType of component component —
+// its Apply, or with subApp set the ApplyPolicy of sub-application subApp it
+// added — left a bundle entry's application out of the bundle, by pointer, or
+// renamed it from names[i]. The Phase-4 automatic health check and
+// NetworkPolicy synthesis find a component's application by its name and then
+// its pointer, so a replaced, removed or renamed one would silently get neither
+// (go-kure/launcher#734, go-kure/launcher#752).
+func checkEntryApplications(entries []componentEntry, names []string, bundle *stack.Bundle, component, traitType, subApp string) error {
 	inBundle := make(map[*stack.Application]bool, len(bundle.Applications))
 	for _, a := range bundle.Applications {
 		inBundle[a] = true
 	}
 	for i, c := range entries {
 		if !inBundle[c.app] {
+			by, contract := entryAppRefusal(component, traitType, subApp)
 			return &TransformError{Message: fmt.Sprintf(
-				"component %q trait %q replaced or removed the application of component %q; %s",
-				component, traitType, c.component.Name, entryAppContract)}
+				"%s replaced or removed the application of component %q; %s",
+				by, c.component.Name, contract)}
 		}
 		if c.app.Name != names[i] {
+			by, contract := entryAppRefusal(component, traitType, subApp)
 			return &TransformError{Message: fmt.Sprintf(
-				"component %q trait %q renamed the application of component %q from %q to %q; %s",
-				component, traitType, c.component.Name, names[i], c.app.Name, entryAppContract)}
+				"%s renamed the application of component %q from %q to %q; %s",
+				by, c.component.Name, names[i], c.app.Name, contract)}
 		}
 	}
 	return nil
+}
+
+// entryAppRefusal returns the subject of a checkEntryApplications error and the
+// contract it broke.
+func entryAppRefusal(component, traitType, subApp string) (by, contract string) {
+	by = fmt.Sprintf("component %q trait %q", component, traitType)
+	if subApp == "" {
+		return by, entryAppContract
+	}
+	return fmt.Sprintf("%s: the ApplyPolicy of sub-application %q", by, subApp), entryAppPolicyContract
 }
 
 // applyEntryTraits applies the traits of one entry — each member's own, on that
@@ -1075,7 +1092,8 @@ func checkEntryApplications(entries []componentEntry, names []string, bundle *st
 //
 // bundleEntries are the entries whose applications the bundle was built from.
 // Each must still be in the bundle, by pointer and under the name it had when
-// this entry's traits began, after every trait (checkEntryApplications).
+// this entry's traits began, after every trait and after the ApplyPolicy of
+// every sub-application one added (checkEntryApplications).
 func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundleEntries []componentEntry, groupTraitApps map[string]string, bundle *stack.Bundle, ctx TransformContext) ([]*stack.Application, error) {
 	var subApps []*stack.Application
 	var decorators []subAppDecoration
@@ -1175,7 +1193,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 					Cause:   err,
 				}
 			}
-			if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type); err != nil {
+			if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type, ""); err != nil {
 				return nil, err
 			}
 
@@ -1195,6 +1213,11 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				if enforceable, ok := newApp.Config.(Enforceable); ok {
 					if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
 						return nil, &ViolationError{Component: entry.component.Name, Cause: err}
+					}
+					// The policy runs after the trait's check, so it is held to the
+					// same names (go-kure/launcher#752).
+					if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type, newApp.Name); err != nil {
+						return nil, err
 					}
 				}
 			}
