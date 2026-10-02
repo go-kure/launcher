@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -255,7 +256,7 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, error) {
 		// accepted, so user info, a signed query or anything else an endpoint
 		// could smuggle is refused. The value is not quoted back.
 		if !plainBucketEndpoint(s.Endpoint) {
-			return nil, nil, errors.Errorf("%s: source.endpoint of an inline Bucket must be a host[:port], or an https:// URL of only a host and an optional port; user info, a path, a query, a fragment or http:// is not taken inline (author a bucket, with a secretRef or insecure: true, and reference it)", helmType)
+			return nil, nil, errors.Errorf("%s: source.endpoint of an inline Bucket must be a host[:port], or an https:// URL of only a host and an optional port, any port in 1-65535; user info, a path, a query, a fragment or http:// is not taken inline (author a bucket, with a secretRef or insecure: true, and reference it)", helmType)
 		}
 	case s.URL == "" && s.Name == "":
 		return nil, nil, errors.Errorf("%s: source requires either source.url (inline) or source.name (reference)", helmType)
@@ -395,7 +396,7 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 }
 
 // plainSourceURL reports whether raw is exactly an http:// or https:// URL made
-// of a host, an optional port and, when withPath is set, a non-root path (without
+// of a host, an optional port in 1-65535 and, when withPath is set, a non-root path (without
 // it, at most "/"). The URL is re-assembled from what url.Parse found and must
 // match raw, so user info, a query, a fragment or anything else is refused by
 // construction rather than by a list of what to look for: an inline source has no
@@ -408,6 +409,13 @@ func plainSourceURL(raw string, withPath bool) bool {
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" || strings.HasSuffix(u.Host, ":") {
 		return false
+	}
+	// url.Parse checks only that a port is digits; 0 or above 65535 would be
+	// emitted as written and the source would never become ready.
+	if p := u.Port(); p != "" {
+		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			return false
+		}
 	}
 	path := u.EscapedPath()
 	if withPath != (path != "" && path != "/") {
@@ -440,7 +448,7 @@ func checkHelmGitSource(src *helmSource) error {
 		return errors.Errorf("%s: source.kind GitRepository requires an http:// or https:// URL; an ssh:// repository needs credentials, so author a gitrepository and reference it", helmType)
 	}
 	if !plainSourceURL(src.URL, true) {
-		return errors.Errorf("%s: source.url of an inline GitRepository must be an http:// or https:// URL of a host, an optional port and a repository path only; user info, a query or a fragment is not taken inline (author a gitrepository with a secretRef and reference it)", helmType)
+		return errors.Errorf("%s: source.url of an inline GitRepository must be an http:// or https:// URL of a host, an optional port in 1-65535 and a repository path only; user info, a query or a fragment is not taken inline (author a gitrepository with a secretRef and reference it)", helmType)
 	}
 	var set []string
 	if src.Ref != nil {
