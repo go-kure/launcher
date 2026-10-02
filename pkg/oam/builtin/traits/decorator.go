@@ -69,7 +69,8 @@ type identityPortMapper interface {
 // backendRefTargetCollector): synthesis runs before the sub-application pass,
 // and forwarding them would make every decorated component a router. One more,
 // kure's layout.LayoutAugmenter, is forwarded separately — see wrapIfAugmenter
-// below — because unlike these twelve it must NOT be present unconditionally.
+// below — because unlike these twelve it must NOT be present unconditionally;
+// so is its extension layout.LayoutIntentAugmenter, for the same reason.
 //
 // Every method is defined unconditionally, so an embedding decorator ALWAYS
 // satisfies all twelve. Call sites must therefore test the returned VALUE, not the
@@ -349,10 +350,32 @@ func (a augmentingDecorator) GenerateCoversAugmentLayout() bool {
 
 var _ oam.LayoutAugmentationCoverage = augmentingDecorator{}
 
+// intentAugmentingDecorator is an augmentingDecorator that also forwards
+// kure's layout.LayoutIntentAugmenter, for an inner config that implements it.
+// The layout walker reads WantsOwnLayout by assertion and treats an absent
+// method as "wants its own layout" (pkg/stack/layout/walker.go:454-469), so an
+// inner augmenter answering false would lose its placement the moment a trait
+// decorated it. Like AugmentLayout, the method is present only when the inner
+// has it; wrapIfAugmenter picks this type then, and augmentingDecorator
+// otherwise. A wrap chain keeps the intent by induction: each level's inner is
+// the previous level's wrapper.
+type intentAugmentingDecorator struct {
+	augmentingDecorator
+	intent layout.LayoutIntentAugmenter
+}
+
+// WantsOwnLayout forwards to the inner config's LayoutIntentAugmenter.
+func (a intentAugmentingDecorator) WantsOwnLayout() bool {
+	return a.intent.WantsOwnLayout()
+}
+
+var _ layout.LayoutIntentAugmenter = intentAugmentingDecorator{}
+
 // wrapIfAugmenter returns outer unchanged when inner does not implement
 // layout.LayoutAugmenter, or an augmentingDecorator embedding outer (so outer's
 // own Generate and its decoratorBase forwards still promote through via
-// decoratedConfig) when it does. kure's layout walker
+// decoratedConfig) when it does — an intentAugmentingDecorator when inner also
+// implements layout.LayoutIntentAugmenter. kure's layout walker
 // (pkg/stack/layout/walker.go:454-459) type-asserts LayoutAugmenter by
 // PRESENCE, and that presence decides whether the app gets a per-app
 // sub-layout or merges into the parent's flat Resources (walker.go:473-505) —
@@ -362,10 +385,15 @@ var _ oam.LayoutAugmentationCoverage = augmentingDecorator{}
 // per-app sub-layout placement regardless of what its inner config wants.
 // Every trait decorator constructor must route its return value through this.
 func wrapIfAugmenter(outer decoratedConfig, inner stack.ApplicationConfig) stack.ApplicationConfig {
-	if a, ok := inner.(layout.LayoutAugmenter); ok {
-		return augmentingDecorator{decoratedConfig: outer, augmenter: a}
+	a, ok := inner.(layout.LayoutAugmenter)
+	if !ok {
+		return outer
 	}
-	return outer
+	wrapped := augmentingDecorator{decoratedConfig: outer, augmenter: a}
+	if intent, ok := inner.(layout.LayoutIntentAugmenter); ok {
+		return intentAugmentingDecorator{augmentingDecorator: wrapped, intent: intent}
+	}
+	return wrapped
 }
 
 // checkMountPathCollision returns an error if podSpec's first container already
