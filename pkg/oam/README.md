@@ -444,16 +444,22 @@ the object, so pass objects as generated; an object with no kind is an error.
 
 Nothing above compares the applications inside one document: a component and another
 component's trait, two components, or two traits can each generate the same object, and
-both pass `Transform` (go-kure/launcher#646). After transforming a document, generate it
+both pass `Transform` (go-kure/launcher#646). That includes one component's own: two of
+its traits, or a trait and an application the component generates itself (a `helm`
+component's values ConfigMap), rendering one object (go-kure/launcher#757). `Transform` alone refuses none of these, so a
+library caller must run both steps below on every transformed document, as `kurel build`
+does. After transforming a document, generate it
 with `GenerateApplications(cluster)` and pass the result to `CheckInDocumentCollisions`. It
 returns each application's objects with its producer, generating each application once, in
 the order kure's own generation uses and with the bundle labels and annotations kure adds,
 so its objects replace a `Bundle.Generate` of the same cluster rather than add a second
 generation, which could differ from the first. The check reports every object, keyed as
 above, that more than one application generates, naming each producer as a component (a
-sibling group is one) or as a trait's sub-application and its component. A trait named
-after its own component reads like that component, so a second producer with the same name
-is named as another application of it. A repeat within one application is not reported. `kurel build` runs both before it writes anything.
+sibling group is one) or as a trait's sub-application and its component. Producers that
+read alike are named once with their count, since the cluster cannot tell them apart: two
+traits of one component whose sub-applications share a name read as `2 sub-applications
+"dup" of component "web"`, a trait named after its own component and that component as
+`2 applications "web" of component "web"` (go-kure/launcher#757). A repeat within one application is not reported. `kurel build` runs both before it writes anything.
 
 A force-applied PersistentVolume or PersistentVolumeClaim is warned about, not refused
 (go-kure/launcher#720): when an update changes one of its immutable fields, Flux deletes

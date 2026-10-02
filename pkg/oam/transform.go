@@ -533,6 +533,10 @@ type componentEntry struct {
 }
 
 // Transform converts an OAM Application to a kure Cluster.
+//
+// It does not refuse two applications of the document that generate one
+// object, two traits of one component included (go-kure/launcher#757): a
+// caller runs GenerateApplications and CheckInDocumentCollisions on the result.
 func (t *Transformer) Transform(app *Application, ctx TransformContext) (*stack.Cluster, error) {
 	cluster, _, err := t.TransformWithPolicy(app, ctx)
 	return cluster, err

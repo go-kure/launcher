@@ -204,22 +204,43 @@ func CheckInDocumentCollisions(apps []GeneratedApplication) error {
 }
 
 // applicationList names the applications at idx: "both A and B" for two, "A, B
-// and C" for more. A name already used is repeated as "another application" —
-// a trait may carry its component's name, so two producers can read alike, and
-// which one is the component's own cannot be told from the cluster.
+// and C" for more. Applications that read alike are named once, where the first
+// of them stands, with their count: "2 sub-applications "dup" of component
+// "web"" for two traits of one component that create sub-applications of one
+// name, "2 applications "web" of component "web"" for a trait named after its
+// own component. Which one is which cannot be told from the cluster
+// (go-kure/launcher#757).
 func applicationList(apps []GeneratedApplication, idx []int) string {
-	names := make([]string, len(idx))
-	seen := map[string]bool{}
-	for k, i := range idx {
-		names[k] = apps[i].String()
-		if seen[names[k]] {
-			names[k] = fmt.Sprintf("another application %q of component %q", apps[i].Name, apps[i].componentOrName())
+	var names []string
+	var first []int
+	count := map[string]int{}
+	for _, i := range idx {
+		name := apps[i].String()
+		if count[name] == 0 {
+			names = append(names, name)
+			first = append(first, i)
 		}
-		seen[apps[i].String()] = true
+		count[name]++
+	}
+	for k, name := range names {
+		if n := count[name]; n > 1 {
+			names[k] = apps[first[k]].countedString(n)
+		}
 	}
 	last := len(names) - 1
-	if last == 1 {
+	switch {
+	case last == 0:
+		return names[0]
+	case len(idx) == 2:
 		return "both " + names[0] + " and " + names[1]
 	}
 	return strings.Join(names[:last], ", ") + " and " + names[last]
+}
+
+// countedString names n applications that each read as a.String().
+func (a GeneratedApplication) countedString(n int) string {
+	if a.componentOrName() == a.Name {
+		return fmt.Sprintf("%d applications %q of component %q", n, a.Name, a.Name)
+	}
+	return fmt.Sprintf("%d sub-applications %q of component %q", n, a.Name, a.Component)
 }
