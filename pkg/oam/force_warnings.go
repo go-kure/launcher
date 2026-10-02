@@ -83,64 +83,89 @@ func (s *forceScan) addUnpatched(apps []GeneratedApplication) {
 }
 
 // addPatched records the volumes of one leaf bundle's apps as Flux applies them
-// after the bundle's patches: each volume the build keeps, named by the first
-// application that generates it, annotated as its patched copies are. A patch
-// that deletes a volume drops it; one the build holds that no application
-// generated as such (a patch renamed it) is named by the bundle's first
-// application, and its force key is not named as the patches' since its
-// generated copy is unknown. A bundle with no volume is not built: a patch adds
-// no object.
+// after the bundle's patches. kustomize keeps its resources in input order and a
+// patch never reorders them, so each built resource is traced to the generated
+// resource it was built from: the next one with its identity, skipping those a
+// patch deleted, or, when its identity was not generated at all, the next one in
+// order (a patch renamed it; a rename after a deletion in one bundle is read as
+// renaming the deleted one). Its volumes, a list envelope's members included, are
+// named by that resource's application and read as patched; a force key is named
+// as the patches' unless the volume was generated with it. A patch can add a
+// volume, as a member of a list envelope it extends, so a bundle with no volume is
+// built too.
 func (s *forceScan) addPatched(apps []GeneratedApplication) error {
+	type generatedResource struct {
+		app GeneratedApplication
+		obj client.Object
+		id  objectIdentity
+	}
 	var objects []*client.Object
-	var order []objectIdentity
-	producer := map[objectIdentity]GeneratedApplication{}
+	var inputs []generatedResource
+	inputIDs := map[objectIdentity]bool{}
 	generated := map[objectIdentity]bool{}
 	for _, app := range apps {
 		for _, p := range generatedObjects(app) {
 			objects = append(objects, p)
-			for _, obj := range appliedObjects(*p) {
-				id, ok := volumeIdentity(obj)
-				if !ok {
-					continue
+			for _, r := range kustomizeInlined(*p) {
+				id := resourceIdentity(r)
+				inputs = append(inputs, generatedResource{app: app, obj: r, id: id})
+				inputIDs[id] = true
+				for _, obj := range fluxExpanded(r) {
+					if vid, ok := volumeIdentity(obj); ok {
+						generated[vid] = generated[vid] || forceSelected(obj)
+					}
 				}
-				if _, seen := producer[id]; !seen {
-					producer[id] = app
-					order = append(order, id)
-				}
-				generated[id] = generated[id] || forceSelected(obj)
 			}
 		}
-	}
-	if len(order) == 0 {
-		return nil
 	}
 	built, err := applyBundlePatches(objects, apps[0].Patches)
 	if err != nil {
 		return err
 	}
-	var builtOrder []objectIdentity
-	patched := map[objectIdentity]bool{}
-	for _, obj := range built {
-		id, ok := volumeIdentity(obj)
-		if !ok {
-			continue
+	next := 0
+	for _, out := range built {
+		outID := resourceIdentity(out)
+		producer, origin := apps[0], client.Object(nil)
+		for next < len(inputs) {
+			in := inputs[next]
+			next++
+			if in.id == outID || !inputIDs[outID] {
+				producer, origin = in.app, in.obj
+				break
+			}
 		}
-		if _, seen := patched[id]; !seen {
-			builtOrder = append(builtOrder, id)
-		}
-		patched[id] = patched[id] || forceSelected(obj)
-	}
-	for _, id := range order {
-		if selected, kept := patched[id]; kept {
-			s.add(id, producer[id], selected, selected && generated[id])
-		}
-	}
-	for _, id := range builtOrder {
-		if _, ok := producer[id]; !ok {
-			s.add(id, apps[0], patched[id], patched[id])
+		for _, obj := range fluxExpanded(out) {
+			id, ok := volumeIdentity(obj)
+			if !ok {
+				continue
+			}
+			wasSelected, wasGenerated := generated[id]
+			if !wasGenerated && origin != nil {
+				if _, isVolume := volumeIdentity(origin); isVolume {
+					wasSelected = forceSelected(origin)
+				}
+			}
+			selected := forceSelected(obj)
+			s.add(id, producer, selected, selected && wasSelected)
 		}
 	}
 	return nil
+}
+
+// resourceIdentity keys obj as kustomize and Flux key a resource: API group, kind,
+// namespace and name.
+func resourceIdentity(obj client.Object) objectIdentity {
+	gvk := obj.GetObjectKind().GroupVersionKind()
+	return objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()}
+}
+
+// fluxExpanded is Flux's ReadObjects step for one built resource: a list envelope
+// (items is an array, kind unchecked) stands for its members, one level only.
+func fluxExpanded(obj client.Object) []client.Object {
+	if u, ok := obj.(*unstructured.Unstructured); ok && u.IsList() {
+		return listMembers(u)
+	}
+	return []client.Object{obj}
 }
 
 // bundleEnd returns the end of the run of apps, from start, that one leaf bundle
@@ -175,9 +200,10 @@ func bundleEnd(apps []GeneratedApplication, start int) int {
 //
 // A bundle's patches (GeneratedApplication.Patches, from the fluxcd-patches trait)
 // are applied first, as Flux applies its Kustomization's spec.patches: the objects
-// of a leaf bundle holding a volume are built with kustomize and the patched copies
-// are read (applyBundlePatches). A patch can add the force key, remove or disable
-// it, or delete the volume; a force key only patches add is named as theirs. A
+// of a leaf bundle with patches are built with kustomize and the patched copies are
+// read (applyBundlePatches), each named by the application that generated it. A
+// patch can add the force key, remove or disable it, delete or rename the volume,
+// or add one to a list envelope; a force key only patches add is named as theirs. A
 // patch set that does not build is warned once, naming the bundle's first
 // application and the build error, and that bundle's objects are read unpatched.
 // postBuild substitution and anything the cluster changes on apply are not
@@ -233,12 +259,7 @@ func forceSelected(obj client.Object) bool {
 func appliedObjects(obj client.Object) []client.Object {
 	var out []client.Object
 	for _, built := range kustomizeInlined(obj) {
-		u, ok := built.(*unstructured.Unstructured)
-		if !ok || !u.IsList() {
-			out = append(out, built)
-			continue
-		}
-		out = append(out, listMembers(u)...)
+		out = append(out, fluxExpanded(built)...)
 	}
 	return out
 }

@@ -26,15 +26,15 @@ const (
 	patchedBundleManifests = "manifests.yaml"
 )
 
-// applyBundlePatches returns the objects Flux applies for one leaf bundle whose
-// Kustomization carries patches (spec.patches, which the fluxcd-patches trait
-// sets). It builds them as kustomize-controller does: the objects encoded as a
+// applyBundlePatches returns the resources kustomize builds for one leaf bundle
+// whose Kustomization carries patches (spec.patches, which the fluxcd-patches
+// trait sets), as kustomize-controller builds them: the objects encoded as a
 // delivered artifact encodes them, a kustomization.yaml listing them with the
 // patches appended in order and each target mapped field for field, built with
-// krusty under kustomize-controller's options, and read back as Flux's
-// ReadObjects reads a build (a list envelope still standing stands for its
-// members). A patch set that does not build is an error.
-func applyBundlePatches(objects []*client.Object, patches []stack.Patch) ([]client.Object, error) {
+// krusty under kustomize-controller's options. The resources keep their input
+// order (a patch never reorders them), list envelopes not yet expanded the way
+// Flux's ReadObjects expands them. A patch set that does not build is an error.
+func applyBundlePatches(objects []*client.Object, patches []stack.Patch) ([]*unstructured.Unstructured, error) {
 	manifests, err := kio.EncodeObjectsToYAML(objects)
 	if err != nil {
 		return nil, errors.Wrap(err, "encoding the bundle's objects")
@@ -66,28 +66,18 @@ func applyBundlePatches(objects []*client.Object, patches []stack.Patch) ([]clie
 	if err := fs.WriteFile(path.Join(patchedBundleDir, "kustomization.yaml"), kustYAML); err != nil {
 		return nil, errors.Wrap(err, "writing the bundle's kustomization")
 	}
-	built, err := kustomizeBuild(fs, patchedBundleDir)
-	if err != nil {
-		return nil, err
-	}
-	var out []client.Object
-	for _, m := range built {
-		u := &unstructured.Unstructured{Object: m}
-		if u.IsList() {
-			out = append(out, listMembers(u)...)
-			continue
-		}
-		out = append(out, u)
-	}
-	return out, nil
+	return kustomizeBuild(fs, patchedBundleDir)
 }
 
 // kustomizeBuild runs krusty on dir as fluxcd/pkg/kustomize Build runs it: under
 // a mutex, with load restrictions off and plugins disabled, and a panic recovered
-// as an error. (Build also resets kustomize's global OpenAPI schema around each
-// build, which matters only to a kustomization with an openapi field; this one has
-// none.)
-func kustomizeBuild(fs filesys.FileSystem, dir string) (out []map[string]any, err error) {
+// as an error. It keeps the input order, as Flux's zero-value Reorder option does
+// (it is neither legacy nor unspecified, so nothing is sorted), named here so a
+// change of default cannot reorder it: each resource is traced to the object it
+// was built from by position. (Build also resets kustomize's global OpenAPI schema
+// around each build, which matters only to a kustomization with an openapi
+// field; this one has none.)
+func kustomizeBuild(fs filesys.FileSystem, dir string) (out []*unstructured.Unstructured, err error) {
 	kustomizeBuildMutex.Lock()
 	defer kustomizeBuildMutex.Unlock()
 	defer func() {
@@ -96,6 +86,7 @@ func kustomizeBuild(fs filesys.FileSystem, dir string) (out []map[string]any, er
 		}
 	}()
 	res, err := krusty.MakeKustomizer(&krusty.Options{
+		Reorder:          krusty.ReorderOptionNone,
 		LoadRestrictions: kustypes.LoadRestrictionsNone,
 		PluginConfig:     kustypes.DisabledPluginConfig(),
 	}).Run(fs, dir)
@@ -107,7 +98,7 @@ func kustomizeBuild(fs filesys.FileSystem, dir string) (out []map[string]any, er
 		if err != nil {
 			return nil, errors.Wrap(err, "reading the patched objects")
 		}
-		out = append(out, m)
+		out = append(out, &unstructured.Unstructured{Object: m})
 	}
 	return out, nil
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -143,19 +144,66 @@ func TestWarnForcedVolumes_BundlePatches(t *testing.T) {
 }
 
 // TestWarnForcedVolumes_BundlePatchScope pins that a bundle's patches reach only
-// its own objects, and that a bundle with no volume is not built.
+// its own objects.
 func TestWarnForcedVolumes_BundlePatchScope(t *testing.T) {
 	got := patchedWarnings(t,
 		&stack.Bundle{Name: "a", Applications: []*stack.Application{fixedApp("a", claimObject("shop", "data", nil))},
 			Patches: []stack.Patch{{Patch: addForceJSON, Target: claimKind()}}},
 		&stack.Bundle{Name: "b", Applications: []*stack.Application{fixedApp("b", claimObject("shop", "other", nil))}},
-		&stack.Bundle{Name: "c", Applications: []*stack.Application{fixedApp("c", configMap("shop", "web"))},
-			Patches: []stack.Patch{{Patch: "not: [valid"}}},
 	)
 	want := []string{claimWarning("data", `component "a"`, patchedReason)}
 	if !slices.Equal(got, want) {
 		t.Errorf("warnings =\n%q\nwant\n%q", got, want)
 	}
+}
+
+// TestWarnForcedVolumes_BundlePatchProvenance pins that a patched volume is named
+// by the application that generated it, in generation order, even when a patch
+// renames it, and that a volume a patch adds to a list envelope is found in a
+// bundle that generated none.
+func TestWarnForcedVolumes_BundlePatchProvenance(t *testing.T) {
+	t.Run("rename", func(t *testing.T) {
+		// Kinds mixed, so kustomize's legacy sort would reorder them: a
+		// ConfigMap, then a claim and a volume, which that sort puts first.
+		got := patchedWarnings(t, &stack.Bundle{Name: "db", Applications: []*stack.Application{
+			fixedApp("config", configMap("shop", "settings")),
+			fixedApp("web", claimObject("shop", "web", forceAnnotated("enabled"))),
+			fixedApp("cache", claimObject("shop", "data", nil)),
+			fixedApp("later", volumeObject("pv-later", forceAnnotated("enabled"))),
+		}, Patches: []stack.Patch{{Patch: "- op: replace\n  path: /metadata/name\n  value: renamed\n" +
+			"- op: add\n  path: /metadata/annotations\n  value:\n    kustomize.toolkit.fluxcd.io/force: enabled\n",
+			Target: &stack.PatchSelector{Kind: "PersistentVolumeClaim", Name: "data"}}}})
+		want := []string{
+			claimWarning("web", `component "web"`, annotationReason),
+			claimWarning("renamed", `component "cache"`, patchedReason),
+			`PersistentVolume pv-later (component "later") is force-applied (` + annotationReason + `)` + forcedTail,
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
+		}
+	})
+	t.Run("envelope gains a volume", func(t *testing.T) {
+		envelope := collisionObject(&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "example.com/v1", "kind": "Widget",
+			"metadata": map[string]any{"namespace": "shop", "name": "envelope"},
+			"items":    []any{map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"namespace": "shop", "name": "cm"}}},
+		}})
+		got := patchedWarnings(t, &stack.Bundle{Name: "raw", Applications: []*stack.Application{fixedApp("raw", envelope)},
+			Patches: []stack.Patch{{Patch: "- op: add\n  path: /items/-\n  value:\n    apiVersion: v1\n    kind: PersistentVolumeClaim\n" +
+				"    metadata:\n      namespace: shop\n      name: added\n      annotations:\n        kustomize.toolkit.fluxcd.io/force: enabled\n",
+				Target: &stack.PatchSelector{Kind: "Widget"}}}})
+		want := []string{claimWarning("added", `component "raw"`, patchedReason)}
+		if !slices.Equal(got, want) {
+			t.Errorf("warnings =\n%q\nwant\n%q", got, want)
+		}
+	})
+	t.Run("a volume-less bundle's patches that do not build", func(t *testing.T) {
+		got := patchedWarnings(t, &stack.Bundle{Name: "c", Applications: []*stack.Application{fixedApp("c", configMap("shop", "web"))},
+			Patches: []stack.Patch{{Patch: "not: [valid"}}})
+		if len(got) != 1 || !strings.HasPrefix(got[0], `the patches of the bundle of component "c" could not be applied`) {
+			t.Errorf("warnings = %q, want one build warning", got)
+		}
+	})
 }
 
 // TestWarnForcedVolumes_BundlePatchesFailToBuild pins the fallback: a patch set
