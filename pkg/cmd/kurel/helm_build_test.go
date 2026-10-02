@@ -375,6 +375,27 @@ func TestBuildCommand_HelmSourceNameTakenByAuthoredComponent(t *testing.T) {
 	}
 }
 
+// TestBuiltinHelm_ValuesFromKindRefused: a helm component's valuesFrom reaches
+// the helmrelease it lowers to, whose kind check refuses a kind Flux does not
+// admit at build time (go-kure/launcher#748). Under valuesMode: configMap the
+// values ConfigMap's entry comes first, so the authored entry is index 1.
+func TestBuiltinHelm_ValuesFromKindRefused(t *testing.T) {
+	for mode, want := range map[string]string{
+		"inline":    `helmrelease: valuesFrom[0].kind "secret" is not one of Secret, ConfigMap`,
+		"configMap": `helmrelease: valuesFrom[1].kind "secret" is not one of Secret, ConfigMap`,
+	} {
+		t.Run(mode, func(t *testing.T) {
+			comp := helmValuesComponent(map[string]any{"replicaCount": 2})
+			comp.Properties["valuesMode"] = mode
+			comp.Properties["valuesFrom"] = []any{map[string]any{"kind": "secret", "name": "creds"}}
+			_, err := helmValuesTransform(t, "", comp)
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want one containing %q", err, want)
+			}
+		})
+	}
+}
+
 // TestBuiltinHelm_FluxNamespace: under a Flux namespace the generated source
 // and the releases land in it, a release's sourceRef (no namespace) resolves to
 // the source there, and the release targets the application namespace.

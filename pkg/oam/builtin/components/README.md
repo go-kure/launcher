@@ -2354,10 +2354,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `upgrade.strategy.retryInterval`. A nested key matches case-insensitively at every level, as
   the decode does. Exactly one of
   `chart` and `chartRef` is required. `values` must be a JSON object; a non-finite number
-  (`.nan`, `.inf`) is a build error, never a panic. Nothing else is checked here: the enum checks on `driftDetection.mode`,
-  `install.crds`, `upgrade.crds` and `valuesFrom[].kind`, and the required
-  `valuesFrom[].name`, are left to the HelmRelease CRD's own admission, and there is no
-  `releaseName` default — Flux's own applies.
+  (`.nan`, `.inf`) is a build error, never a panic. Each `valuesFrom[].kind` must be
+  `Secret` or `ConfigMap`, exactly as Flux's enum spells them; a missing or other kind is a
+  build error naming the entry's index (go-kure/launcher#748). Like the other checks it runs
+  again in `Generate`, and it covers the `valuesFrom` a `helm` component passes through.
+  Nothing else is checked here: the enum checks on `driftDetection.mode`, `install.crds` and
+  `upgrade.crds`, and the required `valuesFrom[].name`, are left to the HelmRelease CRD's own
+  admission, and there is no `releaseName` default — Flux's own applies.
 
   **Identity and namespaces.** The HelmRelease is named after the component and lands in
   the Flux namespace when one is configured, else in the application namespace

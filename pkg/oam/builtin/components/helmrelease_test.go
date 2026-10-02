@@ -289,6 +289,12 @@ func TestHelmReleaseHandler_Refuses(t *testing.T) {
 		{"unknown top-level key", map[string]any{"chart": hrChart(), "chartt": "x"}, `unknown field "chartt"`},
 		{"unknown nested key", map[string]any{"chart": map[string]any{"spec": map[string]any{"chart": "p", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "p"}, "chartVersion": "1"}}}, `unknown field "chartVersion"`},
 		{"unknown key in valuesFrom item", map[string]any{"chart": hrChart(), "valuesFrom": []any{map[string]any{"kind": "Secret", "name": "s", "key": "x"}}}, `unknown field "key"`},
+		// valuesFrom kind is Flux's enum, checked at build time
+		// (go-kure/launcher#748): exact case, no other kind, any entry.
+		{"valuesFrom kind missing", map[string]any{"chart": hrChart(), "valuesFrom": []any{map[string]any{"name": "s"}}}, "helmrelease: valuesFrom[0].kind is required: one of Secret, ConfigMap"},
+		{"valuesFrom kind lowercase", map[string]any{"chart": hrChart(), "valuesFrom": []any{map[string]any{"kind": "secret", "name": "s"}}}, `helmrelease: valuesFrom[0].kind "secret" is not one of Secret, ConfigMap`},
+		{"valuesFrom kind a source kind", map[string]any{"chart": hrChart(), "valuesFrom": []any{map[string]any{"kind": "HelmRepository", "name": "s"}}}, `helmrelease: valuesFrom[0].kind "HelmRepository" is not one of Secret, ConfigMap`},
+		{"valuesFrom kind on a later entry", map[string]any{"chart": hrChart(), "valuesFrom": []any{map[string]any{"kind": "ConfigMap", "name": "a"}, map[string]any{"kind": "Configmap", "name": "b"}}}, `helmrelease: valuesFrom[1].kind "Configmap" is not one of Secret, ConfigMap`},
 		{"wrong type bool", map[string]any{"chart": hrChart(), "suspend": "yes"}, "suspend"},
 		{"wrong type integer", map[string]any{"chart": hrChart(), "maxHistory": "3"}, "maxHistory"},
 		{"wrong type object", map[string]any{"chart": "podinfo"}, "chart"},
@@ -356,6 +362,7 @@ func TestHelmReleaseConfig_GenerateValidatesDirectConfig(t *testing.T) {
 		"values not JSON":  {Name: "web", Spec: helmv2.HelmReleaseSpec{ChartRef: chartRef, Values: &apiextensionsv1.JSON{Raw: []byte(`{"a":`)}}},
 		"values a string":  {Name: "web", Spec: helmv2.HelmReleaseSpec{ChartRef: chartRef, Values: &apiextensionsv1.JSON{Raw: []byte(`"s"`)}}},
 		"trailing content": {Name: "web", Spec: helmv2.HelmReleaseSpec{ChartRef: chartRef, Values: &apiextensionsv1.JSON{Raw: []byte(`{"a":1} {}`)}}},
+		"valuesFrom kind":  {Name: "web", Spec: helmv2.HelmReleaseSpec{ChartRef: chartRef, ValuesFrom: []helmv2.ValuesReference{{Kind: "Bucket", Name: "b"}}}},
 	}
 	names := make([]string, 0, len(cases))
 	for n := range cases {
