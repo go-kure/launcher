@@ -37,7 +37,8 @@
 #   - a printf verb carrying the `#` flag, so `%#12x`, `%+#12.6g`, the indexed
 #     `%#12[1]x` and the `*` width or precision `%#12.*x` pass;
 #   - a shell prefix trim `${name#...}` or `${name##...}`, also on an array
-#     element, so `${port#80}` and `${items[0]#80}` pass.
+#     element whose subscript holds no `#`, so `${port#80}` and
+#     `${items[0]#80}` pass while `${items["see #227"]#80}` does not.
 #
 # Escape hatch: `allow-ref` anywhere on the same line exempts that line. Needed
 # for an all-digit CSS colour such as `#123`, which no pattern can tell apart
@@ -49,8 +50,9 @@
 # message such as "resolve#2" would trip it), an ownerless all-numeric
 # repository name such as `123#456` (digits on both sides of `#` also occur in
 # ordinary text), a qualified `owner/repo#N` that names the wrong repository,
-# and a reference that quoting moves out of a shell trim's pattern, such as
-# `echo "${x#" "see #227" "}"` (telling it apart needs quote-aware parsing).
+# and any reference inside a shell trim's pattern, with or without a subscript
+# (`${x# see #227}`, `${items[0]# see #227}`), quoting included
+# (`echo "${x#" "see #227" "}"`; telling those apart needs quote-aware parsing).
 #
 # Usage: check-issue-refs.sh [--root DIR]
 # Exit:  0 clean, 1 references found, 2 usage or scan error.
@@ -74,7 +76,7 @@ EMPH='(^|[^A-Za-z0-9_&./-])_([A-Za-z0-9_.-]*[A-Za-z][A-Za-z0-9_.-]*)?#[0-9]{2,5}
 LINK='^(.*)\]\(([^()[:space:]"'"'"'`]|\([^()[:space:]"'"'"'`]*\))*\)(.*)$'
 URL='^(.*)[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]<>()"'"'"'`]*(.*)$'
 VERB='^(.*)%[-+ 0]*#[-+ #0]*(\[[0-9]+\])?(\*|[0-9]*)(\.(\[[0-9]+\])?(\*|[0-9]*))?(\[[0-9]+\])?[A-Za-z](.*)$'
-TRIM='^(.*)\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]}]*\])?##?[^}]*\}(.*)$'
+TRIM='^(.*)\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]}#]*\])?##?[^}]*\}(.*)$'
 
 hits="$(mktemp)"
 trap 'rm -f "$hits"' EXIT
