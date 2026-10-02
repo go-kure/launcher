@@ -227,7 +227,9 @@ func TestHelmRule_SourceNameIsPerDocument(t *testing.T) {
 }
 
 // TestHelmRule_ReferenceForm: source.name references an existing source of each
-// kind, with its namespace, and nothing but the release is emitted.
+// kind, with its namespace, and nothing but the release is emitted. A
+// GitRepository or Bucket source is a chart.spec.sourceRef with chart as the
+// chart's path in the artifact, as a HelmRepository is.
 func TestHelmRule_ReferenceForm(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -237,6 +239,10 @@ func TestHelmRule_ReferenceForm(t *testing.T) {
 	}{
 		{"HelmRepository", map[string]any{"chart": "podinfo", "version": "6.5.0", "source": map[string]any{"name": "charts", "kind": "HelmRepository", "namespace": "flux-system"}},
 			"chart", map[string]any{"spec": map[string]any{"chart": "podinfo", "version": "6.5.0", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "charts", "namespace": "flux-system"}}}},
+		{"GitRepository", map[string]any{"chart": "./charts/podinfo", "source": map[string]any{"name": "podinfo", "kind": "GitRepository", "namespace": "flux-system"}},
+			"chart", map[string]any{"spec": map[string]any{"chart": "./charts/podinfo", "sourceRef": map[string]any{"kind": "GitRepository", "name": "podinfo", "namespace": "flux-system"}}}},
+		{"Bucket", map[string]any{"chart": "charts/podinfo", "source": map[string]any{"name": "artifacts", "kind": "Bucket"}},
+			"chart", map[string]any{"spec": map[string]any{"chart": "charts/podinfo", "sourceRef": map[string]any{"kind": "Bucket", "name": "artifacts"}}}},
 		{"OCIRepository", map[string]any{"source": map[string]any{"name": "podinfo", "kind": "OCIRepository"}},
 			"chartRef", map[string]any{"kind": "OCIRepository", "name": "podinfo"}},
 		{"HelmChart", map[string]any{"source": map[string]any{"name": "podinfo", "kind": "HelmChart", "namespace": "flux-system"}},
@@ -365,10 +371,18 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"inline HelmChart", map[string]any{"chart": "a", "source": map[string]any{"url": "https://charts.example.com", "kind": "HelmChart"}}, `helm: source.kind "HelmChart" is not valid for inline source`},
 		{"inline OCI with chart", map[string]any{"chart": "a", "source": oci}, "helm: chart is not used with source.kind OCIRepository"},
 		{"reference without kind", map[string]any{"chart": "a", "source": map[string]any{"name": "x"}}, "helm: source.kind is required when source.name is set"},
+		{"inline GitRepository", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository"}}, `helm: source.kind "GitRepository" is not valid for inline source; must be HelmRepository or OCIRepository`},
+		{"inline Bucket", map[string]any{"chart": "a", "source": map[string]any{"url": "https://minio.example.com", "kind": "Bucket"}}, `helm: source.kind "Bucket" is not valid for inline source; must be HelmRepository or OCIRepository`},
+		{"reference unknown kind", map[string]any{"chart": "a", "source": map[string]any{"name": "x", "kind": "ExternalArtifact"}}, `helm: source.kind "ExternalArtifact" is not valid for a source reference; must be HelmRepository, GitRepository, Bucket, OCIRepository, or HelmChart`},
 		{"reference HelmRepository without chart", map[string]any{"source": map[string]any{"name": "x", "kind": "HelmRepository"}}, "helm: source.kind HelmRepository requires chart to be specified"},
+		{"reference GitRepository without chart", map[string]any{"source": map[string]any{"name": "x", "kind": "GitRepository"}}, "helm: source.kind GitRepository requires chart to be specified"},
+		{"reference Bucket without chart", map[string]any{"source": map[string]any{"name": "x", "kind": "Bucket"}}, "helm: source.kind Bucket requires chart to be specified"},
+		{"reference GitRepository with version", map[string]any{"chart": "./charts/a", "version": "1.0.0", "source": map[string]any{"name": "x", "kind": "GitRepository"}}, "helm: version is not used with source.kind GitRepository, whose chart is read at the source's fetched revision"},
+		{"reference Bucket with version", map[string]any{"chart": "charts/a", "version": "1.0.0", "source": map[string]any{"name": "x", "kind": "Bucket"}}, "helm: version is not used with source.kind Bucket, whose chart is read at the source's fetched revision"},
 		{"reference OCI with chart", map[string]any{"chart": "a", "source": map[string]any{"name": "x", "kind": "OCIRepository"}}, "helm: chart is not used with source.kind OCIRepository"},
 		{"reference HelmChart with version", map[string]any{"version": "1.0.0", "source": map[string]any{"name": "x", "kind": "HelmChart"}}, "helm: version is not used with a referenced source.kind HelmChart"},
 		{"template reference", map[string]any{"delivery": "template", "chart": "a", "source": map[string]any{"name": "x", "kind": "HelmRepository"}}, "helm: delivery: template requires an inline source URL; source.name is not supported"},
+		{"template GitRepository reference", map[string]any{"delivery": "template", "chart": "./charts/a", "source": map[string]any{"name": "x", "kind": "GitRepository"}}, "helm: delivery: template requires an inline source URL; source.name is not supported"},
 		{"template valuesMode configMap", template(map[string]any{"valuesMode": "configMap"}), "helm: delivery: template does not support valuesMode: configMap"},
 		{"template OCI without version", map[string]any{"delivery": "template", "source": oci}, "helm: delivery: template with an OCIRepository source requires version to be set"},
 		{"template OCI with chart", map[string]any{"delivery": "template", "chart": "a", "version": "1.0.0", "source": oci}, "helm: chart is not used with source.kind OCIRepository"},

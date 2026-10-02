@@ -56,9 +56,11 @@ var helmFluxOnlyKeys = []string{"interval", "releaseName", "targetNamespace", "d
 // own interval default, never the release interval, so the identity says
 // everything about its content.
 //
-// With source.name the release references an existing source of kind
-// HelmRepository (chart.spec.sourceRef), OCIRepository or HelmChart (chartRef),
-// optionally in source.namespace, and nothing else is emitted.
+// With source.name the release references an existing source, optionally in
+// source.namespace, and nothing else is emitted: a HelmRepository, GitRepository
+// or Bucket through chart.spec.sourceRef, with chart naming the chart (its path
+// in a GitRepository or Bucket artifact), or an OCIRepository or HelmChart
+// through chartRef.
 //
 // The properties decode strictly: a key the schema does not declare, at any
 // depth of source, is refused. delivery: template refuses every key only a
@@ -84,8 +86,8 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: desc}
 	}
 	return map[string]oam.PropertySchema{
-		"chart":    str("Chart name within a HelmRepository source, where it is required. Refused with an OCIRepository or HelmChart source, which already name the chart."),
-		"version":  str("Chart version. For an inline oci:// source it is the OCIRepository's ref.tag, and required under delivery: template. Refused with a referenced OCIRepository or HelmChart source, which already pin it."),
+		"chart":    str("Chart name within a HelmRepository source, or the chart's path within a referenced GitRepository or Bucket source; required with those three. Refused with an OCIRepository or HelmChart source, which already name the chart."),
+		"version":  str("Chart version. For an inline oci:// source it is the OCIRepository's ref.tag, and required under delivery: template. Refused with a referenced OCIRepository or HelmChart source, which already pin it, and with a GitRepository or Bucket source, whose chart Flux reads at the fetched revision, ignoring any version."),
 		"delivery": {Type: oam.PropertyTypeString, Default: "flux", Enum: []any{"flux", "template"}, Description: "flux emits a HelmRelease (plus its source for an inline URL); template renders the chart client-side at build time."},
 		"source": {
 			Type:        oam.PropertyTypeObject,
@@ -93,7 +95,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 			Description: "Chart source: an inline url (the source is generated, and shared by helm components of the document with the same URL and, for OCI, version), or a reference (name, kind, namespace) to an existing source CR.",
 			Properties: map[string]oam.PropertySchema{
 				"url":       str("Inline chart location: an http:// or https:// Helm repository URL, or an oci:// URL naming the chart. Mutually exclusive with name."),
-				"kind":      {Type: oam.PropertyTypeString, Enum: []any{"HelmRepository", "OCIRepository", "HelmChart"}, Description: "Source kind. With url it is inferred from the scheme when unset and must agree with it (HelmRepository or OCIRepository); with name it is required."},
+				"kind":      {Type: oam.PropertyTypeString, Enum: []any{"HelmRepository", "GitRepository", "Bucket", "OCIRepository", "HelmChart"}, Description: "Source kind. With url it is inferred from the scheme when unset and must agree with it (HelmRepository or OCIRepository); with name it is required and may be any of the five."},
 				"name":      str("Name of an existing source CR to reference. Mutually exclusive with url; not supported under delivery: template."),
 				"namespace": str("Namespace of the referenced source CR. Only with name."),
 			},
@@ -232,18 +234,24 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 		switch kind {
 		case "":
 			return oam.LoweringResult{}, errors.Errorf("%s: source.kind is required when source.name is set", helmType)
-		case "HelmRepository", "OCIRepository", "HelmChart":
+		case "HelmRepository", "GitRepository", "Bucket", "OCIRepository", "HelmChart":
 		default:
-			return oam.LoweringResult{}, errors.Errorf("%s: source.kind %q is not valid for a source reference; must be HelmRepository, OCIRepository, or HelmChart", helmType, kind)
+			return oam.LoweringResult{}, errors.Errorf("%s: source.kind %q is not valid for a source reference; must be HelmRepository, GitRepository, Bucket, OCIRepository, or HelmChart", helmType, kind)
 		}
-		if kind == "HelmRepository" && props.Chart == "" {
-			return oam.LoweringResult{}, errors.Errorf("%s: source.kind HelmRepository requires chart to be specified", helmType)
+		if helmChartTemplateKind(kind) && props.Chart == "" {
+			return oam.LoweringResult{}, errors.Errorf("%s: source.kind %s requires chart to be specified", helmType, kind)
+		}
+		// Flux reads a GitRepository or Bucket chart at the source's fetched
+		// revision and ignores chart.spec.version, so an authored one would be
+		// silently dropped.
+		if (kind == "GitRepository" || kind == "Bucket") && props.Version != "" {
+			return oam.LoweringResult{}, errors.Errorf("%s: version is not used with source.kind %s, whose chart is read at the source's fetched revision", helmType, kind)
 		}
 	}
 	// An OCIRepository or HelmChart source already names the chart, and a
 	// chartRef has no version: an inline OCI version becomes the generated
 	// source's ref.tag, and a referenced source pins its own.
-	if kind != "HelmRepository" {
+	if !helmChartTemplateKind(kind) {
 		if props.Chart != "" {
 			return oam.LoweringResult{}, errors.Errorf("%s: chart is not used with source.kind %s, which already names the chart", helmType, kind)
 		}
@@ -269,7 +277,7 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 			result.Components = append(result.Components, source)
 		}
 	}
-	if kind == "HelmRepository" {
+	if helmChartTemplateKind(kind) {
 		spec := map[string]any{"chart": props.Chart, "sourceRef": ref}
 		if props.Version != "" {
 			spec["version"] = props.Version
@@ -287,6 +295,17 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 		Annotations: comp.Annotations,
 	})
 	return result, nil
+}
+
+// helmChartTemplateKind reports whether a source of kind is read through the
+// HelmRelease's chart template (chart.spec.sourceRef), whose kinds Flux limits
+// to HelmRepository, GitRepository and Bucket. Every other kind is a chartRef.
+func helmChartTemplateKind(kind string) bool {
+	switch kind {
+	case "HelmRepository", "GitRepository", "Bucket":
+		return true
+	}
+	return false
 }
 
 // helmGeneratedSource names and builds the source component for an inline URL.
