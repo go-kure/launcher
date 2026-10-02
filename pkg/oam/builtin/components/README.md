@@ -2106,6 +2106,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `source` is refused, and so are:
     - `delivery: native`;
     - `source.namespace` with an inline source;
+    - an inline HelmRepository or OCIRepository URL carrying a user or password
+      (`https://user:token@host`, `oci://user@registry/chart`), under either
+      delivery: the URL is copied verbatim into the generated source or the
+      render, so the credential would sit in plain text in the output.
+      Credentials go in the `secretRef` of an authored `helmrepository` or
+      `ocirepository`, referenced with `source.name`; a client-side render takes
+      none. No message repeats the URL, not even the refusal of one that does
+      not parse;
     - an inline GitRepository without exactly one `source.ref` field, or with a
       URL that is not `http://` or `https://` (an `ssh://` one needs credentials),
       or one that is more or less than a host, an optional port and a
@@ -2269,8 +2277,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   required: `url` (required) is an `http://` or `https://` Helm repository URL, or an `oci://`
   URL naming the chart; `kind` (optional, `HelmRepository` or `OCIRepository`) is inferred from
   the scheme when unset — `oci://` is `OCIRepository`, anything else `HelmRepository` — and
-  must agree with it when set. `chart` is required for a `HelmRepository`; an `OCIRepository`'s
-  URL already names the chart, so there `chart` is not used. `version`
+  must agree with it when set. A `url` carrying a user or password is refused, since the render
+  takes no credentials, and the message never repeats it. `chart` is required for a
+  `HelmRepository`; an `OCIRepository`'s URL already names the chart, so there `chart` is not
+  used. `version`
   is required for an `OCIRepository`. `values` is an open object, the Helm values tree, and must
   be representable as JSON: a non-finite number (`.nan`, `.inf`) is a build error. The source
   checks are shared with the `helm` rule's inline source rather than copied.
