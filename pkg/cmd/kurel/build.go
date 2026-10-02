@@ -211,6 +211,7 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	if err := oam.CheckInDocumentCollisions(apps); err != nil {
 		return errors.Wrapf(err, "application %q", app.Metadata.Name)
 	}
+	transformer.WarnForcedVolumes(apps)
 	objects := generatedObjects(apps)
 
 	if len(objects) == 0 {

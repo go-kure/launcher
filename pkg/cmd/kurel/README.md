@@ -254,7 +254,11 @@ Every object of the stdout build is in exactly one artifact, and the artifacts t
 hold exactly the stdout build's objects. The layout-augmenter check above runs first, so
 a component it refuses fails the build before anything is written. Output is
 byte-identical across runs. A build that renders no objects still warns `no resources
-generated` and writes no `<app>.yaml` (one an earlier build wrote stays), but with `--oci-repository` it writes the delivery
+generated` and writes no `<app>.yaml` (one an earlier build wrote stays). A build also
+warns, on stderr and with unchanged output, once per PersistentVolume or
+PersistentVolumeClaim that Flux would force-apply — through the `force-replace` trait or a
+`reconciliation` policy's `force: true` — because an immutable-field change then deletes
+and recreates it (go-kure/launcher#720; `force_warning_test.go`). With `--oci-repository` it writes the delivery
 output: every bundle's artifact directory holds only the empty `kustomization.yaml`, and a
 `manifests.yaml` an earlier build left there is removed.
 

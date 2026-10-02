@@ -100,6 +100,11 @@ leaves the bundle's own value unchanged rather than forcing `false`. A property 
 with the wrong type (`interval: 5`, `prune: "true"`) is an error rather than ignored;
 `null` reads as absent. At least one property
 must be given, and at most one `reconciliation` policy is allowed per application.
+`force: true` force-applies every object of the bundle, its PersistentVolumeClaims and
+PersistentVolumes included: one whose immutable field changes is deleted and recreated, which
+can lose its data. It stays allowed, and `Transformer.WarnForcedVolumes` (which `kurel build`
+runs) warns once per such claim or volume, as it does for the `force-replace` trait's
+annotation (go-kure/launcher#720; see the `pkg/oam` README).
 
 ```yaml
 policies:
