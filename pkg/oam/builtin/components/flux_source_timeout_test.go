@@ -58,6 +58,9 @@ func TestFluxSourceComponents_LongTimeoutEmittedInMinutes(t *testing.T) {
 		{"120m30.5s", "120m30.5s"},
 	}
 	for _, k := range fluxSourceKinds() {
+		if _, ok := k.handler.PropertySchema()["timeout"]; !ok {
+			continue // a HelmChart has no timeout
+		}
 		// The same source with a timeout below an hour: the typed object, as
 		// every source was emitted before.
 		base := encodeObjects(t, generateFluxSource(t, k, "10m"))

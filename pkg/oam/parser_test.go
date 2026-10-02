@@ -395,16 +395,12 @@ spec:
 	if len(valErr.ValidValues) == 0 {
 		t.Error("expected ValidValues to be populated for unknown component type")
 	}
-	if strings.Contains(err.Error(), "was removed") {
-		t.Errorf("a never-built-in type must not get the removed-type hint, got %q", err)
-	}
 }
 
-// TestParse_RemovedComponentTypeHint pins the removed-type hint: a document
-// still authoring helmchart (removed by go-kure/launcher#350) gets the unknown-
-// type error plus where to go instead, while a custom type registered under the
-// same name is admitted like any other custom type.
-func TestParse_RemovedComponentTypeHint(t *testing.T) {
+// TestParse_AcceptsHelmchartType pins the reuse of the helmchart name: removed
+// as a composite by go-kure/launcher#350, it is the kind-named Flux HelmChart
+// component since go-kure/launcher#351, so parsing admits it as a built-in type.
+func TestParse_AcceptsHelmchartType(t *testing.T) {
 	input := `
 apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
@@ -416,27 +412,12 @@ spec:
     type: helmchart
     properties:
       chart: podinfo
+      sourceRef:
+        kind: HelmRepository
+        name: podinfo
 `
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for the removed helmchart type, got nil")
-	}
-	var valErr *errors.ValidationError
-	if !stderrors.As(err, &valErr) {
-		t.Fatalf("expected *errors.ValidationError, got %T: %v", err, err)
-	}
-	if valErr.Value != "helmchart" || len(valErr.ValidValues) == 0 {
-		t.Errorf("Value = %q with %d valid values, want helmchart with the supported list", valErr.Value, len(valErr.ValidValues))
-	}
-	for _, want := range []string{`invalid value "helmchart" for "type"`, `type "helmchart" was removed: use "helm"`, "go-kure/launcher#350"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %q, want it to contain %q", err, want)
-		}
-	}
-
-	app := siblingDoc(Component{Name: "web", Type: "helmchart", Properties: map[string]any{}})
-	if err := validateWithExtraTypes(app, nil, map[string]bool{"helmchart": true}, LowerableTypes{}); err != nil {
-		t.Errorf("a registered custom helmchart type was refused: %v", err)
+	if _, err := Parse([]byte(input)); err != nil {
+		t.Fatalf("helmchart was refused: %v", err)
 	}
 }
 

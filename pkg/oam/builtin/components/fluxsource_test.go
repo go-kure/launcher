@@ -26,19 +26,19 @@ type fluxSourceHandler interface {
 }
 
 // fluxSourceKind describes one kind-named Flux source component
-// (go-kure/launcher#347) for the table-driven tests below.
+// (go-kure/launcher#347, go-kure/launcher#351) for the table-driven tests below.
 type fluxSourceKind struct {
 	typ      string            // component type
 	kind     string            // emitted Kind
 	handler  fluxSourceHandler // the handler under test
 	spec     reflect.Type      // the source-controller spec type it projects
 	required []string          // the properties the CRD requires
-	host     string            // the property ApplyPolicy checks
+	host     string            // the property ApplyPolicy checks; empty when it checks none
 	minimal  string            // the smallest valid properties, as YAML
 	full     string            // every top-level spec key, as YAML
 }
 
-// fluxSourceKinds lists the four components. The full fixtures write every
+// fluxSourceKinds lists the five components. The full fixtures write every
 // duration in the canonical form metav1.Duration re-encodes to, so the emitted
 // spec can be compared with the authored map key for key.
 func fluxSourceKinds() []fluxSourceKind {
@@ -135,6 +135,26 @@ interval: 10m0s
 timeout: 1m0s
 ignore: "*.md"
 suspend: true
+`,
+		},
+		{
+			typ: "helmchart", kind: "HelmChart", handler: &components.HelmChartHandler{},
+			spec: reflect.TypeFor[sourcev1.HelmChartSpec](), required: []string{"chart", "sourceRef"},
+			minimal: "chart: podinfo\nsourceRef: {kind: HelmRepository, name: podinfo}",
+			full: `
+chart: podinfo
+version: ">=6.0.0"
+sourceRef: {apiVersion: source.toolkit.fluxcd.io/v1, kind: HelmRepository, name: podinfo}
+interval: 10m0s
+reconcileStrategy: Revision
+valuesFiles: [values.yaml, values-prod.yaml]
+ignoreMissingValuesFiles: true
+suspend: true
+verify:
+  provider: cosign
+  secretRef: {name: cosign-pub}
+  matchOIDCIdentity:
+    - {issuer: "^https://issuer.example.com$", subject: "^org/.*$"}
 `,
 		},
 	}
@@ -288,6 +308,7 @@ func TestFluxSourceHandlers_EveryFieldReachable(t *testing.T) {
 		"ocirepository":  {},
 		"gitrepository":  {},
 		"bucket":         {},
+		"helmchart":      {},
 	}
 	for _, k := range fluxSourceKinds() {
 		t.Run(k.typ, func(t *testing.T) {
@@ -381,12 +402,13 @@ func TestFluxSourceHandlers_Refuses(t *testing.T) {
 		props string // YAML merged over the kind's minimal properties
 		drop  string // a minimal key to delete first
 		want  string
+		needs string // a property the row relies on; kinds without it skip the row
 	}
 	common := []refusal{
 		{name: "unknown top-level key", props: "bogus: x", want: `unknown field "bogus"`},
-		{name: "unknown nested key", props: "secretRef: {name: s, namespace: other}", want: `unknown field "namespace"`},
+		{name: "unknown nested key", props: "secretRef: {name: s, namespace: other}", want: `unknown field "namespace"`, needs: "secretRef"},
 		{name: "wrongly typed bool", props: `suspend: "yes"`, want: "suspend"},
-		{name: "wrongly typed object", props: "secretRef: creds", want: "secretRef"},
+		{name: "wrongly typed object", props: "secretRef: creds", want: "secretRef", needs: "secretRef"},
 		{name: "invalid duration", props: "interval: 5minutes", want: "5minutes"},
 	}
 	perKind := map[string][]refusal{
@@ -411,9 +433,21 @@ func TestFluxSourceHandlers_Refuses(t *testing.T) {
 			{name: "no endpoint", drop: "endpoint", want: "bucket: endpoint is required"},
 			{name: "unknown key in sts", props: "sts: {provider: ldap, endpoint: https://sts.example.com, region: x}", want: `unknown field "region"`},
 		},
+		"helmchart": {
+			{name: "no chart", drop: "chart", want: "helmchart: chart is required"},
+			{name: "no sourceRef", drop: "sourceRef", want: "helmchart: sourceRef.kind is required"},
+			{name: "no sourceRef.kind", props: "sourceRef: {name: podinfo}", want: "helmchart: sourceRef.kind is required"},
+			{name: "no sourceRef.name", props: "sourceRef: {kind: HelmRepository}", want: "helmchart: sourceRef.name is required"},
+			{name: "unknown key in sourceRef", props: "sourceRef: {kind: HelmRepository, name: podinfo, namespace: other}", want: `unknown field "namespace"`},
+			{name: "wrongly typed object", props: "sourceRef: podinfo", want: "sourceRef"},
+			{name: "wrongly typed array", props: "valuesFiles: values.yaml", want: "valuesFiles"},
+		},
 	}
 	for _, k := range fluxSourceKinds() {
 		for _, tc := range append(slices.Clone(common), perKind[k.typ]...) {
+			if _, ok := k.handler.PropertySchema()[tc.needs]; tc.needs != "" && !ok {
+				continue
+			}
 			t.Run(k.typ+"/"+tc.name, func(t *testing.T) {
 				props := fluxSrcProps(t, k.minimal)
 				delete(props, tc.drop)
@@ -481,6 +515,63 @@ func TestFluxSourceHandlers_ApplyPolicy(t *testing.T) {
 		if err := cfg.ApplyPolicy(fakeOCIPolicy{}); err != nil {
 			t.Errorf("%s %q: empty allowlist: %v", tc.typ, tc.value, err)
 		}
+	}
+}
+
+// TestHelmChart_ApplyPolicyChecksNothing: a HelmChart fetches from the source
+// its sourceRef names, whose host is checked where that source is authored, so
+// no allowlist refuses it.
+func TestHelmChart_ApplyPolicyChecksNothing(t *testing.T) {
+	k := fluxSourceKinds()[4]
+	cfg := fluxSrcConfig(t, k, fluxSrcProps(t, k.minimal)).(oam.Enforceable)
+	for _, p := range []oam.Policy{nil, fakeOCIPolicy{}, fakeOCIPolicy{allowed: []string{"ghcr.io"}}} {
+		if err := cfg.ApplyPolicy(p); err != nil {
+			t.Errorf("policy %v: %v", p, err)
+		}
+	}
+}
+
+// TestHelmChart_CompositeKeyHint: a key of the removed helmchart composite gets
+// the pointer to helm, at the authored-property check kurel build runs first and
+// at the strict decode a library caller reaches directly; any other unknown key
+// gets the plain error.
+func TestHelmChart_CompositeKeyHint(t *testing.T) {
+	const hint = `a document written for the removed helmchart composite uses "helm" (go-kure/launcher#350`
+	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"helmchart": &components.HelmChartHandler{}}, nil)
+	for _, tc := range []struct {
+		key      string
+		wantHint bool
+	}{
+		{"source", true},
+		{"valuesMode", true},
+		{"delivery", true},
+		{"bogus", false},
+		{"chartName", false}, // a typo of a HelmChart key
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			props := func() map[string]any {
+				p := fluxSrcProps(t, fluxSourceKinds()[4].minimal)
+				p[tc.key] = "x"
+				return p
+			}
+			app := &oam.Application{
+				Metadata: oam.Metadata{Name: "shop", Namespace: "shop"},
+				Spec:     oam.ApplicationSpec{Components: []oam.Component{{Name: "chart", Type: "helmchart", Properties: props()}}},
+			}
+			authored := tr.ValidateAuthoredProperties(app)
+			if authored == nil || !strings.Contains(authored.Error(), `unsupported field "`+tc.key+`"`) {
+				t.Fatalf("ValidateAuthoredProperties: error = %v, want the unsupported-field error", authored)
+			}
+			_, decoded := (&components.HelmChartHandler{}).ToApplicationConfig(&oam.Component{Name: "chart", Type: "helmchart", Properties: props()}, "shop")
+			if decoded == nil || !strings.Contains(decoded.Error(), `unknown field "`+tc.key+`"`) {
+				t.Fatalf("ToApplicationConfig: error = %v, want the unknown-field error", decoded)
+			}
+			for _, err := range []error{authored, decoded} {
+				if got := strings.Contains(err.Error(), hint); got != tc.wantHint {
+					t.Errorf("error %q: hint present = %v, want %v", err, got, tc.wantHint)
+				}
+			}
+		})
 	}
 }
 
@@ -692,8 +783,12 @@ func TestFluxSourceHandlers_GenerateDoesNotAlias(t *testing.T) {
 			props := fluxSrcProps(t, k.full)
 			delete(props, "interval")
 			cfg := fluxSrcConfig(t, k, props)
-			// secretRef is a pointer field every kind has.
+			// secretRef is a pointer field every kind has, a HelmChart's
+			// inside verify.
 			secretRefName := func(spec reflect.Value) reflect.Value {
+				if k.typ == "helmchart" {
+					spec = spec.FieldByName("Verify").Elem()
+				}
 				return spec.FieldByName("SecretRef").Elem().FieldByName("Name")
 			}
 			cfgSpec := reflect.ValueOf(cfg).Elem().FieldByName("Spec")
@@ -728,6 +823,15 @@ func TestFluxSourceConfigs_GenerateValidatesDirectConfig(t *testing.T) {
 		"gitrepository without url": &components.GitRepositoryConfig{Name: "src"},
 		"bucket without endpoint":   &components.BucketConfig{Name: "src", Spec: sourcev1.BucketSpec{BucketName: "b"}},
 		"bucket without bucketName": &components.BucketConfig{Name: "src", Spec: sourcev1.BucketSpec{Endpoint: "s3.amazonaws.com"}},
+		"helmchart without chart": &components.HelmChartConfig{Name: "src", Spec: sourcev1.HelmChartSpec{
+			SourceRef: sourcev1.LocalHelmChartSourceReference{Kind: "HelmRepository", Name: "podinfo"},
+		}},
+		"helmchart without sourceRef.kind": &components.HelmChartConfig{Name: "src", Spec: sourcev1.HelmChartSpec{
+			Chart: "podinfo", SourceRef: sourcev1.LocalHelmChartSourceReference{Name: "podinfo"},
+		}},
+		"helmchart without sourceRef.name": &components.HelmChartConfig{Name: "src", Spec: sourcev1.HelmChartSpec{
+			Chart: "podinfo", SourceRef: sourcev1.LocalHelmChartSourceReference{Kind: "HelmRepository"},
+		}},
 	}
 	names := make([]string, 0, len(cases))
 	for n := range cases {
@@ -750,7 +854,7 @@ type fluxSrcPolicy struct {
 
 func (p fluxSrcPolicy) AllowedRegistries() []string { return p.allowed }
 
-// TestTransform_FluxSources runs the transform pipeline over all four source
+// TestTransform_FluxSources runs the transform pipeline over all five source
 // components with a Flux namespace: each CR lands there, the auto health check
 // references it there, and the suspended one carries none. The same document
 // under a policy whose allowed registries miss one fetch host fails the build,

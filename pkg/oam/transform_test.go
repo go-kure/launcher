@@ -1761,7 +1761,8 @@ func TestApplyAutoHealthChecks_HelmReleaseKindRegistered(t *testing.T) {
 }
 
 // TestApplyAutoHealthChecks_FluxSourceKindsRegistered pins the kind-named Flux
-// source components (go-kure/launcher#347) into componentHealthCheckGVK: each
+// source components (go-kure/launcher#347, go-kure/launcher#351) into
+// componentHealthCheckGVK: each
 // emits one source.toolkit.fluxcd.io/v1 CR, a Flux control-plane CR relocated to
 // the flux namespace, so the inferred check follows it there, and stays in the
 // app namespace when no flux namespace is configured. A type missing from the
@@ -1772,6 +1773,7 @@ func TestApplyAutoHealthChecks_FluxSourceKindsRegistered(t *testing.T) {
 		{"ocirepository", "OCIRepository"},
 		{"gitrepository", "GitRepository"},
 		{"bucket", "Bucket"},
+		{"helmchart", "HelmChart"},
 	}
 	for _, k := range kinds {
 		for _, tc := range []struct{ fluxNS, wantNS string }{{"flux-system", "flux-system"}, {"", "demo"}} {

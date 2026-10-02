@@ -464,8 +464,9 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 	wantHandlers := []string{
 		"cnpg-cluster", "crd", "cronjob", "daemonset", "deployment", "helmrelease", "helmtemplate", "job", "manifests",
 		"oci", "passthrough", "service", "statefulset",
-		// The kind-named Flux source components (go-kure/launcher#347).
-		"bucket", "gitrepository", "helmrepository", "ocirepository",
+		// The kind-named Flux source components (go-kure/launcher#347,
+		// go-kure/launcher#351).
+		"bucket", "gitrepository", "helmchart", "helmrepository", "ocirepository",
 		// The CloudNativePG kind components beside cnpg-cluster (go-kure/launcher#573).
 		"cnpg-database", "cnpg-objectstore", "cnpg-pooler",
 	}

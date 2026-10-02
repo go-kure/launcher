@@ -73,10 +73,10 @@ same way. The `force-replace` trait (opt-in Flux force-apply, e.g. so a `job`
 can be updated in place) is registered in both `builtinTraitHandlers()` and
 `pkg/oam`'s trait allowlist, and `force_replace_build_test.go` builds a `job`
 with and without it. The kind-named Flux source components — `helmrepository`,
-`ocirepository`, `gitrepository` and `bucket`, each emitting exactly one source
-CR (go-kure/launcher#347) — are registered in both `builtinComponentHandlers()`
-and `pkg/oam`'s component allowlist; the `flux-sources` fixture under
-`testdata/` builds all four. The `cnpg-cluster` component — the full-fidelity,
+`ocirepository`, `gitrepository` and `bucket` (go-kure/launcher#347), and
+`helmchart` (go-kure/launcher#351), each emitting exactly one source CR — are
+registered in both `builtinComponentHandlers()` and `pkg/oam`'s component
+allowlist; the `flux-sources` fixture under `testdata/` builds all five. The `cnpg-cluster` component — the full-fidelity,
 opinion-free projection of a CloudNativePG `Cluster` — is registered in
 `builtinComponentHandlers()` and `pkg/oam`'s component allowlist; the
 `cnpg-cluster-minimal` and `cnpg-cluster-full` fixtures build it. Its siblings

@@ -45,6 +45,9 @@ func durationFieldCases() []durationFieldCase {
 		cases = append(cases, durationFieldCase{typ: "helmrelease", handler: &components.HelmReleaseHandler{}, props: hr, path: path, hours: true})
 	}
 	for _, k := range fluxSourceKinds() {
+		if _, ok := k.handler.PropertySchema()["timeout"]; !ok {
+			continue // a HelmChart has no timeout
+		}
 		cases = append(cases, durationFieldCase{
 			typ:     k.typ,
 			handler: k.handler,

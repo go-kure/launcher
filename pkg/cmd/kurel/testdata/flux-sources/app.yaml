@@ -39,3 +39,14 @@ spec:
         secretRef:
           name: minio-credentials
         suspend: true
+    - name: podinfo-chart
+      type: helmchart
+      properties:
+        chart: charts/podinfo
+        sourceRef:
+          kind: GitRepository
+          name: podinfo-repo
+        reconcileStrategy: Revision
+        valuesFiles:
+          - charts/podinfo/values.yaml
+          - charts/podinfo/values-prod.yaml

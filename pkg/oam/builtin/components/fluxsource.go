@@ -11,16 +11,17 @@ import (
 )
 
 // The kind-named Flux source components — helmrepository, ocirepository,
-// gitrepository and bucket (go-kure/launcher#347) — each project one
-// source-controller spec type 1:1. ToApplicationConfig decodes the component's
-// properties strictly into that type (builtin.DecodeStrictJSON, no owned keys),
-// so an unknown or wrongly typed key at any depth is a build error, and checks
-// what the CRD would otherwise reject only at apply time: its required fields,
-// and the url scheme where the CRD has a pattern for it. Generate emits exactly
-// one CR, named after the component, carrying a deep copy of that spec plus the
-// interval default. Every other constraint is left to the CRD's own admission.
+// gitrepository and bucket (go-kure/launcher#347), and helmchart
+// (go-kure/launcher#351) — each project one source-controller spec type 1:1.
+// ToApplicationConfig decodes the component's properties strictly into that
+// type (builtin.DecodeStrictJSON, no owned keys), so an unknown or wrongly
+// typed key at any depth is a build error, and checks what the CRD would
+// otherwise reject only at apply time: its required fields, and the url scheme
+// where the CRD has a pattern for it. Generate emits exactly one CR, named after
+// the component, carrying a deep copy of that spec plus the interval default.
+// Every other constraint is left to the CRD's own admission.
 //
-// This file holds what the four share; each kind has its own file.
+// This file holds what the five share; each kind has its own file.
 
 // fluxSourceDefaultInterval is spec.interval when a source component leaves it
 // unset (a zero duration counts as unset). OCIRepository, GitRepository and
@@ -101,7 +102,7 @@ func enforceFluxSourceOCIHost(typ, field, value string, requireRepository bool, 
 	return enforceFluxSourceHost(typ, field, value, p)
 }
 
-// The PropertySchema building blocks of the four source components. Their
+// The PropertySchema building blocks of the five source components. Their
 // schemas declare every top-level key of the spec type, with nested Flux shapes
 // as open objects: the strict decode in ToApplicationConfig checks those.
 

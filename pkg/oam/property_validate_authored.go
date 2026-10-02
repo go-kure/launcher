@@ -168,12 +168,45 @@ func (t *Transformer) validateAuthoredPolicy(pol *ApplicationPolicy) error {
 func (t *Transformer) validateAuthoredComponent(comp *Component) error {
 	path := fmt.Sprintf("component %q (type %q): properties", comp.Name, comp.Type)
 	if h, ok := t.componentHandlers[comp.Type]; ok {
-		return validateAuthoredAgainst(h, comp.Properties, path)
+		return withUnsupportedFieldHint(h, validateAuthoredAgainst(h, comp.Properties, path))
 	}
 	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
 		return validateAuthoredAgainst(rule, comp.Properties, path)
 	}
 	return nil
+}
+
+// unsupportedFieldHinter is implemented by a component handler that adds a
+// hint to the refusal of an undeclared top-level key: the helmchart terminal
+// points a key of the composite that used to carry its name to `helm`. "" adds
+// nothing.
+type unsupportedFieldHinter interface {
+	UnsupportedFieldHint(key string) string
+}
+
+// unsupportedFieldError is validateAuthoredProperties' refusal of an undeclared
+// top-level key.
+type unsupportedFieldError struct {
+	path, key, allowed string
+}
+
+func (e *unsupportedFieldError) Error() string {
+	return fmt.Sprintf("%s: unsupported field %q (allowed: %s)", e.path, e.key, e.allowed)
+}
+
+// withUnsupportedFieldHint appends handler's hint to err when err refuses an
+// undeclared top-level key and handler has a hint for that key. Any other err
+// is returned unchanged.
+func withUnsupportedFieldHint(handler any, err error) error {
+	h, ok := handler.(unsupportedFieldHinter)
+	var uerr *unsupportedFieldError
+	if !ok || !errors.As(err, &uerr) {
+		return err
+	}
+	if hint := h.UnsupportedFieldHint(uerr.key); hint != "" {
+		return errors.Errorf("%w; %s", err, hint)
+	}
+	return err
 }
 
 // validateAuthoredTrait is validateAuthoredComponent for the trait position. The
@@ -361,7 +394,7 @@ func validateAuthoredProperties(schema map[string]PropertySchema, props map[stri
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		field, ok := schema[key]
 		if !ok {
-			return errors.Errorf("%s: unsupported field %q (allowed: %s)", path, key, declaredFields(schema))
+			return &unsupportedFieldError{path: path, key: key, allowed: declaredFields(schema)}
 		}
 		normalized, err := validatePropertyValue(field, props[key], path+"."+key)
 		if err != nil {

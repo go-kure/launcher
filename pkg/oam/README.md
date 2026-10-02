@@ -243,6 +243,17 @@ Kustomization waits until the source is ready. Because the GVK is a `*.toolkit.f
 and each config accepts a Flux namespace, the check moves to that namespace with the object.
 They sit in `defaultTierMap` at `TierApps`, like `oci` and `helmrelease`.
 
+`helmchart` (go-kure/launcher#351), the kind-named component for Flux's `HelmChart`, is listed
+the same way, with the `source.toolkit.fluxcd.io/v1` `HelmChart` GVK, and sits at `TierApps`.
+kstatus reads a HelmChart exactly as it reads a Bucket. Neither kind has a kind-specific rule:
+`legacyTypes` lists only core kinds (fluxcd/cli-utils v1.2.3 `pkg/kstatus/status/core.go:22-39`,
+looked up by `GetLegacyConditionsFn`, `:57-65`). Both are read by the generic rules
+(`generic.go:22`, `checkGenericProperties`): `status.observedGeneration` against
+`metadata.generation` (`:82-95`), then a true `Reconciling` or `Stalled` condition (`:51`,
+`:54`). Both statuses carry those two fields (source-controller api v1.9.5
+`helmchart_types.go:123` and `:143`, `bucket_types.go:198` and `:202`). The helm rule never
+emits a HelmChart, so a `helmchart` is always authored and keeps `defaultTierMap`'s tier.
+
 The exception is a `helmrepository`, `ocirepository`, `gitrepository` or `bucket` that a
 lowering rule emitted (`Component.synthesized`): `ClassifyComponentWithDomain` places it in
 `TierInfra`, after
@@ -266,7 +277,7 @@ for `paused: true`: the document instructs the workload not to progress, so wait
 not a health signal but a guaranteed timeout. `helmrelease` declines it for `suspend: true`
 too: helm-controller does not reconcile a suspended HelmRelease, and the Ready condition the
 check reads is written by a reconciliation, so a newly created suspended release never acquires
-one. The HelmRelease is still emitted; only the check is skipped. The four Flux source components veto for their
+one. The HelmRelease is still emitted; only the check is skipped. The five Flux source components veto for their
 own `suspend: true` for the same reason — the document tells source-controller not to reconcile
 — and `helmrepository` also vetoes for `type: oci`, which Flux treats as a static object with
 no artifact, so there is no reconcile to wait on.

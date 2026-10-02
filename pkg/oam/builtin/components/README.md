@@ -31,7 +31,7 @@ schemas at every depth) carries a `Description`, surfaced in the downstream runt
 Reference.
 
 The kind-named Flux source components (`helmrepository`, `ocirepository`, `gitrepository`,
-`bucket`) reach the same strictness another way: each schema declares exactly the top-level keys
+`bucket`, `helmchart`) reach the same strictness another way: each schema declares exactly the top-level keys
 of its source-controller spec type and leaves the nested Flux blocks open, and each handler
 decodes the whole property map strictly into that type, refusing an unknown or wrongly typed key
 at any depth (see their entry under "Per-type highlights").
@@ -75,6 +75,7 @@ reads it.
 | `ocirepository` | OCIRepository | Kind-named: the full Flux `OCIRepositorySpec`, with no Kustomization (compare `oci`). |
 | `gitrepository` | GitRepository | Kind-named: the full Flux `GitRepositorySpec`. |
 | `bucket` | Bucket | Kind-named: the full Flux `BucketSpec`. |
+| `helmchart` | HelmChart | Kind-named: the full Flux `HelmChartSpec`, a chart from an existing source. Not the composite removed under this name (go-kure/launcher#350); that is `helm`. |
 | `postgresql` | CNPG Cluster, Pooler, ObjectStore, Database | CloudNativePG database (backup/monitoring/pooling). |
 | `cnpg-cluster` | CNPG Cluster | Operator-CR kind component: the whole `postgresql.cnpg.io/v1` `ClusterSpec`, strictly decoded, with no launcher opinions — see below. |
 | `cnpg-pooler` | CNPG Pooler | Operator-CR kind component: the whole `PoolerSpec`, strictly decoded — see below. |
@@ -2101,7 +2102,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     - an OCI source without `version`;
     - each HelmRelease key, `releaseName` and `targetNamespace` included, which
       `helmtemplate` does not accept.
-  - Strict, unlike the removed `helmchart`. An undeclared key at the top level or inside
+  - Strict, unlike the removed `helmchart` composite. An undeclared key at the top level or inside
     `source` is refused, and so are:
     - `delivery: native`;
     - `source.namespace` with an inline source;
@@ -2130,8 +2131,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   An authored component already named like a generated source fails the build
   as a duplicate component name.
-- **helmchart** — **Removed** (go-kure/launcher#350); use `helm`. A document still authoring
-  `type: helmchart` fails validation with the unknown-type error plus a pointer to `helm`. To
+- **helmchart** — since go-kure/launcher#351, the kind-named terminal for Flux's `HelmChart`:
+  see **helmrepository / ocirepository / gitrepository / bucket / helmchart** below. Until
+  go-kure/launcher#350 the name belonged to a role-level composite (a HelmRelease plus its source,
+  or a client-side render), which is gone; use `helm`. A document written for the composite
+  fails validation on a key `HelmChartSpec` does not declare. When that key is one of the
+  composite's own that `HelmChartSpec` lacks (`delivery`, `releaseName`, `targetNamespace`,
+  `source`, `values`, `valuesMode`, `driftDetection`, `install`, `upgrade`, `valuesFrom`), the
+  error adds a pointer to `helm`; any other unknown key gets the plain error. To
   migrate, change `type: helmchart` to `type: helm` and rename `delivery: native` to
   `delivery: flux`; the other properties keep their names. The output then changes only as
   this table says. `TestHelmParity` (`pkg/cmd/kurel`) pins it on three fixture pairs: the
@@ -2387,15 +2394,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   allowlist, accepts every `oci://` url.
   `interval` (default `60m`) must be a duration Flux accepts, checked exactly as
   for `helmrelease` (go-kure/launcher#590): see its Defaults paragraph above.
-- **helmrepository / ocirepository / gitrepository / bucket** — the kind-named terminals for
-  Flux's four fetching source kinds (go-kure/launcher#347, part of the Helm-family redesign
-  go-kure/launcher#336). Each component's properties are exactly the top-level JSON keys of its
-  source-controller spec type — `HelmRepositorySpec`, `OCIRepositorySpec`, `GitRepositorySpec`,
-  `BucketSpec`, in the version `go.mod` links — and a test ties each published schema to its
-  struct, so a bump that adds or drops a spec field fails the suite until the schema follows.
+- **helmrepository / ocirepository / gitrepository / bucket / helmchart** — the kind-named
+  terminals for Flux's four fetching source kinds (go-kure/launcher#347, part of the Helm-family
+  redesign go-kure/launcher#336) and for its `HelmChart` (go-kure/launcher#351), which builds a
+  chart artifact from one of them. Each component's properties are exactly the top-level JSON
+  keys of its source-controller spec type — `HelmRepositorySpec`, `OCIRepositorySpec`,
+  `GitRepositorySpec`, `BucketSpec`, `HelmChartSpec`, in the version `go.mod` links — and a test
+  ties each published schema to its struct, so a bump that adds or drops a spec field fails the
+  suite until the schema follows.
   Each emits exactly one CR of its kind, named after the component, and nothing else: no
-  Kustomization (compare `oci`), no HelmRelease (compare `helmrelease`), and no source dedup — two
-  components naming the same URL emit two CRs.
+  Kustomization (compare `oci`), no HelmRelease (compare `helmrelease`), no source for a
+  `helmchart` (its `sourceRef` names one that exists, as a `helmrelease`'s
+  `chart.spec.sourceRef` does), and no source dedup — two components naming the same URL emit
+  two CRs. A `helmrelease` consumes a `helmchart` through `chartRef` with `kind: HelmChart`.
 
   **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON` into the spec
   type, with no launcher-owned keys. A key the struct does not declare, at any depth
@@ -2407,7 +2418,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   validation, which a `kurel build` runs first, is exact.
 
   **Checks and defaults.** Required: `url` on `helmrepository`, `ocirepository` and
-  `gitrepository`; `bucketName` and `endpoint` on `bucket`. A `url` must start with a scheme the
+  `gitrepository`; `bucketName` and `endpoint` on `bucket`; `chart`, `sourceRef.kind` and
+  `sourceRef.name` on `helmchart`. A `url` must start with a scheme the
   CRD's own pattern admits: `http://`, `https://` or `oci://` for `helmrepository`, and only
   `oci://` under `type: oci`; `oci://` for `ocirepository`; `http://`, `https://` or `ssh://` for
   `gitrepository`, so an scp-style `git@host:org/repo` is refused — write
@@ -2417,7 +2429,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   does not poll it, and its emitted `interval` reads `0s`, the value the Go type always writes.
   A set `interval` must be a duration Flux accepts, checked exactly as on `helmrelease` above
   (go-kure/launcher#601); under `type: oci` too, where the CRD pattern still applies.
-  A set `timeout` is checked the same way, against the source CRDs' narrower pattern, which has
+  A set `timeout` (a `helmchart` has none) is checked the same way, against the source CRDs'
+  narrower pattern, which has
   no `h` unit: `^([0-9]+(\.[0-9]+)?(ms|s|m))+$` (go-kure/launcher#606), so an authored `1h` is
   refused. A `timeout` of an hour or more authored in minutes or seconds (`90m`, `3600s`) is
   accepted and emitted with its hours folded into minutes: `90m0s`, `60m0s`
@@ -2426,8 +2439,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `timeout` below an hour, or none, leaves the source emitted exactly as before. A config built
   directly gets the same minutes form.
   Nothing else is checked or defaulted: enums (`type`, `provider`, `layerSelector.operation`,
-  `verify.mode`) and cross-field rules (a Bucket's `sts` against its `provider`,
-  `serviceAccountName` against `secretRef`) are left to the CRD's own admission.
+  `verify.mode`, a HelmChart's `sourceRef.kind` and `reconcileStrategy`) and cross-field rules
+  (a Bucket's `sts` against its `provider`, `serviceAccountName` against `secretRef`, a
+  HelmChart's `verify` only with a HelmRepository source) are left to the CRD's own admission.
+  Nor is the source a `helmchart` names: whether it exists, or is of the kind `sourceRef.kind`
+  says, is known only on the cluster.
 
   **Policy.** `ApplyPolicy` checks the host the source is fetched from against the policy's
   allowed registries (`AllowedRegistries`), with the same exact match `oci`, `crd` and
@@ -2435,7 +2451,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   A port is part of the host, so `registry.local:5000` matches only an entry with that port. The
   user of an `ssh://` URL is dropped (`ssh://git@github.com/org/repo` checks `github.com`);
   userinfo on an `http://`, `https://` or `oci://` URL is not, so such a URL matches no entry and
-  is refused. An empty allowlist permits every host, and none of the rules below applies.
+  is refused. An empty allowlist permits every host, and none of the rules below applies. A
+  `helmchart` checks nothing: it fetches from the source its `sourceRef` names, whose host is
+  checked where that source is authored, as for a `helmrelease`.
 
   Some sources are not fetched from the host their field names, so the check follows Flux instead:
 
@@ -2471,13 +2489,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **Namespace and references.** The CR lands in the Flux namespace when one is configured, else in
   the application namespace (`SetFluxNamespace`). Every local reference it carries — `secretRef`,
   `certSecretRef`, `proxySecretRef`, the Secret references under `verify` and `sts`,
-  `serviceAccountName`, a GitRepository `include` — resolves in the namespace the CR lands in, so
-  under a Flux namespace the objects it names must live there.
+  `serviceAccountName`, a GitRepository `include`, a HelmChart's `sourceRef` — resolves in the
+  namespace the CR lands in, so under a Flux namespace the objects it names must live there. A
+  `helmchart` whose `sourceRef` names a source component in the same document finds it there:
+  both move to the Flux namespace.
 
   **Health check.** The inferred auto health check references the CR
   (`source.toolkit.fluxcd.io/v1`, in the namespace the CR lands in). `suspend: true` skips it,
   as `job` does for its own `suspend: true`, and so does a `helmrepository` with `type: oci`,
-  which Flux treats as a static object with no artifact to wait for.
+  which Flux treats as a static object with no artifact to wait for. kstatus reads a HelmChart
+  as it reads the four sources, through its `Ready`, `Reconciling` and `Stalled` conditions and
+  `observedGeneration` (cites in `pkg/oam/README.md`).
 
   **Generated by the `helm` rule.** An inline source on a `helm` component generates one of
   these components: a `helmrepository` for an `http(s)://` URL; an `ocirepository` for an
@@ -2486,7 +2508,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   field; or a `bucket` for `kind: Bucket` with `endpoint` and `bucketName` and no URL. It is
   named `<app>-source-<digest>` and shared by every `helm` component with the same source
   identity (see **helm** above). An authored source component exposes the whole spec
-  (credentials, `type: oci`, `provider`, verification, …) and is never shared.
+  (credentials, `type: oci`, `provider`, verification, …) and is never shared. The rule never
+  generates a `helmchart`.
 - **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
   (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
   `backup.*`, `monitoring.enabled`, `pooler.enabled`, `managedRoles`, `databases`.

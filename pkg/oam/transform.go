@@ -1290,7 +1290,8 @@ func detectCycles(deps map[string][]string) error {
 // suspended HelmRelease is not reconciled, so its Ready condition cannot report
 // on it.
 //
-// The kind-named Flux source components (go-kure/launcher#347) are listed: each
+// The kind-named Flux source components (go-kure/launcher#347, and helmchart,
+// go-kure/launcher#351) are listed: each
 // emits exactly one source CR whose Ready condition kstatus reads, so a
 // Kustomization that depends on a source waits until the source is ready. Each
 // vetoes its check for `suspend: true`, the same shape as job's veto: the
@@ -1319,6 +1320,7 @@ var componentHealthCheckGVK = map[string]struct{ APIVersion, Kind string }{
 	"ocirepository":  {"source.toolkit.fluxcd.io/v1", "OCIRepository"},
 	"gitrepository":  {"source.toolkit.fluxcd.io/v1", "GitRepository"},
 	"bucket":         {"source.toolkit.fluxcd.io/v1", "Bucket"},
+	"helmchart":      {"source.toolkit.fluxcd.io/v1", "HelmChart"},
 }
 
 // postProcessFluxNamespace walks all leaf bundle applications and calls
