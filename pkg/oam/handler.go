@@ -14,7 +14,11 @@ type ComponentHandler interface {
 }
 
 // TraitHandler handles application of a specific OAM trait type to a kure
-// Application and Bundle.
+// Application and Bundle. Apply mutates the application it is given and may
+// append sub-applications to the bundle; it must not replace or remove a
+// component's application there, which the transform refuses: the automatic
+// health check and NetworkPolicy synthesis find a component's application by
+// pointer, so a replaced one would silently get neither.
 type TraitHandler interface {
 	CanHandle(traitType string) bool
 	Apply(trait *Trait, app *stack.Application, bundle *stack.Bundle) error

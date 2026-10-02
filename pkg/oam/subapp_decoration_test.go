@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -132,78 +133,131 @@ func TestDecorateSubApplications_AnyTraitOrder(t *testing.T) {
 	}
 }
 
-// reorderTraitHandler is a trait that does more than append to the bundle:
-// with replace it swaps its application for a new one named after it plus
-// "-replaced", with remove it drops its application, otherwise it moves its
-// application to the end of the bundle; with appends it then adds a
-// sub-application.
+// reorderTraitHandler is a trait that does more than append to the bundle. Its
+// op acts on the application named target, or on the trait's own application
+// when target is empty: "move" moves it to the end of the bundle, "replace"
+// swaps it for a new one named after it plus "-replaced", "remove" drops it,
+// and "" does nothing. With appends set it then adds a sub-application of that
+// name.
 type reorderTraitHandler struct {
-	replace bool
-	remove  bool
-	appends bool
+	op      string
+	target  string
+	appends string
 }
 
-func (reorderTraitHandler) CanHandle(t string) bool { return t == "reorder" }
+func (reorderTraitHandler) CanHandle(t string) bool { return strings.HasPrefix(t, "reorder") }
 
 func (h reorderTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *stack.Bundle) error {
 	i := slices.Index(bundle.Applications, app)
-	switch {
-	case h.replace:
-		name := app.Name + "-replaced"
-		bundle.Applications[i] = stack.NewApplication(name, app.Namespace, &namedConfigMapConfig{name: name, namespace: app.Namespace})
-	case h.remove:
-		bundle.Applications = slices.Delete(bundle.Applications, i, i+1)
-	default:
-		bundle.Applications = append(slices.Delete(bundle.Applications, i, i+1), app)
+	if h.target != "" {
+		i = slices.IndexFunc(bundle.Applications, func(a *stack.Application) bool { return a.Name == h.target })
 	}
-	if h.appends {
+	switch h.op {
+	case "move":
+		moved := bundle.Applications[i]
+		bundle.Applications = append(slices.Delete(bundle.Applications, i, i+1), moved)
+	case "replace":
+		name := bundle.Applications[i].Name + "-replaced"
+		bundle.Applications[i] = stack.NewApplication(name, app.Namespace, &namedConfigMapConfig{name: name, namespace: app.Namespace})
+	case "remove":
+		bundle.Applications = slices.Delete(bundle.Applications, i, i+1)
+	}
+	if h.appends != "" {
 		bundle.Applications = append(bundle.Applications,
-			stack.NewApplication(app.Name+"-sub", app.Namespace, &namedConfigMapConfig{name: app.Name + "-sub", namespace: app.Namespace}))
+			stack.NewApplication(h.appends, app.Namespace, &namedConfigMapConfig{name: h.appends, namespace: app.Namespace}))
 	}
 	return nil
 }
 
+// reorderApp is "shop": a webservice web carrying one trait per handler, in
+// order, registered as reorder0, reorder1, …, and a webservice other. With
+// stamp, web also carries a decorating stamp trait.
+func reorderApp(tr *Transformer, handlers []reorderTraitHandler, stamp bool) *Application {
+	var traits []Trait
+	for i, h := range handlers {
+		typ := fmt.Sprintf("reorder%d", i)
+		tr.RegisterTrait(typ, h)
+		traits = append(traits, Trait{Type: typ})
+	}
+	if stamp {
+		tr.RegisterTrait("stamp", stampTraitHandler{decorates: true})
+		traits = append(traits, Trait{Type: "stamp"})
+	}
+	app := makeApp("shop",
+		Component{Name: "web", Type: "webservice", Properties: map[string]any{}, Traits: traits},
+		Component{Name: "other", Type: "webservice", Properties: map[string]any{}},
+	)
+	app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+	return app
+}
+
 // TestApplyTraits_KeepsCustomOrder is go-kure/launcher#718: the bundle is
 // ordered component by component only when its traits did nothing but append.
-// A trait that moved, replaced or removed an application keeps the order it
-// left; one that shortened the bundle must not make the engine index past it,
-// nor miss the sub-application it appended after the removal shifted the tail
-// (the decorating stamp shows whether the engine saw it as one).
+// A trait that moved an application or removed a sub-application keeps the
+// order it left; one that shortened the bundle must not make the engine index
+// past it, nor miss the sub-application it appended after the removal shifted
+// the tail (the decorating stamp shows whether the engine saw it as one).
 // TestDecorateSubApplications_AnyTraitOrder's flat shape pins the append-only
 // case.
 func TestApplyTraits_KeepsCustomOrder(t *testing.T) {
 	cases := []struct {
-		name    string
-		handler reorderTraitHandler
-		stamp   bool
-		want    string
+		name     string
+		handlers []reorderTraitHandler
+		stamp    bool
+		want     string
 	}{
-		{name: "move", want: "other=,web="},
-		{name: "move-and-append", handler: reorderTraitHandler{appends: true}, want: "other=,web=,web-sub="},
-		{name: "replace", handler: reorderTraitHandler{replace: true}, want: "web-replaced=,other="},
-		{name: "remove", handler: reorderTraitHandler{remove: true}, want: "other="},
-		{name: "remove-and-append", handler: reorderTraitHandler{remove: true, appends: true}, stamp: true, want: "other=,web-sub=x"},
+		{name: "move", handlers: []reorderTraitHandler{{op: "move"}}, want: "other=,web="},
+		{name: "move-and-append", handlers: []reorderTraitHandler{{op: "move", appends: "web-sub"}}, want: "other=,web=,web-sub="},
+		{
+			name:     "remove a sub-application",
+			handlers: []reorderTraitHandler{{appends: "web-sub"}, {op: "remove", target: "web-sub"}},
+			stamp:    true,
+			want:     "web=x,other=",
+		},
+		{
+			name:     "remove a sub-application and append",
+			handlers: []reorderTraitHandler{{appends: "web-sub"}, {op: "remove", target: "web-sub", appends: "web-sub2"}},
+			stamp:    true,
+			want:     "web=x,other=,web-sub2=x",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := inDocumentTransformer()
-			tr.RegisterTrait("reorder", tc.handler)
-			traits := []Trait{{Type: "reorder"}}
-			if tc.stamp {
-				tr.RegisterTrait("stamp", stampTraitHandler{decorates: true})
-				traits = append(traits, Trait{Type: "stamp"})
-			}
-			app := makeApp("shop",
-				Component{Name: "web", Type: "webservice", Properties: map[string]any{}, Traits: traits},
-				Component{Name: "other", Type: "webservice", Properties: map[string]any{}},
-			)
-			app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+			app := reorderApp(tr, tc.handlers, tc.stamp)
 			cluster, _, err := tr.TransformWithPolicy(app, TransformContext{})
 			if err != nil {
 				t.Fatalf("TransformWithPolicy: %v", err)
 			}
 			if got := strings.Join(stamps(t, cluster), ","); got != tc.want {
 				t.Errorf("objects = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestApplyTraits_RefusesReplacedComponentApplication is
+// go-kure/launcher#734: the Phase-4 passes find a component's application by
+// the pointer its entry holds, so a trait that replaces or removes one, its own
+// or another component's in the bundle, fails the transform instead of
+// silently costing that component its NetworkPolicies and health check.
+func TestApplyTraits_RefusesReplacedComponentApplication(t *testing.T) {
+	for name, tc := range map[string]struct {
+		handler   reorderTraitHandler
+		component string
+	}{
+		"replace its own":             {reorderTraitHandler{op: "replace"}, "web"},
+		"remove its own":              {reorderTraitHandler{op: "remove"}, "web"},
+		"remove its own and append":   {reorderTraitHandler{op: "remove", appends: "web"}, "web"},
+		"replace another component's": {reorderTraitHandler{op: "replace", target: "other"}, "other"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := inDocumentTransformer()
+			app := reorderApp(tr, []reorderTraitHandler{tc.handler}, false)
+			_, _, err := tr.TransformWithPolicy(app, TransformContext{})
+			want := fmt.Sprintf(`component "web" trait "reorder0" replaced or removed the application of component %q; a TraitHandler mutates the application it is given and appends sub-applications, it must not replace or remove an application`, tc.component)
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want one containing %q", err, want)
 			}
 		})
 	}
