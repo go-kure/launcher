@@ -2098,7 +2098,8 @@ not part of either change.
     - `delivery: native`;
     - `source.namespace` with an inline source;
     - an inline GitRepository without exactly one `source.ref` field, or with a
-      URL that is not `http://` or `https://` (an `ssh://` one needs credentials);
+      URL that is not `http://` or `https://` (an `ssh://` one needs credentials),
+      or with a user or token in the URL;
     - `url` with an inline Bucket, or one without `endpoint` or `bucketName`;
     - `source.ref` other than on an inline GitRepository, and `endpoint`,
       `bucketName`, `provider`, `region`, `prefix` other than on an inline

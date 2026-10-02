@@ -473,6 +473,9 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"inline GitRepository empty ref", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{}}}, "helm: an inline source.kind GitRepository requires source.ref with exactly one of"},
 		{"inline GitRepository two ref fields", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main", "tag": "v1.0.0"}}}, "helm: source.ref sets branch, tag; an inline GitRepository takes exactly one of branch, tag, semver, name, commit"},
 		{"inline GitRepository oci URL", map[string]any{"chart": "a", "source": map[string]any{"url": "oci://ghcr.io/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires an http:// or https:// URL; an ssh:// repository needs credentials, so author a gitrepository and reference it"},
+		{"inline GitRepository URL with user and token", map[string]any{"chart": "a", "source": map[string]any{"url": "https://user:token@github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.url carries credentials, which an inline GitRepository does not take; author a gitrepository with a secretRef and reference it"},
+		{"inline GitRepository URL with token only", map[string]any{"chart": "a", "source": map[string]any{"url": "https://token@github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.url carries credentials, which an inline GitRepository does not take; author a gitrepository with a secretRef and reference it"},
+		{"inline GitRepository malformed URL with a token", map[string]any{"chart": "a", "source": map[string]any{"url": "https://user:FAKE_TOKEN@github.com/%zz", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.url is not a valid URL"},
 		{"inline GitRepository ssh URL", map[string]any{"chart": "a", "source": map[string]any{"url": "ssh://git@github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires an http:// or https:// URL; an ssh:// repository needs credentials, so author a gitrepository and reference it"},
 		{"inline GitRepository without chart", map[string]any{"source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires chart to be specified"},
 		{"inline GitRepository with version", map[string]any{"chart": "./charts/a", "version": "1.0.0", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: version is not used with source.kind GitRepository, whose chart is read at the source's fetched revision"},
@@ -517,6 +520,9 @@ func TestHelmRule_Refusals(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("error = %q, want it to contain %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "FAKE_TOKEN") {
+				t.Errorf("error = %q quotes the credential from source.url", err)
 			}
 		})
 	}
