@@ -93,12 +93,13 @@ type generatedVolume struct {
 // addPatched records the volumes of one leaf bundle's apps as Flux applies them
 // after the bundle's patches: the apps' objects, as generated, built with the
 // patches as kustomize-controller builds them, so each volume is forced exactly
-// as Flux forces it. The build is not traced back to the generated objects: a
-// built volume is named by the first application that generates a volume of its
-// identity, else by its bundle, and its force key is named as the patches' unless
-// a generated volume of its identity carried it. A volume a patch renames is
-// therefore named by the identity it ends with. A bundle with no volume is built
-// too, since a patch can add one.
+// as Flux forces it. A built volume is named by the first application that
+// generates a volume of its identity, else by its bundle, and its force key is
+// named as the patches' unless a generated volume of its identity carried it.
+// When a volume is force-applied, attributePatched then names it by the generated
+// object it comes from wherever an attribution build proves that, so a volume a
+// patch renames is named by its own application; it never changes which volumes
+// warn. A bundle with no volume is built too, since a patch can add one.
 func (s *forceScan) addPatched(apps []GeneratedApplication) error {
 	var objects []*client.Object
 	generated := map[objectIdentity]generatedVolume{}
@@ -121,18 +122,30 @@ func (s *forceScan) addPatched(apps []GeneratedApplication) error {
 	if err != nil {
 		return err
 	}
-	for _, obj := range built {
+	var volumes []patchedVolume
+	for k, obj := range built {
 		id, ok := volumeIdentity(obj)
 		if !ok {
 			continue
 		}
-		selected := forceSelected(obj)
 		g, seen := generated[id]
 		producer := "the bundle of " + apps[0].String()
 		if seen {
 			producer = g.app.String()
 		}
-		s.add(id, producer, apps[0].Forced, selected, selected && g.selected)
+		volumes = append(volumes, patchedVolume{
+			id:                id,
+			producer:          producer,
+			selected:          forceSelected(obj),
+			generatedSelected: g.selected,
+			built:             k,
+		})
+	}
+	if forceRelevant(volumes, apps[0].Forced) {
+		attributePatched(volumes, built, apps)
+	}
+	for _, v := range volumes {
+		s.add(v.id, v.producer, apps[0].Forced, v.selected, v.selected && v.generatedSelected)
 	}
 	return nil
 }
@@ -182,12 +195,19 @@ func bundleEnd(apps []GeneratedApplication, start int) int {
 // read (applyBundlePatches), exactly as Flux builds and reads them (a document Flux
 // skips, such as one without an apiVersion, is skipped), so a patched volume is
 // warned exactly when Flux force-applies it. A patch can add the force key, remove
-// or disable it, delete or rename the volume, or add one to a list envelope. The
-// build is not traced back to the generated objects: a patched volume is named by
-// the first application that generates a volume of its final identity, else by its
-// bundle, and a force key is named as the patches' unless a generated volume of that
-// identity carried it, so a volume a patch renames or swaps can be named
-// imprecisely. A patch set that does not build, or whose result Flux cannot read
+// or disable it, delete or rename the volume, or add one to a list envelope.
+//
+// A force-applied patched volume is named by the generated object it comes from:
+// when a bundle has one, it is built a second time from objects tagged with their
+// origin, and the tags are used only where that build, untagged, is exactly the
+// first. That second build only names: it never changes which volumes warn. A
+// volume it cannot trace is named by the first application that generates a volume
+// of its final identity, else by its bundle, with a force key named as the
+// patches' unless a generated volume of that identity carried it. That covers
+// every volume of a bundle whose patches read or write the tag (a JSON test or copy
+// of a whole annotations map, say), a volume whose annotations a patch replaces,
+// one a patch adds, and both volumes when a patch copies one's annotations to the
+// other. A patch set that does not build, or whose result Flux cannot read
 // (a list member that is not an object), is warned once, naming the bundle's
 // first application and the build error, and that bundle's objects are read
 // unpatched. postBuild substitution and anything the cluster changes on apply are
@@ -195,7 +215,8 @@ func bundleEnd(apps []GeneratedApplication, start int) int {
 //
 // It warns and changes nothing: the force is the author's choice. A caller passes
 // GenerateApplications' result, after CheckInDocumentCollisions; the volume warnings
-// follow generation order (a patched bundle's in kustomize's build order), after
+// follow generation order (a patched bundle's volumes that cannot be traced after
+// its others, in kustomize's build order), after
 // any patch build warning. An application a caller
 // built (not from GenerateApplications) is patched on its own. With no warning
 // handler it does nothing. A nil entry, or a nil object inside one, is skipped.
