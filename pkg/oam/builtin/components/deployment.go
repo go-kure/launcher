@@ -440,6 +440,9 @@ func (c *DeploymentConfig) Generate(app *stack.Application) ([]*client.Object, e
 		objects = append(objects, &saObj)
 	}
 	for _, pvc := range c.PVCs {
+		if pvc.ClaimName != "" {
+			continue // an existing claim, referenced by claimName
+		}
 		p, err := BuildPVC(pvc, app.Namespace, deploymentComponentLabels(app.Name))
 		if err != nil {
 			return nil, err

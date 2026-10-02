@@ -1,0 +1,16 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: runner
+      type: serviceaccount
+      properties: {}
+    - name: builder
+      type: serviceaccount
+      properties:
+        automountServiceAccountToken: false
+        imagePullSecrets:
+          - name: registry-credentials

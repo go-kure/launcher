@@ -235,7 +235,13 @@ the same `services` tier). `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore`
 (go-kure/launcher#573) are absent for a fourth reason: their `Pooler`, `Database` and
 `ObjectStore` statuses carry no condition kstatus reads, so a check would report them ready
 without waiting on anything — `postgresql`, which emits the same kinds, checks only its
-`Cluster`. They sit in the `services` tier with `cnpg-cluster`.
+`Cluster`. They sit in the `services` tier with `cnpg-cluster`. `serviceaccount`,
+`persistentvolumeclaim` and `configmap` (go-kure/launcher#702) are absent as well.
+kstatus reports a ServiceAccount or a ConfigMap current as soon as it exists, so a check
+would wait on nothing. A claim whose class binds on first consumer stays `Pending` until a
+pod mounts it, so a check would hold the tier on a claim nothing mounts yet. The workload
+that mounts it already carries the check that matters. Like `deployment` and `service`, the
+three are not in `defaultTierMap` and fall back to `TierApps`.
 
 `helmrelease` (go-kure/launcher#327) is listed, with the `helm.toolkit.fluxcd.io/v2`
 `HelmRelease` GVK: it always emits exactly one HelmRelease, whose Ready
@@ -479,7 +485,9 @@ member's kind) and one layout directory. Its application generates each member's
 first object in emission order, then every member's remaining objects in the same
 order: a deployment and a service member give Deployment, Service, then the
 Deployment's ServiceAccount and claims, as a single component generating all of them
-orders them. It answers every config contract the transform reads
+orders them. `webservice` lowers to a deployment, a service and a serviceaccount member,
+which give Deployment, Service, ServiceAccount, then the Deployment's claims: the same
+order (go-kure/launcher#702). It answers every config contract the transform reads
 (Service port and port name, backend Service name, routing target, ServiceAccount,
 single-pod claim) from the one member that has a value, gives the Flux namespace
 to every member that takes one, and reports the group's name as its component

@@ -1,0 +1,25 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: queue-worker
+      type: worker
+      properties:
+        image: ghcr.io/example/worker:v1.0.0
+        replicas: 3
+        volumes:
+          - name: shared
+            type: pvc
+            mountPath: /shared
+            size: 2Gi
+            accessModes:
+              - ReadWriteMany
+          - name: cache
+            type: emptyDir
+            mountPath: /cache
+      traits:
+        - type: force-replace
+          properties: {}

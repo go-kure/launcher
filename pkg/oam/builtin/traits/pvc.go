@@ -89,9 +89,14 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 		}
 	}
 
+	// An authored "" requests no StorageClass, which the API keeps apart from an
+	// unset class (the cluster default), as a workload's `pvc` volume does
+	// (go-kure/launcher#702).
 	var storageClass string
+	var storageClassExplicitEmpty bool
 	if s, ok := props["storageClassName"].(string); ok {
 		storageClass = s
+		storageClassExplicitEmpty = s == ""
 	}
 
 	accessModes := []string{string(corev1.ReadWriteOnce)}
@@ -136,8 +141,10 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 		componentName: app.Name,
 		Size:          size,
 		StorageClass:  storageClass,
-		AccessModes:   accessModes,
-		VolumeMode:    volumeMode,
+		// Set only for an authored "": storageClass is then "" too.
+		StorageClassExplicitEmpty: storageClassExplicitEmpty,
+		AccessModes:               accessModes,
+		VolumeMode:                volumeMode,
 	}, nil
 }
 
@@ -147,7 +154,10 @@ type PVCTraitConfig struct {
 	componentName string
 	Size          string
 	StorageClass  string
-	AccessModes   []string
+	// StorageClassExplicitEmpty marks an authored storageClassName "": the
+	// claim then requests no class instead of the cluster default.
+	StorageClassExplicitEmpty bool
+	AccessModes               []string
 	// VolumeMode is the authored volumeMode, empty when unauthored.
 	VolumeMode corev1.PersistentVolumeMode
 }
@@ -197,11 +207,12 @@ func (c *PVCTraitConfig) Generate(app *stack.Application) ([]*client.Object, err
 
 	labels := componentLabels(c.componentName)
 	pvc, err := components.BuildPVC(components.PVCConfig{
-		Name:         c.Name,
-		Size:         c.Size,
-		StorageClass: c.StorageClass,
-		AccessModes:  c.AccessModes,
-		VolumeMode:   c.VolumeMode,
+		Name:                      c.Name,
+		Size:                      c.Size,
+		StorageClass:              c.StorageClass,
+		StorageClassExplicitEmpty: c.StorageClassExplicitEmpty,
+		AccessModes:               c.AccessModes,
+		VolumeMode:                c.VolumeMode,
 	}, app.Namespace, labels)
 	if err != nil {
 		return nil, err

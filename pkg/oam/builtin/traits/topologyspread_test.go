@@ -197,7 +197,8 @@ func (p *replicasPolicy) DefaultReplicas() *int32 { return p.defaultReplicas }
 // tests need, exactly as kurel build does.
 func topologySpreadTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
-		"deployment": &components.DeploymentHandler{},
+		"deployment":     &components.DeploymentHandler{},
+		"serviceaccount": &components.ServiceAccountHandler{},
 	}, nil)
 	tr.RegisterComponentLowering(components.WorkerRule{})
 	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})

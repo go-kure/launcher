@@ -45,18 +45,64 @@ func TestWorkerRule_PropertySchemaUnchanged(t *testing.T) {
 	}
 }
 
-// lowerWorker runs WorkerRule.LowerComponent and returns its one emitted
-// component.
+// lowerWorker runs WorkerRule.LowerComponent and returns its deployment
+// member.
 func lowerWorker(t *testing.T, comp *oam.Component) oam.Component {
+	t.Helper()
+	return lowerWorkerMembers(t, comp)[0]
+}
+
+// lowerWorkerMembers runs WorkerRule.LowerComponent and returns every member:
+// deployment and, unless serviceAccountName was authored, serviceaccount
+// (go-kure/launcher#702).
+func lowerWorkerMembers(t *testing.T, comp *oam.Component) []oam.Component {
 	t.Helper()
 	res, err := components.WorkerRule{}.LowerComponent(comp, oam.LoweringContext{})
 	if err != nil {
 		t.Fatalf("LowerComponent: %v", err)
 	}
-	if len(res.Components) != 1 || len(res.Policies) != 0 || len(res.Traits) != 0 || len(res.Documents) != 0 {
-		t.Fatalf("LowerComponent emitted %+v, want exactly one component", res)
+	want := 2
+	if _, authored := comp.Properties["serviceAccountName"]; authored {
+		want = 1
 	}
-	return res.Components[0]
+	if len(res.Components) != want || len(res.Policies) != 0 || len(res.Traits) != 0 || len(res.Documents) != 0 {
+		t.Fatalf("LowerComponent emitted %+v, want exactly %d components", res, want)
+	}
+	return res.Components
+}
+
+// Unless serviceAccountName is authored, the rule emits the component's
+// ServiceAccount as a serviceaccount member, carrying the object decorators
+// among the authored traits, and hands the deployment member its name, so the
+// deployment emits none of its own (go-kure/launcher#702).
+func TestWorkerRule_EmitsServiceAccountMember(t *testing.T) {
+	annotations := map[string]string{"launcher.gokure.dev/tier": "infra"}
+	members := lowerWorkerMembers(t, &oam.Component{Name: "app", Type: "worker",
+		Properties:  map[string]any{"image": "ghcr.io/org/app:v1"},
+		Traits:      []oam.Trait{{Type: "force-replace"}, {Type: "scaler"}, {Type: "prune-protection"}},
+		Annotations: annotations})
+	sa := members[1]
+	if sa.Name != "app" || sa.Type != "serviceaccount" {
+		t.Fatalf("second member is %s/%s, want app/serviceaccount", sa.Name, sa.Type)
+	}
+	if want := map[string]any{"automountServiceAccountToken": false}; !reflect.DeepEqual(sa.Properties, want) {
+		t.Errorf("serviceaccount properties = %v, want %v", sa.Properties, want)
+	}
+	if !reflect.DeepEqual(sa.Annotations, annotations) {
+		t.Errorf("serviceaccount annotations = %v, want the authored %v", sa.Annotations, annotations)
+	}
+	if len(sa.Traits) != 2 || sa.Traits[0].Type != "force-replace" || sa.Traits[1].Type != "prune-protection" {
+		t.Errorf("serviceaccount traits = %+v, want force-replace then prune-protection", sa.Traits)
+	}
+	if got := members[0].Properties["serviceAccountName"]; got != "app" {
+		t.Errorf("deployment serviceAccountName = %v, want the component name", got)
+	}
+
+	members = lowerWorkerMembers(t, &oam.Component{Name: "app", Type: "worker",
+		Properties: map[string]any{"image": "ghcr.io/org/app:v1", "serviceAccountName": "shared"}})
+	if got := members[0].Properties["serviceAccountName"]; got != "shared" {
+		t.Errorf("deployment serviceAccountName = %v, want the authored %q", got, "shared")
+	}
 }
 
 // The emitted component is a deployment of the same name carrying the authored

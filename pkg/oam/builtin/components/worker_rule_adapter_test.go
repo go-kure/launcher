@@ -35,8 +35,9 @@ func (workerViaRule) ToApplicationConfig(comp *oam.Component, namespace string) 
 	if err != nil {
 		return nil, err
 	}
-	if len(res.Components) != 1 {
-		return nil, errors.Errorf("worker rule emitted %d components, want 1", len(res.Components))
+	n := len(res.Components)
+	if n < 1 || n > 2 || res.Components[0].Type != "deployment" || (n == 2 && res.Components[1].Type != "serviceaccount") {
+		return nil, errors.Errorf("worker rule emitted %d components, want a deployment and at most a serviceaccount", n)
 	}
 	emitted := res.Components[0]
 	cfg, err := (&components.DeploymentHandler{}).ToApplicationConfig(&emitted, namespace)
@@ -47,18 +48,29 @@ func (workerViaRule) ToApplicationConfig(comp *oam.Component, namespace string) 
 	if !ok {
 		return nil, errors.Errorf("deployment handler returned %T, want *components.DeploymentConfig", cfg)
 	}
+	var sa stack.ApplicationConfig
+	if n == 2 {
+		if sa, err = (&components.ServiceAccountHandler{}).ToApplicationConfig(&res.Components[1], namespace); err != nil {
+			return nil, err
+		}
+	}
 	synthesized := emitted.Traits[:len(emitted.Traits)-len(comp.Traits)]
-	return &workerViaRuleConfig{DeploymentConfig: dep, synthesized: synthesized}, nil
+	return &workerViaRuleConfig{DeploymentConfig: dep, serviceAccount: sa, synthesized: synthesized}, nil
 }
 
-// workerViaRuleConfig is the deployment component's config plus the traits the
-// worker rule synthesized in front of the authored ones (today at most one,
+// workerViaRuleConfig is the deployment component's config, the serviceaccount
+// member's when the rule emitted one, and the traits the worker rule
+// synthesized in front of the authored ones (today at most one,
 // topology-spread), applied innermost at Generate as the engine applies them.
 type workerViaRuleConfig struct {
 	*components.DeploymentConfig
-	synthesized []oam.Trait
+	serviceAccount stack.ApplicationConfig
+	synthesized    []oam.Trait
 }
 
+// Generate generates the members as the sibling group does: each member's
+// first object in member order (Deployment, ServiceAccount), then the rest of
+// the deployment member's objects (its claims).
 func (c *workerViaRuleConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	inner := stack.NewApplication(app.Name, app.Namespace, c.DeploymentConfig)
 	for i := range c.synthesized {
@@ -69,5 +81,14 @@ func (c *workerViaRuleConfig) Generate(app *stack.Application) ([]*client.Object
 			return nil, err
 		}
 	}
-	return inner.Config.Generate(app)
+	dep, err := inner.Config.Generate(app)
+	if err != nil || c.serviceAccount == nil {
+		return dep, err
+	}
+	sa, err := c.serviceAccount.Generate(app)
+	if err != nil {
+		return nil, err
+	}
+	objs := append([]*client.Object{dep[0]}, sa...)
+	return append(objs, dep[1:]...), nil
 }

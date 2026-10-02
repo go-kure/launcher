@@ -39,7 +39,10 @@ component-position ones (`builtinComponentLoweringRules()` — `worker`,
 `worker` lowers to a `deployment` component plus, unless `topologySpread: false`, a
 synthesized `topology-spread` trait. `webservice` lowers to a same-name `deployment`
 and `service` pair, deployed as one component, with the same `topology-spread`
-treatment on the `deployment`. `postgresql` lowers to a `cnpg-cluster`
+treatment on the `deployment`. Unless `serviceAccountName` is authored, both also
+emit a same-name `serviceaccount` member for the component's ServiceAccount
+(go-kure/launcher#702), so `builtinComponentHandlers()` must register
+`serviceaccount`. `postgresql` lowers to a `cnpg-cluster`
 (plus `cnpg-objectstore`, `cnpg-pooler` and one `cnpg-database` per database
 when authored) carrying the engine-only `cnpg-postgresql-defaults` trait, which
 is registered from `builtinEngineTraits()` via `RegisterEngineTrait`: only a rule
@@ -82,7 +85,13 @@ opinion-free projection of a CloudNativePG `Cluster` — is registered in
 `cnpg-cluster-minimal` and `cnpg-cluster-full` fixtures build it. Its siblings
 `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore` (one CloudNativePG
 `Pooler`, `Database` or Barman Cloud `ObjectStore` each) are registered the same
-way; the `cnpg-<kind>-minimal` and `cnpg-<kind>-full` fixtures build each.
+way; the `cnpg-<kind>-minimal` and `cnpg-<kind>-full` fixtures build each. The
+kind components `serviceaccount`, `persistentvolumeclaim` and `configmap`
+(go-kure/launcher#702) are registered the same way. Fixtures with the same names
+build each one, and the `pvc-volume-claimname` fixture mounts a
+`persistentvolumeclaim` through a `pvc` volume's `claimName`. The
+`webservice-pvc-volumes` and `worker-pvc-volumes` fixtures pin the claims both
+role components generate, byte-identical to before the `serviceaccount` member.
 
 Because a lowering rule may claim types the parser would otherwise reject, `build`
 constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`

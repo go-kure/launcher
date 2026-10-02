@@ -270,6 +270,12 @@ type PVCConfig struct {
 	// VolumeMode is the authored volumeMode, empty when unauthored so the
 	// claim leaves it unset and the apiserver defaults it to Filesystem.
 	VolumeMode corev1.PersistentVolumeMode
+	// ClaimName, when set, makes the entry a reference to an existing claim
+	// of that name (a pvc volume authoring claimName): no object is built for
+	// it, Size and StorageClass stay empty, Name is the pod-local volume name,
+	// and AccessModes states the referenced claim's modes so the non-RWX
+	// constraints still see it (go-kure/launcher#702).
+	ClaimName string
 }
 
 // ParsedVolumes holds the results of parsing volume definitions from OAM
@@ -2084,7 +2090,14 @@ func nullElem(v any) any {
 // already means "the overall server". It is a per-field judgement, not a
 // property of the file.
 func parseStorageClassField(raw map[string]any, label string) (value string, explicitEmpty bool, err error) {
-	v, present := authoredValue(raw, "storageClass")
+	return parseStorageClassKey(raw, "storageClass", label)
+}
+
+// parseStorageClassKey is parseStorageClassField over any key: the
+// persistentvolumeclaim component reads the same value as `storageClassName`,
+// the API field's own name.
+func parseStorageClassKey(raw map[string]any, key, label string) (value string, explicitEmpty bool, err error) {
+	v, present := authoredValue(raw, key)
 	if !present {
 		return "", false, nil
 	}
@@ -2609,7 +2622,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			}
 			result.Volumes = append(result.Volumes, vol)
 		case "pvc":
-			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "devicePath", "volumeMode", "readOnly", "size", "storageClass", "accessModes"}, fmt.Sprintf("volume %q: pvc", volName)); err != nil {
+			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "devicePath", "volumeMode", "readOnly", "size", "storageClass", "accessModes", "claimName"}, fmt.Sprintf("volume %q: pvc", volName)); err != nil {
 				return result, err
 			}
 			var volumeMode corev1.PersistentVolumeMode
@@ -2622,6 +2635,29 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			}
 			if err := checkVolumeModePairing(fmt.Sprintf("volume %q", volName), volumeMode, mountPresent, devicePath); err != nil {
 				return result, err
+			}
+			// authoredValue, not parseStringField's presence: an authored ""
+			// is a reference with an invalid name, not a generated claim.
+			claimName, _, err := parseStringField(m, "claimName", fmt.Sprintf("volume %q: claimName", volName))
+			if err != nil {
+				return result, err
+			}
+			if _, claimNamePresent := authoredValue(m, "claimName"); claimNamePresent {
+				ref, err := parseClaimReference(m, volName, claimName, volumeMode)
+				if err != nil {
+					return result, err
+				}
+				result.Volumes = append(result.Volumes, corev1.Volume{
+					Name: volName,
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: claimName,
+							ReadOnly:  readOnly,
+						},
+					},
+				})
+				result.PVCs = append(result.PVCs, ref)
+				break
 			}
 			size, present, err := parseStringField(m, "size", fmt.Sprintf("volume %q: PVC size", volName))
 			if err != nil {
@@ -2726,6 +2762,33 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 	return result, nil
 }
 
+// parseClaimReference reads a pvc volume that authors claimName: it mounts an
+// existing claim of that name and generates none (go-kure/launcher#702). The
+// claim's own spec is not this component's to state, so size and storageClass
+// are refused next to it. accessModes stays: it states the referenced claim's
+// modes (default ReadWriteOnce), which is all hasNonRWXPVC needs to keep the
+// replicas and strategy constraints in force.
+func parseClaimReference(m map[string]any, volName, claimName string, volumeMode corev1.PersistentVolumeMode) (PVCConfig, error) {
+	for _, key := range []string{"size", "storageClass"} {
+		if _, present := authoredValue(m, key); present {
+			return PVCConfig{}, errors.Errorf("volume %q: %s cannot be set with claimName; the referenced claim already exists and states its own", volName, key)
+		}
+	}
+	if errs := validation.IsDNS1123Subdomain(claimName); len(errs) > 0 {
+		return PVCConfig{}, errors.Errorf("volume %q: invalid claimName %q: %s", volName, claimName, strings.Join(errs, "; "))
+	}
+	accessModes, err := parseAccessModes(m)
+	if err != nil {
+		return PVCConfig{}, errors.Errorf("volume %q: %w", volName, err)
+	}
+	return PVCConfig{
+		Name:        volName,
+		ClaimName:   claimName,
+		AccessModes: accessModes,
+		VolumeMode:  volumeMode,
+	}, nil
+}
+
 var validAccessModes = map[string]bool{
 	string(corev1.ReadWriteOnce):    true,
 	string(corev1.ReadOnlyMany):     true,
@@ -2762,6 +2825,9 @@ func firstNonRWXPVC(pvcs []PVCConfig) string {
 		}
 		for _, mode := range pvc.AccessModes {
 			if mode == string(corev1.ReadWriteOnce) || mode == string(corev1.ReadWriteOncePod) {
+				if pvc.ClaimName != "" {
+					return pvc.ClaimName
+				}
 				return pvc.Name
 			}
 		}
@@ -4892,6 +4958,9 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 // requests[storage]. It is checked here as well as in parseVolumes because the
 // pvc trait builds its claim through this function without that parser.
 func BuildPVC(pvc PVCConfig, namespace string, labels map[string]string) (*corev1.PersistentVolumeClaim, error) {
+	if pvc.ClaimName != "" {
+		return nil, errors.Errorf("PVC %q references the existing claim %q; there is no object to build", pvc.Name, pvc.ClaimName)
+	}
 	qty, err := resource.ParseQuantity(pvc.Size)
 	if err != nil {
 		return nil, errors.Errorf("PVC %q: invalid size %q: %w", pvc.Name, pvc.Size, err)
@@ -4970,10 +5039,21 @@ func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) 
 	// each time keeps the result idempotent, instead of qualifying an
 	// already-qualified PVCConfig.Name/ClaimName left over from a prior
 	// run and doubling the prefix (e.g. "app-data" -> "app-app-data").
+	//
+	// A claimName reference names an existing claim, which is not this
+	// component's to rename: it is copied as is, and its pod volume (keyed by
+	// the pod-local name it keeps in Name) is skipped in both passes, so a
+	// referenced claim sharing a name with a generated one is never rewritten.
+	referenceVolumes := make(map[string]bool)
+	for _, pvc := range pvcs {
+		if pvc.ClaimName != "" {
+			referenceVolumes[pvc.Name] = true
+		}
+	}
 	localNameByClaimName := make(map[string]string, len(volumes))
 	for i := range volumes {
 		claim := volumes[i].PersistentVolumeClaim
-		if claim == nil {
+		if claim == nil || referenceVolumes[volumes[i].Name] {
 			continue
 		}
 		localNameByClaimName[claim.ClaimName] = volumes[i].Name
@@ -4981,6 +5061,10 @@ func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) 
 	qualifiedNames := make(map[string]string, len(pvcs))
 	out := make([]PVCConfig, len(pvcs))
 	for i, pvc := range pvcs {
+		if pvc.ClaimName != "" {
+			out[i] = pvc
+			continue
+		}
 		localName, ok := localNameByClaimName[pvc.Name]
 		if !ok {
 			localName = pvc.Name
@@ -4997,7 +5081,7 @@ func qualifyPVCNames(volumes []corev1.Volume, pvcs []PVCConfig, appName string) 
 	}
 	for i := range volumes {
 		claim := volumes[i].PersistentVolumeClaim
-		if claim == nil {
+		if claim == nil || referenceVolumes[volumes[i].Name] {
 			continue
 		}
 		if qualified, ok := qualifiedNames[claim.ClaimName]; ok {

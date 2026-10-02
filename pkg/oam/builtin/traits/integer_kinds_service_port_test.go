@@ -49,7 +49,8 @@ func transformServicePort(t *testing.T, traitType string, port any) ([]client.Ob
 		}}
 	}
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
-		"deployment": &components.DeploymentHandler{},
+		"deployment":     &components.DeploymentHandler{},
+		"serviceaccount": &components.ServiceAccountHandler{},
 	}, nil)
 	tr.RegisterComponentLowering(components.WorkerRule{})
 	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})

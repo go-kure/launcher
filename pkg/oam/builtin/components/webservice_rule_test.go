@@ -45,14 +45,57 @@ func TestWebserviceRule_PropertySchemaUnchanged(t *testing.T) {
 // and service members.
 func lowerWebservice(t *testing.T, comp *oam.Component) (dep, svc oam.Component) {
 	t.Helper()
+	members := lowerWebserviceMembers(t, comp)
+	return members[0], members[1]
+}
+
+// lowerWebserviceMembers runs WebserviceRule.LowerComponent and returns every
+// member: deployment, service and, unless serviceAccountName was authored,
+// serviceaccount (go-kure/launcher#702).
+func lowerWebserviceMembers(t *testing.T, comp *oam.Component) []oam.Component {
+	t.Helper()
 	res, err := components.WebserviceRule{}.LowerComponent(comp, oam.LoweringContext{})
 	if err != nil {
 		t.Fatalf("LowerComponent: %v", err)
 	}
-	if len(res.Components) != 2 || len(res.Policies) != 0 || len(res.Traits) != 0 || len(res.Documents) != 0 {
-		t.Fatalf("LowerComponent emitted %+v, want exactly two components", res)
+	want := 3
+	if _, authored := comp.Properties["serviceAccountName"]; authored {
+		want = 2
 	}
-	return res.Components[0], res.Components[1]
+	if len(res.Components) != want || len(res.Policies) != 0 || len(res.Traits) != 0 || len(res.Documents) != 0 {
+		t.Fatalf("LowerComponent emitted %+v, want exactly %d components", res, want)
+	}
+	return res.Components
+}
+
+// Unless serviceAccountName is authored, the rule emits the component's
+// ServiceAccount as a third, serviceaccount member — the account deployment
+// generated itself, token automount off — and hands the deployment member its
+// name, so the deployment emits none of its own. An authored name stays the
+// deployment's, with no member (go-kure/launcher#702).
+func TestWebserviceRule_EmitsServiceAccountMember(t *testing.T) {
+	annotations := map[string]string{"launcher.gokure.dev/tier": "infra"}
+	members := lowerWebserviceMembers(t, &oam.Component{Name: "web", Type: "webservice",
+		Properties: map[string]any{"image": "ghcr.io/org/app:v1"}, Annotations: annotations})
+	sa := members[2]
+	if sa.Name != "web" || sa.Type != "serviceaccount" {
+		t.Fatalf("third member is %s/%s, want web/serviceaccount", sa.Name, sa.Type)
+	}
+	if want := map[string]any{"automountServiceAccountToken": false}; !reflect.DeepEqual(sa.Properties, want) {
+		t.Errorf("serviceaccount properties = %v, want %v", sa.Properties, want)
+	}
+	if !reflect.DeepEqual(sa.Annotations, annotations) {
+		t.Errorf("serviceaccount annotations = %v, want the authored %v", sa.Annotations, annotations)
+	}
+	if got := members[0].Properties["serviceAccountName"]; got != "web" {
+		t.Errorf("deployment serviceAccountName = %v, want the component name", got)
+	}
+
+	members = lowerWebserviceMembers(t, &oam.Component{Name: "web", Type: "webservice",
+		Properties: map[string]any{"image": "ghcr.io/org/app:v1", "serviceAccountName": "shared"}})
+	if got := members[0].Properties["serviceAccountName"]; got != "shared" {
+		t.Errorf("deployment serviceAccountName = %v, want the authored %q", got, "shared")
+	}
 }
 
 // The rule emits a same-name pair, a deployment then a service. The deployment
@@ -151,7 +194,7 @@ func TestWebserviceRule_AffinityShorthandBecomesRaw(t *testing.T) {
 
 // Each authored trait goes, by value and in authored order, to the member it
 // acts on: the routing traits to the service; prune-protection and
-// force-replace to both; everything else — the workload traits, the bundle
+// force-replace to every member; everything else — the workload traits, the bundle
 // traits (fluxcd-*), and a type the rule does not know — to the deployment.
 // topologySpread (absent or true) puts a propertyless topology-spread in front
 // of the deployment's traits; false puts none.
@@ -182,7 +225,11 @@ func TestWebserviceRule_RoutesTraits(t *testing.T) {
 		if ts != "absent" {
 			props["topologySpread"] = ts
 		}
-		dep, svc := lowerWebservice(t, &oam.Component{Name: "web", Type: "webservice", Properties: props, Traits: authored})
+		members := lowerWebserviceMembers(t, &oam.Component{Name: "web", Type: "webservice", Properties: props, Traits: authored})
+		dep, svc := members[0], members[1]
+		if got, want := types(members[2].Traits), []string{"prune-protection", "force-replace"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: serviceaccount traits = %v, want %v", name, got, want)
+		}
 		want := wantDep
 		if ts != false {
 			want = append([]string{"topology-spread"}, wantDep...)

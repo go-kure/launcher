@@ -11,7 +11,12 @@ import (
 
 // WorkerRule lowers a "worker" component (D1 component position,
 // oam.ComponentLoweringRule) into a terminal "deployment" component carrying
-// the same name. It is the first production component-position rule, and the
+// the same name and, unless `serviceAccountName` is authored, a same-name
+// "serviceaccount" sibling (roleServiceAccount): the component's own
+// ServiceAccount, with `automountServiceAccountToken: false` as the handler
+// generated it, while the deployment member is handed
+// `serviceAccountName: <component name>` so it generates none of its own. It
+// is the first production component-position rule, and the
 // re-expression of the former WorkerHandler: worker was a Deployment with no
 // Service plus two of launcher's own opinions, and `deployment` is the
 // unopinionated projection of that same API kind, so what worker adds is
@@ -48,7 +53,10 @@ import (
 // Generate, before any trait saw the Deployment. An authored `topology-spread`
 // on a worker therefore still refuses with the same message whenever the
 // default already produced constraints, and still does nothing when it did
-// not. Annotations (the tier override, among others) are forwarded too.
+// not. Annotations (the tier override, among others) are forwarded too, to
+// both members; the serviceaccount member also gets the authored
+// `prune-protection` and `force-replace` traits, which decorate every object
+// the component generates.
 //
 // Everything past the parse is the deployment component's: ApplyPolicy,
 // NonRWXClaim, ServiceAccountName, EmitsAutoHealthCheck, labels and the
@@ -126,18 +134,24 @@ func (r WorkerRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (
 		}
 	}
 
+	sa := roleServiceAccount(comp, props, comp.Traits)
+
 	traits := comp.Traits
 	if !opinions.topologySpreadDisabled {
 		traits = append([]oam.Trait{{Type: "topology-spread", Properties: map[string]any{}}}, comp.Traits...)
 	}
 
-	return oam.LoweringResult{Components: []oam.Component{{
+	members := []oam.Component{{
 		Name:        comp.Name,
 		Type:        "deployment",
 		Properties:  props,
 		Traits:      traits,
 		Annotations: comp.Annotations,
-	}}}, nil
+	}}
+	if sa != nil {
+		members = append(members, *sa)
+	}
+	return oam.LoweringResult{Components: members}, nil
 }
 
 // workerOpinions is what parseWorker keeps: the two properties worker

@@ -11,15 +11,16 @@ import (
 )
 
 // registerWebservice registers "webservice" on tr as kurel build does: the
-// components.WebserviceRule lowering rule, plus the two terminal kinds it emits
-// ("deployment", "service") and the "topology-spread" trait it synthesizes.
-// Tests that build a webservice through a Transformer use it, so they run the
-// production path — the same-name sibling group, its trait routing and its
-// NetworkPolicy synthesis — rather than a handler stand-in.
+// components.WebserviceRule lowering rule, plus the three terminal kinds it
+// emits ("deployment", "service", "serviceaccount") and the "topology-spread"
+// trait it synthesizes. Tests that build a webservice through a Transformer use
+// it, so they run the production path — the same-name sibling group, its trait
+// routing and its NetworkPolicy synthesis — rather than a handler stand-in.
 func registerWebservice(tr *oam.Transformer) {
 	tr.RegisterComponentLowering(components.WebserviceRule{})
 	tr.RegisterComponent("deployment", &components.DeploymentHandler{})
 	tr.RegisterComponent("service", &components.ServiceHandler{})
+	tr.RegisterComponent("serviceaccount", &components.ServiceAccountHandler{})
 	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
 }
 
@@ -48,8 +49,15 @@ func (webserviceViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 	if err != nil {
 		return nil, err
 	}
-	if len(res.Components) != 2 || res.Components[0].Type != "deployment" || res.Components[1].Type != "service" {
-		return nil, errors.Errorf("webservice rule emitted %d components, want a deployment and a service", len(res.Components))
+	n := len(res.Components)
+	if n < 2 || n > 3 || res.Components[0].Type != "deployment" || res.Components[1].Type != "service" || (n == 3 && res.Components[2].Type != "serviceaccount") {
+		return nil, errors.Errorf("webservice rule emitted %d components, want a deployment, a service and at most a serviceaccount", n)
+	}
+	var sa stack.ApplicationConfig
+	if n == 3 {
+		if sa, err = (&components.ServiceAccountHandler{}).ToApplicationConfig(&res.Components[2], namespace); err != nil {
+			return nil, err
+		}
 	}
 	emitted := res.Components[0]
 	cfg, err := (&components.DeploymentHandler{}).ToApplicationConfig(&emitted, namespace)
@@ -75,16 +83,18 @@ func (webserviceViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 			synthesized = append(synthesized, t)
 		}
 	}
-	return &webserviceViaRuleConfig{DeploymentConfig: dep, service: svc, synthesized: synthesized}, nil
+	return &webserviceViaRuleConfig{DeploymentConfig: dep, service: svc, serviceAccount: sa, synthesized: synthesized}, nil
 }
 
 // webserviceViaRuleConfig is the deployment member's config, the service
-// member's, and the traits the rule synthesized in front of the deployment
-// member's (today at most one, topology-spread).
+// member's, the serviceaccount member's when the rule emitted one, and the
+// traits the rule synthesized in front of the deployment member's (today at
+// most one, topology-spread).
 type webserviceViaRuleConfig struct {
 	*components.DeploymentConfig
-	service     *components.ServiceConfig
-	synthesized []oam.Trait
+	service        *components.ServiceConfig
+	serviceAccount stack.ApplicationConfig
+	synthesized    []oam.Trait
 }
 
 func (c *webserviceViaRuleConfig) ServicePort() int32 { return c.service.ServicePort() }
@@ -93,9 +103,9 @@ func (c *webserviceViaRuleConfig) ServicePortName() (string, bool) {
 	return c.service.ServicePortName()
 }
 
-// Generate generates both members as the sibling group does: each member's
-// first object in member order (Deployment, Service), then the rest of each
-// member's objects (the deployment member's ServiceAccount and claims).
+// Generate generates the members as the sibling group does: each member's
+// first object in member order (Deployment, Service, ServiceAccount), then the
+// rest of each member's objects (the deployment member's claims).
 func (c *webserviceViaRuleConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	inner := stack.NewApplication(app.Name, app.Namespace, c.DeploymentConfig)
 	for i := range c.synthesized {
@@ -111,18 +121,22 @@ func (c *webserviceViaRuleConfig) Generate(app *stack.Application) ([]*client.Ob
 	if err != nil {
 		return nil, err
 	}
+	var sa []*client.Object
+	if c.serviceAccount != nil {
+		if sa, err = c.serviceAccount.Generate(app); err != nil {
+			return nil, err
+		}
+	}
 	var objs []*client.Object
-	if len(dep) > 0 {
-		objs = append(objs, dep[0])
+	for _, member := range [][]*client.Object{dep, svc, sa} {
+		if len(member) > 0 {
+			objs = append(objs, member[0])
+		}
 	}
-	if len(svc) > 0 {
-		objs = append(objs, svc[0])
-	}
-	if len(dep) > 1 {
-		objs = append(objs, dep[1:]...)
-	}
-	if len(svc) > 1 {
-		objs = append(objs, svc[1:]...)
+	for _, member := range [][]*client.Object{dep, svc, sa} {
+		if len(member) > 1 {
+			objs = append(objs, member[1:]...)
+		}
 	}
 	return objs, nil
 }

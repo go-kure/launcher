@@ -1,0 +1,17 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: settings
+      type: configmap
+      properties:
+        immutable: true
+        data:
+          LOG_LEVEL: info
+          config.yaml: |
+            mode: production
+        binaryData:
+          logo.bin: aGVsbG8=

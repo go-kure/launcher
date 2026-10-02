@@ -63,7 +63,7 @@ preflight reject every valid use of the trait.
 ### Storage
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
-| `pvc` | PersistentVolumeClaim | `name`, `size` (optional; policy default `storageSize`; the effective size must be a positive quantity — zero or negative fails the build, as `ValidatePersistentVolumeClaimSpec` would refuse the claim), `storageClassName`, `accessModes[]`, `volumeMode` (optional `Filesystem`\|`Block`; omitted leaves the claim's mode unset, which the apiserver defaults to `Filesystem`; any other value or type fails the build) (policy: `maxStorageSize`) |
+| `pvc` | PersistentVolumeClaim | `name`, `size` (optional; policy default `storageSize`; the effective size must be a positive quantity — zero or negative fails the build, as `ValidatePersistentVolumeClaimSpec` would refuse the claim), `storageClassName` (an authored `""` requests no class, i.e. no dynamic provisioning, and is emitted as `storageClassName: ""`; unset uses the cluster default. **Pre-GA output change** (go-kure/launcher#702): `""` used to be treated as unset), `accessModes[]`, `volumeMode` (optional `Filesystem`\|`Block`; omitted leaves the claim's mode unset, which the apiserver defaults to `Filesystem`; any other value or type fails the build) (policy: `maxStorageSize`) |
 | `volsync` | VolSync ReplicationSource | `sourcePVC`, `schedule`, `copyMethod`, `storageClassName`, `volumeSnapshotClassName`, `retain.{daily,weekly,monthly}` (class fields also supplied via capability rendering; injection is `copyMethod`-aware) |
 
 ### Configuration & scaling
