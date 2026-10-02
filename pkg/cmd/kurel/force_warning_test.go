@@ -140,6 +140,57 @@ spec:
 	}
 }
 
+// TestWarnForcedVolumes_FluxCDPatches pins go-kure/launcher#728 through kurel's
+// own transformer: the fluxcd-patches trait's patches are applied before the
+// claim is read, so a patch that adds the force key warns and one that removes it
+// does not.
+func TestWarnForcedVolumes_FluxCDPatches(t *testing.T) {
+	const app = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    - name: media
+      type: persistentvolumeclaim
+      properties:
+        size: 20Gi
+      traits:
+`
+	const (
+		addForce = `        - type: fluxcd-patches
+          properties:
+            patches:
+              - target:
+                  kind: PersistentVolumeClaim
+                patch: |
+                  - op: add
+                    path: /metadata/annotations
+                    value:
+                      kustomize.toolkit.fluxcd.io/force: enabled
+`
+		removeForce = `        - type: force-replace
+        - type: fluxcd-patches
+          properties:
+            patches:
+              - target:
+                  kind: PersistentVolumeClaim
+                  name: media
+                patch: |
+                  - op: remove
+                    path: /metadata/annotations/kustomize.toolkit.fluxcd.io~1force
+`
+	)
+	want := []string{`PersistentVolumeClaim default/media (component "media") is force-applied (kustomize.toolkit.fluxcd.io/force: enabled, set by its bundle's patches)` + forcedWarningTail}
+	if got := forcedVolumeWarnings(t, app+addForce); !slices.Equal(got, want) {
+		t.Errorf("patch adds the force key: warnings =\n%q\nwant\n%q", got, want)
+	}
+	if got := forcedVolumeWarnings(t, app+removeForce); len(got) != 0 {
+		t.Errorf("patch removes the force key: warnings = %q, want none", got)
+	}
+}
+
 // TestWarnForcedVolumes_ListMembers pins that a claim inside a list a `manifests`
 // component generates is warned about as Flux applies it: by its own annotation,
 // or by the bundle's force. The manifest parser expands the outer list itself, so

@@ -448,7 +448,17 @@ a list envelope still in the output stands for its members — Kustomize's build
 kind ending in `List` whose `items` is an array, recursively, then Flux expands any
 remaining object whose `items` is an array, one level only — and a member is forced by its
 own metadata, not the envelope's. An object generated more than once is warned once,
-naming its first producer and every reason any copy is forced. It
+naming its first producer and every reason any copy is forced. A bundle's patches
+(`GeneratedApplication.Patches`, which the `fluxcd-patches` trait sets) are applied first,
+as Flux applies its Kustomization's `spec.patches` (go-kure/launcher#728): the objects of a
+leaf bundle that holds a volume are built with kustomize (krusty, with kustomize-controller's
+options, serialized and with a panic recovered) and the patched copies are read. A patch can
+add the force key (named `kustomize.toolkit.fluxcd.io/force: enabled, set by its bundle's
+patches`), remove or disable it, or delete the volume. A patch set that does not build is
+warned once, naming the bundle's first application and the build error, and that bundle is
+checked as generated. Every caller and build gets this; postBuild substitution and anything
+the cluster changes on apply are not modelled. An application a caller built rather than
+`GenerateApplications` is patched on its own. It
 covers every generated claim alike — a `webservice`/`worker` `volumes` entry (a
 synthesized `pvc` trait, so named as a sub-application of its component,
 go-kure/launcher#702), the `pvc` trait, the `persistentvolumeclaim` component, a `manifests` component's objects — and changes no
