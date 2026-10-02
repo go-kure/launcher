@@ -2,6 +2,7 @@ package traits_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
@@ -70,6 +71,66 @@ func TestConfigMapHandler_Apply_NoMountPath(t *testing.T) {
 	}
 	if len(bundle.Applications) != 1 {
 		t.Fatalf("expected 1 bundle app, got %d", len(bundle.Applications))
+	}
+}
+
+// TestConfigMapHandler_Apply_SizeLimit pins the trait to the API server's 1 MiB
+// ConfigMap limit (corev1.MaxSecretSize), summed over the stringified data
+// values the ConfigMap stores.
+func TestConfigMapHandler_Apply_SizeLimit(t *testing.T) {
+	limit := corev1.MaxSecretSize
+	cases := []struct {
+		name    string
+		data    map[string]any
+		wantErr string
+	}{
+		{
+			name: "one value at the limit",
+			data: map[string]any{"k": strings.Repeat("a", limit)},
+		},
+		{
+			name:    "one value a byte over",
+			data:    map[string]any{"k": strings.Repeat("a", limit+1)},
+			wantErr: `configmap trait "my-config": data and binaryData hold 1048577 bytes, over the 1048576-byte limit`,
+		},
+		{
+			name:    "two values summing a byte over",
+			data:    map[string]any{"a": strings.Repeat("a", limit/2), "b": strings.Repeat("b", limit/2+1)},
+			wantErr: "hold 1048577 bytes, over the 1048576-byte limit",
+		},
+		{
+			// 12345 is stored as the five-byte string "12345".
+			name:    "a stringified number counted as stored",
+			data:    map[string]any{"n": 12345, "s": strings.Repeat("a", limit-4)},
+			wantErr: "hold 1048577 bytes, over the 1048576-byte limit",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &traits.ConfigMapHandler{}
+			app := stack.NewApplication("myapp", "default", nil)
+			bundle := &stack.Bundle{}
+			trait := &oam.Trait{
+				Type:       "configmap",
+				Properties: map[string]any{"name": "my-config", "data": tc.data},
+			}
+			err := h.Apply(trait, app, bundle)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Apply: %v", err)
+				}
+				if len(bundle.Applications) != 1 {
+					t.Fatalf("expected 1 bundle app, got %d", len(bundle.Applications))
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Apply error = %v, want one containing %q", err, tc.wantErr)
+			}
+			if len(bundle.Applications) != 0 {
+				t.Fatalf("refused trait still added %d bundle app(s)", len(bundle.Applications))
+			}
+		})
 	}
 }
 

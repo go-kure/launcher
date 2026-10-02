@@ -13,6 +13,7 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
+	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // ConfigMapHandler handles OAM configmap traits.
@@ -61,6 +62,10 @@ func (h *ConfigMapHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 		for k, v := range rawData {
 			data[k] = fmt.Sprintf("%v", v)
 		}
+	}
+	// Count the stringified values, which are what the ConfigMap stores.
+	if err := components.CheckConfigMapSize(data, nil); err != nil {
+		return errors.Wrapf(err, "configmap trait %q", name)
 	}
 
 	cmConfig := &ConfigMapConfig{

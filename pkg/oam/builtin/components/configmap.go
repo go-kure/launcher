@@ -95,7 +95,9 @@ func (c *ConfigMapConfig) Generate(app *stack.Application) ([]*client.Object, er
 }
 
 // parseConfigMap reads a configmap component's properties, applying the key
-// and total-size checks ValidateConfigMap applies to the same fields.
+// and total-size checks ValidateConfigMap applies to the same fields. Keys are
+// checked in sorted order, so with several bad entries the one reported does
+// not depend on map iteration order.
 func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
 	props := component.Properties
 	c := &ConfigMapConfig{Name: component.Name}
@@ -103,7 +105,8 @@ func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
 	if raw, present, err := parseObjectField(props, "data", "data"); err != nil {
 		return nil, err
 	} else if present {
-		for k, v := range raw {
+		for _, k := range slices.Sorted(maps.Keys(raw)) {
+			v := raw[k]
 			if err := validateConfigMapKey("data", k); err != nil {
 				return nil, err
 			}
@@ -121,7 +124,8 @@ func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
 	if raw, present, err := parseObjectField(props, "binaryData", "binaryData"); err != nil {
 		return nil, err
 	} else if present {
-		for k, v := range raw {
+		for _, k := range slices.Sorted(maps.Keys(raw)) {
+			v := raw[k]
 			if err := validateConfigMapKey("binaryData", k); err != nil {
 				return nil, err
 			}
@@ -143,17 +147,8 @@ func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
 		}
 	}
 
-	// ValidateConfigMap also caps the summed size of every data value and every
-	// decoded binaryData value; over it the API server refuses the ConfigMap.
-	total := 0
-	for _, v := range c.Data {
-		total += len(v)
-	}
-	for _, v := range c.BinaryData {
-		total += len(v)
-	}
-	if total > corev1.MaxSecretSize {
-		return nil, errors.Errorf("data and binaryData hold %d bytes, over the %d-byte limit the API server allows a ConfigMap", total, corev1.MaxSecretSize)
+	if err := CheckConfigMapSize(c.Data, c.BinaryData); err != nil {
+		return nil, err
 	}
 
 	immutable, err := parseBoolField(props, "immutable", "immutable")
@@ -162,6 +157,25 @@ func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
 	}
 	c.Immutable = immutable
 	return c, nil
+}
+
+// CheckConfigMapSize refuses a ConfigMap payload the API server refuses for
+// size: ValidateConfigMap caps the summed length of every data value and every
+// decoded binaryData value at corev1.MaxSecretSize (1 MiB). The configmap
+// component and the configmap trait both call it, so they refuse the same
+// payloads with the same message.
+func CheckConfigMapSize(data map[string]string, binaryData map[string][]byte) error {
+	total := 0
+	for _, v := range data {
+		total += len(v)
+	}
+	for _, v := range binaryData {
+		total += len(v)
+	}
+	if total > corev1.MaxSecretSize {
+		return errors.Errorf("data and binaryData hold %d bytes, over the %d-byte limit the API server allows a ConfigMap", total, corev1.MaxSecretSize)
+	}
+	return nil
 }
 
 // validateConfigMapKey refuses a key the API server refuses in a ConfigMap
