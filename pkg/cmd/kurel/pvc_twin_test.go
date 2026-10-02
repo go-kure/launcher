@@ -152,10 +152,18 @@ func TestPVCTwin_SameClaimBothWays(t *testing.T) {
 				t.Errorf("claims differ beyond the app label\nkind:\n%s\ntrait:\n%s", k, tr)
 			}
 			// A decorator must actually reach the claim, not merely be absent on
-			// both paths.
+			// both paths. The literal wire values are what Flux matches.
+			decoratorAnnotation := map[string][2]string{
+				"force-replace":    {"kustomize.toolkit.fluxcd.io/force", "enabled"},
+				"prune-protection": {"kustomize.toolkit.fluxcd.io/prune", "disabled"},
+			}
 			for _, d := range tc.decorators {
-				if d == "force-replace" && !isForceAnnotated(traitClaim) {
-					t.Errorf("force-replace on the owner did not reach the trait's claim")
+				want, ok := decoratorAnnotation[d]
+				if !ok {
+					t.Fatalf("no expected annotation recorded for decorator %q", d)
+				}
+				if v, _ := docAnnotation(traitClaim, want[0]); v != want[1] {
+					t.Errorf("%s on the owner did not reach the trait's claim: %s = %q, want %q", d, want[0], v, want[1])
 				}
 			}
 		})
@@ -167,11 +175,6 @@ func labelOf(obj map[string]any, key string) string {
 	labels, _ := md["labels"].(map[string]any)
 	v, _ := labels[key].(string)
 	return v
-}
-
-func isForceAnnotated(obj map[string]any) bool {
-	v, ok := docAnnotation(obj, "kustomize.toolkit.fluxcd.io/force")
-	return ok && v == "enabled"
 }
 
 // TestPVCTwin_SameRefusalsBothWays requires both paths to refuse the same
