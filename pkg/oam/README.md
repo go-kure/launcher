@@ -483,12 +483,18 @@ builds and reads them (fluxcd/pkg/ssa `ReadObjects`: a list stands for its membe
 document without a name, kind and apiVersion, or that is a kustomize config, is skipped), so a
 patched volume is warned exactly when Flux force-applies it. A patch can add the force key,
 remove or disable it, delete or rename the volume, or add one to a list envelope.
-Known limit: the build is not traced back to the generated objects. A patched volume is named
-by the first application that generates a volume of its final identity, else by its bundle,
-and its force key is named `kustomize.toolkit.fluxcd.io/force: enabled, set by its bundle's
-patches` unless a generated volume of that identity carried it; a volume a patch renames or
-swaps can therefore be named imprecisely, and a patched bundle's warnings follow kustomize's
-build order (tracked in go-kure/launcher#745). A patch set that does not build, or whose
+A force-applied patched volume is named by the generated object it comes from, even when a patch
+renames or swaps it (go-kure/launcher#745): a bundle with one is built a second time from objects
+tagged with their origin under a launcher annotation, and the tags are used only where that
+build, untagged, is byte for byte and in order the first; it only names, never changes which
+volumes warn, and a bundle with no force-applied volume is not built again. Known limit: a volume that cannot be traced
+is named by the first application that generates a volume of its final identity, else by its
+bundle, with its force key named `kustomize.toolkit.fluxcd.io/force: enabled, set by its bundle's
+patches` unless a generated volume of that identity carried it, after the bundle's traced
+volumes in kustomize's build order. That covers every volume of a bundle whose patches read or
+write the tag (a JSON `test` or `copy` of a whole annotations map), a volume whose annotations a
+patch replaces, one a patch adds, and both volumes when a patch copies one's annotations to the
+other. A patch set that does not build, or whose
 result Flux cannot read (a list member that is not an object), is warned once, naming the bundle's first application and the build error, and that bundle is
 checked as generated. Every caller and build gets this; postBuild substitution and anything
 the cluster changes on apply are not modelled. An application a caller built rather than
