@@ -536,15 +536,18 @@ for a trait it builds, which writes `value` at the dot-separated object-key `pat
 `Properties` (`"networkPolicy"`,
 `"tls.secretName"`; array items cannot be addressed; an object along the path that
 is missing or `null`, typed nil included, is created) and records a deep copy of it
-as rendered. A reserved key is then accepted only while it holds the recorded value
-at that same path. The comparison reads the key the way emission validation does —
-any string or boolean kind, any slice or array as a list, any string-keyed map as an
-object — and compares numbers exactly, so the record survives emission validation's
-normalization (a `[]byte` or `[]int32` becoming `[]any`, a named integer becoming
-`int`), while a value the rule copied into the key from a trait, a policy, metadata
-or another component, or changed after recording it, is refused like any authored
-one — including a number that only prints the same, such as an authored
-`1.0000000000000001e+18` over a rendered `1000000000000000100`
+as rendered, keeping its Go types. A reserved key is then accepted only while it
+holds the recorded value at that same path: either that value itself, or what
+emission validation makes of it under the key's own schema, compared Go type for Go
+type. So the record survives validation's normalization exactly where validation
+performs it (a `[]byte` or `[]int32` under a declared array becoming `[]any`, a named
+integer under a declared integer becoming `int`), and nowhere else: below a key an
+object leaves to `AdditionalProperties`, or under a schema with no `Type`, the
+handler receives what the rule wrote, so a rendered `[]byte` there is not matched by
+an authored list of the same integers. A value the rule copied into the key from a
+trait, a policy, metadata or another component, or changed after recording it, is
+refused like any authored one — including a number that only prints the same, such
+as an authored `1.0000000000000001e+18` over a rendered `1000000000000000100`
 (go-kure/launcher#612). `RenderReserved` refuses a value that is or holds a `null`,
 NaN or ±Inf, any Go type other than strings, booleans, numbers, slices, arrays and
 string-keyed maps, or a collection that contains itself. The record follows the component

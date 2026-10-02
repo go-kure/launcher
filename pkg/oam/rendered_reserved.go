@@ -17,16 +17,19 @@ import (
 // so the record vouches for a value, not for a key: a value copied into the key from
 // anywhere else, or the rendered one changed afterwards, is checked as authored.
 //
-// The snapshot is a deep copy in the shapes emission validation normalizes to:
-// strings, booleans, numbers, []any and map[string]any. It cannot be changed through
-// the value the rule passed in, and the comparison reads the current value through
-// the same coercions validatePropertyValue applies (asStringValue, asArrayValue,
-// asObjectValue, asExactNumber), so the rewrite emission validation makes — a typed Go
+// The snapshot is a deep copy that keeps every Go type the rule wrote, so it cannot be
+// changed through the value the rule passed in. The comparison is directed by the
+// schema of the reserved key (sameRenderedValue): the current value matches when it
+// is the snapshot itself, or what emission validation (validatePropertyValue) turns
+// the snapshot into under that schema. So the rewrite validation makes — a typed Go
 // collection becoming []any or map[string]any, a named scalar its predeclared type, an
-// integer of another kind int — compares equal, while two numbers a property reader
-// tells apart never do: numbers are compared exactly, never through float64 or a
-// JSON encoding, which reads 1000000000000000100 and 1.0000000000000001e+18 as the
-// same value though IntegerValue does not.
+// integer of another kind int — compares equal exactly where validation makes it,
+// and nowhere else: below a key an object leaves to AdditionalProperties, or under a
+// schema with no Type, validation passes the value through as written, so a []byte
+// there still differs from a list of the same integers. Two numbers a property reader
+// tells apart never compare equal, since every value is compared with its Go type:
+// 1000000000000000100 and 1.0000000000000001e+18 print the same in JSON, though
+// IntegerValue reads them apart.
 //
 // A record map is never written once built: adding a path builds a new one
 // (renderedValues.with), so recording on one copy of an element never exempts
@@ -102,7 +105,7 @@ func renderReserved(props *map[string]any, rendered *renderedValues, path string
 	if err != nil {
 		return err
 	}
-	snapshot, err := snapshotRenderedValue(value, map[propertyCopyKey]bool{})
+	snapshot, err := snapshotRenderedValue(value)
 	if err != nil {
 		return errors.Wrapf(err, "render reserved %q", path)
 	}
@@ -131,124 +134,101 @@ func parseRenderedPath(path string) ([]string, error) {
 }
 
 // snapshotRenderedValue is the snapshot renderReserved records for value: a deep copy
-// holding a string for every string kind, a bool for every boolean kind, an int64,
-// uint64 or float64 for every integer, unsigned or floating-point kind (each holds
-// its value exactly), []any for every slice or array kind and map[string]any for
-// every map with string-kinded keys. It refuses a null at any depth, NaN and ±Inf,
-// any other Go type, and a map or slice that contains itself; onPath holds the maps
-// and slices being copied above value.
-func snapshotRenderedValue(value any, onPath map[propertyCopyKey]bool) (any, error) {
+// (copyPropertyValue) that keeps every Go type value holds, named types, arrays and
+// typed collections included, so it compares as the value the rule wrote. It refuses,
+// through checkRenderedValue, what is not a property value.
+func snapshotRenderedValue(value any) (any, error) {
+	if err := checkRenderedValue(value, map[propertyCopyKey]bool{}); err != nil {
+		return nil, err
+	}
+	return copyRenderedValue(value), nil
+}
+
+// copyRenderedValue deep-copies a value checkRenderedValue accepted, keeping its Go
+// types.
+func copyRenderedValue(value any) any {
+	return copyPropertyValue(reflect.ValueOf(value), map[propertyCopyKey]reflect.Value{}).Interface()
+}
+
+// checkRenderedValue accepts a property value: a string, boolean or finite number of
+// any Go kind, a slice or array of them, or a map with string-kinded keys holding
+// them, nested to any depth. It refuses a null at any depth, NaN and ±Inf, any other
+// Go type, and a map or slice that contains itself; onPath holds the maps and slices
+// being checked above value.
+func checkRenderedValue(value any, onPath map[propertyCopyKey]bool) error {
 	if isNullValue(value) {
-		return nil, errors.New("value is or holds a null, which is absence and cannot be rendered")
+		return errors.New("value is or holds a null, which is absence and cannot be rendered")
 	}
 	rv := reflect.ValueOf(value)
 	switch rv.Kind() {
-	case reflect.String:
-		return rv.String(), nil
-	case reflect.Bool:
-		return rv.Bool(), nil
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return rv.Int(), nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return rv.Uint(), nil
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return nil
 	case reflect.Float32, reflect.Float64:
-		f := rv.Float()
-		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return nil, errors.Errorf("value is or holds %v, which is not a finite number", f)
+		if f := rv.Float(); math.IsNaN(f) || math.IsInf(f, 0) {
+			return errors.Errorf("value is or holds %v, which is not a finite number", f)
 		}
-		return f, nil
+		return nil
 	case reflect.Slice, reflect.Array:
 		if rv.Kind() == reflect.Slice && rv.Len() > 0 {
 			key := propertyCopyKey{ptr: rv.Pointer(), len: rv.Len(), typ: rv.Type()}
 			if onPath[key] {
-				return nil, errors.New("value contains itself")
+				return errors.New("value contains itself")
 			}
 			onPath[key] = true
 			defer delete(onPath, key)
 		}
-		out := make([]any, rv.Len())
-		for i := range out {
-			item, err := snapshotRenderedValue(rv.Index(i).Interface(), onPath)
-			if err != nil {
-				return nil, err
+		for i := range rv.Len() {
+			if err := checkRenderedValue(rv.Index(i).Interface(), onPath); err != nil {
+				return err
 			}
-			out[i] = item
 		}
-		return out, nil
+		return nil
 	case reflect.Map:
 		if rv.Type().Key().Kind() != reflect.String {
-			return nil, errors.Errorf("value is or holds %T, a map whose keys are not strings", value)
+			return errors.Errorf("value is or holds %T, a map whose keys are not strings", value)
 		}
 		key := propertyCopyKey{ptr: rv.Pointer(), typ: rv.Type()}
 		if onPath[key] {
-			return nil, errors.New("value contains itself")
+			return errors.New("value contains itself")
 		}
 		onPath[key] = true
 		defer delete(onPath, key)
-		out := make(map[string]any, rv.Len())
 		for iter := rv.MapRange(); iter.Next(); {
-			item, err := snapshotRenderedValue(iter.Value().Interface(), onPath)
-			if err != nil {
-				return nil, err
+			if err := checkRenderedValue(iter.Value().Interface(), onPath); err != nil {
+				return err
 			}
-			out[iter.Key().String()] = item
 		}
-		return out, nil
+		return nil
 	default:
-		return nil, errors.Errorf("value is or holds %T, which is not a property value (a string, boolean, number, list or string-keyed object)", value)
+		return errors.Errorf("value is or holds %T, which is not a property value (a string, boolean, number, list or string-keyed object)", value)
 	}
 }
 
-// sameRenderedValue reports whether current is the value recorded, a snapshot
-// snapshotRenderedValue took. A null in current is never equal, since the snapshot
-// holds none. Otherwise current is read through the coercions validatePropertyValue
-// applies — any string or boolean kind, any slice or array kind as a list, any map
-// with string-kinded keys as an object — and numbers are compared exactly
-// (asExactNumber), so an integer of any kind equals a float only when the float is
-// exactly that integer. The walk follows the snapshot, so it ends at its depth
-// whatever current holds.
-func sameRenderedValue(recorded, current any) bool {
+// sameRenderedValue reports whether current, the value a key holds that field
+// declares, is the value recorded there: a snapshot snapshotRenderedValue took.
+//
+// It is when current is the snapshot itself — the check running before emission
+// validation has seen the value — or when current is what emission validation makes
+// of the snapshot: validatePropertyValue under field, run on a fresh copy so the
+// record is never rewritten. Both are compared with reflect.DeepEqual, which tells Go
+// types apart, so a value is equal only to one of the same type at every depth.
+// Normalization equivalence is thereby validation's own, not a copy of its rules: a
+// []byte below a declared array of integers matches the []any of ints validation
+// writes back there, while below a key left to AdditionalProperties, or under a
+// schema with no Type, validation writes nothing back and the []byte matches only
+// itself. A null in current is never equal, since the snapshot holds none; a snapshot
+// validation refuses matches only itself.
+func sameRenderedValue(field PropertySchema, recorded, current any) bool {
 	if isNullValue(current) {
 		return false
 	}
-	switch r := recorded.(type) {
-	case string:
-		s, ok := asStringValue(current)
-		return ok && s == r
-	case bool:
-		cv := reflect.ValueOf(current)
-		return cv.Kind() == reflect.Bool && cv.Bool() == r
-	case []any:
-		items, ok := asArrayValue(current)
-		if !ok || len(items) != len(r) {
-			return false
-		}
-		for i := range r {
-			if !sameRenderedValue(r[i], items[i]) {
-				return false
-			}
-		}
+	if reflect.DeepEqual(recorded, current) {
 		return true
-	case map[string]any:
-		obj, ok := asObjectValue(current)
-		if !ok || len(obj) != len(r) {
-			return false
-		}
-		for key, item := range r {
-			cur, present := obj[key]
-			if !present || !sameRenderedValue(item, cur) {
-				return false
-			}
-		}
-		return true
-	default:
-		rn, ok := asExactNumber(recorded)
-		if !ok {
-			return false
-		}
-		cn, ok := asExactNumber(current)
-		return ok && rn.equal(cn)
 	}
+	normalized, err := validatePropertyValue(field, copyRenderedValue(recorded), "")
+	return err == nil && reflect.DeepEqual(normalized, current)
 }
 
 // setPropertyAt writes value at the object-key path segments in *props, creating the
@@ -302,8 +282,9 @@ func (r renderedValues) child(at, key string) (renderedValues, string) {
 	return r, at + "." + key
 }
 
-// exempts reports whether value is the one recorded at path.
-func (r renderedValues) exempts(path string, value any) bool {
+// exempts reports whether value, held by a key field declares, is the one recorded at
+// path.
+func (r renderedValues) exempts(path string, field PropertySchema, value any) bool {
 	recorded, ok := r[path]
-	return ok && sameRenderedValue(recorded, value)
+	return ok && sameRenderedValue(field, recorded, value)
 }

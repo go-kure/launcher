@@ -14,7 +14,8 @@ import (
 
 // typedReservedSchema reserves an integer, an array of integers and an object with an
 // integer field, so emission validation rewrites what a rule renders into them
-// (normalizeIntegerValue, asArrayValue, asObjectValue) before the next D3 check.
+// (normalizeIntegerValue, asArrayValue, asObjectValue) before the next D3 check, and
+// an object whose children are all undeclared, which it rewrites nothing below.
 func typedReservedSchema() map[string]PropertySchema {
 	return map[string]PropertySchema{
 		"image": {Type: PropertyTypeString, Description: "Authored freely."},
@@ -23,6 +24,9 @@ func typedReservedSchema() map[string]PropertySchema {
 		"limits": {Type: PropertyTypeObject, PlatformReserved: true, Description: "Platform-supplied.", Properties: map[string]PropertySchema{
 			"cpu": {Type: PropertyTypeInteger},
 		}},
+		// An object that leaves every key to AdditionalProperties, so emission
+		// validation passes what a rule renders below it through untouched.
+		"data": {Type: PropertyTypeObject, PlatformReserved: true, AdditionalProperties: true, Description: "Platform-supplied."},
 	}
 }
 
@@ -261,5 +265,81 @@ func TestRenderReserved_NilElementIsAnError(t *testing.T) {
 	var trait *Trait
 	if err := trait.RenderReserved("tls.secretName", "x"); err == nil || !strings.Contains(err.Error(), "nil trait") {
 		t.Fatalf("expected a nil trait to be refused, got: %v", err)
+	}
+}
+
+// undeclaredChildCases are values a rule renders under a key the reserved "data"
+// object leaves to AdditionalProperties, each with an authored YAML value the round-2
+// comparison read as the same through a coercion emission validation performs only
+// where a schema declares a type — never below an undeclared key, so the handler is
+// handed a different value.
+var undeclaredChildCases = []struct {
+	name     string
+	rendered any
+	authored string
+}{
+	{"byte slice against a list of integers", []byte{1, 2}, "[1, 2]"},
+	{"int array against a list", [2]int{1, 2}, "[1, 2]"},
+	{"named integer against an integer", renderedPort(8443), "8443"},
+	{"int64 against an int", int64(8443), "8443"},
+	{"named string against a string", renderedMode("platform"), "platform"},
+	{"typed map against an object", map[string]int32{"cpu": 2}, "{cpu: 2}"},
+}
+
+// policyDataApp is a document whose policy carries an authored data object holding
+// payload, decoded from YAML the way a user's document is.
+func policyDataApp(t *testing.T, kind, payload string) *Application {
+	t.Helper()
+	var props map[string]any
+	if err := yaml.Unmarshal([]byte("data: {payload: "+payload+"}\n"), &props); err != nil {
+		t.Fatalf("decode policy properties: %v", err)
+	}
+	app := emptyDoc(kind)
+	app.Spec.Policies = []ApplicationPolicy{{Name: "p", Type: "anything", Properties: props}}
+	return app
+}
+
+// TestTransform_RenderedReservedUndeclaredChildReplacedIsRefused: a reserved object
+// whose children are undeclared reaches the handler as the rule wrote it, so an
+// authored object copied over it is refused unless it is that same value — a
+// policy's {payload: [1, 2]} is not a rendered {payload: []byte{1, 2}}, which a
+// handler encodes as "AQI=" — for a component and a trait alike.
+func TestTransform_RenderedReservedUndeclaredChildReplacedIsRefused(t *testing.T) {
+	for _, el := range typedElements {
+		for _, tc := range undeclaredChildCases {
+			t.Run(el.name+"/"+tc.name, func(t *testing.T) {
+				app := policyDataApp(t, "Copying", tc.authored)
+				_, err := el.run(t, app, func(props *map[string]any, render func(string, any) error, doc *Application) error {
+					if err := render("data", map[string]any{"payload": tc.rendered}); err != nil {
+						return err
+					}
+					(*props)["data"] = doc.Spec.Policies[0].Properties["data"]
+					return nil
+				})
+				expectTypedReservedRefused(t, err, "data")
+			})
+		}
+	}
+}
+
+// TestTransform_RenderedReservedUndeclaredChildSurvivesValidation: the same rendered
+// objects left as they are match their record, and reach the handler with the
+// undeclared child exactly as the rule wrote it.
+func TestTransform_RenderedReservedUndeclaredChildSurvivesValidation(t *testing.T) {
+	for _, el := range typedElements {
+		for _, tc := range undeclaredChildCases {
+			t.Run(el.name+"/"+tc.name, func(t *testing.T) {
+				got, err := el.run(t, emptyDoc("Rendering"), func(_ *map[string]any, render func(string, any) error, _ *Application) error {
+					return render("data", map[string]any{"payload": tc.rendered})
+				})
+				if err != nil {
+					t.Fatalf("a rendered reserved object must be accepted, got: %v", err)
+				}
+				want := map[string]any{"payload": tc.rendered}
+				if !reflect.DeepEqual(got["data"], want) {
+					t.Fatalf("expected data %#v at the handler, got %#v", want, got["data"])
+				}
+			})
+		}
 	}
 }

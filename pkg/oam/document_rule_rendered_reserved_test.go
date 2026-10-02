@@ -413,6 +413,11 @@ func TestEnforcePlatformReserved_HonoursTheRecord(t *testing.T) {
 			"secret": {Type: PropertyTypeString, PlatformReserved: true},
 		}}},
 	}
+	declaredChildSchema := map[string]PropertySchema{
+		"networkPolicy": {Type: PropertyTypeObject, PlatformReserved: true, AdditionalProperties: true, Properties: map[string]PropertySchema{
+			"replicas": {Type: PropertyTypeInteger},
+		}},
+	}
 	dottedSchema := map[string]PropertySchema{
 		"tls.secretName": {Type: PropertyTypeString, PlatformReserved: true},
 		"tls": {Type: PropertyTypeObject, Properties: map[string]PropertySchema{
@@ -439,11 +444,20 @@ func TestEnforcePlatformReserved_HonoursTheRecord(t *testing.T) {
 			accept:   true,
 		},
 		{
-			// Emission validation's rewrite of a typed Go value keeps the value.
-			name:     "same value in another Go type",
+			// Emission validation's rewrite of a typed Go value, under a child the
+			// schema declares, keeps the value.
+			name:     "same value in the Go type validation writes",
+			schema:   declaredChildSchema,
+			props:    map[string]any{"networkPolicy": map[string]any{"replicas": 3, "mode": "platform"}},
+			rendered: record("networkPolicy", map[string]any{"replicas": renderedPort(3), "mode": "platform"}),
+			accept:   true,
+		},
+		{
+			// Under a child the schema leaves to AdditionalProperties, validation
+			// rewrites nothing, so another Go type is another value.
+			name:     "same number in another Go type under an undeclared child",
 			props:    map[string]any{"networkPolicy": map[string]any{"replicas": 3, "mode": "platform"}},
 			rendered: record("networkPolicy", map[string]any{"replicas": int64(3), "mode": "platform"}),
-			accept:   true,
 		},
 		{
 			name:     "different value",
