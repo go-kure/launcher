@@ -532,11 +532,14 @@ nested in an emitted component gets the same classification as that component. A
 sees trait and policy properties and metadata too, which nothing checks before it
 runs. Such a rule writes a reserved value it renders from `LoweringContext.Capabilities`
 with `Component.RenderReserved(path, value)`, or `Trait.RenderReserved(path, value)`
-for a trait it builds, which writes `value` at the dot-separated object-key `path` in
-`Properties` (`"networkPolicy"`,
+for a trait it builds, which writes a deep copy of `value` at the dot-separated
+object-key `path` in `Properties` (`"networkPolicy"`,
 `"tls.secretName"`; array items cannot be addressed; an object along the path that
-is missing or `null`, typed nil included, is created) and records a deep copy of it
-as rendered, keeping its Go types. A reserved key is then accepted only while it
+is missing or `null`, typed nil included, is created) and records another deep copy
+of it as rendered, both keeping its Go types. Changing `value` afterwards changes
+nothing in `Properties`, and one value rendered at two paths is two independent
+copies, so emission validation normalizing it under one key leaves the other as
+written. A reserved key is then accepted only while it
 holds the recorded value at that same path: either that value itself, or what
 emission validation makes of it under the key's own schema, compared Go type for Go
 type. So the record survives validation's normalization exactly where validation

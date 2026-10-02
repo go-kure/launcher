@@ -38,8 +38,8 @@ import (
 // arrives without one.
 type renderedValues map[string]any
 
-// RenderReserved writes value at path in c.Properties and records it as a value a
-// lowering rule rendered, so the D3 check (enforcePlatformReserved) accepts it in a
+// RenderReserved writes a deep copy of value at path in c.Properties and records it as
+// a value a lowering rule rendered, so the D3 check (enforcePlatformReserved) accepts it in a
 // key the component's schema marks PlatformReserved. It is for a rule whose output
 // is otherwise checked as authored — every component a DocumentLoweringRule builds,
 // and the output of any rule whose input nothing checked — that renders a reserved
@@ -55,7 +55,10 @@ type renderedValues map[string]any
 // cannot be addressed), and an existing non-null value along the path that is not a
 // map[string]any are errors, and leave c unchanged. The write is in place, like an
 // assignment into c.Properties, so a rule that copied a component it was handed gives
-// the copy its own properties map first: a rule must not mutate its input.
+// the copy its own properties map first: a rule must not mutate its input. What it
+// writes is a copy of value that keeps its Go types and shares nothing with it, so
+// changing value afterwards changes nothing in c.Properties, and one value rendered
+// at two paths is two independent copies.
 //
 // value must be a property value — a string, boolean or finite number of any Go kind,
 // a slice or array of them, or a map with string-kinded keys holding them, nested to
@@ -81,8 +84,9 @@ func (c *Component) RenderReserved(path string, value any) error {
 
 // RenderReserved is Component.RenderReserved for a trait, with the same path, value
 // and exemption rules, checked against the schema of the trait's own type: it writes
-// value at path in t.Properties and records it, so the D3 check accepts it in a key
-// that schema marks PlatformReserved. It is for every trait a DocumentLoweringRule
+// a deep copy of value at path in t.Properties and records it, so the D3 check
+// accepts it in a key that schema marks PlatformReserved, and changing value
+// afterwards changes nothing in t.Properties. It is for every trait a DocumentLoweringRule
 // builds, and any other trait the engine checks as authored, that carries a reserved
 // value rendered from LoweringContext.Capabilities.
 //
@@ -109,7 +113,10 @@ func renderReserved(props *map[string]any, rendered *renderedValues, path string
 	if err != nil {
 		return errors.Wrapf(err, "render reserved %q", path)
 	}
-	if err := setPropertyAt(props, segments, value); err != nil {
+	// The properties get their own deep copy, separate from the snapshot, so no
+	// caller-held reference and no other rendered key aliases what is written: emission
+	// validation normalizing one key in place cannot rewrite another key's value.
+	if err := setPropertyAt(props, segments, copyRenderedValue(value)); err != nil {
 		return errors.Wrapf(err, "render reserved %q", path)
 	}
 	*rendered = rendered.with(path, snapshot)
