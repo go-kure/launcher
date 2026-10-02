@@ -134,6 +134,91 @@ func TestConfigMapHandler_Apply_SizeLimit(t *testing.T) {
 	}
 }
 
+// TestConfigMapHandler_Apply_KeyValidity pins the trait to the keys the API
+// server admits in a ConfigMap (IsConfigMapKey), checked before the size limit
+// with the configmap component's message.
+func TestConfigMapHandler_Apply_KeyValidity(t *testing.T) {
+	cases := []struct {
+		name    string
+		data    map[string]any
+		wantErr string
+	}{
+		{
+			name: "valid keys",
+			data: map[string]any{"config.yaml": "a: 1", "APP_ENV": "prod", "key-name": "v"},
+		},
+		{
+			name:    "a slash",
+			data:    map[string]any{"a/b": "v"},
+			wantErr: `configmap trait "my-config": data: invalid key "a/b": `,
+		},
+		{
+			name:    "254 characters",
+			data:    map[string]any{strings.Repeat("a", 254): "v"},
+			wantErr: `data: invalid key "` + strings.Repeat("a", 254) + `"`,
+		},
+		{
+			name:    "dot-dot",
+			data:    map[string]any{"..": "v"},
+			wantErr: `data: invalid key ".."`,
+		},
+		{
+			name:    "key checked before size",
+			data:    map[string]any{"a/b": strings.Repeat("a", corev1.MaxSecretSize+1)},
+			wantErr: `data: invalid key "a/b"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &traits.ConfigMapHandler{}
+			app := stack.NewApplication("myapp", "default", nil)
+			bundle := &stack.Bundle{}
+			trait := &oam.Trait{
+				Type:       "configmap",
+				Properties: map[string]any{"name": "my-config", "data": tc.data},
+			}
+			err := h.Apply(trait, app, bundle)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Apply: %v", err)
+				}
+				if len(bundle.Applications) != 1 {
+					t.Fatalf("expected 1 bundle app, got %d", len(bundle.Applications))
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Apply error = %v, want one containing %q", err, tc.wantErr)
+			}
+			if len(bundle.Applications) != 0 {
+				t.Fatalf("refused trait still added %d bundle app(s)", len(bundle.Applications))
+			}
+		})
+	}
+}
+
+// With several bad keys, the one reported is the first in sorted key order,
+// whatever order the map iterates in. Five bad keys and fifty runs make an
+// unsorted loop report "a/x" every time with a chance of about 5^-50.
+func TestConfigMapHandler_Apply_KeysInSortedOrder(t *testing.T) {
+	data := map[string]any{}
+	for _, k := range []string{"e", "c", "a", "d", "b"} {
+		data[k+"/x"] = "v"
+	}
+	h := &traits.ConfigMapHandler{}
+	for range 50 {
+		app := stack.NewApplication("myapp", "default", nil)
+		trait := &oam.Trait{
+			Type:       "configmap",
+			Properties: map[string]any{"name": "my-config", "data": data},
+		}
+		err := h.Apply(trait, app, &stack.Bundle{})
+		if want := `data: invalid key "a/x"`; err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("Apply error = %v, want one containing %q", err, want)
+		}
+	}
+}
+
 func TestTransform_FluxNamespace_ReachesHelmRelease(t *testing.T) {
 	// Build a transformer with helmrelease component handler and configmap trait handler.
 	transformer := oam.NewTransformer(
