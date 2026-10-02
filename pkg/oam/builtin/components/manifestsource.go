@@ -185,11 +185,12 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 	return body, nil
 }
 
-// displayURL renders a fetch URL for an error message from its scheme, host and
-// path only. The userinfo is left out, user included: url.URL.Redacted masks
-// only the password, and a token is as often written as the user
-// (https://<token>@host). The query is left out too, since a signed URL carries
-// its credential there. A URL with no host, such as the opaque
+// displayURL renders a fetch URL for an error message from its scheme and host,
+// port included, only. Every other part can carry a credential: the userinfo,
+// user included, since url.URL.Redacted masks only the password and a token is
+// as often written as the user (https://<token>@host); the path, where a
+// capability URL puts its token (https://host/download/<token>/x.yaml); and the
+// query, where a signed URL does. A URL with no host, such as the opaque
 // https:user:token@host, which parses with everything after the scheme in
 // Opaque, is not rendered at all.
 func displayURL(rawURL string) string {
@@ -197,7 +198,7 @@ func displayURL(rawURL string) string {
 	if err != nil || u.Host == "" {
 		return "(url without a host)"
 	}
-	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}).String()
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
 }
 
 // failureCause names why a request or a response read failed using fixed text
