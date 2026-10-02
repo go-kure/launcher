@@ -1474,9 +1474,10 @@ func deploymentOrder(entries []componentEntry, deps map[string][]string) []compo
 }
 
 // resolveCapability merges capability rendering into trait properties (rendering as
-// defaults, OAM inline values win). An authored null, typed nil included, is absent
-// (the null contract, isNullValue), so it does not displace a rendering value for its key
-// (go-kure/launcher#742). Tries the scoped key, falls back to the bare
+// defaults, OAM inline values win), recursively into nested objects
+// (mergeRenderedProperties, go-kure/launcher#750). An authored null, typed nil
+// included, is absent (the null contract, isNullValue), so it does not displace a
+// rendering value for its key (go-kure/launcher#742). Tries the scoped key, falls back to the bare
 // type key. Returns (trait, "", false) on no match; otherwise (possibly merged
 // trait, matched key, true) — a match with empty Rendering still counts as consumed.
 // The rendering is copied with its Go types kept (copyRendering), which relies on
@@ -1499,20 +1500,39 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (
 		return trait, matchedKey, true
 	}
 
-	rendering := copyRendering(cap.Rendering)
+	result := trait
+	result.Properties = mergeRenderedProperties(copyRendering(cap.Rendering), trait.Properties)
+	return result, matchedKey, true
+}
 
-	merged := make(map[string]any, len(rendering)+len(trait.Properties))
-	maps.Copy(merged, rendering)
-	for k, v := range trait.Properties {
-		if _, rendered := rendering[k]; rendered && isNullValue(v) {
+// mergeRenderedProperties merges authored over rendered key by key, recursing where
+// both hold an object (map[string]any), so an authored nested key overrides only
+// that key and the rendering's sibling keys are kept (go-kure/launcher#750). An
+// authored null, typed nil included (isNullValue), over a rendered key is absent at
+// any depth and keeps the rendered value; under a key the rendering lacks it is left
+// as authored. Any other authored value, a list included, replaces the rendered one
+// whole, as does an object over a rendered null (a typed nil map included) or over a
+// rendered object of another Go type (map[string]string). rendered must be the
+// caller's own copy: its top level is written into and returned, and each nested
+// object is cloned before it is written into. authored is never mutated.
+func mergeRenderedProperties(rendered, authored map[string]any) map[string]any {
+	for k, v := range authored {
+		r, has := rendered[k]
+		if has && isNullValue(v) {
 			continue
 		}
-		merged[k] = v
+		if rm, ok := r.(map[string]any); ok && rm != nil {
+			if am, ok := v.(map[string]any); ok {
+				// Cloned before it is written into: copyRendering keeps an object the
+				// rendering shares between two keys shared, and an override of one
+				// must not reach the other.
+				rendered[k] = mergeRenderedProperties(maps.Clone(rm), am)
+				continue
+			}
+		}
+		rendered[k] = v
 	}
-
-	result := trait
-	result.Properties = merged
-	return result, matchedKey, true
+	return rendered
 }
 
 // applyComponentCapabilityDefaults returns props with each key d lists that props

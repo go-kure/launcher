@@ -398,3 +398,125 @@ func TestCapabilityMerge_NullIsAbsent(t *testing.T) {
 		}
 	})
 }
+
+// sharedRequestsAndLimits is a rendering whose requests and limits are one map, as a
+// rendering built in Go can be; the copy keeps them one map.
+func sharedRequestsAndLimits() map[string]any {
+	shared := map[string]any{"cpu": 1}
+	return map[string]any{"resources": map[string]any{"requests": shared, "limits": shared}}
+}
+
+// TestCapabilityMerge_Nested: an authored nested key overrides only that key and the
+// rendering's sibling keys are kept, on resolveCapability and both trait merge sites
+// (go-kure/launcher#750). A null stays absent at any depth; a list, a value of
+// another kind, and a rendered object of another Go type are replaced whole.
+func TestCapabilityMerge_Nested(t *testing.T) {
+	limits := func() map[string]any {
+		return map[string]any{"resources": map[string]any{"limits": map[string]any{"cpu": 1, "memory": "1Gi"}}}
+	}
+	cases := []struct {
+		name      string
+		rendering func() map[string]any
+		authored  func() map[string]any
+		want      map[string]any
+	}{
+		{name: "nested override keeps siblings", rendering: limits,
+			authored: func() map[string]any {
+				return map[string]any{"resources": map[string]any{"limits": map[string]any{"cpu": 2}}}
+			},
+			want: map[string]any{"resources": map[string]any{"limits": map[string]any{"cpu": 2, "memory": "1Gi"}}}},
+		{name: "nested null keeps the rendered value", rendering: limits,
+			authored: func() map[string]any {
+				return map[string]any{"resources": map[string]any{"limits": map[string]any{"cpu": nil, "memory": []any(nil)}}}
+			},
+			want: limits()},
+		{name: "nested null under a key the rendering lacks stays", rendering: limits,
+			authored: func() map[string]any {
+				return map[string]any{"resources": map[string]any{"limits": map[string]any{"pods": nil}}}
+			},
+			want: map[string]any{"resources": map[string]any{"limits": map[string]any{"cpu": 1, "memory": "1Gi", "pods": nil}}}},
+		{name: "empty authored object keeps the rendered one", rendering: limits,
+			authored: func() map[string]any { return map[string]any{"resources": map[string]any{}} },
+			want:     limits()},
+		{name: "list replaced whole",
+			rendering: func() map[string]any { return map[string]any{"hosts": []any{"a", "b"}} },
+			authored:  func() map[string]any { return map[string]any{"hosts": []any{"c"}} },
+			want:      map[string]any{"hosts": []any{"c"}}},
+		{name: "scalar over object replaced whole", rendering: limits,
+			authored: func() map[string]any { return map[string]any{"resources": "none"} },
+			want:     map[string]any{"resources": "none"}},
+		{name: "object over scalar replaced whole",
+			rendering: func() map[string]any { return map[string]any{"mode": "x"} },
+			authored:  func() map[string]any { return map[string]any{"mode": map[string]any{"a": "1"}} },
+			want:      map[string]any{"mode": map[string]any{"a": "1"}}},
+		{name: "object over a typed nil rendered map replaced whole",
+			rendering: func() map[string]any { return map[string]any{"resources": map[string]any(nil)} },
+			authored:  func() map[string]any { return map[string]any{"resources": map[string]any{"cpu": 2}} },
+			want:      map[string]any{"resources": map[string]any{"cpu": 2}}},
+		{name: "override of a shared rendered object leaves its alias",
+			rendering: sharedRequestsAndLimits,
+			authored: func() map[string]any {
+				return map[string]any{"resources": map[string]any{"requests": map[string]any{"cpu": 2}}}
+			},
+			want: map[string]any{"resources": map[string]any{
+				"requests": map[string]any{"cpu": 2}, "limits": map[string]any{"cpu": 1}}}},
+		{name: "distinct overrides of a shared rendered object",
+			rendering: sharedRequestsAndLimits,
+			authored: func() map[string]any {
+				return map[string]any{"resources": map[string]any{
+					"requests": map[string]any{"cpu": 2}, "limits": map[string]any{"cpu": 3}}}
+			},
+			want: map[string]any{"resources": map[string]any{
+				"requests": map[string]any{"cpu": 2}, "limits": map[string]any{"cpu": 3}}}},
+		{name: "object over a typed rendered map replaced whole",
+			rendering: func() map[string]any { return map[string]any{"labels": map[string]string{"a": "1", "b": "2"}} },
+			authored:  func() map[string]any { return map[string]any{"labels": map[string]any{"a": "3"}} },
+			want:      map[string]any{"labels": map[string]any{"a": "3"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			caps := map[string]CapabilityBinding{"store-trait": {Rendering: tc.rendering()}}
+
+			authored := tc.authored()
+			got, _, matched := resolveCapability(Trait{Type: "store-trait", Properties: authored}, caps)
+			if !matched || !reflect.DeepEqual(got.Properties, tc.want) {
+				t.Errorf("resolveCapability merged %v (matched %v), want %v", got.Properties, matched, tc.want)
+			}
+			if !reflect.DeepEqual(authored, tc.authored()) {
+				t.Errorf("the authored properties were mutated: %v", authored)
+			}
+			if !reflect.DeepEqual(caps["store-trait"].Rendering, tc.rendering()) {
+				t.Errorf("the profile's rendering was mutated: %v", caps["store-trait"].Rendering)
+			}
+
+			th := &recordingTraitHandler{typ: "store-trait"}
+			tr := NewTransformer(
+				map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+				map[string]TraitHandler{"store-trait": th},
+			)
+			app := storeApp(Component{Name: "web", Type: "webservice",
+				Traits: []Trait{{Type: "store-trait", Properties: tc.authored()}}})
+			if _, err := tr.Transform(app, TransformContext{Capabilities: caps}); err != nil {
+				t.Fatalf("Transform (dispatch): %v", err)
+			}
+			if !reflect.DeepEqual(th.got, tc.want) {
+				t.Errorf("dispatch: handler got %v, want %v", th.got, tc.want)
+			}
+
+			var lowered map[string]any
+			tr = NewTransformer(
+				map[string]ComponentHandler{"webservice": &pipelineComponentHandler{typ: "webservice"}},
+				map[string]TraitHandler{"store-trait-done": &recordingTraitHandler{typ: "store-trait-done"}},
+			)
+			tr.RegisterTraitLowering(recordingTraitRule{got: &lowered})
+			app = storeApp(Component{Name: "web", Type: "webservice",
+				Traits: []Trait{{Type: "store-trait", Properties: tc.authored()}}})
+			if _, err := tr.Transform(app, TransformContext{Capabilities: caps}); err != nil {
+				t.Fatalf("Transform (lowering): %v", err)
+			}
+			if !reflect.DeepEqual(lowered, tc.want) {
+				t.Errorf("lowering: rule got %v, want %v", lowered, tc.want)
+			}
+		})
+	}
+}

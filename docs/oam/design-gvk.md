@@ -326,8 +326,10 @@ trait's top-level property map is merged with the ClusterProfile's capability re
 parsing (`applyTraits` → `resolveCapability`, `pkg/oam/transform.go`), so a
 capability-aware trait may legitimately author a document in which the platform, not the
 author, supplies a required property. Enforcing `Required` before that merge would reject it.
-Nested `Required` — inside an object- or array-typed property — *is* enforced, because
-capability rendering merges only at the top level.
+Nested `Required` — inside an object- or array-typed property — *is* enforced. Capability
+rendering now merges into nested objects too (go-kure/launcher#750), so a partial nested
+override that relies on the rendering for a required sibling is refused at parse time: a
+known limit, tracked in go-kure/launcher#765.
 
 ---
 

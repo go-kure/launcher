@@ -370,10 +370,11 @@ func validateAuthoredAgainst(handler any, props map[string]any, path string) err
 //     capability-aware traits the profile exists to complete — the same spurious
 //     "is required" failure recorded against the emitted path in
 //     validateEmittedDocument's note on forwarded traits.
-//   - A nested object, by contrast, is authored whole: capability rendering merges
-//     at the top level of a trait's property map, never inside one of its object
-//     values. So a required field of an object the user did write is genuinely
-//     missing, and reporting it names the line they wrote.
+//   - A nested object is still checked for Required here, and reporting a missing
+//     field names the line the user wrote. Capability rendering does merge into
+//     nested objects too (mergeRenderedProperties, go-kure/launcher#750), so a
+//     partial nested override that relies on the rendering for a required sibling
+//     is refused here: a known limit, go-kure/launcher#765.
 //   - Nothing is lost at the component top level either. A handler that needs a
 //     property already fails without it, with a message written for that property;
 //     a second gate here would only change which error surfaces first.

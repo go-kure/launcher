@@ -876,7 +876,9 @@ with `no handler for policy type`. Top-level `Required` is also deliberately not
 here — `ClusterProfile` capability rendering merges into a trait's top-level property
 map after this runs, so a required property the platform supplies is legitimately
 absent from what the author wrote. Nested `Required`, inside an object the author did
-write, still is.
+write, still is, although the rendering now merges into nested objects too
+(go-kure/launcher#750): a partial nested override relying on the rendering for a
+required sibling is refused here (a known limit, see go-kure/launcher#765).
 
 One property is legal on **every** trait regardless of what its handler declares:
 `scope`. It is read by the transform engine rather than by a handler —
@@ -1177,14 +1179,25 @@ type** still accepts any default, unchanged.
 
 ### Rendering merge: authored values and nulls
 
-A trait's matched capability rendering is merged under its top-level properties: an
-authored value replaces the rendered one at that key, and keys the trait does not
-author keep the platform value. An authored `null` is absence here too, so a `null`
-over a key the rendering supplies takes the platform value. A `null` under a key the
-rendering lacks is left as authored. **Pre-GA output change** (go-kure/launcher#742):
-the authored `null` used to replace the rendered value, so the handler saw the key
-unset. This holds for every trait with a rendering, on both the dispatch path and
-a trait lowering rule's input.
+A trait's matched capability rendering is merged under its properties: an authored
+value replaces the rendered one at that key, and keys the trait does not author keep
+the platform value. Where both hold an object, the merge recurses
+(go-kure/launcher#750): authoring `resources: {limits: {cpu: 2}}` over a rendered
+`resources: {limits: {cpu: 1, memory: 1Gi}}` gives `{cpu: 2, memory: 1Gi}`, and an
+authored `{}` keeps the rendered object. A list, a value of another kind, and a
+rendered object built in Go with another type (`map[string]string`) are replaced
+whole. An authored `null` is absence here too, at any depth, so a `null` over a key
+the rendering supplies takes the platform value. A `null` under a key the rendering
+lacks is left as authored. **Pre-GA output changes**: the authored `null` used to
+replace the rendered value, so the handler saw the key unset (go-kure/launcher#742);
+an authored object used to replace the rendered object whole, dropping its sibling
+keys (go-kure/launcher#750). This holds for every trait with a rendering, on both the
+dispatch path and a trait lowering rule's input.
+
+Limit: authored validation (`ValidateAuthoredProperties`) runs before the merge and
+still enforces nested `Required` inside an object the author wrote, so a partial
+override that omits a required nested key the rendering would supply is refused
+(see go-kure/launcher#765).
 
 A component handler that implements `ComponentCapabilityDefaults` (see Transform &
 extension) gets the same precedence for the properties it lists, and only those.
