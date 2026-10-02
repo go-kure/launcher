@@ -148,7 +148,7 @@ self-test (`make test-verify-merge`).
 | `test` | `test` | 25 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
 | `security` | `Security` | 15 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `action-pins` | `action-pins` | 2 min | — | Fails if any third-party `uses:` ref is not pinned to a 40-char commit SHA (`go-kure/.github` composite action) |
-| `issue-refs` | `issue-refs` | 2 min | — | Self-tests then runs `scripts/check-issue-refs.sh` over the whole tracked tree: rejects a bare `#N` or an ownerless `name#N` reference (go-kure/launcher#400; `make check-issue-refs`) |
+| `issue-refs` | `issue-refs` | 2 min | — | Self-tests then runs `scripts/check-issue-refs.sh` over the whole tracked tree, and on a pull request over its commit messages: rejects a bare `#N` or an ownerless `name#N` reference (go-kure/launcher#400, go-kure/launcher#732; `make check-issue-refs`) |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) |
@@ -198,7 +198,7 @@ Runs on main and `release/*` branches only (not PRs):
   quickstart with `traits: []` re-introduced at spec level (go-kure/launcher#417) — so a gate that
   can no longer fail goes red as well. Marker syntax: `DEVELOPMENT.md` § "Checking documentation
   YAML fences"
-- **Issue-reference guard** — `issue-refs` runs `make check-issue-refs`'s two steps
+- **Issue-reference guard** — `issue-refs` runs `make check-issue-refs`'s first two steps
   (go-kure/launcher#400): the self-test (`scripts/check-issue-refs-test.sh`, fixtures that must
   fail and must pass, each in a throwaway git repository), then `scripts/check-issue-refs.sh` on
   the tracked `*.go`, `*.md`, `*.sh`, `*.yml`, `*.yaml`, `*.toml` and `*.json` files. It rejects a
@@ -208,7 +208,11 @@ Runs on main and `release/*` branches only (not PRs):
   merge queue get the same result. Exempt: `CHANGELOG.md` (generated from commit subjects),
   anything under a `testdata/` directory, and any line carrying `allow-ref`; within a line,
   Markdown link targets `](...)`, URLs, printf verbs with the `#` flag and shell prefix trims
-  `${name#...}` are ignored.
+  `${name#...}` are ignored. On a pull request a third step scans the PR's own commit messages
+  (`--commits <base.sha> --head <head.sha>`, go-kure/launcher#732) with the same matcher,
+  skipping Renovate's commits; push and merge-queue runs skip it, because a rebase keeps each
+  message and the PR run already checked it. `make check-issue-refs` runs the same scan locally
+  against `ISSUE_REFS_BASE` (default `origin/main`).
   Convention and known gaps: `AGENTS.md` § "Issue references"
 - **Manifest schema validation** — `validate-manifests` builds a representative subset of
   `examples/*.yaml` via `kurel build` and validates the output against
