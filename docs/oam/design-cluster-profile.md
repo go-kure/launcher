@@ -161,7 +161,12 @@ traits:
 ```
 
 If the Application overrides an individual key within a nested map, only that key is
-overridden; sibling keys from rendering are preserved.
+overridden; sibling keys from rendering are preserved (go-kure/launcher#750). The
+merge recurses wherever both sides hold a map; a list, or a value of another kind,
+replaces the rendered value whole. A `null` is absent at any depth. Authored
+validation still checks nested `Required` before the merge, so a partial override
+that relies on the rendering for a required sibling is refused
+(go-kure/launcher#765).
 
 ---
 
