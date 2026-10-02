@@ -50,7 +50,9 @@ type CapabilityAware interface {
 // absent). It reads only the listed keys, never the rest of the rendering, and
 // records the key as consumed when the profile binds it. A component a lowering rule
 // synthesized is skipped: its properties are the rule's own output, as a sealed
-// trait's are.
+// trait's are. EvaluateProfile validates the binding only through the trait handler
+// or trait lowering rule of the key's type, so register one for that type; with
+// neither, the rendering reaches the component unvalidated.
 type ComponentCapabilityDefaults interface {
 	CapabilityDefaults() (key string, properties []string)
 }

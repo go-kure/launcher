@@ -755,7 +755,11 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// After D3, which checks only what was authored: the capability defaults a
 		// ComponentCapabilityDefaults handler names fill the keys left unauthored.
 		if d, ok := handler.(ComponentCapabilityDefaults); ok && !component.synthesized {
-			component.Properties = applyComponentCapabilityDefaults(d, component.Properties, ctx)
+			filled, err := applyComponentCapabilityDefaults(d, component.Properties, ctx)
+			if err != nil {
+				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+			}
+			component.Properties = filled
 		}
 
 		config, err := handler.ToApplicationConfig(&component, namespace)
@@ -1335,13 +1339,13 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (
 // as defaults, inline wins", restricted to the listed keys. The key is recorded as
 // consumed when the profile binds it, whether or not a value was copied, as a trait's
 // matched key is. props is never mutated: a copy is returned when a value is filled,
-// and the filled values are deep copies, as resolveCapability's are, so no component
-// shares a value with the profile.
-func applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[string]any, ctx TransformContext) map[string]any {
+// and the filled values are deep copies, so no component shares a value with the
+// profile. A filled value that cannot be copied is an error, never shared instead.
+func applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[string]any, ctx TransformContext) (map[string]any, error) {
 	key, keys := d.CapabilityDefaults()
 	binding, ok := ctx.Capabilities[key]
 	if !ok {
-		return props
+		return props, nil
 	}
 	if ctx.consumedCapabilities != nil {
 		ctx.consumedCapabilities[key] = struct{}{}
@@ -1356,17 +1360,18 @@ func applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[s
 		}
 	}
 	if len(fill) == 0 {
-		return props
+		return props, nil
 	}
-	if copied, err := deepCopyMap(fill); err == nil {
-		fill = copied
+	copied, err := deepCopyMap(fill)
+	if err != nil {
+		return nil, errors.Wrapf(err, "capability %q defaults", key)
 	}
 	out := maps.Clone(props)
 	if out == nil {
-		out = make(map[string]any, len(fill))
+		out = make(map[string]any, len(copied))
 	}
-	maps.Copy(out, fill)
-	return out
+	maps.Copy(out, copied)
+	return out, nil
 }
 
 // buildCapabilityKey returns "<type>.<scope>" when the trait carries a non-empty
