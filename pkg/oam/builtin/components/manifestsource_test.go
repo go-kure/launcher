@@ -407,9 +407,19 @@ func TestDisplayHost(t *testing.T) {
 		{"example.com#s3cr3t", "example.com", true},
 		{"[fe80::1%s3cr3t]:8443", "[fe80::1]:8443", true},
 		{"[fe80::1%25s3cr3t]", "[fe80::1]", true},
-		{"fe80::1%s3cr3t", "fe80::1", true},
 		{"[fe80::1%zone]s3cr3t]:8443", "[fe80::1]:8443", true},
-		{"[fe80::1%zone]:s3cr3t", "[fe80::1]", true},
+		{"", "", false},
+		// Not shown at all: what is left is not a plain host, or the "@" may
+		// belong to a query or fragment.
+		{"fe80::1%s3cr3t", "", true},
+		{"[fe80::1%zone]:s3cr3t", "", true},
+		{"[fe80::1%zone@s3cr3t]:8443", "", true},
+		{"[fe80::1@s3cr3t]:8443", "", true},
+		{"deploy:s3?cr3t@example.com", "", true},
+		{"deploy:s3#cr3t@example.com", "", true},
+		{"s3cr3t?x@example.com", "", true},
+		{"example.com?sig=a@s3cr3t", "", true},
+		{"s3cr3t]:8443", "", true},
 	}
 	for _, tc := range cases {
 		got, trimmed := displayHost(tc.in)
@@ -422,6 +432,7 @@ func TestDisplayHost(t *testing.T) {
 		{"https://deploy:s3cr3t@example.com:8443/a/s3cr3t?sig=s3cr3t#s3cr3t", "https://example.com:8443"},
 		{"https://[fe80::1%25s3cr3t]:8443/x.yaml", "https://[fe80::1]:8443"},
 		{"https://[fe80::1%25zone%5Ds3cr3t]:8443/x.yaml", "https://[fe80::1]:8443"},
+		{"https://bücher.example/x.yaml", "(url whose host is not shown)"},
 		{"https:deploy:s3cr3t@example.com/x", "(url without a host)"},
 	}
 	for _, tc := range urls {

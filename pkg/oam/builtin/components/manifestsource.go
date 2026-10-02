@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -208,37 +209,50 @@ func displayURL(rawURL string) string {
 		return "(url without a host)"
 	}
 	host, _ := displayHost(u.Host)
+	if host == "" {
+		return "(url whose host is not shown)"
+	}
 	return u.Scheme + "://" + host
 }
 
 // displayHost reduces a host, as urlHost or url.URL.Host returns it, to the part
-// that is safe to print: what follows the last "@" (the userinfo is dropped), up
-// to the first "?" or "#" (a query or fragment urlHost keeps is dropped), with
-// an IPv6 zone ("%" up to the last "]") dropped, since net/url keeps arbitrary
-// zone text in Host, "]" included. The port stays, unless a zone precedes it
-// and it is not numeric. trimmed reports whether anything was dropped.
+// that is safe to print, or to "" when that part cannot be told apart from the
+// rest. The userinfo runs to the last "@" and is dropped, unless a "?" or "#"
+// precedes that "@": the "@" may then belong to a query or fragment as well, so
+// nothing is shown. A query or fragment urlHost keeps is dropped, and so is an
+// IPv6 zone ("%" up to the last "]"), since net/url keeps arbitrary zone text
+// in Host, "]" included. What is left is shown only when it is a plain host
+// (plainHost); anything else, such as a "]" left from a userinfo inside the
+// brackets or a port that is not numeric, is not shown at all. trimmed reports
+// whether shown differs from host.
 func displayHost(host string) (shown string, trimmed bool) {
 	shown = host
-	if i := strings.IndexAny(shown, "?#"); i >= 0 {
-		shown = shown[:i]
+	at := strings.LastIndex(shown, "@")
+	if q := strings.IndexAny(shown, "?#"); q >= 0 {
+		if q < at {
+			return "", true
+		}
+		shown = shown[:q]
 	}
-	if i := strings.LastIndex(shown, "@"); i >= 0 {
-		shown = shown[i+1:]
+	if at >= 0 {
+		shown = shown[at+1:]
 	}
 	if i := strings.Index(shown, "%"); i >= 0 {
-		// The zone runs to the last "]", since it can itself contain one, and
-		// only a numeric port is kept after that.
 		rest := ""
 		if j := strings.LastIndex(shown, "]"); j > i {
-			rest = "]"
-			if port := shown[j+1:]; len(port) > 1 && port[0] == ':' && strings.Trim(port[1:], "0123456789") == "" {
-				rest += port
-			}
+			rest = shown[j:]
 		}
 		shown = shown[:i] + rest
 	}
+	if !plainHost.MatchString(shown) {
+		return "", host != ""
+	}
 	return shown, shown != host
 }
+
+// plainHost matches a host displayHost may print: a DNS name or IPv4 address,
+// or a bracketed IPv6 address, with an optional numeric port.
+var plainHost = regexp.MustCompile(`^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]+)(:[0-9]+)?$`)
 
 // fetchError is a fetch or read failure whose text is fixed (see failureCause)
 // but whose cause stays reachable through errors.Is and errors.As, so a caller
@@ -316,10 +330,14 @@ func enforceAllowedURLHosts(rawURL string, allowed []string) error {
 	// can carry the url's userinfo, query or IPv6 zone, any of which can hold a
 	// credential. Matching above is unchanged, so such a url still fails closed.
 	shown, trimmed := displayHost(host)
-	if trimmed {
+	switch {
+	case !trimmed:
+		return errors.Errorf("source registry %q is not in allowed registries %v", shown, allowed)
+	case shown != "":
 		return errors.Errorf("source registry %q is not in allowed registries %v; the url's userinfo, IPv6 zone, query or fragment, which no entry matches, is not shown", shown, allowed)
+	default:
+		return errors.Errorf("source registry is not in allowed registries %v; it is not shown, since the url's userinfo, IPv6 zone, query or fragment cannot be told apart from its host", allowed)
 	}
-	return errors.Errorf("source registry %q is not in allowed registries %v", shown, allowed)
 }
 
 // urlHost extracts the host, port included, that a source URL or endpoint names.
