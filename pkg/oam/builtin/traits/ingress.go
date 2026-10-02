@@ -69,6 +69,25 @@ func checkImplicitBackend(app *stack.Application, location string) error {
 	return nil
 }
 
+// checkTraitServicePort refuses a trait-level servicePort on a component that owns a Service and
+// knows it has no port: a port-less headless service (go-kure/launcher#690). servicePort would
+// route to a port that Service lacks. A component with a service port is refused separately, with
+// its own message; one that does not know its ports (helmchart, a port-less daemonset) is not
+// refused.
+func checkTraitServicePort(app *stack.Application) error {
+	pn, ok := app.Config.(servicePortNamer)
+	if !ok {
+		return nil
+	}
+	if _, known := pn.ServicePortName(); known {
+		return errors.Errorf(
+			"servicePort may not be set on component %q: its Service has no ports to route to; "+
+				"route from another component and name a Service that has the port",
+			app.Name)
+	}
+	return nil
+}
+
 // checkImplicitPortName refuses an implicit backend addressed by a port name other than
 // the name of the component's own service port, when the component knows its port names
 // (servicePortNamer). This holds a named port to the same one port a numbered one is held
@@ -200,6 +219,9 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 				"servicePort may not be set on a component that already exposes service port %d; "+
 					"use path-level 'port' or 'backend' overrides instead",
 				existingPort)
+		}
+		if err := checkTraitServicePort(app); err != nil {
+			return nil, err
 		}
 		defaultPort = sp
 		traitPortProvided = true
