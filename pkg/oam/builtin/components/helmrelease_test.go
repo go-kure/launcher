@@ -295,6 +295,16 @@ func TestHelmReleaseHandler_Refuses(t *testing.T) {
 		{"valuesFrom kind lowercase", map[string]any{"chart": hrChart(), "valuesFrom": []any{map[string]any{"kind": "secret", "name": "s"}}}, `helmrelease: valuesFrom[0].kind "secret" is not one of Secret, ConfigMap`},
 		{"valuesFrom kind a source kind", map[string]any{"chart": hrChart(), "valuesFrom": []any{map[string]any{"kind": "HelmRepository", "name": "s"}}}, `helmrelease: valuesFrom[0].kind "HelmRepository" is not one of Secret, ConfigMap`},
 		{"valuesFrom kind on a later entry", map[string]any{"chart": hrChart(), "valuesFrom": []any{map[string]any{"kind": "ConfigMap", "name": "a"}, map[string]any{"kind": "Configmap", "name": "b"}}}, `helmrelease: valuesFrom[1].kind "Configmap" is not one of Secret, ConfigMap`},
+		// name, valuesKey and targetPath follow the CRD's limits and patterns
+		// (go-kure/launcher#762); lengths count characters.
+		{"valuesFrom name missing", hrValuesFrom(map[string]any{"kind": "Secret"}), "helmrelease: valuesFrom[0].name is required"},
+		{"valuesFrom name too long", hrValuesFrom(map[string]any{"kind": "Secret", "name": strings.Repeat("a", 254)}), "helmrelease: valuesFrom[0].name is 254 characters, more than 253"},
+		{"valuesFrom valuesKey with a space", hrValuesFrom(map[string]any{"kind": "Secret", "name": "s", "valuesKey": "values yaml"}), `helmrelease: valuesFrom[0].valuesKey "values yaml" does not match ^[\-._a-zA-Z0-9]+$`},
+		{"valuesFrom valuesKey too long", hrValuesFrom(map[string]any{"kind": "Secret", "name": "s", "valuesKey": strings.Repeat("k", 254)}), "helmrelease: valuesFrom[0].valuesKey is 254 characters, more than 253"},
+		{"valuesFrom targetPath with a space", hrValuesFrom(map[string]any{"kind": "Secret", "name": "s", "targetPath": "a b"}), `helmrelease: valuesFrom[0].targetPath "a b" does not match `},
+		{"valuesFrom targetPath index too long", hrValuesFrom(map[string]any{"kind": "Secret", "name": "s", "targetPath": "a[123456]"}), `helmrelease: valuesFrom[0].targetPath "a[123456]" does not match `},
+		{"valuesFrom targetPath too long", hrValuesFrom(map[string]any{"kind": "Secret", "name": "s", "targetPath": strings.Repeat("p", 251)}), "helmrelease: valuesFrom[0].targetPath is 251 characters, more than 250"},
+		{"valuesFrom name on a later entry", hrValuesFrom(map[string]any{"kind": "Secret", "name": "s"}, map[string]any{"kind": "ConfigMap", "name": ""}), "helmrelease: valuesFrom[1].name is required"},
 		{"wrong type bool", map[string]any{"chart": hrChart(), "suspend": "yes"}, "suspend"},
 		{"wrong type integer", map[string]any{"chart": hrChart(), "maxHistory": "3"}, "maxHistory"},
 		{"wrong type object", map[string]any{"chart": "podinfo"}, "chart"},
@@ -314,6 +324,35 @@ func TestHelmReleaseHandler_Refuses(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want one containing %q", err, tc.want)
 			}
+		})
+	}
+}
+
+// hrValuesFrom is a valid helmrelease document with the given valuesFrom
+// entries.
+func hrValuesFrom(entries ...map[string]any) map[string]any {
+	from := make([]any, len(entries))
+	for i, e := range entries {
+		from[i] = e
+	}
+	return map[string]any{"chart": hrChart(), "valuesFrom": from}
+}
+
+// TestHelmReleaseHandler_ValuesFromAccepts: valuesFrom entries at the CRD's
+// limits and covering its patterns build. The multi-byte name is 253
+// characters but more bytes, so only a character count admits it.
+func TestHelmReleaseHandler_ValuesFromAccepts(t *testing.T) {
+	cases := map[string]map[string]any{
+		"name at the limit":            {"kind": "Secret", "name": strings.Repeat("a", 253)},
+		"multi-byte name at the limit": {"kind": "Secret", "name": strings.Repeat("é", 253)},
+		"valuesKey at the limit":       {"kind": "ConfigMap", "name": "c", "valuesKey": strings.Repeat("k", 253)},
+		"valuesKey every class":        {"kind": "ConfigMap", "name": "c", "valuesKey": "values-1_a.yaml"},
+		"targetPath at the limit":      {"kind": "Secret", "name": "s", "targetPath": strings.Repeat("p", 250)},
+		"targetPath every class":       {"kind": "Secret", "name": "s", "valuesKey": "token", "targetPath": `a.b_c-d[0]\e/f[12345]`},
+	}
+	for name, entry := range cases {
+		t.Run(name, func(t *testing.T) {
+			hrGenerate(t, hrConfig(t, "web", hrValuesFrom(entry)), "")
 		})
 	}
 }
@@ -363,6 +402,9 @@ func TestHelmReleaseConfig_GenerateValidatesDirectConfig(t *testing.T) {
 		"values a string":  {Name: "web", Spec: helmv2.HelmReleaseSpec{ChartRef: chartRef, Values: &apiextensionsv1.JSON{Raw: []byte(`"s"`)}}},
 		"trailing content": {Name: "web", Spec: helmv2.HelmReleaseSpec{ChartRef: chartRef, Values: &apiextensionsv1.JSON{Raw: []byte(`{"a":1} {}`)}}},
 		"valuesFrom kind":  {Name: "web", Spec: helmv2.HelmReleaseSpec{ChartRef: chartRef, ValuesFrom: []helmv2.ValuesReference{{Kind: "Bucket", Name: "b"}}}},
+		"valuesFrom name":  {Name: "web", Spec: helmv2.HelmReleaseSpec{ChartRef: chartRef, ValuesFrom: []helmv2.ValuesReference{{Kind: "Secret"}}}},
+		"valuesFrom key":   {Name: "web", Spec: helmv2.HelmReleaseSpec{ChartRef: chartRef, ValuesFrom: []helmv2.ValuesReference{{Kind: "Secret", Name: "s", ValuesKey: "a/b"}}}},
+		"valuesFrom path":  {Name: "web", Spec: helmv2.HelmReleaseSpec{ChartRef: chartRef, ValuesFrom: []helmv2.ValuesReference{{Kind: "Secret", Name: "s", TargetPath: "a b"}}}},
 	}
 	names := make([]string, 0, len(cases))
 	for n := range cases {
