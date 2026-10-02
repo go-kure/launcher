@@ -167,9 +167,9 @@ func TestHelmRule_FluxOCIRepository(t *testing.T) {
 // TestHelmRule_FluxGitRepository: an inline GitRepository source generates a
 // gitrepository with the URL and the one authored ref field, named after the
 // JSON identity, and the release reads it through chart.spec.sourceRef with
-// chart as the path. An ssh:// URL is accepted as well.
+// chart as the path. An http:// URL is accepted as well.
 func TestHelmRule_FluxGitRepository(t *testing.T) {
-	for _, url := range []string{"https://github.com/example/charts", "ssh://git@github.com/example/charts"} {
+	for _, url := range []string{"https://github.com/example/charts", "http://git.example.com/charts"} {
 		t.Run(url, func(t *testing.T) {
 			comps := lowerHelm(t, helmLowering("shop"), "podinfo", map[string]any{
 				"chart":  "./charts/podinfo",
@@ -189,6 +189,7 @@ func TestHelmRule_FluxGitRepository(t *testing.T) {
 			release := componentByType(t, comps, "helmrelease")
 			wantRelease := map[string]any{"chart": map[string]any{"spec": map[string]any{
 				"chart": "./charts/podinfo", "sourceRef": map[string]any{"kind": "GitRepository", "name": wantName},
+				"reconcileStrategy": "Revision",
 			}}}
 			if !reflect.DeepEqual(release.Properties, wantRelease) {
 				t.Errorf("release properties = %v, want %v", release.Properties, wantRelease)
@@ -220,6 +221,7 @@ func TestHelmRule_FluxBucket(t *testing.T) {
 	release := componentByType(t, comps, "helmrelease")
 	wantRelease := map[string]any{"chart": map[string]any{"spec": map[string]any{
 		"chart": "charts/podinfo", "sourceRef": map[string]any{"kind": "Bucket", "name": wantName},
+		"reconcileStrategy": "Revision",
 	}}}
 	if !reflect.DeepEqual(release.Properties, wantRelease) {
 		t.Errorf("release properties = %v, want %v", release.Properties, wantRelease)
@@ -334,9 +336,9 @@ func TestHelmRule_ReferenceForm(t *testing.T) {
 		{"HelmRepository", map[string]any{"chart": "podinfo", "version": "6.5.0", "source": map[string]any{"name": "charts", "kind": "HelmRepository", "namespace": "flux-system"}},
 			"chart", map[string]any{"spec": map[string]any{"chart": "podinfo", "version": "6.5.0", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "charts", "namespace": "flux-system"}}}},
 		{"GitRepository", map[string]any{"chart": "./charts/podinfo", "source": map[string]any{"name": "podinfo", "kind": "GitRepository", "namespace": "flux-system"}},
-			"chart", map[string]any{"spec": map[string]any{"chart": "./charts/podinfo", "sourceRef": map[string]any{"kind": "GitRepository", "name": "podinfo", "namespace": "flux-system"}}}},
+			"chart", map[string]any{"spec": map[string]any{"chart": "./charts/podinfo", "sourceRef": map[string]any{"kind": "GitRepository", "name": "podinfo", "namespace": "flux-system"}, "reconcileStrategy": "Revision"}}},
 		{"Bucket", map[string]any{"chart": "charts/podinfo", "source": map[string]any{"name": "artifacts", "kind": "Bucket"}},
-			"chart", map[string]any{"spec": map[string]any{"chart": "charts/podinfo", "sourceRef": map[string]any{"kind": "Bucket", "name": "artifacts"}}}},
+			"chart", map[string]any{"spec": map[string]any{"chart": "charts/podinfo", "sourceRef": map[string]any{"kind": "Bucket", "name": "artifacts"}, "reconcileStrategy": "Revision"}}},
 		{"OCIRepository", map[string]any{"source": map[string]any{"name": "podinfo", "kind": "OCIRepository"}},
 			"chartRef", map[string]any{"kind": "OCIRepository", "name": "podinfo"}},
 		{"HelmChart", map[string]any{"source": map[string]any{"name": "podinfo", "kind": "HelmChart", "namespace": "flux-system"}},
@@ -470,7 +472,8 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"inline GitRepository without ref", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository"}}, "helm: an inline source.kind GitRepository requires source.ref with exactly one of branch, tag, semver, name, commit"},
 		{"inline GitRepository empty ref", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{}}}, "helm: an inline source.kind GitRepository requires source.ref with exactly one of"},
 		{"inline GitRepository two ref fields", map[string]any{"chart": "a", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main", "tag": "v1.0.0"}}}, "helm: source.ref sets branch, tag; an inline GitRepository takes exactly one of branch, tag, semver, name, commit"},
-		{"inline GitRepository oci URL", map[string]any{"chart": "a", "source": map[string]any{"url": "oci://ghcr.io/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires an http://, https:// or ssh:// URL"},
+		{"inline GitRepository oci URL", map[string]any{"chart": "a", "source": map[string]any{"url": "oci://ghcr.io/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires an http:// or https:// URL; an ssh:// repository needs credentials, so author a gitrepository and reference it"},
+		{"inline GitRepository ssh URL", map[string]any{"chart": "a", "source": map[string]any{"url": "ssh://git@github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires an http:// or https:// URL; an ssh:// repository needs credentials, so author a gitrepository and reference it"},
 		{"inline GitRepository without chart", map[string]any{"source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: source.kind GitRepository requires chart to be specified"},
 		{"inline GitRepository with version", map[string]any{"chart": "./charts/a", "version": "1.0.0", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, "helm: version is not used with source.kind GitRepository, whose chart is read at the source's fetched revision"},
 		{"inline Bucket with url", map[string]any{"chart": "a", "source": map[string]any{"url": "https://minio.example.com", "kind": "Bucket"}}, "helm: source.kind Bucket takes source.endpoint and source.bucketName, not source.url"},
@@ -514,6 +517,39 @@ func TestHelmRule_Refusals(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("error = %q, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestHelmRule_ReconcileStrategyRevisionForGitAndBucket: a release reading its
+// chart from a GitRepository or Bucket, inline or referenced, sets
+// reconcileStrategy Revision, so a new source revision with an unchanged chart
+// version still deploys. A HelmRepository release keeps Flux's ChartVersion
+// default and carries no reconcileStrategy key.
+func TestHelmRule_ReconcileStrategyRevisionForGitAndBucket(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]any
+		want  bool
+	}{
+		{"inline HelmRepository", map[string]any{"chart": "podinfo", "version": "6.5.0", "source": map[string]any{"url": "https://charts.example.com"}}, false},
+		{"referenced HelmRepository", map[string]any{"chart": "podinfo", "source": map[string]any{"name": "charts", "kind": "HelmRepository"}}, false},
+		{"inline GitRepository", map[string]any{"chart": "./charts/podinfo", "source": map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}}}, true},
+		{"referenced GitRepository", map[string]any{"chart": "./charts/podinfo", "source": map[string]any{"name": "podinfo", "kind": "GitRepository"}}, true},
+		{"inline Bucket", map[string]any{"chart": "charts/podinfo", "source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts"}}, true},
+		{"referenced Bucket", map[string]any{"chart": "charts/podinfo", "source": map[string]any{"name": "artifacts", "kind": "Bucket"}}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			release := componentByType(t, lowerHelm(t, helmLowering("shop"), "podinfo", tc.props), "helmrelease")
+			spec := release.Properties["chart"].(map[string]any)["spec"].(map[string]any)
+			got, set := spec["reconcileStrategy"]
+			if tc.want && got != "Revision" {
+				t.Errorf("chart.spec.reconcileStrategy = %v, want Revision", got)
+			}
+			if !tc.want && set {
+				t.Errorf("chart.spec.reconcileStrategy = %v, want the key absent", got)
 			}
 		})
 	}

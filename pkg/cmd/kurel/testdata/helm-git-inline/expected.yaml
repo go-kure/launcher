@@ -18,6 +18,7 @@ spec:
   chart:
     spec:
       chart: ./charts/podinfo
+      reconcileStrategy: Revision
       sourceRef:
         kind: GitRepository
         name: monitoring-source-27dab1d241
@@ -32,6 +33,7 @@ spec:
   chart:
     spec:
       chart: ./charts/exporter
+      reconcileStrategy: Revision
       sourceRef:
         kind: GitRepository
         name: monitoring-source-27dab1d241
