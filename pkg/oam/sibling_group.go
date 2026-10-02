@@ -469,7 +469,8 @@ func checkSiblingGroups(entries []componentEntry) error {
 	return nil
 }
 
-// siblingAnswers names each value-forwarded contract cfg answers with a non-zero value.
+// siblingAnswers names each value-forwarded contract cfg answers with a non-zero
+// value, or, for ServiceAccountName, for pods it runs.
 func siblingAnswers(cfg stack.ApplicationConfig) []string {
 	var out []string
 	if p, ok := cfg.(servicePortProvider); ok && p.ServicePort() != 0 {
@@ -483,8 +484,10 @@ func siblingAnswers(cfg stack.ApplicationConfig) []string {
 			out = append(out, "ServicePortName")
 		}
 	}
+	// A pod-running member answers even with no name: its pods run as the
+	// namespace's default account, which the group could not report for both.
 	if n, ok := cfg.(ServiceAccountNamer); ok {
-		if name, _ := n.ServiceAccountName(); name != "" {
+		if name, runsPods := n.ServiceAccountName(); name != "" || runsPods {
 			out = append(out, "ServiceAccountName")
 		}
 	}

@@ -165,6 +165,20 @@ func TestSiblingGroup_Refusals(t *testing.T) {
 		doc:      siblingDoc(Component{Name: "web", Type: "pair"}),
 		want:     `members a and b both answer ServicePort`,
 	}, {
+		// The unnamed member's pods run as default, which the group, answering
+		// "sa", would misreport.
+		name:     "a named and an unnamed pod-running member",
+		handlers: []*siblingStubHandler{namerHandler("a", "sa"), namerHandler("b", "")},
+		rules:    []emitRule{{"pair", pair("a", "b")}},
+		doc:      siblingDoc(Component{Name: "web", Type: "pair"}),
+		want:     `members a and b both answer ServiceAccountName`,
+	}, {
+		name:     "two unnamed pod-running members",
+		handlers: []*siblingStubHandler{namerHandler("a", ""), namerHandler("b", "")},
+		rules:    []emitRule{{"pair", pair("a", "b")}},
+		doc:      siblingDoc(Component{Name: "web", Type: "pair"}),
+		want:     `members a and b both answer ServiceAccountName`,
+	}, {
 		name: "a layout augmenter member",
 		handlers: []*siblingStubHandler{stubHandler("a", 0), {typ: "aug", build: func() stack.ApplicationConfig {
 			return &siblingAugmenterStub{}
@@ -562,6 +576,13 @@ type namerStub struct {
 }
 
 func (s *namerStub) ServiceAccountName() (string, bool) { return s.name, s.runsPods }
+
+// namerHandler builds a pod-running namerStub with the given account name.
+func namerHandler(typ, name string) *siblingStubHandler {
+	return &siblingStubHandler{typ: typ, build: func() stack.ApplicationConfig {
+		return &namerStub{name: name, runsPods: true}
+	}}
+}
 
 // TestSiblingGroup_ServiceAccountNameOrsRunsPods: the group answers the first
 // member's non-empty name and ORs every member's runsPods, so a named member
