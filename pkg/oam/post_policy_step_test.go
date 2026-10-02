@@ -10,23 +10,30 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// stepConfig is an Enforceable config that logs when the policy is applied to it.
-type stepConfig struct{ log *[]string }
+// stepConfig is an Enforceable config that logs when the policy is applied to
+// it, and refuses the policy with policyErr when set.
+type stepConfig struct {
+	log       *[]string
+	policyErr error
+}
 
 func (c *stepConfig) Generate(*stack.Application) ([]*client.Object, error) { return nil, nil }
 
 func (c *stepConfig) ApplyPolicy(Policy) error {
 	*c.log = append(*c.log, "policy")
-	return nil
+	return c.policyErr
 }
 
 // stepSinkHandler builds a stepConfig for the terminal "step-sink" type.
-type stepSinkHandler struct{ log *[]string }
+type stepSinkHandler struct {
+	log       *[]string
+	policyErr error
+}
 
 func (stepSinkHandler) CanHandle(t string) bool { return t == "step-sink" }
 
 func (h stepSinkHandler) ToApplicationConfig(*Component, string) (stack.ApplicationConfig, error) {
-	return &stepConfig{log: h.log}, nil
+	return &stepConfig{log: h.log, policyErr: h.policyErr}, nil
 }
 
 // loggedTraitHandler logs each time the "logged" trait is applied.
@@ -88,7 +95,13 @@ func loggingStep(t *testing.T, log *[]string, name string) PostPolicyStep {
 }
 
 func stepTransform(log *[]string, trait string, steps ...PostPolicyStep) error {
-	tr := NewTransformer(map[string]ComponentHandler{"step-sink": stepSinkHandler{log: log}}, nil)
+	return stepTransformWithPolicy(log, nil, trait, steps...)
+}
+
+// stepTransformWithPolicy is stepTransform with a policy that refuses with
+// policyErr when it is set.
+func stepTransformWithPolicy(log *[]string, policyErr error, trait string, steps ...PostPolicyStep) error {
+	tr := NewTransformer(map[string]ComponentHandler{"step-sink": stepSinkHandler{log: log, policyErr: policyErr}}, nil)
 	tr.RegisterBuiltinTrait("logged", loggedTraitHandler{log: log})
 	tr.RegisterBuiltinTraitLowering(aliasTraitRule{})
 	tr.RegisterComponentLowering(stepAttachingRule{steps: steps})
@@ -131,14 +144,37 @@ func TestPostPolicyStep_SurvivesATraitRule(t *testing.T) {
 	}
 }
 
-// A failing step fails the transform, naming the component, and nothing after
-// it runs.
+// A failing step fails the transform with a TransformError naming the
+// component and wrapping the step's own error, and nothing after it runs.
 func TestPostPolicyStep_ErrorNamesTheComponent(t *testing.T) {
 	var log []string
-	failing := func(stack.ApplicationConfig) error { return errors.New("boom") }
+	boom := errors.New("boom")
+	failing := func(stack.ApplicationConfig) error { return boom }
 	err := stepTransform(&log, "logged", failing, loggingStep(t, &log, "after"))
 	if err == nil || !strings.Contains(err.Error(), `component "web": boom`) {
 		t.Fatalf("err = %v, want one containing %q", err, `component "web": boom`)
+	}
+	var te *TransformError
+	if !errors.As(err, &te) || te.Message != `component "web"` {
+		t.Errorf("err = %#v, want a *TransformError with message %q", err, `component "web"`)
+	}
+	if !errors.Is(err, boom) {
+		t.Errorf("err = %v, want it to wrap the step's error", err)
+	}
+	if want := []string{"policy"}; !slices.Equal(log, want) {
+		t.Errorf("ran %v, want %v", log, want)
+	}
+}
+
+// A policy refusal stops the component before its steps: the transform fails
+// with the policy's ViolationError, and no step runs.
+func TestPostPolicyStep_NotRunAfterAPolicyRefusal(t *testing.T) {
+	var log []string
+	refused := errors.New("refused")
+	err := stepTransformWithPolicy(&log, refused, "logged", loggingStep(t, &log, "step"))
+	var ve *ViolationError
+	if !errors.As(err, &ve) || ve.Component != "web" || !errors.Is(err, refused) {
+		t.Fatalf("err = %#v, want a *ViolationError for component %q wrapping the policy's error", err, "web")
 	}
 	if want := []string{"policy"}; !slices.Equal(log, want) {
 		t.Errorf("ran %v, want %v", log, want)
@@ -146,11 +182,12 @@ func TestPostPolicyStep_ErrorNamesTheComponent(t *testing.T) {
 }
 
 // Attaching to a copy never reaches another copy, even when they share the
-// steps attached before the copy was taken; a nil step and a nil component are
-// ignored.
+// steps attached before the copy was taken and that slice has spare capacity
+// (so an unclipped append from two copies would write the same element); a nil
+// step and a nil component are ignored.
 func TestComponentAfterPolicy_CopiesStayApart(t *testing.T) {
 	var log []string
-	var c Component
+	c := Component{afterPolicy: make([]PostPolicyStep, 0, 4)}
 	c.AfterPolicy(func(stack.ApplicationConfig) error { log = append(log, "shared"); return nil })
 	c.AfterPolicy(nil)
 	d, e := c, c
