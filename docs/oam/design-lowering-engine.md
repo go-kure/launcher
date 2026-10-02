@@ -563,9 +563,28 @@ claims apart from the `app` label, the same capability default on both paths, th
 same refusals for malformed properties on both paths, and a decorator on the owner
 that reaches the trait's claim.
 
-The `configmap` twin follows go-kure/launcher#740, which changes the same trait.
-Today the two `configmap` paths still differ in value typing, `binaryData` and
-`immutable`, and labels.
+For `configmap` the kind's code path is `components.ParseConfigMapProperties` and
+`GenerateConfigMap`, and these are the ownership fields:
+
+- **Name**: the trait's `name` property, against the kind's component name.
+- **`app` label**: the owning component, against the ConfigMap itself.
+- **Namespace**: the owner's. Under a Flux namespace the trait's ConfigMap follows
+  the owner's Flux object when that object reads it by name (go-kure/launcher#740);
+  the kind's ConfigMap stays in the application namespace.
+- **Bundle and provenance**: the ConfigMap joins the owner's bundle, so the owner's
+  decorators (`prune-protection`) reach it, and provenance names the owner.
+- **Mount**: the trait's optional `mountPath` mounts the ConfigMap into the owner's
+  workload; a workload reads the kind's through a `configMap` volume or `envFrom`.
+
+Value typing is not among them: the kind's string-only `data` wins, so the trait
+refuses a number or boolean it used to stringify. `helm`'s synthesized values
+`configmap` trait (go-kure/launcher#759) passes the values as one string and is
+unaffected.
+
+`pkg/cmd/kurel/configmap_twin_test.go` builds each intent both ways. It requires
+identical ConfigMaps apart from the `app` label, the same refusals for malformed
+properties on both paths, a decorator on the owner that reaches the trait's
+ConfigMap, and an unchanged `helm` values ConfigMap.
 
 ## What this does not resolve
 

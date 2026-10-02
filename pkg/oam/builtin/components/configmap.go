@@ -23,7 +23,8 @@ import (
 // ConfigMap's name, so a workload's `configMap` volume or `envFrom` names it.
 // It is a different type from the `configmap` trait, which attaches a
 // ConfigMap to another component: component and trait types live in separate
-// registries (pkg/oam transform.go).
+// registries (pkg/oam transform.go). The trait is this kind's twin and builds
+// its ConfigMap through ParseConfigMapProperties and GenerateConfigMap.
 //
 // `data` values are strings, as the API's are: a number or a boolean is
 // refused rather than stringified, so the stored text is exactly what was
@@ -78,8 +79,97 @@ type ConfigMapConfig struct {
 
 // Generate creates the ConfigMap.
 func (c *ConfigMapConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	cm := kubernetes.CreateConfigMap(app.Name, app.Namespace)
-	cm.Labels = maps.Clone(appLabels(app.Name))
+	return GenerateConfigMap(*c, app.Name, app.Namespace, appLabels(app.Name))
+}
+
+// parseConfigMap reads a configmap component's properties.
+func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
+	c, err := ParseConfigMapProperties(component.Properties)
+	if err != nil {
+		return nil, err
+	}
+	c.Name = component.Name
+	return &c, nil
+}
+
+// The two functions below are the kind's whole ConfigMap path: parse and
+// generate. The configmap trait, the kind's twin (go-kure/launcher#741), runs
+// the same two, so the two build the same ConfigMap from the same properties
+// and differ only in what ownership means: the ConfigMap's name, its labels,
+// its namespace and the bundle it is placed in, all passed to
+// GenerateConfigMap.
+
+// ParseConfigMapProperties reads data, binaryData and immutable, applying the
+// key and total-size checks ValidateConfigMap applies to the same fields. Keys
+// are checked in sorted order, so with several bad entries the one reported
+// does not depend on map iteration order. Keys it does not know are left to
+// the caller: the configmap trait reads `name` and `mountPath`. The returned
+// Name and Namespace are unset.
+func ParseConfigMapProperties(props map[string]any) (ConfigMapConfig, error) {
+	var c ConfigMapConfig
+
+	if raw, present, err := parseObjectField(props, "data", "data"); err != nil {
+		return ConfigMapConfig{}, err
+	} else if present {
+		for _, k := range slices.Sorted(maps.Keys(raw)) {
+			v := raw[k]
+			if err := ValidateConfigMapKey("data", k); err != nil {
+				return ConfigMapConfig{}, err
+			}
+			s, ok := v.(string)
+			if !ok {
+				return ConfigMapConfig{}, errors.Errorf("data.%s: must be a string, got %T; quote the value", k, v)
+			}
+			if c.Data == nil {
+				c.Data = map[string]string{}
+			}
+			c.Data[k] = s
+		}
+	}
+
+	if raw, present, err := parseObjectField(props, "binaryData", "binaryData"); err != nil {
+		return ConfigMapConfig{}, err
+	} else if present {
+		for _, k := range slices.Sorted(maps.Keys(raw)) {
+			v := raw[k]
+			if err := ValidateConfigMapKey("binaryData", k); err != nil {
+				return ConfigMapConfig{}, err
+			}
+			if _, dup := c.Data[k]; dup {
+				return ConfigMapConfig{}, errors.Errorf("binaryData.%s: key also appears in data; a key may appear in only one of them", k)
+			}
+			s, ok := v.(string)
+			if !ok {
+				return ConfigMapConfig{}, errors.Errorf("binaryData.%s: must be a base64-encoded string, got %T", k, v)
+			}
+			b, err := base64.StdEncoding.DecodeString(s)
+			if err != nil {
+				return ConfigMapConfig{}, errors.Errorf("binaryData.%s: invalid base64: %w", k, err)
+			}
+			if c.BinaryData == nil {
+				c.BinaryData = map[string][]byte{}
+			}
+			c.BinaryData[k] = b
+		}
+	}
+
+	if err := CheckConfigMapSize(c.Data, c.BinaryData); err != nil {
+		return ConfigMapConfig{}, err
+	}
+
+	immutable, err := parseBoolField(props, "immutable", "immutable")
+	if err != nil {
+		return ConfigMapConfig{}, err
+	}
+	c.Immutable = immutable
+	return c, nil
+}
+
+// GenerateConfigMap builds the ConfigMap under name in namespace, with its
+// own copy of labels and its entries added in sorted key order.
+func GenerateConfigMap(c ConfigMapConfig, name, namespace string, labels map[string]string) ([]*client.Object, error) {
+	cm := kubernetes.CreateConfigMap(name, namespace)
+	cm.Labels = maps.Clone(labels)
 	cm.Annotations = nil
 	for _, k := range slices.Sorted(maps.Keys(c.Data)) {
 		kubernetes.AddConfigMapData(cm, k, c.Data[k])
@@ -92,71 +182,6 @@ func (c *ConfigMapConfig) Generate(app *stack.Application) ([]*client.Object, er
 	}
 	obj := client.Object(cm)
 	return []*client.Object{&obj}, nil
-}
-
-// parseConfigMap reads a configmap component's properties, applying the key
-// and total-size checks ValidateConfigMap applies to the same fields. Keys are
-// checked in sorted order, so with several bad entries the one reported does
-// not depend on map iteration order.
-func parseConfigMap(component *oam.Component) (*ConfigMapConfig, error) {
-	props := component.Properties
-	c := &ConfigMapConfig{Name: component.Name}
-
-	if raw, present, err := parseObjectField(props, "data", "data"); err != nil {
-		return nil, err
-	} else if present {
-		for _, k := range slices.Sorted(maps.Keys(raw)) {
-			v := raw[k]
-			if err := ValidateConfigMapKey("data", k); err != nil {
-				return nil, err
-			}
-			s, ok := v.(string)
-			if !ok {
-				return nil, errors.Errorf("data.%s: must be a string, got %T; quote the value", k, v)
-			}
-			if c.Data == nil {
-				c.Data = map[string]string{}
-			}
-			c.Data[k] = s
-		}
-	}
-
-	if raw, present, err := parseObjectField(props, "binaryData", "binaryData"); err != nil {
-		return nil, err
-	} else if present {
-		for _, k := range slices.Sorted(maps.Keys(raw)) {
-			v := raw[k]
-			if err := ValidateConfigMapKey("binaryData", k); err != nil {
-				return nil, err
-			}
-			if _, dup := c.Data[k]; dup {
-				return nil, errors.Errorf("binaryData.%s: key also appears in data; a key may appear in only one of them", k)
-			}
-			s, ok := v.(string)
-			if !ok {
-				return nil, errors.Errorf("binaryData.%s: must be a base64-encoded string, got %T", k, v)
-			}
-			b, err := base64.StdEncoding.DecodeString(s)
-			if err != nil {
-				return nil, errors.Errorf("binaryData.%s: invalid base64: %w", k, err)
-			}
-			if c.BinaryData == nil {
-				c.BinaryData = map[string][]byte{}
-			}
-			c.BinaryData[k] = b
-		}
-	}
-
-	if err := CheckConfigMapSize(c.Data, c.BinaryData); err != nil {
-		return nil, err
-	}
-
-	immutable, err := parseBoolField(props, "immutable", "immutable")
-	if err != nil {
-		return nil, err
-	}
-	c.Immutable = immutable
-	return c, nil
 }
 
 // CheckConfigMapSize refuses a ConfigMap payload the API server refuses for

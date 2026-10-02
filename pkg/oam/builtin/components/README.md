@@ -1765,13 +1765,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     also appear in `data`) and `immutable`. The `data` values and the decoded
     `binaryData` values together may hold at most 1,048,576 bytes, the limit
     the API server enforces; a larger ConfigMap is refused at build time. That
-    check is the exported `CheckConfigMapSize(data, binaryData)`, which the
-    `configmap` trait also calls. A key the API server refuses in a ConfigMap
-    is refused by the exported `ValidateConfigMapKey(field, key)`, which the
-    trait also calls for its `data` keys. Keys are checked in sorted order, so
+    check is the exported `CheckConfigMapSize(data, binaryData)`. A key the API
+    server refuses in a ConfigMap is refused by the exported
+    `ValidateConfigMapKey(field, key)`. Keys are checked in sorted order, so
     with several bad entries the one reported is the same on every build. It is
-    a different type from the
-    `configmap` trait, which attaches a ConfigMap to another component.
+    a different type from the `configmap` trait, which attaches a ConfigMap to
+    another component. The trait is this kind's twin (go-kure/launcher#741): it
+    reads `data`, `binaryData` and `immutable` through the exported
+    `ParseConfigMapProperties(props)` and builds the ConfigMap through
+    `GenerateConfigMap(config, name, namespace, labels)`, so the same properties
+    give the same ConfigMap and the same refusals on both paths.
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
@@ -2183,8 +2186,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     or data over the ConfigMap size limit, fails the build), labelled
     `app: <label value>` like the trait's other ConfigMaps, emitted after the
     HelmRelease, and moved with the release into the Flux namespace, since its
-    `valuesFrom` names it. The trait is synthesized by the rule, not yet built through
-    the `configmap` kind's own code. Known gap, shared with authored traits
+    `valuesFrom` names it. The trait builds its ConfigMap through the `configmap`
+    kind's own code (go-kure/launcher#741); the values travel as one string, so the
+    kind's string-only typing never refuses them. Known gap, shared with authored traits
     (go-kure/launcher#757): an authored `configmap` trait on the same component that
     takes the same name is not refused, and both ConfigMaps are emitted.
   - An inline source also emits the source: a `helmrepository` with only the URL
