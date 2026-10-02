@@ -393,8 +393,8 @@ since it dials the kubelet directly rather than resolving a declared name.
 container's `ports` list, refusing a name that list does not declare and any
 named port when it is empty; see "Main container ports".)
 Where a named port is allowed at all, it is further checked against the
-exact name the kind's builder actually declares — `"http"` for
-`webservice`/`daemonset`, `"tcp"` for `statefulset` — not merely accepted as
+exact names the main container actually declares — `"http"` for
+`webservice`, the authored `ports` names on the kinds above — not merely accepted as
 any syntactically valid name: a syntactically valid but different name (e.g.
 `httpGet.port: metrics` on a `webservice`, whose only declared container
 port is `"http"`) builds successfully but is exactly as unresolvable by the
@@ -1079,7 +1079,11 @@ named `serviceName` (default: the component name) on `statefulset`. An authored
   StatefulSet carries `serviceName: ""`. The API server refuses a change to
   `spec.serviceName` on an existing StatefulSet, so one that relied on the
   default and now names the authored Service must be recreated: delete it with
-  `--cascade=orphan` so its pods survive, then apply. (The authored Service
+  `--cascade=orphan` so its pods survive, then apply. The adopted pods keep the
+  old `spec.subdomain`, which is set only when a pod is created, so their DNS
+  names under the new Service do not resolve until they are replaced: run
+  `kubectl rollout restart statefulset/<name>` (or, under `updateStrategy:
+  OnDelete`, delete the pods one at a time). (The authored Service
   cannot keep the old name: it is the component's own, and component names are
   unique within an Application.)
 - A trait that routed to the component's own Service (an implicit `ingress`,
