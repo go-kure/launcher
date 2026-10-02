@@ -102,6 +102,57 @@ func TestBuiltinHelm_SourceDeploysInInfra(t *testing.T) {
 	}
 }
 
+// TestBuiltinHelm_GitAndBucketSourcesDeployInInfra: a generated gitrepository
+// and bucket are classified into the infra tier like a generated
+// helmrepository, ahead of their releases in apps.
+func TestBuiltinHelm_GitAndBucketSourcesDeployInInfra(t *testing.T) {
+	const app = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    - name: api
+      type: helm
+      properties:
+        chart: ./charts/api
+        source:
+          kind: GitRepository
+          url: https://github.com/example/charts
+          ref:
+            branch: main
+    - name: web
+      type: helm
+      properties:
+        chart: charts/web
+        source:
+          kind: Bucket
+          endpoint: minio.example.com
+          bucketName: charts
+`
+	cluster, _, err := transformWithBuiltins(t, app)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	bundles := leafBundles(cluster.Node)
+	for _, identity := range []string{
+		`git:{"url":"https://github.com/example/charts","ref":{"branch":"main"}}`,
+		`bucket:{"provider":"","endpoint":"minio.example.com","bucketName":"charts","region":"","prefix":""}`,
+	} {
+		sum := sha256.Sum256([]byte(identity))
+		source := "shop-source-" + hex.EncodeToString(sum[:])[:10]
+		if got := bundleHolding(bundles, source); got != "shop-infra" {
+			t.Errorf("source %s (%s) is in bundle %q, want shop-infra (bundles: %v)", source, identity, got, slices.Sorted(maps.Keys(bundles)))
+		}
+	}
+	for _, rel := range []string{"api", "web"} {
+		if got := bundleHolding(bundles, rel); got != "shop-apps" {
+			t.Errorf("%s is in bundle %q, want shop-apps", rel, got)
+		}
+	}
+}
+
 // helmDependsOn is a dependency policy ordering web after api, which makes the
 // cluster dependency-aware: one bundle per component, each also depending on
 // every bundle of the preceding populated tier.

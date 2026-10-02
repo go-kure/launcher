@@ -67,7 +67,7 @@ reads it.
 | `service` | Service | Kind-named Service in front of pods another component owns: `selector`, the full `ports` list, `type`. Emits nothing else — see below. |
 | `cronjob` | CronJob, SA (+PVC) | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields (see below). |
 | `job` | Job, SA (+PVC) | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` (see below). |
-| `helm` | via `helmrelease` + a generated `helmrepository`/`ocirepository`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per URL within a document. See below. |
+| `helm` | via `helmrelease` + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
 | `helmchart` | HelmRelease + Helm/OCIRepository, or rendered manifests | **Deprecated: use `helm`** (migration table below). Helm via Flux (`native`) or client-side `template`. |
 | `helmrelease` | HelmRelease (+values ConfigMap) | Kind-named: the full Flux `HelmReleaseSpec` plus `valuesMode`, against an existing source. |
 | `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`. The composite's `delivery: template`, authorable directly — see below. |
@@ -1986,21 +1986,32 @@ not part of either change.
 - **helm** (go-kure/launcher#349, `helm.go`) — the role-named Helm component: a
   component-position lowering rule (`HelmRule`), not a handler, that lowers to the
   kind-named terminals below. Properties: `chart`, `version`, `delivery`
-  (`flux` default | `template`), `source` (inline `url` with optional `kind`, or a
-  reference `{name, kind, namespace}` to an existing HelmRepository, GitRepository,
-  Bucket, OCIRepository or HelmChart), `values`, `valuesMode` (`inline` |
+  (`flux` default | `template`), `source` (inline `url` with optional `kind` and,
+  for a GitRepository, `ref`; an inline Bucket's `kind`, `endpoint`, `bucketName`,
+  `provider`, `region`, `prefix`; or a reference `{name, kind, namespace}` to an
+  existing HelmRepository, GitRepository, Bucket, OCIRepository or HelmChart),
+  `values`, `valuesMode` (`inline` |
   `configMap`), and the HelmRelease keys `interval`, `releaseName`,
   `targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
   - `delivery: flux` emits a `helmrelease` under the authored name, with the
-    authored traits and annotations. A HelmRepository source, or a referenced
-    GitRepository or Bucket source (go-kure/launcher#336), becomes
-    `chart.spec.sourceRef` with `chart` required: the chart name, or for a
-    GitRepository or Bucket the chart's path in the fetched artifact. An
-    OCIRepository or HelmChart source becomes `chartRef`. `values` and the HelmRelease keys are forwarded verbatim, so their
-    shape is the `helmrelease` terminal's to check. `valuesMode` is forwarded only
-    when authored: the rule has no registration-time default.
-  - An inline `url` also emits the source: a `helmrepository` with only the URL
+    authored traits and annotations. A HelmRepository, GitRepository or Bucket
+    source (go-kure/launcher#336) becomes `chart.spec.sourceRef` with `chart`
+    required: the chart name, or for a GitRepository or Bucket the chart's path in
+    the fetched artifact. An OCIRepository or HelmChart source becomes `chartRef`.
+    `values` and the HelmRelease keys are forwarded verbatim, so their shape is
+    the `helmrelease` terminal's to check. `valuesMode` is forwarded only when
+    authored: the rule has no registration-time default.
+  - An inline source also emits the source: a `helmrepository` with only the URL
     for `http(s)://`, or an `ocirepository` with `ref.tag: <version>` for `oci://`.
+    A Git repository needs `kind: GitRepository` set (an `http(s)://` URL alone
+    means a Helm repository) and emits a `gitrepository` with the URL (`http://`,
+    `https://` or `ssh://`) and `source.ref`, which must set exactly one of
+    `branch`, `tag`, `semver`, `name`, `commit`: Flux would otherwise check out
+    branch `master`, or pick one of several fields by precedence. `kind: Bucket`
+    with `endpoint` and `bucketName` (and optionally `provider`, `region`,
+    `prefix`), and no `url`, emits a `bucket` with exactly those keys.
+    Credentials (`secretRef` and the like) have no inline form: author the
+    `gitrepository` or `bucket` component and reference it.
     The `ocirepository` also selects the Helm chart content layer
     (`application/vnd.cncf.helm.chart.content.v1.tar+gzip`) with
     `operation: copy`. Flux therefore passes the chart archive through unchanged.
@@ -2008,7 +2019,10 @@ not part of either change.
     ignore rules exclude (`*.zip`, `*.png`, ...) even when the chart reads them
     with `.Files.Get`. `helmchart`'s generated OCIRepository selects the same layer.
     It is named `<document>-source-<digest>`, where the 10-hex digest is taken
-    over the content identity: `helm:<url>`, or `oci:<url>:<version>`.
+    over the content identity: `helm:<url>`, `oci:<url>:<version>`,
+    `git:<JSON of url and ref>`, or `bucket:<JSON of provider, endpoint,
+    bucketName, region, prefix>` (JSON, so a `:` inside a URL or endpoint cannot
+    make two identities collide).
     Components of one document with the same identity share one source; the
     first emits it and the rest only reference it (`NameAllocator.NameOrAdopt`).
     Different documents never share or collide, because the document name is part
@@ -2016,8 +2030,8 @@ not part of either change.
     interval default rather than the release `interval`. The source terminal's
     registry allowlist (`ApplyPolicy`) and auto health check apply to it.
   - **The generated source deploys in the `infra` tier**, whatever the release's
-    tier (`pkg/oam` classifies a rule-emitted `helmrepository`/`ocirepository`
-    that way). A release moved into `infra` by a tier annotation or a `placement`
+    tier (`pkg/oam` classifies a rule-emitted `helmrepository`, `ocirepository`,
+    `gitrepository` or `bucket` that way). A release moved into `infra` by a tier annotation or a `placement`
     policy therefore never sits in an earlier tier than its source. If it did, the
     release's health check would hold back the source's tier, and the source
     would never be applied. For the same reason a `placement` policy naming the
@@ -2028,20 +2042,26 @@ not part of either change.
     `valuesMode: inline` is dropped. The rule refuses everything a client-side
     render cannot honour, each with a `helm:` message:
     - a source reference, and `valuesMode: configMap`;
+    - an inline GitRepository or Bucket source, since the render fetches only
+      from a Helm or OCI repository;
     - an OCI source without `version`;
     - each HelmRelease key, `releaseName` and `targetNamespace` included, which
       `helmtemplate` does not accept.
   - Strict, unlike `helmchart`. An undeclared key at the top level or inside
     `source` is refused, and so are:
     - `delivery: native`;
-    - `source.namespace` with an inline URL;
+    - `source.namespace` with an inline source;
+    - an inline GitRepository without exactly one `source.ref` field, or with a
+      URL that is not `http://`, `https://` or `ssh://`;
+    - `url` with an inline Bucket, or one without `endpoint` or `bucketName`;
+    - `source.ref` other than on an inline GitRepository, and `endpoint`,
+      `bucketName`, `provider`, `region`, `prefix` other than on an inline
+      Bucket;
     - `chart` with an OCIRepository or HelmChart source;
     - `version` with a referenced OCIRepository or HelmChart source, which pins
       its own;
     - `version` with a GitRepository or Bucket source: Flux reads that chart at
       the source's fetched revision and ignores `version`;
-    - `source.kind` GitRepository or Bucket with an inline `url` (only the
-      reference form exists for those kinds);
     - two keys equal ignoring case, at the top level or inside `source`
       (`chart` and `Chart`): the decode would match both to one field and keep
       either.

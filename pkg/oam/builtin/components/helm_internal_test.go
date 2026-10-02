@@ -37,6 +37,13 @@ func TestHelmRule_SchemaMatchesDecode(t *testing.T) {
 	if got, want := slices.Sorted(maps.Keys(source.Properties)), jsonKeys(reflect.TypeFor[helmSource]()); !slices.Equal(got, want) {
 		t.Errorf("source schema keys = %v, want %v", got, want)
 	}
+	ref := source.Properties["ref"]
+	if ref.AdditionalProperties {
+		t.Errorf("source.ref schema admits additional properties; the decode refuses them")
+	}
+	if got, want := slices.Sorted(maps.Keys(ref.Properties)), jsonKeys(reflect.TypeFor[helmGitRef]()); !slices.Equal(got, want) {
+		t.Errorf("source.ref schema keys = %v, want %v", got, want)
+	}
 	for _, key := range helmFluxOnlyKeys {
 		if !slices.Contains(helmPassthroughKeys, key) {
 			t.Errorf("flux-only key %q is not a passthrough key, so template delivery could never see it", key)

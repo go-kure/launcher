@@ -1,0 +1,25 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: default
+spec:
+  components:
+    - name: podinfo
+      type: helm
+      properties:
+        chart: ./charts/podinfo
+        source:
+          kind: GitRepository
+          url: https://github.com/example/charts
+          ref:
+            tag: v6.5.0
+    - name: exporter
+      type: helm
+      properties:
+        chart: ./charts/exporter
+        source:
+          kind: GitRepository
+          url: https://github.com/example/charts
+          ref:
+            tag: v6.5.0

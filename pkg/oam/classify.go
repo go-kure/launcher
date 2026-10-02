@@ -89,8 +89,9 @@ func ClassifyComponent(c *Component) (Tier, error) {
 }
 
 // generatedSourceTypes are the Flux source component types a lowering rule emits on its
-// consumers' behalf (the helm rule's helmrepository and ocirepository). A rule-emitted
-// (synthesized) component of one of these types deploys in TierInfra, the earliest tier:
+// consumers' behalf (the helm rule's helmrepository, ocirepository, gitrepository and
+// bucket). A rule-emitted (synthesized) component of one of these types deploys in
+// TierInfra, the earliest tier:
 // the consumers keep their own tier, from an annotation or a placement policy, and a source
 // in a later tier than a consumer would never be applied, since that tier waits on the
 // consumer's health check. An authored source keeps defaultTierMap's tier. A placement
@@ -99,6 +100,8 @@ func ClassifyComponent(c *Component) (Tier, error) {
 var generatedSourceTypes = map[string]bool{
 	"helmrepository": true,
 	"ocirepository":  true,
+	"gitrepository":  true,
+	"bucket":         true,
 }
 
 // isGeneratedSource reports whether c is a Flux source a lowering rule emitted on its
