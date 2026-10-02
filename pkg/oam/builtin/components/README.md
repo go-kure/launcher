@@ -793,14 +793,14 @@ On `worker`, the affinity the shorthand evaluates to is also validated the way t
 (`affinity: the shorthand evaluates to an affinity the API server would
 refuse: …`). **Behavior-changing** under `launcher.gokure.dev/v1alpha1`: such
 a worker document built before, into a manifest the API server rejects, and
-is now refused at build time — a bug fix under the pre-release exception in
-`docs/oam/design-gvk.md`, signalled by the `fix(format)` commit scope. The
+is now refused at build time — a pre-GA format change (`docs/oam/design-gvk.md`
+§ Document-Format Lifecycle), signalled by the `fix(format)` commit scope. The
 check runs after every other worker property is parsed, so an earlier refusal
 keeps its place. A component name longer than 63 characters stays refused;
 when the shorthand enables pod anti-affinity, whose label selector carries
 the name, this check now refuses it before the container-name check does.
 `webservice` validates the evaluated shorthand the same way, with the same
-message, as the last step of its parse, under the same pre-release exception
+message, as the last step of its parse, as a pre-GA format change too
 (a `fix(format)` change of its own): such a webservice document also built
 before, into a Deployment the API server rejects. A webservice's name is
 checked against the Service-name rule first, so an over-long name is refused
@@ -1312,7 +1312,8 @@ and the claim's volume. "Effective" means after an EnvironmentPolicy
 `scalerMaxReplicas` default is applied. `maxReplicas: 1` still builds. On
 `webservice` and `worker`, a document that combined the two used to build and
 then left pods 2 and up unschedulable or stuck attaching; it is now refused
-under the pre-release bug-fix exception (`docs/oam/design-gvk.md`). On
+as a pre-GA format change (`docs/oam/design-gvk.md` § Document-Format
+Lifecycle). On
 `deployment` the combination was never accepted, because `scaler` was not
 admitted there: the trait is newly admitted with this safeguard in place.
 

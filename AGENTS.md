@@ -151,14 +151,13 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   `launcher.gokure.dev/v1alpha1` document (`app.yaml`/`kurel.yaml`/`cluster.yaml`/
   `environments.yaml`, or a `CapabilityDefinition`) uses the `format` scope (`feat(format):`, `fix(format):`,
   `docs(format):`) so it lands under the
-  changelog's Document Format heading — see `docs/oam/design-gvk.md` § Document-Format
-  Lifecycle for the additive/breaking test and the version-string discipline it implies.
-  Until launcher's first stable release, a **bug fix** may change the output of, or newly
-  reject, a `v1alpha1` document without a version-string move: it ships as `fix(format):`
-  and its commit subject (the only part rendered as the Document Format changelog entry)
+  changelog's Document Format heading, and its commit subject (the only part rendered there)
   names which documents change.
-  A deliberate feature that alters an existing document's output or validity, a removal,
-  and a default change that is not a bug fix still count as breaking and move the version
+  Until launcher's first stable GA release there is no format stability promise: a fix, a
+  feature or a removal may change the output of, or newly reject, a `v1alpha1` document
+  without a version-string move or a deprecation period, and the PR description discloses
+  any output change. From that release on, `docs/oam/design-gvk.md` § Document-Format
+  Lifecycle applies: the additive/breaking test, and a breaking change moves the version
   string
 
 ## Code Conventions
