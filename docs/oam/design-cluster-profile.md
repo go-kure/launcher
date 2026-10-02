@@ -43,7 +43,7 @@ spec:
 | `metadata.name` | string | Identifies the cluster; referenced in build tooling |
 | `spec.gitopsEngine` | string | GitOps engine whose delivery CRs the built-in components emit. Accepted: `"fluxcd"` (default, optional). |
 | `spec.capabilities` | map | Keys are trait types; values are capability bindings |
-| `capabilities.<type>.rendering` | map | Platform values merged into trait properties before handler invocation |
+| `capabilities.<type>.rendering` | map | Platform values merged into trait properties before handler invocation, and into the listed properties of a component whose handler implements `ComponentCapabilityDefaults` (the `persistentvolumeclaim` kind reads `pvc`'s `storageClassName`) |
 
 ### Capability schema
 
@@ -125,6 +125,9 @@ take precedence:
 ```
 resolved = rendering ∪ application-properties   (application overwrites)
 ```
+
+An application property authored as `null` is absent, so it does not overwrite: the
+rendering's value stands (go-kure/launcher#742).
 
 Example:
 

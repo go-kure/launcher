@@ -752,6 +752,12 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			}
 		}
 
+		// After D3, which checks only what was authored: the capability defaults a
+		// ComponentCapabilityDefaults handler names fill the keys left unauthored.
+		if d, ok := handler.(ComponentCapabilityDefaults); ok && !component.synthesized {
+			component.Properties = applyComponentCapabilityDefaults(d, component.Properties, ctx)
+		}
+
 		config, err := handler.ToApplicationConfig(&component, namespace)
 		if err != nil {
 			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
@@ -1281,7 +1287,9 @@ func deploymentOrder(entries []componentEntry, deps map[string][]string) []compo
 }
 
 // resolveCapability merges capability rendering into trait properties (rendering as
-// defaults, OAM inline values win). Tries the scoped key, falls back to the bare
+// defaults, OAM inline values win). An authored null is absent (the null contract,
+// property_validate.go), so it does not displace a rendering value for its key
+// (go-kure/launcher#742). Tries the scoped key, falls back to the bare
 // type key. Returns (trait, "", false) on no match; otherwise (possibly merged
 // trait, matched key, true) — a match with empty Rendering still counts as consumed.
 func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (Trait, string, bool) {
@@ -1309,11 +1317,56 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (
 
 	merged := make(map[string]any, len(rendering)+len(trait.Properties))
 	maps.Copy(merged, rendering)
-	maps.Copy(merged, trait.Properties)
+	for k, v := range trait.Properties {
+		if _, rendered := rendering[k]; v == nil && rendered {
+			continue
+		}
+		merged[k] = v
+	}
 
 	result := trait
 	result.Properties = merged
 	return result, matchedKey, true
+}
+
+// applyComponentCapabilityDefaults returns props with each key d lists that props
+// leaves unauthored (absent, or an explicit null) taken from the rendering of the
+// capability d names: the component counterpart of resolveCapability's "rendering
+// as defaults, inline wins", restricted to the listed keys. The key is recorded as
+// consumed when the profile binds it, whether or not a value was copied, as a trait's
+// matched key is. props is never mutated: a copy is returned when a value is filled,
+// and the filled values are deep copies, as resolveCapability's are, so no component
+// shares a value with the profile.
+func applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[string]any, ctx TransformContext) map[string]any {
+	key, keys := d.CapabilityDefaults()
+	binding, ok := ctx.Capabilities[key]
+	if !ok {
+		return props
+	}
+	if ctx.consumedCapabilities != nil {
+		ctx.consumedCapabilities[key] = struct{}{}
+	}
+	fill := map[string]any{}
+	for _, k := range keys {
+		if v, authored := props[k]; authored && v != nil {
+			continue
+		}
+		if v, has := binding.Rendering[k]; has && v != nil {
+			fill[k] = v
+		}
+	}
+	if len(fill) == 0 {
+		return props
+	}
+	if copied, err := deepCopyMap(fill); err == nil {
+		fill = copied
+	}
+	out := maps.Clone(props)
+	if out == nil {
+		out = make(map[string]any, len(fill))
+	}
+	maps.Copy(out, fill)
+	return out
 }
 
 // buildCapabilityKey returns "<type>.<scope>" when the trait carries a non-empty

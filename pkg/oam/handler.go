@@ -42,6 +42,19 @@ type CapabilityAware interface {
 	CapabilityRequired() bool
 }
 
+// ComponentCapabilityDefaults is an optional interface for ComponentHandlers whose
+// properties take defaults from a ClusterProfile capability. CapabilityDefaults names
+// the capability key and the property keys it supplies. Before ToApplicationConfig,
+// the engine copies each listed key the component does not author from that
+// binding's rendering, so an authored value wins ("" included; an explicit null is
+// absent). It reads only the listed keys, never the rest of the rendering, and
+// records the key as consumed when the profile binds it. A component a lowering rule
+// synthesized is skipped: its properties are the rule's own output, as a sealed
+// trait's are.
+type ComponentCapabilityDefaults interface {
+	CapabilityDefaults() (key string, properties []string)
+}
+
 // PropertySchemaProvider is an optional interface implemented by component and
 // trait handlers that declare a schema for their user-facing properties. The
 // downstream runtime's validator consumes these schemas (via Transformer.HandlerSchemas) to validate a

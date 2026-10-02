@@ -554,14 +554,14 @@ For `pvc` the kind's code path is `components.ParseClaimProperties`,
 - **Bundle and provenance**: the claim joins the owner's bundle, so the owner's
   decorators (`force-replace`, `prune-protection`) reach it, and provenance names the
   owner.
-- **Input-side default**: a ClusterProfile `pvc` capability can supply a default
-  `storageClassName` to the trait. The kind has no capability rendering, so this is
-  the one input-side difference. Giving the kind the same default is tracked in
-  go-kure/launcher#742.
+Input is not among them: a ClusterProfile `pvc` capability supplies an unauthored
+`storageClassName` to both, to the trait through its rendering merge and to the kind
+through `ComponentCapabilityDefaults` (go-kure/launcher#742).
 
 `pkg/cmd/kurel/pvc_twin_test.go` builds each intent both ways. It requires identical
-claims apart from the `app` label, the same refusals for malformed properties on both
-paths, and a decorator on the owner that reaches the trait's claim.
+claims apart from the `app` label, the same capability default on both paths, the
+same refusals for malformed properties on both paths, and a decorator on the owner
+that reaches the trait's claim.
 
 The `configmap` twin follows go-kure/launcher#740, which changes the same trait.
 Today the two `configmap` paths still differ in value typing, `binaryData` and

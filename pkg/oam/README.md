@@ -312,6 +312,7 @@ the built-ins. Extend the system by implementing:
 | `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits). |
 | `PolicyHandler` | `CanHandle(type)` + `Apply(policy, components, result)` — validates one `spec.policies` entry and records its effect (tier overrides, dependency edges, extra health checks, reconciliation settings) on the shared `PolicyResult`; see [policies](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies). A policy type with no registered handler fails the transform. |
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
+| `ComponentCapabilityDefaults` | `CapabilityDefaults() (key string, properties []string)` — on a `ComponentHandler` whose properties take defaults from a `ClusterProfile` capability. Before `ToApplicationConfig`, the engine fills each listed property the component leaves unauthored (absent or `null`) from that binding's rendering; an authored value, `""` included, wins. It reads only the listed keys, never the rest of the rendering, and records the key in `ConsumedCapabilities` when the profile binds it. A component a lowering rule synthesized is skipped, as a sealed trait is. Implemented by `persistentvolumeclaim` (`pvc`, `storageClassName`; go-kure/launcher#742). |
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
 | `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). |
 | `SourceDeduplicatable` | Collapse duplicate sources (e.g. shared OCI/Helm repos). |
@@ -1111,6 +1112,20 @@ into the rendering, past the check that exists to keep it out. Files were never
 exposed to this (`LoadCapabilityDefinitions` checks defaults at load); `SetCapabilityDefs`
 was, being the same bypass the type check above guards. A property declaring **no
 type** still accepts any default, unchanged.
+
+### Rendering merge: authored values and nulls
+
+A trait's matched capability rendering is merged under its top-level properties: an
+authored value replaces the rendered one at that key, and keys the trait does not
+author keep the platform value. An authored `null` is absence here too, so a `null`
+over a key the rendering supplies takes the platform value. A `null` under a key the
+rendering lacks is left as authored. **Pre-GA output change** (go-kure/launcher#742):
+the authored `null` used to replace the rendered value, so the handler saw the key
+unset. This holds for every trait with a rendering, on both the dispatch path and
+a trait lowering rule's input.
+
+A component handler that implements `ComponentCapabilityDefaults` (see Transform &
+extension) gets the same precedence for the properties it lists, and only those.
 
 This is a large internal builder surface; the tables above cover the entry points.
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the full

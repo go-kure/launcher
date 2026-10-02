@@ -39,16 +39,13 @@ func (h *PVCHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[str
 }
 
 // PropertySchema declares the pvc trait's user-facing properties: the
-// persistentvolumeclaim kind's, plus the claim's `name`. Only the
-// storageClassName description differs, since the trait alone takes a
-// platform default from the ClusterProfile `pvc` capability
-// (go-kure/launcher#742 tracks giving the kind the same).
+// persistentvolumeclaim kind's, plus the claim's `name`. Both take the same
+// storageClassName default from the ClusterProfile `pvc` capability: the trait
+// through the engine's trait rendering merge, the kind through
+// CapabilityDefaults (go-kure/launcher#742).
 func (h *PVCHandler) PropertySchema() map[string]oam.PropertySchema {
 	schema := maps.Clone((&components.PersistentVolumeClaimHandler{}).PropertySchema())
 	schema["name"] = oam.PropertySchema{Type: oam.PropertyTypeString, Required: true, Description: "Name of the PersistentVolumeClaim to create (a DNS-1123 subdomain)."}
-	sc := schema["storageClassName"]
-	sc.Description = "StorageClass backing the claim. Unset takes the ClusterProfile pvc capability's storageClassName, else the cluster's default class; an empty string requests no class (no dynamic provisioning)."
-	schema["storageClassName"] = sc
 	return schema
 }
 

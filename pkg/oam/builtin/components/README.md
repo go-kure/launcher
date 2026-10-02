@@ -1746,7 +1746,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (go-kure/launcher#741): it runs the kind's own `ParseClaimProperties`,
     `ApplyClaimPolicy` and `GenerateClaim`, so the same properties build the
     same claim. Only the ownership fields differ: the claim's name, its `app`
-    label, namespace and bundle. An unauthored `size`
+    label, namespace and bundle. An unauthored `storageClassName` (absent or
+    `null`) comes from the ClusterProfile `pvc` capability's
+    `storageClassName`, as the trait's does (go-kure/launcher#742); with no
+    binding it stays unset, which is the cluster's default class. **Pre-GA
+    output change**: the kind used to ignore that binding, and since a claim's
+    `storageClassName` is immutable, an existing claim built from the kind
+    under a `pvc` binding now builds with a different class and fails to apply
+    until it is recreated or the class is authored. An unauthored `size`
     comes from the EnvironmentPolicy storage default; with neither, the build
     fails with `size: required …`. The policy's maximum storage size applies
     either way. A workload mounts the claim through a `pvc` volume's

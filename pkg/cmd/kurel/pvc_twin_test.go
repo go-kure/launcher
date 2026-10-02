@@ -62,9 +62,15 @@ func pvcTwinApp(t *testing.T, viaTrait bool, name string, props map[string]any, 
 // claim prints a data-loss warning there.
 func buildPVCDocs(t *testing.T, appYAML string) ([]map[string]any, string, error) {
 	t.Helper()
+	return buildPVCDocsWithProfile(t, appYAML, testClusterYAML)
+}
+
+// buildPVCDocsWithProfile is buildPVCDocs against the ClusterProfile profileYAML.
+func buildPVCDocsWithProfile(t *testing.T, appYAML, profileYAML string) ([]map[string]any, string, error) {
+	t.Helper()
 	dir := t.TempDir()
 	appPath := writeTempFile(t, dir, "app.yaml", appYAML)
-	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", profileYAML)
 
 	cmd := NewKurelCommand()
 	var out, errOut bytes.Buffer
@@ -165,6 +171,57 @@ func TestPVCTwin_SameClaimBothWays(t *testing.T) {
 				if v, _ := docAnnotation(traitClaim, want[0]); v != want[1] {
 					t.Errorf("%s on the owner did not reach the trait's claim: %s = %q, want %q", d, want[0], v, want[1])
 				}
+			}
+		})
+	}
+}
+
+// pvcCapabilityClusterYAML is testClusterYAML plus a `pvc` capability that
+// supplies a platform storageClassName default.
+const pvcCapabilityClusterYAML = testClusterYAML + `    pvc:
+      rendering:
+        storageClassName: platform-ssd
+`
+
+// TestPVCTwin_CapabilityDefaultBothWays requires the kind and the trait to take
+// the same storageClassName under a ClusterProfile `pvc` binding
+// (go-kure/launcher#742): the platform class fills an unset or null value on
+// both paths, and an authored value, "" included, wins on both.
+func TestPVCTwin_CapabilityDefaultBothWays(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]any
+		want  any // the claim's spec.storageClassName; nil means absent
+	}{
+		{name: "unset takes the platform class", props: map[string]any{"size": "1Gi"}, want: "platform-ssd"},
+		{name: "null takes the platform class", props: map[string]any{"size": "1Gi", "storageClassName": nil}, want: "platform-ssd"},
+		{name: "authored class wins", props: map[string]any{"size": "1Gi", "storageClassName": "slow"}, want: "slow"},
+		{name: "authored empty string wins", props: map[string]any{"size": "1Gi", "storageClassName": ""}, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var claims []map[string]any
+			for _, viaTrait := range []bool{false, true} {
+				docs, stderr, err := buildPVCDocsWithProfile(t, pvcTwinApp(t, viaTrait, "data", tc.props), pvcCapabilityClusterYAML)
+				if err != nil {
+					t.Fatalf("viaTrait=%v: %v\n%s", viaTrait, err, stderr)
+				}
+				claim := claimDoc(t, docs, "data")
+				spec, _ := claim["spec"].(map[string]any)
+				got, present := spec["storageClassName"]
+				if !present {
+					got = nil
+				}
+				if got != tc.want {
+					t.Errorf("viaTrait=%v: spec.storageClassName = %#v (present %v), want %#v", viaTrait, got, present, tc.want)
+				}
+				delete(claim["metadata"].(map[string]any)["labels"].(map[string]any), "app")
+				claims = append(claims, claim)
+			}
+			if !reflect.DeepEqual(claims[0], claims[1]) {
+				k, _ := yaml.Marshal(claims[0])
+				tr, _ := yaml.Marshal(claims[1])
+				t.Errorf("claims differ beyond the app label\nkind:\n%s\ntrait:\n%s", k, tr)
 			}
 		})
 	}
