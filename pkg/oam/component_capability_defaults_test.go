@@ -67,6 +67,8 @@ func TestComponentCapabilityDefaults(t *testing.T) {
 			want: map[string]any{"class": "platform"}, wantConsumed: []string{"store"}},
 		{name: "null takes the rendering", props: map[string]any{"class": nil}, capabilities: storeBinding(),
 			want: map[string]any{"class": "platform"}, wantConsumed: []string{"store"}},
+		{name: "typed nil takes the rendering", props: map[string]any{"class": map[string]any(nil)}, capabilities: storeBinding(),
+			want: map[string]any{"class": "platform"}, wantConsumed: []string{"store"}},
 		{name: "authored value wins", props: map[string]any{"class": "mine"}, capabilities: storeBinding(),
 			want: map[string]any{"class": "mine"}, wantConsumed: []string{"store"}},
 		{name: "authored empty string wins", props: map[string]any{"class": ""}, capabilities: storeBinding(),
@@ -173,8 +175,12 @@ func (r recordingTraitRule) LowerTrait(trait *Trait, _ LoweringContext) (Lowerin
 // lowering path (lowerDocumentBody). A null under a key the rendering lacks stays.
 func TestCapabilityMerge_NullIsAbsent(t *testing.T) {
 	caps := map[string]CapabilityBinding{"store-trait": {Rendering: map[string]any{"class": "platform"}}}
-	authored := func() map[string]any { return map[string]any{"class": nil, "other": nil, "name": "x"} }
-	want := map[string]any{"class": "platform", "other": nil, "name": "x"}
+	// "tier" is a typed nil, which isNullValue reads as null too.
+	caps["store-trait"].Rendering["tier"] = "gold"
+	authored := func() map[string]any {
+		return map[string]any{"class": nil, "tier": []any(nil), "other": nil, "name": "x"}
+	}
+	want := map[string]any{"class": "platform", "tier": "gold", "other": nil, "name": "x"}
 
 	t.Run("resolveCapability", func(t *testing.T) {
 		got, key, matched := resolveCapability(Trait{Type: "store-trait", Properties: authored()}, caps)

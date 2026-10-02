@@ -1287,8 +1287,8 @@ func deploymentOrder(entries []componentEntry, deps map[string][]string) []compo
 }
 
 // resolveCapability merges capability rendering into trait properties (rendering as
-// defaults, OAM inline values win). An authored null is absent (the null contract,
-// property_validate.go), so it does not displace a rendering value for its key
+// defaults, OAM inline values win). An authored null, typed nil included, is absent
+// (the null contract, isNullValue), so it does not displace a rendering value for its key
 // (go-kure/launcher#742). Tries the scoped key, falls back to the bare
 // type key. Returns (trait, "", false) on no match; otherwise (possibly merged
 // trait, matched key, true) — a match with empty Rendering still counts as consumed.
@@ -1318,7 +1318,7 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (
 	merged := make(map[string]any, len(rendering)+len(trait.Properties))
 	maps.Copy(merged, rendering)
 	for k, v := range trait.Properties {
-		if _, rendered := rendering[k]; v == nil && rendered {
+		if _, rendered := rendering[k]; rendered && isNullValue(v) {
 			continue
 		}
 		merged[k] = v
@@ -1330,7 +1330,7 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (
 }
 
 // applyComponentCapabilityDefaults returns props with each key d lists that props
-// leaves unauthored (absent, or an explicit null) taken from the rendering of the
+// leaves unauthored (absent, or a null as isNullValue reads it) taken from the rendering of the
 // capability d names: the component counterpart of resolveCapability's "rendering
 // as defaults, inline wins", restricted to the listed keys. The key is recorded as
 // consumed when the profile binds it, whether or not a value was copied, as a trait's
@@ -1348,10 +1348,10 @@ func applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[s
 	}
 	fill := map[string]any{}
 	for _, k := range keys {
-		if v, authored := props[k]; authored && v != nil {
+		if v, authored := props[k]; authored && !isNullValue(v) {
 			continue
 		}
-		if v, has := binding.Rendering[k]; has && v != nil {
+		if v, has := binding.Rendering[k]; has && !isNullValue(v) {
 			fill[k] = v
 		}
 	}
