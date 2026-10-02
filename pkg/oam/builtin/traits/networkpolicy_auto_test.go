@@ -1,6 +1,7 @@
 package traits_test
 
 import (
+	"errors"
 	"maps"
 	"slices"
 	"strings"
@@ -1040,7 +1041,9 @@ func TestTransform_ExternalBackend_MixedSelectorPresence_DoesNotWiden(t *testing
 }
 
 // Two paths giving the SAME external Service two different selectors is an authoring conflict — a
-// Service has one selector — rejected at parse.
+// Service has one selector — rejected at parse. The traffic sources arrive by capability rendering,
+// the way a user's document gets them, so the error is the conflict and not the platform-reserved
+// refusal an authored networkPolicy would draw first.
 func TestTransform_ExternalBackend_ConflictingSelectorsInTrait_Rejected(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
 	registerWebservice(tr)
@@ -1064,19 +1067,30 @@ func TestTransform_ExternalBackend_ConflictingSelectorsInTrait_Rejected(t *testi
 							map[string]any{"path": "/b", "backend": "external-svc", "port": 8082,
 								"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "other"}}},
 						}}},
-						"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}}},
 					},
 				}},
 			}},
 		},
 	}
-	if _, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"}); err == nil {
-		t.Fatal("expected an error for conflicting backendSelector values on one Service")
+	_, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: ingressNetworkPolicyCapabilities("ingress-nginx")})
+	assertSelectorConflict(t, err, `backend service "external-svc" given conflicting backendSelector values`)
+}
+
+// assertSelectorConflict requires err to be the named backendSelector conflict, never the
+// platform-reserved refusal that would make a conflict test pass without reaching its check.
+func assertSelectorConflict(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want one containing %q", err, want)
+	}
+	if errors.Is(err, oam.ErrPlatformReserved) {
+		t.Fatalf("error = %v, is the platform-reserved refusal, not the selector conflict", err)
 	}
 }
 
 // Two routers naming the same external Service in the same namespace with different selectors is a
 // conflict resolved only at synthesis — it must fail the transform, not emit two colliding allows.
+// As above, the traffic sources come from capability rendering, not an authored networkPolicy.
 func TestTransform_ExternalBackend_ConflictingSelectorsAcrossRouters_FailsTransform(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
 	registerWebservice(tr)
@@ -1094,7 +1108,6 @@ func TestTransform_ExternalBackend_ConflictingSelectorsAcrossRouters_FailsTransf
 						map[string]any{"path": "/", "backend": "external-svc", "port": 8081,
 							"backendSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": label}}},
 					}}},
-					"networkPolicy": map[string]any{"trafficSources": []any{map[string]any{"namespace": "ingress-nginx"}}},
 				},
 			}},
 		}
@@ -1105,9 +1118,8 @@ func TestTransform_ExternalBackend_ConflictingSelectorsAcrossRouters_FailsTransf
 		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec:       oam.ApplicationSpec{Components: []oam.Component{mkRouter("router-a", "external"), mkRouter("router-b", "other")}},
 	}
-	if _, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default"}); err == nil {
-		t.Fatal("expected an error for an external Service given two different selectors across routers")
-	}
+	_, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Capabilities: ingressNetworkPolicyCapabilities("ingress-nginx")})
+	assertSelectorConflict(t, err, `external backend Service "external-svc" in namespace "default" given conflicting backendSelector values`)
 }
 
 // An external policy name that collides with an ACTUALLY-EMITTED component inbound policy fails the
