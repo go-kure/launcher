@@ -1074,8 +1074,8 @@ func checkEntryApplications(entries []componentEntry, names []string, bundle *st
 // ctx.subAppDecorations.
 //
 // bundleEntries are the entries whose applications the bundle was built from.
-// Each must still be in the bundle, by pointer and under its name, after every
-// trait (checkEntryApplications).
+// Each must still be in the bundle, by pointer and under the name it had when
+// this entry's traits began, after every trait (checkEntryApplications).
 func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundleEntries []componentEntry, groupTraitApps map[string]string, bundle *stack.Bundle, ctx TransformContext) ([]*stack.Application, error) {
 	var subApps []*stack.Application
 	var decorators []subAppDecoration
@@ -1088,11 +1088,17 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 		typ   string
 	}
 	decorated := make(map[slotTrait]string)
-	entryNames := make([]string, len(bundleEntries))
-	for i, c := range bundleEntries {
-		entryNames[i] = c.app.Name
+	steps := e.traitSteps(app)
+	// The names are taken only for an entry with a trait to check: a traitless
+	// one would pay for every entry's name and use none (go-kure/launcher#747).
+	var entryNames []string
+	if slices.ContainsFunc(steps, func(s traitStep) bool { return len(s.traits) > 0 }) {
+		entryNames = make([]string, len(bundleEntries))
+		for i, c := range bundleEntries {
+			entryNames[i] = c.app.Name
+		}
 	}
-	for _, step := range e.traitSteps(app) {
+	for _, step := range steps {
 		entry := step.entry
 		for _, trait := range step.traits {
 			handler := t.findTraitHandler(trait.Type)

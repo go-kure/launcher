@@ -272,6 +272,26 @@ func TestApplyTraits_RefusesReplacedComponentApplication(t *testing.T) {
 	}
 }
 
+// TestApplyTraits_RefusesRenameOfEarlierComponent is go-kure/launcher#747: the
+// names a component's traits are checked against cover every component of the
+// bundle, so a trait on a later component that renames an earlier component's
+// application, whose own traits already ran, fails the transform.
+func TestApplyTraits_RefusesRenameOfEarlierComponent(t *testing.T) {
+	tr := inDocumentTransformer()
+	tr.RegisterTrait("reorder0", reorderTraitHandler{})
+	tr.RegisterTrait("reorder1", reorderTraitHandler{op: "rename", target: "web"})
+	app := makeApp("shop",
+		Component{Name: "web", Type: "webservice", Properties: map[string]any{}, Traits: []Trait{{Type: "reorder0"}}},
+		Component{Name: "other", Type: "webservice", Properties: map[string]any{}, Traits: []Trait{{Type: "reorder1"}}},
+	)
+	app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
+	_, _, err := tr.TransformWithPolicy(app, TransformContext{})
+	want := `component "other" trait "reorder1" renamed the application of component "web" from "web" to "web-renamed"; ` + entryAppContract
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want one containing %q", err, want)
+	}
+}
+
 // TestDecorateSubApplications_OptIn pins that a trait handler which does not
 // answer true to DecoratesSubApplications keeps the narrow scope.
 func TestDecorateSubApplications_OptIn(t *testing.T) {
