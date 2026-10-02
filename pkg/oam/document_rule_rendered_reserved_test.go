@@ -306,13 +306,16 @@ func TestComponentRenderReserved_WritesAndRecords(t *testing.T) {
 	if want := map[string]any{"secretName": "shop-tls", "issuer": "platform"}; !reflect.DeepEqual(comp.Properties["tls"], want) {
 		t.Fatalf("expected both values under tls, got %#v", comp.Properties["tls"])
 	}
-	if want := (renderedValues{"tls.secretName": `"shop-tls"`, "tls.issuer": `"platform"`}); !reflect.DeepEqual(comp.rendered, want) {
+	if want := (renderedValues{"tls.secretName": "shop-tls", "tls.issuer": "platform"}); !reflect.DeepEqual(comp.rendered, want) {
 		t.Fatalf("expected the record %#v, got %#v", want, comp.rendered)
 	}
 }
 
 func TestComponentRenderReserved_RefusesAndLeavesTheComponentUnchanged(t *testing.T) {
 	var typedNilMap map[string]any
+	cyclic := map[string]any{}
+	cyclic["self"] = cyclic
+	secret := "s"
 	tests := []struct {
 		name  string
 		path  string
@@ -331,8 +334,14 @@ func TestComponentRenderReserved_RefusesAndLeavesTheComponentUnchanged(t *testin
 		{"typed nil value", "tls.secretName", typedNilMap, "null"},
 		{"value holding a null", "tls", map[string]any{"secretName": nil}, "null"},
 		{"value holding a null item", "tls", map[string]any{"hosts": []any{"a", nil}}, "null"},
-		{"value that does not encode", "tls.secretName", math.NaN(), "encode"},
-		{"value of an unencodable type", "tls.secretName", make(chan int), "encode"},
+		{"value holding a typed nil", "tls", map[string]any{"hosts": []string(nil)}, "null"},
+		{"NaN", "tls.secretName", math.NaN(), "not a finite number"},
+		{"infinity", "tls.secretName", map[string]any{"n": math.Inf(-1)}, "not a finite number"},
+		{"channel", "tls.secretName", make(chan int), "not a property value"},
+		{"pointer", "tls.secretName", &secret, "not a property value"},
+		{"struct", "tls", struct{ SecretName string }{"s"}, "not a property value"},
+		{"map with non-string keys", "tls", map[int]string{1: "s"}, "keys are not strings"},
+		{"value containing itself", "tls", cyclic, "contains itself"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -430,8 +439,8 @@ func TestEnforcePlatformReserved_HonoursTheRecord(t *testing.T) {
 			accept:   true,
 		},
 		{
-			// Emission validation's rewrite of a typed Go value keeps what it encodes to.
-			name:     "value of another Go type that encodes the same",
+			// Emission validation's rewrite of a typed Go value keeps the value.
+			name:     "same value in another Go type",
 			props:    map[string]any{"networkPolicy": map[string]any{"replicas": 3, "mode": "platform"}},
 			rendered: record("networkPolicy", map[string]any{"replicas": int64(3), "mode": "platform"}),
 			accept:   true,
@@ -463,7 +472,7 @@ func TestEnforcePlatformReserved_HonoursTheRecord(t *testing.T) {
 			name:     "reserved key in an array item",
 			schema:   arraySchema,
 			props:    map[string]any{"rules": []any{map[string]any{"secret": "s"}}},
-			rendered: renderedValues{"rules.secret": `"s"`},
+			rendered: renderedValues{"rules.secret": "s"},
 		},
 		{
 			// A key holding a dot cannot be named by a path: the record of the nested
@@ -782,7 +791,7 @@ func TestTraitRenderReserved_WritesRecordsAndCopiesOnWrite(t *testing.T) {
 	if err := rendered.RenderReserved("networkPolicy", map[string]any{"mode": "platform"}); err != nil {
 		t.Fatalf("RenderReserved: %v", err)
 	}
-	if want := (renderedValues{"networkPolicy": `{"mode":"platform"}`}); !reflect.DeepEqual(rendered.rendered, want) {
+	if want := (renderedValues{"networkPolicy": map[string]any{"mode": "platform"}}); !reflect.DeepEqual(rendered.rendered, want) {
 		t.Fatalf("expected the record %#v, got %#v", want, rendered.rendered)
 	}
 	if authored.rendered != nil {

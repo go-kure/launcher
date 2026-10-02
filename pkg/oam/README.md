@@ -534,13 +534,20 @@ runs. Such a rule writes a reserved value it renders from `LoweringContext.Capab
 with `Component.RenderReserved(path, value)`, or `Trait.RenderReserved(path, value)`
 for a trait it builds, which writes `value` at the dot-separated object-key `path` in
 `Properties` (`"networkPolicy"`,
-`"tls.secretName"`; array items cannot be addressed) and records it as rendered. A
-reserved key is then accepted only while it holds the recorded value at that same
-path, compared by what it encodes to as JSON, so the record survives emission
-validation's normalization but a value the rule copied into the key from a trait, a
-policy, metadata or another component, or changed after recording it, is refused
-like any authored one (go-kure/launcher#612). `RenderReserved` refuses a value that
-is or holds a `null`, or does not encode to JSON. The record follows the component
+`"tls.secretName"`; array items cannot be addressed; an object along the path that
+is missing or `null`, typed nil included, is created) and records a deep copy of it
+as rendered. A reserved key is then accepted only while it holds the recorded value
+at that same path. The comparison reads the key the way emission validation does —
+any string or boolean kind, any slice or array as a list, any string-keyed map as an
+object — and compares numbers exactly, so the record survives emission validation's
+normalization (a `[]byte` or `[]int32` becoming `[]any`, a named integer becoming
+`int`), while a value the rule copied into the key from a trait, a policy, metadata
+or another component, or changed after recording it, is refused like any authored
+one — including a number that only prints the same, such as an authored
+`1.0000000000000001e+18` over a rendered `1000000000000000100`
+(go-kure/launcher#612). `RenderReserved` refuses a value that is or holds a `null`,
+NaN or ±Inf, any Go type other than strings, booleans, numbers, slices, arrays and
+string-keyed maps, or a collection that contains itself. The record follows the component
 through copies and later lowering rounds; a rule that rebuilds a component from its
 fields, or a document that is serialized and parsed again (what `LowerRaws` returns),
 leaves it behind. A trait works the same way against its own type's schema; its
