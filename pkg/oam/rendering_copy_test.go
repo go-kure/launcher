@@ -128,7 +128,22 @@ func TestCapabilityRendering_RefusedAtEntry(t *testing.T) {
 	}
 }
 
-// TestCapabilityRendering_TopLevelNullKept: a null rendering value is not refused,
+// TestCapabilityRendering_RefusalIsDeterministic: with several refused values in
+// one nested map, the error always names the one under the first key in sorted
+// order, not whichever map iteration reaches first.
+func TestCapabilityRendering_RefusalIsDeterministic(t *testing.T) {
+	caps := map[string]CapabilityBinding{"pvc": {Rendering: map[string]any{
+		"limits": map[string]any{"cpu": nil, "memory": math.Inf(1), "pods": math.NaN(), "storage": make(chan int)},
+	}}}
+	for range 200 {
+		err := checkCapabilityRenderings(caps)
+		if err == nil || !strings.Contains(err.Error(), "null") {
+			t.Fatalf("error = %v, want the null under %q, the first key", err, "cpu")
+		}
+	}
+}
+
+// TestCapabilityRendering_TopLevelNullKept:a null rendering value is not refused,
 // and the trait merge carries it as before.
 func TestCapabilityRendering_TopLevelNullKept(t *testing.T) {
 	th := &recordingTraitHandler{typ: "store"}

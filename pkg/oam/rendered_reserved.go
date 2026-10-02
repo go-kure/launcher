@@ -4,6 +4,7 @@ import (
 	"maps"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -203,8 +204,12 @@ func checkRenderedValue(value any, onPath map[propertyCopyKey]bool) error {
 		}
 		onPath[key] = true
 		defer delete(onPath, key)
-		for iter := rv.MapRange(); iter.Next(); {
-			if err := checkRenderedValue(iter.Value().Interface(), onPath); err != nil {
+		// Keys in sorted order, so a map holding several refused values always
+		// reports the same one.
+		keys := rv.MapKeys()
+		slices.SortFunc(keys, func(a, b reflect.Value) int { return strings.Compare(a.String(), b.String()) })
+		for _, k := range keys {
+			if err := checkRenderedValue(rv.MapIndex(k).Interface(), onPath); err != nil {
 				return err
 			}
 		}
