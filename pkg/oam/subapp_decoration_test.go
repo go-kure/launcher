@@ -172,26 +172,35 @@ func (h reorderTraitHandler) Apply(_ *Trait, app *stack.Application, bundle *sta
 // TestApplyTraits_KeepsCustomOrder is go-kure/launcher#718: the bundle is
 // ordered component by component only when its traits did nothing but append.
 // A trait that moved, replaced or removed an application keeps the order it
-// left; one that shortened the bundle must not make the engine index past it.
+// left; one that shortened the bundle must not make the engine index past it,
+// nor miss the sub-application it appended after the removal shifted the tail
+// (the decorating stamp shows whether the engine saw it as one).
 // TestDecorateSubApplications_AnyTraitOrder's flat shape pins the append-only
 // case.
 func TestApplyTraits_KeepsCustomOrder(t *testing.T) {
 	cases := []struct {
 		name    string
 		handler reorderTraitHandler
+		stamp   bool
 		want    string
 	}{
 		{name: "move", want: "other=,web="},
 		{name: "move-and-append", handler: reorderTraitHandler{appends: true}, want: "other=,web=,web-sub="},
 		{name: "replace", handler: reorderTraitHandler{replace: true}, want: "web-replaced=,other="},
 		{name: "remove", handler: reorderTraitHandler{remove: true}, want: "other="},
+		{name: "remove-and-append", handler: reorderTraitHandler{remove: true, appends: true}, stamp: true, want: "other=,web-sub=x"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := inDocumentTransformer()
 			tr.RegisterTrait("reorder", tc.handler)
+			traits := []Trait{{Type: "reorder"}}
+			if tc.stamp {
+				tr.RegisterTrait("stamp", stampTraitHandler{decorates: true})
+				traits = append(traits, Trait{Type: "stamp"})
+			}
 			app := makeApp("shop",
-				Component{Name: "web", Type: "webservice", Properties: map[string]any{}, Traits: []Trait{{Type: "reorder"}}},
+				Component{Name: "web", Type: "webservice", Properties: map[string]any{}, Traits: traits},
 				Component{Name: "other", Type: "webservice", Properties: map[string]any{}},
 			)
 			app.APIVersion, app.Kind = SupportedAPIVersion, terminalDocumentKind
