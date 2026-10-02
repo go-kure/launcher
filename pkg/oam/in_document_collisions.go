@@ -12,11 +12,15 @@ import (
 
 // GeneratedApplication is one application's generated output, as a caller that
 // generates a transformed document holds it: the stack.Application's name, the OAM
-// component it belongs to, and every object it generated.
+// component it belongs to, every object it generated, and whether its bundle
+// force-applies them.
 type GeneratedApplication struct {
 	Name      string // the stack.Application's name
 	Component string // the OAM component it belongs to (ComponentNamed), else Name
 	Objects   []*client.Object
+	// Forced reports that the application's leaf bundle sets Force, so its Flux
+	// Kustomization (spec.force) force-applies every object, annotated or not.
+	Forced bool
 }
 
 // String names the application as a collision error names its producer: a
@@ -86,6 +90,7 @@ func generateBundle(bundle *stack.Bundle, out *[]GeneratedApplication) error {
 		return nil
 	}
 	start := len(*out)
+	forced := bundle.Force != nil && *bundle.Force
 	for _, app := range bundle.Applications {
 		objs, err := app.Generate()
 		if err != nil {
@@ -98,7 +103,7 @@ func generateBundle(bundle *stack.Bundle, out *[]GeneratedApplication) error {
 		// Copied at once, as Bundle.Generate appends each result at once: a config
 		// that reuses its result slice must not change an earlier application's.
 		objs = append([]*client.Object(nil), objs...)
-		*out = append(*out, GeneratedApplication{Name: app.Name, Component: component, Objects: objs})
+		*out = append(*out, GeneratedApplication{Name: app.Name, Component: component, Objects: objs, Forced: forced})
 	}
 	// Merged after every application of the bundle has generated, as
 	// Bundle.Generate merges them: an application may change an object another

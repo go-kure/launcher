@@ -79,7 +79,7 @@ preflight reject every valid use of the trait.
 | `fluxcd-patches` | Appends `Kustomization.spec.patches` | `patches[]` (`patch`, `target`) |
 | `fluxcd-postbuild` | Sets `Kustomization.spec.postBuild` | `substitute`, `substituteFrom[]` |
 | `prune-protection` | Adds `kustomize.toolkit.fluxcd.io/prune: disabled` | (no properties) |
-| `force-replace` | Adds `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a `job`'s pod template). Replacing a Job re-runs it and stops any run in progress. Opt-in: without the trait launcher does not add the annotation. | (no properties) |
+| `force-replace` | Adds `kustomize.toolkit.fluxcd.io/force: enabled`, so Flux deletes and recreates an object whose update fails on an immutable field (a `job`'s pod template). Replacing a Job re-runs it and stops any run in progress. Replacing a PersistentVolumeClaim or PersistentVolume can lose its data, so each one annotated gets a build warning. Opt-in: without the trait launcher does not add the annotation. | (no properties) |
 
 `prune-protection` and `force-replace` annotate every object the component produces: what the
 component itself generates, including resources a layout-augmenting component adds (see
@@ -93,7 +93,12 @@ The NetworkPolicies the engine synthesizes (default-deny, inbound and egress all
 covered: they belong to no component's traits and are regenerated on every build, so Flux
 pruning them stays correct. Neither is another component's sub-application. `force-replace` sets
 its annotation after the component's own `Generate` returns, so it reaches a `job`'s Job even
-though that component clears the Job's annotations while building it.
+though that component clears the Job's annotations while building it. It annotates claims too —
+a component's `volumes` claims and the `pvc` sub-application's (`volsync` generates none; it
+backs up an existing claim) — and keeps doing so: a claim whose immutable field changes is then deleted and recreated, losing its data unless
+its volume is retained, so `Transformer.WarnForcedVolumes` (which `kurel build` runs) warns once
+per annotated PersistentVolume and PersistentVolumeClaim (go-kure/launcher#720; see the
+`pkg/oam` README).
 
 ## Capability-aware traits
 

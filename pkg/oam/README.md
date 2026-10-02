@@ -426,6 +426,31 @@ sibling group is one) or as a trait's sub-application and its component. A trait
 after its own component reads like that component, so a second producer with the same name
 is named as another application of it. A repeat within one application is not reported. `kurel build` runs both before it writes anything.
 
+A force-applied PersistentVolume or PersistentVolumeClaim is warned about, not refused
+(go-kure/launcher#720): when an update changes one of its immutable fields, Flux deletes
+and recreates it instead of failing the apply, which can lose a claim's data. Pass the same
+`GenerateApplications` result, after `CheckInDocumentCollisions`, to
+`Transformer.WarnForcedVolumes`. It emits one warning through the warning handler
+(`SetWarningHandler`) per PersistentVolume and PersistentVolumeClaim that carries
+`kustomize.toolkit.fluxcd.io/force: enabled` (the `force-replace` trait sets it) or whose
+application is `GeneratedApplication.Forced` (its leaf bundle sets `Force`, which a
+`reconciliation` policy's `force: true` does). The warning names the kind,
+`namespace/name`, the producer and every reason the object is forced, in generation order:
+`PersistentVolumeClaim shop/data (component "db") is force-applied
+(kustomize.toolkit.fluxcd.io/force: enabled): when an update changes an immutable field,
+Flux deletes and recreates it instead of failing the apply, which can lose its data`.
+Objects are read as Flux applies them: a list envelope still in the output (an
+unstructured object whose `items` is an array) stands for its members, recursively, and a
+member is forced by its own annotation, not the envelope's. An object generated more than
+once is warned once, naming its first producer and every reason any copy is forced. It
+covers every generated claim alike — a component's `volumes`, the `pvc` trait, a
+`manifests` component's objects — and changes no output. The `volsync` trait generates no
+claim: its `sourcePVC` is warned where that claim is generated. With no warning handler it
+does nothing. An embedder that does not
+call it gets no warning. Objects a layout augmenter adds outside `Generate` are not in the
+inventory and are not checked (`kurel build` refuses an augmenter whose `Generate` does not
+cover them; see `LayoutAugmentationCoverage`).
+
 `Reserve`/`Name` fail on every repeat claim of a name, including one from the same content.
 Rules whose outputs share one derived object (two components pointing at the same chart
 source, say) use the emit-or-adopt pair instead:
