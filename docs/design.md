@@ -299,8 +299,9 @@ type Policy interface {
 ## 11. Launcher Layout
 
 > **Superseded** by [Launcher delivery scope](delivery-scope.md) (2026-10-04): launcher becomes
-> delivery-agnostic, and the `kurel build --oci-repository` layer below is removed (ticket L1 there,
-> which also deletes this section).
+> delivery-agnostic, and the `kurel build --oci-repository` layer below is removed by
+> [go-kure/launcher#781](https://github.com/go-kure/launcher/issues/781), which also deletes
+> this section.
 
 Launcher's GitOps output is intentionally simple:
 
