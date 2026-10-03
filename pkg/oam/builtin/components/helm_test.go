@@ -3,6 +3,7 @@ package components_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"maps"
 	"math"
 	"reflect"
 	"strings"
@@ -397,6 +398,49 @@ func TestHelmRule_Template(t *testing.T) {
 	}
 }
 
+// TestHelmRule_TemplateReleaseName: delivery: template forwards an authored
+// releaseName, in any spelling, to the helmtemplate under its declared one, and
+// forwards none when none is authored or it is null, leaving the terminal's
+// chart-name default. The emitted component then resolves to that name.
+func TestHelmRule_TemplateReleaseName(t *testing.T) {
+	base := func(extra map[string]any) map[string]any {
+		m := map[string]any{"delivery": "template", "chart": "podinfo", "source": map[string]any{"url": "https://charts.example.com"}}
+		maps.Copy(m, extra)
+		return m
+	}
+	cases := []struct {
+		name     string
+		props    map[string]any
+		forward  any // nil: not forwarded
+		resolved string
+	}{
+		{"authored", base(map[string]any{"releaseName": "shop-podinfo"}), "shop-podinfo", "shop-podinfo"},
+		{"other spelling", base(map[string]any{"ReleaseName": "shop-podinfo"}), "shop-podinfo", "shop-podinfo"},
+		{"unset", base(nil), nil, "podinfo"},
+		{"null", base(map[string]any{"releaseName": nil}), nil, "podinfo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			comps := lowerHelm(t, helmLowering("shop"), "web", tc.props)
+			got, ok := comps[0].Properties["releaseName"]
+			if tc.forward == nil {
+				if ok {
+					t.Errorf("properties = %v, want no releaseName", comps[0].Properties)
+				}
+			} else if got != tc.forward {
+				t.Errorf("releaseName = %v, want %v", got, tc.forward)
+			}
+			cfg, err := (&components.HelmTemplateHandler{}).ToApplicationConfig(&comps[0], "demo")
+			if err != nil {
+				t.Fatalf("helmtemplate ToApplicationConfig: %v", err)
+			}
+			if rn := cfg.(*components.HelmTemplateConfig).ReleaseName; rn != tc.resolved {
+				t.Errorf("resolved release name = %q, want %q", rn, tc.resolved)
+			}
+		})
+	}
+}
+
 // TestHelmRule_NullPassthroughIsAbsent: a passthrough key set to null is not
 // forwarded, and so is not refused under delivery: template either.
 func TestHelmRule_NullPassthroughIsAbsent(t *testing.T) {
@@ -520,7 +564,7 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"template OCI without version", map[string]any{"delivery": "template", "source": oci}, "helm: delivery: template with an OCIRepository source requires version to be set"},
 		{"template OCI with chart", map[string]any{"delivery": "template", "chart": "a", "version": "1.0.0", "source": oci}, "helm: chart is not used with source.kind OCIRepository"},
 	}
-	for _, key := range []string{"interval", "releaseName", "targetNamespace", "driftDetection", "install", "upgrade", "valuesFrom"} {
+	for _, key := range []string{"interval", "targetNamespace", "driftDetection", "install", "upgrade", "valuesFrom"} {
 		cases = append(cases, struct {
 			name  string
 			props map[string]any

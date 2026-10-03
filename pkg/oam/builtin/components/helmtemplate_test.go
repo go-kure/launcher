@@ -77,7 +77,6 @@ func TestHelmTemplateHandler_RejectionMatrix(t *testing.T) {
 		// schemaRefuses reports whether authored validation refuses it too.
 		schemaRefuses bool
 	}{
-		{"releaseName", withKey("releaseName", "web"), `"releaseName"`, true},
 		{"targetNamespace", withKey("targetNamespace", "web-ns"), `"targetNamespace"`, true},
 		{"interval", withKey("interval", "10m"), `"interval"`, true},
 		{"driftDetection", withKey("driftDetection", map[string]any{"mode": "enabled"}), `"driftDetection"`, true},
@@ -252,6 +251,8 @@ func TestHelmTemplateConfig_DirectConfigCheckedBeforeRender(t *testing.T) {
 		{"OCIRepository without version", &components.HelmTemplateConfig{Name: "web", SourceURL: "oci://ghcr.io/x/podinfo"}, "requires version"},
 		{"kind disagrees with scheme", &components.HelmTemplateConfig{Name: "web", SourceURL: "https://charts.example.com", SourceKind: "OCIRepository", Version: "1.0.0"}, "requires an oci:// URL"},
 		{"non-finite values", &components.HelmTemplateConfig{Name: "web", SourceURL: "https://charts.example.com", Chart: "podinfo", Values: map[string]any{"x": math.Inf(1)}}, "not representable as JSON"},
+		{"invalid release name", &components.HelmTemplateConfig{Name: "web", SourceURL: "https://charts.example.com", Chart: "podinfo", ReleaseName: "Web"}, `releaseName "Web" must be a DNS-1123 subdomain`},
+		{"invalid default release name", &components.HelmTemplateConfig{Name: "web", SourceURL: "oci://ghcr.io/x/Pod_Info", Version: "1.0.0"}, "set releaseName"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -398,21 +399,124 @@ func TestHelmTemplate_RendersRealChart(t *testing.T) {
 	}
 }
 
-// TestHelmTemplate_ReleaseNamespaceIsApplicationNamespace: the render's
-// .Release.Namespace is the namespace the handler is given, and the release
-// name stays kure's default — the terminal declares no releaseName.
-func TestHelmTemplate_ReleaseNamespaceIsApplicationNamespace(t *testing.T) {
+// TestHelmTemplate_ReleaseIdentity: the render's .Release.Namespace is the
+// namespace the handler is given, and its .Release.Name is the authored
+// releaseName, or the chart name when none is authored — rendered by kure from
+// a locally served chart, as a build does.
+func TestHelmTemplate_ReleaseIdentity(t *testing.T) {
 	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", identityChart)
-	cfg, err := htParse(map[string]any{
-		"chart":   "testchart",
-		"version": "0.1.0",
-		"source":  map[string]any{"url": srvURL},
-	})
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
+	for _, tc := range []struct {
+		name        string
+		releaseName any
+		want        string
+	}{
+		{"unset defaults to the chart name", nil, "testchart-cm"},
+		{"authored", "shop-a", "shop-a-cm"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			props := map[string]any{
+				"chart":   "testchart",
+				"version": "0.1.0",
+				"source":  map[string]any{"url": srvURL},
+			}
+			if tc.releaseName != nil {
+				props["releaseName"] = tc.releaseName
+			}
+			cfg, err := htParse(props)
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			gotName, gotNamespace := renderedIdentity(t, cfg)
+			if gotName != tc.want || gotNamespace != "demo" {
+				t.Errorf("rendered %s/%s, want demo/%s", gotNamespace, gotName, tc.want)
+			}
+		})
 	}
-	gotName, gotNamespace := renderedIdentity(t, cfg)
-	if gotName != "release-cm" || gotNamespace != "demo" {
-		t.Errorf("rendered %s/%s, want demo/release-cm", gotNamespace, gotName)
+}
+
+// TestHelmTemplateConfig_DirectConfigReleaseName: a config built directly,
+// which never went through the handler, still renders under the chart name
+// when ReleaseName is empty, and under ReleaseName when it is set.
+func TestHelmTemplateConfig_DirectConfigReleaseName(t *testing.T) {
+	srvURL := startMinimalHelmChartServer(t, "testchart", "0.1.0", identityChart)
+	for releaseName, want := range map[string]string{"": "testchart-cm", "direct": "direct-cm"} {
+		cfg := &components.HelmTemplateConfig{Name: "web", Namespace: "demo", SourceURL: srvURL, Chart: "testchart", Version: "0.1.0", ReleaseName: releaseName}
+		if gotName, _ := renderedIdentity(t, cfg); gotName != want {
+			t.Errorf("ReleaseName %q: rendered %s, want %s", releaseName, gotName, want)
+		}
+	}
+}
+
+// TestHelmTemplateHandler_ReleaseName pins the release name the handler
+// resolves and records: the authored releaseName, else the chart name — chart
+// for a HelmRepository, the last path segment of source.url (a trailing slash
+// ignored) for an OCIRepository — and refuses one that is not a valid Helm
+// release name, a default with the remedy to set releaseName. Both the
+// handler and authored-property validation accept the key.
+func TestHelmTemplateHandler_ReleaseName(t *testing.T) {
+	oci := func(url string) map[string]any {
+		return map[string]any{"version": "1.0.0", "source": map[string]any{"url": url}}
+	}
+	with := func(p map[string]any, releaseName string) map[string]any {
+		p["releaseName"] = releaseName
+		return p
+	}
+	okCases := []struct {
+		name  string
+		props map[string]any
+		want  string
+	}{
+		{"HelmRepository default is chart", htBaseProps(), "podinfo"},
+		{"OCIRepository default is the last path segment", oci("oci://ghcr.io/example/charts/podinfo"), "podinfo"},
+		{"OCIRepository default ignores a trailing slash", oci("oci://ghcr.io/example/charts/podinfo/"), "podinfo"},
+		{"authored on a HelmRepository", with(htBaseProps(), "shop-podinfo"), "shop-podinfo"},
+		{"authored on an OCIRepository", with(oci("oci://ghcr.io/example/charts/Pod_Info"), "podinfo"), "podinfo"},
+		{"authored 53 characters", with(htBaseProps(), strings.Repeat("a", 53)), strings.Repeat("a", 53)},
+		{"authored with dots", with(htBaseProps(), "shop.podinfo"), "shop.podinfo"},
+	}
+	for _, tc := range okCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := htParse(tc.props)
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			if got := cfg.(*components.HelmTemplateConfig).ReleaseName; got != tc.want {
+				t.Errorf("ReleaseName = %q, want %q", got, tc.want)
+			}
+			if err := htAuthoredErr(tc.props); err != nil {
+				t.Errorf("authored validation refused %v: %v", tc.props, err)
+			}
+		})
+	}
+
+	const rule = "must be a DNS-1123 subdomain of at most 53 characters, as a Helm release name is"
+	errCases := []struct {
+		name    string
+		props   map[string]any
+		wantErr string
+	}{
+		{"authored uppercase", with(htBaseProps(), "Podinfo"), `helmtemplate: releaseName "Podinfo" ` + rule},
+		{"authored underscore", with(htBaseProps(), "pod_info"), `helmtemplate: releaseName "pod_info" ` + rule},
+		{"authored 54 characters", with(htBaseProps(), strings.Repeat("a", 54)), "helmtemplate: releaseName " + `"` + strings.Repeat("a", 54) + `" ` + rule},
+		{"authored leading dash", with(htBaseProps(), "-podinfo"), `helmtemplate: releaseName "-podinfo" ` + rule},
+		{"HelmRepository default from an invalid chart", map[string]any{"chart": "Pod_Info", "source": map[string]any{"url": "https://charts.example.com"}},
+			`helmtemplate: the default release name "Pod_Info", taken from chart, ` + rule + "; set releaseName"},
+		{"OCIRepository default from an invalid segment", oci("oci://ghcr.io/example/charts/Pod_Info"),
+			`helmtemplate: the default release name "Pod_Info", taken from the last path segment of source.url, ` + rule + "; set releaseName"},
+		{"OCIRepository default from a too long segment", oci("oci://ghcr.io/example/" + strings.Repeat("a", 54)),
+			"taken from the last path segment of source.url, " + rule + "; set releaseName"},
+		{"OCIRepository URL without a path", oci("oci://ghcr.io"), "helmtemplate: source.url has no path segment to take the default release name from; set releaseName"},
+		{"OCIRepository URL of a bare slash", oci("oci://ghcr.io/"), "helmtemplate: source.url has no path segment to take the default release name from; set releaseName"},
+	}
+	for _, tc := range errCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := htParse(tc.props)
+			if err == nil {
+				t.Fatalf("accepted %v", tc.props)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q does not contain %q", err, tc.wantErr)
+			}
+		})
 	}
 }

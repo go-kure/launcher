@@ -16,6 +16,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack/helm"
 	"github.com/go-kure/kure/pkg/stack/layout"
 	"gopkg.in/yaml.v3"
+	chartutil "helm.sh/helm/v4/pkg/chart/v2/util"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -39,27 +40,84 @@ type renderChartFunc = func(chartURL, version string, values map[string]any, opt
 // chartSource is what one client-side render fetches: an inline chart source
 // whose Kind inlineChartSourceKind has already resolved and checked against
 // URL's scheme, the chart name within a HelmRepository, the chart version, the
-// values tree handed to the render as-is, and the namespace the render uses as
-// .Release.Namespace (empty leaves kure's default, "default"). .Release.Name is
-// always kure's default, "release".
+// values tree handed to the render as-is, the namespace the render uses as
+// .Release.Namespace (empty leaves kure's default, "default"), and the release
+// name it uses as .Release.Name, which templateReleaseName has already resolved
+// and checked (empty leaves kure's default, "release").
 type chartSource struct {
-	URL       string
-	Kind      string // "HelmRepository" or "OCIRepository"
-	Chart     string
-	Version   string
-	Values    map[string]any
-	Namespace string
+	URL         string
+	Kind        string // "HelmRepository" or "OCIRepository"
+	Chart       string
+	Version     string
+	Values      map[string]any
+	Namespace   string
+	ReleaseName string
 }
 
-// renderOptions turns the namespace into a kure render option when set. It
-// only sets .Release.Namespace: kure stamps no metadata.namespace, so a chart
-// that omits it still renders namespace-less objects.
+// renderOptions turns the release name and the namespace into kure render
+// options, each when set. The namespace only sets .Release.Namespace: kure
+// stamps no metadata.namespace, so a chart that omits it still renders
+// namespace-less objects.
 func (s chartSource) renderOptions() []helm.RenderOption {
 	var opts []helm.RenderOption
+	if s.ReleaseName != "" {
+		opts = append(opts, helm.WithReleaseName(s.ReleaseName))
+	}
 	if s.Namespace != "" {
 		opts = append(opts, helm.WithNamespace(s.Namespace))
 	}
 	return opts
+}
+
+// validHelmReleaseName reports whether name is a release name Helm accepts,
+// by Helm's own rule (chartutil.ValidateReleaseName): a DNS-1123 subdomain of
+// at most 53 characters. kure's render checks nothing, so a name Helm would
+// refuse to install under would otherwise render.
+func validHelmReleaseName(name string) bool {
+	return chartutil.ValidateReleaseName(name) == nil
+}
+
+// helmReleaseNameRule completes a refused release name's message, in place of
+// Helm's, which quotes its regular expression.
+const helmReleaseNameRule = "must be a DNS-1123 subdomain of at most 53 characters, as a Helm release name is"
+
+// templateReleaseName resolves the release name of a client-side render whose
+// source kind is already resolved: releaseName when set, else the chart's name
+// — chart for a HelmRepository, the last path segment of an OCIRepository's
+// URL (a trailing slash ignored), which names the chart there. Either must be
+// a valid Helm release name (validHelmReleaseName); a default that is not is
+// refused with the remedy to set releaseName. Every error is prefixed with
+// owner, the component type.
+func templateReleaseName(owner, releaseName, kind, rawURL, chart string) (string, error) {
+	if releaseName != "" {
+		if !validHelmReleaseName(releaseName) {
+			return "", errors.Errorf("%s: releaseName %q %s", owner, releaseName, helmReleaseNameRule)
+		}
+		return releaseName, nil
+	}
+	name, from := chart, "chart"
+	if kind == "OCIRepository" {
+		name, from = ociChartName(rawURL), "the last path segment of source.url"
+		if name == "" {
+			return "", errors.Errorf("%s: source.url has no path segment to take the default release name from; set releaseName", owner)
+		}
+	}
+	if !validHelmReleaseName(name) {
+		return "", errors.Errorf("%s: the default release name %q, taken from %s, %s; set releaseName", owner, name, from, helmReleaseNameRule)
+	}
+	return name, nil
+}
+
+// ociChartName returns the last path segment of an oci:// chart URL, a
+// trailing slash ignored, or "" when the URL has no path (or does not parse,
+// which inlineChartSourceKind has already refused).
+func ociChartName(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	p := strings.TrimRight(u.Path, "/")
+	return p[strings.LastIndex(p, "/")+1:]
 }
 
 // chartURL is the location handed to the renderer: a HelmRepository's base URL
