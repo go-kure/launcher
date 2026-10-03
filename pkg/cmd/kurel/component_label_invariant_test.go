@@ -159,11 +159,10 @@ func workloadProps(extra map[string]any) map[string]any {
 // selectors are the chart's contract, like an operator's, and out of scope; an
 // `app` label a chart authored would still be compared with the projection,
 // so this chart has none. It labels the ConfigMap with .Release.Name, the one
-// value through which a component name could reach a rendered label: the
-// render passes no release name, so it is kure's default ("release") whatever
-// the component is called, the 200-character name renders, and rendering with
-// the component name as the release name would fail here on the long name's
-// label value.
+// value through which a component name reaches a rendered label: with no
+// releaseName authored the release name is the component name, shortened as
+// Flux shortens a release name to at most 53 characters, so the label value
+// stays within the 63-character limit and the 200-character name renders.
 func helmtemplateLabelProps(t *testing.T) map[string]any {
 	t.Helper()
 	chart := buildMinimalChartTar(t, "labelchart", "0.1.0", map[string]string{

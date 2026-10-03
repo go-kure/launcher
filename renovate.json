@@ -52,6 +52,7 @@
         "github.com/fluxcd/pkg/apis/meta",
         "github.com/fluxcd/source-controller/api",
         "gopkg.in/yaml.v3",
+        "helm.sh/helm/v4",
         "k8s.io/api",
         "k8s.io/apiextensions-apiserver",
         "k8s.io/apimachinery",

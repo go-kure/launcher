@@ -39,8 +39,8 @@ func (h *HelmTemplateHandler) CanHandle(componentType string) bool {
 
 // PropertySchema declares exactly the keys helmTemplateProperties decodes plus
 // values, so authored-property validation and the handler's strict decode
-// admit the same set: source (url, kind), chart, version and values. A test
-// ties this schema to the struct.
+// admit the same set: source (url, kind), chart, version, releaseName and
+// values. A test ties this schema to the struct.
 func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"source": {
@@ -52,23 +52,24 @@ func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 				"kind": {Type: oam.PropertyTypeString, Enum: []any{"HelmRepository", "OCIRepository"}, Description: "Source kind. Inferred from the URL scheme when unset (oci:// is OCIRepository, anything else HelmRepository); when set, it must agree with the scheme."},
 			},
 		},
-		"chart":   {Type: oam.PropertyTypeString, Description: "Chart name within a HelmRepository source, where it is required. Not used for an OCIRepository source, whose URL already names the chart."},
-		"version": {Type: oam.PropertyTypeString, Description: "Chart version to render. Required for an OCIRepository source."},
-		"values":  {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Helm values tree passed to the client-side render. Must be representable as JSON."},
+		"chart":       {Type: oam.PropertyTypeString, Description: "Chart name within a HelmRepository source, where it is required. Not used for an OCIRepository source, whose URL already names the chart."},
+		"version":     {Type: oam.PropertyTypeString, Description: "Chart version to render. Required for an OCIRepository source."},
+		"releaseName": {Type: oam.PropertyTypeString, Description: "The render's .Release.Name: a DNS-1123 subdomain of at most 53 characters, as a Helm release name is. Defaults to the release name Flux gives a HelmRelease named after the component: the component name, a name over 53 characters shortened as Flux shortens it (its first 40 characters, '-', and 12 hex digits of its SHA-256)."},
+		"values":      {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Helm values tree passed to the client-side render. Must be representable as JSON."},
 	}
 }
 
 // helmTemplateProperties is the property surface the strict decode checks,
 // values excepted. Any key it does not declare, at any depth, is refused — in
-// particular a release identity (releaseName, targetNamespace; this terminal
-// renders into the application namespace under kure's default release name),
-// every property only a Flux-reconciled release reads (interval,
+// particular targetNamespace (this terminal renders into the application
+// namespace), every property only a Flux-reconciled release reads (interval,
 // driftDetection, install, upgrade, valuesFrom, valuesMode), the helm rule's
 // delivery switch, and a source reference (source.name, source.namespace).
 type helmTemplateProperties struct {
-	Source  *helmTemplateSource `json:"source"`
-	Chart   string              `json:"chart"`
-	Version string              `json:"version"`
+	Source      *helmTemplateSource `json:"source"`
+	Chart       string              `json:"chart"`
+	Version     string              `json:"version"`
+	ReleaseName string              `json:"releaseName"`
 }
 
 // helmTemplateSource is the inline chart source: a URL, and optionally the
@@ -82,7 +83,9 @@ type helmTemplateSource struct {
 // split off first, and checks the inline source: source.url required, the kind
 // inferred from or checked against the URL scheme, chart required for a
 // HelmRepository, version required for an OCIRepository, values an object that
-// encodes as JSON.
+// encodes as JSON, and the release name, authored or defaulted from the
+// component name as Flux defaults a HelmRelease's, a valid Helm release name
+// (templateReleaseName).
 func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	props, owned, err := builtin.DecodeStrictJSON[helmTemplateProperties](component.Properties, helmTemplateValuesKey)
 	if err != nil {
@@ -102,6 +105,7 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 		SourceKind:  props.Source.Kind,
 		Chart:       props.Chart,
 		Version:     props.Version,
+		ReleaseName: props.ReleaseName,
 		Values:      values,
 		renderChart: helm.RenderChart,
 	}
@@ -109,8 +113,9 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 	if err != nil {
 		return nil, err
 	}
-	// Record the resolved kind.
+	// Record the resolved kind and release name.
 	cfg.SourceKind = src.Kind
+	cfg.ReleaseName = src.ReleaseName
 	return cfg, nil
 }
 
@@ -145,9 +150,14 @@ type HelmTemplateConfig struct {
 	// Name is the component name.
 	Name string
 	// Namespace is the application namespace, the render's .Release.Namespace;
-	// empty leaves kure's default, "default". The release name is always
-	// kure's default, "release": this terminal declares no releaseName.
+	// empty leaves kure's default, "default".
 	Namespace string
+	// ReleaseName is the render's .Release.Name, a valid Helm release name.
+	// ToApplicationConfig records the name it resolved; empty on a config built
+	// directly means the default derived from Name, as Flux derives a
+	// HelmRelease's release name (templateReleaseName). With Name empty too,
+	// the config is refused.
+	ReleaseName string
 
 	// SourceURL is where the chart is fetched from: an http(s):// Helm
 	// repository URL, or an oci:// URL naming the chart.
@@ -196,7 +206,11 @@ func (c *HelmTemplateConfig) source() (chartSource, error) {
 	if _, err := json.Marshal(c.Values); err != nil {
 		return chartSource{}, errors.Errorf("%s: values is not representable as JSON: %w", helmTemplateType, err)
 	}
-	return chartSource{URL: c.SourceURL, Kind: kind, Chart: c.Chart, Version: c.Version, Values: c.Values, Namespace: c.Namespace}, nil
+	releaseName, err := templateReleaseName(helmTemplateType, c.ReleaseName, c.Name)
+	if err != nil {
+		return chartSource{}, err
+	}
+	return chartSource{URL: c.SourceURL, Kind: kind, Chart: c.Chart, Version: c.Version, Values: c.Values, Namespace: c.Namespace, ReleaseName: releaseName}, nil
 }
 
 // ensureRendered checks c and renders its chart, once: Generate and

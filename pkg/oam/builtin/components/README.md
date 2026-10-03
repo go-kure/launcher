@@ -2241,15 +2241,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     generated source may only keep it in `infra`, and a `dependency` rule may not
     make it wait on any component; either fails the build.
   - `delivery: template` emits a `helmtemplate` with the URL, its resolved kind,
-    `chart`, `version` and `values`. No source is emitted, and an authored
+    `chart`, `version`, `values` and an authored `releaseName`, which the
+    `helmtemplate` checks and, when unset, defaults to the release name Flux
+    gives the `delivery: flux` HelmRelease when it has no `targetNamespace`: the
+    component name (see **helmtemplate**). No source is emitted, and an authored
     `valuesMode: inline` is dropped. The rule refuses everything a client-side
     render cannot honour, each with a `helm:` message:
     - a source reference, and `valuesMode: configMap`;
     - an inline GitRepository or Bucket source, since the render fetches only
       from a Helm or OCI repository;
     - an OCI source without `version`;
-    - each HelmRelease key, `releaseName` and `targetNamespace` included, which
-      `helmtemplate` does not accept.
+    - every other HelmRelease key (`interval`, `targetNamespace`,
+      `driftDetection`, `install`, `upgrade`, `valuesFrom`), which `helmtemplate`
+      does not accept.
   - Strict, unlike the removed `helmchart` composite. An undeclared key at the top level or inside
     `source` is refused, and so are:
     - `delivery: native`;
@@ -2314,7 +2318,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   | 8 | Generated sources get the automatic source health check. |
   | 9 | The registry allowlist applies to inline sources. |
   | 10 | Generated sources deploy in the infra tier. A tier annotation on the component places only its release; the generated source stays in infra. |
-  | 11 | Template delivery refuses `releaseName` and `targetNamespace`. |
+  | 11 | Template delivery refuses `targetNamespace`, and an unset `releaseName` renders under Flux's default release name for the component — the component name, shortened as Flux shortens it — instead of `release` (go-kure/launcher#776). |
   | 12 | `chart` is refused with an OCIRepository or HelmChart source. |
   | 13 | `version` is refused with a referenced OCIRepository or HelmChart source. |
   | 14 | `source.namespace` is refused together with `url`. |
@@ -2327,8 +2331,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   no longer makes the component a `LayoutAugmenter` (the values ConfigMap comes from a
   `configmap` trait on the `helmrelease`, ordinary build output, so `kurel build` accepts it and a layout-walking consumer
   no longer moves the component into a sub-layout), and under `delivery: template` the render's
-  `.Release.Name` and `.Release.Namespace` can no longer be authored (row 11; see
-  **helmtemplate**).
+  `.Release.Namespace` can no longer be authored (row 11; see **helmtemplate**).
 - **helmrelease** — the kind-named terminal for Flux's `HelmRelease`
   (go-kure/launcher#327, part of the Helm-family redesign go-kure/launcher#336). Its
   properties are exactly the top-level JSON keys of `HelmReleaseSpec` in the
@@ -2437,6 +2440,27 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   be representable as JSON: a non-finite number (`.nan`, `.inf`) is a build error. The source
   checks are shared with the `helm` rule's inline source rather than copied.
 
+  **Release name.** `releaseName` is the render's `.Release.Name`. Unset, it is the release name
+  Flux gives a HelmRelease named after the component with no `spec.releaseName` and no
+  `spec.targetNamespace`: the component name, and for a name over 53 characters, Flux
+  helm-controller's shortened form of it — its first 40 characters, `-`, and the first 12 hex
+  digits of the SHA-256 of the whole name. A `helm` component therefore renders under
+  `delivery: template` with the same release name its HelmRelease is installed under with
+  `delivery: flux`, as long as that HelmRelease has no `targetNamespace` (none authored, and no
+  Flux namespace, which would default one; Flux then uses `<targetNamespace>-<name>`). The chart
+  and its source play no part. The name, authored or defaulted, must be a valid Helm release name
+  by Helm's own rule — a DNS-1123 subdomain of at most 53 characters — since kure's render checks
+  nothing. An authored name is never shortened: one over 53 characters is refused. A default that
+  is not valid — the shortening can cut a dotted name just after a `.`, leaving a label that starts
+  with `-` — is refused with the remedy to set `releaseName`, as Flux would fail to install it. A
+  `HelmTemplateConfig` built directly defaults it from `Name` the same way, and is refused when
+  both are empty. Since component names are unique in a document, two renders of one chart no
+  longer share a release name by default. Two given the same `releaseName` in one namespace
+  generate the same objects when the chart names its objects after the release, as most do, and
+  `kurel build` refuses them as a generated-object collision rather than merging them. Before
+  go-kure/launcher#776 every render used kure's default `release`; the project is pre-GA, so the
+  changed object names of an existing template-rendered chart carry no compatibility shim.
+
   **Decoding.** `values` is split off, and the rest of the property map is decoded with
   `builtin.DecodeStrictJSON` into a closed struct, so any other key, at any depth, is refused by
   name, as is a wrongly typed value. `values` itself reaches the render exactly as authored, with
@@ -2446,18 +2470,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   match case-insensitively in the handler, as in `encoding/json`; schema validation, which a
   `kurel build` runs first, is exact.
 
-  **Refused outright.** A release identity (`releaseName`, `targetNamespace`), every property
-  only a Flux-reconciled release reads (`interval`, `driftDetection`, `install`, `upgrade`,
-  `valuesFrom`, `valuesMode`), the `helm` rule's `delivery` switch, and a source reference
-  (`source.name`, `source.namespace`) are undeclared keys: schema validation refuses each, and so
-  does the strict decode. An `OCIRepository` source without `version` is refused by the handler.
-  The key itself is what is refused, whatever it holds; the terminal has no handler-level default
-  at all. The render's `.Release.Namespace` is the application namespace and its `.Release.Name`
-  is kure's default `release`; the terminal declares neither, so neither can be set. Flux derives
-  a HelmRelease's default release name differently (`<name>`, or `<targetNamespace>-<name>` when
-  a target namespace is set), so a chart whose object names embed the release name renders them
-  differently under the two deliveries. Nothing stamps `metadata.namespace` on rendered objects,
-  so a chart that leaves it unset renders namespace-less objects.
+  **Refused outright.** `targetNamespace`, every property only a Flux-reconciled release reads
+  (`interval`, `driftDetection`, `install`, `upgrade`, `valuesFrom`, `valuesMode`), the `helm`
+  rule's `delivery` switch, and a source reference (`source.name`, `source.namespace`) are
+  undeclared keys: schema validation refuses each, and so does the strict decode. An
+  `OCIRepository` source without `version` is refused by the handler. The key itself is what is
+  refused, whatever it holds. The render's `.Release.Namespace` is the application namespace;
+  the terminal declares no `targetNamespace`, so it cannot be set. When a target namespace is set
+  on the `delivery: flux` HelmRelease, authored or defaulted under a Flux namespace, Flux derives
+  its default release name as `<targetNamespace>-<name>`, which the template default (see
+  **Release name**) does not follow; a chart whose object names embed the release name then
+  renders them differently under the two deliveries unless `releaseName` is set.
+  Nothing stamps `metadata.namespace` on rendered objects, so a chart that leaves it unset
+  renders namespace-less objects.
 
   **Output order.** Every rendered manifest carrying a `helm.sh/hook` annotation (or a standalone
   `helm.sh/hook-weight`) is grouped by `(phase, weight)` via kure's `helm.SplitByHookWeight`.
